@@ -1,0 +1,3 @@
+#!/bin/sh
+# Every commit passes the full local gate (docs/standards/review.md). There is no CI yet.
+exec pnpm check

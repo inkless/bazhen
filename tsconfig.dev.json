@@ -2,11 +2,16 @@
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "rootDir": ".",
-    "outDir": "node_modules/.cache/tsc-tests",
+    "outDir": "node_modules/.cache/tsc-dev",
     "emitDeclarationOnly": true,
     "rewriteRelativeImportExtensions": false
   },
-  "include": ["packages/*/src/**/*.test.ts", "apps/daemon/src/**/*.test.ts", "tests/support/*.ts"],
+  "include": [
+    "packages/*/src/**/*.test.ts",
+    "apps/daemon/src/**/*.test.ts",
+    "tests/support/*.ts",
+    "scripts/*.ts"
+  ],
   "references": [
     {
       "path": "packages/protocol"

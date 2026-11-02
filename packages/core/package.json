@@ -8,5 +8,8 @@
   },
   "dependencies": {
     "@bazhen/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "fast-check": "4.10.2"
   }
 }
