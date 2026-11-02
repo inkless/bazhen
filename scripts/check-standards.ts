@@ -2,7 +2,7 @@
 // `pnpm check`; every failure names the file and the fix.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -120,7 +120,9 @@ function checkContextFile(doc: string, scripts: Set<string>): void {
       }
     }
     const candidate = span.replace(/:\d+$/, "");
-    if (!PATH_LIKE.test(candidate) || LINT_RULE.test(candidate)) continue;
+    if (!PATH_LIKE.test(candidate) || LINT_RULE.test(candidate) || candidate.startsWith("@")) {
+      continue;
+    }
     const local = join(root, doc, "..", candidate);
     if (!existsSync(join(root, candidate)) && !existsSync(local)) {
       failures.push(`${doc}: names \`${candidate}\`, which does not exist.`);
@@ -154,9 +156,57 @@ function checkAgentContext(): void {
   }
 }
 
+// Skills live once in .agents/skills (Codex, pi, opencode); .claude/skills links to it.
+const SKILLS_DIR = ".agents/skills";
+const DESCRIPTION_MAX = 1024;
+
+function skillDocs(): string[] {
+  if (!existsSync(join(root, SKILLS_DIR))) return [];
+  return readdirSync(join(root, SKILLS_DIR)).map((name) => `${SKILLS_DIR}/${name}/SKILL.md`);
+}
+
+function checkSkills(scripts: Set<string>): void {
+  let link = "";
+  try {
+    link = readlinkSync(join(root, ".claude/skills"));
+  } catch {
+    // Missing or not a link.
+  }
+  if (link !== "../.agents/skills") {
+    failures.push(
+      ".claude/skills must be a symlink to ../.agents/skills (one source for every harness).",
+    );
+  }
+  for (const doc of skillDocs()) {
+    const dir = doc.split("/")[2] ?? "";
+    if (!existsSync(join(root, doc))) {
+      failures.push(`${SKILLS_DIR}/${dir} has no SKILL.md.`);
+      continue;
+    }
+    const text = readFileSync(join(root, doc), "utf8");
+    const front = /^---\n([\s\S]*?)\n---\n/.exec(text)?.[1] ?? "";
+    const name = /^name: (.+)$/m.exec(front)?.[1]?.trim();
+    const description = /^description: (.+)$/m.exec(front)?.[1]?.trim() ?? "";
+    if (name !== dir || !dir.startsWith("bz-")) {
+      failures.push(`${doc}: name must equal its directory and start with "bz-" (got "${name}").`);
+    }
+    if (description.length === 0 || description.length > DESCRIPTION_MAX) {
+      failures.push(`${doc}: description must be 1-${DESCRIPTION_MAX} characters.`);
+    }
+    if (!description.includes("changing Bazhen's source in this repository")) {
+      failures.push(
+        `${doc}: description must say it applies "when changing Bazhen's source in this ` +
+          "repository\", so it doesn't compete with the product's bazhen-* skills.",
+      );
+    }
+    checkContextFile(doc, scripts);
+  }
+}
+
 checkSiblingTests();
 checkHooks();
 checkAgentContext();
+checkSkills(scriptNames());
 
 if (failures.length > 0) {
   console.error(`Standards check failed:\n${failures.map((f) => `  - ${f}`).join("\n")}`);
