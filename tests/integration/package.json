@@ -1,0 +1,11 @@
+{
+  "name": "@bazhen/integration-tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@bazhen/core": "workspace:*",
+    "@bazhen/daemon": "workspace:*",
+    "@bazhen/runtime-tmux": "workspace:*"
+  }
+}

@@ -1,4 +1,10 @@
 .DS_Store
-/target/
 node_modules/
 dist/
+coverage/
+*.tsbuildinfo
+/target/
+dist-types/
+test-results/
+playwright-report/
+.playwright-mcp/

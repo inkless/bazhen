@@ -1,0 +1,9 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+  - "tests/*"
+
+# node-pty loads its shipped prebuilds for darwin and linux (x64, arm64); its install script
+# would only fall back to a native compile. Revisit when Windows support needs ConPTY.
+allowBuilds:
+  node-pty: false
