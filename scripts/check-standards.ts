@@ -90,8 +90,73 @@ function checkHooks(): void {
   }
 }
 
+// Agent context is read on every session, so it stays short, and every path and command it names
+// must exist: stale context misleads every agent that reads it.
+const AGENTS_MAX_LINES = 60;
+const CONTEXT_DOCS = [
+  "AGENTS.md",
+  "docs/standards/code.md",
+  "docs/standards/testing.md",
+  "docs/standards/review.md",
+];
+const PNPM_BUILTINS = new Set(["install", "exec", "add", "remove", "update"]);
+const LINT_RULE = /^(import|vitest|typescript|unicorn|react|react-hooks|eslint)\//;
+const PATH_LIKE = /^(\.?[\w@-]+\/)+[\w.@-]*$|^\.?[\w-]+\.(ts|tsx|md|json)$/;
+
+function scriptNames(): Set<string> {
+  const pkg: unknown = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+  const scripts =
+    typeof pkg === "object" && pkg !== null && "scripts" in pkg ? pkg.scripts : undefined;
+  return new Set(typeof scripts === "object" && scripts !== null ? Object.keys(scripts) : []);
+}
+
+function checkContextFile(doc: string, scripts: Set<string>): void {
+  const text = readFileSync(join(root, doc), "utf8");
+  for (const [, span = ""] of text.matchAll(/`([^`\n]+)`/g)) {
+    for (const [, first = "", second = ""] of span.matchAll(/\bpnpm ([\w:-]+)(?: ([\w:-]+))?/g)) {
+      const script = first === "run" ? second : first;
+      if (!PNPM_BUILTINS.has(script) && !scripts.has(script)) {
+        failures.push(`${doc}: names \`pnpm ${script}\`, which is not a package.json script.`);
+      }
+    }
+    const candidate = span.replace(/:\d+$/, "");
+    if (!PATH_LIKE.test(candidate) || LINT_RULE.test(candidate)) continue;
+    const local = join(root, doc, "..", candidate);
+    if (!existsSync(join(root, candidate)) && !existsSync(local)) {
+      failures.push(`${doc}: names \`${candidate}\`, which does not exist.`);
+    }
+  }
+}
+
+function checkAgentContext(): void {
+  const scripts = scriptNames();
+  const agents = join(root, "AGENTS.md");
+  if (!existsSync(agents)) {
+    failures.push("AGENTS.md is missing.");
+    return;
+  }
+  const lines = readFileSync(agents, "utf8").trimEnd().split("\n").length;
+  if (lines > AGENTS_MAX_LINES) {
+    failures.push(
+      `AGENTS.md is ${lines} lines (budget ${AGENTS_MAX_LINES}). Keep only what an agent cannot ` +
+        "discover or would otherwise get wrong; move rationale to docs/standards/.",
+    );
+  }
+  const claude = join(root, "CLAUDE.md");
+  if (!existsSync(claude) || readFileSync(claude, "utf8").trim() !== "@AGENTS.md") {
+    failures.push(
+      "CLAUDE.md must contain only `@AGENTS.md`: Claude Code skips AGENTS.md otherwise.",
+    );
+  }
+  for (const doc of CONTEXT_DOCS) {
+    if (existsSync(join(root, doc))) checkContextFile(doc, scripts);
+    else failures.push(`${doc} is missing.`);
+  }
+}
+
 checkSiblingTests();
 checkHooks();
+checkAgentContext();
 
 if (failures.length > 0) {
   console.error(`Standards check failed:\n${failures.map((f) => `  - ${f}`).join("\n")}`);

@@ -19,11 +19,13 @@ client. Agents, tasks, and orchestration come later.
 | ------------------------------------- | --------------------------------------------------------------------------------------- |
 | `pnpm install --frozen-lockfile`      | Install exactly what the lockfile records                                               |
 | `pnpm dev`                            | Start the daemon (`http://127.0.0.1:7900`) and the web client (`http://127.0.0.1:5173`) |
-| `pnpm check`                          | Lint, format check, type-check, unit tests, integration tests                           |
-| `pnpm test` / `pnpm test:integration` | Unit tests / tests against a throwaway private tmux server                              |
+| `pnpm check`                          | Standards check, lint, format check, type-check, small, medium and integration tests    |
+| `pnpm test` / `pnpm test:integration` | Small tests / tests against a throwaway private tmux server                             |
 | `pnpm test:e2e`                       | Browser tests: starts daemon and web client in a temporary `BAZHEN_HOME`                |
 | `pnpm build`                          | Compile packages to `dist/` and build the web bundle                                    |
 | `pnpm format`                         | Rewrite files with oxfmt                                                                |
+
+Contributing, for people and agents: [AGENTS.md](AGENTS.md) and [docs/standards/](docs/standards/).
 
 ## Layout
 
