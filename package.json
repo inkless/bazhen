@@ -7,13 +7,15 @@
     "dev": "pnpm --parallel --filter @bazhen/daemon --filter @bazhen/web run dev",
     "build": "tsc -b && pnpm --filter @bazhen/web run build",
     "typecheck": "tsc -b",
-    "lint": "oxlint --type-aware",
+    "lint": "node scripts/lint-config.ts --check && oxlint --type-aware --report-unused-disable-directives-severity=error",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "test": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
-    "check": "pnpm run lint && pnpm run format:check && pnpm run typecheck && pnpm run test && pnpm run test:integration",
-    "test:e2e": "pnpm --filter @bazhen/e2e-tests run test"
+    "check": "pnpm run lint && pnpm run format:check && pnpm run typecheck && pnpm run test && pnpm run test:medium && pnpm run test:integration",
+    "test:e2e": "pnpm --filter @bazhen/e2e-tests run test",
+    "lint:config": "node scripts/lint-config.ts",
+    "test:medium": "vitest run --project medium"
   },
   "devDependencies": {
     "@types/node": "26.6.6",

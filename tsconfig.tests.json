@@ -1,0 +1,24 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "node_modules/.cache/tsc-tests",
+    "emitDeclarationOnly": true,
+    "rewriteRelativeImportExtensions": false
+  },
+  "include": ["packages/*/src/**/*.test.ts", "apps/daemon/src/**/*.test.ts"],
+  "references": [
+    {
+      "path": "packages/protocol"
+    },
+    {
+      "path": "packages/core"
+    },
+    {
+      "path": "packages/runtime-tmux"
+    },
+    {
+      "path": "apps/daemon"
+    }
+  ]
+}

@@ -21,6 +21,9 @@
     },
     {
       "path": "tests/e2e"
+    },
+    {
+      "path": "tsconfig.tests.json"
     }
   ]
 }

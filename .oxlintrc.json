@@ -1,6 +1,13 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["typescript", "unicorn", "import", "react", "react-hooks"],
+  "plugins": [
+    "typescript",
+    "unicorn",
+    "import",
+    "react",
+    "react-hooks",
+    "vitest"
+  ],
   "categories": {
     "correctness": "error",
     "suspicious": "warn"
@@ -8,8 +15,799 @@
   "rules": {
     "typescript/no-floating-promises": "error",
     "typescript/no-misused-promises": "error",
+    "typescript/no-explicit-any": "error",
+    "typescript/switch-exhaustiveness-check": "error",
+    "import/no-cycle": "error",
+    "vitest/no-focused-tests": "error",
+    "vitest/no-disabled-tests": "error",
+    "vitest/expect-expect": "error",
+    "vitest/no-conditional-expect": "error",
+    "vitest/no-conditional-in-test": "error",
+    "vitest/no-identical-title": "error",
+    "vitest/no-standalone-expect": "error",
     "no-console": "off",
     "react/react-in-jsx-scope": "off"
   },
-  "ignorePatterns": ["dist/**", "spikes/**", "**/node_modules/**"]
+  "overrides": [
+    {
+      "files": [
+        "packages/protocol/**/*.ts",
+        "packages/protocol/**/*.tsx"
+      ],
+      "rules": {
+        "import/no-nodejs-modules": "error",
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/core",
+                  "@bazhen/core/**",
+                  "**/packages/core/**"
+                ],
+                "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/core."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-tmux",
+                  "@bazhen/runtime-tmux/**",
+                  "**/packages/runtime-tmux/**"
+                ],
+                "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**"
+                ],
+                "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "@bazhen/web",
+                  "@bazhen/web/**",
+                  "**/apps/web/**"
+                ],
+                "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "hono",
+                  "@hono/*",
+                  "ws",
+                  "@xterm/*"
+                ],
+                "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import runtime libraries."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "packages/protocol/**/*.test.ts",
+        "packages/protocol/**/*.test.tsx"
+      ],
+      "rules": {
+        "import/no-nodejs-modules": "error",
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/core",
+                  "@bazhen/core/**",
+                  "**/packages/core/**"
+                ],
+                "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/core."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-tmux",
+                  "@bazhen/runtime-tmux/**",
+                  "**/packages/runtime-tmux/**"
+                ],
+                "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**"
+                ],
+                "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "@bazhen/web",
+                  "@bazhen/web/**",
+                  "**/apps/web/**"
+                ],
+                "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "hono",
+                  "@hono/*",
+                  "ws",
+                  "@xterm/*"
+                ],
+                "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import runtime libraries."
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "fs",
+                  "node:fs",
+                  "fs/promises",
+                  "node:fs/promises",
+                  "os",
+                  "node:os",
+                  "net",
+                  "node:net",
+                  "child_process",
+                  "node:child_process",
+                  "sqlite",
+                  "node:sqlite"
+                ],
+                "message": "A *.test.ts is a small test: no files, sockets, processes or databases. Rename it *.medium.test.ts (docs/standards/testing.md)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "packages/protocol/**/*.medium.test.ts"
+      ],
+      "rules": {
+        "import/no-nodejs-modules": "error",
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/core",
+                  "@bazhen/core/**",
+                  "**/packages/core/**"
+                ],
+                "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/core."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-tmux",
+                  "@bazhen/runtime-tmux/**",
+                  "**/packages/runtime-tmux/**"
+                ],
+                "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**"
+                ],
+                "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "@bazhen/web",
+                  "@bazhen/web/**",
+                  "**/apps/web/**"
+                ],
+                "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "hono",
+                  "@hono/*",
+                  "ws",
+                  "@xterm/*"
+                ],
+                "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import runtime libraries."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "packages/core/**/*.ts",
+        "packages/core/**/*.tsx"
+      ],
+      "rules": {
+        "import/no-nodejs-modules": "error",
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/runtime-tmux",
+                  "@bazhen/runtime-tmux/**",
+                  "**/packages/runtime-tmux/**"
+                ],
+                "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**"
+                ],
+                "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "@bazhen/web",
+                  "@bazhen/web/**",
+                  "**/apps/web/**"
+                ],
+                "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "@bazhen/protocol",
+                  "@bazhen/protocol/**",
+                  "**/packages/protocol/**"
+                ],
+                "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import only types from @bazhen/protocol.",
+                "allowTypeImports": true
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "hono",
+                  "@hono/*",
+                  "ws",
+                  "@xterm/*"
+                ],
+                "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import runtime libraries."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "packages/core/**/*.test.ts",
+        "packages/core/**/*.test.tsx"
+      ],
+      "rules": {
+        "import/no-nodejs-modules": "error",
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/runtime-tmux",
+                  "@bazhen/runtime-tmux/**",
+                  "**/packages/runtime-tmux/**"
+                ],
+                "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**"
+                ],
+                "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "@bazhen/web",
+                  "@bazhen/web/**",
+                  "**/apps/web/**"
+                ],
+                "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "@bazhen/protocol",
+                  "@bazhen/protocol/**",
+                  "**/packages/protocol/**"
+                ],
+                "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import only types from @bazhen/protocol.",
+                "allowTypeImports": true
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "hono",
+                  "@hono/*",
+                  "ws",
+                  "@xterm/*"
+                ],
+                "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import runtime libraries."
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "fs",
+                  "node:fs",
+                  "fs/promises",
+                  "node:fs/promises",
+                  "os",
+                  "node:os",
+                  "net",
+                  "node:net",
+                  "child_process",
+                  "node:child_process",
+                  "sqlite",
+                  "node:sqlite"
+                ],
+                "message": "A *.test.ts is a small test: no files, sockets, processes or databases. Rename it *.medium.test.ts (docs/standards/testing.md)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "packages/core/**/*.medium.test.ts"
+      ],
+      "rules": {
+        "import/no-nodejs-modules": "error",
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/runtime-tmux",
+                  "@bazhen/runtime-tmux/**",
+                  "**/packages/runtime-tmux/**"
+                ],
+                "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**"
+                ],
+                "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "@bazhen/web",
+                  "@bazhen/web/**",
+                  "**/apps/web/**"
+                ],
+                "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "@bazhen/protocol",
+                  "@bazhen/protocol/**",
+                  "**/packages/protocol/**"
+                ],
+                "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import only types from @bazhen/protocol.",
+                "allowTypeImports": true
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "hono",
+                  "@hono/*",
+                  "ws",
+                  "@xterm/*"
+                ],
+                "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import runtime libraries."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "packages/runtime-tmux/**/*.ts",
+        "packages/runtime-tmux/**/*.tsx"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**"
+                ],
+                "message": "packages/runtime-tmux (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "@bazhen/web",
+                  "@bazhen/web/**",
+                  "**/apps/web/**"
+                ],
+                "message": "packages/runtime-tmux (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "hono",
+                  "@hono/*",
+                  "ws",
+                  "@xterm/*"
+                ],
+                "message": "packages/runtime-tmux (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import runtime libraries."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "packages/runtime-tmux/**/*.test.ts",
+        "packages/runtime-tmux/**/*.test.tsx"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**"
+                ],
+                "message": "packages/runtime-tmux (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "@bazhen/web",
+                  "@bazhen/web/**",
+                  "**/apps/web/**"
+                ],
+                "message": "packages/runtime-tmux (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "hono",
+                  "@hono/*",
+                  "ws",
+                  "@xterm/*"
+                ],
+                "message": "packages/runtime-tmux (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import runtime libraries."
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "fs",
+                  "node:fs",
+                  "fs/promises",
+                  "node:fs/promises",
+                  "os",
+                  "node:os",
+                  "net",
+                  "node:net",
+                  "child_process",
+                  "node:child_process",
+                  "sqlite",
+                  "node:sqlite"
+                ],
+                "message": "A *.test.ts is a small test: no files, sockets, processes or databases. Rename it *.medium.test.ts (docs/standards/testing.md)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "packages/runtime-tmux/**/*.medium.test.ts"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**"
+                ],
+                "message": "packages/runtime-tmux (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "@bazhen/web",
+                  "@bazhen/web/**",
+                  "**/apps/web/**"
+                ],
+                "message": "packages/runtime-tmux (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "hono",
+                  "@hono/*",
+                  "ws",
+                  "@xterm/*"
+                ],
+                "message": "packages/runtime-tmux (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import runtime libraries."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "apps/daemon/**/*.ts",
+        "apps/daemon/**/*.tsx"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/web",
+                  "@bazhen/web/**",
+                  "**/apps/web/**"
+                ],
+                "message": "apps/daemon (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "apps/daemon/**/*.test.ts",
+        "apps/daemon/**/*.test.tsx"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/web",
+                  "@bazhen/web/**",
+                  "**/apps/web/**"
+                ],
+                "message": "apps/daemon (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "fs",
+                  "node:fs",
+                  "fs/promises",
+                  "node:fs/promises",
+                  "os",
+                  "node:os",
+                  "net",
+                  "node:net",
+                  "child_process",
+                  "node:child_process",
+                  "sqlite",
+                  "node:sqlite"
+                ],
+                "message": "A *.test.ts is a small test: no files, sockets, processes or databases. Rename it *.medium.test.ts (docs/standards/testing.md)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "apps/daemon/**/*.medium.test.ts"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/web",
+                  "@bazhen/web/**",
+                  "**/apps/web/**"
+                ],
+                "message": "apps/daemon (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "apps/web/**/*.ts",
+        "apps/web/**/*.tsx"
+      ],
+      "rules": {
+        "import/no-nodejs-modules": "error",
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/core",
+                  "@bazhen/core/**",
+                  "**/packages/core/**"
+                ],
+                "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/core."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-tmux",
+                  "@bazhen/runtime-tmux/**",
+                  "**/packages/runtime-tmux/**"
+                ],
+                "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**"
+                ],
+                "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "hono",
+                  "@hono/*",
+                  "ws"
+                ],
+                "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import runtime libraries."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "apps/web/**/*.test.ts",
+        "apps/web/**/*.test.tsx"
+      ],
+      "rules": {
+        "import/no-nodejs-modules": "error",
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/core",
+                  "@bazhen/core/**",
+                  "**/packages/core/**"
+                ],
+                "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/core."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-tmux",
+                  "@bazhen/runtime-tmux/**",
+                  "**/packages/runtime-tmux/**"
+                ],
+                "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**"
+                ],
+                "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "hono",
+                  "@hono/*",
+                  "ws"
+                ],
+                "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import runtime libraries."
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "fs",
+                  "node:fs",
+                  "fs/promises",
+                  "node:fs/promises",
+                  "os",
+                  "node:os",
+                  "net",
+                  "node:net",
+                  "child_process",
+                  "node:child_process",
+                  "sqlite",
+                  "node:sqlite"
+                ],
+                "message": "A *.test.ts is a small test: no files, sockets, processes or databases. Rename it *.medium.test.ts (docs/standards/testing.md)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "apps/web/**/*.medium.test.ts"
+      ],
+      "rules": {
+        "import/no-nodejs-modules": "error",
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/core",
+                  "@bazhen/core/**",
+                  "**/packages/core/**"
+                ],
+                "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/core."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-tmux",
+                  "@bazhen/runtime-tmux/**",
+                  "**/packages/runtime-tmux/**"
+                ],
+                "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**"
+                ],
+                "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "hono",
+                  "@hono/*",
+                  "ws"
+                ],
+                "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import runtime libraries."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "ignorePatterns": [
+    "dist/**",
+    "spikes/**",
+    "**/node_modules/**"
+  ]
 }

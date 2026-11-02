@@ -41,12 +41,3 @@ export function ptyHandleCount(): number {
   ]);
   return Number(out.toString().trim());
 }
-
-export async function waitFor(pred: () => boolean, ms = 3000): Promise<boolean> {
-  const start = Date.now();
-  while (Date.now() - start < ms) {
-    if (pred()) return true;
-    await sleep(20);
-  }
-  return pred();
-}

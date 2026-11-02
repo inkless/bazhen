@@ -6,7 +6,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { newId, toTerminalId } from "@bazhen/core";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
 import { nodePtySpawner } from "@bazhen/daemon/pty";
-import { killServer, ptyHandleCount, sleep, testSocket, waitFor } from "./helpers.ts";
+import { killServer, ptyHandleCount, sleep, testSocket } from "./helpers.ts";
 
 const socket = testSocket("runtime");
 const runtime = new TmuxRuntime({
@@ -41,12 +41,9 @@ describe("tmux runtime on a private server", () => {
   it("keeps an exited terminal with its exit status", async () => {
     const s = spec(["sh", "-c", "exit 3"]);
     await runtime.create(s);
-    let entry;
-    for (let i = 0; i < 100 && !entry?.dead; i++) {
-      entry = (await runtime.inventory()).find((e) => e.ref.terminalId === s.terminalId);
-      if (!entry?.dead) await sleep(20);
-    }
-    expect(entry).toMatchObject({ dead: true, exitStatus: 3 });
+    await expect
+      .poll(async () => (await runtime.inventory()).find((e) => e.ref.terminalId === s.terminalId))
+      .toMatchObject({ dead: true, exitStatus: 3 });
   });
 
   it("round-trips input through an attached terminal", async () => {
@@ -55,7 +52,7 @@ describe("tmux runtime on a private server", () => {
     let seen = "";
     stream.onData((b) => (seen += Buffer.from(b).toString("utf8")));
     stream.write(Buffer.from("ping-你好\r"));
-    expect(await waitFor(() => seen.includes("ping-你好"))).toBe(true);
+    await expect.poll(() => seen).toContain("ping-你好");
     stream.close();
   });
 
@@ -65,9 +62,16 @@ describe("tmux runtime on a private server", () => {
     let seen = "";
     stream.onData((b) => (seen += Buffer.from(b).toString("utf8")));
     stream.write(Buffer.from("\x02c"));
-    expect(await waitFor(() => seen.includes("^B"))).toBe(true);
-    const session = ref.locator.session ?? "";
-    const windows = execFileSync("tmux", ["-L", socket, "list-windows", "-t", session]).toString();
+    await expect.poll(() => seen).toContain("^B");
+    const session = ref.locator.session;
+    expect(session).toBeTypeOf("string");
+    const windows = execFileSync("tmux", [
+      "-L",
+      socket,
+      "list-windows",
+      "-t",
+      String(session),
+    ]).toString();
     expect(windows.trim().split("\n")).toHaveLength(1);
     stream.close();
   });
@@ -77,7 +81,7 @@ describe("tmux runtime on a private server", () => {
     const stream = await runtime.attach(ref, size);
     let seen = "";
     stream.onData((b) => (seen += Buffer.from(b).toString("utf8")));
-    expect(await waitFor(() => seen.includes("<x;>"))).toBe(true);
+    await expect.poll(() => seen).toContain("<x;>");
     stream.close();
   });
 
@@ -91,8 +95,7 @@ describe("tmux runtime on a private server", () => {
       await sleep(20);
       stream.close();
     }
-    await waitFor(() => ptyHandleCount() <= baseline, 3000);
-    expect(ptyHandleCount()).toBeLessThanOrEqual(baseline);
+    await expect.poll(ptyHandleCount, { timeout: 3000 }).toBeLessThanOrEqual(baseline);
     expect(closes).toBe(30);
   });
 });
