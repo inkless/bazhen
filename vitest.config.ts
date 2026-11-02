@@ -15,12 +15,14 @@ export default defineConfig({
         test: {
           name: "medium",
           include: ["packages/*/src/**/*.medium.test.ts", "apps/*/src/**/*.medium.test.ts"],
+          globalSetup: ["tests/support/global-setup.ts"],
         },
       },
       {
         test: {
           name: "integration",
           include: ["tests/integration/**/*.test.ts"],
+          globalSetup: ["tests/support/global-setup.ts"],
           fileParallelism: false,
           maxWorkers: 1,
           testTimeout: 30_000,

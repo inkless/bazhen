@@ -6,7 +6,7 @@
     "emitDeclarationOnly": true,
     "rewriteRelativeImportExtensions": false
   },
-  "include": ["packages/*/src/**/*.test.ts", "apps/daemon/src/**/*.test.ts"],
+  "include": ["packages/*/src/**/*.test.ts", "apps/daemon/src/**/*.test.ts", "tests/support/*.ts"],
   "references": [
     {
       "path": "packages/protocol"

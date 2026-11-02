@@ -7,7 +7,7 @@
     "dev": "pnpm --parallel --filter @bazhen/daemon --filter @bazhen/web run dev",
     "build": "tsc -b && pnpm --filter @bazhen/web run build",
     "typecheck": "tsc -b",
-    "lint": "node scripts/lint-config.ts --check && oxlint --type-aware --report-unused-disable-directives-severity=error",
+    "lint": "node scripts/lint-config.ts --check && oxlint --type-aware --deny-warnings --report-unused-disable-directives-severity=error",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "test": "vitest run --project unit",

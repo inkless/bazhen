@@ -3,8 +3,9 @@ import { readdirSync } from "node:fs";
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** A private tmux server name scoped to this test run, so teardown can find and check it. */
 export function testSocket(label: string): string {
-  return `bz-test-${label}-${process.pid}`;
+  return `bz-test-${process.env["BZ_TEST_RUN"] ?? process.pid}-${label}`;
 }
 
 export function killServer(socket: string): void {
