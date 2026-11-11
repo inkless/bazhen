@@ -12,6 +12,7 @@ client. Agents, tasks, and orchestration come later.
 - pnpm 12 (pinned through `packageManager`)
 - tmux 3.x
 - macOS or Linux
+- For `pnpm test:e2e`, the pinned Chromium: `pnpm --filter @bazhen/e2e-tests exec playwright install chromium`
 
 ## Commands
 
