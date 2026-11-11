@@ -6,7 +6,7 @@ export default defineConfig({
       {
         test: {
           name: "unit",
-          include: ["packages/*/src/**/*.test.ts", "apps/*/src/**/*.test.ts"],
+          include: ["packages/*/src/**/*.test.ts", "apps/*/src/**/*.test.ts", "scripts/*.test.ts"],
           exclude: ["**/*.medium.test.ts", "**/node_modules/**"],
           env: { BAZHEN_HOME: "/nonexistent/bazhen-unit-tests" },
         },

@@ -52,25 +52,48 @@ const MATRIX: Area[] = [
     platformFree: true,
     thirdParty: ["node-pty", "hono", "@hono/*", "ws"],
   },
+  // Repository scripts: Node tools with no package bans, listed so their small tests get the
+  // small-test bans.
+  { dir: "scripts", banned: [] },
 ];
 
 // Small tests (`*.test.ts`) run in process with no I/O; anything that needs a file, a database or
 // a subprocess is a `*.medium.test.ts`.
-const SMALL_TEST_BANS = ["fs", "fs/promises", "os", "net", "child_process", "sqlite"].flatMap(
-  (m) => [m, `node:${m}`],
-);
+const SMALL_TEST_BANS = [
+  "fs",
+  "fs/promises",
+  "os",
+  "net",
+  "http",
+  "https",
+  "http2",
+  "dgram",
+  "tls",
+  "child_process",
+  "worker_threads",
+  "sqlite",
+].flatMap((m) => [m, `node:${m}`]);
 
-type Pattern = { group: string[]; message: string; allowTypeImports?: boolean };
+export type Pattern = { group: string[]; message: string; allowTypeImports?: boolean };
+export type Override = {
+  files: string[];
+  rules: { "import/no-nodejs-modules"?: "error"; "no-restricted-imports": Restriction };
+};
+type Restriction = ["error", { patterns: Pattern[] }];
 
 function packagePatterns(name: string, message: string, allowTypeImports: boolean): Pattern {
   const dir = PACKAGE_DIR[name];
   if (dir === undefined) throw new Error(`unknown package ${name}`);
-  const pattern: Pattern = { group: [name, `${name}/**`, `**/${dir}/**`], message };
+  const short = dir.split("/")[1] ?? dir;
+  const pattern: Pattern = {
+    group: [name, `${name}/**`, `**/${dir}/**`, `**/${short}/src/**`],
+    message,
+  };
   if (allowTypeImports) pattern.allowTypeImports = true;
   return pattern;
 }
 
-function restrictions(area: Area, smallTest: boolean): unknown {
+function restrictions(area: Area, smallTest: boolean): Restriction {
   const where = `${area.dir} (tech-stack-and-scaffold.md §3, docs/standards/code.md)`;
   const patterns: Pattern[] = [
     ...area.banned.map((p) => packagePatterns(p, `${where} must not import ${p}.`, false)),
@@ -94,9 +117,9 @@ function restrictions(area: Area, smallTest: boolean): unknown {
   return ["error", { patterns }];
 }
 
-function overrides(): unknown[] {
+function overrides(): Override[] {
   return MATRIX.flatMap((area) => {
-    const base = area.platformFree ? { "import/no-nodejs-modules": "error" } : {};
+    const base = area.platformFree ? { "import/no-nodejs-modules": "error" as const } : {};
     return [
       {
         files: [`${area.dir}/**/*.ts`, `${area.dir}/**/*.tsx`],
@@ -114,7 +137,7 @@ function overrides(): unknown[] {
   });
 }
 
-const config = {
+export const config = {
   $schema: "./node_modules/oxlint/configuration_schema.json",
   plugins: ["typescript", "unicorn", "import", "react", "react-hooks", "vitest"],
   categories: { correctness: "error", suspicious: "warn" },
@@ -138,14 +161,15 @@ const config = {
   ignorePatterns: ["dist/**", "spikes/**", "**/node_modules/**"],
 };
 
-const target = fileURLToPath(new URL("../.oxlintrc.json", import.meta.url));
-const generated = `${JSON.stringify(config, null, 2)}\n`;
-
-if (process.argv.includes("--check")) {
-  if (readFileSync(target, "utf8") !== generated) {
-    console.error(".oxlintrc.json is stale: run `pnpm lint:config` and commit the result.");
-    process.exit(1);
+if (import.meta.main) {
+  const target = fileURLToPath(new URL("../.oxlintrc.json", import.meta.url));
+  const generated = `${JSON.stringify(config, null, 2)}\n`;
+  if (process.argv.includes("--check")) {
+    if (readFileSync(target, "utf8") !== generated) {
+      console.error(".oxlintrc.json is stale: run `pnpm lint:config` and commit the result.");
+      process.exit(1);
+    }
+  } else {
+    writeFileSync(target, generated);
   }
-} else {
-  writeFileSync(target, generated);
 }

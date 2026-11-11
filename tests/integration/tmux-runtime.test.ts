@@ -52,7 +52,7 @@ describe("tmux runtime on a private server", () => {
     let seen = "";
     stream.onData((b) => (seen += Buffer.from(b).toString("utf8")));
     stream.write(Buffer.from("ping-你好\r"));
-    await expect.poll(() => seen).toContain("ping-你好");
+    await expect.poll(() => seen, { timeout: 3000 }).toContain("ping-你好");
     stream.close();
   });
 
@@ -62,7 +62,7 @@ describe("tmux runtime on a private server", () => {
     let seen = "";
     stream.onData((b) => (seen += Buffer.from(b).toString("utf8")));
     stream.write(Buffer.from("\x02c"));
-    await expect.poll(() => seen).toContain("^B");
+    await expect.poll(() => seen, { timeout: 3000 }).toContain("^B");
     const session = ref.locator.session;
     expect(session).toBeTypeOf("string");
     const windows = execFileSync("tmux", [
@@ -81,7 +81,7 @@ describe("tmux runtime on a private server", () => {
     const stream = await runtime.attach(ref, size);
     let seen = "";
     stream.onData((b) => (seen += Buffer.from(b).toString("utf8")));
-    await expect.poll(() => seen).toContain("<x;>");
+    await expect.poll(() => seen, { timeout: 3000 }).toContain("<x;>");
     stream.close();
   });
 

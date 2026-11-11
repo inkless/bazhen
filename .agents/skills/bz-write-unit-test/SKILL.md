@@ -1,6 +1,6 @@
 ---
 name: bz-write-unit-test
-description: Writes a small or medium test for Bazhen's own source in this repository (packages/*/src, apps/*/src) and proves it can fail. Use when changing Bazhen's source in this repository, to add behaviour or fix a bug, before writing the implementation. Not for tests against real tmux (bz-write-integration-test), and not for operating a running Bazhen.
+description: Writes a small or medium test for Bazhen's own source in this repository (packages/*/src, apps/*/src) and proves it can fail. Use when changing Bazhen's source in this repository in a way that needs no real tmux or PTYs, to add behaviour or fix a bug, before writing the implementation. Not for tests against real tmux (bz-write-integration-test), and not for operating a running Bazhen.
 ---
 
 # Write a unit test for Bazhen's source
@@ -11,8 +11,8 @@ hook rejects a test that passes without your change.
 ## Steps
 
 1. **Pick the size from what the test touches** (`docs/standards/testing.md` § Sizes):
-   - memory only: `src/<dir>/<module>.test.ts`;
-   - temporary files, SQLite, or the HTTP app: `src/<dir>/<module>.medium.test.ts`.
+   - memory only, including `app.request`: `src/<dir>/<module>.test.ts`;
+   - temporary files or SQLite: `src/<dir>/<module>.medium.test.ts`.
 2. **Name the behaviour, not the function.** For example, "refuses a request whose Host header is
    not on the allowlist".
 3. **Copy the nearest exemplar:**
@@ -40,7 +40,7 @@ hook rejects a test that passes without your change.
 
 - **`node:fs`, `node:os`, `node:sqlite` or `node:child_process` in a `*.test.ts` fails lint.**
   Rename the file `*.medium.test.ts`; don't work around the rule.
-- **Lint rejects `if`, `&&`, `??` and loops inside a test body.** Split the cases into separate
+- **Lint rejects `if`, `&&` and `??` inside a test body.** Split the cases into separate
   tests, or move the logic into a helper at module scope, as the property test does.
 - **No mocks of code we own.** Use a fake object built from the real interface, like the
   `runtime` fake in `app.test.ts`. No fake timers: pass time and IDs in.

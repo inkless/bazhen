@@ -19,19 +19,29 @@ const LINUX_CUTOFF_FRACTION = 420 / 511;
 const readPtySysctl = (name: string) =>
   Number(readFileSync(`/proc/sys/kernel/pty/${name}`, "utf8").trim());
 
+function cutoffOverride(): number | undefined {
+  const raw = process.env["BZ_PTY_CUTOFF"];
+  if (raw === undefined || raw === "") return undefined;
+  const cutoff = Number(raw);
+  if (!Number.isFinite(cutoff) || cutoff <= 0) {
+    fail(`BZ_PTY_CUTOFF must be a positive number of PTYs, got "${raw}".`);
+  }
+  return cutoff;
+}
+
 export function ptysInUse(): { used: number; cutoff: number } {
-  const override = process.env["BZ_PTY_CUTOFF"];
+  const override = cutoffOverride();
   if (process.platform === "linux") {
     const max = readPtySysctl("max");
     return {
       used: readPtySysctl("nr"),
-      cutoff: override ? Number(override) : Math.floor(max * LINUX_CUTOFF_FRACTION),
+      cutoff: override ?? Math.floor(max * LINUX_CUTOFF_FRACTION),
     };
   }
   // Counts the 16 legacy BSD names too, which overcounts slightly: the safe direction, and the
   // same way the spike measured the cutoff.
   const used = readdirSync("/dev").filter((name) => name.startsWith("ttys")).length;
-  return { used, cutoff: override ? Number(override) : MACOS_CUTOFF };
+  return { used, cutoff: override ?? MACOS_CUTOFF };
 }
 
 function tmuxSocketDir(): string {

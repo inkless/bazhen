@@ -46,12 +46,14 @@ function walk(sequence: TerminalEvent[]): Step[] {
   let generation = 0;
   for (const event of sequence) {
     let to: TerminalState = state;
+    let rejected = false;
     try {
       to = nextState(state, event);
     } catch (error) {
       if (!(error instanceof InvalidTransition)) throw error;
+      rejected = true;
     }
-    const generationAfter = to === state ? generation : nextGeneration(state, event, generation);
+    const generationAfter = rejected ? generation : nextGeneration(state, event, generation);
     steps.push({ from: state, event, to, generationBefore: generation, generationAfter });
     state = to;
     generation = generationAfter;
@@ -74,6 +76,40 @@ const generationRisesOnlyOnRespawn = (steps: Step[]) =>
       : s.generationAfter === s.generationBefore + 1 &&
         s.from === "exited" &&
         s.event.type === "respawned",
+  );
+
+const respawnRaisesGeneration = (steps: Step[]) =>
+  steps
+    .filter((s) => s.from === "exited" && s.event.type === "respawned")
+    .every((s) => s.generationAfter === s.generationBefore + 1);
+
+// Visits every state: creating -> running -> unknown -> running -> exited -> running (respawn)
+// -> lost -> closing -> closed, then a second terminal that fails.
+const canonical: TerminalEvent["type"][] = [
+  "runtime.confirmed",
+  "runtime.unreachable",
+  "runtime.reconfirmed",
+  "process.exited",
+  "respawned",
+  "target.absent",
+  "close.requested",
+  "close.completed",
+];
+const ALL_STATES: TerminalState[] = [
+  "creating",
+  "running",
+  "unknown",
+  "exited",
+  "lost",
+  "closing",
+  "closed",
+  "failed",
+];
+const statesVisited = (...sequences: TerminalEvent["type"][][]) =>
+  new Set(
+    sequences.flatMap((types) =>
+      walk(types.map((type): TerminalEvent => ({ type }))).flatMap((s) => [s.from, s.to]),
+    ),
   );
 
 const unreachability = fc.array(
@@ -102,6 +138,18 @@ describe("terminal state machine, over any sequence of events", () => {
     expect(() =>
       fc.assert(fc.property(events, (e) => generationRisesOnlyOnRespawn(walk(e)))),
     ).not.toThrow();
+  });
+
+  it("raises the generation by exactly one on every respawn of an exited terminal", () => {
+    expect(() =>
+      fc.assert(fc.property(events, (e) => respawnRaisesGeneration(walk(e)))),
+    ).not.toThrow();
+  });
+
+  it("can reach every state, so the walks above exercise the whole table", () => {
+    expect([...statesVisited(canonical, ["runtime.rejected"])].toSorted()).toEqual(
+      ALL_STATES.toSorted(),
+    );
   });
 
   it("never concludes lost while the runtime is merely unreachable", () => {

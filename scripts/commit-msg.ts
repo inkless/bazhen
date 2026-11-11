@@ -15,17 +15,34 @@ const TYPES = [
   "chore",
   "revert",
 ];
-const SUBJECT = new RegExp(`^(${TYPES.join("|")})(\\([a-z0-9-]+\\))?!?: \\S.{0,70}$`);
+const SUBJECT = new RegExp(`^(${TYPES.join("|")})(\\([a-z0-9-]+\\))?!?: \\S.*$`);
+const MAX_LENGTH = 72;
 
-const file = process.argv[2];
-if (file === undefined) throw new Error("usage: node scripts/commit-msg.ts <message-file>");
-const subject = readFileSync(file, "utf8").split("\n")[0] ?? "";
+// git writes these subjects itself: `rebase --autosquash` rewrites fixup!/squash!/amend! before
+// they land, and `git revert` writes `Revert "<original subject>"`.
+const GIT_GENERATED = /^((fixup|squash|amend)! |Revert ".+"$)/;
 
-// git's own fixup!/squash! subjects are rewritten by `rebase --autosquash` before they land.
-if (!/^(fixup|squash|amend)! /.test(subject) && !SUBJECT.test(subject)) {
-  console.error(
-    `Commit subject is not a Conventional Commit: "${subject}"\n` +
-      `Use \`type(scope): subject\` (at most 72 characters), with type one of ${TYPES.join(", ")}.`,
-  );
-  process.exit(1);
+/** Why the subject is rejected, or undefined when it is acceptable. */
+export function subjectProblem(subject: string): string | undefined {
+  if (GIT_GENERATED.test(subject)) return undefined;
+  if (!SUBJECT.test(subject)) {
+    return (
+      `Commit subject is not a Conventional Commit: "${subject}"\n` +
+      `Use \`type(scope): subject\`, with type one of ${TYPES.join(", ")}.`
+    );
+  }
+  if (subject.length > MAX_LENGTH) {
+    return `Commit subject is ${subject.length} characters (at most ${MAX_LENGTH}): "${subject}"`;
+  }
+  return undefined;
+}
+
+if (import.meta.main) {
+  const file = process.argv[2];
+  if (file === undefined) throw new Error("usage: node scripts/commit-msg.ts <message-file>");
+  const problem = subjectProblem(readFileSync(file, "utf8").split("\n")[0] ?? "");
+  if (problem !== undefined) {
+    console.error(problem);
+    process.exit(1);
+  }
 }

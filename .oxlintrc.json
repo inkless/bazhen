@@ -44,7 +44,8 @@
                 "group": [
                   "@bazhen/core",
                   "@bazhen/core/**",
-                  "**/packages/core/**"
+                  "**/packages/core/**",
+                  "**/core/src/**"
                 ],
                 "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/core."
               },
@@ -52,7 +53,8 @@
                 "group": [
                   "@bazhen/runtime-tmux",
                   "@bazhen/runtime-tmux/**",
-                  "**/packages/runtime-tmux/**"
+                  "**/packages/runtime-tmux/**",
+                  "**/runtime-tmux/src/**"
                 ],
                 "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
               },
@@ -60,7 +62,8 @@
                 "group": [
                   "@bazhen/daemon",
                   "@bazhen/daemon/**",
-                  "**/apps/daemon/**"
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**"
                 ],
                 "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
               },
@@ -68,7 +71,8 @@
                 "group": [
                   "@bazhen/web",
                   "@bazhen/web/**",
-                  "**/apps/web/**"
+                  "**/apps/web/**",
+                  "**/web/src/**"
                 ],
                 "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
               },
@@ -102,7 +106,8 @@
                 "group": [
                   "@bazhen/core",
                   "@bazhen/core/**",
-                  "**/packages/core/**"
+                  "**/packages/core/**",
+                  "**/core/src/**"
                 ],
                 "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/core."
               },
@@ -110,7 +115,8 @@
                 "group": [
                   "@bazhen/runtime-tmux",
                   "@bazhen/runtime-tmux/**",
-                  "**/packages/runtime-tmux/**"
+                  "**/packages/runtime-tmux/**",
+                  "**/runtime-tmux/src/**"
                 ],
                 "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
               },
@@ -118,7 +124,8 @@
                 "group": [
                   "@bazhen/daemon",
                   "@bazhen/daemon/**",
-                  "**/apps/daemon/**"
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**"
                 ],
                 "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
               },
@@ -126,7 +133,8 @@
                 "group": [
                   "@bazhen/web",
                   "@bazhen/web/**",
-                  "**/apps/web/**"
+                  "**/apps/web/**",
+                  "**/web/src/**"
                 ],
                 "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
               },
@@ -151,8 +159,20 @@
                   "node:os",
                   "net",
                   "node:net",
+                  "http",
+                  "node:http",
+                  "https",
+                  "node:https",
+                  "http2",
+                  "node:http2",
+                  "dgram",
+                  "node:dgram",
+                  "tls",
+                  "node:tls",
                   "child_process",
                   "node:child_process",
+                  "worker_threads",
+                  "node:worker_threads",
                   "sqlite",
                   "node:sqlite"
                 ],
@@ -177,7 +197,8 @@
                 "group": [
                   "@bazhen/core",
                   "@bazhen/core/**",
-                  "**/packages/core/**"
+                  "**/packages/core/**",
+                  "**/core/src/**"
                 ],
                 "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/core."
               },
@@ -185,7 +206,8 @@
                 "group": [
                   "@bazhen/runtime-tmux",
                   "@bazhen/runtime-tmux/**",
-                  "**/packages/runtime-tmux/**"
+                  "**/packages/runtime-tmux/**",
+                  "**/runtime-tmux/src/**"
                 ],
                 "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
               },
@@ -193,7 +215,8 @@
                 "group": [
                   "@bazhen/daemon",
                   "@bazhen/daemon/**",
-                  "**/apps/daemon/**"
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**"
                 ],
                 "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
               },
@@ -201,7 +224,8 @@
                 "group": [
                   "@bazhen/web",
                   "@bazhen/web/**",
-                  "**/apps/web/**"
+                  "**/apps/web/**",
+                  "**/web/src/**"
                 ],
                 "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
               },
@@ -235,7 +259,8 @@
                 "group": [
                   "@bazhen/runtime-tmux",
                   "@bazhen/runtime-tmux/**",
-                  "**/packages/runtime-tmux/**"
+                  "**/packages/runtime-tmux/**",
+                  "**/runtime-tmux/src/**"
                 ],
                 "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
               },
@@ -243,7 +268,8 @@
                 "group": [
                   "@bazhen/daemon",
                   "@bazhen/daemon/**",
-                  "**/apps/daemon/**"
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**"
                 ],
                 "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
               },
@@ -251,7 +277,8 @@
                 "group": [
                   "@bazhen/web",
                   "@bazhen/web/**",
-                  "**/apps/web/**"
+                  "**/apps/web/**",
+                  "**/web/src/**"
                 ],
                 "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
               },
@@ -259,7 +286,8 @@
                 "group": [
                   "@bazhen/protocol",
                   "@bazhen/protocol/**",
-                  "**/packages/protocol/**"
+                  "**/packages/protocol/**",
+                  "**/protocol/src/**"
                 ],
                 "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import only types from @bazhen/protocol.",
                 "allowTypeImports": true
@@ -294,7 +322,8 @@
                 "group": [
                   "@bazhen/runtime-tmux",
                   "@bazhen/runtime-tmux/**",
-                  "**/packages/runtime-tmux/**"
+                  "**/packages/runtime-tmux/**",
+                  "**/runtime-tmux/src/**"
                 ],
                 "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
               },
@@ -302,7 +331,8 @@
                 "group": [
                   "@bazhen/daemon",
                   "@bazhen/daemon/**",
-                  "**/apps/daemon/**"
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**"
                 ],
                 "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
               },
@@ -310,7 +340,8 @@
                 "group": [
                   "@bazhen/web",
                   "@bazhen/web/**",
-                  "**/apps/web/**"
+                  "**/apps/web/**",
+                  "**/web/src/**"
                 ],
                 "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
               },
@@ -318,7 +349,8 @@
                 "group": [
                   "@bazhen/protocol",
                   "@bazhen/protocol/**",
-                  "**/packages/protocol/**"
+                  "**/packages/protocol/**",
+                  "**/protocol/src/**"
                 ],
                 "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import only types from @bazhen/protocol.",
                 "allowTypeImports": true
@@ -344,8 +376,20 @@
                   "node:os",
                   "net",
                   "node:net",
+                  "http",
+                  "node:http",
+                  "https",
+                  "node:https",
+                  "http2",
+                  "node:http2",
+                  "dgram",
+                  "node:dgram",
+                  "tls",
+                  "node:tls",
                   "child_process",
                   "node:child_process",
+                  "worker_threads",
+                  "node:worker_threads",
                   "sqlite",
                   "node:sqlite"
                 ],
@@ -370,7 +414,8 @@
                 "group": [
                   "@bazhen/runtime-tmux",
                   "@bazhen/runtime-tmux/**",
-                  "**/packages/runtime-tmux/**"
+                  "**/packages/runtime-tmux/**",
+                  "**/runtime-tmux/src/**"
                 ],
                 "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
               },
@@ -378,7 +423,8 @@
                 "group": [
                   "@bazhen/daemon",
                   "@bazhen/daemon/**",
-                  "**/apps/daemon/**"
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**"
                 ],
                 "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
               },
@@ -386,7 +432,8 @@
                 "group": [
                   "@bazhen/web",
                   "@bazhen/web/**",
-                  "**/apps/web/**"
+                  "**/apps/web/**",
+                  "**/web/src/**"
                 ],
                 "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
               },
@@ -394,7 +441,8 @@
                 "group": [
                   "@bazhen/protocol",
                   "@bazhen/protocol/**",
-                  "**/packages/protocol/**"
+                  "**/packages/protocol/**",
+                  "**/protocol/src/**"
                 ],
                 "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import only types from @bazhen/protocol.",
                 "allowTypeImports": true
@@ -428,7 +476,8 @@
                 "group": [
                   "@bazhen/daemon",
                   "@bazhen/daemon/**",
-                  "**/apps/daemon/**"
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**"
                 ],
                 "message": "packages/runtime-tmux (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
               },
@@ -436,7 +485,8 @@
                 "group": [
                   "@bazhen/web",
                   "@bazhen/web/**",
-                  "**/apps/web/**"
+                  "**/apps/web/**",
+                  "**/web/src/**"
                 ],
                 "message": "packages/runtime-tmux (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
               },
@@ -469,7 +519,8 @@
                 "group": [
                   "@bazhen/daemon",
                   "@bazhen/daemon/**",
-                  "**/apps/daemon/**"
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**"
                 ],
                 "message": "packages/runtime-tmux (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
               },
@@ -477,7 +528,8 @@
                 "group": [
                   "@bazhen/web",
                   "@bazhen/web/**",
-                  "**/apps/web/**"
+                  "**/apps/web/**",
+                  "**/web/src/**"
                 ],
                 "message": "packages/runtime-tmux (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
               },
@@ -502,8 +554,20 @@
                   "node:os",
                   "net",
                   "node:net",
+                  "http",
+                  "node:http",
+                  "https",
+                  "node:https",
+                  "http2",
+                  "node:http2",
+                  "dgram",
+                  "node:dgram",
+                  "tls",
+                  "node:tls",
                   "child_process",
                   "node:child_process",
+                  "worker_threads",
+                  "node:worker_threads",
                   "sqlite",
                   "node:sqlite"
                 ],
@@ -527,7 +591,8 @@
                 "group": [
                   "@bazhen/daemon",
                   "@bazhen/daemon/**",
-                  "**/apps/daemon/**"
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**"
                 ],
                 "message": "packages/runtime-tmux (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
               },
@@ -535,7 +600,8 @@
                 "group": [
                   "@bazhen/web",
                   "@bazhen/web/**",
-                  "**/apps/web/**"
+                  "**/apps/web/**",
+                  "**/web/src/**"
                 ],
                 "message": "packages/runtime-tmux (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
               },
@@ -568,7 +634,8 @@
                 "group": [
                   "@bazhen/web",
                   "@bazhen/web/**",
-                  "**/apps/web/**"
+                  "**/apps/web/**",
+                  "**/web/src/**"
                 ],
                 "message": "apps/daemon (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
               }
@@ -591,7 +658,8 @@
                 "group": [
                   "@bazhen/web",
                   "@bazhen/web/**",
-                  "**/apps/web/**"
+                  "**/apps/web/**",
+                  "**/web/src/**"
                 ],
                 "message": "apps/daemon (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
               },
@@ -606,8 +674,20 @@
                   "node:os",
                   "net",
                   "node:net",
+                  "http",
+                  "node:http",
+                  "https",
+                  "node:https",
+                  "http2",
+                  "node:http2",
+                  "dgram",
+                  "node:dgram",
+                  "tls",
+                  "node:tls",
                   "child_process",
                   "node:child_process",
+                  "worker_threads",
+                  "node:worker_threads",
                   "sqlite",
                   "node:sqlite"
                 ],
@@ -631,7 +711,8 @@
                 "group": [
                   "@bazhen/web",
                   "@bazhen/web/**",
-                  "**/apps/web/**"
+                  "**/apps/web/**",
+                  "**/web/src/**"
                 ],
                 "message": "apps/daemon (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
               }
@@ -655,7 +736,8 @@
                 "group": [
                   "@bazhen/core",
                   "@bazhen/core/**",
-                  "**/packages/core/**"
+                  "**/packages/core/**",
+                  "**/core/src/**"
                 ],
                 "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/core."
               },
@@ -663,7 +745,8 @@
                 "group": [
                   "@bazhen/runtime-tmux",
                   "@bazhen/runtime-tmux/**",
-                  "**/packages/runtime-tmux/**"
+                  "**/packages/runtime-tmux/**",
+                  "**/runtime-tmux/src/**"
                 ],
                 "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
               },
@@ -671,7 +754,8 @@
                 "group": [
                   "@bazhen/daemon",
                   "@bazhen/daemon/**",
-                  "**/apps/daemon/**"
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**"
                 ],
                 "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
               },
@@ -704,7 +788,8 @@
                 "group": [
                   "@bazhen/core",
                   "@bazhen/core/**",
-                  "**/packages/core/**"
+                  "**/packages/core/**",
+                  "**/core/src/**"
                 ],
                 "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/core."
               },
@@ -712,7 +797,8 @@
                 "group": [
                   "@bazhen/runtime-tmux",
                   "@bazhen/runtime-tmux/**",
-                  "**/packages/runtime-tmux/**"
+                  "**/packages/runtime-tmux/**",
+                  "**/runtime-tmux/src/**"
                 ],
                 "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
               },
@@ -720,7 +806,8 @@
                 "group": [
                   "@bazhen/daemon",
                   "@bazhen/daemon/**",
-                  "**/apps/daemon/**"
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**"
                 ],
                 "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
               },
@@ -744,8 +831,20 @@
                   "node:os",
                   "net",
                   "node:net",
+                  "http",
+                  "node:http",
+                  "https",
+                  "node:https",
+                  "http2",
+                  "node:http2",
+                  "dgram",
+                  "node:dgram",
+                  "tls",
+                  "node:tls",
                   "child_process",
                   "node:child_process",
+                  "worker_threads",
+                  "node:worker_threads",
                   "sqlite",
                   "node:sqlite"
                 ],
@@ -770,7 +869,8 @@
                 "group": [
                   "@bazhen/core",
                   "@bazhen/core/**",
-                  "**/packages/core/**"
+                  "**/packages/core/**",
+                  "**/core/src/**"
                 ],
                 "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/core."
               },
@@ -778,7 +878,8 @@
                 "group": [
                   "@bazhen/runtime-tmux",
                   "@bazhen/runtime-tmux/**",
-                  "**/packages/runtime-tmux/**"
+                  "**/packages/runtime-tmux/**",
+                  "**/runtime-tmux/src/**"
                 ],
                 "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
               },
@@ -786,7 +887,8 @@
                 "group": [
                   "@bazhen/daemon",
                   "@bazhen/daemon/**",
-                  "**/apps/daemon/**"
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**"
                 ],
                 "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
               },
@@ -800,6 +902,78 @@
                 "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import runtime libraries."
               }
             ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "scripts/**/*.ts",
+        "scripts/**/*.tsx"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": []
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "scripts/**/*.test.ts",
+        "scripts/**/*.test.tsx"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "node-pty",
+                  "fs",
+                  "node:fs",
+                  "fs/promises",
+                  "node:fs/promises",
+                  "os",
+                  "node:os",
+                  "net",
+                  "node:net",
+                  "http",
+                  "node:http",
+                  "https",
+                  "node:https",
+                  "http2",
+                  "node:http2",
+                  "dgram",
+                  "node:dgram",
+                  "tls",
+                  "node:tls",
+                  "child_process",
+                  "node:child_process",
+                  "worker_threads",
+                  "node:worker_threads",
+                  "sqlite",
+                  "node:sqlite"
+                ],
+                "message": "A *.test.ts is a small test: no files, sockets, processes or databases. Rename it *.medium.test.ts (docs/standards/testing.md)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "scripts/**/*.medium.test.ts"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": []
           }
         ]
       }

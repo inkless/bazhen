@@ -10,10 +10,12 @@ a run pass.**
 
 ## "Refusing to run: N PTYs are in use machine-wide"
 
-Something on this machine holds PTYs. macOS allows 511 in total, and the cutoff is 420.
+Something on this machine holds PTYs. The limits and the cutoff are in
+`docs/standards/testing.md` § Hermeticity.
 
-1. Count them with `ls /dev/ttys* | wc -l`, and find the holders with
+1. On macOS, count them with `ls /dev/ttys* | wc -l`, and find the holders with
    `lsof /dev/ptmx 2>/dev/null | awk 'NR>1 {print $1, $2}' | sort | uniq -c | sort -rn | head`.
+   On Linux, read the count from `/proc/sys/kernel/pty/nr`.
 2. If the holder is a Node process from an earlier test run, kill that process. If it's
    something of the user's (terminals, editors), stop and tell the user. Don't kill it.
 3. A Bazhen daemon that holds one PTY per attach and never releases them is a leak. Reproduce it
@@ -38,7 +40,7 @@ Teardown found servers from this run alive, and has already killed them. The mes
    - a probe typed without `\r`, so canonical mode stopped echoing;
    - a `waitFor` loop instead of `expect.poll`.
 
-   Every tmux call already times out after 5 s, so a hang is in our code or the test.
+   Every runtime tmux call already times out after 5 s, so a hang is in our code or the test.
 
 ## It fails sometimes
 

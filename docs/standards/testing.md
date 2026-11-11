@@ -3,29 +3,29 @@
 A test is worth keeping when it would fail if the behaviour it names broke. Everything on this
 page serves that rule, or keeps tests from hurting the machine and each other.
 
-| Rule                                                                             | Enforced by                                 |
-| -------------------------------------------------------------------------------- | ------------------------------------------- |
-| A test that passes without the change it accompanies is rejected                 | commit-msg hook (`pnpm test:falsify`)       |
-| A new test that can't be judged by reverting carries a `Control:` trailer        | commit-msg hook                             |
-| Small tests (`*.test.ts`) touch no files, sockets, processes or databases        | `pnpm lint`                                 |
-| No `.only`, `.skip`, assertion-free tests, or conditionals inside tests          | `pnpm lint` (vitest rules)                  |
-| Every source file with runtime code has a sibling test, or a named covering test | `pnpm check` (`scripts/check-standards.ts`) |
-| Test files type-check                                                            | `pnpm typecheck` (`tsconfig.dev.json`)      |
-| Tests can't reach a real tmux server, and leave none running                     | integration setup and teardown              |
-| Test runs refuse to start when the machine is short of PTYs                      | integration and medium setup                |
-| Fakes over mocks; behaviour-named tests; no snapshots of terminal output         | review                                      |
+| Rule                                                                               | Enforced by                                 |
+| ---------------------------------------------------------------------------------- | ------------------------------------------- |
+| A test that passes without the change it accompanies is rejected                   | commit-msg hook (`pnpm test:falsify`)       |
+| A new test that can't be judged by reverting needs at least one `Control:` trailer | commit-msg hook                             |
+| Small tests (`*.test.ts`) touch no files, sockets, processes or databases          | `pnpm lint`                                 |
+| No `.only`, `.skip`, assertion-free tests, or conditionals inside tests            | `pnpm lint` (vitest rules)                  |
+| Every source file with runtime code has a sibling test, or a named covering test   | `pnpm check` (`scripts/check-standards.ts`) |
+| Test files type-check                                                              | `pnpm typecheck` (`tsconfig.dev.json`)      |
+| Tests can't reach a real tmux server, and leave none running                       | integration setup and teardown              |
+| Test runs refuse to start when the machine is short of PTYs                        | integration and medium setup                |
+| Fakes over mocks; behaviour-named tests; no snapshots of terminal output           | review                                      |
 
 ## Sizes
 
 Size is about what a test touches, and the file name declares it. The sizes follow _Software
 Engineering at Google_.
 
-| Size   | File                          | May touch                              | Runs in                                |
-| ------ | ----------------------------- | -------------------------------------- | -------------------------------------- |
-| small  | `src/**/x.test.ts`            | memory only                            | `pnpm test`, in parallel, milliseconds |
-| medium | `src/**/x.medium.test.ts`     | temporary files, SQLite, `app.request` | `pnpm test:medium`                     |
-| medium | `tests/integration/*.test.ts` | a private tmux server, real PTYs       | `pnpm test:integration`, one worker    |
-| large  | `tests/e2e/*.spec.ts`         | daemon, web client and browser         | `pnpm test:e2e`                        |
+| Size   | File                          | May touch                            | Runs in                                |
+| ------ | ----------------------------- | ------------------------------------ | -------------------------------------- |
+| small  | `src/**/x.test.ts`            | memory only, including `app.request` | `pnpm test`, in parallel, milliseconds |
+| medium | `src/**/x.medium.test.ts`     | temporary files, SQLite              | `pnpm test:medium`                     |
+| medium | `tests/integration/*.test.ts` | a private tmux server, real PTYs     | `pnpm test:integration`, one worker    |
+| large  | `tests/e2e/*.spec.ts`         | daemon, web client and browser       | `pnpm test:e2e`                        |
 
 Write the smallest test that can fail for the right reason. E2E tests cover only wiring that
 crosses processes; a behaviour that a medium test can reach belongs in a medium test.

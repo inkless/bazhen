@@ -18,7 +18,7 @@ terminal on the machine, not just Bazhen's.
    `afterAll(() => killServer(socket))`. Helpers are in `tests/integration/helpers.ts`.
 3. Build inputs with a builder like `spec()` in `tmux-runtime.test.ts`.
 4. **Assert first, wait second.** Use `await expect.poll(() => seen).toContain("…")`, which fails
-   with the last value it saw. Never `sleep` to wait, and never a boolean wait helper.
+   with the last value it saw. Never `sleep` to wait for a result, and never a boolean wait helper.
 5. If the code opens PTYs, add or extend the lifecycle test: repeat the operation about 30 times
    and `expect.poll(ptyHandleCount).toBeLessThanOrEqual(baseline)`.
 6. Run it with `pnpm test:file tests/integration/<file>.test.ts -t "<name>"`, then
@@ -35,7 +35,7 @@ terminal on the machine, not just Bazhen's.
 - **tmux 3.6b crashes its server** on `window-size manual` set globally (set it per window, after
   creation), and on `refresh-client -A <pane>:off` against a busy pane. A crash kills every
   terminal. The pins are in `tmux-defects.test.ts`.
-- **Every tmux call times out after 5 s.** A test that hangs for 30 s is waiting on something
+- **Every runtime tmux call times out after 5 s.** A test that hangs for 30 s is waiting on something
   else.
 - **The integration project runs one file at a time**, so don't rely on parallelism.
 - If a run hangs, leaks or refuses to start, use `bz-debug-integration-test`.

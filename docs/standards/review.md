@@ -26,13 +26,18 @@ change was made, and records any `Control:` trailers.
 
 ## Already checked by tooling
 
-`pnpm check` runs on every commit, through the pre-commit hook:
+The pre-commit hook runs a tiered gate on every commit:
 
-- formatting;
-- lint, including the import matrix, the test rules and `any`;
-- types, for sources, tests and scripts;
-- small, medium and integration tests;
-- sibling tests.
+- a commit that touches only Markdown, `docs/` or `.agents/` gets the standards check (sibling
+  tests, agent context, skills) and formatting;
+- any other commit gets `pnpm check:fast`: the standards check, formatting, lint (including the
+  import matrix, the test rules and `any`), types for sources, tests and scripts, and the small
+  and medium tests;
+- the integration tests run as well when the commit touches `packages/runtime-tmux/`,
+  `packages/core/`, `apps/daemon/`, `tests/integration/`, `tests/support/`, `vitest.config.ts`,
+  `package.json` or `pnpm-lock.yaml`.
+
+`pnpm check` is the full gate, with every tier; run it before you push.
 
 The commit-msg hook checks the subject and runs the falsification harness. Don't spend review
 time on any of these. If one of them is wrong, fix the check.

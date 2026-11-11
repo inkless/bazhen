@@ -24,7 +24,8 @@ Never rename, remove or tighten anything that has shipped.
    - a malformed body;
    - an expected failure, such as a missing terminal.
 
-   The Host-allowlist test already covers every route, so don't remove it.
+   The Host allowlist is middleware on every route (`apps/daemon/src/http/app.ts`); keep its
+   test.
 
 5. **Client.** If the web client uses the endpoint, import the schema from `@bazhen/protocol`,
    never from the daemon. Then add or extend an e2e test in `tests/e2e/`.

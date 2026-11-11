@@ -32,22 +32,45 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
-/** True when the module has code that runs, not just types and re-exports. */
-function hasRuntimeCode(file: string): boolean {
-  if (file.endsWith(".tsx")) return true;
-  const js = stripTypeScriptTypes(readFileSync(join(root, file), "utf8"));
-  const code = js
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/\/\/.*$/gm, "")
+/** Removes comments, leaving string and template literals intact. */
+function stripComments(js: string): string {
+  let out = "";
+  let quote = "";
+  for (let i = 0; i < js.length; i++) {
+    const c = js[i] ?? "";
+    if (quote !== "") {
+      out += c;
+      if (c === "\\") out += js[++i] ?? "";
+      else if (c === quote) quote = "";
+    } else if (c === "/" && js[i + 1] === "/") {
+      while (i < js.length && js[i] !== "\n") i++;
+      out += "\n";
+    } else if (c === "/" && js[i + 1] === "*") {
+      const end = js.indexOf("*/", i + 2);
+      i = end === -1 ? js.length : end + 1;
+    } else {
+      if (c === '"' || c === "'" || c === "`") quote = c;
+      out += c;
+    }
+  }
+  return out;
+}
+
+/** True when the TypeScript source has code that runs, not just types and re-exports. */
+export function hasRuntimeCode(source: string): boolean {
+  const code = stripComments(stripTypeScriptTypes(source))
     .replace(/^\s*export\s+(\*|\{[^}]*\})\s+from\s+["'][^"']+["'];?/gm, "")
     .replace(/^\s*export\s*\{\s*\};?/gm, "");
   return code.trim().length > 0;
 }
 
+const SIBLING_TESTS = [".test.ts", ".test.tsx", ".medium.test.ts", ".medium.test.tsx"];
+
 function checkSiblingTests(): void {
   const dirs = readdirSync(join(root, "packages"))
     .map((p) => `packages/${p}/src`)
-    .concat(readdirSync(join(root, "apps")).map((a) => `apps/${a}/src`));
+    .concat(readdirSync(join(root, "apps")).map((a) => `apps/${a}/src`))
+    .concat(["scripts"]);
   for (const file of dirs.flatMap(sourceFiles)) {
     const covering = COVERED_ELSEWHERE[file];
     if (covering !== undefined) {
@@ -56,9 +79,11 @@ function checkSiblingTests(): void {
       }
       continue;
     }
-    if (!hasRuntimeCode(file)) continue;
+    if (!file.endsWith(".tsx") && !hasRuntimeCode(readFileSync(join(root, file), "utf8"))) {
+      continue;
+    }
     const stem = file.replace(/\.tsx?$/, "");
-    if (![".test.ts", ".medium.test.ts"].some((ext) => existsSync(join(root, stem + ext)))) {
+    if (!SIBLING_TESTS.some((ext) => existsSync(join(root, stem + ext)))) {
       failures.push(
         `${file}: has runtime code but no ${stem}.test.ts or .medium.test.ts beside it ` +
           "(docs/standards/testing.md). If another test covers it, add it to COVERED_ELSEWHERE " +
@@ -74,6 +99,13 @@ function checkSiblingTests(): void {
 }
 
 function checkHooks(): void {
+  // CI and exported trees (no .git) never run the hooks, so there is nothing to install.
+  if (process.env["CI"]) return;
+  try {
+    execFileSync("git", ["rev-parse", "--git-dir"], { cwd: root, stdio: "ignore" });
+  } catch {
+    return;
+  }
   let hooksPath = "";
   try {
     hooksPath = execFileSync("git", ["config", "--get", "core.hooksPath"], {
@@ -100,6 +132,8 @@ const CONTEXT_DOCS = [
   "docs/standards/review.md",
 ];
 const PNPM_BUILTINS = new Set(["install", "exec", "add", "remove", "update"]);
+// pnpm options that take a value as the next word; every other option is a bare flag.
+const PNPM_VALUE_FLAGS = new Set(["--filter", "-F", "--dir", "-C", "--reporter", "--loglevel"]);
 const LINT_RULE = /^(import|vitest|typescript|unicorn|react|react-hooks|eslint)\//;
 const PATH_LIKE = /^(\.?[\w@-]+\/)+[\w.@-]*$|^\.?[\w-]+\.(ts|tsx|md|json)$/;
 
@@ -110,19 +144,56 @@ function scriptNames(): Set<string> {
   return new Set(typeof scripts === "object" && scripts !== null ? Object.keys(scripts) : []);
 }
 
+/** The text of every inline code span, and every whitespace-separated word in fenced blocks. */
+function codeSpans(text: string): string[] {
+  const spans: string[] = [];
+  const prose = text.replace(/^ *```[^\n]*\n([\s\S]*?)^ *```[^\n]*$/gm, (_, body: string) => {
+    for (const line of body.split("\n")) spans.push(line, ...line.split(/\s+/).filter(Boolean));
+    return "";
+  });
+  for (const [, span = ""] of prose.matchAll(/`([^`\n]+)`/g)) spans.push(span);
+  return spans;
+}
+
+/** Script names run by the `pnpm ...` commands in a code span, skipping options and values. */
+export function pnpmScripts(span: string): string[] {
+  const scripts: string[] = [];
+  for (const [, rest = ""] of span.matchAll(/\bpnpm((?: +\S+)*)/g)) {
+    const words = rest.trim().split(/ +/).filter(Boolean);
+    let i = 0;
+    while (words[i]?.startsWith("-")) {
+      const flag = words[i] ?? "";
+      i += PNPM_VALUE_FLAGS.has(flag) ? 2 : 1;
+    }
+    if (words[i] === "run") i++;
+    while (words[i]?.startsWith("-")) i++;
+    const script = words[i];
+    if (script !== undefined && /^[\w:-]+$/.test(script)) scripts.push(script);
+  }
+  return scripts;
+}
+
+/** Paths named in the code spans and fenced blocks of a Markdown document. */
+export function pathCandidates(text: string): string[] {
+  const paths = new Set<string>();
+  for (const span of codeSpans(text)) {
+    const candidate = span.replace(/:\d+$/, "");
+    if (PATH_LIKE.test(candidate) && !LINT_RULE.test(candidate) && !candidate.startsWith("@")) {
+      paths.add(candidate);
+    }
+  }
+  return [...paths];
+}
+
 function checkContextFile(doc: string, scripts: Set<string>): void {
   const text = readFileSync(join(root, doc), "utf8");
-  for (const [, span = ""] of text.matchAll(/`([^`\n]+)`/g)) {
-    for (const [, first = "", second = ""] of span.matchAll(/\bpnpm ([\w:-]+)(?: ([\w:-]+))?/g)) {
-      const script = first === "run" ? second : first;
-      if (!PNPM_BUILTINS.has(script) && !scripts.has(script)) {
-        failures.push(`${doc}: names \`pnpm ${script}\`, which is not a package.json script.`);
-      }
+  const named = new Set(codeSpans(text).flatMap(pnpmScripts));
+  for (const script of named) {
+    if (!PNPM_BUILTINS.has(script) && !scripts.has(script)) {
+      failures.push(`${doc}: names \`pnpm ${script}\`, which is not a package.json script.`);
     }
-    const candidate = span.replace(/:\d+$/, "");
-    if (!PATH_LIKE.test(candidate) || LINT_RULE.test(candidate) || candidate.startsWith("@")) {
-      continue;
-    }
+  }
+  for (const candidate of pathCandidates(text)) {
     const local = join(root, doc, "..", candidate);
     if (!existsSync(join(root, candidate)) && !existsSync(local)) {
       failures.push(`${doc}: names \`${candidate}\`, which does not exist.`);
@@ -162,7 +233,9 @@ const DESCRIPTION_MAX = 1024;
 
 function skillDocs(): string[] {
   if (!existsSync(join(root, SKILLS_DIR))) return [];
-  return readdirSync(join(root, SKILLS_DIR)).map((name) => `${SKILLS_DIR}/${name}/SKILL.md`);
+  return readdirSync(join(root, SKILLS_DIR))
+    .filter((name) => statSync(join(root, SKILLS_DIR, name)).isDirectory())
+    .map((name) => `${SKILLS_DIR}/${name}/SKILL.md`);
 }
 
 function checkSkills(scripts: Set<string>): void {
@@ -203,12 +276,14 @@ function checkSkills(scripts: Set<string>): void {
   }
 }
 
-checkSiblingTests();
-checkHooks();
-checkAgentContext();
-checkSkills(scriptNames());
+if (import.meta.main) {
+  checkSiblingTests();
+  checkHooks();
+  checkAgentContext();
+  checkSkills(scriptNames());
 
-if (failures.length > 0) {
-  console.error(`Standards check failed:\n${failures.map((f) => `  - ${f}`).join("\n")}`);
-  process.exit(1);
+  if (failures.length > 0) {
+    console.error(`Standards check failed:\n${failures.map((f) => `  - ${f}`).join("\n")}`);
+    process.exit(1);
+  }
 }
