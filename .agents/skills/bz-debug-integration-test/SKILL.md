@@ -53,13 +53,14 @@ Teardown found servers from this run alive, and has already killed them. The mes
    - two runs sharing a fixed name or port: use `testSocket()` and free ports.
 3. Fix the race. There are no retries in this repository.
 
-## Known tmux 3.6b server crashes (a crash kills every terminal)
+## Known tmux server crashes (a crash kills every terminal)
 
-- `set -g window-size manual`: set it per window, after creation.
-- `refresh-client -A <pane>:off` against a pane that is producing output.
+- `set -g window-size manual`, before tmux 3.8: set it per window, after creation.
+- `refresh-client -A <pane>:off` against a pane that is producing output (seen on 3.6b).
 
 The pins are in `tests/integration/tmux-defects.test.ts`. If a pin starts failing after a tmux
-upgrade, the defect is fixed upstream; say so in the commit rather than deleting the pin.
+upgrade, the defect is fixed upstream: re-verify it, make the pin assert the fixed behaviour from
+that release on, and say so in the commit rather than deleting the pin.
 
 ## Inspecting a server
 
