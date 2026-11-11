@@ -133,11 +133,16 @@ describe("staleWorktrees", () => {
 });
 
 describe("signalExitCode", () => {
-  it("maps a child killed by SIGINT or SIGTERM to 130 or 143, and nothing else", () => {
+  it("maps a child killed by SIGINT, SIGTERM or SIGHUP to 130, 143 or 129, and nothing else", () => {
     expect(
-      [{ signal: "SIGINT" }, { signal: "SIGTERM" }, { signal: null }, new Error("x"), null].map(
-        signalExitCode,
-      ),
-    ).toEqual([130, 143, undefined, undefined, undefined]);
+      [
+        { signal: "SIGINT" },
+        { signal: "SIGTERM" },
+        { signal: "SIGHUP" },
+        { signal: null },
+        new Error("x"),
+        null,
+      ].map(signalExitCode),
+    ).toEqual([130, 143, 129, undefined, undefined, undefined]);
   });
 });

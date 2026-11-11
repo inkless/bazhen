@@ -119,6 +119,7 @@ function commit(extra: Record<string, string> = {}) {
     cwd: fx.linked,
     env: env(extra),
     encoding: "utf8",
+    timeout: 30_000,
   });
 }
 
@@ -186,6 +187,7 @@ describe("falsify as the commit-msg hook in a linked worktree", () => {
       cwd: fx.linked,
       env: env({ STUB_STATUS: "passed" }),
       encoding: "utf8",
+      timeout: 30_000,
     });
     expect({ status: result.status, log: stubLog() }).toEqual({ status: 0, log: "" });
   });

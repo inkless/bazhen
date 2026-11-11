@@ -200,7 +200,7 @@ let cleanup: (() => void) | undefined;
 let signalled = false;
 
 const exitCodeFor = (signal: unknown) =>
-  signal === "SIGINT" ? 130 : signal === "SIGTERM" ? 143 : undefined;
+  signal === "SIGINT" ? 130 : signal === "SIGTERM" ? 143 : signal === "SIGHUP" ? 129 : undefined;
 
 function signalGroup(child: ChildProcess, signal: NodeJS.Signals): void {
   if (child.pid === undefined) return;
@@ -311,11 +311,27 @@ async function main(): Promise<number> {
       cleanup = undefined;
       removeWorktree(dir, top);
     };
+    // SIGHUP too: an agent's tmux pane closing mid-commit must not orphan the detached children.
     process.once("SIGINT", handleSignal);
     process.once("SIGTERM", handleSignal);
+    process.once("SIGHUP", handleSignal);
     try {
-      isolatedGit(["worktree", "add", "--quiet", "--detach", dir, rev], top);
-      isolatedGit(["worktree", "lock", "--reason", `bz-falsify pid=${process.pid}`, dir], top);
+      // Locked in the same step as it is created, so a crash can never leave an unlocked (and so
+      // never-swept) worktree behind.
+      isolatedGit(
+        [
+          "worktree",
+          "add",
+          "--quiet",
+          "--detach",
+          "--lock",
+          "--reason",
+          `bz-falsify pid=${process.pid}`,
+          dir,
+          rev,
+        ],
+        top,
+      );
       if (staged) {
         // Bring the worktree to the staged state; the test files must be the new ones. `git show`
         // runs with the inherited environment, because only that sees the real index.
@@ -369,6 +385,7 @@ async function main(): Promise<number> {
       cleanup?.();
       process.off("SIGINT", handleSignal);
       process.off("SIGTERM", handleSignal);
+      process.off("SIGHUP", handleSignal);
     }
   }
 

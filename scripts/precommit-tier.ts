@@ -43,7 +43,7 @@ export function tier(paths: string[]): Tier {
 if (isMain(import.meta)) {
   const staged = execFileSync(
     "git",
-    ["diff", "--cached", "--name-only", "--no-renames", "--diff-filter=ACMRD", "-z"],
+    ["diff", "--cached", "--name-only", "--no-renames", "--diff-filter=ACMRDT", "-z"],
     { encoding: "utf8" },
   );
   console.log(tier(staged.split("\0").filter(Boolean)));
