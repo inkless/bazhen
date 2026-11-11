@@ -6,6 +6,7 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { isMain } from "./is-main.ts";
 
 type Area = {
   dir: string;
@@ -161,7 +162,7 @@ export const config = {
   ignorePatterns: ["dist/**", "spikes/**", "**/node_modules/**"],
 };
 
-if (import.meta.main) {
+if (isMain(import.meta)) {
   const target = fileURLToPath(new URL("../.oxlintrc.json", import.meta.url));
   const generated = `${JSON.stringify(config, null, 2)}\n`;
   if (process.argv.includes("--check")) {

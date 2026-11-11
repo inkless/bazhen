@@ -1,6 +1,7 @@
 // Checks a commit message's subject against Conventional Commits (docs/standards/review.md).
 
 import { readFileSync } from "node:fs";
+import { isMain } from "./is-main.ts";
 
 const TYPES = [
   "feat",
@@ -18,13 +19,18 @@ const TYPES = [
 const SUBJECT = new RegExp(`^(${TYPES.join("|")})(\\([a-z0-9-]+\\))?!?: \\S.*$`);
 const MAX_LENGTH = 72;
 
-// git writes these subjects itself: `rebase --autosquash` rewrites fixup!/squash!/amend! before
-// they land, and `git revert` writes `Revert "<original subject>"`.
-const GIT_GENERATED = /^((fixup|squash|amend)! |Revert ".+"$)/;
+// `rebase --autosquash` folds these into the commit they name, so what follows the prefix is that
+// commit's subject and must pass the rule on its own.
+const AUTOSQUASH = /^(fixup|squash|amend)! /;
+// `git revert` writes `Revert "<original subject>"`. The original subject was checked when it
+// landed, and the wrapper alone can push it past the length budget, so it is exempt.
+const REVERT = /^Revert ".+"$/;
 
 /** Why the subject is rejected, or undefined when it is acceptable. */
 export function subjectProblem(subject: string): string | undefined {
-  if (GIT_GENERATED.test(subject)) return undefined;
+  if (REVERT.test(subject)) return undefined;
+  const autosquash = AUTOSQUASH.exec(subject)?.[0];
+  if (autosquash !== undefined) return subjectProblem(subject.slice(autosquash.length));
   if (!SUBJECT.test(subject)) {
     return (
       `Commit subject is not a Conventional Commit: "${subject}"\n` +
@@ -37,7 +43,7 @@ export function subjectProblem(subject: string): string | undefined {
   return undefined;
 }
 
-if (import.meta.main) {
+if (isMain(import.meta)) {
   const file = process.argv[2];
   if (file === undefined) throw new Error("usage: node scripts/commit-msg.ts <message-file>");
   const problem = subjectProblem(readFileSync(file, "utf8").split("\n")[0] ?? "");

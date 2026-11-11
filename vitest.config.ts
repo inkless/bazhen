@@ -14,7 +14,11 @@ export default defineConfig({
       {
         test: {
           name: "medium",
-          include: ["packages/*/src/**/*.medium.test.ts", "apps/*/src/**/*.medium.test.ts"],
+          include: [
+            "packages/*/src/**/*.medium.test.ts",
+            "apps/*/src/**/*.medium.test.ts",
+            "scripts/*.medium.test.ts",
+          ],
           globalSetup: ["tests/support/global-setup.ts"],
         },
       },

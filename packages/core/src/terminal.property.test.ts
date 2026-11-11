@@ -14,20 +14,27 @@ import {
   type TerminalEvent,
 } from "./terminal.ts";
 
-const EVENT_TYPES: TerminalEvent["type"][] = [
-  "runtime.confirmed",
-  "runtime.rejected",
-  "process.exited",
-  "runtime.unreachable",
-  "runtime.reconfirmed",
-  "target.absent",
-  "respawned",
-  "close.requested",
-  "close.completed",
+// Weighted towards the events that keep a terminal alive: drawn uniformly, most walks hit a final
+// state within a few events, and 200 walks often contained no respawn at all.
+const EVENT_WEIGHTS: [TerminalEvent["type"], number][] = [
+  ["runtime.confirmed", 4],
+  ["runtime.rejected", 1],
+  ["process.exited", 4],
+  ["runtime.unreachable", 2],
+  ["runtime.reconfirmed", 2],
+  ["target.absent", 1],
+  ["respawned", 4],
+  ["close.requested", 1],
+  ["close.completed", 1],
 ];
 
 const events = fc.array(
-  fc.constantFrom(...EVENT_TYPES).map((type): TerminalEvent => ({ type })),
+  fc.oneof(
+    ...EVENT_WEIGHTS.map(([type, weight]) => ({
+      weight,
+      arbitrary: fc.constant<TerminalEvent>({ type }),
+    })),
+  ),
   { maxLength: 40 },
 );
 
@@ -118,6 +125,11 @@ const unreachability = fc.array(
     .map((type): TerminalEvent => ({ type })),
   { maxLength: 40 },
 );
+const respawnsAnExitedTerminal = (steps: Step[]) =>
+  steps.some((s) => s.from === "exited" && s.event.type === "respawned");
+const walksThatRespawn = (count: number) =>
+  fc.sample(events, count).filter((e) => respawnsAnExitedTerminal(walk(e))).length;
+
 const startRunning: TerminalEvent[] = [{ type: "runtime.confirmed" }];
 const neverLost = (steps: Step[]) => steps.every((s) => s.to !== "lost");
 
@@ -150,6 +162,10 @@ describe("terminal state machine, over any sequence of events", () => {
     expect([...statesVisited(canonical, ["runtime.rejected"])].toSorted()).toEqual(
       ALL_STATES.toSorted(),
     );
+  });
+
+  it("samples walks that respawn an exited terminal, so the generation checks aren't vacuous", () => {
+    expect(walksThatRespawn(200)).toBeGreaterThan(0);
   });
 
   it("never concludes lost while the runtime is merely unreachable", () => {

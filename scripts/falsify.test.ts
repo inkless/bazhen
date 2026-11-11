@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { classify, newTitles, parseNameStatus, type VitestReport } from "./falsify.ts";
+import {
+  classify,
+  newTitles,
+  parseNameStatus,
+  signalExitCode,
+  staleWorktrees,
+  type VitestReport,
+} from "./falsify.ts";
 
 const FILE = "packages/core/src/x.test.ts";
 
@@ -42,6 +49,12 @@ describe("newTitles", () => {
     expect(newTitles(diff("it(`adds ${n}`, () => {});"), FILE)).toEqual([
       `<unparsed test in ${FILE}>`,
     ]);
+  });
+
+  it("adds the unparsed marker for each unreadable test, alongside the readable titles", () => {
+    expect(
+      newTitles(diff('it("a", () => {});', "it(", '  "wrapped",', "it(`b ${x}`, f);"), FILE),
+    ).toEqual(["a", `<unparsed test in ${FILE}>`]);
   });
 
   it("unescapes quotes inside the title", () => {
@@ -101,5 +114,30 @@ describe("parseNameStatus", () => {
     expect(parseNameStatus("R087\told.test.ts\tnew.test.ts\n")).toEqual([
       { status: "R", path: "new.test.ts", oldPath: "old.test.ts" },
     ]);
+  });
+});
+
+const porcelain = [
+  "worktree /repo\nHEAD abc\nbranch refs/heads/main",
+  "worktree /tmp/bz-falsify-dead\nHEAD abc\ndetached\nlocked bz-falsify pid=999999",
+  "worktree /tmp/bz-falsify-live\nHEAD abc\ndetached\nlocked bz-falsify pid=42",
+  "worktree /tmp/bz-falsify-unlocked\nHEAD abc\ndetached",
+  "worktree /tmp/other\nHEAD abc\ndetached\nlocked bz-falsify pid=999999",
+  "worktree /tmp/bz-falsify-mine\nHEAD abc\ndetached\nlocked someone else's reason",
+].join("\n\n");
+
+describe("staleWorktrees", () => {
+  it("lists only bz-falsify- worktrees locked by a pid that is dead", () => {
+    expect(staleWorktrees(porcelain, (pid) => pid === 42)).toEqual(["/tmp/bz-falsify-dead"]);
+  });
+});
+
+describe("signalExitCode", () => {
+  it("maps a child killed by SIGINT or SIGTERM to 130 or 143, and nothing else", () => {
+    expect(
+      [{ signal: "SIGINT" }, { signal: "SIGTERM" }, { signal: null }, new Error("x"), null].map(
+        signalExitCode,
+      ),
+    ).toEqual([130, 143, undefined, undefined, undefined]);
   });
 });

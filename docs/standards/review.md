@@ -26,16 +26,18 @@ change was made, and records any `Control:` trailers.
 
 ## Already checked by tooling
 
-The pre-commit hook runs a tiered gate on every commit:
+The pre-commit hook runs a tiered gate on every commit. `scripts/precommit-tier.ts` picks the
+tier from the staged paths, counting both sides of a rename:
 
-- a commit that touches only Markdown, `docs/` or `.agents/` gets the standards check (sibling
-  tests, agent context, skills) and formatting;
+- a commit that touches only Markdown, `docs/` or Markdown under `.agents/` gets the standards
+  check (sibling tests, agent context, skills) and formatting;
 - any other commit gets `pnpm check:fast`: the standards check, formatting, lint (including the
   import matrix, the test rules and `any`), types for sources, tests and scripts, and the small
   and medium tests;
 - the integration tests run as well when the commit touches `packages/runtime-tmux/`,
-  `packages/core/`, `apps/daemon/`, `tests/integration/`, `tests/support/`, `vitest.config.ts`,
-  `package.json` or `pnpm-lock.yaml`.
+  `packages/core/`, `packages/protocol/`, `apps/daemon/`, `tests/integration/`, `tests/support/`,
+  a test package's `package.json`, `vitest.config.ts`, `package.json`, `pnpm-lock.yaml` or
+  `pnpm-workspace.yaml`.
 
 `pnpm check` is the full gate, with every tier; run it before you push.
 

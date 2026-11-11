@@ -6,6 +6,7 @@ import { existsSync, readdirSync, readFileSync, readlinkSync, statSync } from "n
 import { stripTypeScriptTypes } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isMain } from "./is-main.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const failures: string[] = [];
@@ -98,9 +99,14 @@ function checkSiblingTests(): void {
   }
 }
 
+/** True when `CI` says this is a CI run, which never runs the hooks. `CI=false` is not CI. */
+export function isCi(ci: string | undefined): boolean {
+  return /^(true|1)$/i.test(ci ?? "");
+}
+
 function checkHooks(): void {
   // CI and exported trees (no .git) never run the hooks, so there is nothing to install.
-  if (process.env["CI"]) return;
+  if (isCi(process.env["CI"])) return;
   try {
     execFileSync("git", ["rev-parse", "--git-dir"], { cwd: root, stdio: "ignore" });
   } catch {
@@ -276,7 +282,7 @@ function checkSkills(scripts: Set<string>): void {
   }
 }
 
-if (import.meta.main) {
+if (isMain(import.meta)) {
   checkSiblingTests();
   checkHooks();
   checkAgentContext();

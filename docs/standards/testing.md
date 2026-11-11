@@ -23,7 +23,9 @@ Engineering at Google_.
 | Size   | File                          | May touch                            | Runs in                                |
 | ------ | ----------------------------- | ------------------------------------ | -------------------------------------- |
 | small  | `src/**/x.test.ts`            | memory only, including `app.request` | `pnpm test`, in parallel, milliseconds |
+| small  | `scripts/*.test.ts`           | memory only                          | `pnpm test`                            |
 | medium | `src/**/x.medium.test.ts`     | temporary files, SQLite              | `pnpm test:medium`                     |
+| medium | `scripts/*.medium.test.ts`    | temporary files, git, subprocesses   | `pnpm test:medium`                     |
 | medium | `tests/integration/*.test.ts` | a private tmux server, real PTYs     | `pnpm test:integration`, one worker    |
 | large  | `tests/e2e/*.spec.ts`         | daemon, web client and browser       | `pnpm test:e2e`                        |
 
@@ -40,8 +42,15 @@ Every new test must be shown to fail without the code it covers.
   - **KILLED** — it failed. Good.
   - **SURVIVED** — it passed without the change, so it can't detect the change. The commit is
     refused.
-  - **INVALID** — it couldn't load, or it timed out. Every test of a brand-new function lands
-    here, because the function doesn't exist before the change.
+  - **INVALID** — no verdict: it couldn't load, timed out, was skipped, or its title couldn't
+    be read or isn't unique; a commit that adds tests without a source change also lands here.
+    Every test of a brand-new function is INVALID, because the function doesn't exist before
+    the change.
+
+  Titles are read from added lines that look like `it(...)` or `test(...)` calls, so a fixture
+  string such as `'it("fixture", f)'` in a test file counts as a test. It can't be found in the
+  run, comes out INVALID and asks for a control: the safe direction.
+
 - **Controls for INVALID tests.** Break the code by hand: swap a comparison, delete a branch, or
   return a constant. Confirm the test fails on its assertion, not on a crash or a timeout, then
   restore the code. Record it in the commit message as
@@ -71,7 +80,9 @@ A test owns everything it touches and leaves nothing behind.
 - **PTYs are a machine-wide resource.** macOS has 511, and a leak starves every terminal on the
   machine. The setup refuses to run above 420 in use. A runtime change that opens PTYs needs a
   lifecycle test that repeats the operation and asserts the handle count returns to its baseline
-  (`ptyHandleCount()`).
+  (`ptyHandleCount()`). Linux uses the same fraction of `/proc/sys/kernel/pty/max`;
+  `BZ_PTY_CUTOFF` exists only for machines with a different PTY limit, never to get a leaky run
+  through.
 - **Ports.** Use free ports, never fixed ones, because parallel worktrees run the same suites.
 
 ## Writing the test

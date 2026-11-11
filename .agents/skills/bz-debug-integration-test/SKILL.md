@@ -5,8 +5,9 @@ description: Diagnoses Bazhen integration test runs that hang, report leaked tmu
 
 # Debug an integration test run
 
-**Gate: find the leak or the race. Never raise the PTY cutoff, add retries, or add sleeps to make
-a run pass.**
+**Gate: find the leak or the race. Never raise the PTY cutoff (`BZ_PTY_CUTOFF` is only for a
+machine with a different PTY limit; `docs/standards/testing.md` § Hermeticity), add retries, or
+add sleeps to make a run pass.**
 
 ## "Refusing to run: N PTYs are in use machine-wide"
 

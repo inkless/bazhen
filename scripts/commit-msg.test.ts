@@ -22,11 +22,31 @@ describe("subjectProblem", () => {
     ]);
   });
 
-  it("accepts git's fixup! subjects", () => {
-    expect(subjectProblem("fixup! feat(core): add lost state")).toBeUndefined();
+  it("accepts fixup!, squash! and amend! subjects that name a valid subject", () => {
+    expect(
+      ["fixup!", "squash!", "amend!", "fixup! fixup!"].map((prefix) =>
+        subjectProblem(`${prefix} feat(core): add lost state`),
+      ),
+    ).toEqual([undefined, undefined, undefined, undefined]);
+  });
+
+  it("rejects a fixup! whose remainder is not a Conventional Commit", () => {
+    expect(subjectProblem("fixup! add lost state")).toMatch(/not a Conventional Commit/);
+  });
+
+  it("budgets 72 characters for the remainder after the fixup! prefix", () => {
+    const remainder = `feat(core): ${"x".repeat(61)}`;
+    expect([
+      subjectProblem(`fixup! ${remainder.slice(0, 72)}`),
+      subjectProblem(`squash! ${remainder}`),
+    ]).toEqual([undefined, expect.stringMatching(/73 characters/)]);
   });
 
   it("accepts git's default revert subject", () => {
-    expect(subjectProblem('Revert "feat(core): add lost state"')).toBeUndefined();
+    const long = `feat(core): ${"x".repeat(60)}`;
+    expect([
+      subjectProblem('Revert "feat(core): add lost state"'),
+      subjectProblem(`Revert "${long}"`),
+    ]).toEqual([undefined, undefined]);
   });
 });

@@ -5,19 +5,27 @@
 // worktree, and classifies each new test:
 //   KILLED    it failed: the test depends on the change. Good.
 //   SURVIVED  it passed without the change: it cannot detect the change. Not allowed.
-//   INVALID   its file did not load, it timed out, or its title could not be matched: no
-//             verdict. Every test of a brand-new symbol lands here, so it needs a hand-run
-//             control recorded as a commit trailer:
-//             `Control: <what you broke> -> <how the test failed>`.
+//   INVALID   no verdict: it couldn't load, timed out, was skipped, or its title couldn't be
+//             read or isn't unique; a commit that adds tests without a source change also lands
+//             here. Every test of a brand-new symbol is INVALID, so it needs a hand-run control
+//             recorded as a commit trailer: `Control: <what you broke> -> <how the test failed>`.
+//
+// Titles come from added lines that look like `it(...)`/`test(...)` calls, so a fixture string in
+// a test file such as 'it("fixture", f)' counts as a test too. It then can't be found in the
+// report and comes out INVALID: the safe direction, since it asks for a control.
+//
+// The temporary worktree is locked with this process's pid. A run killed before it could clean
+// up leaves it behind, and the next run removes it once that pid is dead.
 //
 // Usage:
 //   node scripts/falsify.ts [<rev>]                  check an existing commit (default HEAD)
 //   node scripts/falsify.ts --staged <message-file>  check the staged change (commit-msg hook)
 
-import { execFileSync, spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
+import { isMain } from "./is-main.ts";
 
 export type Outcome = "KILLED" | "SURVIVED" | "INVALID";
 export type Change = { status: string; path: string; oldPath?: string };
@@ -27,6 +35,11 @@ const REVERTIBLE = /^(apps|packages)\/[^/]+\/src\//;
 const TITLE = /(?<![.\w])(?:it|test)(?:\.\w+(?:\([^()]*\))?)*\(\s*(["'`])((?:\\.|(?!\1).)+)\1/g;
 const TEST_CALL = /(?<![.\w])(?:it|test)(?:\.\w+)*\s*\(/;
 const CONTROL_TRAILER = /^Control: .+ -> .+$/m;
+const WORKTREE_PREFIX = "bz-falsify-";
+const LOCK_REASON = /^bz-falsify pid=(\d+)$/;
+const INSTALL_TIMEOUT_MS = 120_000;
+const VITEST_TIMEOUT_MS = 300_000;
+const KILL_GRACE_MS = 2000;
 
 // Git exports these to hooks (GIT_DIR in linked worktrees, GIT_INDEX_FILE always). Inherited,
 // they point every command run in the temporary worktree at the real repository and index.
@@ -75,22 +88,22 @@ export function parseNameStatus(out: string): Change[] {
 const unescape = (title: string) => title.replace(/\\(["'`])/g, "$1");
 
 /**
- * Titles of tests whose `it(...)`/`test(...)` line the change adds. When the added lines call a
- * test but no title can be read, the result is a single `<unparsed test in FILE>` marker, which
- * classifies as INVALID and so forces a Control trailer.
+ * Titles of tests whose `it(...)`/`test(...)` line the change adds. Every added test call whose
+ * title can't be read (wrapped onto the next line, interpolated, a variable) adds an
+ * `<unparsed test in FILE>` marker, which classifies as INVALID and so forces a Control trailer.
  */
 export function newTitles(diff: string, file: string): string[] {
   const titles = new Set<string>();
-  let calls = false;
   for (const line of diff.split("\n")) {
-    if (!line.startsWith("+") || line.startsWith("+++")) continue;
-    if (TEST_CALL.test(line)) calls = true;
+    if (!line.startsWith("+") || line.startsWith("+++") || !TEST_CALL.test(line)) continue;
+    let parsed = false;
     for (const [, quote, title] of line.matchAll(TITLE)) {
       if (title === undefined || (quote === "`" && title.includes("${"))) continue;
       titles.add(unescape(title));
+      parsed = true;
     }
+    if (!parsed) titles.add(`<unparsed test in ${file}>`);
   }
-  if (titles.size === 0 && calls) return [`<unparsed test in ${file}>`];
   return [...titles];
 }
 
@@ -122,37 +135,136 @@ export function classify(report: VitestReport, file: string, title: string): Out
   return test.status === "failed" ? "KILLED" : "INVALID";
 }
 
-// The long steps run asynchronously so a SIGINT or SIGTERM is handled while they run: the
-// handler kills the child and removes the temporary worktree.
-let running: ChildProcess | undefined;
-let cleanup: (() => void) | undefined;
-
-function onSignal(signal: NodeJS.Signals): void {
-  running?.kill("SIGKILL");
-  cleanup?.();
-  process.exit(signal === "SIGINT" ? 130 : 143);
+/** The `bz-falsify-` worktrees in `git worktree list --porcelain` output whose locking pid is dead. */
+export function staleWorktrees(porcelain: string, alive: (pid: number) => boolean): string[] {
+  return porcelain
+    .split("\n\n")
+    .map((block) => {
+      const path = /^worktree (.+)$/m.exec(block)?.[1];
+      const pid = LOCK_REASON.exec(/^locked (.*)$/m.exec(block)?.[1] ?? "")?.[1];
+      return { path, pid: pid === undefined ? undefined : Number(pid) };
+    })
+    .filter(
+      (w): w is { path: string; pid: number } =>
+        w.path !== undefined &&
+        basename(w.path).startsWith(WORKTREE_PREFIX) &&
+        w.pid !== undefined &&
+        !alive(w.pid),
+    )
+    .map((w) => w.path);
 }
 
-function run(cmd: string, args: string[], cwd: string, timeoutMs?: number): Promise<boolean> {
+const errorCode = (error: unknown) =>
+  error instanceof Error && "code" in error ? error.code : undefined;
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return errorCode(error) !== "ESRCH";
+  }
+}
+
+/** Removes the worktrees of earlier runs that died before cleaning up. Never touches others. */
+function sweepStale(top: string): void {
+  const listed = isolatedGit(["worktree", "list", "--porcelain"], top);
+  for (const path of staleWorktrees(listed, pidAlive)) {
+    removeWorktree(path, top);
+  }
+}
+
+function removeWorktree(dir: string, top: string): void {
+  const quiet = (args: string[]) => {
+    try {
+      isolatedGit(args, top);
+    } catch {
+      // Already unlocked or gone.
+    }
+  };
+  quiet(["worktree", "unlock", dir]);
+  quiet(["worktree", "remove", "--force", dir]);
+  if (existsSync(dir)) {
+    // `worktree remove` refused (a file it couldn't delete): delete the folder, then drop the
+    // registration, which `remove --force` does for a missing folder.
+    rmSync(dir, { recursive: true, force: true });
+    quiet(["worktree", "remove", "--force", dir]);
+  }
+}
+
+// The long steps run asynchronously so a SIGINT or SIGTERM is handled while they run. Each child
+// leads its own process group (pnpm and vitest start their own children), and a signal or a
+// timeout stops the whole group, then the temporary worktree is removed.
+let running: ChildProcess | undefined;
+let cleanup: (() => void) | undefined;
+let signalled = false;
+
+const exitCodeFor = (signal: unknown) =>
+  signal === "SIGINT" ? 130 : signal === "SIGTERM" ? 143 : undefined;
+
+function signalGroup(child: ChildProcess, signal: NodeJS.Signals): void {
+  if (child.pid === undefined) return;
+  try {
+    process.kill(-child.pid, signal);
+  } catch (error) {
+    if (errorCode(error) !== "ESRCH") throw error;
+  }
+}
+
+/** SIGTERM to the child's group, then SIGKILL after a grace period. */
+async function stopGroup(child: ChildProcess): Promise<void> {
+  signalGroup(child, "SIGTERM");
+  await new Promise<void>((done) => {
+    const timer = setTimeout(done, KILL_GRACE_MS);
+    if (child.exitCode !== null || child.signalCode !== null) {
+      clearTimeout(timer);
+      done();
+    }
+    child.once("exit", () => {
+      clearTimeout(timer);
+      done();
+    });
+  });
+  signalGroup(child, "SIGKILL");
+}
+
+async function onSignal(signal: NodeJS.Signals): Promise<void> {
+  signalled = true;
+  if (running) await stopGroup(running);
+  cleanup?.();
+  process.exit(exitCodeFor(signal) ?? 1);
+}
+
+const handleSignal = (signal: NodeJS.Signals) => void onSignal(signal);
+
+function run(cmd: string, args: string[], cwd: string, timeoutMs: number): Promise<boolean> {
   return new Promise((done) => {
-    const child = spawn(cmd, args, { cwd, env: isolatedEnv(), stdio: "ignore" });
+    const child = spawn(cmd, args, { cwd, env: isolatedEnv(), stdio: "ignore", detached: true });
     running = child;
-    const timer =
-      timeoutMs === undefined ? undefined : setTimeout(() => child.kill("SIGKILL"), timeoutMs);
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      void stopGroup(child);
+    }, timeoutMs);
     const finish = (ok: boolean) => {
       clearTimeout(timer);
+      // After a signal, onSignal owns the exit: main must not go on to the next step.
+      if (signalled) return;
       running = undefined;
-      done(ok);
+      done(ok && !timedOut);
     };
     child.once("error", () => finish(false));
     child.once("exit", (code) => finish(code === 0));
   });
 }
 
+// --ignore-scripts: the root `prepare` script would set core.hooksPath in the shared git config,
+// and nothing else needs a lifecycle script (node-pty's build is declined via allowBuilds).
 async function install(dir: string): Promise<boolean> {
+  const flags = ["--frozen-lockfile", "--ignore-scripts"];
   return (
-    (await run("pnpm", ["install", "--frozen-lockfile", "--offline"], dir)) ||
-    run("pnpm", ["install", "--frozen-lockfile", "--prefer-offline"], dir)
+    (await run("pnpm", ["install", ...flags, "--offline"], dir, INSTALL_TIMEOUT_MS)) ||
+    run("pnpm", ["install", ...flags, "--prefer-offline"], dir, INSTALL_TIMEOUT_MS)
   );
 }
 
@@ -166,7 +278,7 @@ async function main(): Promise<number> {
     return 0;
   }
   const top = git(["rev-parse", "--show-toplevel"]).trim();
-  isolatedGit(["worktree", "prune"], top);
+  sweepStale(top);
 
   const message = messageFile
     ? readFileSync(messageFile, "utf8")
@@ -194,20 +306,16 @@ async function main(): Promise<number> {
   if (reverts.length === 0) {
     for (const t of targets) results.push({ ...t, outcome: "INVALID" });
   } else {
-    const dir = mkdtempSync(join(tmpdir(), "bz-falsify-"));
+    const dir = mkdtempSync(join(tmpdir(), WORKTREE_PREFIX));
     cleanup = () => {
       cleanup = undefined;
-      try {
-        isolatedGit(["worktree", "remove", "--force", dir], top);
-      } catch {
-        rmSync(dir, { recursive: true, force: true });
-        spawnSync("git", ["worktree", "prune"], { cwd: top, env: isolatedEnv(), stdio: "ignore" });
-      }
+      removeWorktree(dir, top);
     };
-    process.once("SIGINT", onSignal);
-    process.once("SIGTERM", onSignal);
+    process.once("SIGINT", handleSignal);
+    process.once("SIGTERM", handleSignal);
     try {
       isolatedGit(["worktree", "add", "--quiet", "--detach", dir, rev], top);
+      isolatedGit(["worktree", "lock", "--reason", `bz-falsify pid=${process.pid}`, dir], top);
       if (staged) {
         // Bring the worktree to the staged state; the test files must be the new ones. `git show`
         // runs with the inherited environment, because only that sees the real index.
@@ -247,7 +355,7 @@ async function main(): Promise<number> {
           `--outputFile=${reportFile}`,
         ],
         dir,
-        300_000,
+        VITEST_TIMEOUT_MS,
       );
       let report: VitestReport = { testResults: [] };
       try {
@@ -259,8 +367,8 @@ async function main(): Promise<number> {
       for (const t of targets) results.push({ ...t, outcome: classify(report, t.file, t.title) });
     } finally {
       cleanup?.();
-      process.off("SIGINT", onSignal);
-      process.off("SIGTERM", onSignal);
+      process.off("SIGINT", handleSignal);
+      process.off("SIGTERM", handleSignal);
     }
   }
 
@@ -292,4 +400,22 @@ async function main(): Promise<number> {
   return 0;
 }
 
-if (import.meta.main) process.exit(await main());
+/** The exit code for a signal that killed a synchronous child (git), or undefined. */
+export function signalExitCode(error: unknown): number | undefined {
+  return typeof error === "object" && error !== null && "signal" in error
+    ? exitCodeFor(error.signal)
+    : undefined;
+}
+
+async function entry(): Promise<number> {
+  try {
+    return await main();
+  } catch (error) {
+    // Ctrl-C reaches a synchronous git child too, which dies of it and makes execFileSync throw.
+    const code = signalExitCode(error);
+    if (code === undefined) throw error;
+    return code;
+  }
+}
+
+if (isMain(import.meta)) process.exit(await entry());

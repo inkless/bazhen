@@ -1,36 +1,21 @@
 #!/bin/sh
-# Tiered local gate (docs/standards/review.md). There is no CI yet.
-# - Docs-only commits: the standards check and formatting.
-# - Everything else: `pnpm check:fast`, plus the integration tests when the change can reach tmux.
-set -e
+# Tiered local gate (docs/standards/review.md). There is no CI yet. The tiers are defined, and
+# tested, in scripts/precommit-tier.ts.
+set -eu
 
-staged=$(git diff --cached --name-only --diff-filter=ACMRD)
-
-docs_only=yes
-integration=no
-newline='
-'
-IFS=$newline
-for path in $staged; do
-  case "$path" in
-    *.md | docs/* | .agents/*) ;;
-    *) docs_only=no ;;
-  esac
-  case "$path" in
-    packages/runtime-tmux/* | packages/core/* | apps/daemon/* | tests/integration/* | \
-      tests/support/* | vitest.config.ts | package.json | pnpm-lock.yaml)
-      integration=yes
-      ;;
-  esac
-done
-unset IFS
-
-if [ "$docs_only" = yes ]; then
-  node --disable-warning=ExperimentalWarning scripts/check-standards.ts
-  exec pnpm format:check
-fi
-
-pnpm check:fast
-if [ "$integration" = yes ]; then
-  exec pnpm test:integration
-fi
+tier=$(node --disable-warning=ExperimentalWarning scripts/precommit-tier.ts)
+case "$tier" in
+  docs)
+    node --disable-warning=ExperimentalWarning scripts/check-standards.ts
+    exec pnpm format:check
+    ;;
+  fast) exec pnpm check:fast ;;
+  full)
+    pnpm check:fast
+    exec pnpm test:integration
+    ;;
+  *)
+    echo "pre-commit: unknown tier \"$tier\"" >&2
+    exit 1
+    ;;
+esac
