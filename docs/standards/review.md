@@ -21,20 +21,18 @@ already checked (listed at the end).
 7. **Docs.** If behaviour, a command or a rule changed, are `AGENTS.md`, the README or these
    standards updated in the same commit?
 
-The commit subject is a Conventional Commit, `type(scope): subject`. The body says why the
-change was made, and records any `Control:` trailers.
+The commit body says why the change was made, and records any `Control:` trailers.
 
 ## Already checked by tooling
 
 - **pre-commit** runs oxfmt and oxlint (with the `pnpm lint` flags) on the staged files, through
   lint-staged.
-- **commit-msg** runs commitlint: a Conventional Commit subject of at most 72 characters.
-- **pre-push** runs `pnpm check`, the full local gate: the standards check (sibling tests, agent
-  context, skills), lint (including the import matrix, the test rules and `any`), the format
-  check, types for sources, tests and scripts, and the small, medium and integration tests.
-- **CI** runs `pnpm check` on macOS and Linux, on Node 24 and 26, plus `pnpm test:e2e`. On a pull
+- **CI** runs `pnpm check`, the full gate: the standards check (sibling tests, agent context,
+  skills), lint (including the import matrix, the test rules and `any`), the format check, types
+  for sources, tests and scripts, and the small, medium and integration tests. It runs on macOS and Linux, on Node 24 and 26, plus `pnpm test:e2e`. On a pull
   request it also runs `pnpm test:falsify` against the target branch; run it yourself before
   pushing.
 
-The hooks are installed by `pnpm install` (husky). Never skip them with `--no-verify`. Don't
+The pre-commit hook is installed by `pnpm install` (husky); never skip it with `--no-verify`.
+Run `pnpm check` yourself before opening a pull request. Don't
 spend review time on any of these. If one of them is wrong, fix the check.
