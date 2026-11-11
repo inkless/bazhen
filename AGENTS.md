@@ -3,20 +3,10 @@
 A local daemon that owns durable terminals on a private tmux server, plus a web client. TypeScript
 throughout: pnpm workspaces, Node 26 (24 supported), oxlint, oxfmt, Vitest, Playwright.
 
-## Commands
-
-- `pnpm install --frozen-lockfile`, then `pnpm run prepare` once per checkout (installs the git hooks)
-- `pnpm check` runs everything the pre-commit hook runs. Run it before you commit
-- `pnpm test` (small), `pnpm test:medium`, `pnpm test:integration` (real tmux), `pnpm test:e2e` (browser)
-- One file or test: `pnpm test:file <path> -t "<test name>"`. `pnpm dev` starts daemon and web client
-- `pnpm format` rewrites files. `pnpm lint:config` regenerates `.oxlintrc.json` from the matrix in `scripts/lint-config.ts`
-- `pnpm test:falsify [<rev>]` checks that new tests fail without the change; the commit-msg hook runs it
-
 ## Tooling you might not expect
 
 - The daemon runs `.ts` directly through Node's type stripping, so use erasable TypeScript only:
   no enums, namespaces or parameter properties. Import with the `.ts` extension
-- `pnpm typecheck` is `tsc -b` (TypeScript 7). It also checks tests and `scripts/`
 - Call `pnpm` scripts, not the tool binaries; the scripts carry the flags the checks rely on
 - `BAZHEN_HOME` relocates all daemon state, and `BAZHEN_TMUX_SOCKET` names the private tmux server
 
