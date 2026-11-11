@@ -1,30 +1,35 @@
 // Falsification harness (docs/standards/testing.md). It answers one question about the tests a
-// change adds: would they fail if the source change were not there?
+// branch adds: would they fail if the branch's source change were not there?
 //
-// It runs the change's new tests against the *previous* version of the source, in a throwaway
+// It runs the branch's new tests against the base's version of the source, in a throwaway
 // worktree, and classifies each new test:
 //   KILLED    it failed: the test depends on the change. Good.
-//   SURVIVED  it passed without the change: it cannot detect the change. Not allowed.
-//   INVALID   no verdict: it couldn't load, timed out, was skipped, or its title couldn't be
-//             read or isn't unique; a commit that adds tests without a source change also lands
-//             here. Every test of a brand-new symbol is INVALID, so it needs a hand-run control
-//             recorded as a commit trailer: `Control: <what you broke> -> <how the test failed>`.
+//   SURVIVED  it passed without the change: it cannot detect the change. Not allowed. Only a test
+//             that directly imports a reverted file can survive; one that passes otherwise is
+//             unrelated to the source change and comes out INVALID.
+//   INVALID   no verdict: it couldn't load, timed out, was skipped, its title couldn't be read or
+//             isn't unique, or it passed but is unrelated to the source change; a branch that
+//             adds tests without a source change also lands here. Every test of a brand-new symbol is INVALID, so it needs a hand-run control
+//             recorded as a trailer in a commit on the branch:
+//             `Control: <what you broke> -> <how the test failed>`.
 //
 // Titles come from added lines that look like `it(...)`/`test(...)` calls, so a fixture string in
 // a test file such as 'it("fixture", f)' counts as a test too. It then can't be found in the
 // report and comes out INVALID: the safe direction, since it asks for a control.
 //
+// Only committed work is judged: the worktree is checked out at HEAD, so commit before running.
 // The temporary worktree is locked with this process's pid. A run killed before it could clean
 // up leaves it behind, and the next run removes it once that pid is dead.
 //
 // Usage:
-//   node scripts/falsify.ts [<rev>]                  check an existing commit (default HEAD)
-//   node scripts/falsify.ts --staged <message-file>  check the staged change (commit-msg hook)
+//   node scripts/falsify.ts [--base <ref>]
+// The branch is compared with its merge base with <ref>; <ref> defaults to origin/main, or main
+// when there is no origin.
 
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, join, posix } from "node:path";
 import { isMain } from "./is-main.ts";
 
 export type Outcome = "KILLED" | "SURVIVED" | "INVALID";
@@ -41,8 +46,9 @@ const INSTALL_TIMEOUT_MS = 120_000;
 const VITEST_TIMEOUT_MS = 300_000;
 const KILL_GRACE_MS = 2000;
 
-// Git exports these to hooks (GIT_DIR in linked worktrees, GIT_INDEX_FILE always). Inherited,
-// they point every command run in the temporary worktree at the real repository and index.
+// Inherited, these point every git command at another repository or index: git exports them to
+// hooks, and a caller may set them. Every git command here, and everything run in the temporary
+// worktree, gets them stripped, so the repository is always the one the working directory is in.
 const GIT_LOCATION_VARS = [
   "GIT_DIR",
   "GIT_INDEX_FILE",
@@ -58,17 +64,13 @@ function isolatedEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
-/** Git with the inherited environment: sees the real index, as the hook's caller does. */
-const git = (args: string[]) =>
-  execFileSync("git", args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-
-/** Git for the temporary worktree, with the hook's repository location stripped. */
-const isolatedGit = (args: string[], cwd: string) =>
+const git = (args: string[], cwd = process.cwd()) =>
   execFileSync("git", args, {
     cwd,
     env: isolatedEnv(),
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "pipe"],
   });
 
 export function parseNameStatus(out: string): Change[] {
@@ -135,6 +137,63 @@ export function classify(report: VitestReport, file: string, title: string): Out
   return test.status === "failed" ? "KILLED" : "INVALID";
 }
 
+// Runtime imports: `import … from`/`export … from` (not `import type`), `import "…"` and
+// `import("…")`. A type-only import can't change what a test does at run time.
+const STATIC_IMPORT = /\b(?:import|export)\s+(type\s+)?[^;'"]*?\bfrom\s*["']([^"']+)["']/g;
+const BARE_IMPORT = /\bimport\s*\(?\s*["']([^"']+)["']/g;
+const WORKSPACE = /^(@bazhen\/[^/]+)/;
+
+/**
+ * The reverted paths a test file imports directly: a relative specifier resolved against the
+ * test's folder (with `.ts`, `.tsx` or `/index.ts` tried when it has no extension), or a
+ * workspace package (`@bazhen/x`, `@bazhen/x/sub`), which counts every reverted path under that
+ * package's folder. `packages` maps package names to folders, e.g. `@bazhen/core` →
+ * `packages/core`.
+ */
+export function relatedReverts(
+  testPath: string,
+  testSource: string,
+  revertedPaths: string[],
+  packages: Record<string, string>,
+): string[] {
+  const specifiers = [
+    ...[...testSource.matchAll(STATIC_IMPORT)].filter((m) => !m[1]).map((m) => m[2]),
+    ...[...testSource.matchAll(BARE_IMPORT)].map((m) => m[1]),
+  ].filter((s): s is string => s !== undefined);
+  const related = new Set<string>();
+  for (const specifier of specifiers) {
+    if (specifier.startsWith(".")) {
+      const path = posix.join(posix.dirname(testPath), specifier);
+      const candidates = /\.[cm]?[jt]sx?$/.test(path)
+        ? [path]
+        : [path, `${path}.ts`, `${path}.tsx`, `${path}/index.ts`];
+      for (const r of revertedPaths) if (candidates.includes(r)) related.add(r);
+    } else {
+      const dir = packages[WORKSPACE.exec(specifier)?.[1] ?? ""];
+      if (dir === undefined) continue;
+      for (const r of revertedPaths) if (r.startsWith(`${dir}/`)) related.add(r);
+    }
+  }
+  return [...related];
+}
+
+/** Workspace package names mapped to their folders, read from apps/* and packages/*. */
+function workspacePackages(top: string): Record<string, string> {
+  const packages: Record<string, string> = {};
+  for (const group of ["apps", "packages"]) {
+    if (!existsSync(join(top, group))) continue;
+    for (const name of readdirSync(join(top, group))) {
+      const manifest = join(top, group, name, "package.json");
+      if (!existsSync(manifest)) continue;
+      const parsed: unknown = JSON.parse(readFileSync(manifest, "utf8"));
+      if (typeof parsed === "object" && parsed !== null && "name" in parsed) {
+        if (typeof parsed.name === "string") packages[parsed.name] = `${group}/${name}`;
+      }
+    }
+  }
+  return packages;
+}
+
 /** The `bz-falsify-` worktrees in `git worktree list --porcelain` output whose locking pid is dead. */
 export function staleWorktrees(porcelain: string, alive: (pid: number) => boolean): string[] {
   return porcelain
@@ -168,7 +227,7 @@ function pidAlive(pid: number): boolean {
 
 /** Removes the worktrees of earlier runs that died before cleaning up. Never touches others. */
 function sweepStale(top: string): void {
-  const listed = isolatedGit(["worktree", "list", "--porcelain"], top);
+  const listed = git(["worktree", "list", "--porcelain"], top);
   for (const path of staleWorktrees(listed, pidAlive)) {
     removeWorktree(path, top);
   }
@@ -177,7 +236,7 @@ function sweepStale(top: string): void {
 function removeWorktree(dir: string, top: string): void {
   const quiet = (args: string[]) => {
     try {
-      isolatedGit(args, top);
+      git(args, top);
     } catch {
       // Already unlocked or gone.
     }
@@ -258,8 +317,9 @@ function run(cmd: string, args: string[], cwd: string, timeoutMs: number): Promi
   });
 }
 
-// --ignore-scripts: the root `prepare` script would set core.hooksPath in the shared git config,
-// and nothing else needs a lifecycle script (node-pty's build is declined via allowBuilds).
+// --ignore-scripts: the root `prepare` script (husky) would set core.hooksPath in the shared git
+// config, and nothing else needs a lifecycle script (node-pty's build is declined via
+// allowBuilds).
 async function install(dir: string): Promise<boolean> {
   const flags = ["--frozen-lockfile", "--ignore-scripts"];
   return (
@@ -268,22 +328,65 @@ async function install(dir: string): Promise<boolean> {
   );
 }
 
-async function main(): Promise<number> {
-  const staged = process.argv[2] === "--staged";
-  const messageFile = staged ? process.argv[3] : undefined;
-  const rev = staged ? "HEAD" : (process.argv[2] ?? "HEAD");
-  const base = staged ? "HEAD" : `${rev}^`;
+const USAGE = "usage: node scripts/falsify.ts [--base <ref>]";
 
-  if (staged && existsSync(resolve(git(["rev-parse", "--git-path", "MERGE_HEAD"]).trim()))) {
-    return 0;
+/** The `--base` ref from the arguments, or undefined; throws on anything else. */
+export function parseArgs(args: string[]): { base?: string } {
+  if (args.length === 0) return {};
+  const [flag, value, ...rest] = args;
+  if (flag !== "--base" || value === undefined || value.startsWith("-") || rest.length > 0) {
+    throw new Error(USAGE);
+  }
+  return { base: value };
+}
+
+/** True when any of the branch's commit messages records a control. */
+export const hasControl = (messages: string): boolean => CONTROL_TRAILER.test(messages);
+
+const resolves = (ref: string) => {
+  try {
+    git(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * The commit the branch is judged against: its merge base with `ref`, so commits that landed on
+ * the base after the branch forked never count as the branch's change.
+ */
+function mergeBase(ref: string | undefined): string {
+  const target = ref ?? (resolves("origin/main") ? "origin/main" : "main");
+  return git(["merge-base", target, "HEAD"]).trim();
+}
+
+async function main(args: string[]): Promise<number> {
+  let options: { base?: string };
+  try {
+    options = parseArgs(args);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : USAGE);
+    return 2;
   }
   const top = git(["rev-parse", "--show-toplevel"]).trim();
+  const head = git(["rev-parse", "--verify", "HEAD^{commit}"]).trim();
+  let base: string;
+  try {
+    base = mergeBase(options.base);
+  } catch (error) {
+    if (signalExitCode(error) !== undefined) throw error;
+    console.error(
+      `falsify: no merge base between HEAD and ${options.base ?? "origin/main or main"}. ` +
+        "Pass --base <ref> naming the branch this one is based on; in a shallow clone, fetch " +
+        "the full history first.",
+    );
+    return 2;
+  }
   sweepStale(top);
 
-  const message = messageFile
-    ? readFileSync(messageFile, "utf8")
-    : git(["log", "-1", "--format=%B", rev]);
-  const range = staged ? ["--cached", base] : [base, rev];
+  const messages = git(["log", "--format=%B", `${base}..${head}`]);
+  const range = [base, head];
 
   const changes = parseNameStatus(git(["diff", "--name-status", "-M", ...range]));
   const tests = changes.filter((c) => c.status !== "D" && TEST_FILE.test(c.path));
@@ -294,14 +397,17 @@ async function main(): Promise<number> {
       title,
     }));
   });
-  if (targets.length === 0) return 0;
+  if (targets.length === 0) {
+    console.log(`falsify: no new tests between ${base.slice(0, 12)} and HEAD`);
+    return 0;
+  }
 
   const reverts = changes.filter(
     (c) =>
       (REVERTIBLE.test(c.path) && !TEST_FILE.test(c.path)) ||
       (c.oldPath !== undefined && REVERTIBLE.test(c.oldPath) && !TEST_FILE.test(c.oldPath)),
   );
-  const results: { file: string; title: string; outcome: Outcome }[] = [];
+  const results: { file: string; title: string; outcome: Outcome; unrelated?: boolean }[] = [];
 
   if (reverts.length === 0) {
     for (const t of targets) results.push({ ...t, outcome: "INVALID" });
@@ -311,14 +417,14 @@ async function main(): Promise<number> {
       cleanup = undefined;
       removeWorktree(dir, top);
     };
-    // SIGHUP too: an agent's tmux pane closing mid-commit must not orphan the detached children.
+    // SIGHUP too: an agent's tmux pane closing mid-run must not orphan the detached children.
     process.once("SIGINT", handleSignal);
     process.once("SIGTERM", handleSignal);
     process.once("SIGHUP", handleSignal);
     try {
       // Locked in the same step as it is created, so a crash can never leave an unlocked (and so
       // never-swept) worktree behind.
-      isolatedGit(
+      git(
         [
           "worktree",
           "add",
@@ -328,29 +434,16 @@ async function main(): Promise<number> {
           "--reason",
           `bz-falsify pid=${process.pid}`,
           dir,
-          rev,
+          head,
         ],
         top,
       );
-      if (staged) {
-        // Bring the worktree to the staged state; the test files must be the new ones. `git show`
-        // runs with the inherited environment, because only that sees the real index.
-        for (const c of changes) {
-          if (c.status === "R" && c.oldPath) rmSync(join(dir, c.oldPath), { force: true });
-          const target = join(dir, c.path);
-          if (c.status === "D") rmSync(target, { force: true });
-          else {
-            mkdirSync(dirname(target), { recursive: true });
-            writeFileSync(target, execFileSync("git", ["show", `:${c.path}`], { cwd: top }));
-          }
-        }
-      }
       for (const c of reverts) {
         if (c.status === "A" || c.status === "C") rmSync(join(dir, c.path), { force: true });
         else if (c.status === "R" && c.oldPath) {
           rmSync(join(dir, c.path), { force: true });
-          isolatedGit(["checkout", base, "--", c.oldPath], dir);
-        } else isolatedGit(["checkout", base, "--", c.path], dir);
+          git(["checkout", base, "--", c.oldPath], dir);
+        } else git(["checkout", base, "--", c.path], dir);
       }
       if (!(await install(dir))) {
         console.error(
@@ -380,7 +473,20 @@ async function main(): Promise<number> {
       } catch {
         // No report at all: the run never got going, so every target is INVALID.
       }
-      for (const t of targets) results.push({ ...t, outcome: classify(report, t.file, t.title) });
+      // A passing test that imports none of the reverted files is a test of code the branch didn't
+      // change (a characterization or property test): no verdict, so it needs a control.
+      const revertedPaths = reverts.flatMap((c) => (c.oldPath ? [c.oldPath, c.path] : [c.path]));
+      const packages = workspacePackages(dir);
+      for (const t of targets) {
+        const outcome = classify(report, t.file, t.title);
+        const source = readFileSync(join(dir, t.file), "utf8");
+        if (
+          outcome === "SURVIVED" &&
+          relatedReverts(t.file, source, revertedPaths, packages).length === 0
+        ) {
+          results.push({ ...t, outcome: "INVALID", unrelated: true });
+        } else results.push({ ...t, outcome });
+      }
     } finally {
       cleanup?.();
       process.off("SIGINT", handleSignal);
@@ -389,8 +495,11 @@ async function main(): Promise<number> {
     }
   }
 
-  console.log("falsify: new tests run against the source before this change");
-  for (const r of results) console.log(`  ${r.outcome.padEnd(8)} ${r.file} › ${r.title}`);
+  console.log(`falsify: new tests run against the source at ${base.slice(0, 12)}`);
+  for (const r of results) {
+    const note = r.unrelated ? " (passed; unrelated to the source change)" : "";
+    console.log(`  ${r.outcome.padEnd(8)} ${r.file} › ${r.title}${note}`);
+  }
 
   const survived = results.filter((r) => r.outcome === "SURVIVED");
   if (survived.length > 0) {
@@ -401,16 +510,16 @@ async function main(): Promise<number> {
     return 1;
   }
   const invalid = results.filter((r) => r.outcome === "INVALID");
-  if (invalid.length > 0 && !CONTROL_TRAILER.test(message)) {
+  if (invalid.length > 0 && !hasControl(messages)) {
     console.error(
       reverts.length === 0
-        ? "\nThis change adds tests but no source change to revert."
-        : "\nSome tests could not be judged by reverting (new symbols, unparsed titles, load " +
-            "errors or timeouts).",
+        ? "\nThis branch adds tests but no source change to revert."
+        : "\nSome tests could not be judged by reverting (new symbols, tests unrelated to the " +
+            "source change, unparsed titles, load errors or timeouts).",
     );
     console.error(
-      "Break the code by hand, confirm each test fails on its assertion, and record it in the " +
-        "commit message:\n  Control: <what you broke> -> <how the test failed>",
+      "Break the code by hand, confirm each test fails on its assertion, and record it in a " +
+        "commit message on the branch:\n  Control: <what you broke> -> <how the test failed>",
     );
     return 1;
   }
@@ -426,7 +535,7 @@ export function signalExitCode(error: unknown): number | undefined {
 
 async function entry(): Promise<number> {
   try {
-    return await main();
+    return await main(process.argv.slice(2));
   } catch (error) {
     // Ctrl-C reaches a synchronous git child too, which dies of it and makes execFileSync throw.
     const code = signalExitCode(error);

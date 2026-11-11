@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasRuntimeCode, isCi, pathCandidates, pnpmScripts } from "./check-standards.ts";
+import { hasRuntimeCode, pathCandidates, pnpmScripts } from "./check-standards.ts";
 
 describe("hasRuntimeCode", () => {
   it("is false for a type-only module", () => {
@@ -45,19 +45,5 @@ describe("pnpmScripts", () => {
         pnpmScripts,
       ),
     ).toEqual([["test"], ["lint"], ["test"], ["build"], []]);
-  });
-});
-
-describe("isCi", () => {
-  it("is true only for CI=true or CI=1, in any case", () => {
-    expect(["true", "TRUE", "1", "false", "0", "", undefined].map(isCi)).toEqual([
-      true,
-      true,
-      true,
-      false,
-      false,
-      false,
-      false,
-    ]);
   });
 });

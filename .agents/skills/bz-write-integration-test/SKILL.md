@@ -23,7 +23,8 @@ terminal on the machine, not just Bazhen's.
    and `expect.poll(ptyHandleCount).toBeLessThanOrEqual(baseline)`.
 6. Run it with `pnpm test:file tests/integration/<file>.test.ts -t "<name>"`, then
    `pnpm test:integration`, then `pnpm check`.
-7. On commit, handle the falsify result as in `bz-write-unit-test` step 6.
+7. Before pushing, run `pnpm test:falsify` and handle the result as in `bz-write-unit-test`
+   step 6.
 
 ## Gotchas (each one cost real debugging)
 

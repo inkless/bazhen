@@ -5,8 +5,8 @@ description: Writes a small or medium test for Bazhen's own source in this repos
 
 # Write a unit test for Bazhen's source
 
-**Gate: no new behaviour without a test that fails first, for the right reason.** The commit-msg
-hook rejects a test that passes without your change.
+**Gate: no new behaviour without a test that fails first, for the right reason.** CI's falsify
+check rejects a pull request whose new test passes without your change.
 
 ## Steps
 
@@ -23,10 +23,11 @@ hook rejects a test that passes without your change.
 4. **Run it and watch it fail:** `pnpm test:file <path> -t "<name>"`. It must fail on an
    assertion. A failure to import or compile proves nothing.
 5. Implement until it passes, then run `pnpm check`.
-6. **Commit.** The hook reruns your new tests against the old source:
+6. **Commit, then run `pnpm test:falsify` before pushing.** It reruns the branch's new tests
+   against the source at the branch's base, as CI does on the pull request:
    - **SURVIVED** — the test doesn't depend on your change. Fix the assertion.
    - **INVALID** (a brand-new function) — break your code by hand, confirm the test fails on its
-     assertion, restore the code, and add a trailer:
+     assertion, restore the code, and record a trailer in a commit on the branch:
      `Control: <what you broke> -> <how the test failed>`.
 
 ## Checklist
@@ -48,10 +49,10 @@ hook rejects a test that passes without your change.
 
 ## Rationalizations
 
-| Thought                                      | Answer                                                              |
-| -------------------------------------------- | ------------------------------------------------------------------- |
-| "It's obviously correct, a test is overkill" | Then the test is cheap. The hook decides whether it is load-bearing |
-| "I'll write the test after the code"         | Then you never see it fail, so you don't know it can                |
-| "I'll `.skip` it for now"                    | Lint fails on `.skip`. Fix it or delete it                          |
-| "A mock is quicker"                          | A mock tests your assumptions about the code, not the code          |
-| "The falsify hook is wrong here"             | Record a control with a trailer. Never use `--no-verify`            |
+| Thought                                      | Answer                                                             |
+| -------------------------------------------- | ------------------------------------------------------------------ |
+| "It's obviously correct, a test is overkill" | Then the test is cheap. Falsify decides whether it is load-bearing |
+| "I'll write the test after the code"         | Then you never see it fail, so you don't know it can               |
+| "I'll `.skip` it for now"                    | Lint fails on `.skip`. Fix it or delete it                         |
+| "A mock is quicker"                          | A mock tests your assumptions about the code, not the code         |
+| "The falsify check is wrong here"            | Record a control with a trailer. Never use `--no-verify`           |

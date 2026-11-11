@@ -1,5 +1,0 @@
-#!/bin/sh
-# Conventional Commits, then the falsification harness on any tests the commit adds.
-set -e
-node scripts/commit-msg.ts "$1"
-node scripts/falsify.ts --staged "$1"

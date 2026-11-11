@@ -8,7 +8,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { isMain } from "./is-main.ts";
 
-type Area = {
+export type Area = {
   dir: string;
   banned: string[];
   typeOnly?: string[];
@@ -26,8 +26,9 @@ const PACKAGE_DIR: Record<string, string> = {
 
 const RUNTIME_LIBS = ["node-pty", "hono", "@hono/*", "ws", "@xterm/*"];
 
-// tech-stack-and-scaffold.md §3.
-const MATRIX: Area[] = [
+// tech-stack-and-scaffold.md §3. The single source of the import matrix: docs/standards/code.md
+// explains it, and scripts/lint-config.medium.test.ts checks each package.json against it.
+export const MATRIX: Area[] = [
   {
     dir: "packages/protocol",
     banned: ["@bazhen/core", "@bazhen/runtime-tmux", "@bazhen/daemon", "@bazhen/web"],

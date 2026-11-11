@@ -5,8 +5,8 @@ page serves that rule, or keeps tests from hurting the machine and each other.
 
 | Rule                                                                               | Enforced by                                 |
 | ---------------------------------------------------------------------------------- | ------------------------------------------- |
-| A test that passes without the change it accompanies is rejected                   | commit-msg hook (`pnpm test:falsify`)       |
-| A new test that can't be judged by reverting needs at least one `Control:` trailer | commit-msg hook                             |
+| A test that passes without the change it accompanies is rejected                   | CI on pull requests (`pnpm test:falsify`)   |
+| A new test that can't be judged by reverting needs at least one `Control:` trailer | CI on pull requests (`pnpm test:falsify`)   |
 | Small tests (`*.test.ts`) touch no files, sockets, processes or databases          | `pnpm lint`                                 |
 | No `.only`, `.skip`, assertion-free tests, or conditionals inside tests            | `pnpm lint` (vitest rules)                  |
 | Every source file with runtime code has a sibling test, or a named covering test   | `pnpm check` (`scripts/check-standards.ts`) |
@@ -36,14 +36,17 @@ crosses processes; a behaviour that a medium test can reach belongs in a medium 
 
 Every new test must be shown to fail without the code it covers.
 
-- **Revert check.** The commit-msg hook runs the commit's new tests against the source as it
-  was before the change, in a throwaway worktree (`scripts/falsify.ts`). Each test comes out as
-  one of:
+- **Revert check.** CI runs it on every pull request, and you run `pnpm test:falsify` before
+  pushing. It takes the branch's new tests and runs them against the source as it was at the
+  branch's merge base with main (origin/main when there is a remote), in a throwaway
+  worktree (`scripts/falsify.ts`). Only committed work counts. Each test comes out as one of:
   - **KILLED** — it failed. Good.
-  - **SURVIVED** — it passed without the change, so it can't detect the change. The commit is
-    refused.
-  - **INVALID** — no verdict: it couldn't load, timed out, was skipped, or its title couldn't
-    be read or isn't unique; a commit that adds tests without a source change also lands here.
+  - **SURVIVED** — it passed without the change, so it can't detect the change. The check
+    fails. Only a test that directly imports a reverted file can survive.
+  - **INVALID** — no verdict: it couldn't load, timed out, was skipped, its title couldn't be
+    read or isn't unique, or it passed but imports no reverted file, so it is unrelated to the
+    source change (a characterization or property test of existing code); a branch that adds
+    tests without a source change also lands here.
     Every test of a brand-new function is INVALID, because the function doesn't exist before
     the change.
 
@@ -53,8 +56,10 @@ Every new test must be shown to fail without the code it covers.
 
 - **Controls for INVALID tests.** Break the code by hand: swap a comparison, delete a branch, or
   return a constant. Confirm the test fails on its assertion, not on a crash or a timeout, then
-  restore the code. Record it in the commit message as
-  `Control: <what you broke> -> <how the test failed>`.
+  restore the code. Record it as a trailer in a commit message on the branch:
+  `Control: <what you broke> -> <how the test failed>`, one per INVALID test. The check accepts
+  any one trailer on the branch, so the reviewer is who holds you to the rest. Never bypass a
+  hook with `--no-verify`.
 
 Two lessons from the scaffold's controls:
 
@@ -63,8 +68,8 @@ Two lessons from the scaffold's controls:
 - **A control can find a real bug.** One control caught a race where a fast-exiting process
   destroyed its tmux session before `remain-on-exit` applied.
 
-`pnpm test:falsify <rev>` checks an existing commit. Stryker-style mutation scores are not a
-gate, because their cost and equivalent mutants make the number meaningless.
+`pnpm test:falsify --base <ref>` judges the branch against another base. Stryker-style mutation
+scores are not a gate, because their cost and equivalent mutants make the number meaningless.
 
 ## Hermeticity
 

@@ -1,7 +1,6 @@
 // Repository standards that no linter covers (docs/standards/code.md, testing.md). Runs first in
 // `pnpm check`; every failure names the file and the fix.
 
-import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
 import { join } from "node:path";
@@ -96,35 +95,6 @@ function checkSiblingTests(): void {
     if (!existsSync(join(root, file))) {
       failures.push(`scripts/check-standards.ts: COVERED_ELSEWHERE lists missing ${file}.`);
     }
-  }
-}
-
-/** True when `CI` says this is a CI run, which never runs the hooks. `CI=false` is not CI. */
-export function isCi(ci: string | undefined): boolean {
-  return /^(true|1)$/i.test(ci ?? "");
-}
-
-function checkHooks(): void {
-  // CI and exported trees (no .git) never run the hooks, so there is nothing to install.
-  if (isCi(process.env["CI"])) return;
-  try {
-    execFileSync("git", ["rev-parse", "--git-dir"], { cwd: root, stdio: "ignore" });
-  } catch {
-    return;
-  }
-  let hooksPath = "";
-  try {
-    hooksPath = execFileSync("git", ["config", "--get", "core.hooksPath"], {
-      cwd: root,
-      encoding: "utf8",
-    }).trim();
-  } catch {
-    // Unset.
-  }
-  if (hooksPath !== ".githooks") {
-    failures.push(
-      `git hooks are not installed (core.hooksPath is "${hooksPath}"): run \`pnpm run prepare\`.`,
-    );
   }
 }
 
@@ -284,7 +254,6 @@ function checkSkills(scripts: Set<string>): void {
 
 if (isMain(import.meta)) {
   checkSiblingTests();
-  checkHooks();
   checkAgentContext();
   checkSkills(scriptNames());
 
