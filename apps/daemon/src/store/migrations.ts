@@ -3,6 +3,9 @@ export interface Migration {
   readonly sql: string;
 }
 
+// Append-only. A shipped migration has already run on users' databases, so editing it forks
+// their schema from new installs; add a new version instead, with a medium test that upgrades
+// from the previous one.
 export const MIGRATIONS: readonly Migration[] = [
   {
     version: 1,

@@ -29,8 +29,9 @@ terminal on the machine, not just Bazhen's.
 
 - **Typed input needs `\r`.** Without it, macOS canonical mode stops echoing at the 1024-byte
   line limit, and the probe silently stops answering.
-- **Settings that must apply before the process can exit** (`remain-on-exit`) go in the same tmux
-  command list as `new-session`. Otherwise a fast-exiting process destroys the session first.
+- **Server-wide options live in `TMUX_CONFIG`** (`packages/runtime-tmux/src/index.ts`), which is
+  applied before any session exists. `remain-on-exit` is there because a fast-exiting process
+  once destroyed its session before a later `set-option` could apply.
 - **tmux 3.6b crashes its server** on `window-size manual` set globally (set it per window, after
   creation), and on `refresh-client -A <pane>:off` against a busy pane. A crash kills every
   terminal. The pins are in `tmux-defects.test.ts`.

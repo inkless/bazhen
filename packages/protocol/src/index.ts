@@ -1,6 +1,10 @@
 import { z } from "zod";
 
-/** Major.minor. Within one major version, changes are additive only. */
+/**
+ * Major.minor. Within one major version, changes are additive only: add messages and optional
+ * fields, never rename, remove or tighten what has shipped. Bump the minor in the same commit as
+ * any addition; clients negotiate on it.
+ */
 export const PROTOCOL_VERSION = "1.0";
 
 export const ProtocolVersion = z.string().regex(/^\d+\.\d+$/);

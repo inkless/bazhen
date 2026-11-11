@@ -44,7 +44,7 @@ Teardown found servers from this run alive, and has already killed them. The mes
 1. Rerun only that test, about 20 times:
    `for i in $(seq 20); do pnpm test:file <file> -t "<name>" || break; done`
 2. Usual causes:
-   - ordering between tmux commands sent separately: send them as one command list;
+   - an option set after `new-session` that had to apply before it: move it into `TMUX_CONFIG`;
    - asserting before the output arrived: use `expect.poll`;
    - two runs sharing a fixed name or port: use `testSocket()` and free ports.
 3. Fix the race. There are no retries in this repository.
