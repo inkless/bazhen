@@ -21,7 +21,7 @@ const TMUX_TIMEOUT_MS = 5_000;
 /**
  * The private server's configuration. With tmux's defaults, Ctrl-B would be swallowed as a prefix
  * and `C-b d` would detach Bazhen's own client, so no key reaches tmux itself. `window-size
- * manual` is deliberately absent: set globally, tmux 3.6b crashes on the next window creation.
+ * manual` is deliberately absent: set globally, tmux before 3.8 crashes on the next window creation.
  */
 export const TMUX_CONFIG = `set -g prefix None
 set -g prefix2 None

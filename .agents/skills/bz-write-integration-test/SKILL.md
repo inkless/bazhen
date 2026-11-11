@@ -33,9 +33,9 @@ terminal on the machine, not just Bazhen's.
 - **Server-wide options live in `TMUX_CONFIG`** (`packages/runtime-tmux/src/index.ts`), which is
   applied before any session exists. `remain-on-exit` is there because a fast-exiting process
   once destroyed its session before a later `set-option` could apply.
-- **tmux 3.6b crashes its server** on `window-size manual` set globally (set it per window, after
-  creation), and on `refresh-client -A <pane>:off` against a busy pane. A crash kills every
-  terminal. The pins are in `tmux-defects.test.ts`.
+- **tmux crashes its server** on `window-size manual` set globally before 3.8 (set it per window,
+  after creation), and on `refresh-client -A <pane>:off` against a busy pane (seen on 3.6b). A
+  crash kills every terminal. The pins are in `tmux-defects.test.ts`.
 - **Every runtime tmux call times out after 5 s.** A test that hangs for 30 s is waiting on something
   else.
 - **The integration project runs one file at a time**, so don't rely on parallelism.
