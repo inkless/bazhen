@@ -23,7 +23,8 @@ Something on this machine holds PTYs. macOS allows 511 in total, and the cutoff 
 
 Teardown found servers from this run alive, and has already killed them. The message names them.
 
-1. The label in `bz-test-<run>-<label>` tells you which test started each one.
+1. The label in `bz-test-<run>-<label>` tells you which test started each one. A server named
+   `default` means a test ran `tmux` without `-L`: give it a `testSocket()`.
 2. That test is missing `afterAll(() => killServer(socket))`, or it created a second socket it
    never recorded. Fix the test. Teardown is a backstop, not the cleanup.
 
@@ -59,6 +60,8 @@ upgrade, the defect is fixed upstream; say so in the commit rather than deleting
 
 ## Inspecting a server
 
-List this machine's test servers with `ls /tmp/tmux-$(id -u) | grep '^bz-'`. Inspect one with
-`tmux -L <socket> list-sessions`, and kill one of yours with `tmux -L <socket> kill-server`. Only
-kill servers whose run ID is your run's, because other worktrees run the same suites.
+Each test run keeps its tmux servers in a private directory, `/tmp/bz-tmux-*/tmux-<uid>/`, which
+teardown deletes. While a run is hung, list its servers with `ls /tmp/bz-tmux-*/tmux-$(id -u)/`.
+Inspect one with `TMUX_TMPDIR=<that bz-tmux dir> tmux -L <socket> list-sessions`, and kill it the
+same way with `kill-server`. Always set `TMUX_TMPDIR` and `-L`: you are running inside the
+user's own tmux server, and a bare `tmux kill-server` would end every session on it.

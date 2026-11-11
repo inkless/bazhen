@@ -11,7 +11,7 @@ page serves that rule, or keeps tests from hurting the machine and each other.
 | No `.only`, `.skip`, assertion-free tests, or conditionals inside tests          | `pnpm lint` (vitest rules)                  |
 | Every source file with runtime code has a sibling test, or a named covering test | `pnpm check` (`scripts/check-standards.ts`) |
 | Test files type-check                                                            | `pnpm typecheck` (`tsconfig.dev.json`)      |
-| Tests leave no tmux server running                                               | integration teardown                        |
+| Tests can't reach a real tmux server, and leave none running                     | integration setup and teardown              |
 | Test runs refuse to start when the machine is short of PTYs                      | integration and medium setup                |
 | Fakes over mocks; behaviour-named tests; no snapshots of terminal output         | review                                      |
 
@@ -63,9 +63,11 @@ A test owns everything it touches and leaves nothing behind.
 
 - **Paths.** Medium and integration runs get a temporary `BAZHEN_HOME`. Unit runs point it at a
   path that doesn't exist. Never read or write the real Bazhen directories.
-- **tmux.** Use `testSocket(label)` from `tests/integration/helpers.ts` for every server: never
-  the default server, never `bazhen`. Kill each server in `afterAll`. Teardown fails the run on
-  any server still alive.
+- **tmux.** Each run gets its own tmux socket directory (`TMUX_TMPDIR`) and runs outside any
+  tmux client (`TMUX` unset). Any tmux command a test runs, even a bare `tmux` with no `-L`,
+  lands on a throwaway server, never on the user's sessions, the agent fleet or a real daemon.
+  Still, name each server with `testSocket(label)` so a leak says which test caused it, and kill
+  it in `afterAll`. Teardown fails the run on any server still alive.
 - **PTYs are a machine-wide resource.** macOS has 511, and a leak starves every terminal on the
   machine. The setup refuses to run above 420 in use. A runtime change that opens PTYs needs a
   lifecycle test that repeats the operation and asserts the handle count returns to its baseline

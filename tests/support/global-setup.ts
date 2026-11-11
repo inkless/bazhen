@@ -1,7 +1,9 @@
 // Vitest globalSetup for the medium and integration projects (docs/standards/testing.md).
 // - Every run gets a temporary BAZHEN_HOME, so no test touches the user's real data.
-// - Every run gets an id (BZ_TEST_RUN) that testSocket() puts in tmux socket names, so teardown
-//   can find exactly this run's servers without touching parallel runs in other worktrees.
+// - Every run gets its own tmux socket directory (TMUX_TMPDIR) and runs outside any tmux client
+//   (TMUX unset). Every tmux command a test runs, with or without -L, lands on a throwaway server
+//   and can never reach the user's sessions, the agent fleet, or a real Bazhen daemon. Teardown
+//   fails the run if any server in that directory is still alive.
 // - The run refuses to start when the machine is close to running out of PTYs: a leak there
 //   starves every terminal on the machine, not just Bazhen's.
 
@@ -36,6 +38,12 @@ function tmuxSocketDir(): string {
   return join(process.env["TMUX_TMPDIR"] ?? "/tmp", `tmux-${process.getuid?.() ?? 0}`);
 }
 
+// Under /tmp, not os.tmpdir(): a Unix socket path must fit in about 104 bytes on macOS, and the
+// per-user temp directory there is already over 50.
+function privateTmuxDir(): string {
+  return mkdtempSync("/tmp/bz-tmux-");
+}
+
 // Vitest's source-map lookup crashes on errors thrown from globalSetup and hides their message,
 // so print it before throwing.
 function fail(message: string): never {
@@ -53,6 +61,7 @@ function alive(socket: string): boolean {
 }
 
 let home: string | undefined;
+let tmuxDir: string | undefined;
 
 export function setup(): void {
   const { used, cutoff } = ptysInUse();
@@ -65,13 +74,16 @@ export function setup(): void {
   home = mkdtempSync(join(tmpdir(), "bz-test-home-"));
   process.env["BAZHEN_HOME"] = home;
   process.env["BZ_TEST_RUN"] = `${process.pid}`;
+  tmuxDir = privateTmuxDir();
+  process.env["TMUX_TMPDIR"] = tmuxDir;
+  delete process.env["TMUX"];
+  delete process.env["TMUX_PANE"];
 }
 
 export function teardown(): void {
-  const prefix = `bz-test-${process.env["BZ_TEST_RUN"]}-`;
   let sockets: string[] = [];
   try {
-    sockets = readdirSync(tmuxSocketDir()).filter((name) => name.startsWith(prefix));
+    sockets = readdirSync(tmuxSocketDir());
   } catch {
     // No socket directory: this run never started tmux.
   }
@@ -83,7 +95,7 @@ export function teardown(): void {
       // Already gone.
     }
   }
-  for (const socket of sockets) rmSync(join(tmuxSocketDir(), socket), { force: true });
+  if (tmuxDir) rmSync(tmuxDir, { recursive: true, force: true });
   if (home) rmSync(home, { recursive: true, force: true });
   if (leaked.length > 0) {
     fail(
