@@ -12,7 +12,7 @@ import type {
   TerminalId,
   TerminalSpec,
 } from "@bazhen/core";
-import { toTerminalId } from "@bazhen/core";
+import { isId } from "@bazhen/core";
 
 const run = promisify(execFile);
 const TAG = "@bazhen_terminal_id";
@@ -139,9 +139,8 @@ export class TmuxRuntime implements RuntimeAdapter {
     );
     const entries: RuntimeInventoryEntry[] = [];
     for (const line of out.split("\n")) {
-      const [rawId = "", session = "", dead = "0", status = ""] = line.split("\t");
-      const terminalId = toTerminalId(rawId);
-      if (!terminalId) continue;
+      const [terminalId = "", session = "", dead = "0", status = ""] = line.split("\t");
+      if (!isId("term", terminalId)) continue;
       entries.push({
         ref: { terminalId, runtime: this.kind, locator: await this.locate(session) },
         dead: dead === "1",

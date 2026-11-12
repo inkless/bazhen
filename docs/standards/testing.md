@@ -115,7 +115,7 @@ A test owns everything it touches and leaves nothing behind.
 - **Poll with `expect.poll`,** which fails with the last value it saw. Never `sleep` to wait for
   something.
 - **Write property tests for state tables.** Generate random event sequences with fast-check and
-  assert invariants (`packages/core/src/terminal.property.test.ts`). Keep the walk and the
+  assert invariants (`packages/core/src/machine.property.test.ts`). Keep the walk and the
   predicates at module scope, and only `fc.assert` inside the test.
 - **Test HTTP routes through `app.request`,** with a `Host` header from the allowlist
   (`apps/daemon/src/http/app.test.ts`).

@@ -16,6 +16,7 @@ for something no check covers.
 | Errors at seams are typed; nothing is swallowed                        | review                                                                               |
 | Comments explain _why_, never _what_                                   | review                                                                               |
 | Dependencies are pinned exactly, with a reason for any pre-release     | review                                                                               |
+| The committed JSON Schema matches the protocol's zod schemas           | `pnpm check` (`scripts/protocol-schema.ts --check`)                                  |
 
 ## Boundaries
 
@@ -64,8 +65,11 @@ Imports use the `.ts` extension. `import type` is for types only, because
   in a comment. Otherwise let it propagate.
 - **Validate at network boundaries.** Every request and response body goes through its zod
   schema in `packages/protocol`, at the daemon's edge, in both directions.
+- **Publish the protocol.** `packages/protocol/schema/` is the protocol as JSON Schema, generated
+  from every zod schema `packages/protocol` exports, for clients in other languages. After
+  changing a schema, run `pnpm schema` and commit the files with it.
 
-Known gaps, left for the terminal-lifecycle row (BZ-2): in `packages/runtime-tmux/src/index.ts`,
+Known gaps, left for BZ-2's tmux-runtime change: in `packages/runtime-tmux/src/index.ts`,
 `create`, `inventory` and `close` let raw `execFile` errors escape, and `resize` swallows its
 errors.
 

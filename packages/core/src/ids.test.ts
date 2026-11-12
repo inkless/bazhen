@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isId, newId, toTerminalId } from "./ids.ts";
+import { isId, newId } from "./ids.ts";
 
 const zeros = (n: number) => new Uint8Array(n);
 
@@ -11,17 +11,35 @@ describe("newId", () => {
   });
 
   it("marks the id as UUID version 7", () => {
-    const id = newId("term");
-    expect(id.slice(5 + 12, 5 + 13)).toBe("7");
-    expect(isId(id)).toBe(true);
+    const id = newId("agent");
+    expect(id.slice("agent_".length + 12, "agent_".length + 13)).toBe("7");
   });
 
+  it("refuses a random source that returns too few bytes", () => {
+    expect(() => newId("msg", 0, () => new Uint8Array(8))).toThrow(RangeError);
+  });
+});
+
+describe("isId", () => {
   it("rejects a tmux pane id as a Bazhen id", () => {
-    expect(isId("%12")).toBe(false);
+    expect(isId("term", "%12")).toBe(false);
   });
 
-  it("accepts only term-prefixed ids as terminal ids", () => {
-    expect(toTerminalId(newId("term"))).not.toBeNull();
-    expect(toTerminalId(newId("host"))).toBeNull();
+  it("rejects a well-formed hex string that is not a UUIDv7", () => {
+    expect([isId("term", newId("term")), isId("term", `term_${"0".repeat(32)}`)]).toEqual([
+      true,
+      false,
+    ]);
+  });
+
+  it("accepts an id only under its own prefix", () => {
+    const id = newId("term");
+    expect(isId("term", id)).toBe(true);
+    expect(isId("agent", id)).toBe(false);
+  });
+
+  it("does not take one prefix for a longer one that starts with it", () => {
+    const id = newId("attn");
+    expect([isId("attn", id), isId("att", id)]).toEqual([true, false]);
   });
 });
