@@ -24,7 +24,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # macOS runners are billed at a premium while the repo is private; add macos-latest back
+        # once it is public.
+        os: [ubuntu-latest]
         node: ["24", "26.13.0"]
     steps:
       - uses: actions/checkout@v7
@@ -51,7 +53,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # macOS runners are billed at a premium while the repo is private; add macos-latest back
+        # once it is public.
+        os: [ubuntu-latest]
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
