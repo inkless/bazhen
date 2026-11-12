@@ -14,6 +14,7 @@ page serves that rule, or keeps tests from hurting the machine and each other.
 | Tests can't reach a real tmux server, and leave none running                       | integration setup and teardown              |
 | Test runs refuse to start when the machine is short of PTYs                        | integration and medium setup                |
 | Fakes over mocks; behaviour-named tests; no snapshots of terminal output           | review                                      |
+| Behaviour tests are black-box: they reach the daemon only through public surfaces  | review                                      |
 
 ## Sizes
 
@@ -31,6 +32,20 @@ Engineering at Google_.
 
 Write the smallest test that can fail for the right reason. E2E tests cover only wiring that
 crosses processes; a behaviour that a medium test can reach belongs in a medium test.
+
+## Black-box behaviour tests
+
+The daemon may be rewritten in another language later (a Rust daemon is revisited at M2). What
+makes that cheap is a suite that certifies the rewrite unchanged, so behaviour tests are written
+against the daemon's public surfaces, never its TypeScript internals.
+
+- **The black-box suite is its own package.** It depends only on `@bazhen/protocol`, starts the
+  daemon as a separate process, and drives it only over HTTP, WebSocket, the CLI and tmux. A
+  behaviour a user or an agent can observe gets its test there.
+- **Unit, medium and integration tests may be internal.** They import the packages they test, and
+  would be rewritten with the code.
+- The suite arrives with the first domain row, which adds it to the size table above. Until then,
+  new tests follow that table.
 
 ## Falsification
 
