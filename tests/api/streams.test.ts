@@ -72,7 +72,7 @@ describe("a view's stream over time", () => {
     await view.closed();
     expect(view.frames.at(-1)).toEqual({
       type: "error",
-      message: expect.stringContaining(`no running terminal ${terminalId}`),
+      message: expect.stringContaining(`terminal ${terminalId}: gone`),
     });
   });
 

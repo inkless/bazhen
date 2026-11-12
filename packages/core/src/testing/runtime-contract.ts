@@ -122,6 +122,26 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       await expect.poll(() => seen, { timeout: harness.waitMs }).toContain("ping-你好");
     });
 
+    it("tells whether the program is on its alternate screen, as it switches", async () => {
+      const runtime = fresh();
+      const ref = await runtime.create(spec(["cat"]));
+      const { stream, alternate } = await runtime.attach(ref, null, 0);
+      onTestFinished(() => stream.close());
+      stream.write(encode("\x1b[?1049h\r"));
+      await expect.poll(() => stream.alternateScreen(), { timeout: harness.waitMs }).toBe(true);
+      stream.write(encode("\x1b[?1049l\r"));
+      await expect.poll(() => stream.alternateScreen(), { timeout: harness.waitMs }).toBe(false);
+      expect(alternate).toBe(false);
+    });
+
+    it("refuses to attach to a terminal that is no longer there", async () => {
+      const runtime = fresh();
+      await runtime.create(spec(sleeping)); // keeps the server up once the other is gone
+      const ref = await runtime.create(spec(sleeping));
+      await runtime.close(ref);
+      await expect(runtime.attach(ref, null, 0)).rejects.toMatchObject({ reason: "gone" });
+    });
+
     it("reports how the pane's own process ended, or that it could not tell", async () => {
       const runtime = fresh();
       const coded = await runtime.create(spec(exiting(3)));
