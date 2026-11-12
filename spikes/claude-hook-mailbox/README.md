@@ -29,6 +29,7 @@ Run any probe with plain Node (no dependencies): `node probe-smoke.ts`.
 | `probe-interrupt.ts` | Esc mid-stream and mid-tool; are async hooks held to `timeout`? |
 | `probe-races.ts` | Two waiters, mail mid-turn, stale waiters after `/clear` |
 | `probe-stopfailure.ts` | API errors and `StopFailure` |
+| `probe-takeover.ts` | Take over a running long-idle run early: re-serve its socket, wake it |
 | `summarize-ids.ts` | `session_id` / `prompt_id` / `agent_id` coverage across run dirs |
 
 Each run leaves `hooks.jsonl`, `requests.jsonl`, `waiter.jsonl` and `result.json` in its temp
