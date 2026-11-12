@@ -81,7 +81,16 @@ export const HookRequest = z.object({
 });
 export type HookRequest = z.infer<typeof HookRequest>;
 
-/** What the hook client prints and exits with, verbatim; it knows no harness format. */
+/**
+ * What the hook client prints and exits with, verbatim; it knows no harness format.
+ *
+ * On the wire it is framed rather than JSON, so a client with no JSON parser (a std-only binary,
+ * a `sh` + `curl` script) can read it byte for byte: `Content-Type` is `HOOK_REPLY_TYPE`,
+ * `Content-Length` is set, `Bazhen-Exit-Code` carries `exitCode`, `Bazhen-Offered` the
+ * comma-separated `offered` IDs, `Bazhen-Stdout-Bytes` the UTF-8 length of `stdout`, and the body
+ * is `stdout` then `stderr`. A client fails open on anything else, or on a body over
+ * `HOOK_REPLY_MAX_BYTES`.
+ */
 export const HookReply = z.object({
   exitCode: z.number().int().min(0).max(255),
   stdout: z.string(),
@@ -90,6 +99,34 @@ export const HookReply = z.object({
   offered: z.array(Id("msg")),
 });
 export type HookReply = z.infer<typeof HookReply>;
+
+export const HOOK_REPLY_TYPE = "application/vnd.bazhen.hook-reply";
+
+/** Clients refuse a larger body, so the daemon never offers more mail than one reply holds. */
+export const HOOK_REPLY_MAX_BYTES = 1 << 20;
+
+/** A reply as `HookReply` documents its framing: the headers, and stdout then stderr. */
+export function frameHookReply(reply: HookReply): {
+  headers: Record<string, string>;
+  body: Uint8Array<ArrayBuffer>;
+} {
+  const encoder = new TextEncoder();
+  const stdout = encoder.encode(reply.stdout);
+  const stderr = encoder.encode(reply.stderr);
+  const body = new Uint8Array(stdout.length + stderr.length);
+  body.set(stdout);
+  body.set(stderr, stdout.length);
+  return {
+    headers: {
+      "content-type": HOOK_REPLY_TYPE,
+      "content-length": String(body.length),
+      "bazhen-exit-code": String(reply.exitCode),
+      "bazhen-offered": reply.offered.join(","),
+      "bazhen-stdout-bytes": String(stdout.length),
+    },
+    body,
+  };
+}
 
 export const HookAck = z.object({ agentId: Id("agent"), offered: z.array(Id("msg")) });
 export type HookAck = z.infer<typeof HookAck>;

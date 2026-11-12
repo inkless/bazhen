@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { AttentionCloseReason, HookReply, SendMessageRequest } from "./mail.ts";
+import {
+  AttentionCloseReason,
+  HOOK_REPLY_TYPE,
+  HookReply,
+  SendMessageRequest,
+  frameHookReply,
+} from "./mail.ts";
 import { EVENTS } from "./events.ts";
 
 describe("mail and attention schemas", () => {
@@ -19,5 +25,24 @@ describe("mail and attention schemas", () => {
       AttentionCloseReason.safeParse("answered").success,
       closed.safeParse({ reason: "answered" }).success,
     ]).toEqual([true, false]);
+  });
+});
+
+describe("frameHookReply", () => {
+  it("counts stdout in UTF-8 bytes and puts it before stderr", () => {
+    const { headers, body } = frameHookReply({
+      exitCode: 2,
+      stdout: "日本",
+      stderr: "x",
+      offered: ["msg_a", "msg_b"],
+    });
+    expect(headers).toEqual({
+      "content-type": HOOK_REPLY_TYPE,
+      "content-length": "7",
+      "bazhen-exit-code": "2",
+      "bazhen-offered": "msg_a,msg_b",
+      "bazhen-stdout-bytes": "6",
+    });
+    expect(new TextDecoder().decode(body)).toBe("日本x");
   });
 });

@@ -2,7 +2,6 @@ import { chmodSync, mkdirSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { getRequestListener, serve } from "@hono/node-server";
 import { filterEnv } from "@bazhen/core";
 import { LocalEnvironment } from "@bazhen/env-local";
@@ -19,7 +18,7 @@ import { TerminalHub } from "./stream/hub.ts";
 import { endOpenAttachments, storeLog } from "./stream/log.ts";
 import { streamRoute } from "./stream/server.ts";
 import { Approvals } from "./mailbox/approvals.ts";
-import { hookCommand } from "./mailbox/hook-command.ts";
+import { HOOK_SCRIPT, hookClient, hookCommand } from "./mailbox/hook-command.ts";
 import { hookApp } from "./mailbox/ingress.ts";
 import { Mailbox } from "./mailbox/mailbox.ts";
 import { currentInputs, resolvePaths } from "./config/paths.ts";
@@ -58,7 +57,8 @@ const runtime = new TmuxRuntime({
   pty: nodePtySpawner,
   env: hostEnv,
 });
-const hookClient = fileURLToPath(new URL("mailbox/hook-client.ts", import.meta.url));
+const hookRunner = hookClient();
+if (hookRunner === HOOK_SCRIPT) console.warn(`bazhen-hook is not built; hooks use ${HOOK_SCRIPT}`);
 // Agents use the user's own Codex home and its managed app-server, connected on first use.
 const codex = new CodexChannel({
   codexHome: codexHomeOf(hostEnv, inputs.home),
@@ -71,7 +71,7 @@ const environment = new LocalEnvironment({
   harnesses: [
     new ClaudeCodeHarness({
       newSessionId: randomUUID,
-      hookCommand: hookCommand(process.execPath, hookClient),
+      hookCommand: hookCommand(hookRunner),
       // A mode every agent starts in, overriding the user's settings; unset by default.
       ...(process.env.BAZHEN_CLAUDE_PERMISSION_MODE
         ? { permissionMode: process.env.BAZHEN_CLAUDE_PERMISSION_MODE }

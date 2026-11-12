@@ -1,6 +1,12 @@
 import { Hono } from "hono";
 import { isId } from "@bazhen/core";
-import { HookAck, HookRequest, isCompatible } from "@bazhen/protocol";
+import {
+  HookAck,
+  HookRequest,
+  frameHookReply,
+  isCompatible,
+  type HookReply,
+} from "@bazhen/protocol";
 import { readHook } from "@bazhen/harness-claude-code";
 import type { Approvals } from "./approvals.ts";
 import { QUIET, type Mailbox } from "./mailbox.ts";
@@ -22,34 +28,34 @@ export function hookApp(deps: IngressDeps): Hono {
 
   app.post("/v1/hooks", async (c) => {
     const hook = HookRequest.safeParse(await c.req.json().catch(() => undefined));
-    if (!hook.success || !isCompatible(hook.data.protocolVersion)) return c.json(QUIET);
+    if (!hook.success || !isCompatible(hook.data.protocolVersion)) return framed(QUIET);
     const { agentId, event, payload } = hook.data;
-    if (!isId("agent", agentId) || !deps.knows(agentId)) return c.json(QUIET);
+    if (!isId("agent", agentId) || !deps.knows(agentId)) return framed(QUIET);
     const read = readHook(event, payload);
     switch (read.kind) {
       case "wait":
-        return c.json(await deps.mailbox.wait(agentId, c.req.raw.signal));
+        return framed(await deps.mailbox.wait(agentId, c.req.raw.signal));
       case "permission":
-        return c.json(
+        return framed(
           await deps.approvals.request(agentId, read.summary, read.tool, c.req.raw.signal),
         );
       case "promptStarted":
         deps.mailbox.promptStarted(agentId, read.prompt, read.promptId);
-        return c.json(QUIET);
+        break;
       case "turnEnded":
         deps.mailbox.turnEnded(agentId, read.promptId);
         deps.approvals.turnEnded(agentId);
-        return c.json(QUIET);
+        break;
       case "toolStarted":
         deps.approvals.toolStarted(agentId, read.tool, read.useId);
-        return c.json(QUIET);
+        break;
       case "toolSettled":
         deps.approvals.toolSettled(agentId, read.useId);
-        return c.json(QUIET);
+        break;
       case "ignored":
         break;
     }
-    return c.json(QUIET);
+    return framed(QUIET);
   });
 
   app.post("/v1/hooks/ack", async (c) => {
@@ -59,4 +65,9 @@ export function hookApp(deps: IngressDeps): Hono {
   });
 
   return app;
+}
+
+function framed(reply: HookReply): Response {
+  const { headers, body } = frameHookReply(reply);
+  return new Response(body, { headers });
 }
