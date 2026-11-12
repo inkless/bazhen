@@ -61,6 +61,36 @@ describe("bazhen start, status and stop", () => {
   });
 });
 
+describe("a second daemon on the same home", () => {
+  let daemon: Daemon;
+  beforeAll(async () => {
+    daemon = await Daemon.start();
+  });
+  afterAll(async () => {
+    await daemon?.stop();
+  });
+
+  it("exits already running and leaves the first daemon's socket answering", async () => {
+    const second = await daemon.startAnother();
+    expect(second).toMatchObject({ code: 1, out: expect.stringContaining("already running") });
+    expect((await overSocket(daemon.socket, "GET", "/v1/health")).status).toBe(200);
+  });
+});
+
+describe("bazhen stop with no daemon", () => {
+  let home: Awaited<ReturnType<typeof cliHome>>;
+  beforeAll(async () => {
+    home = await cliHome();
+  });
+  afterAll(async () => {
+    await home?.cleanup();
+  });
+
+  it("says it isn't running, and succeeds: stopping is idempotent", async () => {
+    expect(await bazhen(["stop"], home.env)).toEqual({ code: 0, out: "bazhen is not running\n" });
+  });
+});
+
 describe("bazhen stop", () => {
   let daemon: Daemon;
   beforeAll(async () => {
@@ -89,6 +119,10 @@ describe("bazhen start's environment", () => {
   });
   afterAll(async () => {
     await daemon?.stop();
+  });
+
+  it("runs the daemon in /, not the directory it was started from", () => {
+    expect(daemon.daemonCwd()).toBe("/");
   });
 
   it("keeps a parent session's variables from agents, and passes what the config re-allows", async () => {

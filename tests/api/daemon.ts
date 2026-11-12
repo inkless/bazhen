@@ -344,6 +344,41 @@ export class Daemon {
     );
   }
 
+  /**
+   * Runs a second daemon on this home, straight from its entry point rather than through
+   * `bazhen start`'s own check, and resolves with how it exited and what it printed.
+   */
+  startAnother(): Promise<{ code: number; out: string }> {
+    return new Promise((resolve) => {
+      execFile(
+        process.execPath,
+        ["--disable-warning=ExperimentalWarning", join(repo, "apps/daemon/src/main.ts")],
+        { env: { ...this.env, BAZHEN_PORT: String(this.port) }, timeout: 30_000 },
+        (err, stdout, stderr) =>
+          resolve({ code: err === null ? 0 : Number(err.code ?? 1), out: stdout + stderr }),
+      );
+    });
+  }
+
+  /**
+   * The working directory of the daemon serving this home, found by its environment rather than
+   * as a child, since `bazhen start` detaches it (Linux only).
+   */
+  daemonCwd(): string {
+    const entry = join(repo, "apps/daemon/src/main.ts");
+    for (const pid of readdirSync("/proc").filter((name) => /^\d+$/.test(name))) {
+      try {
+        const cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf8");
+        const environ = readFileSync(`/proc/${pid}/environ`, "utf8").split("\0");
+        if (cmdline.includes(entry) && environ.includes(`BAZHEN_HOME=${this.home}`))
+          return readlinkSync(`/proc/${pid}/cwd`);
+      } catch {
+        // The process ended, or isn't ours to read.
+      }
+    }
+    throw new Error(`no daemon for ${this.home}`);
+  }
+
   /** Whether the agent still has a tmux session. */
   hasTerminal(agentId: string): boolean {
     return this.session(agentId) !== undefined;
