@@ -69,7 +69,10 @@ Every new test must be shown to fail without the code it covers.
 
   Titles are read from added lines that look like `it(...)` or `test(...)` calls, so a fixture
   string such as `'it("fixture", f)'` in a test file counts as a test. It can't be found in the
-  run, comes out INVALID and asks for a control: the safe direction.
+  run, comes out INVALID and asks for a control: the safe direction. An existing test whose call
+  line only became `async` is left out, since it isn't new; one removed and added again with the
+  same call line is judged. A test whose body changes under an unchanged call line is not read
+  as new, so a rewritten test gets its control by hand.
 
 - **Controls for INVALID tests.** Break the code by hand: swap a comparison, delete a branch, or
   return a constant. Confirm the test fails on its assertion, not on a crash or a timeout, then
