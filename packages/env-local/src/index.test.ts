@@ -53,13 +53,16 @@ describe("local environment", () => {
   it("refuses a harness it has no adapter for, rather than emulating it", async () => {
     const runtime = new FakeRuntime();
     await expect(environment(runtime).launch(launch("codex"))).rejects.toThrow(UnsupportedHarness);
-    expect(await runtime.inventory()).toEqual([]);
+    expect((await runtime.health()).state).toBe("not-running");
   });
 
   it("is reachable only while its tmux server runs, and unknown while none does", async () => {
     const running = new FakeRuntime();
     await environment(running).launch(launch());
-    const runtimes = [running, new FakeRuntime(), new FakeRuntime({ reachable: false })];
+    const unreadable = new FakeRuntime();
+    await environment(unreadable).launch(launch());
+    unreadable.disconnect();
+    const runtimes = [running, new FakeRuntime(), unreadable];
     const states = await Promise.all(
       runtimes.map(async (runtime) => (await environment(runtime).health()).state),
     );

@@ -1,11 +1,14 @@
 // An in-memory RuntimeAdapter, for tests that must not run tmux. It keeps TmuxRuntime's contract:
 // runtime-contract.ts runs one suite against both, so what a test proves against this runtime
 // holds against tmux. A program's argv decides what it does: `sh -c '… exit N'` exits with N at
-// once, `cat` echoes what it is sent, and anything else runs until it is signalled.
+// once, `cat` echoes what it is sent, and anything else runs until it is signalled. As with tmux,
+// no server runs until the first terminal is created or after the last one goes, and while none
+// runs nothing can be read.
 
 import type { ExitStatus, Signal } from "@bazhen/protocol";
 import type { TerminalId } from "../ids.ts";
 import {
+  assertSameGeneration,
   ProcessState,
   StaleIncarnation,
   type Attached,
@@ -54,14 +57,10 @@ export class FakeRuntime implements RuntimeAdapter {
   readonly kind = "fake";
   private readonly terminals = new Map<TerminalId, Terminal>();
   private readonly listeners = new Set<ExitListener>();
-  private readonly reachable: boolean;
+  private reachable = true;
   /** The server's start time, as TmuxRuntime records it; empty while no server runs. */
   private serverStart = "";
   private serial = 0;
-
-  constructor(opts: { readonly reachable?: boolean } = {}) {
-    this.reachable = opts.reachable ?? true;
-  }
 
   async health(): Promise<RuntimeHealth> {
     if (!this.reachable) return { state: "unreachable", version: null };
@@ -70,6 +69,7 @@ export class FakeRuntime implements RuntimeAdapter {
 
   async inventory(): Promise<RuntimeInventoryEntry[]> {
     this.read();
+    this.server();
     return [...this.terminals.values()].map((t) => ({
       ref: this.refOf(t),
       tags: t.spec.tags,
@@ -133,13 +133,13 @@ export class FakeRuntime implements RuntimeAdapter {
 
   async close(ref: RuntimeRef): Promise<void> {
     const t = this.onServer(ref);
-    if (t !== undefined) this.vanish(this.refOf(t));
+    if (t !== undefined) this.remove(t);
   }
 
   async respawn(ref: RuntimeRef, spec: TerminalSpec): Promise<RuntimeRef> {
     const t = this.paneOf(ref);
     if (t.pane.exit === null) throw new ProcessState(ref.terminalId, "exited");
-    assertSameGeneration(ref, t.pane);
+    assertSameGeneration(ref, String(t.pane.generation));
     t.spec = spec;
     t.pane = { ...this.pane(spec), id: t.pane.id };
     this.reportIfExited(t);
@@ -149,17 +149,19 @@ export class FakeRuntime implements RuntimeAdapter {
   async signal(ref: RuntimeRef, signal: Signal): Promise<void> {
     const t = this.paneOf(ref);
     if (t.pane.exit !== null) throw new ProcessState(ref.terminalId, "running");
-    assertSameGeneration(ref, t.pane);
-    this.exit(this.refOf(t), { type: "signalled", signal });
+    assertSameGeneration(ref, String(t.pane.generation));
+    t.pane.exit = { type: "signalled", signal };
+    this.reportIfExited(t);
   }
 
-  /** Reports every terminal already dead at once, as a poll would, then each exit as it happens. */
+  /** Reports every terminal already dead on the next turn, as a poll would, then each exit. */
   onExit(cb: ExitListener): () => void {
     this.listeners.add(cb);
-    if (this.reachable) {
+    void Promise.resolve().then(() => {
+      if (!this.listeners.has(cb) || !this.reachable) return;
       for (const t of this.terminals.values())
         if (t.pane.exit !== null) cb(this.refOf(t), t.pane.exit);
-    }
+    });
     return () => void this.listeners.delete(cb);
   }
 
@@ -183,13 +185,6 @@ export class FakeRuntime implements RuntimeAdapter {
     this.terminalOf(ref).history = history;
   }
 
-  /** The terminal's process ends, however it was asked to. */
-  exit(ref: RuntimeRef, status: ExitStatus): void {
-    const t = this.terminalOf(ref);
-    t.pane.exit = status;
-    this.reportIfExited(t);
-  }
-
   /** The pane is replaced inside the terminal, as a split and a kill by hand would. */
   replacePane(ref: RuntimeRef): void {
     const t = this.terminalOf(ref);
@@ -198,9 +193,19 @@ export class FakeRuntime implements RuntimeAdapter {
 
   /** The terminal ends outside Bazhen, as a killed session would; every client closes. */
   vanish(ref: RuntimeRef): void {
-    const t = this.terminalOf(ref);
+    this.remove(this.terminalOf(ref));
+  }
+
+  /** The server stays up but can no longer be read, as a socket Bazhen can't open. */
+  disconnect(): void {
+    this.reachable = false;
+  }
+
+  /** A terminal goes, and with the last one the server, as tmux's does. */
+  private remove(t: Terminal): void {
     this.terminals.delete(t.spec.terminalId);
     for (const client of t.streams) client.end();
+    if (this.terminals.size === 0) this.serverStart = "";
   }
 
   private pane(spec: TerminalSpec): Pane {
@@ -242,7 +247,12 @@ export class FakeRuntime implements RuntimeAdapter {
   }
 
   private read(): void {
-    if (!this.reachable) throw new Error("the fake runtime is unreachable");
+    if (!this.reachable) throw new Error("the fake runtime's server can't be read");
+  }
+
+  /** Throws as tmux does when no server runs: nothing is there to read. */
+  private server(): void {
+    if (this.serverStart === "") throw new Error("no server running");
   }
 
   private terminalOf(ref: RuntimeRef): Terminal {
@@ -254,6 +264,7 @@ export class FakeRuntime implements RuntimeAdapter {
   /** As TmuxRuntime's: the terminal, from the server `ref` was made on, or undefined if gone. */
   private onServer(ref: RuntimeRef): Terminal | undefined {
     this.read();
+    this.server();
     if (ref.locator.serverStart !== this.serverStart || ref.locator.serverPid !== "1") {
       throw new StaleIncarnation(ref.terminalId, "server-replaced");
     }
@@ -266,13 +277,5 @@ export class FakeRuntime implements RuntimeAdapter {
     if (t.pane.id !== ref.locator.paneId)
       throw new StaleIncarnation(ref.terminalId, "pane-replaced");
     return t;
-  }
-}
-
-function assertSameGeneration(ref: RuntimeRef, now: Pane): void {
-  const recorded = ref.locator.generation;
-  if (!recorded) throw new StaleIncarnation(ref.terminalId, "unnumbered");
-  if (recorded !== String(now.generation)) {
-    throw new StaleIncarnation(ref.terminalId, "process-replaced");
   }
 }

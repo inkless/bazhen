@@ -15,8 +15,8 @@ import {
 export interface ContractHarness {
   /** A runtime on a server of its own, which the suite ends after each test. */
   make(): { readonly runtime: RuntimeAdapter; dispose(): void };
-  /** A runtime whose server can't be read. */
-  unreachable(): RuntimeAdapter;
+  /** Leaves `runtime`'s server running, but where it can no longer be read. */
+  unreadable(runtime: RuntimeAdapter): void;
   /** Replaces the terminal's pane inside it, as a split and a kill by hand would. */
   replacePane(runtime: RuntimeAdapter, ref: RuntimeRef): void;
   /** Ends the terminal outside Bazhen, as a killed session would. */
@@ -79,9 +79,10 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
   };
 
   describe(`${name}: the runtime contract`, () => {
-    it("reports not-running before any terminal exists, and healthy after", async () => {
+    it("has no server to read before its first terminal, and a healthy one after", async () => {
       const runtime = fresh();
       expect((await runtime.health()).state).toBe("not-running");
+      await expect(runtime.inventory()).rejects.not.toBeInstanceOf(StaleIncarnation);
       await runtime.create(spec(["cat"]));
       expect((await runtime.health()).state).toBe("healthy");
     });
@@ -127,6 +128,8 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       const killed = await runtime.create(spec(sleeping));
       const codes = exitsOf(runtime, coded.terminalId);
       const signals = exitsOf(runtime, killed.terminalId);
+      // Exits are found by looking, never inside the subscription itself.
+      expect(codes).toEqual([]);
       await runtime.signal(killed, "SIGTERM");
       await expect
         .poll(() => codes.at(-1)?.status, { timeout: harness.waitMs })
@@ -171,6 +174,13 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       const ref = await runtime.create(s);
       await expect(runtime.respawn(ref, s)).rejects.toMatchObject({ expected: "exited" });
       expect(await running(runtime, ref)).toEqual({ pid: ref.locator.panePid, dead: false });
+    });
+
+    it("refuses to signal a process that has already exited", async () => {
+      const runtime = fresh();
+      const ref = await runtime.create(spec(exiting(0)));
+      await deadOf(runtime, ref);
+      await expect(runtime.signal(ref, "SIGTERM")).rejects.toMatchObject({ expected: "running" });
     });
 
     it("touches nothing when the server is not the one the terminal was created on", async () => {
@@ -252,15 +262,21 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       ]);
     });
 
-    it("refuses to close a terminal on a server it can't read", async () => {
+    it("refuses to close a terminal on a server it can't read, without calling it stale", async () => {
       const runtime = fresh();
       const ref = await runtime.create(spec(sleeping));
-      await expect(harness.unreachable().close(ref)).rejects.toBeInstanceOf(Error);
+      harness.unreadable(runtime);
+      await expect(runtime.close(ref)).rejects.not.toBeInstanceOf(StaleIncarnation);
+      expect((await runtime.health()).state).toBe("unreachable");
     });
 
-    it("reports no exit while the server cannot be read", async () => {
+    it("reports no exit, even of a terminal already dead, while the server cannot be read", async () => {
+      const runtime = fresh();
+      const ref = await runtime.create(spec(exiting(0)));
+      await deadOf(runtime, ref);
+      harness.unreadable(runtime);
       const seen: string[] = [];
-      onTestFinished(harness.unreachable().onExit((ref) => seen.push(ref.terminalId)));
+      onTestFinished(runtime.onExit((dead) => seen.push(dead.terminalId)));
       await delay(300);
       expect(seen).toEqual([]);
     });

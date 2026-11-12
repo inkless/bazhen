@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { filterEnv, type RuntimeAdapter } from "@bazhen/core";
@@ -25,9 +25,17 @@ runtimeContract("TmuxRuntime", {
     const server = testServer(`contract-${++made}`);
     const runtime = runtimeOn(server);
     servers.set(runtime, server);
-    return { runtime, dispose: () => server.kill() };
+    return {
+      runtime,
+      dispose: () => {
+        // Readable again first, or nothing could stop it.
+        if (existsSync(server.socket)) chmodSync(server.socket, 0o700);
+        server.kill();
+      },
+    };
   },
-  unreachable: () => runtimeOn(testServer(`contract-none-${++made}`)),
+  // A socket this user can't open: the server runs on, and no command reaches it.
+  unreadable: (runtime) => chmodSync(serverOf(runtime).socket, 0o000),
   replacePane: (runtime, ref) => {
     const server = serverOf(runtime);
     tmuxOut(server, "split-window", "-d", "-t", String(ref.locator.sessionId), "sleep", "300");

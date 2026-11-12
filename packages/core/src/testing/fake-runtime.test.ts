@@ -10,7 +10,7 @@ const fakeOf = (runtime: unknown) => {
 
 runtimeContract("FakeRuntime", {
   make: () => ({ runtime: new FakeRuntime(), dispose: () => {} }),
-  unreachable: () => new FakeRuntime({ reachable: false }),
+  unreadable: (runtime) => fakeOf(runtime).disconnect(),
   replacePane: (runtime, ref) => fakeOf(runtime).replacePane(ref),
   vanish: (runtime, ref) => fakeOf(runtime).vanish(ref),
   cwd: "/w",
