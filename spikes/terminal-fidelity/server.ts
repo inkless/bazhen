@@ -46,8 +46,19 @@ const REPLIES = (process.env["BZ_SPIKE_REPLIES"] ?? "daemon") as "daemon" | "bro
 const SPIKE_EXTRA = process.env["BZ_SPIKE_TMUX_EXTRA"] ?? "";
 writeFileSync(configFile, TMUX_CONFIG + SPIKE_EXTRA + "\n", { mode: 0o600 });
 
+// The tmux server's global environment is copied from whichever process starts it, and every pane
+// inherits it. Start it from an allowlist, never from the daemon's own environment (notes.md, F7).
+const ENV_ALLOW = /^(PATH|HOME|USER|LOGNAME|SHELL|LANG|LC_[A-Z]+|TMPDIR|TZ)$/;
+function cleanEnv(extra: Record<string, string> = {}): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) if (v !== undefined && ENV_ALLOW.test(k)) env[k] = v;
+  return { ...env, ...extra };
+}
+const CLEAN_ENV = process.env["BZ_SPIKE_DIRTY_ENV"] === "1" ? undefined : cleanEnv();
+
 async function tmux(...args: string[]): Promise<string> {
   const { stdout } = await run("tmux", ["-L", SOCKET, "-f", configFile, ...args], {
+    env: CLEAN_ENV,
     timeout: 5000,
     maxBuffer: 64 * 1024 * 1024,
   });
@@ -204,9 +215,7 @@ async function startClient(t: Term): Promise<void> {
   } else {
     argv = [...base, "attach-session", "-t", t.session];
   }
-  const env = Object.fromEntries(
-    Object.entries(process.env).filter((e): e is [string, string] => e[1] !== undefined && e[0] !== "TMUX"),
-  );
+  const env = cleanEnv();
   const proc = spawn("tmux", argv, {
     name: "xterm-256color",
     cols: t.size.cols,
