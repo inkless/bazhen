@@ -92,6 +92,8 @@ interface Watched {
   readonly screen: Settle;
   alternate: boolean;
   checkingScreen: boolean;
+  /** Output arrived while a check was running, so its answer may already be stale. */
+  screenStale: boolean;
   /** Whether the last check failed, so a failing one is reported once, not every time. */
   screenFailed: boolean;
   lease: Lease;
@@ -173,6 +175,7 @@ export class TerminalHub {
         ),
         alternate,
         checkingScreen: false,
+        screenStale: false,
         screenFailed: false,
         lease: { holder: null, epoch: this.log.epoch(ref.terminalId) },
       };
@@ -216,10 +219,17 @@ export class TerminalHub {
     this.end(watched, id, "evicted_slow");
   }
 
-  /** One check at a time: a busy terminal settles every half second whether or not it changed. */
+  /**
+   * One check at a time: a busy terminal settles every half second whether or not it changed. A
+   * check asked for while one runs is run after it, since the screen may have switched since.
+   */
   private checkScreen(watched: Watched): void {
-    if (watched.checkingScreen) return;
+    if (watched.checkingScreen) {
+      watched.screenStale = true;
+      return;
+    }
     watched.checkingScreen = true;
+    watched.screenStale = false;
     watched.stream
       .alternateScreen()
       .then(
@@ -239,7 +249,10 @@ export class TerminalHub {
           }
         },
       )
-      .finally(() => (watched.checkingScreen = false));
+      .finally(() => {
+        watched.checkingScreen = false;
+        if (watched.screenStale && this.watched.has(watched.terminal)) this.checkScreen(watched);
+      });
   }
 
   private forget(terminal: TerminalId, opening: Promise<Watched>): void {

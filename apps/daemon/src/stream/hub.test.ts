@@ -37,6 +37,8 @@ function fakeRuntime(history = "earlier output") {
   let screenChecks = 0;
   let screenFails = false;
   let screenHangs = false;
+  const pendingChecks: ((alternate: boolean) => void)[] = [];
+  let screenHeld = false;
   const runtime: RuntimeAdapter = {
     kind: "fake",
     health: () => Promise.reject(new Error("not used")),
@@ -59,6 +61,7 @@ function fakeRuntime(history = "earlier output") {
           screenChecks++;
           if (screenFails) throw new Error("tmux gone");
           if (screenHangs) await new Promise(() => {});
+          if (screenHeld) return new Promise<boolean>((resolve) => pendingChecks.push(resolve));
           return alternate;
         },
         close: () => void closes++,
@@ -76,6 +79,9 @@ function fakeRuntime(history = "earlier output") {
     setAlternate: (on: boolean) => (alternate = on),
     failScreenChecks: () => (screenFails = true),
     hangScreenChecks: () => (screenHangs = true),
+    /** From now on each screen check waits until answered, oldest first. */
+    holdScreenChecks: () => (screenHeld = true),
+    answerScreenCheck: (answer: boolean) => pendingChecks.shift()?.(answer),
     screenChecks: () => screenChecks,
     counts: () => ({ attaches, closes }),
   };
@@ -437,6 +443,22 @@ describe("terminal hub: screen state and slow views", () => {
       await new Promise((resolve) => setTimeout(resolve, 30));
     }
     expect(rt.screenChecks()).toBe(1);
+  });
+
+  it("checks the screen again when output arrived while a check was running", async () => {
+    const rt = fakeRuntime();
+    const hub = new TerminalHub(rt.runtime, memoryLog().log, quick);
+    const a = viewer();
+    await hub.join(ref, a.v, size);
+    rt.holdScreenChecks();
+    rt.emit("still on the main screen");
+    await expect.poll(() => rt.screenChecks()).toBe(1);
+    rt.emit("\x1b[?1049h");
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    rt.answerScreenCheck(false);
+    await expect.poll(() => rt.screenChecks()).toBe(2);
+    rt.answerScreenCheck(true);
+    await expect.poll(() => a.frames.at(-1)).toEqual({ type: "screen", alternate: true });
   });
 
   it("reports a screen check that keeps failing once, not every time", async () => {
