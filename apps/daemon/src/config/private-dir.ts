@@ -22,7 +22,6 @@ export function ensurePrivateDir(path: string, uid: number): void {
   }
   const stat = lstatSync(path);
   if (stat.isSymbolicLink()) throw new UnsafeRuntimeDir(path, "it is a symlink");
-  if (!stat.isDirectory()) throw new UnsafeRuntimeDir(path, "it is not a directory");
   if (stat.uid !== uid) throw new UnsafeRuntimeDir(path, `it is owned by uid ${stat.uid}`);
   if ((stat.mode & 0o777) !== 0o700) chmodSync(path, 0o700);
 }

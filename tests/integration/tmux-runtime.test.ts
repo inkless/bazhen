@@ -9,17 +9,19 @@ import { nodePtySpawner } from "@bazhen/daemon/pty";
 import { killServer, ptyHandleCount, sleep, testSocket, tmuxOut } from "./helpers.ts";
 
 const socket = testSocket("runtime");
-// Only in the daemon's own environment: a pane that shows it inherited the daemon instead of the
-// environment the runtime was given.
-process.env["BZ_DAEMON_ONLY"] = "leaked";
+// As if `bazhen start` ran inside another Claude Code session, with a token of the user's own.
+const launchedFrom = { ...process.env, CLAUDECODE: "1", BZ_USER_VALUE: "kept" };
 const runtime = new TmuxRuntime({
   socket,
   pty: nodePtySpawner,
   configFile: join(mkdtempSync(join(tmpdir(), "bz-tmux-conf-")), "tmux.conf"),
-  env: { ...filterEnv(process.env, { deny: ["BZ_DAEMON_ONLY"] }).env, BZ_USER_VALUE: "kept" },
+  env: filterEnv(launchedFrom).env,
 });
 const size = { cols: 100, rows: 30 };
-const spec = (argv: [string, ...string[]], tags: TerminalTags = { kind: "agent" }) => ({
+const spec = (
+  argv: [string, ...string[]],
+  tags: TerminalTags = { kind: "agent", agentId: newId("agent") },
+) => ({
   terminalId: newId("term"),
   tags,
   argv,
@@ -87,18 +89,31 @@ describe("tmux runtime on a private server", () => {
     stream.close();
   });
 
-  it("gives a pane the runtime's environment and its own variables, never the daemon's", async () => {
-    const ref = await runtime.create({
-      ...spec([
-        "sh",
-        "-c",
-        'printf "<%s|%s|%s>" "$BZ_USER_VALUE" "$BAZHEN_AGENT_ID" "${BZ_DAEMON_ONLY-unset}"; sleep 30',
-      ]),
-      env: { BAZHEN_AGENT_ID: "agent-x" },
-    });
-    await expect
-      .poll(() => screen(ref.locator.session), { timeout: 3000 })
-      .toContain("<kept|agent-x|unset>");
+  it("gives a pane the filtered environment and Bazhen's variables, never the daemon's own", async () => {
+    process.env["BZ_DAEMON_ONLY"] = "leaked";
+    try {
+      const ref = await runtime.create({
+        ...spec([
+          "sh",
+          "-c",
+          'printf "<%s|%s|%s|%s>" "$BZ_USER_VALUE" "$BAZHEN_AGENT_ID" "${CLAUDECODE-unset}" "${BZ_DAEMON_ONLY-unset}"; sleep 30',
+        ]),
+        env: { BAZHEN_AGENT_ID: "agent-x" },
+      });
+      await expect
+        .poll(() => screen(ref.locator.session), { timeout: 3000 })
+        .toContain("<kept|agent-x|unset|unset>");
+    } finally {
+      delete process.env["BZ_DAEMON_ONLY"];
+    }
+  });
+
+  it("keeps the user's values in the server's memory, never in a session's tmux argv", async () => {
+    const ref = await runtime.create({ ...spec(["cat"]), env: { BAZHEN_AGENT_ID: "agent-x" } });
+    const session = String(ref.locator.session);
+    expect(tmuxOut(socket, "show-environment", "-g")).toContain("BZ_USER_VALUE=kept");
+    expect(tmuxOut(socket, "show-environment", "-t", session)).not.toContain("BZ_USER_VALUE");
+    expect(tmuxOut(socket, "show-environment", "-t", session)).toContain("BAZHEN_AGENT_ID=agent-x");
   });
 
   it("copies no attaching client's variables into the session", () => {
@@ -122,7 +137,7 @@ describe("tmux runtime on a private server", () => {
     ]);
   });
 
-  it("ignores a session it did not create, even one carrying a terminal id", async () => {
+  it("ignores a session carrying a terminal id but no kind, as Bazhen never writes one", async () => {
     const forged = newId("term");
     tmuxOut(socket, "new-session", "-d", "-s", "foreign", "cat");
     tmuxOut(socket, "set-option", "-t", "foreign", "@bazhen_terminal_id", forged);

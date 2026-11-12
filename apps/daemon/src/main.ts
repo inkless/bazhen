@@ -1,10 +1,9 @@
 import { mkdirSync } from "node:fs";
-import { userInfo } from "node:os";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
 import { filterEnv } from "@bazhen/core";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
-import { currentPaths } from "./config/paths.ts";
+import { currentInputs, resolvePaths } from "./config/paths.ts";
 import { ensurePrivateDir } from "./config/private-dir.ts";
 import { createApp } from "./http/app.ts";
 import { nodePtySpawner } from "./pty/node-pty.ts";
@@ -14,10 +13,11 @@ const APP_VERSION = "0.1.0";
 const HOSTNAME = "127.0.0.1";
 const port = Number(process.env.BAZHEN_PORT ?? 7900);
 
-const paths = currentPaths();
+const inputs = currentInputs();
+const paths = resolvePaths(inputs);
 for (const dir of [paths.config, paths.data, paths.bank, paths.state, paths.cache])
   mkdirSync(dir, { recursive: true });
-ensurePrivateDir(paths.run, userInfo().uid);
+ensurePrivateDir(paths.run, inputs.uid);
 
 // Captured once: agents get what a new terminal tab would, minus Bazhen's and the launching
 // session's internals (foundation-design §9.5).

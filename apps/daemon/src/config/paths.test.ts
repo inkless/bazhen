@@ -10,6 +10,8 @@ const mac: PathInputs = {
   uid: 501,
 };
 
+const tmux = (home: string) => resolvePaths({ ...linux, env: { BAZHEN_HOME: home } }).tmuxSocket;
+
 describe("resolvePaths", () => {
   it("uses XDG defaults on Linux when no XDG variables are set", () => {
     const p = resolvePaths(linux);
@@ -67,6 +69,11 @@ describe("resolvePaths", () => {
     const b = resolvePaths({ ...linux, env: { BAZHEN_HOME: "/b" } }).tmuxSocket;
     expect([resolvePaths(linux).tmuxSocket, a === b]).toEqual(["bazhen", false]);
     expect(a).toMatch(/^bazhen-[0-9a-f]{8}$/);
+  });
+
+  it("treats /a and /a/ as one home, and refuses a relative one", () => {
+    expect(tmux("/a/")).toBe(tmux("/a"));
+    expect(() => tmux("a")).toThrow(RangeError);
   });
 
   it("lets a flag beat the environment, and the environment beat the config file", () => {

@@ -10,11 +10,9 @@ export interface Size {
  * What the daemon writes into the runtime beside the TerminalId, so reconciliation can rebuild
  * the join from the runtime alone (foundation-design §3.2).
  */
-export interface TerminalTags {
-  readonly kind: "agent" | "shell";
-  readonly agentId?: AgentSessionId;
-  readonly linkedAgentId?: AgentSessionId;
-}
+export type TerminalTags =
+  | { readonly kind: "agent"; readonly agentId: AgentSessionId }
+  | { readonly kind: "shell"; readonly linkedAgentId?: AgentSessionId };
 
 export interface TerminalSpec {
   readonly terminalId: TerminalId;

@@ -11,6 +11,7 @@ describe("filterEnv", () => {
     const { env } = filterEnv({
       CLAUDECODE: "1",
       CLAUDE_CODE_SESSION_ID: "s",
+      CLAUDE_CODE_MESSAGING_SOCKET: "/s",
       TMUX: "/t",
       TERM_PROGRAM_VERSION: "3",
       FORCE_COLOR: "1",
@@ -20,13 +21,19 @@ describe("filterEnv", () => {
     expect(env).toEqual({});
   });
 
-  it("keeps CODEX_HOME while stripping other Codex variables", () => {
-    expect(filterEnv({ CODEX_HOME: "/h", CODEX_THREAD_ID: "t" }).env).toEqual({ CODEX_HOME: "/h" });
+  it("keeps the user's harness configuration while stripping harness session variables", () => {
+    const { env } = filterEnv({
+      CODEX_HOME: "/h",
+      CODEX_THREAD_ID: "t",
+      CLAUDE_CODE_USE_BEDROCK: "1",
+      CLAUDE_CODE_SESSION_ID: "s",
+    });
+    expect(env).toEqual({ CODEX_HOME: "/h", CLAUDE_CODE_USE_BEDROCK: "1" });
   });
 
   it("counts what each pattern removed", () => {
-    const { removed } = filterEnv({ CLAUDE_CODE_A: "1", CLAUDE_CODE_B: "1", TMUX: "/t" });
-    expect(removed).toEqual({ "CLAUDE_CODE_*": 2, TMUX: 1 });
+    const { removed } = filterEnv({ ITERM_PROFILE: "1", ITERM_SESSION_ID: "1", TMUX: "/t" });
+    expect(removed).toEqual({ "ITERM_*": 2, TMUX: 1 });
   });
 
   it("applies the user's extra denials and passthroughs", () => {

@@ -18,16 +18,45 @@ import { isId } from "@bazhen/core";
 const run = promisify(execFile);
 const TMUX_TIMEOUT_MS = 5_000;
 
-/** Bazhen's tmux user options, in the order `list-panes` reports them. */
-const TAGS = [
-  ["terminalId", "@bazhen_terminal_id"],
-  ["kind", "@bazhen_kind"],
-  ["agentId", "@bazhen_agent_id"],
-  ["linkedAgentId", "@bazhen_linked_agent_id"],
-] as const;
+/** Every pane fact Bazhen reads from tmux, by name: its own @bazhen_* options, then tmux's. */
+const COLUMN = {
+  terminalId: "@bazhen_terminal_id",
+  kind: "@bazhen_kind",
+  agentId: "@bazhen_agent_id",
+  linkedAgentId: "@bazhen_linked_agent_id",
+  session: "session_name",
+  serverPid: "pid",
+  serverStart: "start_time",
+  sessionId: "session_id",
+  paneId: "pane_id",
+  dead: "pane_dead",
+  status: "pane_dead_status",
+} as const;
+type Column = keyof typeof COLUMN;
+type Row = (column: Column) => string;
 
-/** Where a pane is, read in the same `list-panes` or `display-message` call as its tags. */
-const LOCATION = ["session_name", "pid", "start_time", "session_id", "pane_id"] as const;
+/** A tmux format for `keys`, and a parser that reads a printed line back by column name. */
+function columns(keys: readonly Column[]) {
+  return {
+    format: keys.map((k) => `#{${COLUMN[k]}}`).join("\t"),
+    parse: (line: string): Row => {
+      const values = line.split("\t");
+      return (k) => values[keys.indexOf(k)] ?? "";
+    },
+  };
+}
+
+const LOCATION_KEYS = ["session", "serverPid", "serverStart", "sessionId", "paneId"] as const;
+const LOCATION = columns(LOCATION_KEYS);
+const PANE = columns([
+  "terminalId",
+  "kind",
+  "agentId",
+  "linkedAgentId",
+  ...LOCATION_KEYS,
+  "dead",
+  "status",
+]);
 
 /**
  * The private server's configuration. With tmux's defaults, Ctrl-B would be swallowed as a prefix
@@ -143,50 +172,39 @@ export class TmuxRuntime implements RuntimeAdapter {
     );
     const location = await this.tmux(
       ...sequence([
-        ...tagCommands(session, { terminalId: spec.terminalId, ...spec.tags }),
+        ...tagCommands(session, spec.terminalId, spec.tags),
         ["set-option", "-w", "-t", windowOf(session), "window-size", "manual"],
         resizeArgs(session, spec.size),
-        ["display-message", "-p", "-t", windowOf(session), format(LOCATION)],
+        ["display-message", "-p", "-t", windowOf(session), LOCATION.format],
       ]),
     );
     return {
       terminalId: spec.terminalId,
       runtime: this.kind,
-      locator: this.locator(location.split("\t")),
+      locator: this.locator(LOCATION.parse(location)),
     };
   }
 
-  private locator([session = "", pid = "", start = "", sessionId = "", paneId = ""]: string[]) {
+  private locator(row: Row): Record<string, string> {
     return {
       socket: this.opts.socket,
-      session,
-      serverPid: pid,
-      serverStart: start,
-      sessionId,
-      paneId,
+      ...Object.fromEntries(LOCATION_KEYS.map((k) => [k, row(k)])),
     };
   }
 
   async inventory(): Promise<RuntimeInventoryEntry[]> {
-    const fields = [
-      ...TAGS.map(([, option]) => option),
-      ...LOCATION,
-      "pane_dead",
-      "pane_dead_status",
-    ];
-    const out = await this.tmux("list-panes", "-a", "-F", format(fields));
+    const out = await this.tmux("list-panes", "-a", "-F", PANE.format);
     return out.split("\n").flatMap((line) => {
-      const values = line.split("\t");
-      const tagged = decodeTags(values.slice(0, TAGS.length));
+      const row = PANE.parse(line);
+      const tagged = decodeTags(row);
       if (tagged === null) return [];
-      const [dead, status] = values.slice(TAGS.length + LOCATION.length);
-      const { terminalId, ...tags } = tagged;
+      const dead = row("dead") === "1";
       return [
         {
-          ref: { terminalId, runtime: this.kind, locator: this.locator(values.slice(TAGS.length)) },
-          tags,
-          dead: dead === "1",
-          exitStatus: dead === "1" && status !== "" ? Number(status) : null,
+          ref: { terminalId: tagged.terminalId, runtime: this.kind, locator: this.locator(row) },
+          tags: tagged.tags,
+          dead,
+          exitStatus: dead && row("status") !== "" ? Number(row("status")) : null,
         },
       ];
     });
@@ -214,9 +232,10 @@ export class TmuxRuntime implements RuntimeAdapter {
         else closeHandlers.push(cb);
       },
       write: (bytes) => proc.write(bytes),
+      // The window first: once its session is gone, the failure is tmux's to report.
       resize: async (next) => {
-        proc.resize(next);
         await resizeWindow(next);
+        proc.resize(next);
       },
       close: () => proc.kill(),
     };
@@ -227,23 +246,29 @@ export class TmuxRuntime implements RuntimeAdapter {
   }
 }
 
-type Tagged = { readonly terminalId: TerminalId } & TerminalTags;
-
-function tagCommands(session: string, tagged: Tagged): string[][] {
-  return TAGS.flatMap(([key, option]) => {
-    const value = tagged[key];
-    return value === undefined ? [] : [["set-option", "-t", session, option, value]];
-  });
+function tagCommands(session: string, terminalId: TerminalId, tags: TerminalTags): string[][] {
+  const options: [string, string][] = [
+    [COLUMN.terminalId, terminalId],
+    [COLUMN.kind, tags.kind],
+  ];
+  if (tags.kind === "agent") options.push([COLUMN.agentId, tags.agentId]);
+  else if (tags.linkedAgentId) options.push([COLUMN.linkedAgentId, tags.linkedAgentId]);
+  return options.map(([option, value]) => ["set-option", "-t", session, option, value]);
 }
 
-/** The tags `tagCommands` wrote, or null for a pane Bazhen did not create. */
-function decodeTags([terminalId = "", kind, agentId = "", linked = ""]: string[]): Tagged | null {
-  if (!isId("term", terminalId) || (kind !== "agent" && kind !== "shell")) return null;
+/** The tags `tagCommands` wrote, or null for a pane whose tags Bazhen did not write. */
+function decodeTags(row: Row): { terminalId: TerminalId; tags: TerminalTags } | null {
+  const terminalId = row("terminalId");
+  const agentId = row("agentId");
+  const linked = row("linkedAgentId");
+  if (!isId("term", terminalId)) return null;
+  if (row("kind") === "agent") {
+    return isId("agent", agentId) ? { terminalId, tags: { kind: "agent", agentId } } : null;
+  }
+  if (row("kind") !== "shell") return null;
   return {
     terminalId,
-    kind,
-    ...(isId("agent", agentId) ? { agentId } : {}),
-    ...(isId("agent", linked) ? { linkedAgentId: linked } : {}),
+    tags: isId("agent", linked) ? { kind: "shell", linkedAgentId: linked } : { kind: "shell" },
   };
 }
 
@@ -258,8 +283,6 @@ const resizeArgs = (session: string, size: Size) => [
   "-y",
   String(size.rows),
 ];
-
-const format = (fields: readonly string[]) => fields.map((f) => `#{${f}}`).join("\t");
 
 /** Several tmux commands as one invocation: a lone `;` argument separates them. */
 function sequence(commands: string[][]): string[] {

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { homedir, tmpdir, userInfo } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 
 export interface BazhenPaths {
   readonly config: string;
@@ -37,7 +37,12 @@ const absolute = (value: string | undefined) => (value?.startsWith("/") ? value 
  * flag, then the environment, then the config file, then the default.
  */
 export function resolvePaths(i: PathInputs): BazhenPaths {
-  const root = i.flags?.home ?? i.env.BAZHEN_HOME;
+  const home = i.flags?.home ?? i.env.BAZHEN_HOME;
+  if (home !== undefined && !isAbsolute(home)) {
+    throw new RangeError(`BAZHEN_HOME must be an absolute path, not ${home}`);
+  }
+  // Normalised, so `/a` and `/a/` are one instance with one tmux server.
+  const root = home === undefined ? undefined : resolve(home);
   const xdg = (name: string, fallback: string) =>
     join(absolute(i.env[name]) ?? join(i.home, fallback), "bazhen");
   const base = root
@@ -74,13 +79,14 @@ function defaultRun(i: PathInputs): string {
   return runtime ? join(runtime, "bazhen") : `/tmp/bazhen-${i.uid}`;
 }
 
-export function currentPaths(flags?: PathInputs["flags"]): BazhenPaths {
-  return resolvePaths({
+/** This process's inputs to `resolvePaths`. */
+export function currentInputs(flags?: PathInputs["flags"]): PathInputs {
+  return {
     platform: process.platform,
     env: process.env,
     home: homedir(),
     tmp: tmpdir(),
     uid: userInfo().uid,
     ...(flags ? { flags } : {}),
-  });
+  };
 }
