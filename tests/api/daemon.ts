@@ -370,6 +370,23 @@ export class Daemon {
     });
   }
 
+  /** PTY handles the daemon process holds: /dev/ptmx entries on macOS, ptmx links on Linux. */
+  ptyHandles(): number {
+    const pid = this.process?.pid;
+    if (pid === undefined) throw new Error("the daemon is not running");
+    const pattern = process.platform === "linux" ? "ptmx" : "/dev/ptmx";
+    const out = execFileSync("sh", [
+      "-c",
+      `lsof -p ${pid} 2>/dev/null | grep -c ${pattern} || true`,
+    ]);
+    return Number(out.toString().trim());
+  }
+
+  /** Detaches every tmux client from the agent's terminal, as if the client's tmux link broke. */
+  detachClients(agentId: string): void {
+    this.tmux("detach-client", "-s", this.requireSession(agentId));
+  }
+
   /** Stops the daemon, its tmux server and every file under its home. */
   async stop(): Promise<void> {
     await this.exit("SIGTERM");
@@ -490,6 +507,23 @@ export class View {
   /** The text a browser would show from everything received, whatever escapes drew it. */
   async text(): Promise<string> {
     return (await replay(this.received(), SIZE)).lines.join("\n");
+  }
+
+  /** Stops reading from the socket, as a stalled browser would; the daemon's sends back up. */
+  stall(): void {
+    this.ws.pause();
+  }
+
+  resume(): void {
+    this.ws.resume();
+  }
+
+  /** Resolves when the daemon has closed this view's socket. */
+  closed(): Promise<void> {
+    return new Promise((resolve) => {
+      if (this.ws.readyState === this.ws.CLOSED) resolve();
+      else this.ws.once("close", () => resolve());
+    });
   }
 
   close(): void {

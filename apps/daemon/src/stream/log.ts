@@ -26,6 +26,10 @@ export function storeLog(store: Store): AttachmentLog {
         payload: { attachmentId, epoch },
       }),
     epoch: (terminalId) => store.leaseEpoch(terminalId),
+    closing: (terminalId) => {
+      const state = store.terminalState(terminalId);
+      return state === "closing" || state === "closed";
+    },
   };
 }
 

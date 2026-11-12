@@ -296,9 +296,12 @@ export class TmuxRuntime implements RuntimeAdapter {
         await resizeWindow(next);
         proc.resize(next);
       },
+      alternateScreen: async () =>
+        (await this.tmux("display-message", "-p", "-t", windowOf(session), "#{alternate_on}")) ===
+        "1",
       close: () => proc.kill(),
     };
-    return { stream, history };
+    return { stream, history, alternate: alternate === 1 };
   }
 
   async close(ref: RuntimeRef): Promise<void> {

@@ -56,6 +56,7 @@ function serve(deps: StreamDeps, ws: WebSocket, terminalId: string): void {
         mode: f.mode,
         send: (out: Uint8Array) => ws.send(out, { binary: true }),
         notify,
+        unsent: () => ws.bufferedAmount,
         close: () => ws.close(),
       };
       deps.hub.join(ref, viewer, { cols: f.cols, rows: f.rows }).then(

@@ -144,6 +144,17 @@ describe("tmux runtime on a private server", () => {
     stream.close();
   });
 
+  it("tells whether the program is drawing on its alternate screen", async () => {
+    const ref = await runtime.create(
+      spec(["sh", "-c", "printf main; sleep 0.5; printf '\\033[?1049halt'; sleep 30"]),
+    );
+    const { stream } = await runtime.attach(ref, size, 0);
+    const before = await stream.alternateScreen();
+    await expect.poll(() => screen(ref.locator.session), { timeout: 3000 }).toContain("alt");
+    expect([before, await stream.alternateScreen()]).toEqual([false, true]);
+    stream.close();
+  });
+
   it("keeps blank lines at the end of the history", async () => {
     const ref = await runtime.create(
       spec([
@@ -165,8 +176,8 @@ describe("tmux runtime on a private server", () => {
     await expect
       .poll(() => screen(ref.locator.session), { timeout: 3000 })
       .toContain("on the alternate screen");
-    const { stream, history } = await runtime.attach(ref, size, 50);
-    expect(history).toBe("");
+    const { stream, history, alternate } = await runtime.attach(ref, size, 50);
+    expect([history, alternate]).toEqual(["", true]);
     stream.close();
   });
 
@@ -196,11 +207,13 @@ describe("tmux runtime on a private server", () => {
       ended: () => {},
       granted: () => {},
       epoch: () => 0,
+      closing: () => false,
     });
     const viewer = {
       mode: "interactive" as const,
       send: () => {},
       notify: () => {},
+      unsent: () => 0,
       close: () => {},
     };
     const baseline = ptyHandleCount();

@@ -1,3 +1,4 @@
+import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { newId } from "@bazhen/core";
 import { Store } from "../store/store.ts";
@@ -26,5 +27,17 @@ describe("attachment log", () => {
     endOpenAttachments(store);
     expect([store.openAttachments(), store.events(0).at(-1)?.entityId]).toEqual([[], a]);
     store.close();
+  });
+
+  it("reports a terminal as closing only once it is being or has been closed", async () => {
+    const { path, store, terminalId } = await withAgent();
+    const open = storeLog(store).closing(terminalId);
+    store.close();
+    const raw = new DatabaseSync(path);
+    raw.prepare("UPDATE terminals SET state = 'closing' WHERE id = ?").run(terminalId);
+    raw.close();
+    const again = Store.open(path);
+    expect([open, storeLog(again).closing(terminalId)]).toEqual([false, true]);
+    again.close();
   });
 });

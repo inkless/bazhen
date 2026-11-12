@@ -87,11 +87,49 @@
       "properties": {
         "type": {
           "type": "string",
+          "const": "screen"
+        },
+        "alternate": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type",
+        "alternate"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
           "const": "exit"
         }
       },
       "required": [
         "type"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "ended"
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "evicted_slow",
+            "disconnected"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "reason"
       ],
       "additionalProperties": false
     },
