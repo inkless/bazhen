@@ -102,7 +102,7 @@ export type EventPayload<T extends EventType> = z.infer<(typeof EVENTS)[T]["payl
 
 const isEventType = (type: string): type is EventType => Object.hasOwn(EVENTS, type);
 
-const streamed = (type: EventType) => {
+const eventBranch = (type: EventType) => {
   const entry: { readonly payload: z.ZodType; readonly streamed?: z.ZodType } = EVENTS[type];
   return z.object({
     id: z.number().int().positive(),
@@ -121,7 +121,7 @@ const streamed = (type: EventType) => {
  * One event as the stream sends it: a branch per registered type, each checking its own
  * payload. Clients skip types they don't know, so registering one breaks no older client.
  */
-export const Event = z.union(Object.keys(EVENTS).filter(isEventType).map(streamed));
+export const Event = z.union(Object.keys(EVENTS).filter(isEventType).map(eventBranch));
 export type Event = z.infer<typeof Event>;
 
 /**

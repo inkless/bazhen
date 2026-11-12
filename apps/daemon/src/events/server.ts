@@ -6,6 +6,8 @@ import { follow } from "./feed.ts";
 
 /** The client sends nothing on this stream. */
 const MAX_FRAME_BYTES = 1024;
+/** RFC 6455's close code for a server that can't go on. */
+const INTERNAL_ERROR = 1011;
 
 /** The event stream's WebSocket endpoint, `/v1/events` (foundation-design §5.2). */
 export function eventRoute(store: Store): UpgradeRoute {
@@ -26,6 +28,10 @@ export function eventRoute(store: Store): UpgradeRoute {
               else ws.terminate();
             }),
           close: () => ws.close(),
+          fail: (err) => {
+            console.error("an event stream failed", err);
+            ws.close(INTERNAL_ERROR, "internal error");
+          },
         });
         ws.on("close", stop);
       });

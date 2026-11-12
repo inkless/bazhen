@@ -118,8 +118,11 @@ server.on(
 );
 
 const RETIRE_EVERY_MS = 60 * 60 * 1000;
+const shuttingDown = new AbortController();
 const retireOld = () =>
-  retire(store, new Date()).catch((err: unknown) => console.error("event retention failed", err));
+  retire(store, new Date(), shuttingDown.signal).catch((err: unknown) =>
+    console.error("event retention failed", err),
+  );
 void retireOld();
 const retention = setInterval(() => void retireOld(), RETIRE_EVERY_MS);
 
@@ -138,6 +141,7 @@ rmSync(paths.socket, { force: true });
 hooks.listen(paths.socket, () => chmodSync(paths.socket, 0o600));
 
 function shutdown() {
+  shuttingDown.abort();
   clearInterval(retention);
   server.close();
   hooks.close();

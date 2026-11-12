@@ -69,13 +69,22 @@ export function watchState(
     });
     const ws = new WebSocket(`${location.origin.replace(/^http/, "ws")}/v1/events?${query}`);
     socket = ws;
+    let state: "connecting" | "open" | "reset" = "connecting";
+    ws.addEventListener("open", () => (state = "open"));
     ws.addEventListener("message", (message) => {
       const frame = EventFrame.safeParse(JSON.parse(String(message.data)));
-      // A type this client doesn't know is still a change; only a reset counts as a failure.
-      if (!frame.success || frame.data.type === "event") delay = 0;
-      read().catch(failed);
+      // The close that follows a reset reads the state again. Anything else is a change, an event
+      // type this client doesn't know included.
+      if (frame.success && frame.data.type === "reset") state = "reset";
+      else read().catch(failed);
     });
-    ws.addEventListener("close", retry);
+    ws.addEventListener("close", () => {
+      // A stream that was healthy, as before a daemon restart, reconnects at once. A browser
+      // isn't told why an upgrade was refused, so a refusal is shown rather than retried unseen.
+      if (state === "open") delay = 0;
+      if (state === "connecting") failed(new Error("the daemon refused the event stream"));
+      retry();
+    });
   };
   const start = () =>
     read().then(open, (err: unknown) => {

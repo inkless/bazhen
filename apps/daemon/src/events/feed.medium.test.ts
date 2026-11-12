@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EventFrame } from "@bazhen/protocol";
+import { DatabaseSync } from "node:sqlite";
 import { age, register as registered, settled, tempDb } from "../testing/fixtures.ts";
 import { Store } from "../store/store.ts";
 import { follow } from "./feed.ts";
@@ -11,6 +12,7 @@ function client(acknowledge: "at once" | "by hand" = "at once") {
   const frames: EventFrame[] = [];
   const pending: (() => void)[] = [];
   let closed = false;
+  const failures: unknown[] = [];
   const sink = {
     send: (frame: EventFrame, written?: () => void) => {
       frames.push(frame);
@@ -19,12 +21,14 @@ function client(acknowledge: "at once" | "by hand" = "at once") {
       else pending.push(written);
     },
     close: () => (closed = true),
+    fail: (err: unknown) => failures.push(err),
   };
   return {
     sink,
     ids: () => frames.flatMap((f) => (f.type === "event" ? [f.event.id] : [])),
     frames,
     closed: () => closed,
+    failures,
     /** Writes the feed is waiting to hear have finished. */
     awaited: () => pending.length,
     /** The client finishes receiving the page in flight. */
@@ -92,6 +96,25 @@ describe("event feed", () => {
     register(store);
     await settled();
     expect(c.ids()).toEqual([seen]);
+    store.close();
+  });
+
+  it("fails only the subscriber whose page holds an event that won't parse, sending none of it", async () => {
+    const path = tempDb();
+    const store = Store.open(path);
+    register(store);
+    const bad = register(store);
+    const raw = new DatabaseSync(path);
+    raw.prepare("UPDATE events SET payload = ? WHERE id = ?").run('{"kind":"mars"}', bad);
+    raw.close();
+    const broken = client();
+    follow(store, { epoch: store.epoch(), after: 0 }, broken.sink);
+    const caughtUp = client();
+    follow(store, { epoch: store.epoch(), after: bad }, caughtUp.sink);
+    const later = register(store);
+    await settled();
+    expect([broken.frames, broken.failures.length]).toEqual([[], 1]);
+    expect(caughtUp.ids()).toEqual([later]);
     store.close();
   });
 });

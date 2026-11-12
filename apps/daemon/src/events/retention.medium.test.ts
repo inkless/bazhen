@@ -18,4 +18,14 @@ describe("event retention", () => {
     expect([early, store.events(0, 5000).length]).toEqual([kept + 1200, kept + 1]);
     store.close();
   });
+
+  it("retires nothing once it has been told to stop", async () => {
+    const { path, store, terminalId } = await withAgent();
+    visit(store, terminalId);
+    age(path, AGED);
+    const before = store.events(0).length;
+    await retire(store, after(RETENTION_MS + 1), AbortSignal.abort());
+    expect(store.events(0).length).toBe(before);
+    store.close();
+  });
 });

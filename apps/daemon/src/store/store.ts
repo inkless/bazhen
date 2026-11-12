@@ -407,6 +407,7 @@ export class Store {
    * Retires up to `limit` events older than `cutoff`, walking up from where retention last
    * stopped, and answers whether any remain. Events a projection points at stay, and so does the
    * newest event: ids are max(id) + 1, so deleting it would hand out ids retention has passed.
+   * Events kept earlier are looked at again each time, and go once nothing points at them.
    */
   pruneBatch(cutoff: Date, limit = 1000): boolean {
     return this.transaction(() => {
@@ -420,11 +421,10 @@ export class Store {
       const young = rows.findIndex((r) => String(r.ts) >= cutoff.toISOString());
       const expired = young === -1 ? rows : rows.slice(0, young);
       const through = Number(expired.at(-1)?.id ?? from);
-      if (through === from) return false;
       this.prepare(
-        `DELETE FROM events WHERE id > ? AND id <= ?
+        `DELETE FROM events WHERE id <= ?
            AND id <> (SELECT max(id) FROM events) AND id NOT IN (${this.referenced})`,
-      ).run(from, through);
+      ).run(through);
       this.prepare("UPDATE event_log SET pruned_through = ?").run(through);
       return young === -1 && rows.length === limit;
     });

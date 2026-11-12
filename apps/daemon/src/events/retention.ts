@@ -6,9 +6,17 @@ export const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 /**
  * Retires every event older than the retention period, a batch at a time, yielding between
- * batches so hooks waiting on the daemon are never held behind a long first prune.
+ * batches so hooks waiting on the daemon are never held behind a long first prune. Stops between
+ * batches once `signal` aborts, so a shutdown can close the store under it.
  */
-export async function retire(store: Pick<Store, "pruneBatch">, now: Date): Promise<void> {
+export async function retire(
+  store: Pick<Store, "pruneBatch">,
+  now: Date,
+  signal?: AbortSignal,
+): Promise<void> {
   const cutoff = new Date(now.getTime() - RETENTION_MS);
-  while (store.pruneBatch(cutoff)) await setImmediate();
+  for (;;) {
+    if (signal?.aborted === true || !store.pruneBatch(cutoff)) return;
+    await setImmediate();
+  }
 }

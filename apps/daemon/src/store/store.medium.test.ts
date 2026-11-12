@@ -298,4 +298,28 @@ describe("Store event log", () => {
     ]).toEqual(["foreign", "foreign", null, null]);
     store.close();
   });
+
+  it("retires an old event once the projection that kept it no longer points at it", async () => {
+    const { path, store, terminalId } = await withAgent();
+    const attachmentId = newId("att");
+    const started = store.append({
+      type: "attachment.started",
+      entityId: attachmentId,
+      actor: "system",
+      payload: { terminalId, mode: "observe" },
+    });
+    age(path);
+    store.pruneBatch(CUTOFF);
+    const keptWhileOpen = store.events(started - 1, 1).map((e) => e.id);
+    store.append({
+      type: "attachment.ended",
+      entityId: attachmentId,
+      actor: "system",
+      payload: { reason: "client_closed" },
+    });
+    store.pruneBatch(CUTOFF);
+    const keptAfterEnd = store.events(0).some((e) => e.id === started);
+    expect([keptWhileOpen, keptAfterEnd]).toEqual([[started], false]);
+    store.close();
+  });
 });
