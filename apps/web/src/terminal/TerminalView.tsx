@@ -1,0 +1,275 @@
+import { useEffect, useRef, useState } from "react";
+import { FitAddon } from "@xterm/addon-fit";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
+import { WebglAddon } from "@xterm/addon-webgl";
+import { Terminal as Xterm } from "@xterm/xterm";
+import "@xterm/xterm/css/xterm.css";
+import {
+  parseJson,
+  PROTOCOL_VERSION,
+  StreamServerFrame,
+  withoutEventReports,
+  type StreamClientFrame,
+} from "@bazhen/protocol";
+import {
+  DEFAULT_KEY_MAP,
+  KEY_MAP_STORAGE_KEY,
+  matchKey,
+  parseKeyMap,
+  type KeyMap,
+} from "./keymap.ts";
+import { Backoff } from "./reconnect.ts";
+import { wheelAction, type TerminalKind } from "./scroll.ts";
+import { attachScrollInput } from "./scroll-input.ts";
+
+type Status =
+  | { kind: "connecting" }
+  | { kind: "viewing" }
+  | { kind: "driving" }
+  | { kind: "reconnecting" }
+  | { kind: "ended"; message: string };
+
+interface Report {
+  readonly status: Status;
+  /** Something that went wrong without ending the view. */
+  readonly notice: string | null;
+}
+
+/** One terminal's real screen, interactive, as foundation-design §5.9 sets it out. */
+export function TerminalView({ terminalId, kind }: { terminalId: string; kind: TerminalKind }) {
+  const host = useRef<HTMLDivElement>(null);
+  const [report, setReport] = useState<Report>({ status: { kind: "connecting" }, notice: null });
+
+  useEffect(() => {
+    const element = host.current;
+    return element === null ? undefined : connect(element, terminalId, kind, setReport);
+  }, [terminalId, kind]);
+
+  const { status, notice } = report;
+  return (
+    <section aria-label="terminal">
+      {status.kind === "ended" ? (
+        <p role="alert">{status.message}</p>
+      ) : (
+        <p>{STATUS_TEXT[status.kind]}</p>
+      )}
+      {notice !== null && <p role="status">{notice}</p>}
+      <div ref={host} style={{ height: "70vh" }} />
+    </section>
+  );
+}
+
+const STATUS_TEXT = {
+  connecting: "Connecting…",
+  viewing: "Viewing — click to type",
+  driving: "Driving",
+  reconnecting: "Reconnecting…",
+} as const;
+
+/** The device's own key map over the defaults; a stored map that doesn't parse is not applied. */
+function loadKeyMap(): { map: KeyMap; problem: string | null } {
+  const stored = localStorage.getItem(KEY_MAP_STORAGE_KEY);
+  if (stored === null) return { map: DEFAULT_KEY_MAP, problem: null };
+  const parsed = parseKeyMap(parseJson(stored));
+  return parsed.ok
+    ? { map: parsed.map, problem: null }
+    : { map: DEFAULT_KEY_MAP, problem: `Your key map was not applied: ${parsed.error}.` };
+}
+
+/**
+ * Renders the terminal's stream into `element` and sends what the user types while this view
+ * drives. Returns the teardown.
+ */
+function connect(
+  element: HTMLElement,
+  terminalId: string,
+  kind: TerminalKind,
+  onReport: (report: Report) => void,
+) {
+  const term = new Xterm({ allowProposedApi: true, cursorBlink: true, macOptionIsMeta: true });
+  const fit = new FitAddon();
+  term.loadAddon(fit);
+  term.loadAddon(new Unicode11Addon());
+  term.unicode.activeVersion = "11";
+  term.open(element);
+  loadRenderer(term);
+  fit.fit();
+  swallowReplies(term);
+  // For browser tests: the screen as text and the top line in view, whichever renderer draws it.
+  Reflect.set(globalThis, "bazhenScreen", () => screenText(term));
+  Reflect.set(globalThis, "bazhenViewport", () => term.buffer.active.viewportY);
+
+  const keys = loadKeyMap();
+  let status: Status = { kind: "connecting" };
+  let notice = keys.problem;
+  const report = (next: Partial<Report>) => {
+    status = next.status ?? status;
+    notice = next.notice === undefined ? notice : next.notice;
+    onReport({ status, notice });
+  };
+  report({});
+
+  const encoder = new TextEncoder();
+  const backoff = new Backoff();
+  let ws: WebSocket | undefined;
+  let attached = false;
+  let driving = false;
+  let wantsToDrive = false;
+  /** Whether the program is on its alternate screen, which only the daemon can see. */
+  let alternate = false;
+  let over = false;
+  let retry: ReturnType<typeof setTimeout> | undefined;
+
+  const send = (frame: StreamClientFrame) => {
+    if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(frame));
+  };
+  const engage = () => {
+    if (attached) send({ type: "engage" });
+    else wantsToDrive = true;
+  };
+  /**
+   * Input goes only from the driver. Anything else is dropped; a keystroke also asks for the
+   * lease, a focus or mouse report never does (§4.3).
+   */
+  const input = (bytes: Uint8Array<ArrayBuffer>, keystroke = true) => {
+    if (driving && ws?.readyState === WebSocket.OPEN) ws.send(bytes);
+    else if (keystroke) engage();
+  };
+  const end = (message: string) => {
+    over = true;
+    report({ status: { kind: "ended", message } });
+  };
+  const reattach = () => {
+    if (over) return;
+    attached = driving = false;
+    report({ status: { kind: "reconnecting" } });
+    clearTimeout(retry);
+    retry = setTimeout(open, backoff.next());
+  };
+
+  const open = () => {
+    const socket = new WebSocket(
+      `${location.origin.replace("http", "ws")}/v1/terminals/${terminalId}/stream`,
+    );
+    ws = socket;
+    socket.binaryType = "arraybuffer";
+    socket.addEventListener("open", () => {
+      const { cols, rows } = term;
+      send({ type: "hello", protocolVersion: PROTOCOL_VERSION, mode: "interactive", cols, rows });
+    });
+    socket.addEventListener("message", (e: MessageEvent<ArrayBuffer | string>) => {
+      if (typeof e.data !== "string") {
+        term.write(new Uint8Array(e.data));
+        return;
+      }
+      const frame = StreamServerFrame.safeParse(parseJson(e.data));
+      if (!frame.success) return end("The daemon sent a frame this page can't read.");
+      const f = frame.data;
+      if (f.type === "snapshot_start") term.reset();
+      else if (f.type === "snapshot_end") backoff.reset();
+      else if (f.type === "screen") alternate = f.alternate;
+      else if (f.type === "attached") {
+        attached = true;
+        // A view focused before its socket opened saw no focus event to claim the lease with.
+        if (wantsToDrive || element.contains(document.activeElement)) engage();
+        wantsToDrive = false;
+      } else if (f.type === "lease") {
+        driving = f.driver;
+        report({ status: { kind: driving ? "driving" : "viewing" } });
+      } else if (f.type === "notice") report({ notice: f.message });
+      else if (f.type === "error") end(`The daemon refused this view: ${f.message}`);
+      else if (f.type === "exit") end("The terminal has closed.");
+      else if (f.type === "ended") reattach();
+    });
+    socket.addEventListener("close", () => {
+      if (ws === socket) reattach();
+    });
+  };
+  open();
+
+  term.attachCustomKeyEventHandler((event) => {
+    const bytes = matchKey(event, keys.map);
+    if (bytes === null) return true;
+    input(encoder.encode(bytes));
+    event.preventDefault();
+    return false;
+  });
+
+  const route = () =>
+    wheelAction({ mouseTracking: term.modes.mouseTrackingMode !== "none", alternate, kind });
+  const detachScroll = attachScrollInput(element, term, route, (bytes) => input(bytes));
+
+  const typed = term.onData((data) =>
+    input(encoder.encode(data), withoutEventReports(data) !== ""),
+  );
+  // Only X10 mouse reports come this way.
+  const binary = term.onBinary((data) => input(latin1(data), false));
+  const resize = term.onResize(({ cols, rows }) => send({ type: "resize", cols, rows }));
+  const observer = new ResizeObserver(() => fit.fit());
+  observer.observe(element);
+  // A click, focus here or the window gaining focus takes the lease (§4.3): switching back to a
+  // device whose page already has focus fires no focus event.
+  element.addEventListener("pointerdown", engage);
+  element.addEventListener("focusin", engage);
+  window.addEventListener("focus", engage);
+  return () => {
+    over = true;
+    clearTimeout(retry);
+    element.removeEventListener("pointerdown", engage);
+    element.removeEventListener("focusin", engage);
+    window.removeEventListener("focus", engage);
+    detachScroll();
+    observer.disconnect();
+    typed.dispose();
+    binary.dispose();
+    resize.dispose();
+    ws?.close();
+    term.dispose();
+    Reflect.deleteProperty(globalThis, "bazhenScreen");
+    Reflect.deleteProperty(globalThis, "bazhenViewport");
+  };
+}
+
+/** WebGL where the browser has it, xterm.js's DOM renderer otherwise. */
+function loadRenderer(term: Xterm): void {
+  try {
+    const webgl = new WebglAddon();
+    webgl.onContextLoss(() => webgl.dispose());
+    term.loadAddon(webgl);
+  } catch {
+    // The DOM renderer is already drawing.
+  }
+}
+
+/**
+ * The daemon answers the terminal queries tmux's client asks (foundation-design §5.4). A browser
+ * answering too would send its reply as input, and from a view that isn't driving it would ask
+ * for the lease. These are the queries xterm.js 6 answers.
+ */
+function swallowReplies(term: Xterm): void {
+  const { parser } = term;
+  parser.registerCsiHandler({ final: "c" }, swallow);
+  parser.registerCsiHandler({ prefix: ">", final: "c" }, swallow);
+  parser.registerCsiHandler({ prefix: ">", final: "q" }, swallow);
+  parser.registerCsiHandler({ final: "n" }, swallow);
+  parser.registerCsiHandler({ prefix: "?", final: "n" }, swallow);
+  parser.registerCsiHandler({ intermediates: "$", final: "p" }, swallow);
+  parser.registerCsiHandler({ prefix: "?", intermediates: "$", final: "p" }, swallow);
+  parser.registerCsiHandler({ final: "t" }, swallow);
+  parser.registerDcsHandler({ intermediates: "$", final: "q" }, swallow);
+  for (const id of [4, 10, 11, 12]) parser.registerOscHandler(id, (data) => data.includes("?"));
+}
+
+const swallow = () => true;
+
+function screenText(term: Xterm): string {
+  const buffer = term.buffer.active;
+  const lines: string[] = [];
+  for (let y = 0; y < buffer.length; y++) {
+    lines.push(buffer.getLine(y)?.translateToString(true) ?? "");
+  }
+  return lines.join("\n");
+}
+
+/** A string of byte values, as xterm.js hands binary input over. */
+const latin1 = (data: string) => Uint8Array.from(data, (c) => c.charCodeAt(0));

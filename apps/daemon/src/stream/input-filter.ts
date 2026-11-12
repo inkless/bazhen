@@ -1,3 +1,5 @@
+import { withoutEventReports } from "@bazhen/protocol";
+
 const ESC = "\\x1b";
 const ST_OR_BEL = `(?:${ESC}\\\\|\\x07)`;
 
@@ -16,20 +18,6 @@ const REPLY = new RegExp(
     `${ESC}\\[\\d+(?:;\\d+)*t`,
     `${ESC}P(?:[01]\\$r|>\\|)[^\\x1b]*${ESC}\\\\`,
     `${ESC}\\](?:4;\\d+|1[0-2]);rgb:[\\da-fA-F/]*${ST_OR_BEL}`,
-  ].join("|"),
-  "g",
-);
-/**
- * Reports a terminal sends on its own, not keystrokes: focus in and out, and mouse reports in the
- * SGR, urxvt and X10 encodings. The driver's program gets them; they never ask for the lease, so a
- * wheel over a view that isn't driving can't take it.
- */
-const EVENT_REPORT = new RegExp(
-  [
-    `${ESC}\\[[IO]`,
-    `${ESC}\\[<\\d+;\\d+;\\d+[Mm]`,
-    `${ESC}\\[\\d+;\\d+;\\d+M`,
-    `${ESC}\\[M[\\s\\S]{3}`,
   ].join("|"),
   "g",
 );
@@ -52,6 +40,6 @@ export function classifyInput(input: Uint8Array): ViewInput {
     .join("");
   return {
     bytes: Buffer.from(kept, "latin1"),
-    keystrokes: kept.replace(EVENT_REPORT, "").length > 0,
+    keystrokes: withoutEventReports(kept).length > 0,
   };
 }
