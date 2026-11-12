@@ -92,6 +92,8 @@ interface View {
   interactive: boolean;
   size: Size | null;
   droppedInput: number;
+  /** Live bytes held while this view's snapshot is being taken; null once it is live. */
+  pending: Buffer[] | null;
 }
 
 interface Term {
@@ -201,7 +203,15 @@ function historyBytes(text: string, rows: number): string {
 
 function fanOut(t: Term, data: Buffer): void {
   t.headless?.write(data);
-  for (const v of t.views) later(() => v.ws.readyState === v.ws.OPEN && v.ws.send(data));
+  for (const v of t.views) {
+    if (v.pending) v.pending.push(data);
+    else later(() => v.ws.readyState === v.ws.OPEN && v.ws.send(data));
+  }
+}
+
+/** Resolves once the headless emulator has parsed everything written to it so far. */
+function drained(t: Term): Promise<void> {
+  return new Promise((res) => t.headless!.write("", res));
 }
 
 async function startClient(t: Term): Promise<void> {
@@ -212,7 +222,7 @@ async function startClient(t: Term): Promise<void> {
   let argv: string[];
   if (t.seed === "capture-then-attach") {
     const hist = await tmux("capture-pane", "-p", "-e", "-J", "-t", target, "-S", `-${HISTORY_LINES}`, "-E", "-1");
-    t.headless!.write(historyBytes(hist, t.size.rows));
+    await new Promise<void>((res) => t.headless!.write(historyBytes(hist, t.size.rows), res));
     argv = [...base, "attach-session", "-t", t.session];
   } else if (t.seed === "atomic") {
     // One command list: the server runs both without processing pane output in between.
@@ -297,7 +307,7 @@ function takeLease(t: Term, v: View): void {
 }
 
 async function attachView(t: Term, ws: WebSocket, interactive: boolean, hello: Size | null): Promise<void> {
-  const v: View = { id: nextViewId++, ws, interactive, size: hello, droppedInput: 0 };
+  const v: View = { id: nextViewId++, ws, interactive, size: hello, droppedInput: 0, pending: [] };
   if (interactive) t.lastInteractive = v;
   if (interactive && !t.driver && hello) t.size = hello;
   const first = !t.client;
@@ -307,13 +317,21 @@ async function attachView(t: Term, ws: WebSocket, interactive: boolean, hello: S
     }
     await startClient(t);
   }
-  // Serialize and subscribe in one event-loop turn: no byte can land between them.
+  // Subscribe now (bytes are held in v.pending), then serialize once the headless emulator has
+  // parsed exactly the bytes written before this point: its writes are asynchronous, so a
+  // synchronous serialize would miss whatever is still queued (notes.md, F12).
+  t.views.add(v);
+  const SYNC_SERIALIZE = process.env["BZ_SPIKE_SYNC_SERIALIZE"] === "1";
+  if (!SYNC_SERIALIZE) await drained(t);
   send(v, { type: "hello", protocol: 0, cols: t.size.cols, rows: t.size.rows, view: v.id, first, replies: REPLIES });
   send(v, { type: "snapshot-start" });
   const snap = t.serializer!.serialize({ scrollback: HISTORY_LINES });
   ws.send(Buffer.from(snap));
   send(v, { type: "snapshot-end" });
-  t.views.add(v);
+  const held = v.pending ?? [];
+  v.pending = null;
+  // In sync mode the held bytes predate the serialize call and are already in the snapshot.
+  if (!SYNC_SERIALIZE) for (const b of held) later(() => ws.readyState === ws.OPEN && ws.send(b));
   broadcastLease(t);
 
   ws.on("message", (data, isBinary) => {
