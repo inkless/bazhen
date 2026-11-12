@@ -100,7 +100,11 @@ describe("what a view shows when it opens", () => {
       'i=0; while [ $i -lt 1500 ]; do i=$((i+1)); echo "n $i"; sleep 0.002; done; echo done; sleep 600',
     ]);
     const first = await opened(terminalId, "interactive");
-    await waitUntil(() => daemon.screen(agentId).includes("n 300"), "the program to be busy");
+    // The history, not the screen: at 2 ms a line, "n 300" is on screen for less than a poll.
+    await waitUntil(
+      () => daemon.capture(agentId, 2000).includes("n 300\n"),
+      "the program to be busy",
+    );
     const late = await opened(terminalId, "observe");
     await waitUntil(() => daemon.screen(agentId).includes("done"), "the program to finish");
     await expect.poll(async () => (await replay(late.received(), size)).screen).toContain("done");
