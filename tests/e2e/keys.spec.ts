@@ -1,7 +1,7 @@
-import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
+import { TmuxServer } from "@bazhen/host-guard";
 import { readKeyLog } from "../support/key-log.ts";
 import { onAlternateScreen, openSecondView, screen, viewportTop } from "./page.ts";
 
@@ -12,10 +12,10 @@ import { onAlternateScreen, openSecondView, screen, viewportTop } from "./page.t
 const probe = fileURLToPath(new URL("../support/key-probe.ts", import.meta.url));
 const work = String(process.env["BZ_E2E_WORK"]);
 
+/** The daemon's private tmux server, by its socket in the run's own home, as teardown finds it. */
 function tmux(...args: string[]): string {
-  return execFileSync("tmux", ["-L", String(process.env["BZ_E2E_SOCKET"]), ...args], {
-    env: { ...process.env, TMUX: "" },
-  }).toString();
+  const home = String(process.env["BZ_E2E_HOME"]);
+  return TmuxServer.at(join(home, "run", "tmux.sock"), { root: home }).runSync(args);
 }
 
 function sessionOf(agentId: string): string {
