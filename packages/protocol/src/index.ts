@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export * from "./states.ts";
+
 /**
  * Major.minor. Within one major version, changes are additive only: add messages and optional
  * fields, never rename, remove or tighten what has shipped. Bump the minor in the same commit as
@@ -24,18 +26,6 @@ export const HealthResponse = z.object({
   }),
 });
 export type HealthResponse = z.infer<typeof HealthResponse>;
-
-export const TerminalState = z.enum([
-  "creating",
-  "running",
-  "exited",
-  "unknown",
-  "lost",
-  "closing",
-  "closed",
-  "failed",
-]);
-export type TerminalState = z.infer<typeof TerminalState>;
 
 const major = (v: string) => v.split(".")[0];
 

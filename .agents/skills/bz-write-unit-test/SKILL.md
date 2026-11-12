@@ -17,7 +17,7 @@ check rejects a pull request whose new test passes without your change.
    not on the allowlist".
 3. **Copy the nearest exemplar:**
    - plain behaviour: `packages/core/src/terminal.test.ts`;
-   - a state table: `packages/core/src/terminal.property.test.ts`, which uses fast-check;
+   - a state table: `packages/core/src/machine.property.test.ts`, which uses fast-check;
    - HTTP: `apps/daemon/src/http/app.test.ts` (`app.request` with `host: "127.0.0.1:7900"`);
    - SQLite: `apps/daemon/src/store/store.medium.test.ts`.
 4. **Run it and watch it fail:** `pnpm test:file <path> -t "<name>"`. It must fail on an

@@ -17,6 +17,7 @@ const COVERED_ELSEWHERE: Record<string, string> = {
   "apps/daemon/src/pty/node-pty.ts": "tests/integration/tmux-runtime.test.ts",
   "apps/daemon/src/main.ts": "tests/e2e/health.spec.ts",
   "apps/daemon/src/store/migrations.ts": "apps/daemon/src/store/store.medium.test.ts",
+  "packages/protocol/src/states.ts": "packages/core/src/machine.property.test.ts",
   "apps/web/src/App.tsx": "tests/e2e/health.spec.ts",
   "apps/web/src/main.tsx": "tests/e2e/health.spec.ts",
 };

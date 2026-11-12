@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { newId, toTerminalId } from "@bazhen/core";
+import { newId } from "@bazhen/core";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
 import { nodePtySpawner } from "@bazhen/daemon/pty";
 import { killServer, ptyHandleCount, sleep, testSocket } from "./helpers.ts";
@@ -16,7 +16,7 @@ const runtime = new TmuxRuntime({
 });
 const size = { cols: 100, rows: 30 };
 const spec = (argv: [string, ...string[]]) => ({
-  terminalId: toTerminalId(newId("term"))!,
+  terminalId: newId("term"),
   argv,
   cwd: process.cwd(),
   env: {},

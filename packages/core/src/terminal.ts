@@ -1,62 +1,54 @@
 import type { TerminalState } from "@bazhen/protocol";
+import { machine } from "./machine.ts";
 
 export type TerminalEvent =
-  | { type: "runtime.confirmed" }
-  | { type: "runtime.rejected" }
-  | { type: "process.exited" }
-  | { type: "runtime.unreachable" }
-  | { type: "runtime.reconfirmed" }
-  | { type: "target.absent" }
-  | { type: "respawned" }
-  | { type: "close.requested" }
-  | { type: "close.completed" };
+  | "runtime.confirmed"
+  | "runtime.rejected"
+  | "process.exited"
+  | "runtime.unreachable"
+  | "runtime.reconfirmed"
+  | "target.absent"
+  | "respawned"
+  | "relinked"
+  | "close.requested"
+  | "close.completed";
 
-const TRANSITIONS: Readonly<
-  Record<TerminalState, Partial<Record<TerminalEvent["type"], TerminalState>>>
-> = {
+// Only positive evidence that the runtime answers and the target is gone makes a terminal lost;
+// an unreadable runtime keeps it unknown indefinitely (foundation-design §4.1).
+export const terminal = machine<TerminalState, TerminalEvent>("terminal", {
   creating: { "runtime.confirmed": "running", "runtime.rejected": "failed" },
   running: {
     "process.exited": "exited",
     "runtime.unreachable": "unknown",
     "target.absent": "lost",
+    relinked: "running",
     "close.requested": "closing",
   },
-  // Only positive evidence that the runtime answers and the target is gone makes a terminal
-  // lost; an unreadable runtime keeps it unknown indefinitely.
-  unknown: { "runtime.reconfirmed": "running", "target.absent": "lost" },
-  exited: { respawned: "running", "close.requested": "closing" },
+  unknown: {
+    "runtime.reconfirmed": "running",
+    "process.exited": "exited",
+    "target.absent": "lost",
+    relinked: "running",
+    "close.requested": "closing",
+  },
+  exited: { respawned: "running", "target.absent": "lost", "close.requested": "closing" },
   lost: { "close.requested": "closing" },
   closing: { "close.completed": "closed" },
   closed: {},
   failed: {},
-};
+});
 
-export class InvalidTransition extends Error {
-  readonly from: TerminalState;
-  readonly event: TerminalEvent["type"];
-
-  constructor(from: TerminalState, event: TerminalEvent["type"]) {
-    super(`terminal cannot handle ${event} while ${from}`);
-    this.from = from;
-    this.event = event;
-  }
+export interface TerminalPosition {
+  readonly state: TerminalState;
+  readonly generation: number;
 }
 
-export function nextState(from: TerminalState, event: TerminalEvent): TerminalState {
-  const to = TRANSITIONS[from][event.type];
-  if (to === undefined) throw new InvalidTransition(from, event.type);
-  return to;
-}
-
-/** A respawn starts a new runtime incarnation; commands aimed at an older one are stale. */
-export function nextGeneration(
-  from: TerminalState,
-  event: TerminalEvent,
-  generation: number,
-): number {
-  return event.type === "respawned" && from === "exited" ? generation + 1 : generation;
-}
-
-export function isFinal(state: TerminalState): boolean {
-  return state === "closed" || state === "failed";
+/**
+ * Applies `event` through the table. A respawn or a re-link starts a new runtime incarnation, so
+ * it takes the next generation, and commands aimed at an older one are stale.
+ */
+export function advanceTerminal(at: TerminalPosition, event: TerminalEvent): TerminalPosition {
+  const state = terminal.next(at.state, event);
+  const incarnation = event === "respawned" || event === "relinked";
+  return { state, generation: incarnation ? at.generation + 1 : at.generation };
 }
