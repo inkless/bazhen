@@ -26,6 +26,9 @@ export interface TerminalSpec {
   readonly generation: number;
 }
 
+/** What a terminal runs: a respawn keeps the terminal, its tags and its size, and replaces this. */
+export type ProcessSpec = Pick<TerminalSpec, "argv" | "cwd" | "env" | "generation">;
+
 /** Locates one runtime incarnation of a terminal. Diagnostic and routing only, never identity. */
 export interface RuntimeRef {
   readonly terminalId: TerminalId;
@@ -119,7 +122,7 @@ export interface RuntimeAdapter {
   /** Ends the terminal. A terminal the runtime positively no longer has counts as closed. */
   close(ref: RuntimeRef): Promise<void>;
   /** Starts a new process in a terminal whose process has exited, and returns the new ref. */
-  respawn(ref: RuntimeRef, spec: TerminalSpec): Promise<RuntimeRef>;
+  respawn(ref: RuntimeRef, spec: ProcessSpec): Promise<RuntimeRef>;
   /** Signals the terminal's process and its process group. */
   signal(ref: RuntimeRef, signal: Signal): Promise<void>;
   /**

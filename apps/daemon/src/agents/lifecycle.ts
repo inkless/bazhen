@@ -1,13 +1,25 @@
 import {
+  advanceTerminal,
   agent,
   NoTerminal,
+  NotResumable,
+  ProcessState,
   StaleIncarnation,
   terminal,
   type EnvironmentAdapter,
   type RuntimeRef,
 } from "@bazhen/core";
-import { AgentCommandResponse, type CloseAgentRequest, type ExitStatus } from "@bazhen/protocol";
-import { UnknownAgent, type Store } from "../store/store.ts";
+import {
+  AgentCommandResponse,
+  type AgentState,
+  type CloseAgentRequest,
+  type EventPayload,
+  type EventType,
+  type ExitStatus,
+  type RespawnAgentRequest,
+  type SignalAgentRequest,
+} from "@bazhen/protocol";
+import { runtimePayload, UnknownAgent, type AgentTerminal, type Store } from "../store/store.ts";
 
 /** A command named a generation the agent's terminal has moved past (foundation-design §10). */
 export class StaleGeneration extends Error {
@@ -43,9 +55,9 @@ export class EnvironmentUnavailable extends Error {
 }
 
 /**
- * Every change to an agent after its launch (foundation-design §4.5): its process ending, and
- * close. Closes of one agent run one at a time; an exit landing during one finds the agent no
- * longer running, and changes nothing.
+ * Every change to an agent after its launch (foundation-design §4.5): its process ending, and the
+ * commands close, respawn and signal. Commands on one agent run one at a time; an exit landing
+ * during one is recorded only if the agent is still running then.
  */
 export class Lifecycle {
   private readonly store: Store;
@@ -85,7 +97,86 @@ export class Lifecycle {
    * A lost agent's terminal is already gone, so it closes without the environment.
    */
   close(agentId: string, req: CloseAgentRequest): Promise<AgentCommandResponse> {
-    const request = { agentId, ...req };
+    return this.command("close", agentId, req, closable, async (found) => {
+      if (found.state === "closed") return () => [];
+      const closing =
+        found.state === "closing"
+          ? this.store.lastEventId(agentId, "agent.closing")
+          : this.record(agentId, "agent.closing", {});
+      if (found.state !== "lost") {
+        await this.environment
+          .close({ runtime: found.runtime, externalRef: null })
+          .catch((cause: unknown) => fromEnvironment(agentId, cause));
+      }
+      return () => [
+        ...(closing === undefined ? [] : [closing]),
+        this.record(agentId, "agent.closed", {}),
+      ];
+    });
+  }
+
+  /**
+   * Starts an exited agent again on its harness session, at the next generation. `starting` is
+   * recorded first, so a daemon that dies meanwhile finds a respawn to settle; a rejected respawn,
+   * an unreachable environment included, returns the agent to exited, its terminal kept and
+   * still closable.
+   */
+  respawn(agentId: string, req: RespawnAgentRequest): Promise<AgentCommandResponse> {
+    return this.command("respawn", agentId, req, respawnable, async (found) => {
+      const launched = this.store.agentLaunch(agentId);
+      if (launched === undefined || found.terminalState === null || found.generation === null)
+        throw new NoTerminal();
+      // Known before anything happens, so it is refused with nothing recorded.
+      const { externalRef, launch } = launched;
+      if (externalRef === null || !this.environment.resumable.includes(launch.harness))
+        throw new NotResumable(found.agentId);
+      const next = advanceTerminal(
+        { state: found.terminalState, generation: found.generation },
+        "respawned",
+      );
+      const requested = this.record(agentId, "agent.respawn_requested", {});
+      const refs = await this.environment
+        .respawn({
+          agentId: found.agentId,
+          request: launch,
+          refs: { runtime: found.runtime, externalRef },
+          generation: next.generation,
+        })
+        .catch((cause: unknown) => {
+          this.record(agentId, "agent.respawn_rejected", { reason: rejection(cause) });
+          return fromEnvironment(agentId, cause);
+        });
+      const runtimeRef = runtimePayload(refs.runtime);
+      return () => [
+        requested,
+        this.record(agentId, "agent.respawned", { externalRef: refs.externalRef, runtimeRef }),
+      ];
+    });
+  }
+
+  /** Signals a running agent's process; an exit it causes is recorded when the runtime sees it. */
+  signal(agentId: string, req: SignalAgentRequest): Promise<AgentCommandResponse> {
+    return this.command("signal", agentId, req, running, async (found) => {
+      await this.environment
+        .signal({ runtime: found.runtime, externalRef: null }, req.signal)
+        .catch((cause: unknown) => fromEnvironment(agentId, cause));
+      return () => [this.record(agentId, "agent.signalled", { signal: req.signal })];
+    });
+  }
+
+  /**
+   * One command on one agent: a repeated key gets the first answer; otherwise the agent must be in
+   * a state the command accepts, at the generation it names. `act` does the work and returns the
+   * last step, which is recorded with the key's answer, so a repeat always gets this answer.
+   */
+  private command(
+    name: string,
+    agentId: string,
+    req: { readonly idempotencyKey: string; readonly generation: number },
+    accepts: (state: AgentState) => boolean,
+    act: (found: AgentTerminal) => Promise<() => number[]>,
+  ): Promise<AgentCommandResponse> {
+    const request = { command: name, agentId, ...req };
     return this.serially(agentId, async () => {
       const prior = this.store.replay(req.idempotencyKey, request, (r) =>
         AgentCommandResponse.parse(r),
@@ -93,39 +184,28 @@ export class Lifecycle {
       if (prior !== undefined) return prior;
       const found = this.store.agentTerminal({ agentId });
       if (found === undefined) throw new UnknownAgent(agentId);
-      if (found.state === "closed") return { agentId, eventIds: [] };
-      if (found.state !== "closing" && !agent.accepts(found.state, "close.requested"))
-        throw new AgentStateConflict(agentId, found.state);
+      if (!accepts(found.state)) throw new AgentStateConflict(agentId, found.state);
       if (found.generation !== req.generation) throw new StaleGeneration(agentId, found.generation);
-
-      const append = (type: "agent.closing" | "agent.closed") =>
-        this.store.append({ type, entityId: agentId, actor: "user", payload: {} });
-      const closing =
-        found.state === "closing"
-          ? this.store.lastEventId(agentId, "agent.closing")
-          : append("agent.closing");
-      if (found.state !== "lost") {
-        await this.environment
-          .close({ runtime: found.runtime, externalRef: null })
-          .catch((cause: unknown) => {
-            if (cause instanceof StaleIncarnation) throw new TerminalReplaced(agentId, cause);
-            if (cause instanceof NoTerminal) throw cause;
-            throw new EnvironmentUnavailable(agentId, cause);
-          });
-      }
-      // The last event and the key's answer go together, so a repeat always gets this answer.
+      const last = await act(found);
       return this.store.transaction(() => {
-        const eventIds = [...(closing === undefined ? [] : [closing]), append("agent.closed")];
-        const response = { agentId, eventIds };
+        const response = { agentId, eventIds: last() };
         this.store.answered(req.idempotencyKey, request, response);
         return response;
       });
     });
   }
 
+  private record<T extends AgentEventType>(
+    agentId: string,
+    type: T,
+    payload: EventPayload<T>,
+  ): number {
+    return this.store.append({ type, entityId: agentId, actor: "user", payload });
+  }
+
   private serially<T>(agentId: string, run: () => Promise<T>): Promise<T> {
     const next = (this.queues.get(agentId) ?? Promise.resolve()).then(run);
-    // The queue only orders closes; each caller gets its own close's failure from `next`.
+    // The queue only orders commands; each caller gets its own command's failure from `next`.
     const settled = next.catch(() => {});
     this.queues.set(agentId, settled);
     void settled.then(() => {
@@ -133,4 +213,26 @@ export class Lifecycle {
     });
     return next;
   }
+}
+
+type AgentEventType = Extract<EventType, `agent.${string}`>;
+
+const closable = (state: AgentState) =>
+  state === "closing" || state === "closed" || agent.accepts(state, "close.requested");
+const respawnable = (state: AgentState) => agent.accepts(state, "respawn.requested");
+const running = (state: AgentState) => state === "running";
+
+/** An environment's failure as the command's: typed where the caller can act on it. */
+function fromEnvironment(agentId: string, cause: unknown): never {
+  if (cause instanceof StaleIncarnation) throw new TerminalReplaced(agentId, cause);
+  if (cause instanceof NoTerminal || cause instanceof NotResumable || cause instanceof ProcessState)
+    throw cause;
+  throw new EnvironmentUnavailable(agentId, cause);
+}
+
+function rejection(cause: unknown): EventPayload<"agent.respawn_rejected">["reason"] {
+  if (cause instanceof NotResumable) return "not_resumable";
+  if (cause instanceof NoTerminal) return "no_terminal";
+  if (cause instanceof StaleIncarnation || cause instanceof ProcessState) return "terminal_changed";
+  return "unavailable";
 }

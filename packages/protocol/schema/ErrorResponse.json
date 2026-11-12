@@ -11,6 +11,7 @@
         "launch_failed",
         "conflict",
         "stale_generation",
+        "not_resumable",
         "unavailable",
         "not_found",
         "origin_not_allowed",

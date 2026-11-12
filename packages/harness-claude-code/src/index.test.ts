@@ -28,6 +28,20 @@ describe("Claude Code harness", () => {
     });
   });
 
+  it("resumes the agent's own session, with the same hooks, minting no new one", async () => {
+    const harness = new ClaudeCodeHarness({
+      newSessionId: () => "fresh",
+      hookCommand: "bazhen-hook",
+    });
+    const resumed = await harness.resumeSpec(request, { kind: "claude-session", id: "s-7" });
+    const launched = await harness.launchSpec();
+    expect([resumed.argv.slice(0, 3), resumed.externalRef]).toEqual([
+      ["claude", "--resume", "s-7"],
+      { kind: "claude-session", id: "s-7" },
+    ]);
+    expect(resumed.argv.slice(3)).toEqual(launched.argv.slice(3));
+  });
+
   it("gives every launch its own session", async () => {
     let n = 0;
     const harness = claude(() => `session-${++n}`);

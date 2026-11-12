@@ -30,6 +30,7 @@ export type AgentEvent =
   | "environment.reconfirmed"
   | "target.absent"
   | "respawn.requested"
+  | "respawn.rejected"
   | "relaunch.requested"
   | "close.requested"
   | "close.completed";
@@ -37,7 +38,13 @@ export type AgentEvent =
 // While its environment is unreachable an agent is unknown, never lost: only a reachable
 // environment that positively lacks the target makes it lost (foundation-design §4.4, §4.5).
 export const agent = machine<AgentState, AgentEvent>("agent session", {
-  starting: { "launch.confirmed": "running", "launch.rejected": "failed" },
+  // A rejected respawn returns to exited, where the terminal still is: it stays closable, and
+  // failed would leave its tmux session with nothing to close it.
+  starting: {
+    "launch.confirmed": "running",
+    "launch.rejected": "failed",
+    "respawn.rejected": "exited",
+  },
   running: {
     "process.exited": "exited",
     "environment.unreachable": "unknown",

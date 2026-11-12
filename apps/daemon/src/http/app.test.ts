@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { newId, UnsupportedHarness } from "@bazhen/core";
+import { newId, NotResumable, UnsupportedHarness } from "@bazhen/core";
 import { FakeRuntime } from "@bazhen/core/testing";
 import { PROTOCOL_VERSION, type LaunchAgentRequest } from "@bazhen/protocol";
 import { EnvironmentUnavailable, StaleGeneration } from "../agents/lifecycle.ts";
@@ -29,6 +29,10 @@ const app = createApp({
     if (req.generation !== 2) throw new StaleGeneration(agentId, 2);
     throw new EnvironmentUnavailable(agentId, new Error("tmux unreachable"));
   },
+  respawn: async () => {
+    throw new NotResumable(newId("agent"));
+  },
+  signal: () => Promise.reject(new Error("not used by these tests")),
   launch: async (req: LaunchAgentRequest) => {
     if (req.harness === "codex") throw new UnsupportedHarness("codex");
     return launched;
@@ -121,5 +125,14 @@ describe("HTTP app", () => {
     const [stale, unavailable] = await Promise.all([close(1), close(2)]);
     expect([stale.status, (await stale.json()).error]).toEqual([409, "stale_generation"]);
     expect([unavailable.status, (await unavailable.json()).error]).toEqual([503, "unavailable"]);
+  });
+
+  it("answers a respawn of an agent with no session to resume as not resumable", async () => {
+    const res = await app.request("/v1/agents/agent_x/respawn", {
+      method: "POST",
+      headers: { host, "content-type": "application/json" },
+      body: JSON.stringify({ idempotencyKey: "r", generation: 0 }),
+    });
+    expect([res.status, (await res.json()).error]).toEqual([409, "not_resumable"]);
   });
 });

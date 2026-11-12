@@ -86,6 +86,21 @@ export const CloseAgentRequest = z.object({
 });
 export type CloseAgentRequest = z.infer<typeof CloseAgentRequest>;
 
+/** Starts an exited agent again on its harness session, at the next generation (§4.5). */
+export const RespawnAgentRequest = z.object({
+  idempotencyKey: IdempotencyKey,
+  generation: z.number().int().nonnegative(),
+});
+export type RespawnAgentRequest = z.infer<typeof RespawnAgentRequest>;
+
+/** Signals a running agent's process, in place of typing a key into it. */
+export const SignalAgentRequest = z.object({
+  idempotencyKey: IdempotencyKey,
+  generation: z.number().int().nonnegative(),
+  signal: Signal,
+});
+export type SignalAgentRequest = z.infer<typeof SignalAgentRequest>;
+
 /** What a command on an agent produced: the events it recorded, none if there was nothing to do. */
 export const AgentCommandResponse = z.object({
   agentId: Id("agent"),
@@ -111,6 +126,7 @@ export const ErrorResponse = z.object({
     "launch_failed",
     "conflict",
     "stale_generation",
+    "not_resumable",
     "unavailable",
     "not_found",
     "origin_not_allowed",

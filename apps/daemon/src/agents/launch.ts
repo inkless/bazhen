@@ -10,7 +10,7 @@ import {
 } from "@bazhen/core";
 import { HarnessId, LaunchAgentResponse, type LaunchAgentRequest } from "@bazhen/protocol";
 import { z } from "zod";
-import { IdempotencyConflict, type Store } from "../store/store.ts";
+import { IdempotencyConflict, runtimePayload, type Store } from "../store/store.ts";
 
 /** The local environment's id, registering it on the first run (foundation-design §3). */
 export function localEnvironmentId(store: Store): EnvironmentId {
@@ -116,10 +116,7 @@ export async function launchAgent(
         type: "agent.running",
         payload: {
           externalRef: refs.externalRef,
-          runtimeRef: refs.runtime && {
-            runtime: refs.runtime.runtime,
-            locator: refs.runtime.locator,
-          },
+          runtimeRef: refs.runtime && runtimePayload(refs.runtime),
         },
       }),
     launched.eventIds,

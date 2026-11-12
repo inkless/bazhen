@@ -2,6 +2,8 @@ import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqli
 import {
   isId,
   newId,
+  type AgentLaunchRequest,
+  type AgentSessionId,
   type AttachmentId,
   type AttentionId,
   type EnvironmentId,
@@ -14,6 +16,7 @@ import {
   AgentState,
   EVENTS,
   ExternalRef,
+  HarnessId,
   StateSnapshot,
   TerminalState,
   type EnvironmentKind,
@@ -69,8 +72,11 @@ export class UnknownAgent extends Error {
   }
 }
 
+/** A runtime incarnation as an event records it: the ref, minus the terminal it is for. */
+export const runtimePayload = ({ runtime, locator }: RuntimeRef) => ({ runtime, locator });
+
 export interface AgentTerminal {
-  readonly agentId: string;
+  readonly agentId: AgentSessionId;
   readonly state: AgentState;
   readonly terminalState: TerminalState | null;
   readonly generation: number | null;
@@ -378,6 +384,25 @@ export class Store {
     this.remember(key, { request: JSON.stringify(request), response });
   }
 
+  /** What an agent was launched with, and the harness session it is on, to start it again. */
+  agentLaunch(
+    agentId: string,
+  ): { launch: AgentLaunchRequest; externalRef: ExternalRef | null } | undefined {
+    const row = this.prepare(
+      "SELECT harness, project, cwd, external_ref FROM agent_sessions WHERE id = ?",
+    ).get(agentId);
+    if (row === undefined) return undefined;
+    const ref = row.external_ref;
+    return {
+      launch: {
+        harness: HarnessId.parse(row.harness),
+        project: String(row.project),
+        cwd: String(row.cwd),
+      },
+      externalRef: typeof ref === "string" ? ExternalRef.parse(JSON.parse(ref)) : null,
+    };
+  }
+
   /**
    * An agent and its terminal, found by either id, for a lifecycle change: the agent's state, the
    * terminal's state and generation, and the runtime incarnation it is in.
@@ -389,9 +414,9 @@ export class Store {
               t.generation, t.runtime, t.locator
        FROM agent_sessions a LEFT JOIN terminals t ON t.id = a.terminal_id WHERE ${where} = ?`,
     ).get(id);
-    if (row === undefined) return undefined;
+    if (row === undefined || typeof row.id !== "string" || !isId("agent", row.id)) return undefined;
     return {
-      agentId: String(row.id),
+      agentId: row.id,
       state: AgentState.parse(row.agent_state),
       terminalState: row.terminal_state === null ? null : TerminalState.parse(row.terminal_state),
       generation: typeof row.generation === "number" ? row.generation : null,

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   newId,
   NoTerminal,
+  ProcessState,
   UnsupportedHarness,
   type HarnessAdapter,
   type RuntimeAdapter,
@@ -93,5 +94,29 @@ describe("local environment", () => {
       tags: { kind: "shell" },
     });
     expect(await env.inventory()).toEqual([{ agentId: l.agentId, ref, dead: false }]);
+  });
+
+  it("refuses to respawn a terminal whose process still runs, before the harness resumes anything", async () => {
+    const runtime = new FakeRuntime();
+    let resumed = 0;
+    const resumable: HarnessAdapter = {
+      ...harness,
+      resumeSpec: async () => {
+        resumed++;
+        return harness.launchSpec({ harness: "claude-code", project: "p", cwd: "/work" });
+      },
+    };
+    const env = new LocalEnvironment({
+      id: newId("env"),
+      runtime,
+      harnesses: [resumable],
+      socket: "/run/b.sock",
+    });
+    const l = launch();
+    const refs = await env.launch(l);
+    await expect(
+      env.respawn({ agentId: l.agentId, request: l.request, refs, generation: 1 }),
+    ).rejects.toThrow(ProcessState);
+    expect(resumed).toBe(0);
   });
 });

@@ -28,4 +28,12 @@ export interface HarnessChannelPort {
 export interface HarnessAdapter {
   readonly id: HarnessId;
   launchSpec(request: AgentLaunchRequest): Promise<HarnessLaunch>;
+  /**
+   * How to start the TUI again on the agent's existing harness session. A harness without it
+   * can't be respawned: a fresh session would rebind the agent (foundation-design §3.1).
+   */
+  resumeSpec?(
+    request: AgentLaunchRequest,
+    session: Omit<ExternalRef, "environmentId">,
+  ): Promise<HarnessLaunch>;
 }

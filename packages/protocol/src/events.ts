@@ -1,10 +1,16 @@
 import { z } from "zod";
-import { ExitStatus, ExternalRef, HarnessId } from "./agents.ts";
+import { ExitStatus, ExternalRef, HarnessId, Signal } from "./agents.ts";
 import { AttachmentMode, EnvironmentKind, Id } from "./ids.ts";
 import { ApprovalDecision, AttentionCloseReason } from "./mail.ts";
 import { ProtocolVersion } from "./version.ts";
 
 const queued = z.object({ agentId: Id("agent"), body: z.string() });
+
+/** A terminal's runtime incarnation, as RuntimeRef names it, minus the terminal it is for. */
+const RuntimeRefPayload = z.object({
+  runtime: z.string(),
+  locator: z.record(z.string(), z.string()),
+});
 
 /**
  * Every event type the store accepts, with the entity it is about and its payload. A row adds
@@ -31,10 +37,8 @@ export const EVENTS = {
     entity: "agent",
     payload: z.object({
       externalRef: ExternalRef.nullable(),
-      /** The terminal's runtime incarnation, as RuntimeRef names it; null with no local terminal. */
-      runtimeRef: z
-        .object({ runtime: z.string(), locator: z.record(z.string(), z.string()) })
-        .nullable(),
+      /** Null with no local terminal. */
+      runtimeRef: RuntimeRefPayload.nullable(),
     }),
   },
   "agent.failed": {
@@ -43,6 +47,25 @@ export const EVENTS = {
   },
   /** A reachable environment no longer has the agent's terminal (§4.5, §7.1). */
   "agent.lost": { entity: "agent", payload: z.object({}) },
+  /** A respawn was asked for; the terminal is still the exited one until the next event. */
+  "agent.respawn_requested": { entity: "agent", payload: z.object({}) },
+  /** The terminal runs again, at the next generation, on the agent's harness session. */
+  "agent.respawned": {
+    entity: "agent",
+    payload: z.object({
+      externalRef: ExternalRef.nullable(),
+      runtimeRef: RuntimeRefPayload,
+    }),
+  },
+  /** The respawn failed; the agent is exited again, with its terminal, and still closable. */
+  "agent.respawn_rejected": {
+    entity: "agent",
+    payload: z.object({
+      reason: z.enum(["not_resumable", "no_terminal", "terminal_changed", "unavailable"]),
+    }),
+  },
+  /** The agent's process was sent a signal; any exit it causes is recorded on its own. */
+  "agent.signalled": { entity: "agent", payload: z.object({ signal: Signal }) },
   /** The agent's process ended; its terminal stays, with its last screen (§4.1, §4.5). */
   "agent.exited": { entity: "agent", payload: z.object({ exit: ExitStatus }) },
   /** A close was asked for. Recorded before the terminal is touched, so a view that loses its

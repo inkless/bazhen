@@ -1,6 +1,7 @@
 import { writeFileSync } from "node:fs";
 import type {
   Attached,
+  ProcessSpec,
   PtySpawner,
   RuntimeAdapter,
   RuntimeHealth,
@@ -306,7 +307,7 @@ export class TmuxRuntime implements RuntimeAdapter {
     if (pane !== undefined) await this.tmux("kill-session", "-t", located(pane.ref, "sessionId"));
   }
 
-  async respawn(ref: RuntimeRef, spec: TerminalSpec): Promise<RuntimeRef> {
+  async respawn(ref: RuntimeRef, spec: ProcessSpec): Promise<RuntimeRef> {
     const pane = await this.paneOf(ref);
     if (pane.exit === null) throw new ProcessState(ref.terminalId, "exited");
     assertSameGeneration(ref, pane.ref.locator.generation);
@@ -410,7 +411,7 @@ function located(ref: RuntimeRef, key: "sessionId" | "paneId"): string {
  * `tmux kill-server` would end Bazhen's private server and every terminal on it. A new terminal
  * tab has neither, so `env` drops them and then execs the argv, which stays the pane's process.
  */
-const processArgs = (spec: TerminalSpec) => [
+const processArgs = (spec: ProcessSpec) => [
   "-c",
   spec.cwd,
   ...Object.entries(spec.env).flatMap(([k, v]) => ["-e", escapeTrailingSemicolon(`${k}=${v}`)]),

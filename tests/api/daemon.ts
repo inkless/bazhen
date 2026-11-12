@@ -234,6 +234,11 @@ export class Daemon {
       ?.split(" ")[1];
   }
 
+  /** The title the agent's TUI gave its pane. */
+  paneTitle(agentId: string): string {
+    return this.paneFact(agentId, "pane_title") ?? "";
+  }
+
   /** Whether the agent still has a tmux session. */
   hasTerminal(agentId: string): boolean {
     return this.session(agentId) !== undefined;
