@@ -1,0 +1,12 @@
+{
+  "name": "@bazhen/api-tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@bazhen/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@anthropic-ai/claude-code": "2.1.322"
+  }
+}

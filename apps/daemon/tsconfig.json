@@ -1,11 +1,26 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "rootDir": "src", "outDir": "dist" },
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist"
+  },
   "include": ["src"],
   "exclude": ["src/**/*.test.ts"],
   "references": [
-    { "path": "../../packages/protocol" },
-    { "path": "../../packages/core" },
-    { "path": "../../packages/runtime-tmux" }
+    {
+      "path": "../../packages/protocol"
+    },
+    {
+      "path": "../../packages/core"
+    },
+    {
+      "path": "../../packages/runtime-tmux"
+    },
+    {
+      "path": "../../packages/env-local"
+    },
+    {
+      "path": "../../packages/harness-claude-code"
+    }
   ]
 }

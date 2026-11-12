@@ -1,8 +1,12 @@
 import { mkdirSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
 import { filterEnv } from "@bazhen/core";
+import { LocalEnvironment } from "@bazhen/env-local";
+import { ClaudeCodeHarness } from "@bazhen/harness-claude-code";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
+import { launchAgent, localEnvironmentId } from "./agents/launch.ts";
 import { currentInputs, resolvePaths } from "./config/paths.ts";
 import { ensurePrivateDir } from "./config/private-dir.ts";
 import { createApp } from "./http/app.ts";
@@ -12,6 +16,7 @@ import { Store } from "./store/store.ts";
 const APP_VERSION = "0.1.0";
 const HOSTNAME = "127.0.0.1";
 const port = Number(process.env.BAZHEN_PORT ?? 7900);
+const DEFAULT_SIZE = { cols: 120, rows: 40 };
 
 const inputs = currentInputs();
 const paths = resolvePaths(inputs);
@@ -29,11 +34,25 @@ const runtime = new TmuxRuntime({
   configFile: join(paths.run, "tmux.conf"),
   env: hostEnv,
 });
+const environment = new LocalEnvironment({
+  id: localEnvironmentId(store),
+  runtime,
+  harnesses: [new ClaudeCodeHarness(randomUUID)],
+  socket: paths.socket,
+});
+const allowedHosts = [`${HOSTNAME}:${port}`, `localhost:${port}`];
+// The web dev server proxies to the daemon, and the browser's requests keep its origin. It is
+// allowed only when the dev scripts name its port; a built daemon serves the client itself.
+const webPort = process.env.BAZHEN_WEB_PORT;
+const webDevHosts = webPort ? [`${HOSTNAME}:${webPort}`, `localhost:${webPort}`] : [];
 const app = createApp({
   appVersion: APP_VERSION,
   schemaVersion: () => store.schemaVersion(),
   runtime,
-  allowedHosts: [`${HOSTNAME}:${port}`, `localhost:${port}`],
+  allowedHosts,
+  allowedOrigins: [...allowedHosts, ...webDevHosts].map((host) => `http://${host}`),
+  state: () => store.snapshot(),
+  launch: (req) => launchAgent({ store, environment, size: DEFAULT_SIZE }, req),
 });
 
 const server = serve({ fetch: app.fetch, hostname: HOSTNAME, port }, (info) => {

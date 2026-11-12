@@ -622,6 +622,496 @@
     },
     {
       "files": [
+        "packages/env-local/**/*.ts",
+        "packages/env-local/**/*.tsx"
+      ],
+      "rules": {
+        "import/no-nodejs-modules": "error",
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/runtime-tmux",
+                  "@bazhen/runtime-tmux/**",
+                  "**/packages/runtime-tmux/**",
+                  "**/runtime-tmux/src/**"
+                ],
+                "message": "packages/env-local (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/harness-claude-code",
+                  "@bazhen/harness-claude-code/**",
+                  "**/packages/harness-claude-code/**",
+                  "**/harness-claude-code/src/**"
+                ],
+                "message": "packages/env-local (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/harness-claude-code."
+              },
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**"
+                ],
+                "message": "packages/env-local (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "@bazhen/web",
+                  "@bazhen/web/**",
+                  "**/apps/web/**",
+                  "**/web/src/**"
+                ],
+                "message": "packages/env-local (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "@bazhen/protocol",
+                  "@bazhen/protocol/**",
+                  "**/packages/protocol/**",
+                  "**/protocol/src/**"
+                ],
+                "message": "packages/env-local (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import only types from @bazhen/protocol.",
+                "allowTypeImports": true
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "hono",
+                  "@hono/*",
+                  "ws",
+                  "@xterm/*"
+                ],
+                "message": "packages/env-local (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import runtime libraries."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "packages/env-local/**/*.test.ts",
+        "packages/env-local/**/*.test.tsx"
+      ],
+      "rules": {
+        "import/no-nodejs-modules": "error",
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/runtime-tmux",
+                  "@bazhen/runtime-tmux/**",
+                  "**/packages/runtime-tmux/**",
+                  "**/runtime-tmux/src/**"
+                ],
+                "message": "packages/env-local (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/harness-claude-code",
+                  "@bazhen/harness-claude-code/**",
+                  "**/packages/harness-claude-code/**",
+                  "**/harness-claude-code/src/**"
+                ],
+                "message": "packages/env-local (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/harness-claude-code."
+              },
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**"
+                ],
+                "message": "packages/env-local (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "@bazhen/web",
+                  "@bazhen/web/**",
+                  "**/apps/web/**",
+                  "**/web/src/**"
+                ],
+                "message": "packages/env-local (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "@bazhen/protocol",
+                  "@bazhen/protocol/**",
+                  "**/packages/protocol/**",
+                  "**/protocol/src/**"
+                ],
+                "message": "packages/env-local (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import only types from @bazhen/protocol.",
+                "allowTypeImports": true
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "hono",
+                  "@hono/*",
+                  "ws",
+                  "@xterm/*"
+                ],
+                "message": "packages/env-local (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import runtime libraries."
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "fs",
+                  "node:fs",
+                  "fs/promises",
+                  "node:fs/promises",
+                  "os",
+                  "node:os",
+                  "net",
+                  "node:net",
+                  "http",
+                  "node:http",
+                  "https",
+                  "node:https",
+                  "http2",
+                  "node:http2",
+                  "dgram",
+                  "node:dgram",
+                  "tls",
+                  "node:tls",
+                  "child_process",
+                  "node:child_process",
+                  "worker_threads",
+                  "node:worker_threads",
+                  "sqlite",
+                  "node:sqlite"
+                ],
+                "message": "A *.test.ts is a small test: no files, sockets, processes or databases. Rename it *.medium.test.ts (docs/standards/testing.md)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "packages/env-local/**/*.medium.test.ts"
+      ],
+      "rules": {
+        "import/no-nodejs-modules": "error",
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/runtime-tmux",
+                  "@bazhen/runtime-tmux/**",
+                  "**/packages/runtime-tmux/**",
+                  "**/runtime-tmux/src/**"
+                ],
+                "message": "packages/env-local (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/harness-claude-code",
+                  "@bazhen/harness-claude-code/**",
+                  "**/packages/harness-claude-code/**",
+                  "**/harness-claude-code/src/**"
+                ],
+                "message": "packages/env-local (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/harness-claude-code."
+              },
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**"
+                ],
+                "message": "packages/env-local (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "@bazhen/web",
+                  "@bazhen/web/**",
+                  "**/apps/web/**",
+                  "**/web/src/**"
+                ],
+                "message": "packages/env-local (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "@bazhen/protocol",
+                  "@bazhen/protocol/**",
+                  "**/packages/protocol/**",
+                  "**/protocol/src/**"
+                ],
+                "message": "packages/env-local (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import only types from @bazhen/protocol.",
+                "allowTypeImports": true
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "hono",
+                  "@hono/*",
+                  "ws",
+                  "@xterm/*"
+                ],
+                "message": "packages/env-local (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import runtime libraries."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "packages/harness-claude-code/**/*.ts",
+        "packages/harness-claude-code/**/*.tsx"
+      ],
+      "rules": {
+        "import/no-nodejs-modules": "error",
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/runtime-tmux",
+                  "@bazhen/runtime-tmux/**",
+                  "**/packages/runtime-tmux/**",
+                  "**/runtime-tmux/src/**"
+                ],
+                "message": "packages/harness-claude-code (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/env-local",
+                  "@bazhen/env-local/**",
+                  "**/packages/env-local/**",
+                  "**/env-local/src/**"
+                ],
+                "message": "packages/harness-claude-code (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/env-local."
+              },
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**"
+                ],
+                "message": "packages/harness-claude-code (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "@bazhen/web",
+                  "@bazhen/web/**",
+                  "**/apps/web/**",
+                  "**/web/src/**"
+                ],
+                "message": "packages/harness-claude-code (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "@bazhen/protocol",
+                  "@bazhen/protocol/**",
+                  "**/packages/protocol/**",
+                  "**/protocol/src/**"
+                ],
+                "message": "packages/harness-claude-code (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import only types from @bazhen/protocol.",
+                "allowTypeImports": true
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "hono",
+                  "@hono/*",
+                  "ws",
+                  "@xterm/*"
+                ],
+                "message": "packages/harness-claude-code (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import runtime libraries."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "packages/harness-claude-code/**/*.test.ts",
+        "packages/harness-claude-code/**/*.test.tsx"
+      ],
+      "rules": {
+        "import/no-nodejs-modules": "error",
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/runtime-tmux",
+                  "@bazhen/runtime-tmux/**",
+                  "**/packages/runtime-tmux/**",
+                  "**/runtime-tmux/src/**"
+                ],
+                "message": "packages/harness-claude-code (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/env-local",
+                  "@bazhen/env-local/**",
+                  "**/packages/env-local/**",
+                  "**/env-local/src/**"
+                ],
+                "message": "packages/harness-claude-code (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/env-local."
+              },
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**"
+                ],
+                "message": "packages/harness-claude-code (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "@bazhen/web",
+                  "@bazhen/web/**",
+                  "**/apps/web/**",
+                  "**/web/src/**"
+                ],
+                "message": "packages/harness-claude-code (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "@bazhen/protocol",
+                  "@bazhen/protocol/**",
+                  "**/packages/protocol/**",
+                  "**/protocol/src/**"
+                ],
+                "message": "packages/harness-claude-code (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import only types from @bazhen/protocol.",
+                "allowTypeImports": true
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "hono",
+                  "@hono/*",
+                  "ws",
+                  "@xterm/*"
+                ],
+                "message": "packages/harness-claude-code (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import runtime libraries."
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "fs",
+                  "node:fs",
+                  "fs/promises",
+                  "node:fs/promises",
+                  "os",
+                  "node:os",
+                  "net",
+                  "node:net",
+                  "http",
+                  "node:http",
+                  "https",
+                  "node:https",
+                  "http2",
+                  "node:http2",
+                  "dgram",
+                  "node:dgram",
+                  "tls",
+                  "node:tls",
+                  "child_process",
+                  "node:child_process",
+                  "worker_threads",
+                  "node:worker_threads",
+                  "sqlite",
+                  "node:sqlite"
+                ],
+                "message": "A *.test.ts is a small test: no files, sockets, processes or databases. Rename it *.medium.test.ts (docs/standards/testing.md)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "packages/harness-claude-code/**/*.medium.test.ts"
+      ],
+      "rules": {
+        "import/no-nodejs-modules": "error",
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/runtime-tmux",
+                  "@bazhen/runtime-tmux/**",
+                  "**/packages/runtime-tmux/**",
+                  "**/runtime-tmux/src/**"
+                ],
+                "message": "packages/harness-claude-code (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/env-local",
+                  "@bazhen/env-local/**",
+                  "**/packages/env-local/**",
+                  "**/env-local/src/**"
+                ],
+                "message": "packages/harness-claude-code (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/env-local."
+              },
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**"
+                ],
+                "message": "packages/harness-claude-code (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "@bazhen/web",
+                  "@bazhen/web/**",
+                  "**/apps/web/**",
+                  "**/web/src/**"
+                ],
+                "message": "packages/harness-claude-code (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "@bazhen/protocol",
+                  "@bazhen/protocol/**",
+                  "**/packages/protocol/**",
+                  "**/protocol/src/**"
+                ],
+                "message": "packages/harness-claude-code (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import only types from @bazhen/protocol.",
+                "allowTypeImports": true
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "hono",
+                  "@hono/*",
+                  "ws",
+                  "@xterm/*"
+                ],
+                "message": "packages/harness-claude-code (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import runtime libraries."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
         "apps/daemon/**/*.ts",
         "apps/daemon/**/*.tsx"
       ],
@@ -715,6 +1205,242 @@
                   "**/web/src/**"
                 ],
                 "message": "apps/daemon (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "tests/api/**/*.ts",
+        "tests/api/**/*.tsx"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/core",
+                  "@bazhen/core/**",
+                  "**/packages/core/**",
+                  "**/core/src/**"
+                ],
+                "message": "tests/api (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/core."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-tmux",
+                  "@bazhen/runtime-tmux/**",
+                  "**/packages/runtime-tmux/**",
+                  "**/runtime-tmux/src/**"
+                ],
+                "message": "tests/api (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/env-local",
+                  "@bazhen/env-local/**",
+                  "**/packages/env-local/**",
+                  "**/env-local/src/**"
+                ],
+                "message": "tests/api (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/env-local."
+              },
+              {
+                "group": [
+                  "@bazhen/harness-claude-code",
+                  "@bazhen/harness-claude-code/**",
+                  "**/packages/harness-claude-code/**",
+                  "**/harness-claude-code/src/**"
+                ],
+                "message": "tests/api (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/harness-claude-code."
+              },
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**"
+                ],
+                "message": "tests/api (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "@bazhen/web",
+                  "@bazhen/web/**",
+                  "**/apps/web/**",
+                  "**/web/src/**"
+                ],
+                "message": "tests/api (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "tests/api/**/*.test.ts",
+        "tests/api/**/*.test.tsx"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/core",
+                  "@bazhen/core/**",
+                  "**/packages/core/**",
+                  "**/core/src/**"
+                ],
+                "message": "tests/api (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/core."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-tmux",
+                  "@bazhen/runtime-tmux/**",
+                  "**/packages/runtime-tmux/**",
+                  "**/runtime-tmux/src/**"
+                ],
+                "message": "tests/api (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/env-local",
+                  "@bazhen/env-local/**",
+                  "**/packages/env-local/**",
+                  "**/env-local/src/**"
+                ],
+                "message": "tests/api (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/env-local."
+              },
+              {
+                "group": [
+                  "@bazhen/harness-claude-code",
+                  "@bazhen/harness-claude-code/**",
+                  "**/packages/harness-claude-code/**",
+                  "**/harness-claude-code/src/**"
+                ],
+                "message": "tests/api (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/harness-claude-code."
+              },
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**"
+                ],
+                "message": "tests/api (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "@bazhen/web",
+                  "@bazhen/web/**",
+                  "**/apps/web/**",
+                  "**/web/src/**"
+                ],
+                "message": "tests/api (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "fs",
+                  "node:fs",
+                  "fs/promises",
+                  "node:fs/promises",
+                  "os",
+                  "node:os",
+                  "net",
+                  "node:net",
+                  "http",
+                  "node:http",
+                  "https",
+                  "node:https",
+                  "http2",
+                  "node:http2",
+                  "dgram",
+                  "node:dgram",
+                  "tls",
+                  "node:tls",
+                  "child_process",
+                  "node:child_process",
+                  "worker_threads",
+                  "node:worker_threads",
+                  "sqlite",
+                  "node:sqlite"
+                ],
+                "message": "A *.test.ts is a small test: no files, sockets, processes or databases. Rename it *.medium.test.ts (docs/standards/testing.md)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "tests/api/**/*.medium.test.ts"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/core",
+                  "@bazhen/core/**",
+                  "**/packages/core/**",
+                  "**/core/src/**"
+                ],
+                "message": "tests/api (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/core."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-tmux",
+                  "@bazhen/runtime-tmux/**",
+                  "**/packages/runtime-tmux/**",
+                  "**/runtime-tmux/src/**"
+                ],
+                "message": "tests/api (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/env-local",
+                  "@bazhen/env-local/**",
+                  "**/packages/env-local/**",
+                  "**/env-local/src/**"
+                ],
+                "message": "tests/api (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/env-local."
+              },
+              {
+                "group": [
+                  "@bazhen/harness-claude-code",
+                  "@bazhen/harness-claude-code/**",
+                  "**/packages/harness-claude-code/**",
+                  "**/harness-claude-code/src/**"
+                ],
+                "message": "tests/api (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/harness-claude-code."
+              },
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**"
+                ],
+                "message": "tests/api (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "@bazhen/web",
+                  "@bazhen/web/**",
+                  "**/apps/web/**",
+                  "**/web/src/**"
+                ],
+                "message": "tests/api (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
               }
             ]
           }

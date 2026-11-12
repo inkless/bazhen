@@ -28,6 +28,7 @@ Engineering at Google_.
 | medium | `src/**/x.medium.test.ts`     | temporary files, SQLite              | `pnpm test:medium`                     |
 | medium | `scripts/*.medium.test.ts`    | temporary files, git, subprocesses   | `pnpm test:medium`                     |
 | medium | `tests/integration/*.test.ts` | a private tmux server, real PTYs     | `pnpm test:integration`, one worker    |
+| large  | `tests/api/*.test.ts`         | the daemon as a process, tmux, CLIs  | `pnpm test:api`, one worker            |
 | large  | `tests/e2e/*.spec.ts`         | daemon, web client and browser       | `pnpm test:e2e`                        |
 
 Write the smallest test that can fail for the right reason. E2E tests cover only wiring that
@@ -44,8 +45,9 @@ against the daemon's public surfaces, never its TypeScript internals.
   behaviour a user or an agent can observe gets its test there.
 - **Unit, medium and integration tests may be internal.** They import the packages they test, and
   would be rewritten with the code.
-- The suite arrives with the first domain row, which adds it to the size table above. Until then,
-  new tests follow that table.
+- `tests/api` is that suite. It starts the daemon under a temporary `BAZHEN_HOME` and runs the
+  real harness CLIs pinned in its `package.json`. No agent reaches a real model, and the daemon
+  never sees the developer's own credentials: its environment is built from a short allowlist.
 
 ## Falsification
 

@@ -1,24 +1,6 @@
+import type { AgentState, ExternalRef, HarnessId } from "@bazhen/protocol";
 import type { AgentSessionId, EnvironmentId, TerminalId } from "./ids.ts";
 import { machine } from "./machine.ts";
-
-export type AgentState =
-  | "starting"
-  | "running"
-  | "exited"
-  | "unknown"
-  | "lost"
-  | "closing"
-  | "closed"
-  | "failed";
-
-export type HarnessId = "claude-code" | "codex";
-
-/** A harness- or server-side object, such as a Claude Code session or a Codex thread. */
-export interface ExternalRef {
-  readonly environmentId: EnvironmentId;
-  readonly kind: "claude-session" | "codex-thread";
-  readonly id: string;
-}
 
 /** What was asked for at launch, kept so the agent can be respawned the same way. */
 export interface AgentLaunchRequest {

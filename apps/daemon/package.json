@@ -7,15 +7,18 @@
     "./pty": "./src/pty/node-pty.ts"
   },
   "scripts": {
-    "dev": "node --watch --watch-preserve-output src/main.ts",
+    "dev": "BAZHEN_WEB_PORT=${BAZHEN_WEB_PORT:-5173} node --watch --watch-preserve-output src/main.ts",
     "start": "node src/main.ts"
   },
   "dependencies": {
     "@bazhen/core": "workspace:*",
+    "@bazhen/env-local": "workspace:*",
+    "@bazhen/harness-claude-code": "workspace:*",
     "@bazhen/protocol": "workspace:*",
     "@bazhen/runtime-tmux": "workspace:*",
     "@hono/node-server": "2.1.5",
     "hono": "4.13.16",
-    "node-pty": "1.2.0-beta.18"
+    "node-pty": "1.2.0-beta.18",
+    "zod": "4.6.7"
   }
 }

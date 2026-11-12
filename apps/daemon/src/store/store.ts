@@ -1,15 +1,33 @@
-import { DatabaseSync } from "node:sqlite";
-import { newId } from "@bazhen/core";
+import { DatabaseSync, type StatementSync } from "node:sqlite";
+import { isId, newId, type EnvironmentId } from "@bazhen/core";
+import { z } from "zod";
+import {
+  EVENTS,
+  StateSnapshot,
+  type EnvironmentKind,
+  type EventPayload,
+  type EventType,
+} from "@bazhen/protocol";
 import { LATEST_SCHEMA_VERSION, MIGRATIONS, type Migration } from "./migrations.ts";
+import { project, type Statements } from "./projections.ts";
 
-export interface NewEvent {
-  readonly type: string;
-  readonly entityType: string;
+export interface NewEvent<T extends EventType> {
+  readonly type: T;
   readonly entityId: string;
   readonly actor: string;
-  readonly payload: unknown;
+  readonly payload: EventPayload<T>;
   readonly causationId?: number;
   readonly correlationId?: string;
+}
+
+/** A payload its event type's schema refuses; nothing is recorded. */
+export class InvalidEvent extends Error {
+  readonly type: EventType;
+
+  constructor(type: EventType, cause: unknown) {
+    super(`invalid ${type} payload`, { cause });
+    this.type = type;
+  }
 }
 
 export class SchemaTooNew extends Error {
@@ -27,6 +45,10 @@ export class SchemaTooNew extends Error {
 export class Store {
   private readonly db: DatabaseSync;
   private host = "";
+  private depth = 0;
+  private readonly cache = new Map<string, StatementSync>();
+  /** What the projections may do: run SQL, inside the transaction that records an event. */
+  private readonly statements: Statements = { prepare: (sql) => this.prepare(sql) };
 
   private constructor(db: DatabaseSync) {
     this.db = db;
@@ -83,44 +105,106 @@ export class Store {
   }
 
   /**
-   * Appends an event and applies its projection in one transaction: if the projection throws,
-   * the event is not recorded either.
+   * Appends a registered event and applies it to the read models in one transaction: if either
+   * fails, neither is recorded.
    */
-  append(event: NewEvent, project?: (eventId: number, db: DatabaseSync) => void): number {
+  append<T extends EventType>(event: NewEvent<T>): number {
     return this.transaction(() => {
-      const result = this.db
-        .prepare(
-          `INSERT INTO events (host_id, ts, type, entity_type, entity_id, actor, causation_id, correlation_id, payload)
+      const result = this.prepare(
+        `INSERT INTO events (host_id, ts, type, entity_type, entity_id, actor, causation_id, correlation_id, payload)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          this.host,
-          new Date().toISOString(),
-          event.type,
-          event.entityType,
-          event.entityId,
-          event.actor,
-          event.causationId ?? null,
-          event.correlationId ?? null,
-          JSON.stringify(event.payload),
-        );
+      ).run(
+        this.host,
+        new Date().toISOString(),
+        event.type,
+        EVENTS[event.type].entity,
+        event.entityId,
+        event.actor,
+        event.causationId ?? null,
+        event.correlationId ?? null,
+        JSON.stringify(event.payload),
+      );
       const id = Number(result.lastInsertRowid);
-      project?.(id, this.db);
+      // The projection parses the payload with its type's schema, rolling the event back if
+      // it doesn't match.
+      try {
+        project(this.statements, { id, hostId: this.host, ...event });
+      } catch (err) {
+        throw err instanceof z.ZodError ? new InvalidEvent(event.type, err) : err;
+      }
       return id;
     });
   }
 
+  private prepare(sql: string): StatementSync {
+    let statement = this.cache.get(sql);
+    if (statement === undefined) {
+      statement = this.db.prepare(sql);
+      this.cache.set(sql, statement);
+    }
+    return statement;
+  }
+
+  /** The answer first given to a mutation carrying `key`, if there was one. */
+  recall(key: string): unknown {
+    const row = this.prepare("SELECT response FROM idempotency_keys WHERE key = ?").get(key);
+    return typeof row?.response === "string" ? JSON.parse(row.response) : undefined;
+  }
+
+  remember(key: string, response: unknown): void {
+    this.prepare("INSERT OR REPLACE INTO idempotency_keys (key, response) VALUES (?, ?)").run(
+      key,
+      JSON.stringify(response),
+    );
+  }
+
+  environments(kind: EnvironmentKind): EnvironmentId[] {
+    return this.prepare("SELECT id FROM environments WHERE kind = ? ORDER BY created_event_id")
+      .all(kind)
+      .flatMap((r) => (typeof r.id === "string" && isId("env", r.id) ? [r.id] : []));
+  }
+
+  /** Every projection the state snapshot shows, with the last event it reflects. */
+  snapshot(): StateSnapshot {
+    return this.transaction("read", () =>
+      StateSnapshot.parse({
+        eventId: Number(this.prepare("SELECT coalesce(max(id), 0) AS id FROM events").get()?.id),
+        environments: this.prepare(
+          "SELECT id, kind FROM environments ORDER BY created_event_id",
+        ).all(),
+        agents: this.prepare(
+          `SELECT id, environment_id AS environmentId, harness, project, cwd, state,
+                  terminal_id AS terminalId, external_ref AS externalRef
+           FROM agent_sessions ORDER BY created_event_id`,
+        )
+          .all()
+          .map((r) => ({
+            ...r,
+            externalRef: typeof r.externalRef === "string" ? JSON.parse(r.externalRef) : null,
+          })),
+      }),
+    );
+  }
+
   eventsAfter(afterId: number, limit = 500): Array<{ id: number; type: string; entityId: string }> {
-    return this.db
-      .prepare(
-        "SELECT id, type, entity_id AS entityId FROM events WHERE id > ? ORDER BY id LIMIT ?",
-      )
+    return this.prepare(
+      "SELECT id, type, entity_id AS entityId FROM events WHERE id > ? ORDER BY id LIMIT ?",
+    )
       .all(afterId, limit)
       .map((r) => ({ id: Number(r.id), type: String(r.type), entityId: String(r.entityId) }));
   }
 
-  private transaction<T>(fn: () => T): T {
-    this.db.exec("BEGIN IMMEDIATE");
+  /**
+   * Runs `fn` in one transaction; nested calls join the outer one. A read takes no write lock,
+   * but still sees one consistent state.
+   */
+  transaction<T>(fn: () => T): T;
+  transaction<T>(mode: "read", fn: () => T): T;
+  transaction<T>(...args: [() => T] | ["read", () => T]): T {
+    const fn = args.length === 1 ? args[0] : args[1];
+    if (this.depth > 0) return fn();
+    this.db.exec(args.length === 1 ? "BEGIN IMMEDIATE" : "BEGIN DEFERRED");
+    this.depth++;
     try {
       const out = fn();
       this.db.exec("COMMIT");
@@ -128,6 +212,8 @@ export class Store {
     } catch (err) {
       this.db.exec("ROLLBACK");
       throw err;
+    } finally {
+      this.depth--;
     }
   }
 

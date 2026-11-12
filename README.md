@@ -22,6 +22,7 @@ client. Agents, tasks, and orchestration come later.
 | `pnpm dev`                            | Start the daemon (`http://127.0.0.1:7900`) and the web client (`http://127.0.0.1:5173`) |
 | `pnpm check`                          | Standards check, lint, format check, type-check, small, medium and integration tests    |
 | `pnpm test` / `pnpm test:integration` | Small tests / tests against a throwaway private tmux server                             |
+| `pnpm test:api`                       | Black-box tests: the daemon as a process, with the real agent CLIs, in a temporary home |
 | `pnpm test:e2e`                       | Browser tests: starts daemon and web client in a temporary `BAZHEN_HOME`                |
 | `pnpm test:falsify`                   | Run the branch's new tests against the base's source; CI runs it on pull requests       |
 | `pnpm build`                          | Compile packages to `dist/` and build the web bundle                                    |

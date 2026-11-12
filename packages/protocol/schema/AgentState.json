@@ -1,0 +1,15 @@
+{
+  "$id": "AgentState",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "string",
+  "enum": [
+    "starting",
+    "running",
+    "exited",
+    "unknown",
+    "lost",
+    "closing",
+    "closed",
+    "failed"
+  ]
+}

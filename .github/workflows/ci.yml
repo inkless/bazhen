@@ -42,6 +42,32 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
 
+  # The black-box suite runs the real harness CLIs, pinned in tests/api. No agent is let reach a
+  # model, so it needs no credentials. It is slower than `pnpm check`, so it is a job of its own.
+  api:
+    name: api (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26.13.0
+          cache: pnpm
+      - name: Install tmux
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Install tmux
+        if: runner.os == 'macOS'
+        run: command -v tmux || brew install tmux
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:api
+
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 20

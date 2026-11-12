@@ -91,8 +91,11 @@ describe("each package.json, against the import matrix", () => {
       "packages/protocol": [],
       "packages/core": [],
       "packages/runtime-tmux": [],
+      "packages/env-local": [],
+      "packages/harness-claude-code": [],
       "apps/daemon": [],
       "apps/web": [],
+      "tests/api": [],
     });
   });
 });
