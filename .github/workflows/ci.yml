@@ -25,7 +25,8 @@ jobs:
       fail-fast: false
       matrix:
         # macOS runners are billed at a premium while the repo is private; add macos-latest back
-        # once it is public.
+        # once it is public. The real-tmux suites refuse any host but a marked Linux one, so on
+        # macOS they need a Linux container or a change to tests/support/disposable-host.ts.
         os: [ubuntu-latest]
         node: ["24", "26.13.0"]
     steps:
@@ -58,7 +59,8 @@ jobs:
       fail-fast: false
       matrix:
         # macOS runners are billed at a premium while the repo is private; add macos-latest back
-        # once it is public.
+        # once it is public. The real-tmux suites refuse any host but a marked Linux one, so on
+        # macOS they need a Linux container or a change to tests/support/disposable-host.ts.
         os: [ubuntu-latest]
     steps:
       - uses: actions/checkout@v7

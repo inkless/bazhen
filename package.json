@@ -20,7 +20,8 @@
     "test:medium": "vitest run --project medium",
     "prepare": "husky",
     "test:falsify": "node scripts/falsify.ts",
-    "test:file": "vitest run"
+    "test:file": "vitest run",
+    "test:real": "node scripts/test-real.ts"
   },
   "devDependencies": {
     "@types/node": "26.6.6",

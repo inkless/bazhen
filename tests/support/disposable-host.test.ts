@@ -15,8 +15,8 @@ describe("the disposable-host check", () => {
     expect(onDisposableHost("darwin", marked)).toBe(false);
   });
 
-  it("refuses to start a suite off a disposable host, saying where it runs", () => {
-    expect(() => requireDisposableHost(false)).toThrow("run only in CI");
+  it("refuses to start a suite off a disposable host, naming the command to use", () => {
+    expect(() => requireDisposableHost(false)).toThrow("pnpm test:real");
     expect(() => requireDisposableHost(true)).not.toThrow();
   });
 });
