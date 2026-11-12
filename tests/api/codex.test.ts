@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { StateSnapshot, type LaunchAgentResponse } from "@bazhen/protocol";
+import { SendMessageResponse, StateSnapshot, type LaunchAgentResponse } from "@bazhen/protocol";
 import { BANNER, Daemon, waitUntil } from "./daemon.ts";
 import { startFakeResponses } from "./fake-responses.ts";
 import type { FakeModel } from "./fake-model.ts";
@@ -68,6 +68,22 @@ describe("a Codex agent", () => {
     await expect
       .poll(() => daemon.screen(launched.agentId), { timeout: 30_000 })
       .toContain("echo: hello from bazhen");
+  });
+
+  it("delivers mail to the agent through Codex's own queue, labelled with its id", async () => {
+    const sent = await daemon.request(`/v1/agents/${launched.agentId}/messages`, {
+      method: "POST",
+      body: { idempotencyKey: "mail", body: "a message for codex" },
+    });
+    const { messageId } = SendMessageResponse.parse(sent.body);
+    await expect
+      .poll(async () => (await state()).messages.find((m) => m.id === messageId)?.state, {
+        timeout: 30_000,
+      })
+      .toBe("delivered");
+    await expect
+      .poll(() => String(model.requests.find((r) => r.includes(messageId))), { timeout: 30_000 })
+      .toContain("a message for codex");
   });
 
   it("asks the inbox before running a command outside the sandbox, and runs it once allowed", async () => {

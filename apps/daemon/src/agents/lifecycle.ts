@@ -59,6 +59,9 @@ export class EnvironmentUnavailable extends Error {
  * commands close, respawn and signal. Commands on one agent run one at a time; an exit landing
  * during one is recorded only if the agent is still running then.
  */
+/** A message's states before it reaches its agent or can't. */
+const IN_FLIGHT = ["queued", "offered", "emitted", "seen", "queued_in_codex"] as const;
+
 export class Lifecycle {
   private readonly store: Store;
   private readonly environment: EnvironmentAdapter;
@@ -111,6 +114,15 @@ export class Lifecycle {
       return () => [
         ...(closing === undefined ? [] : [closing]),
         this.record(agentId, "agent.closed", {}),
+        // Mail still on its way can no longer reach it (foundation-design §4.7).
+        ...this.store.mail(agentId, IN_FLIGHT).map((m) =>
+          this.store.append({
+            type: "mailbox.undeliverable",
+            entityId: m.id,
+            actor: "system",
+            payload: { reason: "agent_closed" },
+          }),
+        ),
       ];
     });
   }

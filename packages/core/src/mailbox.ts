@@ -5,7 +5,8 @@ import { machine } from "./machine.ts";
  * - `offer`: a waiter or a PostToolUse hook takes the message; `ack`: the hook client wrote it.
  * - `seen`: a wake's UserPromptSubmit carried its id; `confirm`: the receiving turn's Stop, or,
  *   for Codex, the turn that carries its label.
- * - `accept` / `accept_offline`: `codex queue` took it with or without a live app-server.
+ * - `accept`: `codex queue` stored it, with or without a live app-server; only the turn that
+ *   carries it delivers it, and that turn may start before the queue command has returned.
  */
 export type MailboxEvent =
   | "offer"
@@ -13,7 +14,6 @@ export type MailboxEvent =
   | "seen"
   | "confirm"
   | "accept"
-  | "accept_offline"
   | "requeue"
   | "give_up"
   | "agent_closed";
@@ -23,8 +23,8 @@ export type MailboxEvent =
 export const mailbox = machine<MailboxState, MailboxEvent>("mailbox message", {
   queued: {
     offer: "offered",
-    accept: "delivered",
-    accept_offline: "queued_in_codex",
+    accept: "queued_in_codex",
+    confirm: "delivered",
     give_up: "undeliverable",
     agent_closed: "undeliverable",
   },

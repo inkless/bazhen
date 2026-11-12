@@ -165,6 +165,13 @@ export function project(db: Statements, e: Recorded): void {
     }
     case "mailbox.delivered":
       return moveMessage(db, e, "confirm");
+    case "mailbox.accepted":
+      EVENTS[e.type].payload.parse(e.payload);
+      return moveMessage(db, e, "accept");
+    case "mailbox.undeliverable": {
+      const { reason } = EVENTS[e.type].payload.parse(e.payload);
+      return moveMessage(db, e, reason === "agent_closed" ? "agent_closed" : "give_up");
+    }
     case "mailbox.requeued":
       EVENTS[e.type].payload.parse(e.payload);
       return moveMessage(db, e, "requeue", { prompt_id: null });

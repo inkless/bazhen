@@ -6,14 +6,15 @@ import { getRequestListener, serve } from "@hono/node-server";
 import { filterEnv } from "@bazhen/core";
 import { LocalEnvironment } from "@bazhen/env-local";
 import { ClaudeCodeHarness } from "@bazhen/harness-claude-code";
-import { CodexHarness } from "@bazhen/harness-codex";
+import { CodexHarness, DAEMON_START_ARGS } from "@bazhen/harness-codex";
 import { TmuxServer } from "@bazhen/host-guard";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
 import { launchAgent, localEnvironmentId } from "./agents/launch.ts";
 import { Lifecycle } from "./agents/lifecycle.ts";
 import { reconcile } from "./agents/reconcile.ts";
 import { codexApprovals } from "./codex/approvals.ts";
-import { CodexChannel, codexHomeOf, startCodexDaemon } from "./codex/channel.ts";
+import { allOf, appServerAddress, CodexChannel, codexCli, codexHomeOf } from "./codex/channel.ts";
+import { CodexMail } from "./codex/mail.ts";
 import { retire } from "./events/retention.ts";
 import { eventRoute } from "./events/server.ts";
 import { TerminalHub } from "./stream/hub.ts";
@@ -53,7 +54,15 @@ if (await answers(paths.socket)) {
 // session's internals (foundation-design §9.5).
 const hostEnv = filterEnv(process.env, config.envRules).env;
 const store = Store.open(join(paths.data, "bazhen.db"));
-const mailbox = new Mailbox(store);
+const codexHome = codexHomeOf(hostEnv, inputs.home);
+// The Codex CLI, in the environment the agents get, which names their Codex home.
+const codexCommand = codexCli(hostEnv);
+const codexMail = new CodexMail({
+  store,
+  remote: appServerAddress(codexHome),
+  codex: codexCommand,
+});
+const mailbox = new Mailbox(store, { codex: (id, agentId) => void codexMail.deliver(id, agentId) });
 const approvals = new Approvals(store);
 // What the daemon was holding when it last stopped is gone with its sockets (§7 step 2).
 endOpenAttachments(store);
@@ -71,10 +80,13 @@ const hookRunner = hookClient();
 if (hookRunner === HOOK_SCRIPT) console.warn(`bazhen-hook is not built; hooks use ${HOOK_SCRIPT}`);
 // Agents use the user's own Codex home and its managed app-server, connected on first use.
 const codex = new CodexChannel({
-  codexHome: codexHomeOf(hostEnv, inputs.home),
-  startDaemon: () => startCodexDaemon(hostEnv),
+  codexHome,
+  startDaemon: () => codexCommand(DAEMON_START_ARGS),
   boundThreads: () => store.codexThreads(),
-  listener: codexApprovals(approvals, (threadId) => store.codexAgent(threadId)),
+  listener: allOf(
+    codexApprovals(approvals, (threadId) => store.codexAgent(threadId)),
+    codexMail.listener,
+  ),
 });
 const environment = new LocalEnvironment({
   id: localEnvironmentId(store),

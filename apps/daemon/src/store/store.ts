@@ -359,6 +359,13 @@ export class Store {
     return row === undefined ? undefined : String(row.id);
   }
 
+  /** The thread a running Codex agent is bound to, if it is one. */
+  codexThread(agentId: string): string | undefined {
+    const sql = `SELECT ${THREAD} AS thread FROM agent_sessions WHERE ${RUNNING_CODEX} AND id = ?`;
+    const row = this.prepare(sql).get(agentId);
+    return row === undefined ? undefined : String(row.thread);
+  }
+
   /** The Codex threads the running Codex agents are bound to. */
   codexThreads(): string[] {
     const sql = `SELECT ${THREAD} AS thread FROM agent_sessions WHERE ${RUNNING_CODEX}`;

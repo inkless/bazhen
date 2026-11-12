@@ -4,8 +4,11 @@ import { ZodError } from "zod";
 import {
   approvalResult,
   CodexHarness,
+  messageText,
+  queueArgs,
   readApproval,
   readResolved,
+  readUserMessage,
   ThreadMismatch,
 } from "./index.ts";
 
@@ -132,5 +135,28 @@ describe("Codex approvals", () => {
       { decision: "accept" },
       { decision: "decline" },
     ]);
+  });
+});
+
+describe("Codex mail", () => {
+  it("queues a message on the app-server, or into the Codex home when none is up", () => {
+    expect([queueArgs("thr-1", "hi", "unix:///s.sock"), queueArgs("thr-1", "hi", null)]).toEqual([
+      ["queue", "--thread", "thr-1", "--remote", "unix:///s.sock", "--message", "hi"],
+      ["queue", "--thread", "thr-1", "--message", "hi"],
+    ]);
+  });
+
+  it("labels each message with its id, so the turn that takes it can be matched to it", () => {
+    expect(messageText("msg_1", "hi")).toBe("Message for you from Bazhen (msg_1):\nhi");
+  });
+
+  it("reads which messages a turn takes as the user's input, and nothing else", () => {
+    const text = `${messageText("msg_1", "hi")}\n\n${messageText("msg_2", "there")}`;
+    const item = { type: "userMessage", id: "u-1", content: [{ type: "text", text }] };
+    expect([
+      readUserMessage("item/started", { threadId: "thr-1", turnId: "t-1", item }),
+      readUserMessage("item/started", { threadId: "thr-1", item: { type: "agentMessage" } }),
+      readUserMessage("turn/started", { threadId: "thr-1", item }),
+    ]).toEqual([{ threadId: "thr-1", messageIds: ["msg_1", "msg_2"] }, null, null]);
   });
 });

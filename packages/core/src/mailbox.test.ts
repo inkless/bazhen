@@ -10,7 +10,7 @@ describe("mailbox message", () => {
   });
 
   it("waits in Codex's own queue until the turn carrying it starts", () => {
-    const parked = mailbox.next("queued", "accept_offline");
+    const parked = mailbox.next("queued", "accept");
     expect(parked).toBe("queued_in_codex");
     expect(() => mailbox.next(parked, "requeue")).toThrow(InvalidTransition);
     expect(mailbox.next(parked, "confirm")).toBe("delivered");
