@@ -3,6 +3,8 @@ import type { HarnessId, StateSnapshot } from "@bazhen/protocol";
 import { answer, launchAgent, sendMessage, watchState } from "./api.ts";
 import { Terminal } from "./Terminal.tsx";
 
+const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
 /**
  * Every agent, a way to launch one, what needs the human, and the selected agent's terminal and
  * mail. A plain stand-in for the dashboard and inbox, kept current by the event stream.
@@ -13,7 +15,7 @@ export function Fleet() {
   const [cwd, setCwd] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const failed = (e: unknown) => setError(String(e));
+  const failed = (e: unknown) => setError(messageOf(e));
 
   useEffect(
     () =>
@@ -22,7 +24,7 @@ export function Fleet() {
           setState(s);
           setError(null);
         },
-        (e: unknown) => setError(String(e)),
+        (e: unknown) => setError(messageOf(e)),
       ),
     [],
   );
