@@ -94,6 +94,19 @@ export function project(db: Statements, e: Recorded): void {
     case "agent.lost":
       advance(db, e.id, e.entityId, ["target.absent", "target.absent"]);
       return;
+    case "agent.exited": {
+      const { exit } = EVENTS[e.type].payload.parse(e.payload);
+      advance(db, e.id, e.entityId, ["process.exited", "process.exited"], {
+        terminal: { exit: JSON.stringify(exit) },
+      });
+      return;
+    }
+    case "agent.closing":
+      advance(db, e.id, e.entityId, ["close.requested", "close.requested"]);
+      return;
+    case "agent.closed":
+      advance(db, e.id, e.entityId, ["close.completed", "close.completed"]);
+      return;
     case "attachment.started": {
       const { terminalId, mode } = EVENTS[e.type].payload.parse(e.payload);
       db.prepare(

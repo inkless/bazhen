@@ -7,23 +7,13 @@ import {
   type SendMessageRequest,
 } from "@bazhen/protocol";
 import { wakeText } from "@bazhen/harness-claude-code";
-import type { Store } from "../store/store.ts";
+import { UnknownAgent, type Store } from "../store/store.ts";
 
 /** A reply that lets the hook go with no effect on the harness. */
 export const QUIET: HookReply = { exitCode: 0, stdout: "", stderr: "", offered: [] };
 
 /** How long the hook client has to write what it was handed and ack it. */
 const ACK_DEADLINE_MS = 10_000;
-
-/** A message for an agent this daemon doesn't know, or one with no way to take mail. */
-export class UnknownAgent extends Error {
-  readonly agentId: string;
-
-  constructor(agentId: string) {
-    super(`no agent ${agentId} that takes mail`);
-    this.agentId = agentId;
-  }
-}
 
 type Step =
   | "mailbox.offered"
@@ -59,7 +49,8 @@ export class Mailbox {
       { agentId, body: req.body },
       (r) => SendMessageResponse.parse(r),
       () => {
-        if (this.store.agent(agentId)?.harness !== "claude-code") throw new UnknownAgent(agentId);
+        if (this.store.agent(agentId)?.harness !== "claude-code")
+          throw new UnknownAgent(agentId, "that takes mail");
         const messageId = newId("msg");
         const eventId = this.store.append({
           type: "mailbox.queued",

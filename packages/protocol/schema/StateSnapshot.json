@@ -85,6 +85,18 @@
               }
             ]
           },
+          "generation": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "externalRef": {
             "anyOf": [
               {
@@ -117,6 +129,66 @@
                 "type": "null"
               }
             ]
+          },
+          "exit": {
+            "anyOf": [
+              {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "exited"
+                      },
+                      "code": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "code"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "signalled"
+                      },
+                      "signal": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "signal"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "unknown"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -127,7 +199,9 @@
           "cwd",
           "state",
           "terminalId",
-          "externalRef"
+          "generation",
+          "externalRef",
+          "exit"
         ],
         "additionalProperties": false
       }

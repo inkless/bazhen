@@ -11,9 +11,11 @@ import {
 } from "@bazhen/core";
 import { z } from "zod";
 import {
+  AgentState,
   EVENTS,
   ExternalRef,
   StateSnapshot,
+  TerminalState,
   type EnvironmentKind,
   type MailboxState,
   type ResetReason,
@@ -55,6 +57,35 @@ export interface OpenAttention {
   readonly id: AttentionId;
   readonly toolUseId: string | null;
   readonly mainAgent: boolean;
+}
+
+/** No agent the command can act on: none by that id or, given `qualifier`, none that is so. */
+export class UnknownAgent extends Error {
+  readonly agentId: string;
+
+  constructor(agentId: string, qualifier?: string) {
+    super(["no agent", agentId, qualifier].filter(Boolean).join(" "));
+    this.agentId = agentId;
+  }
+}
+
+export interface AgentTerminal {
+  readonly agentId: string;
+  readonly state: AgentState;
+  readonly terminalState: TerminalState | null;
+  readonly generation: number | null;
+  readonly runtime: RuntimeRef | null;
+}
+
+/** The runtime incarnation a terminal row records, or null while it has none. */
+function refFrom(
+  terminalId: unknown,
+  row: Record<string, SQLOutputValue> | undefined,
+): RuntimeRef | null {
+  if (typeof terminalId !== "string" || !isId("term", terminalId)) return null;
+  if (typeof row?.runtime !== "string") return null;
+  const locator: Record<string, string> = JSON.parse(String(row.locator));
+  return { terminalId, runtime: row.runtime, locator };
 }
 
 export class IdempotencyConflict extends Error {
@@ -220,9 +251,7 @@ export class Store {
   /** A terminal's current runtime incarnation, if it is running in one. */
   runtimeRef(terminalId: string): RuntimeRef | undefined {
     const row = this.prepare("SELECT runtime, locator FROM terminals WHERE id = ?").get(terminalId);
-    if (!isId("term", terminalId) || typeof row?.runtime !== "string") return undefined;
-    const locator: Record<string, string> = JSON.parse(String(row.locator));
-    return { terminalId, runtime: row.runtime, locator };
+    return refFrom(terminalId, row) ?? undefined;
   }
 
   /** The epoch of a terminal's last lease grant, or 0 if it has had none. */
@@ -325,19 +354,49 @@ export class Store {
    * answer is written in the transaction that records the mutation.
    */
   once<T>(key: string, request: unknown, parse: (stored: unknown) => T, mutate: () => T): T {
-    const asked = JSON.stringify(request);
-    const prior = this.recall(key);
-    if (prior !== undefined) {
-      const stored: unknown =
-        typeof prior === "object" && prior !== null ? Reflect.get(prior, "request") : undefined;
-      if (stored !== asked) throw new IdempotencyConflict(key);
-      return parse(Reflect.get(Object(prior), "response"));
-    }
+    const prior = this.replay(key, request, parse);
+    if (prior !== undefined) return prior;
     return this.transaction(() => {
       const response = mutate();
-      this.remember(key, { request: asked, response });
+      this.answered(key, request, response);
       return response;
     });
+  }
+
+  /** The first answer to `key`, parsed; undefined if none. The same key for another request is refused. */
+  replay<T>(key: string, request: unknown, parse: (stored: unknown) => T): T | undefined {
+    const prior = this.recall(key);
+    if (prior === undefined) return undefined;
+    const stored: unknown =
+      typeof prior === "object" && prior !== null ? Reflect.get(prior, "request") : undefined;
+    if (stored !== JSON.stringify(request)) throw new IdempotencyConflict(key);
+    return parse(Reflect.get(Object(prior), "response"));
+  }
+
+  /** Records the answer to `key`, for `replay`. */
+  answered(key: string, request: unknown, response: unknown): void {
+    this.remember(key, { request: JSON.stringify(request), response });
+  }
+
+  /**
+   * An agent and its terminal, found by either id, for a lifecycle change: the agent's state, the
+   * terminal's state and generation, and the runtime incarnation it is in.
+   */
+  agentTerminal(by: { agentId: string } | { terminalId: string }): AgentTerminal | undefined {
+    const [where, id] = "agentId" in by ? ["a.id", by.agentId] : ["t.id", by.terminalId];
+    const row = this.prepare(
+      `SELECT a.id, a.state AS agent_state, t.id AS terminal_id, t.state AS terminal_state,
+              t.generation, t.runtime, t.locator
+       FROM agent_sessions a LEFT JOIN terminals t ON t.id = a.terminal_id WHERE ${where} = ?`,
+    ).get(id);
+    if (row === undefined) return undefined;
+    return {
+      agentId: String(row.id),
+      state: AgentState.parse(row.agent_state),
+      terminalState: row.terminal_state === null ? null : TerminalState.parse(row.terminal_state),
+      generation: typeof row.generation === "number" ? row.generation : null,
+      runtime: refFrom(row.terminal_id, row),
+    };
   }
 
   /** Every projection the state snapshot shows, with the last event it reflects. */
@@ -350,14 +409,16 @@ export class Store {
           "SELECT id, kind FROM environments ORDER BY created_event_id",
         ).all(),
         agents: this.prepare(
-          `SELECT id, environment_id AS environmentId, harness, project, cwd, state,
-                  terminal_id AS terminalId, external_ref AS externalRef
-           FROM agent_sessions ORDER BY created_event_id`,
+          `SELECT a.id, a.environment_id AS environmentId, a.harness, a.project, a.cwd, a.state,
+                  a.terminal_id AS terminalId, t.generation, a.external_ref AS externalRef, t.exit
+           FROM agent_sessions a LEFT JOIN terminals t ON t.id = a.terminal_id
+           ORDER BY a.created_event_id`,
         )
           .all()
           .map((r) => ({
             ...r,
             externalRef: typeof r.externalRef === "string" ? JSON.parse(r.externalRef) : null,
+            exit: typeof r.exit === "string" ? JSON.parse(r.exit) : null,
           })),
         attention: this.prepare(
           `SELECT id, agent_session_id AS agentId, state, close_reason AS closeReason, summary
@@ -368,6 +429,14 @@ export class Store {
         ).all(),
       }),
     );
+  }
+
+  /** The id of the latest event of `type` about an entity, if there is one. */
+  lastEventId(entityId: string, type: EventType): number | undefined {
+    const row = this.prepare(
+      "SELECT max(id) AS id FROM events WHERE entity_id = ? AND type = ?",
+    ).get(entityId, type);
+    return typeof row?.id === "number" ? row.id : undefined;
   }
 
   /** This database's epoch, which every cursor into its log carries. */

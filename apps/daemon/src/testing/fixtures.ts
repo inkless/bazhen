@@ -44,22 +44,27 @@ export function fakeEnvironment(
     health: async () => ({ state: "reachable", version: null }),
     inventory: async () => present(),
     launch,
+    close: async () => {},
+    onExit: () => () => {},
   };
 }
 
-/** A store with one running Claude Code agent and its terminal. */
-export async function withAgent() {
+/** A store with one running Claude Code agent and its terminal, in `environment`. */
+export async function withAgent(
+  environment: (store: Store) => EnvironmentAdapter = (store) => fakeEnvironment(store),
+) {
   const path = tempDb();
   const store = Store.open(path);
+  const env = environment(store);
   const launched = await launchAgent(
-    { store, environment: fakeEnvironment(store), size: { cols: 80, rows: 24 } },
+    { store, environment: env, size: { cols: 80, rows: 24 } },
     { idempotencyKey: "launch", harness: "claude-code", cwd: "/w" },
   );
   const { agentId, terminalId } = launched;
   if (!isId("agent", agentId) || terminalId === null || !isId("term", terminalId)) {
     throw new Error("launched no agent");
   }
-  return { path, store, agentId, terminalId };
+  return { path, store, agentId, terminalId, environment: env };
 }
 
 /** A view that came and went: two events no projection points at once it has ended. */

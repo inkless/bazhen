@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { HOOK_REPLY_MAX_BYTES } from "@bazhen/protocol";
 import { Store } from "../store/store.ts";
 import { withAgent } from "../testing/fixtures.ts";
-import { Mailbox, UnknownAgent } from "./mailbox.ts";
+import { UnknownAgent } from "../store/store.ts";
+import { Mailbox } from "./mailbox.ts";
 
 const stateOf = (store: Store, id: string) =>
   store.snapshot().messages.find((m) => m.id === id)?.state;

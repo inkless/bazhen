@@ -10,6 +10,7 @@ import { CodexHarness } from "@bazhen/harness-codex";
 import { TmuxServer } from "@bazhen/host-guard";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
 import { launchAgent, localEnvironmentId } from "./agents/launch.ts";
+import { Lifecycle } from "./agents/lifecycle.ts";
 import { reconcile } from "./agents/reconcile.ts";
 import { CodexChannel, codexHomeOf, startCodexDaemon } from "./codex/channel.ts";
 import { retire } from "./events/retention.ts";
@@ -88,6 +89,8 @@ if (store.codexThreads().length > 0) {
     .resume()
     .catch((err: unknown) => console.warn(`codex: could not reconnect: ${String(err)}`));
 }
+const lifecycle = new Lifecycle(store, environment);
+lifecycle.watch();
 const allowedHosts = [`${HOSTNAME}:${port}`, `localhost:${port}`];
 // The web dev server proxies to the daemon, and the browser's requests keep its origin. It is
 // allowed only when the dev scripts name its port; a built daemon serves the client itself.
@@ -106,6 +109,7 @@ const app = createApp({
   launch: (req) => launchAgent({ store, environment, size: DEFAULT_SIZE }, req),
   send: (agentId, req) => mailbox.send(agentId, req),
   answer: (attentionId, req) => approvals.answer(attentionId, req),
+  close: (agentId, req) => lifecycle.close(agentId, req),
 });
 
 const hub = new TerminalHub(runtime, storeLog(store));

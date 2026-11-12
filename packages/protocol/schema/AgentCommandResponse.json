@@ -1,0 +1,24 @@
+{
+  "$id": "AgentCommandResponse",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "agentId": {
+      "type": "string",
+      "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+    },
+    "eventIds": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "exclusiveMinimum": 0,
+        "maximum": 9007199254740991
+      }
+    }
+  },
+  "required": [
+    "agentId",
+    "eventIds"
+  ],
+  "additionalProperties": false
+}

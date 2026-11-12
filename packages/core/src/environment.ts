@@ -1,5 +1,5 @@
 import type { AgentLaunchRequest } from "./agent.ts";
-import type { EnvironmentKind, ExternalRef, HarnessId } from "@bazhen/protocol";
+import type { EnvironmentKind, ExitStatus, ExternalRef, HarnessId } from "@bazhen/protocol";
 import type { AgentSessionId, EnvironmentId, TerminalId } from "./ids.ts";
 import type { RuntimeRef, Size } from "./runtime.ts";
 
@@ -46,6 +46,13 @@ export class UnsupportedHarness extends Error {
   }
 }
 
+/** The agent has no terminal to act on, though its state says it should. */
+export class NoTerminal extends Error {
+  constructor() {
+    super("the agent has no terminal recorded");
+  }
+}
+
 /** The environment could not start the agent; the agent is recorded as failed. */
 export class LaunchFailed extends Error {
   readonly agentId: AgentSessionId;
@@ -66,4 +73,8 @@ export interface EnvironmentAdapter {
   health(): Promise<EnvironmentHealth>;
   inventory(): Promise<AgentInventoryEntry[]>;
   launch(launch: AgentLaunch): Promise<AgentRefs>;
+  /** Ends what runs the agent. What the environment positively no longer has counts as ended. */
+  close(refs: AgentRefs): Promise<void>;
+  /** Reports every terminal whose process has ended, as the runtime does (RuntimeAdapter.onExit). */
+  onExit(cb: (ref: RuntimeRef, status: ExitStatus) => void): () => void;
 }
