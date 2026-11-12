@@ -174,8 +174,19 @@ export function approvalReply(decision: ApprovalDecision): string {
 
 /**
  * What a wake hands the model: Claude Code shows it as a system notification, not user input,
- * and its UserPromptSubmit carries it verbatim, so each message's id confirms it was seen.
+ * and its UserPromptSubmit carries it verbatim, so each message's id confirms it was seen. A
+ * message offered before may already have reached the agent, and says so (foundation-design §5.6).
  */
-export function wakeText(messages: readonly { id: string; body: string }[]): string {
-  return messages.map((m) => `Message for you from Bazhen (${m.id}):\n${m.body}`).join("\n\n");
+export function wakeText(
+  messages: readonly { id: string; body: string; firstOffered: string | null }[],
+): string {
+  return messages
+    .map((m) => {
+      const again =
+        m.firstOffered === null
+          ? ""
+          : `(possible re-delivery of ${m.id}, first offered ${m.firstOffered})\n`;
+      return `Message for you from Bazhen (${m.id}):\n${again}${m.body}`;
+    })
+    .join("\n\n");
 }

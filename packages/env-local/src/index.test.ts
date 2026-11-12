@@ -78,4 +78,25 @@ describe("local environment", () => {
     await expect(environment(runtime).launch(launch("codex"))).rejects.toThrow(UnsupportedHarness);
     expect(created).toEqual([]);
   });
+
+  it("is reachable only while its tmux server runs, and unknown while none does", async () => {
+    const states = await Promise.all(
+      (["healthy", "not-running", "unreachable"] as const).map(
+        async (state) =>
+          (await environment(fakeRuntime({ state, version: null }).runtime).health()).state,
+      ),
+    );
+    expect(states).toEqual(["reachable", "unknown", "unreachable"]);
+  });
+
+  it("lists only agent terminals, by the agent their tags name", async () => {
+    const agentId = newId("agent");
+    const ref = { terminalId: newId("term"), runtime: "fake", locator: {} };
+    const shell = { terminalId: newId("term"), runtime: "fake", locator: {} };
+    const { runtime } = fakeRuntime({ state: "healthy", version: null }, [
+      { ref, tags: { kind: "agent", agentId }, dead: false, exitStatus: null },
+      { ref: shell, tags: { kind: "shell" }, dead: false, exitStatus: null },
+    ]);
+    expect(await environment(runtime).inventory()).toEqual([{ agentId, ref, dead: false }]);
+  });
 });

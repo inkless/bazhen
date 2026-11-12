@@ -137,6 +137,12 @@ export const MIGRATIONS: readonly Migration[] = [
       ) STRICT;
     `,
   },
+  {
+    version: 5,
+    sql: `
+      ALTER TABLE mailbox ADD COLUMN first_offered_event_id INTEGER REFERENCES events (id);
+    `,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

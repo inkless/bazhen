@@ -9,6 +9,7 @@ import { LocalEnvironment } from "@bazhen/env-local";
 import { ClaudeCodeHarness } from "@bazhen/harness-claude-code";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
 import { launchAgent, localEnvironmentId } from "./agents/launch.ts";
+import { reconcile } from "./agents/reconcile.ts";
 import { TerminalHub } from "./stream/hub.ts";
 import { endOpenAttachments, storeLog } from "./stream/log.ts";
 import { streamUpgrades } from "./stream/server.ts";
@@ -39,7 +40,10 @@ const hostEnv = filterEnv(process.env).env;
 const store = Store.open(join(paths.data, "bazhen.db"));
 const mailbox = new Mailbox(store);
 const approvals = new Approvals(store);
+// What the daemon was holding when it last stopped is gone with its sockets (§7 step 2).
 endOpenAttachments(store);
+mailbox.requeueInFlight();
+approvals.closeAbandoned();
 const runtime = new TmuxRuntime({
   socket: paths.tmuxSocket,
   pty: nodePtySpawner,
@@ -62,6 +66,7 @@ const environment = new LocalEnvironment({
   ],
   socket: paths.socket,
 });
+await reconcile(store, environment);
 const allowedHosts = [`${HOSTNAME}:${port}`, `localhost:${port}`];
 // The web dev server proxies to the daemon, and the browser's requests keep its origin. It is
 // allowed only when the dev scripts name its port; a built daemon serves the client itself.

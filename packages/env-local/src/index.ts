@@ -1,12 +1,15 @@
 import type {
+  AgentInventoryEntry,
   AgentLaunch,
   AgentRefs,
   EnvironmentAdapter,
+  EnvironmentHealth,
+  EnvironmentHealthState,
   EnvironmentId,
   HarnessAdapter,
   RuntimeAdapter,
 } from "@bazhen/core";
-import type { HarnessId } from "@bazhen/protocol";
+import type { HarnessId, RuntimeHealthState } from "@bazhen/protocol";
 import { UnsupportedHarness } from "@bazhen/core";
 
 export interface LocalEnvironmentOptions {
@@ -21,6 +24,12 @@ export interface LocalEnvironmentOptions {
  * The machine Bazhen runs on: agents are terminals in the private runtime, each running one
  * harness's TUI (foundation-design §8.1).
  */
+const HEALTH: Record<RuntimeHealthState, EnvironmentHealthState> = {
+  healthy: "reachable",
+  "not-running": "unknown",
+  unreachable: "unreachable",
+};
+
 export class LocalEnvironment implements EnvironmentAdapter {
   readonly kind = "local";
   readonly id: EnvironmentId;
@@ -31,6 +40,22 @@ export class LocalEnvironment implements EnvironmentAdapter {
     this.id = opts.id;
     this.harnesses = opts.harnesses.map((h) => h.id);
     this.opts = opts;
+  }
+
+  /**
+   * Only a running server can say an agent is gone (§4.4). No server running says nothing yet:
+   * it can't be told apart from a server that died taking its agents, until the server's pid and
+   * start time are recorded.
+   */
+  async health(): Promise<EnvironmentHealth> {
+    const { state, version } = await this.opts.runtime.health();
+    return { state: HEALTH[state], version };
+  }
+
+  async inventory(): Promise<AgentInventoryEntry[]> {
+    return (await this.opts.runtime.inventory()).flatMap((e) =>
+      e.tags.kind === "agent" ? [{ agentId: e.tags.agentId, ref: e.ref, dead: e.dead }] : [],
+    );
   }
 
   async launch({ agentId, terminalId, request, size }: AgentLaunch): Promise<AgentRefs> {

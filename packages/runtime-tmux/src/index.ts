@@ -298,8 +298,11 @@ function decodeTags(row: Row): { terminalId: TerminalId; tags: TerminalTags } | 
   };
 }
 
-/** tmux's answer when its server isn't running, or its socket is gone. */
-const noServer = (err: TmuxError) => /no server running|error connecting/.test(err.stderr);
+/** The socket is missing or nobody listens on it; any other failure says nothing about the server. */
+const noServer = (err: TmuxError) =>
+  /no server running|error connecting to .* \((No such file or directory|Connection refused)\)/.test(
+    err.stderr,
+  );
 
 const windowOf = (session: string) => `${session}:0`;
 
