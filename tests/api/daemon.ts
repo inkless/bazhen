@@ -10,7 +10,12 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { WebSocket } from "ws";
-import { LaunchAgentResponse, PROTOCOL_VERSION, StreamServerFrame } from "@bazhen/protocol";
+import {
+  EventFrame,
+  LaunchAgentResponse,
+  PROTOCOL_VERSION,
+  StreamServerFrame,
+} from "@bazhen/protocol";
 import { agentHomes, codexDaemonStarted, loginEnv } from "../support/agent-env.ts";
 import { replay } from "./fixtures/browser.ts";
 
@@ -167,15 +172,30 @@ export class Daemon {
       },
     );
     const view = new View(ws);
-    await new Promise<void>((resolve, reject) => {
-      ws.once("open", () => resolve());
-      ws.once("unexpected-response", (_req, res) =>
-        reject(new Error(`refused: ${res.statusCode}`)),
-      );
-      ws.once("error", reject);
-    });
+    await opened(ws);
     view.frame({ type: "hello", protocolVersion: PROTOCOL_VERSION, mode, ...size });
     return view;
+  }
+
+  /** Opens the event stream as a browser would, resuming after `cursor`. */
+  async events(
+    cursor: { epoch: string; eventId: number },
+    opts: { origin?: string; version?: string; path?: string } = {},
+  ): Promise<EventClient> {
+    const query = new URLSearchParams({
+      v: opts.version ?? PROTOCOL_VERSION,
+      epoch: cursor.epoch,
+      after: String(cursor.eventId),
+    });
+    const ws = new WebSocket(
+      `${this.url.replace("http", "ws")}${opts.path ?? "/v1/events"}?${query}`,
+      {
+        headers: { origin: opts.origin ?? this.url },
+      },
+    );
+    const client = new EventClient(ws);
+    await opened(ws);
+    return client;
   }
 
   /** Whether a file exists in the agents' work directory. */
@@ -315,6 +335,48 @@ export class Daemon {
     await codexStopped;
     // The agents' processes may still be writing their state as the server goes down.
     rmSync(this.home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+}
+
+/** Resolves once the upgrade is accepted; a refusal rejects with its status. */
+function opened(ws: WebSocket): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    ws.once("open", () => resolve());
+    ws.once("unexpected-response", (_req, res) => reject(new Error(`refused: ${res.statusCode}`)));
+    ws.once("error", reject);
+  });
+}
+
+/** One open event stream: every frame the daemon sent it. */
+export class EventClient {
+  readonly frames: EventFrame[] = [];
+  private closed = false;
+  private readonly ws: WebSocket;
+
+  constructor(ws: WebSocket) {
+    this.ws = ws;
+    ws.on("message", (data: Buffer) => {
+      this.frames.push(EventFrame.parse(JSON.parse(data.toString("utf8"))));
+    });
+    ws.on("close", () => (this.closed = true));
+  }
+
+  /** The ids of the events received, in the order they arrived. */
+  ids(): number[] {
+    return this.frames.flatMap((f) => (f.type === "event" ? [f.event.id] : []));
+  }
+
+  types(): string[] {
+    return this.frames.flatMap((f) => (f.type === "event" ? [f.event.type] : []));
+  }
+
+  /** Whether the daemon has closed the stream. */
+  ended(): boolean {
+    return this.closed;
+  }
+
+  close(): void {
+    this.ws.close();
   }
 }
 
