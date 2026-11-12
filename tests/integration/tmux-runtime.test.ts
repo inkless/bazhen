@@ -176,6 +176,32 @@ describe("tmux runtime on a private server", () => {
     stream.close();
   });
 
+  it("keeps blank lines at the end of the history", async () => {
+    const ref = await runtime.create(
+      spec([
+        "sh",
+        "-c",
+        'seq 1 40; echo; echo; echo; for i in $(seq 1 29); do echo "screen $i"; done; printf "end"; sleep 30',
+      ]),
+    );
+    await expect.poll(() => screen(ref.locator.session), { timeout: 3000 }).toContain("end");
+    const { stream, history } = await runtime.attach(ref, size, 6);
+    expect(history.split("\n")).toEqual(["38", "39", "40", "", "", ""]);
+    stream.close();
+  });
+
+  it("attaches with no history for a program on its alternate screen", async () => {
+    const ref = await runtime.create(
+      spec(["sh", "-c", "seq 1 100; printf '\\033[?1049hon the alternate screen'; sleep 30"]),
+    );
+    await expect
+      .poll(() => screen(ref.locator.session), { timeout: 3000 })
+      .toContain("on the alternate screen");
+    const { stream, history } = await runtime.attach(ref, size, 50);
+    expect(history).toBe("");
+    stream.close();
+  });
+
   it("attaches with no history when the program's output still fits on the screen", async () => {
     const ref = await runtime.create(spec(["sh", "-c", "echo only-line; sleep 30"]));
     await expect.poll(() => screen(ref.locator.session), { timeout: 3000 }).toContain("only-line");

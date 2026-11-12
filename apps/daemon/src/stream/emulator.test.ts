@@ -1,7 +1,7 @@
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import headless from "@xterm/headless";
 import { describe, expect, it } from "vitest";
-import { ScreenEmulator } from "./emulator.ts";
+import { ScreenEmulator, TerminalClosed } from "./emulator.ts";
 
 const ESC = "\x1b";
 const ST = `${ESC}\\`;
@@ -108,6 +108,10 @@ describe("the daemon's attach snapshot", () => {
     expect(cursor(await replayed("ab\r\ncde\x1b[1;2H"))).toEqual([1, 0]);
   });
 
+  it("puts the cursor back on the last column after a full row, not one short of it", async () => {
+    expect(cursor(await replayed(`${"x".repeat(20)}\x1b[1;20H`))).toEqual([19, 0]);
+  });
+
   it("keeps a cursor waiting to wrap at the end of a full line", async () => {
     const browser = await replayed("x".repeat(20));
     await new Promise<void>((resolve) => browser.write("y", resolve));
@@ -139,6 +143,30 @@ describe("the daemon's attach snapshot", () => {
         (mode) => !snapshot.includes(mode),
       ),
     ).toEqual([]);
+  });
+
+  it("fails a snapshot once the terminal has closed, even one already waiting", async () => {
+    const emulator = new ScreenEmulator(size, () => {});
+    emulator.write(Buffer.from("x".repeat(100_000)));
+    const waiting = emulator.snapshot();
+    emulator.dispose();
+    await expect(waiting).rejects.toThrow(TerminalClosed);
+    await expect(emulator.snapshot()).rejects.toThrow(TerminalClosed);
+  });
+
+  it("keeps a history line's colours off the screen drawn below it", async () => {
+    const browser = browserTerminal();
+    const emulator = new ScreenEmulator(size, () => {});
+    emulator.seed("\x1b[31mred history");
+    emulator.write(Buffer.from("plain"));
+    const snapshot = await emulator.snapshot();
+    emulator.dispose();
+    await new Promise<void>((resolve) => browser.write(snapshot, resolve));
+    const row = lines(browser).indexOf("plain");
+    expect([row > 0, browser.buffer.active.getLine(row)?.getCell(0)?.isFgDefault()]).toEqual([
+      true,
+      true,
+    ]);
   });
 
   it("matches the screen at its new size after a resize", async () => {

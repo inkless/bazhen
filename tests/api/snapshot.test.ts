@@ -7,6 +7,10 @@ const size = { cols: 100, rows: 30 };
 let daemon: Daemon;
 beforeAll(async () => {
   daemon = await Daemon.start();
+  // tmux keeps 2,000 lines by default, which would hide the daemon's own limit. The setting
+  // applies to terminals created after it, and needs the server a first terminal starts.
+  await daemon.program(["sleep", "600"]);
+  daemon.tmux("set-option", "-g", "history-limit", "5000");
 });
 afterAll(async () => {
   await daemon?.stop();
@@ -47,6 +51,44 @@ describe("what a view shows when it opens", () => {
       captured(daemon.capture(agentId, 2000)),
       daemon.cursor(agentId),
     ]);
+    expect(shown.lines.length - shown.screen.length).toBe(2000);
+    first.close();
+    late.close();
+  });
+
+  it("puts the cursor where a view open all along has it, after a full line", async () => {
+    const { agentId, terminalId } = await daemon.program([
+      "sh",
+      "-c",
+      `printf '%0${size.cols}d' 0; sleep 600`,
+    ]);
+    await waitUntil(() => daemon.screen(agentId).includes("0".repeat(size.cols)), "the line");
+    const first = await opened(terminalId, "interactive");
+    const late = await opened(terminalId, "observe");
+    // tmux's own cursor waits to wrap past the last column; its client draws it on that column.
+    expect([
+      daemon.cursor(agentId),
+      (await replay(late.snapshot(), size)).cursor,
+      (await replay(first.received(), size)).cursor,
+    ]).toEqual([
+      [size.cols, 0],
+      [size.cols - 1, 0],
+      [size.cols - 1, 0],
+    ]);
+    first.close();
+    late.close();
+  });
+
+  it("lays out rows holding emoji and wide characters exactly as tmux does", async () => {
+    const { agentId, terminalId } = await daemon.program([
+      "sh",
+      "-c",
+      "printf 'a😀b  c\\n日本語x\\nflag 🇯🇵 end\\n\\033[4;10Hmoved'; sleep 600",
+    ]);
+    await waitUntil(() => daemon.screen(agentId).includes("moved"), "the output");
+    const first = await opened(terminalId, "interactive");
+    const late = await opened(terminalId, "observe");
+    expect((await replay(late.snapshot(), size)).screen).toEqual(captured(daemon.capture(agentId)));
     first.close();
     late.close();
   });

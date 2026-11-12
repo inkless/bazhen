@@ -25,6 +25,14 @@ const TRACKED_MODES: ReadonlyMap<number, boolean> = new Map([
   [1015, false],
 ]);
 
+/** The terminal closed before a snapshot of it could be taken. */
+export class TerminalClosed extends Error {
+  constructor() {
+    super("the terminal closed");
+    this.name = "TerminalClosed";
+  }
+}
+
 /**
  * The daemon's copy of a terminal's screen and history, fed everything its runtime client
  * prints. It answers the client's terminal queries (foundation-design §5.4): tmux holds every
@@ -37,6 +45,9 @@ export class ScreenEmulator {
   private modes = new Map(TRACKED_MODES);
   /** The scroll region tmux set, or null for the whole screen. */
   private region: readonly [number, number] | null = null;
+  private disposed = false;
+  /** Snapshots waiting their turn in the write queue, failed if the terminal closes first. */
+  private readonly pending = new Set<(err: TerminalClosed) => void>();
 
   constructor(size: Size, reply: (bytes: Uint8Array) => void) {
     this.term = new headless.Terminal({
@@ -99,7 +110,8 @@ export class ScreenEmulator {
   /** Puts tmux's history above the screen, oldest first, before the runtime client draws it. */
   seed(history: string): void {
     if (history === "") return;
-    this.term.write(`${history.split("\n").join("\r\n")}${"\r\n".repeat(this.term.rows)}`);
+    // The reset keeps the last history line's attributes off the screen drawn below it.
+    this.term.write(`${history.split("\n").join("\r\n")}${ESC}[0m${"\r\n".repeat(this.term.rows)}`);
   }
 
   write(bytes: Uint8Array): void {
@@ -111,8 +123,12 @@ export class ScreenEmulator {
    * before this call: writes are queued, and serializing waits its turn.
    */
   snapshot(): Promise<string> {
-    return new Promise((resolve) => {
+    if (this.disposed) return Promise.reject(new TerminalClosed());
+    return new Promise((resolve, reject) => {
+      this.pending.add(reject);
       this.term.write("", () => {
+        this.pending.delete(reject);
+        if (this.disposed) return;
         resolve(this.serializer.serialize({ scrollback: HISTORY_LINES }) + this.state());
       });
     });
@@ -128,21 +144,29 @@ export class ScreenEmulator {
   }
 
   dispose(): void {
+    this.disposed = true;
+    for (const reject of this.pending) reject(new TerminalClosed());
+    this.pending.clear();
     this.term.dispose();
   }
 
   /**
-   * What the serializer leaves out. The scroll region is set inside a saved cursor, since
-   * setting it homes the cursor. A cursor waiting to wrap comes back at the last column instead,
-   * which matters only if tmux left it there with a scroll region set.
+   * What the serializer leaves out or gets wrong. It restores the cursor with relative moves,
+   * which land one column short after a full row; an absolute position fixes that, except for a
+   * cursor waiting to wrap, which the serializer leaves right and a position would lose. Setting
+   * the scroll region homes the cursor, so the position follows it; a waiting cursor inside a
+   * scroll region comes back at the last column instead, which tmux does not leave at rest.
    */
   private state(): string {
-    const region =
-      this.region === null ? "" : `${ESC}7${ESC}[${this.region[0]};${this.region[1]}r${ESC}8`;
+    const { cursorX: x, cursorY: y } = this.term.buffer.active;
+    const waiting = x >= this.term.cols;
+    const region = this.region === null ? "" : `${ESC}[${this.region[0]};${this.region[1]}r`;
+    const cursor =
+      waiting && region === "" ? "" : `${ESC}[${y + 1};${Math.min(x, this.term.cols - 1) + 1}H`;
     const modes = [...this.modes]
       .filter(([mode, on]) => TRACKED_MODES.get(mode) !== on)
       .map(([mode, on]) => `${ESC}[?${mode}${on ? "h" : "l"}`)
       .join("");
-    return region + modes;
+    return region + cursor + modes;
   }
 }

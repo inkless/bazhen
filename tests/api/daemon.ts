@@ -193,17 +193,9 @@ export class Daemon {
 
   /** Where tmux has the program's cursor: column and row on the screen, from zero. */
   cursor(agentId: string): [number, number] {
-    const at = "#{cursor_x} #{cursor_y}";
-    const [x = 0, y = 0] = this.tmux(
-      "display-message",
-      "-p",
-      "-t",
-      this.requireSession(agentId),
-      at,
-    )
-      .trim()
-      .split(" ")
-      .map(Number);
+    const session = this.requireSession(agentId);
+    const out = this.tmux("display-message", "-p", "-t", session, "#{cursor_x} #{cursor_y}");
+    const [x = 0, y = 0] = out.trim().split(" ").map(Number);
     return [x, y];
   }
 

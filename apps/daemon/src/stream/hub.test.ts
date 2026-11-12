@@ -9,7 +9,8 @@ import {
   type TerminalId,
 } from "@bazhen/core";
 import type { AttachmentMode, StreamServerFrame } from "@bazhen/protocol";
-import { TerminalHub, type AttachmentLog, type Viewer } from "./hub.ts";
+import { TerminalClosed } from "./emulator.ts";
+import { TerminalHub, ViewEnded, type AttachmentLog, type Viewer } from "./hub.ts";
 
 /** What a browser shows after writing everything a view was sent: each non-blank line. */
 async function screenOf(sent: readonly string[]): Promise<string[]> {
@@ -131,6 +132,31 @@ describe("terminal hub", () => {
       ["earlier output", "one two three"],
       ["earlier output", "one two three"],
     ]);
+  });
+
+  it("never tells a view it is attached when the terminal closes while it opens", async () => {
+    const rt = fakeRuntime();
+    const hub = new TerminalHub(rt.runtime, memoryLog().log);
+    await hub.join(ref, viewer().v, size);
+    const late = viewer();
+    await expect(
+      hub.join(
+        ref,
+        emittingOnSnapshot(late.v, () => rt.end()),
+        size,
+      ),
+    ).rejects.toThrow(TerminalClosed);
+    expect([late.frames.some((f) => f.type === "attached"), late.closed()]).toEqual([false, true]);
+  });
+
+  it("never tells a view it is attached when the terminal closes as its screen is sent", async () => {
+    const rt = fakeRuntime();
+    const hub = new TerminalHub(rt.runtime, memoryLog().log);
+    await hub.join(ref, viewer().v, size);
+    const late = viewer();
+    const closingOnSend: Viewer = { ...late.v, send: () => rt.end() };
+    await expect(hub.join(ref, closingOnSend, size)).rejects.toThrow(ViewEnded);
+    expect(late.frames.some((f) => f.type === "attached")).toBe(false);
   });
 
   it("tells a view it is attached only once it has its screen and is ready for input", async () => {

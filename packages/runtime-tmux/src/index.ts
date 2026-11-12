@@ -125,13 +125,18 @@ export class TmuxRuntime implements RuntimeAdapter {
   }
 
   private async tmux(...args: string[]): Promise<string> {
+    return (await this.tmuxOutput(args)).trimEnd();
+  }
+
+  /** What tmux printed, untrimmed: blank lines at its end can be content. */
+  private async tmuxOutput(args: readonly string[]): Promise<string> {
     const argv = ["-L", this.opts.socket, "-f", this.opts.configFile, ...args];
     try {
       const { stdout } = await run(this.bin, argv, {
         env: this.opts.env,
         timeout: TMUX_TIMEOUT_MS,
       });
-      return stdout.trimEnd();
+      return stdout;
     } catch (cause) {
       throw new TmuxError(args, cause);
     }
@@ -216,33 +221,36 @@ export class TmuxRuntime implements RuntimeAdapter {
     const session = sessionOf(ref);
     const resizeWindow = (next: Size) => this.tmux(...resizeArgs(session, next));
     if (size !== null) await resizeWindow(size);
-    const [cols = 80, rows = 24, held = 0] = (
+    const [cols = 80, rows = 24, held = 0, alternate = 0] = (
       await this.tmux(
         "display-message",
         "-p",
         "-t",
         windowOf(session),
-        "#{window_width} #{window_height} #{history_size}",
+        "#{window_width} #{window_height} #{history_size} #{alternate_on}",
       )
     )
       .split(" ")
       .map(Number);
-    // With no history, `-E -1` would capture the screen's first line instead of nothing.
-    const lines = Math.min(historyLines, held);
+    // A program on its alternate screen has no history of its own: tmux's is the main screen's,
+    // behind it. With no history, `-E -1` would capture the screen's first line instead.
+    const lines = alternate === 1 ? 0 : Math.min(historyLines, held);
     const history =
       lines > 0
-        ? await this.tmux(
-            "capture-pane",
-            "-p",
-            "-e",
-            "-J",
-            "-t",
-            windowOf(session),
-            "-S",
-            `-${lines}`,
-            "-E",
-            "-1",
-          )
+        ? (
+            await this.tmuxOutput([
+              "capture-pane",
+              "-p",
+              "-e",
+              "-J",
+              "-t",
+              windowOf(session),
+              "-S",
+              `-${lines}`,
+              "-E",
+              "-1",
+            ])
+          ).replace(/\n$/, "")
         : "";
     const proc = this.opts.pty.spawn(
       [this.bin, "-L", this.opts.socket, "attach-session", "-t", session],

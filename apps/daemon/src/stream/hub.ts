@@ -24,6 +24,14 @@ export interface Viewer {
   close(): void;
 }
 
+/** A view ended before it finished opening; it was never told it is attached. */
+export class ViewEnded extends Error {
+  constructor() {
+    super("the view ended while it opened");
+    this.name = "ViewEnded";
+  }
+}
+
 export type EndReason = EventPayload<"attachment.ended">["reason"];
 
 /** What the hub records about attachments and leases; the daemon writes it to the store. */
@@ -97,6 +105,8 @@ export class TerminalHub {
     viewer.notify(leaseFrame(watched, id));
     viewer.notify({ type: "snapshot_start" });
     viewer.send(Buffer.from(await snapshot));
+    // The view may have left, or the terminal closed, while its snapshot was sent.
+    if (!watched.viewers.has(id)) throw new ViewEnded();
     viewer.notify({ type: "snapshot_end" });
     for (const bytes of queue) viewer.send(bytes);
     delete entry.queue;
@@ -234,6 +244,8 @@ export class TerminalHub {
     if (next.cols === watched.size.cols && next.rows === watched.size.rows) return;
     watched.resizing = watched.stream
       .resize(next)
+      // Before the client's redraw at the new size: the PTY resize that prompts it is the last
+      // step of the stream's resize, and no output is delivered before this continuation runs.
       .then(() => {
         watched.size = next;
         watched.emulator.resize(next);

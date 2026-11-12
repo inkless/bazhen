@@ -58,9 +58,10 @@ export interface RuntimeStream {
 export interface Attached {
   readonly stream: RuntimeStream;
   /**
-   * The history above the screen as the client attached, oldest first, as plain VT bytes: read
-   * after the terminal took the client's size, which can push screen lines into it, and before the
-   * client draws the screen. Read on demand only, never polled (foundation-design §4.2, §5.9).
+   * The history above the screen as the client attached, oldest first: lines separated by `\n`,
+   * with their SGR attributes, and empty for a program on its alternate screen. Read after the
+   * terminal took the client's size, which can push screen lines into it, and before the client
+   * draws the screen. Read on demand only, never polled (foundation-design §4.2, §5.9).
    */
   readonly history: string;
 }
