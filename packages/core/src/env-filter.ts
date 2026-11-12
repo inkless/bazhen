@@ -1,17 +1,26 @@
 /**
  * What an agent must not inherit from the environment `bazhen start` ran in. Everything else is
- * kept, so agents see what a new terminal tab would (foundation-design §9.5). A trailing `*`
- * matches a prefix.
+ * kept, so agents see what a new terminal tab would (foundation-design §9.5). Harness session
+ * variables are listed by name, so the user's own harness configuration (CLAUDE_CODE_USE_BEDROCK,
+ * CODEX_HOME) passes through. A trailing `*` matches a prefix.
  */
 export const ENV_DENYLIST: readonly string[] = [
   // Bazhen and tmux: Bazhen sets its own afresh for each agent.
   "BAZHEN_*",
   "TMUX",
   "TMUX_PANE",
-  // Harness sessions: a nested harness would believe it runs inside its parent.
+  // Harness sessions: a nested harness would believe it runs inside its parent, or send its
+  // messages to the parent's socket.
   "CLAUDECODE",
-  "CLAUDE_CODE_*",
-  "CODEX_*",
+  "CLAUDE_CODE_SESSION_ID",
+  "CLAUDE_CODE_ENTRYPOINT",
+  "CLAUDE_CODE_CHILD_SESSION",
+  "CLAUDE_CODE_MESSAGING_SOCKET",
+  "CLAUDE_CODE_MESSAGING_TOKEN",
+  "CLAUDE_PID",
+  "CODEX_THREAD_ID",
+  "CODEX_SANDBOX",
+  "CODEX_SANDBOX_NETWORK_DISABLED",
   // Terminal presentation: tmux sets its own, and a foreign value cost Codex its true colour.
   "TERM",
   "TERMINFO",
@@ -30,9 +39,6 @@ export const ENV_DENYLIST: readonly string[] = [
   "SHLVL",
   "_",
 ];
-
-/** Kept despite the denylist: the user's Codex home is configuration, not session state. */
-export const ENV_PASSTHROUGH: readonly string[] = ["CODEX_HOME"];
 
 export interface EnvRules {
   /** Always removed, whatever the passthrough says (`agents.env.deny`). */
@@ -54,7 +60,7 @@ export function filterEnv(
   source: Readonly<Record<string, string | undefined>>,
   rules: EnvRules = {},
 ): FilteredEnv {
-  const passthrough = [...ENV_PASSTHROUGH, ...(rules.passthrough ?? [])];
+  const passthrough = rules.passthrough ?? [];
   const denyingPattern = (name: string) =>
     rules.deny?.find((p) => matches(name, p)) ??
     (passthrough.some((p) => matches(name, p))
