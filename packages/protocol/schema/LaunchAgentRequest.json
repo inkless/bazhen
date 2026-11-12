@@ -17,8 +17,7 @@
     },
     "cwd": {
       "type": "string",
-      "format": "starts_with",
-      "pattern": "^\\/.*"
+      "minLength": 1
     },
     "project": {
       "type": "string",

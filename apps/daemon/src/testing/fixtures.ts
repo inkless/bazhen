@@ -65,8 +65,8 @@ export async function withAgent(
   const store = Store.open(path);
   const env = environment(store);
   const launched = await launchAgent(
-    { store, environment: env, size: { cols: 80, rows: 24 } },
-    { idempotencyKey: "launch", harness: "claude-code", cwd: "/w" },
+    { store, environment: env, size: { cols: 80, rows: 24 }, home: tmpdir() },
+    { idempotencyKey: "launch", harness: "claude-code", cwd: "~" },
   );
   const { agentId, terminalId } = launched;
   if (!isId("agent", agentId) || terminalId === null || !isId("term", terminalId)) {
@@ -146,8 +146,8 @@ export async function withCodexAgent(threadId = "thr-1") {
     harnesses: ["codex"],
   };
   const { agentId } = await launchAgent(
-    { store, environment, size: { cols: 80, rows: 24 } },
-    { idempotencyKey: "codex", harness: "codex", cwd: "/w" },
+    { store, environment, size: { cols: 80, rows: 24 }, home: tmpdir() },
+    { idempotencyKey: "codex", harness: "codex", cwd: "~" },
   );
   return { store, agentId };
 }

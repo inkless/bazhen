@@ -1,3 +1,4 @@
+import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import {
   LaunchFailed,
@@ -85,8 +86,11 @@ async function running({ session = true } = {}) {
 /** The id of an agent whose launch the environment rejected. */
 async function failedLaunch(store: Store): Promise<string> {
   const environment = fakeEnvironment(store, () => Promise.reject(new Error("no tmux")));
-  const request = { idempotencyKey: "launch-2", harness: "claude-code", cwd: "/w" } as const;
-  const failed = await launchAgent({ store, environment, size: { cols: 80, rows: 24 } }, request)
+  const request = { idempotencyKey: "launch-2", harness: "claude-code", cwd: "~" } as const;
+  const failed = await launchAgent(
+    { store, environment, size: { cols: 80, rows: 24 }, home: tmpdir() },
+    request,
+  )
     .then(() => undefined)
     .catch((e: unknown) => e);
   if (!(failed instanceof LaunchFailed)) throw new Error("the launch did not fail");
