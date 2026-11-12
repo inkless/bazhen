@@ -3,11 +3,11 @@ import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { getRequestListener, serve } from "@hono/node-server";
-import { filterEnv } from "@bazhen/core";
 import { LocalEnvironment } from "@bazhen/env-local";
 import { ClaudeCodeHarness } from "@bazhen/harness-claude-code";
 import { CodexHarness, DAEMON_START_ARGS } from "@bazhen/harness-codex";
 import { TmuxServer } from "@bazhen/host-guard";
+import { PROTOCOL_VERSION } from "@bazhen/protocol";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
 import { launchAgent, localEnvironmentId } from "./agents/launch.ts";
 import { Lifecycle } from "./agents/lifecycle.ts";
@@ -25,6 +25,7 @@ import { HOOK_SCRIPT, hookClient, hookCommand } from "./mailbox/hook-command.ts"
 import { hookApp } from "./mailbox/ingress.ts";
 import { Mailbox } from "./mailbox/mailbox.ts";
 import { InvalidConfig, loadSettings } from "./config/config.ts";
+import { capture } from "./env/capture.ts";
 import { answers } from "./socket/client.ts";
 import { currentInputs } from "./config/paths.ts";
 import { ensurePrivateDir } from "./config/private-dir.ts";
@@ -39,7 +40,7 @@ const HOSTNAME = "127.0.0.1";
 const DEFAULT_SIZE = { cols: 120, rows: 40 };
 
 const inputs = currentInputs();
-const { paths, config } = settingsOrExit();
+const { paths, config, configFile } = settingsOrExit();
 const { port } = config;
 for (const dir of [paths.config, paths.data, paths.bank, paths.state, paths.cache])
   mkdirSync(dir, { recursive: true });
@@ -52,7 +53,8 @@ if (await answers(paths.socket)) {
 }
 // Captured once: agents get what a new terminal tab would, minus Bazhen's and the launching
 // session's internals (foundation-design §9.5).
-const hostEnv = filterEnv(process.env, config.envRules).env;
+const captured = capture(process.env, config.envRules);
+const hostEnv = captured.env;
 const store = Store.open(join(paths.data, "bazhen.db"));
 const codexHome = codexHomeOf(hostEnv, inputs.home);
 // The Codex CLI, in the environment the agents get, which names their Codex home.
@@ -103,6 +105,7 @@ const environment = new LocalEnvironment({
     new CodexHarness(codex, codex.address),
   ],
   socket: paths.socket,
+  ...(config.loginShell === undefined ? {} : { loginShell: config.loginShell }),
 });
 await reconcile(store, environment);
 // The Codex agents' threads lost their subscriber with the last daemon (§7 step 4).
@@ -164,6 +167,25 @@ const socketListener = getRequestListener(
       knows: (agentId) => store.agent(agentId) !== undefined,
     }),
     stop: shutdown,
+    doctor: async () => {
+      const runtimeHealth = await runtime.health();
+      return {
+        appVersion: APP_VERSION,
+        protocolVersion: PROTOCOL_VERSION,
+        runtime: { state: runtimeHealth.state, version: runtimeHealth.version },
+        hookClient: { path: hookRunner, fallback: hookRunner === HOOK_SCRIPT },
+        config: configFile,
+        agents: {
+          shell: config.loginShell === undefined ? "direct" : "login",
+          loginShell: config.loginShell ?? null,
+        },
+        env: {
+          capturedAt: captured.at,
+          kept: Object.keys(captured.env).length,
+          removed: captured.removed,
+        },
+      };
+    },
   }).fetch,
 );
 const socketServer = createServer((req, res) => void socketListener(req, res));

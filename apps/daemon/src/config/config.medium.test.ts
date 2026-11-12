@@ -22,6 +22,8 @@ describe("readConfigFile", () => {
         "port = 8100",
         "[bank]",
         'path = "/bank"',
+        "[agents]",
+        'shell = "login"',
         "[agents.env]",
         'deny = ["SECRET_*"]',
         'passthrough = ["TERM"]',
@@ -30,13 +32,13 @@ describe("readConfigFile", () => {
     expect(readConfigFile(file)).toEqual({
       daemon: { port: 8100 },
       bank: { path: "/bank" },
-      agents: { env: { deny: ["SECRET_*"], passthrough: ["TERM"] } },
+      agents: { shell: "login", env: { deny: ["SECRET_*"], passthrough: ["TERM"] } },
     });
   });
 
   it("has no settings when there is no file", () => {
     dir = mkdtempSync(join(tmpdir(), "bz-config-"));
-    expect(readConfigFile(join(dir, "config.toml"))).toEqual({});
+    expect(readConfigFile(join(dir, "config.toml"))).toBeUndefined();
   });
 
   it.each([

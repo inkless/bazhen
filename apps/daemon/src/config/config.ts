@@ -6,6 +6,7 @@ import { ENV_RULE, type EnvRules } from "@bazhen/core";
 import { resolvePaths, type PathInputs } from "./paths.ts";
 
 const Port = z.int().min(1).max(65_535);
+const Shell = z.enum(["direct", "login"]);
 const EnvRule = z.string().regex(ENV_RULE, "must be a variable name, or a prefix ending in *");
 
 /** The keys `config.toml` may hold. Unknown keys are refused, so a typo never means "default". */
@@ -14,6 +15,7 @@ const ConfigFile = z.strictObject({
   bank: z.strictObject({ path: z.string().startsWith("/").optional() }).optional(),
   agents: z
     .strictObject({
+      shell: Shell.optional(),
       env: z
         .strictObject({
           deny: z.array(EnvRule).optional(),
@@ -30,6 +32,8 @@ export interface Config {
   /** From the file only; `resolvePaths` ranks it below the flag and `BAZHEN_BANK`. */
   readonly bank: string | undefined;
   readonly envRules: Required<EnvRules>;
+  /** With `agents.shell = "login"`, the shell every agent starts through; otherwise none. */
+  readonly loginShell: string | undefined;
 }
 
 export class InvalidConfig extends Error {
@@ -39,13 +43,13 @@ export class InvalidConfig extends Error {
 const DEFAULT_PORT = 7900;
 const CONFIG_FILE = "config.toml";
 
-/** The file's settings; a missing file has none. */
-export function readConfigFile(file: string): ConfigFile {
+/** The file's settings, or undefined when there is no file. */
+export function readConfigFile(file: string): ConfigFile | undefined {
   let text: string;
   try {
     text = readFileSync(file, "utf8");
   } catch (err) {
-    if (err instanceof Error && "code" in err && err.code === "ENOENT") return {};
+    if (err instanceof Error && "code" in err && err.code === "ENOENT") return undefined;
     throw new InvalidConfig(`${file}: ${String(err)}`, { cause: err });
   }
   let toml: unknown;
@@ -90,6 +94,10 @@ export function resolveConfig(
       file.daemon?.port ??
       DEFAULT_PORT,
     bank: file.bank?.path,
+    loginShell: loginShell(
+      fromEnv(env, "BAZHEN_AGENTS_SHELL", Shell) ?? file.agents?.shell ?? "direct",
+      env["SHELL"],
+    ),
     envRules: {
       deny: file.agents?.env?.deny ?? [],
       passthrough: file.agents?.env?.passthrough ?? [],
@@ -103,8 +111,20 @@ export function resolveConfig(
  */
 export function loadSettings(inputs: PathInputs) {
   const located = resolvePaths(inputs);
-  const config = resolveConfig(readConfigFile(join(located.config, CONFIG_FILE)), inputs.env);
+  const configFile = join(located.config, CONFIG_FILE);
+  const settings = readConfigFile(configFile);
+  const config = resolveConfig(settings ?? {}, inputs.env);
   const paths =
     config.bank === undefined ? located : resolvePaths({ ...inputs, configBank: config.bank });
-  return { paths, config };
+  return { paths, config, configFile: { path: configFile, found: settings !== undefined } };
+}
+
+/** The login shell to start agents through, which must be the user's own, by absolute path. */
+function loginShell(
+  shell: z.infer<typeof Shell>,
+  userShell: string | undefined,
+): string | undefined {
+  if (shell === "direct") return undefined;
+  if (userShell?.startsWith("/")) return userShell;
+  throw new InvalidConfig(`agents.shell is "login", but SHELL is ${userShell ?? "unset"}`);
 }

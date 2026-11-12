@@ -31,12 +31,29 @@ import {
   UnsupportedHarness,
 } from "@bazhen/core";
 
+/**
+ * `argv` started through the user's login shell. The harness's argv goes in as the shell's own
+ * arguments, never inside its command string, so no quoting is involved: fish reads them as
+ * `$argv`, and bash, zsh and sh as `"$@"` (after `sh`, which fills `$0`). `exec` keeps the TUI
+ * the pane's own process.
+ */
+export function loginArgv(shell: string, argv: readonly string[]): [string, ...string[]] {
+  return shell.split("/").at(-1) === "fish"
+    ? [shell, "-l", "-i", "-c", "exec $argv", ...argv]
+    : [shell, "-l", "-i", "-c", 'exec "$@"', "sh", ...argv];
+}
+
 export interface LocalEnvironmentOptions {
   readonly id: EnvironmentId;
   readonly runtime: RuntimeAdapter;
   readonly harnesses: readonly HarnessAdapter[];
   /** The daemon's Unix socket, handed to every agent as BAZHEN_SOCKET. */
   readonly socket: string;
+  /**
+   * With `agents.shell = "login"`, the user's login shell, which each agent then starts through,
+   * re-reading the user's rc as a new terminal tab does (foundation-design §9.5).
+   */
+  readonly loginShell?: string;
 }
 
 /**
@@ -153,7 +170,10 @@ export class LocalEnvironment implements EnvironmentAdapter {
     return harness;
   }
 
-  /** The process an agent's terminal runs: the harness's TUI, with Bazhen's variables. */
+  /**
+   * The process an agent's terminal runs: the harness's TUI, with Bazhen's variables, started
+   * through the login shell when there is one.
+   */
   private process(
     agentId: AgentSessionId,
     request: AgentLaunchRequest,
@@ -161,7 +181,10 @@ export class LocalEnvironment implements EnvironmentAdapter {
     generation: number,
   ): ProcessSpec {
     return {
-      argv: launch.argv,
+      argv:
+        this.opts.loginShell === undefined
+          ? launch.argv
+          : loginArgv(this.opts.loginShell, launch.argv),
       cwd: request.cwd,
       env: { ...launch.env, BAZHEN_AGENT_ID: agentId, BAZHEN_SOCKET: this.opts.socket },
       generation,
