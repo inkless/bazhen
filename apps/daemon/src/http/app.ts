@@ -13,7 +13,7 @@ import {
   type StateSnapshot,
 } from "@bazhen/protocol";
 import { LaunchFailed, UnsupportedHarness, type RuntimeAdapter } from "@bazhen/core";
-import { IdempotencyConflict } from "../agents/launch.ts";
+import { IdempotencyConflict } from "../store/store.ts";
 import { AttentionClosed } from "../mailbox/approvals.ts";
 import { UnknownAgent } from "../mailbox/mailbox.ts";
 import { refusal, type Allowlists } from "./guard.ts";

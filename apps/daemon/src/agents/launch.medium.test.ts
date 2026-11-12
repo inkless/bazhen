@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { LaunchFailed, UnsupportedHarness, type AgentLaunch } from "@bazhen/core";
 import { Store } from "../store/store.ts";
 import { fakeEnvironment, tempDb } from "../testing/fixtures.ts";
-import { IdempotencyConflict, launchAgent, localEnvironmentId } from "./launch.ts";
+import { IdempotencyConflict } from "../store/store.ts";
+import { launchAgent, localEnvironmentId } from "./launch.ts";
 
 function setup(fail = false) {
   const store = Store.open(tempDb());

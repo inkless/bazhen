@@ -41,7 +41,11 @@ export class Mailbox {
   private readonly store: Store;
   private readonly ackDeadlineMs: number;
   private readonly waiters = new Map<string, (reply: HookReply) => void>();
-  private readonly unacked = new Map<MessageId, ReturnType<typeof setTimeout>>();
+  /** Messages handed to a hook and not yet written, with the agent each is for. */
+  private readonly unacked = new Map<
+    MessageId,
+    { agentId: string; timer: ReturnType<typeof setTimeout> }
+  >();
 
   constructor(store: Store, ackDeadlineMs = ACK_DEADLINE_MS) {
     this.store = store;
@@ -51,6 +55,7 @@ export class Mailbox {
   send(agentId: string, req: SendMessageRequest): SendMessageResponse {
     const response = this.store.once(
       req.idempotencyKey,
+      { agentId, body: req.body },
       (r) => SendMessageResponse.parse(r),
       () => {
         if (this.store.agent(agentId)?.harness !== "claude-code") throw new UnknownAgent(agentId);
@@ -88,7 +93,7 @@ export class Mailbox {
 
   /** The hook client wrote what it was handed. */
   ack(offered: readonly string[]): void {
-    for (const [id, timer] of this.unacked) {
+    for (const [id, { timer }] of this.unacked) {
       if (!offered.includes(id)) continue;
       clearTimeout(timer);
       this.unacked.delete(id);
@@ -119,17 +124,24 @@ export class Mailbox {
       for (const m of queued) this.record("mailbox.offered", m.id, {});
     });
     for (const m of queued) {
-      this.unacked.set(
-        m.id,
-        setTimeout(() => this.requeue(m.id, "not_written"), this.ackDeadlineMs),
+      const timer = setTimeout(
+        () => this.requeue(agentId, m.id, "not_written"),
+        this.ackDeadlineMs,
       );
+      this.unacked.set(m.id, { agentId, timer });
     }
     waiter({ exitCode: 2, stdout: "", stderr: wakeText(queued), offered: queued.map((m) => m.id) });
   }
 
-  private requeue(id: MessageId, reason: EventPayload<"mailbox.requeued">["reason"]): void {
+  /** Back to the queue, and straight to a waiter if one is already waiting. */
+  private requeue(
+    agentId: string,
+    id: MessageId,
+    reason: EventPayload<"mailbox.requeued">["reason"],
+  ): void {
     this.unacked.delete(id);
     this.record("mailbox.requeued", id, { reason });
+    this.offer(agentId);
   }
 
   private record<T extends Step>(type: T, id: MessageId, payload: EventPayload<T>): number {

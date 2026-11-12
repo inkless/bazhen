@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { HarnessAdapter } from "@bazhen/core";
-import { approvalReply, ClaudeCodeHarness, readHook, wakeText } from "./index.ts";
+import {
+  approvalReply,
+  ClaudeCodeHarness,
+  isMainAgentTool,
+  readHook,
+  wakeText,
+  type Hook,
+} from "./index.ts";
 
+const toolOf = (h: Hook) => ("tool" in h ? h.tool : "");
 const request = { harness: "claude-code" as const, project: "p", cwd: "/work" };
 const claude = (newSessionId: () => string): HarnessAdapter =>
   new ClaudeCodeHarness({ newSessionId, hookCommand: "bazhen-hook" });
@@ -76,13 +84,21 @@ describe("Claude Code hooks", () => {
     );
   });
 
-  it("names the tool a permission request is for", () => {
-    expect(
-      readHook("PermissionRequest", { tool_name: "Bash", tool_input: { command: "touch x" } }),
-    ).toEqual({
-      kind: "permission",
-      summary: 'Bash: {"command":"touch x"}',
+  it("names the tool a permission request is for, and keys it to that tool's result", () => {
+    const call = { tool_name: "Bash", tool_input: { command: "touch x" } };
+    const asked = readHook("PermissionRequest", call);
+    expect(asked).toMatchObject({ kind: "permission", summary: 'Bash: {"command":"touch x"}' });
+    expect(readHook("PostToolUse", { ...call, tool_use_id: "t-1" })).toEqual({
+      kind: "toolSettled",
+      tool: toolOf(asked),
     });
+  });
+
+  it("tells a subagent's tool call apart from the same call by the agent itself", () => {
+    const call = { tool_name: "Bash", tool_input: { command: "touch x" } };
+    const own = readHook("PostToolUse", call);
+    const subagent = readHook("PostToolUse", { ...call, agent_id: "sub-1" });
+    expect([own, subagent].map((h) => isMainAgentTool(toolOf(h)))).toEqual([true, false]);
   });
 
   it("ignores a hook it did not install", () => {

@@ -24,7 +24,14 @@ function post(path: string, body: unknown, timeoutMs: number): Promise<unknown> 
         let text = "";
         res.setEncoding("utf8");
         res.on("data", (chunk: string) => (text += chunk));
-        res.on("end", () => resolve(JSON.parse(text)));
+        res.on("end", () => {
+          // A reply that isn't the daemon's JSON is a failure like any other: the hook fails open.
+          try {
+            resolve(JSON.parse(text));
+          } catch (err) {
+            reject(err);
+          }
+        });
         res.on("error", reject);
       },
     );

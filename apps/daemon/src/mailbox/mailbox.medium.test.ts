@@ -45,12 +45,13 @@ describe("mailbox", () => {
     expect([(await older).exitCode, (await newer).exitCode]).toEqual([0, 2]);
   });
 
-  it("queues a message again when the hook client never says it wrote it", async () => {
+  it("offers a message again to the waiter when the hook client never says it wrote it", async () => {
     const { store, agentId } = await withAgent();
     const mailbox = new Mailbox(store, 10);
     const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
     await mailbox.wait(agentId, live());
-    await expect.poll(() => stateOf(store, messageId)).toBe("queued");
+    const again = await mailbox.wait(agentId, live());
+    expect([again.offered, stateOf(store, messageId)]).toEqual([[messageId], "offered"]);
   });
 
   it("refuses mail for an agent it doesn't run, and queues a repeat only once", async () => {

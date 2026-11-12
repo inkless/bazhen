@@ -34,6 +34,16 @@ function rowIds<P extends IdPrefix>(rows: readonly Record<string, SQLOutputValue
   return rows.flatMap((r) => (typeof r.id === "string" && isId(prefix, r.id) ? [r.id] : []));
 }
 
+/** A key reused for a different request: answering with the first one would be a lie. */
+export class IdempotencyConflict extends Error {
+  readonly key: string;
+
+  constructor(key: string) {
+    super(`idempotency key ${key} was first used for a different request`);
+    this.key = key;
+  }
+}
+
 /** A payload its event type's schema refuses; nothing is recorded. */
 export class InvalidEvent extends Error {
   readonly type: EventType;
@@ -221,11 +231,17 @@ export class Store {
     );
   }
 
-  /** Open attention items, for one agent or all. */
-  openAttention(agentId?: string): AttentionId[] {
-    const sql = `SELECT id FROM attention_items
+  /** Open attention items, for one agent or all, with the tool call each is about. */
+  openAttention(agentId?: string): { id: AttentionId; tool: string }[] {
+    const sql = `SELECT id, tool_key FROM attention_items
                  WHERE state = 'open' AND (?1 IS NULL OR agent_session_id = ?1) ORDER BY created_event_id`;
-    return rowIds(this.prepare(sql).all(agentId ?? null), "attn");
+    return this.prepare(sql)
+      .all(agentId ?? null)
+      .flatMap((r) =>
+        typeof r.id === "string" && isId("attn", r.id)
+          ? [{ id: r.id, tool: String(r.tool_key) }]
+          : [],
+      );
   }
 
   /** One agent's harness, if this daemon runs it. */
@@ -235,16 +251,23 @@ export class Store {
   }
 
   /**
-   * Runs a mutation once per idempotency key: a repeat gets the first answer, parsed as `parse`
-   * reads it, and the answer is written in the transaction that records the mutation (§5.1).
+   * Runs a mutation once per idempotency key (§5.1): a repeat of the same request gets the first
+   * answer, parsed as `parse` reads it; the same key for a different request is refused. The
+   * answer is written in the transaction that records the mutation.
    */
-  once<T>(key: string, parse: (stored: unknown) => T, mutate: () => T): T {
+  once<T>(key: string, request: unknown, parse: (stored: unknown) => T, mutate: () => T): T {
+    const asked = JSON.stringify(request);
     const prior = this.recall(key);
-    if (prior !== undefined) return parse(prior);
+    if (prior !== undefined) {
+      const stored: unknown =
+        typeof prior === "object" && prior !== null ? Reflect.get(prior, "request") : undefined;
+      if (stored !== asked) throw new IdempotencyConflict(key);
+      return parse(Reflect.get(Object(prior), "response"));
+    }
     return this.transaction(() => {
-      const answer = mutate();
-      this.remember(key, answer);
-      return answer;
+      const response = mutate();
+      this.remember(key, { request: asked, response });
+      return response;
     });
   }
 

@@ -28,13 +28,17 @@ function run(event: string, env: Record<string, string>) {
   );
 }
 
-/** A daemon socket that answers every waiter with a wake. */
-function listen(socket: string) {
+/** A daemon socket that answers every hook with `body` and `status`. */
+function listen(
+  socket: string,
+  body = JSON.stringify({ exitCode: 2, stdout: "", stderr: "mail", offered: [] }),
+  status = 200,
+) {
   server = createServer((req, res) => {
     req.resume();
     req.on("end", () => {
-      res.setHeader("content-type", "application/json");
-      res.end(JSON.stringify({ exitCode: 2, stdout: "", stderr: "mail", offered: [] }));
+      res.statusCode = status;
+      res.end(body);
     });
   });
   server.listen(socket);
@@ -52,5 +56,18 @@ describe("hook client", () => {
     // Nothing listens yet, as while the daemon restarts; the waiter must not give up.
     setTimeout(() => listen(socket), 1500);
     expect(await waiting).toEqual({ code: 2, stderr: "mail" });
+  });
+
+  it("fails open on a reply that isn't the daemon's JSON", async () => {
+    dir = mkdtempSync(join(tmpdir(), "bz-hook-"));
+    const socket = join(dir, "bazhen.sock");
+    listen(socket, "Internal Server Error", 500);
+    await new Promise((r) => server?.once("listening", r));
+    expect(
+      await run("PermissionRequest", { BAZHEN_AGENT_ID: newId("agent"), BAZHEN_SOCKET: socket }),
+    ).toEqual({
+      code: 0,
+      stderr: "",
+    });
   });
 });

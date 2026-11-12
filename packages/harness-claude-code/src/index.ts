@@ -65,6 +65,7 @@ function hooks(hook: string) {
         { matcher: "*", hooks: [run("PermissionRequest", APPROVAL_WAIT_MS / 1000 + 10)] },
       ],
       PostToolUse: [{ matcher: "*", hooks: [report("PostToolUse")] }],
+      PostToolUseFailure: [{ matcher: "*", hooks: [report("PostToolUseFailure")] }],
     },
   };
 }
@@ -78,10 +79,10 @@ export const APPROVAL_WAIT_MS = 50_000;
 /** A Claude Code hook as the daemon acts on it, whatever Claude Code calls it. */
 export type Hook =
   | { readonly kind: "wait" }
-  | { readonly kind: "permission"; readonly summary: string }
+  | { readonly kind: "permission"; readonly summary: string; readonly tool: string }
   | { readonly kind: "promptStarted"; readonly prompt: string; readonly promptId: string | null }
   | { readonly kind: "turnEnded"; readonly promptId: string | null }
-  | { readonly kind: "toolSettled" }
+  | { readonly kind: "toolSettled"; readonly tool: string }
   | { readonly kind: "ignored" };
 
 /** Reads one of the hooks `launchSpec` installed; the daemon never sees Claude Code's formats. */
@@ -90,13 +91,14 @@ export function readHook(event: string, payload: unknown): Hook {
     case "wait":
       return { kind: "wait" };
     case "PermissionRequest":
-      return { kind: "permission", summary: approvalSummary(payload) };
+      return { kind: "permission", summary: approvalSummary(payload), tool: toolKey(payload) };
     case "UserPromptSubmit":
       return { kind: "promptStarted", prompt: promptOf(payload), promptId: promptIdOf(payload) };
     case "Stop":
       return { kind: "turnEnded", promptId: promptIdOf(payload) };
     case "PostToolUse":
-      return { kind: "toolSettled" };
+    case "PostToolUseFailure":
+      return { kind: "toolSettled", tool: toolKey(payload) };
     default:
       return { kind: "ignored" };
   }
@@ -116,6 +118,23 @@ function promptIdOf(payload: unknown): string | null {
   const id = field(payload, "prompt_id");
   return typeof id === "string" ? id : null;
 }
+
+/**
+ * Which tool call a hook is about. A PermissionRequest carries no tool_use_id, so a request and
+ * the tool's result are matched by who called it (the agent or one of its subagents), the tool
+ * and its exact input (foundation-design §5.6).
+ */
+function toolKey(payload: unknown): string {
+  const caller = field(payload, "agent_id");
+  return JSON.stringify([
+    typeof caller === "string" ? caller : "main",
+    field(payload, "tool_name") ?? null,
+    field(payload, "tool_input") ?? null,
+  ]);
+}
+
+/** The key of a tool call the agent itself made, as opposed to one of its subagents. */
+export const isMainAgentTool = (tool: string) => tool.startsWith('["main",');
 
 /** What a permission request is for, as the inbox shows it. */
 function approvalSummary(payload: unknown): string {

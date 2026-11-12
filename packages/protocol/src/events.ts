@@ -68,7 +68,12 @@ export const EVENTS = {
   /** A harness asks the human, here to run a tool (§4.6, §5.6). */
   "attention.opened": {
     entity: "attention",
-    payload: z.object({ agentId: Id("agent"), summary: z.string() }),
+    payload: z.object({
+      agentId: Id("agent"),
+      summary: z.string(),
+      /** Which tool call it is, so that call's result closes this item and no other. */
+      tool: z.string(),
+    }),
   },
   "attention.answered": { entity: "attention", payload: z.object({ decision: ApprovalDecision }) },
   "attention.closed": {

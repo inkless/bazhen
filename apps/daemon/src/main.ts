@@ -46,7 +46,9 @@ const runtime = new TmuxRuntime({
   env: hostEnv,
 });
 const hookClient = fileURLToPath(new URL("mailbox/hook-client.ts", import.meta.url));
-const hookCommand = `'${process.execPath}' --disable-warning=ExperimentalWarning '${hookClient}'`;
+/** One shell word, whatever the path holds: Claude Code runs hook commands through a shell. */
+const word = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
+const hookCommand = `${word(process.execPath)} --disable-warning=ExperimentalWarning ${word(hookClient)}`;
 const environment = new LocalEnvironment({
   id: localEnvironmentId(store),
   runtime,

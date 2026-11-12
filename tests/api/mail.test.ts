@@ -66,11 +66,17 @@ describe("mail to a Claude Code agent", () => {
   });
 
   it("refuses an answer to an item that is already closed", async () => {
-    const closed = (await state()).attention.find((a) => a.state === "closed");
-    const late = await daemon.request(`/v1/attention/${String(closed?.id)}/answer`, {
-      method: "POST",
-      body: { idempotencyKey: "late", decision: "deny" },
-    });
-    expect(late.status).toBe(409);
+    await send("late", "[[fake:bash:touch answered-once]]");
+    await expect
+      .poll(async () => openItems(await state())[0]?.summary, { timeout: 30_000 })
+      .toContain("touch answered-once");
+    const id = String(openItems(await state())[0]?.id);
+    const answer = (key: string) =>
+      daemon.request(`/v1/attention/${id}/answer`, {
+        method: "POST",
+        body: { idempotencyKey: key, decision: "allow" },
+      });
+    expect((await answer("first")).status).toBe(200);
+    expect((await answer("second")).status).toBe(409);
   });
 });

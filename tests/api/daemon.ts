@@ -166,18 +166,18 @@ export class Daemon {
     this.tmux("respawn-pane", "-k", "-t", `${session}:0`, ...argv);
   }
 
-  private async exit(signal: NodeJS.Signals): Promise<void> {
+  private async exit(): Promise<void> {
     const child = this.process;
     if (child === undefined || child.exitCode !== null || child.signalCode !== null) return;
     await new Promise((resolve) => {
       child.once("exit", resolve);
-      child.kill(signal);
+      child.kill("SIGTERM");
     });
   }
 
   /** Stops the daemon, its tmux server and every file under its home. */
   async stop(): Promise<void> {
-    await this.exit("SIGTERM");
+    await this.exit();
     try {
       this.tmux("kill-server");
     } catch {
