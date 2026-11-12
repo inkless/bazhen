@@ -32,6 +32,17 @@ export default defineConfig({
           testTimeout: 30_000,
         },
       },
+      {
+        test: {
+          name: "api",
+          include: ["tests/api/**/*.test.ts"],
+          globalSetup: ["tests/support/global-setup.ts"],
+          fileParallelism: false,
+          maxWorkers: 1,
+          testTimeout: 60_000,
+          hookTimeout: 60_000,
+        },
+      },
     ],
   },
 });

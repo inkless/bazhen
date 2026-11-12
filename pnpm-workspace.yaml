@@ -7,3 +7,5 @@ packages:
 # would only fall back to a native compile. Revisit when Windows support needs ConPTY.
 allowBuilds:
   node-pty: false
+  # Links the pinned platform binary; tests/api runs the real CLI against a fake model API.
+  "@anthropic-ai/claude-code": true

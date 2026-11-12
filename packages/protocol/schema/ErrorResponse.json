@@ -1,0 +1,25 @@
+{
+  "$id": "ErrorResponse",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "error": {
+      "type": "string",
+      "enum": [
+        "invalid_request",
+        "unsupported",
+        "launch_failed",
+        "origin_not_allowed",
+        "host_not_allowed"
+      ]
+    },
+    "message": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "error",
+    "message"
+  ],
+  "additionalProperties": false
+}

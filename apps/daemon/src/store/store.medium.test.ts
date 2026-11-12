@@ -1,17 +1,44 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
+import { InvalidTransition, newId } from "@bazhen/core";
+import { MIGRATIONS } from "./migrations.ts";
+import { UnknownEntity } from "./projections.ts";
 import { LATEST_SCHEMA_VERSION, SchemaTooNew, Store } from "./store.ts";
 
 const dbPath = () => join(mkdtempSync(join(tmpdir(), "bz-store-")), "bazhen.db");
-const event = {
-  type: "terminal.created",
-  entityType: "terminal",
-  entityId: "term_1",
+
+function withEnvironment(store: Store) {
+  const environmentId = newId("env");
+  store.append({
+    type: "environment.registered",
+    entityId: environmentId,
+    actor: "system",
+    payload: { kind: "local" },
+  });
+  return environmentId;
+}
+
+function launch(store: Store, environmentId: string) {
+  const agentId = newId("agent");
+  const terminalId = newId("term");
+  store.append({
+    type: "agent.launched",
+    entityId: agentId,
+    actor: "system",
+    payload: { environmentId, harness: "claude-code", project: "p", cwd: "/work", terminalId },
+  });
+  return { agentId, terminalId };
+}
+
+const running = (agentId: string) => ({
+  type: "agent.running" as const,
+  entityId: agentId,
   actor: "system",
-  payload: {},
-};
+  payload: { externalRef: null, runtime: { kind: "tmux", locator: { session: "bz-1" } } },
+});
 
 describe("Store", () => {
   it("migrates a fresh database to the latest schema, and reopening is a no-op", () => {
@@ -31,22 +58,58 @@ describe("Store", () => {
     expect(() => Store.open(path)).toThrow(SchemaTooNew);
   });
 
-  it("records no event when its projection fails", () => {
+  it("upgrades a schema-1 database, keeping its terminals as agent terminals", () => {
+    const path = dbPath();
+    const v1 = Store.open(path, MIGRATIONS.slice(0, 1));
+    const host = v1.hostId();
+    v1.close();
+    const raw = new DatabaseSync(path);
+    raw.exec(`INSERT INTO events (host_id, ts, type, entity_type, entity_id, actor, payload)
+              VALUES ('${host}', '2026-01-01', 'old', 'terminal', 'term_1', 'system', '{}')`);
+    raw.exec(
+      `INSERT INTO terminals VALUES ('term_1', '${host}', 'running', 0, 'tmux', '{}', 1, 1)`,
+    );
+    raw.close();
+    const upgraded = Store.open(path);
+    expect(upgraded.schemaVersion()).toBe(2);
+    upgraded.close();
+    const check = new DatabaseSync(path);
+    expect(check.prepare("SELECT kind FROM terminals").get()).toEqual({ kind: "agent" });
+    check.close();
+  });
+
+  it("records no event when its projection refuses it", () => {
     const store = Store.open(dbPath());
-    expect(() =>
-      store.append(event, () => {
-        throw new Error("projection failed");
-      }),
-    ).toThrow("projection failed");
-    expect(store.eventsAfter(0)).toEqual([]);
+    launch(store, withEnvironment(store));
+    const before = store.snapshot().eventId;
+    expect(() => store.append(running(newId("agent")))).toThrow(UnknownEntity);
+    expect(store.snapshot().eventId).toBe(before);
     store.close();
   });
 
-  it("keeps the same HostId across reopen, and stamps it on events", () => {
+  it("moves a launched agent and its terminal to running together, once", () => {
+    const path = dbPath();
+    const store = Store.open(path);
+    const { agentId, terminalId } = launch(store, withEnvironment(store));
+    expect(store.snapshot().agents).toMatchObject([{ id: agentId, state: "starting", terminalId }]);
+    store.append(running(agentId));
+    expect(store.snapshot().agents).toMatchObject([{ id: agentId, state: "running" }]);
+    expect(() => store.append(running(agentId))).toThrow(InvalidTransition);
+    store.close();
+    const raw = new DatabaseSync(path);
+    expect(
+      raw.prepare("SELECT state, runtime FROM terminals WHERE id = ?").get(terminalId),
+    ).toEqual({
+      state: "running",
+      runtime: "tmux",
+    });
+    raw.close();
+  });
+
+  it("keeps the same HostId across reopen", () => {
     const path = dbPath();
     const first = Store.open(path);
     const host = first.hostId();
-    first.append(event);
     first.close();
     const again = Store.open(path);
     expect(host).toMatch(/^host_[0-9a-f]{32}$/);
@@ -56,9 +119,36 @@ describe("Store", () => {
 
   it("orders events by id for resumable streams", () => {
     const store = Store.open(dbPath());
-    const a = store.append(event);
-    const b = store.append({ ...event, entityId: "term_2" });
-    expect(store.eventsAfter(a).map((e) => e.id)).toEqual([b]);
+    const environmentId = withEnvironment(store);
+    const a = store.snapshot().eventId;
+    launch(store, environmentId);
+    expect(store.eventsAfter(a).map((e) => e.type)).toEqual(["agent.launched"]);
+    store.close();
+  });
+
+  it("returns the answer a key was first given, across a restart", () => {
+    const path = dbPath();
+    const store = Store.open(path);
+    store.remember("k-1", { agentId: "agent_x", eventIds: [1] });
+    store.close();
+    const again = Store.open(path);
+    expect([again.recall("k-1"), again.recall("k-2")]).toEqual([
+      { agentId: "agent_x", eventIds: [1] },
+      undefined,
+    ]);
+    again.close();
+  });
+
+  it("rolls a transaction back whole, nested appends included", () => {
+    const store = Store.open(dbPath());
+    const before = store.snapshot().eventId;
+    expect(() =>
+      store.transaction(() => {
+        withEnvironment(store);
+        throw new Error("abandoned");
+      }),
+    ).toThrow("abandoned");
+    expect(store.snapshot()).toMatchObject({ eventId: before, environments: [] });
     store.close();
   });
 });

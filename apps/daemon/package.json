@@ -12,10 +12,13 @@
   },
   "dependencies": {
     "@bazhen/core": "workspace:*",
+    "@bazhen/env-local": "workspace:*",
+    "@bazhen/harness-claude-code": "workspace:*",
     "@bazhen/protocol": "workspace:*",
     "@bazhen/runtime-tmux": "workspace:*",
     "@hono/node-server": "2.1.5",
     "hono": "4.13.16",
-    "node-pty": "1.2.0-beta.18"
+    "node-pty": "1.2.0-beta.18",
+    "zod": "4.6.7"
   }
 }

@@ -11,6 +11,12 @@
       "path": "packages/runtime-tmux"
     },
     {
+      "path": "packages/env-local"
+    },
+    {
+      "path": "packages/harness-claude-code"
+    },
+    {
       "path": "apps/daemon"
     },
     {
@@ -18,6 +24,9 @@
     },
     {
       "path": "tests/integration"
+    },
+    {
+      "path": "tests/api"
     },
     {
       "path": "tests/e2e"

@@ -41,6 +41,39 @@ export const MIGRATIONS: readonly Migration[] = [
       ) STRICT;
     `,
   },
+  {
+    version: 2,
+    sql: `
+      CREATE TABLE environments (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        created_event_id INTEGER NOT NULL REFERENCES events (id)
+      ) STRICT;
+
+      CREATE TABLE agent_sessions (
+        id TEXT PRIMARY KEY,
+        environment_id TEXT NOT NULL REFERENCES environments (id),
+        harness TEXT NOT NULL,
+        project TEXT NOT NULL,
+        cwd TEXT NOT NULL,
+        state TEXT NOT NULL,
+        terminal_id TEXT,
+        external_ref TEXT,
+        created_event_id INTEGER NOT NULL REFERENCES events (id),
+        updated_event_id INTEGER NOT NULL REFERENCES events (id)
+      ) STRICT;
+
+      ALTER TABLE terminals ADD COLUMN environment_id TEXT REFERENCES environments (id);
+      ALTER TABLE terminals ADD COLUMN kind TEXT NOT NULL DEFAULT 'agent';
+      ALTER TABLE terminals ADD COLUMN agent_session_id TEXT REFERENCES agent_sessions (id);
+      CREATE INDEX terminals_agent ON terminals (agent_session_id);
+
+      CREATE TABLE idempotency_keys (
+        key TEXT PRIMARY KEY,
+        response TEXT NOT NULL
+      ) STRICT;
+    `,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

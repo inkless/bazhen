@@ -20,6 +20,8 @@ const PACKAGE_DIR: Record<string, string> = {
   "@bazhen/protocol": "packages/protocol",
   "@bazhen/core": "packages/core",
   "@bazhen/runtime-tmux": "packages/runtime-tmux",
+  "@bazhen/env-local": "packages/env-local",
+  "@bazhen/harness-claude-code": "packages/harness-claude-code",
   "@bazhen/daemon": "apps/daemon",
   "@bazhen/web": "apps/web",
 };
@@ -47,7 +49,38 @@ export const MATRIX: Area[] = [
     banned: ["@bazhen/daemon", "@bazhen/web"],
     thirdParty: ["node-pty", "hono", "@hono/*", "ws", "@xterm/*"],
   },
+  {
+    dir: "packages/env-local",
+    banned: [
+      "@bazhen/runtime-tmux",
+      "@bazhen/harness-claude-code",
+      "@bazhen/daemon",
+      "@bazhen/web",
+    ],
+    typeOnly: ["@bazhen/protocol"],
+    platformFree: true,
+    thirdParty: RUNTIME_LIBS,
+  },
+  {
+    dir: "packages/harness-claude-code",
+    banned: ["@bazhen/runtime-tmux", "@bazhen/env-local", "@bazhen/daemon", "@bazhen/web"],
+    typeOnly: ["@bazhen/protocol"],
+    platformFree: true,
+    thirdParty: RUNTIME_LIBS,
+  },
   { dir: "apps/daemon", banned: ["@bazhen/web"] },
+  // The black-box suite: it reaches the daemon only over its public surfaces.
+  {
+    dir: "tests/api",
+    banned: [
+      "@bazhen/core",
+      "@bazhen/runtime-tmux",
+      "@bazhen/env-local",
+      "@bazhen/harness-claude-code",
+      "@bazhen/daemon",
+      "@bazhen/web",
+    ],
+  },
   {
     dir: "apps/web",
     banned: ["@bazhen/core", "@bazhen/runtime-tmux", "@bazhen/daemon"],
