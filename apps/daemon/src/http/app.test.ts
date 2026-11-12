@@ -1,21 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { newId, UnsupportedHarness, type RuntimeAdapter } from "@bazhen/core";
+import { newId, UnsupportedHarness } from "@bazhen/core";
+import { FakeRuntime } from "@bazhen/core/testing";
 import { PROTOCOL_VERSION, type LaunchAgentRequest } from "@bazhen/protocol";
 import { AttentionClosed } from "../mailbox/approvals.ts";
 import { createApp } from "./app.ts";
 
-const unused = () => Promise.reject(new Error("not used by these tests"));
-const runtime: RuntimeAdapter = {
-  kind: "tmux",
-  health: async () => ({ state: "not-running", version: "tmux 3.6b" }),
-  inventory: unused,
-  create: unused,
-  attach: unused,
-  close: unused,
-  respawn: unused,
-  signal: unused,
-  onExit: () => () => {},
-};
+const runtime = new FakeRuntime();
 const launched = { agentId: newId("agent"), terminalId: newId("term"), eventIds: [2, 3] };
 const app = createApp({
   appVersion: "0.1.0",
@@ -56,7 +46,7 @@ describe("HTTP app", () => {
     expect(await res.json()).toMatchObject({
       protocolVersion: PROTOCOL_VERSION,
       schemaVersion: 1,
-      runtime: { state: "not-running", version: "tmux 3.6b" },
+      runtime: { state: "not-running", version: "fake" },
     });
   });
 
