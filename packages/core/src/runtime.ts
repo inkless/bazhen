@@ -44,6 +44,8 @@ export interface RuntimeInventoryEntry {
 }
 
 export interface RuntimeStream {
+  /** The size the client attached at; the runtime picks it when none was asked for. */
+  readonly size: Size;
   onData(cb: (bytes: Uint8Array) => void): void;
   onClose(cb: () => void): void;
   write(bytes: Uint8Array): void;
@@ -52,18 +54,28 @@ export interface RuntimeStream {
   close(): void;
 }
 
+/** A runtime client just opened, and what it can't redraw: the history above its screen. */
+export interface Attached {
+  readonly stream: RuntimeStream;
+  /**
+   * The history above the screen as the client attached, oldest first: lines separated by `\n`,
+   * with their SGR attributes, and empty for a program on its alternate screen. Read after the
+   * terminal took the client's size, which can push screen lines into it, and before the client
+   * draws the screen. Read on demand only, never polled (foundation-design §4.2, §5.9).
+   */
+  readonly history: string;
+}
+
 export interface RuntimeAdapter {
   readonly kind: string;
   health(): Promise<RuntimeHealth>;
   inventory(): Promise<RuntimeInventoryEntry[]>;
   create(spec: TerminalSpec): Promise<RuntimeRef>;
-  /** Opens a client at `size`, or, given null, at whatever size the terminal already has. */
-  attach(ref: RuntimeRef, size: Size | null): Promise<RuntimeStream>;
   /**
-   * The visible screen as plain VT bytes, cursor included, to seed a view that joins a terminal
-   * already on screen. Read on demand only, never polled (foundation-design §4.2, §5.9).
+   * Opens a client at `size`, or, given null, at whatever size the terminal already has, with up
+   * to `historyLines` of the history above its screen.
    */
-  snapshot(ref: RuntimeRef): Promise<string>;
+  attach(ref: RuntimeRef, size: Size | null, historyLines: number): Promise<Attached>;
   close(ref: RuntimeRef): Promise<void>;
 }
 

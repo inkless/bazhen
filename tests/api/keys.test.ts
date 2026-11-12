@@ -1,7 +1,6 @@
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { LaunchAgentResponse } from "@bazhen/protocol";
 import { Daemon, waitUntil, type View } from "./daemon.ts";
 import { readKeyLog } from "./fixtures/key-log.ts";
 
@@ -12,19 +11,11 @@ let terminalId = "";
 let log = "";
 beforeAll(async () => {
   daemon = await Daemon.start();
-  const launched = LaunchAgentResponse.parse(
-    (
-      await daemon.request("/v1/agents", {
-        method: "POST",
-        body: { idempotencyKey: "keys", harness: "claude-code", cwd: daemon.work },
-      })
-    ).body,
-  );
-  terminalId = String(launched.terminalId);
   log = join(daemon.work, "keys.log");
-  daemon.runInTerminal(launched.agentId, [process.execPath, probe, log]);
+  const program = await daemon.program([process.execPath, probe, log]);
+  terminalId = program.terminalId;
   await waitUntil(
-    () => daemon.screen(launched.agentId).includes("key-probe ready"),
+    () => daemon.screen(program.agentId).includes("key-probe ready"),
     "the key probe",
   );
 });

@@ -11,7 +11,6 @@ const runtime: RuntimeAdapter = {
   inventory: unused,
   create: unused,
   attach: unused,
-  snapshot: unused,
   close: unused,
 };
 const launched = { agentId: newId("agent"), terminalId: newId("term"), eventIds: [2, 3] };

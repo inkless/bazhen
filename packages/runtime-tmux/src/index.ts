@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { promisify } from "node:util";
 import type {
+  Attached,
   PtySpawner,
   RuntimeAdapter,
   RuntimeHealth,
@@ -124,13 +125,18 @@ export class TmuxRuntime implements RuntimeAdapter {
   }
 
   private async tmux(...args: string[]): Promise<string> {
+    return (await this.tmuxOutput(args)).trimEnd();
+  }
+
+  /** What tmux printed, untrimmed: blank lines at its end can be content. */
+  private async tmuxOutput(args: readonly string[]): Promise<string> {
     const argv = ["-L", this.opts.socket, "-f", this.opts.configFile, ...args];
     try {
       const { stdout } = await run(this.bin, argv, {
         env: this.opts.env,
         timeout: TMUX_TIMEOUT_MS,
       });
-      return stdout.trimEnd();
+      return stdout;
     } catch (cause) {
       throw new TmuxError(args, cause);
     }
@@ -211,21 +217,41 @@ export class TmuxRuntime implements RuntimeAdapter {
     });
   }
 
-  async attach(ref: RuntimeRef, size: Size | null): Promise<RuntimeStream> {
+  async attach(ref: RuntimeRef, size: Size | null, historyLines: number): Promise<Attached> {
     const session = sessionOf(ref);
     const resizeWindow = (next: Size) => this.tmux(...resizeArgs(session, next));
     if (size !== null) await resizeWindow(size);
-    const [cols = 80, rows = 24] = (
+    const [cols = 80, rows = 24, held = 0, alternate = 0] = (
       await this.tmux(
         "display-message",
         "-p",
         "-t",
         windowOf(session),
-        "#{window_width} #{window_height}",
+        "#{window_width} #{window_height} #{history_size} #{alternate_on}",
       )
     )
       .split(" ")
       .map(Number);
+    // A program on its alternate screen has no history of its own: tmux's is the main screen's,
+    // behind it. With no history, `-E -1` would capture the screen's first line instead.
+    const lines = alternate === 1 ? 0 : Math.min(historyLines, held);
+    const history =
+      lines > 0
+        ? (
+            await this.tmuxOutput([
+              "capture-pane",
+              "-p",
+              "-e",
+              "-J",
+              "-t",
+              windowOf(session),
+              "-S",
+              `-${lines}`,
+              "-E",
+              "-1",
+            ])
+          ).replace(/\n$/, "")
+        : "";
     const proc = this.opts.pty.spawn(
       [this.bin, "-L", this.opts.socket, "attach-session", "-t", session],
       { cols, rows },
@@ -237,7 +263,8 @@ export class TmuxRuntime implements RuntimeAdapter {
       closed = true;
       for (const h of closeHandlers) h();
     });
-    return {
+    const stream: RuntimeStream = {
+      size: { cols, rows },
       onData: (cb) => proc.onData(cb),
       onClose: (cb) => {
         if (closed) cb();
@@ -251,20 +278,7 @@ export class TmuxRuntime implements RuntimeAdapter {
       },
       close: () => proc.kill(),
     };
-  }
-
-  async snapshot(ref: RuntimeRef): Promise<string> {
-    const window = windowOf(sessionOf(ref));
-    const out = await this.tmux(
-      ...sequence([
-        ["capture-pane", "-p", "-e", "-t", window],
-        ["display-message", "-p", "-t", window, "#{cursor_x} #{cursor_y}"],
-      ]),
-    );
-    const lines = out.split("\n");
-    const [x = 0, y = 0] = (lines.pop() ?? "").split(" ").map(Number);
-    // Clear, draw the screen line by line, then put the cursor back where the program left it.
-    return `\x1b[H\x1b[2J${lines.join("\r\n")}\x1b[${y + 1};${x + 1}H`;
+    return { stream, history };
   }
 
   async close(ref: RuntimeRef): Promise<void> {
