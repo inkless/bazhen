@@ -135,19 +135,41 @@ export const upgradeOutcome = (ws: WebSocket) =>
     ws.once("error", (err) => resolve(err.message));
   });
 
+/**
+ * A store with a running Codex agent bound to each of `threads`, by thread; a null thread gives
+ * an agent bound to none.
+ */
+export async function withCodexAgents(...threads: (string | null)[]) {
+  const store = Store.open(tempDb());
+  const agents = new Map<string | null, string>();
+  for (const threadId of threads) {
+    const environment: EnvironmentAdapter = {
+      ...fakeEnvironment(store, async (l) => ({
+        runtime: { terminalId: l.terminalId, runtime: "tmux", locator: {} },
+        externalRef:
+          threadId === null
+            ? null
+            : { environmentId: localEnvironmentId(store), kind: "codex-thread", id: threadId },
+      })),
+      harnesses: ["codex"],
+    };
+    const { agentId } = await launchAgent(
+      { store, environment, size: { cols: 80, rows: 24 }, home: tmpdir() },
+      { idempotencyKey: `codex-${String(threadId)}`, harness: "codex", cwd: "~" },
+    );
+    agents.set(threadId, agentId);
+  }
+  /** The agent on `threadId`; a thread the fixture didn't make fails the test outright. */
+  const agentOn = (threadId: string | null) => {
+    const agentId = agents.get(threadId);
+    if (agentId === undefined) throw new Error(`no agent on thread ${String(threadId)}`);
+    return agentId;
+  };
+  return { store, agentOn };
+}
+
 /** A store with one running Codex agent, bound to `threadId`. */
 export async function withCodexAgent(threadId = "thr-1") {
-  const store = Store.open(tempDb());
-  const environment: EnvironmentAdapter = {
-    ...fakeEnvironment(store, async (l) => ({
-      runtime: { terminalId: l.terminalId, runtime: "tmux", locator: {} },
-      externalRef: { environmentId: localEnvironmentId(store), kind: "codex-thread", id: threadId },
-    })),
-    harnesses: ["codex"],
-  };
-  const { agentId } = await launchAgent(
-    { store, environment, size: { cols: 80, rows: 24 }, home: tmpdir() },
-    { idempotencyKey: "codex", harness: "codex", cwd: "~" },
-  );
-  return { store, agentId };
+  const { store, agentOn } = await withCodexAgents(threadId);
+  return { store, agentId: agentOn(threadId) };
 }

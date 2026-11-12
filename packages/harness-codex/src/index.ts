@@ -179,23 +179,23 @@ const UserMessage = z.object({
   }),
 });
 
-/** The label `messageText` puts on each message, and the id it carries. */
-const LABEL = /Message for you from Bazhen \((msg_[0-9a-zA-Z]+)\)/g;
+/**
+ * The label `messageText` starts each message with, and the id it carries. Only where Bazhen
+ * puts it counts: a body that quotes another message's label confirms nothing.
+ */
+const LABEL = /^Message for you from Bazhen \((msg_[0-9a-zA-Z]+)\):\n/;
 
 /**
- * The Bazhen messages a turn takes as the user's input, by id, and its thread; null for any
- * other notification.
+ * The Bazhen message a turn takes as the user's input, by id, and its thread; a null id for
+ * input that isn't one, and null for any other notification.
  */
 export function readUserMessage(
   method: string,
   params: unknown,
-): { readonly threadId: string; readonly messageIds: string[] } | null {
+): { readonly threadId: string; readonly messageId: string | null } | null {
   if (method !== "item/started") return null;
   const p = UserMessage.safeParse(params);
   if (!p.success) return null;
-  const text = p.data.item.content.map((c) => c.text ?? "").join("");
-  return {
-    threadId: p.data.threadId,
-    messageIds: [...text.matchAll(LABEL)].map((m) => String(m[1])),
-  };
+  const first = p.data.item.content[0]?.text ?? "";
+  return { threadId: p.data.threadId, messageId: LABEL.exec(first)?.[1] ?? null };
 }

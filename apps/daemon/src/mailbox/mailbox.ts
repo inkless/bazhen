@@ -66,6 +66,10 @@ export class Mailbox {
       (r) => SendMessageResponse.parse(r),
       () => {
         if (deliver === undefined) throw new UnknownAgent(agentId, "that takes mail");
+        // A Codex agent with no thread has nowhere to take it; the sender hears so now.
+        if (harness === "codex" && this.store.codexThread(agentId) === undefined) {
+          throw new UnknownAgent(agentId, "bound to a Codex thread");
+        }
         const messageId = newId("msg");
         created = true;
         const eventId = this.store.append({
