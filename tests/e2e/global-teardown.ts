@@ -13,5 +13,6 @@ export default function teardown(): void {
     }
   }
   const home = process.env["BZ_E2E_HOME"];
-  if (home) rmSync(home, { recursive: true, force: true });
+  // An agent's process may still be writing its state as the tmux server goes down.
+  if (home) rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }

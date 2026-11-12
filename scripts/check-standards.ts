@@ -21,6 +21,9 @@ const COVERED_ELSEWHERE: Record<string, string> = {
   "packages/core/src/environment.ts": "packages/env-local/src/index.test.ts",
   "apps/web/src/App.tsx": "tests/e2e/health.spec.ts",
   "apps/web/src/main.tsx": "tests/e2e/health.spec.ts",
+  "apps/web/src/api.ts": "tests/e2e/terminal.spec.ts",
+  "apps/web/src/Fleet.tsx": "tests/e2e/terminal.spec.ts",
+  "apps/web/src/Terminal.tsx": "tests/e2e/terminal.spec.ts",
 };
 
 function sourceFiles(dir: string): string[] {

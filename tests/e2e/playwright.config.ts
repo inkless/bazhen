@@ -1,8 +1,10 @@
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineConfig, devices } from "@playwright/test";
+import { claudeHome } from "../support/claude-home.ts";
 
 // Free ports and a per-run home and tmux server, so parallel worktrees can run e2e at once.
 // Playwright re-evaluates this file in its workers; they inherit the values through the
@@ -37,6 +39,12 @@ if (!process.env["BZ_E2E_DAEMON_PORT"] || !process.env["BZ_E2E_WEB_PORT"]) {
 }
 process.env["BZ_E2E_HOME"] ??= mkdtempSync(join(tmpdir(), "bz-e2e-home-"));
 process.env["BZ_E2E_SOCKET"] ??= `bz-e2e-${process.pid}`;
+// Where the page launches agents: the real Claude Code, pinned in this package, started with no
+// prompt and no way to reach a model.
+const work = join(process.env["BZ_E2E_HOME"], "work");
+mkdirSync(work, { recursive: true });
+process.env["BZ_E2E_WORK"] = realpathSync(work);
+const claudeBin = fileURLToPath(new URL("node_modules/.bin", import.meta.url));
 
 const daemonPort = Number(process.env["BZ_E2E_DAEMON_PORT"]);
 const webPort = Number(process.env["BZ_E2E_WEB_PORT"]);
@@ -45,6 +53,8 @@ const env = {
   BAZHEN_PORT: String(daemonPort),
   BAZHEN_WEB_PORT: String(webPort),
   BAZHEN_TMUX_SOCKET: process.env["BZ_E2E_SOCKET"],
+  PATH: `${claudeBin}:${process.env["PATH"] ?? ""}`,
+  ...claudeHome(join(process.env["BZ_E2E_HOME"], "claude"), process.env["BZ_E2E_WORK"]),
 };
 
 export default defineConfig({

@@ -182,6 +182,8 @@ export const config = {
     "typescript/no-explicit-any": "error",
     "typescript/switch-exhaustiveness-check": "error",
     "import/no-cycle": "error",
+    // A stylesheet is imported only for its effect; any other module must be used.
+    "import/no-unassigned-import": ["warn", { allow: ["**/*.css"] }],
     "vitest/no-focused-tests": "error",
     "vitest/no-disabled-tests": "error",
     "vitest/expect-expect": "error",
