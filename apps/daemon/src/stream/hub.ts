@@ -14,13 +14,16 @@ import {
 import type { AttachmentMode, EventPayload, StreamServerFrame } from "@bazhen/protocol";
 import { HISTORY_LINES, ScreenEmulator } from "./emulator.ts";
 import { classifyInput } from "./input-filter.ts";
+import { Settle } from "./settle.ts";
 
 /** One browser view of a terminal, as the hub sees it. */
 export interface Viewer {
   readonly mode: AttachmentMode;
   send(bytes: Uint8Array): void;
   notify(frame: StreamServerFrame): void;
-  /** The stream is gone (the terminal closed): the view should disconnect. */
+  /** Bytes sent to the view that have not reached it yet. */
+  unsent(): number;
+  /** The view's stream is over: it should disconnect. */
   close(): void;
 }
 
@@ -32,6 +35,20 @@ export class ViewEnded extends Error {
   }
 }
 
+export interface HubOptions {
+  /** A view this far behind its terminal's output is ended, never sent a stream with a hole. */
+  readonly maxUnsentBytes: number;
+  /** How long output must pause, or at most how long it may run, before the screen is re-read. */
+  readonly screenQuietMs: number;
+  readonly screenMaxWaitMs: number;
+}
+
+export const HUB_DEFAULTS: HubOptions = {
+  maxUnsentBytes: 4 * 1024 * 1024,
+  screenQuietMs: 100,
+  screenMaxWaitMs: 500,
+};
+
 export type EndReason = EventPayload<"attachment.ended">["reason"];
 
 /** What the hub records about attachments and leases; the daemon writes it to the store. */
@@ -41,6 +58,8 @@ export interface AttachmentLog {
   granted(terminal: TerminalId, attachment: AttachmentId, epoch: number): void;
   /** The epoch of the terminal's last grant, so a new one is always higher. */
   epoch(terminal: TerminalId): number;
+  /** Whether the terminal is being closed, so its client's exit ends views as terminal_closed. */
+  closing(terminal: TerminalId): boolean;
 }
 
 /** A view's handle on its attachment. */
@@ -57,8 +76,9 @@ interface Entry {
   size: Size;
   /** The epoch this view was granted the lease at; its input counts only under that epoch. */
   grantedEpoch?: number;
-  /** Live bytes held while the view's snapshot is on its way. */
+  /** Live bytes held while the view's snapshot is on its way, and how many there are. */
   queue?: Uint8Array[];
+  held: number;
   /** Whether it has been told its input was dropped under the current lease. */
   toldDropped?: boolean;
 }
@@ -68,6 +88,14 @@ interface Watched {
   readonly stream: RuntimeStream;
   readonly emulator: ScreenEmulator;
   readonly viewers: Map<AttachmentId, Entry>;
+  /** Re-reads whether the program is on its alternate screen once its output settles. */
+  readonly screen: Settle;
+  alternate: boolean;
+  checkingScreen: boolean;
+  /** Output arrived while a check was running, so its answer may already be stale. */
+  screenStale: boolean;
+  /** Whether the last check failed, so a failing one is reported once, not every time. */
+  screenFailed: boolean;
   lease: Lease;
   /** The terminal's size as last applied. */
   size: Size;
@@ -84,11 +112,13 @@ interface Watched {
 export class TerminalHub {
   private readonly runtime: RuntimeAdapter;
   private readonly log: AttachmentLog;
+  private readonly opts: HubOptions;
   private readonly watched = new Map<TerminalId, Promise<Watched>>();
 
-  constructor(runtime: RuntimeAdapter, log: AttachmentLog) {
+  constructor(runtime: RuntimeAdapter, log: AttachmentLog, opts: HubOptions = HUB_DEFAULTS) {
     this.runtime = runtime;
     this.log = log;
+    this.opts = opts;
   }
 
   async join(ref: RuntimeRef, viewer: Viewer, size: Size): Promise<Attachment> {
@@ -98,7 +128,7 @@ export class TerminalHub {
     const id = newId("att");
     // From here the view's live bytes are held, and the snapshot covers every byte before them.
     const queue: Uint8Array[] = [];
-    const entry: Entry = { viewer, size, queue };
+    const entry: Entry = { viewer, size, queue, held: 0 };
     watched.viewers.set(id, entry);
     const snapshot = watched.emulator.snapshot();
     this.log.started(id, watched.terminal, viewer.mode);
@@ -108,8 +138,10 @@ export class TerminalHub {
     // The view may have left, or the terminal closed, while its snapshot was sent.
     if (!watched.viewers.has(id)) throw new ViewEnded();
     viewer.notify({ type: "snapshot_end" });
+    viewer.notify({ type: "screen", alternate: watched.alternate });
     for (const bytes of queue) viewer.send(bytes);
     delete entry.queue;
+    entry.held = 0;
     // The most recent interactive view sizes the terminal while nobody drives it.
     if (!opened) this.fitTo(watched);
     // Last: a view may send input and engage as soon as it is told, and they need the handle
@@ -131,31 +163,46 @@ export class TerminalHub {
     const existing = this.watched.get(ref.terminalId);
     if (existing !== undefined) return { watched: await existing, opened: false };
     const opening = (async () => {
-      const { stream, history } = await this.runtime.attach(ref, size, HISTORY_LINES);
+      const { stream, history, alternate } = await this.runtime.attach(ref, size, HISTORY_LINES);
       const watched: Watched = {
         terminal: ref.terminalId,
         stream,
         emulator: new ScreenEmulator(stream.size, (reply) => stream.write(reply)),
         size: stream.size,
         viewers: new Map(),
+        screen: new Settle(this.opts.screenQuietMs, this.opts.screenMaxWaitMs, () =>
+          this.checkScreen(watched),
+        ),
+        alternate,
+        checkingScreen: false,
+        screenStale: false,
+        screenFailed: false,
         lease: { holder: null, epoch: this.log.epoch(ref.terminalId) },
       };
       // Before any of the client's output, whose first redraw paints the screen below it.
       watched.emulator.seed(history);
       stream.onData((bytes) => {
         watched.emulator.write(bytes);
-        for (const entry of watched.viewers.values()) {
-          if (entry.queue) entry.queue.push(bytes);
-          else entry.viewer.send(bytes);
+        watched.screen.poke();
+        for (const [id, entry] of watched.viewers) {
+          if (entry.queue) {
+            entry.queue.push(bytes);
+            entry.held += bytes.length;
+          } else entry.viewer.send(bytes);
+          if (entry.viewer.unsent() + entry.held > this.opts.maxUnsentBytes) {
+            this.evict(watched, id, entry);
+          }
         }
       });
       stream.onClose(() => {
+        // The client also exits when its connection to tmux is lost while the terminal lives on.
+        const closed = this.log.closing(watched.terminal);
         for (const [id, entry] of watched.viewers) {
-          entry.viewer.notify({ type: "exit" });
-          entry.viewer.close();
-          this.log.ended(id, "terminal_closed");
+          dismiss(entry, closed ? { type: "exit" } : { type: "ended", reason: "disconnected" });
+          this.log.ended(id, closed ? "terminal_closed" : "disconnected");
         }
         watched.viewers.clear();
+        watched.screen.dispose();
         watched.emulator.dispose();
         this.forget(ref.terminalId, opening);
       });
@@ -164,6 +211,48 @@ export class TerminalHub {
     this.watched.set(ref.terminalId, opening);
     opening.catch(() => this.forget(ref.terminalId, opening));
     return { watched: await opening, opened: true };
+  }
+
+  /** Ends a view that has fallen behind, at a frame boundary; it reattaches for a fresh screen. */
+  private evict(watched: Watched, id: AttachmentId, entry: Entry): void {
+    dismiss(entry, { type: "ended", reason: "evicted_slow" });
+    this.end(watched, id, "evicted_slow");
+  }
+
+  /**
+   * One check at a time: a busy terminal settles every half second whether or not it changed. A
+   * check asked for while one runs is run after it, since the screen may have switched since.
+   */
+  private checkScreen(watched: Watched): void {
+    if (watched.checkingScreen) {
+      watched.screenStale = true;
+      return;
+    }
+    watched.checkingScreen = true;
+    watched.screenStale = false;
+    watched.stream
+      .alternateScreen()
+      .then(
+        (alternate) => {
+          watched.screenFailed = false;
+          if (alternate === watched.alternate) return;
+          watched.alternate = alternate;
+          for (const entry of watched.viewers.values()) {
+            entry.viewer.notify({ type: "screen", alternate });
+          }
+        },
+        (err: unknown) => {
+          if (watched.screenFailed) return;
+          watched.screenFailed = true;
+          for (const entry of watched.viewers.values()) {
+            entry.viewer.notify({ type: "notice", message: `screen check failed: ${String(err)}` });
+          }
+        },
+      )
+      .finally(() => {
+        watched.checkingScreen = false;
+        if (watched.screenStale && this.watched.has(watched.terminal)) this.checkScreen(watched);
+      });
   }
 
   private forget(terminal: TerminalId, opening: Promise<Watched>): void {
@@ -252,7 +341,7 @@ export class TerminalHub {
       })
       .catch((err: unknown) => {
         for (const entry of watched.viewers.values()) {
-          entry.viewer.notify({ type: "error", message: `resize failed: ${String(err)}` });
+          entry.viewer.notify({ type: "notice", message: `resize failed: ${String(err)}` });
         }
       })
       .finally(() => {
@@ -272,12 +361,19 @@ export class TerminalHub {
     watched.lease = release(watched.lease, id);
     if (watched.viewers.size === 0) {
       this.watched.delete(watched.terminal);
+      watched.screen.dispose();
       watched.stream.close();
       return;
     }
     if (wasDriver) this.announceLease(watched);
     this.fitTo(watched);
   }
+}
+
+/** Tells a view why its stream is over, and closes it. */
+function dismiss(entry: Entry, frame: StreamServerFrame): void {
+  entry.viewer.notify(frame);
+  entry.viewer.close();
 }
 
 function leaseFrame(watched: Watched, id: AttachmentId): StreamServerFrame {

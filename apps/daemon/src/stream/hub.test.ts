@@ -1,10 +1,10 @@
 import headless from "@xterm/headless";
 import { describe, expect, it } from "vitest";
-import { newId, type AttachmentId, type TerminalId } from "@bazhen/core";
+import { newId, type Attached, type AttachmentId, type TerminalId } from "@bazhen/core";
 import { FakeRuntime } from "@bazhen/core/testing";
 import type { AttachmentMode, StreamServerFrame } from "@bazhen/protocol";
 import { TerminalClosed } from "./emulator.ts";
-import { TerminalHub, ViewEnded, type AttachmentLog, type Viewer } from "./hub.ts";
+import { HUB_DEFAULTS, TerminalHub, ViewEnded, type AttachmentLog, type Viewer } from "./hub.ts";
 
 /** What a browser shows after writing everything a view was sent: each non-blank line. */
 async function screenOf(sent: readonly string[]): Promise<string[]> {
@@ -18,9 +18,29 @@ async function screenOf(sent: readonly string[]): Promise<string[]> {
   return lines.filter((line) => line !== "");
 }
 
+/** A FakeRuntime whose screen checks a test can fail, stall, or answer one at a time. */
+class CheckedRuntime extends FakeRuntime {
+  checks = 0;
+  mode: "answer" | "fail" | "hang" | "hold" = "answer";
+  readonly held: ((alternate: boolean) => void)[] = [];
+
+  override async attach(...args: Parameters<FakeRuntime["attach"]>): Promise<Attached> {
+    const attached = await super.attach(...args);
+    const check = () => attached.stream.alternateScreen();
+    const alternateScreen = async () => {
+      this.checks++;
+      if (this.mode === "fail") throw new Error("tmux gone");
+      if (this.mode === "hang") return new Promise<boolean>(() => {});
+      if (this.mode === "hold") return new Promise<boolean>((resolve) => this.held.push(resolve));
+      return check();
+    };
+    return { ...attached, stream: { ...attached.stream, alternateScreen } };
+  }
+}
+
 /** A runtime with one terminal, whose program echoes nothing, and what reaches it. */
 async function fakeRuntime(history = "earlier output") {
-  const runtime = new FakeRuntime();
+  const runtime = new CheckedRuntime();
   const ref = await runtime.create({
     terminalId: newId("term"),
     tags: { kind: "shell" },
@@ -40,11 +60,17 @@ async function fakeRuntime(history = "earlier output") {
     attachedAt: clients.attaches,
     emit: (s: string) => runtime.output(ref, s),
     end: () => runtime.vanish(ref),
+    failScreenChecks: () => (runtime.mode = "fail"),
+    hangScreenChecks: () => (runtime.mode = "hang"),
+    /** From now on each screen check waits until answered, oldest first. */
+    holdScreenChecks: () => (runtime.mode = "hold"),
+    answerScreenCheck: (answer: boolean) => runtime.held.shift()?.(answer),
+    screenChecks: () => runtime.checks,
     counts: () => ({ attaches: clients.attaches.length, closes: clients.closes }),
   };
 }
 
-function viewer(mode: AttachmentMode = "interactive") {
+function viewer(mode: AttachmentMode = "interactive", unsent = () => 0) {
   const seen: string[] = [];
   const frames: StreamServerFrame[] = [];
   let closed = false;
@@ -52,6 +78,7 @@ function viewer(mode: AttachmentMode = "interactive") {
     mode,
     send: (bytes) => seen.push(Buffer.from(bytes).toString()),
     notify: (frame) => frames.push(frame),
+    unsent,
     close: () => (closed = true),
   };
   return { v, seen, frames, closed: () => closed };
@@ -68,7 +95,7 @@ function emittingOnSnapshot(view: Viewer, during: () => void): Viewer {
   };
 }
 
-function memoryLog() {
+function memoryLog(closing = false) {
   const events: string[] = [];
   const log: AttachmentLog = {
     started: (a: AttachmentId) => events.push(`started ${a}`),
@@ -76,6 +103,7 @@ function memoryLog() {
     granted: (_t: TerminalId, a: AttachmentId, epoch: number) =>
       events.push(`granted ${a} ${epoch}`),
     epoch: () => 4,
+    closing: () => closing,
   };
   return { log, events };
 }
@@ -147,10 +175,18 @@ describe("terminal hub", () => {
       mode: "interactive",
       send: () => order.push("bytes"),
       notify: (frame) => order.push(frame.type),
+      unsent: () => 0,
       close: () => {},
     };
     await hub.join(rt.ref, late, size);
-    expect(order).toEqual(["lease", "snapshot_start", "bytes", "snapshot_end", "attached"]);
+    expect(order).toEqual([
+      "lease",
+      "snapshot_start",
+      "bytes",
+      "snapshot_end",
+      "screen",
+      "attached",
+    ]);
   });
 
   it("passes keystrokes only from the driver, and drops the rest without queuing them", async () => {
@@ -333,7 +369,7 @@ describe("terminal hub", () => {
 
   it("tells every view when the terminal itself goes away", async () => {
     const rt = await fakeRuntime();
-    const { log, events } = memoryLog();
+    const { log, events } = memoryLog(true);
     const hub = new TerminalHub(rt.runtime, log);
     const a = viewer();
     const attached = await hub.join(rt.ref, a.v, size);
@@ -342,6 +378,129 @@ describe("terminal hub", () => {
       { type: "exit" },
       true,
       `ended ${attached.id} terminal_closed`,
+    ]);
+  });
+});
+
+describe("terminal hub: screen state and slow views", () => {
+  const quick = { ...HUB_DEFAULTS, screenQuietMs: 10, screenMaxWaitMs: 50 };
+
+  it("tells a view whether the program is on its alternate screen, right after its snapshot", async () => {
+    const rt = await fakeRuntime();
+    rt.emit("\x1b[?1049h");
+    const hub = new TerminalHub(rt.runtime, memoryLog().log, quick);
+    const a = viewer();
+    await hub.join(rt.ref, a.v, size);
+    const types = a.frames.map((f) => f.type);
+    expect([
+      types.indexOf("screen") - types.indexOf("snapshot_end"),
+      a.frames.find((f) => f.type === "screen"),
+    ]).toEqual([1, { type: "screen", alternate: true }]);
+  });
+
+  it("tells every view when the program switches screens, once, after its output settles", async () => {
+    const rt = await fakeRuntime();
+    const hub = new TerminalHub(rt.runtime, memoryLog().log, quick);
+    const a = viewer();
+    const b = viewer("observe");
+    await hub.join(rt.ref, a.v, size);
+    await hub.join(rt.ref, b.v, size);
+    rt.emit("\x1b[?1049h");
+    rt.emit("drawn");
+    await expect.poll(() => b.frames.at(-1)).toEqual({ type: "screen", alternate: true });
+    rt.emit("more");
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    const screenFrames = (v: typeof a) => v.frames.filter((f) => f.type === "screen").length;
+    expect([screenFrames(a), screenFrames(b)]).toEqual([2, 2]);
+  });
+
+  it("starts no screen check while one is still running", async () => {
+    const rt = await fakeRuntime();
+    const hub = new TerminalHub(rt.runtime, memoryLog().log, quick);
+    await hub.join(rt.ref, viewer().v, size);
+    rt.hangScreenChecks();
+    for (let i = 0; i < 3; i++) {
+      rt.emit("output");
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+    expect(rt.screenChecks()).toBe(1);
+  });
+
+  it("checks the screen again when output arrived while a check was running", async () => {
+    const rt = await fakeRuntime();
+    const hub = new TerminalHub(rt.runtime, memoryLog().log, quick);
+    const a = viewer();
+    await hub.join(rt.ref, a.v, size);
+    rt.holdScreenChecks();
+    rt.emit("still on the main screen");
+    await expect.poll(() => rt.screenChecks()).toBe(1);
+    rt.emit("\x1b[?1049h");
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    rt.answerScreenCheck(false);
+    await expect.poll(() => rt.screenChecks()).toBe(2);
+    rt.answerScreenCheck(true);
+    await expect.poll(() => a.frames.at(-1)).toEqual({ type: "screen", alternate: true });
+  });
+
+  it("reports a screen check that keeps failing once, not every time", async () => {
+    const rt = await fakeRuntime();
+    const hub = new TerminalHub(rt.runtime, memoryLog().log, quick);
+    const a = viewer();
+    await hub.join(rt.ref, a.v, size);
+    rt.failScreenChecks();
+    for (let i = 0; i < 3; i++) {
+      rt.emit("output");
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+    expect([rt.screenChecks() >= 3, a.frames.filter((f) => f.type === "notice")]).toEqual([
+      true,
+      [{ type: "notice", message: "screen check failed: Error: tmux gone" }],
+    ]);
+  });
+
+  it("ends a view that falls too far behind, and keeps serving the others", async () => {
+    const rt = await fakeRuntime();
+    const { log, events } = memoryLog();
+    const hub = new TerminalHub(rt.runtime, log, { ...quick, maxUnsentBytes: 100 });
+    let backlog = 0;
+    const slow = viewer("observe", () => backlog);
+    const fast = viewer();
+    const s = await hub.join(rt.ref, slow.v, size);
+    await hub.join(rt.ref, fast.v, size);
+    backlog = 101;
+    rt.emit("one");
+    rt.emit("two");
+    expect([
+      slow.frames.at(-1),
+      slow.closed(),
+      slow.seen.at(-1),
+      fast.seen.slice(-2),
+      events.includes(`ended ${s.id} evicted_slow`),
+      rt.counts().closes,
+    ]).toEqual([{ type: "ended", reason: "evicted_slow" }, true, "one", ["one", "two"], true, 0]);
+  });
+
+  it("counts output held during a view's snapshot as unsent", async () => {
+    const rt = await fakeRuntime();
+    const hub = new TerminalHub(rt.runtime, memoryLog().log, { ...quick, maxUnsentBytes: 100 });
+    await hub.join(rt.ref, viewer().v, size);
+    const late = viewer();
+    const flooding = emittingOnSnapshot(late.v, () => rt.emit("x".repeat(101)));
+    await expect(hub.join(rt.ref, flooding, size)).rejects.toThrow(ViewEnded);
+    expect(late.frames.at(-1)).toEqual({ type: "ended", reason: "evicted_slow" });
+  });
+
+  it("ends views as disconnected when the runtime client is lost but the terminal lives on", async () => {
+    const rt = await fakeRuntime();
+    const { log, events } = memoryLog(false);
+    const hub = new TerminalHub(rt.runtime, log, quick);
+    const a = viewer();
+    const attached = await hub.join(rt.ref, a.v, size);
+    rt.end();
+    expect([a.frames.at(-1), a.closed(), events.at(-1)]).toEqual([
+      { type: "ended", reason: "disconnected" },
+      true,
+      `ended ${attached.id} disconnected`,
     ]);
   });
 });

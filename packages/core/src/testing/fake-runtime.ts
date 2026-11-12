@@ -1,7 +1,8 @@
 // An in-memory RuntimeAdapter, for tests that must not run tmux. It keeps TmuxRuntime's contract:
 // runtime-contract.ts runs one suite against both, so what a test proves against this runtime
 // holds against tmux. A program's argv decides what it does: `sh -c '… exit N'` exits with N at
-// once, `cat` echoes what it is sent, and anything else runs until it is signalled. As with tmux,
+// once, `cat` echoes what it is sent, and anything else runs until it is signalled. Output that
+// switches screens puts the program on its alternate screen or takes it off. As with tmux,
 // no server runs until the first terminal is created or after the last one goes, and while none
 // runs nothing can be read.
 
@@ -45,6 +46,8 @@ interface Terminal {
   pane: Pane;
   size: Size;
   history: string;
+  /** Whether the program is on its alternate screen, as its last switch in its output says. */
+  alternate: boolean;
   readonly streams: Set<{ emit(bytes: Uint8Array): void; end(): void }>;
   readonly clients: ClientRecord;
 }
@@ -52,6 +55,21 @@ interface Terminal {
 type ExitListener = (ref: RuntimeRef, status: ExitStatus) => void;
 
 const EXIT = /(?:^|;)\s*exit (\d+)\s*$/;
+/** Where the program is after `text`: on its alternate screen if its last switch went there. */
+function screenAfter(text: string, alternate: boolean): boolean {
+  let last = -1;
+  let on = alternate;
+  for (const mode of ["47", "1047", "1049"]) {
+    for (const [end, value] of [
+      ["h", true],
+      ["l", false],
+    ] as const) {
+      const at = text.lastIndexOf(`\x1b[?${mode}${end}`);
+      if (at > last) [last, on] = [at, value];
+    }
+  }
+  return on;
+}
 
 export class FakeRuntime implements RuntimeAdapter {
   readonly kind = "fake";
@@ -86,6 +104,7 @@ export class FakeRuntime implements RuntimeAdapter {
       pane: this.pane(spec),
       size: spec.size,
       history: "",
+      alternate: false,
       streams: new Set(),
       clients: { attaches: [], written: [], resizes: [], closes: 0 },
     };
@@ -122,13 +141,18 @@ export class FakeRuntime implements RuntimeAdapter {
         t.clients.resizes.push(next);
         t.size = next;
       },
+      alternateScreen: async () => {
+        this.read();
+        return this.terminalOf(ref).alternate;
+      },
       close: () => {
         t.clients.closes++;
         end();
       },
     };
-    const lines = historyLines > 0 ? t.history.split("\n").slice(-historyLines).join("\n") : "";
-    return { stream, history: lines };
+    const lines =
+      historyLines > 0 && !t.alternate ? t.history.split("\n").slice(-historyLines).join("\n") : "";
+    return { stream, history: lines, alternate: t.alternate };
   }
 
   async close(ref: RuntimeRef): Promise<void> {
@@ -237,6 +261,7 @@ export class FakeRuntime implements RuntimeAdapter {
   }
 
   private emit(t: Terminal, bytes: Uint8Array): void {
+    t.alternate = screenAfter(decode(bytes), t.alternate);
     for (const client of t.streams) client.emit(bytes);
   }
 

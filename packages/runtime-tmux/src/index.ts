@@ -239,6 +239,10 @@ export class TmuxRuntime implements RuntimeAdapter {
 
   async attach(ref: RuntimeRef, size: Size | null, historyLines: number): Promise<Attached> {
     const session = sessionOf(ref);
+    // Asked plainly: other commands answer a missing target with an error or with blank fields.
+    await this.tmux("has-session", "-t", session).catch(() => {
+      throw new StaleIncarnation(ref.terminalId, "gone");
+    });
     const resizeWindow = (next: Size) => this.tmux(...resizeArgs(session, next));
     if (size !== null) await resizeWindow(size);
     const [cols = 80, rows = 24, held = 0, alternate = 0] = (
@@ -296,9 +300,12 @@ export class TmuxRuntime implements RuntimeAdapter {
         await resizeWindow(next);
         proc.resize(next);
       },
+      alternateScreen: async () =>
+        (await this.tmux("display-message", "-p", "-t", windowOf(session), "#{alternate_on}")) ===
+        "1",
       close: () => proc.kill(),
     };
-    return { stream, history };
+    return { stream, history, alternate: alternate === 1 };
   }
 
   async close(ref: RuntimeRef): Promise<void> {

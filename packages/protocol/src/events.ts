@@ -59,7 +59,14 @@ export const EVENTS = {
   "attachment.ended": {
     entity: "attachment",
     payload: z.object({
-      reason: z.enum(["client_closed", "terminal_closed", "attach_failed", "daemon_restart"]),
+      reason: z.enum([
+        "client_closed",
+        "terminal_closed",
+        "attach_failed",
+        "daemon_restart",
+        "disconnected",
+        "evicted_slow",
+      ]),
     }),
   },
   /** A message for an agent, delivered at least once through its harness (§4.7, §5.6). */

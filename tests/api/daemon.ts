@@ -9,6 +9,8 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
+  readlinkSync,
   realpathSync,
   rmSync,
   statSync,
@@ -370,6 +372,29 @@ export class Daemon {
     });
   }
 
+  /**
+   * PTY handles the daemon process holds, from /proc: these suites run only on Linux, in CI or
+   * the `pnpm test:real` container.
+   */
+  ptyHandles(): number {
+    const pid = this.process?.pid;
+    if (pid === undefined) throw new Error("the daemon is not running");
+    const fds = `/proc/${pid}/fd`;
+    return readdirSync(fds).filter((fd) => {
+      try {
+        return readlinkSync(join(fds, fd)).includes("ptmx");
+      } catch {
+        // Closed between the listing and the read.
+        return false;
+      }
+    }).length;
+  }
+
+  /** Detaches every tmux client from the agent's terminal, as if the client's tmux link broke. */
+  detachClients(agentId: string): void {
+    this.tmux("detach-client", "-s", this.requireSession(agentId));
+  }
+
   /** Stops the daemon, its tmux server and every file under its home. */
   async stop(): Promise<void> {
     await this.exit("SIGTERM");
@@ -490,6 +515,23 @@ export class View {
   /** The text a browser would show from everything received, whatever escapes drew it. */
   async text(): Promise<string> {
     return (await replay(this.received(), SIZE)).lines.join("\n");
+  }
+
+  /** Stops reading from the socket, as a stalled browser would; the daemon's sends back up. */
+  stall(): void {
+    this.ws.pause();
+  }
+
+  resume(): void {
+    this.ws.resume();
+  }
+
+  /** Resolves when the daemon has closed this view's socket. */
+  closed(): Promise<void> {
+    return new Promise((resolve) => {
+      if (this.ws.readyState === this.ws.CLOSED) resolve();
+      else this.ws.once("close", () => resolve());
+    });
   }
 
   close(): void {

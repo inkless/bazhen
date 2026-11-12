@@ -90,6 +90,8 @@ export interface RuntimeStream {
   onClose(cb: () => void): void;
   write(bytes: Uint8Array): void;
   resize(size: Size): Promise<void>;
+  /** Whether the program is drawing on its alternate screen, read from the runtime. */
+  alternateScreen(): Promise<boolean>;
   /** Must release every OS handle the stream holds. */
   close(): void;
 }
@@ -104,6 +106,8 @@ export interface Attached {
    * draws the screen. Read on demand only, never polled (foundation-design §4.2, §5.9).
    */
   readonly history: string;
+  /** Whether the program was on its alternate screen as the client attached. */
+  readonly alternate: boolean;
 }
 
 export interface RuntimeAdapter {

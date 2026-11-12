@@ -248,6 +248,11 @@ export class Store {
     return rowIds(rows.all(kind), "env");
   }
 
+  terminalState(terminalId: string): TerminalState | undefined {
+    const row = this.prepare("SELECT state FROM terminals WHERE id = ?").get(terminalId);
+    return row === undefined ? undefined : TerminalState.parse(row.state);
+  }
+
   /** A terminal's current runtime incarnation, if it is running in one. */
   runtimeRef(terminalId: string): RuntimeRef | undefined {
     const row = this.prepare("SELECT runtime, locator FROM terminals WHERE id = ?").get(terminalId);
