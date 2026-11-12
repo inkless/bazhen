@@ -4,13 +4,14 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { baseEnv } from "./harness.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const schemaDir = join(here, "schema");
 // A throwaway CODEX_HOME, so generating the schema never touches the user's.
 const codexHome = mkdtempSync("/tmp/bz-spike-census-");
 execFileSync("codex", ["app-server", "generate-json-schema", "--out", schemaDir], {
-  env: { ...process.env, CODEX_HOME: codexHome },
+  env: { ...baseEnv(), CODEX_HOME: codexHome },
 });
 console.log("codex:", execFileSync("codex", ["--version"], { encoding: "utf8" }).trim());
 

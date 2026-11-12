@@ -7,7 +7,7 @@
 // - Refuses to start near the macOS PTY limit; kills everything it started on exit.
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { appendFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
+import { connect, createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RpcClient } from "./rpc-client.ts";
@@ -17,8 +17,32 @@ const PTY_CUTOFF = 420;
 
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Codex processes and the tmux server get only these variables. The tmux server copies the
+// environment of whoever starts it into every pane, so passing process.env through would leak
+// the driving session's variables (agent session ids, sockets, FORCE_COLOR) into each TUI.
+const ENV_ALLOW = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "TMPDIR", "TZ"];
+
+export function baseEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (ENV_ALLOW.includes(k) || k.startsWith("LC_")) env[k] = v;
+  }
+  return env;
+}
+
 function ptysInUse(): number {
   return readdirSync("/dev").filter((name) => name.startsWith("ttys")).length;
+}
+
+function canConnect(sock: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const s = connect(sock);
+    s.once("connect", () => {
+      s.destroy();
+      resolve(true);
+    });
+    s.once("error", () => resolve(false));
+  });
 }
 
 async function freePort(): Promise<number> {
@@ -121,14 +145,13 @@ export class Run {
       ].join("\n"),
     );
     const env: NodeJS.ProcessEnv = {
-      ...process.env,
+      ...baseEnv(),
       // HOME stays the user's: a temporary HOME has no login keychain. CODEX_HOME alone moves
       // every Codex path (config, sessions, sockets, daemon package) into the run directory.
       CODEX_HOME: codexHome,
       BZ_FAKE_KEY: "dummy",
       TMUX_TMPDIR: this.tmuxDir,
     };
-    delete env["TMUX"];
     const h = { root, home, codexHome, work, env };
     this.homes.push(h);
     return h;
@@ -144,16 +167,13 @@ export class Run {
     });
     proc.stderr?.on("data", (d: Buffer) => appendFileSync(join(h.root, "app-server.log"), d));
     this.children.push(proc);
+    // Wait until the socket accepts a connection: after a restart on the same path, a stale
+    // socket file can exist before the new server listens.
     for (let i = 0; i < 50; i++) {
-      try {
-        readdirSync(h.root).includes(sockName) && execFileSync("test", ["-S", sock]);
-        await sleep(300);
-        return { proc, sock };
-      } catch {
-        await sleep(200);
-      }
+      if (await canConnect(sock)) return { proc, sock };
+      await sleep(200);
     }
-    throw new Error(`app-server socket ${sock} never appeared`);
+    throw new Error(`app-server socket ${sock} never accepted a connection`);
   }
 
   async client(name: string, h: Home, sock: string): Promise<RpcClient> {
@@ -164,8 +184,7 @@ export class Run {
   }
 
   tmux(...args: string[]): string {
-    const env = { ...process.env, TMUX_TMPDIR: this.tmuxDir };
-    delete env["TMUX"];
+    const env = { ...baseEnv(), TMUX_TMPDIR: this.tmuxDir };
     return execFileSync("tmux", ["-L", this.tmuxSocket, "-f", "/dev/null", ...args], {
       env,
       encoding: "utf8",
@@ -187,6 +206,11 @@ export class Run {
     if (!hasServer) {
       this.tmux("new-session", "-d", "-x", "160", "-y", "45", "-s", "spike", "-n", "init", "sleep 86400");
       this.tmux("set-option", "-g", "remain-on-exit", "on");
+      const names = this.tmux("show-environment", "-g")
+        .split("\n")
+        .map((line) => line.split("=")[0])
+        .filter(Boolean);
+      this.log("tmux.global.env", { names });
     }
     this.tmux("new-window", "-d", ...envArgs, "-n", window, "-c", h.work, cmd);
     this.log("tui.start", { window, codexArgs });
