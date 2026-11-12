@@ -110,6 +110,8 @@ const app = createApp({
   send: (agentId, req) => mailbox.send(agentId, req),
   answer: (attentionId, req) => approvals.answer(attentionId, req),
   close: (agentId, req) => lifecycle.close(agentId, req),
+  respawn: (agentId, req) => lifecycle.respawn(agentId, req),
+  signal: (agentId, req) => lifecycle.signal(agentId, req),
 });
 
 const hub = new TerminalHub(runtime, storeLog(store));

@@ -1,9 +1,9 @@
 import type { SQLInputValue, StatementSync } from "node:sqlite";
 import {
+  advanceTerminal,
   agent,
   attention,
   mailbox,
-  terminal,
   type AgentEvent,
   type MailboxEvent,
   type TerminalEvent,
@@ -82,9 +82,7 @@ export function project(db: Statements, e: Recorded): void {
       const { externalRef, runtimeRef } = EVENTS[e.type].payload.parse(e.payload);
       advance(db, e.id, e.entityId, ["launch.confirmed", "runtime.confirmed"], {
         agent: { external_ref: externalRef && JSON.stringify(externalRef) },
-        ...(runtimeRef && {
-          terminal: { runtime: runtimeRef.runtime, locator: JSON.stringify(runtimeRef.locator) },
-        }),
+        ...(runtimeRef && { terminal: incarnation(runtimeRef) }),
       });
       return;
     }
@@ -101,6 +99,24 @@ export function project(db: Statements, e: Recorded): void {
       });
       return;
     }
+    case "agent.respawn_requested":
+      advance(db, e.id, e.entityId, ["respawn.requested", null]);
+      return;
+    case "agent.respawned": {
+      const { externalRef, runtimeRef } = EVENTS[e.type].payload.parse(e.payload);
+      advance(db, e.id, e.entityId, ["launch.confirmed", "respawned"], {
+        agent: { external_ref: externalRef && JSON.stringify(externalRef) },
+        terminal: { ...incarnation(runtimeRef), exit: null },
+      });
+      return;
+    }
+    case "agent.respawn_rejected":
+      EVENTS[e.type].payload.parse(e.payload);
+      advance(db, e.id, e.entityId, ["respawn.rejected", null]);
+      return;
+    case "agent.signalled":
+      EVENTS[e.type].payload.parse(e.payload);
+      return;
     case "agent.closing":
       advance(db, e.id, e.entityId, ["close.requested", "close.requested"]);
       return;
@@ -180,6 +196,12 @@ export function project(db: Statements, e: Recorded): void {
 
 type Columns = Readonly<Record<string, SQLInputValue>>;
 
+/** The columns that record which runtime incarnation a terminal is in. */
+const incarnation = (ref: { runtime: string; locator: Record<string, string> }): Columns => ({
+  runtime: ref.runtime,
+  locator: JSON.stringify(ref.locator),
+});
+
 function moveMessage(db: Statements, e: Recorded, event: MailboxEvent, columns: Columns = {}) {
   const row = db.prepare("SELECT state FROM mailbox WHERE id = ?").get(e.entityId);
   if (row === undefined) throw new UnknownEntity("message", e.entityId);
@@ -199,7 +221,7 @@ function advance(
   db: Statements,
   eventId: number,
   agentId: string,
-  [agentEvent, terminalEvent]: [AgentEvent, TerminalEvent],
+  [agentEvent, terminalEvent]: [AgentEvent, TerminalEvent | null],
   columns: { agent?: Columns; terminal?: Columns } = {},
 ): void {
   const row = db.prepare("SELECT state FROM agent_sessions WHERE id = ?").get(agentId);
@@ -208,12 +230,16 @@ function advance(
     state: agent.next(AgentState.parse(row.state), agentEvent),
     ...columns.agent,
   });
-  const term = db.prepare("SELECT state FROM terminals WHERE agent_session_id = ?").get(agentId);
+  if (terminalEvent === null) return;
+  const term = db
+    .prepare("SELECT state, generation FROM terminals WHERE agent_session_id = ?")
+    .get(agentId);
   if (term === undefined) return;
-  update(db, "terminals", "agent_session_id", agentId, eventId, {
-    state: terminal.next(TerminalState.parse(term.state), terminalEvent),
-    ...columns.terminal,
-  });
+  const at = advanceTerminal(
+    { state: TerminalState.parse(term.state), generation: Number(term.generation) },
+    terminalEvent,
+  );
+  update(db, "terminals", "agent_session_id", agentId, eventId, { ...at, ...columns.terminal });
 }
 
 function update(

@@ -6,6 +6,7 @@
   "dependencies": {
     "@bazhen/core": "workspace:*",
     "@bazhen/daemon": "workspace:*",
+    "@bazhen/env-local": "workspace:*",
     "@bazhen/host-guard": "workspace:*",
     "@bazhen/protocol": "workspace:*",
     "@bazhen/runtime-tmux": "workspace:*"

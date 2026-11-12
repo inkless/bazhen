@@ -18,6 +18,7 @@ afterAll(async () => {
 });
 
 const state = async () => StateSnapshot.parse((await daemon.request("/v1/state")).body);
+const agentIn = (s: StateSnapshot) => s.agents.find((a) => a.id === agentId);
 const openItems = (s: StateSnapshot) => s.attention.filter((a) => a.state === "open");
 /** The open item whose summary names this tool call, if one is open. */
 const openItemFor = async (call: string) =>
@@ -75,5 +76,27 @@ describe("mail to a Claude Code agent", () => {
       });
     expect((await answer("first")).status).toBe(200);
     expect((await answer("second")).status).toBe(409);
+  });
+
+  // Mail reaches Claude Code only through hooks installed at launch, so this shows a respawn
+  // resumes the session with them.
+  it("delivers mail to the agent once it has been respawned on its session", async () => {
+    await daemon.signalAgent(agentId, "SIGKILL");
+    await expect
+      .poll(async () => agentIn(await state())?.state, { timeout: 10_000 })
+      .toBe("exited");
+    const generation = Number(agentIn(await state())?.generation);
+    const respawned = await daemon.request(`/v1/agents/${agentId}/respawn`, {
+      method: "POST",
+      body: { idempotencyKey: "respawn", generation },
+    });
+    expect(respawned.status).toBe(200);
+    await waitUntil(() => daemon.screen(agentId).includes("Claude Code"), "the resumed TUI");
+    const { messageId } = await send("after-respawn", "Reply to confirm, after the respawn.");
+    await expect
+      .poll(async () => (await state()).messages.find((m) => m.id === messageId)?.state, {
+        timeout: 30_000,
+      })
+      .toBe("delivered");
   });
 });

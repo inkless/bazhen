@@ -17,6 +17,16 @@ afterAll(async () => {
   await model?.close();
 });
 
+/**
+ * Whether a pane title names `threadId`. Codex cuts a long title short with an ellipsis, so the
+ * title is a long enough prefix of it: thread ids are UUIDv7, and a thread started later differs
+ * well within 20 characters.
+ */
+const showsThread = (title: string, threadId: string) => {
+  const shown = title.replace(/(\.\.\.|…)$/, "");
+  return shown.length >= 20 && threadId.startsWith(shown);
+};
+
 const state = async () => StateSnapshot.parse((await daemon.request("/v1/state")).body);
 
 describe("a Codex agent", () => {
@@ -57,5 +67,29 @@ describe("a Codex agent", () => {
         timeout: 30_000,
       })
       .toContain(threadId);
+  });
+
+  it("respawns on the agent's own thread, with the TUI back on screen", async () => {
+    const agent = async () => (await state()).agents.find((a) => a.id === launched.agentId);
+    const thread = (await agent())?.externalRef;
+    await daemon.signalAgent(launched.agentId, "SIGKILL");
+    await expect.poll(async () => (await agent())?.state, { timeout: 10_000 }).toBe("exited");
+    const respawned = await daemon.request(`/v1/agents/${launched.agentId}/respawn`, {
+      method: "POST",
+      body: { idempotencyKey: "respawn", generation: Number((await agent())?.generation) },
+    });
+    expect(respawned.status).toBe(200);
+    await waitUntil(
+      () => daemon.screen(launched.agentId).includes(BANNER.codex),
+      "Codex's TUI after the respawn",
+      30_000,
+    );
+    expect(await agent()).toMatchObject({ state: "running", generation: 1, externalRef: thread });
+    // The TUI titles its pane with the thread it shows: the same thread, not a new one.
+    await expect
+      .poll(() => showsThread(daemon.paneTitle(launched.agentId), String(thread?.id)), {
+        timeout: 30_000,
+      })
+      .toBe(true);
   });
 });

@@ -10,6 +10,7 @@ import type { WebSocket } from "ws";
 import {
   isId,
   newId,
+  NoTerminal,
   type AgentInventoryEntry,
   type AgentLaunch,
   type AgentRefs,
@@ -41,9 +42,16 @@ export function fakeEnvironment(
     id: localEnvironmentId(store),
     kind: "local",
     harnesses: ["claude-code"],
+    resumable: ["claude-code"],
     health: async () => ({ state: "reachable", version: null }),
     inventory: async () => present(),
     launch,
+    respawn: async ({ refs, generation }) => {
+      if (refs.runtime === null) throw new NoTerminal();
+      const locator = { ...refs.runtime.locator, generation: String(generation) };
+      return { runtime: { ...refs.runtime, locator }, externalRef: refs.externalRef };
+    },
+    signal: async () => {},
     close: async () => {},
     onExit: () => () => {},
   };

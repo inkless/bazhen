@@ -12,6 +12,11 @@ describe("agent session lifecycle", () => {
     expect(agent.next("lost", "relaunch.requested")).toBe("starting");
   });
 
+  it("returns to exited, still closable, when a respawn is rejected", () => {
+    const rejected = agent.next(agent.next("exited", "respawn.requested"), "respawn.rejected");
+    expect([rejected, agent.accepts(rejected, "close.requested")]).toEqual(["exited", true]);
+  });
+
   it("cannot be respawned while still running", () => {
     expect(() => agent.next("running", "respawn.requested")).toThrow(InvalidTransition);
   });

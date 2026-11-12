@@ -2,14 +2,16 @@ import { describe, expect, it } from "vitest";
 import {
   LaunchFailed,
   newId,
+  NotResumable,
   StaleIncarnation,
   type AgentRefs,
+  type AgentRespawn,
   type RuntimeRef,
 } from "@bazhen/core";
-import type { ExitStatus } from "@bazhen/protocol";
-import type { Store } from "../store/store.ts";
+import type { ExitStatus, Signal } from "@bazhen/protocol";
+import { IdempotencyConflict, type Store } from "../store/store.ts";
 import { fakeEnvironment, withAgent } from "../testing/fixtures.ts";
-import { launchAgent } from "./launch.ts";
+import { launchAgent, localEnvironmentId } from "./launch.ts";
 import {
   AgentStateConflict,
   EnvironmentUnavailable,
@@ -18,35 +20,65 @@ import {
   TerminalReplaced,
 } from "./lifecycle.ts";
 
-/** A running agent whose environment records closes, fails them on demand, and reports exits. */
-async function running() {
+/**
+ * A running agent whose environment records closes, respawns and signals, fails them on demand,
+ * and reports exits.
+ */
+async function running({ session = true } = {}) {
   const closed: AgentRefs[] = [];
+  const respawned: AgentRespawn[] = [];
+  const signalled: Signal[] = [];
   let failure: Error | undefined;
   const statesAtClose: (string | undefined)[] = [];
   let report: ((ref: RuntimeRef, status: ExitStatus) => void) | undefined;
-  const { store, agentId, terminalId, environment } = await withAgent((s) => ({
-    ...fakeEnvironment(s, async (l) => ({
+  const { store, agentId, terminalId, environment } = await withAgent((s) => {
+    const environmentId = localEnvironmentId(s);
+    const base = fakeEnvironment(s, async (l) => ({
       runtime: { terminalId: l.terminalId, runtime: "tmux", locator: { generation: "0" } },
-      externalRef: null,
-    })),
-    close: async (refs) => {
-      statesAtClose.push(s.snapshot().agents[0]?.state);
-      if (failure !== undefined) throw failure;
-      closed.push(refs);
-    },
-    onExit: (cb) => {
-      report = cb;
-      return () => (report = undefined);
-    },
-  }));
+      externalRef: session ? { environmentId, kind: "claude-session", id: "s-1" } : null,
+    }));
+    return {
+      ...base,
+      respawn: async (r) => {
+        if (failure !== undefined) throw failure;
+        respawned.push(r);
+        return base.respawn(r);
+      },
+      signal: async (_refs, signal) => {
+        if (failure !== undefined) throw failure;
+        signalled.push(signal);
+      },
+      close: async (refs) => {
+        statesAtClose.push(s.snapshot().agents[0]?.state);
+        if (failure !== undefined) throw failure;
+        closed.push(refs);
+      },
+      onExit: (cb) => {
+        report = cb;
+        return () => (report = undefined);
+      },
+    };
+  });
   const lifecycle = new Lifecycle(store, environment);
   lifecycle.watch();
   const exit = (generation: string, status: ExitStatus = { type: "exited", code: 1 }) =>
     report?.({ terminalId, runtime: "tmux", locator: { generation } }, status);
   const agent = () => store.snapshot().agents[0];
   const events = () => store.snapshot().eventId;
-  const failCloses = (with_?: Error) => (failure = with_);
-  return { store, lifecycle, agentId, closed, statesAtClose, exit, agent, events, failCloses };
+  const fail = (with_?: Error) => (failure = with_);
+  return {
+    store,
+    lifecycle,
+    agentId,
+    closed,
+    respawned,
+    signalled,
+    statesAtClose,
+    exit,
+    agent,
+    events,
+    fail,
+  };
 }
 
 /** The id of an agent whose launch the environment rejected. */
@@ -98,8 +130,8 @@ describe("agent lifecycle", () => {
   });
 
   it("says a terminal whose server was replaced can't be closed by repeating the command", async () => {
-    const { lifecycle, agentId, agent, failCloses } = await running();
-    failCloses(new StaleIncarnation(newId("term"), "server-replaced"));
+    const { lifecycle, agentId, agent, fail } = await running();
+    fail(new StaleIncarnation(newId("term"), "server-replaced"));
     await expect(lifecycle.close(agentId, { idempotencyKey: "c", generation: 0 })).rejects.toThrow(
       TerminalReplaced,
     );
@@ -107,13 +139,13 @@ describe("agent lifecycle", () => {
   });
 
   it("leaves the agent closing when the environment can't be reached, and finishes on a retry", async () => {
-    const { lifecycle, agentId, agent, failCloses } = await running();
-    failCloses(new Error("tmux unreachable"));
+    const { lifecycle, agentId, agent, fail } = await running();
+    fail(new Error("tmux unreachable"));
     await expect(lifecycle.close(agentId, { idempotencyKey: "c", generation: 0 })).rejects.toThrow(
       EnvironmentUnavailable,
     );
     expect(agent()?.state).toBe("closing");
-    failCloses();
+    fail();
     const res = await lifecycle.close(agentId, { idempotencyKey: "c", generation: 0 });
     expect([res.eventIds.length, agent()?.state]).toEqual([2, "closed"]);
   });
@@ -156,5 +188,96 @@ describe("agent lifecycle", () => {
       lifecycle.close(agentId, { idempotencyKey: "d", generation: 0 }),
     ]);
     expect([a.eventIds.length, b.eventIds.length, closed.length]).toEqual([2, 0, 1]);
+  });
+
+  it("respawns an exited agent at the next generation, under the same id", async () => {
+    const { lifecycle, agentId, exit, agent, respawned } = await running();
+    exit("0");
+    const res = await lifecycle.respawn(agentId, { idempotencyKey: "r", generation: 0 });
+    expect([res.eventIds.length, respawned[0]?.generation]).toEqual([2, 1]);
+    expect(agent()).toMatchObject({ id: agentId, state: "running", generation: 1, exit: null });
+  });
+
+  it("records the next exit under the new generation, and drops one about the old", async () => {
+    const { lifecycle, agentId, exit, agent } = await running();
+    exit("0");
+    await lifecycle.respawn(agentId, { idempotencyKey: "r", generation: 0 });
+    exit("0");
+    const afterStale = agent()?.state;
+    exit("1", { type: "exited", code: 4 });
+    expect([afterStale, agent()?.exit]).toEqual(["running", { type: "exited", code: 4 }]);
+  });
+
+  it("returns a rejected respawn to exited, still closable, and says why", async () => {
+    const { lifecycle, agentId, exit, agent, fail } = await running();
+    exit("0");
+    fail(new StaleIncarnation(newId("term"), "gone"));
+    await expect(
+      lifecycle.respawn(agentId, { idempotencyKey: "r", generation: 0 }),
+    ).rejects.toThrow(TerminalReplaced);
+    const rejected = agent()?.state;
+    fail();
+    await lifecycle.close(agentId, { idempotencyKey: "c", generation: 0 });
+    expect([rejected, agent()?.state]).toEqual(["exited", "closed"]);
+  });
+
+  it("refuses a respawn the agent has no session for, recording nothing", async () => {
+    const { lifecycle, agentId, exit, events, respawned } = await running({ session: false });
+    exit("0");
+    const before = events();
+    await expect(
+      lifecycle.respawn(agentId, { idempotencyKey: "r", generation: 0 }),
+    ).rejects.toThrow(NotResumable);
+    expect([events(), respawned.length]).toEqual([before, 0]);
+  });
+
+  it("refuses to respawn a running agent, or one at a stale generation", async () => {
+    const { lifecycle, agentId, exit } = await running();
+    await expect(
+      lifecycle.respawn(agentId, { idempotencyKey: "r", generation: 0 }),
+    ).rejects.toThrow(AgentStateConflict);
+    exit("0");
+    await expect(
+      lifecycle.respawn(agentId, { idempotencyKey: "s", generation: 2 }),
+    ).rejects.toThrow(StaleGeneration);
+  });
+
+  it("returns a respawn the environment can't reach to exited, to be tried again", async () => {
+    const { lifecycle, agentId, exit, agent, fail } = await running();
+    exit("0");
+    fail(new Error("tmux unreachable"));
+    await expect(
+      lifecycle.respawn(agentId, { idempotencyKey: "r", generation: 0 }),
+    ).rejects.toThrow(EnvironmentUnavailable);
+    fail();
+    const again = await lifecycle.respawn(agentId, { idempotencyKey: "r", generation: 0 });
+    expect([again.eventIds.length, agent()?.state]).toEqual([2, "running"]);
+  });
+
+  it("signals a running agent and records it, without changing its state", async () => {
+    const { lifecycle, agentId, agent, signalled } = await running();
+    const res = await lifecycle.signal(agentId, {
+      idempotencyKey: "s",
+      generation: 0,
+      signal: "SIGINT",
+    });
+    expect([res.eventIds.length, signalled, agent()?.state]).toEqual([1, ["SIGINT"], "running"]);
+  });
+
+  it("refuses to signal an agent that is not running", async () => {
+    const { lifecycle, agentId, exit, signalled } = await running();
+    exit("0");
+    await expect(
+      lifecycle.signal(agentId, { idempotencyKey: "s", generation: 0, signal: "SIGTERM" }),
+    ).rejects.toThrow(AgentStateConflict);
+    expect(signalled).toEqual([]);
+  });
+
+  it("refuses one key used for two different commands", async () => {
+    const { lifecycle, agentId } = await running();
+    await lifecycle.signal(agentId, { idempotencyKey: "k", generation: 0, signal: "SIGINT" });
+    await expect(lifecycle.close(agentId, { idempotencyKey: "k", generation: 0 })).rejects.toThrow(
+      IdempotencyConflict,
+    );
   });
 });

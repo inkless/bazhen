@@ -1,5 +1,5 @@
 import type { AgentLaunchRequest } from "./agent.ts";
-import type { EnvironmentKind, ExitStatus, ExternalRef, HarnessId } from "@bazhen/protocol";
+import type { EnvironmentKind, ExitStatus, ExternalRef, HarnessId, Signal } from "@bazhen/protocol";
 import type { AgentSessionId, EnvironmentId, TerminalId } from "./ids.ts";
 import type { RuntimeRef, Size } from "./runtime.ts";
 
@@ -30,6 +30,14 @@ export interface AgentLaunch {
   readonly size: Size;
 }
 
+/** A respawn: the agent as recorded, and the generation its terminal's new incarnation takes. */
+export interface AgentRespawn {
+  readonly agentId: AgentSessionId;
+  readonly request: AgentLaunchRequest;
+  readonly refs: AgentRefs;
+  readonly generation: number;
+}
+
 /** What now runs the agent: its terminal's incarnation and its harness session, where known. */
 export interface AgentRefs {
   readonly runtime: RuntimeRef | null;
@@ -53,6 +61,26 @@ export class NoTerminal extends Error {
   }
 }
 
+/** The agent has no harness session it can be started again on. */
+export class NotResumable extends Error {
+  readonly agentId: AgentSessionId;
+
+  constructor(agentId: AgentSessionId) {
+    super(`agent ${agentId} has no session to resume`);
+    this.agentId = agentId;
+  }
+}
+
+/** A terminal already carries the agent: an agent has one terminal at a time. */
+export class AgentTerminalExists extends Error {
+  readonly agentId: AgentSessionId;
+
+  constructor(agentId: AgentSessionId) {
+    super(`agent ${agentId} already has a terminal`);
+    this.agentId = agentId;
+  }
+}
+
 /** The environment could not start the agent; the agent is recorded as failed. */
 export class LaunchFailed extends Error {
   readonly agentId: AgentSessionId;
@@ -69,10 +97,19 @@ export interface EnvironmentAdapter {
   readonly kind: EnvironmentKind;
   /** The harnesses it can run; a launch of any other is refused before anything is recorded. */
   readonly harnesses: readonly HarnessId[];
+  /** The harnesses whose agents can be respawned on their session; a respawn of any other is refused first. */
+  readonly resumable: readonly HarnessId[];
   /** Only a reachable environment can say an agent is gone (foundation-design §4.4). */
   health(): Promise<EnvironmentHealth>;
   inventory(): Promise<AgentInventoryEntry[]>;
   launch(launch: AgentLaunch): Promise<AgentRefs>;
+  /** Starts the agent's exited terminal again, on its existing harness session. */
+  respawn(respawn: AgentRespawn): Promise<AgentRefs & { readonly runtime: RuntimeRef }>;
+  /**
+   * Signals the agent's process. A native path, because Ctrl-C through the terminal would be
+   * typing (§11.1); an environment that can't signal reports it unsupported.
+   */
+  signal(refs: AgentRefs, signal: Signal): Promise<void>;
   /** Ends what runs the agent. What the environment positively no longer has counts as ended. */
   close(refs: AgentRefs): Promise<void>;
   /** Reports every terminal whose process has ended, as the runtime does (RuntimeAdapter.onExit). */

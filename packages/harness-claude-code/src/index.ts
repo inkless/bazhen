@@ -1,5 +1,5 @@
-import type { HarnessAdapter, HarnessLaunch } from "@bazhen/core";
-import type { ApprovalDecision } from "@bazhen/protocol";
+import type { AgentLaunchRequest, HarnessAdapter, HarnessLaunch } from "@bazhen/core";
+import type { ApprovalDecision, ExternalRef } from "@bazhen/protocol";
 
 export interface ClaudeCodeOptions {
   readonly newSessionId: () => string;
@@ -24,11 +24,22 @@ export class ClaudeCodeHarness implements HarnessAdapter {
 
   async launchSpec(): Promise<HarnessLaunch> {
     const id = this.opts.newSessionId();
+    return this.spec(["--session-id", id], id);
+  }
+
+  /** The same TUI, with its hooks, on the session the agent already had. */
+  async resumeSpec(
+    _request: AgentLaunchRequest,
+    session: Omit<ExternalRef, "environmentId">,
+  ): Promise<HarnessLaunch> {
+    return this.spec(["--resume", session.id], session.id);
+  }
+
+  private spec(session: string[], id: string): HarnessLaunch {
     return {
       argv: [
         "claude",
-        "--session-id",
-        id,
+        ...session,
         "--settings",
         JSON.stringify(hooks(this.opts.hookCommand)),
         ...(this.opts.permissionMode === undefined

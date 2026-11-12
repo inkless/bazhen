@@ -3,6 +3,8 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import {
   AnswerAttentionRequest,
   CloseAgentRequest,
+  RespawnAgentRequest,
+  SignalAgentRequest,
   HealthResponse,
   LaunchAgentRequest,
   PROTOCOL_VERSION,
@@ -14,7 +16,15 @@ import {
   type LaunchAgentResponse,
   type StateSnapshot,
 } from "@bazhen/protocol";
-import { LaunchFailed, NoTerminal, UnsupportedHarness, type RuntimeAdapter } from "@bazhen/core";
+import {
+  LaunchFailed,
+  NoTerminal,
+  NotResumable,
+  ProcessState,
+  UnsupportedHarness,
+  type RuntimeAdapter,
+} from "@bazhen/core";
+import type { z } from "zod";
 import { IdempotencyConflict, UnknownAgent } from "../store/store.ts";
 import {
   AgentStateConflict,
@@ -35,6 +45,8 @@ export interface AppDeps {
   readonly send: (agentId: string, req: SendMessageRequest) => SendMessageResponse;
   readonly answer: (attentionId: string, req: AnswerAttentionRequest) => AnswerAttentionResponse;
   readonly close: (agentId: string, req: CloseAgentRequest) => Promise<AgentCommandResponse>;
+  readonly respawn: (agentId: string, req: RespawnAgentRequest) => Promise<AgentCommandResponse>;
+  readonly signal: (agentId: string, req: SignalAgentRequest) => Promise<AgentCommandResponse>;
 }
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -82,23 +94,22 @@ export function createApp(deps: AppDeps): Hono {
     return c.json(await deps.launch(body.data));
   });
 
-  app.post("/v1/agents/:id/messages", async (c) => {
-    const body = SendMessageRequest.safeParse(await c.req.json().catch(() => undefined));
-    if (!body.success) return fail(c, 400, "invalid_request", body.error.message);
-    return c.json(deps.send(c.req.param("id"), body.data));
-  });
-
-  app.post("/v1/agents/:id/close", async (c) => {
-    const body = CloseAgentRequest.safeParse(await c.req.json().catch(() => undefined));
-    if (!body.success) return fail(c, 400, "invalid_request", body.error.message);
-    return c.json(await deps.close(c.req.param("id"), body.data));
-  });
-
-  app.post("/v1/attention/:id/answer", async (c) => {
-    const body = AnswerAttentionRequest.safeParse(await c.req.json().catch(() => undefined));
-    if (!body.success) return fail(c, 400, "invalid_request", body.error.message);
-    return c.json(deps.answer(c.req.param("id"), body.data));
-  });
+  /** A request about one entity: the body is checked against its schema, then handed to `run`. */
+  const route = <T, R>(
+    path: `/v1/${string}/:id/${string}`,
+    schema: z.ZodType<T>,
+    run: (id: string, req: T) => R | Promise<R>,
+  ) =>
+    app.post(path, async (c) => {
+      const body = schema.safeParse(await c.req.json().catch(() => undefined));
+      if (!body.success) return fail(c, 400, "invalid_request", body.error.message);
+      return c.json(await run(c.req.param("id"), body.data));
+    });
+  route("/v1/agents/:id/messages", SendMessageRequest, deps.send);
+  route("/v1/agents/:id/close", CloseAgentRequest, deps.close);
+  route("/v1/agents/:id/respawn", RespawnAgentRequest, deps.respawn);
+  route("/v1/agents/:id/signal", SignalAgentRequest, deps.signal);
+  route("/v1/attention/:id/answer", AnswerAttentionRequest, deps.answer);
 
   // Typed failures from the domain become protocol errors in one place; anything else is a bug.
   app.onError((err, c) => {
@@ -108,7 +119,8 @@ export function createApp(deps: AppDeps): Hono {
     if (err instanceof AttentionClosed) return fail(c, 409, "conflict", err.message);
     if (err instanceof UnknownAgent) return fail(c, 404, "not_found", err.message);
     if (err instanceof StaleGeneration) return fail(c, 409, "stale_generation", err.message);
-    const conflict = [AgentStateConflict, TerminalReplaced, NoTerminal].some(
+    if (err instanceof NotResumable) return fail(c, 409, "not_resumable", err.message);
+    const conflict = [AgentStateConflict, TerminalReplaced, NoTerminal, ProcessState].some(
       (e) => err instanceof e,
     );
     if (conflict) return fail(c, 409, "conflict", err.message);
