@@ -36,11 +36,4 @@ describe("approvals", () => {
       approvals.answer(String(item(store)?.id), { idempotencyKey: "late", decision: "allow" }),
     ).toThrow(AttentionClosed);
   });
-
-  it("closes items left open by a daemon that stopped as stale", async () => {
-    const { store, agentId } = await withAgent();
-    void new Approvals(store).request(agentId, bash);
-    new Approvals(store).closeAbandoned();
-    expect(item(store)?.closeReason).toBe("stale");
-  });
 });

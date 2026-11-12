@@ -82,11 +82,6 @@ export class Approvals {
     }
   }
 
-  /** The hooks behind open items died with the daemon; their requests are gone. */
-  closeAbandoned(): void {
-    for (const id of this.store.openAttention()) this.close(id, "stale");
-  }
-
   private close(id: AttentionId, reason: CloseReason): void {
     this.record("attention.closed", id, { reason });
   }

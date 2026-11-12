@@ -53,16 +53,6 @@ describe("mailbox", () => {
     await expect.poll(() => stateOf(store, messageId)).toBe("queued");
   });
 
-  it("queues every message a hook held again after a daemon restart", async () => {
-    const { store, agentId } = await withAgent();
-    const mailbox = new Mailbox(store);
-    const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
-    await mailbox.wait(agentId, live());
-    mailbox.ack([messageId]);
-    new Mailbox(store).requeueInFlight();
-    expect(stateOf(store, messageId)).toBe("queued");
-  });
-
   it("refuses mail for an agent it doesn't run, and queues a repeat only once", async () => {
     const { store, agentId } = await withAgent();
     const mailbox = new Mailbox(store);

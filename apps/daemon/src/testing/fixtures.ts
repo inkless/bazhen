@@ -4,13 +4,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  isId,
-  type AgentInventoryEntry,
-  type AgentLaunch,
-  type AgentRefs,
-  type EnvironmentAdapter,
-} from "@bazhen/core";
+import { isId, type AgentLaunch, type AgentRefs, type EnvironmentAdapter } from "@bazhen/core";
 import { launchAgent, localEnvironmentId } from "../agents/launch.ts";
 import { Store } from "../store/store.ts";
 
@@ -23,14 +17,11 @@ export function fakeEnvironment(
     runtime: { terminalId: l.terminalId, runtime: "tmux", locator: {} },
     externalRef: null,
   }),
-  present: () => AgentInventoryEntry[] = () => [],
 ): EnvironmentAdapter {
   return {
     id: localEnvironmentId(store),
     kind: "local",
     harnesses: ["claude-code"],
-    health: async () => ({ state: "reachable", version: null }),
-    inventory: async () => present(),
     launch,
   };
 }

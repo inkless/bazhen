@@ -3,25 +3,6 @@ import type { EnvironmentKind, ExternalRef, HarnessId } from "@bazhen/protocol";
 import type { AgentSessionId, EnvironmentId, TerminalId } from "./ids.ts";
 import type { RuntimeRef, Size } from "./runtime.ts";
 
-export type EnvironmentHealthState =
-  | "unknown"
-  | "reachable"
-  | "unreachable"
-  | "auth_failed"
-  | "version_unsupported";
-
-export interface EnvironmentHealth {
-  readonly state: EnvironmentHealthState;
-  readonly version: string | null;
-}
-
-/** A Bazhen-launched agent the environment still has, for reconciliation (foundation-design §7). */
-export interface AgentInventoryEntry {
-  readonly agentId: AgentSessionId;
-  readonly ref: RuntimeRef;
-  readonly dead: boolean;
-}
-
 /** A launch, with every Bazhen id already minted by the daemon (foundation-design §8.1). */
 export interface AgentLaunch {
   readonly agentId: AgentSessionId;
@@ -62,8 +43,5 @@ export interface EnvironmentAdapter {
   readonly kind: EnvironmentKind;
   /** The harnesses it can run; a launch of any other is refused before anything is recorded. */
   readonly harnesses: readonly HarnessId[];
-  /** Only a reachable environment can say an agent is gone (foundation-design §4.4). */
-  health(): Promise<EnvironmentHealth>;
-  inventory(): Promise<AgentInventoryEntry[]>;
   launch(launch: AgentLaunch): Promise<AgentRefs>;
 }

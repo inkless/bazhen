@@ -166,16 +166,6 @@ export class Daemon {
     this.tmux("respawn-pane", "-k", "-t", `${session}:0`, ...argv);
   }
 
-  /** Kills the daemon outright, as a crash would; its agents keep running in tmux. */
-  async kill(): Promise<void> {
-    await this.exit("SIGKILL");
-  }
-
-  /** Starts the daemon again on the same home, as `bazhen start` would after a crash. */
-  async restart(): Promise<void> {
-    await this.spawn();
-  }
-
   private async exit(signal: NodeJS.Signals): Promise<void> {
     const child = this.process;
     if (child === undefined || child.exitCode !== null || child.signalCode !== null) return;

@@ -6,7 +6,6 @@ import {
   type AttentionId,
   type EnvironmentId,
   type IdPrefix,
-  type MessageId,
   type RuntimeRef,
 } from "@bazhen/core";
 import { z } from "zod";
@@ -220,13 +219,6 @@ export class Store {
           ]
         : [],
     );
-  }
-
-  /** Messages a hook held when the daemon stopped; their hooks are gone with its socket. */
-  inFlight(): MessageId[] {
-    const sql =
-      "SELECT id FROM mailbox WHERE state IN ('offered', 'emitted', 'seen') ORDER BY created_event_id";
-    return rowIds(this.prepare(sql).all(), "msg");
   }
 
   /** Open attention items, for one agent or all. */

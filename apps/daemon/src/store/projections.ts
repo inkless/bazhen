@@ -91,9 +91,6 @@ export function project(db: Statements, e: Recorded): void {
     case "agent.failed":
       advance(db, e.id, e.entityId, ["launch.rejected", "runtime.rejected"]);
       return;
-    case "agent.lost":
-      advance(db, e.id, e.entityId, ["target.absent", "target.absent"]);
-      return;
     case "attachment.started": {
       const { terminalId, mode } = EVENTS[e.type].payload.parse(e.payload);
       db.prepare(

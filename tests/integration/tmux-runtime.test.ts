@@ -37,11 +37,8 @@ const screen = (session: string | undefined) =>
   tmuxOut(socket, "capture-pane", "-p", "-t", `${String(session)}:0`);
 
 describe("tmux runtime on a private server", () => {
-  it("reports not-running and no terminals before any terminal exists", async () => {
-    expect([(await runtime.health()).state, await runtime.inventory()]).toEqual([
-      "not-running",
-      [],
-    ]);
+  it("reports not-running before any terminal exists", async () => {
+    expect((await runtime.health()).state).toBe("not-running");
   });
 
   it("finds a created terminal again by its Bazhen id, not by tmux numbering", async () => {

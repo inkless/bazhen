@@ -111,11 +111,6 @@ export class Mailbox {
     }
   }
 
-  /** The hooks holding mail died with the daemon's socket (§7 step 2). */
-  requeueInFlight(): void {
-    for (const id of this.store.inFlight()) this.requeue(id, "daemon_restart");
-  }
-
   private offer(agentId: string): void {
     const waiter = this.waiters.get(agentId);
     const queued = this.store.mail(agentId, ["queued"]);
