@@ -39,6 +39,9 @@ function fakeRuntime(history = "earlier output") {
     inventory: () => Promise.reject(new Error("not used")),
     create: () => Promise.reject(new Error("not used")),
     close: () => Promise.reject(new Error("not used")),
+    respawn: () => Promise.reject(new Error("not used")),
+    signal: () => Promise.reject(new Error("not used")),
+    onExit: () => () => {},
     attach: async (_ref, at) => {
       attaches++;
       attachedAt.push(at);

@@ -14,10 +14,15 @@ import type {
   TerminalSpec,
   TerminalTags,
 } from "@bazhen/core";
-import { isId } from "@bazhen/core";
+import type { ExitStatus, Signal } from "@bazhen/protocol";
+import { isId, ProcessState, StaleIncarnation } from "@bazhen/core";
+import { exitStatus, UnknownCause } from "./exit-status.ts";
+import { ExitWatch, type DeadTerminal } from "./exit-watch.ts";
 
 const run = promisify(execFile);
 const TMUX_TIMEOUT_MS = 5_000;
+const EXIT_POLL_MS = 1_000;
+const UNKNOWN_EXIT_AFTER_MS = 2_000;
 
 /** Every pane fact Bazhen reads from tmux, by name: its own @bazhen_* options, then tmux's. */
 const COLUMN = {
@@ -30,8 +35,11 @@ const COLUMN = {
   serverStart: "start_time",
   sessionId: "session_id",
   paneId: "pane_id",
+  panePid: "pane_pid",
+  generation: "@bazhen_generation",
   dead: "pane_dead",
   status: "pane_dead_status",
+  deadSignal: "pane_dead_signal",
 } as const;
 type Column = keyof typeof COLUMN;
 type Row = (column: Column) => string;
@@ -47,7 +55,15 @@ function columns(keys: readonly Column[]) {
   };
 }
 
-const LOCATION_KEYS = ["session", "serverPid", "serverStart", "sessionId", "paneId"] as const;
+const LOCATION_KEYS = [
+  "session",
+  "serverPid",
+  "serverStart",
+  "sessionId",
+  "paneId",
+  "panePid",
+  "generation",
+] as const;
 const LOCATION = columns(LOCATION_KEYS);
 const PANE = columns([
   "terminalId",
@@ -57,7 +73,9 @@ const PANE = columns([
   ...LOCATION_KEYS,
   "dead",
   "status",
+  "deadSignal",
 ]);
+const SERVER = columns(["serverPid", "serverStart"]);
 
 /**
  * The private server's configuration. With tmux's defaults, Ctrl-B would be swallowed as a prefix
@@ -111,16 +129,27 @@ export interface TmuxRuntimeOptions {
    */
   readonly env: Readonly<Record<string, string>>;
   readonly tmuxBin?: string;
+  /** How often dead terminals are looked for while anyone listens. */
+  readonly exitPollMs?: number;
+  /** Where a failure inside exit polling goes, since no caller is waiting on it. */
+  readonly onError?: (err: unknown) => void;
 }
 
 export class TmuxRuntime implements RuntimeAdapter {
   readonly kind = "tmux";
   private readonly bin: string;
   private readonly opts: TmuxRuntimeOptions;
+  private readonly exits: ExitWatch;
+  private readonly unknownCause = new UnknownCause(UNKNOWN_EXIT_AFTER_MS);
 
   constructor(opts: TmuxRuntimeOptions) {
     this.opts = opts;
     this.bin = opts.tmuxBin ?? "tmux";
+    this.exits = new ExitWatch({
+      read: () => this.deadTerminals(),
+      intervalMs: opts.exitPollMs ?? EXIT_POLL_MS,
+      onError: opts.onError ?? ((err) => console.warn("tmux exit polling failed:", err)),
+    });
     writeFileSync(opts.configFile, TMUX_CONFIG, { mode: 0o600 });
   }
 
@@ -160,7 +189,6 @@ export class TmuxRuntime implements RuntimeAdapter {
 
   async create(spec: TerminalSpec): Promise<RuntimeRef> {
     const session = sessionName(spec.terminalId);
-    const env = Object.entries(spec.env).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
     const { cols, rows } = spec.size;
     await this.tmux(
       "new-session",
@@ -171,15 +199,12 @@ export class TmuxRuntime implements RuntimeAdapter {
       String(cols),
       "-y",
       String(rows),
-      "-c",
-      spec.cwd,
-      ...env,
-      "--",
-      ...spec.argv.map(escapeTrailingSemicolon),
+      ...processArgs(spec),
     );
     const location = await this.tmux(
       ...sequence([
         ...tagCommands(session, spec.terminalId, spec.tags),
+        generationCommand(windowOf(session), spec.generation),
         ["set-option", "-w", "-t", windowOf(session), "window-size", "manual"],
         resizeArgs(session, spec.size),
         ["display-message", "-p", "-t", windowOf(session), LOCATION.format],
@@ -201,20 +226,23 @@ export class TmuxRuntime implements RuntimeAdapter {
 
   async inventory(): Promise<RuntimeInventoryEntry[]> {
     const out = await this.tmux("list-panes", "-a", "-F", PANE.format);
-    return out.split("\n").flatMap((line) => {
+    const rows = out.split("\n").flatMap((line) => {
       const row = PANE.parse(line);
       const tagged = decodeTags(row);
       if (tagged === null) return [];
       const dead = row("dead") === "1";
       return [
         {
+          key: [tagged.terminalId, row("paneId"), row("generation")].join(" "),
           ref: { terminalId: tagged.terminalId, runtime: this.kind, locator: this.locator(row) },
           tags: tagged.tags,
-          dead,
-          exitStatus: dead && row("status") !== "" ? Number(row("status")) : null,
+          exit: dead ? exitStatus(row("status"), row("deadSignal")) : null,
         },
       ];
     });
+    return this.unknownCause
+      .settle(rows, Date.now())
+      .map(({ ref, tags, exit }) => ({ ref, tags, exit }));
   }
 
   async attach(ref: RuntimeRef, size: Size | null, historyLines: number): Promise<Attached> {
@@ -282,9 +310,140 @@ export class TmuxRuntime implements RuntimeAdapter {
   }
 
   async close(ref: RuntimeRef): Promise<void> {
-    await this.tmux("kill-session", "-t", sessionOf(ref));
+    const [pane] = await this.panesOf(ref);
+    if (pane !== undefined) await this.tmux("kill-session", "-t", located(pane.ref, "sessionId"));
+  }
+
+  async respawn(ref: RuntimeRef, spec: TerminalSpec): Promise<RuntimeRef> {
+    const pane = await this.paneOf(ref);
+    if (pane.exit === null) throw new ProcessState(ref.terminalId, "exited");
+    assertSameGeneration(ref, pane.ref);
+    const target = located(pane.ref, "paneId");
+    // tmux runs one client's command list without another client's commands in between. Were it
+    // ever split, the number going first means a stale ref is refused rather than acting on the
+    // new process.
+    const location = await this.tmux(
+      ...sequence([
+        generationCommand(target, spec.generation),
+        ["respawn-pane", "-t", target, ...processArgs(spec)],
+        ["display-message", "-p", "-t", target, LOCATION.format],
+      ]),
+    );
+    return { ...ref, locator: this.locator(LOCATION.parse(location)) };
+  }
+
+  async signal(ref: RuntimeRef, signal: Signal): Promise<void> {
+    const pane = await this.paneOf(ref);
+    if (pane.exit !== null) throw new ProcessState(ref.terminalId, "running");
+    assertSameGeneration(ref, pane.ref);
+    const pid = pane.ref.locator.panePid;
+    // The pane's process leads its own group, so this reaches the tools it started as well,
+    // as Ctrl-C or a hangup in a terminal would.
+    try {
+      process.kill(-Number(pid), signal);
+    } catch (err) {
+      // The group exited after the check above; reporting that exit is the poller's job.
+      if (!(err instanceof Error && "code" in err && err.code === "ESRCH")) throw err;
+    }
+  }
+
+  onExit(cb: (ref: RuntimeRef, status: ExitStatus) => void): () => void {
+    return this.exits.subscribe(cb);
+  }
+
+  private async deadTerminals(): Promise<DeadTerminal[]> {
+    try {
+      return (await this.inventory()).flatMap((e) =>
+        e.exit === null ? [] : [{ ref: e.ref, status: e.exit }],
+      );
+    } catch (err) {
+      // An unreadable server is no evidence that anything exited (foundation-design §7.1).
+      if (err instanceof TmuxError) return [];
+      throw err;
+    }
+  }
+
+  /**
+   * The panes tagged with `ref`'s terminal, read from the server `ref` was created on. tmux reuses
+   * its session and pane numbers after a restart, so a number alone could name another agent's
+   * terminal. Empty means the server answered and has no such terminal.
+   */
+  private async panesOf(ref: RuntimeRef): Promise<RuntimeInventoryEntry[]> {
+    const panes = (await this.inventory()).filter((e) => e.ref.terminalId === ref.terminalId);
+    const server = panes[0]?.ref.locator ?? (await this.server());
+    if (
+      server.serverPid !== ref.locator.serverPid ||
+      server.serverStart !== ref.locator.serverStart
+    )
+      throw new StaleIncarnation(ref.terminalId, "server-replaced");
+    return panes;
+  }
+
+  private async server(): Promise<{ serverPid: string; serverStart: string }> {
+    const row = SERVER.parse(await this.tmux("display-message", "-p", SERVER.format));
+    return { serverPid: row("serverPid"), serverStart: row("serverStart") };
+  }
+
+  /** The pane `ref` recorded: respawn and signal act on it and on nothing else. */
+  private async paneOf(ref: RuntimeRef): Promise<RuntimeInventoryEntry> {
+    const panes = await this.panesOf(ref);
+    const pane = panes.find((e) => e.ref.locator.paneId === ref.locator.paneId);
+    if (pane === undefined)
+      throw new StaleIncarnation(ref.terminalId, panes.length > 0 ? "pane-replaced" : "gone");
+    return pane;
   }
 }
+
+/**
+ * A field of a ref read back from tmux. An empty `-t` would let tmux pick its own default
+ * target, which could be another agent's terminal, so a missing field is never defaulted.
+ */
+function located(ref: RuntimeRef, key: "sessionId" | "paneId"): string {
+  const value = ref.locator[key];
+  if (!value) throw new Error(`terminal ${ref.terminalId} has no ${key} in its locator`);
+  return value;
+}
+
+/**
+ * The process half of a terminal: its directory, Bazhen's variables and its argv. tmux sets TMUX
+ * and TMUX_PANE in every pane, whatever the server's environment, and with them a terminal's
+ * `tmux kill-server` would end Bazhen's private server and every terminal on it. A new terminal
+ * tab has neither, so `env` drops them and then execs the argv, which stays the pane's process.
+ */
+const processArgs = (spec: TerminalSpec) => [
+  "-c",
+  spec.cwd,
+  ...Object.entries(spec.env).flatMap(([k, v]) => ["-e", escapeTrailingSemicolon(`${k}=${v}`)]),
+  "--",
+  "env",
+  "-u",
+  "TMUX",
+  "-u",
+  "TMUX_PANE",
+  "--",
+  ...spec.argv.map(escapeTrailingSemicolon),
+];
+
+/**
+ * The generation in `ref` is the one tmux holds now. Bazhen writes each terminal's generation into
+ * its pane, because tmux 3.8 forgets a dead pane's pid. A ref without one can't be checked, so it
+ * is refused rather than acted on.
+ */
+function assertSameGeneration(ref: RuntimeRef, now: RuntimeRef): void {
+  const recorded = ref.locator.generation;
+  if (!recorded) throw new StaleIncarnation(ref.terminalId, "unnumbered");
+  if (recorded !== now.locator.generation)
+    throw new StaleIncarnation(ref.terminalId, "process-replaced");
+}
+
+const generationCommand = (target: string, generation: number) => [
+  "set-option",
+  "-p",
+  "-t",
+  target,
+  COLUMN.generation,
+  String(generation),
+];
 
 function tagCommands(session: string, terminalId: TerminalId, tags: TerminalTags): string[][] {
   const options: [string, string][] = [

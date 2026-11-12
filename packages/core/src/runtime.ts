@@ -1,4 +1,4 @@
-import type { RuntimeHealthState } from "@bazhen/protocol";
+import type { ExitStatus, RuntimeHealthState, Signal } from "@bazhen/protocol";
 import type { AgentSessionId, TerminalId } from "./ids.ts";
 
 export interface Size {
@@ -22,6 +22,8 @@ export interface TerminalSpec {
   /** Bazhen's own variables for this terminal only; never a user value (foundation-design §9.5). */
   readonly env: Readonly<Record<string, string>>;
   readonly size: Size;
+  /** The incarnation this starts: 0 at create, the next one at each respawn (§3). */
+  readonly generation: number;
 }
 
 /** Locates one runtime incarnation of a terminal. Diagnostic and routing only, never identity. */
@@ -39,8 +41,36 @@ export interface RuntimeHealth {
 export interface RuntimeInventoryEntry {
   readonly ref: RuntimeRef;
   readonly tags: TerminalTags;
-  readonly dead: boolean;
-  readonly exitStatus: number | null;
+  /** How the terminal's process ended, or null while it runs. */
+  readonly exit: ExitStatus | null;
+}
+
+/**
+ * The runtime no longer holds the incarnation a ref names. tmux reuses its session and pane
+ * numbers, so a ref is acted on only after its server, pane and process are found unchanged
+ * (foundation-design §3, §7.1).
+ */
+export class StaleIncarnation extends Error {
+  readonly terminalId: TerminalId;
+  readonly reason: "gone" | "server-replaced" | "pane-replaced" | "process-replaced" | "unnumbered";
+
+  constructor(terminalId: TerminalId, reason: StaleIncarnation["reason"]) {
+    super(`terminal ${terminalId}: ${reason}`);
+    this.terminalId = terminalId;
+    this.reason = reason;
+  }
+}
+
+/** The right incarnation, but its process is not in the state the request needs. */
+export class ProcessState extends Error {
+  readonly terminalId: TerminalId;
+  readonly expected: "running" | "exited";
+
+  constructor(terminalId: TerminalId, expected: ProcessState["expected"]) {
+    super(`terminal ${terminalId}: its process is not ${expected}`);
+    this.terminalId = terminalId;
+    this.expected = expected;
+  }
 }
 
 export interface RuntimeStream {
@@ -76,7 +106,18 @@ export interface RuntimeAdapter {
    * to `historyLines` of the history above its screen.
    */
   attach(ref: RuntimeRef, size: Size | null, historyLines: number): Promise<Attached>;
+  /** Ends the terminal. A terminal the runtime positively no longer has counts as closed. */
   close(ref: RuntimeRef): Promise<void>;
+  /** Starts a new process in a terminal whose process has exited, and returns the new ref. */
+  respawn(ref: RuntimeRef, spec: TerminalSpec): Promise<RuntimeRef>;
+  /** Signals the terminal's process and its process group. */
+  signal(ref: RuntimeRef, signal: Signal): Promise<void>;
+  /**
+   * Reports every dead terminal on every check, so the caller drops repeats and stale
+   * incarnations by the generation in the ref. A cause first reported unknown may be named by a
+   * later report, never the other way. Returns the unsubscribe function.
+   */
+  onExit(cb: (ref: RuntimeRef, status: ExitStatus) => void): () => void;
 }
 
 /** The PTY seam: the only place a PTY library is named. */

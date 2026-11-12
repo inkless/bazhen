@@ -18,6 +18,21 @@ export const AgentState = z.enum([
 ]);
 export type AgentState = z.infer<typeof AgentState>;
 
+/** What an agent's process can be sent, in place of typing a key into it (foundation-design §8.2). */
+export const Signal = z.enum(["SIGINT", "SIGTERM", "SIGHUP", "SIGKILL"]);
+export type Signal = z.infer<typeof Signal>;
+
+/**
+ * How a process ended: with an exit code, or killed by a signal named as in `SIGTERM`. Unknown when
+ * the runtime knows the process is gone but not how it ended.
+ */
+export const ExitStatus = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("exited"), code: z.number().int() }),
+  z.object({ type: z.literal("signalled"), signal: z.string() }),
+  z.object({ type: z.literal("unknown") }),
+]);
+export type ExitStatus = z.infer<typeof ExitStatus>;
+
 /** A harness- or server-side object, such as a Claude Code session or a Codex thread. */
 export const ExternalRef = z.object({
   environmentId: Id("env"),

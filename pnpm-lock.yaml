@@ -350,6 +350,9 @@ importers:
       '@bazhen/daemon':
         specifier: workspace:*
         version: link:../../apps/daemon
+      '@bazhen/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
       '@bazhen/runtime-tmux':
         specifier: workspace:*
         version: link:../../packages/runtime-tmux

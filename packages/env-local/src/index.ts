@@ -54,7 +54,9 @@ export class LocalEnvironment implements EnvironmentAdapter {
 
   async inventory(): Promise<AgentInventoryEntry[]> {
     return (await this.opts.runtime.inventory()).flatMap((e) =>
-      e.tags.kind === "agent" ? [{ agentId: e.tags.agentId, ref: e.ref, dead: e.dead }] : [],
+      e.tags.kind === "agent"
+        ? [{ agentId: e.tags.agentId, ref: e.ref, dead: e.exit !== null }]
+        : [],
     );
   }
 
@@ -69,6 +71,7 @@ export class LocalEnvironment implements EnvironmentAdapter {
       cwd: request.cwd,
       env: { ...launch.env, BAZHEN_AGENT_ID: agentId, BAZHEN_SOCKET: this.opts.socket },
       size,
+      generation: 0,
     });
     const externalRef = launch.externalRef && { ...launch.externalRef, environmentId: this.id };
     return { runtime, externalRef };

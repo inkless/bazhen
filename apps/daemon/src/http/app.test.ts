@@ -12,6 +12,9 @@ const runtime: RuntimeAdapter = {
   create: unused,
   attach: unused,
   close: unused,
+  respawn: unused,
+  signal: unused,
+  onExit: () => () => {},
 };
 const launched = { agentId: newId("agent"), terminalId: newId("term"), eventIds: [2, 3] };
 const app = createApp({

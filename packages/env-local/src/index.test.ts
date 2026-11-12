@@ -26,6 +26,9 @@ function fakeRuntime(
     },
     attach: () => Promise.reject(new Error("not used")),
     close: () => Promise.reject(new Error("not used")),
+    respawn: () => Promise.reject(new Error("not used")),
+    signal: () => Promise.reject(new Error("not used")),
+    onExit: () => () => {},
   };
   return { runtime, created };
 }
@@ -62,6 +65,7 @@ describe("local environment", () => {
         cwd: "/work",
         env: { HARNESS_OWN: "1", BAZHEN_AGENT_ID: l.agentId, BAZHEN_SOCKET: "/run/b.sock" },
         size: { cols: 80, rows: 24 },
+        generation: 0,
       },
     ]);
   });
@@ -93,8 +97,8 @@ describe("local environment", () => {
     const ref = { terminalId: newId("term"), runtime: "fake", locator: {} };
     const shell = { terminalId: newId("term"), runtime: "fake", locator: {} };
     const { runtime } = fakeRuntime({ state: "healthy", version: null }, [
-      { ref, tags: { kind: "agent", agentId }, dead: false, exitStatus: null },
-      { ref: shell, tags: { kind: "shell" }, dead: false, exitStatus: null },
+      { ref, tags: { kind: "agent", agentId }, exit: null },
+      { ref: shell, tags: { kind: "shell" }, exit: null },
     ]);
     expect(await environment(runtime).inventory()).toEqual([{ agentId, ref, dead: false }]);
   });
