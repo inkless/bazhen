@@ -38,7 +38,14 @@ if (!process.env["BZ_E2E_DAEMON_PORT"] || !process.env["BZ_E2E_WEB_PORT"]) {
   process.env["BZ_E2E_WEB_PORT"] ??= String(web);
 }
 process.env["BZ_E2E_HOME"] ??= mkdtempSync(join(tmpdir(), "bz-e2e-home-"));
-process.env["BZ_E2E_SOCKET"] ??= `bz-e2e-${process.pid}`;
+process.env["BZ_E2E_SOCKET"] ||= `bz-e2e-${process.pid}`;
+// Every tmux command of the run, the daemon's and teardown's, lands in a socket directory of its
+// own, outside any tmux client, so none can reach the user's sessions. Short, under /tmp, for
+// sun_path's limit; the config is loaded more than once per run, and keeps the first one.
+process.env["BZ_E2E_TMUX_TMPDIR"] ||= mkdtempSync("/tmp/bz-tmux-");
+process.env["TMUX_TMPDIR"] = process.env["BZ_E2E_TMUX_TMPDIR"];
+delete process.env["TMUX"];
+delete process.env["TMUX_PANE"];
 // Where the page launches agents: the real Claude Code, pinned in this package, started with no
 // prompt and no way to reach a model.
 const work = join(process.env["BZ_E2E_HOME"], "work");

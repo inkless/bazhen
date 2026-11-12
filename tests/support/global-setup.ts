@@ -2,8 +2,11 @@
 // - Every run gets a temporary BAZHEN_HOME, so no test touches the user's real data.
 // - Every run gets its own tmux socket directory (TMUX_TMPDIR) and runs outside any tmux client
 //   (TMUX unset). Every tmux command a test runs, with or without -L, lands on a throwaway server
-//   and can never reach the user's sessions, the agent fleet, or a real Bazhen daemon. Teardown
-//   fails the run if any server in that directory is still alive.
+//   and can never reach the user's sessions, the agent fleet, or a real Bazhen daemon. That
+//   isolation comes first, before anything in setup that can fail, because teardown runs even
+//   when setup failed. Teardown looks only in the directory this run made, never at
+//   TMUX_TMPDIR or /tmp, and never kills a server named `default`; it fails the run if any
+//   server there is still alive.
 // - The run refuses to start when the machine is close to running out of PTYs: a leak there
 //   starves every terminal on the machine, not just Bazhen's.
 
@@ -44,10 +47,6 @@ export function ptysInUse(): { used: number; cutoff: number } {
   return { used, cutoff: override ?? MACOS_CUTOFF };
 }
 
-function tmuxSocketDir(): string {
-  return join(process.env["TMUX_TMPDIR"] ?? "/tmp", `tmux-${process.getuid?.() ?? 0}`);
-}
-
 // Under /tmp, not os.tmpdir(): a Unix socket path must fit in about 104 bytes on macOS, and the
 // per-user temp directory there is already over 50.
 function privateTmuxDir(): string {
@@ -61,19 +60,37 @@ function fail(message: string): never {
   throw new Error(message);
 }
 
-function alive(socket: string): boolean {
+/** tmux by socket path, so a command can only reach a server in the directory it names. */
+function tmuxAt(socket: string, ...args: string[]): boolean {
   try {
-    execFileSync("tmux", ["-L", socket, "list-sessions"], { stdio: "ignore", timeout: 5000 });
+    execFileSync("tmux", ["-S", socket, ...args], { stdio: "ignore", timeout: 5000 });
     return true;
   } catch {
     return false;
   }
 }
 
+/** The live tmux servers in a run's own socket directory. */
+function serversIn(dir: string): string[] {
+  const sockets = join(dir, `tmux-${process.getuid?.() ?? 0}`);
+  let names: string[] = [];
+  try {
+    names = readdirSync(sockets);
+  } catch {
+    // No socket directory: this run never started tmux.
+  }
+  return names.filter((name) => tmuxAt(join(sockets, name), "list-sessions"));
+}
+
 let home: string | undefined;
 let tmuxDir: string | undefined;
 
 export function setup(): void {
+  // First, before anything that can fail: teardown runs even after a failed setup.
+  tmuxDir = privateTmuxDir();
+  process.env["TMUX_TMPDIR"] = tmuxDir;
+  delete process.env["TMUX"];
+  delete process.env["TMUX_PANE"];
   const { used, cutoff } = ptysInUse();
   if (used > cutoff) {
     fail(
@@ -84,29 +101,21 @@ export function setup(): void {
   home = mkdtempSync(join(tmpdir(), "bz-test-home-"));
   process.env["BAZHEN_HOME"] = home;
   process.env["BZ_TEST_RUN"] = `${process.pid}`;
-  tmuxDir = privateTmuxDir();
-  process.env["TMUX_TMPDIR"] = tmuxDir;
-  delete process.env["TMUX"];
-  delete process.env["TMUX_PANE"];
 }
 
 export function teardown(): void {
-  let sockets: string[] = [];
-  try {
-    sockets = readdirSync(tmuxSocketDir());
-  } catch {
-    // No socket directory: this run never started tmux.
-  }
-  const leaked = sockets.filter(alive);
-  for (const socket of leaked) {
-    try {
-      execFileSync("tmux", ["-L", socket, "kill-server"], { stdio: "ignore", timeout: 5000 });
-    } catch {
-      // Already gone.
-    }
-  }
-  if (tmuxDir) rmSync(tmuxDir, { recursive: true, force: true });
   if (home) rmSync(home, { recursive: true, force: true });
+  home = undefined;
+  const dir = tmuxDir;
+  tmuxDir = undefined;
+  // Setup never made this run's directory, so no server is this run's to stop.
+  if (dir === undefined) return;
+  const leaked = serversIn(dir);
+  const sockets = join(dir, `tmux-${process.getuid?.() ?? 0}`);
+  // A server named `default` is left alone, even here: killing one by mistake ends every session
+  // on the machine.
+  for (const name of leaked) if (name !== "default") tmuxAt(join(sockets, name), "kill-server");
+  rmSync(dir, { recursive: true, force: true });
   if (leaked.length > 0) {
     fail(
       `Tests left ${leaked.length} tmux server(s) running: ${leaked.join(", ")}. ` +

@@ -1,12 +1,12 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "rootDir": ".",
+    "rootDir": "..",
     "outDir": "dist",
     "noEmit": false,
     "emitDeclarationOnly": true
   },
-  "include": ["*.ts"],
+  "include": ["*.ts", "../support/global-setup.ts"],
   "references": [
     { "path": "../../packages/core" },
     { "path": "../../packages/runtime-tmux" },
