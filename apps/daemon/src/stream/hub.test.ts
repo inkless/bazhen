@@ -88,6 +88,21 @@ describe("terminal hub", () => {
     expect([rt.counts().attaches, a.seen, b.seen]).toEqual([1, ["out"], ["<screen>", "out"]]);
   });
 
+  it("tells a view that joins late it is attached only once it is ready for input", async () => {
+    const rt = fakeRuntime();
+    const hub = new TerminalHub(rt.runtime, memoryLog().log);
+    await hub.join(ref, viewer().v, size);
+    const order: string[] = [];
+    const late: Viewer = {
+      mode: "interactive",
+      send: (bytes) => order.push(Buffer.from(bytes).toString()),
+      notify: (frame) => order.push(frame.type),
+      close: () => {},
+    };
+    await hub.join(ref, late, size);
+    expect(order).toEqual(["lease", "<screen>", "attached"]);
+  });
+
   it("passes keystrokes only from the driver, and drops the rest without queuing them", async () => {
     const rt = fakeRuntime();
     const hub = new TerminalHub(rt.runtime, memoryLog().log);

@@ -91,7 +91,6 @@ export class TerminalHub {
     const entry: Entry = opened ? { viewer, size } : { viewer, size, queue: [] };
     watched.viewers.set(id, entry);
     this.log.started(id, watched.terminal, viewer.mode);
-    viewer.notify({ type: "attached", attachmentId: id });
     viewer.notify(leaseFrame(watched, id));
     if (entry.queue !== undefined) {
       try {
@@ -107,6 +106,9 @@ export class TerminalHub {
     }
     // The most recent interactive view sizes the terminal while nobody drives it.
     if (!opened) this.fitTo(watched);
+    // Last: a view may send input and engage as soon as it is told, and they need the handle
+    // returned below.
+    viewer.notify({ type: "attached", attachmentId: id });
     return {
       id,
       input: (bytes) => this.input(watched, id, bytes),
