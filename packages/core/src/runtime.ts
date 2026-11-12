@@ -57,7 +57,13 @@ export interface RuntimeAdapter {
   health(): Promise<RuntimeHealth>;
   inventory(): Promise<RuntimeInventoryEntry[]>;
   create(spec: TerminalSpec): Promise<RuntimeRef>;
-  attach(ref: RuntimeRef, size: Size): Promise<RuntimeStream>;
+  /** Opens a client at `size`, or, given null, at whatever size the terminal already has. */
+  attach(ref: RuntimeRef, size: Size | null): Promise<RuntimeStream>;
+  /**
+   * The visible screen as plain VT bytes, cursor included, to seed a view that joins a terminal
+   * already on screen. Read on demand only, never polled (foundation-design §4.2, §5.9).
+   */
+  snapshot(ref: RuntimeRef): Promise<string>;
   close(ref: RuntimeRef): Promise<void>;
 }
 

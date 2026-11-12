@@ -75,6 +75,35 @@ export function project(db: Statements, e: Recorded): void {
     case "agent.failed":
       advance(db, e.id, e.entityId, ["launch.rejected", "runtime.rejected"]);
       return;
+    case "attachment.started": {
+      const { terminalId, mode } = EVENTS[e.type].payload.parse(e.payload);
+      db.prepare(
+        "INSERT INTO attachments_open (id, terminal_id, mode, started_event_id) VALUES (?, ?, ?, ?)",
+      ).run(e.entityId, terminalId, mode, e.id);
+      return;
+    }
+    case "attachment.ended": {
+      EVENTS[e.type].payload.parse(e.payload);
+      const open = db
+        .prepare("SELECT terminal_id FROM attachments_open WHERE id = ?")
+        .get(e.entityId);
+      if (open === undefined) return;
+      db.prepare("DELETE FROM attachments_open WHERE id = ?").run(e.entityId);
+      // The lease ends with its attachment (§4.3); the epoch stays, so the next grant is higher.
+      db.prepare(
+        "UPDATE leases SET holder = NULL, updated_event_id = ? WHERE terminal_id = ? AND holder = ?",
+      ).run(e.id, String(open.terminal_id), e.entityId);
+      return;
+    }
+    case "lease.granted": {
+      const { attachmentId, epoch } = EVENTS[e.type].payload.parse(e.payload);
+      db.prepare(
+        `INSERT INTO leases (terminal_id, holder, epoch, updated_event_id) VALUES (?, ?, ?, ?)
+         ON CONFLICT (terminal_id) DO UPDATE SET holder = excluded.holder, epoch = excluded.epoch,
+           updated_event_id = excluded.updated_event_id`,
+      ).run(e.entityId, attachmentId, epoch, e.id);
+      return;
+    }
   }
 }
 

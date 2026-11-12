@@ -10,6 +10,7 @@ const runtime: RuntimeAdapter = {
   inventory: unused,
   create: unused,
   attach: unused,
+  snapshot: unused,
   close: unused,
 };
 const launched = { agentId: newId("agent"), terminalId: newId("term"), eventIds: [2, 3] };
@@ -17,8 +18,7 @@ const app = createApp({
   appVersion: "0.1.0",
   schemaVersion: () => 1,
   runtime,
-  allowedHosts: ["127.0.0.1:7900"],
-  allowedOrigins: ["http://127.0.0.1:7900"],
+  allow: { hosts: ["127.0.0.1:7900"], origins: ["http://127.0.0.1:7900"] },
   state: () => ({ eventId: 3, environments: [], agents: [] }),
   launch: async (req: LaunchAgentRequest) => {
     if (req.harness === "codex") throw new UnsupportedHarness("codex");

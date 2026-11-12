@@ -210,13 +210,24 @@ export class TmuxRuntime implements RuntimeAdapter {
     });
   }
 
-  async attach(ref: RuntimeRef, size: Size): Promise<RuntimeStream> {
-    const session = ref.locator.session ?? sessionName(ref.terminalId);
+  async attach(ref: RuntimeRef, size: Size | null): Promise<RuntimeStream> {
+    const session = sessionOf(ref);
     const resizeWindow = (next: Size) => this.tmux(...resizeArgs(session, next));
-    await resizeWindow(size);
+    if (size !== null) await resizeWindow(size);
+    const [cols = 80, rows = 24] = (
+      await this.tmux(
+        "display-message",
+        "-p",
+        "-t",
+        windowOf(session),
+        "#{window_width} #{window_height}",
+      )
+    )
+      .split(" ")
+      .map(Number);
     const proc = this.opts.pty.spawn(
       [this.bin, "-L", this.opts.socket, "attach-session", "-t", session],
-      size,
+      { cols, rows },
       this.opts.env,
     );
     const closeHandlers: Array<() => void> = [];
@@ -241,8 +252,22 @@ export class TmuxRuntime implements RuntimeAdapter {
     };
   }
 
+  async snapshot(ref: RuntimeRef): Promise<string> {
+    const window = windowOf(sessionOf(ref));
+    const out = await this.tmux(
+      ...sequence([
+        ["capture-pane", "-p", "-e", "-t", window],
+        ["display-message", "-p", "-t", window, "#{cursor_x} #{cursor_y}"],
+      ]),
+    );
+    const lines = out.split("\n");
+    const [x = 0, y = 0] = (lines.pop() ?? "").split(" ").map(Number);
+    // Clear, draw the screen line by line, then put the cursor back where the program left it.
+    return `\x1b[H\x1b[2J${lines.join("\r\n")}\x1b[${y + 1};${x + 1}H`;
+  }
+
   async close(ref: RuntimeRef): Promise<void> {
-    await this.tmux("kill-session", "-t", ref.locator.session ?? sessionName(ref.terminalId));
+    await this.tmux("kill-session", "-t", sessionOf(ref));
   }
 }
 
@@ -293,6 +318,8 @@ function sequence(commands: string[][]): string[] {
 export function escapeTrailingSemicolon(arg: string): string {
   return arg.endsWith(";") ? `${arg.slice(0, -1)}\\;` : arg;
 }
+
+const sessionOf = (ref: RuntimeRef) => ref.locator.session ?? sessionName(ref.terminalId);
 
 export function sessionName(terminalId: TerminalId): string {
   return `bz-${terminalId.slice(-12)}`;

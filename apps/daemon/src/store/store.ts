@@ -1,5 +1,5 @@
 import { DatabaseSync, type StatementSync } from "node:sqlite";
-import { isId, newId, type EnvironmentId } from "@bazhen/core";
+import { isId, newId, type AttachmentId, type EnvironmentId, type RuntimeRef } from "@bazhen/core";
 import { z } from "zod";
 import {
   EVENTS,
@@ -162,6 +162,27 @@ export class Store {
     return this.prepare("SELECT id FROM environments WHERE kind = ? ORDER BY created_event_id")
       .all(kind)
       .flatMap((r) => (typeof r.id === "string" && isId("env", r.id) ? [r.id] : []));
+  }
+
+  /** A terminal's current runtime incarnation, if it is running in one. */
+  runtimeRef(terminalId: string): RuntimeRef | undefined {
+    const row = this.prepare("SELECT runtime, locator FROM terminals WHERE id = ?").get(terminalId);
+    if (!isId("term", terminalId) || typeof row?.runtime !== "string") return undefined;
+    const locator: Record<string, string> = JSON.parse(String(row.locator));
+    return { terminalId, runtime: row.runtime, locator };
+  }
+
+  /** The epoch of a terminal's last lease grant, or 0 if it has had none. */
+  leaseEpoch(terminalId: string): number {
+    const row = this.prepare("SELECT epoch FROM leases WHERE terminal_id = ?").get(terminalId);
+    return typeof row?.epoch === "number" ? row.epoch : 0;
+  }
+
+  /** Attachments recorded as open; after a restart, none of them has a client any more. */
+  openAttachments(): AttachmentId[] {
+    return this.prepare("SELECT id FROM attachments_open ORDER BY started_event_id")
+      .all()
+      .flatMap((r) => (typeof r.id === "string" && isId("att", r.id) ? [r.id] : []));
   }
 
   /** Every projection the state snapshot shows, with the last event it reflects. */

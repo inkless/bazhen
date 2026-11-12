@@ -10,15 +10,13 @@ import {
 } from "@bazhen/protocol";
 import { LaunchFailed, UnsupportedHarness, type RuntimeAdapter } from "@bazhen/core";
 import { IdempotencyConflict } from "../agents/launch.ts";
+import { refusal, type Allowlists } from "./guard.ts";
 
 export interface AppDeps {
   readonly appVersion: string;
   readonly schemaVersion: () => number;
   readonly runtime: RuntimeAdapter;
-  /** Host header values accepted; anything else is refused as a DNS-rebinding defence. */
-  readonly allowedHosts: readonly string[];
-  /** Origins a browser may act from: state-changing requests and socket upgrades from any other are refused. */
-  readonly allowedOrigins: readonly string[];
+  readonly allow: Allowlists;
   readonly state: () => StateSnapshot;
   readonly launch: (req: LaunchAgentRequest) => Promise<LaunchAgentResponse>;
 }
@@ -39,20 +37,12 @@ export function createApp(deps: AppDeps): Hono {
   const app = new Hono();
 
   app.use("*", async (c, next) => {
-    const host = c.req.header("host") ?? "";
-    if (!deps.allowedHosts.includes(host)) return fail(c, 421, "host_not_allowed", host);
-    return next();
-  });
-
-  // A browser always sends Origin on these, so a page elsewhere can't act through a user's
-  // browser (foundation-design §9.1). A request without one comes from a local process, which
-  // the Host check and, later, pairing govern.
-  app.use("*", async (c, next) => {
+    const host = c.req.header("host");
     const origin = c.req.header("origin");
-    const acts = !SAFE_METHODS.has(c.req.method) || c.req.header("upgrade") !== undefined;
-    if (acts && origin !== undefined && !deps.allowedOrigins.includes(origin)) {
-      return fail(c, 403, "origin_not_allowed", origin);
-    }
+    const acting = !SAFE_METHODS.has(c.req.method) || c.req.header("upgrade") !== undefined;
+    const refused = refusal(deps.allow, { host, origin, acting });
+    if (refused === "host_not_allowed") return fail(c, 421, refused, host ?? "");
+    if (refused !== null) return fail(c, 403, refused, origin ?? "");
     return next();
   });
 
