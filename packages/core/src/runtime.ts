@@ -61,6 +61,16 @@ export class StaleIncarnation extends Error {
   }
 }
 
+/**
+ * The generation `ref` recorded is the one the runtime holds now (`current`). A ref without one
+ * can't be checked, so it is refused rather than acted on.
+ */
+export function assertSameGeneration(ref: RuntimeRef, current: string | undefined): void {
+  const recorded = ref.locator.generation;
+  if (!recorded) throw new StaleIncarnation(ref.terminalId, "unnumbered");
+  if (recorded !== current) throw new StaleIncarnation(ref.terminalId, "process-replaced");
+}
+
 /** The right incarnation, but its process is not in the state the request needs. */
 export class ProcessState extends Error {
   readonly terminalId: TerminalId;

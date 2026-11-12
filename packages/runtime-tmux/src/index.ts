@@ -19,7 +19,7 @@ import {
   signalPane,
   type ConfiguredTmuxServer,
 } from "@bazhen/host-guard";
-import { isId, ProcessState, StaleIncarnation } from "@bazhen/core";
+import { assertSameGeneration, isId, ProcessState, StaleIncarnation } from "@bazhen/core";
 import { exitStatus, UnknownCause } from "./exit-status.ts";
 import { ExitWatch, type DeadTerminal } from "./exit-watch.ts";
 
@@ -309,7 +309,7 @@ export class TmuxRuntime implements RuntimeAdapter {
   async respawn(ref: RuntimeRef, spec: TerminalSpec): Promise<RuntimeRef> {
     const pane = await this.paneOf(ref);
     if (pane.exit === null) throw new ProcessState(ref.terminalId, "exited");
-    assertSameGeneration(ref, pane.ref);
+    assertSameGeneration(ref, pane.ref.locator.generation);
     const target = located(pane.ref, "paneId");
     // tmux runs one client's command list without another client's commands in between. Were it
     // ever split, the number going first means a stale ref is refused rather than acting on the
@@ -327,7 +327,7 @@ export class TmuxRuntime implements RuntimeAdapter {
   async signal(ref: RuntimeRef, signal: Signal): Promise<void> {
     const pane = await this.paneOf(ref);
     if (pane.exit !== null) throw new ProcessState(ref.terminalId, "running");
-    assertSameGeneration(ref, pane.ref);
+    assertSameGeneration(ref, pane.ref.locator.generation);
     const target = located(pane.ref, "paneId");
     // The pane's process leads its own group, so this reaches the tools it started as well.
     // A group that exited after the check above is the poller's to report.
@@ -424,18 +424,7 @@ const processArgs = (spec: TerminalSpec) => [
   ...spec.argv.map(escapeTrailingSemicolon),
 ];
 
-/**
- * The generation in `ref` is the one tmux holds now. Bazhen writes each terminal's generation into
- * its pane, because tmux 3.8 forgets a dead pane's pid. A ref without one can't be checked, so it
- * is refused rather than acted on.
- */
-function assertSameGeneration(ref: RuntimeRef, now: RuntimeRef): void {
-  const recorded = ref.locator.generation;
-  if (!recorded) throw new StaleIncarnation(ref.terminalId, "unnumbered");
-  if (recorded !== now.locator.generation)
-    throw new StaleIncarnation(ref.terminalId, "process-replaced");
-}
-
+/** Each terminal's generation, written into its pane, because tmux 3.8 forgets a dead pane's pid. */
 const generationCommand = (target: string, generation: number) => [
   "set-option",
   "-p",

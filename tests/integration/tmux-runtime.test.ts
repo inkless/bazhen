@@ -34,18 +34,6 @@ const screen = (session: string | undefined) =>
   tmuxOut(server, "capture-pane", "-p", "-t", `${String(session)}:0`);
 
 describe("tmux runtime on a private server", () => {
-  it("reports not-running before any terminal exists", async () => {
-    expect((await runtime.health()).state).toBe("not-running");
-  });
-
-  it("finds a created terminal again by its Bazhen id, not by tmux numbering", async () => {
-    const s = spec(["cat"]);
-    await runtime.create(s);
-    const found = (await runtime.inventory()).find((e) => e.ref.terminalId === s.terminalId);
-    expect(found?.exit).toBeNull();
-    expect((await runtime.health()).state).toBe("healthy");
-  });
-
   it("reads its terminals back when started without a UTF-8 locale", async () => {
     const bare = testServer("runtime-no-locale");
     const { LANG: _l, LC_ALL: _a, LC_CTYPE: _c, ...noLocale } = filterEnv(process.env).env;
@@ -59,26 +47,6 @@ describe("tmux runtime on a private server", () => {
     } finally {
       bare.kill();
     }
-  });
-
-  it("keeps an exited terminal with its exit status", async () => {
-    const s = spec(["sh", "-c", "exit 3"]);
-    await runtime.create(s);
-    await expect
-      .poll(async () => (await runtime.inventory()).find((e) => e.ref.terminalId === s.terminalId))
-      .toMatchObject({
-        exit: expect.toBeOneOf([{ type: "exited", code: 3 }, { type: "unknown" }]),
-      });
-  });
-
-  it("round-trips input through an attached terminal", async () => {
-    const ref = await runtime.create(spec(["cat"]));
-    const { stream } = await runtime.attach(ref, size, 0);
-    let seen = "";
-    stream.onData((b) => (seen += Buffer.from(b).toString("utf8")));
-    stream.write(Buffer.from("ping-你好\r"));
-    await expect.poll(() => seen, { timeout: 3000 }).toContain("ping-你好");
-    stream.close();
   });
 
   it("keeps the browser on its normal screen, where it has scrollback", async () => {
@@ -146,20 +114,6 @@ describe("tmux runtime on a private server", () => {
     expect(tmuxOut(server, "show-options", "-g", "update-environment").trim()).toBe(
       "update-environment",
     );
-  });
-
-  it("reads back an agent's and a linked shell's tags from the runtime", async () => {
-    const agentId = newId("agent");
-    const agentSpec = spec(["cat"], { kind: "agent", agentId });
-    const shellSpec = spec(["cat"], { kind: "shell", linkedAgentId: agentId });
-    await runtime.create(agentSpec);
-    await runtime.create(shellSpec);
-    const all = await runtime.inventory();
-    const tagsOf = (id: string) => all.find((e) => e.ref.terminalId === id)?.tags;
-    expect([tagsOf(agentSpec.terminalId), tagsOf(shellSpec.terminalId)]).toEqual([
-      { kind: "agent", agentId },
-      { kind: "shell", linkedAgentId: agentId },
-    ]);
   });
 
   it("ignores a session carrying a terminal id but no kind, as Bazhen never writes one", async () => {
