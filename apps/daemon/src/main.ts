@@ -12,9 +12,11 @@ import { TmuxRuntime } from "@bazhen/runtime-tmux";
 import { launchAgent, localEnvironmentId } from "./agents/launch.ts";
 import { reconcile } from "./agents/reconcile.ts";
 import { CodexChannel, codexHomeOf, startCodexDaemon } from "./codex/channel.ts";
+import { retire } from "./events/retention.ts";
+import { eventRoute } from "./events/server.ts";
 import { TerminalHub } from "./stream/hub.ts";
 import { endOpenAttachments, storeLog } from "./stream/log.ts";
-import { streamUpgrades } from "./stream/server.ts";
+import { streamRoute } from "./stream/server.ts";
 import { Approvals } from "./mailbox/approvals.ts";
 import { hookCommand } from "./mailbox/hook-command.ts";
 import { hookApp } from "./mailbox/ingress.ts";
@@ -22,6 +24,7 @@ import { Mailbox } from "./mailbox/mailbox.ts";
 import { currentInputs, resolvePaths } from "./config/paths.ts";
 import { ensurePrivateDir } from "./config/private-dir.ts";
 import { createApp } from "./http/app.ts";
+import { upgrades } from "./http/upgrades.ts";
 import { nodePtySpawner } from "./pty/node-pty.ts";
 import { Store } from "./store/store.ts";
 
@@ -106,7 +109,22 @@ const hub = new TerminalHub(runtime, storeLog(store));
 const server = serve({ fetch: app.fetch, hostname: HOSTNAME, port }, (info) => {
   console.log(`bazhen daemon listening on http://${HOSTNAME}:${info.port} (data: ${paths.data})`);
 });
-server.on("upgrade", streamUpgrades({ allow, hub, runtimeRef: (id) => store.runtimeRef(id) }));
+server.on(
+  "upgrade",
+  upgrades(allow, [
+    streamRoute({ hub, runtimeRef: (id) => store.runtimeRef(id) }),
+    eventRoute(store),
+  ]),
+);
+
+const RETIRE_EVERY_MS = 60 * 60 * 1000;
+const shuttingDown = new AbortController();
+const retireOld = () =>
+  retire(store, new Date(), shuttingDown.signal).catch((err: unknown) =>
+    console.error("event retention failed", err),
+  );
+void retireOld();
+const retention = setInterval(() => void retireOld(), RETIRE_EVERY_MS);
 
 // Hook ingress: the 0600 socket in the private runtime directory, whose permission is the
 // authentication. A waiter holds its request for hours, so requests have no time limit.
@@ -123,6 +141,8 @@ rmSync(paths.socket, { force: true });
 hooks.listen(paths.socket, () => chmodSync(paths.socket, 0o600));
 
 function shutdown() {
+  shuttingDown.abort();
+  clearInterval(retention);
   server.close();
   hooks.close();
   codex.close();

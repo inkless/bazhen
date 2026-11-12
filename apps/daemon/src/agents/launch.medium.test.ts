@@ -41,7 +41,7 @@ describe("launchAgent", () => {
   it("records the agent before starting it, then running with its harness session", async () => {
     const { store, deps } = setup();
     const answer = await launchAgent(deps, request);
-    expect(store.eventsAfter(0).map((e) => e.type)).toEqual([
+    expect(store.events(0).map((e) => e.type)).toEqual([
       "environment.registered",
       "agent.launched",
       "agent.running",

@@ -1,9 +1,10 @@
-import { createServer, type Server } from "node:http";
+import type { Server } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { newId } from "@bazhen/core";
 import { PROTOCOL_VERSION } from "@bazhen/protocol";
-import { streamUpgrades } from "./server.ts";
+import { serveUpgrades } from "../testing/fixtures.ts";
+import { streamRoute } from "./server.ts";
 
 let server: Server | undefined;
 afterEach(() => {
@@ -21,23 +22,11 @@ async function endpoint() {
       return new Promise<never>(() => {});
     },
   };
-  server = createServer();
-  const allow = { hosts: [] as string[], origins: [] as string[] };
-  server.on(
-    "upgrade",
-    streamUpgrades({
-      allow,
-      hub,
-      runtimeRef: (id) => ({ terminalId, runtime: "fake", locator: { id } }),
-    }),
-  );
-  await new Promise<void>((resolve) => server?.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  if (address === null || typeof address === "string") throw new Error("no port");
-  const host = `127.0.0.1:${address.port}`;
-  allow.hosts.push(host);
-  allow.origins.push(`http://${host}`);
-  return { url: `ws://${host}/v1/terminals/${terminalId}/stream`, joins: () => joins };
+  const served = await serveUpgrades([
+    streamRoute({ hub, runtimeRef: (id) => ({ terminalId, runtime: "fake", locator: { id } }) }),
+  ]);
+  server = served.server;
+  return { url: `ws://${served.host}/v1/terminals/${terminalId}/stream`, joins: () => joins };
 }
 
 const hello = {
@@ -59,14 +48,5 @@ describe("stream endpoint", () => {
     ws.send(JSON.stringify({ type: "unknown" }));
     await new Promise((resolve) => ws.once("close", resolve));
     expect(joins()).toBe(1);
-  });
-
-  it("answers a stream from another host as HTTP does, 421", async () => {
-    const { url } = await endpoint();
-    const ws = new WebSocket(url, { headers: { host: "evil.example" } });
-    const status = await new Promise((resolve) =>
-      ws.once("unexpected-response", (_q, res) => resolve(res.statusCode)),
-    );
-    expect(status).toBe(421);
   });
 });

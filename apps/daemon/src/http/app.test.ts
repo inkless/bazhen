@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { newId, UnsupportedHarness, type RuntimeAdapter } from "@bazhen/core";
-import type { LaunchAgentRequest } from "@bazhen/protocol";
+import { PROTOCOL_VERSION, type LaunchAgentRequest } from "@bazhen/protocol";
 import { AttentionClosed } from "../mailbox/approvals.ts";
 import { createApp } from "./app.ts";
 
@@ -22,7 +22,14 @@ const app = createApp({
   schemaVersion: () => 1,
   runtime,
   allow: { hosts: ["127.0.0.1:7900"], origins: ["http://127.0.0.1:7900"] },
-  state: () => ({ eventId: 3, environments: [], agents: [], attention: [], messages: [] }),
+  state: () => ({
+    epoch: "e1",
+    eventId: 3,
+    environments: [],
+    agents: [],
+    attention: [],
+    messages: [],
+  }),
   send: () => ({ messageId: newId("msg"), eventIds: [4] }),
   answer: () => {
     throw new AttentionClosed("attn_x");
@@ -47,7 +54,7 @@ describe("HTTP app", () => {
     const res = await app.request("/v1/health", { headers: { host } });
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({
-      protocolVersion: "1.0",
+      protocolVersion: PROTOCOL_VERSION,
       schemaVersion: 1,
       runtime: { state: "not-running", version: "tmux 3.6b" },
     });
@@ -61,6 +68,7 @@ describe("HTTP app", () => {
   it("serves the state snapshot with the event it is consistent with", async () => {
     const res = await app.request("/v1/state", { headers: { host } });
     expect(await res.json()).toEqual({
+      epoch: "e1",
       eventId: 3,
       environments: [],
       agents: [],

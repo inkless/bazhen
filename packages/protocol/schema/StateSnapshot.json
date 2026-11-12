@@ -3,6 +3,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {
+    "epoch": {
+      "type": "string"
+    },
     "eventId": {
       "type": "integer",
       "minimum": 0,
@@ -217,6 +220,7 @@
     }
   },
   "required": [
+    "epoch",
     "eventId",
     "environments",
     "agents",
