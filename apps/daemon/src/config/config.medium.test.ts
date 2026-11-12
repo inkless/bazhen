@@ -44,6 +44,7 @@ describe("readConfigFile", () => {
     ["a wrong type", '[daemon]\nport = "8100"', "daemon.port:"],
     ["a relative bank", '[bank]\npath = "bank"', "bank.path:"],
     ["a value of the wrong kind", '[agents.env]\ndeny = "SECRET_*"', "agents.env.deny:"],
+    ["a rule that names no variable", '[agents.env]\ndeny = ["*"]', "agents.env.deny.0:"],
     ["broken TOML", "[daemon\nport = 1", "config.toml:"],
   ])("refuses %s, naming the file and the key", (_what, text, message) => {
     const file = write(text);

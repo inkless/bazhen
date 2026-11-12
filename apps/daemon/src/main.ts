@@ -23,6 +23,7 @@ import { HOOK_SCRIPT, hookClient, hookCommand } from "./mailbox/hook-command.ts"
 import { hookApp } from "./mailbox/ingress.ts";
 import { Mailbox } from "./mailbox/mailbox.ts";
 import { InvalidConfig, loadSettings } from "./config/config.ts";
+import { answers } from "./socket/client.ts";
 import { currentInputs } from "./config/paths.ts";
 import { ensurePrivateDir } from "./config/private-dir.ts";
 import { createApp, type AppDeps } from "./http/app.ts";
@@ -41,6 +42,12 @@ const { port } = config;
 for (const dir of [paths.config, paths.data, paths.bank, paths.state, paths.cache])
   mkdirSync(dir, { recursive: true });
 ensurePrivateDir(paths.run, inputs.uid);
+// Its socket is about to be replaced; a daemon still answering on it would be orphaned, with its
+// store and tmux server shared. (A lock that also covers two starts racing comes later.)
+if (await answers(paths.socket)) {
+  console.error(`bazhen is already running on ${paths.socket}`);
+  process.exit(1);
+}
 // Captured once: agents get what a new terminal tab would, minus Bazhen's and the launching
 // session's internals (foundation-design §9.5).
 const hostEnv = filterEnv(process.env, config.envRules).env;

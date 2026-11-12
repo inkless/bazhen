@@ -2,10 +2,11 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "smol-toml";
 import { z } from "zod";
-import type { EnvRules } from "@bazhen/core";
+import { ENV_RULE, type EnvRules } from "@bazhen/core";
 import { resolvePaths, type PathInputs } from "./paths.ts";
 
 const Port = z.int().min(1).max(65_535);
+const EnvRule = z.string().regex(ENV_RULE, "must be a variable name, or a prefix ending in *");
 
 /** The keys `config.toml` may hold. Unknown keys are refused, so a typo never means "default". */
 const ConfigFile = z.strictObject({
@@ -15,8 +16,8 @@ const ConfigFile = z.strictObject({
     .strictObject({
       env: z
         .strictObject({
-          deny: z.array(z.string()).optional(),
-          passthrough: z.array(z.string()).optional(),
+          deny: z.array(EnvRule).optional(),
+          passthrough: z.array(EnvRule).optional(),
         })
         .optional(),
     })
@@ -29,10 +30,6 @@ export interface Config {
   /** From the file only; `resolvePaths` ranks it below the flag and `BAZHEN_BANK`. */
   readonly bank: string | undefined;
   readonly envRules: Required<EnvRules>;
-}
-
-export interface ConfigFlags {
-  readonly port?: number;
 }
 
 export class InvalidConfig extends Error {
@@ -81,15 +78,14 @@ const fromEnv = <T>(
   return parsed.data;
 };
 
-/** Each setting from a flag, then the environment, then the file, then the default. */
+/** Each setting from the environment, then the file, then the default. CLI flags reach it as the
+ * environment (`bazhen --port` sets BAZHEN_PORT). */
 export function resolveConfig(
   file: ConfigFile,
   env: Readonly<Record<string, string | undefined>>,
-  flags: ConfigFlags = {},
 ): Config {
   return {
     port:
-      flags.port ??
       fromEnv(env, "BAZHEN_PORT", z.coerce.number().pipe(Port)) ??
       file.daemon?.port ??
       DEFAULT_PORT,
@@ -105,13 +101,9 @@ export function resolveConfig(
  * Where everything lives and how the daemon is configured. The config file sits in the config
  * directory, which itself never comes from the file; the file can then move the bank.
  */
-export function loadSettings(inputs: PathInputs, flags: ConfigFlags = {}) {
+export function loadSettings(inputs: PathInputs) {
   const located = resolvePaths(inputs);
-  const config = resolveConfig(
-    readConfigFile(join(located.config, CONFIG_FILE)),
-    inputs.env,
-    flags,
-  );
+  const config = resolveConfig(readConfigFile(join(located.config, CONFIG_FILE)), inputs.env);
   const paths =
     config.bank === undefined ? located : resolvePaths({ ...inputs, configBank: config.bank });
   return { paths, config };

@@ -12,6 +12,8 @@ import { HealthResponse, StateSnapshot, StopResponse } from "@bazhen/protocol";
 /** The exit status when the daemon isn't running. */
 const NOT_RUNNING = 3;
 const STOPPED_WITHIN_MS = 5000;
+/** A daemon that holds a status call this long is wedged, and reported as not answering. */
+const CALL_MS = 5000;
 const USAGE = `usage: bazhen <start|stop|status> [--home <dir>] [--port <port>]`;
 
 const { positionals, values } = parseArgs({
@@ -30,7 +32,12 @@ function start(): number {
   return result.status ?? 1;
 }
 
+/** Idempotent: a daemon that isn't running is already stopped. */
 async function stop(): Promise<number> {
+  if (!(await answers(socket))) {
+    console.log("bazhen is not running");
+    return 0;
+  }
   await call(socket, { method: "POST", path: "/v1/daemon/stop", reply: StopResponse });
   for (const begun = Date.now(); Date.now() - begun < STOPPED_WITHIN_MS;) {
     if (!(await answers(socket))) {
@@ -45,8 +52,8 @@ async function stop(): Promise<number> {
 
 async function status(): Promise<number> {
   const [health, state] = await Promise.all([
-    call(socket, { method: "GET", path: "/v1/health", reply: HealthResponse }),
-    call(socket, { method: "GET", path: "/v1/state", reply: StateSnapshot }),
+    call(socket, { method: "GET", path: "/v1/health", reply: HealthResponse }, CALL_MS),
+    call(socket, { method: "GET", path: "/v1/state", reply: StateSnapshot }, CALL_MS),
   ]);
   const byState = Map.groupBy(state.agents, (a) => a.state);
   const agents = [...byState].map(([s, list]) => `${list.length} ${s}`).join(", ") || "none";

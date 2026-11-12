@@ -9,11 +9,13 @@ describe("daemonEnv", () => {
     TMUX: "/tmp/tmux-1/default,1,0",
     BAZHEN_HOME: "/b",
     BAZHEN_PORT: "8100",
+    BAZHEN_AGENT_ID: "agent_parent",
+    BAZHEN_SOCKET: "/tmp/parent.sock",
     SECRET_KEY: "s",
     TERM: "xterm-256color",
   };
 
-  it("keeps the user's variables and Bazhen's own settings, and drops a parent's internals", () => {
+  it("keeps the user's variables and Bazhen's settings, and drops a parent agent's internals", () => {
     expect(daemonEnv(env, {})).toEqual({
       HOME: "/home/u",
       GH_TOKEN: "t",

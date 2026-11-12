@@ -138,5 +138,5 @@ export const ErrorResponse = z.object({
 export type ErrorResponse = z.infer<typeof ErrorResponse>;
 
 /** `POST /v1/daemon/stop`, on the Unix socket only: the daemon stops once it has sent this. */
-export const StopResponse = z.strictObject({});
+export const StopResponse = z.object({});
 export type StopResponse = z.infer<typeof StopResponse>;

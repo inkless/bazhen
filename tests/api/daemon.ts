@@ -10,10 +10,12 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   readlinkSync,
   realpathSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
 import { request } from "node:http";
 import { createServer } from "node:net";
@@ -165,6 +167,24 @@ export class Daemon {
     return daemon;
   }
 
+  /**
+   * A daemon started as a user starts it: `bazhen start`, from a shell whose environment adds
+   * `env`, with `config` as its config.toml. `stop` ends it with `bazhen stop`.
+   */
+  static async startWithCli(config: string, env: Record<string, string>): Promise<Daemon> {
+    const daemon = new Daemon(realpathSync(mkdtempSync("/tmp/bz-api-")), {});
+    daemon.port = await freePort();
+    Object.assign(daemon.env, { BAZHEN_PORT: String(daemon.port) });
+    mkdirSync(join(daemon.home, "config"), { recursive: true });
+    writeFileSync(join(daemon.home, "config", "config.toml"), config);
+    const started = await bazhen(["start"], { ...daemon.env, ...env });
+    if (started.code !== 0) {
+      await daemon.stop();
+      throw new Error(`bazhen start failed:\n${started.out}`);
+    }
+    return daemon;
+  }
+
   /** Launches an agent in the work directory, keyed by `key`. */
   async launch(
     key: string,
@@ -311,6 +331,17 @@ export class Daemon {
   /** The title the agent's TUI gave its pane. */
   paneTitle(agentId: string): string {
     return this.paneFact(agentId, "pane_title") ?? "";
+  }
+
+  /** The environment the agent's process runs with, as its own tools see it (Linux only). */
+  agentEnv(agentId: string): Record<string, string> {
+    const environ = readFileSync(`/proc/${this.panePid(agentId)}/environ`, "utf8");
+    return Object.fromEntries(
+      environ
+        .split("\0")
+        .filter((entry) => entry.includes("="))
+        .map((entry) => [entry.slice(0, entry.indexOf("=")), entry.slice(entry.indexOf("=") + 1)]),
+    );
   }
 
   /** Whether the agent still has a tmux session. */
@@ -475,6 +506,8 @@ export class Daemon {
   /** Stops the daemon, its tmux server and every file under its home. */
   async stop(): Promise<void> {
     await this.exit("SIGTERM");
+    // A daemon `bazhen start` detached is not this process's child.
+    await bazhen(["stop"], this.env);
     // Codex's managed daemon outlives its clients; only its own stop ends it.
     const codexStopped = codexDaemonStarted(this.home)
       ? run("codex", ["app-server", "daemon", "stop"], { env: this.env, timeout: 90_000 })

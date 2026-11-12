@@ -24,10 +24,8 @@ describe("resolveConfig", () => {
     });
   });
 
-  it("takes the environment over the file, and a flag over both", () => {
-    const env = { BAZHEN_PORT: "8200" };
-    expect(resolveConfig(file, env).port).toBe(8200);
-    expect(resolveConfig(file, env, { port: 8300 }).port).toBe(8300);
+  it("takes the environment over the file", () => {
+    expect(resolveConfig(file, { BAZHEN_PORT: "8200" }).port).toBe(8200);
   });
 
   it("treats an empty variable as unset", () => {

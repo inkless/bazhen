@@ -76,3 +76,26 @@ describe("bazhen stop", () => {
     expect(daemon.hasTerminal(agentId)).toBe(true);
   });
 });
+
+describe("bazhen start's environment", () => {
+  let daemon: Daemon;
+  beforeAll(async () => {
+    // From inside a parent Claude Code session, with a name the denylist drops unless passed
+    // (not TERM_PROGRAM, which tmux sets in every pane itself).
+    daemon = await Daemon.startWithCli('[agents.env]\npassthrough = ["ITERM_PROFILE"]\n', {
+      CLAUDECODE: "1",
+      ITERM_PROFILE: "kept-by-config",
+    });
+  });
+  afterAll(async () => {
+    await daemon?.stop();
+  });
+
+  it("keeps a parent session's variables from agents, and passes what the config re-allows", async () => {
+    const { agentId } = await daemon.launch("env");
+    await expect.poll(() => daemon.hasTerminal(agentId)).toBe(true);
+    const env = daemon.agentEnv(agentId);
+    expect(env["CLAUDECODE"]).toBeUndefined();
+    expect(env["ITERM_PROFILE"]).toBe("kept-by-config");
+  });
+});
