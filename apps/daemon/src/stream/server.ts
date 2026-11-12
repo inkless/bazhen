@@ -1,40 +1,24 @@
-import type { IncomingMessage } from "node:http";
-import type { Duplex } from "node:stream";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import type { RuntimeRef } from "@bazhen/core";
 import { isCompatible, StreamClientFrame, type StreamServerFrame } from "@bazhen/protocol";
-import { refusal, type Allowlists } from "../http/guard.ts";
+import type { UpgradeRoute } from "../http/upgrades.ts";
 import type { Attachment, TerminalHub } from "./hub.ts";
 
-const STREAM_PATH = /^\/v1\/terminals\/([^/]+)\/stream$/;
 /** A frame is a keystroke burst or a paste; nothing a person types comes near this. */
 const MAX_FRAME_BYTES = 1 << 20;
-/** The same statuses as the HTTP surface, so a refused upgrade reads like a refused request. */
-const REFUSAL_STATUS = {
-  host_not_allowed: "421 Misdirected Request",
-  origin_not_allowed: "403 Forbidden",
-};
 
 export interface StreamDeps {
-  readonly allow: Allowlists;
   readonly hub: Pick<TerminalHub, "join">;
   readonly runtimeRef: (terminalId: string) => RuntimeRef | undefined;
 }
 
-/** The terminal stream's WebSocket endpoint (foundation-design §5.3); the only user of `ws`. */
-export function streamUpgrades(deps: StreamDeps) {
+/** The terminal stream's WebSocket endpoint (foundation-design §5.3). */
+export function streamRoute(deps: StreamDeps): UpgradeRoute {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
-  return (req: IncomingMessage, socket: Duplex, head: Buffer): void => {
-    const path = new URL(req.url ?? "/", "http://daemon").pathname;
-    const terminalId = STREAM_PATH.exec(path)?.[1];
-    const { host, origin } = req.headers;
-    const refused = refusal(deps.allow, { host, origin, acting: true });
-    if (refused !== null || terminalId === undefined) {
-      const status = refused === null ? "404 Not Found" : REFUSAL_STATUS[refused];
-      socket.end(`HTTP/1.1 ${status}\r\n\r\n`);
-      return;
-    }
-    wss.handleUpgrade(req, socket, head, (ws) => serve(deps, ws, terminalId));
+  return {
+    path: /^\/v1\/terminals\/([^/]+)\/stream$/,
+    upgrade: (req, socket, head, [, terminalId = ""]) =>
+      wss.handleUpgrade(req, socket, head, (ws) => serve(deps, ws, terminalId)),
   };
 }
 

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { InvalidTransition, newId } from "@bazhen/core";
-import { withAgent } from "../testing/fixtures.ts";
+import { age, visit, withAgent } from "../testing/fixtures.ts";
 import { MIGRATIONS } from "./migrations.ts";
 import { UnknownEntity } from "./projections.ts";
 import { LATEST_SCHEMA_VERSION, SchemaTooNew, Store } from "./store.ts";
@@ -156,33 +156,7 @@ describe("Store", () => {
   });
 });
 
-const OLD = "2026-01-01T00:00:00.000Z";
 const CUTOFF = new Date("2026-02-01T00:00:00.000Z");
-
-/** Dates every event recorded so far before the cutoff, as if a month had passed. */
-function age(path: string) {
-  const raw = new DatabaseSync(path);
-  raw.prepare("UPDATE events SET ts = ?").run(OLD);
-  raw.close();
-}
-
-/** A view that came and went: two events no projection points at once it has ended. */
-function visit(store: Store, terminalId: string) {
-  const attachmentId = newId("att");
-  const started = store.append({
-    type: "attachment.started",
-    entityId: attachmentId,
-    actor: "system",
-    payload: { terminalId, mode: "observe" },
-  });
-  const ended = store.append({
-    type: "attachment.ended",
-    entityId: attachmentId,
-    actor: "system",
-    payload: { reason: "client_closed" },
-  });
-  return [started, ended] as const;
-}
 
 const flushed = () => new Promise((resolve) => setTimeout(resolve, 0));
 

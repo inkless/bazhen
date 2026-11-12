@@ -2,6 +2,7 @@ import { z } from "zod";
 import { ExternalRef, HarnessId } from "./agents.ts";
 import { AttachmentMode, EnvironmentKind, Id } from "./ids.ts";
 import { ApprovalDecision, AttentionCloseReason } from "./mail.ts";
+import { ProtocolVersion } from "./version.ts";
 
 /**
  * Every event type the store accepts, with the entity it is about and its payload. A row adds
@@ -123,6 +124,17 @@ const streamed = (type: EventType) =>
  */
 export const Event = z.union(Object.keys(EVENTS).filter(isEventType).map(streamed));
 export type Event = z.infer<typeof Event>;
+
+/**
+ * The query that opens `/v1/events`: the client's protocol version, and the cursor `/v1/state`
+ * or the last event it saw gave it. The stream resumes after `after`.
+ */
+export const EventStreamQuery = z.object({
+  v: ProtocolVersion,
+  epoch: z.string().min(1),
+  after: z.string().regex(/^\d+$/),
+});
+export type EventStreamQuery = z.infer<typeof EventStreamQuery>;
 
 /** Text frames on `/v1/events`; the client sends none. */
 export const EventFrame = z.discriminatedUnion("type", [

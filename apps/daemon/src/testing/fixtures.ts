@@ -4,8 +4,10 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import {
   isId,
+  newId,
   type AgentInventoryEntry,
   type AgentLaunch,
   type AgentRefs,
@@ -15,6 +17,13 @@ import { launchAgent, localEnvironmentId } from "../agents/launch.ts";
 import { Store } from "../store/store.ts";
 
 export const tempDb = () => join(mkdtempSync(join(tmpdir(), "bz-store-")), "bazhen.db");
+
+/** Dates every event the database at `path` holds to `ts`, as if they had been there a while. */
+export function age(path: string, ts = "2026-01-01T00:00:00.000Z"): void {
+  const raw = new DatabaseSync(path);
+  raw.prepare("UPDATE events SET ts = ?").run(ts);
+  raw.close();
+}
 
 /** A local environment that runs Claude Code only, launching however `launch` says. */
 export function fakeEnvironment(
@@ -48,4 +57,22 @@ export async function withAgent() {
     throw new Error("launched no agent");
   }
   return { path, store, agentId, terminalId };
+}
+
+/** A view that came and went: two events no projection points at once it has ended. */
+export function visit(store: Store, terminalId: string) {
+  const attachmentId = newId("att");
+  const started = store.append({
+    type: "attachment.started",
+    entityId: attachmentId,
+    actor: "system",
+    payload: { terminalId, mode: "observe" },
+  });
+  const ended = store.append({
+    type: "attachment.ended",
+    entityId: attachmentId,
+    actor: "system",
+    payload: { reason: "client_closed" },
+  });
+  return [started, ended] as const;
 }
