@@ -22,6 +22,7 @@ const PACKAGE_DIR: Record<string, string> = {
   "@bazhen/runtime-tmux": "packages/runtime-tmux",
   "@bazhen/env-local": "packages/env-local",
   "@bazhen/harness-claude-code": "packages/harness-claude-code",
+  "@bazhen/harness-codex": "packages/harness-codex",
   "@bazhen/daemon": "apps/daemon",
   "@bazhen/web": "apps/web",
 };
@@ -54,6 +55,7 @@ export const MATRIX: Area[] = [
     banned: [
       "@bazhen/runtime-tmux",
       "@bazhen/harness-claude-code",
+      "@bazhen/harness-codex",
       "@bazhen/daemon",
       "@bazhen/web",
     ],
@@ -63,7 +65,26 @@ export const MATRIX: Area[] = [
   },
   {
     dir: "packages/harness-claude-code",
-    banned: ["@bazhen/runtime-tmux", "@bazhen/env-local", "@bazhen/daemon", "@bazhen/web"],
+    banned: [
+      "@bazhen/runtime-tmux",
+      "@bazhen/env-local",
+      "@bazhen/harness-codex",
+      "@bazhen/daemon",
+      "@bazhen/web",
+    ],
+    typeOnly: ["@bazhen/protocol"],
+    platformFree: true,
+    thirdParty: RUNTIME_LIBS,
+  },
+  {
+    dir: "packages/harness-codex",
+    banned: [
+      "@bazhen/runtime-tmux",
+      "@bazhen/env-local",
+      "@bazhen/harness-claude-code",
+      "@bazhen/daemon",
+      "@bazhen/web",
+    ],
     typeOnly: ["@bazhen/protocol"],
     platformFree: true,
     thirdParty: RUNTIME_LIBS,
@@ -77,6 +98,7 @@ export const MATRIX: Area[] = [
       "@bazhen/runtime-tmux",
       "@bazhen/env-local",
       "@bazhen/harness-claude-code",
+      "@bazhen/harness-codex",
       "@bazhen/daemon",
       "@bazhen/web",
     ],

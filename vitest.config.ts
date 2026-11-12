@@ -40,7 +40,8 @@ export default defineConfig({
           fileParallelism: false,
           maxWorkers: 1,
           testTimeout: 60_000,
-          hookTimeout: 60_000,
+          // Setup starts real agents and Codex's managed daemon, and teardown stops that daemon.
+          hookTimeout: 120_000,
         },
       },
     ],

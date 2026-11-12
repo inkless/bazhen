@@ -40,6 +40,27 @@ describe("newTitles", () => {
     expect(newTitles(text, FILE)).toEqual(["adds a", "adds b"]);
   });
 
+  it("leaves out an existing test whose call line only became async", () => {
+    const text = [
+      "+++ b/" + FILE,
+      '-  it("was sync", () => {',
+      '+  it("was sync", async () => {',
+      '+  it("is new", async () => {',
+    ].join("\n");
+    expect(newTitles(text, FILE)).toEqual(["is new"]);
+  });
+
+  it("judges a test removed and added again under the same title, or with another change", () => {
+    const text = [
+      "+++ b/" + FILE,
+      '-  it("moved and rewritten", () => {',
+      '-  it("renamed its argument", (a) => {',
+      '+  it("moved and rewritten", () => {',
+      '+  it("renamed its argument", async (b) => {',
+    ].join("\n");
+    expect(newTitles(text, FILE)).toEqual(["moved and rewritten", "renamed its argument"]);
+  });
+
   it("reads a backtick title without interpolation", () => {
     expect(newTitles(diff("it(`plain backtick`, () => {});"), FILE)).toEqual(["plain backtick"]);
   });

@@ -93,6 +93,7 @@ describe("each package.json, against the import matrix", () => {
       "packages/runtime-tmux": [],
       "packages/env-local": [],
       "packages/harness-claude-code": [],
+      "packages/harness-codex": [],
       "apps/daemon": [],
       "apps/web": [],
       "tests/api": [],

@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import type { StateSnapshot } from "@bazhen/protocol";
+import type { HarnessId, StateSnapshot } from "@bazhen/protocol";
 import { answer, fetchState, launchAgent, sendMessage } from "./api.ts";
 import { Terminal } from "./Terminal.tsx";
 
@@ -33,10 +33,8 @@ export function Fleet() {
   const agent = state?.agents.find((a) => a.id === selected);
   const open = state?.attention.filter((a) => a.state === "open") ?? [];
 
-  const launch = (e: FormEvent) => {
-    e.preventDefault();
-    launchAgent("claude-code", cwd).then((r) => setSelected(r.agentId), failed);
-  };
+  const launch = (harness: HarnessId) =>
+    void launchAgent(harness, cwd).then((r) => setSelected(r.agentId), failed);
   const send = (e: FormEvent) => {
     e.preventDefault();
     if (agent === undefined) return;
@@ -45,7 +43,12 @@ export function Fleet() {
 
   return (
     <>
-      <form onSubmit={launch}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          launch("claude-code");
+        }}
+      >
         <label>
           Directory{" "}
           <input
@@ -54,7 +57,10 @@ export function Fleet() {
             placeholder="/path/to/project"
           />
         </label>
-        <button type="submit">Launch Claude Code</button>
+        <button type="submit">Launch Claude Code</button>{" "}
+        <button type="button" onClick={() => launch("codex")}>
+          Launch Codex
+        </button>
       </form>
       {error !== null && <p role="alert">{error}</p>}
       <section aria-label="inbox">

@@ -93,21 +93,32 @@ const unescape = (title: string) => title.replace(/\\(["'`])/g, "$1");
  * Titles of tests whose `it(...)`/`test(...)` line the change adds. Every added test call whose
  * title can't be read (wrapped onto the next line, interpolated, a variable) adds an
  * `<unparsed test in FILE>` marker, which classifies as INVALID and so forces a Control trailer.
+ * An existing test whose call line only became `async`, for a seam that did, is left out: it
+ * isn't new, and its behaviour may not have changed at all. A test removed and added again with
+ * the same call line, as when it is rewritten elsewhere in the file, is judged like a new one.
  */
 export function newTitles(diff: string, file: string): string[] {
-  const titles = new Set<string>();
+  const added = new Map<string, string>();
+  const removed = new Map<string, string>();
   for (const line of diff.split("\n")) {
-    if (!line.startsWith("+") || line.startsWith("+++") || !TEST_CALL.test(line)) continue;
+    const side = line.startsWith("+") ? added : line.startsWith("-") ? removed : undefined;
+    if (side === undefined || /^(\+\+\+|---) /.test(line) || !TEST_CALL.test(line)) continue;
     let parsed = false;
     for (const [, quote, title] of line.matchAll(TITLE)) {
       if (title === undefined || (quote === "`" && title.includes("${"))) continue;
-      titles.add(unescape(title));
+      side.set(unescape(title), line.slice(1).trim());
       parsed = true;
     }
-    if (!parsed) titles.add(`<unparsed test in ${file}>`);
+    if (!parsed && side === added) added.set(`<unparsed test in ${file}>`, "");
   }
-  return [...titles];
+  const onlyMadeAsync = (title: string, call: string) => {
+    const before = removed.get(title);
+    return before !== undefined && before !== call && withoutAsync(before) === withoutAsync(call);
+  };
+  return [...added].flatMap(([title, call]) => (onlyMadeAsync(title, call) ? [] : [title]));
 }
+
+const withoutAsync = (call: string) => call.replaceAll(/\basync\s+/g, "");
 
 export type VitestReport = {
   testResults: {
