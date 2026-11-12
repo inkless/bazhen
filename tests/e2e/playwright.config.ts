@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig, devices } from "@playwright/test";
-import { claudeHome, loginEnv } from "../support/agent-env.ts";
+import { agentHomes, loginEnv } from "../support/agent-env.ts";
 
 // Free ports and a per-run home and tmux server, so parallel worktrees can run e2e at once.
 // Playwright re-evaluates this file in its workers; they inherit the values through the
@@ -55,7 +55,7 @@ const env: Record<string, string> = {
   BAZHEN_WEB_PORT: String(webPort),
   BAZHEN_TMUX_SOCKET: process.env["BZ_E2E_SOCKET"],
   PATH: `${claudeBin}:${process.env["PATH"] ?? ""}`,
-  ...claudeHome(join(process.env["BZ_E2E_HOME"], "claude"), process.env["BZ_E2E_WORK"]),
+  ...agentHomes(process.env["BZ_E2E_HOME"], process.env["BZ_E2E_WORK"]),
 };
 
 /**

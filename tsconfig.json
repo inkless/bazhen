@@ -17,6 +17,9 @@
       "path": "packages/harness-claude-code"
     },
     {
+      "path": "packages/harness-codex"
+    },
+    {
       "path": "apps/daemon"
     },
     {

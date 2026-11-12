@@ -26,7 +26,7 @@ afterAll(async () => {
 describe("the terminal stream", () => {
   it("shows the agent's real TUI to a view, and types what the driver types into it", async () => {
     const view = await daemon.view(terminalId, "interactive");
-    await expect.poll(() => view.output(), { timeout: 10_000 }).toMatch(/Claude Code/);
+    await expect.poll(() => view.text(), { timeout: 10_000 }).toContain("Claude Code");
     view.frame({ type: "engage" });
     await expect
       .poll(() => view.frames)
@@ -54,9 +54,9 @@ describe("the terminal stream", () => {
 
   it("shows a view that joins later the screen as it already is", async () => {
     const first = await daemon.view(terminalId, "interactive");
-    await expect.poll(() => first.output(), { timeout: 10_000 }).toMatch(/Claude Code/);
+    await expect.poll(() => first.text(), { timeout: 10_000 }).toContain("Claude Code");
     const late = await daemon.view(terminalId, "observe");
-    await expect.poll(() => late.output(), { timeout: 10_000 }).toMatch(/Claude Code/);
+    await expect.poll(() => late.text(), { timeout: 10_000 }).toContain("Claude Code");
     // Seeded from the daemon's snapshot, through the one client.
     expect(late.frames.map((f) => f.type)).toEqual(
       expect.arrayContaining(["snapshot_start", "snapshot_end"]),

@@ -99,6 +99,8 @@ export async function launchAgent(
     [],
   );
   const refs = await environment.launch({ agentId, terminalId, request, size }).catch((cause) => {
+    // The client learns only that it failed; the daemon's log says why.
+    console.error(`agent ${agentId} failed to launch:`, cause);
     record(
       () =>
         store.append({ ...event, type: "agent.failed", payload: { reason: "launch_rejected" } }),

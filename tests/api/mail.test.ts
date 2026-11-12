@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { LaunchAgentResponse, SendMessageResponse, StateSnapshot } from "@bazhen/protocol";
+import { SendMessageResponse, StateSnapshot } from "@bazhen/protocol";
 import { Daemon, waitUntil } from "./daemon.ts";
 import { startFakeModel, type FakeModel } from "./fake-model.ts";
 
@@ -9,11 +9,7 @@ let agentId = "";
 beforeAll(async () => {
   model = await startFakeModel();
   daemon = await Daemon.start({ modelUrl: model.url });
-  const launched = await daemon.request("/v1/agents", {
-    method: "POST",
-    body: { idempotencyKey: "mail", harness: "claude-code", cwd: daemon.work },
-  });
-  agentId = LaunchAgentResponse.parse(launched.body).agentId;
+  agentId = (await daemon.launch("mail")).agentId;
   await waitUntil(() => daemon.screen(agentId).includes("Claude Code"), "Claude Code's TUI");
 });
 afterAll(async () => {

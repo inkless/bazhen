@@ -32,7 +32,7 @@ function fakeRuntime(
 
 const harness: HarnessAdapter = {
   id: "claude-code",
-  launchSpec: () => ({
+  launchSpec: async () => ({
     argv: ["claude", "--session-id", "s-1"],
     env: { HARNESS_OWN: "1" },
     externalRef: { kind: "claude-session", id: "s-1" },

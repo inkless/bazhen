@@ -12,6 +12,7 @@ import {
 import { z } from "zod";
 import {
   EVENTS,
+  ExternalRef,
   StateSnapshot,
   type EnvironmentKind,
   type MailboxState,
@@ -284,6 +285,18 @@ export class Store {
     return this.prepare(sql)
       .all(environmentId)
       .map((r) => String(r.id));
+  }
+
+  /** The Codex threads the running Codex agents are bound to. */
+  codexThreads(): string[] {
+    const sql = `SELECT external_ref FROM agent_sessions
+                 WHERE harness = 'codex' AND state = 'running' AND external_ref IS NOT NULL`;
+    return this.prepare(sql)
+      .all()
+      .flatMap((r) => {
+        const ref = ExternalRef.safeParse(JSON.parse(String(r.external_ref)));
+        return ref.success && ref.data.kind === "codex-thread" ? [ref.data.id] : [];
+      });
   }
 
   /**

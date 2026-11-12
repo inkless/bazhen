@@ -7,9 +7,11 @@ import { getRequestListener, serve } from "@hono/node-server";
 import { filterEnv } from "@bazhen/core";
 import { LocalEnvironment } from "@bazhen/env-local";
 import { ClaudeCodeHarness } from "@bazhen/harness-claude-code";
+import { CodexHarness } from "@bazhen/harness-codex";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
 import { launchAgent, localEnvironmentId } from "./agents/launch.ts";
 import { reconcile } from "./agents/reconcile.ts";
+import { CodexChannel, codexHomeOf, startCodexDaemon } from "./codex/channel.ts";
 import { TerminalHub } from "./stream/hub.ts";
 import { endOpenAttachments, storeLog } from "./stream/log.ts";
 import { streamUpgrades } from "./stream/server.ts";
@@ -51,6 +53,12 @@ const runtime = new TmuxRuntime({
   env: hostEnv,
 });
 const hookClient = fileURLToPath(new URL("mailbox/hook-client.ts", import.meta.url));
+// Agents use the user's own Codex home and its managed app-server, connected on first use.
+const codex = new CodexChannel({
+  codexHome: codexHomeOf(hostEnv, inputs.home),
+  startDaemon: () => startCodexDaemon(hostEnv),
+  boundThreads: () => store.codexThreads(),
+});
 const environment = new LocalEnvironment({
   id: localEnvironmentId(store),
   runtime,
@@ -63,10 +71,17 @@ const environment = new LocalEnvironment({
         ? { permissionMode: process.env.BAZHEN_CLAUDE_PERMISSION_MODE }
         : {}),
     }),
+    new CodexHarness(codex, codex.address),
   ],
   socket: paths.socket,
 });
 await reconcile(store, environment);
+// The Codex agents' threads lost their subscriber with the last daemon (§7 step 4).
+if (store.codexThreads().length > 0) {
+  codex
+    .resume()
+    .catch((err: unknown) => console.warn(`codex: could not reconnect: ${String(err)}`));
+}
 const allowedHosts = [`${HOSTNAME}:${port}`, `localhost:${port}`];
 // The web dev server proxies to the daemon, and the browser's requests keep its origin. It is
 // allowed only when the dev scripts name its port; a built daemon serves the client itself.
@@ -110,6 +125,7 @@ hooks.listen(paths.socket, () => chmodSync(paths.socket, 0o600));
 function shutdown() {
   server.close();
   hooks.close();
+  codex.close();
   store.close();
   process.exit(0);
 }

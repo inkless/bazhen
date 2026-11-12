@@ -22,7 +22,7 @@ export class ClaudeCodeHarness implements HarnessAdapter {
     this.opts = opts;
   }
 
-  launchSpec(): HarnessLaunch {
+  async launchSpec(): Promise<HarnessLaunch> {
     const id = this.opts.newSessionId();
     return {
       argv: [

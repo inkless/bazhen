@@ -61,7 +61,7 @@ export class LocalEnvironment implements EnvironmentAdapter {
   async launch({ agentId, terminalId, request, size }: AgentLaunch): Promise<AgentRefs> {
     const harness = this.opts.harnesses.find((h) => h.id === request.harness);
     if (harness === undefined) throw new UnsupportedHarness(request.harness);
-    const launch = harness.launchSpec(request);
+    const launch = await harness.launchSpec(request);
     const runtime = await this.opts.runtime.create({
       terminalId,
       tags: { kind: "agent", agentId },

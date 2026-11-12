@@ -5,7 +5,7 @@
 //   anything else            a short text reply
 // Every request is kept, so a test can check what the model was sent.
 
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
 interface Block {
   readonly type: string;
@@ -103,7 +103,7 @@ function stream(res: ServerResponse, req: Request, answer: ReturnType<typeof rep
   res.end();
 }
 
-async function body(r: IncomingMessage): Promise<string> {
+export async function body(r: IncomingMessage): Promise<string> {
   let text = "";
   for await (const chunk of r) text += String(chunk);
   return text;
@@ -163,6 +163,11 @@ export async function startFakeModel(): Promise<FakeModel> {
       setTimeout(() => respond(res, req, answer), delayOf(req));
     });
   });
+  return listenLocal(server, requests);
+}
+
+/** Starts a fake on a free loopback port, keeping the requests it records. */
+export async function listenLocal(server: Server, requests: string[]): Promise<FakeModel> {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("no port");

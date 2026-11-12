@@ -2,14 +2,25 @@
 // WebSocket and tmux. Nothing here imports the daemon's code, so the same tests can certify a
 // daemon written in another language.
 
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { execFile, execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { once } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { WebSocket } from "ws";
 import { LaunchAgentResponse, PROTOCOL_VERSION, StreamServerFrame } from "@bazhen/protocol";
-import { claudeHome, loginEnv } from "../support/agent-env.ts";
+import { agentHomes, codexDaemonStarted, loginEnv } from "../support/agent-env.ts";
+import { replay } from "./fixtures/browser.ts";
+
+const run = promisify(execFile);
+
+/** What each harness's TUI shows once it has started. */
+export const BANNER = { "claude-code": "Claude Code", codex: "OpenAI Codex" } as const;
+
+/** The size the daemon gives every agent's terminal. */
+const SIZE = { cols: 120, rows: 40 };
 
 const repo = fileURLToPath(new URL("../..", import.meta.url));
 const bin = fileURLToPath(new URL("node_modules/.bin", import.meta.url));
@@ -39,6 +50,13 @@ export async function waitUntil(
   throw new Error(`timed out waiting for ${what}`);
 }
 
+export interface DaemonOptions {
+  /** The fake Anthropic API's base URL, for Claude Code. */
+  readonly modelUrl?: string;
+  /** The fake Responses API's base URL, for Codex. */
+  readonly responsesUrl?: string;
+}
+
 export class Daemon {
   readonly home: string;
   readonly work: string;
@@ -47,27 +65,51 @@ export class Daemon {
   private port = 0;
   private process: ChildProcess | undefined;
 
-  private constructor(home: string, modelUrl: string | undefined) {
+  private constructor(home: string, opts: DaemonOptions) {
     this.home = home;
     this.work = join(home, "work");
     this.tmuxSocket = `bz-test-${process.env["BZ_TEST_RUN"] ?? process.pid}-api-${++instances}`;
     mkdirSync(this.work, { recursive: true });
-    const claude = claudeHome(join(home, "claude"), this.work);
+
     this.env = {
       ...loginEnv(),
       PATH: `${bin}:${process.env["PATH"] ?? "/usr/bin:/bin"}`,
       BAZHEN_HOME: home,
       BAZHEN_TMUX_SOCKET: this.tmuxSocket,
-      ...claude,
-      ...(modelUrl === undefined ? {} : { ANTHROPIC_BASE_URL: modelUrl }),
+      ...agentHomes(home, this.work, { anthropic: opts.modelUrl, responses: opts.responsesUrl }),
     };
   }
 
   /** A daemon on a fresh home. Short paths keep its socket under sun_path's limit. */
-  static async start(opts: { modelUrl?: string } = {}): Promise<Daemon> {
-    const daemon = new Daemon(realpathSync(mkdtempSync("/tmp/bz-api-")), opts.modelUrl);
+  static async start(opts: DaemonOptions = {}): Promise<Daemon> {
+    const daemon = new Daemon(realpathSync(mkdtempSync("/tmp/bz-api-")), opts);
     await daemon.spawn();
     return daemon;
+  }
+
+  /** Launches an agent in the work directory, keyed by `key`. */
+  async launch(
+    key: string,
+    harness: "claude-code" | "codex" = "claude-code",
+  ): Promise<LaunchAgentResponse> {
+    const res = await this.request("/v1/agents", {
+      method: "POST",
+      body: { idempotencyKey: key, harness, cwd: this.work },
+    });
+    return LaunchAgentResponse.parse(res.body);
+  }
+
+  /**
+   * Submits a prompt in an agent's TUI through a view, as a person would. Enter waits until the
+   * text has drawn, so the TUI doesn't read both as one paste.
+   */
+  async prompt(launched: { agentId: string; terminalId: string | null }, text: string) {
+    const view = await this.view(String(launched.terminalId), "interactive");
+    await view.drive();
+    view.type(text);
+    await waitUntil(() => this.screen(launched.agentId).includes(text), "the typed prompt");
+    view.type("\r");
+    view.close();
   }
 
   get url(): string {
@@ -172,14 +214,7 @@ export class Daemon {
    * terminal is one the daemon knows and streams.
    */
   async program(argv: readonly string[]): Promise<{ agentId: string; terminalId: string }> {
-    const launched = LaunchAgentResponse.parse(
-      (
-        await this.request("/v1/agents", {
-          method: "POST",
-          body: { idempotencyKey: `program-${++programs}`, harness: "claude-code", cwd: this.work },
-        })
-      ).body,
-    );
+    const launched = await this.launch(`program-${++programs}`);
     const ids = { agentId: launched.agentId, terminalId: String(launched.terminalId) };
     await waitUntil(() => this.session(ids.agentId) !== undefined, "the agent's terminal");
     this.runInTerminal(ids.agentId, argv);
@@ -214,6 +249,38 @@ export class Daemon {
     this.tmux("kill-session", "-t", session);
   }
 
+  /** Runs the Codex CLI on this daemon's Codex home, as its user would. */
+  async codex(...args: string[]): Promise<void> {
+    await run("codex", args, { env: this.env, timeout: 90_000 });
+  }
+
+  /**
+   * One request to Codex's managed app-server on this daemon's Codex home, as a client of its
+   * own: it initializes, asks and disconnects.
+   */
+  async codexRequest(method: string, params: unknown): Promise<unknown> {
+    const socket = join(this.home, "codex", "app-server-control", "app-server-control.sock");
+    const ws = new WebSocket(`ws+unix://${socket}:/`);
+    await once(ws, "open");
+    const replies = new Map<number, unknown>();
+    ws.on("message", (data: Buffer) => {
+      const m: unknown = JSON.parse(data.toString("utf8"));
+      if (typeof m === "object" && m !== null && "id" in m && typeof m.id === "number") {
+        replies.set(m.id, m);
+      }
+    });
+    const ask = async (id: number, m: string, p: unknown) => {
+      ws.send(JSON.stringify({ id, method: m, params: p }));
+      await waitUntil(() => replies.has(id), `the app-server's reply to ${m}`);
+      return replies.get(id);
+    };
+    await ask(0, "initialize", { clientInfo: { name: "bazhen-test", version: "0" } });
+    ws.send(JSON.stringify({ method: "initialized" }));
+    const reply = await ask(1, method, params);
+    ws.close();
+    return reply;
+  }
+
   /** Kills the daemon outright, as a crash would; its agents keep running in tmux. */
   async kill(): Promise<void> {
     await this.exit("SIGKILL");
@@ -236,11 +303,16 @@ export class Daemon {
   /** Stops the daemon, its tmux server and every file under its home. */
   async stop(): Promise<void> {
     await this.exit("SIGTERM");
+    // Codex's managed daemon outlives its clients; only its own stop ends it.
+    const codexStopped = codexDaemonStarted(this.home)
+      ? run("codex", ["app-server", "daemon", "stop"], { env: this.env, timeout: 90_000 })
+      : undefined;
     try {
       this.tmux("kill-server");
     } catch {
       // No server was ever started.
     }
+    await codexStopped;
     // The agents' processes may still be writing their state as the server goes down.
     rmSync(this.home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
@@ -305,6 +377,11 @@ export class View {
 
   type(text: string): void {
     this.ws.send(Buffer.from(text), { binary: true });
+  }
+
+  /** The text a browser would show from everything received, whatever escapes drew it. */
+  async text(): Promise<string> {
+    return (await replay(this.received(), SIZE)).lines.join("\n");
   }
 
   close(): void {

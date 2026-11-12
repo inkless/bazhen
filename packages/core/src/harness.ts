@@ -11,10 +11,21 @@ export interface HarnessLaunch {
 }
 
 /**
+ * A harness's own server, reached over a connection the daemon owns, such as Codex's app-server
+ * (foundation-design §8.1, §5.8). The adapter exchanges JSON-RPC messages; it never sees the
+ * socket.
+ */
+export interface HarnessChannelPort {
+  /** One request's result; a JSON-RPC error rejects. */
+  request(method: string, params: unknown): Promise<unknown>;
+}
+
+/**
  * One harness inside the local environment (foundation-design §11.1). It never opens a socket
- * or a process, or touches the store.
+ * or a process, or touches the store, except through the ports it is given. Preparing a launch
+ * may create the harness's own session, as Codex's thread is, before the TUI starts.
  */
 export interface HarnessAdapter {
   readonly id: HarnessId;
-  launchSpec(request: AgentLaunchRequest): HarnessLaunch;
+  launchSpec(request: AgentLaunchRequest): Promise<HarnessLaunch>;
 }

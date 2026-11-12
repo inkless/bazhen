@@ -15,8 +15,8 @@ const claude = (newSessionId: () => string): HarnessAdapter =>
   new ClaudeCodeHarness({ newSessionId, hookCommand: "bazhen-hook" });
 
 describe("Claude Code harness", () => {
-  it("launches with a session id it chose, and reports that session as the agent's", () => {
-    const launch = claude(() => "6f1c0b2e-0000-4000-8000-000000000001").launchSpec(request);
+  it("launches with a session id it chose, and reports that session as the agent's", async () => {
+    const launch = await claude(() => "6f1c0b2e-0000-4000-8000-000000000001").launchSpec(request);
     expect(launch.argv.slice(0, 3)).toEqual([
       "claude",
       "--session-id",
@@ -28,17 +28,17 @@ describe("Claude Code harness", () => {
     });
   });
 
-  it("gives every launch its own session", () => {
+  it("gives every launch its own session", async () => {
     let n = 0;
     const harness = claude(() => `session-${++n}`);
     expect([
-      harness.launchSpec(request).externalRef?.id,
-      harness.launchSpec(request).externalRef?.id,
+      (await harness.launchSpec(request)).externalRef?.id,
+      (await harness.launchSpec(request)).externalRef?.id,
     ]).toEqual(["session-1", "session-2"]);
   });
 
-  it("installs its hooks with the launch, waking an idle session for mail", () => {
-    const argv = claude(() => "s").launchSpec(request).argv;
+  it("installs its hooks with the launch, waking an idle session for mail", async () => {
+    const { argv } = await claude(() => "s").launchSpec(request);
     const settings: unknown = JSON.parse(String(argv[argv.indexOf("--settings") + 1]));
     expect(settings).toMatchObject({
       hooks: {
@@ -59,14 +59,14 @@ describe("Claude Code harness", () => {
     });
   });
 
-  it("starts in a configured permission mode, and in the user's own otherwise", () => {
+  it("starts in a configured permission mode, and in the user's own otherwise", async () => {
     const harness: HarnessAdapter = new ClaudeCodeHarness({
       newSessionId: () => "s",
       hookCommand: "h",
       permissionMode: "default",
     });
-    const configured = harness.launchSpec(request).argv;
-    expect([configured.slice(-2), claude(() => "s").launchSpec(request).argv]).toEqual([
+    const configured = (await harness.launchSpec(request)).argv;
+    expect([configured.slice(-2), (await claude(() => "s").launchSpec(request)).argv]).toEqual([
       ["--permission-mode", "default"],
       expect.not.arrayContaining(["--permission-mode"]),
     ]);
