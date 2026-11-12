@@ -33,7 +33,8 @@ export function tempCodexHome() {
 /**
  * A stand-in app-server on `socket`: it answers `initialize` for `codexHome` as `version`, and
  * every other request with `answer`, told which connection (from 0) it came on and with what
- * params. Where `answer` returns nothing it ends the connection without a close frame.
+ * params; an `andSends` beside the result is a message the server sends of its own accord
+ * right after. Where `answer` returns nothing it ends the connection without a close frame.
  */
 export async function fakeServer(
   socket: string,
@@ -46,22 +47,32 @@ export async function fakeServer(
     result: {},
   }),
   version = "0.166.0",
-): Promise<{ wss: WebSocketServer; close(): Promise<void> }> {
+): Promise<{ wss: WebSocketServer; replies: unknown[]; close(): Promise<void> }> {
   const http = createServer();
   servers.push(http);
   const wss = new WebSocketServer({ server: http });
   let connections = 0;
+  // What the client sent that isn't a request: its replies to the server's own requests.
+  const replies: unknown[] = [];
   wss.on("connection", (ws) => {
     const connection = connections++;
     ws.on("message", (data: Buffer) => {
-      const m = Request.parse(JSON.parse(data.toString()));
+      const json: unknown = JSON.parse(data.toString());
+      const parsed = Request.safeParse(json);
+      if (!parsed.success) {
+        replies.push(json);
+        return;
+      }
+      const m = parsed.data;
       if (m.id === undefined) return;
       const reply =
         m.method === "initialize"
           ? { result: { userAgent: `bazhen/${version} (Mac OS 26.7.1; arm64)`, codexHome } }
           : answer(m.method, connection, m.params);
-      if (reply === null || reply === undefined) ws.terminate();
-      else ws.send(JSON.stringify({ id: m.id, ...reply }));
+      if (reply === null || reply === undefined) return ws.terminate();
+      const { andSends, ...answered } = reply as { andSends?: object };
+      ws.send(JSON.stringify({ id: m.id, ...answered }));
+      if (andSends !== undefined) ws.send(JSON.stringify(andSends));
     });
   });
   await new Promise<void>((resolve) => http.listen(socket, resolve));
@@ -69,5 +80,5 @@ export async function fakeServer(
     for (const ws of wss.clients) ws.terminate();
     await new Promise((resolve) => http.close(resolve));
   };
-  return { wss, close };
+  return { wss, replies, close };
 }

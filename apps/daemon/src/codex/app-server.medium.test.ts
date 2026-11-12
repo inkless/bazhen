@@ -43,4 +43,34 @@ describe("app-server connection", () => {
     await expect(server.request("thread/start", {})).rejects.toThrow("ended");
     expect(server.open).toBe(false);
   });
+
+  it("hands the server's own requests and notifications to its listener, and answers on the same connection", async () => {
+    const { codexHome, socket } = home();
+    const { wss, replies } = await fakeServer(socket, codexHome);
+    const server = await AppServer.connect(socket, codexHome);
+    const heard: unknown[] = [];
+    server.listen({
+      request: (method, params, id, respond) => {
+        heard.push([method, params, id]);
+        respond({ decision: "accept" });
+      },
+      notification: (method, params) => heard.push([method, params]),
+    });
+    for (const ws of wss.clients) {
+      ws.send(
+        JSON.stringify({
+          id: 5,
+          method: "item/commandExecution/requestApproval",
+          params: { a: 1 },
+        }),
+      );
+      ws.send(JSON.stringify({ method: "serverRequest/resolved", params: { requestId: 5 } }));
+    }
+    await expect.poll(() => replies).toEqual([{ id: 5, result: { decision: "accept" } }]);
+    expect(heard).toEqual([
+      ["item/commandExecution/requestApproval", { a: 1 }, 5],
+      ["serverRequest/resolved", { requestId: 5 }],
+    ]);
+    server.close();
+  });
 });

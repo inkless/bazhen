@@ -1,11 +1,6 @@
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import type { RuntimeRef } from "@bazhen/core";
-import {
-  isCompatible,
-  parseJson,
-  StreamClientFrame,
-  type StreamServerFrame,
-} from "@bazhen/protocol";
+import { isCompatible, StreamClientFrame, type StreamServerFrame } from "@bazhen/protocol";
 import type { UpgradeRoute } from "../http/upgrades.ts";
 import type { Attachment, TerminalHub } from "./hub.ts";
 
@@ -81,4 +76,12 @@ function serve(deps: StreamDeps, ws: WebSocket, terminalId: string): void {
 function toBuffer(data: RawData): Buffer {
   if (Buffer.isBuffer(data)) return data;
   return Array.isArray(data) ? Buffer.concat(data) : Buffer.from(data);
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
 }

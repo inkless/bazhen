@@ -8,11 +8,8 @@ describe("LaunchAgentRequest", () => {
     expect(LaunchAgentRequest.safeParse(launch).success).toBe(true);
   });
 
-  it("refuses an empty directory, and leaves what a path means to the daemon", () => {
-    expect([
-      LaunchAgentRequest.safeParse({ ...launch, cwd: "" }).success,
-      LaunchAgentRequest.safeParse({ ...launch, cwd: "~/work" }).success,
-    ]).toEqual([false, true]);
+  it("refuses a relative directory, which would depend on where the daemon was started", () => {
+    expect(LaunchAgentRequest.safeParse({ ...launch, cwd: "work" }).success).toBe(false);
   });
 
   it("refuses a launch without an idempotency key", () => {

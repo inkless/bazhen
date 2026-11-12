@@ -4,7 +4,7 @@ import type {
   HarnessChannelPort,
   HarnessLaunch,
 } from "@bazhen/core";
-import type { ExternalRef } from "@bazhen/protocol";
+import type { ApprovalDecision, ExternalRef } from "@bazhen/protocol";
 import { z } from "zod";
 
 const ThreadStarted = z.object({ thread: z.object({ id: z.string() }) });
@@ -86,4 +86,60 @@ export class CodexHarness implements HarnessAdapter {
       externalRef: { kind: "codex-thread", id: threadId },
     };
   }
+}
+
+/** A Codex request for the human's approval, as the daemon acts on it. */
+export interface CodexApproval {
+  readonly threadId: string;
+  /** The tool call it is for. */
+  readonly itemId: string;
+  readonly summary: string;
+}
+
+const Approval = z.object({
+  threadId: z.string(),
+  itemId: z.string(),
+  command: z.string().nullish(),
+  reason: z.string().nullish(),
+});
+
+/** What each approval request asks for, by its method. */
+const ASKS = new Map<string, (command: string | null | undefined) => string>([
+  ["item/commandExecution/requestApproval", (command) => `Run ${command ?? "a command"}`],
+  ["item/fileChange/requestApproval", () => "Change files"],
+]);
+
+/**
+ * Reads one of the app-server's requests: an approval to run a command or change files becomes
+ * one for the inbox (foundation-design §5.8); anything else is not Bazhen's to answer.
+ */
+export function readApproval(method: string, params: unknown): CodexApproval | null {
+  const asks = ASKS.get(method);
+  if (asks === undefined) return null;
+  const p = Approval.safeParse(params);
+  if (!p.success) return null;
+  const { threadId, itemId, command, reason } = p.data;
+  const what = asks(command);
+  return { threadId, itemId, summary: reason ? `${what} (${reason})` : what };
+}
+
+/** The result that answers an approval request with the inbox's decision. */
+export const approvalResult = (decision: ApprovalDecision) => ({
+  decision: decision === "allow" ? "accept" : "decline",
+});
+
+/** The id of one of the app-server's own requests, unique on its connection. */
+export const RequestId = z.union([z.number(), z.string()]);
+export type RequestId = z.infer<typeof RequestId>;
+
+const Resolved = z.object({ requestId: RequestId });
+
+/**
+ * The request a `serverRequest/resolved` notification says was answered, by another client or
+ * the TUI; null for any other notification.
+ */
+export function readResolved(method: string, params: unknown): RequestId | null {
+  if (method !== "serverRequest/resolved") return null;
+  const p = Resolved.safeParse(params);
+  return p.success ? p.data.requestId : null;
 }

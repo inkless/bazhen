@@ -2,6 +2,7 @@ import { isId, newId, type AttentionId } from "@bazhen/core";
 import {
   AnswerAttentionResponse,
   type AnswerAttentionRequest,
+  type ApprovalDecision,
   type EventPayload,
   type HookReply,
 } from "@bazhen/protocol";
@@ -19,19 +20,33 @@ export class AttentionClosed extends Error {
   }
 }
 
-type CloseReason = EventPayload<"attention.closed">["reason"];
+/** An answer for an item whose harness can't take it right now; it may be given again. */
+export class AttentionUnavailable extends Error {
+  constructor(attentionId: string) {
+    super(`attention item ${attentionId} can't be answered while its harness is unreachable`);
+  }
+}
+
+export type CloseReason = EventPayload<"attention.closed">["reason"];
+
+/** Hands the inbox's decision to the harness, or null when the request ended without one. */
+export type Reply = (decision: ApprovalDecision | null) => void;
 
 /**
- * A harness asking to run a tool becomes an attention item while its hook waits (§5.6). The
- * first answer wins: the inbox's returns the hook's decision, which dismisses the TUI's prompt.
- * One given in the TUI shows only as that tool call's result, or the turn ending; Esc kills the
- * hook. Past the wait the hook gives up with no decision, so the TUI prompt decides, never an
- * automatic allow.
+ * A harness asking to run a tool becomes an attention item while it waits for an answer (§5.6,
+ * §5.8). The first answer wins: the inbox's goes to the harness, which dismisses the TUI's
+ * prompt; one given in the TUI closes the item, however the harness reports it.
+ *
+ * Claude Code asks through a hook that waits. One answered in the TUI shows only as that tool
+ * call's result, or the turn ending; Esc kills the hook. Past the wait the hook gives up with no
+ * decision, so the TUI prompt decides, never an automatic allow.
  */
 export class Approvals {
   private readonly store: Store;
   private readonly waitMs: number;
-  private readonly pending = new Map<AttentionId, (reply: HookReply) => void>();
+  private readonly pending = new Map<AttentionId, Reply>();
+  /** Whether an item's harness can take an answer now; one without is always answerable. */
+  private readonly answerable = new Map<AttentionId, () => boolean>();
   /** Each agent's tool calls that have started, have no request yet and haven't finished. */
   private readonly started = new Map<string, { tool: string; useId: string }[]>();
 
@@ -45,31 +60,66 @@ export class Approvals {
     this.started.set(agentId, [...(this.started.get(agentId) ?? []), { tool, useId }]);
   }
 
+  /** Claude Code's PermissionRequest hook, answered when the inbox decides or the wait ends. */
   request(agentId: string, summary: string, tool: string, signal: AbortSignal): Promise<HookReply> {
+    return new Promise((resolve) => {
+      const id = this.open(
+        agentId,
+        summary,
+        this.claim(agentId, tool),
+        isMainAgentTool(tool),
+        (d) => {
+          clearTimeout(timer);
+          resolve(d === null ? QUIET : { ...QUIET, stdout: approvalReply(d) });
+        },
+      );
+      const timer = setTimeout(() => this.withdraw(id, "timed_out"), this.waitMs);
+      // The hook was killed, as Esc does: the TUI took the request back.
+      signal.addEventListener("abort", () => this.withdraw(id, "answered_in_tui"), { once: true });
+    });
+  }
+
+  /**
+   * An item for a request the harness holds open itself, such as Codex's approval requests, for
+   * the tool call `toolUseId`; `reply` gets the inbox's answer.
+   */
+  ask(
+    agentId: string,
+    summary: string,
+    toolUseId: string | null,
+    reply: Reply,
+    answerable: () => boolean,
+  ): AttentionId {
+    const id = this.open(agentId, summary, toolUseId, true, reply);
+    this.answerable.set(id, answerable);
+    return id;
+  }
+
+  /** The request behind an item ended without the inbox's answer, for `reason`. */
+  withdraw(id: AttentionId, reason: CloseReason): void {
+    const reply = this.take(id);
+    // An item answered or closed already stays as it is.
+    if (reply === undefined && !this.openIds().includes(id)) return;
+    this.close(id, reason);
+    reply?.(null);
+  }
+
+  private open(
+    agentId: string,
+    summary: string,
+    toolUseId: string | null,
+    mainAgent: boolean,
+    reply: Reply,
+  ): AttentionId {
     const id = newId("attn");
     this.store.append({
       type: "attention.opened",
       entityId: id,
       actor: "system",
-      payload: {
-        agentId,
-        summary,
-        toolUseId: this.claim(agentId, tool),
-        mainAgent: isMainAgentTool(tool),
-      },
+      payload: { agentId, summary, toolUseId, mainAgent },
     });
-    return new Promise((resolve) => {
-      const settle = (reply: HookReply, reason?: CloseReason) => {
-        if (!this.pending.delete(id)) return;
-        clearTimeout(timer);
-        if (reason !== undefined) this.close(id, reason);
-        resolve(reply);
-      };
-      const timer = setTimeout(() => settle(QUIET, "timed_out"), this.waitMs);
-      // The hook was killed, as Esc does: the TUI took the request back.
-      signal.addEventListener("abort", () => settle(QUIET, "answered_in_tui"));
-      this.pending.set(id, settle);
-    });
+    this.pending.set(id, reply);
+    return id;
   }
 
   answer(id: string, req: AnswerAttentionRequest): AnswerAttentionResponse {
@@ -79,11 +129,12 @@ export class Approvals {
       (r) => AnswerAttentionResponse.parse(r),
       () => {
         if (!isId("attn", id) || !this.openIds().includes(id)) throw new AttentionClosed(id);
+        if (this.answerable.get(id)?.() === false) throw new AttentionUnavailable(id);
         const eventId = this.record("attention.answered", id, { decision: req.decision });
         return { eventIds: [eventId] };
       },
     );
-    if (isId("attn", id)) this.pending.get(id)?.({ ...QUIET, stdout: approvalReply(req.decision) });
+    if (isId("attn", id)) this.take(id)?.(req.decision);
     return response;
   }
 
@@ -122,15 +173,21 @@ export class Approvals {
 
   private settleWhere(agentId: string, matches: (item: OpenAttention) => boolean): void {
     for (const item of this.store.openAttention(agentId)) {
-      if (!matches(item)) continue;
-      this.pending.get(item.id)?.(QUIET);
-      this.close(item.id, "answered_in_tui");
+      if (matches(item)) this.withdraw(item.id, "answered_in_tui");
     }
   }
 
   /** The hooks behind open items died with the daemon; their requests are gone. */
   closeAbandoned(): void {
     for (const item of this.store.openAttention()) this.close(item.id, "stale");
+  }
+
+  /** The reply still waiting for an item's answer, which only the first answer gets. */
+  private take(id: AttentionId): Reply | undefined {
+    const reply = this.pending.get(id);
+    this.pending.delete(id);
+    this.answerable.delete(id);
+    return reply;
   }
 
   private openIds(): AttentionId[] {

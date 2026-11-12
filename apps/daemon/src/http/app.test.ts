@@ -107,7 +107,7 @@ describe("HTTP app", () => {
   });
 
   it("refuses a malformed launch and a harness the environment can't run", async () => {
-    const bad = await post({ ...launch, cwd: "" });
+    const bad = await post({ ...launch, cwd: "relative" });
     const unsupported = await post({ ...launch, harness: "codex" });
     expect([bad.status, unsupported.status]).toEqual([400, 422]);
   });

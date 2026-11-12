@@ -7,10 +7,16 @@ import type { FakeModel } from "./fake-model.ts";
 let model: FakeModel;
 let daemon: Daemon;
 let launched: LaunchAgentResponse;
+/** An agent of its own for the approval tests, so their interrupted turns touch no other test. */
+let asker: LaunchAgentResponse;
 beforeAll(async () => {
   model = await startFakeResponses();
   daemon = await Daemon.start({ responsesUrl: model.url });
-  launched = await daemon.launch("codex", "codex");
+  [launched, asker] = await Promise.all([
+    daemon.launch("codex", "codex"),
+    daemon.launch("codex-asker", "codex"),
+  ]);
+  await waitUntil(() => daemon.screen(asker.agentId).includes(BANNER.codex), "Codex's TUI", 30_000);
 });
 afterAll(async () => {
   await daemon?.stop();
@@ -28,6 +34,20 @@ const showsThread = (title: string, threadId: string) => {
 };
 
 const state = async () => StateSnapshot.parse((await daemon.request("/v1/state")).body);
+/** The id of the open item whose summary names this command, once there is one. */
+async function openItemFor(command: string): Promise<string> {
+  let id: string | undefined;
+  const find = async () => {
+    id = (await state()).attention.find(
+      (a) => a.state === "open" && a.summary.includes(command),
+    )?.id;
+    return id !== undefined;
+  };
+  await waitUntil(find, `an item for ${command}`, 30_000);
+  return String(id);
+}
+const closeReasonOf = async (id: string) =>
+  (await state()).attention.find((a) => a.id === id)?.closeReason;
 
 describe("a Codex agent", () => {
   it("is bound to the thread Bazhen started for it, before its TUI runs", async () => {
@@ -48,6 +68,44 @@ describe("a Codex agent", () => {
     await expect
       .poll(() => daemon.screen(launched.agentId), { timeout: 30_000 })
       .toContain("echo: hello from bazhen");
+  });
+
+  it("asks the inbox before running a command outside the sandbox, and runs it once allowed", async () => {
+    await daemon.prompt(asker, "[[fake:shell:touch approved-by-inbox]]");
+    const id = await openItemFor("approved-by-inbox");
+    const answered = await daemon.request(`/v1/attention/${id}/answer`, {
+      method: "POST",
+      body: { idempotencyKey: "allow", decision: "allow" },
+    });
+    expect(answered.status).toBe(200);
+    await expect.poll(() => daemon.hasFile("approved-by-inbox"), { timeout: 30_000 }).toBe(true);
+    expect(await closeReasonOf(id)).toBe("answered");
+  });
+
+  it("closes the item when the request is answered in the TUI instead", async () => {
+    await daemon.prompt(asker, "[[fake:shell:touch approved-in-tui]]");
+    const id = await openItemFor("approved-in-tui");
+    // The TUI shows its own prompt a moment after the request reaches the inbox.
+    await expect.poll(() => daemon.screen(asker.agentId)).toContain("Yes, proceed");
+    const view = await daemon.view(String(asker.terminalId), "interactive");
+    await view.drive();
+    view.type("y");
+    await expect.poll(() => daemon.hasFile("approved-in-tui"), { timeout: 30_000 }).toBe(true);
+    await expect.poll(() => closeReasonOf(id)).toBe("answered_in_tui");
+    view.close();
+  });
+
+  it("closes the item when the turn that asked is interrupted", async () => {
+    await daemon.prompt(asker, "[[fake:shell:touch never-run]]");
+    const id = await openItemFor("never-run");
+    await expect.poll(() => daemon.screen(asker.agentId)).toContain("Yes, proceed");
+    const view = await daemon.view(String(asker.terminalId), "interactive");
+    await view.drive();
+    // Ctrl-C, as a person stops the agent mid-turn.
+    view.type("\u0003");
+    await expect.poll(() => closeReasonOf(id), { timeout: 20_000 }).toBe("answered_in_tui");
+    expect(daemon.hasFile("never-run")).toBe(false);
+    view.close();
   });
 
   it("resumes the agent's thread itself after a kill -9, with no TUI to do it", async () => {
