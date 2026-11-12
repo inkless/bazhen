@@ -68,7 +68,8 @@ export class InvalidEnvRule extends Error {
   }
 }
 
-const RULE = /^[A-Za-z_][A-Za-z0-9_]*\*?$/;
+/** An `agents.env` rule: a variable name, or a prefix ending in `*`. */
+export const ENV_RULE = /^[A-Za-z_][A-Za-z0-9_]*\*?$/;
 
 const matches = (name: string, pattern: string) =>
   pattern.endsWith("*") ? name.startsWith(pattern.slice(0, -1)) : name === pattern;
@@ -78,7 +79,7 @@ export function filterEnv(
   rules: EnvRules = {},
 ): FilteredEnv {
   const { deny = [], passthrough = [] } = rules;
-  const invalid = [...deny, ...passthrough].find((r) => !RULE.test(r));
+  const invalid = [...deny, ...passthrough].find((r) => !ENV_RULE.test(r));
   if (invalid !== undefined) throw new InvalidEnvRule(invalid);
   const denyingPattern = (name: string) =>
     deny.find((p) => matches(name, p)) ??

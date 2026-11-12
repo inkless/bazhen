@@ -10,11 +10,14 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   readlinkSync,
   realpathSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
+import { request } from "node:http";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,6 +55,68 @@ async function freePort(): Promise<number> {
 
 let programs = 0;
 
+/** One HTTP request over a daemon's Unix socket, as the CLI and the hook client make them. */
+export function overSocket(
+  socket: string,
+  method: "GET" | "POST",
+  path: string,
+  init: { headers?: Record<string, string>; body?: unknown } = {},
+): Promise<{ status: number; body: unknown }> {
+  return new Promise((resolve, reject) => {
+    const req = request(
+      {
+        socketPath: socket,
+        method,
+        path,
+        headers: { "content-type": "application/json", ...init.headers },
+      },
+      (res) => {
+        let text = "";
+        res.on("data", (d: Buffer) => (text += d.toString()));
+        res.on("end", () => resolve({ status: res.statusCode ?? 0, body: JSON.parse(text) }));
+      },
+    );
+    req.on("error", reject);
+    req.end(init.body === undefined ? undefined : JSON.stringify(init.body));
+  });
+}
+
+/** Runs `bazhen <args>` with `env`, and resolves with how it exited and what it printed. */
+export function bazhen(
+  args: readonly string[],
+  env: Record<string, string>,
+): Promise<{ code: number; out: string }> {
+  return new Promise((resolve) => {
+    execFile(
+      process.execPath,
+      ["--disable-warning=ExperimentalWarning", join(repo, "apps/cli/src/main.ts"), ...args],
+      { env, timeout: 30_000 },
+      (err, stdout, stderr) =>
+        resolve({ code: err === null ? 0 : Number(err.code ?? 1), out: stdout + stderr }),
+    );
+  });
+}
+
+/** A daemon's environment on `home`: the login session's, and nothing of the test run's. */
+function homeEnv(home: string): Record<string, string> {
+  return { ...loginEnv(), PATH: process.env["PATH"] ?? "/usr/bin:/bin", BAZHEN_HOME: home };
+}
+
+/**
+ * A fresh home and port for the CLI to start a daemon of its own in, and the cleanup that ends
+ * whatever it started there.
+ */
+export async function cliHome() {
+  const home = realpathSync(mkdtempSync("/tmp/bz-cli-"));
+  const env = { ...homeEnv(home), BAZHEN_PORT: String(await freePort()) };
+  const cleanup = async () => {
+    await bazhen(["stop"], env);
+    TmuxServer.at(join(home, "run", "tmux.sock"), { root: home }).kill();
+    rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  };
+  return { env, cleanup };
+}
+
 /** Waits for a condition outside a test, where `expect.poll` can't run. */
 export async function waitUntil(
   condition: () => boolean | Promise<boolean>,
@@ -77,7 +142,8 @@ export class Daemon {
   readonly work: string;
   /** The daemon's private server: `<home>/run/tmux.sock`, for a home this short. */
   readonly tmuxServer: TmuxServer;
-  private readonly env: Record<string, string>;
+  /** What the daemon runs with; the CLI reaches this daemon with it too. */
+  readonly env: Record<string, string>;
   private port = 0;
   private process: ChildProcess | undefined;
 
@@ -88,9 +154,8 @@ export class Daemon {
     mkdirSync(this.work, { recursive: true });
 
     this.env = {
-      ...loginEnv(),
+      ...homeEnv(home),
       PATH: `${bin}:${process.env["PATH"] ?? "/usr/bin:/bin"}`,
-      BAZHEN_HOME: home,
       ...agentHomes(home, this.work, { anthropic: opts.modelUrl, responses: opts.responsesUrl }),
     };
   }
@@ -99,6 +164,24 @@ export class Daemon {
   static async start(opts: DaemonOptions = {}): Promise<Daemon> {
     const daemon = new Daemon(realpathSync(mkdtempSync("/tmp/bz-api-")), opts);
     await daemon.spawn();
+    return daemon;
+  }
+
+  /**
+   * A daemon started as a user starts it: `bazhen start`, from a shell whose environment adds
+   * `env`, with `config` as its config.toml. `stop` ends it with `bazhen stop`.
+   */
+  static async startWithCli(config: string, env: Record<string, string>): Promise<Daemon> {
+    const daemon = new Daemon(realpathSync(mkdtempSync("/tmp/bz-api-")), {});
+    daemon.port = await freePort();
+    Object.assign(daemon.env, { BAZHEN_PORT: String(daemon.port) });
+    mkdirSync(join(daemon.home, "config"), { recursive: true });
+    writeFileSync(join(daemon.home, "config", "config.toml"), config);
+    const started = await bazhen(["start"], { ...daemon.env, ...env });
+    if (started.code !== 0) {
+      await daemon.stop();
+      throw new Error(`bazhen start failed:\n${started.out}`);
+    }
     return daemon;
   }
 
@@ -131,6 +214,11 @@ export class Daemon {
     return `http://127.0.0.1:${this.port}`;
   }
 
+  /** The daemon's Unix socket, beside its tmux server. */
+  get socket(): string {
+    return join(this.home, "run", "bazhen.sock");
+  }
+
   private async spawn(): Promise<void> {
     this.port = await freePort();
     const child = spawn(
@@ -151,7 +239,7 @@ export class Daemon {
       ) {
         // The daemon keeps its tmux server beside its own socket. Were its runtime directory
         // ever moved (a home too long for a socket path), every tmux command here would miss it.
-        if (existsSync(join(this.home, "run", "bazhen.sock"))) return;
+        if (existsSync(this.socket)) return;
         await this.stop();
         throw new Error(`the daemon's runtime directory is not ${join(this.home, "run")}`);
       }
@@ -169,7 +257,11 @@ export class Daemon {
       headers,
       ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
     });
-    const body: unknown = await res.json();
+    // A route that doesn't exist answers with plain text, not JSON.
+    const text = await res.text();
+    const body: unknown = res.headers.get("content-type")?.includes("json")
+      ? JSON.parse(text)
+      : text;
     return { status: res.status, body };
   }
 
@@ -239,6 +331,52 @@ export class Daemon {
   /** The title the agent's TUI gave its pane. */
   paneTitle(agentId: string): string {
     return this.paneFact(agentId, "pane_title") ?? "";
+  }
+
+  /** The environment the agent's process runs with, as its own tools see it (Linux only). */
+  agentEnv(agentId: string): Record<string, string> {
+    const environ = readFileSync(`/proc/${this.panePid(agentId)}/environ`, "utf8");
+    return Object.fromEntries(
+      environ
+        .split("\0")
+        .filter((entry) => entry.includes("="))
+        .map((entry) => [entry.slice(0, entry.indexOf("=")), entry.slice(entry.indexOf("=") + 1)]),
+    );
+  }
+
+  /**
+   * Runs a second daemon on this home, straight from its entry point rather than through
+   * `bazhen start`'s own check, and resolves with how it exited and what it printed.
+   */
+  startAnother(): Promise<{ code: number; out: string }> {
+    return new Promise((resolve) => {
+      execFile(
+        process.execPath,
+        ["--disable-warning=ExperimentalWarning", join(repo, "apps/daemon/src/main.ts")],
+        { env: { ...this.env, BAZHEN_PORT: String(this.port) }, timeout: 30_000 },
+        (err, stdout, stderr) =>
+          resolve({ code: err === null ? 0 : Number(err.code ?? 1), out: stdout + stderr }),
+      );
+    });
+  }
+
+  /**
+   * The working directory of the daemon serving this home, found by its environment rather than
+   * as a child, since `bazhen start` detaches it (Linux only).
+   */
+  daemonCwd(): string {
+    const entry = join(repo, "apps/daemon/src/main.ts");
+    for (const pid of readdirSync("/proc").filter((name) => /^\d+$/.test(name))) {
+      try {
+        const cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf8");
+        const environ = readFileSync(`/proc/${pid}/environ`, "utf8").split("\0");
+        if (cmdline.includes(entry) && environ.includes(`BAZHEN_HOME=${this.home}`))
+          return readlinkSync(`/proc/${pid}/cwd`);
+      } catch {
+        // The process ended, or isn't ours to read.
+      }
+    }
+    throw new Error(`no daemon for ${this.home}`);
   }
 
   /** Whether the agent still has a tmux session. */
@@ -403,6 +541,8 @@ export class Daemon {
   /** Stops the daemon, its tmux server and every file under its home. */
   async stop(): Promise<void> {
     await this.exit("SIGTERM");
+    // A daemon `bazhen start` detached is not this process's child.
+    await bazhen(["stop"], this.env);
     // Codex's managed daemon outlives its clients; only its own stop ends it.
     const codexStopped = codexDaemonStarted(this.home)
       ? run("codex", ["app-server", "daemon", "stop"], { env: this.env, timeout: 90_000 })

@@ -12,6 +12,8 @@ export type Area = {
   dir: string;
   banned: string[];
   typeOnly?: string[];
+  /** Packages it may import only these subpath exports of, named without the package. */
+  onlySubpaths?: Record<string, string[]>;
   platformFree?: boolean;
   thirdParty?: string[];
 };
@@ -26,6 +28,7 @@ const PACKAGE_DIR: Record<string, string> = {
   "@bazhen/harness-codex": "packages/harness-codex",
   "@bazhen/daemon": "apps/daemon",
   "@bazhen/web": "apps/web",
+  "@bazhen/cli": "apps/cli",
 };
 
 const RUNTIME_LIBS = ["node-pty", "hono", "@hono/*", "ws", "@xterm/*"];
@@ -105,7 +108,22 @@ export const MATRIX: Area[] = [
     platformFree: true,
     thirdParty: RUNTIME_LIBS,
   },
-  { dir: "apps/daemon", banned: ["@bazhen/web"] },
+  { dir: "apps/daemon", banned: ["@bazhen/web", "@bazhen/cli"] },
+  // The CLI holds no logic: it calls the daemon's API through the daemon's own socket client and
+  // path resolution, and runs the daemon's own start-up, rather than copies of them.
+  {
+    dir: "apps/cli",
+    banned: [
+      "@bazhen/core",
+      "@bazhen/runtime-tmux",
+      "@bazhen/env-local",
+      "@bazhen/harness-claude-code",
+      "@bazhen/harness-codex",
+      "@bazhen/host-guard",
+      "@bazhen/web",
+    ],
+    onlySubpaths: { "@bazhen/daemon": ["paths", "client", "start"] },
+  },
   // The black-box suite: it reaches the daemon only over its public surfaces. It may use
   // @bazhen/host-guard, a dependency-free safety guard rather than a daemon internal, to run tmux.
   {
@@ -178,6 +196,14 @@ function restrictions(area: Area, smallTest: boolean): Restriction {
     ...(area.typeOnly ?? []).map((p) =>
       packagePatterns(p, `${where} may import only types from ${p}.`, true),
     ),
+    ...Object.entries(area.onlySubpaths ?? {}).map(([p, allowed]) => {
+      const pattern = packagePatterns(
+        p,
+        `${where} may import from ${p} only ${allowed.map((a) => `${p}/${a}`).join(", ")}.`,
+        false,
+      );
+      return { ...pattern, group: [...pattern.group, ...allowed.map((a) => `!${p}/${a}`)] };
+    }),
   ];
   if (area.thirdParty?.length) {
     patterns.push({

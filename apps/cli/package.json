@@ -1,0 +1,13 @@
+{
+  "name": "@bazhen/cli",
+  "version": "0.1.0",
+  "private": true,
+  "bin": {
+    "bazhen": "./src/main.ts"
+  },
+  "type": "module",
+  "dependencies": {
+    "@bazhen/daemon": "workspace:*",
+    "@bazhen/protocol": "workspace:*"
+  }
+}

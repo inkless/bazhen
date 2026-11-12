@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "pnpm run build:hook && pnpm --parallel --filter @bazhen/daemon --filter @bazhen/web run dev",
+    "bazhen": "node --disable-warning=ExperimentalWarning apps/cli/src/main.ts",
     "build": "pnpm run build:hook && tsc -b && pnpm --filter @bazhen/web run build",
     "typecheck": "tsc -b",
     "lint": "node scripts/lint-config.ts --check && oxlint --type-aware --deny-warnings --report-unused-disable-directives-severity=error",

@@ -26,6 +26,9 @@
       "path": "apps/daemon"
     },
     {
+      "path": "apps/cli"
+    },
+    {
       "path": "apps/web"
     },
     {

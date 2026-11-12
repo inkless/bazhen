@@ -5,7 +5,10 @@
   "type": "module",
   "exports": {
     "./pty": "./src/pty/node-pty.ts",
-    "./stream": "./src/stream/hub.ts"
+    "./stream": "./src/stream/hub.ts",
+    "./paths": "./src/config/paths.ts",
+    "./client": "./src/socket/client.ts",
+    "./start": "./src/start.ts"
   },
   "scripts": {
     "dev": "BAZHEN_WEB_PORT=${BAZHEN_WEB_PORT:-5173} node --watch --watch-preserve-output src/main.ts",
@@ -25,6 +28,7 @@
     "@xterm/headless": "6.0.0",
     "hono": "4.13.16",
     "node-pty": "1.2.0-beta.18",
+    "smol-toml": "1.9.1",
     "ws": "8.22.2",
     "zod": "4.6.7"
   },
