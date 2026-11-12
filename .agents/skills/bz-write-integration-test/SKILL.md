@@ -5,7 +5,8 @@ description: Writes an integration test in tests/integration that drives Bazhen'
 
 # Write an integration test against real tmux
 
-**Gate: every tmux server the test starts is named by `testSocket()` and killed in
+**Gate: integration tests run only in the test container (`pnpm test:real`), never on the
+host, and every tmux server the test starts is named by `testSocket()` and killed in
 `afterAll`.** Teardown fails the whole run on any server left alive. A leaked PTY starves every
 terminal on the machine, not just Bazhen's.
 
@@ -21,9 +22,9 @@ terminal on the machine, not just Bazhen's.
    with the last value it saw. Never `sleep` to wait for a result, and never a boolean wait helper.
 5. If the code opens PTYs, add or extend the lifecycle test: repeat the operation about 30 times
    and `expect.poll(ptyHandleCount).toBeLessThanOrEqual(baseline)`.
-6. Run it with `pnpm test:file tests/integration/<file>.test.ts -t "<name>"`, then
-   `pnpm test:integration`, then `pnpm check`.
-7. Before pushing, run `pnpm test:falsify` and handle the result as in `bz-write-unit-test`
+6. Run it with `pnpm test:real integration`, then `pnpm check`. On the host the suite refuses
+   to start; that is the safety check working, not something to get around.
+7. Before pushing, run `pnpm test:real falsify` and handle the result as in `bz-write-unit-test`
    step 6.
 
 ## Gotchas (each one cost real debugging)
@@ -46,6 +47,7 @@ terminal on the machine, not just Bazhen's.
 | Thought                                              | Answer                                                           |
 | ---------------------------------------------------- | ---------------------------------------------------------------- |
 | "I'll use the default tmux server, it's just a test" | That is the user's real session. Use `testSocket()`              |
+| "Running it on the host once is faster"              | The host is where every agent's session lives. Use the container |
 | "A `sleep(500)` is fine here"                        | It is either flaky or slow. Use `expect.poll`                    |
 | "Cleanup in `afterAll` is noise"                     | Teardown fails the run without it, and the leak outlives the run |
 | "The PTY check is overkill for this change"          | A PTY leak exhausted the machine once already                    |

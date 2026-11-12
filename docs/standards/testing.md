@@ -11,8 +11,9 @@ page serves that rule, or keeps tests from hurting the machine and each other.
 | No `.only`, `.skip`, assertion-free tests, or conditionals inside tests            | `pnpm lint` (vitest rules)                  |
 | Every source file with runtime code has a sibling test, or a named covering test   | `pnpm check` (`scripts/check-standards.ts`) |
 | Test files type-check                                                              | `pnpm typecheck` (`tsconfig.dev.json`)      |
+| Tests that run real tmux start only on a disposable host (container or CI)         | integration, api and e2e setup              |
 | Tests can't reach a real tmux server, and leave none running                       | integration setup and teardown              |
-| Test runs refuse to start when the machine is short of PTYs                        | integration and medium setup                |
+| Test runs refuse to start when the machine is short of PTYs                        | integration and api setup                   |
 | Fakes over mocks; behaviour-named tests; no snapshots of terminal output           | review                                      |
 | Behaviour tests are black-box: they reach the daemon only through public surfaces  | review                                      |
 
@@ -27,9 +28,16 @@ Engineering at Google_.
 | small  | `scripts/*.test.ts`           | memory only                          | `pnpm test`                            |
 | medium | `src/**/x.medium.test.ts`     | temporary files, SQLite              | `pnpm test:medium`                     |
 | medium | `scripts/*.medium.test.ts`    | temporary files, git, subprocesses   | `pnpm test:medium`                     |
-| medium | `tests/integration/*.test.ts` | a private tmux server, real PTYs     | `pnpm test:integration`, one worker    |
-| large  | `tests/api/*.test.ts`         | the daemon as a process, tmux, CLIs  | `pnpm test:api`, one worker            |
-| large  | `tests/e2e/*.spec.ts`         | daemon, web client and browser       | `pnpm test:e2e`                        |
+| medium | `tests/integration/*.test.ts` | a private tmux server, real PTYs     | `pnpm test:real integration`           |
+| large  | `tests/api/*.test.ts`         | the daemon as a process, tmux, CLIs  | `pnpm test:real api`                   |
+| large  | `tests/e2e/*.spec.ts`         | daemon, web client and browser       | `pnpm test:real e2e`                   |
+
+`pnpm check` runs the small and medium tests on the host; none of them runs tmux or an agent.
+The other three sizes run real tmux, so they run only on a disposable host: the test container
+(`pnpm test:real`, which builds it from the worktree without mounting it) or a CI runner. A
+disposable host is Linux with `/etc/bazhen-disposable-host`; their setup refuses to start
+anywhere else. Never create that file on a machine you work on. Inside a container or CI they
+are the `pnpm test:integration`, `test:api` and `test:e2e` scripts, one worker each.
 
 Write the smallest test that can fail for the right reason. E2E tests cover only wiring that
 crosses processes; a behaviour that a medium test can reach belongs in a medium test.
@@ -88,13 +96,17 @@ Two lessons from the scaffold's controls:
 - **A control can find a real bug.** One control caught a race where a fast-exiting process
   destroyed its tmux session before `remain-on-exit` applied.
 
-`pnpm test:falsify --base <ref>` judges the branch against another base. Stryker-style mutation
+`pnpm test:falsify --base <ref>` judges the branch against another base. On the host, a new test
+that runs real tmux comes out INVALID, because its setup refuses; `pnpm test:real falsify` judges
+it in the container. Hand-made mutants of such a test run there too. Stryker-style mutation
 scores are not a gate, because their cost and equivalent mutants make the number meaningless.
 
 ## Hermeticity
 
 A test owns everything it touches and leaves nothing behind.
 
+- **The host.** Real tmux runs only in the container or CI (above). A global setup runs no build
+  or compile step: a step that fails there makes vitest run teardown on a half-made setup.
 - **Paths.** Medium and integration runs get a temporary `BAZHEN_HOME`. Unit runs point it at a
   path that doesn't exist. Never read or write the real Bazhen directories.
 - **tmux.** Each run gets its own tmux socket directory (`TMUX_TMPDIR`) and runs outside any

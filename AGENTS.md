@@ -8,6 +8,9 @@ TypeScript throughout, in a pnpm workspace.
 - A failing check is fixed in the code, never by a suppression comment, a lowered severity or
   `--no-verify`. If the check itself is wrong, change the check, and say why in the commit
 - Call `pnpm` scripts, not the tool binaries; the scripts carry the flags the checks rely on
+- Tests that run real tmux (integration, api, e2e, and falsify of them) run only through
+  `pnpm test:real`, in a throwaway container, never on the host: one wrong socket there ends
+  every tmux session on the machine. They refuse to start anywhere else
 - With parallel agents: stage files by name, never `git add -A`; don't use `git stash`;
   rebase, don't merge
 

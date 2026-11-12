@@ -29,7 +29,7 @@ Never rename, remove or tighten anything that has shipped.
 
 5. **Client.** If the web client uses the endpoint, import the schema from `@bazhen/protocol`,
    never from the daemon. Then add or extend an e2e test in `tests/e2e/`.
-6. Run `pnpm check` (and `pnpm test:e2e` if step 5 applied). Before pushing, run
+6. Run `pnpm check` (and `pnpm test:real e2e` if step 5 applied). Before pushing, run
    `pnpm test:falsify` and handle the result as in `bz-write-unit-test` step 6.
 
 ## Checklist
