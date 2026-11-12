@@ -10,6 +10,7 @@ function keydown(key: string, mods: Partial<KeyChord> = {}): KeyChord {
     altKey: false,
     metaKey: false,
     isComposing: false,
+    keyCode: 13,
     ...mods,
   };
 }
@@ -38,6 +39,12 @@ describe("terminal key map", () => {
   it("leaves a key pressed during IME composition to the IME", () => {
     expect(
       matchKey(keydown("Enter", { shiftKey: true, isComposing: true }), DEFAULT_KEY_MAP),
+    ).toBeNull();
+  });
+
+  it("leaves the key that ends a Safari IME composition to the IME", () => {
+    expect(
+      matchKey(keydown("Enter", { shiftKey: true, keyCode: 229 }), DEFAULT_KEY_MAP),
     ).toBeNull();
   });
 

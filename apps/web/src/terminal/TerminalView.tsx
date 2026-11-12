@@ -11,16 +11,12 @@ import {
   withoutEventReports,
   type StreamClientFrame,
 } from "@bazhen/protocol";
-import {
-  DEFAULT_KEY_MAP,
-  KEY_MAP_STORAGE_KEY,
-  matchKey,
-  parseKeyMap,
-  type KeyMap,
-} from "./keymap.ts";
+import { matchKey } from "./keymap.ts";
 import { Backoff } from "./reconnect.ts";
 import { wheelAction, type TerminalKind } from "./scroll.ts";
 import { attachScrollInput } from "./scroll-input.ts";
+import { loadSettings } from "./settings.ts";
+import { attachTakeover } from "./takeover.ts";
 
 type Status =
   | { kind: "connecting" }
@@ -51,7 +47,7 @@ export function TerminalView({ terminalId, kind }: { terminalId: string; kind: T
       {status.kind === "ended" ? (
         <p role="alert">{status.message}</p>
       ) : (
-        <p>{STATUS_TEXT[status.kind]}</p>
+        <p aria-live="polite">{STATUS_TEXT[status.kind]}</p>
       )}
       {notice !== null && <p role="status">{notice}</p>}
       <div ref={host} style={{ height: "70vh" }} />
@@ -66,16 +62,6 @@ const STATUS_TEXT = {
   reconnecting: "Reconnecting…",
 } as const;
 
-/** The device's own key map over the defaults; a stored map that doesn't parse is not applied. */
-function loadKeyMap(): { map: KeyMap; problem: string | null } {
-  const stored = localStorage.getItem(KEY_MAP_STORAGE_KEY);
-  if (stored === null) return { map: DEFAULT_KEY_MAP, problem: null };
-  const parsed = parseKeyMap(parseJson(stored));
-  return parsed.ok
-    ? { map: parsed.map, problem: null }
-    : { map: DEFAULT_KEY_MAP, problem: `Your key map was not applied: ${parsed.error}.` };
-}
-
 /**
  * Renders the terminal's stream into `element` and sends what the user types while this view
  * drives. Returns the teardown.
@@ -86,7 +72,12 @@ function connect(
   kind: TerminalKind,
   onReport: (report: Report) => void,
 ) {
-  const term = new Xterm({ allowProposedApi: true, cursorBlink: true, macOptionIsMeta: true });
+  const settings = loadSettings(localStorage);
+  const term = new Xterm({
+    allowProposedApi: true,
+    cursorBlink: true,
+    macOptionIsMeta: settings.optionIsMeta,
+  });
   const fit = new FitAddon();
   term.loadAddon(fit);
   term.loadAddon(new Unicode11Addon());
@@ -95,13 +86,9 @@ function connect(
   loadRenderer(term);
   fit.fit();
   swallowReplies(term);
-  // For browser tests: the screen as text and the top line in view, whichever renderer draws it.
-  Reflect.set(globalThis, "bazhenScreen", () => screenText(term));
-  Reflect.set(globalThis, "bazhenViewport", () => term.buffer.active.viewportY);
 
-  const keys = loadKeyMap();
   let status: Status = { kind: "connecting" };
-  let notice = keys.problem;
+  let notice = settings.problem;
   const report = (next: Partial<Report>) => {
     status = next.status ?? status;
     notice = next.notice === undefined ? notice : next.notice;
@@ -119,6 +106,7 @@ function connect(
   let alternate = false;
   let over = false;
   let retry: ReturnType<typeof setTimeout> | undefined;
+  const unhook = exposeForTests(terminalId, term, () => alternate);
 
   const send = (frame: StreamClientFrame) => {
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(frame));
@@ -129,22 +117,16 @@ function connect(
   };
   /**
    * Input goes only from the driver. Anything else is dropped; a keystroke also asks for the
-   * lease, a focus or mouse report never does (§4.3).
+   * lease, a focus or mouse report or a scroll never does (§4.3).
    */
-  const input = (bytes: Uint8Array<ArrayBuffer>, keystroke = true) => {
+  const input = (bytes: Uint8Array<ArrayBuffer>, keystroke: boolean) => {
     if (driving && ws?.readyState === WebSocket.OPEN) ws.send(bytes);
     else if (keystroke) engage();
   };
   const end = (message: string) => {
     over = true;
+    ws?.close();
     report({ status: { kind: "ended", message } });
-  };
-  const reattach = () => {
-    if (over) return;
-    attached = driving = false;
-    report({ status: { kind: "reconnecting" } });
-    clearTimeout(retry);
-    retry = setTimeout(open, backoff.next());
   };
 
   const open = () => {
@@ -179,26 +161,28 @@ function connect(
       } else if (f.type === "notice") report({ notice: f.message });
       else if (f.type === "error") end(`The daemon refused this view: ${f.message}`);
       else if (f.type === "exit") end("The terminal has closed.");
-      else if (f.type === "ended") reattach();
+      // The daemon closes the socket next; its close is what reattaches.
+      else if (f.type === "ended") report({ status: { kind: "reconnecting" } });
     });
     socket.addEventListener("close", () => {
-      if (ws === socket) reattach();
+      if (ws !== socket || over) return;
+      attached = driving = false;
+      report({ status: { kind: "reconnecting" }, notice: null });
+      retry = setTimeout(open, backoff.next());
     });
   };
   open();
 
   term.attachCustomKeyEventHandler((event) => {
-    const bytes = matchKey(event, keys.map);
-    if (bytes === null) return true;
-    input(encoder.encode(bytes));
+    const text = matchKey(event, settings.keyMap);
+    if (text === null) return true;
+    input(encoder.encode(text), true);
     event.preventDefault();
     return false;
   });
-
   const route = () =>
     wheelAction({ mouseTracking: term.modes.mouseTrackingMode !== "none", alternate, kind });
-  const detachScroll = attachScrollInput(element, term, route, (bytes) => input(bytes));
-
+  const detachScroll = attachScrollInput(element, term, route, (bytes) => input(bytes, false));
   const typed = term.onData((data) =>
     input(encoder.encode(data), withoutEventReports(data) !== ""),
   );
@@ -207,17 +191,11 @@ function connect(
   const resize = term.onResize(({ cols, rows }) => send({ type: "resize", cols, rows }));
   const observer = new ResizeObserver(() => fit.fit());
   observer.observe(element);
-  // A click, focus here or the window gaining focus takes the lease (§4.3): switching back to a
-  // device whose page already has focus fires no focus event.
-  element.addEventListener("pointerdown", engage);
-  element.addEventListener("focusin", engage);
-  window.addEventListener("focus", engage);
+  const detachTakeover = attachTakeover(element, engage);
   return () => {
     over = true;
     clearTimeout(retry);
-    element.removeEventListener("pointerdown", engage);
-    element.removeEventListener("focusin", engage);
-    window.removeEventListener("focus", engage);
+    detachTakeover();
     detachScroll();
     observer.disconnect();
     typed.dispose();
@@ -225,19 +203,23 @@ function connect(
     resize.dispose();
     ws?.close();
     term.dispose();
-    Reflect.deleteProperty(globalThis, "bazhenScreen");
-    Reflect.deleteProperty(globalThis, "bazhenViewport");
+    unhook();
   };
 }
 
-/** WebGL where the browser has it, xterm.js's DOM renderer otherwise. */
+/**
+ * WebGL where it draws correctly, xterm.js's DOM renderer otherwise. Under phone emulation WebGL
+ * drew every glyph about twice too large while the DOM renderer was right, so a touch-first
+ * device gets the DOM renderer.
+ */
 function loadRenderer(term: Xterm): void {
+  if (matchMedia("(pointer: coarse)").matches) return;
   try {
     const webgl = new WebglAddon();
     webgl.onContextLoss(() => webgl.dispose());
     term.loadAddon(webgl);
   } catch {
-    // The DOM renderer is already drawing.
+    // No WebGL in this browser: the DOM renderer is already drawing.
   }
 }
 
@@ -261,6 +243,21 @@ function swallowReplies(term: Xterm): void {
 }
 
 const swallow = () => true;
+
+/**
+ * For browser tests, per view: the screen as text, the top line in view and whether the daemon
+ * reported the alternate screen, whichever renderer draws.
+ */
+function exposeForTests(terminalId: string, term: Xterm, alternate: () => boolean): () => void {
+  const views: Record<string, unknown> = Reflect.get(globalThis, "bazhenViews") ?? {};
+  Reflect.set(globalThis, "bazhenViews", views);
+  views[terminalId] = {
+    screen: () => screenText(term),
+    viewportTop: () => term.buffer.active.viewportY,
+    alternate,
+  };
+  return () => delete views[terminalId];
+}
 
 function screenText(term: Xterm): string {
   const buffer = term.buffer.active;

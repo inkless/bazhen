@@ -7,9 +7,11 @@ export interface KeyChord {
   readonly altKey: boolean;
   readonly metaKey: boolean;
   readonly isComposing: boolean;
+  /** 229 while an IME is composing; Safari reports a composition's final key this way. */
+  readonly keyCode: number;
 }
 
-/** Chords, written like kitty's `map` (`shift+enter`), to the bytes the terminal is sent. */
+/** Chords, written like kitty's `map` (`shift+enter`), to the text the terminal is sent for them. */
 export type KeyMap = ReadonlyMap<string, string>;
 
 /**
@@ -18,9 +20,6 @@ export type KeyMap = ReadonlyMap<string, string>;
  */
 export const DEFAULT_KEY_MAP: KeyMap = new Map([["shift+enter", "\x1b\r"]]);
 
-/** The localStorage key a device's own bindings are kept under, as `{ chord: bytes }`. */
-export const KEY_MAP_STORAGE_KEY = "bazhen.keyMap";
-
 const MODIFIERS = ["ctrl", "alt", "shift", "meta"] as const;
 
 export type ParsedKeyMap = { ok: true; map: KeyMap } | { ok: false; error: string };
@@ -28,21 +27,21 @@ export type ParsedKeyMap = { ok: true; map: KeyMap } | { ok: false; error: strin
 /** A user's bindings over the defaults; a map with any invalid entry is rejected whole. */
 export function parseKeyMap(raw: unknown): ParsedKeyMap {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-    return { ok: false, error: "a key map is an object of chord to bytes" };
+    return { ok: false, error: "a key map is an object of chord to text" };
   }
   const map = new Map(DEFAULT_KEY_MAP);
-  for (const [chord, bytes] of Object.entries(raw)) {
+  for (const [chord, text] of Object.entries(raw)) {
     const name = canonical(chord);
     if (name === null) return { ok: false, error: `unknown chord "${chord}"` };
-    if (typeof bytes !== "string") return { ok: false, error: `"${chord}" must map to a string` };
-    map.set(name, bytes);
+    if (typeof text !== "string") return { ok: false, error: `"${chord}" must map to a string` };
+    map.set(name, text);
   }
   return { ok: true, map };
 }
 
-/** The bytes `event` is bound to, or null to leave it to xterm.js. */
+/** The text `event` is bound to, or null to leave it to xterm.js. */
 export function matchKey(event: KeyChord, map: KeyMap): string | null {
-  if (event.type !== "keydown" || event.isComposing) return null;
+  if (event.type !== "keydown" || event.isComposing || event.keyCode === 229) return null;
   const held = MODIFIERS.filter((m) => event[`${m}Key`]);
   return map.get([...held, event.key.toLowerCase()].join("+")) ?? null;
 }

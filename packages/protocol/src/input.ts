@@ -23,12 +23,3 @@ const EVENT_REPORT = new RegExp(
 export function withoutEventReports(text: string): string {
   return text.replace(EVENT_REPORT, "");
 }
-
-/** JSON from a peer, or undefined when it isn't JSON: a frame's schema then rejects it. */
-export function parseJson(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return undefined;
-  }
-}

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
 import { readKeyLog } from "../support/key-log.ts";
-import { openSecondView, screen, viewportTop } from "./page.ts";
+import { onAlternateScreen, openSecondView, screen, viewportTop } from "./page.ts";
 
 // The page's terminal against the real daemon and tmux. Each test launches an agent from the page,
 // then runs a key probe in its terminal in place of the agent: the probe logs exactly the bytes
@@ -50,16 +50,24 @@ interface Probe {
   received(since: number): string;
   /** Binary frames the page sent: what the browser typed, or answered. */
   readonly sent: Buffer[];
+  /** Each stream the page opened, when it opened and when it closed. */
+  readonly sockets: readonly { opened: number; closed?: number }[];
 }
 
 /** Launches an agent from the page and runs the key probe in its terminal instead. */
 async function launchProbe(page: Page, ...options: string[]): Promise<Probe> {
   const sent: Buffer[] = [];
-  page.on("websocket", (ws) =>
+  const sockets: { opened: number; closed?: number }[] = [];
+  page.on("websocket", (ws) => {
+    // The dev server's hot-reload socket is not a terminal's.
+    if (!ws.url().includes("/v1/terminals/")) return;
+    const socket: { opened: number; closed?: number } = { opened: Date.now() };
+    sockets.push(socket);
+    ws.on("close", () => (socket.closed = Date.now()));
     ws.on("framesent", ({ payload }) => {
       if (typeof payload !== "string") sent.push(payload);
-    }),
-  );
+    });
+  });
   await page.goto("/");
   await page.getByPlaceholder("/path/to/project").fill(work);
   await page.getByRole("button", { name: "Launch Claude Code" }).click();
@@ -74,7 +82,7 @@ async function launchProbe(page: Page, ...options: string[]): Promise<Probe> {
       .filter((a) => a.at >= since)
       .map((a) => a.hex)
       .join("");
-  return { agentId, session, received, sent };
+  return { agentId, session, received, sent, sockets };
 }
 
 /**
@@ -91,6 +99,16 @@ async function reopen(page: Page): Promise<void> {
 async function drive(page: Page): Promise<void> {
   await page.getByRole("region", { name: "terminal" }).locator(".xterm-screen").click();
   await expect(page.getByText("Driving")).toBeVisible();
+}
+
+/**
+ * How long after the lost stream closed its replacement opened: the last two streams, since
+ * React's development mode opens and drops one more as the page mounts.
+ */
+function reattachDelay(sockets: Probe["sockets"]): number {
+  const [lost, replacement] = sockets.slice(-2);
+  if (lost?.closed === undefined || replacement === undefined) return Number.POSITIVE_INFINITY;
+  return replacement.opened - lost.closed;
 }
 
 const hex = (text: string) => Buffer.from(text, "latin1").toString("hex");
@@ -129,16 +147,16 @@ test("sends nothing for the wheel over an agent on its alternate screen", async 
   await reopen(page);
   await drive(page);
   await page.keyboard.type("!");
-  await expect.poll(() => screen(page)).toContain("on the alternate screen");
-  // The daemon tells the page about the alternate screen once the output settles.
-  await page.waitForTimeout(500);
+  await expect.poll(() => onAlternateScreen(page)).toBe(true);
   const [top, before, since] = [await viewportTop(page), program.sent.length, Date.now()];
   await page.mouse.wheel(0, -400);
-  await page.waitForTimeout(300);
+  // Input is delivered in order: once this key arrives, anything the wheel sent has too.
+  await page.keyboard.type("s");
+  await expect.poll(() => program.received(since)).toContain(hex("s"));
   expect([await viewportTop(page), program.sent.length, program.received(since)]).toEqual([
     top,
-    before,
-    "",
+    before + 1,
+    hex("s"),
   ]);
 });
 
@@ -173,7 +191,7 @@ test("moves the lease to the view clicked on another device, and its first key a
   await expect(page.getByText("Viewing — click to type")).toBeVisible();
   const since = Date.now();
   await phone.keyboard.type("x");
-  await expect.poll(() => program.received(since)).toBe(hex("x"));
+  await expect.poll(() => program.received(since)).toContain(hex("x"));
   await phone.context().close();
 });
 
@@ -181,19 +199,62 @@ test("leaves the lease where it is when a view that isn't driving loses focus", 
   page,
   browser,
 }) => {
-  await launchProbe(page);
+  const program = await launchProbe(page);
   await drive(page);
   const phone = await openSecondView(browser, "key-probe ready");
   await drive(phone);
   await expect(page.getByText("Viewing — click to type")).toBeVisible();
   // xterm.js reports losing focus, as tmux asked it to, and the report must not take the lease.
   await page.getByRole("textbox", { name: "Terminal input" }).blur();
-  await page.waitForTimeout(300);
+  const since = Date.now();
+  await phone.keyboard.type("k");
+  await expect.poll(() => program.received(since)).toContain(hex("k"));
   await expect(phone.getByText("Driving")).toBeVisible();
   await phone.context().close();
 });
 
-test("reattaches after the daemon's tmux client is lost, and drives again at once", async ({
+test("takes the lease when its window gains focus", async ({ page, browser }) => {
+  await launchProbe(page);
+  await drive(page);
+  const phone = await openSecondView(browser, "key-probe ready");
+  await phone.evaluate('window.dispatchEvent(new FocusEvent("focus"))');
+  await expect(phone.getByText("Driving")).toBeVisible();
+  await expect(page.getByText("Viewing — click to type")).toBeVisible();
+  await phone.context().close();
+});
+
+test("scrolls a watching phone on a swipe without taking the lease, and takes it on a tap", async ({
+  page,
+  browser,
+}) => {
+  const program = await launchProbe(page, "--lines=200");
+  await reopen(page);
+  await drive(page);
+  const phone = await openSecondView(browser, "key-probe ready", { hasTouch: true });
+  const box = await terminalBox(phone);
+  const cdp = await phone.context().newCDPSession(phone);
+  const at = (y: number) => [{ x: box.x + box.width / 2, y }];
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: at(box.y + 20) });
+  for (let step = 1; step <= 10; step++) {
+    const touchPoints = at(box.y + 20 + step * 30);
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints });
+  }
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  const since = Date.now();
+  await page.keyboard.type("w");
+  await expect.poll(() => program.received(since)).toContain(hex("w"));
+  await expect(page.getByText("Driving")).toBeVisible();
+  await phone.locator(".xterm-screen").tap();
+  await expect(phone.getByText("Driving")).toBeVisible();
+  // Tapped again once the laptop has taken over: the phone keeps focus, so no focus event fires.
+  await page.locator(".xterm-screen").click();
+  await expect(phone.getByText("Viewing — click to type")).toBeVisible();
+  await phone.locator(".xterm-screen").tap();
+  await expect(phone.getByText("Driving")).toBeVisible();
+  await phone.context().close();
+});
+
+test("reattaches after the daemon's tmux client is lost, at once, and drives again", async ({
   page,
 }) => {
   const program = await launchProbe(page);
@@ -202,13 +263,15 @@ test("reattaches after the daemon's tmux client is lost, and drives again at onc
   await expect(page.getByText("Reconnecting…")).toBeVisible();
   // The page still has focus, which no event will announce again: it claims the lease itself.
   await expect(page.getByText("Driving")).toBeVisible({ timeout: 10_000 });
+  // One backoff step, 250 ms, not two: the lost socket is retried once.
+  expect(reattachDelay(program.sockets)).toBeLessThan(450);
   const since = Date.now();
   await page.keyboard.type("y");
-  await expect.poll(() => program.received(since)).toBe(hex("y"));
+  await expect.poll(() => program.received(since)).toContain(hex("y"));
 });
 
 test("answers none of tmux's terminal queries itself", async ({ page }) => {
   const program = await launchProbe(page);
-  await page.waitForTimeout(500);
+  // The queries come first on the stream, so by the time the probe's text shows, they are parsed.
   expect(program.sent).toEqual([]);
 });

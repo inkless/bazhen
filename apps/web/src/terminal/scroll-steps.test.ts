@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ScrollSteps } from "./touch.ts";
+import { ScrollSteps } from "./scroll-steps.ts";
 
 describe("scroll steps from travel", () => {
   it("makes one step per row of travel, carrying the remainder to the next move", () => {

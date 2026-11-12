@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseJson, withoutEventReports } from "./input.ts";
+import { withoutEventReports } from "./input.ts";
 
 const ESC = "\x1b";
 
@@ -17,14 +17,5 @@ describe("a view's input without its event reports", () => {
 
   it("keeps what was typed around a report", () => {
     expect(withoutEventReports(`a${ESC}[Ib${ESC}[A`)).toBe(`ab${ESC}[A`);
-  });
-});
-
-describe("JSON from a peer", () => {
-  it("is undefined when it isn't JSON, rather than an exception", () => {
-    expect([parseJson('{"type":"engage"}'), parseJson("{not json")]).toEqual([
-      { type: "engage" },
-      undefined,
-    ]);
   });
 });

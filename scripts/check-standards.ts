@@ -31,6 +31,7 @@ const COVERED_ELSEWHERE: Record<string, string> = {
   "apps/web/src/Fleet.tsx": "tests/e2e/terminal.spec.ts",
   "apps/web/src/terminal/TerminalView.tsx": "tests/e2e/keys.spec.ts",
   "apps/web/src/terminal/scroll-input.ts": "tests/e2e/keys.spec.ts",
+  "apps/web/src/terminal/takeover.ts": "tests/e2e/keys.spec.ts",
 };
 
 function sourceFiles(dir: string): string[] {

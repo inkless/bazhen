@@ -1,8 +1,13 @@
 import type { Terminal } from "@xterm/xterm";
 import type { WheelAction } from "./scroll.ts";
-import { ScrollSteps } from "./touch.ts";
+import { ScrollSteps } from "./scroll-steps.ts";
 
 const encoder = new TextEncoder();
+/** Pixels per unit of a wheel event's delta, by its `deltaMode`: pixels, lines or pages. */
+function pixelsPerUnit(mode: number, row: number, rows: number): number {
+  if (mode === WheelEvent.DOM_DELTA_PAGE) return row * rows;
+  return mode === WheelEvent.DOM_DELTA_LINE ? row : 1;
+}
 const ARROWS = {
   normal: { up: encoder.encode("\x1b[A"), down: encoder.encode("\x1b[B") },
   application: { up: encoder.encode("\x1bOA"), down: encoder.encode("\x1bOB") },
@@ -34,8 +39,7 @@ export function attachScrollInput(
     event.stopPropagation();
     if (action === "swallow") return;
     const row = rowHeight();
-    const pixels =
-      event.deltaMode === WheelEvent.DOM_DELTA_PIXEL ? -event.deltaY : -event.deltaY * row;
+    const pixels = -event.deltaY * pixelsPerUnit(event.deltaMode, row, term.rows);
     const steps = wheelSteps.add(pixels, row);
     for (let i = 0; i < Math.abs(steps); i++) input(arrow(steps > 0));
   };
