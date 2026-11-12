@@ -57,8 +57,6 @@ interface Entry {
 
 interface Watched {
   readonly terminal: TerminalId;
-  /** The attach this entry came from, so a newer one for the same terminal is never dropped. */
-  readonly opening: Promise<Watched>;
   readonly stream: RuntimeStream;
   readonly emulator: ScreenEmulator;
   readonly viewers: Map<AttachmentId, Entry>;
@@ -127,7 +125,6 @@ export class TerminalHub {
     const opening = this.runtime.attach(ref, size).then((stream) => {
       const watched: Watched = {
         terminal: ref.terminalId,
-        opening,
         stream,
         emulator: new ScreenEmulator((reply) => stream.write(reply)),
         viewers: new Map(),
@@ -147,7 +144,8 @@ export class TerminalHub {
           this.log.ended(id, "terminal_closed");
         }
         watched.viewers.clear();
-        this.unwatch(watched);
+        watched.emulator.dispose();
+        this.forget(ref.terminalId, opening);
       });
       return watched;
     });
@@ -160,16 +158,11 @@ export class TerminalHub {
     if (this.watched.get(terminal) === opening) this.watched.delete(terminal);
   }
 
-  private unwatch(watched: Watched): void {
-    this.forget(watched.terminal, watched.opening);
-    watched.emulator.dispose();
-  }
-
   /**
    * Keystrokes reach the terminal only from its driver. Any other view's are dropped, never
-   * queued, and it is told once per lease; an interactive view's keystroke also asks for the
-   * lease (§4.3). Terminal replies never reach the program, and neither replies nor focus
-   * reports count as keystrokes: an old driver's blur must not take the lease back. The epoch
+   * queued: an interactive view's keystroke takes the lease instead (§4.3), and an observer is
+   * told once per lease. Terminal replies never reach the program, and neither replies nor focus
+   * and mouse reports count as keystrokes: an old driver's blur must not take the lease back. The epoch
    * check fences stale input once input frames carry the epoch they were typed under; until then
    * it is the epoch of this view's own grant.
    */
@@ -182,11 +175,13 @@ export class TerminalHub {
       return;
     }
     if (!input.keystrokes) return;
-    if (!entry.toldDropped) {
-      entry.toldDropped = true;
-      entry.viewer.notify({ type: "input_dropped" });
+    if (entry.viewer.mode === "interactive") {
+      this.engage(watched, id);
+      return;
     }
-    this.engage(watched, id);
+    if (entry.toldDropped) return;
+    entry.toldDropped = true;
+    entry.viewer.notify({ type: "input_dropped" });
   }
 
   private engage(watched: Watched, id: AttachmentId): void {
@@ -254,8 +249,8 @@ export class TerminalHub {
     const wasDriver = watched.lease.holder === id;
     watched.lease = release(watched.lease, id);
     if (watched.viewers.size === 0) {
+      this.watched.delete(watched.terminal);
       watched.stream.close();
-      this.unwatch(watched);
       return;
     }
     if (wasDriver) this.announceLease(watched);

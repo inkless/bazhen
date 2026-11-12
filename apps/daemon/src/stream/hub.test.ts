@@ -113,10 +113,11 @@ describe("terminal hub", () => {
     l.engage();
     p.input(Buffer.from("b"));
     p.input(Buffer.from("c"));
-    expect([rt.written, laptop.frames.at(-1)]).toEqual([
-      ["c"],
-      { type: "lease", driver: false, epoch: 6 },
-    ]);
+    expect([
+      rt.written,
+      laptop.frames.at(-1),
+      phone.frames.some((f) => f.type === "input_dropped"),
+    ]).toEqual([["c"], { type: "lease", driver: false, epoch: 6 }, false]);
   });
 
   it("never passes a terminal reply from the driver to the program", async () => {

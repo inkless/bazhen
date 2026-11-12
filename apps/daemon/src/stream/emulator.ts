@@ -16,11 +16,23 @@ export class ScreenEmulator {
   private readonly term: headless.Terminal;
 
   constructor(reply: (bytes: Uint8Array) => void) {
-    this.term = new headless.Terminal({ scrollback: 0, allowProposedApi: true });
+    this.term = new headless.Terminal({
+      scrollback: 0,
+      allowProposedApi: true,
+      // xterm.js drops a window-size query before any handler sees it unless this is on.
+      windowOptions: { getWinSizePixels: true },
+    });
     const answer = (text: string) => reply(Buffer.from(text, "latin1"));
     this.term.onData(answer);
     this.term.parser.registerCsiHandler({ prefix: ">", final: "q" }, () => {
       answer(`\x1bP>|bazhen${ST}`);
+      return true;
+    });
+    // tmux 3.8 asks for the window's size in pixels and holds Esc until it is told. A browser's
+    // pixels are unknown here, which tmux accepts as zero.
+    this.term.parser.registerCsiHandler({ final: "t" }, (params) => {
+      if (params[0] !== 14) return false;
+      answer("\x1b[4;0;0t");
       return true;
     });
     for (const [id, colour] of COLOURS) {

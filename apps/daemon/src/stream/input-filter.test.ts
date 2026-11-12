@@ -59,6 +59,18 @@ describe("terminal reply stripping", () => {
     expect(typed(`${ESC}[I${ESC}[O`)).toBe(false);
   });
 
+  it.each([
+    ["SGR", `${ESC}[<65;10;5M`],
+    ["SGR release", `${ESC}[<0;10;5m`],
+    ["urxvt", `${ESC}[96;10;5M`],
+    ["X10", `${ESC}[Ma*%`],
+  ])(
+    "counts a %s mouse report as no keystroke, so a wheel never takes the lease",
+    (_name, report) => {
+      expect([typed(report), strip(report)]).toEqual([false, report]);
+    },
+  );
+
   it("counts a reply alone as no keystroke", () => {
     expect(typed(`${ESC}[?1;2c`)).toBe(false);
   });

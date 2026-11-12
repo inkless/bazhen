@@ -7,9 +7,11 @@ import { filterEnv, newId } from "@bazhen/core";
 import { TmuxError, TmuxRuntime } from "@bazhen/runtime-tmux";
 import { nodePtySpawner } from "@bazhen/daemon/pty";
 import { TerminalHub } from "@bazhen/daemon/stream";
-import { killServer, launchedFrom, ptyHandleCount, sleep, testSocket, tmuxOut } from "./helpers.ts";
+import { killServer, ptyHandleCount, sleep, testSocket, tmuxOut } from "./helpers.ts";
 
 const socket = testSocket("runtime");
+// As if `bazhen start` ran inside another Claude Code session, with a token of the user's own.
+const launchedFrom = { ...process.env, CLAUDECODE: "1", BZ_USER_VALUE: "kept" };
 const runtime = new TmuxRuntime({
   socket,
   pty: nodePtySpawner,

@@ -19,13 +19,26 @@ const REPLY = new RegExp(
   ].join("|"),
   "g",
 );
-const FOCUS_REPORT = new RegExp(`${ESC}\\[[IO]`, "g");
+/**
+ * Reports a terminal sends on its own, not keystrokes: focus in and out, and mouse reports in the
+ * SGR, urxvt and X10 encodings. The driver's program gets them; they never ask for the lease, so a
+ * wheel over a view that isn't driving can't take it.
+ */
+const EVENT_REPORT = new RegExp(
+  [
+    `${ESC}\\[[IO]`,
+    `${ESC}\\[<\\d+;\\d+;\\d+[Mm]`,
+    `${ESC}\\[\\d+;\\d+;\\d+M`,
+    `${ESC}\\[M[\\s\\S]{3}`,
+  ].join("|"),
+  "g",
+);
 const PASTE = new RegExp(`(${ESC}\\[200~[\\s\\S]*?(?:${ESC}\\[201~|$))`);
 
 export interface ViewInput {
   /** The input with every terminal reply removed; pasted text is left exactly as pasted. */
   readonly bytes: Uint8Array;
-  /** Whether anything is left beyond focus reports: what a person typed or pasted. */
+  /** Whether anything is left beyond focus and mouse reports: what a person typed or pasted. */
   readonly keystrokes: boolean;
 }
 
@@ -39,6 +52,6 @@ export function classifyInput(input: Uint8Array): ViewInput {
     .join("");
   return {
     bytes: Buffer.from(kept, "latin1"),
-    keystrokes: kept.replace(FOCUS_REPORT, "").length > 0,
+    keystrokes: kept.replace(EVENT_REPORT, "").length > 0,
   };
 }

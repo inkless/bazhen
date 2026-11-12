@@ -37,6 +37,10 @@ describe("the daemon's screen emulator", () => {
     expect(await answersTo(`${ESC}[>q`)).toBe(`${ESC}P>|bazhen${ST}`);
   });
 
+  it("answers tmux 3.8's window pixel size query, with the size unknown", async () => {
+    expect(await answersTo(`${ESC}[14t`)).toBe(`${ESC}[4;0;0t`);
+  });
+
   it("answers the foreground and background colour queries", async () => {
     expect(await answersTo(`${ESC}]10;?${ST}${ESC}]11;?${ESC}\\`)).toBe(
       `${ESC}]10;rgb:ffff/ffff/ffff${ST}${ESC}]11;rgb:0000/0000/0000${ST}`,
