@@ -67,6 +67,16 @@ describe("tmux runtime on a private server", () => {
     stream.close();
   });
 
+  it("keeps the browser on its normal screen, where it has scrollback", async () => {
+    const ref = await runtime.create(spec(["sh", "-c", "echo on-screen; sleep 30"]));
+    const stream = await runtime.attach(ref, size);
+    let seen = "";
+    stream.onData((b) => (seen += Buffer.from(b).toString("latin1")));
+    await expect.poll(() => seen, { timeout: 3000 }).toContain("on-screen");
+    expect(seen).not.toContain("\x1b[?1049h");
+    stream.close();
+  });
+
   it("passes Ctrl-B to the program instead of treating it as a tmux prefix", async () => {
     const ref = await runtime.create(spec(["cat"]));
     const stream = await runtime.attach(ref, size);

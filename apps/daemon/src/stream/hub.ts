@@ -12,6 +12,8 @@ import {
   type TerminalId,
 } from "@bazhen/core";
 import type { AttachmentMode, EventPayload, StreamServerFrame } from "@bazhen/protocol";
+import { ScreenEmulator } from "./emulator.ts";
+import { classifyInput } from "./input-filter.ts";
 
 /** One browser view of a terminal, as the hub sees it. */
 export interface Viewer {
@@ -56,6 +58,7 @@ interface Entry {
 interface Watched {
   readonly terminal: TerminalId;
   readonly stream: RuntimeStream;
+  readonly emulator: ScreenEmulator;
   readonly viewers: Map<AttachmentId, Entry>;
   lease: Lease;
   /** A resize in flight, and the latest size asked for while it runs. */
@@ -88,7 +91,6 @@ export class TerminalHub {
     const entry: Entry = opened ? { viewer, size } : { viewer, size, queue: [] };
     watched.viewers.set(id, entry);
     this.log.started(id, watched.terminal, viewer.mode);
-    viewer.notify({ type: "attached", attachmentId: id });
     viewer.notify(leaseFrame(watched, id));
     if (entry.queue !== undefined) {
       try {
@@ -104,6 +106,9 @@ export class TerminalHub {
     }
     // The most recent interactive view sizes the terminal while nobody drives it.
     if (!opened) this.fitTo(watched);
+    // Last: a view may send input and engage as soon as it is told, and they need the handle
+    // returned below.
+    viewer.notify({ type: "attached", attachmentId: id });
     return {
       id,
       input: (bytes) => this.input(watched, id, bytes),
@@ -123,10 +128,12 @@ export class TerminalHub {
       const watched: Watched = {
         terminal: ref.terminalId,
         stream,
+        emulator: new ScreenEmulator((reply) => stream.write(reply)),
         viewers: new Map(),
         lease: { holder: null, epoch: this.log.epoch(ref.terminalId) },
       };
       stream.onData((bytes) => {
+        watched.emulator.write(bytes);
         for (const entry of watched.viewers.values()) {
           if (entry.queue) entry.queue.push(bytes);
           else entry.viewer.send(bytes);
@@ -139,6 +146,7 @@ export class TerminalHub {
           this.log.ended(id, "terminal_closed");
         }
         watched.viewers.clear();
+        watched.emulator.dispose();
         this.forget(ref.terminalId, opening);
       });
       return watched;
@@ -153,15 +161,24 @@ export class TerminalHub {
   }
 
   /**
-   * Keystrokes reach the terminal only from its driver; any other view's are dropped, and it is
-   * told once per lease. The epoch check fences stale input once input frames carry the epoch
-   * they were typed under; until then it is the epoch of this view's own grant.
+   * Keystrokes reach the terminal only from its driver. Any other view's are dropped, never
+   * queued: an interactive view's keystroke takes the lease instead (§4.3), and an observer is
+   * told once per lease. Terminal replies never reach the program, and neither replies nor focus
+   * and mouse reports count as keystrokes: an old driver's blur must not take the lease back. The epoch
+   * check fences stale input once input frames carry the epoch they were typed under; until then
+   * it is the epoch of this view's own grant.
    */
   private input(watched: Watched, id: AttachmentId, bytes: Uint8Array): void {
     const entry = watched.viewers.get(id);
     if (entry === undefined) return;
+    const input = classifyInput(bytes);
     if (acceptsInput(watched.lease, id, entry.grantedEpoch ?? -1)) {
-      watched.stream.write(bytes);
+      if (input.bytes.length > 0) watched.stream.write(input.bytes);
+      return;
+    }
+    if (!input.keystrokes) return;
+    if (entry.viewer.mode === "interactive") {
+      this.engage(watched, id);
       return;
     }
     if (entry.toldDropped) return;

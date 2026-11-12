@@ -18,6 +18,7 @@
     "@bazhen/protocol": "workspace:*",
     "@bazhen/runtime-tmux": "workspace:*",
     "@hono/node-server": "2.1.5",
+    "@xterm/headless": "6.0.0",
     "hono": "4.13.16",
     "node-pty": "1.2.0-beta.18",
     "ws": "8.22.2",

@@ -63,7 +63,8 @@ const PANE = columns([
  * and `C-b d` would detach Bazhen's own client, so no key reaches tmux itself. `window-size
  * manual` is deliberately absent: set globally, tmux before 3.8 crashes on the next window
  * creation. An empty `update-environment` stops an attaching client from copying its own
- * variables into a session.
+ * variables into a session. Without the smcup override, the client switches the browser's
+ * terminal to its alternate buffer, which keeps no scrollback and turns the wheel into arrow keys.
  */
 export const TMUX_CONFIG = `set -g prefix None
 set -g prefix2 None
@@ -80,6 +81,7 @@ set -g focus-events on
 set -g set-clipboard on
 set -g update-environment ""
 set -as terminal-features ",xterm-256color:RGB:extkeys:clipboard:hyperlinks:focus"
+set -ga terminal-overrides ",xterm-256color:smcup@:rmcup@"
 `;
 
 export class TmuxError extends Error {
