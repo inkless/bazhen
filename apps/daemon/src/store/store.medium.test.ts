@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { InvalidTransition, newId } from "@bazhen/core";
+import { withAgent } from "../testing/fixtures.ts";
 import { MIGRATIONS } from "./migrations.ts";
 import { UnknownEntity } from "./projections.ts";
 import { LATEST_SCHEMA_VERSION, SchemaTooNew, Store } from "./store.ts";
@@ -124,7 +125,7 @@ describe("Store", () => {
     const environmentId = withEnvironment(store);
     const a = store.snapshot().eventId;
     launch(store, environmentId);
-    expect(store.eventsAfter(a).map((e) => e.type)).toEqual(["agent.launched"]);
+    expect(store.events(a).map((e) => e.type)).toEqual(["agent.launched"]);
     store.close();
   });
 
@@ -151,6 +152,187 @@ describe("Store", () => {
       }),
     ).toThrow("abandoned");
     expect(store.snapshot()).toMatchObject({ eventId: before, environments: [] });
+    store.close();
+  });
+});
+
+const OLD = "2026-01-01T00:00:00.000Z";
+const CUTOFF = new Date("2026-02-01T00:00:00.000Z");
+
+/** Dates every event recorded so far before the cutoff, as if a month had passed. */
+function age(path: string) {
+  const raw = new DatabaseSync(path);
+  raw.prepare("UPDATE events SET ts = ?").run(OLD);
+  raw.close();
+}
+
+/** A view that came and went: two events no projection points at once it has ended. */
+function visit(store: Store, terminalId: string) {
+  const attachmentId = newId("att");
+  const started = store.append({
+    type: "attachment.started",
+    entityId: attachmentId,
+    actor: "system",
+    payload: { terminalId, mode: "observe" },
+  });
+  const ended = store.append({
+    type: "attachment.ended",
+    entityId: attachmentId,
+    actor: "system",
+    payload: { reason: "client_closed" },
+  });
+  return [started, ended] as const;
+}
+
+const flushed = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+describe("Store event log", () => {
+  it("gives each database its own epoch, kept across reopen and carried by the snapshot", () => {
+    const path = dbPath();
+    const first = Store.open(path);
+    const epoch = first.epoch();
+    first.close();
+    const again = Store.open(path);
+    const other = Store.open(dbPath());
+    expect(epoch).toMatch(/^[0-9a-f]{32}$/);
+    expect([again.epoch(), again.snapshot().epoch]).toEqual([epoch, epoch]);
+    expect(other.epoch()).not.toBe(epoch);
+    again.close();
+    other.close();
+  });
+
+  it("mints an epoch for a database upgraded from schema 5, resumable from its newest event", () => {
+    const path = dbPath();
+    const v5 = Store.open(path, MIGRATIONS.slice(0, 5));
+    withEnvironment(v5);
+    v5.close();
+    const upgraded = Store.open(path);
+    const { epoch, eventId } = upgraded.snapshot();
+    expect([epoch, upgraded.cursorFault(epoch, eventId)]).toEqual([
+      expect.stringMatching(/^[0-9a-f]{32}$/),
+      null,
+    ]);
+    upgraded.close();
+  });
+
+  it("reads back each event whole, payload included", () => {
+    const store = Store.open(dbPath());
+    const environmentId = withEnvironment(store);
+    expect(store.events(0)).toEqual([
+      {
+        id: 1,
+        ts: expect.any(String),
+        type: "environment.registered",
+        entityType: "environment",
+        entityId: environmentId,
+        actor: "system",
+        causationId: null,
+        correlationId: null,
+        payload: { kind: "local" },
+      },
+    ]);
+    store.close();
+  });
+
+  it("tells listeners once per transaction that appended, never about a rolled-back one", async () => {
+    const store = Store.open(dbPath());
+    let calls = 0;
+    store.onCommit(() => calls++);
+    store.transaction(() => {
+      launch(store, withEnvironment(store));
+    });
+    await flushed();
+    expect(calls).toBe(1);
+    expect(() =>
+      store.transaction(() => {
+        withEnvironment(store);
+        throw new Error("abandoned");
+      }),
+    ).toThrow("abandoned");
+    store.transaction(() => store.remember("k-1", {}));
+    await flushed();
+    expect(calls).toBe(1);
+    store.close();
+  });
+
+  it("keeps a committed append when a listener throws, and still tells the others", async () => {
+    const store = Store.open(dbPath());
+    let told = false;
+    store.onCommit(() => {
+      throw new Error("broken subscriber");
+    });
+    store.onCommit(() => (told = true));
+    withEnvironment(store);
+    await flushed();
+    expect([told, store.snapshot().environments.length]).toEqual([true, 1]);
+    store.close();
+  });
+
+  it("retires old events no projection points at, and keeps those one does", async () => {
+    const { path, store, agentId, terminalId } = await withAgent();
+    // Never offered, so its first_offered_event_id is NULL: retention must still prune.
+    store.append({
+      type: "mailbox.queued",
+      entityId: newId("msg"),
+      actor: "system",
+      payload: { agentId, body: "hi" },
+    });
+    const kept = store.events(0).map((e) => e.type);
+    const [, ended] = visit(store, terminalId);
+    age(path);
+    const [young] = visit(store, terminalId);
+    expect(store.pruneBatch(CUTOFF)).toBe(false);
+    expect(store.events(0).map((e) => e.type)).toEqual([
+      ...kept,
+      "attachment.started",
+      "attachment.ended",
+    ]);
+    expect(store.events(0).at(-2)?.id).toBe(young);
+    const epoch = store.epoch();
+    expect([store.cursorFault(epoch, ended - 1), store.cursorFault(epoch, ended)]).toEqual([
+      "stale",
+      null,
+    ]);
+    store.close();
+  });
+
+  it("never retires the newest event, so later ids stay above what retention has passed", async () => {
+    const { path, store, terminalId } = await withAgent();
+    const [, newest] = visit(store, terminalId);
+    age(path);
+    store.pruneBatch(new Date("2100-01-01T00:00:00.000Z"));
+    expect(store.events(newest - 1).map((e) => e.id)).toEqual([newest]);
+    const [next] = visit(store, terminalId);
+    expect(next).toBe(newest + 1);
+    expect(store.cursorFault(store.epoch(), newest)).toBeNull();
+    store.close();
+  });
+
+  it("retires a long backlog in bounded batches, each moving the watermark up", async () => {
+    const { path, store, terminalId } = await withAgent();
+    const [, firstEnd] = visit(store, terminalId);
+    visit(store, terminalId);
+    const [, newest] = visit(store, terminalId);
+    age(path);
+    const epoch = store.epoch();
+    // Nine events, two per batch: the first visit's end (id 5) falls behind in the third.
+    const faults: (string | null)[] = [];
+    while (store.pruneBatch(CUTOFF, 2)) faults.push(store.cursorFault(epoch, firstEnd));
+    expect(faults).toEqual([null, null, "stale", "stale"]);
+    expect(store.cursorFault(epoch, newest)).toBeNull();
+    store.close();
+  });
+
+  it("calls a cursor foreign when it names another store or an event this one never had", () => {
+    const store = Store.open(dbPath());
+    withEnvironment(store);
+    const { epoch, eventId } = store.snapshot();
+    expect([
+      store.cursorFault("0".repeat(32), eventId),
+      store.cursorFault(epoch, eventId + 1),
+      store.cursorFault(epoch, eventId),
+      store.cursorFault(epoch, 0),
+    ]).toEqual(["foreign", "foreign", null, null]);
     store.close();
   });
 });

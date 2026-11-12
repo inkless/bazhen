@@ -31,6 +31,22 @@ export interface NewEvent<T extends EventType> {
   readonly correlationId?: string;
 }
 
+/** An event as the log holds it, payload parsed from its JSON. */
+export interface LoggedEvent {
+  readonly id: number;
+  readonly ts: string;
+  readonly type: string;
+  readonly entityType: string;
+  readonly entityId: string;
+  readonly actor: string;
+  readonly causationId: number | null;
+  readonly correlationId: string | null;
+  readonly payload: unknown;
+}
+
+/** Why a cursor can't be resumed: older than retention, or not from this store. */
+export type CursorFault = "stale" | "foreign";
+
 /** A row's id as a Bazhen id of the given kind, or nothing if it isn't one. */
 function rowIds<P extends IdPrefix>(rows: readonly Record<string, SQLOutputValue>[], prefix: P) {
   return rows.flatMap((r) => (typeof r.id === "string" && isId(prefix, r.id) ? [r.id] : []));
@@ -78,6 +94,10 @@ export class Store {
   private readonly db: DatabaseSync;
   private host = "";
   private depth = 0;
+  private appended = false;
+  private readonly listeners = new Set<() => void>();
+  /** Every event a projection still points at; retention keeps them, as it keeps projections. */
+  private referenced = "";
   private readonly cache = new Map<string, StatementSync>();
   /** What the projections may do: run SQL, inside the transaction that records an event. */
   private readonly statements: Statements = { prepare: (sql) => this.prepare(sql) };
@@ -115,6 +135,7 @@ export class Store {
     const store = new Store(db);
     store.migrate(migrations);
     store.ensureHost();
+    store.referenced = referencedEvents(db);
     return store;
   }
 
@@ -157,6 +178,7 @@ export class Store {
         JSON.stringify(event.payload),
       );
       const id = Number(result.lastInsertRowid);
+      this.appended = true;
       // The projection parses the payload with its type's schema, rolling the event back if
       // it doesn't match.
       try {
@@ -324,6 +346,7 @@ export class Store {
   snapshot(): StateSnapshot {
     return this.transaction("read", () =>
       StateSnapshot.parse({
+        epoch: this.epoch(),
         eventId: Number(this.prepare("SELECT coalesce(max(id), 0) AS id FROM events").get()?.id),
         environments: this.prepare(
           "SELECT id, kind FROM environments ORDER BY created_event_id",
@@ -349,12 +372,64 @@ export class Store {
     );
   }
 
-  eventsAfter(afterId: number, limit = 500): Array<{ id: number; type: string; entityId: string }> {
-    return this.prepare(
-      "SELECT id, type, entity_id AS entityId FROM events WHERE id > ? ORDER BY id LIMIT ?",
-    )
+  /** This database's epoch, which every cursor into its log carries. */
+  epoch(): string {
+    return String(this.prepare("SELECT epoch FROM event_log").get()?.epoch);
+  }
+
+  /** Events after `afterId`, oldest first. */
+  events(afterId: number, limit = 500): LoggedEvent[] {
+    const sql = `SELECT id, ts, type, entity_type, entity_id, actor, causation_id, correlation_id, payload
+                 FROM events WHERE id > ? ORDER BY id LIMIT ?`;
+    return this.prepare(sql)
       .all(afterId, limit)
-      .map((r) => ({ id: Number(r.id), type: String(r.type), entityId: String(r.entityId) }));
+      .map((r) => ({
+        id: Number(r.id),
+        ts: String(r.ts),
+        type: String(r.type),
+        entityType: String(r.entity_type),
+        entityId: String(r.entity_id),
+        actor: String(r.actor),
+        causationId: typeof r.causation_id === "number" ? r.causation_id : null,
+        correlationId: typeof r.correlation_id === "string" ? r.correlation_id : null,
+        payload: JSON.parse(String(r.payload)),
+      }));
+  }
+
+  /** Whether the log can no longer continue after `afterId` for a client of store `epoch`. */
+  cursorFault(epoch: string, afterId: number): CursorFault | null {
+    const row = this.prepare(
+      "SELECT epoch, pruned_through, (SELECT coalesce(max(id), 0) FROM events) AS newest FROM event_log",
+    ).get();
+    if (epoch !== row?.epoch || afterId > Number(row.newest)) return "foreign";
+    return afterId < Number(row.pruned_through) ? "stale" : null;
+  }
+
+  /**
+   * Retires up to `limit` events older than `cutoff`, walking up from where retention last
+   * stopped, and answers whether any remain. Events a projection points at stay, and so does the
+   * newest event: ids are max(id) + 1, so deleting it would hand out ids retention has passed.
+   */
+  pruneBatch(cutoff: Date, limit = 1000): boolean {
+    return this.transaction(() => {
+      const from = Number(
+        this.prepare("SELECT pruned_through FROM event_log").get()?.pruned_through,
+      );
+      const rows = this.prepare("SELECT id, ts FROM events WHERE id > ? ORDER BY id LIMIT ?").all(
+        from,
+        limit,
+      );
+      const young = rows.findIndex((r) => String(r.ts) >= cutoff.toISOString());
+      const expired = young === -1 ? rows : rows.slice(0, young);
+      const through = Number(expired.at(-1)?.id ?? from);
+      if (through === from) return false;
+      this.prepare(
+        `DELETE FROM events WHERE id > ? AND id <= ?
+           AND id <> (SELECT max(id) FROM events) AND id NOT IN (${this.referenced})`,
+      ).run(from, through);
+      this.prepare("UPDATE event_log SET pruned_through = ?").run(through);
+      return young === -1 && rows.length === limit;
+    });
   }
 
   /**
@@ -371,18 +446,62 @@ export class Store {
     try {
       const out = fn();
       this.db.exec("COMMIT");
+      if (this.appended) this.notify();
       return out;
     } catch (err) {
       this.db.exec("ROLLBACK");
       throw err;
     } finally {
+      this.appended = false;
       this.depth--;
+    }
+  }
+
+  /**
+   * Calls `listener` after each commit that appended events, never for a rolled-back one. It runs
+   * after the mutation has returned, so a failing listener can't fail what already committed.
+   */
+  onCommit(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private notify(): void {
+    for (const listener of this.listeners) {
+      queueMicrotask(() => {
+        if (!this.listeners.has(listener)) return;
+        try {
+          listener();
+        } catch (err) {
+          console.error("an event listener failed", err);
+        }
+      });
     }
   }
 
   close(): void {
     this.db.close();
   }
+}
+
+const quote = (name: unknown) => `"${String(name).replaceAll('"', '""')}"`;
+
+/**
+ * One query for every event id a projection column points at, read from the schema's foreign
+ * keys, so a table added later is kept without retention having to know about it.
+ */
+function referencedEvents(db: DatabaseSync): string {
+  const columns = db
+    .prepare(
+      `SELECT m.name AS tbl, f."from" AS col FROM sqlite_master m, pragma_foreign_key_list(m.name) f
+       WHERE m.type = 'table' AND f."table" = 'events' ORDER BY m.name, f."from"`,
+    )
+    .all();
+  // NOT IN over a NULL is never true, which would keep every event.
+  const selects = columns.map(
+    (c) => `SELECT ${quote(c.col)} FROM ${quote(c.tbl)} WHERE ${quote(c.col)} IS NOT NULL`,
+  );
+  return selects.length > 0 ? selects.join(" UNION ") : "SELECT NULL WHERE 0";
 }
 
 export { LATEST_SCHEMA_VERSION };

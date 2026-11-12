@@ -24,7 +24,7 @@ describe("attachment log", () => {
     storeLog(store).started(b, terminalId, "observe");
     storeLog(store).ended(b, "client_closed");
     endOpenAttachments(store);
-    expect([store.openAttachments(), store.eventsAfter(0).at(-1)?.entityId]).toEqual([[], a]);
+    expect([store.openAttachments(), store.events(0).at(-1)?.entityId]).toEqual([[], a]);
     store.close();
   });
 });
