@@ -90,6 +90,7 @@ describe("each package.json, against the import matrix", () => {
     expect(bannedDeclarations()).toEqual({
       "packages/protocol": [],
       "packages/core": [],
+      "packages/host-guard": [],
       "packages/runtime-tmux": [],
       "packages/env-local": [],
       "packages/harness-claude-code": [],

@@ -44,8 +44,9 @@ Contributing, for people and agents: [AGENTS.md](AGENTS.md) and [docs/standards/
 macOS and Linux both follow XDG (`~/.config/bazhen`, `~/.local/share/bazhen`, …). The socket
 lives in `$XDG_RUNTIME_DIR/bazhen` on Linux and `$TMPDIR/bazhen` on macOS, mode 0700.
 `BAZHEN_HOME` relocates everything under one directory and gives it its own tmux server;
-`BAZHEN_BANK` relocates only the document bank. `BAZHEN_PORT` and `BAZHEN_TMUX_SOCKET` override
-the daemon's port and private tmux server name. `BAZHEN_CLAUDE_PERMISSION_MODE` starts every Claude
-Code agent in that permission mode instead of the one your settings pick.
+`BAZHEN_BANK` relocates only the document bank. `BAZHEN_PORT` overrides the daemon's port.
+`BAZHEN_CLAUDE_PERMISSION_MODE` starts every Claude Code agent in that permission mode instead of
+the one your settings pick.
 
-Bazhen only ever manages its own tmux server (`tmux -L bazhen`), never your default one.
+Bazhen only ever manages its own tmux server, by the socket `tmux.sock` in its runtime directory
+(`tmux -S`), never your default one or any server found by name.

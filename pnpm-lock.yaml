@@ -166,6 +166,9 @@ importers:
 
   .:
     devDependencies:
+      '@bazhen/host-guard':
+        specifier: workspace:*
+        version: link:packages/host-guard
       '@types/node':
         specifier: 26.6.6
         version: 26.6.6
@@ -205,6 +208,9 @@ importers:
       '@bazhen/harness-codex':
         specifier: workspace:*
         version: link:../../packages/harness-codex
+      '@bazhen/host-guard':
+        specifier: workspace:*
+        version: link:../../packages/host-guard
       '@bazhen/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
@@ -308,6 +314,8 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
 
+  packages/host-guard: {}
+
   packages/protocol:
     dependencies:
       zod:
@@ -319,12 +327,18 @@ importers:
       '@bazhen/core':
         specifier: workspace:*
         version: link:../core
+      '@bazhen/host-guard':
+        specifier: workspace:*
+        version: link:../host-guard
       '@bazhen/protocol':
         specifier: workspace:*
         version: link:../protocol
 
   tests/api:
     dependencies:
+      '@bazhen/host-guard':
+        specifier: workspace:*
+        version: link:../../packages/host-guard
       '@bazhen/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
@@ -349,6 +363,10 @@ importers:
         version: 8.22.2
 
   tests/e2e:
+    dependencies:
+      '@bazhen/host-guard':
+        specifier: workspace:*
+        version: link:../../packages/host-guard
     devDependencies:
       '@anthropic-ai/claude-code':
         specifier: 2.1.322
@@ -365,6 +383,9 @@ importers:
       '@bazhen/daemon':
         specifier: workspace:*
         version: link:../../apps/daemon
+      '@bazhen/host-guard':
+        specifier: workspace:*
+        version: link:../../packages/host-guard
       '@bazhen/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol

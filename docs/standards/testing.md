@@ -37,8 +37,9 @@ The other three sizes run real tmux, so they run only on a disposable host: the 
 (`pnpm test:real`, which builds it from the worktree without mounting it) or a CI runner. A
 disposable host is Linux with `/etc/bazhen-disposable-host`; their setup refuses to start
 anywhere else. Never create that file on a machine you work on. Inside a container or CI they
-are the `pnpm test:integration`, `test:api` and `test:e2e` scripts, one worker each. Each run's image is removed when it ends, and its containers have no network; Docker's build
-cache keeps the layers, so `docker builder prune` reclaims that space.
+are the `pnpm test:integration`, `test:api` and `test:e2e` scripts, one worker each. Each run's
+image is removed when it ends, and its containers have no network; Docker's build cache keeps the
+layers, so `docker builder prune` reclaims that space.
 
 Write the smallest test that can fail for the right reason. E2E tests cover only wiring that
 crosses processes; a behaviour that a medium test can reach belongs in a medium test.
@@ -49,9 +50,10 @@ The daemon may be rewritten in another language later (a Rust daemon is revisite
 makes that cheap is a suite that certifies the rewrite unchanged, so behaviour tests are written
 against the daemon's public surfaces, never its TypeScript internals.
 
-- **The black-box suite is its own package.** It depends only on `@bazhen/protocol`, starts the
-  daemon as a separate process, and drives it only over HTTP, WebSocket, the CLI and tmux. A
-  behaviour a user or an agent can observe gets its test there.
+- **The black-box suite is its own package.** It depends only on `@bazhen/protocol`, and on
+  `@bazhen/host-guard` to run tmux: a dependency-free safety guard, not a daemon internal. It
+  starts the daemon as a separate process, and drives it only over HTTP, WebSocket, the CLI and
+  tmux. A behaviour a user or an agent can observe gets its test there.
 - **Unit, medium and integration tests may be internal.** They import the packages they test, and
   would be rewritten with the code.
 - `tests/api` is that suite. It starts the daemon under a temporary `BAZHEN_HOME` and runs the
@@ -110,11 +112,11 @@ A test owns everything it touches and leaves nothing behind.
   or compile step: a step that fails there makes vitest run teardown on a half-made setup.
 - **Paths.** Medium and integration runs get a temporary `BAZHEN_HOME`. Unit runs point it at a
   path that doesn't exist. Never read or write the real Bazhen directories.
-- **tmux.** Each run gets its own tmux socket directory (`TMUX_TMPDIR`) and runs outside any
-  tmux client (`TMUX` unset). Any tmux command a test runs, even a bare `tmux` with no `-L`,
-  lands on a throwaway server, never on the user's sessions, the agent fleet or a real daemon.
-  Still, name each server with `testSocket(label)` so a leak says which test caused it, and kill
-  it in `afterAll`. Teardown fails the run on any server still alive.
+- **tmux.** A test runs tmux only through `@bazhen/host-guard`, which names every server by a
+  socket path inside a directory the run owns, and refuses `default` and the directory the
+  user's own servers share. Get a server with `testServer(label)`, so a leak says which test
+  caused it, and kill it in `afterAll`. Each run also gets its own `TMUX_TMPDIR` and runs outside
+  any tmux client (`TMUX` unset). Teardown fails the run on any server still alive.
 - **PTYs are a machine-wide resource.** macOS has 511, and a leak starves every terminal on the
   machine. The setup refuses to run above 420 in use. A runtime change that opens PTYs needs a
   lifecycle test that repeats the operation and asserts the handle count returns to its baseline

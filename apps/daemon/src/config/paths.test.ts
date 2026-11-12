@@ -64,11 +64,12 @@ describe("resolvePaths", () => {
     ]);
   });
 
-  it("gives each BAZHEN_HOME its own tmux server, and the default home the bazhen server", () => {
-    const a = resolvePaths({ ...linux, env: { BAZHEN_HOME: "/a" } }).tmuxSocket;
-    const b = resolvePaths({ ...linux, env: { BAZHEN_HOME: "/b" } }).tmuxSocket;
-    expect([resolvePaths(linux).tmuxSocket, a === b]).toEqual(["bazhen", false]);
-    expect(a).toMatch(/^bazhen-[0-9a-f]{8}$/);
+  it("gives each home a tmux server of its own, by a socket in its private runtime directory", () => {
+    expect(tmux("/a")).toBe("/a/run/tmux.sock");
+    expect(resolvePaths(linux).tmuxSocket).toBe("/tmp/bazhen-1000/tmux.sock");
+    expect(resolvePaths({ ...mac, env: { BAZHEN_TMUX_SOCKET: "default" } }).tmuxSocket).toBe(
+      "/var/folders/xy/T/bazhen/tmux.sock",
+    );
   });
 
   it("treats /a and /a/ as one home, and refuses a relative one", () => {

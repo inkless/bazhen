@@ -19,6 +19,7 @@ export type Area = {
 const PACKAGE_DIR: Record<string, string> = {
   "@bazhen/protocol": "packages/protocol",
   "@bazhen/core": "packages/core",
+  "@bazhen/host-guard": "packages/host-guard",
   "@bazhen/runtime-tmux": "packages/runtime-tmux",
   "@bazhen/env-local": "packages/env-local",
   "@bazhen/harness-claude-code": "packages/harness-claude-code",
@@ -43,6 +44,21 @@ export const MATRIX: Area[] = [
     banned: ["@bazhen/runtime-tmux", "@bazhen/daemon", "@bazhen/web"],
     typeOnly: ["@bazhen/protocol"],
     platformFree: true,
+    thirdParty: RUNTIME_LIBS,
+  },
+  // The one place that runs tmux or sends a signal; it depends on nothing of Bazhen's.
+  {
+    dir: "packages/host-guard",
+    banned: [
+      "@bazhen/protocol",
+      "@bazhen/core",
+      "@bazhen/runtime-tmux",
+      "@bazhen/env-local",
+      "@bazhen/harness-claude-code",
+      "@bazhen/harness-codex",
+      "@bazhen/daemon",
+      "@bazhen/web",
+    ],
     thirdParty: RUNTIME_LIBS,
   },
   {
@@ -90,7 +106,8 @@ export const MATRIX: Area[] = [
     thirdParty: RUNTIME_LIBS,
   },
   { dir: "apps/daemon", banned: ["@bazhen/web"] },
-  // The black-box suite: it reaches the daemon only over its public surfaces.
+  // The black-box suite: it reaches the daemon only over its public surfaces. It may use
+  // @bazhen/host-guard, a dependency-free safety guard rather than a daemon internal, to run tmux.
   {
     dir: "tests/api",
     banned: [

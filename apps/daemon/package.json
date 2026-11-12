@@ -16,6 +16,7 @@
     "@bazhen/env-local": "workspace:*",
     "@bazhen/harness-claude-code": "workspace:*",
     "@bazhen/harness-codex": "workspace:*",
+    "@bazhen/host-guard": "workspace:*",
     "@bazhen/protocol": "workspace:*",
     "@bazhen/runtime-tmux": "workspace:*",
     "@hono/node-server": "2.1.5",

@@ -1,21 +1,17 @@
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { TerminalTags } from "@bazhen/core";
 import { filterEnv, newId } from "@bazhen/core";
-import { TmuxError, TmuxRuntime } from "@bazhen/runtime-tmux";
+import { sessionName, TmuxError, TmuxRuntime } from "@bazhen/runtime-tmux";
 import { nodePtySpawner } from "@bazhen/daemon/pty";
 import { TerminalHub } from "@bazhen/daemon/stream";
-import { killServer, ptyHandleCount, sleep, testSocket, tmuxOut } from "./helpers.ts";
+import { ptyHandleCount, sleep, testServer, tmuxOut } from "./helpers.ts";
 
-const socket = testSocket("runtime");
+const server = testServer("runtime");
 // As if `bazhen start` ran inside another Claude Code session, with a token of the user's own.
 const launchedFrom = { ...process.env, CLAUDECODE: "1", BZ_USER_VALUE: "kept" };
 const runtime = new TmuxRuntime({
-  socket,
+  server,
   pty: nodePtySpawner,
-  configFile: join(mkdtempSync(join(tmpdir(), "bz-tmux-conf-")), "tmux.conf"),
   env: filterEnv(launchedFrom).env,
 });
 const size = { cols: 100, rows: 30 };
@@ -32,10 +28,10 @@ const spec = (
   generation: 0,
 });
 
-afterAll(() => killServer(socket));
+afterAll(() => server.kill());
 
 const screen = (session: string | undefined) =>
-  tmuxOut(socket, "capture-pane", "-p", "-t", `${String(session)}:0`);
+  tmuxOut(server, "capture-pane", "-p", "-t", `${String(session)}:0`);
 
 describe("tmux runtime on a private server", () => {
   it("reports not-running before any terminal exists", async () => {
@@ -48,6 +44,21 @@ describe("tmux runtime on a private server", () => {
     const found = (await runtime.inventory()).find((e) => e.ref.terminalId === s.terminalId);
     expect(found?.exit).toBeNull();
     expect((await runtime.health()).state).toBe("healthy");
+  });
+
+  it("reads its terminals back when started without a UTF-8 locale", async () => {
+    const bare = testServer("runtime-no-locale");
+    const { LANG: _l, LC_ALL: _a, LC_CTYPE: _c, ...noLocale } = filterEnv(process.env).env;
+    try {
+      const plain = new TmuxRuntime({ server: bare, pty: nodePtySpawner, env: noLocale });
+      const s = spec(["cat"]);
+      const ref = await plain.create(s);
+      expect(ref.locator.session).toBe(sessionName(s.terminalId));
+      const found = (await plain.inventory()).find((e) => e.ref.terminalId === s.terminalId);
+      expect(found?.ref.locator).toEqual(ref.locator);
+    } finally {
+      bare.kill();
+    }
   });
 
   it("keeps an exited terminal with its exit status", async () => {
@@ -89,7 +100,7 @@ describe("tmux runtime on a private server", () => {
     await expect.poll(() => seen, { timeout: 3000 }).toContain("^B");
     const session = ref.locator.session;
     expect(session).toBeTypeOf("string");
-    const windows = tmuxOut(socket, "list-windows", "-t", String(session));
+    const windows = tmuxOut(server, "list-windows", "-t", String(session));
     expect(windows.trim().split("\n")).toHaveLength(1);
     stream.close();
   });
@@ -125,14 +136,14 @@ describe("tmux runtime on a private server", () => {
   it("keeps the user's values in the server's memory, never in a session's tmux argv", async () => {
     const ref = await runtime.create({ ...spec(["cat"]), env: { BAZHEN_AGENT_ID: "agent-x" } });
     const session = String(ref.locator.session);
-    expect(tmuxOut(socket, "show-environment", "-g")).toContain("BZ_USER_VALUE=kept");
-    expect(tmuxOut(socket, "show-environment", "-t", session)).not.toContain("BZ_USER_VALUE");
-    expect(tmuxOut(socket, "show-environment", "-t", session)).toContain("BAZHEN_AGENT_ID=agent-x");
+    expect(tmuxOut(server, "show-environment", "-g")).toContain("BZ_USER_VALUE=kept");
+    expect(tmuxOut(server, "show-environment", "-t", session)).not.toContain("BZ_USER_VALUE");
+    expect(tmuxOut(server, "show-environment", "-t", session)).toContain("BAZHEN_AGENT_ID=agent-x");
   });
 
   it("copies no attaching client's variables into the session", () => {
     // An empty array option prints only its name; the default lists DISPLAY, SSH_AUTH_SOCK, …
-    expect(tmuxOut(socket, "show-options", "-g", "update-environment").trim()).toBe(
+    expect(tmuxOut(server, "show-options", "-g", "update-environment").trim()).toBe(
       "update-environment",
     );
   });
@@ -153,8 +164,8 @@ describe("tmux runtime on a private server", () => {
 
   it("ignores a session carrying a terminal id but no kind, as Bazhen never writes one", async () => {
     const forged = newId("term");
-    tmuxOut(socket, "new-session", "-d", "-s", "foreign", "cat");
-    tmuxOut(socket, "set-option", "-t", "foreign", "@bazhen_terminal_id", forged);
+    tmuxOut(server, "new-session", "-d", "-s", "foreign", "cat");
+    tmuxOut(server, "set-option", "-t", "foreign", "@bazhen_terminal_id", forged);
     const ids = (await runtime.inventory()).map((e) => e.ref.terminalId);
     expect(ids).not.toContain(forged);
     expect(ids.length).toBeGreaterThan(0);

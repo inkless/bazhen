@@ -41,9 +41,8 @@ if (!process.env["BZ_E2E_DAEMON_PORT"] || !process.env["BZ_E2E_WEB_PORT"]) {
   process.env["BZ_E2E_WEB_PORT"] ??= String(web);
 }
 process.env["BZ_E2E_HOME"] ??= mkdtempSync(join(tmpdir(), "bz-e2e-home-"));
-process.env["BZ_E2E_SOCKET"] ||= `bz-e2e-${process.pid}`;
-// Every tmux command of the run, the daemon's and teardown's, lands in a socket directory of its
-// own, outside any tmux client, so none can reach the user's sessions. Short, under /tmp, for
+// The daemon and teardown name their server by path. Any other tmux command of the run, an agent's
+// say, lands in a socket directory of its own, outside any tmux client. Short, under /tmp, for
 // sun_path's limit; the config is loaded more than once per run, and keeps the first one.
 process.env["BZ_E2E_TMUX_TMPDIR"] ||= mkdtempSync("/tmp/bz-tmux-");
 process.env["TMUX_TMPDIR"] = process.env["BZ_E2E_TMUX_TMPDIR"];
@@ -63,7 +62,6 @@ const env: Record<string, string> = {
   BAZHEN_HOME: process.env["BZ_E2E_HOME"],
   BAZHEN_PORT: String(daemonPort),
   BAZHEN_WEB_PORT: String(webPort),
-  BAZHEN_TMUX_SOCKET: process.env["BZ_E2E_SOCKET"],
   PATH: `${claudeBin}:${process.env["PATH"] ?? ""}`,
   ...agentHomes(process.env["BZ_E2E_HOME"], process.env["BZ_E2E_WORK"]),
 };

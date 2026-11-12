@@ -6,7 +6,7 @@ description: Writes an integration test in tests/integration that drives Bazhen'
 # Write an integration test against real tmux
 
 **Gate: integration tests run only in the test container (`pnpm test:real`), never on the
-host, and every tmux server the test starts is named by `testSocket()` and killed in
+host, and every tmux server the test starts is named by `testServer()` and killed in
 `afterAll`.** Teardown fails the whole run on any server left alive. A leaked PTY starves every
 terminal on the machine, not just Bazhen's.
 
@@ -15,8 +15,9 @@ terminal on the machine, not just Bazhen's.
 1. Add the test to the right file in `tests/integration/`: runtime behaviour goes in
    `tmux-runtime.test.ts`, and tmux's own behaviour in `tmux-defects.test.ts`. Start a new file
    only for a new area.
-2. Get a server with `const socket = testSocket("<label>")`, then add
-   `afterAll(() => killServer(socket))`. Helpers are in `tests/integration/helpers.ts`.
+2. Get a server with `const server = testServer("<label>")`, then add
+   `afterAll(() => server.kill())`. Run tmux only through it (`tmuxOut(server, …)`); helpers are
+   in `tests/integration/helpers.ts`.
 3. Build inputs with a builder like `spec()` in `tmux-runtime.test.ts`.
 4. **Assert first, wait second.** Use `await expect.poll(() => seen).toContain("…")`, which fails
    with the last value it saw. Never `sleep` to wait for a result, and never a boolean wait helper.
@@ -46,7 +47,7 @@ terminal on the machine, not just Bazhen's.
 
 | Thought                                              | Answer                                                           |
 | ---------------------------------------------------- | ---------------------------------------------------------------- |
-| "I'll use the default tmux server, it's just a test" | That is the user's real session. Use `testSocket()`              |
+| "I'll use the default tmux server, it's just a test" | That is the user's real session. Use `testServer()`              |
 | "Running it on the host once is faster"              | The host is where every agent's session lives. Use the container |
 | "A `sleep(500)` is fine here"                        | It is either flaky or slow. Use `expect.poll`                    |
 | "Cleanup in `afterAll` is noise"                     | Teardown fails the run without it, and the leak outlives the run |
