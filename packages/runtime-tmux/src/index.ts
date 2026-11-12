@@ -19,7 +19,7 @@ import {
   signalPane,
   type ConfiguredTmuxServer,
 } from "@bazhen/host-guard";
-import { assertSameGeneration, isId, ProcessState, StaleIncarnation } from "@bazhen/core";
+import { assertSameGeneration, isId, ProcessState, StaleIncarnation, TerminalNotFound } from "@bazhen/core";
 import { exitStatus, UnknownCause } from "./exit-status.ts";
 import { ExitWatch, type DeadTerminal } from "./exit-watch.ts";
 
@@ -239,6 +239,10 @@ export class TmuxRuntime implements RuntimeAdapter {
 
   async attach(ref: RuntimeRef, size: Size | null, historyLines: number): Promise<Attached> {
     const session = sessionOf(ref);
+    // Asked plainly: other commands answer a missing target with an error or with blank fields.
+    await this.tmux("has-session", "-t", session).catch((err: unknown) => {
+      throw new TerminalNotFound(ref, err);
+    });
     const resizeWindow = (next: Size) => this.tmux(...resizeArgs(session, next));
     if (size !== null) await resizeWindow(size);
     const [cols = 80, rows = 24, held = 0, alternate = 0] = (

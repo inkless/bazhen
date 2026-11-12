@@ -96,6 +96,17 @@ export interface RuntimeStream {
   close(): void;
 }
 
+/** The runtime has no terminal where the reference points: it closed, or was never there. */
+export class TerminalNotFound extends Error {
+  readonly ref: RuntimeRef;
+
+  constructor(ref: RuntimeRef, cause?: unknown) {
+    super(`no running terminal ${ref.terminalId}`, { cause });
+    this.name = "TerminalNotFound";
+    this.ref = ref;
+  }
+}
+
 /** A runtime client just opened, and what it can't redraw: the history above its screen. */
 export interface Attached {
   readonly stream: RuntimeStream;

@@ -27,6 +27,16 @@ async function opened(
   return view;
 }
 
+/**
+ * Waits until `view` shows what tmux has on screen. tmux's client draws the screen a moment after
+ * it attaches, and a view that opens sooner gets the screen as the daemon has it, still empty.
+ */
+async function drawn(view: View, agentId: string, at = size): Promise<void> {
+  await expect
+    .poll(async () => (await replay(view.received(), at)).screen)
+    .toEqual(captured(daemon.capture(agentId)));
+}
+
 /** The numbers of every `n <number>` line a view shows. */
 async function numbers(view: View): Promise<number[]> {
   const { lines } = await replay(view.received(), size);
@@ -45,6 +55,7 @@ describe("what a view shows when it opens", () => {
     ]);
     await waitUntil(() => daemon.screen(agentId).includes("prompt>"), "the program's output");
     const first = await opened(terminalId, "interactive");
+    await drawn(first, agentId);
     const late = await opened(terminalId, "observe");
     const shown = await replay(late.snapshot(), size);
     expect([shown.lines, shown.cursor]).toEqual([
@@ -64,6 +75,7 @@ describe("what a view shows when it opens", () => {
     ]);
     await waitUntil(() => daemon.screen(agentId).includes("0".repeat(size.cols)), "the line");
     const first = await opened(terminalId, "interactive");
+    await drawn(first, agentId);
     const late = await opened(terminalId, "observe");
     // tmux's own cursor waits to wrap past the last column; its client draws it on that column.
     expect([
@@ -87,6 +99,7 @@ describe("what a view shows when it opens", () => {
     ]);
     await waitUntil(() => daemon.screen(agentId).includes("moved"), "the output");
     const first = await opened(terminalId, "interactive");
+    await drawn(first, agentId);
     const late = await opened(terminalId, "observe");
     expect((await replay(late.snapshot(), size)).screen).toEqual(captured(daemon.capture(agentId)));
     first.close();
@@ -122,6 +135,7 @@ describe("what a view shows when it opens", () => {
     ]);
     await waitUntil(() => daemon.screen(agentId).includes("mouse on"), "the program");
     const first = await opened(terminalId, "interactive");
+    await drawn(first, agentId);
     await expect.poll(() => first.output()).toContain("\x1b[?1006h");
     const late = await opened(terminalId, "observe");
     expect(late.snapshot().toString("latin1")).toContain("\x1b[?1006h");
@@ -142,6 +156,7 @@ describe("what a view shows when it opens", () => {
     const laptop = await opened(terminalId, "interactive");
     await laptop.drive();
     await waitUntil(() => daemon.screen(agentId).includes("bottom of 30 rows"), "the redraw");
+    await drawn(laptop, agentId);
     const late = await opened(terminalId, "observe");
     expect((await replay(late.snapshot(), size)).screen).toEqual(captured(daemon.capture(agentId)));
     phone.close();

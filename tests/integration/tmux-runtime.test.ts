@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from "vitest";
 import type { TerminalTags } from "@bazhen/core";
-import { filterEnv, newId } from "@bazhen/core";
+import { filterEnv, newId, TerminalNotFound } from "@bazhen/core";
 import { sessionName, TmuxError, TmuxRuntime } from "@bazhen/runtime-tmux";
 import { nodePtySpawner } from "@bazhen/daemon/pty";
 import { TerminalHub } from "@bazhen/daemon/stream";
@@ -153,6 +153,12 @@ describe("tmux runtime on a private server", () => {
     await expect.poll(() => screen(ref.locator.session), { timeout: 3000 }).toContain("alt");
     expect([before, await stream.alternateScreen()]).toEqual([false, true]);
     stream.close();
+  });
+
+  it("refuses to attach to a terminal that is no longer there", async () => {
+    const ref = await runtime.create(spec(["sleep", "30"]));
+    await runtime.close(ref);
+    await expect(runtime.attach(ref, null, 0)).rejects.toThrow(TerminalNotFound);
   });
 
   it("keeps blank lines at the end of the history", async () => {

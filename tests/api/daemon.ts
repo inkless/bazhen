@@ -381,6 +381,11 @@ export class Daemon {
     return Number(out.toString().trim());
   }
 
+  /** Ends the agent's tmux session behind the daemon's back, as a crash would. */
+  killSession(agentId: string): void {
+    this.tmux("kill-session", "-t", this.requireSession(agentId));
+  }
+
   /** Detaches every tmux client from the agent's terminal, as if the client's tmux link broke. */
   detachClients(agentId: string): void {
     this.tmux("detach-client", "-s", this.requireSession(agentId));

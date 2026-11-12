@@ -65,6 +65,17 @@ describe("a view's stream over time", () => {
     expect(view.frames.at(-1)).toEqual({ type: "ended", reason: "disconnected" });
   });
 
+  it("refuses a view of a terminal whose program's session is gone", async () => {
+    const { agentId, terminalId } = await daemon.program(["sleep", "600"]);
+    daemon.killSession(agentId);
+    const view = await daemon.view(terminalId, "observe");
+    await view.closed();
+    expect(view.frames.at(-1)).toEqual({
+      type: "error",
+      message: expect.stringContaining(`no running terminal ${terminalId}`),
+    });
+  });
+
   it("returns to its PTY baseline after views come, go and fall behind", async () => {
     const { terminalId } = await daemon.program(FLOOD);
     const baseline = daemon.ptyHandles();
