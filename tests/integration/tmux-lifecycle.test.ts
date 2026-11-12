@@ -10,7 +10,7 @@ import {
   type RuntimeRef,
   type TerminalSpec,
 } from "@bazhen/core";
-import { isAlive, type TmuxServer } from "@bazhen/host-guard";
+import { isAlive, type ConfiguredTmuxServer } from "@bazhen/host-guard";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
 import { nodePtySpawner } from "@bazhen/daemon/pty";
 import { sleep, testServer, tmuxOut } from "./helpers.ts";
@@ -23,7 +23,7 @@ const UNKNOWN = { type: "unknown" } as const;
 const WAIT = 10_000;
 const dir = mkdtempSync(join(tmpdir(), "bz-lifecycle-"));
 const server = testServer("lifecycle");
-const runtimeOn = (on: TmuxServer) =>
+const runtimeOn = (on: ConfiguredTmuxServer) =>
   new TmuxRuntime({
     server: on,
     pty: nodePtySpawner,
@@ -189,6 +189,25 @@ describe("tmux runtime lifecycle on a private server", () => {
       reason: "unnumbered",
     });
     expect(pane(ref).dead).toBe(false);
+  });
+
+  it("refuses to signal a process replaced outside Bazhen, under the same generation", async () => {
+    const ref = await runtime.create(spec(["sleep", "300"]));
+    tmuxOut(server, "respawn-pane", "-k", "-t", String(ref.locator.paneId), "sleep", "300");
+    await expect(runtime.signal(ref, "SIGKILL")).rejects.toMatchObject({
+      reason: "process-replaced",
+    });
+    const [pid = "", dead = ""] = tmuxOut(
+      server,
+      "display-message",
+      "-p",
+      "-t",
+      String(ref.locator.paneId),
+      "#{pane_pid} #{pane_dead}",
+    )
+      .trim()
+      .split(" ");
+    expect([pid === ref.locator.panePid, dead]).toEqual([false, "0"]);
   });
 
   it("passes a variable whose value ends in ; through tmux whole", async () => {

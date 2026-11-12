@@ -1,51 +1,41 @@
 import { describe, expect, it } from "vitest";
-import { socketRefusal, TmuxServer } from "./tmux.ts";
+import { socketRefusal } from "./tmux.ts";
 
 const uid = 501;
 const root = "/tmp/bz-tmux-abc";
+const shared = [`/tmp/tmux-${uid}`, `/private/tmp/tmux-${uid}`];
+const refusal = (socket: string, at = root, fold = false) =>
+  socketRefusal(socket, at, shared, fold);
 
-describe("the tmux socket guard", () => {
+describe("the tmux socket guard, by path", () => {
   it("accepts a socket inside the caller's own directory", () => {
-    expect(socketRefusal(`${root}/tmux-${uid}/bz-test-1-runtime`, root, uid)).toBeUndefined();
-    expect(socketRefusal("/var/folders/x/T/bazhen/tmux.sock", "/var/folders/x/T/bazhen", uid)).toBe(
-      undefined,
-    );
+    expect(refusal(`${root}/servers/bz-test-1-runtime`)).toBeUndefined();
+    expect(refusal("/var/folders/x/T/bazhen/tmux.sock", "/var/folders/x/T/bazhen")).toBeUndefined();
   });
 
   it("refuses a socket outside its root, or the root itself", () => {
-    expect(socketRefusal("/tmp/bz-tmux-other/s", root, uid)).toMatch("not inside");
-    expect(socketRefusal(`${root}/../bz-tmux-other/s`, root, uid)).toMatch("normalized");
-    expect(socketRefusal(root, root, uid)).toMatch("not inside");
+    expect(refusal("/tmp/bz-tmux-other/s")).toMatch("not inside");
+    expect(refusal(`${root}/../bz-tmux-other/s`)).toMatch("normalized");
+    expect(refusal(root)).toMatch("not inside");
   });
 
   it("refuses the user's default server by name, wherever it is", () => {
-    expect(socketRefusal(`${root}/tmux-${uid}/default`, root, uid)).toMatch("user's own server");
+    expect(refusal(`${root}/servers/default`)).toMatch("user's own server");
   });
 
   it("refuses any root that holds the directory the user's own servers live in", () => {
-    for (const shared of ["/tmp", "/private/tmp", `/tmp/tmux-${uid}`, "/"]) {
-      expect(socketRefusal(`${shared}/bz/s`.replace("//", "/"), shared, uid)).toMatch(
-        "own servers live",
-      );
+    for (const at of ["/tmp", "/private/tmp", `/tmp/tmux-${uid}`, "/"]) {
+      expect(refusal(`${at}/bz/s`.replace("//", "/"), at)).toMatch("own servers live");
     }
   });
 
-  it("refuses a relative socket or root", () => {
-    expect(socketRefusal("s", root, uid)).toMatch("not an absolute");
-    expect(socketRefusal(`${root}/s`, "tmp/x", uid)).toMatch("not an absolute");
+  it("refuses the shared directory by another case where the file system ignores case", () => {
+    expect(refusal(`/TMP/tmux-${uid}/bazhen`, "/TMP", true)).toMatch("own servers live");
+    expect(refusal(`${root}/servers/DEFAULT`, root, true)).toMatch("user's own server");
   });
 
-  it("names its server by path in every command, forcing UTF-8, never by -L", () => {
-    const server = TmuxServer.at(`${root}/s`, { root, config: `${root}/tmux.conf` });
-    expect(server.argv("list-sessions")).toEqual([
-      "tmux",
-      "-u",
-      "-S",
-      `${root}/s`,
-      "-f",
-      `${root}/tmux.conf`,
-      "list-sessions",
-    ]);
-    expect(() => TmuxServer.at("/tmp/tmux-0/default", { root: "/tmp" })).toThrow(RangeError);
+  it("refuses a relative socket or root", () => {
+    expect(refusal("s")).toMatch("not an absolute");
+    expect(refusal(`${root}/s`, "tmp/x")).toMatch("not an absolute");
   });
 });

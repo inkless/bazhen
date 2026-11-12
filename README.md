@@ -49,4 +49,7 @@ lives in `$XDG_RUNTIME_DIR/bazhen` on Linux and `$TMPDIR/bazhen` on macOS, mode 
 the one your settings pick.
 
 Bazhen only ever manages its own tmux server, by the socket `tmux.sock` in its runtime directory
-(`tmux -S`), never your default one or any server found by name.
+(`tmux -S`), never your default one or any server found by name. To look at it yourself:
+`tmux -S "$TMPDIR/bazhen/tmux.sock" ls` on macOS, `tmux -S "$XDG_RUNTIME_DIR/bazhen/tmux.sock" ls`
+on Linux, or `<BAZHEN_HOME>/run/tmux.sock` under a relocated home. A runtime directory whose
+socket path would be too long moves to `/tmp/bazhen-<uid>-<hash>`.

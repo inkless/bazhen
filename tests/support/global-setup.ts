@@ -12,7 +12,7 @@
 // - The run refuses to start when the machine is close to running out of PTYs: a leak there
 //   starves every terminal on the machine, not just Bazhen's.
 
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TmuxServer } from "@bazhen/host-guard";
@@ -63,7 +63,13 @@ function fail(message: string): never {
   throw new Error(message);
 }
 
-const socketDir = (dir: string) => join(dir, `tmux-${process.getuid?.() ?? 0}`);
+/**
+ * A run's two directories: `servers`, the root its tests' servers live in, and `stray`, its
+ * TMUX_TMPDIR, where a bare `tmux` would land. They are siblings, because host-guard refuses a
+ * root that holds TMUX_TMPDIR's `tmux-<uid>`.
+ */
+const socketDir = (dir: string) => join(dir, "servers");
+const strayDir = (dir: string) => join(dir, "stray");
 
 /** The live tmux servers in a run's own socket directory. */
 function serversIn(dir: string): Map<string, TmuxServer> {
@@ -71,7 +77,10 @@ function serversIn(dir: string): Map<string, TmuxServer> {
   for (const name of readdirSync(socketDir(dir))) {
     // `default` is refused even here: killing one by mistake ends every session on the machine.
     if (name === "default") continue;
-    const server = TmuxServer.at(join(socketDir(dir), name), { root: dir });
+    const path = join(socketDir(dir), name);
+    // The servers' config files sit beside their sockets.
+    if (!statSync(path).isSocket()) continue;
+    const server = TmuxServer.at(path, { root: socketDir(dir) });
     if (server.alive()) servers.set(name, server);
   }
   return servers;
@@ -85,7 +94,9 @@ export function setup(): void {
   // Next, before anything that can fail: teardown runs even after a failed setup.
   tmuxDir = privateTmuxDir();
   mkdirSync(socketDir(tmuxDir), { mode: 0o700 });
-  process.env["TMUX_TMPDIR"] = tmuxDir;
+  mkdirSync(strayDir(tmuxDir), { mode: 0o700 });
+  process.env["TMUX_TMPDIR"] = strayDir(tmuxDir);
+  process.env["BZ_TEST_SERVERS"] = socketDir(tmuxDir);
   delete process.env["TMUX"];
   delete process.env["TMUX_PANE"];
   const { used, cutoff } = ptysInUse();

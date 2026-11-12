@@ -228,7 +228,7 @@ export function staleWorktrees(porcelain: string, alive: (pid: number) => boolea
 /** Removes the worktrees of earlier runs that died before cleaning up. Never touches others. */
 function sweepStale(top: string): void {
   const listed = git(["worktree", "list", "--porcelain"], top);
-  for (const path of staleWorktrees(listed, isAlive)) {
+  for (const path of staleWorktrees(listed, (pid) => pid > 1 && isAlive(pid))) {
     removeWorktree(path, top);
   }
 }

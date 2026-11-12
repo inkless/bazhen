@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import { TmuxServer } from "@bazhen/host-guard";
+import { TmuxServer, type ConfiguredTmuxServer } from "@bazhen/host-guard";
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -9,11 +9,11 @@ export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * A private tmux server scoped to this test run, in the run's own socket directory, so teardown
  * can find and check it. Its config file sits beside it unless the test names one.
  */
-export function testServer(label: string, config?: string): TmuxServer {
-  const root = process.env["TMUX_TMPDIR"];
-  if (root === undefined) throw new Error("no TMUX_TMPDIR: the integration setup did not run");
+export function testServer(label: string, config?: string): ConfiguredTmuxServer {
+  const root = process.env["BZ_TEST_SERVERS"];
+  if (root === undefined) throw new Error("no BZ_TEST_SERVERS: the integration setup did not run");
   const name = `bz-test-${process.env["BZ_TEST_RUN"] ?? process.pid}-${label}`;
-  return TmuxServer.at(join(root, `tmux-${process.getuid?.() ?? 0}`, name), {
+  return TmuxServer.at(join(root, name), {
     root,
     config: config ?? join(root, `${name}.conf`),
   });

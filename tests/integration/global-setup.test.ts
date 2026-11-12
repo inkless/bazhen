@@ -6,8 +6,9 @@ import { setup, teardown } from "../support/global-setup.ts";
 
 const saved = { ...process.env };
 let outer = "";
+let own: TmuxServer | undefined;
 afterEach(() => {
-  usersOwn().kill();
+  own?.kill();
   rmSync(outer, { recursive: true, force: true });
   process.env = { ...saved };
 });
@@ -21,12 +22,14 @@ describe("the test run's tmux isolation", () => {
   it("leaves every server alone when setup fails before the run starts", () => {
     outer = mkdtempSync("/tmp/bz-outer-");
     mkdirSync(join(outer, `tmux-${uid}`), { mode: 0o700 });
-    usersOwn().runSync(["new-session", "-d", "sleep 600"]);
+    // Named before TMUX_TMPDIR points at `outer`, which makes its directory a shared one.
+    own = usersOwn();
+    own.runSync(["new-session", "-d", "sleep 600"]);
     // The user's environment as a run inherits it, and a PTY check that refuses to run.
     process.env["TMUX_TMPDIR"] = outer;
     process.env["BZ_PTY_CUTOFF"] = "0.5";
     expect(() => setup()).toThrow("Refusing to run");
     teardown();
-    expect(usersOwn().alive()).toBe(true);
+    expect(own.alive()).toBe(true);
   });
 });

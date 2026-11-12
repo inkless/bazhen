@@ -5,11 +5,16 @@
 import { spawn, type SpawnOptions } from "node:child_process";
 
 const groups = new Set<number>();
-const vouched = new WeakSet<PaneGroup>();
+/** Each proof's expiry; a proof is used once, and only within a second of the check behind it. */
+const vouched = new WeakMap<PaneGroup, number>();
+const PROOF_MS = 1_000;
 
-/** A pane's process group, as a private tmux server reported it (`TmuxServer.paneGroup`). */
+/** A live pane's process group, as one of Bazhen's own tmux servers reported it. */
 export interface PaneGroup {
   readonly pid: number;
+  readonly server: string;
+  readonly pane: string;
+  readonly generation: string;
 }
 
 const isPid = (pid: number) => Number.isInteger(pid) && pid > 1;
@@ -17,20 +22,22 @@ const isPid = (pid: number) => Number.isInteger(pid) && pid > 1;
 const errorCode = (error: unknown) =>
   error instanceof Error && "code" in error ? error.code : undefined;
 
-/** A pane's process group, recorded as one `signalPane` may reach. Only tmux.ts calls this. */
-export function vouch(pid: number): PaneGroup {
-  if (!isPid(pid)) throw new RangeError(`refusing to vouch for pid ${pid}`);
-  const pane = Object.freeze({ pid });
-  vouched.add(pane);
-  return pane;
+/** A live pane's process group, as one `signalPane` may reach once. Only tmux.ts calls this. */
+export function vouch(group: PaneGroup, now = Date.now()): PaneGroup {
+  if (!isPid(group.pid)) throw new RangeError(`refusing to vouch for pid ${group.pid}`);
+  const proof = Object.freeze({ ...group });
+  vouched.set(proof, now + PROOF_MS);
+  return proof;
 }
 
-function send(target: number, signal: NodeJS.Signals): void {
+/** Whether the target existed; a group that already exited is the caller's to notice. */
+function send(target: number, signal: NodeJS.Signals): boolean {
   try {
     process.kill(target, signal);
+    return true;
   } catch (error) {
-    // The group already exited; that is the caller's to notice.
     if (errorCode(error) !== "ESRCH") throw error;
+    return false;
   }
 }
 
@@ -46,12 +53,17 @@ export function signalGroup(child: { readonly pid?: number | undefined }, signal
   const pid = child.pid;
   if (pid === undefined) return;
   if (!groups.has(pid)) throw new RangeError(`refusing to signal group ${pid}: not started here`);
-  send(-pid, signal);
+  // Kept until the whole group is gone, not just its leader: a group outlives the child that
+  // leads it, and is still this process's to stop.
+  if (!send(-pid, signal)) groups.delete(pid);
 }
 
 /** Signals a pane's process and every tool it started, as Ctrl-C or a hangup would. */
-export function signalPane(pane: PaneGroup, signal: NodeJS.Signals): void {
-  if (!vouched.has(pane)) throw new RangeError(`refusing to signal group ${pane.pid}: unvouched`);
+export function signalPane(pane: PaneGroup, signal: NodeJS.Signals, now = Date.now()): void {
+  const expiry = vouched.get(pane);
+  vouched.delete(pane);
+  if (expiry === undefined) throw new RangeError(`refusing to signal group ${pane.pid}: unvouched`);
+  if (now > expiry) throw new RangeError(`refusing to signal group ${pane.pid}: stale proof`);
   send(-pane.pid, signal);
 }
 

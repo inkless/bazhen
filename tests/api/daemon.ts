@@ -138,8 +138,13 @@ export class Daemon {
           (r) => r.ok,
           () => false,
         )
-      )
-        return;
+      ) {
+        // The daemon keeps its tmux server beside its own socket. Were its runtime directory
+        // ever moved (a home too long for a socket path), every tmux command here would miss it.
+        if (existsSync(join(this.home, "run", "bazhen.sock"))) return;
+        await this.stop();
+        throw new Error(`the daemon's runtime directory is not ${join(this.home, "run")}`);
+      }
       await new Promise((r) => setTimeout(r, 100));
     }
     await this.stop();

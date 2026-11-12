@@ -36,6 +36,8 @@ Each layer has one job:
   never by `-L`, and refuses `default` and the directory the user's own servers share. A signal
   reaches only a group this process started (`spawnGroup`) or a pane its tmux server vouched
   for (`paneGroup`, `signalPane`). It depends on nothing of Bazhen's, so anything may use it.
+  The one signal sent elsewhere is `ChildProcess.kill()` on a child this process spawned and still
+  holds: Node addresses it by the child's own pid, so it can't reach anything else.
 - `apps/daemon` is the composition root: it wires the adapters and implementations into core.
 - `apps/web` is the client: it talks to the daemon only through the protocol.
 

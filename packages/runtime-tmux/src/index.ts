@@ -13,7 +13,12 @@ import type {
   TerminalTags,
 } from "@bazhen/core";
 import type { ExitStatus, Signal } from "@bazhen/protocol";
-import { signalPane, type TmuxServer } from "@bazhen/host-guard";
+import {
+  GENERATION_OPTION,
+  PaneRefused,
+  signalPane,
+  type ConfiguredTmuxServer,
+} from "@bazhen/host-guard";
 import { isId, ProcessState, StaleIncarnation } from "@bazhen/core";
 import { exitStatus, UnknownCause } from "./exit-status.ts";
 import { ExitWatch, type DeadTerminal } from "./exit-watch.ts";
@@ -33,7 +38,7 @@ const COLUMN = {
   sessionId: "session_id",
   paneId: "pane_id",
   panePid: "pane_pid",
-  generation: "@bazhen_generation",
+  generation: GENERATION_OPTION,
   dead: "pane_dead",
   status: "pane_dead_status",
   deadSignal: "pane_dead_signal",
@@ -116,7 +121,7 @@ export class TmuxError extends Error {
 
 export interface TmuxRuntimeOptions {
   /** Bazhen's private server, whose `config` is where TMUX_CONFIG is written before it starts. */
-  readonly server: TmuxServer;
+  readonly server: ConfiguredTmuxServer;
   readonly pty: PtySpawner;
   /**
    * The whole environment of every tmux command and of the daemon's attach clients. The server
@@ -142,7 +147,6 @@ export class TmuxRuntime implements RuntimeAdapter {
       intervalMs: opts.exitPollMs ?? EXIT_POLL_MS,
       onError: opts.onError ?? ((err) => console.warn("tmux exit polling failed:", err)),
     });
-    if (opts.server.config === undefined) throw new Error("the tmux server needs a config file");
     writeFileSync(opts.server.config, TMUX_CONFIG, { mode: 0o600 });
   }
 
@@ -327,14 +331,19 @@ export class TmuxRuntime implements RuntimeAdapter {
     const target = located(pane.ref, "paneId");
     // The pane's process leads its own group, so this reaches the tools it started as well.
     // A group that exited after the check above is the poller's to report.
+    // The process the caller meant, not whichever the pane runs now.
+    const expected = { pid: ref.locator.panePid ?? "", generation: ref.locator.generation ?? "" };
     const group = await this.opts.server
-      .paneGroup(target, { env: this.opts.env })
+      .paneGroup(target, expected, { env: this.opts.env })
       .catch((cause: unknown) => {
+        if (cause instanceof PaneRefused && cause.reason === "dead") {
+          throw new ProcessState(ref.terminalId, "running");
+        }
+        if (cause instanceof PaneRefused) {
+          throw new StaleIncarnation(ref.terminalId, "process-replaced");
+        }
         throw new TmuxError(["display-message", "-t", target], cause);
       });
-    if (String(group.pid) !== pane.ref.locator.panePid) {
-      throw new StaleIncarnation(ref.terminalId, "process-replaced");
-    }
     signalPane(group, signal);
   }
 
