@@ -3,11 +3,11 @@
 // one predicate per invariant, and `fc.assert` inside the test.
 
 import * as fc from "fast-check";
-import type { TerminalState } from "@bazhen/protocol";
+import type { MailboxState, TerminalState } from "@bazhen/protocol";
 import { describe, expect, it } from "vitest";
 import { agent, type AgentEvent } from "./agent.ts";
 import { InvalidTransition, type Machine } from "./machine.ts";
-import { mailbox, type MailboxEvent, type MailboxState } from "./mailbox.ts";
+import { mailbox, type MailboxEvent } from "./mailbox.ts";
 import { advanceTerminal, terminal, type TerminalEvent } from "./terminal.ts";
 
 interface Step<S, E> {

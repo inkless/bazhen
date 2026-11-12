@@ -1,13 +1,5 @@
+import type { MailboxState } from "@bazhen/protocol";
 import { machine } from "./machine.ts";
-
-export type MailboxState =
-  | "queued"
-  | "offered"
-  | "emitted"
-  | "seen"
-  | "queued_in_codex"
-  | "delivered"
-  | "undeliverable";
 
 /**
  * - `offer`: a waiter or a PostToolUse hook takes the message; `ack`: the hook client wrote it.

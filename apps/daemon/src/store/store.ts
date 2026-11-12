@@ -1,10 +1,19 @@
-import { DatabaseSync, type StatementSync } from "node:sqlite";
-import { isId, newId, type AttachmentId, type EnvironmentId, type RuntimeRef } from "@bazhen/core";
+import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqlite";
+import {
+  isId,
+  newId,
+  type AttachmentId,
+  type AttentionId,
+  type EnvironmentId,
+  type IdPrefix,
+  type RuntimeRef,
+} from "@bazhen/core";
 import { z } from "zod";
 import {
   EVENTS,
   StateSnapshot,
   type EnvironmentKind,
+  type MailboxState,
   type EventPayload,
   type EventType,
 } from "@bazhen/protocol";
@@ -18,6 +27,27 @@ export interface NewEvent<T extends EventType> {
   readonly payload: EventPayload<T>;
   readonly causationId?: number;
   readonly correlationId?: string;
+}
+
+/** A row's id as a Bazhen id of the given kind, or nothing if it isn't one. */
+function rowIds<P extends IdPrefix>(rows: readonly Record<string, SQLOutputValue>[], prefix: P) {
+  return rows.flatMap((r) => (typeof r.id === "string" && isId(prefix, r.id) ? [r.id] : []));
+}
+
+/** A key reused for a different request: answering with the first one would be a lie. */
+export interface OpenAttention {
+  readonly id: AttentionId;
+  readonly toolUseId: string | null;
+  readonly mainAgent: boolean;
+}
+
+export class IdempotencyConflict extends Error {
+  readonly key: string;
+
+  constructor(key: string) {
+    super(`idempotency key ${key} was first used for a different request`);
+    this.key = key;
+  }
 }
 
 /** A payload its event type's schema refuses; nothing is recorded. */
@@ -159,9 +189,10 @@ export class Store {
   }
 
   environments(kind: EnvironmentKind): EnvironmentId[] {
-    return this.prepare("SELECT id FROM environments WHERE kind = ? ORDER BY created_event_id")
-      .all(kind)
-      .flatMap((r) => (typeof r.id === "string" && isId("env", r.id) ? [r.id] : []));
+    const rows = this.prepare(
+      "SELECT id FROM environments WHERE kind = ? ORDER BY created_event_id",
+    );
+    return rowIds(rows.all(kind), "env");
   }
 
   /** A terminal's current runtime incarnation, if it is running in one. */
@@ -180,9 +211,76 @@ export class Store {
 
   /** Attachments recorded as open; after a restart, none of them has a client any more. */
   openAttachments(): AttachmentId[] {
-    return this.prepare("SELECT id FROM attachments_open ORDER BY started_event_id")
-      .all()
-      .flatMap((r) => (typeof r.id === "string" && isId("att", r.id) ? [r.id] : []));
+    return rowIds(
+      this.prepare("SELECT id FROM attachments_open ORDER BY started_event_id").all(),
+      "att",
+    );
+  }
+
+  /** An agent's messages in the given states, oldest first. */
+  mail(agentId: string, states: readonly MailboxState[]) {
+    const marks = states.map(() => "?").join(", ");
+    const rows = this.prepare(
+      `SELECT id, body, prompt_id FROM mailbox
+       WHERE agent_session_id = ? AND state IN (${marks}) ORDER BY created_event_id`,
+    ).all(agentId, ...states);
+    return rows.flatMap((r) =>
+      typeof r.id === "string" && isId("msg", r.id)
+        ? [
+            {
+              id: r.id,
+              body: String(r.body),
+              promptId: typeof r.prompt_id === "string" ? r.prompt_id : null,
+            },
+          ]
+        : [],
+    );
+  }
+
+  /** Open attention items, for one agent or all, with the tool call each is about. */
+  openAttention(agentId?: string): OpenAttention[] {
+    const sql = `SELECT id, tool_use_id, main_agent FROM attention_items
+                 WHERE state = 'open' AND (?1 IS NULL OR agent_session_id = ?1) ORDER BY created_event_id`;
+    return this.prepare(sql)
+      .all(agentId ?? null)
+      .flatMap((r) =>
+        typeof r.id === "string" && isId("attn", r.id)
+          ? [
+              {
+                id: r.id,
+                toolUseId: typeof r.tool_use_id === "string" ? r.tool_use_id : null,
+                mainAgent: r.main_agent === 1,
+              },
+            ]
+          : [],
+      );
+  }
+
+  /** One agent's harness, if this daemon runs it. */
+  agent(agentId: string): { harness: string } | undefined {
+    const row = this.prepare("SELECT harness FROM agent_sessions WHERE id = ?").get(agentId);
+    return row === undefined ? undefined : { harness: String(row.harness) };
+  }
+
+  /**
+   * Runs a mutation once per idempotency key (§5.1): a repeat of the same request gets the first
+   * answer, parsed as `parse` reads it; the same key for a different request is refused. The
+   * answer is written in the transaction that records the mutation.
+   */
+  once<T>(key: string, request: unknown, parse: (stored: unknown) => T, mutate: () => T): T {
+    const asked = JSON.stringify(request);
+    const prior = this.recall(key);
+    if (prior !== undefined) {
+      const stored: unknown =
+        typeof prior === "object" && prior !== null ? Reflect.get(prior, "request") : undefined;
+      if (stored !== asked) throw new IdempotencyConflict(key);
+      return parse(Reflect.get(Object(prior), "response"));
+    }
+    return this.transaction(() => {
+      const response = mutate();
+      this.remember(key, { request: asked, response });
+      return response;
+    });
   }
 
   /** Every projection the state snapshot shows, with the last event it reflects. */
@@ -203,6 +301,13 @@ export class Store {
             ...r,
             externalRef: typeof r.externalRef === "string" ? JSON.parse(r.externalRef) : null,
           })),
+        attention: this.prepare(
+          `SELECT id, agent_session_id AS agentId, state, close_reason AS closeReason, summary
+           FROM attention_items ORDER BY created_event_id`,
+        ).all(),
+        messages: this.prepare(
+          "SELECT id, agent_session_id AS agentId, state FROM mailbox ORDER BY created_event_id",
+        ).all(),
       }),
     );
   }

@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { EnvironmentKind, Id } from "./ids.ts";
+import { EnvironmentKind, Id, IdempotencyKey } from "./ids.ts";
+import { Attention, Message } from "./mail.ts";
 
 export const HarnessId = z.enum(["claude-code", "codex"]);
 export type HarnessId = z.infer<typeof HarnessId>;
@@ -43,12 +44,6 @@ export const Agent = z.object({
 });
 export type Agent = z.infer<typeof Agent>;
 
-/**
- * Every mutation carries a key chosen by the client; repeating it returns the first answer
- * instead of acting twice (foundation-design §5.1).
- */
-export const IdempotencyKey = z.string().min(1).max(200);
-
 export const LaunchAgentRequest = z.object({
   idempotencyKey: IdempotencyKey,
   harness: HarnessId,
@@ -70,6 +65,8 @@ export const StateSnapshot = z.object({
   eventId: z.number().int().nonnegative(),
   environments: z.array(Environment),
   agents: z.array(Agent),
+  attention: z.array(Attention),
+  messages: z.array(Message),
 });
 export type StateSnapshot = z.infer<typeof StateSnapshot>;
 
@@ -79,6 +76,7 @@ export const ErrorResponse = z.object({
     "unsupported",
     "launch_failed",
     "conflict",
+    "not_found",
     "origin_not_allowed",
     "host_not_allowed",
   ]),

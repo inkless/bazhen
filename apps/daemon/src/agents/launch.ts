@@ -10,7 +10,7 @@ import {
 } from "@bazhen/core";
 import { HarnessId, LaunchAgentResponse, type LaunchAgentRequest } from "@bazhen/protocol";
 import { z } from "zod";
-import type { Store } from "../store/store.ts";
+import { IdempotencyConflict, type Store } from "../store/store.ts";
 
 /** The local environment's id, registering it on the first run (foundation-design §3). */
 export function localEnvironmentId(store: Store): EnvironmentId {
@@ -24,16 +24,6 @@ export function localEnvironmentId(store: Store): EnvironmentId {
     payload: { kind: "local" },
   });
   return id;
-}
-
-/** A key reused for a different launch: answering with the first one would be a lie. */
-export class IdempotencyConflict extends Error {
-  readonly key: string;
-
-  constructor(key: string) {
-    super(`idempotency key ${key} was first used for a different launch`);
-    this.key = key;
-  }
 }
 
 /** What a launch key remembers: the request it was for, and how that launch ended. */

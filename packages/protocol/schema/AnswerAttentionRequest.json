@@ -1,0 +1,24 @@
+{
+  "$id": "AnswerAttentionRequest",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "decision": {
+      "type": "string",
+      "enum": [
+        "allow",
+        "deny"
+      ]
+    }
+  },
+  "required": [
+    "idempotencyKey",
+    "decision"
+  ],
+  "additionalProperties": false
+}

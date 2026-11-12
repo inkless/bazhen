@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { newId, UnsupportedHarness, type RuntimeAdapter } from "@bazhen/core";
 import type { LaunchAgentRequest } from "@bazhen/protocol";
+import { AttentionClosed } from "../mailbox/approvals.ts";
 import { createApp } from "./app.ts";
 
 const unused = () => Promise.reject(new Error("not used by these tests"));
@@ -19,7 +20,11 @@ const app = createApp({
   schemaVersion: () => 1,
   runtime,
   allow: { hosts: ["127.0.0.1:7900"], origins: ["http://127.0.0.1:7900"] },
-  state: () => ({ eventId: 3, environments: [], agents: [] }),
+  state: () => ({ eventId: 3, environments: [], agents: [], attention: [], messages: [] }),
+  send: () => ({ messageId: newId("msg"), eventIds: [4] }),
+  answer: () => {
+    throw new AttentionClosed("attn_x");
+  },
   launch: async (req: LaunchAgentRequest) => {
     if (req.harness === "codex") throw new UnsupportedHarness("codex");
     return launched;
@@ -53,7 +58,13 @@ describe("HTTP app", () => {
 
   it("serves the state snapshot with the event it is consistent with", async () => {
     const res = await app.request("/v1/state", { headers: { host } });
-    expect(await res.json()).toEqual({ eventId: 3, environments: [], agents: [] });
+    expect(await res.json()).toEqual({
+      eventId: 3,
+      environments: [],
+      agents: [],
+      attention: [],
+      messages: [],
+    });
   });
 
   it("launches an agent and answers with the events it produced", async () => {
@@ -84,5 +95,14 @@ describe("HTTP app", () => {
     const bad = await post({ ...launch, cwd: "relative" });
     const unsupported = await post({ ...launch, harness: "codex" });
     expect([bad.status, unsupported.status]).toEqual([400, 422]);
+  });
+
+  it("answers a late answer to an attention item with a conflict, not a success", async () => {
+    const res = await app.request("/v1/attention/attn_x/answer", {
+      method: "POST",
+      headers: { host, "content-type": "application/json" },
+      body: JSON.stringify({ idempotencyKey: "a", decision: "allow" }),
+    });
+    expect(res.status).toBe(409);
   });
 });

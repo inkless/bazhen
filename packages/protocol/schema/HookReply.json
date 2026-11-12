@@ -1,0 +1,32 @@
+{
+  "$id": "HookReply",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "exitCode": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 255
+    },
+    "stdout": {
+      "type": "string"
+    },
+    "stderr": {
+      "type": "string"
+    },
+    "offered": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^msg_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+      }
+    }
+  },
+  "required": [
+    "exitCode",
+    "stdout",
+    "stderr",
+    "offered"
+  ],
+  "additionalProperties": false
+}

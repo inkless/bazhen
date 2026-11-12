@@ -4,17 +4,22 @@ import {
   UnsupportedHarness,
   type HarnessAdapter,
   type RuntimeAdapter,
+  type RuntimeHealth,
+  type RuntimeInventoryEntry,
   type TerminalSpec,
 } from "@bazhen/core";
 import { LocalEnvironment } from "./index.ts";
 
 /** An in-memory runtime that records what it was asked to create. */
-function fakeRuntime() {
+function fakeRuntime(
+  health: RuntimeHealth = { state: "healthy", version: null },
+  inventory: RuntimeInventoryEntry[] = [],
+) {
   const created: TerminalSpec[] = [];
   const runtime: RuntimeAdapter = {
     kind: "fake",
-    health: () => Promise.reject(new Error("not used")),
-    inventory: () => Promise.reject(new Error("not used")),
+    health: async () => health,
+    inventory: async () => inventory,
     create: async (spec) => {
       created.push(spec);
       return { terminalId: spec.terminalId, runtime: "fake", locator: { session: "s" } };

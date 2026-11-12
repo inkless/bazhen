@@ -3,7 +3,7 @@
 // daemon written in another language.
 
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,7 +42,7 @@ export class Daemon {
   private port = 0;
   private process: ChildProcess | undefined;
 
-  private constructor(home: string) {
+  private constructor(home: string, modelUrl: string | undefined) {
     this.home = home;
     this.work = join(home, "work");
     this.tmuxSocket = `bz-test-${process.env["BZ_TEST_RUN"] ?? process.pid}-api-${++instances}`;
@@ -54,12 +54,13 @@ export class Daemon {
       BAZHEN_HOME: home,
       BAZHEN_TMUX_SOCKET: this.tmuxSocket,
       ...claude,
+      ...(modelUrl === undefined ? {} : { ANTHROPIC_BASE_URL: modelUrl }),
     };
   }
 
   /** A daemon on a fresh home. Short paths keep its socket under sun_path's limit. */
-  static async start(): Promise<Daemon> {
-    const daemon = new Daemon(realpathSync(mkdtempSync("/tmp/bz-api-")));
+  static async start(opts: { modelUrl?: string } = {}): Promise<Daemon> {
+    const daemon = new Daemon(realpathSync(mkdtempSync("/tmp/bz-api-")), opts.modelUrl);
     await daemon.spawn();
     return daemon;
   }
@@ -129,6 +130,11 @@ export class Daemon {
     return view;
   }
 
+  /** Whether a file exists in the agents' work directory. */
+  hasFile(name: string): boolean {
+    return existsSync(join(this.work, name));
+  }
+
   tmux(...args: string[]): string {
     return execFileSync("tmux", ["-L", this.tmuxSocket, ...args], {
       env: { ...process.env, TMUX: "" },
@@ -160,15 +166,18 @@ export class Daemon {
     this.tmux("respawn-pane", "-k", "-t", `${session}:0`, ...argv);
   }
 
+  private async exit(): Promise<void> {
+    const child = this.process;
+    if (child === undefined || child.exitCode !== null || child.signalCode !== null) return;
+    await new Promise((resolve) => {
+      child.once("exit", resolve);
+      child.kill("SIGTERM");
+    });
+  }
+
   /** Stops the daemon, its tmux server and every file under its home. */
   async stop(): Promise<void> {
-    const child = this.process;
-    if (child !== undefined && child.exitCode === null && child.signalCode === null) {
-      await new Promise((resolve) => {
-        child.once("exit", resolve);
-        child.kill("SIGTERM");
-      });
-    }
+    await this.exit();
     try {
       this.tmux("kill-server");
     } catch {

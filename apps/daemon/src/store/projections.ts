@@ -1,6 +1,22 @@
 import type { SQLInputValue, StatementSync } from "node:sqlite";
-import { agent, terminal, type AgentEvent, type TerminalEvent } from "@bazhen/core";
-import { AgentState, EVENTS, TerminalState, type EventType } from "@bazhen/protocol";
+import {
+  agent,
+  attention,
+  mailbox,
+  terminal,
+  type AgentEvent,
+  type MailboxEvent,
+  type TerminalEvent,
+} from "@bazhen/core";
+import {
+  AgentState,
+  AttentionCloseReason,
+  AttentionState,
+  EVENTS,
+  MailboxState,
+  TerminalState,
+  type EventType,
+} from "@bazhen/protocol";
 
 /** Prepares a statement once and reuses it: the store runs on the loop every hook waits on. */
 export type Statements = { prepare(sql: string): StatementSync };
@@ -95,6 +111,41 @@ export function project(db: Statements, e: Recorded): void {
       ).run(e.id, String(open.terminal_id), e.entityId);
       return;
     }
+    case "mailbox.queued": {
+      const { agentId, body } = EVENTS[e.type].payload.parse(e.payload);
+      db.prepare(
+        `INSERT INTO mailbox (id, agent_session_id, body, state, created_event_id, updated_event_id)
+         VALUES (?, ?, ?, 'queued', ?, ?)`,
+      ).run(e.entityId, agentId, body, e.id, e.id);
+      return;
+    }
+    case "mailbox.offered":
+      return moveMessage(db, e, "offer");
+    case "mailbox.emitted":
+      return moveMessage(db, e, "ack");
+    case "mailbox.seen": {
+      const { promptId } = EVENTS[e.type].payload.parse(e.payload);
+      return moveMessage(db, e, "seen", { prompt_id: promptId });
+    }
+    case "mailbox.delivered":
+      return moveMessage(db, e, "confirm");
+    case "mailbox.requeued":
+      EVENTS[e.type].payload.parse(e.payload);
+      return moveMessage(db, e, "requeue", { prompt_id: null });
+    case "attention.opened": {
+      const { agentId, summary, toolUseId, mainAgent } = EVENTS[e.type].payload.parse(e.payload);
+      db.prepare(
+        `INSERT INTO attention_items (id, agent_session_id, state, summary, tool_use_id,
+           main_agent, created_event_id, updated_event_id)
+         VALUES (?, ?, 'open', ?, ?, ?, ?, ?)`,
+      ).run(e.entityId, agentId, summary, toolUseId, mainAgent ? 1 : 0, e.id, e.id);
+      return;
+    }
+    case "attention.answered":
+      EVENTS[e.type].payload.parse(e.payload);
+      return closeAttention(db, e, "answered");
+    case "attention.closed":
+      return closeAttention(db, e, EVENTS[e.type].payload.parse(e.payload).reason);
     case "lease.granted": {
       const { attachmentId, epoch } = EVENTS[e.type].payload.parse(e.payload);
       db.prepare(
@@ -108,6 +159,20 @@ export function project(db: Statements, e: Recorded): void {
 }
 
 type Columns = Readonly<Record<string, SQLInputValue>>;
+
+function moveMessage(db: Statements, e: Recorded, event: MailboxEvent, columns: Columns = {}) {
+  const row = db.prepare("SELECT state FROM mailbox WHERE id = ?").get(e.entityId);
+  if (row === undefined) throw new UnknownEntity("message", e.entityId);
+  const state = mailbox.next(MailboxState.parse(row.state), event);
+  update(db, "mailbox", "id", e.entityId, e.id, { state, ...columns });
+}
+
+function closeAttention(db: Statements, e: Recorded, reason: AttentionCloseReason) {
+  const row = db.prepare("SELECT state FROM attention_items WHERE id = ?").get(e.entityId);
+  if (row === undefined) throw new UnknownEntity("attention item", e.entityId);
+  const state = attention.next(AttentionState.parse(row.state), reason);
+  update(db, "attention_items", "id", e.entityId, e.id, { state, close_reason: reason });
+}
 
 /** Moves an agent and its terminal together: a local agent's terminal is its process (§4.5). */
 function advance(

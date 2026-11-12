@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ExternalRef, HarnessId } from "./agents.ts";
 import { AttachmentMode, EnvironmentKind, Id } from "./ids.ts";
+import { ApprovalDecision, AttentionCloseReason } from "./mail.ts";
 
 /**
  * Every event type the store accepts, with the entity it is about and its payload. A row adds
@@ -47,6 +48,39 @@ export const EVENTS = {
     payload: z.object({
       reason: z.enum(["client_closed", "terminal_closed", "attach_failed", "daemon_restart"]),
     }),
+  },
+  /** A message for an agent, delivered at least once through its harness (§4.7, §5.6). */
+  "mailbox.queued": {
+    entity: "message",
+    payload: z.object({ agentId: Id("agent"), body: z.string() }),
+  },
+  /** A hook took the message to hand to the harness. */
+  "mailbox.offered": { entity: "message", payload: z.object({}) },
+  /** The hook client wrote it where the harness reads it. */
+  "mailbox.emitted": { entity: "message", payload: z.object({}) },
+  /** A prompt carrying its id started; that prompt's end delivers it. */
+  "mailbox.seen": { entity: "message", payload: z.object({ promptId: z.string() }) },
+  "mailbox.delivered": { entity: "message", payload: z.object({}) },
+  "mailbox.requeued": {
+    entity: "message",
+    payload: z.object({ reason: z.enum(["not_written"]) }),
+  },
+  /** A harness asks the human, here to run a tool (§4.6, §5.6). */
+  "attention.opened": {
+    entity: "attention",
+    payload: z.object({
+      agentId: Id("agent"),
+      summary: z.string(),
+      /** The tool call it is for, whose result closes it; null if no call was seen to start. */
+      toolUseId: z.string().nullable(),
+      /** Asked by the agent itself, whose turn ending closes it, rather than by a subagent. */
+      mainAgent: z.boolean(),
+    }),
+  },
+  "attention.answered": { entity: "attention", payload: z.object({ decision: ApprovalDecision }) },
+  "attention.closed": {
+    entity: "attention",
+    payload: z.object({ reason: AttentionCloseReason.exclude(["answered"]) }),
   },
   /** An engaged view became the terminal's driver; the epoch rises on every grant (§4.3). */
   "lease.granted": {
