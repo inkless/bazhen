@@ -41,8 +41,12 @@ jobs:
       - name: Install tmux
         if: runner.os == 'macOS'
         run: command -v tmux || brew install tmux
+      # The real-tmux suites refuse to run on any host that is not thrown away after use.
+      - name: Mark the runner disposable
+        run: sudo touch /etc/bazhen-disposable-host
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      - run: pnpm test:integration
 
   # The black-box suite runs the real harness CLIs, pinned in tests/api. No agent is let reach a
   # model, so it needs no credentials. It is slower than `pnpm check`, so it is a job of its own.
@@ -69,6 +73,8 @@ jobs:
       - name: Install tmux
         if: runner.os == 'macOS'
         run: command -v tmux || brew install tmux
+      - name: Mark the runner disposable
+        run: sudo touch /etc/bazhen-disposable-host
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:api
 
@@ -84,6 +90,8 @@ jobs:
           cache: pnpm
       - name: Install tmux
         run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Mark the runner disposable
+        run: sudo touch /etc/bazhen-disposable-host
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @bazhen/e2e-tests exec playwright install --with-deps chromium
       - run: pnpm test:e2e
@@ -104,6 +112,8 @@ jobs:
           cache: pnpm
       - name: Install tmux
         run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Mark the runner disposable
+        run: sudo touch /etc/bazhen-disposable-host
       - run: pnpm install --frozen-lockfile
       - name: pnpm test:falsify
         env:

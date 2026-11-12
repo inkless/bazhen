@@ -6,7 +6,7 @@
     "noEmit": false,
     "emitDeclarationOnly": true
   },
-  "include": ["*.ts", "../support/global-setup.ts"],
+  "include": ["*.ts", "../support/global-setup.ts", "../support/disposable-host.ts"],
   "references": [
     { "path": "../../packages/core" },
     { "path": "../../packages/runtime-tmux" },

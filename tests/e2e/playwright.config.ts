@@ -5,6 +5,9 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig, devices } from "@playwright/test";
 import { agentHomes, loginEnv } from "../support/agent-env.ts";
+import { requireDisposableHost } from "../support/disposable-host.ts";
+
+requireDisposableHost();
 
 // Free ports and a per-run home and tmux server, so parallel worktrees can run e2e at once.
 // Playwright re-evaluates this file in its workers; they inherit the values through the

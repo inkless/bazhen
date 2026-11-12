@@ -6,7 +6,12 @@ export default defineConfig({
       {
         test: {
           name: "unit",
-          include: ["packages/*/src/**/*.test.ts", "apps/*/src/**/*.test.ts", "scripts/*.test.ts"],
+          include: [
+            "packages/*/src/**/*.test.ts",
+            "apps/*/src/**/*.test.ts",
+            "scripts/*.test.ts",
+            "tests/support/*.test.ts",
+          ],
           exclude: ["**/*.medium.test.ts", "**/node_modules/**"],
           env: { BAZHEN_HOME: "/nonexistent/bazhen-unit-tests" },
         },
@@ -19,7 +24,7 @@ export default defineConfig({
             "apps/*/src/**/*.medium.test.ts",
             "scripts/*.medium.test.ts",
           ],
-          globalSetup: ["tests/support/global-setup.ts"],
+          globalSetup: ["tests/support/medium-setup.ts"],
         },
       },
       {
