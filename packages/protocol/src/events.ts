@@ -93,3 +93,44 @@ export const EVENTS = {
 
 export type EventType = keyof typeof EVENTS;
 export type EventPayload<T extends EventType> = z.infer<(typeof EVENTS)[T]["payload"]>;
+
+/**
+ * Payloads the event stream sends in a narrower shape than the log stores. Message bodies stay
+ * out of the stream, as they stay out of `/v1/state` (foundation-design §5.2).
+ */
+const STREAMED: Partial<Record<EventType, z.ZodType>> = {
+  "mailbox.queued": EVENTS["mailbox.queued"].payload.omit({ body: true }),
+};
+
+const isEventType = (type: string): type is EventType => Object.hasOwn(EVENTS, type);
+
+const streamed = (type: EventType) =>
+  z.object({
+    id: z.number().int().positive(),
+    ts: z.string(),
+    type: z.literal(type),
+    entityType: z.literal(EVENTS[type].entity),
+    entityId: z.string(),
+    actor: z.string(),
+    causationId: z.number().int().positive().nullable(),
+    correlationId: z.string().nullable(),
+    payload: STREAMED[type] ?? EVENTS[type].payload,
+  });
+
+/**
+ * One event as the stream sends it: a branch per registered type, each checking its own
+ * payload. Clients skip types they don't know, so registering one breaks no older client.
+ */
+export const Event = z.union(Object.keys(EVENTS).filter(isEventType).map(streamed));
+export type Event = z.infer<typeof Event>;
+
+/** Text frames on `/v1/events`; the client sends none. */
+export const EventFrame = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("event"), event: Event }),
+  /**
+   * The cursor can't be resumed: older than retention (`stale`), or not from this store
+   * (`foreign`). Re-read `/v1/state` and resume from its cursor.
+   */
+  z.object({ type: z.literal("reset"), reason: z.enum(["stale", "foreign"]) }),
+]);
+export type EventFrame = z.infer<typeof EventFrame>;

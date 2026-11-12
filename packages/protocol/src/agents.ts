@@ -75,8 +75,9 @@ export const LaunchAgentResponse = z.object({
 });
 export type LaunchAgentResponse = z.infer<typeof LaunchAgentResponse>;
 
-/** Projections, consistent as of `eventId`: resume the event stream after it. */
+/** Projections, consistent as of `eventId` in store `epoch`: resume the event stream there. */
 export const StateSnapshot = z.object({
+  epoch: z.string(),
   eventId: z.number().int().nonnegative(),
   environments: z.array(Environment),
   agents: z.array(Agent),
