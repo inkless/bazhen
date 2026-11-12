@@ -7,6 +7,7 @@ export class Settle {
   private quiet: ReturnType<typeof setTimeout> | undefined;
   private deadline: ReturnType<typeof setTimeout> | undefined;
   private last = 0;
+  private stopped = false;
   private readonly quietMs: number;
   private readonly maxWaitMs: number;
   private readonly fire: () => void;
@@ -18,12 +19,19 @@ export class Settle {
   }
 
   poke(): void {
+    if (this.stopped) return;
     this.last = performance.now();
     this.quiet ??= setTimeout(() => this.whenQuiet(), this.quietMs);
     this.deadline ??= setTimeout(() => this.run(), this.maxWaitMs);
   }
 
+  /** For good: a later poke does nothing. */
   dispose(): void {
+    this.stopped = true;
+    this.clear();
+  }
+
+  private clear(): void {
     clearTimeout(this.quiet);
     clearTimeout(this.deadline);
     this.quiet = this.deadline = undefined;
@@ -36,7 +44,7 @@ export class Settle {
   }
 
   private run(): void {
-    this.dispose();
+    this.clear();
     this.fire();
   }
 }

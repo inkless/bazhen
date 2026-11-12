@@ -449,9 +449,9 @@ describe("terminal hub: screen state and slow views", () => {
       rt.emit("output");
       await new Promise((resolve) => setTimeout(resolve, 30));
     }
-    expect([rt.screenChecks() >= 3, a.frames.filter((f) => f.type === "error")]).toEqual([
+    expect([rt.screenChecks() >= 3, a.frames.filter((f) => f.type === "notice")]).toEqual([
       true,
-      [{ type: "error", message: "screen check failed: Error: tmux gone" }],
+      [{ type: "notice", message: "screen check failed: Error: tmux gone" }],
     ]);
   });
 
@@ -473,7 +473,18 @@ describe("terminal hub: screen state and slow views", () => {
       slow.seen.at(-1),
       fast.seen.slice(-2),
       events.includes(`ended ${s.id} evicted_slow`),
-    ]).toEqual([{ type: "ended", reason: "evicted_slow" }, true, "one", ["one", "two"], true]);
+      rt.counts().closes,
+    ]).toEqual([{ type: "ended", reason: "evicted_slow" }, true, "one", ["one", "two"], true, 0]);
+  });
+
+  it("counts output held during a view's snapshot as unsent", async () => {
+    const rt = fakeRuntime();
+    const hub = new TerminalHub(rt.runtime, memoryLog().log, { ...quick, maxUnsentBytes: 100 });
+    await hub.join(ref, viewer().v, size);
+    const late = viewer();
+    const flooding = emittingOnSnapshot(late.v, () => rt.emit("x".repeat(101)));
+    await expect(hub.join(ref, flooding, size)).rejects.toThrow(ViewEnded);
+    expect(late.frames.at(-1)).toEqual({ type: "ended", reason: "evicted_slow" });
   });
 
   it("ends views as disconnected when the runtime client is lost but the terminal lives on", async () => {

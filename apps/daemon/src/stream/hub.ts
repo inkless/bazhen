@@ -76,8 +76,9 @@ interface Entry {
   size: Size;
   /** The epoch this view was granted the lease at; its input counts only under that epoch. */
   grantedEpoch?: number;
-  /** Live bytes held while the view's snapshot is on its way. */
+  /** Live bytes held while the view's snapshot is on its way, and how many there are. */
   queue?: Uint8Array[];
+  held: number;
   /** Whether it has been told its input was dropped under the current lease. */
   toldDropped?: boolean;
 }
@@ -125,7 +126,7 @@ export class TerminalHub {
     const id = newId("att");
     // From here the view's live bytes are held, and the snapshot covers every byte before them.
     const queue: Uint8Array[] = [];
-    const entry: Entry = { viewer, size, queue };
+    const entry: Entry = { viewer, size, queue, held: 0 };
     watched.viewers.set(id, entry);
     const snapshot = watched.emulator.snapshot();
     this.log.started(id, watched.terminal, viewer.mode);
@@ -138,6 +139,7 @@ export class TerminalHub {
     viewer.notify({ type: "screen", alternate: watched.alternate });
     for (const bytes of queue) viewer.send(bytes);
     delete entry.queue;
+    entry.held = 0;
     // The most recent interactive view sizes the terminal while nobody drives it.
     if (!opened) this.fitTo(watched);
     // Last: a view may send input and engage as soon as it is told, and they need the handle
@@ -180,9 +182,13 @@ export class TerminalHub {
         watched.emulator.write(bytes);
         watched.screen.poke();
         for (const [id, entry] of watched.viewers) {
-          if (entry.queue) entry.queue.push(bytes);
-          else entry.viewer.send(bytes);
-          if (entry.viewer.unsent() > this.opts.maxUnsentBytes) this.evict(watched, id, entry);
+          if (entry.queue) {
+            entry.queue.push(bytes);
+            entry.held += bytes.length;
+          } else entry.viewer.send(bytes);
+          if (entry.viewer.unsent() + entry.held > this.opts.maxUnsentBytes) {
+            this.evict(watched, id, entry);
+          }
         }
       });
       stream.onClose(() => {
@@ -229,7 +235,7 @@ export class TerminalHub {
           if (watched.screenFailed) return;
           watched.screenFailed = true;
           for (const entry of watched.viewers.values()) {
-            entry.viewer.notify({ type: "error", message: `screen check failed: ${String(err)}` });
+            entry.viewer.notify({ type: "notice", message: `screen check failed: ${String(err)}` });
           }
         },
       )
@@ -322,7 +328,7 @@ export class TerminalHub {
       })
       .catch((err: unknown) => {
         for (const entry of watched.viewers.values()) {
-          entry.viewer.notify({ type: "error", message: `resize failed: ${String(err)}` });
+          entry.viewer.notify({ type: "notice", message: `resize failed: ${String(err)}` });
         }
       })
       .finally(() => {

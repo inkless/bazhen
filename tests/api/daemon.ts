@@ -370,14 +370,13 @@ export class Daemon {
     });
   }
 
-  /** PTY handles the daemon process holds: /dev/ptmx entries on macOS, ptmx links on Linux. */
+  /** PTY handles the daemon process holds, as lsof lists them on macOS and Linux alike. */
   ptyHandles(): number {
     const pid = this.process?.pid;
     if (pid === undefined) throw new Error("the daemon is not running");
-    const pattern = process.platform === "linux" ? "ptmx" : "/dev/ptmx";
     const out = execFileSync("sh", [
       "-c",
-      `lsof -p ${pid} 2>/dev/null | grep -c ${pattern} || true`,
+      `lsof -p ${pid} 2>/dev/null | grep -c /dev/ptmx || true`,
     ]);
     return Number(out.toString().trim());
   }

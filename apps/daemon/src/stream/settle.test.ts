@@ -31,10 +31,11 @@ describe("settling a burst of activity", () => {
     settle.dispose();
   });
 
-  it("never fires once disposed", async () => {
+  it("never fires once disposed, even when poked again", async () => {
     const { settle, fired } = counting(10, 20);
     settle.poke();
     settle.dispose();
+    settle.poke();
     await sleep(40);
     expect(fired()).toBe(0);
   });

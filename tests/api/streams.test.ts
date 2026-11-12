@@ -43,18 +43,18 @@ describe("a view's stream over time", () => {
 
   it("ends a view whose socket stops reading, and keeps serving the others", async () => {
     const { terminalId } = await daemon.program(FLOOD);
+    const baseline = daemon.ptyHandles();
     const stalled = await opened(terminalId, "observe", BIG);
     const live = await opened(terminalId, "interactive", BIG);
     stalled.stall();
     await waitUntil(() => live.received().length > 16 * 1024 * 1024, "16 MiB of output", 30_000);
+    live.close();
+    // The daemon's client closes, and its PTY goes, only once the stalled view has been ended too.
+    await waitUntil(() => daemon.ptyHandles() <= baseline, "the stalled view's eviction", 30_000);
     stalled.resume();
     await expect
       .poll(() => stalled.frames.at(-1), { timeout: 10_000 })
       .toEqual({ type: "ended", reason: "evicted_slow" });
-    await stalled.closed();
-    const before = live.received().length;
-    await expect.poll(() => live.received().length).toBeGreaterThan(before);
-    live.close();
   });
 
   it("ends views as disconnected when the daemon's tmux client is lost", async () => {

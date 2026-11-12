@@ -51,6 +51,9 @@ export const StreamServerFrame = z.discriminatedUnion("type", [
    * the daemon's client lost the terminal. Reattaching opens a fresh snapshot (§5.3).
    */
   z.object({ type: z.literal("ended"), reason: z.enum(["evicted_slow", "disconnected"]) }),
+  /** The view can't go on: the daemon refused it or lost its terminal. */
   z.object({ type: z.literal("error"), message: z.string() }),
+  /** Something went wrong that the view can live with, such as a resize the runtime refused. */
+  z.object({ type: z.literal("notice"), message: z.string() }),
 ]);
 export type StreamServerFrame = z.infer<typeof StreamServerFrame>;
