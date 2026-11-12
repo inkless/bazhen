@@ -61,10 +61,6 @@ export interface RuntimeAdapter {
   create(spec: TerminalSpec): Promise<RuntimeRef>;
   attach(ref: RuntimeRef, size: Size): Promise<RuntimeStream>;
   close(ref: RuntimeRef): Promise<void>;
-  // Optional until the tmux runtime implements respawn, signals and exit detection.
-  respawn?(ref: RuntimeRef, spec: TerminalSpec): Promise<RuntimeRef>;
-  signal?(ref: RuntimeRef, signal: "SIGINT" | "SIGTERM" | "SIGKILL"): Promise<void>;
-  onExit?(cb: (ref: RuntimeRef, exitStatus: number | null) => void): () => void;
 }
 
 /** The PTY seam: the only place a PTY library is named. */
