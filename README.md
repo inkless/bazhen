@@ -12,21 +12,20 @@ client. Agents, tasks, and orchestration come later.
 - pnpm 12 (pinned through `packageManager`)
 - tmux 3.x
 - macOS or Linux
-- For `pnpm test:e2e`, the pinned Chromium: `pnpm --filter @bazhen/e2e-tests exec playwright install chromium`
+- For the tests that run real tmux, Docker (`pnpm test:real`)
 
 ## Commands
 
-| Command                               | Does                                                                                    |
-| ------------------------------------- | --------------------------------------------------------------------------------------- |
-| `pnpm install --frozen-lockfile`      | Install exactly what the lockfile records, and the git hooks (husky)                    |
-| `pnpm dev`                            | Start the daemon (`http://127.0.0.1:7900`) and the web client (`http://127.0.0.1:5173`) |
-| `pnpm check`                          | Standards check, lint, format check, type-check, small, medium and integration tests    |
-| `pnpm test` / `pnpm test:integration` | Small tests / tests against a throwaway private tmux server                             |
-| `pnpm test:api`                       | Black-box tests: the daemon as a process, with the real agent CLIs, in a temporary home |
-| `pnpm test:e2e`                       | Browser tests: starts daemon and web client in a temporary `BAZHEN_HOME`                |
-| `pnpm test:falsify`                   | Run the branch's new tests against the base's source; CI runs it on pull requests       |
-| `pnpm build`                          | Compile packages to `dist/` and build the web bundle                                    |
-| `pnpm format`                         | Rewrite files with oxfmt                                                                |
+| Command                          | Does                                                                                    |
+| -------------------------------- | --------------------------------------------------------------------------------------- |
+| `pnpm install --frozen-lockfile` | Install exactly what the lockfile records, and the git hooks (husky)                    |
+| `pnpm dev`                       | Start the daemon (`http://127.0.0.1:7900`) and the web client (`http://127.0.0.1:5173`) |
+| `pnpm check`                     | Standards check, lint, format check, type-check, small and medium tests                 |
+| `pnpm test`                      | Small tests                                                                             |
+| `pnpm test:real [suite…]`        | The tests that run real tmux, in a throwaway Linux container: integration, api, e2e     |
+| `pnpm test:falsify`              | Run the branch's new tests against the base's source; CI runs it on pull requests       |
+| `pnpm build`                     | Compile packages to `dist/` and build the web bundle                                    |
+| `pnpm format`                    | Rewrite files with oxfmt                                                                |
 
 Contributing, for people and agents: [AGENTS.md](AGENTS.md) and [docs/standards/](docs/standards/).
 
@@ -37,7 +36,7 @@ Contributing, for people and agents: [AGENTS.md](AGENTS.md) and [docs/standards/
 - `packages/protocol` — shared types, schemas, and the protocol version
 - `packages/core` — domain model and state machines; no platform imports
 - `packages/runtime-tmux` — the tmux runtime adapter
-- `tests/integration` — tests against a private tmux server
+- `tests/integration` — tests against a private tmux server (container or CI only)
 - `tests/e2e` — Playwright browser tests
 
 ## Where Bazhen keeps data

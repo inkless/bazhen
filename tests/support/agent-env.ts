@@ -28,6 +28,7 @@ export function claudeHome(dir: string, trusted: string): Record<string, string>
     join(dir, ".claude.json"),
     JSON.stringify({
       hasCompletedOnboarding: true,
+      hasSeenAutoDefaultNudge: true,
       customApiKeyResponses: { approved: [DUMMY_KEY.slice(-20)], rejected: [] },
       // Trust is keyed by the real path.
       projects: {
