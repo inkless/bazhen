@@ -69,10 +69,6 @@ Imports use the `.ts` extension. `import type` is for types only, because
   from every zod schema `packages/protocol` exports, for clients in other languages. After
   changing a schema, run `pnpm schema` and commit the files with it.
 
-Known gaps, left for BZ-2's tmux-runtime change: in `packages/runtime-tmux/src/index.ts`,
-`create`, `inventory` and `close` let raw `execFile` errors escape, and `resize` swallows its
-errors.
-
 ## Comments
 
 Default to none. A comment earns its place when the reason for the code can't be read from the

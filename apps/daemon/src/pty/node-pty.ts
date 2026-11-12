@@ -1,13 +1,10 @@
 import { spawn } from "node-pty";
 import type { PtyProcess, PtySpawner } from "@bazhen/core";
 
-/** The PTY seam's only implementation. node-pty is pinned to a 1.2.0 beta: 1.1.0 leaks a PTY per spawn on macOS. */
-function definedEnv(env: NodeJS.ProcessEnv): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined),
-  );
-}
-
+/**
+ * The PTY seam's only implementation. node-pty is pinned to a 1.2.0 beta: 1.1.0 leaks a PTY per
+ * spawn on macOS. The child gets exactly `env` plus TERM, never the daemon's own environment.
+ */
 export const nodePtySpawner: PtySpawner = {
   spawn(argv, size, env): PtyProcess {
     const [file, ...args] = argv;
@@ -15,7 +12,7 @@ export const nodePtySpawner: PtySpawner = {
       name: "xterm-256color",
       cols: size.cols,
       rows: size.rows,
-      env: { ...definedEnv(process.env), ...env, TERM: "xterm-256color" },
+      env: { ...env, TERM: "xterm-256color" },
       encoding: null,
     });
     return {

@@ -1,15 +1,27 @@
 import type { RuntimeHealthState } from "@bazhen/protocol";
-import type { TerminalId } from "./ids.ts";
+import type { AgentSessionId, TerminalId } from "./ids.ts";
 
 export interface Size {
   readonly cols: number;
   readonly rows: number;
 }
 
+/**
+ * What the daemon writes into the runtime beside the TerminalId, so reconciliation can rebuild
+ * the join from the runtime alone (foundation-design §3.2).
+ */
+export interface TerminalTags {
+  readonly kind: "agent" | "shell";
+  readonly agentId?: AgentSessionId;
+  readonly linkedAgentId?: AgentSessionId;
+}
+
 export interface TerminalSpec {
   readonly terminalId: TerminalId;
+  readonly tags: TerminalTags;
   readonly argv: readonly [string, ...string[]];
   readonly cwd: string;
+  /** Bazhen's own variables for this terminal only; never a user value (foundation-design §9.5). */
   readonly env: Readonly<Record<string, string>>;
   readonly size: Size;
 }
@@ -28,6 +40,7 @@ export interface RuntimeHealth {
 
 export interface RuntimeInventoryEntry {
   readonly ref: RuntimeRef;
+  readonly tags: TerminalTags;
   readonly dead: boolean;
   readonly exitStatus: number | null;
 }
@@ -36,7 +49,7 @@ export interface RuntimeStream {
   onData(cb: (bytes: Uint8Array) => void): void;
   onClose(cb: () => void): void;
   write(bytes: Uint8Array): void;
-  resize(size: Size): void;
+  resize(size: Size): Promise<void>;
   /** Must release every OS handle the stream holds. */
   close(): void;
 }
@@ -48,6 +61,10 @@ export interface RuntimeAdapter {
   create(spec: TerminalSpec): Promise<RuntimeRef>;
   attach(ref: RuntimeRef, size: Size): Promise<RuntimeStream>;
   close(ref: RuntimeRef): Promise<void>;
+  // Optional until the tmux runtime implements respawn, signals and exit detection.
+  respawn?(ref: RuntimeRef, spec: TerminalSpec): Promise<RuntimeRef>;
+  signal?(ref: RuntimeRef, signal: "SIGINT" | "SIGTERM" | "SIGKILL"): Promise<void>;
+  onExit?(cb: (ref: RuntimeRef, exitStatus: number | null) => void): () => void;
 }
 
 /** The PTY seam: the only place a PTY library is named. */

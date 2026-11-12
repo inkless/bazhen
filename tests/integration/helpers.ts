@@ -8,6 +8,11 @@ export function testSocket(label: string): string {
   return `bz-test-${process.env["BZ_TEST_RUN"] ?? process.pid}-${label}`;
 }
 
+/** Runs a tmux command on the test's own server and returns what it printed. */
+export function tmuxOut(socket: string, ...args: string[]): string {
+  return execFileSync("tmux", ["-L", socket, ...args]).toString();
+}
+
 export function killServer(socket: string): void {
   try {
     execFileSync("tmux", ["-L", socket, "kill-server"], { stdio: "ignore" });

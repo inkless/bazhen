@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { userInfo } from "node:os";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
+import { filterEnv } from "@bazhen/core";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
 import { currentPaths } from "./config/paths.ts";
 import { ensurePrivateDir } from "./config/private-dir.ts";
@@ -18,11 +19,15 @@ for (const dir of [paths.config, paths.data, paths.bank, paths.state, paths.cach
   mkdirSync(dir, { recursive: true });
 ensurePrivateDir(paths.run, userInfo().uid);
 
+// Captured once: agents get what a new terminal tab would, minus Bazhen's and the launching
+// session's internals (foundation-design §9.5).
+const hostEnv = filterEnv(process.env).env;
 const store = Store.open(join(paths.data, "bazhen.db"));
 const runtime = new TmuxRuntime({
   socket: paths.tmuxSocket,
   pty: nodePtySpawner,
   configFile: join(paths.run, "tmux.conf"),
+  env: hostEnv,
 });
 const app = createApp({
   appVersion: APP_VERSION,
