@@ -7,22 +7,22 @@ const storage = (entries: Record<string, string>) => ({
 });
 
 describe("a device's terminal settings", () => {
-  it("keeps the defaults on a device that stored nothing: Shift+Enter and Option as Meta", () => {
+  it("keeps the defaults on a device that stored nothing: Shift+Enter, and Option typing characters", () => {
     expect(loadSettings(storage({}))).toEqual({
       keyMap: DEFAULT_KEY_MAP,
-      optionIsMeta: true,
+      optionIsMeta: false,
       problem: null,
     });
   });
 
-  it("applies a stored key map and lets Option type characters when asked", () => {
+  it("applies a stored key map, and Option as Meta when asked", () => {
     const settings = loadSettings(
       storage({
         [SETTINGS_KEYS.keyMap]: '{"ctrl+enter":"\\n"}',
-        [SETTINGS_KEYS.optionIsMeta]: "false",
+        [SETTINGS_KEYS.optionIsMeta]: "true",
       }),
     );
-    expect([settings.keyMap.get("ctrl+enter"), settings.optionIsMeta]).toEqual(["\n", false]);
+    expect([settings.keyMap.get("ctrl+enter"), settings.optionIsMeta]).toEqual(["\n", true]);
   });
 
   it("keeps the defaults and says why when the stored key map isn't usable", () => {
