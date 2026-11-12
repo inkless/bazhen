@@ -1,11 +1,10 @@
-// `pnpm test:real [suite…]`: the real-tmux suites, in a container built from this worktree
-// (docs/standards/testing.md). The build context is a fresh repository holding HEAD, main and
-// the worktree's uncommitted files, so falsify can judge commits and the other suites test what is
-// on disk. Each suite gets a container of its own, with nothing of the host's mounted: no
-// worktree, no socket, no tmux directory.
+// `pnpm test:real [suite…] [--base <ref>]`: the real-tmux suites, in a container built from this
+// worktree (docs/standards/testing.md). The build context is a fresh repository holding HEAD and
+// falsify's base, overlaid with the worktree's uncommitted files, so falsify judges commits and
+// the other suites test what is on disk. Each suite gets a container of its own, with nothing of
+// the host's: no mount, no socket, no network.
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { cpSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -19,18 +18,26 @@ const SUITES = {
 } as const;
 type Suite = keyof typeof SUITES;
 const DEFAULT_SUITES: Suite[] = ["integration", "api", "e2e"];
+const DEFAULT_BASE = "origin/main";
+/** What falsify's base is called inside the image, whatever it was called here. */
+const BASE_REF = "refs/remotes/origin/main";
 
 const isSuite = (name: string): name is Suite => Object.hasOwn(SUITES, name);
+const USAGE = `usage: pnpm test:real [${Object.keys(SUITES).join("|")}]… [--base <ref>]`;
 
-/** The suites named on the command line, in order, or the default set; throws on an unknown one. */
-export function parseSuites(args: readonly string[]): Suite[] {
-  const unknown = args.filter((a) => !isSuite(a));
-  if (unknown.length > 0) {
-    throw new Error(
-      `unknown suite ${unknown.join(", ")}; usage: pnpm test:real [${Object.keys(SUITES).join("|")}]…`,
-    );
+/** The suites named on the command line, in order, or the default set, and falsify's base. */
+export function parseArgs(args: readonly string[]): { suites: Suite[]; base: string } {
+  const at = args.indexOf("--base");
+  const base = at === -1 ? DEFAULT_BASE : args[at + 1];
+  const names = at === -1 ? args : [...args.slice(0, at), ...args.slice(at + 2)];
+  const unknown = names.filter((a) => !isSuite(a));
+  if (base === undefined || base.startsWith("-") || unknown.length > 0) {
+    throw new Error(unknown.length > 0 ? `unknown suite ${unknown.join(", ")}; ${USAGE}` : USAGE);
   }
-  return args.length === 0 ? DEFAULT_SUITES : [...new Set(args.filter(isSuite))];
+  return {
+    suites: names.length === 0 ? DEFAULT_SUITES : [...new Set(names.filter(isSuite))],
+    base,
+  };
 }
 
 /** The image's build arguments, read from the repository's own pins. */
@@ -52,36 +59,45 @@ export function pins(read: (path: string) => string): Record<string, string> {
   };
 }
 
+const SECRET_NAME =
+  /^(\.env(\..*)?|.*\.(pem|key|p12|pfx)|id_(rsa|dsa|ecdsa|ed25519).*|\.npmrc|\.netrc)$/i;
+const SECRET_WORD = /credential|secret/i;
+
+/** Whether an untracked file looks like a secret, which never goes into an image. */
+export function looksSecret(path: string): boolean {
+  const name = basename(path);
+  return SECRET_NAME.test(name) || SECRET_WORD.test(name);
+}
+
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
-
-function hasCommit(cwd: string, ref: string): boolean {
-  try {
-    git(cwd, "rev-parse", "--verify", "--quiet", `${ref}^{commit}`);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 const gitFiles = (top: string, flag: string) =>
   git(top, "ls-files", "-z", flag, "--exclude-standard").split("\0").filter(Boolean);
 
-function buildContext(top: string): string {
+function buildContext(top: string, base: string): string {
   const dir = mkdtempSync(join(tmpdir(), "bz-real-"));
   git(dir, "init", "--quiet");
-  const refs = ["+HEAD:refs/heads/work"];
-  if (hasCommit(top, "origin/main")) {
-    refs.push("+refs/remotes/origin/main:refs/remotes/origin/main");
-  }
-  git(dir, "fetch", "--quiet", top, ...refs);
+  git(
+    dir,
+    "fetch",
+    "--quiet",
+    top,
+    "+HEAD:refs/heads/work",
+    `+${git(top, "rev-parse", base)}:${BASE_REF}`,
+  );
   git(dir, "checkout", "--quiet", "work");
   // `--modified` lists deleted files too.
   const deleted = new Set(gitFiles(top, "--deleted"));
   for (const file of deleted) rmSync(join(dir, file), { force: true });
-  for (const file of [...gitFiles(top, "--modified"), ...gitFiles(top, "--others")]) {
-    if (!deleted.has(file)) cpSync(join(top, file), join(dir, file), { force: true });
+  const untracked = gitFiles(top, "--others");
+  const skipped = untracked.filter(looksSecret);
+  for (const file of [...gitFiles(top, "--modified"), ...untracked]) {
+    if (!deleted.has(file) && !skipped.includes(file)) {
+      cpSync(join(top, file), join(dir, file), { force: true });
+    }
   }
+  if (skipped.length > 0) console.warn(`test:real: left out of the image: ${skipped.join(", ")}`);
   return dir;
 }
 
@@ -93,40 +109,41 @@ function docker(args: string[]): boolean {
 }
 
 function main(args: string[]): number {
-  const suites = parseSuites(args);
+  const { suites, base } = parseArgs(args);
   const top = git(process.cwd(), "rev-parse", "--show-toplevel");
-  const context = buildContext(top);
-  const iidFile = join(tmpdir(), `${basename(context)}.iid`);
+  const context = buildContext(top, base);
+  // A tag of this run's own, so a run elsewhere never removes the image this one is using.
+  const image = `bazhen-test-real:${basename(context).replace(/[^\w.-]/g, "")}`;
+  let built = false;
   try {
-    const buildArgs = Object.entries(pins((p) => readFileSync(join(context, p), "utf8")));
-    const built = docker([
+    built = docker([
       "build",
-      "--iidfile",
-      iidFile,
-      // One tag per worktree, so a rebuild replaces its own image and no other worktree's.
       "--tag",
-      `bazhen-test-real:${createHash("sha256").update(top).digest("hex").slice(0, 12)}`,
-      ...buildArgs.flatMap(([k, v]) => ["--build-arg", `${k}=${v}`]),
+      image,
+      ...Object.entries(pins((p) => readFileSync(join(context, p), "utf8"))).flatMap(([k, v]) => [
+        "--build-arg",
+        `${k}=${v}`,
+      ]),
       "-f",
       join(context, "tests/real/Dockerfile"),
       context,
     ]);
     if (!built) return 1;
-    // The images this replaced; one still running a suite is kept.
-    docker(["image", "prune", "--force", "--filter", "label=org.bazhen.test-real=1"]);
-    const image = readFileSync(iidFile, "utf8").trim();
     const failed = suites.filter(
       (suite) =>
         !docker([
           "run",
           "--rm",
           "--init",
+          "--network",
+          "none",
           // Chromium needs more shared memory than a container's default 64 MB.
           "--shm-size",
           "1g",
           image,
           "pnpm",
           SUITES[suite],
+          ...(suite === "falsify" ? ["--base", BASE_REF] : []),
         ]),
     );
     console.log(
@@ -136,8 +153,8 @@ function main(args: string[]): number {
     );
     return failed.length === 0 ? 0 : 1;
   } finally {
+    if (built) docker(["image", "rm", image]);
     rmSync(context, { recursive: true, force: true });
-    rmSync(iidFile, { force: true });
   }
 }
 

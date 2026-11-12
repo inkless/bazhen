@@ -5,16 +5,17 @@
 
 ARG NODE_VERSION
 FROM node:${NODE_VERSION}-trixie
-LABEL org.bazhen.test-real=1
 
 ARG PNPM_VERSION
 ARG PLAYWRIGHT_VERSION
+# Exact, so a tmux upgrade is a change someone makes and the defect pins are re-run against.
+ARG TMUX_VERSION=3.5a-3
 # Without a UTF-8 locale, tmux prints a tab in a -F format as `_`, which merges every column
 # the runtime reads back. CI runners and login sessions set one.
 ENV HUSKY=0 CI=1 LANG=C.UTF-8
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends tmux \
+  && apt-get install -y --no-install-recommends "tmux=${TMUX_VERSION}" \
   && npx -y "playwright@${PLAYWRIGHT_VERSION}" install-deps chromium \
   && rm -rf /var/lib/apt/lists/* \
   && npm install -g "pnpm@${PNPM_VERSION}" \

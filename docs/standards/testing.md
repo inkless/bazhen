@@ -37,7 +37,8 @@ The other three sizes run real tmux, so they run only on a disposable host: the 
 (`pnpm test:real`, which builds it from the worktree without mounting it) or a CI runner. A
 disposable host is Linux with `/etc/bazhen-disposable-host`; their setup refuses to start
 anywhere else. Never create that file on a machine you work on. Inside a container or CI they
-are the `pnpm test:integration`, `test:api` and `test:e2e` scripts, one worker each.
+are the `pnpm test:integration`, `test:api` and `test:e2e` scripts, one worker each. Each run's image is removed when it ends, and its containers have no network; Docker's build
+cache keeps the layers, so `docker builder prune` reclaims that space.
 
 Write the smallest test that can fail for the right reason. E2E tests cover only wiring that
 crosses processes; a behaviour that a medium test can reach belongs in a medium test.
