@@ -1,9 +1,11 @@
-// Vitest globalSetup for the medium, integration and api projects (docs/standards/testing.md).
+// Vitest globalSetup for the integration and api projects (docs/standards/testing.md).
+// - They run only on a disposable host (./disposable-host.ts). That check comes before anything
+//   else, and teardown does nothing unless setup got past it, so a refused run executes no tmux.
 // - Every run gets a temporary BAZHEN_HOME, so no test touches the user's real data.
 // - Every run gets its own tmux socket directory (TMUX_TMPDIR) and runs outside any tmux client
 //   (TMUX unset). Every tmux command a test runs, with or without -L, lands on a throwaway server
 //   and can never reach the user's sessions, the agent fleet, or a real Bazhen daemon. That
-//   isolation comes first, before anything in setup that can fail, because teardown runs even
+//   isolation comes next, before anything in setup that can fail, because teardown runs even
 //   when setup failed. Teardown looks only in the directory this run made, never at
 //   TMUX_TMPDIR or /tmp, and never kills a server named `default`; it fails the run if any
 //   server there is still alive.
@@ -14,6 +16,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { requireDisposableHost } from "./disposable-host.ts";
 
 // The spikes' watchdog aborted above 420 of macOS's 511 PTYs (kern.tty.ptmx_max).
 const MACOS_CUTOFF = 420;
@@ -86,7 +89,8 @@ let home: string | undefined;
 let tmuxDir: string | undefined;
 
 export function setup(): void {
-  // First, before anything that can fail: teardown runs even after a failed setup.
+  requireDisposableHost();
+  // Next, before anything that can fail: teardown runs even after a failed setup.
   tmuxDir = privateTmuxDir();
   process.env["TMUX_TMPDIR"] = tmuxDir;
   delete process.env["TMUX"];

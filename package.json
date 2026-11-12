@@ -13,7 +13,7 @@
     "test": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
     "test:api": "vitest run --project api",
-    "check": "node --disable-warning=ExperimentalWarning scripts/check-standards.ts && node --disable-warning=ExperimentalWarning scripts/protocol-schema.ts --check && pnpm run lint && pnpm run format:check && pnpm run typecheck && pnpm run test && pnpm run test:medium && pnpm run test:integration",
+    "check": "node --disable-warning=ExperimentalWarning scripts/check-standards.ts && node --disable-warning=ExperimentalWarning scripts/protocol-schema.ts --check && pnpm run lint && pnpm run format:check && pnpm run typecheck && pnpm run test && pnpm run test:medium",
     "test:e2e": "pnpm --filter @bazhen/e2e-tests run test",
     "lint:config": "node scripts/lint-config.ts",
     "schema": "node --disable-warning=ExperimentalWarning scripts/protocol-schema.ts",

@@ -1,10 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
+import { onDisposableHost } from "../support/disposable-host.ts";
 
 // Kills this run's private tmux server and removes its temporary home. Playwright has stopped
 // the daemon by now, but tmux deliberately outlives it.
 export default function teardown(): void {
+  // The config refused to start the run, so nothing here is this run's.
+  if (!onDisposableHost()) return;
   const socket = process.env["BZ_E2E_SOCKET"];
   const tmuxDir = process.env["BZ_E2E_TMUX_TMPDIR"];
   // Only by path in the run's own socket directory, so it can't reach any other server.
