@@ -1,6 +1,8 @@
 // A stand-in for the OpenAI Responses API, so the real Codex TUI can take turns in tests without
-// an account. Every turn gets a short text reply echoing the latest user text. Every request is
-// kept, so a test can check what the model was sent.
+// an account. The reply is picked by the latest user text:
+//   [[fake:shell:<command>]]  a shell call running <command> outside the sandbox, then "done"
+//   anything else             a short text reply echoing it
+// Every request is kept, so a test can check what the model was sent.
 
 import { createServer, type ServerResponse } from "node:http";
 import { body, listenLocal, type FakeModel } from "./fake-model.ts";
@@ -25,33 +27,12 @@ function send(res: ServerResponse, event: { type: string; [key: string]: unknown
 
 let ids = 0;
 
-/** Streams one assistant message, the shape Codex reads from a Responses provider. */
-function reply(res: ServerResponse, text: string): void {
+/** One response's stream around the items `emit` writes, the shape Codex reads from a provider. */
+function respond(res: ServerResponse, emit: (id: string) => void): void {
   const id = `fake${++ids}`;
-  const item = { type: "message", id: `msg_${id}`, role: "assistant" };
   res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
   send(res, { type: "response.created", response: { id: `resp_${id}`, status: "in_progress" } });
-  send(res, {
-    type: "response.output_item.added",
-    output_index: 0,
-    item: { ...item, status: "in_progress", content: [] },
-  });
-  send(res, {
-    type: "response.output_text.delta",
-    item_id: item.id,
-    output_index: 0,
-    content_index: 0,
-    delta: text,
-  });
-  send(res, {
-    type: "response.output_item.done",
-    output_index: 0,
-    item: {
-      ...item,
-      status: "completed",
-      content: [{ type: "output_text", text, annotations: [] }],
-    },
-  });
+  emit(id);
   send(res, {
     type: "response.completed",
     response: {
@@ -69,6 +50,67 @@ function reply(res: ServerResponse, text: string): void {
   res.end();
 }
 
+const message = (res: ServerResponse, text: string) =>
+  respond(res, (id) => {
+    const item = { type: "message", id: `msg_${id}`, role: "assistant" };
+    send(res, {
+      type: "response.output_item.added",
+      output_index: 0,
+      item: { ...item, status: "in_progress", content: [] },
+    });
+    send(res, {
+      type: "response.output_text.delta",
+      item_id: item.id,
+      output_index: 0,
+      content_index: 0,
+      delta: text,
+    });
+    send(res, {
+      type: "response.output_item.done",
+      output_index: 0,
+      item: {
+        ...item,
+        status: "completed",
+        content: [{ type: "output_text", text, annotations: [] }],
+      },
+    });
+  });
+
+/** How each of Codex's shell tools takes its command, in the order the fake prefers them. */
+const SHELL_ARGS = {
+  shell_command: (command: string) => ({ command }),
+  exec_command: (command: string) => ({ cmd: command }),
+  shell: (command: string) => ({ command: ["bash", "-lc", command] }),
+};
+const SHELL_TOOLS = ["shell_command", "exec_command", "shell"] as const;
+
+/**
+ * A call to whichever shell tool Codex offered, asking to run `command` outside the sandbox,
+ * which under `approval_policy = "on-request"` raises an approval request.
+ */
+const shellCall = (res: ServerResponse, tools: unknown, command: string) =>
+  respond(res, (id) => {
+    const offered = (Array.isArray(tools) ? tools : []).map(
+      (t) => field(t, "name") ?? field(t, "type"),
+    );
+    const name = SHELL_TOOLS.find((n) => offered.includes(n)) ?? "shell";
+    const args = {
+      ...SHELL_ARGS[name](command),
+      sandbox_permissions: "require_escalated",
+      justification: "the test asks",
+    };
+    const item = {
+      type: "function_call",
+      id: `fc_${id}`,
+      call_id: `call_${id}`,
+      name,
+      arguments: JSON.stringify(args),
+      status: "completed",
+    };
+    send(res, { type: "response.output_item.added", output_index: 0, item });
+    send(res, { type: "response.output_item.done", output_index: 0, item });
+  });
+
 export async function startFakeResponses(): Promise<FakeModel> {
   const requests: string[] = [];
   const server = createServer((req, res) => {
@@ -78,11 +120,14 @@ export async function startFakeResponses(): Promise<FakeModel> {
         return;
       }
       requests.push(text);
-      const input = field(JSON.parse(text), "input");
-      const user = (Array.isArray(input) ? input : [])
-        .filter((i) => field(i, "role") === "user")
-        .at(-1);
-      reply(res, `echo: ${textOf(user).slice(-80)}`);
+      const request: unknown = JSON.parse(text);
+      const input = field(request, "input");
+      const items = Array.isArray(input) ? input : [];
+      const user = textOf(items.filter((i) => field(i, "role") === "user").at(-1));
+      const shell = /\[\[fake:shell:([^\]]+)\]\]/.exec(user)?.[1];
+      if (field(items.at(-1), "type") === "function_call_output") message(res, "done");
+      else if (shell !== undefined) shellCall(res, field(request, "tools"), shell);
+      else message(res, `echo: ${user.slice(-80)}`);
     });
   });
   return listenLocal(server, requests);

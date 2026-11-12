@@ -1,9 +1,8 @@
 import {
   AnswerAttentionResponse,
-  ErrorResponse,
   EventFrame,
-  LaunchAgentResponse,
   PROTOCOL_VERSION,
+  LaunchAgentResponse,
   SendMessageResponse,
   StateSnapshot,
   type ApprovalDecision,
@@ -109,17 +108,8 @@ async function act(path: string, body: object): Promise<unknown> {
     body: JSON.stringify({ idempotencyKey: crypto.randomUUID(), ...body }),
   });
   const text = await res.text();
-  if (!res.ok) throw new Error(refusal(res.status, text));
+  if (!res.ok) throw new Error(`refused (${res.status}): ${text}`);
   return JSON.parse(text);
-}
-
-/** What the daemon said when it refused, in its own words, or the status if it said nothing. */
-function refusal(status: number, text: string): string {
-  try {
-    return ErrorResponse.parse(JSON.parse(text)).message;
-  } catch {
-    return `the daemon refused the request (${status})`;
-  }
 }
 
 export const launchAgent = async (harness: HarnessId, cwd: string) =>

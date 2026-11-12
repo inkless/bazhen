@@ -12,6 +12,7 @@ import { TmuxRuntime } from "@bazhen/runtime-tmux";
 import { launchAgent, localEnvironmentId } from "./agents/launch.ts";
 import { Lifecycle } from "./agents/lifecycle.ts";
 import { reconcile } from "./agents/reconcile.ts";
+import { codexApprovals } from "./codex/approvals.ts";
 import { CodexChannel, codexHomeOf, startCodexDaemon } from "./codex/channel.ts";
 import { retire } from "./events/retention.ts";
 import { eventRoute } from "./events/server.ts";
@@ -65,6 +66,7 @@ const codex = new CodexChannel({
   codexHome: codexHomeOf(hostEnv, inputs.home),
   startDaemon: () => startCodexDaemon(hostEnv),
   boundThreads: () => store.codexThreads(),
+  listener: codexApprovals(approvals, (threadId) => store.codexAgent(threadId)),
 });
 const environment = new LocalEnvironment({
   id: localEnvironmentId(store),
@@ -84,11 +86,7 @@ const environment = new LocalEnvironment({
 });
 await reconcile(store, environment);
 // The Codex agents' threads lost their subscriber with the last daemon (§7 step 4).
-if (store.codexThreads().length > 0) {
-  codex
-    .resume()
-    .catch((err: unknown) => console.warn(`codex: could not reconnect: ${String(err)}`));
-}
+codex.keepConnected();
 const lifecycle = new Lifecycle(store, environment);
 lifecycle.watch();
 const allowedHosts = [`${HOSTNAME}:${port}`, `localhost:${port}`];
@@ -106,7 +104,7 @@ const app = createApp({
   runtime,
   allow,
   state: () => store.snapshot(),
-  launch: (req) => launchAgent({ store, environment, size: DEFAULT_SIZE, home: inputs.home }, req),
+  launch: (req) => launchAgent({ store, environment, size: DEFAULT_SIZE }, req),
   send: (agentId, req) => mailbox.send(agentId, req),
   answer: (attentionId, req) => approvals.answer(attentionId, req),
   close: (agentId, req) => lifecycle.close(agentId, req),

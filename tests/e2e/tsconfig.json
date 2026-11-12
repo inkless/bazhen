@@ -5,12 +5,7 @@
     "outDir": "dist",
     "emitDeclarationOnly": true
   },
-  "include": [
-    "*.ts",
-    "../support/agent-env.ts",
-    "../support/disposable-host.ts",
-    "../support/key-*.ts"
-  ],
+  "include": ["*.ts", "../support/agent-env.ts", "../support/disposable-host.ts"],
   "references": [
     {
       "path": "../../packages/host-guard"

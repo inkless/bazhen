@@ -4,8 +4,6 @@ import { ProtocolVersion } from "./version.ts";
 export * from "./agents.ts";
 export * from "./events.ts";
 export * from "./ids.ts";
-export * from "./input.ts";
-export * from "./json.ts";
 export * from "./mail.ts";
 export * from "./stream.ts";
 export * from "./version.ts";

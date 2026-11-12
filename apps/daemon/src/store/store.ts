@@ -124,6 +124,11 @@ export class SchemaTooNew extends Error {
   }
 }
 
+/** Running Codex agents, bound to a thread. */
+const RUNNING_CODEX = `harness = 'codex' AND state = 'running'
+  AND json_extract(external_ref, '$.kind') = 'codex-thread'`;
+const THREAD = "json_extract(external_ref, '$.id')";
+
 /** The SQLite seam. Nothing else in the daemon imports node:sqlite. */
 export class Store {
   private readonly db: DatabaseSync;
@@ -347,16 +352,19 @@ export class Store {
       .map((r) => String(r.id));
   }
 
+  /** The running Codex agent bound to a thread, if any. */
+  codexAgent(threadId: string): string | undefined {
+    const sql = `SELECT id FROM agent_sessions WHERE ${RUNNING_CODEX} AND ${THREAD} = ?`;
+    const row = this.prepare(sql).get(threadId);
+    return row === undefined ? undefined : String(row.id);
+  }
+
   /** The Codex threads the running Codex agents are bound to. */
   codexThreads(): string[] {
-    const sql = `SELECT external_ref FROM agent_sessions
-                 WHERE harness = 'codex' AND state = 'running' AND external_ref IS NOT NULL`;
+    const sql = `SELECT ${THREAD} AS thread FROM agent_sessions WHERE ${RUNNING_CODEX}`;
     return this.prepare(sql)
       .all()
-      .flatMap((r) => {
-        const ref = ExternalRef.safeParse(JSON.parse(String(r.external_ref)));
-        return ref.success && ref.data.kind === "codex-thread" ? [ref.data.id] : [];
-      });
+      .map((r) => String(r.thread));
   }
 
   /**

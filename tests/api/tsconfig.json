@@ -6,7 +6,7 @@
     "noEmit": false,
     "emitDeclarationOnly": true
   },
-  "include": ["*.ts", "fixtures/*.ts", "../support/agent-env.ts", "../support/key-*.ts"],
+  "include": ["*.ts", "fixtures/*.ts", "../support/agent-env.ts"],
   "references": [
     {
       "path": "../../packages/protocol"

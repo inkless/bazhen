@@ -1,9 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { HarnessId, StateSnapshot } from "@bazhen/protocol";
 import { answer, launchAgent, sendMessage, watchState } from "./api.ts";
-import { TerminalView } from "./terminal/TerminalView.tsx";
-
-const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
+import { Terminal } from "./Terminal.tsx";
 
 /**
  * Every agent, a way to launch one, what needs the human, and the selected agent's terminal and
@@ -15,7 +13,7 @@ export function Fleet() {
   const [cwd, setCwd] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const failed = (e: unknown) => setError(messageOf(e));
+  const failed = (e: unknown) => setError(String(e));
 
   useEffect(
     () =>
@@ -24,7 +22,7 @@ export function Fleet() {
           setState(s);
           setError(null);
         },
-        (e: unknown) => setError(messageOf(e)),
+        (e: unknown) => setError(String(e)),
       ),
     [],
   );
@@ -96,7 +94,7 @@ export function Fleet() {
             </label>
             <button type="submit">Send</button>
           </form>
-          <TerminalView key={agent.terminalId} terminalId={agent.terminalId} kind="agent" />
+          <Terminal key={agent.terminalId} terminalId={agent.terminalId} />
         </>
       )}
     </>

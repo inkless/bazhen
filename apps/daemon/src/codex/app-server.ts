@@ -1,6 +1,7 @@
 import { once } from "node:events";
 import { realpathSync } from "node:fs";
 import { WebSocket } from "ws";
+import { RequestId } from "@bazhen/harness-codex";
 import { z } from "zod";
 
 /** A JSON-RPC error from the app-server, such as `serverShuttingDown` during a drain. */
@@ -37,13 +38,26 @@ const RpcError = z.object({
   data: z.object({ reason: z.string().optional() }).optional().catch(undefined),
 });
 
-/** A reply to one of Bazhen's requests; the server's own requests and notifications carry a method. */
+/** A reply to one of Bazhen's requests. */
 const Reply = z.object({
   id: z.number(),
-  method: z.string().optional(),
   result: z.unknown().optional(),
   error: RpcError.optional(),
 });
+
+/** A request from the server, which carries an id to answer, or a notification, which has none. */
+const Inbound = z.object({
+  id: RequestId.optional(),
+  method: z.string(),
+  params: z.unknown().optional(),
+});
+
+/** What the server sends of its own accord. */
+export interface Listener {
+  /** A request the server waits on; `respond` answers it on the connection it came on. */
+  request(method: string, params: unknown, id: RequestId, respond: (result: unknown) => void): void;
+  notification(method: string, params: unknown): void;
+}
 
 const Initialized = z.object({ codexHome: z.string(), userAgent: z.string() });
 
@@ -70,6 +84,7 @@ export class AppServer {
   private readonly pending = new Map<number, Pending>();
   private nextId = 0;
   private serverVersion = "unknown";
+  private listener: Listener | undefined;
 
   private constructor(ws: WebSocket) {
     this.ws = ws;
@@ -117,6 +132,11 @@ export class AppServer {
     }
   }
 
+  /** Where the server's requests and notifications go, from now on. */
+  listen(listener: Listener): void {
+    this.listener = listener;
+  }
+
   get open(): boolean {
     return this.ws.readyState === WebSocket.OPEN;
   }
@@ -143,12 +163,23 @@ export class AppServer {
   }
 
   private receive(text: string): void {
-    const reply = Reply.safeParse(parseJson(text));
-    if (!reply.success || reply.data.method !== undefined) return;
+    const json = parseJson(text);
+    if (typeof json === "object" && json !== null && "method" in json) {
+      const inbound = Inbound.safeParse(json);
+      if (inbound.success) this.dispatch(inbound.data);
+      return;
+    }
+    const reply = Reply.safeParse(json);
+    if (!reply.success) return;
     const pending = this.settle(reply.data.id);
     const { error, result } = reply.data;
     if (error === undefined) pending?.resolve(result);
     else pending?.reject(new AppServerError(pending.method, error));
+  }
+
+  private dispatch({ id, method, params }: z.infer<typeof Inbound>): void {
+    if (id === undefined) this.listener?.notification(method, params);
+    else this.listener?.request(method, params, id, (result) => this.send({ id, result }));
   }
 
   /** Takes a request off the pending list, for its reply, its timeout or the end. */

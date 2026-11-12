@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { HarnessChannelPort } from "@bazhen/core";
 import { ZodError } from "zod";
-import { CodexHarness, ThreadMismatch } from "./index.ts";
+import {
+  approvalResult,
+  CodexHarness,
+  readApproval,
+  readResolved,
+  ThreadMismatch,
+} from "./index.ts";
 
 const REMOTE = "unix:///codex/app-server-control.sock";
 
@@ -82,5 +88,49 @@ describe("Codex harness", () => {
         { kind: "codex-thread", id: "thr-7" },
       ),
     ).rejects.toThrow(ThreadMismatch);
+  });
+});
+
+describe("Codex approvals", () => {
+  const call = { threadId: "thr-1", turnId: "t-1", itemId: "call_1" };
+
+  it("reads a request to run a command, and one to change files, as approvals for the inbox", () => {
+    expect([
+      readApproval("item/commandExecution/requestApproval", {
+        ...call,
+        command: "/bin/zsh -lc 'echo hi'",
+        reason: "needs the network",
+      }),
+      readApproval("item/fileChange/requestApproval", { ...call, reason: null }),
+    ]).toEqual([
+      {
+        threadId: "thr-1",
+        itemId: "call_1",
+        summary: "Run /bin/zsh -lc 'echo hi' (needs the network)",
+      },
+      { threadId: "thr-1", itemId: "call_1", summary: "Change files" },
+    ]);
+  });
+
+  it("leaves any other request, or one it can't read, to the TUI", () => {
+    expect([
+      readApproval("item/tool/requestUserInput", call),
+      readApproval("item/commandExecution/requestApproval", { itemId: "call_1" }),
+    ]).toEqual([null, null]);
+  });
+
+  it("names the request a resolved notification says was answered, and nothing else", () => {
+    expect([
+      readResolved("serverRequest/resolved", { threadId: "thr-1", requestId: 7 }),
+      readResolved("thread/status/changed", { requestId: 7 }),
+      readResolved("serverRequest/resolved", {}),
+    ]).toEqual([7, null, null]);
+  });
+
+  it("answers with Codex's own words for allow and deny", () => {
+    expect([approvalResult("allow"), approvalResult("deny")]).toEqual([
+      { decision: "accept" },
+      { decision: "decline" },
+    ]);
   });
 });
