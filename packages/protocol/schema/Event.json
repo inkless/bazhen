@@ -809,7 +809,9 @@
                 "client_closed",
                 "terminal_closed",
                 "attach_failed",
-                "daemon_restart"
+                "daemon_restart",
+                "disconnected",
+                "evicted_slow"
               ]
             }
           },

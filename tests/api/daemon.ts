@@ -9,6 +9,8 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
+  readlinkSync,
   realpathSync,
   rmSync,
   statSync,
@@ -370,20 +372,22 @@ export class Daemon {
     });
   }
 
-  /** PTY handles the daemon process holds, as lsof lists them on macOS and Linux alike. */
+  /**
+   * PTY handles the daemon process holds, from /proc: these suites run only on Linux, in CI or
+   * the `pnpm test:real` container.
+   */
   ptyHandles(): number {
     const pid = this.process?.pid;
     if (pid === undefined) throw new Error("the daemon is not running");
-    const out = execFileSync("sh", [
-      "-c",
-      `lsof -p ${pid} 2>/dev/null | grep -c /dev/ptmx || true`,
-    ]);
-    return Number(out.toString().trim());
-  }
-
-  /** Ends the agent's tmux session behind the daemon's back, as a crash would. */
-  killSession(agentId: string): void {
-    this.tmux("kill-session", "-t", this.requireSession(agentId));
+    const fds = `/proc/${pid}/fd`;
+    return readdirSync(fds).filter((fd) => {
+      try {
+        return readlinkSync(join(fds, fd)).includes("ptmx");
+      } catch {
+        // Closed between the listing and the read.
+        return false;
+      }
+    }).length;
   }
 
   /** Detaches every tmux client from the agent's terminal, as if the client's tmux link broke. */
