@@ -29,26 +29,47 @@ function flagged(source: string): number[] {
   return [...out.matchAll(/fixture\.ts:(\d+):\d+: .*host-guard/g)].map((m) => Number(m[1]));
 }
 
-const FIXTURE = `import { execFileSync, execSync, spawn } from "node:child_process";
-declare const pty: { spawn(argv: string[]): void };
-declare const run: (cmd: string, args: string[]) => Promise<unknown>;
-declare const z: { literal(v: string): unknown };
-declare const describe: (name: string) => void;
-execFileSync("tmux", ["-L", "default", "kill-server"]);
-pty.spawn(["tmux", "attach-session"]);
-void run("tmux", ["list-sessions"]);
-execSync(\`tmux kill-server\`);
-spawn("tmux -L default kill-server");
-process.kill(-1, "SIGKILL");
-process["kill"](1, "SIGTERM");
-execFileSync("git", ["status"]);
-execFileSync("tmuxinator", []);
-z.literal("tmux");
-describe("tmux runtime on a private server");
-`;
+const FIXTURE = [
+  'import { execFileSync, execSync, spawn } from "node:child_process";',
+  'import { spawn as launch, execFile } from "node:child_process";',
+  'import * as cp from "node:child_process";',
+  'import { kill } from "node:process";',
+  'import { promisify } from "node:util";',
+  "declare const pty: { spawn(argv: string[]): void };",
+  "declare const z: { literal(v: string): unknown };",
+  "declare const describe: (name: string) => void;",
+  "const run = promisify(execFile);",
+  'const bin = "tmux";',
+  'const argv = ["/usr/bin/tmux", "kill-server"];',
+  'execFileSync("tmux", ["-L", "default", "kill-server"]);',
+  'pty.spawn(["tmux", "attach-session"]);',
+  'void run("tmux", ["list-sessions"]);',
+  "execSync(`tmux kill-server`);",
+  'spawn("tmux -L default kill-server");',
+  'process.kill(-1, "SIGKILL");',
+  'process["kill"](1, "SIGTERM");',
+  'launch("tmux", []);',
+  'execFileSync("/usr/bin/tmux", ["kill-server"]);',
+  'execFileSync("sh", ["-c", "tmux kill-server"]);',
+  'execFileSync("env", ["tmux", "kill-server"]);',
+  'execFileSync(bin, ["kill-server"]);',
+  'spawn(argv[0] ?? "", []); execFileSync("x", argv);',
+  'execFileSync.call(null, "tmux", ["kill-server"]);',
+  'cp.execFileSync("tmux", ["kill-server"]);',
+  'globalThis.process.kill(1, "SIGTERM");',
+  "const { kill: stop } = process;",
+  'execFileSync("git", ["status"]);',
+  'execFileSync("tmuxinator", []);',
+  'z.literal("tmux");',
+  'describe("tmux runtime on a private server");',
+  "void new Error(`tmux ${bin} failed`);",
+  "void [kill, stop];",
+].join("\n");
 
 describe("the host-guard lint rule", () => {
   it("flags every tmux command and signal outside host-guard, and nothing that only names tmux", () => {
-    expect(flagged(FIXTURE)).toEqual([6, 7, 8, 9, 10, 11, 12]);
+    expect(flagged(FIXTURE)).toEqual([
+      4, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
+    ]);
   });
 });
