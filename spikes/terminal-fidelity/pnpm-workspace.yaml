@@ -1,0 +1,4 @@
+# Standalone: this spike is not part of the product workspace. node-pty ships prebuilds.
+packages: []
+allowBuilds:
+  node-pty: false
