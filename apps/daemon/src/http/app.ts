@@ -39,7 +39,8 @@ export interface AppDeps {
   readonly appVersion: string;
   readonly schemaVersion: () => number;
   readonly runtime: RuntimeAdapter;
-  readonly allow: Allowlists;
+  /** Null on the Unix socket, whose 0600 permission is the authentication (§9.1). */
+  readonly allow: Allowlists | null;
   readonly state: () => StateSnapshot;
   readonly launch: (req: LaunchAgentRequest) => Promise<LaunchAgentResponse>;
   readonly send: (agentId: string, req: SendMessageRequest) => SendMessageResponse;
@@ -64,15 +65,18 @@ function fail(
 export function createApp(deps: AppDeps): Hono {
   const app = new Hono();
 
-  app.use("*", async (c, next) => {
-    const host = c.req.header("host");
-    const origin = c.req.header("origin");
-    const acting = !SAFE_METHODS.has(c.req.method) || c.req.header("upgrade") !== undefined;
-    const refused = refusal(deps.allow, { host, origin, acting });
-    if (refused === "host_not_allowed") return fail(c, 421, refused, host ?? "");
-    if (refused !== null) return fail(c, 403, refused, origin ?? "");
-    return next();
-  });
+  const { allow } = deps;
+  if (allow !== null) {
+    app.use("*", async (c, next) => {
+      const host = c.req.header("host");
+      const origin = c.req.header("origin");
+      const acting = !SAFE_METHODS.has(c.req.method) || c.req.header("upgrade") !== undefined;
+      const refused = refusal(allow, { host, origin, acting });
+      if (refused === "host_not_allowed") return fail(c, 421, refused, host ?? "");
+      if (refused !== null) return fail(c, 403, refused, origin ?? "");
+      return next();
+    });
+  }
 
   app.get("/v1/health", async (c) => {
     const runtime = await deps.runtime.health();

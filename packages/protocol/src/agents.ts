@@ -131,7 +131,12 @@ export const ErrorResponse = z.object({
     "not_found",
     "origin_not_allowed",
     "host_not_allowed",
+    "forbidden",
   ]),
   message: z.string(),
 });
 export type ErrorResponse = z.infer<typeof ErrorResponse>;
+
+/** `POST /v1/daemon/stop`, on the Unix socket only: the daemon stops once it has sent this. */
+export const StopResponse = z.strictObject({});
+export type StopResponse = z.infer<typeof StopResponse>;

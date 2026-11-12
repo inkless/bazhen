@@ -15,6 +15,7 @@ import {
   rmSync,
   statSync,
 } from "node:fs";
+import { request } from "node:http";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,6 +53,68 @@ async function freePort(): Promise<number> {
 
 let programs = 0;
 
+/** One HTTP request over a daemon's Unix socket, as the CLI and the hook client make them. */
+export function overSocket(
+  socket: string,
+  method: "GET" | "POST",
+  path: string,
+  init: { headers?: Record<string, string>; body?: unknown } = {},
+): Promise<{ status: number; body: unknown }> {
+  return new Promise((resolve, reject) => {
+    const req = request(
+      {
+        socketPath: socket,
+        method,
+        path,
+        headers: { "content-type": "application/json", ...init.headers },
+      },
+      (res) => {
+        let text = "";
+        res.on("data", (d: Buffer) => (text += d.toString()));
+        res.on("end", () => resolve({ status: res.statusCode ?? 0, body: JSON.parse(text) }));
+      },
+    );
+    req.on("error", reject);
+    req.end(init.body === undefined ? undefined : JSON.stringify(init.body));
+  });
+}
+
+/** Runs `bazhen <args>` with `env`, and resolves with how it exited and what it printed. */
+export function bazhen(
+  args: readonly string[],
+  env: Record<string, string>,
+): Promise<{ code: number; out: string }> {
+  return new Promise((resolve) => {
+    execFile(
+      process.execPath,
+      ["--disable-warning=ExperimentalWarning", join(repo, "apps/cli/src/main.ts"), ...args],
+      { env, timeout: 30_000 },
+      (err, stdout, stderr) =>
+        resolve({ code: err === null ? 0 : Number(err.code ?? 1), out: stdout + stderr }),
+    );
+  });
+}
+
+/** A daemon's environment on `home`: the login session's, and nothing of the test run's. */
+function homeEnv(home: string): Record<string, string> {
+  return { ...loginEnv(), PATH: process.env["PATH"] ?? "/usr/bin:/bin", BAZHEN_HOME: home };
+}
+
+/**
+ * A fresh home and port for the CLI to start a daemon of its own in, and the cleanup that ends
+ * whatever it started there.
+ */
+export async function cliHome() {
+  const home = realpathSync(mkdtempSync("/tmp/bz-cli-"));
+  const env = { ...homeEnv(home), BAZHEN_PORT: String(await freePort()) };
+  const cleanup = async () => {
+    await bazhen(["stop"], env);
+    TmuxServer.at(join(home, "run", "tmux.sock"), { root: home }).kill();
+    rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  };
+  return { env, cleanup };
+}
+
 /** Waits for a condition outside a test, where `expect.poll` can't run. */
 export async function waitUntil(
   condition: () => boolean | Promise<boolean>,
@@ -77,7 +140,8 @@ export class Daemon {
   readonly work: string;
   /** The daemon's private server: `<home>/run/tmux.sock`, for a home this short. */
   readonly tmuxServer: TmuxServer;
-  private readonly env: Record<string, string>;
+  /** What the daemon runs with; the CLI reaches this daemon with it too. */
+  readonly env: Record<string, string>;
   private port = 0;
   private process: ChildProcess | undefined;
 
@@ -88,9 +152,8 @@ export class Daemon {
     mkdirSync(this.work, { recursive: true });
 
     this.env = {
-      ...loginEnv(),
+      ...homeEnv(home),
       PATH: `${bin}:${process.env["PATH"] ?? "/usr/bin:/bin"}`,
-      BAZHEN_HOME: home,
       ...agentHomes(home, this.work, { anthropic: opts.modelUrl, responses: opts.responsesUrl }),
     };
   }
@@ -131,6 +194,11 @@ export class Daemon {
     return `http://127.0.0.1:${this.port}`;
   }
 
+  /** The daemon's Unix socket, beside its tmux server. */
+  get socket(): string {
+    return join(this.home, "run", "bazhen.sock");
+  }
+
   private async spawn(): Promise<void> {
     this.port = await freePort();
     const child = spawn(
@@ -151,7 +219,7 @@ export class Daemon {
       ) {
         // The daemon keeps its tmux server beside its own socket. Were its runtime directory
         // ever moved (a home too long for a socket path), every tmux command here would miss it.
-        if (existsSync(join(this.home, "run", "bazhen.sock"))) return;
+        if (existsSync(this.socket)) return;
         await this.stop();
         throw new Error(`the daemon's runtime directory is not ${join(this.home, "run")}`);
       }
@@ -169,7 +237,11 @@ export class Daemon {
       headers,
       ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
     });
-    const body: unknown = await res.json();
+    // A route that doesn't exist answers with plain text, not JSON.
+    const text = await res.text();
+    const body: unknown = res.headers.get("content-type")?.includes("json")
+      ? JSON.parse(text)
+      : text;
     return { status: res.status, body };
   }
 

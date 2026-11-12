@@ -15,7 +15,8 @@
         "unavailable",
         "not_found",
         "origin_not_allowed",
-        "host_not_allowed"
+        "host_not_allowed",
+        "forbidden"
       ]
     },
     "message": {

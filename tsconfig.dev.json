@@ -9,6 +9,7 @@
   "include": [
     "packages/*/src/**/*.test.ts",
     "apps/daemon/src/**/*.test.ts",
+    "apps/cli/src/**/*.test.ts",
     "tests/support/*.ts",
     "scripts/*.ts"
   ],
@@ -36,6 +37,9 @@
     },
     {
       "path": "apps/daemon"
+    },
+    {
+      "path": "apps/cli"
     }
   ]
 }

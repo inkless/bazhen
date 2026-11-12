@@ -22,27 +22,28 @@ import { Approvals } from "./mailbox/approvals.ts";
 import { HOOK_SCRIPT, hookClient, hookCommand } from "./mailbox/hook-command.ts";
 import { hookApp } from "./mailbox/ingress.ts";
 import { Mailbox } from "./mailbox/mailbox.ts";
-import { currentInputs, resolvePaths } from "./config/paths.ts";
+import { InvalidConfig, loadSettings } from "./config/config.ts";
+import { currentInputs } from "./config/paths.ts";
 import { ensurePrivateDir } from "./config/private-dir.ts";
-import { createApp } from "./http/app.ts";
+import { createApp, type AppDeps } from "./http/app.ts";
 import { upgrades } from "./http/upgrades.ts";
+import { socketApp } from "./socket/routes.ts";
 import { nodePtySpawner } from "./pty/node-pty.ts";
 import { Store } from "./store/store.ts";
 
 const APP_VERSION = "0.1.0";
 const HOSTNAME = "127.0.0.1";
-const port = Number(process.env.BAZHEN_PORT ?? 7900);
 const DEFAULT_SIZE = { cols: 120, rows: 40 };
 
 const inputs = currentInputs();
-const paths = resolvePaths(inputs);
+const { paths, config } = settingsOrExit();
+const { port } = config;
 for (const dir of [paths.config, paths.data, paths.bank, paths.state, paths.cache])
   mkdirSync(dir, { recursive: true });
 ensurePrivateDir(paths.run, inputs.uid);
-
 // Captured once: agents get what a new terminal tab would, minus Bazhen's and the launching
 // session's internals (foundation-design §9.5).
-const hostEnv = filterEnv(process.env).env;
+const hostEnv = filterEnv(process.env, config.envRules).env;
 const store = Store.open(join(paths.data, "bazhen.db"));
 const mailbox = new Mailbox(store);
 const approvals = new Approvals(store);
@@ -100,11 +101,10 @@ const allow = {
   hosts: allowedHosts,
   origins: [...allowedHosts, ...webDevHosts].map((host) => `http://${host}`),
 };
-const app = createApp({
+const commands = {
   appVersion: APP_VERSION,
   schemaVersion: () => store.schemaVersion(),
   runtime,
-  allow,
   state: () => store.snapshot(),
   launch: (req) => launchAgent({ store, environment, size: DEFAULT_SIZE }, req),
   send: (agentId, req) => mailbox.send(agentId, req),
@@ -112,7 +112,8 @@ const app = createApp({
   close: (agentId, req) => lifecycle.close(agentId, req),
   respawn: (agentId, req) => lifecycle.respawn(agentId, req),
   signal: (agentId, req) => lifecycle.signal(agentId, req),
-});
+} satisfies Omit<AppDeps, "allow">;
+const app = createApp({ ...commands, allow });
 
 const hub = new TerminalHub(runtime, storeLog(store));
 const server = serve({ fetch: app.fetch, hostname: HOSTNAME, port }, (info) => {
@@ -135,28 +136,43 @@ const retireOld = () =>
 void retireOld();
 const retention = setInterval(() => void retireOld(), RETIRE_EVERY_MS);
 
-// Hook ingress: the 0600 socket in the private runtime directory, whose permission is the
-// authentication. A waiter holds its request for hours, so requests have no time limit.
-const hookListener = getRequestListener(
-  hookApp({
-    mailbox,
-    approvals,
-    knows: (agentId) => store.agent(agentId) !== undefined,
+// The CLI's commands and hook ingress (socketApp). A waiter holds its request for hours, so
+// requests have no time limit.
+const socketListener = getRequestListener(
+  socketApp({
+    commands: createApp({ ...commands, allow: null }),
+    hooks: hookApp({
+      mailbox,
+      approvals,
+      knows: (agentId) => store.agent(agentId) !== undefined,
+    }),
+    stop: shutdown,
   }).fetch,
 );
-const hooks = createServer((req, res) => void hookListener(req, res));
-hooks.requestTimeout = 0;
+const socketServer = createServer((req, res) => void socketListener(req, res));
+socketServer.requestTimeout = 0;
 rmSync(paths.socket, { force: true });
-hooks.listen(paths.socket, () => chmodSync(paths.socket, 0o600));
+socketServer.listen(paths.socket, () => chmodSync(paths.socket, 0o600));
 
 function shutdown() {
   shuttingDown.abort();
   clearInterval(retention);
   server.close();
-  hooks.close();
+  socketServer.close();
   codex.close();
   store.close();
   process.exit(0);
 }
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
+
+/** A config error ends start-up with its message, which names the file and the key. */
+function settingsOrExit(): ReturnType<typeof loadSettings> {
+  try {
+    return loadSettings(inputs);
+  } catch (err) {
+    if (!(err instanceof InvalidConfig)) throw err;
+    console.error(err.message);
+    return process.exit(1);
+  }
+}
