@@ -30,6 +30,12 @@ export const StreamServerFrame = z.discriminatedUnion("type", [
     driver: z.boolean(),
     epoch: z.number().int().nonnegative(),
   }),
+  /**
+   * The binary frames between these two are the terminal's history and screen as the daemon
+   * holds them; live output follows, with no gap and no repeat (§5.3, §5.9).
+   */
+  z.object({ type: z.literal("snapshot_start") }),
+  z.object({ type: z.literal("snapshot_end") }),
   /** Input from a view that wasn't the driver was dropped, never queued. */
   z.object({ type: z.literal("input_dropped") }),
   z.object({ type: z.literal("exit") }),

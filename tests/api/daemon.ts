@@ -8,7 +8,7 @@ import { createServer } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocket } from "ws";
-import { PROTOCOL_VERSION, StreamServerFrame } from "@bazhen/protocol";
+import { LaunchAgentResponse, PROTOCOL_VERSION, StreamServerFrame } from "@bazhen/protocol";
 import { claudeHome, loginEnv } from "../support/agent-env.ts";
 
 const repo = fileURLToPath(new URL("../..", import.meta.url));
@@ -24,6 +24,7 @@ async function freePort(): Promise<number> {
 }
 
 let instances = 0;
+let programs = 0;
 
 /** Waits for a condition outside a test, where `expect.poll` can't run. */
 export async function waitUntil(
@@ -115,6 +116,7 @@ export class Daemon {
     terminalId: string,
     mode: "observe" | "interactive",
     origin = this.url,
+    size = { cols: 100, rows: 30 },
   ): Promise<View> {
     const ws = new WebSocket(
       `${this.url.replace("http", "ws")}/v1/terminals/${terminalId}/stream`,
@@ -130,7 +132,7 @@ export class Daemon {
       );
       ws.once("error", reject);
     });
-    view.frame({ type: "hello", protocolVersion: PROTOCOL_VERSION, mode, cols: 100, rows: 30 });
+    view.frame({ type: "hello", protocolVersion: PROTOCOL_VERSION, mode, ...size });
     return view;
   }
 
@@ -154,10 +156,55 @@ export class Daemon {
       ?.split(" ")[1];
   }
 
-  /** What the agent's terminal shows. */
-  screen(agentId: string): string {
+  private requireSession(agentId: string): string {
     const session = this.session(agentId);
-    return session === undefined ? "" : this.tmux("capture-pane", "-p", "-t", session);
+    if (session === undefined) throw new Error(`no terminal for ${agentId}`);
+    return session;
+  }
+
+  /** What the agent's terminal shows, or nothing while it has no terminal yet. */
+  screen(agentId: string): string {
+    return this.session(agentId) === undefined ? "" : this.capture(agentId);
+  }
+
+  /**
+   * A terminal running `argv`: an agent is launched, then its program is replaced, so the
+   * terminal is one the daemon knows and streams.
+   */
+  async program(argv: readonly string[]): Promise<{ agentId: string; terminalId: string }> {
+    const launched = LaunchAgentResponse.parse(
+      (
+        await this.request("/v1/agents", {
+          method: "POST",
+          body: { idempotencyKey: `program-${++programs}`, harness: "claude-code", cwd: this.work },
+        })
+      ).body,
+    );
+    const ids = { agentId: launched.agentId, terminalId: String(launched.terminalId) };
+    await waitUntil(() => this.session(ids.agentId) !== undefined, "the agent's terminal");
+    this.runInTerminal(ids.agentId, argv);
+    return ids;
+  }
+
+  /** The visible screen and up to `history` lines above it, as tmux holds them. */
+  capture(agentId: string, history = 0): string {
+    return this.tmux("capture-pane", "-p", "-t", this.requireSession(agentId), "-S", `-${history}`);
+  }
+
+  /** Where tmux has the program's cursor: column and row on the screen, from zero. */
+  cursor(agentId: string): [number, number] {
+    const at = "#{cursor_x} #{cursor_y}";
+    const [x = 0, y = 0] = this.tmux(
+      "display-message",
+      "-p",
+      "-t",
+      this.requireSession(agentId),
+      at,
+    )
+      .trim()
+      .split(" ")
+      .map(Number);
+    return [x, y];
   }
 
   /**
@@ -165,9 +212,7 @@ export class Daemon {
    * Bazhen knows stays the same, so its stream serves the new program.
    */
   runInTerminal(agentId: string, argv: readonly string[]): void {
-    const session = this.session(agentId);
-    if (session === undefined) throw new Error(`no terminal for ${agentId}`);
-    this.tmux("respawn-pane", "-k", "-t", `${session}:0`, ...argv);
+    this.tmux("respawn-pane", "-k", "-t", `${this.requireSession(agentId)}:0`, ...argv);
   }
 
   /** Ends the agent's terminal, as if its tmux session had been killed by hand. */
@@ -212,20 +257,37 @@ export class Daemon {
 /** One open stream: everything the daemon sent it, and a way to type. */
 export class View {
   readonly frames: StreamServerFrame[] = [];
-  private bytes = "";
+  private readonly raw: Buffer[] = [];
+  private snapshotEnd: number | undefined;
   private readonly ws: WebSocket;
 
   constructor(ws: WebSocket) {
     this.ws = ws;
     ws.on("message", (data: Buffer, binary: boolean) => {
-      if (binary) this.bytes += data.toString("utf8");
-      else this.frames.push(StreamServerFrame.parse(JSON.parse(data.toString("utf8"))));
+      if (binary) {
+        this.raw.push(data);
+        return;
+      }
+      const frame = StreamServerFrame.parse(JSON.parse(data.toString("utf8")));
+      if (frame.type === "snapshot_end") this.snapshotEnd = this.raw.length;
+      this.frames.push(frame);
     });
+  }
+
+  /** The bytes of the snapshot the view opened on, without the live output after it. */
+  snapshot(): Buffer {
+    if (this.snapshotEnd === undefined) throw new Error("no snapshot received yet");
+    return Buffer.concat(this.raw.slice(0, this.snapshotEnd));
+  }
+
+  /** Every byte of terminal output this view has received, in order. */
+  received(): Buffer {
+    return Buffer.concat(this.raw);
   }
 
   /** The terminal output this view has received, escape sequences included. */
   output(): string {
-    return this.bytes;
+    return this.received().toString("utf8");
   }
 
   /** Resolves once the daemon has attached this view to the terminal. */

@@ -25,7 +25,6 @@ function fakeRuntime(
       return { terminalId: spec.terminalId, runtime: "fake", locator: { session: "s" } };
     },
     attach: () => Promise.reject(new Error("not used")),
-    snapshot: () => Promise.reject(new Error("not used")),
     close: () => Promise.reject(new Error("not used")),
   };
   return { runtime, created };

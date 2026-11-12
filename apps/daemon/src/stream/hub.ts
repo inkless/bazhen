@@ -12,7 +12,7 @@ import {
   type TerminalId,
 } from "@bazhen/core";
 import type { AttachmentMode, EventPayload, StreamServerFrame } from "@bazhen/protocol";
-import { ScreenEmulator } from "./emulator.ts";
+import { HISTORY_LINES, ScreenEmulator } from "./emulator.ts";
 import { classifyInput } from "./input-filter.ts";
 
 /** One browser view of a terminal, as the hub sees it. */
@@ -61,6 +61,8 @@ interface Watched {
   readonly emulator: ScreenEmulator;
   readonly viewers: Map<AttachmentId, Entry>;
   lease: Lease;
+  /** The terminal's size as last applied. */
+  size: Size;
   /** A resize in flight, and the latest size asked for while it runs. */
   resizing?: Promise<void>;
   wanted?: Size;
@@ -86,24 +88,18 @@ export class TerminalHub {
     const opening = viewer.mode === "interactive" ? size : null;
     const { watched, opened } = await this.watch(ref, opening);
     const id = newId("att");
-    // A runtime client that has just attached redraws the screen itself; a view that joins an
-    // existing one is seeded from a snapshot, its live bytes held until that is sent.
-    const entry: Entry = opened ? { viewer, size } : { viewer, size, queue: [] };
+    // From here the view's live bytes are held, and the snapshot covers every byte before them.
+    const queue: Uint8Array[] = [];
+    const entry: Entry = { viewer, size, queue };
     watched.viewers.set(id, entry);
+    const snapshot = watched.emulator.snapshot();
     this.log.started(id, watched.terminal, viewer.mode);
     viewer.notify(leaseFrame(watched, id));
-    if (entry.queue !== undefined) {
-      try {
-        viewer.send(Buffer.from(await this.runtime.snapshot(ref)));
-      } catch (err) {
-        this.end(watched, id, "attach_failed");
-        viewer.notify({ type: "error", message: `could not read the screen: ${String(err)}` });
-        viewer.close();
-        throw err;
-      }
-      for (const bytes of entry.queue) viewer.send(bytes);
-      delete entry.queue;
-    }
+    viewer.notify({ type: "snapshot_start" });
+    viewer.send(Buffer.from(await snapshot));
+    viewer.notify({ type: "snapshot_end" });
+    for (const bytes of queue) viewer.send(bytes);
+    delete entry.queue;
     // The most recent interactive view sizes the terminal while nobody drives it.
     if (!opened) this.fitTo(watched);
     // Last: a view may send input and engage as soon as it is told, and they need the handle
@@ -124,14 +120,18 @@ export class TerminalHub {
   ): Promise<{ watched: Watched; opened: boolean }> {
     const existing = this.watched.get(ref.terminalId);
     if (existing !== undefined) return { watched: await existing, opened: false };
-    const opening = this.runtime.attach(ref, size).then((stream) => {
+    const opening = (async () => {
+      const { stream, history } = await this.runtime.attach(ref, size, HISTORY_LINES);
       const watched: Watched = {
         terminal: ref.terminalId,
         stream,
-        emulator: new ScreenEmulator((reply) => stream.write(reply)),
+        emulator: new ScreenEmulator(stream.size, (reply) => stream.write(reply)),
+        size: stream.size,
         viewers: new Map(),
         lease: { holder: null, epoch: this.log.epoch(ref.terminalId) },
       };
+      // Before any of the client's output, whose first redraw paints the screen below it.
+      watched.emulator.seed(history);
       stream.onData((bytes) => {
         watched.emulator.write(bytes);
         for (const entry of watched.viewers.values()) {
@@ -150,7 +150,7 @@ export class TerminalHub {
         this.forget(ref.terminalId, opening);
       });
       return watched;
-    });
+    })();
     this.watched.set(ref.terminalId, opening);
     opening.catch(() => this.forget(ref.terminalId, opening));
     return { watched: await opening, opened: true };
@@ -222,14 +222,22 @@ export class TerminalHub {
     this.fitTo(watched);
   }
 
-  /** One resize at a time: a dragged window sends many, and only the latest size matters. */
+  /**
+   * One resize at a time: a dragged window sends many, and only the latest size matters. The
+   * size the terminal already has is not applied again, since tmux would redraw every view.
+   */
   private applySize(watched: Watched, size: Size): void {
     watched.wanted = size;
     if (watched.resizing !== undefined) return;
     const next = watched.wanted;
     delete watched.wanted;
+    if (next.cols === watched.size.cols && next.rows === watched.size.rows) return;
     watched.resizing = watched.stream
       .resize(next)
+      .then(() => {
+        watched.size = next;
+        watched.emulator.resize(next);
+      })
       .catch((err: unknown) => {
         for (const entry of watched.viewers.values()) {
           entry.viewer.notify({ type: "error", message: `resize failed: ${String(err)}` });
