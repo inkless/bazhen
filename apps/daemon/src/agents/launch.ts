@@ -11,6 +11,7 @@ import {
 import { HarnessId, LaunchAgentResponse, type LaunchAgentRequest } from "@bazhen/protocol";
 import { z } from "zod";
 import { IdempotencyConflict, runtimePayload, type Store } from "../store/store.ts";
+import { resolveDirectory } from "./cwd.ts";
 
 /** The local environment's id, registering it on the first run (foundation-design §3). */
 export function localEnvironmentId(store: Store): EnvironmentId {
@@ -26,7 +27,7 @@ export function localEnvironmentId(store: Store): EnvironmentId {
   return id;
 }
 
-/** What a launch key remembers: the request it was for, and how that launch ended. */
+/** What a launch key remembers: the request as it was asked, and how that launch ended. */
 const LaunchRecord = z.object({
   request: z.object({ harness: HarnessId, cwd: z.string(), project: z.string() }),
   response: LaunchAgentResponse,
@@ -39,6 +40,8 @@ export interface LaunchDeps {
   readonly environment: EnvironmentAdapter;
   /** The terminal's size until a view attaches and sets its own. */
   readonly size: Size;
+  /** The daemon user's home, which a launch directory's leading `~` names. */
+  readonly home: string;
 }
 
 /**
@@ -68,13 +71,16 @@ function replay(
 }
 
 export async function launchAgent(
-  { store, environment, size }: LaunchDeps,
+  { store, environment, size, home }: LaunchDeps,
   req: LaunchAgentRequest,
 ): Promise<LaunchAgentResponse> {
-  const request = { harness: req.harness, cwd: req.cwd, project: req.project ?? basename(req.cwd) };
+  const asked = { harness: req.harness, cwd: req.cwd, project: req.project ?? basename(req.cwd) };
   const prior = store.recall(req.idempotencyKey);
-  if (prior !== undefined) return replay(LaunchRecord.parse(prior), req.idempotencyKey, request);
+  // A retry gets the first answer, whatever has happened to the directory since.
+  if (prior !== undefined) return replay(LaunchRecord.parse(prior), req.idempotencyKey, asked);
   if (!environment.harnesses.includes(req.harness)) throw new UnsupportedHarness(req.harness);
+  const cwd = resolveDirectory(req.cwd, home);
+  const request = { harness: req.harness, cwd, project: req.project ?? basename(cwd) };
 
   const agentId = newId("agent");
   const terminalId = newId("term");
@@ -84,7 +90,7 @@ export async function launchAgent(
   const record = (append: () => number, earlier: number[], failed = false) =>
     store.transaction(() => {
       const response = { agentId, terminalId, eventIds: [...earlier, append()] };
-      const remembered: LaunchRecord = { request, response, failed };
+      const remembered: LaunchRecord = { request: asked, response, failed };
       store.remember(req.idempotencyKey, remembered);
       return response;
     });

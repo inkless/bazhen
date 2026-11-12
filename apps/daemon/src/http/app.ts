@@ -24,7 +24,8 @@ import {
   UnsupportedHarness,
   type RuntimeAdapter,
 } from "@bazhen/core";
-import type { z } from "zod";
+import { z } from "zod";
+import { InvalidDirectory } from "../agents/cwd.ts";
 import { IdempotencyConflict, UnknownAgent } from "../store/store.ts";
 import {
   AgentStateConflict,
@@ -51,6 +52,10 @@ export interface AppDeps {
 }
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+/** A request that doesn't parse, described in words rather than as the parser's issue list. */
+const invalid = (c: Context, error: z.ZodError) =>
+  fail(c, 400, "invalid_request", z.prettifyError(error));
 
 function fail(
   c: Context,
@@ -94,7 +99,7 @@ export function createApp(deps: AppDeps): Hono {
 
   app.post("/v1/agents", async (c) => {
     const body = LaunchAgentRequest.safeParse(await c.req.json().catch(() => undefined));
-    if (!body.success) return fail(c, 400, "invalid_request", body.error.message);
+    if (!body.success) return invalid(c, body.error);
     return c.json(await deps.launch(body.data));
   });
 
@@ -106,7 +111,7 @@ export function createApp(deps: AppDeps): Hono {
   ) =>
     app.post(path, async (c) => {
       const body = schema.safeParse(await c.req.json().catch(() => undefined));
-      if (!body.success) return fail(c, 400, "invalid_request", body.error.message);
+      if (!body.success) return invalid(c, body.error);
       return c.json(await run(c.req.param("id"), body.data));
     });
   route("/v1/agents/:id/messages", SendMessageRequest, deps.send);
@@ -118,6 +123,7 @@ export function createApp(deps: AppDeps): Hono {
   // Typed failures from the domain become protocol errors in one place; anything else is a bug.
   app.onError((err, c) => {
     if (err instanceof UnsupportedHarness) return fail(c, 422, "unsupported", err.message);
+    if (err instanceof InvalidDirectory) return fail(c, 400, "invalid_request", err.message);
     if (err instanceof LaunchFailed) return fail(c, 502, "launch_failed", err.message);
     if (err instanceof IdempotencyConflict) return fail(c, 409, "conflict", err.message);
     if (err instanceof AttentionClosed) return fail(c, 409, "conflict", err.message);
