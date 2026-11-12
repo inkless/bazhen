@@ -130,7 +130,8 @@ export const MIGRATIONS: readonly Migration[] = [
         state TEXT NOT NULL,
         close_reason TEXT,
         summary TEXT NOT NULL,
-        tool_key TEXT NOT NULL,
+        tool_use_id TEXT,
+        main_agent INTEGER NOT NULL,
         created_event_id INTEGER NOT NULL REFERENCES events (id),
         updated_event_id INTEGER NOT NULL REFERENCES events (id)
       ) STRICT;

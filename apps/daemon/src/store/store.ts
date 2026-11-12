@@ -35,6 +35,12 @@ function rowIds<P extends IdPrefix>(rows: readonly Record<string, SQLOutputValue
 }
 
 /** A key reused for a different request: answering with the first one would be a lie. */
+export interface OpenAttention {
+  readonly id: AttentionId;
+  readonly toolUseId: string | null;
+  readonly mainAgent: boolean;
+}
+
 export class IdempotencyConflict extends Error {
   readonly key: string;
 
@@ -232,14 +238,20 @@ export class Store {
   }
 
   /** Open attention items, for one agent or all, with the tool call each is about. */
-  openAttention(agentId?: string): { id: AttentionId; tool: string }[] {
-    const sql = `SELECT id, tool_key FROM attention_items
+  openAttention(agentId?: string): OpenAttention[] {
+    const sql = `SELECT id, tool_use_id, main_agent FROM attention_items
                  WHERE state = 'open' AND (?1 IS NULL OR agent_session_id = ?1) ORDER BY created_event_id`;
     return this.prepare(sql)
       .all(agentId ?? null)
       .flatMap((r) =>
         typeof r.id === "string" && isId("attn", r.id)
-          ? [{ id: r.id, tool: String(r.tool_key) }]
+          ? [
+              {
+                id: r.id,
+                toolUseId: typeof r.tool_use_id === "string" ? r.tool_use_id : null,
+                mainAgent: r.main_agent === 1,
+              },
+            ]
           : [],
       );
   }

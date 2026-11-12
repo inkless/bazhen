@@ -51,22 +51,21 @@ async function readStdin(): Promise<unknown> {
   }
 }
 
+/** The daemon's reply; anything that isn't one is a failure like any other, and fails open. */
 async function ask(envelope: unknown): Promise<HookReply | null> {
-  if (event !== "wait") {
-    return post("/v1/hooks", envelope, HOOK_DEADLINE_MS).then(
-      (r) => HookReply.parse(r),
-      () => null,
-    );
-  }
-  for (const deadline = Date.now() + WAIT_FOR_MS; Date.now() < deadline;) {
+  const deadline = Date.now() + (event === "wait" ? WAIT_FOR_MS : HOOK_DEADLINE_MS);
+  for (;;) {
+    let reply: unknown;
     try {
-      return HookReply.parse(await post("/v1/hooks", envelope, deadline - Date.now()));
+      reply = await post("/v1/hooks", envelope, deadline - Date.now());
     } catch {
-      // The daemon is restarting or gone: try again, as the waiter must still hand out mail.
+      // A waiter outlives a daemon restart, as it must still hand out mail; any other hook gives up.
+      if (event !== "wait" || Date.now() >= deadline) return null;
       await new Promise((r) => setTimeout(r, 1000));
+      continue;
     }
+    return HookReply.safeParse(reply).data ?? null;
   }
-  return null;
 }
 
 if (agentId === undefined || socketPath === undefined || event === undefined) process.exit(0);

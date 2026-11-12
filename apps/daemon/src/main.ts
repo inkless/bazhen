@@ -13,6 +13,7 @@ import { TerminalHub } from "./stream/hub.ts";
 import { endOpenAttachments, storeLog } from "./stream/log.ts";
 import { streamUpgrades } from "./stream/server.ts";
 import { Approvals } from "./mailbox/approvals.ts";
+import { hookCommand } from "./mailbox/hook-command.ts";
 import { hookApp } from "./mailbox/ingress.ts";
 import { Mailbox } from "./mailbox/mailbox.ts";
 import { currentInputs, resolvePaths } from "./config/paths.ts";
@@ -46,16 +47,13 @@ const runtime = new TmuxRuntime({
   env: hostEnv,
 });
 const hookClient = fileURLToPath(new URL("mailbox/hook-client.ts", import.meta.url));
-/** One shell word, whatever the path holds: Claude Code runs hook commands through a shell. */
-const word = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
-const hookCommand = `${word(process.execPath)} --disable-warning=ExperimentalWarning ${word(hookClient)}`;
 const environment = new LocalEnvironment({
   id: localEnvironmentId(store),
   runtime,
   harnesses: [
     new ClaudeCodeHarness({
       newSessionId: randomUUID,
-      hookCommand,
+      hookCommand: hookCommand(process.execPath, hookClient),
       // A mode every agent starts in, overriding the user's settings; unset by default.
       ...(process.env.BAZHEN_CLAUDE_PERMISSION_MODE
         ? { permissionMode: process.env.BAZHEN_CLAUDE_PERMISSION_MODE }

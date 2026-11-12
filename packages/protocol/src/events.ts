@@ -71,8 +71,10 @@ export const EVENTS = {
     payload: z.object({
       agentId: Id("agent"),
       summary: z.string(),
-      /** Which tool call it is, so that call's result closes this item and no other. */
-      tool: z.string(),
+      /** The tool call it is for, whose result closes it; null if no call was seen to start. */
+      toolUseId: z.string().nullable(),
+      /** Asked by the agent itself, whose turn ending closes it, rather than by a subagent. */
+      mainAgent: z.boolean(),
     }),
   },
   "attention.answered": { entity: "attention", payload: z.object({ decision: ApprovalDecision }) },

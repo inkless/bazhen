@@ -40,8 +40,11 @@ export function hookApp(deps: IngressDeps): Hono {
         deps.mailbox.turnEnded(agentId, read.promptId);
         deps.approvals.turnEnded(agentId);
         return c.json(QUIET);
+      case "toolStarted":
+        deps.approvals.toolStarted(agentId, read.tool, read.useId);
+        return c.json(QUIET);
       case "toolSettled":
-        deps.approvals.toolSettled(agentId, read.tool);
+        deps.approvals.toolSettled(agentId, read.useId);
         return c.json(QUIET);
       case "ignored":
         break;

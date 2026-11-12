@@ -70,4 +70,14 @@ describe("hook client", () => {
       stderr: "",
     });
   });
+
+  it("fails open on JSON that isn't a hook reply", async () => {
+    dir = mkdtempSync(join(tmpdir(), "bz-hook-"));
+    const socket = join(dir, "bazhen.sock");
+    listen(socket, JSON.stringify({ exitCode: "two" }));
+    await new Promise((r) => server?.once("listening", r));
+    expect(
+      await run("PermissionRequest", { BAZHEN_AGENT_ID: newId("agent"), BAZHEN_SOCKET: socket }),
+    ).toEqual({ code: 0, stderr: "" });
+  });
 });

@@ -23,6 +23,9 @@ afterAll(async () => {
 
 const state = async () => StateSnapshot.parse((await daemon.request("/v1/state")).body);
 const openItems = (s: StateSnapshot) => s.attention.filter((a) => a.state === "open");
+/** The open item whose summary names this tool call, if one is open. */
+const openItemFor = async (call: string) =>
+  openItems(await state()).find((a) => a.summary.includes(call))?.id;
 const send = async (key: string, body: string) =>
   SendMessageResponse.parse(
     (
@@ -67,10 +70,8 @@ describe("mail to a Claude Code agent", () => {
 
   it("refuses an answer to an item that is already closed", async () => {
     await send("late", "[[fake:bash:touch answered-once]]");
-    await expect
-      .poll(async () => openItems(await state())[0]?.summary, { timeout: 30_000 })
-      .toContain("touch answered-once");
-    const id = String(openItems(await state())[0]?.id);
+    await expect.poll(() => openItemFor("touch answered-once"), { timeout: 30_000 }).toBeDefined();
+    const id = String(await openItemFor("touch answered-once"));
     const answer = (key: string) =>
       daemon.request(`/v1/attention/${id}/answer`, {
         method: "POST",

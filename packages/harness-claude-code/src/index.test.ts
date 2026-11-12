@@ -84,20 +84,25 @@ describe("Claude Code hooks", () => {
     );
   });
 
-  it("names the tool a permission request is for, and keys it to that tool's result", () => {
-    const call = { tool_name: "Bash", tool_input: { command: "touch x" } };
+  it("ties a permission request to the call that started it, and that call's result to both", () => {
+    const call = { prompt_id: "p-1", tool_name: "Bash", tool_input: { command: "touch x" } };
+    const started = readHook("PreToolUse", { ...call, tool_use_id: "t-1" });
     const asked = readHook("PermissionRequest", call);
-    expect(asked).toMatchObject({ kind: "permission", summary: 'Bash: {"command":"touch x"}' });
-    expect(readHook("PostToolUse", { ...call, tool_use_id: "t-1" })).toEqual({
-      kind: "toolSettled",
-      tool: toolOf(asked),
-    });
+    expect([
+      started,
+      asked,
+      readHook("PostToolUseFailure", { ...call, tool_use_id: "t-1" }),
+    ]).toEqual([
+      { kind: "toolStarted", tool: toolOf(asked), useId: "t-1" },
+      { kind: "permission", summary: 'Bash: {"command":"touch x"}', tool: toolOf(asked) },
+      { kind: "toolSettled", useId: "t-1" },
+    ]);
   });
 
   it("tells a subagent's tool call apart from the same call by the agent itself", () => {
     const call = { tool_name: "Bash", tool_input: { command: "touch x" } };
-    const own = readHook("PostToolUse", call);
-    const subagent = readHook("PostToolUse", { ...call, agent_id: "sub-1" });
+    const own = readHook("PermissionRequest", call);
+    const subagent = readHook("PermissionRequest", { ...call, agent_id: "sub-1" });
     expect([own, subagent].map((h) => isMainAgentTool(toolOf(h)))).toEqual([true, false]);
   });
 

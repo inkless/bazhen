@@ -6,7 +6,7 @@ import {
   type HookReply,
 } from "@bazhen/protocol";
 import { APPROVAL_WAIT_MS, approvalReply, isMainAgentTool } from "@bazhen/harness-claude-code";
-import type { Store } from "../store/store.ts";
+import type { OpenAttention, Store } from "../store/store.ts";
 import { QUIET } from "./mailbox.ts";
 
 /** An answer for an item that is no longer open: it was answered, timed out or went stale. */
@@ -32,10 +32,17 @@ export class Approvals {
   private readonly store: Store;
   private readonly waitMs: number;
   private readonly pending = new Map<AttentionId, (reply: HookReply) => void>();
+  /** Each agent's tool calls that have started, have no request yet and haven't finished. */
+  private readonly started = new Map<string, { tool: string; useId: string }[]>();
 
   constructor(store: Store, waitMs = APPROVAL_WAIT_MS) {
     this.store = store;
     this.waitMs = waitMs;
+  }
+
+  /** A tool call is about to run; a permission request for it may follow. */
+  toolStarted(agentId: string, tool: string, useId: string): void {
+    this.started.set(agentId, [...(this.started.get(agentId) ?? []), { tool, useId }]);
   }
 
   request(agentId: string, summary: string, tool: string, signal: AbortSignal): Promise<HookReply> {
@@ -44,7 +51,12 @@ export class Approvals {
       type: "attention.opened",
       entityId: id,
       actor: "system",
-      payload: { agentId, summary, tool },
+      payload: {
+        agentId,
+        summary,
+        toolUseId: this.claim(agentId, tool),
+        mainAgent: isMainAgentTool(tool),
+      },
     });
     return new Promise((resolve) => {
       const settle = (reply: HookReply, reason?: CloseReason) => {
@@ -76,8 +88,9 @@ export class Approvals {
   }
 
   /** That tool call ran or failed: its request, if still open, was answered in the TUI. */
-  toolSettled(agentId: string, tool: string): void {
-    this.settleWhere(agentId, (t) => t === tool);
+  toolSettled(agentId: string, useId: string): void {
+    this.keepStarted(agentId, (c) => c.useId !== useId);
+    this.settleWhere(agentId, (item) => item.toolUseId === useId);
   }
 
   /**
@@ -85,12 +98,31 @@ export class Approvals {
    * they wait for their own result.
    */
   turnEnded(agentId: string): void {
-    this.settleWhere(agentId, isMainAgentTool);
+    this.keepStarted(agentId, (c) => !isMainAgentTool(c.tool));
+    this.settleWhere(agentId, (item) => item.mainAgent);
   }
 
-  private settleWhere(agentId: string, matches: (tool: string) => boolean): void {
+  /**
+   * The call a request is for: the earliest started one with the same key that has no request
+   * yet, so identical calls made in parallel are matched in the order they started.
+   */
+  private claim(agentId: string, tool: string): string | null {
+    const calls = this.started.get(agentId) ?? [];
+    const call = calls.find((c) => c.tool === tool);
+    if (call === undefined) return null;
+    this.keepStarted(agentId, (c) => c !== call);
+    return call.useId;
+  }
+
+  private keepStarted(agentId: string, keep: (call: { tool: string; useId: string }) => boolean) {
+    const calls = (this.started.get(agentId) ?? []).filter(keep);
+    if (calls.length === 0) this.started.delete(agentId);
+    else this.started.set(agentId, calls);
+  }
+
+  private settleWhere(agentId: string, matches: (item: OpenAttention) => boolean): void {
     for (const item of this.store.openAttention(agentId)) {
-      if (!matches(item.tool)) continue;
+      if (!matches(item)) continue;
       this.pending.get(item.id)?.(QUIET);
       this.close(item.id, "answered_in_tui");
     }

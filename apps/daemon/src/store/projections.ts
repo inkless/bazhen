@@ -133,12 +133,12 @@ export function project(db: Statements, e: Recorded): void {
       EVENTS[e.type].payload.parse(e.payload);
       return moveMessage(db, e, "requeue", { prompt_id: null });
     case "attention.opened": {
-      const { agentId, summary, tool } = EVENTS[e.type].payload.parse(e.payload);
+      const { agentId, summary, toolUseId, mainAgent } = EVENTS[e.type].payload.parse(e.payload);
       db.prepare(
-        `INSERT INTO attention_items
-           (id, agent_session_id, state, summary, tool_key, created_event_id, updated_event_id)
-         VALUES (?, ?, 'open', ?, ?, ?, ?)`,
-      ).run(e.entityId, agentId, summary, tool, e.id, e.id);
+        `INSERT INTO attention_items (id, agent_session_id, state, summary, tool_use_id,
+           main_agent, created_event_id, updated_event_id)
+         VALUES (?, ?, 'open', ?, ?, ?, ?, ?)`,
+      ).run(e.entityId, agentId, summary, toolUseId, mainAgent ? 1 : 0, e.id, e.id);
       return;
     }
     case "attention.answered":
