@@ -8,6 +8,7 @@ import { filterEnv } from "@bazhen/core";
 import { LocalEnvironment } from "@bazhen/env-local";
 import { ClaudeCodeHarness } from "@bazhen/harness-claude-code";
 import { CodexHarness } from "@bazhen/harness-codex";
+import { TmuxServer } from "@bazhen/host-guard";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
 import { launchAgent, localEnvironmentId } from "./agents/launch.ts";
 import { reconcile } from "./agents/reconcile.ts";
@@ -50,9 +51,11 @@ endOpenAttachments(store);
 mailbox.requeueInFlight();
 approvals.closeAbandoned();
 const runtime = new TmuxRuntime({
-  socket: paths.tmuxSocket,
+  server: TmuxServer.at(paths.tmuxSocket, {
+    root: paths.run,
+    config: join(paths.run, "tmux.conf"),
+  }),
   pty: nodePtySpawner,
-  configFile: join(paths.run, "tmux.conf"),
   env: hostEnv,
 });
 const hookClient = fileURLToPath(new URL("mailbox/hook-client.ts", import.meta.url));

@@ -10,9 +10,10 @@ import {
   type RuntimeRef,
   type TerminalSpec,
 } from "@bazhen/core";
+import { isAlive, type ConfiguredTmuxServer } from "@bazhen/host-guard";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
 import { nodePtySpawner } from "@bazhen/daemon/pty";
-import { killServer, sleep, testSocket, tmuxOut } from "./helpers.ts";
+import { sleep, testServer, tmuxOut } from "./helpers.ts";
 import { TmuxError } from "@bazhen/runtime-tmux";
 
 // tmux 3.4 sometimes never learns how a pane's process ended (exit-status.ts), so every
@@ -21,16 +22,15 @@ const UNKNOWN = { type: "unknown" } as const;
 // Generous, because a loaded CI runner can take a second or more to reap a pane's process.
 const WAIT = 10_000;
 const dir = mkdtempSync(join(tmpdir(), "bz-lifecycle-"));
-const socket = testSocket("lifecycle");
-const runtimeOn = (name: string) =>
+const server = testServer("lifecycle");
+const runtimeOn = (on: ConfiguredTmuxServer) =>
   new TmuxRuntime({
-    socket: name,
+    server: on,
     pty: nodePtySpawner,
-    configFile: join(dir, `${name}.conf`),
     env: filterEnv({ ...process.env, BZ_USER_VALUE: "kept" }).env,
     exitPollMs: 50,
   });
-const runtime = runtimeOn(socket);
+const runtime = runtimeOn(server);
 const spec = (argv: [string, ...string[]]): TerminalSpec => ({
   terminalId: newId("term"),
   tags: { kind: "agent", agentId: newId("agent") },
@@ -41,12 +41,12 @@ const spec = (argv: [string, ...string[]]): TerminalSpec => ({
   generation: 0,
 });
 
-afterAll(() => killServer(socket));
+afterAll(() => server.kill());
 
 /** The pane's process id and whether it has exited, read straight from tmux. */
 const pane = (ref: RuntimeRef) => {
   const [pid = "", dead = ""] = tmuxOut(
-    socket,
+    server,
     "display-message",
     "-p",
     "-t",
@@ -56,15 +56,6 @@ const pane = (ref: RuntimeRef) => {
     .trim()
     .split(" ");
   return { pid, dead: dead === "1" };
-};
-
-const alive = (pid: number) => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
 };
 
 /** Exits reported for `terminalId`, collected until the returned stop is called. */
@@ -153,7 +144,7 @@ describe("tmux runtime lifecycle on a private server", () => {
     await expect.poll(() => readFileSync(childPid, "utf8").trim(), { timeout: WAIT }).not.toBe("");
     const child = Number(readFileSync(childPid, "utf8"));
     await runtime.signal(ref, "SIGTERM");
-    await expect.poll(() => alive(child), { timeout: WAIT }).toBe(false);
+    await expect.poll(() => isAlive(child), { timeout: WAIT }).toBe(false);
   });
 
   it("touches nothing when the server is not the one the terminal was created on", async () => {
@@ -175,8 +166,8 @@ describe("tmux runtime lifecycle on a private server", () => {
 
   it("refuses to act on a pane that has been replaced inside the terminal", async () => {
     const ref = await runtime.create(spec(["sleep", "300"]));
-    tmuxOut(socket, "split-window", "-d", "-t", String(ref.locator.sessionId), "sleep", "300");
-    tmuxOut(socket, "kill-pane", "-t", String(ref.locator.paneId));
+    tmuxOut(server, "split-window", "-d", "-t", String(ref.locator.sessionId), "sleep", "300");
+    tmuxOut(server, "kill-pane", "-t", String(ref.locator.paneId));
     await expect(runtime.signal(ref, "SIGKILL")).rejects.toMatchObject({ reason: "pane-replaced" });
   });
 
@@ -198,6 +189,25 @@ describe("tmux runtime lifecycle on a private server", () => {
       reason: "unnumbered",
     });
     expect(pane(ref).dead).toBe(false);
+  });
+
+  it("refuses to signal a process replaced outside Bazhen, under the same generation", async () => {
+    const ref = await runtime.create(spec(["sleep", "300"]));
+    tmuxOut(server, "respawn-pane", "-k", "-t", String(ref.locator.paneId), "sleep", "300");
+    await expect(runtime.signal(ref, "SIGKILL")).rejects.toMatchObject({
+      reason: "process-replaced",
+    });
+    const [pid = "", dead = ""] = tmuxOut(
+      server,
+      "display-message",
+      "-p",
+      "-t",
+      String(ref.locator.paneId),
+      "#{pane_pid} #{pane_dead}",
+    )
+      .trim()
+      .split(" ");
+    expect([pid === ref.locator.panePid, dead]).toEqual([false, "0"]);
   });
 
   it("passes a variable whose value ends in ; through tmux whole", async () => {
@@ -224,17 +234,17 @@ describe("tmux runtime lifecycle on a private server", () => {
     await runtime.create(spec(["sleep", "300"])); // keeps the server up once the others are gone
     const ref = await runtime.create(spec(["sleep", "300"]));
     const gone = await runtime.create(spec(["sleep", "300"]));
-    tmuxOut(socket, "kill-session", "-t", String(gone.locator.sessionId));
+    tmuxOut(server, "kill-session", "-t", String(gone.locator.sessionId));
     await runtime.close(ref);
     await runtime.close(gone);
-    const left = tmuxOut(socket, "list-sessions", "-F", "#{session_id}").split("\n");
+    const left = tmuxOut(server, "list-sessions", "-F", "#{session_id}").split("\n");
     expect(left).not.toContain(ref.locator.sessionId);
-    const unreadable = runtimeOn(testSocket("lifecycle-missing"));
+    const unreadable = runtimeOn(testServer("lifecycle-missing"));
     await expect(unreadable.close(gone)).rejects.toThrow(TmuxError);
   });
 
   it("reports no exit while the server cannot be read", async () => {
-    const unreachable = runtimeOn(testSocket("lifecycle-none"));
+    const unreachable = runtimeOn(testServer("lifecycle-none"));
     const seen: string[] = [];
     const stop = unreachable.onExit((ref) => seen.push(ref.terminalId));
     await sleep(300);

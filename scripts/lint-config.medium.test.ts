@@ -36,6 +36,9 @@ beforeEach(() => {
     readFileSync(join(repo, ".oxlintrc.json"), "utf8"),
   );
   delete config["$schema"];
+  // A plugin path is relative to the config, which moves here.
+  const plugins = config["jsPlugins"];
+  if (Array.isArray(plugins)) config["jsPlugins"] = plugins.map((p) => join(repo, String(p)));
   writeFileSync(join(dir, ".oxlintrc.json"), JSON.stringify(config));
 });
 
@@ -90,6 +93,7 @@ describe("each package.json, against the import matrix", () => {
     expect(bannedDeclarations()).toEqual({
       "packages/protocol": [],
       "packages/core": [],
+      "packages/host-guard": [],
       "packages/runtime-tmux": [],
       "packages/env-local": [],
       "packages/harness-claude-code": [],

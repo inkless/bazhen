@@ -20,6 +20,9 @@
       "path": "packages/core"
     },
     {
+      "path": "packages/host-guard"
+    },
+    {
       "path": "packages/runtime-tmux"
     },
     {

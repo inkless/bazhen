@@ -1,6 +1,4 @@
-import { execFile } from "node:child_process";
 import { writeFileSync } from "node:fs";
-import { promisify } from "node:util";
 import type {
   Attached,
   PtySpawner,
@@ -15,12 +13,16 @@ import type {
   TerminalTags,
 } from "@bazhen/core";
 import type { ExitStatus, Signal } from "@bazhen/protocol";
+import {
+  GENERATION_OPTION,
+  PaneRefused,
+  signalPane,
+  type ConfiguredTmuxServer,
+} from "@bazhen/host-guard";
 import { isId, ProcessState, StaleIncarnation } from "@bazhen/core";
 import { exitStatus, UnknownCause } from "./exit-status.ts";
 import { ExitWatch, type DeadTerminal } from "./exit-watch.ts";
 
-const run = promisify(execFile);
-const TMUX_TIMEOUT_MS = 5_000;
 const EXIT_POLL_MS = 1_000;
 const UNKNOWN_EXIT_AFTER_MS = 2_000;
 
@@ -36,7 +38,7 @@ const COLUMN = {
   sessionId: "session_id",
   paneId: "pane_id",
   panePid: "pane_pid",
-  generation: "@bazhen_generation",
+  generation: GENERATION_OPTION,
   dead: "pane_dead",
   status: "pane_dead_status",
   deadSignal: "pane_dead_signal",
@@ -118,17 +120,14 @@ export class TmuxError extends Error {
 }
 
 export interface TmuxRuntimeOptions {
-  /** Private server name for `tmux -L`. Bazhen never touches any other server. */
-  readonly socket: string;
+  /** Bazhen's private server, whose `config` is where TMUX_CONFIG is written before it starts. */
+  readonly server: ConfiguredTmuxServer;
   readonly pty: PtySpawner;
-  /** Where TMUX_CONFIG is written before the server starts. */
-  readonly configFile: string;
   /**
    * The whole environment of every tmux command and of the daemon's attach clients. The server
    * copies it into every pane, so it must already be filtered (foundation-design §9.5).
    */
   readonly env: Readonly<Record<string, string>>;
-  readonly tmuxBin?: string;
   /** How often dead terminals are looked for while anyone listens. */
   readonly exitPollMs?: number;
   /** Where a failure inside exit polling goes, since no caller is waiting on it. */
@@ -137,23 +136,18 @@ export interface TmuxRuntimeOptions {
 
 export class TmuxRuntime implements RuntimeAdapter {
   readonly kind = "tmux";
-  private readonly bin: string;
   private readonly opts: TmuxRuntimeOptions;
   private readonly exits: ExitWatch;
   private readonly unknownCause = new UnknownCause(UNKNOWN_EXIT_AFTER_MS);
 
   constructor(opts: TmuxRuntimeOptions) {
-    if (opts.socket === "" || opts.socket === "default") {
-      throw new RangeError(`refusing tmux socket "${opts.socket}": it is not a private server`);
-    }
     this.opts = opts;
-    this.bin = opts.tmuxBin ?? "tmux";
     this.exits = new ExitWatch({
       read: () => this.deadTerminals(),
       intervalMs: opts.exitPollMs ?? EXIT_POLL_MS,
       onError: opts.onError ?? ((err) => console.warn("tmux exit polling failed:", err)),
     });
-    writeFileSync(opts.configFile, TMUX_CONFIG, { mode: 0o600 });
+    writeFileSync(opts.server.config, TMUX_CONFIG, { mode: 0o600 });
   }
 
   private async tmux(...args: string[]): Promise<string> {
@@ -162,13 +156,8 @@ export class TmuxRuntime implements RuntimeAdapter {
 
   /** What tmux printed, untrimmed: blank lines at its end can be content. */
   private async tmuxOutput(args: readonly string[]): Promise<string> {
-    const argv = ["-L", this.opts.socket, "-f", this.opts.configFile, ...args];
     try {
-      const { stdout } = await run(this.bin, argv, {
-        env: this.opts.env,
-        timeout: TMUX_TIMEOUT_MS,
-      });
-      return stdout;
+      return await this.opts.server.run(args, { env: this.opts.env });
     } catch (cause) {
       throw new TmuxError(args, cause);
     }
@@ -222,7 +211,7 @@ export class TmuxRuntime implements RuntimeAdapter {
 
   private locator(row: Row): Record<string, string> {
     return {
-      socket: this.opts.socket,
+      socket: this.opts.server.socket,
       ...Object.fromEntries(LOCATION_KEYS.map((k) => [k, row(k)])),
     };
   }
@@ -284,7 +273,7 @@ export class TmuxRuntime implements RuntimeAdapter {
           ).replace(/\n$/, "")
         : "";
     const proc = this.opts.pty.spawn(
-      [this.bin, "-L", this.opts.socket, "attach-session", "-t", session],
+      this.opts.server.argv("attach-session", "-t", session),
       { cols, rows },
       this.opts.env,
     );
@@ -339,15 +328,23 @@ export class TmuxRuntime implements RuntimeAdapter {
     const pane = await this.paneOf(ref);
     if (pane.exit !== null) throw new ProcessState(ref.terminalId, "running");
     assertSameGeneration(ref, pane.ref);
-    const pid = pane.ref.locator.panePid;
-    // The pane's process leads its own group, so this reaches the tools it started as well,
-    // as Ctrl-C or a hangup in a terminal would.
-    try {
-      process.kill(-Number(pid), signal);
-    } catch (err) {
-      // The group exited after the check above; reporting that exit is the poller's job.
-      if (!(err instanceof Error && "code" in err && err.code === "ESRCH")) throw err;
-    }
+    const target = located(pane.ref, "paneId");
+    // The pane's process leads its own group, so this reaches the tools it started as well.
+    // A group that exited after the check above is the poller's to report.
+    // The process the caller meant, not whichever the pane runs now.
+    const expected = { pid: ref.locator.panePid ?? "", generation: ref.locator.generation ?? "" };
+    const group = await this.opts.server
+      .paneGroup(target, expected, { env: this.opts.env })
+      .catch((cause: unknown) => {
+        if (cause instanceof PaneRefused && cause.reason === "dead") {
+          throw new ProcessState(ref.terminalId, "running");
+        }
+        if (cause instanceof PaneRefused) {
+          throw new StaleIncarnation(ref.terminalId, "process-replaced");
+        }
+        throw new TmuxError(["display-message", "-t", target], cause);
+      });
+    signalPane(group, signal);
   }
 
   onExit(cb: (ref: RuntimeRef, status: ExitStatus) => void): () => void {

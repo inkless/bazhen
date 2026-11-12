@@ -12,10 +12,10 @@
 // - The run refuses to start when the machine is close to running out of PTYs: a leak there
 //   starves every terminal on the machine, not just Bazhen's.
 
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { TmuxServer } from "@bazhen/host-guard";
 import { requireDisposableHost } from "./disposable-host.ts";
 
 // The spikes' watchdog aborted above 420 of macOS's 511 PTYs (kern.tty.ptmx_max).
@@ -63,26 +63,27 @@ function fail(message: string): never {
   throw new Error(message);
 }
 
-/** tmux by socket path, so a command can only reach a server in the directory it names. */
-function tmuxAt(socket: string, ...args: string[]): boolean {
-  try {
-    execFileSync("tmux", ["-S", socket, ...args], { stdio: "ignore", timeout: 5000 });
-    return true;
-  } catch {
-    return false;
-  }
-}
+/**
+ * A run's two directories: `servers`, the root its tests' servers live in, and `stray`, its
+ * TMUX_TMPDIR, where a bare `tmux` would land. They are siblings, because host-guard refuses a
+ * root that holds TMUX_TMPDIR's `tmux-<uid>`.
+ */
+const socketDir = (dir: string) => join(dir, "servers");
+const strayDir = (dir: string) => join(dir, "stray");
 
 /** The live tmux servers in a run's own socket directory. */
-function serversIn(dir: string): string[] {
-  const sockets = join(dir, `tmux-${process.getuid?.() ?? 0}`);
-  let names: string[] = [];
-  try {
-    names = readdirSync(sockets);
-  } catch {
-    // No socket directory: this run never started tmux.
+function serversIn(dir: string): Map<string, TmuxServer> {
+  const servers = new Map<string, TmuxServer>();
+  for (const name of readdirSync(socketDir(dir))) {
+    // `default` is refused even here: killing one by mistake ends every session on the machine.
+    if (name === "default") continue;
+    const path = join(socketDir(dir), name);
+    // The servers' config files sit beside their sockets.
+    if (!statSync(path).isSocket()) continue;
+    const server = TmuxServer.at(path, { root: socketDir(dir) });
+    if (server.alive()) servers.set(name, server);
   }
-  return names.filter((name) => tmuxAt(join(sockets, name), "list-sessions"));
+  return servers;
 }
 
 let home: string | undefined;
@@ -92,7 +93,10 @@ export function setup(): void {
   requireDisposableHost();
   // Next, before anything that can fail: teardown runs even after a failed setup.
   tmuxDir = privateTmuxDir();
-  process.env["TMUX_TMPDIR"] = tmuxDir;
+  mkdirSync(socketDir(tmuxDir), { mode: 0o700 });
+  mkdirSync(strayDir(tmuxDir), { mode: 0o700 });
+  process.env["TMUX_TMPDIR"] = strayDir(tmuxDir);
+  process.env["BZ_TEST_SERVERS"] = socketDir(tmuxDir);
   delete process.env["TMUX"];
   delete process.env["TMUX_PANE"];
   const { used, cutoff } = ptysInUse();
@@ -115,14 +119,11 @@ export function teardown(): void {
   // Setup never made this run's directory, so no server is this run's to stop.
   if (dir === undefined) return;
   const leaked = serversIn(dir);
-  const sockets = join(dir, `tmux-${process.getuid?.() ?? 0}`);
-  // A server named `default` is left alone, even here: killing one by mistake ends every session
-  // on the machine.
-  for (const name of leaked) if (name !== "default") tmuxAt(join(sockets, name), "kill-server");
+  for (const server of leaked.values()) server.kill();
   rmSync(dir, { recursive: true, force: true });
-  if (leaked.length > 0) {
+  if (leaked.size > 0) {
     fail(
-      `Tests left ${leaked.length} tmux server(s) running: ${leaked.join(", ")}. ` +
+      `Tests left ${leaked.size} tmux server(s) running: ${[...leaked.keys()].join(", ")}. ` +
         "Kill every server a test starts in afterAll (docs/standards/testing.md).",
     );
   }

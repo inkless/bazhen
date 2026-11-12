@@ -2,7 +2,7 @@
 // WebSocket and tmux. Nothing here imports the daemon's code, so the same tests can certify a
 // daemon written in another language.
 
-import { execFile, execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { WebSocket } from "ws";
+import { TmuxServer } from "@bazhen/host-guard";
 import {
   EventFrame,
   LaunchAgentResponse,
@@ -39,7 +40,6 @@ async function freePort(): Promise<number> {
   return address.port;
 }
 
-let instances = 0;
 let programs = 0;
 
 /** Waits for a condition outside a test, where `expect.poll` can't run. */
@@ -65,7 +65,8 @@ export interface DaemonOptions {
 export class Daemon {
   readonly home: string;
   readonly work: string;
-  readonly tmuxSocket: string;
+  /** The daemon's private server: `<home>/run/tmux.sock`, for a home this short. */
+  readonly tmuxServer: TmuxServer;
   private readonly env: Record<string, string>;
   private port = 0;
   private process: ChildProcess | undefined;
@@ -73,14 +74,13 @@ export class Daemon {
   private constructor(home: string, opts: DaemonOptions) {
     this.home = home;
     this.work = join(home, "work");
-    this.tmuxSocket = `bz-test-${process.env["BZ_TEST_RUN"] ?? process.pid}-api-${++instances}`;
+    this.tmuxServer = TmuxServer.at(join(home, "run", "tmux.sock"), { root: home });
     mkdirSync(this.work, { recursive: true });
 
     this.env = {
       ...loginEnv(),
       PATH: `${bin}:${process.env["PATH"] ?? "/usr/bin:/bin"}`,
       BAZHEN_HOME: home,
-      BAZHEN_TMUX_SOCKET: this.tmuxSocket,
       ...agentHomes(home, this.work, { anthropic: opts.modelUrl, responses: opts.responsesUrl }),
     };
   }
@@ -138,8 +138,13 @@ export class Daemon {
           (r) => r.ok,
           () => false,
         )
-      )
-        return;
+      ) {
+        // The daemon keeps its tmux server beside its own socket. Were its runtime directory
+        // ever moved (a home too long for a socket path), every tmux command here would miss it.
+        if (existsSync(join(this.home, "run", "bazhen.sock"))) return;
+        await this.stop();
+        throw new Error(`the daemon's runtime directory is not ${join(this.home, "run")}`);
+      }
       await new Promise((r) => setTimeout(r, 100));
     }
     await this.stop();
@@ -204,9 +209,7 @@ export class Daemon {
   }
 
   tmux(...args: string[]): string {
-    return execFileSync("tmux", ["-L", this.tmuxSocket, ...args], {
-      env: { ...process.env, TMUX: "" },
-    }).toString();
+    return this.tmuxServer.runSync(args);
   }
 
   /** The agent's tmux session, found by the tag Bazhen wrote on it. */
@@ -327,11 +330,7 @@ export class Daemon {
     const codexStopped = codexDaemonStarted(this.home)
       ? run("codex", ["app-server", "daemon", "stop"], { env: this.env, timeout: 90_000 })
       : undefined;
-    try {
-      this.tmux("kill-server");
-    } catch {
-      // No server was ever started.
-    }
+    this.tmuxServer.kill();
     await codexStopped;
     // The agents' processes may still be writing their state as the server goes down.
     rmSync(this.home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });

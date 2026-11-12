@@ -26,10 +26,11 @@
 // The branch is compared with its merge base with <ref>; <ref> defaults to origin/main, or main
 // when there is no origin.
 
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, type ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, posix } from "node:path";
+import { isAlive, signalGroup, spawnGroup } from "@bazhen/host-guard";
 import { isMain } from "./is-main.ts";
 
 export type Outcome = "KILLED" | "SURVIVED" | "INVALID";
@@ -224,22 +225,10 @@ export function staleWorktrees(porcelain: string, alive: (pid: number) => boolea
     .map((w) => w.path);
 }
 
-const errorCode = (error: unknown) =>
-  error instanceof Error && "code" in error ? error.code : undefined;
-
-function pidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return errorCode(error) !== "ESRCH";
-  }
-}
-
 /** Removes the worktrees of earlier runs that died before cleaning up. Never touches others. */
 function sweepStale(top: string): void {
   const listed = git(["worktree", "list", "--porcelain"], top);
-  for (const path of staleWorktrees(listed, pidAlive)) {
+  for (const path of staleWorktrees(listed, (pid) => pid > 1 && isAlive(pid))) {
     removeWorktree(path, top);
   }
 }
@@ -272,15 +261,6 @@ let signalled = false;
 const exitCodeFor = (signal: unknown) =>
   signal === "SIGINT" ? 130 : signal === "SIGTERM" ? 143 : signal === "SIGHUP" ? 129 : undefined;
 
-function signalGroup(child: ChildProcess, signal: NodeJS.Signals): void {
-  if (child.pid === undefined) return;
-  try {
-    process.kill(-child.pid, signal);
-  } catch (error) {
-    if (errorCode(error) !== "ESRCH") throw error;
-  }
-}
-
 /** SIGTERM to the child's group, then SIGKILL after a grace period. */
 async function stopGroup(child: ChildProcess): Promise<void> {
   signalGroup(child, "SIGTERM");
@@ -309,7 +289,7 @@ const handleSignal = (signal: NodeJS.Signals) => void onSignal(signal);
 
 function run(cmd: string, args: string[], cwd: string, timeoutMs: number): Promise<boolean> {
   return new Promise((done) => {
-    const child = spawn(cmd, args, { cwd, env: isolatedEnv(), stdio: "ignore", detached: true });
+    const child = spawnGroup(cmd, args, { cwd, env: isolatedEnv(), stdio: "ignore" });
     running = child;
     let timedOut = false;
     const timer = setTimeout(() => {

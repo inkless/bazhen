@@ -11,7 +11,7 @@ export interface BazhenPaths {
   /** Holds the daemon's Unix socket and instance lock; mode 0700. */
   readonly run: string;
   readonly socket: string;
-  /** The private tmux server's name, for `tmux -L`. */
+  /** The private tmux server's socket, in `run`, so every instance has a server of its own. */
   readonly tmuxSocket: string;
 }
 
@@ -28,6 +28,7 @@ export interface PathInputs {
 /** `sun_path` holds 104 bytes, including the terminating NUL. */
 const MAX_SOCKET_PATH = 103;
 const SOCKET_NAME = "bazhen.sock";
+const TMUX_SOCKET_NAME = "tmux.sock";
 
 const shortHash = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 8);
 const absolute = (value: string | undefined) => (value?.startsWith("/") ? value : undefined);
@@ -69,9 +70,7 @@ export function resolvePaths(i: PathInputs): BazhenPaths {
     run,
     socket: join(run, SOCKET_NAME),
     bank: i.flags?.bank ?? i.env.BAZHEN_BANK ?? i.configBank ?? join(base.data, "bank"),
-    // `||`, not `??`: an empty name would make `tmux -L ''`, which some tmux builds read as the
-    // default server.
-    tmuxSocket: i.env.BAZHEN_TMUX_SOCKET || (root ? `bazhen-${shortHash(root)}` : "bazhen"),
+    tmuxSocket: join(run, TMUX_SOCKET_NAME),
   };
 }
 

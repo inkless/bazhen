@@ -33,8 +33,8 @@ Something on this machine holds PTYs. The limits and the cutoff are in
 Teardown found servers from this run alive, and has already killed them. The message names them.
 
 1. The label in `bz-test-<run>-<label>` tells you which test started each one. A server named
-   `default` means a test ran `tmux` without `-L`: give it a `testSocket()`.
-2. That test is missing `afterAll(() => killServer(socket))`, or it created a second socket it
+   `default` can't be one of them: `@bazhen/host-guard` refuses that name.
+2. That test is missing `afterAll(() => server.kill())`, or it created a second socket it
    never recorded. Fix the test. Teardown is a backstop, not the cleanup.
 
 ## The run hangs
@@ -57,7 +57,7 @@ Teardown found servers from this run alive, and has already killed them. The mes
 2. Usual causes:
    - an option set after `new-session` that had to apply before it: move it into `TMUX_CONFIG`;
    - asserting before the output arrived: use `expect.poll`;
-   - two runs sharing a fixed name or port: use `testSocket()` and free ports.
+   - two runs sharing a fixed name or port: use `testServer()` and free ports.
 3. Fix the race. There are no retries in this repository.
 
 ## Known tmux server crashes (a crash kills every terminal)
