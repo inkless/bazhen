@@ -1,6 +1,5 @@
+import type { AttachmentMode } from "@bazhen/protocol";
 import type { AttachmentId } from "./ids.ts";
-
-export type AttachmentMode = "observe" | "interactive";
 
 /**
  * Input authority over one terminal (foundation-design §4.3). The epoch survives a release, so

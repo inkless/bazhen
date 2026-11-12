@@ -58,7 +58,7 @@ describe("Store", () => {
     expect(() => Store.open(path)).toThrow(SchemaTooNew);
   });
 
-  it("upgrades a schema-1 database, keeping its terminals as agent terminals", () => {
+  it("upgrades a schema-1 database through every migration, keeping its terminals", () => {
     const path = dbPath();
     const v1 = Store.open(path, MIGRATIONS.slice(0, 1));
     const host = v1.hostId();
@@ -71,10 +71,12 @@ describe("Store", () => {
     );
     raw.close();
     const upgraded = Store.open(path);
-    expect(upgraded.schemaVersion()).toBe(2);
+    expect(upgraded.schemaVersion()).toBe(LATEST_SCHEMA_VERSION);
     upgraded.close();
     const check = new DatabaseSync(path);
     expect(check.prepare("SELECT kind FROM terminals").get()).toEqual({ kind: "agent" });
+    const tables = check.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all();
+    expect(tables.map((t) => t.name)).toEqual(expect.arrayContaining(["agent_sessions", "leases"]));
     check.close();
   });
 

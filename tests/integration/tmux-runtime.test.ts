@@ -6,6 +6,7 @@ import type { TerminalTags } from "@bazhen/core";
 import { filterEnv, newId } from "@bazhen/core";
 import { TmuxError, TmuxRuntime } from "@bazhen/runtime-tmux";
 import { nodePtySpawner } from "@bazhen/daemon/pty";
+import { TerminalHub } from "@bazhen/daemon/stream";
 import { killServer, ptyHandleCount, sleep, testSocket, tmuxOut } from "./helpers.ts";
 
 const socket = testSocket("runtime");
@@ -163,6 +164,40 @@ describe("tmux runtime on a private server", () => {
     await runtime.close(ref);
     await expect(stream.resize({ cols: 80, rows: 24 })).rejects.toThrow(TmuxError);
     stream.close();
+  });
+
+  it("snapshots the visible screen as VT bytes, with the cursor where the program left it", async () => {
+    const ref = await runtime.create(spec(["sh", "-c", "printf 'hello\\nwor'; sleep 30"]));
+    await expect.poll(() => screen(ref.locator.session), { timeout: 3000 }).toContain("wor");
+    const snapshot = await runtime.snapshot(ref);
+    expect([
+      snapshot.startsWith("\x1b[H\x1b[2Jhello\r\nwor"),
+      snapshot.endsWith("\x1b[2;4H"),
+    ]).toEqual([true, true]);
+  });
+
+  it("returns to its PTY baseline after views come and go through the daemon's hub", async () => {
+    const ref = await runtime.create(spec(["cat"]));
+    const hub = new TerminalHub(runtime, {
+      started: () => {},
+      ended: () => {},
+      granted: () => {},
+      epoch: () => 0,
+    });
+    const viewer = {
+      mode: "interactive" as const,
+      send: () => {},
+      notify: () => {},
+      close: () => {},
+    };
+    const baseline = ptyHandleCount();
+    for (let i = 0; i < 30; i++) {
+      const a = await hub.join(ref, viewer, size);
+      const b = await hub.join(ref, viewer, size);
+      a.leave();
+      b.leave();
+    }
+    await expect.poll(ptyHandleCount, { timeout: 3000 }).toBeLessThanOrEqual(baseline);
   });
 
   it("returns to its PTY handle baseline after repeated attach and detach", async () => {

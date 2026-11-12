@@ -7,6 +7,8 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { WebSocket } from "ws";
+import { PROTOCOL_VERSION, StreamServerFrame } from "@bazhen/protocol";
 
 const repo = fileURLToPath(new URL("../..", import.meta.url));
 const bin = fileURLToPath(new URL("node_modules/.bin", import.meta.url));
@@ -25,6 +27,15 @@ async function freePort(): Promise<number> {
 }
 
 let instances = 0;
+
+/** Waits for a condition outside a test, where `expect.poll` can't run. */
+export async function waitUntil(condition: () => boolean, what: string, timeoutMs = 20_000) {
+  for (const start = Date.now(); Date.now() - start < timeoutMs;) {
+    if (condition()) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error(`timed out waiting for ${what}`);
+}
 
 export class Daemon {
   readonly home: string;
@@ -122,6 +133,30 @@ export class Daemon {
     return { status: res.status, body };
   }
 
+  /** Opens a view of a terminal as a browser would, from the daemon's own origin by default. */
+  async view(
+    terminalId: string,
+    mode: "observe" | "interactive",
+    origin = this.url,
+  ): Promise<View> {
+    const ws = new WebSocket(
+      `${this.url.replace("http", "ws")}/v1/terminals/${terminalId}/stream`,
+      {
+        headers: { origin },
+      },
+    );
+    const view = new View(ws);
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", () => resolve());
+      ws.once("unexpected-response", (_req, res) =>
+        reject(new Error(`refused: ${res.statusCode}`)),
+      );
+      ws.once("error", reject);
+    });
+    view.frame({ type: "hello", protocolVersion: PROTOCOL_VERSION, mode, cols: 100, rows: 30 });
+    return view;
+  }
+
   tmux(...args: string[]): string {
     return execFileSync("tmux", ["-L", this.tmuxSocket, ...args], {
       env: { ...process.env, TMUX: "" },
@@ -154,5 +189,37 @@ export class Daemon {
     }
     // The agents' processes may still be writing their state as the server goes down.
     rmSync(this.home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+}
+
+/** One open stream: everything the daemon sent it, and a way to type. */
+export class View {
+  readonly frames: StreamServerFrame[] = [];
+  private bytes = "";
+  private readonly ws: WebSocket;
+
+  constructor(ws: WebSocket) {
+    this.ws = ws;
+    ws.on("message", (data: Buffer, binary: boolean) => {
+      if (binary) this.bytes += data.toString("utf8");
+      else this.frames.push(StreamServerFrame.parse(JSON.parse(data.toString("utf8"))));
+    });
+  }
+
+  /** The terminal output this view has received, escape sequences included. */
+  output(): string {
+    return this.bytes;
+  }
+
+  frame(frame: unknown): void {
+    this.ws.send(JSON.stringify(frame));
+  }
+
+  type(text: string): void {
+    this.ws.send(Buffer.from(text), { binary: true });
+  }
+
+  close(): void {
+    this.ws.close();
   }
 }

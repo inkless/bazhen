@@ -7,6 +7,9 @@ import { LocalEnvironment } from "@bazhen/env-local";
 import { ClaudeCodeHarness } from "@bazhen/harness-claude-code";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
 import { launchAgent, localEnvironmentId } from "./agents/launch.ts";
+import { TerminalHub } from "./stream/hub.ts";
+import { endOpenAttachments, storeLog } from "./stream/log.ts";
+import { streamUpgrades } from "./stream/server.ts";
 import { currentInputs, resolvePaths } from "./config/paths.ts";
 import { ensurePrivateDir } from "./config/private-dir.ts";
 import { createApp } from "./http/app.ts";
@@ -28,6 +31,7 @@ ensurePrivateDir(paths.run, inputs.uid);
 // session's internals (foundation-design §9.5).
 const hostEnv = filterEnv(process.env).env;
 const store = Store.open(join(paths.data, "bazhen.db"));
+endOpenAttachments(store);
 const runtime = new TmuxRuntime({
   socket: paths.tmuxSocket,
   pty: nodePtySpawner,
@@ -45,19 +49,24 @@ const allowedHosts = [`${HOSTNAME}:${port}`, `localhost:${port}`];
 // allowed only when the dev scripts name its port; a built daemon serves the client itself.
 const webPort = process.env.BAZHEN_WEB_PORT;
 const webDevHosts = webPort ? [`${HOSTNAME}:${webPort}`, `localhost:${webPort}`] : [];
+const allow = {
+  hosts: allowedHosts,
+  origins: [...allowedHosts, ...webDevHosts].map((host) => `http://${host}`),
+};
 const app = createApp({
   appVersion: APP_VERSION,
   schemaVersion: () => store.schemaVersion(),
   runtime,
-  allowedHosts,
-  allowedOrigins: [...allowedHosts, ...webDevHosts].map((host) => `http://${host}`),
+  allow,
   state: () => store.snapshot(),
   launch: (req) => launchAgent({ store, environment, size: DEFAULT_SIZE }, req),
 });
 
+const hub = new TerminalHub(runtime, storeLog(store));
 const server = serve({ fetch: app.fetch, hostname: HOSTNAME, port }, (info) => {
   console.log(`bazhen daemon listening on http://${HOSTNAME}:${info.port} (data: ${paths.data})`);
 });
+server.on("upgrade", streamUpgrades({ allow, hub, runtimeRef: (id) => store.runtimeRef(id) }));
 
 function shutdown() {
   server.close();

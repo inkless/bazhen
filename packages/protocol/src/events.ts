@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ExternalRef, HarnessId } from "./agents.ts";
-import { EnvironmentKind, Id } from "./ids.ts";
+import { AttachmentMode, EnvironmentKind, Id } from "./ids.ts";
 
 /**
  * Every event type the store accepts, with the entity it is about and its payload. A row adds
@@ -35,6 +35,23 @@ export const EVENTS = {
   "agent.failed": {
     entity: "agent",
     payload: z.object({ reason: z.enum(["launch_rejected"]) }),
+  },
+  /** A view opened a terminal's stream (foundation-design §4.2). */
+  "attachment.started": {
+    entity: "attachment",
+    payload: z.object({ terminalId: Id("term"), mode: AttachmentMode }),
+  },
+  /** Ending an attachment releases its lease, and never touches the terminal's process. */
+  "attachment.ended": {
+    entity: "attachment",
+    payload: z.object({
+      reason: z.enum(["client_closed", "terminal_closed", "daemon_restart"]),
+    }),
+  },
+  /** An engaged view became the terminal's driver; the epoch rises on every grant (§4.3). */
+  "lease.granted": {
+    entity: "terminal",
+    payload: z.object({ attachmentId: Id("att"), epoch: z.number().int().positive() }),
   },
 } as const;
 
