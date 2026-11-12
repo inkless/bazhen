@@ -22,6 +22,8 @@ export interface TerminalSpec {
   /** Bazhen's own variables for this terminal only; never a user value (foundation-design §9.5). */
   readonly env: Readonly<Record<string, string>>;
   readonly size: Size;
+  /** The incarnation this starts: 0 at create, the next one at each respawn (§3). */
+  readonly generation: number;
 }
 
 /** Locates one runtime incarnation of a terminal. Diagnostic and routing only, never identity. */
@@ -50,7 +52,7 @@ export interface RuntimeInventoryEntry {
  */
 export class StaleIncarnation extends Error {
   readonly terminalId: TerminalId;
-  readonly reason: "gone" | "server-replaced" | "pane-replaced" | "process-replaced";
+  readonly reason: "gone" | "server-replaced" | "pane-replaced" | "process-replaced" | "unnumbered";
 
   constructor(terminalId: TerminalId, reason: StaleIncarnation["reason"]) {
     super(`terminal ${terminalId}: ${reason}`);
@@ -112,7 +114,8 @@ export interface RuntimeAdapter {
   signal(ref: RuntimeRef, signal: Signal): Promise<void>;
   /**
    * Reports every dead terminal on every check, so the caller drops repeats and stale
-   * incarnations by the ref it holds. Returns the unsubscribe function.
+   * incarnations by the generation in the ref. A cause first reported unknown may be named by a
+   * later report, never the other way. Returns the unsubscribe function.
    */
   onExit(cb: (ref: RuntimeRef, status: ExitStatus) => void): () => void;
 }

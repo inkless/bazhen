@@ -29,6 +29,7 @@ const spec = (
   cwd: process.cwd(),
   env: {},
   size,
+  generation: 0,
 });
 
 afterAll(() => killServer(socket));

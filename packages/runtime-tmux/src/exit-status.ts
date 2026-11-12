@@ -20,3 +20,33 @@ export function exitStatus(status: string, signal: string): ExitStatus {
     : `SIG${signal.toUpperCase().replace(/^SIG/, "")}`;
   return { type: "signalled", signal: name };
 }
+
+/**
+ * Holds back a death of unknown cause for `graceMs`, in case its cause arrives, so a fresh death
+ * reads as still running instead of unknown. After the grace it reads unknown, which a later
+ * reading may still replace with the cause: unknown may become known, never the other way.
+ */
+export class UnknownCause {
+  private readonly graceMs: number;
+  private firstSeen = new Map<string, number>();
+
+  constructor(graceMs: number) {
+    this.graceMs = graceMs;
+  }
+
+  /** Each terminal's exit as it should be reported now; call once per reading, with every terminal. */
+  settle<T extends { readonly key: string; readonly exit: ExitStatus | null }>(
+    rows: readonly T[],
+    now: number,
+  ): T[] {
+    const firstSeen = new Map<string, number>();
+    const settled = rows.map((row) => {
+      if (row.exit?.type !== "unknown") return row;
+      const since = this.firstSeen.get(row.key) ?? now;
+      firstSeen.set(row.key, since);
+      return now - since >= this.graceMs ? row : { ...row, exit: null };
+    });
+    this.firstSeen = firstSeen;
+    return settled;
+  }
+}

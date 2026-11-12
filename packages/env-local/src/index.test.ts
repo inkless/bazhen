@@ -65,6 +65,7 @@ describe("local environment", () => {
         cwd: "/work",
         env: { HARNESS_OWN: "1", BAZHEN_AGENT_ID: l.agentId, BAZHEN_SOCKET: "/run/b.sock" },
         size: { cols: 80, rows: 24 },
+        generation: 0,
       },
     ]);
   });

@@ -13,7 +13,6 @@ const watch = (opts: Partial<ExitWatchOptions>) =>
   new ExitWatch({
     read: async () => [dead],
     intervalMs: 1000,
-    unknownAfterMs: 2000,
     onError: (err) => {
       throw err;
     },
@@ -29,12 +28,6 @@ async function reportsOver(w: ExitWatch, ms: number): Promise<string[]> {
   return seen;
 }
 
-/** A read returning each answer in turn, then the last one for good. */
-const inTurn = (...answers: DeadTerminal[][]) => {
-  let next = 0;
-  return async () => answers[Math.min(next++, answers.length - 1)] ?? [];
-};
-
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
@@ -42,22 +35,6 @@ describe("exit watch", () => {
   it("reports a dead terminal again on every tick, so a missed report is never lost", async () => {
     const seen = await reportsOver(watch({}), 2000);
     expect(seen).toEqual([`${dead.ref.terminalId}:signalled`, `${dead.ref.terminalId}:signalled`]);
-  });
-
-  it("holds back a death of unknown cause, in case its cause arrives, then reports it", async () => {
-    const unknown = deadWith({ type: "unknown" });
-    const seen = await reportsOver(watch({ read: async () => [unknown] }), 4000);
-    expect(seen).toEqual([
-      `${unknown.ref.terminalId}:unknown`,
-      `${unknown.ref.terminalId}:unknown`,
-    ]);
-  });
-
-  it("reports the cause as soon as it arrives, never the unknown it replaced", async () => {
-    const unknown = deadWith({ type: "unknown" });
-    const known: DeadTerminal = { ...unknown, status: { type: "exited", code: 3 } };
-    const seen = await reportsOver(watch({ read: inTurn([unknown], [known]) }), 2000);
-    expect(seen).toEqual([`${unknown.ref.terminalId}:exited`]);
   });
 
   it("stops reading the runtime once the last listener leaves", async () => {

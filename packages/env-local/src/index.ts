@@ -71,6 +71,7 @@ export class LocalEnvironment implements EnvironmentAdapter {
       cwd: request.cwd,
       env: { ...launch.env, BAZHEN_AGENT_ID: agentId, BAZHEN_SOCKET: this.opts.socket },
       size,
+      generation: 0,
     });
     const externalRef = launch.externalRef && { ...launch.externalRef, environmentId: this.id };
     return { runtime, externalRef };

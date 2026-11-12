@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { exitStatus } from "./exit-status.ts";
+import { exitStatus, UnknownCause } from "./exit-status.ts";
 
 describe("exitStatus", () => {
   it("reads an exit code", () => {
@@ -16,5 +16,32 @@ describe("exitStatus", () => {
 
   it("calls a death with neither a code nor a signal unknown", () => {
     expect(exitStatus("", "")).toEqual({ type: "unknown" });
+  });
+});
+
+const exits = (rows: { exit: unknown }[]) => rows.map((r) => r.exit);
+
+describe("UnknownCause", () => {
+  const unknown = { key: "a", exit: { type: "unknown" } as const };
+
+  it("reads a death of unknown cause as running until the grace runs out", () => {
+    const grace = new UnknownCause(2000);
+    expect([0, 1999, 2000].flatMap((t) => exits(grace.settle([unknown], t)))).toEqual([
+      null,
+      null,
+      { type: "unknown" },
+    ]);
+  });
+
+  it("starts the grace again for a terminal that was not dead in between", () => {
+    const grace = new UnknownCause(2000);
+    grace.settle([unknown], 0);
+    grace.settle([], 1000);
+    expect(exits(grace.settle([unknown], 2500))).toEqual([null]);
+  });
+
+  it("passes a known cause straight through", () => {
+    const exited = { key: "a", exit: { type: "exited", code: 1 } as const };
+    expect(new UnknownCause(2000).settle([exited], 0)).toEqual([exited]);
   });
 });

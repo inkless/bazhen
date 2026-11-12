@@ -38,6 +38,7 @@ const spec = (argv: [string, ...string[]]): TerminalSpec => ({
   cwd: dir,
   env: {},
   size: { cols: 80, rows: 24 },
+  generation: 0,
 });
 
 afterAll(() => killServer(socket));
@@ -68,9 +69,9 @@ const alive = (pid: number) => {
 
 /** Exits reported for `terminalId`, collected until the returned stop is called. */
 function exitsOf(terminalId: string) {
-  const seen: { incarnation: string | undefined; status: ExitStatus }[] = [];
+  const seen: { generation: string | undefined; status: ExitStatus }[] = [];
   const stop = runtime.onExit((ref, status) => {
-    if (ref.terminalId === terminalId) seen.push({ incarnation: ref.locator.incarnation, status });
+    if (ref.terminalId === terminalId) seen.push({ generation: ref.locator.generation, status });
   });
   return { seen, stop };
 }
@@ -111,22 +112,26 @@ describe("tmux runtime lifecycle on a private server", () => {
     const s = spec(["sh", "-c", "exit 0"]);
     const ref = await runtime.create(s);
     await deadOf(ref);
-    const next = await runtime.respawn(ref, { ...s, argv: ["sleep", "300"] });
+    const next = await runtime.respawn(ref, { ...s, generation: 1, argv: ["sleep", "300"] });
     expect(next.locator.paneId).toBe(ref.locator.paneId);
     expect(next.locator.panePid).not.toBe(ref.locator.panePid);
     expect(pane(next)).toEqual({ pid: next.locator.panePid, dead: false });
   });
 
-  it("reports a respawned pane's next exit under its new incarnation", async () => {
+  it("reports a respawned pane's next exit under its new generation", async () => {
     const s = spec(["sh", "-c", "exit 1"]);
     const ref = await runtime.create(s);
     await deadOf(ref);
-    const next = await runtime.respawn(ref, { ...s, argv: ["sh", "-c", "sleep 0.5; exit 2"] });
+    const next = await runtime.respawn(ref, {
+      ...s,
+      generation: 1,
+      argv: ["sh", "-c", "sleep 0.5; exit 2"],
+    });
     const exits = exitsOf(ref.terminalId);
-    expect([ref.locator.incarnation, next.locator.incarnation]).toEqual(["1", "2"]);
+    expect([ref.locator.generation, next.locator.generation]).toEqual(["0", "1"]);
     await expect
       .poll(() => exits.seen.at(-1), { timeout: WAIT })
-      .toMatchObject({ incarnation: "2" });
+      .toMatchObject({ generation: "1" });
     expect(exits.seen.at(-1)?.status).toBeOneOf([{ type: "exited", code: 2 }, UNKNOWN]);
     exits.stop();
   });
@@ -175,11 +180,40 @@ describe("tmux runtime lifecycle on a private server", () => {
     await expect(runtime.signal(ref, "SIGKILL")).rejects.toMatchObject({ reason: "pane-replaced" });
   });
 
+  it("refuses to respawn from a ref to an earlier generation", async () => {
+    const s = spec(["sh", "-c", "exit 0"]);
+    const ref = await runtime.create(s);
+    await deadOf(ref);
+    const next = await runtime.respawn(ref, { ...s, generation: 1, argv: ["sh", "-c", "exit 0"] });
+    await deadOf(next);
+    await expect(runtime.respawn(ref, { ...s, generation: 2 })).rejects.toMatchObject({
+      reason: "process-replaced",
+    });
+  });
+
+  it("refuses a ref that carries no generation rather than acting on it unchecked", async () => {
+    const ref = await runtime.create(spec(["sleep", "300"]));
+    const { generation: _, ...unnumbered } = ref.locator;
+    await expect(runtime.signal({ ...ref, locator: unnumbered }, "SIGKILL")).rejects.toMatchObject({
+      reason: "unnumbered",
+    });
+    expect(pane(ref).dead).toBe(false);
+  });
+
+  it("passes a variable whose value ends in ; through tmux whole", async () => {
+    const out = join(dir, `semi-${newId("term")}`);
+    await runtime.create({
+      ...spec(["sh", "-c", `printf %s "$BZ_SEMI" > ${out}`]),
+      env: { BZ_SEMI: "a;" },
+    });
+    await expect.poll(() => readFileSync(out, "utf8"), { timeout: WAIT }).toBe("a;");
+  });
+
   it("refuses to signal a process that has been replaced by a respawn", async () => {
     const s = spec(["sh", "-c", "exit 0"]);
     const ref = await runtime.create(s);
     await deadOf(ref);
-    const next = await runtime.respawn(ref, { ...s, argv: ["sleep", "300"] });
+    const next = await runtime.respawn(ref, { ...s, generation: 1, argv: ["sleep", "300"] });
     await expect(runtime.signal(ref, "SIGKILL")).rejects.toMatchObject({
       reason: "process-replaced",
     });
@@ -214,7 +248,11 @@ describe("tmux runtime lifecycle on a private server", () => {
     const s = spec(["sh", "-c", `env > ${created}`]);
     const ref = await runtime.create(s);
     await deadOf(ref);
-    await runtime.respawn(ref, { ...s, argv: ["sh", "-c", `env > ${respawned}; sleep 300`] });
+    await runtime.respawn(ref, {
+      ...s,
+      generation: 1,
+      argv: ["sh", "-c", `env > ${respawned}; sleep 300`],
+    });
     await expect
       .poll(() => readFileSync(respawned, "utf8"), { timeout: WAIT })
       .toContain("BZ_USER_VALUE=kept");
