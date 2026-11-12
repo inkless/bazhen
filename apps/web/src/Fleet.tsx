@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { HarnessId, StateSnapshot } from "@bazhen/protocol";
 import { answer, launchAgent, sendMessage, watchState } from "./api.ts";
-import { Terminal } from "./Terminal.tsx";
+import { TerminalView } from "./terminal/TerminalView.tsx";
 
 /**
  * Every agent, a way to launch one, what needs the human, and the selected agent's terminal and
@@ -94,7 +94,7 @@ export function Fleet() {
             </label>
             <button type="submit">Send</button>
           </form>
-          <Terminal key={agent.terminalId} terminalId={agent.terminalId} />
+          <TerminalView key={agent.terminalId} terminalId={agent.terminalId} kind="agent" />
         </>
       )}
     </>
