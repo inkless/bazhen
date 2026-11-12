@@ -14,10 +14,11 @@ import {
   type LaunchAgentResponse,
   type StateSnapshot,
 } from "@bazhen/protocol";
-import { LaunchFailed, UnsupportedHarness, type RuntimeAdapter } from "@bazhen/core";
+import { LaunchFailed, NoTerminal, UnsupportedHarness, type RuntimeAdapter } from "@bazhen/core";
 import { IdempotencyConflict, UnknownAgent } from "../store/store.ts";
 import {
   AgentStateConflict,
+  TerminalReplaced,
   EnvironmentUnavailable,
   StaleGeneration,
 } from "../agents/lifecycle.ts";
@@ -107,7 +108,10 @@ export function createApp(deps: AppDeps): Hono {
     if (err instanceof AttentionClosed) return fail(c, 409, "conflict", err.message);
     if (err instanceof UnknownAgent) return fail(c, 404, "not_found", err.message);
     if (err instanceof StaleGeneration) return fail(c, 409, "stale_generation", err.message);
-    if (err instanceof AgentStateConflict) return fail(c, 409, "conflict", err.message);
+    const conflict = [AgentStateConflict, TerminalReplaced, NoTerminal].some(
+      (e) => err instanceof e,
+    );
+    if (conflict) return fail(c, 409, "conflict", err.message);
     if (err instanceof EnvironmentUnavailable) return fail(c, 503, "unavailable", err.message);
     throw err;
   });

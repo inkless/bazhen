@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { WebSocket } from "ws";
-import { TmuxServer } from "@bazhen/host-guard";
+import { GENERATION_OPTION, signalPane, TmuxServer } from "@bazhen/host-guard";
 import {
   EventFrame,
   LaunchAgentResponse,
@@ -242,6 +242,19 @@ export class Daemon {
   /** The process tmux runs for the agent, as the agent's own tools would find it. */
   panePid(agentId: string): number {
     return Number(this.paneFact(agentId, "pane_pid"));
+  }
+
+  /**
+   * Signals the agent's process from outside the daemon, as a user's `kill` would. host-guard
+   * reaches it only once the private server confirms the pane still runs that process.
+   */
+  async signalAgent(agentId: string, signal: NodeJS.Signals): Promise<void> {
+    const pane = this.paneFact(agentId, "pane_id") ?? "";
+    const expected = {
+      pid: this.paneFact(agentId, "pane_pid") ?? "",
+      generation: this.paneFact(agentId, GENERATION_OPTION) ?? "",
+    };
+    signalPane(await this.tmuxServer.paneGroup(pane, expected), signal);
   }
 
   private requireSession(agentId: string): string {

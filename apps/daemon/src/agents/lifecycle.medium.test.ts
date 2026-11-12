@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
-import type { AgentRefs, RuntimeRef } from "@bazhen/core";
+import {
+  LaunchFailed,
+  newId,
+  StaleIncarnation,
+  type AgentRefs,
+  type RuntimeRef,
+} from "@bazhen/core";
 import type { ExitStatus } from "@bazhen/protocol";
+import type { Store } from "../store/store.ts";
 import { fakeEnvironment, withAgent } from "../testing/fixtures.ts";
 import { launchAgent } from "./launch.ts";
 import {
@@ -8,12 +15,14 @@ import {
   EnvironmentUnavailable,
   Lifecycle,
   StaleGeneration,
+  TerminalReplaced,
 } from "./lifecycle.ts";
 
 /** A running agent whose environment records closes, fails them on demand, and reports exits. */
 async function running() {
   const closed: AgentRefs[] = [];
-  let failClose = false;
+  let failure: Error | undefined;
+  const statesAtClose: (string | undefined)[] = [];
   let report: ((ref: RuntimeRef, status: ExitStatus) => void) | undefined;
   const { store, agentId, terminalId, environment } = await withAgent((s) => ({
     ...fakeEnvironment(s, async (l) => ({
@@ -21,7 +30,8 @@ async function running() {
       externalRef: null,
     })),
     close: async (refs) => {
-      if (failClose) throw new Error("tmux unreachable");
+      statesAtClose.push(s.snapshot().agents[0]?.state);
+      if (failure !== undefined) throw failure;
       closed.push(refs);
     },
     onExit: (cb) => {
@@ -35,8 +45,19 @@ async function running() {
     report?.({ terminalId, runtime: "tmux", locator: { generation } }, status);
   const agent = () => store.snapshot().agents[0];
   const events = () => store.snapshot().eventId;
-  const failCloses = (on: boolean) => (failClose = on);
-  return { store, lifecycle, agentId, closed, exit, agent, events, failCloses };
+  const failCloses = (with_?: Error) => (failure = with_);
+  return { store, lifecycle, agentId, closed, statesAtClose, exit, agent, events, failCloses };
+}
+
+/** The id of an agent whose launch the environment rejected. */
+async function failedLaunch(store: Store): Promise<string> {
+  const environment = fakeEnvironment(store, () => Promise.reject(new Error("no tmux")));
+  const request = { idempotencyKey: "launch-2", harness: "claude-code", cwd: "/w" } as const;
+  const failed = await launchAgent({ store, environment, size: { cols: 80, rows: 24 } }, request)
+    .then(() => undefined)
+    .catch((e: unknown) => e);
+  if (!(failed instanceof LaunchFailed)) throw new Error("the launch did not fail");
+  return failed.agentId;
 }
 
 describe("agent lifecycle", () => {
@@ -69,16 +90,32 @@ describe("agent lifecycle", () => {
     expect([res.eventIds.length, closed.length, agent()?.state]).toEqual([2, 1, "closed"]);
   });
 
+  // A view that loses its terminal tells a close from a disconnect by this order.
+  it("records closing before it asks the environment to end the terminal", async () => {
+    const { lifecycle, agentId, statesAtClose } = await running();
+    await lifecycle.close(agentId, { idempotencyKey: "c", generation: 0 });
+    expect(statesAtClose).toEqual(["closing"]);
+  });
+
+  it("says a terminal whose server was replaced can't be closed by repeating the command", async () => {
+    const { lifecycle, agentId, agent, failCloses } = await running();
+    failCloses(new StaleIncarnation(newId("term"), "server-replaced"));
+    await expect(lifecycle.close(agentId, { idempotencyKey: "c", generation: 0 })).rejects.toThrow(
+      TerminalReplaced,
+    );
+    expect(agent()?.state).toBe("closing");
+  });
+
   it("leaves the agent closing when the environment can't be reached, and finishes on a retry", async () => {
     const { lifecycle, agentId, agent, failCloses } = await running();
-    failCloses(true);
+    failCloses(new Error("tmux unreachable"));
     await expect(lifecycle.close(agentId, { idempotencyKey: "c", generation: 0 })).rejects.toThrow(
       EnvironmentUnavailable,
     );
     expect(agent()?.state).toBe("closing");
-    failCloses(false);
+    failCloses();
     const res = await lifecycle.close(agentId, { idempotencyKey: "c", generation: 0 });
-    expect([res.eventIds.length, agent()?.state]).toEqual([1, "closed"]);
+    expect([res.eventIds.length, agent()?.state]).toEqual([2, "closed"]);
   });
 
   it("closes a lost agent without asking the environment, whose terminal is already gone", async () => {
@@ -106,15 +143,7 @@ describe("agent lifecycle", () => {
 
   it("refuses to close an agent whose launch failed, which holds nothing to close", async () => {
     const { store, lifecycle } = await running();
-    const failed = await launchAgent(
-      {
-        store,
-        environment: fakeEnvironment(store, () => Promise.reject(new Error("no tmux"))),
-        size: { cols: 80, rows: 24 },
-      },
-      { idempotencyKey: "launch-2", harness: "claude-code", cwd: "/w" },
-    ).catch((e: unknown) => e);
-    const agentId = String(Reflect.get(Object(failed), "agentId"));
+    const agentId = await failedLaunch(store);
     await expect(lifecycle.close(agentId, { idempotencyKey: "c", generation: 0 })).rejects.toThrow(
       AgentStateConflict,
     );

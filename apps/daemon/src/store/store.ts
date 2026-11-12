@@ -59,12 +59,12 @@ export interface OpenAttention {
   readonly mainAgent: boolean;
 }
 
-/** No agent the command can act on: none by that id, or, with `what`, none of that kind. */
+/** No agent the command can act on: none by that id or, given `qualifier`, none that is so. */
 export class UnknownAgent extends Error {
   readonly agentId: string;
 
-  constructor(agentId: string, what = "") {
-    super(`no agent ${agentId}${what}`);
+  constructor(agentId: string, qualifier?: string) {
+    super(["no agent", agentId, qualifier].filter(Boolean).join(" "));
     this.agentId = agentId;
   }
 }
@@ -429,6 +429,14 @@ export class Store {
         ).all(),
       }),
     );
+  }
+
+  /** The id of the latest event of `type` about an entity, if there is one. */
+  lastEventId(entityId: string, type: EventType): number | undefined {
+    const row = this.prepare(
+      "SELECT max(id) AS id FROM events WHERE entity_id = ? AND type = ?",
+    ).get(entityId, type);
+    return typeof row?.id === "number" ? row.id : undefined;
   }
 
   /** This database's epoch, which every cursor into its log carries. */

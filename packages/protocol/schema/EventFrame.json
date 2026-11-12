@@ -458,6 +458,249 @@
                 },
                 "type": {
                   "type": "string",
+                  "const": "agent.exited"
+                },
+                "entityType": {
+                  "type": "string",
+                  "const": "agent"
+                },
+                "entityId": {
+                  "type": "string"
+                },
+                "actor": {
+                  "type": "string"
+                },
+                "causationId": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "correlationId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "payload": {
+                  "type": "object",
+                  "properties": {
+                    "exit": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "exited"
+                            },
+                            "code": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "code"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "signalled"
+                            },
+                            "signal": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "signal"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "unknown"
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "exit"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "id",
+                "ts",
+                "type",
+                "entityType",
+                "entityId",
+                "actor",
+                "causationId",
+                "correlationId",
+                "payload"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "ts": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string",
+                  "const": "agent.closing"
+                },
+                "entityType": {
+                  "type": "string",
+                  "const": "agent"
+                },
+                "entityId": {
+                  "type": "string"
+                },
+                "actor": {
+                  "type": "string"
+                },
+                "causationId": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "correlationId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "payload": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "id",
+                "ts",
+                "type",
+                "entityType",
+                "entityId",
+                "actor",
+                "causationId",
+                "correlationId",
+                "payload"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "ts": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string",
+                  "const": "agent.closed"
+                },
+                "entityType": {
+                  "type": "string",
+                  "const": "agent"
+                },
+                "entityId": {
+                  "type": "string"
+                },
+                "actor": {
+                  "type": "string"
+                },
+                "causationId": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "correlationId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "payload": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "id",
+                "ts",
+                "type",
+                "entityType",
+                "entityId",
+                "actor",
+                "causationId",
+                "correlationId",
+                "payload"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "ts": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string",
                   "const": "attachment.started"
                 },
                 "entityType": {

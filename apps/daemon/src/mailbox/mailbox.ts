@@ -15,8 +15,6 @@ export const QUIET: HookReply = { exitCode: 0, stdout: "", stderr: "", offered: 
 /** How long the hook client has to write what it was handed and ack it. */
 const ACK_DEADLINE_MS = 10_000;
 
-/** A message for an agent this daemon doesn't know, or one with no way to take mail. */
-
 type Step =
   | "mailbox.offered"
   | "mailbox.emitted"
@@ -52,7 +50,7 @@ export class Mailbox {
       (r) => SendMessageResponse.parse(r),
       () => {
         if (this.store.agent(agentId)?.harness !== "claude-code")
-          throw new UnknownAgent(agentId, " that takes mail");
+          throw new UnknownAgent(agentId, "that takes mail");
         const messageId = newId("msg");
         const eventId = this.store.append({
           type: "mailbox.queued",

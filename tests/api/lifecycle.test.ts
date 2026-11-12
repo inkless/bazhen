@@ -24,7 +24,7 @@ const close = (agentId: string, key: string, generation = 0) =>
 describe("an agent's lifecycle after launch", () => {
   it("shows an agent whose process was killed from outside as exited, with how it ended", async () => {
     const { agentId } = await daemon.program(["sleep", "300"]);
-    process.kill(daemon.panePid(agentId), "SIGKILL");
+    await daemon.signalAgent(agentId, "SIGKILL");
     await expect
       .poll(async () => (await agentOf(agentId))?.state, { timeout: 10_000 })
       .toBe("exited");

@@ -46,6 +46,13 @@ export class UnsupportedHarness extends Error {
   }
 }
 
+/** The agent has no terminal to act on, though its state says it should. */
+export class NoTerminal extends Error {
+  constructor() {
+    super("the agent has no terminal recorded");
+  }
+}
+
 /** The environment could not start the agent; the agent is recorded as failed. */
 export class LaunchFailed extends Error {
   readonly agentId: AgentSessionId;

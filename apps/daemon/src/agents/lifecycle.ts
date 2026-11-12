@@ -1,4 +1,11 @@
-import { agent, terminal, type EnvironmentAdapter, type RuntimeRef } from "@bazhen/core";
+import {
+  agent,
+  NoTerminal,
+  StaleIncarnation,
+  terminal,
+  type EnvironmentAdapter,
+  type RuntimeRef,
+} from "@bazhen/core";
 import { AgentCommandResponse, type CloseAgentRequest, type ExitStatus } from "@bazhen/protocol";
 import { UnknownAgent, type Store } from "../store/store.ts";
 
@@ -13,6 +20,18 @@ export class StaleGeneration extends Error {
 export class AgentStateConflict extends Error {
   constructor(agentId: string, state: string) {
     super(`agent ${agentId} is ${state}`);
+  }
+}
+
+/**
+ * The terminal's tmux server or pane is not the one recorded, so it can't be acted on safely.
+ * Repeating the command won't help; restart recovery settles what happened to it.
+ */
+export class TerminalReplaced extends Error {
+  constructor(agentId: string, cause: unknown) {
+    super(`agent ${agentId}'s terminal is not the one recorded; its server or pane has changed`, {
+      cause,
+    });
   }
 }
 
@@ -81,17 +100,23 @@ export class Lifecycle {
 
       const append = (type: "agent.closing" | "agent.closed") =>
         this.store.append({ type, entityId: agentId, actor: "user", payload: {} });
-      const eventIds = found.state === "closing" ? [] : [append("agent.closing")];
+      const closing =
+        found.state === "closing"
+          ? this.store.lastEventId(agentId, "agent.closing")
+          : append("agent.closing");
       if (found.state !== "lost") {
         await this.environment
           .close({ runtime: found.runtime, externalRef: null })
           .catch((cause: unknown) => {
+            if (cause instanceof StaleIncarnation) throw new TerminalReplaced(agentId, cause);
+            if (cause instanceof NoTerminal) throw cause;
             throw new EnvironmentUnavailable(agentId, cause);
           });
       }
       // The last event and the key's answer go together, so a repeat always gets this answer.
       return this.store.transaction(() => {
-        const response = { agentId, eventIds: [...eventIds, append("agent.closed")] };
+        const eventIds = [...(closing === undefined ? [] : [closing]), append("agent.closed")];
+        const response = { agentId, eventIds };
         this.store.answered(req.idempotencyKey, request, response);
         return response;
       });

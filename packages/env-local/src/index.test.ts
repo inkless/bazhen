@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { newId, UnsupportedHarness, type HarnessAdapter, type RuntimeAdapter } from "@bazhen/core";
+import {
+  newId,
+  NoTerminal,
+  UnsupportedHarness,
+  type HarnessAdapter,
+  type RuntimeAdapter,
+} from "@bazhen/core";
 import { FakeRuntime } from "@bazhen/core/testing";
 import { LocalEnvironment } from "./index.ts";
 
@@ -48,6 +54,13 @@ describe("local environment", () => {
     const env = environment(new FakeRuntime());
     const refs = await env.launch(launch());
     expect(refs.externalRef).toEqual({ environmentId: env.id, kind: "claude-session", id: "s-1" });
+  });
+
+  it("refuses to close an agent with no terminal recorded, rather than call it closed", async () => {
+    const runtime = new FakeRuntime();
+    await expect(environment(runtime).close({ runtime: null, externalRef: null })).rejects.toThrow(
+      NoTerminal,
+    );
   });
 
   it("refuses a harness it has no adapter for, rather than emulating it", async () => {
