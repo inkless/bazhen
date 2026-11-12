@@ -57,13 +57,13 @@ const spike = {
   viewportText(): string[] {
     const b = term.buffer.active;
     const out: string[] = [];
-    for (let i = b.viewportY; i < b.viewportY + term.rows; i++) out.push(b.getLine(i)?.translateToString(true) ?? "");
+    for (let i = b.viewportY; i < b.viewportY + term.rows; i++) out.push(b.getLine(i)?.translateToString(true, 0, term.cols) ?? "");
     return out;
   },
   allText(): string[] {
     const b = term.buffer.active;
     const out: string[] = [];
-    for (let i = 0; i < b.length; i++) out.push(b.getLine(i)?.translateToString(true) ?? "");
+    for (let i = 0; i < b.length; i++) out.push(b.getLine(i)?.translateToString(true, 0, term.cols) ?? "");
     return out;
   },
   bufferType(): string { return term.buffer.active.type; },
@@ -169,10 +169,19 @@ new ResizeObserver(() => {
   if (spike.driver || (!spike.epoch && mode !== "observe")) { fit.fit(); sendResize(); }
 }).observe(document.getElementById("term")!);
 
-const ta = term.textarea!;
-ta.addEventListener("focus", () => {
+// Takeover signals. Textarea focus alone misses the common case: switching back to a device whose
+// page already holds DOM focus fires no focus event, so a click/tap and window focus count too.
+const claim = () => {
+  if (mode !== "observe" && !spike.driver && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "focus" }));
+};
+const focusOnly = params.get("takeover") === "focus";
+term.textarea!.addEventListener("focus", () => {
   if (mode !== "observe" && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "focus" }));
 });
+if (!focusOnly) {
+  document.addEventListener("pointerdown", claim, true);
+  window.addEventListener("focus", claim);
+}
 term.focus();
 infoEl.textContent = `${name} (${mode})`;
 render();

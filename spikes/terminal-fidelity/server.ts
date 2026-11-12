@@ -11,9 +11,14 @@ import { spawn, type IPty } from "node-pty";
 import { WebSocketServer, type WebSocket } from "ws";
 import xtermHeadless from "@xterm/headless";
 import serializePkg from "@xterm/addon-serialize";
+import unicode11Pkg from "@xterm/addon-unicode11";
 
 const { Terminal: Headless } = xtermHeadless;
 const { SerializeAddon } = serializePkg;
+const { Unicode11Addon } = unicode11Pkg;
+// The headless emulator must use the same width table as the browser (unicode11) and tmux, or
+// the attach snapshot misplaces every emoji row (notes.md, F9).
+const HEADLESS_UNICODE11 = process.env["BZ_SPIKE_HEADLESS_UNICODE6"] !== "1";
 const run = promisify(execFile);
 
 const PORT = Number(process.env["PORT"] ?? 7681);
@@ -181,6 +186,10 @@ function newHeadless(t: Term): void {
   });
   t.serializer = new SerializeAddon();
   t.headless.loadAddon(t.serializer);
+  if (HEADLESS_UNICODE11) {
+    t.headless.loadAddon(new Unicode11Addon());
+    t.headless.unicode.activeVersion = "11";
+  }
 }
 
 /** History lines are written so every one of them ends up above the viewport. */
@@ -418,7 +427,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
 function headlessText(t: Term): { lines: string[]; baseY: number; cursorY: number } {
   const buf = t.headless!.buffer.active;
   const lines: string[] = [];
-  for (let i = 0; i < buf.length; i++) lines.push(buf.getLine(i)?.translateToString(true) ?? "");
+  for (let i = 0; i < buf.length; i++) lines.push(buf.getLine(i)?.translateToString(true, 0, t.headless!.cols) ?? "");
   return { lines, baseY: buf.baseY, cursorY: buf.cursorY };
 }
 
