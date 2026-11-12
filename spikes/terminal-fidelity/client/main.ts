@@ -150,6 +150,56 @@ function sendInput(data: string, binary = false): void {
   spike.sent.push({ t: performance.now(), hex: Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("") });
   ws.send(bytes);
 }
+// Modified Enter. xterm.js 6 sends a bare CR for Shift+Enter and Ctrl+Enter, so the modifier is
+// lost before tmux sees it. Encode it here; `?menter=` picks the encoding (notes.md, F15).
+const menter = params.get("menter") ?? "csi27";
+const ENTER_SEQ: Record<string, (mod: number) => string> = {
+  csi27: (mod) => `\x1b[27;${mod};13~`,
+  csiu: (mod) => `\x1b[13;${mod}u`,
+  esccr: () => "\x1b\r",
+  lf: () => "\n",
+};
+term.attachCustomKeyEventHandler((e) => {
+  if (menter === "off" || e.key !== "Enter" || e.altKey || e.metaKey || !(e.shiftKey || e.ctrlKey)) return true;
+  if (e.type === "keydown") {
+    const mod = 1 + (e.shiftKey ? 1 : 0) + (e.ctrlKey ? 4 : 0);
+    sendInput(ENTER_SEQ[menter]!(mod));
+  }
+  e.preventDefault();
+  return false;
+});
+// Wheel policy (F16). `?wheel=smart`: pass the wheel to an app that enabled mouse reporting; scroll
+// xterm's own scrollback on the normal buffer; never turn it into arrow keys on an alternate
+// screen without mouse mode (xterm's default, which makes Codex recall prompt history).
+const wheelPolicy = params.get("wheel") ?? "smart";
+if (wheelPolicy === "smart") {
+  term.attachCustomWheelEventHandler(() => term.modes.mouseTrackingMode !== "none" || term.buffer.active.type === "normal");
+}
+// Touch scroll (F16). xterm.js 6 doesn't scroll on a swipe. Turn vertical finger travel into wheel
+// events on the terminal, one per cell height, so xterm routes them exactly like a mouse wheel:
+// mouse reports when the app wants them, otherwise xterm's own scrollback.
+if (params.get("touch") !== "off") {
+  const screen = document.querySelector(".xterm-screen") as HTMLElement;
+  let lastY: number | null = null;
+  let acc = 0;
+  screen.addEventListener("touchstart", (e) => { lastY = e.touches[0]!.clientY; acc = 0; }, { passive: true });
+  screen.addEventListener("touchmove", (e) => {
+    if (lastY === null) return;
+    const t = e.touches[0]!;
+    acc += t.clientY - lastY;
+    lastY = t.clientY;
+    const cell = screen.clientHeight / term.rows;
+    while (Math.abs(acc) >= cell) {
+      const dir = acc > 0 ? -1 : 1; // finger down reveals earlier output, like wheel up
+      acc -= -dir * cell;
+      if (term.modes.mouseTrackingMode !== "none")
+        screen.dispatchEvent(new WheelEvent("wheel", { deltaY: dir * cell, deltaMode: 0, clientX: t.clientX, clientY: t.clientY, bubbles: true, cancelable: true }));
+      else term.scrollLines(dir); // a synthetic wheel doesn't reach xterm's scroll container
+    }
+    e.preventDefault();
+  }, { passive: false });
+  screen.addEventListener("touchend", () => { lastY = null; }, { passive: true });
+}
 term.onData((d) => sendInput(d));
 term.onBinary((d) => sendInput(d, true));
 

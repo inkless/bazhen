@@ -112,6 +112,8 @@ interface Term {
   driver: View | null;
   lastInteractive: View | null;
   epoch: number;
+  /** Serializes input that needs an async key-mode lookup, so keystroke order is kept. */
+  inputChain: Promise<void>;
   seed: Seed;
   resizes: number;
 }
@@ -177,6 +179,7 @@ async function createTerm(body: {
     driver: null,
     lastInteractive: null,
     epoch: 0,
+    inputChain: Promise.resolve(),
     seed: body.seed ?? "capture-then-attach",
     resizes: 0,
   };
@@ -284,6 +287,21 @@ function stopClient(t: Term): void {
   t.serializer = null;
 }
 
+// Modified Enter (F15). The browser sends the real key as CSI 27;m;13~. tmux 3.6b forwards that to
+// a pane only if the pane asked for modifyOtherKeys (pane_key_mode "Ext 2", e.g. Claude Code); a
+// legacy pane (e.g. Codex, which asks for the kitty protocol tmux lacks) would get a bare CR and
+// submit. For those, send LF, which both TUIs treat as "insert newline".
+const MOD_ENTER = /\x1b\[27;([2-8]);13~|\x1b\[13;([2-8])u/g;
+const ADAPT_ENTER = process.env["BZ_SPIKE_ADAPT_ENTER"] !== "0";
+async function adaptModifiedEnter(t: Term, bytes: Buffer): Promise<Buffer> {
+  const text = bytes.toString("latin1");
+  if (!ADAPT_ENTER || !MOD_ENTER.test(text)) return bytes;
+  MOD_ENTER.lastIndex = 0;
+  const mode = (await tmux("display-message", "-p", "-t", `${t.session}:0`, "#{pane_key_mode}").catch(() => "")).trim();
+  if (mode.startsWith("Ext")) return bytes;
+  return Buffer.from(text.replace(MOD_ENTER, "\n"), "latin1");
+}
+
 function applySize(t: Term, size: Size): void {
   if (size.cols === t.size.cols && size.rows === t.size.rows) return;
   t.size = size;
@@ -348,7 +366,10 @@ async function attachView(t: Term, ws: WebSocket, interactive: boolean, hello: S
         return;
       }
       const bytes = Buffer.isBuffer(data) ? data : Buffer.concat(data as Buffer[]);
-      later(() => t.client?.write(bytes));
+      t.inputChain = t.inputChain.then(async () => {
+        const out = await adaptModifiedEnter(t, bytes);
+        later(() => t.client?.write(out));
+      });
       return;
     }
     const msg = JSON.parse(String(data)) as { type: string; cols?: number; rows?: number; t?: number };
