@@ -4,23 +4,14 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { InvalidTransition, newId } from "@bazhen/core";
-import { age, visit, withAgent } from "../testing/fixtures.ts";
+import { age, register, settled, visit, withAgent } from "../testing/fixtures.ts";
 import { MIGRATIONS } from "./migrations.ts";
 import { UnknownEntity } from "./projections.ts";
 import { LATEST_SCHEMA_VERSION, SchemaTooNew, Store } from "./store.ts";
 
 const dbPath = () => join(mkdtempSync(join(tmpdir(), "bz-store-")), "bazhen.db");
 
-function withEnvironment(store: Store) {
-  const environmentId = newId("env");
-  store.append({
-    type: "environment.registered",
-    entityId: environmentId,
-    actor: "system",
-    payload: { kind: "local" },
-  });
-  return environmentId;
-}
+const withEnvironment = (store: Store) => register(store).environmentId;
 
 function launch(store: Store, environmentId: string) {
   const agentId = newId("agent");
@@ -158,8 +149,6 @@ describe("Store", () => {
 
 const CUTOFF = new Date("2026-02-01T00:00:00.000Z");
 
-const flushed = () => new Promise((resolve) => setTimeout(resolve, 0));
-
 describe("Store event log", () => {
   it("gives each database its own epoch, kept across reopen and carried by the snapshot", () => {
     const path = dbPath();
@@ -215,7 +204,7 @@ describe("Store event log", () => {
     store.transaction(() => {
       launch(store, withEnvironment(store));
     });
-    await flushed();
+    await settled();
     expect(calls).toBe(1);
     expect(() =>
       store.transaction(() => {
@@ -224,7 +213,7 @@ describe("Store event log", () => {
       }),
     ).toThrow("abandoned");
     store.transaction(() => store.remember("k-1", {}));
-    await flushed();
+    await settled();
     expect(calls).toBe(1);
     store.close();
   });
@@ -237,7 +226,7 @@ describe("Store event log", () => {
     });
     store.onCommit(() => (told = true));
     withEnvironment(store);
-    await flushed();
+    await settled();
     expect([told, store.snapshot().environments.length]).toEqual([true, 1]);
     store.close();
   });

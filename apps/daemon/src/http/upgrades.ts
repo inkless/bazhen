@@ -15,6 +15,7 @@ export interface UpgradeRoute {
     req: IncomingMessage,
     socket: Duplex,
     head: Buffer,
+    url: URL,
     match: RegExpExecArray,
   ) => void;
 }
@@ -29,10 +30,10 @@ export function upgrades(allow: Allowlists, routes: readonly UpgradeRoute[]) {
     const { host, origin } = req.headers;
     const refused = refusal(allow, { host, origin, acting: true });
     if (refused !== null) return refuseUpgrade(socket, REFUSAL_STATUS[refused]);
-    const path = new URL(req.url ?? "/", "http://daemon").pathname;
+    const url = new URL(req.url ?? "/", "http://daemon");
     for (const route of routes) {
-      const match = route.path.exec(path);
-      if (match !== null) return route.upgrade(req, socket, head, match);
+      const match = route.path.exec(url.pathname);
+      if (match !== null) return route.upgrade(req, socket, head, url, match);
     }
     refuseUpgrade(socket, "404 Not Found");
   };

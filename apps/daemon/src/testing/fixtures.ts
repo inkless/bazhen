@@ -2,9 +2,11 @@
 // environment, so each test states only what it changes.
 
 import { mkdtempSync } from "node:fs";
+import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import type { WebSocket } from "ws";
 import {
   isId,
   newId,
@@ -14,6 +16,7 @@ import {
   type EnvironmentAdapter,
 } from "@bazhen/core";
 import { launchAgent, localEnvironmentId } from "../agents/launch.ts";
+import { upgrades, type UpgradeRoute } from "../http/upgrades.ts";
 import { Store } from "../store/store.ts";
 
 export const tempDb = () => join(mkdtempSync(join(tmpdir(), "bz-store-")), "bazhen.db");
@@ -76,3 +79,45 @@ export function visit(store: Store, terminalId: string) {
   });
   return [started, ended] as const;
 }
+
+/** Registers a local environment, answering its id and the event that recorded it. */
+export function register(store: Store) {
+  const environmentId = newId("env");
+  const eventId = store.append({
+    type: "environment.registered",
+    entityId: environmentId,
+    actor: "system",
+    payload: { kind: "local" },
+  });
+  return { environmentId, eventId };
+}
+
+/** Resolves once the listeners a commit queued have run. */
+export const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+/** A server on a free port whose upgrades go through the daemon's guard to `routes`. */
+export async function serveUpgrades(
+  routes: readonly UpgradeRoute[],
+): Promise<{ server: Server; host: string }> {
+  const server = createServer();
+  const allow = { hosts: [] as string[], origins: [] as string[] };
+  server.on("upgrade", upgrades(allow, routes));
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (address === null || typeof address === "string") throw new Error("no port");
+  const host = `127.0.0.1:${address.port}`;
+  allow.hosts.push(host);
+  allow.origins.push(`http://${host}`);
+  return { server, host };
+}
+
+/** The status an upgrade was refused with, "open" if it was let through, or why it failed. */
+export const upgradeOutcome = (ws: WebSocket) =>
+  new Promise((resolve) => {
+    ws.once("unexpected-response", (_q, res) => resolve(res.statusCode));
+    ws.once("open", () => {
+      resolve("open");
+      ws.close();
+    });
+    ws.once("error", (err) => resolve(err.message));
+  });

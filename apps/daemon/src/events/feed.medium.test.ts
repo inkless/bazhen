@@ -1,17 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { newId } from "@bazhen/core";
 import type { EventFrame } from "@bazhen/protocol";
-import { age, tempDb } from "../testing/fixtures.ts";
+import { age, register as registered, settled, tempDb } from "../testing/fixtures.ts";
 import { Store } from "../store/store.ts";
 import { follow } from "./feed.ts";
 
-const register = (store: Store) =>
-  store.append({
-    type: "environment.registered",
-    entityId: newId("env"),
-    actor: "system",
-    payload: { kind: "local" },
-  });
+const register = (store: Store) => registered(store).eventId;
 
 /** A client that records what it is sent, and acknowledges writes only when told to. */
 function client(acknowledge: "at once" | "by hand" = "at once") {
@@ -39,8 +32,6 @@ function client(acknowledge: "at once" | "by hand" = "at once") {
   };
 }
 
-const committed = () => new Promise((resolve) => setTimeout(resolve, 0));
-
 describe("event feed", () => {
   it("sends the backlog after the cursor, then each new event, every one once", async () => {
     const store = Store.open(tempDb());
@@ -50,7 +41,7 @@ describe("event feed", () => {
     follow(store, { epoch: store.epoch(), after: first }, c.sink);
     const third = register(store);
     const fourth = register(store);
-    await committed();
+    await settled();
     expect(c.ids()).toEqual([second, third, fourth]);
     store.close();
   });
@@ -61,7 +52,7 @@ describe("event feed", () => {
     const c = client("by hand");
     follow(store, { epoch: store.epoch(), after: 0 }, c.sink, 2);
     ids.push(register(store));
-    await committed();
+    await settled();
     expect([c.ids(), c.awaited()]).toEqual([ids.slice(0, 2), 1]);
     c.drain();
     expect([c.ids(), c.awaited()]).toEqual([ids, 1]);
@@ -96,10 +87,10 @@ describe("event feed", () => {
     const c = client();
     const stop = follow(store, { epoch: store.epoch(), after: 0 }, c.sink);
     const seen = register(store);
-    await committed();
+    await settled();
     stop();
     register(store);
-    await committed();
+    await settled();
     expect(c.ids()).toEqual([seen]);
     store.close();
   });

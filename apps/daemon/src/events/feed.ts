@@ -7,8 +7,6 @@ export interface FeedSink {
   close(): void;
 }
 
-const PAGE = 500;
-
 /**
  * Streams the log to one subscriber from its cursor: the backlog, then each new event, every
  * one exactly once. One page is in flight at a time, so a slow client falls behind in the store
@@ -20,7 +18,7 @@ export function follow(
   store: Pick<Store, "cursorFault" | "events" | "onCommit">,
   cursor: { readonly epoch: string; readonly after: number },
   sink: FeedSink,
-  page = PAGE,
+  page?: number,
 ): () => void {
   let after = cursor.after;
   let inFlight = false;

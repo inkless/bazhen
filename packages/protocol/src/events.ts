@@ -4,9 +4,12 @@ import { AttachmentMode, EnvironmentKind, Id } from "./ids.ts";
 import { ApprovalDecision, AttentionCloseReason } from "./mail.ts";
 import { ProtocolVersion } from "./version.ts";
 
+const queued = z.object({ agentId: Id("agent"), body: z.string() });
+
 /**
  * Every event type the store accepts, with the entity it is about and its payload. A row adds
- * the types it emits here; payloads never carry message bodies, terminal bytes or secrets
+ * the types it emits here. Payloads never carry terminal bytes or secrets; a type whose payload
+ * holds more than a client may see names the narrower shape it is `streamed` in
  * (foundation-design §5.2).
  */
 export const EVENTS = {
@@ -55,7 +58,9 @@ export const EVENTS = {
   /** A message for an agent, delivered at least once through its harness (§4.7, §5.6). */
   "mailbox.queued": {
     entity: "message",
-    payload: z.object({ agentId: Id("agent"), body: z.string() }),
+    payload: queued,
+    /** The mailbox needs the body; the stream leaves it out, as `/v1/state` does. */
+    streamed: queued.omit({ body: true }),
   },
   /** A hook took the message to hand to the harness. */
   "mailbox.offered": { entity: "message", payload: z.object({}) },
@@ -95,18 +100,11 @@ export const EVENTS = {
 export type EventType = keyof typeof EVENTS;
 export type EventPayload<T extends EventType> = z.infer<(typeof EVENTS)[T]["payload"]>;
 
-/**
- * Payloads the event stream sends in a narrower shape than the log stores. Message bodies stay
- * out of the stream, as they stay out of `/v1/state` (foundation-design §5.2).
- */
-const STREAMED: Partial<Record<EventType, z.ZodType>> = {
-  "mailbox.queued": EVENTS["mailbox.queued"].payload.omit({ body: true }),
-};
-
 const isEventType = (type: string): type is EventType => Object.hasOwn(EVENTS, type);
 
-const streamed = (type: EventType) =>
-  z.object({
+const streamed = (type: EventType) => {
+  const entry: { readonly payload: z.ZodType; readonly streamed?: z.ZodType } = EVENTS[type];
+  return z.object({
     id: z.number().int().positive(),
     ts: z.string(),
     type: z.literal(type),
@@ -115,8 +113,9 @@ const streamed = (type: EventType) =>
     actor: z.string(),
     causationId: z.number().int().positive().nullable(),
     correlationId: z.string().nullable(),
-    payload: STREAMED[type] ?? EVENTS[type].payload,
+    payload: entry.streamed ?? entry.payload,
   });
+};
 
 /**
  * One event as the stream sends it: a branch per registered type, each checking its own
@@ -136,6 +135,10 @@ export const EventStreamQuery = z.object({
 });
 export type EventStreamQuery = z.infer<typeof EventStreamQuery>;
 
+/** Why a cursor can't be resumed: older than retention, or not from this store. */
+export const ResetReason = z.enum(["stale", "foreign"]);
+export type ResetReason = z.infer<typeof ResetReason>;
+
 /** Text frames on `/v1/events`; the client sends none. */
 export const EventFrame = z.discriminatedUnion("type", [
   z.object({ type: z.literal("event"), event: Event }),
@@ -143,6 +146,6 @@ export const EventFrame = z.discriminatedUnion("type", [
    * The cursor can't be resumed: older than retention (`stale`), or not from this store
    * (`foreign`). Re-read `/v1/state` and resume from its cursor.
    */
-  z.object({ type: z.literal("reset"), reason: z.enum(["stale", "foreign"]) }),
+  z.object({ type: z.literal("reset"), reason: ResetReason }),
 ]);
 export type EventFrame = z.infer<typeof EventFrame>;

@@ -28,26 +28,27 @@ export function watchState(
   failed: (err: unknown) => void,
 ): () => void {
   let stopped = false;
-  let latest: StateSnapshot | undefined;
-  let reading: Promise<void> | undefined;
+  let reading: Promise<StateSnapshot> | undefined;
   let again = false;
   let socket: WebSocket | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let delay = 0;
 
   // One read at a time; events that arrive during it are covered by one more read after it.
-  const read = (): Promise<void> => {
+  const read = (): Promise<StateSnapshot> => {
     if (reading !== undefined) {
       again = true;
       return reading;
     }
     reading = (async () => {
       try {
+        let latest: StateSnapshot;
         do {
           again = false;
           latest = await fetchState();
           if (!stopped) apply(latest);
         } while (again);
+        return latest;
       } finally {
         reading = undefined;
       }
@@ -59,8 +60,8 @@ export function watchState(
     delay = Math.min(MAX_RETRY_MS, delay * 2 || 500);
     timer = setTimeout(start, delay);
   };
-  const open = () => {
-    if (stopped || latest === undefined) return;
+  const open = (latest: StateSnapshot) => {
+    if (stopped) return;
     const query = new URLSearchParams({
       v: PROTOCOL_VERSION,
       epoch: latest.epoch,

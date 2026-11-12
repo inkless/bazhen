@@ -12,9 +12,8 @@ export function eventRoute(store: Store): UpgradeRoute {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
   return {
     path: /^\/v1\/events$/,
-    upgrade: (req, socket, head) => {
-      const params = new URL(req.url ?? "/", "http://daemon").searchParams;
-      const query = EventStreamQuery.safeParse(Object.fromEntries(params));
+    upgrade: (req, socket, head, url) => {
+      const query = EventStreamQuery.safeParse(Object.fromEntries(url.searchParams));
       if (!query.success || !isCompatible(query.data.v))
         return refuseUpgrade(socket, "400 Bad Request");
       const cursor = { epoch: query.data.epoch, after: Number(query.data.after) };

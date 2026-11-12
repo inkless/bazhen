@@ -16,6 +16,7 @@ import {
   StateSnapshot,
   type EnvironmentKind,
   type MailboxState,
+  type ResetReason,
   type EventPayload,
   type EventType,
 } from "@bazhen/protocol";
@@ -43,9 +44,6 @@ export interface LoggedEvent {
   readonly correlationId: string | null;
   readonly payload: unknown;
 }
-
-/** Why a cursor can't be resumed: older than retention, or not from this store. */
-export type CursorFault = "stale" | "foreign";
 
 /** A row's id as a Bazhen id of the given kind, or nothing if it isn't one. */
 function rowIds<P extends IdPrefix>(rows: readonly Record<string, SQLOutputValue>[], prefix: P) {
@@ -397,7 +395,7 @@ export class Store {
   }
 
   /** Whether the log can no longer continue after `afterId` for a client of store `epoch`. */
-  cursorFault(epoch: string, afterId: number): CursorFault | null {
+  cursorFault(epoch: string, afterId: number): ResetReason | null {
     const row = this.prepare(
       "SELECT epoch, pruned_through, (SELECT coalesce(max(id), 0) FROM events) AS newest FROM event_log",
     ).get();

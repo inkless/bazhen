@@ -17,7 +17,7 @@ export function streamRoute(deps: StreamDeps): UpgradeRoute {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
   return {
     path: /^\/v1\/terminals\/([^/]+)\/stream$/,
-    upgrade: (req, socket, head, [, terminalId = ""]) =>
+    upgrade: (req, socket, head, _url, [, terminalId = ""]) =>
       wss.handleUpgrade(req, socket, head, (ws) => serve(deps, ws, terminalId)),
   };
 }
