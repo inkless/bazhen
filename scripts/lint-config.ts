@@ -151,7 +151,11 @@ const SMALL_TEST_BANS = [
 export type Pattern = { group: string[]; message: string; allowTypeImports?: boolean };
 export type Override = {
   files: string[];
-  rules: { "import/no-nodejs-modules"?: "error"; "no-restricted-imports": Restriction };
+  rules: {
+    "import/no-nodejs-modules"?: "error";
+    "no-restricted-imports"?: Restriction;
+    "bazhen/host-guard"?: "off";
+  };
 };
 type Restriction = ["error", { patterns: Pattern[] }];
 
@@ -192,7 +196,7 @@ function restrictions(area: Area, smallTest: boolean): Restriction {
 }
 
 function overrides(): Override[] {
-  return MATRIX.flatMap((area) => {
+  const areas = MATRIX.flatMap((area): Override[] => {
     const base = area.platformFree ? { "import/no-nodejs-modules": "error" as const } : {};
     return [
       {
@@ -209,11 +213,17 @@ function overrides(): Override[] {
       },
     ];
   });
+  // The one place allowed to run tmux and send signals.
+  return [
+    ...areas,
+    { files: ["packages/host-guard/src/**"], rules: { "bazhen/host-guard": "off" } },
+  ];
 }
 
 export const config = {
   $schema: "./node_modules/oxlint/configuration_schema.json",
   plugins: ["typescript", "unicorn", "import", "react", "react-hooks", "vitest"],
+  jsPlugins: ["./scripts/lint-plugin.ts"],
   categories: { correctness: "error", suspicious: "warn" },
   rules: {
     "typescript/no-floating-promises": "error",
@@ -232,6 +242,7 @@ export const config = {
     "vitest/no-standalone-expect": "error",
     "no-console": "off",
     "react/react-in-jsx-scope": "off",
+    "bazhen/host-guard": "error",
   },
   overrides: overrides(),
   ignorePatterns: ["dist/**", "spikes/**", "**/node_modules/**"],

@@ -119,7 +119,7 @@ const CONTEXT_DOCS = [
 const PNPM_BUILTINS = new Set(["install", "exec", "add", "remove", "update"]);
 // pnpm options that take a value as the next word; every other option is a bare flag.
 const PNPM_VALUE_FLAGS = new Set(["--filter", "-F", "--dir", "-C", "--reporter", "--loglevel"]);
-const LINT_RULE = /^(import|vitest|typescript|unicorn|react|react-hooks|eslint)\//;
+const LINT_RULE = /^(import|vitest|typescript|unicorn|react|react-hooks|eslint|bazhen)\//;
 const PATH_LIKE = /^(\.?[\w@-]+\/)+[\w.@-]*$|^\.?[\w-]+\.(ts|tsx|md|json)$/;
 
 function scriptNames(): Set<string> {

@@ -7,7 +7,11 @@ const overrideFor = (glob: string) => {
   return found;
 };
 
-const patterns = (glob: string) => overrideFor(glob).rules["no-restricted-imports"][1].patterns;
+const patterns = (glob: string) => {
+  const rule = overrideFor(glob).rules["no-restricted-imports"];
+  if (rule === undefined) throw new Error(`no import restrictions for ${glob}`);
+  return rule[1].patterns;
+};
 
 const banned = (glob: string) => patterns(glob).flatMap((p) => p.group);
 

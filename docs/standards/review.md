@@ -29,9 +29,10 @@ The commit body says why the change was made, and records any `Control:` trailer
   lint-staged.
 - **CI** runs `pnpm check`, the full gate: the standards check (sibling tests, agent context,
   skills), the protocol schema drift check, lint (including the import matrix, the test rules and
-  `any`), the format check, types for sources, tests and scripts, and the small, medium and
-  integration tests. It runs on Linux, on Node 24 and 26, plus `pnpm test:e2e`; macOS is off
-  while the repo is private. On a pull request it also runs `pnpm test:falsify` against the target
+  `any`), the format check, types for sources, tests and scripts, and the small and medium
+  tests. CI then runs the integration, api and e2e suites, which no host runs (`pnpm test:real`
+  runs them in a container). It runs on Linux, on Node 24 and 26; macOS is off while the repo is
+  private. On a pull request it also runs `pnpm test:falsify` against the target
   branch; run it yourself before pushing.
 
 The pre-commit hook is installed by `pnpm install` (husky); never skip it with `--no-verify`.
