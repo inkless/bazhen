@@ -3,19 +3,16 @@
 // daemon written in another language.
 
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocket } from "ws";
 import { PROTOCOL_VERSION, StreamServerFrame } from "@bazhen/protocol";
+import { claudeHome, loginEnv } from "../support/agent-env.ts";
 
 const repo = fileURLToPath(new URL("../..", import.meta.url));
 const bin = fileURLToPath(new URL("node_modules/.bin", import.meta.url));
-const DUMMY_KEY = "sk-ant-api-tests-00000000000000000000000000";
-
-/** Only what a login session provides; never the developer's real model credentials. */
-const BASE_ENV = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "TMPDIR", "TMUX_TMPDIR"];
 
 async function freePort(): Promise<number> {
   const server = createServer();
@@ -49,39 +46,14 @@ export class Daemon {
     this.home = home;
     this.work = join(home, "work");
     this.tmuxSocket = `bz-test-${process.env["BZ_TEST_RUN"] ?? process.pid}-api-${++instances}`;
-    const claudeConfig = join(home, "claude");
     mkdirSync(this.work, { recursive: true });
-    mkdirSync(claudeConfig, { recursive: true });
-    // Onboarding done, the work directory trusted and the dummy key approved, so the real TUI
-    // starts without a prompt. Trust is keyed by the real path.
-    writeFileSync(
-      join(claudeConfig, ".claude.json"),
-      JSON.stringify({
-        hasCompletedOnboarding: true,
-        customApiKeyResponses: { approved: [DUMMY_KEY.slice(-20)], rejected: [] },
-        projects: {
-          [this.work]: { hasTrustDialogAccepted: true, hasCompletedProjectOnboarding: true },
-        },
-      }),
-    );
-    // Ask before tools run, whatever mode a machine's managed settings would pick.
-    writeFileSync(
-      join(claudeConfig, "settings.json"),
-      JSON.stringify({ permissions: { defaultMode: "default" } }),
-    );
-    const base = Object.fromEntries(
-      BASE_ENV.flatMap((k) => (process.env[k] === undefined ? [] : [[k, process.env[k]]])),
-    );
+    const claude = claudeHome(join(home, "claude"), this.work);
     this.env = {
-      ...base,
+      ...loginEnv(),
       PATH: `${bin}:${process.env["PATH"] ?? "/usr/bin:/bin"}`,
       BAZHEN_HOME: home,
       BAZHEN_TMUX_SOCKET: this.tmuxSocket,
-      CLAUDE_CONFIG_DIR: claudeConfig,
-      ANTHROPIC_API_KEY: DUMMY_KEY,
-      // Nothing listens here: these tests never let the agent reach a model.
-      ANTHROPIC_BASE_URL: "http://127.0.0.1:9",
-      DISABLE_AUTOUPDATER: "1",
+      ...claude,
     };
   }
 

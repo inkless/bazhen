@@ -1,8 +1,10 @@
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineConfig, devices } from "@playwright/test";
+import { claudeHome, loginEnv } from "../support/agent-env.ts";
 
 // Free ports and a per-run home and tmux server, so parallel worktrees can run e2e at once.
 // Playwright re-evaluates this file in its workers; they inherit the values through the
@@ -37,15 +39,34 @@ if (!process.env["BZ_E2E_DAEMON_PORT"] || !process.env["BZ_E2E_WEB_PORT"]) {
 }
 process.env["BZ_E2E_HOME"] ??= mkdtempSync(join(tmpdir(), "bz-e2e-home-"));
 process.env["BZ_E2E_SOCKET"] ??= `bz-e2e-${process.pid}`;
+// Where the page launches agents: the real Claude Code, pinned in this package, started with no
+// prompt and no way to reach a model.
+const work = join(process.env["BZ_E2E_HOME"], "work");
+mkdirSync(work, { recursive: true });
+process.env["BZ_E2E_WORK"] = realpathSync(work);
+const claudeBin = fileURLToPath(new URL("node_modules/.bin", import.meta.url));
 
 const daemonPort = Number(process.env["BZ_E2E_DAEMON_PORT"]);
 const webPort = Number(process.env["BZ_E2E_WEB_PORT"]);
-const env = {
+const env: Record<string, string> = {
+  ...loginEnv(),
   BAZHEN_HOME: process.env["BZ_E2E_HOME"],
   BAZHEN_PORT: String(daemonPort),
   BAZHEN_WEB_PORT: String(webPort),
   BAZHEN_TMUX_SOCKET: process.env["BZ_E2E_SOCKET"],
+  PATH: `${claudeBin}:${process.env["PATH"] ?? ""}`,
+  ...claudeHome(join(process.env["BZ_E2E_HOME"], "claude"), process.env["BZ_E2E_WORK"]),
 };
+
+/**
+ * Playwright starts its web servers with its own whole environment merged in, so each command
+ * runs under `env -i` with exactly `env`: no real model credential or provider switch reaches the
+ * daemon or the agents it launches.
+ */
+const clean = (command: string) =>
+  `env -i ${Object.entries(env)
+    .map(([k, v]) => `${k}='${v.replaceAll("'", "'\\''")}'`)
+    .join(" ")} ${command}`;
 
 export default defineConfig({
   testDir: ".",
@@ -57,15 +78,13 @@ export default defineConfig({
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: [
     {
-      command: "node ../../apps/daemon/src/main.ts",
+      command: clean("node ../../apps/daemon/src/main.ts"),
       port: daemonPort,
-      env,
       reuseExistingServer: false,
     },
     {
-      command: "pnpm --filter @bazhen/web exec vite",
+      command: clean("pnpm --filter @bazhen/web exec vite"),
       url: `http://127.0.0.1:${webPort}`,
-      env,
       reuseExistingServer: false,
     },
   ],

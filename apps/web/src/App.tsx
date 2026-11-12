@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { HealthResponse, isCompatible } from "@bazhen/protocol";
+import { Fleet } from "./Fleet.tsx";
 
 type Status =
   | { kind: "loading" }
@@ -42,6 +43,7 @@ export function App() {
           </dd>
         </dl>
       )}
+      {status.kind === "ok" && <Fleet />}
     </main>
   );
 }

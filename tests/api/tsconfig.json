@@ -1,11 +1,15 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "rootDir": ".",
+    "rootDir": "..",
     "outDir": "dist",
     "noEmit": false,
     "emitDeclarationOnly": true
   },
-  "include": ["*.ts"],
-  "references": [{ "path": "../../packages/protocol" }]
+  "include": ["*.ts", "../support/agent-env.ts"],
+  "references": [
+    {
+      "path": "../../packages/protocol"
+    }
+  ]
 }
