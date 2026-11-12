@@ -10,17 +10,24 @@ const report: DoctorResponse = {
   hookClient: { path: "/bin/bazhen-hook", fallback: false },
   config: { path: "/c/config.toml", found: false },
   agents: { shell: "direct", loginShell: null },
-  env: { capturedAt: "2026-11-12T00:00:00.000Z", kept: 3, removed: { CLAUDECODE: 1 } },
+  env: {
+    capturedAt: "2026-11-12T00:00:00.000Z",
+    source: "start",
+    kept: 3,
+    removed: { CLAUDECODE: 1 },
+  },
 };
 const doctor = async () => report;
+type Env = Readonly<Record<string, string>>;
+const refreshed = { capturedAt: "t", kept: 1, removed: {}, refused: [], unchanged: [] };
 
-function app() {
+function app(refreshEnv = async (_env: Env) => refreshed) {
   const commands = new Hono();
   commands.post("/v1/attention/:id/answer", (c) => c.json({ answered: c.req.param("id") }));
   commands.get("/v1/state", (c) => c.json({ state: true }));
   const hooks = new Hono();
   hooks.post("/v1/hooks", (c) => c.text("hook"));
-  return socketApp({ commands, hooks, stop: () => undefined, doctor });
+  return socketApp({ commands, hooks, stop: () => undefined, doctor, refreshEnv });
 }
 
 const answer = (headers: Record<string, string> = {}) =>
@@ -34,6 +41,19 @@ describe("socketApp", () => {
 
   it("reports the daemon's doctor", async () => {
     expect(await (await app().request("/v1/daemon/doctor")).json()).toEqual(report);
+  });
+
+  it("hands a refresh the caller's environment, and refuses a body that isn't one", async () => {
+    const received: Env[] = [];
+    const daemon = app(async (env) => {
+      received.push(env);
+      return refreshed;
+    });
+    const refresh = (body: unknown) =>
+      daemon.request("/v1/daemon/env", { method: "POST", body: JSON.stringify(body) });
+    expect((await refresh({ env: { A: "1" } })).status).toBe(200);
+    expect((await refresh({ env: { A: 1 } })).status).toBe(400);
+    expect(received).toEqual([{ A: "1" }]);
   });
 
   it("lets a caller that presents no agent answer an approval", async () => {

@@ -95,6 +95,42 @@ export interface TmuxOptions {
   readonly stdio?: StdioOptions;
 }
 
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * Whether a variable can go to tmux's command parser as data: a plain name, and a value with no
+ * newline or NUL, which no quoting carries safely. Anything else is refused, never escaped.
+ */
+export function isSafeEnvEntry(name: string, value = ""): boolean {
+  return ENV_NAME.test(name) && !/[\n\r\0]/.test(value);
+}
+
+/** One word for tmux's parser: single-quoted, where nothing is special; a quote as `'\''`. */
+const tmuxWord = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
+
+/**
+ * The tmux commands that set `set` and unset `unset` in a server's global environment, one per
+ * line. A value is only ever a quoted word, so it can't end the command or start another.
+ */
+export function environmentScript(
+  set: Readonly<Record<string, string>>,
+  unset: readonly string[],
+): string {
+  const refused = [
+    ...Object.entries(set).filter(([name, value]) => !isSafeEnvEntry(name, value)),
+    ...unset.filter((name) => !isSafeEnvEntry(name)).map((name) => [name]),
+  ].map(([name]) => name);
+  if (refused.length > 0) {
+    throw new RangeError(`refusing to pass to tmux, by name only: ${refused.join(", ")}`);
+  }
+  return [
+    ...Object.entries(set).map(([name, value]) => `set-environment -g ${name} ${tmuxWord(value)}`),
+    ...unset.map((name) => `set-environment -g -u ${name}`),
+  ]
+    .map((line) => `${line}\n`)
+    .join("");
+}
+
 /** A server whose configuration file is known, as a runtime that writes one needs. */
 export type ConfiguredTmuxServer = TmuxServer & { readonly config: string };
 
@@ -161,6 +197,30 @@ export class TmuxServer {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Sets and unsets variables in this server's global environment, which every new pane starts
+   * from. The commands go to tmux's parser on stdin (`source-file -`), so no value ever appears in
+   * argv; this is the only command that reaches tmux on stdin.
+   */
+  async setEnvironment(
+    set: Readonly<Record<string, string>>,
+    unset: readonly string[],
+    opts: TmuxOptions = {},
+  ): Promise<void> {
+    const script = environmentScript(set, unset);
+    if (script === "") return;
+    const [bin, ...argv] = this.argv("source-file", "-");
+    await new Promise<void>((done, fail) => {
+      const child = execFile(
+        bin,
+        argv,
+        { env: opts.env, timeout: opts.timeout ?? TIMEOUT_MS },
+        (err) => (err === null ? done() : fail(err)),
+      );
+      child.stdin?.end(script);
+    });
   }
 
   /** Ends this server, if it runs. */

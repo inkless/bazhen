@@ -1,0 +1,47 @@
+{
+  "$id": "EnvRefreshResponse",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "capturedAt": {
+      "type": "string"
+    },
+    "kept": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "removed": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      }
+    },
+    "refused": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "unchanged": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+      }
+    }
+  },
+  "required": [
+    "capturedAt",
+    "kept",
+    "removed",
+    "refused",
+    "unchanged"
+  ],
+  "additionalProperties": false
+}

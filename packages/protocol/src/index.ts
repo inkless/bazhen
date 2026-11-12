@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { Id } from "./ids.ts";
 import { ProtocolVersion } from "./version.ts";
 
 export * from "./agents.ts";
@@ -40,12 +41,32 @@ export const DoctorResponse = z.object({
   agents: z.object({ shell: z.enum(["direct", "login"]), loginShell: z.string().nullable() }),
   env: z.object({
     capturedAt: z.string(),
+    /** Captured when the daemon started, or by the latest `bazhen env refresh`. */
+    source: z.enum(["start", "refresh"]),
     kept: z.int().nonnegative(),
     /** How many variables each denying rule removed. */
     removed: z.record(z.string(), z.int().nonnegative()),
   }),
 });
 export type DoctorResponse = z.infer<typeof DoctorResponse>;
+
+/**
+ * `POST /v1/daemon/env`, on the Unix socket only: the environment of the shell running
+ * `bazhen env refresh`, for every agent started from now on (foundation-design §9.5).
+ */
+export const EnvRefreshRequest = z.object({ env: z.record(z.string(), z.string()) });
+export type EnvRefreshRequest = z.infer<typeof EnvRefreshRequest>;
+
+export const EnvRefreshResponse = z.object({
+  capturedAt: z.string(),
+  kept: z.int().nonnegative(),
+  removed: z.record(z.string(), z.int().nonnegative()),
+  /** Names left as they were, because tmux can't take their name or value as data. */
+  refused: z.array(z.string()),
+  /** Agents running now, which keep the environment they started with until respawned. */
+  unchanged: z.array(Id("agent")),
+});
+export type EnvRefreshResponse = z.infer<typeof EnvRefreshResponse>;
 
 export const TerminalState = z.enum([
   "creating",

@@ -1,6 +1,12 @@
 import type { HttpBindings } from "@hono/node-server";
 import { Hono } from "hono";
-import type { DoctorResponse, ErrorResponse, StopResponse } from "@bazhen/protocol";
+import {
+  EnvRefreshRequest,
+  type DoctorResponse,
+  type EnvRefreshResponse,
+  type ErrorResponse,
+  type StopResponse,
+} from "@bazhen/protocol";
 
 export interface SocketParts {
   /** The `/v1` command routes, unguarded: the socket's permission is the authentication. */
@@ -9,6 +15,8 @@ export interface SocketParts {
   /** Stops the daemon; called once the reply to `stop` has been written. */
   readonly stop: () => void;
   readonly doctor: () => Promise<DoctorResponse>;
+  /** Agents started from now on get `env`, filtered as at start-up (foundation-design §9.5). */
+  readonly refreshEnv: (env: Readonly<Record<string, string>>) => Promise<EnvRefreshResponse>;
 }
 
 /**
@@ -36,6 +44,16 @@ export function socketApp(parts: SocketParts): Hono<{ Bindings: HttpBindings }> 
   });
 
   app.get("/v1/daemon/doctor", async (c) => c.json(await parts.doctor()));
+
+  // The body is the user's whole environment: it is used and dropped, never logged or stored.
+  app.post("/v1/daemon/env", async (c) => {
+    const req = EnvRefreshRequest.safeParse(await c.req.json().catch(() => undefined));
+    if (!req.success) {
+      const body: ErrorResponse = { error: "invalid_request", message: "expected { env }" };
+      return c.json(body, 400);
+    }
+    return c.json(await parts.refreshEnv(req.data.env));
+  });
 
   app.route("/", parts.hooks);
   app.route("/", parts.commands);
