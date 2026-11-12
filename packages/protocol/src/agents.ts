@@ -78,6 +78,7 @@ export const ErrorResponse = z.object({
     "invalid_request",
     "unsupported",
     "launch_failed",
+    "conflict",
     "origin_not_allowed",
     "host_not_allowed",
   ]),

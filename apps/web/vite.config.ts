@@ -9,7 +9,6 @@ export default defineConfig({
     host: "127.0.0.1",
     port: Number(process.env.BAZHEN_WEB_PORT ?? 5173),
     strictPort: true,
-    // The daemon accepts actions only from its own origin, so the dev proxy presents that one.
-    proxy: { "/v1": { target: daemon, changeOrigin: true, ws: true, headers: { origin: daemon } } },
+    proxy: { "/v1": { target: daemon, changeOrigin: true, ws: true } },
   },
 });

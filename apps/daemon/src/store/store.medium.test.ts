@@ -37,7 +37,7 @@ const running = (agentId: string) => ({
   type: "agent.running" as const,
   entityId: agentId,
   actor: "system",
-  payload: { externalRef: null, runtime: { kind: "tmux", locator: { session: "bz-1" } } },
+  payload: { externalRef: null, runtimeRef: { runtime: "tmux", locator: { session: "bz-1" } } },
 });
 
 describe("Store", () => {

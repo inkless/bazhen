@@ -1,4 +1,4 @@
-// Vitest globalSetup for the medium and integration projects (docs/standards/testing.md).
+// Vitest globalSetup for the medium, integration and api projects (docs/standards/testing.md).
 // - Every run gets a temporary BAZHEN_HOME, so no test touches the user's real data.
 // - Every run gets its own tmux socket directory (TMUX_TMPDIR) and runs outside any tmux client
 //   (TMUX unset). Every tmux command a test runs, with or without -L, lands on a throwaway server

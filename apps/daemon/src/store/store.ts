@@ -9,7 +9,7 @@ import {
   type EventType,
 } from "@bazhen/protocol";
 import { LATEST_SCHEMA_VERSION, MIGRATIONS, type Migration } from "./migrations.ts";
-import { project } from "./projections.ts";
+import { project, type Statements } from "./projections.ts";
 
 export interface NewEvent<T extends EventType> {
   readonly type: T;
@@ -46,7 +46,9 @@ export class Store {
   private readonly db: DatabaseSync;
   private host = "";
   private depth = 0;
-  private readonly statements = new Map<string, StatementSync>();
+  private readonly cache = new Map<string, StatementSync>();
+  /** What the projections may do: run SQL, inside the transaction that records an event. */
+  private readonly statements: Statements = { prepare: (sql) => this.prepare(sql) };
 
   private constructor(db: DatabaseSync) {
     this.db = db;
@@ -126,7 +128,7 @@ export class Store {
       // The projection parses the payload with its type's schema, rolling the event back if
       // it doesn't match.
       try {
-        project(this, { id, hostId: this.host, ...event });
+        project(this.statements, { id, hostId: this.host, ...event });
       } catch (err) {
         throw err instanceof z.ZodError ? new InvalidEvent(event.type, err) : err;
       }
@@ -134,11 +136,11 @@ export class Store {
     });
   }
 
-  prepare(sql: string): StatementSync {
-    let statement = this.statements.get(sql);
+  private prepare(sql: string): StatementSync {
+    let statement = this.cache.get(sql);
     if (statement === undefined) {
       statement = this.db.prepare(sql);
-      this.statements.set(sql, statement);
+      this.cache.set(sql, statement);
     }
     return statement;
   }

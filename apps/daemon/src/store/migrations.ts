@@ -63,9 +63,27 @@ export const MIGRATIONS: readonly Migration[] = [
         updated_event_id INTEGER NOT NULL REFERENCES events (id)
       ) STRICT;
 
-      ALTER TABLE terminals ADD COLUMN environment_id TEXT REFERENCES environments (id);
-      ALTER TABLE terminals ADD COLUMN kind TEXT NOT NULL DEFAULT 'agent';
-      ALTER TABLE terminals ADD COLUMN agent_session_id TEXT REFERENCES agent_sessions (id);
+      -- Rebuilt rather than altered: a terminal that is still being created has no runtime
+      -- incarnation yet, and SQLite can't relax a column's NOT NULL in place.
+      CREATE TABLE terminals_v2 (
+        id TEXT PRIMARY KEY,
+        host_id TEXT NOT NULL REFERENCES host (id),
+        state TEXT NOT NULL,
+        generation INTEGER NOT NULL,
+        runtime TEXT,
+        locator TEXT,
+        environment_id TEXT REFERENCES environments (id),
+        kind TEXT NOT NULL DEFAULT 'agent',
+        agent_session_id TEXT REFERENCES agent_sessions (id),
+        created_event_id INTEGER NOT NULL REFERENCES events (id),
+        updated_event_id INTEGER NOT NULL REFERENCES events (id)
+      ) STRICT;
+      INSERT INTO terminals_v2
+        (id, host_id, state, generation, runtime, locator, created_event_id, updated_event_id)
+        SELECT id, host_id, state, generation, runtime, locator, created_event_id, updated_event_id
+        FROM terminals;
+      DROP TABLE terminals;
+      ALTER TABLE terminals_v2 RENAME TO terminals;
       CREATE INDEX terminals_agent ON terminals (agent_session_id);
 
       CREATE TABLE idempotency_keys (

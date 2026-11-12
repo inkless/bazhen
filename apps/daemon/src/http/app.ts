@@ -9,6 +9,7 @@ import {
   type StateSnapshot,
 } from "@bazhen/protocol";
 import { LaunchFailed, UnsupportedHarness, type RuntimeAdapter } from "@bazhen/core";
+import { IdempotencyConflict } from "../agents/launch.ts";
 
 export interface AppDeps {
   readonly appVersion: string;
@@ -79,6 +80,7 @@ export function createApp(deps: AppDeps): Hono {
   app.onError((err, c) => {
     if (err instanceof UnsupportedHarness) return fail(c, 422, "unsupported", err.message);
     if (err instanceof LaunchFailed) return fail(c, 502, "launch_failed", err.message);
+    if (err instanceof IdempotencyConflict) return fail(c, 409, "conflict", err.message);
     throw err;
   });
 

@@ -10,7 +10,7 @@ import {
   type EnvironmentAdapter,
 } from "@bazhen/core";
 import { Store } from "../store/store.ts";
-import { launchAgent, localEnvironmentId } from "./launch.ts";
+import { IdempotencyConflict, launchAgent, localEnvironmentId } from "./launch.ts";
 
 function setup(fail = false) {
   const store = Store.open(join(mkdtempSync(join(tmpdir(), "bz-launch-")), "bazhen.db"));
@@ -91,12 +91,19 @@ describe("launchAgent", () => {
     expect([store.snapshot().agents, launches]).toEqual([[], []]);
   });
 
-  it("records a launch the environment rejects as failed, and does not retry it on a repeat", async () => {
+  it("records a rejected launch as failed, and answers a repeat with the same failure", async () => {
     const { store, deps, launches } = setup(true);
     await expect(launchAgent(deps, request)).rejects.toThrow(LaunchFailed);
-    const repeat = await launchAgent(deps, request);
-    const failed = store.eventsAfter(0).find((e) => e.type === "agent.failed")?.id;
-    expect([store.snapshot().agents[0]?.state, launches.length]).toEqual(["failed", 1]);
-    expect(repeat.eventIds.at(-1)).toBe(failed);
+    await expect(launchAgent(deps, request)).rejects.toThrow(LaunchFailed);
+    expect([store.snapshot().agents.map((a) => a.state), launches.length]).toEqual([["failed"], 1]);
+  });
+
+  it("refuses a key reused for a different launch, rather than answering for the first", async () => {
+    const { deps, launches } = setup();
+    await launchAgent(deps, request);
+    await expect(launchAgent(deps, { ...request, cwd: "/elsewhere" })).rejects.toThrow(
+      IdempotencyConflict,
+    );
+    expect(launches.length).toBe(1);
   });
 });

@@ -1,8 +1,10 @@
 // Writes the protocol's JSON Schema into packages/protocol/schema/ (foundation-design §5.5). With
 // `--check`, writes nothing and fails when the committed files differ from a fresh export, so a
-// protocol change can't ship without its schema.
+// protocol change can't ship without its schema. Only files git tracks count as committed: a
+// generated file left unstaged would pass here and fail in CI.
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { jsonSchemas } from "../packages/protocol/src/json-schema.ts";
@@ -20,10 +22,11 @@ export function drift(
 const dir = fileURLToPath(new URL("../packages/protocol/schema/", import.meta.url));
 
 function committed(): Record<string, string> {
-  if (!existsSync(dir)) return {};
+  const tracked = execFileSync("git", ["ls-files", "--", "*.json"], { cwd: dir, encoding: "utf8" });
   return Object.fromEntries(
-    readdirSync(dir)
-      .filter((name) => name.endsWith(".json"))
+    tracked
+      .split("\n")
+      .filter(Boolean)
       .map((name) => [name, readFileSync(join(dir, name), "utf8")]),
   );
 }

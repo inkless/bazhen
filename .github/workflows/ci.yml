@@ -42,8 +42,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
 
-  # The black-box suite runs the real harness CLIs, pinned in tests/api, against a fake model
-  # API, so it needs no credentials. It is slower than `pnpm check`, so it is a job of its own.
+  # The black-box suite runs the real harness CLIs, pinned in tests/api. No agent is let reach a
+  # model, so it needs no credentials. It is slower than `pnpm check`, so it is a job of its own.
   api:
     name: api (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

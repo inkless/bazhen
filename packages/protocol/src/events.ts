@@ -26,8 +26,10 @@ export const EVENTS = {
     entity: "agent",
     payload: z.object({
       externalRef: ExternalRef.nullable(),
-      /** The terminal's runtime incarnation; null for an agent with no local terminal. */
-      runtime: z.object({ kind: z.string(), locator: z.record(z.string(), z.string()) }).nullable(),
+      /** The terminal's runtime incarnation, as RuntimeRef names it; null with no local terminal. */
+      runtimeRef: z
+        .object({ runtime: z.string(), locator: z.record(z.string(), z.string()) })
+        .nullable(),
     }),
   },
   "agent.failed": {

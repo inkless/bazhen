@@ -53,6 +53,11 @@ export class Daemon {
         },
       }),
     );
+    // Ask before tools run, whatever mode a machine's managed settings would pick.
+    writeFileSync(
+      join(claudeConfig, "settings.json"),
+      JSON.stringify({ permissions: { defaultMode: "default" } }),
+    );
     const base = Object.fromEntries(
       BASE_ENV.flatMap((k) => (process.env[k] === undefined ? [] : [[k, process.env[k]]])),
     );
@@ -72,7 +77,7 @@ export class Daemon {
   /** A daemon on a fresh home. Short paths keep its socket under sun_path's limit. */
   static async start(): Promise<Daemon> {
     const daemon = new Daemon(realpathSync(mkdtempSync("/tmp/bz-api-")));
-    await daemon.restart();
+    await daemon.spawn();
     return daemon;
   }
 
@@ -80,15 +85,18 @@ export class Daemon {
     return `http://127.0.0.1:${this.port}`;
   }
 
-  /** Starts the daemon again on the same home, as `bazhen start` would after a crash. */
-  async restart(): Promise<void> {
+  private async spawn(): Promise<void> {
     this.port = await freePort();
-    this.process = spawn(
+    const child = spawn(
       process.execPath,
       ["--disable-warning=ExperimentalWarning", join(repo, "apps/daemon/src/main.ts")],
-      { env: { ...this.env, BAZHEN_PORT: String(this.port) }, stdio: "ignore" },
+      { env: { ...this.env, BAZHEN_PORT: String(this.port) }, stdio: ["ignore", "pipe", "pipe"] },
     );
-    for (let i = 0; i < 100; i++) {
+    this.process = child;
+    let output = "";
+    child.stdout.on("data", (d: Buffer) => (output += d.toString()));
+    child.stderr.on("data", (d: Buffer) => (output += d.toString()));
+    for (let i = 0; i < 100 && child.exitCode === null; i++) {
       if (
         await fetch(`${this.url}/v1/health`).then(
           (r) => r.ok,
@@ -98,7 +106,8 @@ export class Daemon {
         return;
       await new Promise((r) => setTimeout(r, 100));
     }
-    throw new Error("the daemon did not start");
+    await this.stop();
+    throw new Error(`the daemon did not start:\n${output}`);
   }
 
   async request(path: string, init: { method?: string; body?: unknown; origin?: string } = {}) {
@@ -131,7 +140,13 @@ export class Daemon {
 
   /** Stops the daemon, its tmux server and every file under its home. */
   async stop(): Promise<void> {
-    await this.exit("SIGTERM");
+    const child = this.process;
+    if (child !== undefined && child.exitCode === null && child.signalCode === null) {
+      await new Promise((resolve) => {
+        child.once("exit", resolve);
+        child.kill("SIGTERM");
+      });
+    }
     try {
       this.tmux("kill-server");
     } catch {
@@ -139,15 +154,5 @@ export class Daemon {
     }
     // The agents' processes may still be writing their state as the server goes down.
     rmSync(this.home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  }
-
-  /** Ends the daemon's process with `signal`, leaving its agents running in tmux. */
-  async exit(signal: NodeJS.Signals): Promise<void> {
-    const child = this.process;
-    if (child === undefined || child.exitCode !== null || child.signalCode !== null) return;
-    await new Promise((resolve) => {
-      child.once("exit", resolve);
-      child.kill(signal);
-    });
   }
 }

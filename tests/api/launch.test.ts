@@ -7,7 +7,8 @@ beforeAll(async () => {
   daemon = await Daemon.start();
 });
 afterAll(async () => {
-  await daemon.stop();
+  // A daemon that never started has already cleaned up after itself.
+  await daemon?.stop();
 });
 
 const launch = (key: string, origin?: string) =>

@@ -58,16 +58,16 @@ export function project(db: Statements, e: Recorded): void {
         `INSERT INTO terminals
            (id, host_id, state, generation, runtime, locator, environment_id, kind, agent_session_id,
             created_event_id, updated_event_id)
-         VALUES (?, ?, 'creating', 0, '', '{}', ?, 'agent', ?, ?, ?)`,
+         VALUES (?, ?, 'creating', 0, NULL, NULL, ?, 'agent', ?, ?, ?)`,
       ).run(terminalId, e.hostId, environmentId, e.entityId, e.id, e.id);
       return;
     }
     case "agent.running": {
-      const { externalRef, runtime } = EVENTS[e.type].payload.parse(e.payload);
+      const { externalRef, runtimeRef } = EVENTS[e.type].payload.parse(e.payload);
       advance(db, e.id, e.entityId, ["launch.confirmed", "runtime.confirmed"], {
         agent: { external_ref: externalRef && JSON.stringify(externalRef) },
-        ...(runtime && {
-          terminal: { runtime: runtime.kind, locator: JSON.stringify(runtime.locator) },
+        ...(runtimeRef && {
+          terminal: { runtime: runtimeRef.runtime, locator: JSON.stringify(runtimeRef.locator) },
         }),
       });
       return;

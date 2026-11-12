@@ -7,7 +7,7 @@
     "./pty": "./src/pty/node-pty.ts"
   },
   "scripts": {
-    "dev": "node --watch --watch-preserve-output src/main.ts",
+    "dev": "BAZHEN_WEB_PORT=${BAZHEN_WEB_PORT:-5173} node --watch --watch-preserve-output src/main.ts",
     "start": "node src/main.ts"
   },
   "dependencies": {

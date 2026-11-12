@@ -41,12 +41,16 @@ const environment = new LocalEnvironment({
   socket: paths.socket,
 });
 const allowedHosts = [`${HOSTNAME}:${port}`, `localhost:${port}`];
+// The web dev server proxies to the daemon, and the browser's requests keep its origin. It is
+// allowed only when the dev scripts name its port; a built daemon serves the client itself.
+const webPort = process.env.BAZHEN_WEB_PORT;
+const webDevHosts = webPort ? [`${HOSTNAME}:${webPort}`, `localhost:${webPort}`] : [];
 const app = createApp({
   appVersion: APP_VERSION,
   schemaVersion: () => store.schemaVersion(),
   runtime,
   allowedHosts,
-  allowedOrigins: allowedHosts.map((host) => `http://${host}`),
+  allowedOrigins: [...allowedHosts, ...webDevHosts].map((host) => `http://${host}`),
   state: () => store.snapshot(),
   launch: (req) => launchAgent({ store, environment, size: DEFAULT_SIZE }, req),
 });
