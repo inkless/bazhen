@@ -45,7 +45,7 @@ describe("tmux runtime on a private server", () => {
     const s = spec(["cat"]);
     await runtime.create(s);
     const found = (await runtime.inventory()).find((e) => e.ref.terminalId === s.terminalId);
-    expect(found?.dead).toBe(false);
+    expect(found?.exit).toBeNull();
     expect((await runtime.health()).state).toBe("healthy");
   });
 
@@ -54,7 +54,7 @@ describe("tmux runtime on a private server", () => {
     await runtime.create(s);
     await expect
       .poll(async () => (await runtime.inventory()).find((e) => e.ref.terminalId === s.terminalId))
-      .toMatchObject({ dead: true, exitStatus: 3 });
+      .toMatchObject({ exit: { code: 3, signal: null } });
   });
 
   it("round-trips input through an attached terminal", async () => {
@@ -160,9 +160,9 @@ describe("tmux runtime on a private server", () => {
   it("reports a failed tmux command as a TmuxError carrying what tmux said", async () => {
     const ref = await runtime.create(spec(["cat"]));
     await runtime.close(ref);
-    const error: unknown = await runtime.close(ref).catch((e: unknown) => e);
+    const error: unknown = await runtime.attach(ref, null, 0).catch((e: unknown) => e);
     expect(error).toMatchObject({
-      args: ["kill-session", "-t", ref.locator.session],
+      args: expect.arrayContaining(["display-message"]),
       stderr: expect.stringMatching(/session/),
     });
     expect(error).toBeInstanceOf(TmuxError);

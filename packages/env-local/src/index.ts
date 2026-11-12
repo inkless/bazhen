@@ -54,7 +54,9 @@ export class LocalEnvironment implements EnvironmentAdapter {
 
   async inventory(): Promise<AgentInventoryEntry[]> {
     return (await this.opts.runtime.inventory()).flatMap((e) =>
-      e.tags.kind === "agent" ? [{ agentId: e.tags.agentId, ref: e.ref, dead: e.dead }] : [],
+      e.tags.kind === "agent"
+        ? [{ agentId: e.tags.agentId, ref: e.ref, dead: e.exit !== null }]
+        : [],
     );
   }
 

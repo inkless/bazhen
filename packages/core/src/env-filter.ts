@@ -18,6 +18,11 @@ export const ENV_DENYLIST: readonly string[] = [
   "CLAUDE_CODE_MESSAGING_SOCKET",
   "CLAUDE_CODE_MESSAGING_TOKEN",
   "CLAUDE_PID",
+  "CLAUDE_CODE_SESSION_ATTENDED",
+  "CLAUDE_CODE_EXECPATH",
+  "CLAUDE_ENV_FILE",
+  "CLAUDE_PROJECT_DIR",
+  "AI_AGENT",
   "CODEX_THREAD_ID",
   "CODEX_SANDBOX",
   "CODEX_SANDBOX_NETWORK_DISABLED",
@@ -53,6 +58,18 @@ export interface FilteredEnv {
   readonly removed: Readonly<Record<string, number>>;
 }
 
+/** A user rule names one variable, or a prefix ending in `*`; anything looser could strip all. */
+export class InvalidEnvRule extends Error {
+  readonly rule: string;
+
+  constructor(rule: string) {
+    super(`not a variable name or NAME_* prefix: ${JSON.stringify(rule)}`);
+    this.rule = rule;
+  }
+}
+
+const RULE = /^[A-Za-z_][A-Za-z0-9_]*\*?$/;
+
 const matches = (name: string, pattern: string) =>
   pattern.endsWith("*") ? name.startsWith(pattern.slice(0, -1)) : name === pattern;
 
@@ -60,9 +77,11 @@ export function filterEnv(
   source: Readonly<Record<string, string | undefined>>,
   rules: EnvRules = {},
 ): FilteredEnv {
-  const passthrough = rules.passthrough ?? [];
+  const { deny = [], passthrough = [] } = rules;
+  const invalid = [...deny, ...passthrough].find((r) => !RULE.test(r));
+  if (invalid !== undefined) throw new InvalidEnvRule(invalid);
   const denyingPattern = (name: string) =>
-    rules.deny?.find((p) => matches(name, p)) ??
+    deny.find((p) => matches(name, p)) ??
     (passthrough.some((p) => matches(name, p))
       ? undefined
       : ENV_DENYLIST.find((p) => matches(name, p)));

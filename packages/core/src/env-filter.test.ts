@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterEnv } from "./env-filter.ts";
+import { filterEnv, InvalidEnvRule } from "./env-filter.ts";
 
 describe("filterEnv", () => {
   it("keeps the user's own variables, as a new terminal tab would", () => {
@@ -31,6 +31,17 @@ describe("filterEnv", () => {
     expect(env).toEqual({ CODEX_HOME: "/h", CLAUDE_CODE_USE_BEDROCK: "1" });
   });
 
+  // What Claude Code 2.1.322 sets for its children that names its own session or paths.
+  it.each([
+    "CLAUDE_CODE_SESSION_ATTENDED",
+    "CLAUDE_CODE_EXECPATH",
+    "CLAUDE_ENV_FILE",
+    "CLAUDE_PROJECT_DIR",
+    "AI_AGENT",
+  ])("strips %s, which belongs to the session bazhen start ran in", (name) => {
+    expect(filterEnv({ [name]: "x" }).env).toEqual({});
+  });
+
   it("counts what each pattern removed", () => {
     const { removed } = filterEnv({ ITERM_PROFILE: "1", ITERM_SESSION_ID: "1", TMUX: "/t" });
     expect(removed).toEqual({ "ITERM_*": 2, TMUX: 1 });
@@ -47,6 +58,14 @@ describe("filterEnv", () => {
   it("lets the user's own denial win over a passthrough", () => {
     expect(filterEnv({ CODEX_HOME: "/h" }, { deny: ["CODEX_HOME"] }).env).toEqual({});
   });
+
+  it.each(["*", "", "A*B", "MY VAR"])(
+    "refuses the user rule %j, which would match too much",
+    (rule) => {
+      expect(() => filterEnv({}, { deny: [rule] })).toThrow(InvalidEnvRule);
+      expect(() => filterEnv({}, { passthrough: [rule] })).toThrow(InvalidEnvRule);
+    },
+  );
 
   it("drops unset variables", () => {
     expect(filterEnv({ HOME: undefined }).env).toEqual({});
