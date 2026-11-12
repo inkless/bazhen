@@ -1,6 +1,7 @@
 export * from "./agent.ts";
 export * from "./attention.ts";
 export * from "./env-filter.ts";
+export * from "./environment.ts";
 export * from "./ids.ts";
 export * from "./lease.ts";
 export * from "./machine.ts";

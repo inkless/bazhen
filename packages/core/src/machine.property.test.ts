@@ -3,11 +3,11 @@
 // one predicate per invariant, and `fc.assert` inside the test.
 
 import * as fc from "fast-check";
-import type { MailboxState, TerminalState } from "@bazhen/protocol";
+import type { TerminalState } from "@bazhen/protocol";
 import { describe, expect, it } from "vitest";
 import { agent, type AgentEvent } from "./agent.ts";
 import { InvalidTransition, type Machine } from "./machine.ts";
-import { mailbox, type MailboxEvent } from "./mailbox.ts";
+import { mailbox, type MailboxEvent, type MailboxState } from "./mailbox.ts";
 import { advanceTerminal, terminal, type TerminalEvent } from "./terminal.ts";
 
 interface Step<S, E> {
@@ -53,10 +53,9 @@ const sequences = <E extends string>(weights: [E, number][]) =>
     { maxLength: 40 },
   );
 
-const finalStaysFinal =
-  <S extends string, E extends string>(m: Machine<S, E>) =>
-  (steps: Step<S, E>[]) =>
-    steps.filter((s) => m.isFinal(s.from)).every((s) => s.to === s.from);
+/** The events `state` accepts; a final state accepts none. */
+const accepted = <S extends string, E extends string>(m: Machine<S, E>, state: S, events: E[]) =>
+  events.filter((e) => tryNext(m, state, e) !== undefined);
 
 const entersOnlyBy = <S, E>(steps: Step<S, E>[], state: S, events: E[]) =>
   steps.filter((s) => s.to === state && s.from !== state).every((s) => events.includes(s.event));
@@ -104,14 +103,13 @@ const generationRisesOnlyOnNewIncarnation = (steps: Step<TerminalState, Terminal
 const respawnRaisesGeneration = (steps: Step<TerminalState, TerminalEvent>[]) =>
   steps.filter((s) => s.from === "exited" && s.event === "respawned").every((s) => rise(s) === 1);
 
-const onlyUnreachability = fc.array(
-  fc.constantFrom<TerminalEvent>("runtime.unreachable", "runtime.reconfirmed"),
-  { maxLength: 40 },
-);
-
 describe("terminal, over any sequence of events", () => {
-  it("never leaves closed or failed", () => {
-    expect(check(terminalWalks, finalStaysFinal(terminal))).not.toThrow();
+  it("accepts no event once closed or failed", () => {
+    const events = TERMINAL_EVENTS.map(([e]) => e);
+    expect([accepted(terminal, "closed", events), accepted(terminal, "failed", events)]).toEqual([
+      [],
+      [],
+    ]);
   });
 
   it("becomes lost only on positive evidence that the target is gone", () => {
@@ -126,12 +124,6 @@ describe("terminal, over any sequence of events", () => {
 
   it("raises the generation on every respawn of an exited terminal", () => {
     expect(check(terminalWalks, respawnRaisesGeneration)).not.toThrow();
-  });
-
-  it("never concludes lost while the runtime is merely unreachable", () => {
-    expect(
-      check(onlyUnreachability, (e) => walk(terminal, "running", e).every((s) => s.to !== "lost")),
-    ).not.toThrow();
   });
 
   it("can reach every state, so the walks above exercise the whole table", () => {
@@ -157,8 +149,12 @@ const AGENT_EVENTS: [AgentEvent, number][] = [
 const agentWalks = sequences(AGENT_EVENTS).map((e) => walk(agent, "starting", e));
 
 describe("agent session, over any sequence of events", () => {
-  it("never leaves closed or failed", () => {
-    expect(check(agentWalks, finalStaysFinal(agent))).not.toThrow();
+  it("accepts no event once closed or failed", () => {
+    const events = AGENT_EVENTS.map(([e]) => e);
+    expect([accepted(agent, "closed", events), accepted(agent, "failed", events)]).toEqual([
+      [],
+      [],
+    ]);
   });
 
   it("becomes lost only when a reachable environment lacks the target", () => {

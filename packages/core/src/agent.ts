@@ -1,5 +1,44 @@
-import type { AgentState } from "@bazhen/protocol";
+import type { AgentSessionId, EnvironmentId, TerminalId } from "./ids.ts";
 import { machine } from "./machine.ts";
+
+export type AgentState =
+  | "starting"
+  | "running"
+  | "exited"
+  | "unknown"
+  | "lost"
+  | "closing"
+  | "closed"
+  | "failed";
+
+export type HarnessId = "claude-code" | "codex";
+
+/** A harness- or server-side object, such as a Claude Code session or a Codex thread. */
+export interface ExternalRef {
+  readonly environmentId: EnvironmentId;
+  readonly kind: "claude-session" | "codex-thread";
+  readonly id: string;
+}
+
+/** What was asked for at launch, kept so the agent can be respawned the same way. */
+export interface AgentLaunchRequest {
+  readonly harness: HarnessId;
+  readonly project: string;
+  readonly cwd: string;
+}
+
+/**
+ * The join key: tasks, attention and mail all reference an agent session, which references what
+ * runs it (foundation-design §3.1). A local agent's terminal is its process.
+ */
+export interface AgentSession {
+  readonly id: AgentSessionId;
+  readonly environmentId: EnvironmentId;
+  readonly launch: AgentLaunchRequest;
+  readonly state: AgentState;
+  readonly terminalId: TerminalId | null;
+  readonly externalRef: ExternalRef | null;
+}
 
 export type AgentEvent =
   | "launch.confirmed"

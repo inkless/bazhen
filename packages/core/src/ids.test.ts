@@ -25,6 +25,10 @@ describe("isId", () => {
     expect(isId("term", "%12")).toBe(false);
   });
 
+  it("rejects a well-formed hex string that is not a UUIDv7", () => {
+    expect(isId("term", `term_${"0".repeat(32)}`)).toBe(false);
+  });
+
   it("accepts an id only under its own prefix", () => {
     const id = newId("term");
     expect(isId("term", id)).toBe(true);
