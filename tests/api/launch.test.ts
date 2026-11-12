@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { LaunchAgentResponse, StateSnapshot } from "@bazhen/protocol";
+import { join } from "node:path";
+import { ErrorResponse, LaunchAgentResponse, StateSnapshot } from "@bazhen/protocol";
 import { Daemon } from "./daemon.ts";
 
 let daemon: Daemon;
@@ -11,12 +12,35 @@ afterAll(async () => {
   await daemon?.stop();
 });
 
-const launch = (key: string, origin?: string) =>
+const launch = (key: string, origin?: string, cwd = daemon.work) =>
   daemon.request("/v1/agents", {
     method: "POST",
-    body: { idempotencyKey: key, harness: "claude-code", cwd: daemon.work },
+    body: { idempotencyKey: key, harness: "claude-code", cwd },
     ...(origin === undefined ? {} : { origin }),
   });
+
+describe("the directory an agent is launched in", () => {
+  it("reads a leading ~ as the daemon user's home", async () => {
+    const missing = `bazhen-api-no-such-dir-${process.pid}`;
+    const { status, body } = await launch("home", undefined, `~/${missing}`);
+    expect([status, ErrorResponse.parse(body).message]).toEqual([
+      400,
+      `${join(String(process.env["HOME"]), missing)} does not exist`,
+    ]);
+  });
+
+  it.each([
+    ["a relative path", () => "work", "is not a full path"],
+    // A file the daemon is sure to have made.
+    ["a file", () => join(daemon.home, "data", "bazhen.db"), "is not a directory"],
+  ])("refuses %s in words, not a parser's issue list", async (what, path, why) => {
+    const { status, body } = await launch(`refused ${what}`, undefined, path());
+    expect([status, ErrorResponse.parse(body)]).toEqual([
+      400,
+      { error: "invalid_request", message: expect.stringContaining(why) },
+    ]);
+  });
+});
 
 describe("launching an agent", () => {
   it("runs the real Claude Code TUI in Bazhen's tmux, tagged with the agent", async () => {

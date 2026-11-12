@@ -1,11 +1,18 @@
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { LaunchFailed, UnsupportedHarness, type AgentLaunch } from "@bazhen/core";
 import { Store } from "../store/store.ts";
 import { fakeEnvironment, tempDb } from "../testing/fixtures.ts";
 import { IdempotencyConflict } from "../store/store.ts";
+import { InvalidDirectory } from "./cwd.ts";
 import { launchAgent, localEnvironmentId } from "./launch.ts";
 
 function setup(fail = false) {
+  // The daemon user's home, with the project a launch names as ~/repo.
+  const home = mkdtempSync(join(tmpdir(), "bz-launch-"));
+  mkdirSync(join(home, "repo"));
   const store = Store.open(tempDb());
   const launches: AgentLaunch[] = [];
   const environment = fakeEnvironment(store, async (l) => {
@@ -16,11 +23,11 @@ function setup(fail = false) {
       externalRef: { environmentId: environment.id, kind: "claude-session", id: "s-1" },
     };
   });
-  const deps = { store, environment, size: { cols: 120, rows: 40 } };
-  return { store, deps, launches };
+  const deps = { store, environment, size: { cols: 120, rows: 40 }, home };
+  return { store, deps, launches, home };
 }
 
-const request = { idempotencyKey: "k-1", harness: "claude-code" as const, cwd: "/work/repo" };
+const request = { idempotencyKey: "k-1", harness: "claude-code" as const, cwd: "~/repo" };
 
 describe("localEnvironmentId", () => {
   it("registers the local environment once, and finds it again after a restart", () => {
@@ -57,6 +64,26 @@ describe("launchAgent", () => {
     ]);
   });
 
+  it("launches in the daemon user's home for a ~/ directory", async () => {
+    const { store, deps, launches, home } = setup();
+    await launchAgent(deps, request);
+    expect([launches[0]?.request.cwd, store.snapshot().agents[0]?.cwd]).toEqual([
+      join(home, "repo"),
+      join(home, "repo"),
+    ]);
+  });
+
+  it("answers a repeated key from the first answer, though its directory has gone since", async () => {
+    const { deps, launches, home } = setup();
+    const first = await launchAgent(deps, request);
+    rmSync(join(home, "repo"), { recursive: true });
+    expect([await launchAgent(deps, request), launches.length]).toEqual([first, 1]);
+    // A new launch there is refused: only the retry is answered without looking.
+    await expect(launchAgent(deps, { ...request, idempotencyKey: "k-2" })).rejects.toThrow(
+      InvalidDirectory,
+    );
+  });
+
   it("launches once for a repeated key, and answers the repeat with the first answer", async () => {
     const { deps, launches } = setup();
     const first = await launchAgent(deps, request);
@@ -82,9 +109,7 @@ describe("launchAgent", () => {
   it("refuses a key reused for a different launch, rather than answering for the first", async () => {
     const { deps, launches } = setup();
     await launchAgent(deps, request);
-    await expect(launchAgent(deps, { ...request, cwd: "/elsewhere" })).rejects.toThrow(
-      IdempotencyConflict,
-    );
+    await expect(launchAgent(deps, { ...request, cwd: "~" })).rejects.toThrow(IdempotencyConflict);
     expect(launches.length).toBe(1);
   });
 });

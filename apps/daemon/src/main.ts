@@ -106,7 +106,7 @@ const app = createApp({
   runtime,
   allow,
   state: () => store.snapshot(),
-  launch: (req) => launchAgent({ store, environment, size: DEFAULT_SIZE }, req),
+  launch: (req) => launchAgent({ store, environment, size: DEFAULT_SIZE, home: inputs.home }, req),
   send: (agentId, req) => mailbox.send(agentId, req),
   answer: (attentionId, req) => approvals.answer(attentionId, req),
   close: (agentId, req) => lifecycle.close(agentId, req),

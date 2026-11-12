@@ -66,7 +66,8 @@ export type Agent = z.infer<typeof Agent>;
 export const LaunchAgentRequest = z.object({
   idempotencyKey: IdempotencyKey,
   harness: HarnessId,
-  cwd: z.string().startsWith("/"),
+  /** An absolute path, or `~` or `~/…` for the daemon user's home. */
+  cwd: z.string().min(1),
   project: z.string().min(1).optional(),
 });
 export type LaunchAgentRequest = z.infer<typeof LaunchAgentRequest>;
