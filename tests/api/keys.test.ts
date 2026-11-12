@@ -2,9 +2,9 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Daemon, waitUntil, type View } from "./daemon.ts";
-import { readKeyLog } from "./fixtures/key-log.ts";
+import { readKeyLog } from "../support/key-log.ts";
 
-const probe = fileURLToPath(new URL("fixtures/key-probe.ts", import.meta.url));
+const probe = fileURLToPath(new URL("../support/key-probe.ts", import.meta.url));
 
 let daemon: Daemon;
 let terminalId = "";
