@@ -1,12 +1,11 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { HarnessId, StateSnapshot } from "@bazhen/protocol";
-import { answer, fetchState, launchAgent, sendMessage } from "./api.ts";
+import { answer, launchAgent, sendMessage, watchState } from "./api.ts";
 import { Terminal } from "./Terminal.tsx";
 
 /**
  * Every agent, a way to launch one, what needs the human, and the selected agent's terminal and
- * mail. A plain stand-in for the dashboard and inbox; the state is re-read every few seconds
- * until the event stream exists.
+ * mail. A plain stand-in for the dashboard and inbox, kept current by the event stream.
  */
 export function Fleet() {
   const [state, setState] = useState<StateSnapshot | null>(null);
@@ -16,19 +15,17 @@ export function Fleet() {
   const [error, setError] = useState<string | null>(null);
   const failed = (e: unknown) => setError(String(e));
 
-  useEffect(() => {
-    const refresh = () =>
-      fetchState().then(
+  useEffect(
+    () =>
+      watchState(
         (s) => {
           setState(s);
           setError(null);
         },
         (e: unknown) => setError(String(e)),
-      );
-    void refresh();
-    const timer = setInterval(() => void refresh(), 2000);
-    return () => clearInterval(timer);
-  }, []);
+      ),
+    [],
+  );
 
   const agent = state?.agents.find((a) => a.id === selected);
   const open = state?.attention.filter((a) => a.state === "open") ?? [];
