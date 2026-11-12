@@ -24,7 +24,19 @@ export default defineConfig({
             "apps/*/src/**/*.medium.test.ts",
             "scripts/*.medium.test.ts",
           ],
+          exclude: ["scripts/hook-bench.medium.test.ts", "**/node_modules/**"],
           globalSetup: ["tests/support/medium-setup.ts"],
+        },
+      },
+      {
+        // A wall-clock gate, so it runs alone: in parallel with PTY tests it measures them.
+        test: {
+          name: "bench",
+          include: ["scripts/hook-bench.medium.test.ts"],
+          globalSetup: ["tests/support/medium-setup.ts"],
+          fileParallelism: false,
+          maxWorkers: 1,
+          testTimeout: 30_000,
         },
       },
       {

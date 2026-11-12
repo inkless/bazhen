@@ -14,8 +14,9 @@ ARG TMUX_VERSION=3.5a-3
 # the runtime reads back. CI runners and login sessions set one.
 ENV HUSKY=0 CI=1 LANG=C.UTF-8
 
+# cargo builds the hook client (apps/hook, std only, so offline) before the suites run it.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends "tmux=${TMUX_VERSION}" \
+  && apt-get install -y --no-install-recommends "tmux=${TMUX_VERSION}" cargo \
   && npx -y "playwright@${PLAYWRIGHT_VERSION}" install-deps chromium \
   && rm -rf /var/lib/apt/lists/* \
   && npm install -g "pnpm@${PNPM_VERSION}" \

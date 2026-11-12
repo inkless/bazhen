@@ -4,24 +4,28 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "pnpm --parallel --filter @bazhen/daemon --filter @bazhen/web run dev",
-    "build": "tsc -b && pnpm --filter @bazhen/web run build",
+    "dev": "pnpm run build:hook && pnpm --parallel --filter @bazhen/daemon --filter @bazhen/web run dev",
+    "build": "pnpm run build:hook && tsc -b && pnpm --filter @bazhen/web run build",
     "typecheck": "tsc -b",
     "lint": "node scripts/lint-config.ts --check && oxlint --type-aware --deny-warnings --report-unused-disable-directives-severity=error",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "test": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
-    "test:api": "vitest run --project api",
-    "check": "node --disable-warning=ExperimentalWarning scripts/check-standards.ts && node --disable-warning=ExperimentalWarning scripts/protocol-schema.ts --check && pnpm run lint && pnpm run format:check && pnpm run typecheck && pnpm run test && pnpm run test:medium",
-    "test:e2e": "pnpm --filter @bazhen/e2e-tests run test",
+    "test:api": "pnpm run build:hook && vitest run --project api",
+    "check": "node --disable-warning=ExperimentalWarning scripts/check-standards.ts && node --disable-warning=ExperimentalWarning scripts/protocol-schema.ts --check && pnpm run lint && pnpm run format:check && pnpm run typecheck && pnpm run test:hook && pnpm run test && pnpm run test:medium && pnpm run test:bench",
+    "test:e2e": "pnpm run build:hook && pnpm --filter @bazhen/e2e-tests run test",
     "lint:config": "node scripts/lint-config.ts",
     "schema": "node --disable-warning=ExperimentalWarning scripts/protocol-schema.ts",
-    "test:medium": "vitest run --project medium",
+    "test:medium": "pnpm run build:hook && vitest run --project medium",
     "prepare": "husky",
     "test:falsify": "node scripts/falsify.ts",
     "test:file": "vitest run",
-    "test:real": "node scripts/test-real.ts"
+    "test:real": "node scripts/test-real.ts",
+    "build:hook": "cargo build --release --quiet --manifest-path apps/hook/Cargo.toml",
+    "test:hook": "cargo fmt --check --manifest-path apps/hook/Cargo.toml && cargo clippy --quiet --manifest-path apps/hook/Cargo.toml -- -D warnings && cargo test --quiet --manifest-path apps/hook/Cargo.toml",
+    "bench:hook": "node scripts/hook-bench.ts",
+    "test:bench": "pnpm run build:hook && vitest run --project bench"
   },
   "devDependencies": {
     "@bazhen/host-guard": "workspace:*",
@@ -39,7 +43,8 @@
       "oxfmt --no-error-on-unmatched-pattern",
       "oxlint --type-aware --deny-warnings --report-unused-disable-directives-severity=error --no-error-on-unmatched-pattern"
     ],
-    "*.{json,md,yml,yaml}": "oxfmt --no-error-on-unmatched-pattern"
+    "*.{json,md,yml,yaml}": "oxfmt --no-error-on-unmatched-pattern",
+    "*.rs": "rustfmt --edition 2024"
   },
   "devEngines": {
     "runtime": {

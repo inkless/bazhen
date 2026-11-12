@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { HOOK_REPLY_MAX_BYTES } from "@bazhen/protocol";
 import { Store } from "../store/store.ts";
 import { withAgent } from "../testing/fixtures.ts";
 import { Mailbox, UnknownAgent } from "./mailbox.ts";
@@ -34,6 +35,28 @@ describe("mailbox", () => {
     expect([stateOf(store, first), stateOf(store, other)]).toEqual(["seen", "emitted"]);
     mailbox.turnEnded(agentId, "p-1");
     expect([stateOf(store, first), stateOf(store, other)]).toEqual(["delivered", "emitted"]);
+  });
+
+  it("offers no more mail than one hook reply holds, and the rest to the next waiter", async () => {
+    const { store, agentId } = await withAgent();
+    const mailbox = new Mailbox(store);
+    const ids = Array.from(
+      { length: 60 },
+      (_, i) =>
+        mailbox.send(agentId, { idempotencyKey: `m${i}`, body: "x".repeat(20_000) }).messageId,
+    );
+    const first = await mailbox.wait(agentId, live());
+    expect(Buffer.byteLength(first.stderr)).toBeLessThanOrEqual(HOOK_REPLY_MAX_BYTES);
+    const second = await mailbox.wait(agentId, live());
+    expect([...first.offered, ...second.offered]).toEqual(ids);
+  });
+
+  it("offers at most 100 messages to one waiter, however small", async () => {
+    const { store, agentId } = await withAgent();
+    const mailbox = new Mailbox(store);
+    for (let i = 0; i < 150; i++) mailbox.send(agentId, { idempotencyKey: `m${i}`, body: "hi" });
+    expect((await mailbox.wait(agentId, live())).offered).toHaveLength(100);
+    expect((await mailbox.wait(agentId, live())).offered).toHaveLength(50);
   });
 
   it("releases an older waiter when a newer one arrives, so only the newest hands out mail", async () => {

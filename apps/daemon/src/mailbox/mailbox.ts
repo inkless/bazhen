@@ -1,5 +1,6 @@
 import { newId, type AgentSessionId, type MessageId } from "@bazhen/core";
 import {
+  HOOK_REPLY_MAX_BYTES,
   SendMessageResponse,
   type EventPayload,
   type HookReply,
@@ -124,8 +125,9 @@ export class Mailbox {
 
   private offer(agentId: string): void {
     const waiter = this.waiters.get(agentId);
-    const queued = this.store.mail(agentId, ["queued"]);
-    if (waiter === undefined || queued.length === 0) return;
+    if (waiter === undefined) return;
+    const queued = fitting(this.store.mail(agentId, ["queued"]));
+    if (queued.length === 0) return;
     this.store.transaction(() => {
       for (const m of queued) this.record("mailbox.offered", m.id, {});
     });
@@ -153,4 +155,24 @@ export class Mailbox {
   private record<T extends Step>(type: T, id: MessageId, payload: EventPayload<T>): number {
     return this.store.append({ type, entityId: id, actor: "system", payload });
   }
+}
+
+/** A wake's offered IDs travel in a header, which clients cap; this keeps it to a few KB. */
+const MAX_WAKE_MESSAGES = 100;
+
+/**
+ * The oldest messages whose wake fits one hook reply: a client refuses a larger one, which would
+ * hold back all of them. The rest stay queued for the agent's next waiter. One message always fits,
+ * since a body is at most 20,000 characters.
+ */
+function fitting<M extends Parameters<typeof wakeText>[0][number]>(queued: readonly M[]): M[] {
+  const fit: M[] = [];
+  // Each message's own wake, plus the blank line wakeText puts between two.
+  let bytes = -2;
+  for (const m of queued.slice(0, MAX_WAKE_MESSAGES)) {
+    bytes += Buffer.byteLength(wakeText([m])) + 2;
+    if (fit.length > 0 && bytes > HOOK_REPLY_MAX_BYTES) break;
+    fit.push(m);
+  }
+  return fit;
 }

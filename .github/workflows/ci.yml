@@ -45,6 +45,10 @@ jobs:
       # The real-tmux suites refuse to run on any host that is not thrown away after use.
       - name: Mark the runner disposable
         run: sudo touch /etc/bazhen-disposable-host
+      # The hook client (apps/hook) is Rust; tests build and run it.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm test:integration
@@ -77,6 +81,7 @@ jobs:
         run: command -v tmux || brew install tmux
       - name: Mark the runner disposable
         run: sudo touch /etc/bazhen-disposable-host
+      - uses: dtolnay/rust-toolchain@stable
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:api
 
@@ -94,6 +99,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y tmux
       - name: Mark the runner disposable
         run: sudo touch /etc/bazhen-disposable-host
+      - uses: dtolnay/rust-toolchain@stable
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @bazhen/e2e-tests exec playwright install --with-deps chromium
       - run: pnpm test:e2e
@@ -116,6 +122,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y tmux
       - name: Mark the runner disposable
         run: sudo touch /etc/bazhen-disposable-host
+      - uses: dtolnay/rust-toolchain@stable
       - run: pnpm install --frozen-lockfile
       - name: pnpm test:falsify
         env:
