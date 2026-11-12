@@ -8,8 +8,9 @@ import type {
   EnvironmentId,
   HarnessAdapter,
   RuntimeAdapter,
+  RuntimeRef,
 } from "@bazhen/core";
-import type { HarnessId, RuntimeHealthState } from "@bazhen/protocol";
+import type { ExitStatus, HarnessId, RuntimeHealthState } from "@bazhen/protocol";
 import { UnsupportedHarness } from "@bazhen/core";
 
 export interface LocalEnvironmentOptions {
@@ -58,6 +59,14 @@ export class LocalEnvironment implements EnvironmentAdapter {
         ? [{ agentId: e.tags.agentId, ref: e.ref, dead: e.exit !== null }]
         : [],
     );
+  }
+
+  async close(refs: AgentRefs): Promise<void> {
+    if (refs.runtime !== null) await this.opts.runtime.close(refs.runtime);
+  }
+
+  onExit(cb: (ref: RuntimeRef, status: ExitStatus) => void): () => void {
+    return this.opts.runtime.onExit(cb);
   }
 
   async launch({ agentId, terminalId, request, size }: AgentLaunch): Promise<AgentRefs> {

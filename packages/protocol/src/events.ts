@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ExternalRef, HarnessId } from "./agents.ts";
+import { ExitStatus, ExternalRef, HarnessId } from "./agents.ts";
 import { AttachmentMode, EnvironmentKind, Id } from "./ids.ts";
 import { ApprovalDecision, AttentionCloseReason } from "./mail.ts";
 import { ProtocolVersion } from "./version.ts";
@@ -43,6 +43,13 @@ export const EVENTS = {
   },
   /** A reachable environment no longer has the agent's terminal (§4.5, §7.1). */
   "agent.lost": { entity: "agent", payload: z.object({}) },
+  /** The agent's process ended; its terminal stays, with its last screen (§4.1, §4.5). */
+  "agent.exited": { entity: "agent", payload: z.object({ exit: ExitStatus }) },
+  /** A close was asked for. Recorded before the terminal is touched, so a view that loses its
+   * terminal next can tell a close from a disconnect. */
+  "agent.closing": { entity: "agent", payload: z.object({}) },
+  /** The agent's terminal is gone, and the agent with it. */
+  "agent.closed": { entity: "agent", payload: z.object({}) },
   /** A view opened a terminal's stream (foundation-design §4.2). */
   "attachment.started": {
     entity: "attachment",

@@ -55,7 +55,11 @@ export const Agent = z.object({
   cwd: z.string(),
   state: AgentState,
   terminalId: Id("term").nullable(),
+  /** Its terminal's incarnation; a command on the agent names the one it expects (§3). */
+  generation: z.number().int().nonnegative().nullable(),
   externalRef: ExternalRef.nullable(),
+  /** How its process ended, once it has. */
+  exit: ExitStatus.nullable(),
 });
 export type Agent = z.infer<typeof Agent>;
 
@@ -75,6 +79,20 @@ export const LaunchAgentResponse = z.object({
 });
 export type LaunchAgentResponse = z.infer<typeof LaunchAgentResponse>;
 
+/** Ends an agent and its terminal (§4.5). A stale generation is refused with the current one. */
+export const CloseAgentRequest = z.object({
+  idempotencyKey: IdempotencyKey,
+  generation: z.number().int().nonnegative(),
+});
+export type CloseAgentRequest = z.infer<typeof CloseAgentRequest>;
+
+/** What a command on an agent produced: the events it recorded, none if there was nothing to do. */
+export const AgentCommandResponse = z.object({
+  agentId: Id("agent"),
+  eventIds: z.array(z.number().int().positive()),
+});
+export type AgentCommandResponse = z.infer<typeof AgentCommandResponse>;
+
 /** Projections, consistent as of `eventId` in store `epoch`: resume the event stream there. */
 export const StateSnapshot = z.object({
   epoch: z.string(),
@@ -92,6 +110,8 @@ export const ErrorResponse = z.object({
     "unsupported",
     "launch_failed",
     "conflict",
+    "stale_generation",
+    "unavailable",
     "not_found",
     "origin_not_allowed",
     "host_not_allowed",

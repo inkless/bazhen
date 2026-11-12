@@ -19,6 +19,10 @@ describe("machine", () => {
     expect(() => door.next("open", "remove")).toThrow(InvalidTransition);
   });
 
+  it("says whether a state accepts an event, as the table does", () => {
+    expect([door.accepts("shut", "remove"), door.accepts("open", "remove")]).toEqual([true, false]);
+  });
+
   it("treats a state that accepts nothing as final", () => {
     expect([door.isFinal("gone"), door.isFinal("shut")]).toEqual([true, false]);
   });

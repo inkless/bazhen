@@ -1,5 +1,5 @@
 import type { AgentLaunchRequest } from "./agent.ts";
-import type { EnvironmentKind, ExternalRef, HarnessId } from "@bazhen/protocol";
+import type { EnvironmentKind, ExitStatus, ExternalRef, HarnessId } from "@bazhen/protocol";
 import type { AgentSessionId, EnvironmentId, TerminalId } from "./ids.ts";
 import type { RuntimeRef, Size } from "./runtime.ts";
 
@@ -66,4 +66,8 @@ export interface EnvironmentAdapter {
   health(): Promise<EnvironmentHealth>;
   inventory(): Promise<AgentInventoryEntry[]>;
   launch(launch: AgentLaunch): Promise<AgentRefs>;
+  /** Ends what runs the agent. What the environment positively no longer has counts as ended. */
+  close(refs: AgentRefs): Promise<void>;
+  /** Reports every terminal whose process has ended, as the runtime does (RuntimeAdapter.onExit). */
+  onExit(cb: (ref: RuntimeRef, status: ExitStatus) => void): () => void;
 }

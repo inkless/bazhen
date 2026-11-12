@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { newId, UnsupportedHarness } from "@bazhen/core";
 import { FakeRuntime } from "@bazhen/core/testing";
 import { PROTOCOL_VERSION, type LaunchAgentRequest } from "@bazhen/protocol";
+import { EnvironmentUnavailable, StaleGeneration } from "../agents/lifecycle.ts";
 import { AttentionClosed } from "../mailbox/approvals.ts";
 import { createApp } from "./app.ts";
 
@@ -24,6 +25,10 @@ const app = createApp({
   answer: () => {
     throw new AttentionClosed("attn_x");
   },
+  close: async (agentId, req) => {
+    if (req.generation !== 2) throw new StaleGeneration(agentId, 2);
+    throw new EnvironmentUnavailable(agentId, new Error("tmux unreachable"));
+  },
   launch: async (req: LaunchAgentRequest) => {
     if (req.harness === "codex") throw new UnsupportedHarness("codex");
     return launched;
@@ -38,6 +43,12 @@ const post = (body: unknown, headers: Record<string, string> = {}) =>
     body: JSON.stringify(body),
   });
 const launch = { idempotencyKey: "k-1", harness: "claude-code", cwd: "/work" };
+const close = (generation: number) =>
+  app.request("/v1/agents/agent_x/close", {
+    method: "POST",
+    headers: { host, "content-type": "application/json" },
+    body: JSON.stringify({ idempotencyKey: "c", generation }),
+  });
 
 describe("HTTP app", () => {
   it("reports runtime health and versions", async () => {
@@ -104,5 +115,11 @@ describe("HTTP app", () => {
       body: JSON.stringify({ idempotencyKey: "a", decision: "allow" }),
     });
     expect(res.status).toBe(409);
+  });
+
+  it("tells a stale generation from an environment that can't be reached, on close", async () => {
+    const [stale, unavailable] = await Promise.all([close(1), close(2)]);
+    expect([stale.status, (await stale.json()).error]).toEqual([409, "stale_generation"]);
+    expect([unavailable.status, (await unavailable.json()).error]).toEqual([503, "unavailable"]);
   });
 });

@@ -4,7 +4,15 @@
 
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -214,11 +222,26 @@ export class Daemon {
 
   /** The agent's tmux session, found by the tag Bazhen wrote on it. */
   private session(agentId: string): string | undefined {
-    const panes = this.tmux("list-panes", "-a", "-F", "#{@bazhen_agent_id} #{session_name}");
+    return this.paneFact(agentId, "session_name");
+  }
+
+  /** A tmux format value of the agent's pane, found by the tag Bazhen wrote on it. */
+  private paneFact(agentId: string, format: string): string | undefined {
+    const panes = this.tmux("list-panes", "-a", "-F", `#{@bazhen_agent_id} #{${format}}`);
     return panes
       .split("\n")
       .find((l) => l.startsWith(`${agentId} `))
       ?.split(" ")[1];
+  }
+
+  /** Whether the agent still has a tmux session. */
+  hasTerminal(agentId: string): boolean {
+    return this.session(agentId) !== undefined;
+  }
+
+  /** The process tmux runs for the agent, as the agent's own tools would find it. */
+  panePid(agentId: string): number {
+    return Number(this.paneFact(agentId, "pane_pid"));
   }
 
   private requireSession(agentId: string): string {
@@ -263,6 +286,17 @@ export class Daemon {
    */
   runInTerminal(agentId: string, argv: readonly string[]): void {
     this.tmux("respawn-pane", "-k", "-t", `${this.requireSession(agentId)}:0`, ...argv);
+  }
+
+  /**
+   * Makes the daemon's tmux server unreachable, as a socket it may not connect to would, until the
+   * returned function puts it back. The server and its agents keep running.
+   */
+  blockTmux(): () => void {
+    const socket = this.tmux("display-message", "-p", "#{socket_path}").trim();
+    const mode = statSync(socket).mode;
+    chmodSync(socket, 0);
+    return () => chmodSync(socket, mode);
   }
 
   /** Ends the agent's terminal, as if its tmux session had been killed by hand. */

@@ -19,6 +19,8 @@ export class InvalidTransition extends Error {
 export interface Machine<S extends string, E extends string> {
   /** The state `event` leads to; throws InvalidTransition when `from` does not accept it. */
   next(from: S, event: E): S;
+  /** Whether `from` accepts `event`, for a caller deciding before it records anything. */
+  accepts(from: S, event: E): boolean;
   /** A state that accepts no event is final. */
   isFinal(state: S): boolean;
 }
@@ -33,6 +35,7 @@ export function machine<S extends string, E extends string>(
       if (to === undefined) throw new InvalidTransition(name, from, event);
       return to;
     },
+    accepts: (from, event) => table[from][event] !== undefined,
     isFinal: (state) => Object.keys(table[state]).length === 0,
   };
 }

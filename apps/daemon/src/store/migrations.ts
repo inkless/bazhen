@@ -155,6 +155,12 @@ export const MIGRATIONS: readonly Migration[] = [
       INSERT INTO event_log (epoch, pruned_through) VALUES (lower(hex(randomblob(16))), 0);
     `,
   },
+  {
+    version: 7,
+    sql: `
+      ALTER TABLE terminals ADD COLUMN exit TEXT;
+    `,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

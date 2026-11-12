@@ -10,6 +10,8 @@
         "unsupported",
         "launch_failed",
         "conflict",
+        "stale_generation",
+        "unavailable",
         "not_found",
         "origin_not_allowed",
         "host_not_allowed"
