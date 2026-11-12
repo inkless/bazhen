@@ -74,6 +74,11 @@ function escapeTrailingSemicolon(arg: string): string {
   return arg.endsWith(";") ? `${arg.slice(0, -1)}\\;` : arg;
 }
 
+function ptyCountOwn(): number {
+  const out = execFileSync("sh", ["-c", `lsof -p ${process.pid} 2>/dev/null | grep -c /dev/ptmx || true`]);
+  return Number(out.toString().trim());
+}
+
 function ptyCountMachine(): number {
   const out = execFileSync("sh", ["-c", "lsof 2>/dev/null | grep -c /dev/ptmx || true"]);
   return Number(out.toString().trim());
@@ -437,7 +442,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     return json(res, 200, { delayMs });
   }
   if (parts[1] === "stats") {
-    return json(res, 200, { ptys: ptyCountMachine(), socket: SOCKET, work, terminals: [...terms.keys()] });
+    return json(res, 200, { ptys: ptyCountMachine(), ownPtys: ptyCountOwn(), socket: SOCKET, work, terminals: [...terms.keys()] });
   }
   json(res, 404, { error: "not found" });
 }

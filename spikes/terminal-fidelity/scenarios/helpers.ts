@@ -29,6 +29,8 @@ export const info = (name: string) => api("GET", `/api/terminals/${name}/info`);
 export const capture = async (name: string, q = "") =>
   (await api("GET", `/api/terminals/${name}/capture${q ? `?${q}` : ""}`)).text as string;
 export const ptys = async () => (await api("GET", "/api/stats")).ptys as number;
+/** PTY masters held by the harness server itself: one per live attach client. */
+export const ownPtys = async () => (await api("GET", "/api/stats")).ownPtys as number;
 
 export async function openView(page: Page, name: string, q = ""): Promise<void> {
   await page.goto(`/?name=${name}${q}`);
