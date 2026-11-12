@@ -143,6 +143,9 @@ export class TmuxRuntime implements RuntimeAdapter {
   private readonly unknownCause = new UnknownCause(UNKNOWN_EXIT_AFTER_MS);
 
   constructor(opts: TmuxRuntimeOptions) {
+    if (opts.socket === "" || opts.socket === "default") {
+      throw new RangeError(`refusing tmux socket "${opts.socket}": it is not a private server`);
+    }
     this.opts = opts;
     this.bin = opts.tmuxBin ?? "tmux";
     this.exits = new ExitWatch({

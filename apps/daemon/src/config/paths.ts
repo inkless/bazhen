@@ -69,7 +69,9 @@ export function resolvePaths(i: PathInputs): BazhenPaths {
     run,
     socket: join(run, SOCKET_NAME),
     bank: i.flags?.bank ?? i.env.BAZHEN_BANK ?? i.configBank ?? join(base.data, "bank"),
-    tmuxSocket: i.env.BAZHEN_TMUX_SOCKET ?? (root ? `bazhen-${shortHash(root)}` : "bazhen"),
+    // `||`, not `??`: an empty name would make `tmux -L ''`, which some tmux builds read as the
+    // default server.
+    tmuxSocket: i.env.BAZHEN_TMUX_SOCKET || (root ? `bazhen-${shortHash(root)}` : "bazhen"),
   };
 }
 
