@@ -128,12 +128,100 @@
         ],
         "additionalProperties": false
       }
+    },
+    "attention": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^attn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+          },
+          "agentId": {
+            "type": "string",
+            "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "open",
+              "closed"
+            ]
+          },
+          "closeReason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "answered",
+                  "answered_in_tui",
+                  "timed_out",
+                  "superseded",
+                  "agent_closed",
+                  "stale"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "agentId",
+          "state",
+          "closeReason",
+          "summary"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "messages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^msg_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+          },
+          "agentId": {
+            "type": "string",
+            "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "offered",
+              "emitted",
+              "seen",
+              "queued_in_codex",
+              "delivered",
+              "undeliverable"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "agentId",
+          "state"
+        ],
+        "additionalProperties": false
+      }
     }
   },
   "required": [
     "eventId",
     "environments",
-    "agents"
+    "agents",
+    "attention",
+    "messages"
   ],
   "additionalProperties": false
 }

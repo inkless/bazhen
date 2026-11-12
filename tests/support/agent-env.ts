@@ -44,5 +44,7 @@ export function claudeHome(dir: string, trusted: string): Record<string, string>
     ANTHROPIC_API_KEY: DUMMY_KEY,
     ANTHROPIC_BASE_URL: "http://127.0.0.1:9",
     DISABLE_AUTOUPDATER: "1",
+    // Ask before tools run, even where a machine's managed settings pick another mode.
+    BAZHEN_CLAUDE_PERMISSION_MODE: "default",
   };
 }

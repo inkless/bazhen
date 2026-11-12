@@ -1,7 +1,9 @@
 import type {
+  AgentInventoryEntry,
   AgentLaunch,
   AgentRefs,
   EnvironmentAdapter,
+  EnvironmentHealth,
   EnvironmentId,
   HarnessAdapter,
   RuntimeAdapter,
@@ -31,6 +33,18 @@ export class LocalEnvironment implements EnvironmentAdapter {
     this.id = opts.id;
     this.harnesses = opts.harnesses.map((h) => h.id);
     this.opts = opts;
+  }
+
+  /** A runtime that answers with no server running is a reachable, empty environment (§4.4). */
+  async health(): Promise<EnvironmentHealth> {
+    const { state, version } = await this.opts.runtime.health();
+    return { state: state === "unreachable" ? "unreachable" : "reachable", version };
+  }
+
+  async inventory(): Promise<AgentInventoryEntry[]> {
+    return (await this.opts.runtime.inventory()).flatMap((e) =>
+      e.tags.kind === "agent" ? [{ agentId: e.tags.agentId, ref: e.ref, dead: e.dead }] : [],
+    );
   }
 
   async launch({ agentId, terminalId, request, size }: AgentLaunch): Promise<AgentRefs> {

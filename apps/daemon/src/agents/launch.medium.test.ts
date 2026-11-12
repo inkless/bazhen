@@ -1,40 +1,20 @@
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import {
-  LaunchFailed,
-  newId,
-  UnsupportedHarness,
-  type AgentLaunch,
-  type EnvironmentAdapter,
-} from "@bazhen/core";
+import { LaunchFailed, UnsupportedHarness, type AgentLaunch } from "@bazhen/core";
 import { Store } from "../store/store.ts";
+import { fakeEnvironment, tempDb } from "../testing/fixtures.ts";
 import { IdempotencyConflict, launchAgent, localEnvironmentId } from "./launch.ts";
 
 function setup(fail = false) {
-  const store = Store.open(join(mkdtempSync(join(tmpdir(), "bz-launch-")), "bazhen.db"));
-  const id = newId("env");
-  store.append({
-    type: "environment.registered",
-    entityId: id,
-    actor: "system",
-    payload: { kind: "local" },
-  });
+  const store = Store.open(tempDb());
   const launches: AgentLaunch[] = [];
-  const environment: EnvironmentAdapter = {
-    id,
-    kind: "local",
-    harnesses: ["claude-code"],
-    launch: async (l) => {
-      launches.push(l);
-      if (fail) throw new Error("tmux refused");
-      return {
-        runtime: { terminalId: l.terminalId, runtime: "tmux", locator: { session: "bz-1" } },
-        externalRef: { environmentId: id, kind: "claude-session", id: "s-1" },
-      };
-    },
-  };
+  const environment = fakeEnvironment(store, async (l) => {
+    launches.push(l);
+    if (fail) throw new Error("tmux refused");
+    return {
+      runtime: { terminalId: l.terminalId, runtime: "tmux", locator: { session: "bz-1" } },
+      externalRef: { environmentId: environment.id, kind: "claude-session", id: "s-1" },
+    };
+  });
   const deps = { store, environment, size: { cols: 120, rows: 40 } };
   return { store, deps, launches };
 }
@@ -43,7 +23,7 @@ const request = { idempotencyKey: "k-1", harness: "claude-code" as const, cwd: "
 
 describe("localEnvironmentId", () => {
   it("registers the local environment once, and finds it again after a restart", () => {
-    const path = join(mkdtempSync(join(tmpdir(), "bz-env-")), "bazhen.db");
+    const path = tempDb();
     const first = Store.open(path);
     const id = localEnvironmentId(first);
     first.close();

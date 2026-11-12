@@ -1,15 +1,21 @@
 import { Hono, type Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import {
+  AnswerAttentionRequest,
   HealthResponse,
   LaunchAgentRequest,
   PROTOCOL_VERSION,
+  SendMessageRequest,
+  type AnswerAttentionResponse,
+  type SendMessageResponse,
   type ErrorResponse,
   type LaunchAgentResponse,
   type StateSnapshot,
 } from "@bazhen/protocol";
 import { LaunchFailed, UnsupportedHarness, type RuntimeAdapter } from "@bazhen/core";
 import { IdempotencyConflict } from "../agents/launch.ts";
+import { AttentionClosed } from "../mailbox/approvals.ts";
+import { UnknownAgent } from "../mailbox/mailbox.ts";
 import { refusal, type Allowlists } from "./guard.ts";
 
 export interface AppDeps {
@@ -19,6 +25,8 @@ export interface AppDeps {
   readonly allow: Allowlists;
   readonly state: () => StateSnapshot;
   readonly launch: (req: LaunchAgentRequest) => Promise<LaunchAgentResponse>;
+  readonly send: (agentId: string, req: SendMessageRequest) => SendMessageResponse;
+  readonly answer: (attentionId: string, req: AnswerAttentionRequest) => AnswerAttentionResponse;
 }
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -66,11 +74,25 @@ export function createApp(deps: AppDeps): Hono {
     return c.json(await deps.launch(body.data));
   });
 
+  app.post("/v1/agents/:id/messages", async (c) => {
+    const body = SendMessageRequest.safeParse(await c.req.json().catch(() => undefined));
+    if (!body.success) return fail(c, 400, "invalid_request", body.error.message);
+    return c.json(deps.send(c.req.param("id"), body.data));
+  });
+
+  app.post("/v1/attention/:id/answer", async (c) => {
+    const body = AnswerAttentionRequest.safeParse(await c.req.json().catch(() => undefined));
+    if (!body.success) return fail(c, 400, "invalid_request", body.error.message);
+    return c.json(deps.answer(c.req.param("id"), body.data));
+  });
+
   // Typed failures from the domain become protocol errors in one place; anything else is a bug.
   app.onError((err, c) => {
     if (err instanceof UnsupportedHarness) return fail(c, 422, "unsupported", err.message);
     if (err instanceof LaunchFailed) return fail(c, 502, "launch_failed", err.message);
     if (err instanceof IdempotencyConflict) return fail(c, 409, "conflict", err.message);
+    if (err instanceof AttentionClosed) return fail(c, 409, "conflict", err.message);
+    if (err instanceof UnknownAgent) return fail(c, 404, "not_found", err.message);
     throw err;
   });
 

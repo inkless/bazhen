@@ -4,17 +4,22 @@ import {
   UnsupportedHarness,
   type HarnessAdapter,
   type RuntimeAdapter,
+  type RuntimeHealth,
+  type RuntimeInventoryEntry,
   type TerminalSpec,
 } from "@bazhen/core";
 import { LocalEnvironment } from "./index.ts";
 
 /** An in-memory runtime that records what it was asked to create. */
-function fakeRuntime() {
+function fakeRuntime(
+  health: RuntimeHealth = { state: "healthy", version: null },
+  inventory: RuntimeInventoryEntry[] = [],
+) {
   const created: TerminalSpec[] = [];
   const runtime: RuntimeAdapter = {
     kind: "fake",
-    health: () => Promise.reject(new Error("not used")),
-    inventory: () => Promise.reject(new Error("not used")),
+    health: async () => health,
+    inventory: async () => inventory,
     create: async (spec) => {
       created.push(spec);
       return { terminalId: spec.terminalId, runtime: "fake", locator: { session: "s" } };
@@ -72,5 +77,25 @@ describe("local environment", () => {
     const { runtime, created } = fakeRuntime();
     await expect(environment(runtime).launch(launch("codex"))).rejects.toThrow(UnsupportedHarness);
     expect(created).toEqual([]);
+  });
+
+  it("is reachable and empty while no tmux server runs, and unreachable only when tmux is", async () => {
+    const empty = fakeRuntime({ state: "not-running", version: "tmux 3.6b" }).runtime;
+    const down = fakeRuntime({ state: "unreachable", version: null }).runtime;
+    expect([
+      (await environment(empty).health()).state,
+      (await environment(down).health()).state,
+    ]).toEqual(["reachable", "unreachable"]);
+  });
+
+  it("lists only agent terminals, by the agent their tags name", async () => {
+    const agentId = newId("agent");
+    const ref = { terminalId: newId("term"), runtime: "fake", locator: {} };
+    const shell = { terminalId: newId("term"), runtime: "fake", locator: {} };
+    const { runtime } = fakeRuntime({ state: "healthy", version: null }, [
+      { ref, tags: { kind: "agent", agentId }, dead: false, exitStatus: null },
+      { ref: shell, tags: { kind: "shell" }, dead: false, exitStatus: null },
+    ]);
+    expect(await environment(runtime).inventory()).toEqual([{ agentId, ref, dead: false }]);
   });
 });

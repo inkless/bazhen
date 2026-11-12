@@ -1,0 +1,22 @@
+{
+  "$id": "SendMessageRequest",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "body": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 20000
+    }
+  },
+  "required": [
+    "idempotencyKey",
+    "body"
+  ],
+  "additionalProperties": false
+}

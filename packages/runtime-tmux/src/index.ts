@@ -148,8 +148,7 @@ export class TmuxRuntime implements RuntimeAdapter {
       return { state: "healthy", version };
     } catch (err) {
       if (!(err instanceof TmuxError)) throw err;
-      const notRunning = /no server running|error connecting/.test(err.stderr);
-      return { state: notRunning ? "not-running" : "unreachable", version };
+      return { state: noServer(err) ? "not-running" : "unreachable", version };
     }
   }
 
@@ -195,7 +194,14 @@ export class TmuxRuntime implements RuntimeAdapter {
   }
 
   async inventory(): Promise<RuntimeInventoryEntry[]> {
-    const out = await this.tmux("list-panes", "-a", "-F", PANE.format);
+    let out: string;
+    try {
+      out = await this.tmux("list-panes", "-a", "-F", PANE.format);
+    } catch (err) {
+      // No server means no terminals; any other failure is not an empty answer.
+      if (err instanceof TmuxError && noServer(err)) return [];
+      throw err;
+    }
     return out.split("\n").flatMap((line) => {
       const row = PANE.parse(line);
       const tagged = decodeTags(row);
@@ -298,6 +304,9 @@ function decodeTags(row: Row): { terminalId: TerminalId; tags: TerminalTags } | 
     tags: isId("agent", linked) ? { kind: "shell", linkedAgentId: linked } : { kind: "shell" },
   };
 }
+
+/** tmux's answer when its server isn't running, or its socket is gone. */
+const noServer = (err: TmuxError) => /no server running|error connecting/.test(err.stderr);
 
 const windowOf = (session: string) => `${session}:0`;
 

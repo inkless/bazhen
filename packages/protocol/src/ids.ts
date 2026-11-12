@@ -10,3 +10,9 @@ export type AttachmentMode = z.infer<typeof AttachmentMode>;
 
 export const EnvironmentKind = z.enum(["local", "opencode-server"]);
 export type EnvironmentKind = z.infer<typeof EnvironmentKind>;
+
+/**
+ * Every mutation carries a key chosen by the client; repeating it returns the first answer
+ * instead of acting twice (foundation-design §5.1).
+ */
+export const IdempotencyKey = z.string().min(1).max(200);
