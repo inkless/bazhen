@@ -1,0 +1,12 @@
+{
+  "$id": "EnvironmentHealthState",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "string",
+  "enum": [
+    "unknown",
+    "reachable",
+    "unreachable",
+    "auth_failed",
+    "version_unsupported"
+  ]
+}

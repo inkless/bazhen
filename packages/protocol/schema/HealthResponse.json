@@ -1,0 +1,60 @@
+{
+  "$id": "HealthResponse",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "status": {
+      "type": "string",
+      "const": "ok"
+    },
+    "appVersion": {
+      "type": "string"
+    },
+    "protocolVersion": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+$"
+    },
+    "schemaVersion": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "runtime": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "tmux"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "healthy",
+            "unreachable",
+            "not-running"
+          ]
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "state",
+        "version"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "status",
+    "appVersion",
+    "protocolVersion",
+    "schemaVersion",
+    "runtime"
+  ],
+  "additionalProperties": false
+}

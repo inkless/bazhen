@@ -28,7 +28,7 @@ The commit body says why the change was made, and records any `Control:` trailer
 - **pre-commit** runs oxfmt and oxlint (with the `pnpm lint` flags) on the staged files, through
   lint-staged.
 - **CI** runs `pnpm check`, the full gate: the standards check (sibling tests, agent context,
-  skills), lint (including the import matrix, the test rules and `any`), the format check, types
+  skills), the protocol schema drift check, lint (including the import matrix, the test rules and `any`), the format check, types
   for sources, tests and scripts, and the small, medium and integration tests. It runs on macOS and Linux, on Node 24 and 26, plus `pnpm test:e2e`. On a pull
   request it also runs `pnpm test:falsify` against the target branch; run it yourself before
   pushing.
