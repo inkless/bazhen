@@ -14,7 +14,7 @@ export async function launchAgent(harness: HarnessId, cwd: string): Promise<Laun
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ idempotencyKey: crypto.randomUUID(), harness, cwd }),
   });
-  const body: unknown = await res.json();
-  if (!res.ok) throw new Error(`launch refused: ${JSON.stringify(body)}`);
-  return LaunchAgentResponse.parse(body);
+  const text = await res.text();
+  if (!res.ok) throw new Error(`launch refused (${res.status}): ${text}`);
+  return LaunchAgentResponse.parse(JSON.parse(text));
 }

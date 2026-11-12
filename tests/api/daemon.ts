@@ -9,13 +9,10 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocket } from "ws";
 import { PROTOCOL_VERSION, StreamServerFrame } from "@bazhen/protocol";
-import { claudeHome } from "../support/claude-home.ts";
+import { claudeHome, loginEnv } from "../support/agent-env.ts";
 
 const repo = fileURLToPath(new URL("../..", import.meta.url));
 const bin = fileURLToPath(new URL("node_modules/.bin", import.meta.url));
-
-/** Only what a login session provides; never the developer's real model credentials. */
-const BASE_ENV = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "TMPDIR", "TMUX_TMPDIR"];
 
 async function freePort(): Promise<number> {
   const server = createServer();
@@ -51,11 +48,8 @@ export class Daemon {
     this.tmuxSocket = `bz-test-${process.env["BZ_TEST_RUN"] ?? process.pid}-api-${++instances}`;
     mkdirSync(this.work, { recursive: true });
     const claude = claudeHome(join(home, "claude"), this.work);
-    const base = Object.fromEntries(
-      BASE_ENV.flatMap((k) => (process.env[k] === undefined ? [] : [[k, process.env[k]]])),
-    );
     this.env = {
-      ...base,
+      ...loginEnv(),
       PATH: `${bin}:${process.env["PATH"] ?? "/usr/bin:/bin"}`,
       BAZHEN_HOME: home,
       BAZHEN_TMUX_SOCKET: this.tmuxSocket,

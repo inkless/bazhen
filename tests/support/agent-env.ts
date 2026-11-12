@@ -1,12 +1,25 @@
-// A throwaway Claude Code configuration for tests that run the real TUI: onboarding done, the
-// work directory trusted and a dummy key approved, so it starts without a prompt; the default
-// permission mode whatever a machine's managed settings pick; and a model endpoint where nothing
-// listens, so no agent ever reaches a model. Never a different HOME (it reaches the keychain).
+// The environment for tests that run a real daemon and real agent CLIs. It starts from what a
+// login session provides, never the developer's whole environment, so no real model credential
+// or provider switch (CLAUDE_CODE_USE_BEDROCK, …) reaches an agent. Claude Code gets a throwaway
+// configuration: onboarding done, the work directory trusted, a dummy key approved, the default
+// permission mode, and a model endpoint where nothing listens. Never a different HOME (it
+// reaches the keychain).
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const DUMMY_KEY = "sk-ant-api-tests-00000000000000000000000000";
+const LOGIN_ENV = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "TMPDIR", "TMUX_TMPDIR"];
+
+/** Only the variables a login session provides, from this process's environment. */
+export function loginEnv(): Record<string, string> {
+  return Object.fromEntries(
+    LOGIN_ENV.flatMap((k) => {
+      const v = process.env[k];
+      return v === undefined ? [] : [[k, v]];
+    }),
+  );
+}
 
 /** Writes the configuration under `dir` and returns the environment that points Claude Code at it. */
 export function claudeHome(dir: string, trusted: string): Record<string, string> {

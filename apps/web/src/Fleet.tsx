@@ -16,7 +16,10 @@ export function Fleet() {
   useEffect(() => {
     const refresh = () =>
       fetchState().then(
-        (s) => setAgents(s.agents),
+        (s) => {
+          setAgents(s.agents);
+          setError(null);
+        },
         (e: unknown) => setError(String(e)),
       );
     void refresh();
