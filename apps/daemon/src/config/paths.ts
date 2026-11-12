@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { homedir, tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 
@@ -7,7 +8,11 @@ export interface BazhenPaths {
   readonly bank: string;
   readonly state: string;
   readonly cache: string;
+  /** Holds the daemon's Unix socket and instance lock; mode 0700. */
   readonly run: string;
+  readonly socket: string;
+  /** The private tmux server's name, for `tmux -L`. */
+  readonly tmuxSocket: string;
 }
 
 export interface PathInputs {
@@ -20,9 +25,21 @@ export interface PathInputs {
   readonly configBank?: string;
 }
 
-/** Precedence: CLI flag, then environment, then config file, then the platform default. */
+/** `sun_path` holds 104 bytes, including the terminating NUL. */
+const MAX_SOCKET_PATH = 103;
+const SOCKET_NAME = "bazhen.sock";
+
+const shortHash = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 8);
+const absolute = (value: string | undefined) => (value?.startsWith("/") ? value : undefined);
+
+/**
+ * One XDG layout on macOS and Linux (foundation-design §6.1). Each location resolves from a CLI
+ * flag, then the environment, then the config file, then the default.
+ */
 export function resolvePaths(i: PathInputs): BazhenPaths {
   const root = i.flags?.home ?? i.env.BAZHEN_HOME;
+  const xdg = (name: string, fallback: string) =>
+    join(absolute(i.env[name]) ?? join(i.home, fallback), "bazhen");
   const base = root
     ? {
         config: join(root, "config"),
@@ -31,38 +48,30 @@ export function resolvePaths(i: PathInputs): BazhenPaths {
         cache: join(root, "cache"),
         run: join(root, "run"),
       }
-    : i.platform === "darwin"
-      ? macDefaults(i)
-      : xdgDefaults(i);
-  const bank = i.flags?.bank ?? i.env.BAZHEN_BANK ?? i.configBank ?? join(base.data, "bank");
-  return { ...base, bank };
+    : {
+        config: xdg("XDG_CONFIG_HOME", ".config"),
+        data: xdg("XDG_DATA_HOME", ".local/share"),
+        state: xdg("XDG_STATE_HOME", ".local/state"),
+        cache: xdg("XDG_CACHE_HOME", ".cache"),
+        run: defaultRun(i),
+      };
+  const run =
+    Buffer.byteLength(join(base.run, SOCKET_NAME)) > MAX_SOCKET_PATH
+      ? `/tmp/bazhen-${i.uid}-${shortHash(base.run)}`
+      : base.run;
+  return {
+    ...base,
+    run,
+    socket: join(run, SOCKET_NAME),
+    bank: i.flags?.bank ?? i.env.BAZHEN_BANK ?? i.configBank ?? join(base.data, "bank"),
+    tmuxSocket: i.env.BAZHEN_TMUX_SOCKET ?? (root ? `bazhen-${shortHash(root)}` : "bazhen"),
+  };
 }
 
-function macDefaults(i: PathInputs) {
-  const support = join(i.home, "Library", "Application Support", "Bazhen");
-  return {
-    config: support,
-    data: support,
-    state: join(i.home, "Library", "Logs", "Bazhen"),
-    cache: join(i.home, "Library", "Caches", "Bazhen"),
-    run: join(i.tmp, `bazhen-${i.uid}`),
-  };
-}
-
-function xdgDefaults(i: PathInputs) {
-  const xdg = (name: string, fallback: string) => {
-    const value = i.env[name];
-    return value && value.startsWith("/") ? value : join(i.home, fallback);
-  };
-  const runtime = i.env.XDG_RUNTIME_DIR;
-  return {
-    config: join(xdg("XDG_CONFIG_HOME", ".config"), "bazhen"),
-    data: join(xdg("XDG_DATA_HOME", ".local/share"), "bazhen"),
-    state: join(xdg("XDG_STATE_HOME", ".local/state"), "bazhen"),
-    cache: join(xdg("XDG_CACHE_HOME", ".cache"), "bazhen"),
-    run:
-      runtime && runtime.startsWith("/") ? join(runtime, "bazhen") : join(i.tmp, `bazhen-${i.uid}`),
-  };
+function defaultRun(i: PathInputs): string {
+  if (i.platform === "darwin") return join(i.tmp, "bazhen");
+  const runtime = absolute(i.env.XDG_RUNTIME_DIR);
+  return runtime ? join(runtime, "bazhen") : `/tmp/bazhen-${i.uid}`;
 }
 
 export function currentPaths(flags?: PathInputs["flags"]): BazhenPaths {

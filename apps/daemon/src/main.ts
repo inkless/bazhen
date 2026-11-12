@@ -1,8 +1,10 @@
 import { mkdirSync } from "node:fs";
+import { userInfo } from "node:os";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
 import { currentPaths } from "./config/paths.ts";
+import { ensurePrivateDir } from "./config/private-dir.ts";
 import { createApp } from "./http/app.ts";
 import { nodePtySpawner } from "./pty/node-pty.ts";
 import { Store } from "./store/store.ts";
@@ -14,11 +16,11 @@ const port = Number(process.env.BAZHEN_PORT ?? 7900);
 const paths = currentPaths();
 for (const dir of [paths.config, paths.data, paths.bank, paths.state, paths.cache])
   mkdirSync(dir, { recursive: true });
-mkdirSync(paths.run, { recursive: true, mode: 0o700 });
+ensurePrivateDir(paths.run, userInfo().uid);
 
 const store = Store.open(join(paths.data, "bazhen.db"));
 const runtime = new TmuxRuntime({
-  socket: process.env.BAZHEN_TMUX_SOCKET ?? "bazhen",
+  socket: paths.tmuxSocket,
   pty: nodePtySpawner,
   configFile: join(paths.run, "tmux.conf"),
 });
