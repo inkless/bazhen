@@ -1,6 +1,5 @@
 import { execFile } from "node:child_process";
 import { writeFileSync } from "node:fs";
-import { constants } from "node:os";
 import { promisify } from "node:util";
 import type {
   Attached,
@@ -17,11 +16,13 @@ import type {
 } from "@bazhen/core";
 import type { ExitStatus, Signal } from "@bazhen/protocol";
 import { isId, ProcessState, StaleIncarnation } from "@bazhen/core";
+import { exitStatus } from "./exit-status.ts";
 import { ExitWatch, type DeadTerminal } from "./exit-watch.ts";
 
 const run = promisify(execFile);
 const TMUX_TIMEOUT_MS = 5_000;
 const EXIT_POLL_MS = 1_000;
+const UNKNOWN_EXIT_AFTER_MS = 2_000;
 
 /** Every pane fact Bazhen reads from tmux, by name: its own @bazhen_* options, then tmux's. */
 const COLUMN = {
@@ -35,6 +36,7 @@ const COLUMN = {
   sessionId: "session_id",
   paneId: "pane_id",
   panePid: "pane_pid",
+  incarnation: "@bazhen_incarnation",
   dead: "pane_dead",
   status: "pane_dead_status",
   deadSignal: "pane_dead_signal",
@@ -60,6 +62,7 @@ const LOCATION_KEYS = [
   "sessionId",
   "paneId",
   "panePid",
+  "incarnation",
 ] as const;
 const LOCATION = columns(LOCATION_KEYS);
 const PANE = columns([
@@ -128,6 +131,8 @@ export interface TmuxRuntimeOptions {
   readonly tmuxBin?: string;
   /** How often dead terminals are looked for while anyone listens. */
   readonly exitPollMs?: number;
+  /** Where a failure inside exit polling goes, since no caller is waiting on it. */
+  readonly onError?: (err: unknown) => void;
 }
 
 export class TmuxRuntime implements RuntimeAdapter {
@@ -139,7 +144,12 @@ export class TmuxRuntime implements RuntimeAdapter {
   constructor(opts: TmuxRuntimeOptions) {
     this.opts = opts;
     this.bin = opts.tmuxBin ?? "tmux";
-    this.exits = new ExitWatch(() => this.deadTerminals(), opts.exitPollMs ?? EXIT_POLL_MS);
+    this.exits = new ExitWatch({
+      read: () => this.deadTerminals(),
+      intervalMs: opts.exitPollMs ?? EXIT_POLL_MS,
+      unknownAfterMs: UNKNOWN_EXIT_AFTER_MS,
+      onError: opts.onError ?? ((err) => console.warn("tmux exit polling failed:", err)),
+    });
     writeFileSync(opts.configFile, TMUX_CONFIG, { mode: 0o600 });
   }
 
@@ -194,6 +204,7 @@ export class TmuxRuntime implements RuntimeAdapter {
     const location = await this.tmux(
       ...sequence([
         ...tagCommands(session, spec.terminalId, spec.tags),
+        incarnationCommand(windowOf(session), 1),
         ["set-option", "-w", "-t", windowOf(session), "window-size", "manual"],
         resizeArgs(session, spec.size),
         ["display-message", "-p", "-t", windowOf(session), LOCATION.format],
@@ -224,7 +235,7 @@ export class TmuxRuntime implements RuntimeAdapter {
         {
           ref: { terminalId: tagged.terminalId, runtime: this.kind, locator: this.locator(row) },
           tags: tagged.tags,
-          exit: dead ? exitOf(row) : null,
+          exit: dead ? exitStatus(row("status"), row("deadSignal")) : null,
         },
       ];
     });
@@ -302,10 +313,14 @@ export class TmuxRuntime implements RuntimeAdapter {
   async respawn(ref: RuntimeRef, spec: TerminalSpec): Promise<RuntimeRef> {
     const pane = await this.paneOf(ref);
     if (pane.exit === null) throw new ProcessState(ref.terminalId, "exited");
+    assertSameIncarnation(ref, pane.ref);
     const target = located(pane.ref, "paneId");
+    // The new number goes on after the new process has started, so a check that lands in between
+    // sees a live pane, never a dead one under the new number.
     const location = await this.tmux(
       ...sequence([
         ["respawn-pane", "-t", target, ...processArgs(spec)],
+        incarnationCommand(target, Number(pane.ref.locator.incarnation) + 1),
         ["display-message", "-p", "-t", target, LOCATION.format],
       ]),
     );
@@ -315,8 +330,8 @@ export class TmuxRuntime implements RuntimeAdapter {
   async signal(ref: RuntimeRef, signal: Signal): Promise<void> {
     const pane = await this.paneOf(ref);
     if (pane.exit !== null) throw new ProcessState(ref.terminalId, "running");
+    assertSameIncarnation(ref, pane.ref);
     const pid = pane.ref.locator.panePid;
-    if (pid !== ref.locator.panePid) throw new StaleIncarnation(ref.terminalId, "process-replaced");
     // The pane's process leads its own group, so this reaches the tools it started as well,
     // as Ctrl-C or a hangup in a terminal would.
     try {
@@ -359,7 +374,7 @@ export class TmuxRuntime implements RuntimeAdapter {
     return panes;
   }
 
-  private async server(): Promise<Record<string, string>> {
+  private async server(): Promise<{ serverPid: string; serverStart: string }> {
     const row = SERVER.parse(await this.tmux("display-message", "-p", SERVER.format));
     return { serverPid: row("serverPid"), serverStart: row("serverStart") };
   }
@@ -393,7 +408,7 @@ function located(ref: RuntimeRef, key: "sessionId" | "paneId"): string {
 const processArgs = (spec: TerminalSpec) => [
   "-c",
   spec.cwd,
-  ...Object.entries(spec.env).flatMap(([k, v]) => ["-e", `${k}=${v}`]),
+  ...Object.entries(spec.env).flatMap(([k, v]) => ["-e", escapeTrailingSemicolon(`${k}=${v}`)]),
   "--",
   "env",
   "-u",
@@ -404,17 +419,25 @@ const processArgs = (spec: TerminalSpec) => [
   ...spec.argv.map(escapeTrailingSemicolon),
 ];
 
-const SIGNAL_NAMES = new Map(Object.entries(constants.signals).map(([name, n]) => [n, name]));
-
-/** tmux leaves the status empty for a signalled process, and names the signal by platform. */
-function exitOf(row: Row): ExitStatus {
-  const status = row("status");
-  const raw = row("deadSignal");
-  const signal = /^\d+$/.test(raw)
-    ? (SIGNAL_NAMES.get(Number(raw)) ?? raw)
-    : `SIG${raw.toUpperCase().replace(/^SIG/, "")}`;
-  return { code: status === "" ? null : Number(status), signal: raw === "" ? null : signal };
+/**
+ * The incarnation in `ref` is the one tmux holds now. Bazhen numbers each incarnation itself,
+ * because tmux 3.8 forgets a dead pane's pid. A ref stored before incarnations were numbered has
+ * none, and is held to its server and pane alone.
+ */
+function assertSameIncarnation(ref: RuntimeRef, now: RuntimeRef): void {
+  const recorded = ref.locator.incarnation;
+  if (recorded !== undefined && recorded !== now.locator.incarnation)
+    throw new StaleIncarnation(ref.terminalId, "process-replaced");
 }
+
+const incarnationCommand = (target: string, n: number) => [
+  "set-option",
+  "-p",
+  "-t",
+  target,
+  COLUMN.incarnation,
+  String(n),
+];
 
 function tagCommands(session: string, terminalId: TerminalId, tags: TerminalTags): string[][] {
   const options: [string, string][] = [
