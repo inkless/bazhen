@@ -26,9 +26,13 @@ async function freePort(): Promise<number> {
 let instances = 0;
 
 /** Waits for a condition outside a test, where `expect.poll` can't run. */
-export async function waitUntil(condition: () => boolean, what: string, timeoutMs = 20_000) {
+export async function waitUntil(
+  condition: () => boolean | Promise<boolean>,
+  what: string,
+  timeoutMs = 20_000,
+) {
   for (const start = Date.now(); Date.now() - start < timeoutMs;) {
-    if (condition()) return;
+    if (await condition()) return;
     await new Promise((r) => setTimeout(r, 100));
   }
   throw new Error(`timed out waiting for ${what}`);
@@ -166,18 +170,35 @@ export class Daemon {
     this.tmux("respawn-pane", "-k", "-t", `${session}:0`, ...argv);
   }
 
-  private async exit(): Promise<void> {
+  /** Ends the agent's terminal, as if its tmux session had been killed by hand. */
+  endTerminal(agentId: string): void {
+    const session = this.session(agentId);
+    if (session === undefined) throw new Error(`no terminal for ${agentId}`);
+    this.tmux("kill-session", "-t", session);
+  }
+
+  /** Kills the daemon outright, as a crash would; its agents keep running in tmux. */
+  async kill(): Promise<void> {
+    await this.exit("SIGKILL");
+  }
+
+  /** Starts the daemon again on the same home, as `bazhen start` would after a crash. */
+  async restart(): Promise<void> {
+    await this.spawn();
+  }
+
+  private async exit(signal: NodeJS.Signals): Promise<void> {
     const child = this.process;
     if (child === undefined || child.exitCode !== null || child.signalCode !== null) return;
     await new Promise((resolve) => {
       child.once("exit", resolve);
-      child.kill("SIGTERM");
+      child.kill(signal);
     });
   }
 
   /** Stops the daemon, its tmux server and every file under its home. */
   async stop(): Promise<void> {
-    await this.exit();
+    await this.exit("SIGTERM");
     try {
       this.tmux("kill-server");
     } catch {

@@ -6,6 +6,7 @@ import {
   type AttentionId,
   type EnvironmentId,
   type IdPrefix,
+  type MessageId,
   type RuntimeRef,
 } from "@bazhen/core";
 import { z } from "zod";
@@ -217,12 +218,13 @@ export class Store {
     );
   }
 
-  /** An agent's messages in the given states, oldest first. */
+  /** An agent's messages in the given states, oldest first, with when each was first offered. */
   mail(agentId: string, states: readonly MailboxState[]) {
     const marks = states.map(() => "?").join(", ");
     const rows = this.prepare(
-      `SELECT id, body, prompt_id FROM mailbox
-       WHERE agent_session_id = ? AND state IN (${marks}) ORDER BY created_event_id`,
+      `SELECT m.id, m.body, m.prompt_id, e.ts AS first_offered FROM mailbox m
+       LEFT JOIN events e ON e.id = m.first_offered_event_id
+       WHERE m.agent_session_id = ? AND m.state IN (${marks}) ORDER BY m.created_event_id`,
     ).all(agentId, ...states);
     return rows.flatMap((r) =>
       typeof r.id === "string" && isId("msg", r.id)
@@ -231,10 +233,24 @@ export class Store {
               id: r.id,
               body: String(r.body),
               promptId: typeof r.prompt_id === "string" ? r.prompt_id : null,
+              firstOffered: typeof r.first_offered === "string" ? r.first_offered : null,
             },
           ]
         : [],
     );
+  }
+
+  /** Messages a hook held when the daemon stopped; their hooks are gone with its socket. */
+  inFlight(): { id: MessageId; agentId: string }[] {
+    const sql = `SELECT id, agent_session_id FROM mailbox
+                 WHERE state IN ('offered', 'emitted', 'seen') ORDER BY created_event_id`;
+    return this.prepare(sql)
+      .all()
+      .flatMap((r) =>
+        typeof r.id === "string" && isId("msg", r.id)
+          ? [{ id: r.id, agentId: String(r.agent_session_id) }]
+          : [],
+      );
   }
 
   /** Open attention items, for one agent or all, with the tool call each is about. */
@@ -260,6 +276,14 @@ export class Store {
   agent(agentId: string): { harness: string } | undefined {
     const row = this.prepare("SELECT harness FROM agent_sessions WHERE id = ?").get(agentId);
     return row === undefined ? undefined : { harness: String(row.harness) };
+  }
+
+  /** The agents an environment should still be running. */
+  runningAgents(environmentId: string): string[] {
+    const sql = "SELECT id FROM agent_sessions WHERE environment_id = ? AND state = 'running'";
+    return this.prepare(sql)
+      .all(environmentId)
+      .map((r) => String(r.id));
   }
 
   /**

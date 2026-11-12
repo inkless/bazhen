@@ -117,6 +117,11 @@ describe("Claude Code hooks", () => {
   });
 
   it("labels each woken message with its id, so its prompt confirms it was seen", () => {
-    expect(wakeText([{ id: "msg_1", body: "hi" }])).toContain("(msg_1):\nhi");
+    expect(wakeText([{ id: "msg_1", body: "hi", firstOffered: null }])).toContain("(msg_1):\nhi");
+  });
+
+  it("labels a message offered before as a possible re-delivery", () => {
+    const again = wakeText([{ id: "msg_1", body: "hi", firstOffered: "2026-11-12T08:00:00Z" }]);
+    expect(again).toContain("possible re-delivery of msg_1, first offered 2026-11-12T08:00:00Z");
   });
 });

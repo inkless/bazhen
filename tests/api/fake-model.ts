@@ -1,6 +1,7 @@
 // A stand-in for the Anthropic Messages API, so the real Claude Code TUI can take turns in tests
 // without an account. Each reply is picked by a marker in the latest user text:
 //   [[fake:bash:<command>]]  a Bash tool call running <command>, then "done" once it has run
+//   [[fake:slow:<ms>]]       a short text reply, sent <ms> milliseconds late
 //   anything else            a short text reply
 // Every request is kept, so a test can check what the model was sent.
 
@@ -108,6 +109,39 @@ async function body(r: IncomingMessage): Promise<string> {
   return text;
 }
 
+/** Answers a request with `answer`, streamed if it asked for a stream. */
+function respond(res: ServerResponse, req: Request, answer: ReturnType<typeof reply>): void {
+  if (req.stream) return stream(res, req, answer);
+  const content = answer.tool
+    ? [
+        {
+          type: "tool_use",
+          id: nextId("toolu"),
+          name: "Bash",
+          input: { command: answer.tool.command },
+        },
+      ]
+    : [{ type: "text", text: answer.text }];
+  res.writeHead(200, { "content-type": "application/json" }).end(
+    JSON.stringify({
+      id: nextId("msg"),
+      type: "message",
+      role: "assistant",
+      model: req.model ?? "fake",
+      content,
+      stop_reason: answer.tool ? "tool_use" : "end_turn",
+      stop_sequence: null,
+      usage: { input_tokens: 10, output_tokens: 5 },
+    }),
+  );
+}
+
+/** How late to answer: a fresh `slow` marker in the latest user text delays the reply. */
+function delayOf(req: Request): number {
+  const last = (req.messages ?? []).filter((m) => m.role === "user").at(-1);
+  return Number(/\[\[fake:slow:(\d+)\]\]/.exec(textOf(last?.content))?.[1] ?? 0);
+}
+
 export async function startFakeModel(): Promise<FakeModel> {
   const requests: string[] = [];
   const server = createServer((r, res) => {
@@ -126,29 +160,7 @@ export async function startFakeModel(): Promise<FakeModel> {
       requests.push(text);
       const req: Request = text === "" ? {} : JSON.parse(text);
       const answer = reply(req);
-      if (req.stream) return stream(res, req, answer);
-      const content = answer.tool
-        ? [
-            {
-              type: "tool_use",
-              id: nextId("toolu"),
-              name: "Bash",
-              input: { command: answer.tool.command },
-            },
-          ]
-        : [{ type: "text", text: answer.text }];
-      res.writeHead(200, { "content-type": "application/json" }).end(
-        JSON.stringify({
-          id: nextId("msg"),
-          type: "message",
-          role: "assistant",
-          model: req.model ?? "fake",
-          content,
-          stop_reason: answer.tool ? "tool_use" : "end_turn",
-          stop_sequence: null,
-          usage: { input_tokens: 10, output_tokens: 5 },
-        }),
-      );
+      setTimeout(() => respond(res, req, answer), delayOf(req));
     });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

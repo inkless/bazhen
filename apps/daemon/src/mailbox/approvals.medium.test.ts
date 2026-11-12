@@ -110,4 +110,11 @@ describe("approvals", () => {
       approvals.answer(String(second?.id), { idempotencyKey: "k", decision: "allow" }),
     ).toThrow(IdempotencyConflict);
   });
+
+  it("closes items left open by a daemon that stopped as stale", async () => {
+    const { store, agentId } = await withAgent();
+    void ask(new Approvals(store), agentId, "t-1");
+    new Approvals(store).closeAbandoned();
+    expect(items(store)[0]?.closeReason).toBe("stale");
+  });
 });

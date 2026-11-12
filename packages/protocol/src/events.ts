@@ -37,6 +37,8 @@ export const EVENTS = {
     entity: "agent",
     payload: z.object({ reason: z.enum(["launch_rejected"]) }),
   },
+  /** A reachable environment no longer has the agent's terminal (§4.5, §7.1). */
+  "agent.lost": { entity: "agent", payload: z.object({}) },
   /** A view opened a terminal's stream (foundation-design §4.2). */
   "attachment.started": {
     entity: "attachment",
@@ -63,7 +65,7 @@ export const EVENTS = {
   "mailbox.delivered": { entity: "message", payload: z.object({}) },
   "mailbox.requeued": {
     entity: "message",
-    payload: z.object({ reason: z.enum(["not_written"]) }),
+    payload: z.object({ reason: z.enum(["not_written", "daemon_restart"]) }),
   },
   /** A harness asks the human, here to run a tool (§4.6, §5.6). */
   "attention.opened": {

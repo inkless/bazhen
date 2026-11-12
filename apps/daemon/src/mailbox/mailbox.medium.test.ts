@@ -54,6 +54,27 @@ describe("mailbox", () => {
     expect([again.offered, stateOf(store, messageId)]).toEqual([[messageId], "offered"]);
   });
 
+  it("offers every message a hook held again after a restart, as a possible re-delivery", async () => {
+    const { store, agentId } = await withAgent();
+    const mailbox = new Mailbox(store);
+    const seen = mailbox.send(agentId, { idempotencyKey: "m1", body: "first" }).messageId;
+    await mailbox.wait(agentId, live());
+    mailbox.ack([seen]);
+    mailbox.promptStarted(agentId, `woken by ${seen}`, "p-1");
+    const offered = mailbox.send(agentId, { idempotencyKey: "m2", body: "second" }).messageId;
+    await mailbox.wait(agentId, live());
+    const restarted = new Mailbox(store);
+    restarted.requeueInFlight();
+    expect([stateOf(store, seen), stateOf(store, offered)]).toEqual(["queued", "queued"]);
+    const again = await restarted.wait(agentId, live());
+    expect([again.offered, again.stderr]).toEqual([
+      [seen, offered],
+      expect.stringMatching(
+        new RegExp(`possible re-delivery of ${seen}.*possible re-delivery of ${offered}`, "s"),
+      ),
+    ]);
+  });
+
   it("refuses mail for an agent it doesn't run, and queues a repeat only once", async () => {
     const { store, agentId } = await withAgent();
     const mailbox = new Mailbox(store);

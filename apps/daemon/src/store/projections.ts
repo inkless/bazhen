@@ -91,6 +91,9 @@ export function project(db: Statements, e: Recorded): void {
     case "agent.failed":
       advance(db, e.id, e.entityId, ["launch.rejected", "runtime.rejected"]);
       return;
+    case "agent.lost":
+      advance(db, e.id, e.entityId, ["target.absent", "target.absent"]);
+      return;
     case "attachment.started": {
       const { terminalId, mode } = EVENTS[e.type].payload.parse(e.payload);
       db.prepare(
@@ -120,7 +123,11 @@ export function project(db: Statements, e: Recorded): void {
       return;
     }
     case "mailbox.offered":
-      return moveMessage(db, e, "offer");
+      moveMessage(db, e, "offer");
+      db.prepare(
+        `UPDATE mailbox SET first_offered_event_id = coalesce(first_offered_event_id, ?) WHERE id = ?`,
+      ).run(e.id, e.entityId);
+      return;
     case "mailbox.emitted":
       return moveMessage(db, e, "ack");
     case "mailbox.seen": {
