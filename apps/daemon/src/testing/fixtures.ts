@@ -134,3 +134,20 @@ export const upgradeOutcome = (ws: WebSocket) =>
     });
     ws.once("error", (err) => resolve(err.message));
   });
+
+/** A store with one running Codex agent, bound to `threadId`. */
+export async function withCodexAgent(threadId = "thr-1") {
+  const store = Store.open(tempDb());
+  const environment: EnvironmentAdapter = {
+    ...fakeEnvironment(store, async (l) => ({
+      runtime: { terminalId: l.terminalId, runtime: "tmux", locator: {} },
+      externalRef: { environmentId: localEnvironmentId(store), kind: "codex-thread", id: threadId },
+    })),
+    harnesses: ["codex"],
+  };
+  const { agentId } = await launchAgent(
+    { store, environment, size: { cols: 80, rows: 24 } },
+    { idempotencyKey: "codex", harness: "codex", cwd: "/w" },
+  );
+  return { store, agentId };
+}

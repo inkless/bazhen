@@ -143,3 +143,59 @@ export function readResolved(method: string, params: unknown): RequestId | null 
   const p = Resolved.safeParse(params);
   return p.success ? p.data.requestId : null;
 }
+
+/**
+ * A message's text as the agent reads it. It always carries the message's id, so the turn that
+ * takes it can be matched to it, whenever and however Codex delivers it (foundation-design §5.8).
+ */
+export const messageText = (id: string, body: string) =>
+  `Message for you from Bazhen (${id}):\n${body}`;
+
+/**
+ * `codex queue`'s arguments for one message: to the app-server at `remote`, which wakes an idle
+ * thread and otherwise waits for the turn boundary, or, with no server to reach, into the Codex
+ * home, which holds it until one comes up. Never `turn/start` or `turn/steer`, which would cut
+ * off a running turn's reply.
+ */
+export function queueArgs(threadId: string, text: string, remote: string | null): string[] {
+  return [
+    "queue",
+    "--thread",
+    threadId,
+    ...(remote === null ? [] : ["--remote", remote]),
+    "--message",
+    text,
+  ];
+}
+
+/** Starts Codex's own managed daemon on the Codex home, installing it from the local CLI. */
+export const DAEMON_START_ARGS: readonly string[] = ["app-server", "daemon", "start"];
+
+const UserMessage = z.object({
+  threadId: z.string(),
+  item: z.object({
+    type: z.literal("userMessage"),
+    content: z.array(z.object({ text: z.string().optional() })),
+  }),
+});
+
+/** The label `messageText` puts on each message, and the id it carries. */
+const LABEL = /Message for you from Bazhen \((msg_[0-9a-zA-Z]+)\)/g;
+
+/**
+ * The Bazhen messages a turn takes as the user's input, by id, and its thread; null for any
+ * other notification.
+ */
+export function readUserMessage(
+  method: string,
+  params: unknown,
+): { readonly threadId: string; readonly messageIds: string[] } | null {
+  if (method !== "item/started") return null;
+  const p = UserMessage.safeParse(params);
+  if (!p.success) return null;
+  const text = p.data.item.content.map((c) => c.text ?? "").join("");
+  return {
+    threadId: p.data.threadId,
+    messageIds: [...text.matchAll(LABEL)].map((m) => String(m[1])),
+  };
+}

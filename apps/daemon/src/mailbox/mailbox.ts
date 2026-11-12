@@ -22,15 +22,23 @@ type Step =
   | "mailbox.delivered"
   | "mailbox.requeued";
 
+export interface MailboxOptions {
+  /** How long the hook client has to write what it was handed and ack it. */
+  readonly ackDeadlineMs?: number;
+  /** Hands a queued message to a Codex agent's own queue (foundation-design §5.8). */
+  readonly codex?: (messageId: string, agentId: string) => void;
+}
+
 /**
- * Claude Code's mail, delivered at least once through its own hooks and never typed
- * (foundation-design §4.7, §5.6). One waiter per agent holds the hook that wakes an idle session;
+ * Mail for agents, never typed. Claude Code's is delivered at least once through its own hooks
+ * (foundation-design §4.7, §5.6): one waiter per agent holds the hook that wakes an idle session;
  * a message is offered to it, written by the hook client, seen in the prompt that carries its id,
- * and delivered when that prompt's turn stops.
+ * and delivered when that prompt's turn stops. Codex's goes to Codex's own queue (§5.8).
  */
 export class Mailbox {
   private readonly store: Store;
   private readonly ackDeadlineMs: number;
+  private readonly codex: MailboxOptions["codex"];
   private readonly waiters = new Map<string, (reply: HookReply) => void>();
   /** Messages handed to a hook and not yet written, with the agent each is for. */
   private readonly unacked = new Map<
@@ -38,20 +46,28 @@ export class Mailbox {
     { agentId: string; timer: ReturnType<typeof setTimeout> }
   >();
 
-  constructor(store: Store, ackDeadlineMs = ACK_DEADLINE_MS) {
+  constructor(store: Store, opts: MailboxOptions = {}) {
     this.store = store;
-    this.ackDeadlineMs = ackDeadlineMs;
+    this.ackDeadlineMs = opts.ackDeadlineMs ?? ACK_DEADLINE_MS;
+    this.codex = opts.codex;
   }
 
   send(agentId: string, req: SendMessageRequest): SendMessageResponse {
+    const harness = this.store.agent(agentId)?.harness;
+    const routes: Record<string, ((id: string, agent: string) => void) | undefined> = {
+      "claude-code": () => this.offer(agentId),
+      codex: this.codex,
+    };
+    const deliver = harness === undefined ? undefined : routes[harness];
+    let created = false;
     const response = this.store.once(
       req.idempotencyKey,
       { agentId, body: req.body },
       (r) => SendMessageResponse.parse(r),
       () => {
-        if (this.store.agent(agentId)?.harness !== "claude-code")
-          throw new UnknownAgent(agentId, "that takes mail");
+        if (deliver === undefined) throw new UnknownAgent(agentId, "that takes mail");
         const messageId = newId("msg");
+        created = true;
         const eventId = this.store.append({
           type: "mailbox.queued",
           entityId: messageId,
@@ -61,7 +77,8 @@ export class Mailbox {
         return { messageId, eventIds: [eventId] };
       },
     );
-    this.offer(agentId);
+    // A repeat of the same send gets the first answer, and hands nothing over again.
+    if (created) deliver?.(response.messageId, agentId);
     return response;
   }
 

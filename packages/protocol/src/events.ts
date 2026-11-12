@@ -106,6 +106,16 @@ export const EVENTS = {
   /** A prompt carrying its id started; that prompt's end delivers it. */
   "mailbox.seen": { entity: "message", payload: z.object({ promptId: z.string() }) },
   "mailbox.delivered": { entity: "message", payload: z.object({}) },
+  /**
+   * `codex queue` stored it in Codex, on a live app-server or, `offline`, in the Codex home. It is
+   * delivered only once the turn carrying it is seen (§5.8).
+   */
+  "mailbox.accepted": { entity: "message", payload: z.object({ offline: z.boolean() }) },
+  /** It will never reach its agent: the agent closed, or every attempt to hand it over failed. */
+  "mailbox.undeliverable": {
+    entity: "message",
+    payload: z.object({ reason: z.enum(["agent_closed", "gave_up"]) }),
+  },
   "mailbox.requeued": {
     entity: "message",
     payload: z.object({ reason: z.enum(["not_written", "daemon_restart"]) }),

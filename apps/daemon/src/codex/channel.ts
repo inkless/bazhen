@@ -18,9 +18,18 @@ const run = promisify(execFile);
 export const codexHomeOf = (env: Readonly<Record<string, string | undefined>>, home: string) =>
   env["CODEX_HOME"] ?? join(home, ".codex");
 
-/** Starts Codex's own managed daemon on the home `env` names, from the local CLI. */
-export const startCodexDaemon = (env: Readonly<Record<string, string>>) =>
-  run("codex", ["app-server", "daemon", "start"], { env, timeout: 60_000 }).then(() => undefined);
+/** The Codex CLI on the home `env` names, with a time limit; it rejects if the command fails. */
+export const codexCli =
+  (env: Readonly<Record<string, string>>) =>
+  (args: readonly string[]): Promise<void> =>
+    run("codex", args, { env, timeout: 60_000 }).then(() => undefined);
+
+/** The managed app-server's control socket in a Codex home. */
+const socketIn = (codexHome: string) =>
+  join(codexHome, "app-server-control", "app-server-control.sock");
+
+/** The app-server, as Codex's own clients reach it with `--remote`. */
+export const appServerAddress = (codexHome: string) => `unix://${socketIn(codexHome)}`;
 
 export interface CodexChannelOptions {
   readonly codexHome: string;
@@ -75,8 +84,8 @@ export class CodexChannel implements HarnessChannelPort {
   constructor(opts: CodexChannelOptions) {
     this.opts = opts;
     this.codexHome = realPath(opts.codexHome);
-    this.socket = join(opts.codexHome, "app-server-control", "app-server-control.sock");
-    this.address = `unix://${this.socket}`;
+    this.socket = socketIn(opts.codexHome);
+    this.address = appServerAddress(opts.codexHome);
     this.log = opts.log ?? console.warn;
     this.firstRetryMs = opts.reconnectMs ?? 1000;
     this.retryMs = this.firstRetryMs;
@@ -193,3 +202,19 @@ export class CodexChannel implements HarnessChannelPort {
 /** No socket, or one nobody accepts on: no server is running. */
 const nothingListens = (err: unknown) =>
   err instanceof Error && "code" in err && (err.code === "ENOENT" || err.code === "ECONNREFUSED");
+
+/** One listener that tells each of `listeners` whatever each listens for. */
+export const allOf = (...listeners: Partial<ChannelListener>[]): ChannelListener => ({
+  request: (method, params, id, respond) => {
+    for (const l of listeners) l.request?.(method, params, id, respond);
+  },
+  notification: (method, params) => {
+    for (const l of listeners) l.notification?.(method, params);
+  },
+  disconnected: () => {
+    for (const l of listeners) l.disconnected?.();
+  },
+  resumed: (threads) => {
+    for (const l of listeners) l.resumed?.(threads);
+  },
+});

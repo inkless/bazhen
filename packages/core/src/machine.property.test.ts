@@ -196,7 +196,6 @@ const MAILBOX_EVENTS: [MailboxEvent, number][] = [
   ["seen", 2],
   ["confirm", 2],
   ["accept", 1],
-  ["accept_offline", 1],
   ["requeue", 2],
   ["give_up", 1],
   ["agent_closed", 1],
@@ -211,9 +210,9 @@ describe("mailbox message, over any sequence of events", () => {
     expect(check(mailboxWalks, neverOfferedAfterDelivery)).not.toThrow();
   });
 
-  it("is delivered only on confirmation or Codex's acceptance", () => {
+  it("is delivered only once a turn confirms it, never on Codex storing it", () => {
     expect(
-      check(mailboxWalks, (steps) => entersOnlyBy(steps, "delivered", ["confirm", "accept"])),
+      check(mailboxWalks, (steps) => entersOnlyBy(steps, "delivered", ["confirm"])),
     ).not.toThrow();
   });
 

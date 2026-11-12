@@ -9,6 +9,7 @@ import {
   type RuntimeRef,
 } from "@bazhen/core";
 import type { ExitStatus, Signal } from "@bazhen/protocol";
+import { Mailbox } from "../mailbox/mailbox.ts";
 import { IdempotencyConflict, type Store } from "../store/store.ts";
 import { fakeEnvironment, withAgent } from "../testing/fixtures.ts";
 import { launchAgent, localEnvironmentId } from "./launch.ts";
@@ -120,6 +121,13 @@ describe("agent lifecycle", () => {
     const { lifecycle, agentId, closed, agent } = await running();
     const res = await lifecycle.close(agentId, { idempotencyKey: "c", generation: 0 });
     expect([res.eventIds.length, closed.length, agent()?.state]).toEqual([2, 1, "closed"]);
+  });
+
+  it("gives up the mail still on its way to an agent that closes", async () => {
+    const { lifecycle, agentId, store } = await running();
+    const { messageId } = new Mailbox(store).send(agentId, { idempotencyKey: "m", body: "hi" });
+    await lifecycle.close(agentId, { idempotencyKey: "c", generation: 0 });
+    expect(store.snapshot().messages.find((m) => m.id === messageId)?.state).toBe("undeliverable");
   });
 
   // A view that loses its terminal tells a close from a disconnect by this order.

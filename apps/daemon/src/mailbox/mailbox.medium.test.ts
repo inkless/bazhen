@@ -71,7 +71,7 @@ describe("mailbox", () => {
 
   it("offers a message again to the waiter when the hook client never says it wrote it", async () => {
     const { store, agentId } = await withAgent();
-    const mailbox = new Mailbox(store, 10);
+    const mailbox = new Mailbox(store, { ackDeadlineMs: 10 });
     const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
     await mailbox.wait(agentId, live());
     const again = await mailbox.wait(agentId, live());
