@@ -92,15 +92,68 @@ describe("terminal hub", () => {
     const rt = fakeRuntime();
     const hub = new TerminalHub(rt.runtime, memoryLog().log);
     const laptop = viewer();
+    const watcher = viewer("observe");
+    const l = await hub.join(ref, laptop.v, size);
+    const w = await hub.join(ref, watcher.v, size);
+    l.engage();
+    l.input(Buffer.from("a"));
+    w.input(Buffer.from("b"));
+    w.input(Buffer.from("c"));
+    expect(rt.written).toEqual(["a"]);
+    expect(watcher.frames.filter((f) => f.type === "input_dropped")).toHaveLength(1);
+  });
+
+  it("drops a stray keystroke from an interactive view, and gives that view the lease", async () => {
+    const rt = fakeRuntime();
+    const hub = new TerminalHub(rt.runtime, memoryLog().log);
+    const laptop = viewer();
     const phone = viewer();
     const l = await hub.join(ref, laptop.v, size);
     const p = await hub.join(ref, phone.v, size);
     l.engage();
-    l.input(Buffer.from("a"));
     p.input(Buffer.from("b"));
     p.input(Buffer.from("c"));
-    expect(rt.written).toEqual(["a"]);
-    expect(phone.frames.filter((f) => f.type === "input_dropped")).toHaveLength(1);
+    expect([rt.written, laptop.frames.at(-1)]).toEqual([
+      ["c"],
+      { type: "lease", driver: false, epoch: 6 },
+    ]);
+  });
+
+  it("never passes a terminal reply from the driver to the program", async () => {
+    const rt = fakeRuntime();
+    const hub = new TerminalHub(rt.runtime, memoryLog().log);
+    const d = await hub.join(ref, viewer().v, size);
+    d.engage();
+    d.input(Buffer.from("\x1b[?1;2c"));
+    d.input(Buffer.from("x"));
+    expect(rt.written).toEqual(["x"]);
+  });
+
+  it("takes the lease for a stray keystroke, but not for a focus report", async () => {
+    const rt = fakeRuntime();
+    const hub = new TerminalHub(rt.runtime, memoryLog().log);
+    const laptop = viewer();
+    const phone = viewer();
+    const l = await hub.join(ref, laptop.v, size);
+    const p = await hub.join(ref, phone.v, size);
+    l.engage();
+    p.input(Buffer.from("\x1b[O"));
+    const afterFocusReport = laptop.frames.at(-1);
+    p.input(Buffer.from("k"));
+    expect([rt.written, afterFocusReport, laptop.frames.at(-1)]).toEqual([
+      [],
+      { type: "lease", driver: true, epoch: 5 },
+      { type: "lease", driver: false, epoch: 6 },
+    ]);
+  });
+
+  it("answers the runtime client's terminal queries itself, without asking any view", async () => {
+    const rt = fakeRuntime();
+    const hub = new TerminalHub(rt.runtime, memoryLog().log);
+    const a = viewer();
+    await hub.join(ref, a.v, size);
+    rt.emit("\x1b[>q");
+    await expect.poll(() => rt.written).toEqual(["\x1bP>|bazhen\x1b\\"]);
   });
 
   it("moves the lease to the view the user engages, and tells every view", async () => {

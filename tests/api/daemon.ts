@@ -135,14 +135,29 @@ export class Daemon {
     }).toString();
   }
 
-  /** What the agent's terminal shows, found by the tag Bazhen wrote on its tmux session. */
-  screen(agentId: string): string {
+  /** The agent's tmux session, found by the tag Bazhen wrote on it. */
+  private session(agentId: string): string | undefined {
     const panes = this.tmux("list-panes", "-a", "-F", "#{@bazhen_agent_id} #{session_name}");
-    const session = panes
+    return panes
       .split("\n")
       .find((l) => l.startsWith(`${agentId} `))
       ?.split(" ")[1];
+  }
+
+  /** What the agent's terminal shows. */
+  screen(agentId: string): string {
+    const session = this.session(agentId);
     return session === undefined ? "" : this.tmux("capture-pane", "-p", "-t", session);
+  }
+
+  /**
+   * Runs another program in the agent's terminal, as if the agent had started it. The terminal
+   * Bazhen knows stays the same, so its stream serves the new program.
+   */
+  runInTerminal(agentId: string, argv: readonly string[]): void {
+    const session = this.session(agentId);
+    if (session === undefined) throw new Error(`no terminal for ${agentId}`);
+    this.tmux("respawn-pane", "-k", "-t", `${session}:0`, ...argv);
   }
 
   /** Stops the daemon, its tmux server and every file under its home. */
@@ -181,6 +196,23 @@ export class View {
   /** The terminal output this view has received, escape sequences included. */
   output(): string {
     return this.bytes;
+  }
+
+  /** Resolves once the daemon has attached this view to the terminal. */
+  async attached(): Promise<void> {
+    await waitUntil(() => this.frames.some((f) => f.type === "attached"), "the attachment");
+  }
+
+  /** Engages this view, as a click would, and resolves once it drives the terminal. */
+  async drive(): Promise<void> {
+    await this.attached();
+    this.frame({ type: "engage" });
+    await waitUntil(() => this.driving(), "the lease");
+  }
+
+  /** Whether this view drives the terminal, by the latest lease frame it received. */
+  driving(): boolean {
+    return this.frames.findLast((f) => f.type === "lease")?.driver === true;
   }
 
   frame(frame: unknown): void {

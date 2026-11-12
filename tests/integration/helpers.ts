@@ -1,6 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { readdirSync } from "node:fs";
 
+/** As if `bazhen start` ran inside another Claude Code session, with a token of the user's own. */
+export const launchedFrom: NodeJS.ProcessEnv = {
+  ...process.env,
+  CLAUDECODE: "1",
+  BZ_USER_VALUE: "kept",
+};
+
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** A private tmux server name scoped to this test run, so teardown can find and check it. */

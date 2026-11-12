@@ -7,11 +7,9 @@ import { filterEnv, newId } from "@bazhen/core";
 import { TmuxError, TmuxRuntime } from "@bazhen/runtime-tmux";
 import { nodePtySpawner } from "@bazhen/daemon/pty";
 import { TerminalHub } from "@bazhen/daemon/stream";
-import { killServer, ptyHandleCount, sleep, testSocket, tmuxOut } from "./helpers.ts";
+import { killServer, launchedFrom, ptyHandleCount, sleep, testSocket, tmuxOut } from "./helpers.ts";
 
 const socket = testSocket("runtime");
-// As if `bazhen start` ran inside another Claude Code session, with a token of the user's own.
-const launchedFrom = { ...process.env, CLAUDECODE: "1", BZ_USER_VALUE: "kept" };
 const runtime = new TmuxRuntime({
   socket,
   pty: nodePtySpawner,
@@ -64,6 +62,16 @@ describe("tmux runtime on a private server", () => {
     stream.onData((b) => (seen += Buffer.from(b).toString("utf8")));
     stream.write(Buffer.from("ping-你好\r"));
     await expect.poll(() => seen, { timeout: 3000 }).toContain("ping-你好");
+    stream.close();
+  });
+
+  it("keeps the browser on its normal screen, where it has scrollback", async () => {
+    const ref = await runtime.create(spec(["sh", "-c", "echo on-screen; sleep 30"]));
+    const stream = await runtime.attach(ref, size);
+    let seen = "";
+    stream.onData((b) => (seen += Buffer.from(b).toString("latin1")));
+    await expect.poll(() => seen, { timeout: 3000 }).toContain("on-screen");
+    expect(seen).not.toContain("\x1b[?1049h");
     stream.close();
   });
 
