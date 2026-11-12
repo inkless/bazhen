@@ -7,23 +7,31 @@ import { refusal, type Allowlists } from "../http/guard.ts";
 import type { Attachment, TerminalHub } from "./hub.ts";
 
 const STREAM_PATH = /^\/v1\/terminals\/([^/]+)\/stream$/;
+/** A frame is a keystroke burst or a paste; nothing a person types comes near this. */
+const MAX_FRAME_BYTES = 1 << 20;
+/** The same statuses as the HTTP surface, so a refused upgrade reads like a refused request. */
+const REFUSAL_STATUS = {
+  host_not_allowed: "421 Misdirected Request",
+  origin_not_allowed: "403 Forbidden",
+};
 
 export interface StreamDeps {
   readonly allow: Allowlists;
-  readonly hub: TerminalHub;
+  readonly hub: Pick<TerminalHub, "join">;
   readonly runtimeRef: (terminalId: string) => RuntimeRef | undefined;
 }
 
 /** The terminal stream's WebSocket endpoint (foundation-design §5.3); the only user of `ws`. */
 export function streamUpgrades(deps: StreamDeps) {
-  const wss = new WebSocketServer({ noServer: true });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
   return (req: IncomingMessage, socket: Duplex, head: Buffer): void => {
     const path = new URL(req.url ?? "/", "http://daemon").pathname;
     const terminalId = STREAM_PATH.exec(path)?.[1];
     const { host, origin } = req.headers;
     const refused = refusal(deps.allow, { host, origin, acting: true });
-    if (terminalId === undefined || refused !== null) {
-      socket.end(`HTTP/1.1 ${refused === null ? "404 Not Found" : "403 Forbidden"}\r\n\r\n`);
+    if (refused !== null || terminalId === undefined) {
+      const status = refused === null ? "404 Not Found" : REFUSAL_STATUS[refused];
+      socket.end(`HTTP/1.1 ${status}\r\n\r\n`);
       return;
     }
     wss.handleUpgrade(req, socket, head, (ws) => serve(deps, ws, terminalId));
@@ -37,6 +45,8 @@ function serve(deps: StreamDeps, ws: WebSocket, terminalId: string): void {
     ws.close();
   };
   let attachment: Attachment | undefined;
+  // Set as soon as a hello arrives, so a second one while the first joins starts nothing.
+  let joining = false;
   let leaving = false;
   ws.on("close", () => {
     leaving = true;
@@ -52,7 +62,8 @@ function serve(deps: StreamDeps, ws: WebSocket, terminalId: string): void {
     if (!frame.success) return refuse("unreadable frame");
     const f = frame.data;
     if (f.type === "hello") {
-      if (attachment !== undefined) return;
+      if (joining) return;
+      joining = true;
       if (!isCompatible(f.protocolVersion))
         return refuse(`protocol ${f.protocolVersion} is unsupported`);
       const ref = deps.runtimeRef(terminalId);

@@ -79,7 +79,9 @@ export class TerminalHub {
   }
 
   async join(ref: RuntimeRef, viewer: Viewer, size: Size): Promise<Attachment> {
-    const { watched, opened } = await this.watch(ref, size);
+    // An observer never sizes the terminal, not even by being the first to open it (§5.4).
+    const opening = viewer.mode === "interactive" ? size : null;
+    const { watched, opened } = await this.watch(ref, opening);
     const id = newId("att");
     // A runtime client that has just attached redraws the screen itself; a view that joins an
     // existing one is seeded from a snapshot, its live bytes held until that is sent.
@@ -89,10 +91,19 @@ export class TerminalHub {
     viewer.notify({ type: "attached", attachmentId: id });
     viewer.notify(leaseFrame(watched, id));
     if (entry.queue !== undefined) {
-      viewer.send(Buffer.from(await this.runtime.snapshot(ref)));
+      try {
+        viewer.send(Buffer.from(await this.runtime.snapshot(ref)));
+      } catch (err) {
+        this.end(watched, id, "attach_failed");
+        viewer.notify({ type: "error", message: `could not read the screen: ${String(err)}` });
+        viewer.close();
+        throw err;
+      }
       for (const bytes of entry.queue) viewer.send(bytes);
       delete entry.queue;
     }
+    // The most recent interactive view sizes the terminal while nobody drives it.
+    if (!opened) this.fitTo(watched);
     return {
       id,
       input: (bytes) => this.input(watched, id, bytes),
@@ -102,7 +113,10 @@ export class TerminalHub {
     };
   }
 
-  private async watch(ref: RuntimeRef, size: Size): Promise<{ watched: Watched; opened: boolean }> {
+  private async watch(
+    ref: RuntimeRef,
+    size: Size | null,
+  ): Promise<{ watched: Watched; opened: boolean }> {
     const existing = this.watched.get(ref.terminalId);
     if (existing !== undefined) return { watched: await existing, opened: false };
     const opening = this.runtime.attach(ref, size).then((stream) => {
@@ -139,8 +153,9 @@ export class TerminalHub {
   }
 
   /**
-   * Keystrokes reach the terminal only from its driver, under the epoch it was granted; any
-   * other view's are dropped, and it is told once per lease.
+   * Keystrokes reach the terminal only from its driver; any other view's are dropped, and it is
+   * told once per lease. The epoch check fences stale input once input frames carry the epoch
+   * they were typed under; until then it is the epoch of this view's own grant.
    */
   private input(watched: Watched, id: AttachmentId, bytes: Uint8Array): void {
     const entry = watched.viewers.get(id);
@@ -162,11 +177,24 @@ export class TerminalHub {
     watched.lease = next;
     entry.grantedEpoch = next.epoch;
     this.log.granted(watched.terminal, id, next.epoch);
-    for (const [other, e] of watched.viewers) {
+    this.announceLease(watched);
+    this.fitTo(watched);
+  }
+
+  private announceLease(watched: Watched): void {
+    for (const [id, e] of watched.viewers) {
       e.toldDropped = false;
-      e.viewer.notify(leaseFrame(watched, other));
+      e.viewer.notify(leaseFrame(watched, id));
     }
-    this.applySize(watched, entry.size);
+  }
+
+  /** The driver's size, or with no driver the most recent interactive view's (§5.4). */
+  private fitTo(watched: Watched): void {
+    const views = [...watched.viewers.entries()];
+    const driver = views.find(([id]) => id === watched.lease.holder)?.[1];
+    const latest = views.findLast(([, e]) => e.viewer.mode === "interactive")?.[1];
+    const target = driver ?? latest;
+    if (target !== undefined) this.applySize(watched, target.size);
   }
 
   /** The driver sets the terminal's size; everyone else renders at it (§5.4). */
@@ -174,7 +202,7 @@ export class TerminalHub {
     const entry = watched.viewers.get(id);
     if (entry === undefined) return;
     entry.size = size;
-    if (watched.lease.holder === id) this.applySize(watched, size);
+    this.fitTo(watched);
   }
 
   /** One resize at a time: a dragged window sends many, and only the latest size matters. */
@@ -197,12 +225,21 @@ export class TerminalHub {
   }
 
   private leave(watched: Watched, id: AttachmentId): void {
+    this.end(watched, id, "client_closed");
+  }
+
+  private end(watched: Watched, id: AttachmentId, reason: EndReason): void {
     if (!watched.viewers.delete(id)) return;
-    this.log.ended(id, "client_closed");
+    this.log.ended(id, reason);
+    const wasDriver = watched.lease.holder === id;
     watched.lease = release(watched.lease, id);
-    if (watched.viewers.size > 0) return;
-    this.watched.delete(watched.terminal);
-    watched.stream.close();
+    if (watched.viewers.size === 0) {
+      this.watched.delete(watched.terminal);
+      watched.stream.close();
+      return;
+    }
+    if (wasDriver) this.announceLease(watched);
+    this.fitTo(watched);
   }
 }
 

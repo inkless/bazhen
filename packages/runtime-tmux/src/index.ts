@@ -210,13 +210,24 @@ export class TmuxRuntime implements RuntimeAdapter {
     });
   }
 
-  async attach(ref: RuntimeRef, size: Size): Promise<RuntimeStream> {
+  async attach(ref: RuntimeRef, size: Size | null): Promise<RuntimeStream> {
     const session = sessionOf(ref);
     const resizeWindow = (next: Size) => this.tmux(...resizeArgs(session, next));
-    await resizeWindow(size);
+    if (size !== null) await resizeWindow(size);
+    const [cols = 80, rows = 24] = (
+      await this.tmux(
+        "display-message",
+        "-p",
+        "-t",
+        windowOf(session),
+        "#{window_width} #{window_height}",
+      )
+    )
+      .split(" ")
+      .map(Number);
     const proc = this.opts.pty.spawn(
       [this.bin, "-L", this.opts.socket, "attach-session", "-t", session],
-      size,
+      { cols, rows },
       this.opts.env,
     );
     const closeHandlers: Array<() => void> = [];

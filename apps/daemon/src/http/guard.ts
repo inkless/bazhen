@@ -1,5 +1,3 @@
-import type { ErrorResponse } from "@bazhen/protocol";
-
 export interface Allowlists {
   /** Host header values accepted; anything else is refused as a DNS-rebinding defence. */
   readonly hosts: readonly string[];
@@ -19,7 +17,10 @@ export interface Arrival {
  * sends Origin when it acts, so a page elsewhere can't act through the user's browser; a request
  * without one comes from a local process, which the Host check and, later, pairing govern.
  */
-export function refusal(allow: Allowlists, arrival: Arrival): ErrorResponse["error"] | null {
+export function refusal(
+  allow: Allowlists,
+  arrival: Arrival,
+): "host_not_allowed" | "origin_not_allowed" | null {
   if (!allow.hosts.includes(arrival.host ?? "")) return "host_not_allowed";
   const { origin } = arrival;
   if (arrival.acting && origin !== undefined && !allow.origins.includes(origin)) {

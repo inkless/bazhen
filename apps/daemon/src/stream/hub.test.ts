@@ -10,9 +10,10 @@ import type { AttachmentMode, StreamServerFrame } from "@bazhen/protocol";
 import { TerminalHub, type AttachmentLog, type Viewer } from "./hub.ts";
 
 /** A runtime whose single terminal echoes nothing and records what reaches it. */
-function fakeRuntime() {
+function fakeRuntime(snapshot: () => Promise<string> = async () => "<screen>") {
   const written: string[] = [];
   const sizes: Size[] = [];
+  const attachedAt: (Size | null)[] = [];
   let attaches = 0;
   let closes = 0;
   let emit: ((s: string) => void) | undefined;
@@ -23,9 +24,10 @@ function fakeRuntime() {
     inventory: () => Promise.reject(new Error("not used")),
     create: () => Promise.reject(new Error("not used")),
     close: () => Promise.reject(new Error("not used")),
-    snapshot: async () => "<screen>",
-    attach: async () => {
+    snapshot,
+    attach: async (_ref, at) => {
       attaches++;
+      attachedAt.push(at);
       return {
         onData: (cb) => (emit = (s) => cb(Buffer.from(s))),
         onClose: (cb) => (end = cb),
@@ -39,6 +41,7 @@ function fakeRuntime() {
     runtime,
     written,
     sizes,
+    attachedAt,
     emit: (s: string) => emit?.(s),
     end: () => end?.(),
     counts: () => ({ attaches, closes }),
@@ -148,6 +151,51 @@ describe("terminal hub", () => {
     for (let cols = 81; cols <= 90; cols++) a.resize({ cols, rows: 24 });
     await expect.poll(() => rt.sizes.at(-1)).toEqual({ cols: 90, rows: 24 });
     expect(rt.sizes).toEqual([size, { cols: 90, rows: 24 }]);
+  });
+
+  it("never sizes the terminal from an observer, even the first one to open it", async () => {
+    const rt = fakeRuntime();
+    const hub = new TerminalHub(rt.runtime, memoryLog().log);
+    await hub.join(ref, viewer("observe").v, { cols: 40, rows: 60 });
+    expect([rt.attachedAt, rt.sizes]).toEqual([[null], []]);
+  });
+
+  it("sizes the terminal from the latest interactive view while nobody drives", async () => {
+    const rt = fakeRuntime();
+    const hub = new TerminalHub(rt.runtime, memoryLog().log);
+    await hub.join(ref, viewer("observe").v, size);
+    await hub.join(ref, viewer().v, { cols: 120, rows: 40 });
+    await expect.poll(() => rt.sizes).toEqual([{ cols: 120, rows: 40 }]);
+  });
+
+  it("hands the size to the remaining view when the driver leaves, and tells it", async () => {
+    const rt = fakeRuntime();
+    const hub = new TerminalHub(rt.runtime, memoryLog().log);
+    const laptop = await hub.join(ref, viewer().v, { cols: 200, rows: 50 });
+    const phone = viewer();
+    await hub.join(ref, phone.v, { cols: 60, rows: 50 });
+    laptop.engage();
+    await expect.poll(() => rt.sizes.at(-1)).toEqual({ cols: 200, rows: 50 });
+    const leaseFrames = () => phone.frames.filter((f) => f.type === "lease").length;
+    const before = leaseFrames();
+    laptop.leave();
+    await expect.poll(() => rt.sizes.at(-1)).toEqual({ cols: 60, rows: 50 });
+    expect([leaseFrames() - before, phone.frames.at(-1)]).toEqual([
+      1,
+      { type: "lease", driver: false, epoch: 5 },
+    ]);
+  });
+
+  it("ends and closes a view whose screen can't be read, and leaves no client behind", async () => {
+    const rt = fakeRuntime(() => Promise.reject(new Error("tmux gone")));
+    const { log, events } = memoryLog();
+    const hub = new TerminalHub(rt.runtime, log);
+    const first = await hub.join(ref, viewer().v, size);
+    const late = viewer();
+    await expect(hub.join(ref, late.v, size)).rejects.toThrow("tmux gone");
+    expect([late.closed(), events.at(-1)?.endsWith("attach_failed")]).toEqual([true, true]);
+    first.leave();
+    expect(rt.counts().closes).toBe(1);
   });
 
   it("closes the runtime client when the last view leaves, and only then", async () => {

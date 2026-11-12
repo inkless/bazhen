@@ -87,11 +87,12 @@ export function project(db: Statements, e: Recorded): void {
       const open = db
         .prepare("SELECT terminal_id FROM attachments_open WHERE id = ?")
         .get(e.entityId);
+      if (open === undefined) return;
       db.prepare("DELETE FROM attachments_open WHERE id = ?").run(e.entityId);
       // The lease ends with its attachment (§4.3); the epoch stays, so the next grant is higher.
       db.prepare(
         "UPDATE leases SET holder = NULL, updated_event_id = ? WHERE terminal_id = ? AND holder = ?",
-      ).run(e.id, String(open?.terminal_id), e.entityId);
+      ).run(e.id, String(open.terminal_id), e.entityId);
       return;
     }
     case "lease.granted": {

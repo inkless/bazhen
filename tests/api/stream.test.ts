@@ -57,6 +57,9 @@ describe("the terminal stream", () => {
     await expect.poll(() => first.output(), { timeout: 10_000 }).toMatch(/Claude Code/);
     const late = await daemon.view(terminalId, "observe");
     await expect.poll(() => late.output(), { timeout: 10_000 }).toMatch(/Claude Code/);
+    // Seeded from a snapshot, which starts by clearing the screen, through the one client.
+    expect(late.output().startsWith("\u001b[H\u001b[2J")).toBe(true);
+    expect(daemon.tmux("list-clients").trim().split("\n")).toHaveLength(1);
     first.close();
     late.close();
   });

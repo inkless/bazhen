@@ -45,7 +45,7 @@ export const EVENTS = {
   "attachment.ended": {
     entity: "attachment",
     payload: z.object({
-      reason: z.enum(["client_closed", "terminal_closed", "daemon_restart"]),
+      reason: z.enum(["client_closed", "terminal_closed", "attach_failed", "daemon_restart"]),
     }),
   },
   /** An engaged view became the terminal's driver; the epoch rises on every grant (§4.3). */
