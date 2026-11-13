@@ -16,6 +16,26 @@
       "type": "string",
       "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
     },
+    "launch": {
+      "type": "object",
+      "properties": {
+        "harness": {
+          "type": "string",
+          "enum": [
+            "claude-code",
+            "codex"
+          ]
+        },
+        "cwd": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "harness"
+      ],
+      "additionalProperties": false
+    },
     "role": {
       "default": "worker",
       "type": "string",
@@ -37,7 +57,6 @@
   },
   "required": [
     "idempotencyKey",
-    "agentId",
     "title",
     "brief"
   ],

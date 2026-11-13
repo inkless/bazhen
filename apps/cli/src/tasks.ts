@@ -1,10 +1,12 @@
 // The task verbs agents and humans run: each is one daemon call, built here from the command
 // line, and its answer printed as plain lines that a model reads as easily as a person.
 
+import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import {
   AssignTaskResponse,
   CreateTaskResponse,
+  HarnessId,
   EscalateResponse,
   Role,
   StateSnapshot,
@@ -26,7 +28,7 @@ export const TASK_USAGE = `usage:
   bazhen task done [<task>] [--note <text>] [--cascade]
   bazhen task cancel <task> [--note <text>] [--cascade]
   bazhen escalate <question> [--task <task>]
-  bazhen delegate <agent> --title <title> (--brief <text> | --brief-file <path>) [--task <task>] [--role lead|worker]`;
+  bazhen delegate (<agent> | --launch claude-code|codex [--dir <dir>]) --title <title> (--brief <text> | --brief-file <path>) [--task <task>] [--role lead|worker]`;
 
 /** A command line that doesn't say what to do; the message says why. */
 export class Usage extends Error {}
@@ -71,6 +73,8 @@ const OPTIONS = {
   task: { type: "string" },
   all: { type: "boolean" },
   cascade: { type: "boolean" },
+  launch: { type: "string" },
+  dir: { type: "string" },
   home: { type: "string" },
   port: { type: "string" },
 } as const;
@@ -125,18 +129,41 @@ export function taskVerb(argv: readonly string[], ctx: Context): Verb {
     );
   }
   if (name === "delegate") {
-    const agentId = need(sub, "the agent to delegate to");
+    const harness = values.launch;
+    if (harness !== undefined && sub !== undefined) {
+      throw new Usage("name the agent to delegate to, or --launch one, not both");
+    }
+    if (harness === undefined && values.dir !== undefined) {
+      throw new Usage("--dir is where a --launch agent starts; give --launch too");
+    }
+    if (harness !== undefined && !HarnessId.safeParse(harness).success) {
+      throw new Usage(`--launch is ${HarnessId.options.join(" or ")}, not ${harness}`);
+    }
+    const to =
+      harness === undefined
+        ? { agentId: need(sub, "the agent to delegate to, or --launch <harness>") }
+        : {
+            launch: {
+              harness,
+              ...(values.dir === undefined
+                ? {}
+                : { cwd: values.dir.startsWith("~") ? values.dir : resolve(values.dir) }),
+            },
+          };
     return post(
       "/v1/tasks/delegate",
       CreateTaskResponse,
       {
-        agentId,
+        ...to,
         role: role("worker"),
         title: need(values.title, "--title"),
         brief: brief(),
         ...(values.task === undefined ? {} : { fromTaskId: values.task }),
       },
-      (r) => `delegated ${r.taskId} to ${agentId}`,
+      (r) =>
+        harness === undefined
+          ? `delegated ${r.taskId} to ${sub}`
+          : `delegated ${r.taskId} to a new ${harness} agent, as ${r.assignmentId ?? "?"}`,
     );
   }
   if (name !== "task") throw new Usage(`unknown verb ${name ?? ""}`);

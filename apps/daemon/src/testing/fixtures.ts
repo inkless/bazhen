@@ -8,12 +8,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { WebSocket } from "ws";
+import type { LaunchAgentRequest } from "@bazhen/protocol";
 import {
   isId,
   newId,
   NoTerminal,
   type AgentInventoryEntry,
   type AgentLaunch,
+  type AgentSessionId,
   type AgentRefs,
   type EnvironmentAdapter,
   type Resumes,
@@ -249,7 +251,7 @@ export async function withCodexAgent(threadId = "thr-1") {
  * A store with three running Claude Code agents, to coordinate, lead and work on tasks, and the
  * task service on the store's real mailbox.
  */
-export async function taskFleet() {
+export async function taskFleet(limits = { maxLaunched: 5, maxDepth: 3 }) {
   const { store, agentId: coordinator, environment } = await withAgent();
   const deps = {
     store,
@@ -270,11 +272,20 @@ export async function taskFleet() {
   const [lead, worker] = [await launch("launch-lead"), await launch("launch-worker")];
   const mailbox = new Mailbox(store);
   const raised: Raised[] = [];
-  const tasks = new Tasks(store, mailbox, (r) => {
-    raised.push(r);
-    return newId("attn");
-  });
-  return { store, mailbox, tasks, raised, coordinator, lead, worker };
+  const launcher = {
+    launch: (req: LaunchAgentRequest, by: AgentSessionId) => launchAgent(deps, req, by),
+    ...limits,
+  };
+  const tasks = new Tasks(
+    store,
+    mailbox,
+    (r) => {
+      raised.push(r);
+      return newId("attn");
+    },
+    launcher,
+  );
+  return { store, mailbox, tasks, raised, launcher, coordinator, lead, worker };
 }
 
 const SENT = ["queued", "offered", "emitted", "seen", "delivered"] as const;

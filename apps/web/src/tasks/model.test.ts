@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { Assignment, Role, StateSnapshot, Task } from "@bazhen/protocol";
-import { agentTasks, holdersOf, openSubtasksUnder, taskTree, type TaskNode } from "./model.ts";
+import {
+  agentTasks,
+  holdersOf,
+  launcherOf,
+  openSubtasksUnder,
+  taskTree,
+  type TaskNode,
+} from "./model.ts";
 
 const AGENT = "agent_0190000000007000800000000000a001";
 const OTHER = "agent_0190000000007000800000000000a002";
@@ -78,5 +85,24 @@ describe("an agent's tasks", () => {
       [on(1, AGENT, "lead"), on(2, AGENT, "worker"), on(3, OTHER, "worker")],
     );
     expect(agentTasks(state, AGENT).map((t) => [t.task.id, t.role])).toEqual([[id(1), "lead"]]);
+  });
+});
+
+/** An agent with only what `launcherOf` reads. */
+const launchedAgent = (agentId: string, project: string, launchedBy: string | null) => ({
+  id: agentId,
+  project,
+  launchedBy,
+});
+
+describe("who launched an agent", () => {
+  it("names the agent that launched it, and no one for an agent the human launched", () => {
+    const state = {
+      agents: [launchedAgent(AGENT, "web", null), launchedAgent(OTHER, "api", AGENT)],
+    };
+    expect([launcherOf(state, OTHER), launcherOf(state, AGENT)]).toEqual([
+      { id: AGENT, project: "web" },
+      null,
+    ]);
   });
 });

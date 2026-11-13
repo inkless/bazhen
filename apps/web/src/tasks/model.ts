@@ -1,4 +1,4 @@
-import type { Assignment, Role, StateSnapshot, Task } from "@bazhen/protocol";
+import type { Agent, Assignment, Role, StateSnapshot, Task } from "@bazhen/protocol";
 
 /** Who holds a role on a task, as a row names them: the agent's project and its short id. */
 export interface Holder {
@@ -58,6 +58,16 @@ export function openSubtasksUnder(state: StateSnapshot, taskId: string): Task[] 
   const below = Map.groupBy(state.tasks, (t) => t.parentTaskId);
   const under = (id: string): Task[] => (below.get(id) ?? []).flatMap((t) => [t, ...under(t.id)]);
   return under(taskId).filter((t) => t.state === "open");
+}
+
+/** The agent that launched this one, by id and project, or null when the human did. */
+export function launcherOf(
+  state: { readonly agents: readonly Pick<Agent, "id" | "project" | "launchedBy">[] },
+  agentId: string,
+): { id: string; project: string | null } | null {
+  const by = state.agents.find((a) => a.id === agentId)?.launchedBy ?? null;
+  if (by === null) return null;
+  return { id: by, project: state.agents.find((a) => a.id === by)?.project ?? null };
 }
 
 /** The open tasks an agent is on now, with its role on each. */

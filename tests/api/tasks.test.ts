@@ -98,6 +98,37 @@ describe("tasks and delegation, through the CLI", () => {
     );
   });
 
+  it("launches a new agent for a delegated subtask, which knows who launched it and gets the brief", async () => {
+    const created = await daemon.request("/v1/tasks", {
+      method: "POST",
+      body: {
+        idempotencyKey: "launch-task",
+        title: "Ship it",
+        brief: "Cut the release.",
+        assign: { agentId: coordinator.agentId, role: "coordinator" },
+      },
+    });
+    const { taskId } = CreateTaskResponse.parse(created.body);
+    const out = await asAgent(coordinator.agentId, [
+      "delegate",
+      "--launch",
+      "claude-code",
+      "--task",
+      taskId,
+      "--title",
+      "Write the notes",
+      "--brief",
+      "Draft the release notes.",
+    ]);
+    expect(out).toMatchObject({
+      code: 0,
+      out: expect.stringContaining("to a new claude-code agent"),
+    });
+    const launched = (await state()).agents.filter((a) => a.launchedBy === coordinator.agentId);
+    expect(launched).toHaveLength(1);
+    await expect.poll(async () => mailTo(String(launched[0]?.id))).toBe(1);
+  });
+
   it("refuses a worker that delegates, and says why", async () => {
     const out = await asAgent(worker.agentId, [
       "delegate",

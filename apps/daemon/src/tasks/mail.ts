@@ -37,6 +37,7 @@ const DELEGATE = (taskId: string, role: Role) =>
     `To hand part of it to another agent (${role === "coordinator" ? "as a lead or a worker" : "as a worker"}), run:`,
     `  bazhen delegate <agent-id> --task ${taskId} --title "<title>" --brief "<instructions>"`,
     "  `bazhen agents` lists the agents; whoever you delegate to tells you when they finish.",
+    "  To start a new agent for it instead, put --launch claude-code or --launch codex in place of the id.",
   ].join("\n");
 
 export function unassignedMail(task: Named, from: Caller) {
@@ -85,4 +86,4 @@ Tasks reach you as messages from Bazhen, and you answer them with the bazhen com
 - bazhen task list: the tasks you are assigned; bazhen task show <task>: one in full.
 - bazhen task done <task> --note "<what you did>": report a task finished, to whoever gave it to you.
 - bazhen escalate "<question>" [--task <task>]: put a question or problem in the human's inbox.
-- As a task's coordinator or lead, bazhen agents lists the other agents, and bazhen delegate <agent-id> --task <task> --title "<title>" --brief "<instructions>" hands part of it to one of them.`;
+- As a task's coordinator or lead, bazhen agents lists the other agents, and bazhen delegate <agent-id> --task <task> --title "<title>" --brief "<instructions>" hands part of it to one of them; with --launch claude-code or --launch codex in place of the agent id, to a new agent started for it.`;

@@ -1,12 +1,11 @@
 import { z } from "zod";
-import { EnvironmentKind, Id, IdempotencyKey } from "./ids.ts";
+import { EnvironmentKind, HarnessId, Id, IdempotencyKey } from "./ids.ts";
+
+export { HarnessId };
 import { Attention, Message } from "./mail.ts";
 import { BusyShell, Shell } from "./shells.ts";
 import { TuiTheme } from "./theme.ts";
 import { Assignment, Task } from "./tasks.ts";
-
-export const HarnessId = z.enum(["claude-code", "codex"]);
-export type HarnessId = z.infer<typeof HarnessId>;
 
 /** foundation-design §4.5. */
 export const AgentState = z.enum([
@@ -139,6 +138,8 @@ export const Agent = z.object({
   resumable: z.boolean().default(false),
   /** Whether a shell can be opened beside it now: its directory still holds its work (protocol 1.28). */
   canOpenShell: z.boolean().default(false),
+  /** The agent that launched it to delegate to it, or null when the human did. Protocol 1.31. */
+  launchedBy: Id("agent").nullable().default(null),
 });
 export type Agent = z.infer<typeof Agent>;
 

@@ -84,6 +84,34 @@ describe("bazhen task verbs", () => {
     ]);
   });
 
+  it("delegates to a new agent it launches, in the directory named, rather than to one named", () => {
+    const verb = taskVerb(
+      ["delegate", "--launch", "codex", "--dir", "/work", "--title", "t", "--brief", "b"],
+      ctx(AGENT),
+    );
+    expect(verb.call.body).toMatchObject({ launch: { harness: "codex", cwd: "/work" } });
+    expect(verb.call.body).not.toHaveProperty("agentId");
+    expect(
+      usage(["delegate", OTHER, "--launch", "codex", "--title", "t", "--brief", "b"]),
+    ).toContain("not both");
+  });
+
+  it("starts a launched agent in the directory named from where the command runs, and wants --launch for --dir", () => {
+    const verb = taskVerb(
+      ["delegate", "--launch", "codex", "--dir", "work", "--title", "t", "--brief", "b"],
+      ctx(AGENT),
+    );
+    expect(verb.call.body).toMatchObject({ launch: { cwd: `${process.cwd()}/work` } });
+    const home = taskVerb(
+      ["delegate", "--launch", "codex", "--dir", "~/proj", "--title", "t", "--brief", "b"],
+      ctx(AGENT),
+    );
+    expect(home.call.body).toMatchObject({ launch: { cwd: "~/proj" } });
+    expect(usage(["delegate", OTHER, "--dir", "work", "--title", "t", "--brief", "b"])).toContain(
+      "give --launch too",
+    );
+  });
+
   it("reads a brief from a file", () => {
     const verb = taskVerb(["task", "create", "--title", "t", "--brief-file", "plan.md"], ctx());
     expect(verb.call.body).toMatchObject({ brief: "brief from plan.md" });

@@ -79,7 +79,7 @@ async function withInbox() {
   const f = await taskFleet();
   const box = new Inbox(f.store, new Approvals(f.store), (to, req) => f.mailbox.send(to, req));
   box.follow();
-  const tasks = new Tasks(f.store, f.mailbox, (r) => box.raise(r));
+  const tasks = new Tasks(f.store, f.mailbox, (r) => box.raise(r), f.launcher);
   const open = () =>
     f.store
       .snapshot(testView)

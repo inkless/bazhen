@@ -81,12 +81,20 @@ export function project(db: Statements, e: Recorded): void {
         project: name,
         cwd,
         terminalId,
+        launchedBy,
       } = EVENTS[e.type].payload.parse(e.payload);
       db.prepare(
         `INSERT INTO agent_sessions
            (id, environment_id, harness, project, cwd, state, terminal_id, created_event_id, updated_event_id)
          VALUES (?, ?, ?, ?, ?, 'starting', ?, ?, ?)`,
       ).run(e.entityId, environmentId, harness, name, cwd, terminalId, e.id, e.id);
+      // Set apart from the insert, which older schemas, read back by upgrade, must still take.
+      if (launchedBy !== undefined) {
+        db.prepare("UPDATE agent_sessions SET launched_by = ? WHERE id = ?").run(
+          launchedBy,
+          e.entityId,
+        );
+      }
       if (terminalId === null) return;
       db.prepare(
         `INSERT INTO terminals
