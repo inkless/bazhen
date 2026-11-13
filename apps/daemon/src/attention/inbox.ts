@@ -41,6 +41,7 @@ export interface Raised {
 const HARNESS_HELD: ReadonlySet<AttentionKind> = new Set(["approval", "question"]);
 
 const parseReply = (r: unknown) => ReplyAttentionResponse.parse(r);
+const parseResend = (r: unknown) => ResendAttentionResponse.parse(r);
 
 /** Agents that are gone for good: mail can't reach them, so a reply can't either. */
 const GONE = new Set(["closing", "closed", "failed"]);
@@ -84,7 +85,7 @@ export class Inbox {
     if (item.kind === "approval") {
       return this.approvals.canAnswer(item.id) ? ["allow", "deny"] : [];
     }
-    if (item.kind === "question") return [];
+    if (item.kind === "question") return this.approvals.canReplyText(item.id) ? ["reply"] : [];
     const state = this.store.agent(item.agentId)?.state;
     if (state === undefined || GONE.has(state)) return ["dismiss"];
     return item.kind === "undeliverable" ? ["reply", "resend", "dismiss"] : ["reply", "dismiss"];
@@ -104,6 +105,9 @@ export class Inbox {
   // The mail goes in the same transaction as the close, so a crash between them can't leave a
   // reply sent and its item open, or the item closed with nothing sent.
   reply(id: string, req: ReplyAttentionRequest): ReplyAttentionResponse {
+    // A question the harness asked takes the reply as its answer, not as mail.
+    const open = this.store.openAttention().find((i) => i.id === id);
+    if (open?.kind === "question") return this.approvals.replyText(id, req);
     return this.store.once(
       req.idempotencyKey,
       { attention: id, reply: req.body },
@@ -123,7 +127,7 @@ export class Inbox {
   }
 
   resend(id: string, req: ResendAttentionRequest): ResendAttentionResponse {
-    return this.store.once(req.idempotencyKey, { attention: id, resend: true }, parseReply, () => {
+    return this.store.once(req.idempotencyKey, { attention: id, resend: true }, parseResend, () => {
       const item = this.offering(id, "resend");
       const body = this.store
         .mail(item.agentId, ["undeliverable"])

@@ -1,11 +1,18 @@
 import type { AttentionId } from "@bazhen/core";
-import { approvalResult, readApproval, readResolved, type RequestId } from "@bazhen/harness-codex";
+import {
+  approvalResult,
+  questionResult,
+  readApproval,
+  readQuestion,
+  readResolved,
+  type RequestId,
+} from "@bazhen/harness-codex";
 import type { Approvals, CloseReason } from "../mailbox/approvals.ts";
 import type { ChannelListener } from "./channel.ts";
 
 /** One open item, and how to answer the request behind it on the connection it last came on. */
 interface Asked {
-  readonly item: AttentionId;
+  item: AttentionId | undefined;
   readonly agentId: string;
   readonly threadId: string;
   respond: ((result: unknown) => void) | undefined;
@@ -35,37 +42,54 @@ export function codexApprovals(
   const close = (key: string, reason: CloseReason) => {
     const a = asked.get(key);
     asked.delete(key);
-    if (a !== undefined) approvals.withdraw(a.item, reason);
+    if (a?.item !== undefined) approvals.withdraw(a.item, reason);
   };
   return {
     request(method, params, id, respond) {
-      // Not an approval, or not for an agent Bazhen runs: the TUI answers it.
-      const request = readApproval(method, params);
+      // Not an approval or a question, or not for an agent Bazhen runs: the TUI answers it.
+      const approval = readApproval(method, params);
+      const question = approval === null ? readQuestion(method, params) : null;
+      const request = approval ?? question;
       if (request === null) return;
       const agentId = agentOf(request.threadId);
       if (agentId === undefined) return;
-      const key = JSON.stringify([request.threadId, request.itemId]);
+      const key = JSON.stringify([request.threadId, question?.key ?? request.itemId]);
       requests.set(id, key);
       const known = asked.get(key);
       if (known !== undefined) {
         known.respond = respond;
         return;
       }
-      const a: Asked = {
-        agentId,
-        threadId: request.threadId,
-        respond,
-        item: approvals.ask(
+      const a: Asked = { agentId, threadId: request.threadId, respond, item: undefined };
+      const answerable = () => a.respond !== undefined;
+      if (approval !== null) {
+        a.item = approvals.ask(
           agentId,
-          request.summary,
-          request.itemId,
+          approval.summary,
+          approval.itemId,
           (decision) => {
             asked.delete(key);
             if (decision !== null) a.respond?.(approvalResult(decision));
           },
-          () => a.respond !== undefined,
-        ),
-      };
+          answerable,
+        );
+      } else {
+        const questionId = question?.answers ?? null;
+        const answer =
+          questionId === null
+            ? null
+            : (text: string | null) => {
+                asked.delete(key);
+                if (text !== null) a.respond?.(questionResult(questionId, text));
+              };
+        a.item = approvals.askQuestion(
+          agentId,
+          request.summary,
+          request.itemId,
+          answer,
+          answerable,
+        );
+      }
       asked.set(key, a);
     },
     notification(method, params) {

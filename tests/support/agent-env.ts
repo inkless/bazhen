@@ -87,6 +87,11 @@ export function codexHome(
       `[projects."${trusted}"]`,
       `trust_level = "trusted"`,
       ``,
+      // Codex refuses request_user_input outside Plan mode unless this is on; the tests ask
+      // their questions in the default mode.
+      `[features]`,
+      `default_mode_request_user_input = true`,
+      ``,
     ].join("\n"),
   );
   // The managed daemon updates itself unless this says not to.

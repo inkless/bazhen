@@ -8,6 +8,8 @@ import {
   messageText,
   queueArgs,
   readApproval,
+  readQuestion,
+  questionResult,
   readResolved,
   readThreadList,
   readThreadStarted,
@@ -126,6 +128,15 @@ describe("Codex's theme", () => {
   });
 });
 
+/** Whether a user-input request asking these questions can be answered from the inbox, and how. */
+const ask = (question: object, more: object[] = []) =>
+  readQuestion("item/tool/requestUserInput", {
+    threadId: "thr-1",
+    turnId: "t-1",
+    itemId: "call_1",
+    questions: [{ id: "q1", header: "H", question: "Which branch?", ...question }, ...more],
+  })?.answers;
+
 describe("Codex approvals", () => {
   const call = { threadId: "thr-1", turnId: "t-1", itemId: "call_1" };
 
@@ -152,6 +163,51 @@ describe("Codex approvals", () => {
       readApproval("item/tool/requestUserInput", call),
       readApproval("item/commandExecution/requestApproval", { itemId: "call_1" }),
     ]).toEqual([null, null]);
+  });
+
+  it("lets the inbox answer a single free-text question, and leaves choices and secrets to the TUI", () => {
+    const choice = { options: [{ label: "main", description: "" }] };
+    expect([
+      ask({}),
+      ask({ ...choice, isOther: true }),
+      ask(choice),
+      ask({ isSecret: true }),
+      ask({}, [{ id: "q2", header: "H", question: "And why?" }]),
+    ]).toEqual(["q1", "q1", null, null, null]);
+  });
+
+  it("reads an elicitation and a permissions request as questions only the TUI answers", () => {
+    expect([
+      readQuestion("mcpServer/elicitation/request", {
+        threadId: "thr-1",
+        turnId: null,
+        serverName: "github",
+        mode: "form",
+        message: "Pick a repo",
+      }),
+      readQuestion("item/permissions/requestApproval", { ...call, reason: "network" }),
+      readQuestion("item/commandExecution/requestApproval", call),
+    ]).toEqual([
+      {
+        threadId: "thr-1",
+        itemId: null,
+        key: '["elicitation","github","Pick a repo"]',
+        summary: "github asks: Pick a repo",
+        answers: null,
+      },
+      {
+        threadId: "thr-1",
+        itemId: "call_1",
+        key: "call_1",
+        summary: "Grant more permissions (network)",
+        answers: null,
+      },
+      null,
+    ]);
+  });
+
+  it("answers a question with the human's text under its id", () => {
+    expect(questionResult("q1", "main")).toEqual({ answers: { q1: { answers: ["main"] } } });
   });
 
   it("names the request a resolved notification says was answered, and nothing else", () => {

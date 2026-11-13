@@ -29,7 +29,54 @@ function ask(approvals: Approvals, agentId: string, useId: string, payload = cal
   return approvals.request(agentId, asked.summary, asked.tool, live());
 }
 
+/** A question starting and asking, as Claude Code's hooks report an AskUserQuestion. */
+function askQuestion(approvals: Approvals, agentId: string, useId: string, caller?: string) {
+  const question = {
+    prompt_id: "p-1",
+    tool_name: "AskUserQuestion",
+    tool_input: {},
+    ...(caller === undefined ? {} : { agent_id: caller }),
+  };
+  const started = readHook("PreToolUse", { ...question, tool_use_id: useId });
+  const asked = readHook("PermissionRequest", question);
+  if (started.kind !== "toolStarted" || asked.kind !== "question") throw new Error("no question");
+  approvals.toolStarted(agentId, started.tool, started.useId);
+  approvals.question(agentId, asked.summary, asked.tool);
+}
+
 describe("approvals", () => {
+  it("closes the agent's question when a prompt with a new id ends its turn, not one that joins it", async () => {
+    const { store, agentId } = await withAgent();
+    const approvals = new Approvals(store);
+    askQuestion(approvals, agentId, "q-1");
+    approvals.promptStarted(agentId, "p-1");
+    const joined = items(store)[0]?.state;
+    approvals.promptStarted(agentId, "p-2");
+    expect([joined, items(store)[0]?.closeReason]).toEqual(["open", "answered_in_tui"]);
+  });
+
+  it("closes a subagent's question when that subagent stops, and no other's", async () => {
+    const { store, agentId } = await withAgent();
+    const approvals = new Approvals(store);
+    askQuestion(approvals, agentId, "q-1", "sub-1");
+    askQuestion(approvals, agentId, "q-2", "sub-2");
+    approvals.subagentStopped(agentId, "sub-1");
+    expect(items(store).map((i) => i.state)).toEqual(["closed", "open"]);
+  });
+
+  it("shows a question the TUI takes, with nothing to answer it, until its tool call ends", async () => {
+    const { store, agentId } = await withAgent();
+    const approvals = new Approvals(store);
+    askQuestion(approvals, agentId, "q-1");
+    const open = items(store)[0];
+    approvals.toolSettled(agentId, "q-1");
+    expect([open?.kind, open?.actions, items(store)[0]?.closeReason]).toEqual([
+      "question",
+      [],
+      "answered_in_tui",
+    ]);
+  });
+
   it("opens an item for a tool request and answers the waiting hook with the inbox's decision", async () => {
     const { store, agentId } = await withAgent();
     const approvals = new Approvals(store);

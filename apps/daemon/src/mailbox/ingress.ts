@@ -75,10 +75,15 @@ export function hookApp(deps: IngressDeps): Hono {
         return framed(
           await deps.approvals.request(agentId, read.summary, read.tool, c.req.raw.signal),
         );
+      case "question":
+        // No decision: the TUI shows its own prompt, and takes the answer.
+        deps.approvals.question(agentId, read.summary, read.tool);
+        break;
       case "promptStarted":
         if (await own()) {
           deps.mailbox.promptStarted(agentId, read.prompt, read.promptId);
           deps.turns.started(agentId);
+          deps.approvals.promptStarted(agentId, read.promptId);
         }
         break;
       case "turnEnded":
@@ -104,8 +109,10 @@ export function hookApp(deps: IngressDeps): Hono {
       case "statusline":
         if (deps.binding.inSession(agentId, origin)) deps.recordUsage(agentId, read.usage);
         break;
-      case "subagentStarted":
       case "subagentStopped":
+        deps.approvals.subagentStopped(agentId, read.subagentId);
+        break;
+      case "subagentStarted":
       case "ignored":
         break;
     }

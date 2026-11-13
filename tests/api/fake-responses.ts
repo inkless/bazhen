@@ -2,6 +2,7 @@
 // an account. The reply is picked by the latest user text:
 //   [[fake:shell:<command>]]  a shell call running <command> outside the sandbox, then "done"
 //   [[fake:slow:<ms>]]        the reply, sent <ms> milliseconds late
+//   [[fake:ask]]              a request_user_input call: one question, two choices, then "done"
 //   anything else             a short text reply echoing it
 // Every request is kept, so a test can check what the model was sent.
 
@@ -112,6 +113,33 @@ const shellCall = (res: ServerResponse, tools: unknown, command: string) =>
     send(res, { type: "response.output_item.done", output_index: 0, item });
   });
 
+/** The question `[[fake:ask]]` asks. */
+export const FAKE_CODEX_QUESTION = "Which branch should it work on?";
+
+/** A request_user_input call, Codex's tool for asking the human, with one question. */
+const askCall = (res: ServerResponse) =>
+  respond(res, (id) => {
+    const question = {
+      id: "branch",
+      header: "Branch",
+      question: FAKE_CODEX_QUESTION,
+      options: [
+        { label: "main (Recommended)", description: "The default branch" },
+        { label: "dev", description: "Work in progress" },
+      ],
+    };
+    const item = {
+      type: "function_call",
+      id: `fc_${id}`,
+      call_id: `call_${id}`,
+      name: "request_user_input",
+      arguments: JSON.stringify({ questions: [question] }),
+      status: "completed",
+    };
+    send(res, { type: "response.output_item.added", output_index: 0, item });
+    send(res, { type: "response.output_item.done", output_index: 0, item });
+  });
+
 export async function startFakeResponses(): Promise<FakeModel> {
   const requests: string[] = [];
   const server = createServer((req, res) => {
@@ -130,6 +158,7 @@ export async function startFakeResponses(): Promise<FakeModel> {
       setTimeout(() => {
         if (field(items.at(-1), "type") === "function_call_output") message(res, "done");
         else if (shell !== undefined) shellCall(res, field(request, "tools"), shell);
+        else if (user.includes("[[fake:ask]]")) askCall(res);
         else message(res, `echo: ${user.slice(-80)}`);
       }, slow);
     });
