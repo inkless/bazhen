@@ -1,6 +1,12 @@
 /** Reads palette.css and tokens.css as text, to test the themes and to show them side by side. */
 
-export type Oklch = { readonly l: number; readonly c: number; readonly h: number };
+export type Oklch = {
+  readonly l: number;
+  readonly c: number;
+  readonly h: number;
+  /** Below 1 for a translucent primitive, whose colour depends on what is under it. */
+  readonly alpha?: number;
+};
 export type Scheme = "light" | "dark";
 type Sides = { readonly light: string; readonly dark: string };
 
@@ -49,7 +55,7 @@ export function cssDeclarations(css: string): Declaration[] {
   return found;
 }
 
-const PRIMITIVE = /^oklch\(([\d.]+) ([\d.]+) ([\d.]+)\)$/;
+const PRIMITIVE = /^oklch\(([\d.]+) ([\d.]+) ([\d.]+)(?: \/ ([\d.]+))?\)$/;
 const MAPPED = /^light-dark\(var\(--([\w-]+)\), var\(--([\w-]+)\)\)$/;
 const MORE_CONTRAST = "@media (prefers-contrast: more)";
 const isColour = (d: Declaration) => d.property.startsWith("--color-");
@@ -59,9 +65,13 @@ export function paletteOf(css: string): Map<string, Oklch> {
     cssDeclarations(css)
       .filter(isColour)
       .map((d) => {
-        const [, l, c, h] = PRIMITIVE.exec(d.value) ?? [];
+        const [, l, c, h, alpha] = PRIMITIVE.exec(d.value) ?? [];
         if (h === undefined) throw new Error(`${d.property} is not an oklch() primitive`);
-        return [d.property.slice(2), { l: Number(l), c: Number(c), h: Number(h) }];
+        const colour = { l: Number(l), c: Number(c), h: Number(h) };
+        return [
+          d.property.slice(2),
+          alpha === undefined ? colour : { ...colour, alpha: Number(alpha) },
+        ];
       }),
   );
 }
@@ -132,8 +142,14 @@ const luminance = (colour: Oklch) => {
   return 0.2126 * (r ?? 0) + 0.7152 * (g ?? 0) + 0.0722 * (b ?? 0);
 };
 
-/** WCAG 2.2's contrast ratio, 1 to 21. */
+/**
+ * WCAG 2.2's contrast ratio, 1 to 21, between two opaque colours. A translucent one is refused:
+ * its ratio depends on what is under it, so a pair using one must be measured composited.
+ */
 export function contrast(a: Oklch, b: Oklch): number {
+  if ((a.alpha ?? 1) < 1 || (b.alpha ?? 1) < 1) {
+    throw new Error("contrast needs opaque colours; composite a translucent one over its backdrop");
+  }
   const [hi = 0, lo = 0] = [luminance(a), luminance(b)].toSorted((x, y) => y - x);
   return (hi + 0.05) / (lo + 0.05);
 }

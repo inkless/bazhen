@@ -1,7 +1,9 @@
-import { useRef, useState, type SubmitEvent } from "react";
+import { useState, type SubmitEvent } from "react";
 import type { Agent, AgentState } from "@bazhen/protocol";
 import { closeAgent, forceCloseAgent, Refused, respawnAgent, sendMessage } from "../api.ts";
 import { TerminalView } from "../terminal/TerminalView.tsx";
+import { Button } from "../ui/Button.tsx";
+import { ConfirmDialog } from "../ui/ConfirmDialog.tsx";
 import { AttachCommand } from "./AttachCommand.tsx";
 import { agentActions, exitText, shortId } from "./model.ts";
 
@@ -17,7 +19,6 @@ const NO_TERMINAL: Partial<Record<AgentState, string>> = {
 /** One agent: what it is, what can be done to it, and its terminal while there is one. */
 export function Workspace({ agent, failed }: { agent: Agent; failed: (e: unknown) => void }) {
   const { open, buttons } = agentActions(agent);
-  const dialog = useRef<HTMLDialogElement>(null);
   // Where the agent was when a command went out. It stays busy until the snapshot shows it moved,
   // since a second click before then would name the generation the first one replaced.
   const [sentAt, setSentAt] = useState<string | null>(null);
@@ -30,7 +31,7 @@ export function Workspace({ agent, failed }: { agent: Agent; failed: (e: unknown
   const busy = sentAt === position;
 
   const run = (command: (id: string, generation: number) => Promise<unknown>) => {
-    if (agent.generation === null) return;
+    if (agent.generation === null || busy) return;
     setSentAt(position);
     command(agent.id, agent.generation).catch((e: unknown) => {
       setSentAt(null);
@@ -53,31 +54,39 @@ export function Workspace({ agent, failed }: { agent: Agent; failed: (e: unknown
         {agent.exit !== null && <span>{exitText(agent.exit)}</span>}
         <span className="spacer" />
         {buttons.includes("respawn") && (
-          <button type="button" disabled={busy} onClick={() => run(respawnAgent)}>
+          <Button isDisabled={busy} onPress={() => run(respawnAgent)}>
             Respawn
-          </button>
+          </Button>
         )}
+        {/* Remounted the moment close changes name, and gone once it is no longer offered, so a
+            confirm left open can't send it. */}
         {closable && (
-          <button type="button" disabled={busy} onClick={() => dialog.current?.showModal()}>
-            {removing ? "Remove…" : "Close agent…"}
-          </button>
+          <ConfirmDialog
+            key={String(removing)}
+            isDisabled={busy}
+            trigger={removing ? "Remove…" : "Close agent…"}
+            title={removing ? "Remove agent" : "Close agent"}
+            message={
+              removing
+                ? `Remove ${agent.project}? Its terminal is already gone; this takes it off the fleet.`
+                : `Close ${agent.project}? Its ${agent.harness} process and terminal end, and mail still on its way is dropped.`
+            }
+            confirm={removing ? "Remove" : "Close agent"}
+            onConfirm={() => run(closeAgent)}
+          />
         )}
         {unconfirmed && closable && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => {
-              if (
-                window.confirm(
-                  `Force close ${agent.project}? Bazhen can't show its old tmux server has ended; ` +
-                    "it is recorded closed, and that server may still be running it.",
-                )
-              )
-                run(forceCloseAgent);
-            }}
-          >
-            Force close…
-          </button>
+          <ConfirmDialog
+            isDisabled={busy}
+            trigger="Force close…"
+            title="Force close agent"
+            message={
+              `Force close ${agent.project}? Bazhen can't show its old tmux server has ended; ` +
+              "it is recorded closed, and that server may still be running it."
+            }
+            confirm="Force close"
+            onConfirm={() => run(forceCloseAgent)}
+          />
         )}
       </header>
       <p className="cwd">{agent.cwd}</p>
@@ -87,7 +96,7 @@ export function Workspace({ agent, failed }: { agent: Agent; failed: (e: unknown
             <label>
               Message <input value={message} onChange={(e) => setMessage(e.target.value)} />
             </label>
-            <button type="submit">Send</button>
+            <Button type="submit">Send</Button>
           </form>
           {agent.terminalId !== null && (
             <TerminalView
@@ -101,33 +110,6 @@ export function Workspace({ agent, failed }: { agent: Agent; failed: (e: unknown
         <p>{NO_TERMINAL[agent.state] ?? "There is no terminal to show."}</p>
       )}
       {agent.attachCommand !== null && <AttachCommand command={agent.attachCommand} />}
-      {/* Gone, or remounted, the moment close is no longer offered or changes name, so a confirm
-          left open can't send it. */}
-      {closable && (
-        <dialog
-          key={String(removing)}
-          ref={dialog}
-          aria-label={removing ? "Remove agent" : "Close agent"}
-        >
-          <p>
-            {removing
-              ? `Remove ${agent.project}? Its terminal is already gone; this takes it off the fleet.`
-              : `Close ${agent.project}? Its ${agent.harness} process and terminal end, and mail still on its way is dropped.`}
-          </p>
-          <button type="button" onClick={() => dialog.current?.close()}>
-            Cancel
-          </button>{" "}
-          <button
-            type="button"
-            onClick={() => {
-              dialog.current?.close();
-              run(closeAgent);
-            }}
-          >
-            {removing ? "Remove" : "Close agent"}
-          </button>
-        </dialog>
-      )}
     </article>
   );
 }

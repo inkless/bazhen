@@ -29,3 +29,17 @@ test("the page still loads, in the system's theme, when site data is blocked", a
   await expect(page.getByRole("heading", { name: "Bazhen" })).toBeVisible();
   await expect(page.locator("html")).not.toHaveAttribute("data-theme", /./);
 });
+
+test("the theme switch pins this device's theme, and back to the system's", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.goto("/");
+  const theme = page.getByRole("radiogroup", { name: "Theme" });
+  await theme.getByRole("radio", { name: "Dark" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.reload();
+  await expect(theme.getByRole("radio", { name: "Dark" })).toBeChecked();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+
+  await theme.getByRole("radio", { name: "System" }).click();
+  await expect(page.locator("html")).not.toHaveAttribute("data-theme", /./);
+});

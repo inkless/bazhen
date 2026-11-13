@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { HealthResponse, isCompatible } from "@bazhen/protocol";
 import { Dashboard } from "./Dashboard.tsx";
+import { ThemeSwitch } from "./ui/ThemeSwitch.tsx";
 
 type Status =
   | { kind: "loading" }
@@ -44,6 +45,7 @@ export function App() {
             </dd>
           </dl>
         )}
+        <ThemeSwitch />
       </header>
       {status.kind === "ok" && <Dashboard />}
     </main>

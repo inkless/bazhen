@@ -1,3 +1,4 @@
+import optimizeLocales from "@react-aria/optimize-locales-plugin";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 
@@ -23,7 +24,9 @@ const closeOnSigint = (): Plugin => ({
 });
 
 export default defineConfig({
-  plugins: [react(), closeOnSigint()],
+  // The UI is written in English, so React Aria's strings for its other locales (the dialog's
+  // hidden dismiss button, among others) would only add weight.
+  plugins: [react(), optimizeLocales.vite({ locales: ["en-US"] }), closeOnSigint()],
   server: {
     host: "127.0.0.1",
     port: Number(process.env.BAZHEN_WEB_PORT ?? 5173),

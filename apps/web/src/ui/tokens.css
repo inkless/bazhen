@@ -13,6 +13,10 @@
   --color-border-strong: light-dark(var(--color-neutral-9), var(--color-neutral-dark-9));
   --color-text: light-dark(var(--color-neutral-12), var(--color-neutral-dark-12));
   --color-text-muted: light-dark(var(--color-neutral-11), var(--color-neutral-dark-11));
+  --color-accent: light-dark(var(--color-blue-10), var(--color-blue-dark-9));
+  --color-accent-hover: light-dark(var(--color-blue-11), var(--color-blue-dark-10));
+  --color-on-accent: light-dark(var(--color-neutral-1), var(--color-neutral-dark-1));
+  --color-backdrop: light-dark(var(--color-black-a5), var(--color-black-a8));
   --color-link: light-dark(var(--color-blue-11), var(--color-blue-dark-11));
   --color-focus-ring: light-dark(var(--color-blue-9), var(--color-blue-dark-9));
   --color-ok: light-dark(var(--color-green-11), var(--color-green-dark-11));
@@ -29,6 +33,7 @@
   --space-4: 16px;
   --space-5: 24px;
   --radius-s: 4px;
+  --radius-m: 8px;
   --radius-pill: 999px;
   --size-hit-min: 24px;
   --font-size-xs: 0.75rem;
@@ -45,7 +50,11 @@
 
   /* $type: duration, cubicBezier */
   --duration-fast: 100ms;
+  --duration-normal: 200ms;
   --easing-standard: cubic-bezier(0.2, 0, 0, 1);
+
+  /* $type: shadow */
+  --shadow-overlay: 0 8px 32px var(--color-black-a5);
 }
 
 :root[data-theme="light"] {
@@ -74,5 +83,6 @@
 @media (prefers-reduced-motion: reduce) {
   :root {
     --duration-fast: 0s;
+    --duration-normal: 0s;
   }
 }

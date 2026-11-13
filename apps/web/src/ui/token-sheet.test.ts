@@ -24,6 +24,7 @@ const TEXT_ON = {
     "color-surface-selected",
   ],
   "color-link": ["color-bg", "color-surface"],
+  "color-on-accent": ["color-accent", "color-accent-hover"],
   "color-ok": ["color-ok-subtle"],
   "color-warn": ["color-warn-subtle"],
   "color-danger": ["color-danger-subtle"],
@@ -76,6 +77,14 @@ describe("contrast", () => {
     expect(contrast(black, white)).toBeCloseTo(21, 1);
     expect(contrast(white, black)).toBeCloseTo(21, 1);
     expect(contrast(white, white)).toBe(1);
+  });
+
+  test("refuses a translucent colour, whose contrast depends on what is under it", () => {
+    const scrim = palette.get("color-black-a5");
+    expect(scrim?.alpha).toBe(0.3);
+    expect(() => contrast({ l: 1, c: 0, h: 0 }, { l: 0, c: 0, h: 0, alpha: 0.3 })).toThrow(
+      /opaque/,
+    );
   });
 
   test("matches WCAG for a mid grey: #777 on white is 4.48:1", () => {
@@ -136,7 +145,7 @@ describe("the palette", () => {
   test("is inside sRGB, so no contrast here rests on a browser's gamut mapping", () => {
     const outside = [...palette].filter(([, colour]) => !inSrgb(colour)).map(([name]) => name);
     expect(outside).toEqual([]);
-    expect(palette.size).toBe(120);
+    expect(palette.size).toBe(122);
   });
 
   test("can tell a colour outside sRGB", () => {

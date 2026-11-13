@@ -2504,6 +2504,13 @@
                   "ws"
                 ],
                 "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import runtime libraries."
+              },
+              {
+                "group": [
+                  "react-aria-components",
+                  "react-aria-components/*"
+                ],
+                "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) takes widgets from the wrappers in apps/web/src/ui (docs/standards/ui.md)."
               }
             ]
           }
@@ -2556,6 +2563,13 @@
                   "ws"
                 ],
                 "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import runtime libraries."
+              },
+              {
+                "group": [
+                  "react-aria-components",
+                  "react-aria-components/*"
+                ],
+                "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) takes widgets from the wrappers in apps/web/src/ui (docs/standards/ui.md)."
               },
               {
                 "group": [
@@ -2637,6 +2651,198 @@
                   "ws"
                 ],
                 "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import runtime libraries."
+              },
+              {
+                "group": [
+                  "react-aria-components",
+                  "react-aria-components/*"
+                ],
+                "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) takes widgets from the wrappers in apps/web/src/ui (docs/standards/ui.md)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "apps/web/src/ui/**/*.ts",
+        "apps/web/src/ui/**/*.tsx"
+      ],
+      "rules": {
+        "import/no-nodejs-modules": "error",
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/core",
+                  "@bazhen/core/**",
+                  "**/packages/core/**",
+                  "**/core/src/**"
+                ],
+                "message": "apps/web/src/ui (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/core."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-tmux",
+                  "@bazhen/runtime-tmux/**",
+                  "**/packages/runtime-tmux/**",
+                  "**/runtime-tmux/src/**"
+                ],
+                "message": "apps/web/src/ui (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**"
+                ],
+                "message": "apps/web/src/ui (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "hono",
+                  "@hono/*",
+                  "ws"
+                ],
+                "message": "apps/web/src/ui (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import runtime libraries."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "apps/web/src/ui/**/*.test.ts",
+        "apps/web/src/ui/**/*.test.tsx"
+      ],
+      "rules": {
+        "import/no-nodejs-modules": "error",
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/core",
+                  "@bazhen/core/**",
+                  "**/packages/core/**",
+                  "**/core/src/**"
+                ],
+                "message": "apps/web/src/ui (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/core."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-tmux",
+                  "@bazhen/runtime-tmux/**",
+                  "**/packages/runtime-tmux/**",
+                  "**/runtime-tmux/src/**"
+                ],
+                "message": "apps/web/src/ui (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**"
+                ],
+                "message": "apps/web/src/ui (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "hono",
+                  "@hono/*",
+                  "ws"
+                ],
+                "message": "apps/web/src/ui (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import runtime libraries."
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "fs",
+                  "node:fs",
+                  "fs/promises",
+                  "node:fs/promises",
+                  "os",
+                  "node:os",
+                  "net",
+                  "node:net",
+                  "http",
+                  "node:http",
+                  "https",
+                  "node:https",
+                  "http2",
+                  "node:http2",
+                  "dgram",
+                  "node:dgram",
+                  "tls",
+                  "node:tls",
+                  "child_process",
+                  "node:child_process",
+                  "worker_threads",
+                  "node:worker_threads",
+                  "sqlite",
+                  "node:sqlite"
+                ],
+                "message": "A *.test.ts is a small test: no files, sockets, processes or databases. Rename it *.medium.test.ts (docs/standards/testing.md)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "apps/web/src/ui/**/*.medium.test.ts"
+      ],
+      "rules": {
+        "import/no-nodejs-modules": "error",
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/core",
+                  "@bazhen/core/**",
+                  "**/packages/core/**",
+                  "**/core/src/**"
+                ],
+                "message": "apps/web/src/ui (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/core."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-tmux",
+                  "@bazhen/runtime-tmux/**",
+                  "**/packages/runtime-tmux/**",
+                  "**/runtime-tmux/src/**"
+                ],
+                "message": "apps/web/src/ui (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**"
+                ],
+                "message": "apps/web/src/ui (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "hono",
+                  "@hono/*",
+                  "ws"
+                ],
+                "message": "apps/web/src/ui (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import runtime libraries."
               }
             ]
           }
