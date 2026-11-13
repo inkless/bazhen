@@ -5,7 +5,7 @@ import { z } from "zod";
  * fields, never rename, remove or tighten what has shipped. Bump the minor in the same commit as
  * any addition; clients negotiate on it.
  */
-export const PROTOCOL_VERSION = "1.19";
+export const PROTOCOL_VERSION = "1.20";
 
 export const ProtocolVersion = z.string().regex(/^\d+\.\d+$/);
 

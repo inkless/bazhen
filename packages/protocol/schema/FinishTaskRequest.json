@@ -1,0 +1,31 @@
+{
+  "$id": "FinishTaskRequest",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "outcome": {
+      "type": "string",
+      "enum": [
+        "done",
+        "cancelled"
+      ]
+    },
+    "note": {
+      "type": "string",
+      "maxLength": 20000
+    },
+    "cascade": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "idempotencyKey",
+    "outcome"
+  ],
+  "additionalProperties": false
+}
