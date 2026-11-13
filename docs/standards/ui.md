@@ -3,13 +3,13 @@
 How to build UI in `apps/web`: what the look is made of, and the rules that keep a new screen
 consistent with the rest and cheap to re-theme.
 
-| Rule                                                                                         | Enforced by                                         |
-| -------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| Screens use only semantic tokens: no literal colours, no primitives                          | `pnpm check` (`scripts/check-standards.ts`)         |
-| Every text/background pair the UI draws meets WCAG 2.2 AA, in every theme                    | `pnpm test` (`apps/web/src/ui/token-sheet.test.ts`) |
-| A new pair of foreground and background is added to that test                                | review                                              |
-| Screens take interactive widgets from `apps/web/src/ui/`, never from `react-aria-components` | review                                              |
-| Interactive targets are at least `--size-hit-min`                                            | review                                              |
+| Rule                                                                                         | Enforced by                                             |
+| -------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| Screens use only semantic tokens: no literal colours, no primitives                          | `pnpm check` (`scripts/check-standards.ts`)             |
+| Every text/background pair the UI draws meets WCAG 2.2 AA, in every theme                    | `pnpm test` (`apps/web/src/ui/token-sheet.test.ts`)     |
+| A new pair of foreground and background is added to that test                                | review                                                  |
+| Screens take interactive widgets from `apps/web/src/ui/`, never from `react-aria-components` | `pnpm lint` (`onlyThrough` in `scripts/lint-config.ts`) |
+| Interactive targets are at least `--size-hit-min`                                            | review                                                  |
 
 ## Tokens
 
@@ -74,11 +74,14 @@ tap on a phone.
 
 - `Button` for every action, with a `variant`: `primary`, `secondary`, `quiet`, `link`.
 - `ConfirmDialog` for a button that asks first: a modal that traps focus, returns it to the
-  trigger, and closes on Escape or a tap outside.
+  trigger, and closes on Escape or a tap outside. Its confirm acts once per opening; the screen's
+  own command should still refuse a second send while the first is in flight.
 - `ThemeSwitch`, the header's System / Light / Dark choice.
 
 A new widget (a menu, a combo box, a toast) is a new wrapper: import the React Aria component by
-name, style it from semantic tokens, and add the pairs it draws to the contrast test.
+name, style it from semantic tokens, and add the pairs it draws to the contrast test. Its
+translated strings ship for `en-US` only (`optimizeLocales` in `apps/web/vite.config.ts`); a
+locale the UI is translated into goes in that list too.
 
 Not everything needs one. A list that navigates, like the fleet, stays a native list of
 buttons: React Aria's `GridList` is a selection widget, with `role="grid"`. Native inputs and

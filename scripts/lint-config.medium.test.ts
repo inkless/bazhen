@@ -20,6 +20,8 @@ const FIXTURES: Record<string, string> = {
   "apps/daemon/src/b.medium.test.ts":
     'export { readFileSync } from "node:fs";\nexport { web } from "@bazhen/web";\n',
   "packages/core/src/c.test.ts": 'export { readFileSync } from "node:fs";\n',
+  "apps/web/src/d.tsx": 'export { Button } from "react-aria-components";\n',
+  "apps/web/src/ui/e.tsx": 'export { Button } from "react-aria-components";\n',
 };
 
 type Diagnostic = { code?: string; filename?: string };
@@ -67,6 +69,8 @@ describe("the generated oxlint config, run by oxlint", () => {
       "apps/web/src/a.ts": ["eslint(no-restricted-imports)", "eslint(no-restricted-imports)"],
       "apps/daemon/src/b.medium.test.ts": ["eslint(no-restricted-imports)"],
       "packages/core/src/c.test.ts": ["eslint(no-restricted-imports)", "import(no-nodejs-modules)"],
+      "apps/web/src/d.tsx": ["eslint(no-restricted-imports)"],
+      "apps/web/src/ui/e.tsx": [],
     });
   });
 });

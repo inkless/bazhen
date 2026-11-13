@@ -27,6 +27,14 @@ describe("generated oxlint config", () => {
     );
   });
 
+  it("lets apps/web take React Aria only through its wrappers in src/ui", () => {
+    expect([
+      banned("apps/web/**/*.ts").includes("react-aria-components"),
+      banned("apps/web/src/ui/**/*.ts").includes("react-aria-components"),
+      banned("apps/web/src/ui/**/*.ts").includes("@bazhen/core"),
+    ]).toEqual([true, false, true]);
+  });
+
   it("lets packages/core import only types from protocol", () => {
     expect(patterns("packages/core/**/*.ts")).toContainEqual(
       expect.objectContaining({

@@ -1,9 +1,11 @@
+import { useState } from "react";
 import { Dialog, DialogTrigger, Heading, Modal, ModalOverlay } from "react-aria-components";
 import { Button } from "./Button.tsx";
 
 /**
  * A button that asks before it acts. The modal traps focus, gives it back to the trigger, and
- * closes on Escape or a tap outside.
+ * closes on Escape or a tap outside. Its confirm acts once per opening: it stays on screen while
+ * the modal animates out, and a second tap there must not send the command again.
  */
 export function ConfirmDialog({
   trigger,
@@ -20,8 +22,9 @@ export function ConfirmDialog({
   onConfirm: () => void;
   isDisabled: boolean;
 }) {
+  const [confirmed, setConfirmed] = useState(false);
   return (
-    <DialogTrigger>
+    <DialogTrigger onOpenChange={(open) => open && setConfirmed(false)}>
       <Button isDisabled={isDisabled}>{trigger}</Button>
       <ModalOverlay isDismissable className="modal-overlay">
         <Modal className="modal">
@@ -36,7 +39,9 @@ export function ConfirmDialog({
                   <Button onPress={close}>Cancel</Button>
                   <Button
                     variant="primary"
+                    isDisabled={confirmed}
                     onPress={() => {
+                      setConfirmed(true);
                       close();
                       onConfirm();
                     }}

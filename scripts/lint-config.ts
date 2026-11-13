@@ -16,6 +16,8 @@ export type Area = {
   onlySubpaths?: Record<string, string[]>;
   platformFree?: boolean;
   thirdParty?: string[];
+  /** Libraries it may use only through the wrappers in `via`, which is an area of its own. */
+  onlyThrough?: { packages: string[]; via: string };
 };
 
 const PACKAGE_DIR: Record<string, string> = {
@@ -32,6 +34,7 @@ const PACKAGE_DIR: Record<string, string> = {
 };
 
 const RUNTIME_LIBS = ["node-pty", "hono", "@hono/*", "ws", "@xterm/*"];
+const WIDGET_LIBS = ["react-aria-components", "react-aria-components/*"];
 
 // tech-stack-and-scaffold.md §3. The single source of the import matrix: docs/standards/code.md
 // explains it, and scripts/lint-config.medium.test.ts checks each package.json against it.
@@ -143,6 +146,14 @@ export const MATRIX: Area[] = [
     banned: ["@bazhen/core", "@bazhen/runtime-tmux", "@bazhen/daemon"],
     platformFree: true,
     thirdParty: ["node-pty", "hono", "@hono/*", "ws"],
+    onlyThrough: { packages: WIDGET_LIBS, via: "apps/web/src/ui" },
+  },
+  // After apps/web, whose rule it replaces for these files: the one place widgets are wrapped.
+  {
+    dir: "apps/web/src/ui",
+    banned: ["@bazhen/core", "@bazhen/runtime-tmux", "@bazhen/daemon"],
+    platformFree: true,
+    thirdParty: ["node-pty", "hono", "@hono/*", "ws"],
   },
   // Repository scripts: Node tools with no package bans, listed so their small tests get the
   // small-test bans.
@@ -209,6 +220,12 @@ function restrictions(area: Area, smallTest: boolean): Restriction {
     patterns.push({
       group: area.thirdParty,
       message: `${where} must not import runtime libraries.`,
+    });
+  }
+  if (area.onlyThrough !== undefined) {
+    patterns.push({
+      group: area.onlyThrough.packages,
+      message: `${where} takes widgets from the wrappers in ${area.onlyThrough.via} (docs/standards/ui.md).`,
     });
   }
   if (smallTest) {

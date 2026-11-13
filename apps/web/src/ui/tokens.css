@@ -10,7 +10,6 @@
   --color-surface: light-dark(var(--color-neutral-3), var(--color-neutral-dark-3));
   --color-surface-hover: light-dark(var(--color-neutral-4), var(--color-neutral-dark-4));
   --color-surface-selected: light-dark(var(--color-neutral-5), var(--color-neutral-dark-5));
-  --color-border: light-dark(var(--color-neutral-6), var(--color-neutral-dark-6));
   --color-border-strong: light-dark(var(--color-neutral-9), var(--color-neutral-dark-9));
   --color-text: light-dark(var(--color-neutral-12), var(--color-neutral-dark-12));
   --color-text-muted: light-dark(var(--color-neutral-11), var(--color-neutral-dark-11));
@@ -69,7 +68,6 @@
 /* More contrast: the theme mapping's overrides, light then dark. */
 @media (prefers-contrast: more) {
   :root {
-    --color-border: light-dark(var(--color-neutral-9), var(--color-neutral-dark-9));
     --color-text-muted: light-dark(var(--color-neutral-12), var(--color-neutral-dark-12));
     --color-link: light-dark(var(--color-blue-12), var(--color-blue-dark-12));
   }

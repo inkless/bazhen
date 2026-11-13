@@ -79,6 +79,14 @@ describe("contrast", () => {
     expect(contrast(white, white)).toBe(1);
   });
 
+  test("refuses a translucent colour, whose contrast depends on what is under it", () => {
+    const scrim = palette.get("color-black-a5");
+    expect(scrim?.alpha).toBe(0.3);
+    expect(() => contrast({ l: 1, c: 0, h: 0 }, { l: 0, c: 0, h: 0, alpha: 0.3 })).toThrow(
+      /opaque/,
+    );
+  });
+
   test("matches WCAG for a mid grey: #777 on white is 4.48:1", () => {
     // #777777 is oklch(0.5693 0 0).
     expect(contrast({ l: 0.5693, c: 0, h: 0 }, { l: 1, c: 0, h: 0 })).toBeCloseTo(4.48, 1);

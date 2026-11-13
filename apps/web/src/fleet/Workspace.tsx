@@ -31,7 +31,7 @@ export function Workspace({ agent, failed }: { agent: Agent; failed: (e: unknown
   const busy = sentAt === position;
 
   const run = (command: (id: string, generation: number) => Promise<unknown>) => {
-    if (agent.generation === null) return;
+    if (agent.generation === null || busy) return;
     setSentAt(position);
     command(agent.id, agent.generation).catch((e: unknown) => {
       setSentAt(null);
@@ -76,21 +76,17 @@ export function Workspace({ agent, failed }: { agent: Agent; failed: (e: unknown
           />
         )}
         {unconfirmed && closable && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => {
-              if (
-                window.confirm(
-                  `Force close ${agent.project}? Bazhen can't show its old tmux server has ended; ` +
-                    "it is recorded closed, and that server may still be running it.",
-                )
-              )
-                run(forceCloseAgent);
-            }}
-          >
-            Force close…
-          </button>
+          <ConfirmDialog
+            isDisabled={busy}
+            trigger="Force close…"
+            title="Force close agent"
+            message={
+              `Force close ${agent.project}? Bazhen can't show its old tmux server has ended; ` +
+              "it is recorded closed, and that server may still be running it."
+            }
+            confirm="Force close"
+            onConfirm={() => run(forceCloseAgent)}
+          />
         )}
       </header>
       <p className="cwd">{agent.cwd}</p>

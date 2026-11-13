@@ -77,6 +77,16 @@ async function unconfirmedCloses(page: Page, agentId: string): Promise<unknown[]
   });
   return forced;
 }
+/** Every close of `agentId` the page sends, as it sends them. */
+function closeRequests(page: Page, agentId: string): string[] {
+  const closes: string[] = [];
+  const close = `/v1/agents/${agentId}/close`;
+  page.on("request", (r) => {
+    if (r.method() === "POST" && r.url().endsWith(close)) closes.push(r.url());
+  });
+  return closes;
+}
+
 const stateOf = (page: Page, state: string) =>
   workspace(page).locator(".workspace-head").getByText(state, { exact: true });
 
@@ -156,20 +166,52 @@ test("offers a forced close only once a close comes back unconfirmed, and sends 
   await page.getByRole("dialog").getByRole("button", { name: "Close agent" }).click();
   await expect(force).toBeVisible();
 
-  const asked: string[] = [];
-  page.once("dialog", (d) => {
-    asked.push(d.type());
-    void d.dismiss();
-  });
+  const confirm = page.getByRole("dialog", { name: "Force close agent" });
   await force.click();
-  await expect.poll(() => asked).toEqual(["confirm"]);
+  await confirm.getByRole("button", { name: "Cancel" }).click();
+  await expect(confirm).toHaveCount(0);
   expect(forced).toEqual([]);
 
-  page.once("dialog", (d) => {
-    asked.push(d.type());
-    void d.accept();
-  });
   await force.click();
+  await confirm.getByRole("button", { name: "Force close" }).click();
   await expect.poll(() => forced.length).toBe(1);
   expect(forced[0]).toMatchObject({ force: true });
+});
+
+test("the close confirm is a modal: Escape, Cancel and a tap outside each leave the agent alone", async ({
+  page,
+}) => {
+  const agentId = await launch(page);
+  const closes = closeRequests(page, agentId);
+  const trigger = workspace(page).getByRole("button", { name: "Close agent…" });
+  const dialog = page.getByRole("dialog", { name: "Close agent" });
+
+  await trigger.click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("Its claude-code process and terminal end");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+
+  await trigger.click();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+
+  await trigger.click();
+  await expect(dialog).toBeVisible();
+  await page.mouse.click(2, 2);
+  await expect(dialog).toHaveCount(0);
+
+  await expect(stateOf(page, "running")).toBeVisible();
+  expect(closes).toEqual([]);
+});
+
+test("sends a close once however fast its confirm is tapped twice", async ({ page }) => {
+  const agentId = await launch(page);
+  const closes = closeRequests(page, agentId);
+  await workspace(page).getByRole("button", { name: "Close agent…" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Close agent" }).dblclick();
+  await expect(stateOf(page, "closed")).toBeVisible({ timeout: 10_000 });
+  expect(closes).toHaveLength(1);
 });
