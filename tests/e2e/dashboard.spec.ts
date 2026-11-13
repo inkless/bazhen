@@ -1,6 +1,6 @@
 import { hostname } from "node:os";
 import { expect, test, type Page } from "@playwright/test";
-import { screen } from "./page.ts";
+import { kill, screen } from "./page.ts";
 
 /** Launches Claude Code from the page and waits for its TUI; answers the agent's id. */
 async function launch(page: Page): Promise<string> {
@@ -9,27 +9,6 @@ async function launch(page: Page): Promise<string> {
   await page.getByRole("button", { name: "Launch Claude Code" }).click();
   await expect.poll(() => screen(page), { timeout: 20_000 }).toContain("Claude Code");
   return new URL(page.url()).hash.replace("#/agent/", "");
-}
-
-/** Ends the agent's process from outside, as a crash would, through the daemon's signal command. */
-function kill(page: Page, agentId: string): Promise<number> {
-  return page.evaluate(async (id) => {
-    const state: unknown = await (await fetch("/v1/state")).json();
-    const agents: unknown = Reflect.get(Object(state), "agents");
-    const agent: unknown = Array.isArray(agents)
-      ? agents.find((a: unknown) => Reflect.get(Object(a), "id") === id)
-      : undefined;
-    const res = await fetch(`/v1/agents/${id}/signal`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        idempotencyKey: crypto.randomUUID(),
-        generation: Reflect.get(Object(agent), "generation"),
-        signal: "SIGKILL",
-      }),
-    });
-    return res.status;
-  }, agentId);
 }
 
 /** Launches an agent from outside the page, as another device would; answers the status. */

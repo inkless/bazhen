@@ -14,6 +14,7 @@ const environment = new LocalEnvironment({
   harnesses: [
     {
       id: "claude-code",
+      themes: ["light", "dark"],
       launchSpec: async (request) => ({
         argv: [...argvFor(request.project)],
         env: {},

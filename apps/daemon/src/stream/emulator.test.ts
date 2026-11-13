@@ -1,5 +1,6 @@
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import headless from "@xterm/headless";
+import { TERMINAL_COLOURS, type TuiTheme } from "@bazhen/protocol";
 import { describe, expect, it } from "vitest";
 import { ScreenEmulator, TerminalClosed } from "./emulator.ts";
 
@@ -13,13 +14,14 @@ const SENTINEL_REPLY = `${ESC}[?1;2c`;
  * Feeds the emulator what tmux's client prints, and collects what it answers. A device
  * attributes query follows the output, so its answer marks the point where all of it is parsed.
  */
-async function answersTo(output: string): Promise<string> {
+async function answersTo(output: string, theme: TuiTheme = "dark"): Promise<string> {
   let replies = "";
   const { promise: parsed, resolve } = Promise.withResolvers<void>();
-  const emulator = new ScreenEmulator({ cols: 80, rows: 24 }, (bytes) => {
+  const reply = (bytes: Uint8Array) => {
     replies += Buffer.from(bytes).toString("latin1");
     if (replies.endsWith(SENTINEL_REPLY)) resolve();
-  });
+  };
+  const emulator = new ScreenEmulator({ cols: 80, rows: 24 }, reply, TERMINAL_COLOURS[theme]);
   emulator.write(Buffer.from(output + SENTINEL, "latin1"));
   await parsed;
   emulator.dispose();
@@ -43,10 +45,12 @@ describe("the daemon's screen emulator", () => {
     expect(await answersTo(`${ESC}[14t`)).toBe(`${ESC}[4;0;0t`);
   });
 
-  it("answers the foreground and background colour queries", async () => {
-    expect(await answersTo(`${ESC}]10;?${ST}${ESC}]11;?${ESC}\\`)).toBe(
-      `${ESC}]10;rgb:ffff/ffff/ffff${ST}${ESC}]11;rgb:0000/0000/0000${ST}`,
-    );
+  it("answers the foreground and background colour queries with the terminal's theme", async () => {
+    const asked = `${ESC}]10;?${ST}${ESC}]11;?${ESC}\\`;
+    expect([await answersTo(asked, "light"), await answersTo(asked, "dark")]).toEqual([
+      `${ESC}]10;rgb:2020/2222/2525${ST}${ESC}]11;rgb:fdfd/fdfd/fdfd${ST}`,
+      `${ESC}]10;rgb:eaea/ebeb/eeee${ST}${ESC}]11;rgb:0f0f/0f0f/1010${ST}`,
+    ]);
   });
 
   it("does not answer a sequence that sets a colour rather than asking for it", async () => {
@@ -66,7 +70,7 @@ function browserTerminal(dimensions = size): headless.Terminal {
 
 /** A fresh terminal, as a browser joining late would be, with the emulator's snapshot written. */
 async function replayed(output: string, history = ""): Promise<headless.Terminal> {
-  const emulator = new ScreenEmulator(size, () => {});
+  const emulator = new ScreenEmulator(size, () => {}, TERMINAL_COLOURS.dark);
   emulator.seed(history);
   emulator.write(Buffer.from(output));
   const snapshot = await emulator.snapshot();
@@ -134,7 +138,7 @@ describe("the daemon's attach snapshot", () => {
   });
 
   it("restores the mouse protocol, the cursor's visibility and the modes tmux turned on", async () => {
-    const emulator = new ScreenEmulator(size, () => {});
+    const emulator = new ScreenEmulator(size, () => {}, TERMINAL_COLOURS.dark);
     emulator.write(Buffer.from("\x1b[?1000h\x1b[?1006h\x1b[?2004h\x1b[?1004h\x1b[?25l"));
     const snapshot = await emulator.snapshot();
     emulator.dispose();
@@ -146,7 +150,7 @@ describe("the daemon's attach snapshot", () => {
   });
 
   it("fails a snapshot once the terminal has closed, even one already waiting", async () => {
-    const emulator = new ScreenEmulator(size, () => {});
+    const emulator = new ScreenEmulator(size, () => {}, TERMINAL_COLOURS.dark);
     emulator.write(Buffer.from("x".repeat(100_000)));
     const waiting = emulator.snapshot();
     emulator.dispose();
@@ -156,7 +160,7 @@ describe("the daemon's attach snapshot", () => {
 
   it("keeps a history line's colours off the screen drawn below it", async () => {
     const browser = browserTerminal();
-    const emulator = new ScreenEmulator(size, () => {});
+    const emulator = new ScreenEmulator(size, () => {}, TERMINAL_COLOURS.dark);
     emulator.seed("\x1b[31mred history");
     emulator.write(Buffer.from("plain"));
     const snapshot = await emulator.snapshot();
@@ -170,7 +174,7 @@ describe("the daemon's attach snapshot", () => {
   });
 
   it("matches the screen at its new size after a resize", async () => {
-    const emulator = new ScreenEmulator(size, () => {});
+    const emulator = new ScreenEmulator(size, () => {}, TERMINAL_COLOURS.dark);
     emulator.resize({ cols: 10, rows: 3 });
     emulator.write(Buffer.from("\x1b[5;15Hz"));
     const snapshot = await emulator.snapshot();

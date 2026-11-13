@@ -171,6 +171,7 @@ const snapshotView: SnapshotView = {
   host: (kind) => (kind === "local" ? hostname() : ""),
   attachCommand: (ref) => runtime.attachCommand(ref),
   resumable: environment.resumable,
+  themes: (harness) => environment.themes[harness] ?? [],
 };
 const commands = {
   appVersion: APP_VERSION,

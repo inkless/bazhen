@@ -9,6 +9,7 @@ import {
   StateSnapshot,
   type ApprovalDecision,
   type HarnessId,
+  type Signal,
   type TuiTheme,
 } from "@bazhen/protocol";
 
@@ -148,6 +149,10 @@ export const answer = async (attentionId: string, decision: ApprovalDecision) =>
 /** Names the generation the UI saw, so a command meant for an earlier incarnation is refused. */
 export const closeAgent = async (agentId: string, generation: number) =>
   AgentCommandResponse.parse(await act(`/v1/agents/${agentId}/close`, { generation }));
+
+/** Signals a running agent's process, at the generation the UI saw. */
+export const signalAgent = async (agentId: string, generation: number, signal: Signal) =>
+  AgentCommandResponse.parse(await act(`/v1/agents/${agentId}/signal`, { generation, signal }));
 
 /** Records a closing agent closed without ending anything, once a close came back unconfirmed. */
 export const forceCloseAgent = async (agentId: string, generation: number) =>

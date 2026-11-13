@@ -11,7 +11,13 @@ import {
   type Size,
   type TerminalId,
 } from "@bazhen/core";
-import type { AttachmentMode, EventPayload, StreamServerFrame } from "@bazhen/protocol";
+import {
+  TERMINAL_COLOURS,
+  type AttachmentMode,
+  type EventPayload,
+  type StreamServerFrame,
+  type TuiTheme,
+} from "@bazhen/protocol";
 import { HISTORY_LINES, ScreenEmulator } from "./emulator.ts";
 import { classifyInput } from "./input-filter.ts";
 import { Settle } from "./settle.ts";
@@ -58,6 +64,8 @@ export interface AttachmentLog {
   granted(terminal: TerminalId, attachment: AttachmentId, epoch: number): void;
   /** The epoch of the terminal's last grant, so a new one is always higher. */
   epoch(terminal: TerminalId): number;
+  /** The theme the terminal's process was started for, which programs that ask are told. */
+  theme(terminal: TerminalId): TuiTheme;
   /** Whether the terminal is being closed, so its client's exit ends views as terminal_closed. */
   closing(terminal: TerminalId): boolean;
 }
@@ -167,7 +175,11 @@ export class TerminalHub {
       const watched: Watched = {
         terminal: ref.terminalId,
         stream,
-        emulator: new ScreenEmulator(stream.size, (reply) => stream.write(reply)),
+        emulator: new ScreenEmulator(
+          stream.size,
+          (reply) => stream.write(reply),
+          TERMINAL_COLOURS[this.log.theme(ref.terminalId)],
+        ),
         size: stream.size,
         viewers: new Map(),
         screen: new Settle(this.opts.screenQuietMs, this.opts.screenMaxWaitMs, () =>

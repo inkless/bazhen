@@ -2,7 +2,7 @@ import { useState, type SubmitEvent } from "react";
 import type { Agent, AgentState } from "@bazhen/protocol";
 import { closeAgent, forceCloseAgent, Refused, respawnAgent, sendMessage } from "../api.ts";
 import { TerminalView } from "../terminal/TerminalView.tsx";
-import { harnessPalette, shownScheme } from "../terminal/theme.ts";
+import { pageTheme } from "../ui/theme.ts";
 import { Button } from "../ui/Button.tsx";
 import { ConfirmDialog } from "../ui/ConfirmDialog.tsx";
 import { AttachCommand } from "./AttachCommand.tsx";
@@ -30,7 +30,6 @@ export function Workspace({ agent, failed }: { agent: Agent; failed: (e: unknown
   const closable = removing || buttons.includes("close");
   const position = `${agent.state}:${agent.generation}`;
   const busy = sentAt === position;
-  const palette = harnessPalette(agent.harness);
 
   const run = (command: (id: string, generation: number) => Promise<unknown>) => {
     if (agent.generation === null || busy) return;
@@ -58,7 +57,7 @@ export function Workspace({ agent, failed }: { agent: Agent; failed: (e: unknown
         {buttons.includes("respawn") && (
           <Button
             isDisabled={busy}
-            onPress={() => run((id, gen) => respawnAgent(id, gen, shownScheme(palette)))}
+            onPress={() => run((id, gen) => respawnAgent(id, gen, pageTheme().scheme()))}
           >
             Respawn
           </Button>
@@ -108,7 +107,7 @@ export function Workspace({ agent, failed }: { agent: Agent; failed: (e: unknown
               key={`${agent.terminalId}:${agent.generation}`}
               terminalId={agent.terminalId}
               kind="agent"
-              palette={palette}
+              scheme={agent.theme}
             />
           )}
         </>

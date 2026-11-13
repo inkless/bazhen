@@ -6,6 +6,11 @@ export interface HarnessLaunch {
   readonly argv: readonly [string, ...string[]];
   /** The harness's own variables, such as CODEX_HOME; never a user value. */
   readonly env: Readonly<Record<string, string>>;
+  /**
+   * The theme the TUI is started for, when the launch named one: the one asked for, or the one
+   * the harness can draw for if it differs.
+   */
+  readonly theme?: TuiTheme;
   /** The harness session the launch creates, when it is known before the TUI starts. */
   readonly externalRef: Omit<ExternalRef, "environmentId"> | null;
 }
@@ -33,6 +38,8 @@ export interface HarnessChannelPort {
  */
 export interface HarnessAdapter {
   readonly id: HarnessId;
+  /** The themes it can start its TUI in; asked for another, it starts in one of these. */
+  readonly themes: readonly TuiTheme[];
   launchSpec(request: AgentLaunchRequest, options: LaunchOptions): Promise<HarnessLaunch>;
   /**
    * How to start the TUI again on the agent's existing harness session. A harness without it

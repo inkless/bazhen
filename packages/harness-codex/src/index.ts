@@ -20,6 +20,19 @@ const BINDING = {
   content: [{ type: "input_text", text: "This thread belongs to an agent that Bazhen runs." }],
 };
 
+/**
+ * Codex has no light or dark of its own: `tui.theme` picks only its syntax highlighting, from the
+ * themes it bundles, and its other colours follow the background the terminal reports.
+ */
+const SYNTAX_THEME = { light: "one-half-light", dark: "one-half-dark" } as const;
+
+/**
+ * The theme a Codex TUI draws for, whatever was asked: it asks the terminal's background as it
+ * starts, before any client of the terminal can answer, and draws for dark when nobody does. Its
+ * syntax highlighting and its terminal follow that, so every client gets one consistent Codex.
+ */
+const STARTS_IN = "dark";
+
 /** The app-server resumed a thread other than the agent's own. */
 export class ThreadMismatch extends Error {
   constructor(expected: string, got: string) {
@@ -34,6 +47,7 @@ export class ThreadMismatch extends Error {
  */
 export class CodexHarness implements HarnessAdapter {
   readonly id = "codex";
+  readonly themes = [STARTS_IN] as const;
   private readonly channel: HarnessChannelPort;
   /** The same server, as the TUI reaches it with `--remote`. */
   private readonly remote: string;
@@ -86,26 +100,14 @@ export class CodexHarness implements HarnessAdapter {
         // The TUI keeps its pane's title set to the thread it shows, through /new and /resume.
         "-c",
         'tui.terminal_title=["thread-id"]',
-        ...(theme === undefined ? [] : ["-c", `tui.theme="${SYNTAX_THEME[TERMINAL_REPORTS]}"`]),
+        ...(theme === undefined ? [] : ["-c", `tui.theme="${SYNTAX_THEME[STARTS_IN]}"`]),
       ],
       env: {},
+      ...(theme && { theme: STARTS_IN }),
       externalRef: { kind: "codex-thread", id: threadId },
     };
   }
 }
-
-/**
- * Codex has no light or dark of its own: `tui.theme` picks only its syntax highlighting, from the
- * themes it bundles, and its other colours follow the background the terminal reports.
- */
-const SYNTAX_THEME = { light: "one-half-light", dark: "one-half-dark" } as const;
-
-/**
- * The background the daemon tells a terminal's programs it has (`COLOURS` in the daemon's screen
- * emulator), which Codex's other colours follow; its syntax highlighting matches that, whatever
- * theme the client shows, so every client gets one consistent Codex.
- */
-const TERMINAL_REPORTS = "dark";
 
 /** A Codex request for the human's approval, as the daemon acts on it. */
 export interface CodexApproval {

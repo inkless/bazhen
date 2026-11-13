@@ -374,6 +374,13 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "theme": {
+                      "type": "string",
+                      "enum": [
+                        "light",
+                        "dark"
+                      ]
                     }
                   },
                   "required": [
@@ -693,6 +700,13 @@
                         "locator"
                       ],
                       "additionalProperties": false
+                    },
+                    "theme": {
+                      "type": "string",
+                      "enum": [
+                        "light",
+                        "dark"
+                      ]
                     }
                   },
                   "required": [

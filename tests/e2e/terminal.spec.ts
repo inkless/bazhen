@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Request } from "@playwright/test";
-import { foregrounds, openSecondView, screen, terminalBackground } from "./page.ts";
+import { foregrounds, kill, openSecondView, screen, terminalBackground } from "./page.ts";
 
 test("launches Claude Code from the page and types into its terminal", async ({ page }) => {
   await page.goto("/");
@@ -22,15 +22,9 @@ test("says in words why it can't launch an agent in a directory", async ({ page 
   );
 });
 
+const isRespawn = (r: Request) => r.method() === "POST" && r.url().endsWith("/respawn");
 const isLaunch = (r: Request) =>
   r.method() === "POST" && new URL(r.url()).pathname === "/v1/agents";
-
-/** The painted background of the element xterm.js draws into. */
-const hostBackground = (page: Page) =>
-  page
-    .getByRole("region", { name: "terminal" })
-    .locator(":scope > div")
-    .evaluate((e) => e.ownerDocument.defaultView?.getComputedStyle(e).backgroundColor);
 
 /**
  * The greys the pinned Claude Code draws its secondary text in, at the 256 colours tmux gives it:
@@ -45,7 +39,7 @@ async function launchClaude(page: Page) {
   await expect.poll(() => screen(page), { timeout: 20_000 }).toContain("Claude Code");
 }
 
-test("recolours an open terminal with the theme and the system's scheme, on the same stream", async ({
+test("draws an agent's terminal in the theme it started in, and respawns it in the page's", async ({
   page,
   browser,
 }) => {
@@ -54,35 +48,42 @@ test("recolours an open terminal with the theme and the system's scheme, on the 
   const streams: string[] = [];
   page.on("websocket", (ws) => streams.push(ws.url()));
   await launchClaude(page);
+  const agentId = new URL(page.url()).hash.replace("#/agent/", "");
   const dark = await terminalBackground(page);
-  const darkHost = await hostBackground(page);
   const opened = streams.length;
 
+  // The page follows the switch; the terminal keeps the theme Claude Code was started in.
   const theme = page.getByRole("radiogroup", { name: "Theme" });
   await theme.getByRole("radio", { name: "Light" }).click();
-  await expect.poll(() => terminalBackground(page)).not.toBe(dark);
-  const light = await terminalBackground(page);
-  // Claude Code itself keeps the theme it started in, and the page says so.
-  await expect(
-    page.getByRole("status").filter({ hasText: "until they are respawned" }),
-  ).toBeVisible();
-  // The strip below the last row, which xterm.js doesn't paint, follows too.
-  expect(await hostBackground(page)).not.toBe(darkHost);
-  await theme.getByRole("radio", { name: "System" }).click();
-  await expect.poll(() => terminalBackground(page)).toBe(dark);
-  await page.emulateMedia({ colorScheme: "light" });
-  await expect.poll(() => terminalBackground(page)).toBe(light);
-  // The same view throughout: no stream opened since, its screen never redrawn from a snapshot.
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  expect(await terminalBackground(page)).toBe(dark);
   expect(streams).toHaveLength(opened);
-  expect(await screen(page)).toContain("Claude Code");
-
-  // A phone on the same terminal follows its own system's scheme.
   const phone = await openSecondView(browser, "Claude Code", {
     hasTouch: true,
-    colorScheme: "dark",
+    colorScheme: "light",
   });
   expect(await terminalBackground(phone)).toBe(dark);
   await phone.close();
+
+  // Claude Code reports no activity, so whether it is mid-turn can't be told: no respawn yet.
+  const notice = page.getByRole("status", { name: "theme" });
+  const row = notice.getByRole("listitem").filter({ hasText: agentId.slice(-6) });
+  await expect(
+    row.getByRole("button", { name: "Can't tell whether it's mid-turn" }),
+  ).toBeDisabled();
+
+  // Once it has exited, it respawns in light, behind the confirm.
+  expect(await kill(page, agentId)).toBe(200);
+  const respawn = row.getByRole("button", { name: "Respawn in light" });
+  await expect(respawn).toBeEnabled({ timeout: 10_000 });
+  await respawn.click();
+  const respawned = page.waitForRequest(isRespawn);
+  await page.getByRole("dialog").getByRole("button", { name: "Respawn in light" }).click();
+  expect((await respawned).postDataJSON()).toMatchObject({ theme: "light" });
+  // Its new incarnation is drawn light. (A Claude Code that never reached a model has no
+  // conversation to resume, so what it draws here says nothing; the launch test covers that.)
+  await expect.poll(() => terminalBackground(page), { timeout: 20_000 }).not.toBe(dark);
+  await expect(row).toBeHidden();
 });
 
 test("starts Claude Code in the theme of the page it is launched from", async ({ page }) => {

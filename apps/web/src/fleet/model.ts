@@ -79,3 +79,15 @@ export function exitText(exit: ExitStatus): string {
 
 /** Enough of an id to tell two agents in one project apart at a glance. */
 export const shortId = (id: string) => id.slice(-6);
+
+/**
+ * Whether an agent can be respawned in another theme now, and why not. A running one is stopped
+ * first, so only between turns, as its harness reports it: stopping it mid-turn would cut the turn
+ * off, and an agent whose harness reports nothing can't be shown to be between turns.
+ */
+export function themeRespawn(a: Pick<Agent, "state" | "activity">): string | null {
+  if (a.state === "exited") return null;
+  const value = a.activity?.value;
+  if (value === undefined || value === "unknown") return "Can't tell whether it's mid-turn";
+  return value === "idle" || value === "waiting_input" ? null : "Mid-turn: wait for it to finish";
+}

@@ -19,6 +19,7 @@ import {
   EVENTS,
   ExternalRef,
   HarnessId,
+  TuiTheme,
   StateSnapshot,
   TerminalState,
   EnvironmentKind,
@@ -85,6 +86,8 @@ export interface SnapshotView {
   attachCommand(ref: RuntimeRef): string | null;
   /** The harnesses whose agents a respawn can resume. */
   readonly resumable: readonly HarnessId[];
+  /** The themes a harness can start its TUI in. */
+  themes(harness: HarnessId): readonly TuiTheme[];
 }
 
 /** Terminal states whose runtime target still exists, so a human can attach to it. */
@@ -557,6 +560,12 @@ export class Store {
     this.remember(key, { request: JSON.stringify(request), response });
   }
 
+  /** The theme a terminal's process was started for: dark when none was named, or it is unknown. */
+  terminalTheme(terminalId: string): TuiTheme {
+    const row = this.prepare("SELECT theme FROM terminals WHERE id = ?").get(terminalId);
+    return TuiTheme.catch("dark").parse(row?.theme);
+  }
+
   /** What an agent was launched with, and the harness session it is on, to start it again. */
   agentLaunch(
     agentId: string,
@@ -613,7 +622,7 @@ export class Store {
         agents: this.prepare(
           `SELECT a.id, a.environment_id AS environmentId, a.harness, a.project, a.cwd, a.state,
                   a.terminal_id AS terminalId, t.generation, a.external_ref AS externalRef, t.exit,
-                  s.activity, t.state AS terminalState, t.runtime, t.locator
+                  coalesce(t.theme, 'dark') AS theme, s.activity, t.state AS terminalState, t.runtime, t.locator
            FROM agent_sessions a LEFT JOIN terminals t ON t.id = a.terminal_id
            LEFT JOIN activity_latest s ON s.agent_session_id = a.id
            ORDER BY a.created_event_id`,
@@ -631,6 +640,7 @@ export class Store {
               exit: typeof r.exit === "string" ? JSON.parse(r.exit) : null,
               ...(activity === null ? {} : { activity: activityOf(activity) }),
               attachCommand: ref === null ? null : view.attachCommand(ref),
+              themes: view.themes(HarnessId.parse(r.harness)),
               commands: offeredCommands(
                 {
                   state: AgentState.parse(r.state),

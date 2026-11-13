@@ -153,6 +153,27 @@
         }
       ]
     },
+    "theme": {
+      "default": "dark",
+      "type": "string",
+      "enum": [
+        "light",
+        "dark"
+      ]
+    },
+    "themes": {
+      "default": [
+        "dark"
+      ],
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "light",
+          "dark"
+        ]
+      }
+    },
     "activity": {
       "type": "object",
       "properties": {

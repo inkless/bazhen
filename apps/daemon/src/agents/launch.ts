@@ -142,6 +142,7 @@ export async function launchAgent(
         payload: {
           externalRef: refs.externalRef,
           runtimeRef: refs.runtime && runtimePayload(refs.runtime),
+          ...(refs.theme && { theme: refs.theme }),
         },
       }),
     launched.eventIds,

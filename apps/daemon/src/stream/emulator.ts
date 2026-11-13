@@ -8,14 +8,7 @@ export const HISTORY_LINES = 2000;
 
 const ESC = "\x1b";
 const ST = `${ESC}\\`;
-/**
- * Light text on black: a program that asks is told the terminal is dark, so the web client keeps
- * the terminal of a harness that picks its colours from this answer dark (docs/standards/ui.md).
- */
-const COLOURS = [
-  [10, "rgb:ffff/ffff/ffff"],
-  [11, "rgb:0000/0000/0000"],
-] as const;
+
 /**
  * Private modes the serializer leaves out, with their defaults: the cursor's visibility and the
  * mouse report encodings. tmux sets each once and re-sends it only when it changes, so a view
@@ -52,7 +45,12 @@ export class ScreenEmulator {
   /** Snapshots waiting their turn in the write queue, failed if the terminal closes first. */
   private readonly pending = new Set<(err: TerminalClosed) => void>();
 
-  constructor(size: Size, reply: (bytes: Uint8Array) => void) {
+  /** `colours` are what a program that asks is told the terminal's text and background are. */
+  constructor(
+    size: Size,
+    reply: (bytes: Uint8Array) => void,
+    colours: { readonly text: string; readonly background: string },
+  ) {
     this.term = new headless.Terminal({
       ...size,
       scrollback: HISTORY_LINES,
@@ -78,7 +76,10 @@ export class ScreenEmulator {
       answer(`${ESC}[4;0;0t`);
       return true;
     });
-    for (const [id, colour] of COLOURS) {
+    for (const [id, colour] of [
+      [10, colours.text],
+      [11, colours.background],
+    ] as const) {
       parser.registerOscHandler(id, (data) => {
         if (data !== "?") return false;
         answer(`${ESC}]${id};${colour}${ST}`);
