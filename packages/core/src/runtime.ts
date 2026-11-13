@@ -115,7 +115,13 @@ export interface Attached {
 
 export interface RuntimeAdapter {
   readonly kind: string;
-  health(): Promise<RuntimeHealth>;
+  /**
+   * `not-running` only when no server answers and none of the servers `recorded` names still
+   * runs. One that runs with its socket gone is `unreachable`, and is asked to recreate it
+   * (foundation-design §7.1).
+   */
+  health(recorded?: readonly RuntimeRef[]): Promise<RuntimeHealth>;
+  /** The terminals the server holds: none when no server runs. An unreadable server throws. */
   inventory(): Promise<RuntimeInventoryEntry[]>;
   create(spec: TerminalSpec): Promise<RuntimeRef>;
   /**

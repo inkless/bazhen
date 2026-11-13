@@ -87,7 +87,8 @@ export class FakeRuntime implements RuntimeAdapter {
 
   async inventory(): Promise<RuntimeInventoryEntry[]> {
     this.read();
-    this.server();
+    // As tmux: with no server running, the socket holds nothing.
+    if (this.serverStart === "") return [];
     return [...this.terminals.values()].map((t) => ({
       ref: this.refOf(t),
       tags: t.spec.tags,

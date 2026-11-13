@@ -81,8 +81,10 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
   describe(`${name}: the runtime contract`, () => {
     it("has no server to read before its first terminal, and a healthy one after", async () => {
       const runtime = fresh();
-      expect((await runtime.health()).state).toBe("not-running");
-      await expect(runtime.inventory()).rejects.not.toBeInstanceOf(StaleIncarnation);
+      expect([(await runtime.health()).state, await runtime.inventory()]).toEqual([
+        "not-running",
+        [],
+      ]);
       await runtime.create(spec(["cat"]));
       expect((await runtime.health()).state).toBe("healthy");
     });

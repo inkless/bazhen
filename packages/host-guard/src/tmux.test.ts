@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { environmentScript, socketRefusal } from "./tmux.ts";
+import { environmentScript, parseLstart, serverRefusal, socketRefusal } from "./tmux.ts";
 
 const uid = 501;
 const root = "/tmp/bz-tmux-abc";
@@ -69,5 +69,66 @@ describe("environmentScript", () => {
 
   it("names a refused variable but never its value", () => {
     expect(() => environmentScript({ SECRET: "token\nvalue" }, [])).toThrow(/^(?!.*token).*SECRET/);
+  });
+});
+
+describe("the recorded tmux server, by what ps says of it", () => {
+  const socket = "/var/folders/x/T/bazhen/tmux.sock";
+  const identity = { pid: "4242", start: "1794000000" };
+  // As ps showed them in the test container (tmux 3.5a) and on macOS (tmux 3.6b).
+  const linux = {
+    comm: "tmux: server",
+    start: 1_794_000_001,
+    args: `tmux -u -S ${socket} -f /tmp/s.conf new-session -d -s bz-1 -- env -u TMUX -- sleep 300`,
+  };
+  const titled = { comm: "tmux", start: 1_794_000_000, args: `tmux: server (${socket})` };
+  const macos = {
+    comm: "/opt/homebrew/bin/tmux",
+    start: 1_794_000_000,
+    args: `tmux -u -S ${socket} -f /var/folders/x/T/bazhen/tmux.conf new-session -d -s bz-1`,
+  };
+
+  it("reads ps's lstart in the C locale and UTC as epoch seconds", () => {
+    expect(parseLstart("Thu Nov 12 17:10:38 2026")).toBe(Date.UTC(2026, 10, 12, 17, 10, 38) / 1000);
+    expect(parseLstart("Mon Nov  2 01:02:03 2026")).toBe(Date.UTC(2026, 10, 2, 1, 2, 3) / 1000);
+    expect(parseLstart("jeu. 12 nov. 17:10:38 2026")).toBeUndefined();
+  });
+
+  it("knows the server by the -S that started it, or by its process title", () => {
+    expect([linux, macos, titled].map((facts) => serverRefusal(facts, identity, socket))).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
+  });
+
+  it("refuses a pid with no process", () => {
+    expect(serverRefusal(undefined, identity, socket)).toBe("no such process");
+  });
+
+  it("refuses a process that is not tmux, even one naming the socket", () => {
+    for (const comm of ["node", "tmux: client", "/usr/bin/tmuxinator"])
+      expect(serverRefusal({ ...linux, comm }, identity, socket)).toMatch("command is");
+  });
+
+  it("refuses a tmux that started more than two seconds from the recorded start", () => {
+    expect(serverRefusal({ ...linux, start: 1_794_000_003 }, identity, socket)).toMatch(
+      "another time",
+    );
+    expect(serverRefusal(linux, { ...identity, start: "" }, socket)).toMatch("another time");
+  });
+
+  it("refuses a tmux server for another socket, or one whose path only begins with ours", () => {
+    for (const args of [
+      "tmux: server (/tmp/bz-tmux-other/s)",
+      `tmux: server (${socket}2)`,
+      `tmux -u -S ${socket}2 new-session -d`,
+    ])
+      expect(serverRefusal({ ...linux, args }, identity, socket)).toMatch("another socket");
+  });
+
+  it("refuses the user's own default server, which names no socket of ours", () => {
+    for (const args of ["tmux: server (/tmp/tmux-501/default)", "tmux", "tmux new-session -A"])
+      expect(serverRefusal({ ...linux, args }, identity, socket)).toMatch("another socket");
   });
 });

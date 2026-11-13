@@ -20,6 +20,7 @@ import {
   isSafeEnvEntry,
   signalPane,
   type ConfiguredTmuxServer,
+  type ServerIdentity,
 } from "@bazhen/host-guard";
 import { assertSameGeneration, isId, ProcessState, StaleIncarnation } from "@bazhen/core";
 import { exitStatus, UnknownCause } from "./exit-status.ts";
@@ -203,7 +204,12 @@ export class TmuxRuntime implements RuntimeAdapter {
     }
   }
 
-  async health(): Promise<RuntimeHealth> {
+  /**
+   * With no server answering, a server `recorded` names that still runs had its socket deleted
+   * under it (macOS temp cleaners do): it is sent SIGUSR1 to recreate it, and is `unreachable`
+   * meanwhile. Only once every recorded server is gone is nothing running (foundation-design §7.1).
+   */
+  async health(recorded: readonly RuntimeRef[] = []): Promise<RuntimeHealth> {
     let version: string;
     try {
       version = await this.tmux("-V");
@@ -215,8 +221,12 @@ export class TmuxRuntime implements RuntimeAdapter {
       return { state: "healthy", version };
     } catch (err) {
       if (!(err instanceof TmuxError)) throw err;
-      return { state: noServer(err) ? "not-running" : "unreachable", version };
+      if (!noServer(err)) return { state: "unreachable", version };
     }
+    for (const identity of identities(recorded)) {
+      if (await this.opts.server.recreateSocket(identity)) return { state: "unreachable", version };
+    }
+    return { state: "not-running", version };
   }
 
   async create(spec: TerminalSpec): Promise<RuntimeRef> {
@@ -257,7 +267,11 @@ export class TmuxRuntime implements RuntimeAdapter {
   }
 
   async inventory(): Promise<RuntimeInventoryEntry[]> {
-    const out = await this.tmux("list-panes", "-a", "-F", PANE.format);
+    const out = await this.tmux("list-panes", "-a", "-F", PANE.format).catch((err: unknown) => {
+      // No server, so nothing on its socket; whether that means gone is health's to say.
+      if (err instanceof TmuxError && noServer(err)) return "";
+      throw err;
+    });
     const rows = out.split("\n").flatMap((line) => {
       const row = PANE.parse(line);
       const tagged = decodeTags(row);
@@ -513,6 +527,17 @@ function decodeTags(row: Row): { terminalId: TerminalId; tags: TerminalTags } | 
     terminalId,
     tags: isId("agent", linked) ? { kind: "shell", linkedAgentId: linked } : { kind: "shell" },
   };
+}
+
+/** The distinct servers `refs` were made on. */
+function identities(refs: readonly RuntimeRef[]): ServerIdentity[] {
+  const seen = new Map<string, ServerIdentity>();
+  for (const { locator } of refs) {
+    const pid = locator.serverPid ?? "";
+    const start = locator.serverStart ?? "";
+    if (pid !== "" && start !== "") seen.set(`${pid} ${start}`, { pid, start });
+  }
+  return [...seen.values()];
 }
 
 /** The socket is missing or nobody listens on it; any other failure says nothing about the server. */

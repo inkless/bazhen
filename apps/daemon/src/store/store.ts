@@ -98,6 +98,21 @@ export interface AgentTerminal {
   readonly runtime: RuntimeRef | null;
 }
 
+const AGENT_TERMINAL = `SELECT a.id, a.state AS agent_state, t.id AS terminal_id,
+         t.state AS terminal_state, t.generation, t.runtime, t.locator
+  FROM agent_sessions a LEFT JOIN terminals t ON t.id = a.terminal_id`;
+
+function agentTerminalFrom(row: Record<string, SQLOutputValue>): AgentTerminal | undefined {
+  if (typeof row.id !== "string" || !isId("agent", row.id)) return undefined;
+  return {
+    agentId: row.id,
+    state: AgentState.parse(row.agent_state),
+    terminalState: row.terminal_state === null ? null : TerminalState.parse(row.terminal_state),
+    generation: typeof row.generation === "number" ? row.generation : null,
+    runtime: refFrom(row.terminal_id, row),
+  };
+}
+
 /** The runtime incarnation a terminal row records, or null while it has none. */
 function refFrom(
   terminalId: unknown,
@@ -403,14 +418,6 @@ export class Store {
     return row === undefined ? undefined : activityOf(row.activity);
   }
 
-  /** The agents an environment should still be running. */
-  runningAgents(environmentId: string): string[] {
-    const sql = "SELECT id FROM agent_sessions WHERE environment_id = ? AND state = 'running'";
-    return this.prepare(sql)
-      .all(environmentId)
-      .map((r) => String(r.id));
-  }
-
   /** The running Codex agent bound to a thread, if any. */
   codexAgent(threadId: string): string | undefined {
     const sql = `SELECT id FROM agent_sessions WHERE ${RUNNING_CODEX} AND ${THREAD} = ?`;
@@ -488,19 +495,20 @@ export class Store {
    */
   agentTerminal(by: { agentId: string } | { terminalId: string }): AgentTerminal | undefined {
     const [where, id] = "agentId" in by ? ["a.id", by.agentId] : ["t.id", by.terminalId];
-    const row = this.prepare(
-      `SELECT a.id, a.state AS agent_state, t.id AS terminal_id, t.state AS terminal_state,
-              t.generation, t.runtime, t.locator
-       FROM agent_sessions a LEFT JOIN terminals t ON t.id = a.terminal_id WHERE ${where} = ?`,
-    ).get(id);
-    if (row === undefined || typeof row.id !== "string" || !isId("agent", row.id)) return undefined;
-    return {
-      agentId: row.id,
-      state: AgentState.parse(row.agent_state),
-      terminalState: row.terminal_state === null ? null : TerminalState.parse(row.terminal_state),
-      generation: typeof row.generation === "number" ? row.generation : null,
-      runtime: refFrom(row.terminal_id, row),
-    };
+    const row = this.prepare(`${AGENT_TERMINAL} WHERE ${where} = ?`).get(id);
+    return row === undefined ? undefined : agentTerminalFrom(row);
+  }
+
+  /**
+   * An environment's agents that a restart may have left behind: every one not yet final, with
+   * its terminal, oldest first (foundation-design §7).
+   */
+  recoverable(environmentId: string): AgentTerminal[] {
+    const sql = `${AGENT_TERMINAL} WHERE a.environment_id = ?
+                 AND a.state NOT IN ('lost', 'closed', 'failed') ORDER BY a.created_event_id`;
+    return this.prepare(sql)
+      .all(environmentId)
+      .flatMap((row) => agentTerminalFrom(row) ?? []);
   }
 
   /**

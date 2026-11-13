@@ -55,14 +55,32 @@ export class EnvironmentUnavailable extends Error {
   }
 }
 
+/** A message's states before it reaches its agent or can't. */
+const IN_FLIGHT = ["queued", "offered", "emitted", "seen", "queued_in_codex"] as const;
+
+/**
+ * Records a closing agent closed, and the mail still on its way to it undeliverable, since it
+ * can no longer reach it (foundation-design §4.7). Returns the events' ids.
+ */
+export function recordClosed(store: Store, agentId: string, actor: "user" | "system"): number[] {
+  return [
+    store.append({ type: "agent.closed", entityId: agentId, actor, payload: {} }),
+    ...store.mail(agentId, IN_FLIGHT).map((m) =>
+      store.append({
+        type: "mailbox.undeliverable",
+        entityId: m.id,
+        actor: "system",
+        payload: { reason: "agent_closed" },
+      }),
+    ),
+  ];
+}
+
 /**
  * Every change to an agent after its launch (foundation-design §4.5): its process ending, and the
  * commands close, respawn and signal. Commands on one agent run one at a time; an exit landing
  * during one is recorded only if the agent is still running then.
  */
-/** A message's states before it reaches its agent or can't. */
-const IN_FLIGHT = ["queued", "offered", "emitted", "seen", "queued_in_codex"] as const;
-
 export class Lifecycle {
   private readonly store: Store;
   private readonly environment: EnvironmentAdapter;
@@ -114,16 +132,7 @@ export class Lifecycle {
       }
       return () => [
         ...(closing === undefined ? [] : [closing]),
-        this.record(agentId, "agent.closed", {}),
-        // Mail still on its way can no longer reach it (foundation-design §4.7).
-        ...this.store.mail(agentId, IN_FLIGHT).map((m) =>
-          this.store.append({
-            type: "mailbox.undeliverable",
-            entityId: m.id,
-            actor: "system",
-            payload: { reason: "agent_closed" },
-          }),
-        ),
+        ...recordClosed(this.store, agentId, "user"),
       ];
     });
   }

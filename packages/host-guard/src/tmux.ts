@@ -6,7 +6,7 @@ import { execFile, execFileSync, type StdioOptions } from "node:child_process";
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { vouch, type PaneGroup } from "./signal.ts";
+import { signalServer, vouch, vouchServer, type PaneGroup } from "./signal.ts";
 
 const run = promisify(execFile);
 const TIMEOUT_MS = 5_000;
@@ -131,6 +131,89 @@ export function environmentScript(
     .join("");
 }
 
+/** A tmux server as a runtime ref records it: its `#{pid}` and `#{start_time}` (epoch seconds). */
+export interface ServerIdentity {
+  readonly pid: string;
+  readonly start: string;
+}
+
+/** One process as `ps` describes it: its command, start (epoch seconds) and argument line. */
+export interface ProcessFacts {
+  readonly comm: string;
+  readonly start: number;
+  readonly args: string;
+}
+
+/** How far a process's start, as `ps` prints it, may lie from tmux's `#{start_time}`. */
+const START_SKEW_S = 2;
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** `ps -o lstart=` in the C locale and UTC, `Thu Nov 12 17:10:38 2026`, as epoch seconds. */
+export function parseLstart(text: string): number | undefined {
+  const match = /^\w{3} +(\w{3}) +(\d{1,2}) (\d{2}):(\d{2}):(\d{2}) (\d{4})$/.exec(text.trim());
+  if (match === null) return undefined;
+  const [, mon = "", day, h, m, sec, year] = match;
+  const month = MONTHS.indexOf(mon);
+  if (month === -1) return undefined;
+  return Date.UTC(Number(year), month, Number(day), Number(h), Number(m), Number(sec)) / 1000;
+}
+
+/** A tmux server's command: its binary's name, or the name Linux's tmux gives its server. */
+const SERVER_COMMS = new Set(["tmux", "tmux: server"]);
+
+/**
+ * Why the process `facts` describes is not the tmux server `identity` recorded for `socket`, or
+ * undefined when it is. All of it must hold, since the signal that follows ends any process that
+ * is not tmux: a tmux command, the recorded start, and `socket` itself in its arguments. The
+ * server keeps the arguments of the command that started it, so its `-S <socket>`, unless its
+ * process title was set to `tmux: server (<socket>)`, as tmux does where it can set one.
+ */
+export function serverRefusal(
+  facts: ProcessFacts | undefined,
+  identity: ServerIdentity,
+  socket: string,
+): string | undefined {
+  if (facts === undefined) return "no such process";
+  if (!SERVER_COMMS.has(basename(facts.comm))) return `its command is ${facts.comm}`;
+  const start = Number(identity.start);
+  if (!/^\d+$/.test(identity.start) || Math.abs(facts.start - start) > START_SKEW_S)
+    return "it started at another time";
+  const args = facts.args.trim();
+  if (args !== `tmux: server (${socket})` && !` ${args} `.includes(` -S ${socket} `))
+    return "it serves another socket";
+  return undefined;
+}
+
+const PS_ENV = { LC_ALL: "C", TZ: "UTC", PATH: process.env["PATH"] ?? "/usr/bin:/bin" };
+
+/** What `ps` says of `pid`, or undefined for no such process. */
+export async function processFacts(pid: number): Promise<ProcessFacts | undefined> {
+  const ps = async (format: string) => {
+    const opts = { env: PS_ENV, timeout: TIMEOUT_MS };
+    const { stdout } = await run("ps", ["-ww", "-p", String(pid), "-o", format], opts).catch(
+      (err: unknown) => {
+        // ps exits 1, printing nothing, for a pid with no process.
+        if (Reflect.get(Object(err), "code") === 1) return { stdout: "" };
+        throw err;
+      },
+    );
+    return stdout.trim();
+  };
+  // Apart, since a command and an argument line can both hold spaces.
+  const comm = await ps("comm=");
+  const startAndArgs = await ps("lstart=,args=");
+  if (comm === "" || startAndArgs === "") return undefined;
+  // lstart is five fields wide.
+  const fields = startAndArgs.split(/ +/);
+  const start = parseLstart(fields.slice(0, 5).join(" "));
+  if (start === undefined) return undefined;
+  return { comm, start, args: fields.slice(5).join(" ") };
+}
+
+/** The pid a ref recorded, if it can name a process at all. */
+const pidOf = (identity: ServerIdentity) =>
+  /^\d+$/.test(identity.pid) && Number(identity.pid) > 1 ? Number(identity.pid) : undefined;
+
 /** A server whose configuration file is known, as a runtime that writes one needs. */
 export type ConfiguredTmuxServer = TmuxServer & { readonly config: string };
 
@@ -221,6 +304,18 @@ export class TmuxServer {
       );
       child.stdin?.end(script);
     });
+  }
+
+  /**
+   * Makes the server `identity` names recreate its socket, with `SIGUSR1`, if it still runs as
+   * this socket's server: a temp cleaner can delete the socket under a live server
+   * (foundation-design §7.1). Whether it was that server, and was sent the signal.
+   */
+  async recreateSocket(identity: ServerIdentity): Promise<boolean> {
+    const pid = pidOf(identity);
+    if (pid === undefined) return false;
+    if (serverRefusal(await processFacts(pid), identity, this.socket) !== undefined) return false;
+    return signalServer(vouchServer({ pid, socket: this.socket }));
   }
 
   /** Ends this server, if it runs. */
