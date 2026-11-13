@@ -107,8 +107,16 @@ test("closes an agent with its shells, but for the one kept, which goes on stand
   await confirm.getByRole("button", { name: "Close agent" }).click();
   const response = await answer;
   expect([response.status(), await response.text()]).toEqual([200, expect.any(String)]);
-  await expect.poll(() => shellIds(page), { timeout: 15_000 }).toEqual([kept]);
-  expect(closing).not.toBe(kept);
+  // The daemon is the whole run's, so other tests' shells may be listed too.
+  await expect
+    .poll(
+      async () => {
+        const ids = await shellIds(page);
+        return [ids.includes(closing), ids.includes(kept)];
+      },
+      { timeout: 15_000 },
+    )
+    .toEqual([false, true]);
 });
 
 test("refuses an agent close that would end a program started after its dialog opened", async ({
@@ -179,14 +187,17 @@ test("keeps a shell kept from a closing agent in the rail, and opens it there", 
 }) => {
   const agentId = await launch(page);
   const kept = await openBeside(page);
+  const rows = page.getByRole("region", { name: "standalone shells" }).locator("button.agent");
+  const before = await rows.count();
   await workspace(page).getByRole("button", { name: "Close agent…" }).click();
   const confirm = page.getByRole("dialog", { name: "Close agent" });
   await confirm.getByRole("checkbox").check();
   const answer = page.waitForResponse((r) => r.url().endsWith(`/v1/agents/${agentId}/close`));
   await confirm.getByRole("button", { name: "Close agent" }).click();
   expect((await answer).status()).toBe(200);
-  const rail = page.getByRole("region", { name: "standalone shells" });
-  await rail.locator(`button.agent`).last().click();
+  // Standalone now, so listed in the rail, newest last, once the next state read shows it.
+  await expect(rows).toHaveCount(before + 1);
+  await rows.last().click();
   expect(new URL(page.url()).hash).toBe(`#/shell/${kept}`);
   await expect(page.getByRole("article", { name: /^shell / })).toBeVisible();
 });

@@ -95,8 +95,12 @@ jobs:
         with:
           node-version: 26.13.0
           cache: pnpm
-      - name: Install tmux
-        run: sudo apt-get update && sudo apt-get install -y tmux fish zsh
+      - name: Install tmux, and what the shell suite runs in a shell
+        run: |
+          echo "man-db man-db/auto-update boolean false" | sudo debconf-set-selections
+          sudo apt-get update
+          sudo apt-get install -y tmux fish zsh
+          sudo apt-get install -y --no-install-recommends neovim less man-db htop
       - name: Mark the runner disposable
         run: sudo touch /etc/bazhen-disposable-host
       - uses: dtolnay/rust-toolchain@stable

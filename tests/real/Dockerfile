@@ -10,14 +10,24 @@ ARG PNPM_VERSION
 ARG PLAYWRIGHT_VERSION
 # Exact, so a tmux upgrade is a change someone makes and the defect pins are re-run against.
 ARG TMUX_VERSION=3.5a-3
+# What the shell-terminal suite runs in a shell, pinned as tmux is.
+ARG NEOVIM_VERSION=0.10.4-8
+ARG LESS_VERSION=668-1
+ARG MAN_DB_VERSION=2.13.1-1
+ARG HTOP_VERSION=3.4.1-5
 # Without a UTF-8 locale, tmux prints a tab in a -F format as `_`, which merges every column
 # the runtime reads back. CI runners and login sessions set one.
 ENV HUSKY=0 CI=1 LANG=C.UTF-8
 
 # cargo builds the hook client (apps/hook, std only, so offline) before the suites run it; fish
-# and zsh are login shells agents.shell = "login" is tested against.
-RUN apt-get update \
+# and zsh are login shells agents.shell = "login" is tested against; neovim, less, man-db and
+# htop are what the shell-terminal suite runs in a shell, as a person would.
+# man-db would rebuild its index on install, which nothing here reads.
+RUN echo "man-db man-db/auto-update boolean false" | debconf-set-selections \
+  && apt-get update \
   && apt-get install -y --no-install-recommends "tmux=${TMUX_VERSION}" cargo fish zsh \
+    "neovim=${NEOVIM_VERSION}" "less=${LESS_VERSION}" "man-db=${MAN_DB_VERSION}" \
+    "htop=${HTOP_VERSION}" \
   && npx -y "playwright@${PLAYWRIGHT_VERSION}" install-deps chromium \
   && rm -rf /var/lib/apt/lists/* \
   && npm install -g "pnpm@${PNPM_VERSION}" \
