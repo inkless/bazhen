@@ -49,13 +49,20 @@ const asReply = (hex = "") =>
   `rgb:${[1, 3, 5].map((i) => hex.slice(i, i + 2).repeat(2)).join("/")}`;
 
 describe("the colours the daemon tells programs", () => {
-  test.each(["light", "dark"] as const)("are the %s terminal's text and background", (scheme) => {
-    const theme = terminalTheme(scheme, false);
-    expect({
-      text: asReply(theme.foreground),
-      background: asReply(theme.background),
-    }).toEqual(TERMINAL_COLOURS[scheme]);
-  });
+  // Every variant terminalTheme() draws, so a more-contrast override can't drift from them.
+  const variants = (["light", "dark"] as const).flatMap((scheme) =>
+    [false, true].map((more) => [scheme, more] as const),
+  );
+  test.each(variants)(
+    "are the %s terminal's text and background (more contrast: %s)",
+    (scheme, more) => {
+      const theme = terminalTheme(scheme, more);
+      expect({
+        text: asReply(theme.foreground),
+        background: asReply(theme.background),
+      }).toEqual(TERMINAL_COLOURS[scheme]);
+    },
+  );
 });
 
 describe("inOtherTheme", () => {

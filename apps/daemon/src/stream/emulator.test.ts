@@ -21,7 +21,7 @@ async function answersTo(output: string, theme: TuiTheme = "dark"): Promise<stri
     replies += Buffer.from(bytes).toString("latin1");
     if (replies.endsWith(SENTINEL_REPLY)) resolve();
   };
-  const emulator = new ScreenEmulator({ cols: 80, rows: 24 }, reply, TERMINAL_COLOURS[theme]);
+  const emulator = new ScreenEmulator({ cols: 80, rows: 24 }, reply, () => TERMINAL_COLOURS[theme]);
   emulator.write(Buffer.from(output + SENTINEL, "latin1"));
   await parsed;
   emulator.dispose();
@@ -53,6 +53,17 @@ describe("the daemon's screen emulator", () => {
     ]);
   });
 
+  it("answers a query for both in one sequence, and one ended in BEL, each in ST as tmux ends its own", async () => {
+    const { text, background } = TERMINAL_COLOURS.light;
+    expect([
+      await answersTo(`${ESC}]10;?;?${ST}`, "light"),
+      await answersTo(`${ESC}]11;?\x07`, "light"),
+    ]).toEqual([
+      `${ESC}]10;${text}${ST}${ESC}]11;${background}${ST}`,
+      `${ESC}]11;${background}${ST}`,
+    ]);
+  });
+
   it("does not answer a sequence that sets a colour rather than asking for it", async () => {
     expect(await answersTo(`${ESC}]11;rgb:1111/1111/1111${ST}`)).toBe("");
   });
@@ -70,7 +81,11 @@ function browserTerminal(dimensions = size): headless.Terminal {
 
 /** A fresh terminal, as a browser joining late would be, with the emulator's snapshot written. */
 async function replayed(output: string, history = ""): Promise<headless.Terminal> {
-  const emulator = new ScreenEmulator(size, () => {}, TERMINAL_COLOURS.dark);
+  const emulator = new ScreenEmulator(
+    size,
+    () => {},
+    () => TERMINAL_COLOURS.dark,
+  );
   emulator.seed(history);
   emulator.write(Buffer.from(output));
   const snapshot = await emulator.snapshot();
@@ -138,7 +153,11 @@ describe("the daemon's attach snapshot", () => {
   });
 
   it("restores the mouse protocol, the cursor's visibility and the modes tmux turned on", async () => {
-    const emulator = new ScreenEmulator(size, () => {}, TERMINAL_COLOURS.dark);
+    const emulator = new ScreenEmulator(
+      size,
+      () => {},
+      () => TERMINAL_COLOURS.dark,
+    );
     emulator.write(Buffer.from("\x1b[?1000h\x1b[?1006h\x1b[?2004h\x1b[?1004h\x1b[?25l"));
     const snapshot = await emulator.snapshot();
     emulator.dispose();
@@ -150,7 +169,11 @@ describe("the daemon's attach snapshot", () => {
   });
 
   it("fails a snapshot once the terminal has closed, even one already waiting", async () => {
-    const emulator = new ScreenEmulator(size, () => {}, TERMINAL_COLOURS.dark);
+    const emulator = new ScreenEmulator(
+      size,
+      () => {},
+      () => TERMINAL_COLOURS.dark,
+    );
     emulator.write(Buffer.from("x".repeat(100_000)));
     const waiting = emulator.snapshot();
     emulator.dispose();
@@ -160,7 +183,11 @@ describe("the daemon's attach snapshot", () => {
 
   it("keeps a history line's colours off the screen drawn below it", async () => {
     const browser = browserTerminal();
-    const emulator = new ScreenEmulator(size, () => {}, TERMINAL_COLOURS.dark);
+    const emulator = new ScreenEmulator(
+      size,
+      () => {},
+      () => TERMINAL_COLOURS.dark,
+    );
     emulator.seed("\x1b[31mred history");
     emulator.write(Buffer.from("plain"));
     const snapshot = await emulator.snapshot();
@@ -174,7 +201,11 @@ describe("the daemon's attach snapshot", () => {
   });
 
   it("matches the screen at its new size after a resize", async () => {
-    const emulator = new ScreenEmulator(size, () => {}, TERMINAL_COLOURS.dark);
+    const emulator = new ScreenEmulator(
+      size,
+      () => {},
+      () => TERMINAL_COLOURS.dark,
+    );
     emulator.resize({ cols: 10, rows: 3 });
     emulator.write(Buffer.from("\x1b[5;15Hz"));
     const snapshot = await emulator.snapshot();

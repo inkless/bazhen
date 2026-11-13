@@ -11,6 +11,15 @@ import { shortId, themeRespawn } from "./model.ts";
  * page's. A running one is stopped first and respawned once the snapshot shows it exited; if this
  * page goes away in between, it stays exited, with its own Respawn, and nothing is lost.
  */
+/** How long a stopped agent has to exit before the respawn is given up, and the user told. */
+const STOP_WAIT_MS = 15_000;
+
+interface Stopping {
+  readonly theme: TuiTheme;
+  readonly generation: number;
+  readonly timer: ReturnType<typeof setTimeout>;
+}
+
 export function ThemeNotice({
   agents,
   scheme,
@@ -20,30 +29,52 @@ export function ThemeNotice({
   scheme: TuiTheme;
   failed: (e: unknown) => void;
 }) {
-  // Agents stopped to be respawned, by id: the theme, and the generation that was stopped.
-  const stopping = useRef(new Map<string, [TuiTheme, number]>());
+  // Agents stopped to be respawned, by id.
+  const stopping = useRef(new Map<string, Stopping>());
+  // The latest snapshot's agents, which a confirm checks again: the list may be older than it.
+  const latest = useRef(agents);
   const [dismissed, setDismissed] = useState<TuiTheme | null>(null);
 
   useEffect(() => {
-    for (const [id, [theme, generation]] of stopping.current) {
+    latest.current = agents;
+    for (const [id, { theme, generation, timer }] of stopping.current) {
       const agent = agents.find((a) => a.id === id);
       if (agent?.generation === generation && agent.state === "running") continue;
+      clearTimeout(timer);
       stopping.current.delete(id);
       if (agent?.state === "exited") respawnAgent(id, generation, theme).catch(failed);
     }
   }, [agents, failed]);
+  useEffect(() => {
+    const pending = stopping.current;
+    return () => {
+      for (const { timer } of pending.values()) clearTimeout(timer);
+    };
+  }, []);
 
   const others = inOtherTheme(agents, scheme);
   if (others.length === 0 || dismissed === scheme) return null;
-  const respawn = (a: Agent) => {
+  const respawn = (listed: Agent) => {
+    const a = latest.current.find((x) => x.id === listed.id) ?? listed;
     if (a.generation === null || stopping.current.has(a.id)) return;
+    const blocked = themeRespawn(a);
+    if (blocked !== null || a.generation !== listed.generation) {
+      failed(new Error(`${a.project} wasn't respawned: ${blocked ?? "it changed meanwhile"}.`));
+      return;
+    }
     const generation = a.generation;
     if (a.state === "exited") {
       respawnAgent(a.id, generation, scheme).catch(failed);
       return;
     }
-    stopping.current.set(a.id, [scheme, generation]);
+    const timer = setTimeout(() => {
+      if (stopping.current.get(a.id)?.generation !== generation) return;
+      stopping.current.delete(a.id);
+      failed(new Error(`${a.project} didn't stop; close it or try again.`));
+    }, STOP_WAIT_MS);
+    stopping.current.set(a.id, { theme: scheme, generation, timer });
     signalAgent(a.id, generation, "SIGTERM").catch((e: unknown) => {
+      clearTimeout(timer);
       stopping.current.delete(a.id);
       failed(e);
     });

@@ -95,8 +95,9 @@ device live.
 When the page's theme differs from an open agent's, the page lists it with "Respawn in <theme>",
 behind a confirm. An exited agent respawns at once; a running one is stopped and respawned, and
 only between turns as its harness reports them, so an agent whose harness reports nothing says it
-can't tell. If the page goes away between the stop and the respawn, the agent is left exited,
-with its own Respawn. An agent started without the web client, from the CLI or by a daemon
+can't tell. The confirm checks that again against the latest snapshot, and an agent that hasn't
+exited 15 seconds after the stop is left as it is, with a message. If the page goes away between
+the stop and the respawn, the agent is left exited, with its own Respawn. An agent started without the web client, from the CLI or by a daemon
 restart, is drawn dark and keeps the user's own setting.
 
 ## Interactive widgets

@@ -45,11 +45,14 @@ export class ScreenEmulator {
   /** Snapshots waiting their turn in the write queue, failed if the terminal closes first. */
   private readonly pending = new Set<(err: TerminalClosed) => void>();
 
-  /** `colours` are what a program that asks is told the terminal's text and background are. */
+  /**
+   * `colours` says what a program that asks is told the terminal's text and background are, read
+   * at each query: a respawn can start the terminal's next process in another theme.
+   */
   constructor(
     size: Size,
     reply: (bytes: Uint8Array) => void,
-    colours: { readonly text: string; readonly background: string },
+    colours: () => { readonly text: string; readonly background: string },
   ) {
     this.term = new headless.Terminal({
       ...size,
@@ -76,16 +79,22 @@ export class ScreenEmulator {
       answer(`${ESC}[4;0;0t`);
       return true;
     });
-    for (const [id, colour] of [
-      [10, colours.text],
-      [11, colours.background],
-    ] as const) {
-      parser.registerOscHandler(id, (data) => {
-        if (data !== "?") return false;
-        answer(`${ESC}]${id};${colour}${ST}`);
-        return true;
-      });
-    }
+    // `10;?;?` asks for the text and then the background, as xterm reads it; a cursor colour asked
+    // for after them (12) goes unanswered, as any query this terminal doesn't know. Replies end in ST
+    // whatever the query ended in: xterm.js doesn't say, and the only program that asks here is
+    // tmux's client, whose queries end in ST.
+    const dynamic = (first: 10 | 11) => (data: string) => {
+      const asked = data.split(";");
+      if (asked.some((p) => p !== "?")) return false;
+      const { text, background } = colours();
+      const colour = { 10: text, 11: background } as const;
+      for (const id of [10, 11] as const) {
+        if (id >= first && id - first < asked.length) answer(`${ESC}]${id};${colour[id]}${ST}`);
+      }
+      return true;
+    };
+    parser.registerOscHandler(10, dynamic(10));
+    parser.registerOscHandler(11, dynamic(11));
     // The handlers below only watch: returning false lets xterm.js apply the sequence too.
     for (const [final, on] of [
       ["h", true],

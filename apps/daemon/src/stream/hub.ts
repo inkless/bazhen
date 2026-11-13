@@ -178,7 +178,7 @@ export class TerminalHub {
         emulator: new ScreenEmulator(
           stream.size,
           (reply) => stream.write(reply),
-          TERMINAL_COLOURS[this.log.theme(ref.terminalId)],
+          () => TERMINAL_COLOURS[this.log.theme(ref.terminalId)],
         ),
         size: stream.size,
         viewers: new Map(),

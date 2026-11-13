@@ -100,7 +100,7 @@ function emittingOnSnapshot(view: Viewer, during: () => void): Viewer {
   };
 }
 
-function memoryLog(closing = false, theme: TuiTheme = "dark") {
+function memoryLog(closing = false) {
   const events: string[] = [];
   const log: AttachmentLog = {
     started: (a: AttachmentId) => events.push(`started ${a}`),
@@ -109,7 +109,7 @@ function memoryLog(closing = false, theme: TuiTheme = "dark") {
       events.push(`granted ${a} ${epoch}`),
     epoch: () => 4,
     closing: () => closing,
-    theme: () => theme,
+    theme: () => "dark",
   };
   return { log, events };
 }
@@ -264,14 +264,22 @@ describe("terminal hub", () => {
     await expect.poll(() => rt.written).toEqual(["\x1bP>|bazhen\x1b\\"]);
   });
 
-  it("tells a program that asks the background of the theme its terminal was started in", async () => {
+  it("tells a program that asks the background of its terminal's current theme, which a respawn changes", async () => {
     const rt = await fakeRuntime();
-    const hub = new TerminalHub(rt.runtime, memoryLog(false, "light").log);
+    let theme: TuiTheme = "dark";
+    const hub = new TerminalHub(rt.runtime, { ...memoryLog().log, theme: () => theme });
     await hub.join(rt.ref, viewer().v, size);
+    rt.emit("\x1b]11;?\x1b\\");
+    await expect.poll(() => rt.written).toHaveLength(1);
+    // A respawn in light keeps the terminal's client, and its emulator, alive.
+    theme = "light";
     rt.emit("\x1b]11;?\x1b\\");
     await expect
       .poll(() => rt.written)
-      .toEqual([`\x1b]11;${TERMINAL_COLOURS.light.background}\x1b\\`]);
+      .toEqual([
+        `\x1b]11;${TERMINAL_COLOURS.dark.background}\x1b\\`,
+        `\x1b]11;${TERMINAL_COLOURS.light.background}\x1b\\`,
+      ]);
   });
 
   it("moves the lease to the view the user engages, and tells every view", async () => {
