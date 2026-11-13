@@ -33,6 +33,19 @@ const showsThread = (title: string, threadId: string) => {
   return shown.length >= 20 && threadId.startsWith(shown);
 };
 
+/** Each user input item a model request carries, as its JSON text. */
+function userInputs(request: string): string[] {
+  const parsed: unknown = JSON.parse(request);
+  const input = typeof parsed === "object" && parsed !== null ? Reflect.get(parsed, "input") : [];
+  return (Array.isArray(input) ? input : [])
+    .filter(
+      (item) => typeof item === "object" && item !== null && Reflect.get(item, "role") === "user",
+    )
+    .map((item) => JSON.stringify(item));
+}
+
+const inputs = () => model.requests.flatMap(userInputs);
+
 const state = async () => StateSnapshot.parse((await daemon.request("/v1/state")).body);
 /** The id of the open item whose summary names this command, once there is one. */
 async function openItemFor(command: string): Promise<string> {
@@ -84,6 +97,32 @@ describe("a Codex agent", () => {
     await expect
       .poll(() => String(model.requests.find((r) => r.includes(messageId))), { timeout: 30_000 })
       .toContain("a message for codex");
+  });
+
+  it("delivers each of two messages that wait for the same turn boundary", async () => {
+    await daemon.prompt(asker, "[[fake:slow:8000]] keep busy");
+    // The turn is under way once the model has been asked; its reply is held back.
+    await expect
+      .poll(() => model.requests.some((r) => r.includes("keep busy")), { timeout: 20_000 })
+      .toBe(true);
+    const send = async (key: string, body: string) =>
+      SendMessageResponse.parse(
+        (
+          await daemon.request(`/v1/agents/${asker.agentId}/messages`, {
+            method: "POST",
+            body: { idempotencyKey: key, body },
+          })
+        ).body,
+      ).messageId;
+    const ids = [await send("first", "first of two"), await send("second", "second of two")];
+    const states = async () =>
+      (await state()).messages.filter((m) => ids.includes(m.id)).map((m) => m.state);
+    await expect.poll(states, { timeout: 60_000 }).toEqual(["delivered", "delivered"]);
+    // Codex 0.166 hands each queued message over as an input item of its own, never two in one.
+    await expect
+      .poll(() => ids.map((id) => inputs().some((item) => item.includes(id))), { timeout: 30_000 })
+      .toEqual([true, true]);
+    expect(inputs().filter((item) => ids.every((id) => item.includes(id)))).toEqual([]);
   });
 
   it("asks the inbox before running a command outside the sandbox, and runs it once allowed", async () => {

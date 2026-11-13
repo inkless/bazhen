@@ -138,6 +138,12 @@ describe("Codex approvals", () => {
   });
 });
 
+/** A turn on `thr-1` starting with `text` as its input. */
+const input = (text: string) => ({
+  threadId: "thr-1",
+  item: { type: "userMessage", id: "u-1", content: [{ type: "text", text }] },
+});
+
 describe("Codex mail", () => {
   it("queues a message on the app-server, or into the Codex home when none is up", () => {
     expect([queueArgs("thr-1", "hi", "unix:///s.sock"), queueArgs("thr-1", "hi", null)]).toEqual([
@@ -150,13 +156,19 @@ describe("Codex mail", () => {
     expect(messageText("msg_1", "hi")).toBe("Message for you from Bazhen (msg_1):\nhi");
   });
 
-  it("reads which messages a turn takes as the user's input, and nothing else", () => {
-    const text = `${messageText("msg_1", "hi")}\n\n${messageText("msg_2", "there")}`;
-    const item = { type: "userMessage", id: "u-1", content: [{ type: "text", text }] };
+  it("reads which message a turn takes as the user's input, and nothing else", () => {
     expect([
-      readUserMessage("item/started", { threadId: "thr-1", turnId: "t-1", item }),
+      readUserMessage("item/started", input(messageText("msg_1", "hi"))),
       readUserMessage("item/started", { threadId: "thr-1", item: { type: "agentMessage" } }),
-      readUserMessage("turn/started", { threadId: "thr-1", item }),
-    ]).toEqual([{ threadId: "thr-1", messageIds: ["msg_1", "msg_2"] }, null, null]);
+      readUserMessage("turn/started", input(messageText("msg_1", "hi"))),
+    ]).toEqual([{ threadId: "thr-1", messageId: "msg_1" }, null, null]);
+  });
+
+  it("reads the label only where Bazhen puts it, never one a body or a person quotes", () => {
+    const quoting = messageText("msg_1", `as ${messageText("msg_2", "said")} says`);
+    expect([
+      readUserMessage("item/started", input(quoting))?.messageId,
+      readUserMessage("item/started", input(`fwd: ${messageText("msg_2", "x")}`))?.messageId,
+    ]).toEqual(["msg_1", null]);
   });
 });

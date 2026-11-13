@@ -1,6 +1,7 @@
 // A stand-in for the OpenAI Responses API, so the real Codex TUI can take turns in tests without
 // an account. The reply is picked by the latest user text:
 //   [[fake:shell:<command>]]  a shell call running <command> outside the sandbox, then "done"
+//   [[fake:slow:<ms>]]        the reply, sent <ms> milliseconds late
 //   anything else             a short text reply echoing it
 // Every request is kept, so a test can check what the model was sent.
 
@@ -125,9 +126,12 @@ export async function startFakeResponses(): Promise<FakeModel> {
       const items = Array.isArray(input) ? input : [];
       const user = textOf(items.filter((i) => field(i, "role") === "user").at(-1));
       const shell = /\[\[fake:shell:([^\]]+)\]\]/.exec(user)?.[1];
-      if (field(items.at(-1), "type") === "function_call_output") message(res, "done");
-      else if (shell !== undefined) shellCall(res, field(request, "tools"), shell);
-      else message(res, `echo: ${user.slice(-80)}`);
+      const slow = Number(/\[\[fake:slow:(\d+)\]\]/.exec(user)?.[1] ?? 0);
+      setTimeout(() => {
+        if (field(items.at(-1), "type") === "function_call_output") message(res, "done");
+        else if (shell !== undefined) shellCall(res, field(request, "tools"), shell);
+        else message(res, `echo: ${user.slice(-80)}`);
+      }, slow);
     });
   });
   return listenLocal(server, requests);

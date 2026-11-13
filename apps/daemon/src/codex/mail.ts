@@ -63,15 +63,28 @@ export class CodexMail {
   }
 
   /** Confirms a message once a turn takes it as its input, whether or not the queue has returned. */
-  readonly listener: Pick<ChannelListener, "notification"> = {
+  readonly listener: Pick<ChannelListener, "notification" | "resumed"> = {
+    /**
+     * A connection resumed these threads, so the turns that take their mail will be seen: hand
+     * over again every message still queued for them, as after a daemon restart that stopped a
+     * hand-over. At least once, as for Claude Code (§7 step 2); one stored in Codex already is
+     * left there.
+     */
+    resumed: (threads) => {
+      for (const threadId of threads) {
+        const agentId = this.opts.store.codexAgent(threadId);
+        if (agentId === undefined) continue;
+        for (const m of this.opts.store.mail(agentId, ["queued"])) void this.deliver(m.id, agentId);
+      }
+    },
     notification: (method, params) => {
       const input = readUserMessage(method, params);
       // Most turns carry no message of Bazhen's, and cost no query.
-      if (input === null || input.messageIds.length === 0) return;
+      if (input === null || input.messageId === null) return;
       const agentId = this.opts.store.codexAgent(input.threadId);
       if (agentId === undefined) return;
       for (const m of this.opts.store.mail(agentId, ["queued", "queued_in_codex"])) {
-        if (input.messageIds.includes(m.id)) this.record(m.id, "mailbox.delivered", {});
+        if (m.id === input.messageId) this.record(m.id, "mailbox.delivered", {});
       }
     },
   };

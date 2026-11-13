@@ -1,19 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { messageText } from "@bazhen/harness-codex";
+import { newId } from "@bazhen/core";
 import { Mailbox } from "../mailbox/mailbox.ts";
-import { withCodexAgent } from "../testing/fixtures.ts";
+import { UnknownAgent } from "../store/store.ts";
+import { withCodexAgents } from "../testing/fixtures.ts";
 import { CodexMail } from "./mail.ts";
 
 /**
- * A Codex agent's mail on thread `thr-1`, through a `codex queue` that takes a message unless
- * `refuses` says no. `startsTurn` makes the queue start the turn that carries the message
+ * The mail of Codex agents on threads `thr-1` and `thr-2`, and of one bound to no thread,
+ * through a `codex queue` that takes a message unless `refuses` says no. Mail is for the
+ * agent on `thr-1`. `startsTurn` makes the queue start the turn that carries the message
  * before the command returns, as Codex may.
  */
 async function mailFor(
   refuses: (args: readonly string[]) => boolean = () => false,
   startsTurn = false,
 ) {
-  const { store, agentId } = await withCodexAgent();
+  const { store, agentOn } = await withCodexAgents("thr-1", "thr-2", null);
+  const agentId = agentOn("thr-1");
   const ran: (readonly string[])[] = [];
   const turn = (threadId: string, text: string) =>
     mail.listener.notification("item/started", {
@@ -41,7 +45,7 @@ async function mailFor(
     return messageId;
   };
   const stateOf = (id: string) => store.snapshot().messages.find((m) => m.id === id)?.state;
-  return { ran, send, stateOf, turn };
+  return { ran, send, stateOf, turn, store, mail, mailbox, agentOn };
 }
 
 describe("Codex mail", () => {
@@ -68,7 +72,8 @@ describe("Codex mail", () => {
     const { send, stateOf, turn } = await mailFor();
     const id = await send("hello");
     turn("thr-1", messageText("msg_someoneelse", "hi"));
-    turn("thr-other", messageText(id, "hello"));
+    // thr-2 is another agent's, so its turn may carry the same text and still confirm nothing.
+    turn("thr-2", messageText(id, "hello"));
     expect(stateOf(id)).toBe("queued_in_codex");
     turn("thr-1", messageText(id, "hello"));
     expect(stateOf(id)).toBe("delivered");
@@ -99,5 +104,37 @@ describe("Codex mail", () => {
     const { ran, send, stateOf } = await mailFor(() => true);
     const id = await send("hello");
     expect([stateOf(id), ran.length]).toEqual(["undeliverable", 6]);
+  });
+
+  it("confirms nothing for a message whose body quotes another's label", async () => {
+    const { send, stateOf, turn } = await mailFor();
+    const quoted = await send("first");
+    const quoting = await send(`about ${messageText(quoted, "first")}`, "second");
+    turn("thr-1", messageText(quoting, `about ${messageText(quoted, "first")}`));
+    expect([stateOf(quoted), stateOf(quoting)]).toEqual(["queued_in_codex", "delivered"]);
+  });
+
+  it("refuses mail for a Codex agent bound to no thread, rather than holding it", async () => {
+    const { mailbox, agentOn } = await mailFor();
+    expect(() => mailbox.send(agentOn(null), { idempotencyKey: "m", body: "hi" })).toThrow(
+      UnknownAgent,
+    );
+  });
+
+  it("hands over again, once its thread is resumed, a message left queued, but not one in Codex", async () => {
+    const { store, mail, agentOn, stateOf, ran, send } = await mailFor();
+    const stored = await send("already stored");
+    const left = newId("msg");
+    // Queued by a daemon that died before its hand-over.
+    store.append({
+      type: "mailbox.queued",
+      entityId: left,
+      actor: "system",
+      payload: { agentId: agentOn("thr-1"), body: "hi" },
+    });
+    ran.length = 0;
+    mail.listener.resumed(["thr-1"]);
+    await expect.poll(() => stateOf(left)).toBe("queued_in_codex");
+    expect([stateOf(stored), ran.length]).toEqual(["queued_in_codex", 1]);
   });
 });
