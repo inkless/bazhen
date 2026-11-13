@@ -2539,7 +2539,9 @@
                 "attach_failed",
                 "daemon_restart",
                 "disconnected",
-                "evicted_slow"
+                "evicted_slow",
+                "timed_out",
+                "replaced"
               ]
             }
           },

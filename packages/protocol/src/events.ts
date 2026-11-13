@@ -228,6 +228,8 @@ export const EVENTS = {
         "daemon_restart",
         "disconnected",
         "evicted_slow",
+        "timed_out",
+        "replaced",
       ]),
     }),
   },

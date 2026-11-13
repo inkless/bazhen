@@ -12,6 +12,13 @@
         "attachmentId": {
           "type": "string",
           "pattern": "^att_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+        },
+        "protocolVersion": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+$"
+        },
+        "resumeToken": {
+          "type": "string"
         }
       },
       "required": [
@@ -34,12 +41,28 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
+        },
+        "driven": {
+          "type": "boolean"
         }
       },
       "required": [
         "type",
         "driver",
         "epoch"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "pong"
+        }
+      },
+      "required": [
+        "type"
       ],
       "additionalProperties": false
     },

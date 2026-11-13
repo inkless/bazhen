@@ -732,6 +732,16 @@ export class View {
       const frame = StreamServerFrame.parse(JSON.parse(data.toString("utf8")));
       if (frame.type === "snapshot_end") this.snapshotEnd = this.raw.length;
       this.frames.push(frame);
+      // As a browser does: what it types counts only under the epoch it last heard of.
+      const attached = this.frames.some((f) => f.type === "attached");
+      const epoch = this.frames.findLast((f) => f.type === "lease")?.epoch;
+      if (
+        (frame.type === "lease" || frame.type === "attached") &&
+        attached &&
+        epoch !== undefined
+      ) {
+        this.frame({ type: "epoch", epoch });
+      }
     });
   }
 
