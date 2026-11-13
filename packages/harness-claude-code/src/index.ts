@@ -70,7 +70,10 @@ function hooks(hook: string) {
   return {
     hooks: {
       SessionStart: [{ hooks: [waiter] }],
-      Stop: [{ hooks: [waiter, report("Stop")] }],
+      // Not async: a turn's end must reach the daemon before the next turn's prompt does.
+      Stop: [{ hooks: [waiter, run("Stop", 10)] }],
+      // An API error ends the turn with StopFailure instead of Stop, idle all the same.
+      StopFailure: [{ hooks: [waiter, run("StopFailure", 10)] }],
       UserPromptSubmit: [{ hooks: [run("UserPromptSubmit", 10)] }],
       // Not async: a permission request that follows must find the call it is about.
       PreToolUse: [{ matcher: "*", hooks: [run("PreToolUse", 10)] }],
@@ -91,12 +94,22 @@ export const APPROVAL_WAIT_MS = 50_000;
 
 /** A Claude Code hook as the daemon acts on it, whatever Claude Code calls it. */
 export type Hook =
-  /** The waiter; `sessionStarted` when it runs for a SessionStart, which may move the binding. */
-  | { readonly kind: "wait"; readonly sessionStarted: boolean }
+  /**
+   * The waiter; `sessionStarted` when it runs for a SessionStart, which may move the binding,
+   * and `compacted` when that SessionStart only compacted the session the agent is in.
+   */
+  | {
+      readonly kind: "wait";
+      readonly sessionStarted: boolean;
+      readonly compacted: boolean;
+      /** The turn whose end this waiter runs for, as the Stop or StopFailure report says too. */
+      readonly turnEnd: { readonly promptId: string | null; readonly failed: boolean } | null;
+    }
   | { readonly kind: "toolStarted"; readonly tool: string; readonly useId: string }
   | { readonly kind: "permission"; readonly summary: string; readonly tool: string }
   | { readonly kind: "promptStarted"; readonly prompt: string; readonly promptId: string | null }
   | { readonly kind: "turnEnded"; readonly promptId: string | null }
+  | { readonly kind: "turnFailed"; readonly promptId: string | null }
   | { readonly kind: "toolSettled"; readonly useId: string }
   | { readonly kind: "ignored" };
 
@@ -104,7 +117,12 @@ export type Hook =
 export function readHook(event: string, payload: unknown): Hook {
   switch (event) {
     case "wait":
-      return { kind: "wait", sessionStarted: field(payload, "hook_event_name") === "SessionStart" };
+      return {
+        kind: "wait",
+        sessionStarted: field(payload, "hook_event_name") === "SessionStart",
+        compacted: field(payload, "source") === "compact",
+        turnEnd: turnEndOf(payload),
+      };
     case "PreToolUse": {
       const useId = toolUseIdOf(payload);
       return useId === null ? IGNORED : { kind: "toolStarted", tool: toolKey(payload), useId };
@@ -117,6 +135,8 @@ export function readHook(event: string, payload: unknown): Hook {
       return { kind: "promptStarted", prompt: promptOf(payload), promptId: promptIdOf(payload) };
     case "Stop":
       return { kind: "turnEnded", promptId: promptIdOf(payload) };
+    case "StopFailure":
+      return { kind: "turnFailed", promptId: promptIdOf(payload) };
     case "PostToolUse":
     case "PostToolUseFailure": {
       const useId = toolUseIdOf(payload);
@@ -128,6 +148,13 @@ export function readHook(event: string, payload: unknown): Hook {
 }
 
 const IGNORED: Hook = { kind: "ignored" };
+
+/** The turn a Stop or StopFailure payload ends, for a hook that runs beside those reports. */
+function turnEndOf(payload: unknown): { promptId: string | null; failed: boolean } | null {
+  const event = field(payload, "hook_event_name");
+  if (event !== "Stop" && event !== "StopFailure") return null;
+  return { promptId: promptIdOf(payload), failed: event === "StopFailure" };
+}
 
 /** Which Claude Code session ran a hook, and whether one of its subagents did. */
 export interface HookOrigin {

@@ -42,8 +42,8 @@ async function daemon() {
 }
 
 /** A Stop's payload, from the agent's own session unless another is named. */
-const stop = (session = CLAUDE_SESSION) =>
-  JSON.stringify({ hook_event_name: "Stop", session_id: session, prompt_id: "p-1" });
+const stop = (session = CLAUDE_SESSION, promptId = "p-1") =>
+  JSON.stringify({ hook_event_name: "Stop", session_id: session, prompt_id: promptId });
 /** A SessionStart's payload, as /clear starts a new session. */
 const sessionStart = (session: string) =>
   JSON.stringify({ hook_event_name: "SessionStart", session_id: session, source: "clear" });
@@ -102,5 +102,21 @@ describe.each([
       2,
       expect.stringContaining(`possible re-delivery of ${messageId}`),
     ]);
+  });
+
+  it("ends a turn from the waiter beside its Stop, when the Stop report itself is lost", async () => {
+    const { socket, agentId, mailbox, state } = await daemon();
+    const env = { BAZHEN_AGENT_ID: agentId, BAZHEN_SOCKET: socket };
+    const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
+    // The waiter that wakes the agent ran beside an earlier turn's Stop.
+    const wake = run(client, "wait", env, stop(CLAUDE_SESSION, "p-0"));
+    expect((await wake).code).toBe(2);
+    await expect.poll(() => state(messageId)).toBe("emitted");
+    mailbox.promptStarted(agentId, `woken by ${messageId}`, "p-1");
+    // Only the waiter that runs beside p-1's Stop reaches the daemon.
+    const beside = run(client, "wait", env, stop());
+    await expect.poll(() => state(messageId)).toBe("delivered");
+    mailbox.send(agentId, { idempotencyKey: "m2", body: "release the waiter" });
+    await beside;
   });
 });

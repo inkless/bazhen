@@ -12,8 +12,8 @@ import {
 
 const toolOf = (h: Hook) => ("tool" in h ? h.tool : "");
 /** The waiter, run for a hook event of that name. */
-const waiterAt = (hook_event_name: string) =>
-  readHook("wait", { hook_event_name, session_id: "s" });
+const waiterAt = (hook_event_name: string, source?: string) =>
+  readHook("wait", { hook_event_name, session_id: "s", source });
 const request = { harness: "claude-code" as const, project: "p", cwd: "/work" };
 const claude = (newSessionId: () => string): HarnessAdapter =>
   new ClaudeCodeHarness({ newSessionId, hookCommand: "bazhen-hook" });
@@ -64,6 +64,16 @@ describe("Claude Code harness", () => {
           {
             hooks: expect.arrayContaining([
               expect.objectContaining({ command: "bazhen-hook wait", asyncRewake: true }),
+              // Not async, so a turn's end reaches the daemon before the next turn's prompt.
+              { type: "command", command: "bazhen-hook Stop", timeout: 10 },
+            ]),
+          },
+        ],
+        StopFailure: [
+          {
+            hooks: expect.arrayContaining([
+              expect.objectContaining({ command: "bazhen-hook wait", asyncRewake: true }),
+              { type: "command", command: "bazhen-hook StopFailure", timeout: 10 },
             ]),
           },
         ],
@@ -92,6 +102,24 @@ describe("Claude Code harness", () => {
 });
 
 describe("Claude Code hooks", () => {
+  it("tells the waiter which turn's end it runs beside, so either report ends the turn", () => {
+    const at = { session_id: "s", prompt_id: "p-1" };
+    expect([
+      Reflect.get(Object(readHook("wait", { ...at, hook_event_name: "Stop" })), "turnEnd"),
+      Reflect.get(Object(readHook("wait", { ...at, hook_event_name: "StopFailure" })), "turnEnd"),
+    ]).toEqual([
+      { promptId: "p-1", failed: false },
+      { promptId: "p-1", failed: true },
+    ]);
+  });
+
+  it("reads an API error's end of turn, with the prompt it ends", () => {
+    expect(readHook("StopFailure", { prompt_id: "p-1", error: "rate_limit" })).toEqual({
+      kind: "turnFailed",
+      promptId: "p-1",
+    });
+  });
+
   it("reads a prompt and the prompt id that ties the turn's end to it", () => {
     const payload = { prompt: "hello", prompt_id: "p-1", session_id: "s" };
     expect([readHook("UserPromptSubmit", payload), readHook("Stop", { prompt_id: "p-1" })]).toEqual(
@@ -131,9 +159,19 @@ describe("Claude Code hooks", () => {
   });
 
   it("tells the waiter a SessionStart ran it, which may move the binding", () => {
-    expect([waiterAt("SessionStart"), waiterAt("Stop")]).toEqual([
-      { kind: "wait", sessionStarted: true },
-      { kind: "wait", sessionStarted: false },
+    expect([
+      waiterAt("SessionStart", "clear"),
+      waiterAt("SessionStart", "compact"),
+      waiterAt("Stop"),
+    ]).toEqual([
+      { kind: "wait", sessionStarted: true, compacted: false, turnEnd: null },
+      { kind: "wait", sessionStarted: true, compacted: true, turnEnd: null },
+      {
+        kind: "wait",
+        sessionStarted: false,
+        compacted: false,
+        turnEnd: { promptId: null, failed: false },
+      },
     ]);
   });
 

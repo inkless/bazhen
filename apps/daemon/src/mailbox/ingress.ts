@@ -45,7 +45,10 @@ export function hookApp(deps: IngressDeps): Hono {
     switch (read.kind) {
       case "wait":
         if (!(await own())) return framed(QUIET);
-        if (read.sessionStarted) deps.mailbox.sessionStarted(agentId);
+        if (read.sessionStarted) deps.mailbox.sessionStarted(agentId, read.compacted);
+        // The waiter runs beside each Stop and StopFailure report, so either ends the turn.
+        if (read.turnEnd?.failed === true) deps.mailbox.turnFailed(agentId, read.turnEnd.promptId);
+        else if (read.turnEnd) deps.mailbox.turnEnded(agentId, read.turnEnd.promptId);
         return framed(await deps.mailbox.wait(agentId, c.req.raw.signal));
       case "permission":
         return framed(
@@ -56,6 +59,10 @@ export function hookApp(deps: IngressDeps): Hono {
         break;
       case "turnEnded":
         if (await own()) deps.mailbox.turnEnded(agentId, read.promptId);
+        deps.approvals.turnEnded(agentId);
+        break;
+      case "turnFailed":
+        if (await own()) deps.mailbox.turnFailed(agentId, read.promptId);
         deps.approvals.turnEnded(agentId);
         break;
       case "toolStarted":

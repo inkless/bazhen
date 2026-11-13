@@ -156,6 +156,12 @@ export const EVENTS = {
         "daemon_restart",
         /** The session started over, as /clear does, before the agent saw it. */
         "session_started",
+        /** The turn carrying it ended in an API error (StopFailure). */
+        "stop_failed",
+        /** The turn that saw it ended with no Stop, as Esc ends one: another turn began. */
+        "interrupted",
+        /** Written, but in no prompt by the second turn end, or a deadline while idle. */
+        "not_seen",
       ]),
     }),
   },
