@@ -1,0 +1,15 @@
+{
+  "$id": "PaneTitleChanged",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "pane": {
+      "type": "string",
+      "pattern": "^%\\d+$"
+    }
+  },
+  "required": [
+    "pane"
+  ],
+  "additionalProperties": false
+}

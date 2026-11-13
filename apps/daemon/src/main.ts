@@ -26,6 +26,7 @@ import {
 import { CodexMail } from "./codex/mail.ts";
 import { recordCodexVersion } from "./codex/version.ts";
 import { codexSignals } from "./codex/signals.ts";
+import { CodexThreads, paneTitleCommand } from "./codex/threads.ts";
 import { retire } from "./events/retention.ts";
 import { eventRoute } from "./events/server.ts";
 import { TerminalHub } from "./stream/hub.ts";
@@ -77,6 +78,8 @@ const codexMail = new CodexMail({
   store,
   remote: appServerAddress(codexHome),
   codex: codexCommand,
+  // A TUI about to show another thread: its mail waits for the move.
+  held: (agentId) => codexThreads.held(agentId),
 });
 const mailbox = new Mailbox(store, { codex: (id, agentId) => void codexMail.deliver(id, agentId) });
 const approvals = new Approvals(store);
@@ -84,6 +87,8 @@ const approvals = new Approvals(store);
 endOpenAttachments(store);
 mailbox.requeueInFlight();
 approvals.closeAbandoned();
+const hookRunner = hookClient();
+if (hookRunner === HOOK_SCRIPT) console.warn(`bazhen-hook is not built; hooks use ${HOOK_SCRIPT}`);
 const runtime = new TmuxRuntime({
   server: TmuxServer.at(paths.tmuxSocket, {
     root: paths.run,
@@ -91,9 +96,21 @@ const runtime = new TmuxRuntime({
   }),
   pty: nodePtySpawner,
   env: hostEnv,
+  // Codex TUIs title their panes with their thread; the script client has no pane-title command.
+  ...(hookRunner === HOOK_SCRIPT
+    ? {}
+    : { onPaneTitle: paneTitleCommand(hookRunner, paths.socket) }),
 });
-const hookRunner = hookClient();
-if (hookRunner === HOOK_SCRIPT) console.warn(`bazhen-hook is not built; hooks use ${HOOK_SCRIPT}`);
+// Follows Codex TUIs from thread to thread, by their panes' titles (§5.8).
+const codexThreads = new CodexThreads({
+  store,
+  runtime,
+  channel: {
+    request: (method, params) => codex.request(method, params),
+    resume: (threadId) => codex.resume(threadId),
+  },
+  released: (agentId) => codexMail.deliverQueued(agentId),
+});
 const localId = localEnvironmentId(store);
 // Agents use the user's own Codex home and its managed app-server, connected on first use.
 const codex = new CodexChannel({
@@ -101,13 +118,18 @@ const codex = new CodexChannel({
   startDaemon: () => codexCommand(DAEMON_START_ARGS),
   boundThreads: () => store.codexThreads(),
   listener: allOf(
-    codexApprovals(approvals, (threadId) => store.codexAgent(threadId)),
+    codexApprovals(
+      approvals,
+      (threadId) => store.codexAgent(threadId),
+      (agentId) => store.codexThread(agentId) !== undefined,
+    ),
     codexMail.listener,
     codexSignals({
       agentOf: (threadId) => store.codexAgent(threadId),
       record: (agentId, activity) => void store.recordActivity(agentId, activity),
       resume: (threadId) => codex.resume(threadId),
     }),
+    codexThreads.listener,
   ),
   connectedTo: (version) => recordCodexVersion(store, localId, version),
 });
@@ -129,6 +151,9 @@ const environment = new LocalEnvironment({
   ...(config.loginShell === undefined ? {} : { loginShell: config.loginShell }),
 });
 await reconcile(store, environment);
+// A title that changed while the daemon was down, or a move it was waiting on, is read again;
+// until it has been, those agents' mail waits, so none goes to a thread the TUI has left.
+codexThreads.followAll();
 // The Codex agents' threads lost their subscriber with the last daemon (§7 step 4).
 codex.keepConnected();
 const lifecycle = new Lifecycle(store, environment);
@@ -194,6 +219,7 @@ const socketListener = getRequestListener(
       binding: new SessionBinding(store, psTable),
     }),
     stop: shutdown,
+    paneTitleChanged: (pane) => void codexThreads.paneTitleChanged(pane),
     refreshEnv: async (env) => {
       const next = filterEnv(env, config.envRules);
       const { refused } = await runtime.replaceEnv(next.env);

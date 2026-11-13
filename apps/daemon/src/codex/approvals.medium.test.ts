@@ -22,8 +22,11 @@ async function codexFor() {
   const approvals = new Approvals(store);
   const answered: unknown[] = [];
   const running = new Set(["thr-1", "thr-2"]);
-  const codex = codexApprovals(approvals, (threadId) =>
-    running.has(threadId) ? agentId : undefined,
+  const alive = { now: true };
+  const codex = codexApprovals(
+    approvals,
+    (threadId) => (running.has(threadId) ? agentId : undefined),
+    () => alive.now,
   );
   /** A request arriving on a connection, whose answers that connection collects in `on`. */
   const ask = (
@@ -32,7 +35,7 @@ async function codexFor() {
     method = "item/commandExecution/requestApproval",
     on: unknown[] = answered,
   ) => codex.request(method, params, id, (result) => on.push(result));
-  return { store, approvals, codex, ask, answered, running };
+  return { store, approvals, codex, ask, answered, running, alive };
 }
 
 describe("Codex approvals", () => {
@@ -99,11 +102,20 @@ describe("Codex approvals", () => {
   });
 
   it("closes an item whose agent no longer runs when the connection ends", async () => {
+    const { store, codex, ask, running, alive } = await codexFor();
+    ask(0);
+    running.delete("thr-1");
+    alive.now = false;
+    codex.disconnected();
+    expect(items(store)[0]?.closeReason).toBe("agent_closed");
+  });
+
+  it("supersedes an item whose agent has moved to another thread when the connection ends", async () => {
     const { store, codex, ask, running } = await codexFor();
     ask(0);
     running.delete("thr-1");
     codex.disconnected();
-    expect(items(store)[0]?.closeReason).toBe("agent_closed");
+    expect(items(store)[0]?.closeReason).toBe("superseded");
   });
 
   it("keeps the item a server still running asks again, and answers it on the new connection", async () => {

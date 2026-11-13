@@ -259,4 +259,41 @@ describe("a Codex agent", () => {
       })
       .toBe(true);
   });
+
+  it("follows its TUI to the new thread a /new starts, and takes mail there", async () => {
+    const bound = async () =>
+      (await state()).agents.find((a) => a.id === launched.agentId)?.externalRef?.id;
+    const before = await bound();
+    await daemon.prompt(launched, "/new");
+    // The new session is up once the TUI titles its pane with another thread.
+    await expect
+      .poll(() => showsThread(daemon.paneTitle(launched.agentId), String(before)), {
+        timeout: 30_000,
+      })
+      .toBe(false);
+    await daemon.prompt(launched, "hello from the new thread");
+    // The pane's title names the thread the TUI shows; the agent is bound to that one now.
+    await expect
+      .poll(
+        async () => {
+          const now = await bound();
+          return {
+            moved: now !== before,
+            shown: showsThread(daemon.paneTitle(launched.agentId), String(now)),
+          };
+        },
+        { timeout: 30_000 },
+      )
+      .toEqual({ moved: true, shown: true });
+    const sent = await daemon.request(`/v1/agents/${launched.agentId}/messages`, {
+      method: "POST",
+      body: { idempotencyKey: "mail-after-new", body: "mail for the new thread" },
+    });
+    const { messageId } = SendMessageResponse.parse(sent.body);
+    await expect
+      .poll(async () => (await state()).messages.find((m) => m.id === messageId)?.state, {
+        timeout: 30_000,
+      })
+      .toBe("delivered");
+  });
 });

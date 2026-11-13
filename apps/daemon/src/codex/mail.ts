@@ -1,4 +1,4 @@
-import type { MessageId } from "@bazhen/core";
+import { isId, type MessageId } from "@bazhen/core";
 import { messageText, queueArgs, readUserMessage } from "@bazhen/harness-codex";
 import type { EventPayload } from "@bazhen/protocol";
 import type { Store } from "../store/store.ts";
@@ -13,6 +13,11 @@ export interface CodexMailOptions {
   readonly log?: (message: string) => void;
   /** The wait after a failed attempt; it doubles for the next. */
   readonly retryMs?: number;
+  /**
+   * Whether an agent's mail waits for now, as while its TUI shows a thread it isn't bound to
+   * yet; `deliverQueued` hands it over once that ends.
+   */
+  readonly held?: (agentId: string) => boolean;
 }
 
 /** Attempts to hand a message to Codex before it is given up as undeliverable (§12). */
@@ -47,6 +52,8 @@ export class CodexMail {
         const message = this.queued(messageId, agentId);
         const threadId = this.opts.store.codexThread(agentId);
         if (message === undefined || threadId === undefined) return;
+        // Still queued: it goes once the hold ends, to the thread the agent is bound to then.
+        if (this.opts.held?.(agentId) === true) return;
         const offline = await this.queue(threadId, messageText(message.id, message.body));
         // A turn carrying it may have started, and confirmed it, before the queue returned.
         if (this.queued(messageId, agentId) === undefined) return;
@@ -62,6 +69,11 @@ export class CodexMail {
     }
   }
 
+  /** Hands over every message still queued for an agent, as once a hold on its mail ends. */
+  deliverQueued(agentId: string): void {
+    for (const m of this.opts.store.mail(agentId, ["queued"])) void this.deliver(m.id, agentId);
+  }
+
   /** Confirms a message once a turn takes it as its input, whether or not the queue has returned. */
   readonly listener: Pick<ChannelListener, "notification" | "resumed"> = {
     /**
@@ -74,17 +86,25 @@ export class CodexMail {
       for (const threadId of threads) {
         const agentId = this.opts.store.codexAgent(threadId);
         if (agentId === undefined) continue;
-        for (const m of this.opts.store.mail(agentId, ["queued"])) void this.deliver(m.id, agentId);
+        this.deliverQueued(agentId);
       }
     },
     notification: (method, params) => {
       const input = readUserMessage(method, params);
       // Most turns carry no message of Bazhen's, and cost no query.
       if (input === null || input.messageId === null) return;
-      const agentId = this.opts.store.codexAgent(input.threadId);
-      if (agentId === undefined) return;
-      for (const m of this.opts.store.mail(agentId, ["queued", "queued_in_codex"])) {
-        if (m.id === input.messageId) this.record(m.id, "mailbox.delivered", {});
+      // By the message, not by the thread. On the agent's own thread a turn may take it before
+      // the queue has returned. One queued in Codex on a thread the agent has since moved off is
+      // still taken there, so a thread no agent is on confirms one Codex holds. A thread another
+      // agent is on confirms nothing of this one's, whatever its turn quotes.
+      const { messageId, threadId } = input;
+      if (!isId("msg", messageId)) return;
+      const message = this.opts.store.codexMessageAgent(messageId);
+      if (message === undefined) return;
+      const owners = this.opts.store.codexAgentsOn(threadId);
+      const own = owners.length === 1 && owners[0] === message.agentId;
+      if (own || (owners.length === 0 && message.inCodex)) {
+        this.record(messageId, "mailbox.delivered", {});
       }
     },
   };

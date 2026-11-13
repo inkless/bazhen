@@ -56,6 +56,14 @@ export const DoctorResponse = z.object({
 export type DoctorResponse = z.infer<typeof DoctorResponse>;
 
 /**
+ * `POST /v1/codex/pane-title`, on the Unix socket only: a pane's title changed, as a Codex TUI's
+ * does when it shows another thread (foundation-design §5.8). It names the pane only; the daemon
+ * reads the title itself.
+ */
+export const PaneTitleChanged = z.object({ pane: z.string().regex(/^%\d+$/) });
+export type PaneTitleChanged = z.infer<typeof PaneTitleChanged>;
+
+/**
  * `POST /v1/daemon/env`, on the Unix socket only: the environment of the shell running
  * `bazhen env refresh`, for every agent started from now on (foundation-design §9.5).
  */

@@ -87,7 +87,8 @@ export const EVENTS = {
   },
   /**
    * The agent is bound to another harness session, which its own process moved to, such as a
-   * Claude Code `/clear` or fork (foundation-design §3.1). Respawn resumes this one.
+   * Claude Code `/clear` or fork, or a Codex TUI's `/new`, `/fork` or `/resume` (foundation-design
+   * §3.1, §5.8). Respawn resumes this one.
    */
   "agent.external_ref_updated": {
     entity: "agent",

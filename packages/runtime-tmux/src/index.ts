@@ -144,6 +144,12 @@ export interface TmuxRuntimeOptions {
   readonly env: Readonly<Record<string, string>>;
   /** How often dead terminals are looked for while anyone listens. */
   readonly exitPollMs?: number;
+  /**
+   * A command the server runs, in the background, whenever a pane's title changes, with the
+   * pane's id appended. Set on the server with every terminal created, so a server started by an
+   * older daemon gets it too.
+   */
+  readonly onPaneTitle?: readonly [string, ...string[]];
   /** Where a failure inside exit polling goes, since no caller is waiting on it. */
   readonly onError?: (err: unknown) => void;
 }
@@ -259,6 +265,9 @@ export class TmuxRuntime implements RuntimeAdapter {
         ...tagCommands(session, spec.terminalId, spec.tags),
         generationCommand(windowOf(session), spec.generation),
         ["set-option", "-w", "-t", windowOf(session), "window-size", "manual"],
+        ...(this.opts.onPaneTitle === undefined
+          ? []
+          : [["set-hook", "-g", "pane-title-changed", paneHook(this.opts.onPaneTitle)]]),
         resizeArgs(session, spec.size),
         ["display-message", "-p", "-t", windowOf(session), LOCATION.format],
       ]),
@@ -268,6 +277,16 @@ export class TmuxRuntime implements RuntimeAdapter {
       runtime: this.kind,
       locator: this.locator(LOCATION.parse(location)),
     };
+  }
+
+  /** The tmux server's socket, as each terminal's locator names it. */
+  get socket(): string {
+    return this.opts.server.socket;
+  }
+
+  /** A terminal's pane title, which the program in it sets, as a Codex TUI does to its thread. */
+  async paneTitle(ref: RuntimeRef): Promise<string> {
+    return this.tmux("display-message", "-p", "-t", located(ref, "paneId"), "#{pane_title}");
   }
 
   private locator(row: Row): Record<string, string> {
@@ -618,6 +637,18 @@ const resizeArgs = (session: string, size: Size) => [
   "-y",
   String(size.rows),
 ];
+
+/**
+ * The hook that runs `argv` in the background with the pane's id appended. tmux parses a hook as
+ * a command line, so the shell command goes in double quotes, with `\\`, `"` and `$` escaped, and
+ * run-shell expands it as a format: each word's `#` is doubled, so only the `#{pane_id}` added
+ * here is one. Each word is single-quoted for the shell.
+ */
+export function paneHook(argv: readonly string[]): string {
+  const words = argv.map((w) => `'${w.replaceAll("'", "'\\''").replaceAll("#", "##")}'`);
+  const shell = [...words, "'#{pane_id}'"].join(" ");
+  return `run-shell -b "${shell.replace(/[\\"$]/g, (c) => `\\${c}`)}"`;
+}
 
 /** Several tmux commands as one invocation: a lone `;` argument separates them. */
 function sequence(commands: string[][]): string[] {
