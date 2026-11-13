@@ -201,6 +201,13 @@ const allow = allowlists({
   webPort: process.env.BAZHEN_WEB_PORT || undefined,
   externalOrigins: config.externalOrigins,
 });
+if (config.externalOriginsFrom !== null) {
+  console.warn(
+    `bazhen: admitting external origins from ${config.externalOriginsFrom}: ` +
+      `${config.externalOrigins.join(", ")}. Nothing authenticates them until device pairing: ` +
+      "whatever reaches them can drive every terminal.",
+  );
+}
 const snapshotView: SnapshotView = {
   host: (kind) => (kind === "local" ? hostname() : ""),
   attachCommand: (ref) => runtime.attachCommand(ref),
@@ -301,6 +308,11 @@ const socketListener = getRequestListener(
           loginShell: config.loginShell ?? null,
         },
         codex: { daemon: codex.version, cli: await codexCliRead },
+        web: {
+          externalOrigins: [...config.externalOrigins],
+          from: config.externalOriginsFrom,
+          allowInsecureOrigins: config.allowInsecureOrigins,
+        },
         env: {
           capturedAt: captured.at,
           source: captured.source,

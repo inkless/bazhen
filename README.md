@@ -83,16 +83,23 @@ must be an absolute path), so your rc files run again at every launch, like a ne
 ### Reaching Bazhen from another device
 
 Bazhen listens on `127.0.0.1` only and never terminates TLS. To open it from a phone, bring your
-own route to that port, such as a Cloudflare Tunnel or a reverse proxy on this machine. Point it
-at the web dev server, `http://127.0.0.1:7901`, while you run `pnpm dev`, and list the address it
-presents, exactly as the browser shows it (scheme, host and any port), in
-`BAZHEN_EXTERNAL_ORIGINS`: `BAZHEN_EXTERNAL_ORIGINS=https://bazhen.example.com pnpm dev`. The
-daemon and the dev server then accept that address, and refuse every other non-loopback one. The
-dev server reads only the variable; `web.external_origins` sets it for the daemon alone.
+own route to that port that runs on this machine, such as a Cloudflare Tunnel or a local reverse
+proxy: a proxy on another host can't reach a loopback port. Point it at the web dev server,
+`http://127.0.0.1:7901`, while you run `pnpm dev`, and list the address it presents, exactly as
+the browser shows it (scheme, host and any port), in `BAZHEN_EXTERNAL_ORIGINS`:
+`BAZHEN_EXTERNAL_ORIGINS=https://bazhen.example.com pnpm dev`. The daemon and the dev server then
+accept that address, and refuse every other non-loopback one; the daemon logs it at start, and
+`bazhen doctor` lists it. The dev server reads only the variable; `web.external_origins` sets it
+for the daemon alone. Plain `http://` to another host is refused unless
+`web.allow_insecure_origins = true` (or `BAZHEN_ALLOW_INSECURE_ORIGINS=true`), since anyone on the
+network could read the traffic.
 
-Device pairing is not built yet, so anyone who can reach that address can type into your agents'
-terminals, and so run any command as you. Keep the route on a network only you use, or behind
-the route's own login, and never on the public internet.
+Device pairing is not built yet, and nothing else authenticates a request. The Origin check
+stops only a browser page on another site: a request with no Origin, as curl or any script
+sends, passes it, so whatever reaches the route can type into your agents' terminals and run any
+command as you. Until pairing, the route's own access control (the tunnel's login, a proxy's
+access list) is the only protection. Keep it on a network only you use, behind that login, and
+never on the public internet.
 
 ## The inbox
 

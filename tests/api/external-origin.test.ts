@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { StateSnapshot } from "@bazhen/protocol";
-import { Daemon } from "./daemon.ts";
+import { bazhen, Daemon } from "./daemon.ts";
 
 const external = "https://bazhen.example.com";
 
@@ -31,5 +31,14 @@ describe("an external origin the user configured", () => {
       ),
     );
     expect(outcomes).toEqual(["open", "Error: refused: 403", "Error: refused: 421"]);
+  });
+
+  it("says so at start and in bazhen doctor, with the warning that nothing authenticates it", async () => {
+    const doctor = await bazhen(["doctor"], daemon.env);
+    expect([
+      daemon.log().includes(`admitting external origins from BAZHEN_EXTERNAL_ORIGINS: ${external}`),
+      doctor.out.includes(`external origins: ${external} (from BAZHEN_EXTERNAL_ORIGINS)`),
+      doctor.out.includes("warning: no authentication until device pairing"),
+    ]).toEqual([true, true, true]);
   });
 });

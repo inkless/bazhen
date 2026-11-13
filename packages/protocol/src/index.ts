@@ -8,6 +8,7 @@ export * from "./ids.ts";
 export * from "./input.ts";
 export * from "./json.ts";
 export * from "./mail.ts";
+export * from "./origins.ts";
 export * from "./shells.ts";
 export * from "./stream.ts";
 export * from "./theme.ts";
@@ -46,6 +47,18 @@ export const DoctorResponse = z.object({
    * not reached. They update apart (foundation-design §5.8). Absent from a daemon before 1.6.
    */
   codex: z.object({ daemon: z.string().nullable(), cli: z.string().nullable() }).optional(),
+  /**
+   * The external origins the daemon admits besides loopback, where they came from, and whether
+   * plain HTTP to another host may be among them (foundation-design §9.2). Absent from a daemon
+   * before they existed.
+   */
+  web: z
+    .object({
+      externalOrigins: z.array(z.string()),
+      from: z.enum(["BAZHEN_EXTERNAL_ORIGINS", "config"]).nullable(),
+      allowInsecureOrigins: z.boolean(),
+    })
+    .optional(),
   env: z.object({
     capturedAt: z.string(),
     /** Captured when the daemon started, or by the latest `bazhen env refresh`. */

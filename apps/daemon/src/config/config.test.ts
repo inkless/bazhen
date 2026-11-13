@@ -15,6 +15,8 @@ describe("resolveConfig", () => {
       loginShell: undefined,
       envRules: { deny: [], passthrough: [] },
       externalOrigins: [],
+      externalOriginsFrom: null,
+      allowInsecureOrigins: false,
     });
   });
 
@@ -25,24 +27,41 @@ describe("resolveConfig", () => {
       loginShell: undefined,
       envRules: { deny: ["SECRET_*"], passthrough: ["TERM"] },
       externalOrigins: [],
+      externalOriginsFrom: null,
+      allowInsecureOrigins: false,
     });
   });
 
-  it("lists the origins the user's own route to the daemon presents", () => {
+  it("lists the origins the user's own route to the daemon presents, and where they came from", () => {
     const web = { web: { external_origins: ["https://bazhen.example.com"] } };
-    expect(resolveConfig(web, {}).externalOrigins).toEqual(["https://bazhen.example.com"]);
+    expect(resolveConfig(web, {})).toMatchObject({
+      externalOrigins: ["https://bazhen.example.com"],
+      externalOriginsFrom: "config",
+    });
   });
 
   it("takes external origins from the environment over the file, and refuses one that isn't", () => {
     const web = { web: { external_origins: ["https://bazhen.example.com"] } };
-    const env = { BAZHEN_EXTERNAL_ORIGINS: "https://a.example.com, http://b.example.com:8080" };
-    expect(resolveConfig(web, env).externalOrigins).toEqual([
-      "https://a.example.com",
-      "http://b.example.com:8080",
-    ]);
+    const env = { BAZHEN_EXTERNAL_ORIGINS: "https://a.example.com, https://b.example.com:8443" };
+    expect(resolveConfig(web, env)).toMatchObject({
+      externalOrigins: ["https://a.example.com", "https://b.example.com:8443"],
+      externalOriginsFrom: "BAZHEN_EXTERNAL_ORIGINS",
+    });
     expect(() => resolveConfig({}, { BAZHEN_EXTERNAL_ORIGINS: "a.example.com" })).toThrow(
-      InvalidConfig,
+      "BAZHEN_EXTERNAL_ORIGINS: a.example.com must be an origin",
     );
+  });
+
+  it("refuses plain HTTP to another host unless it is explicitly allowed", () => {
+    const plain = { web: { external_origins: ["http://bazhen.example.com"] } };
+    expect(() => resolveConfig(plain, {})).toThrow(
+      "web.external_origins: http://bazhen.example.com is plain HTTP to another host",
+    );
+    const allowed = { web: { ...plain.web, allow_insecure_origins: true } };
+    expect([
+      resolveConfig(allowed, {}).allowInsecureOrigins,
+      resolveConfig(plain, { BAZHEN_ALLOW_INSECURE_ORIGINS: "true" }).externalOrigins,
+    ]).toEqual([true, ["http://bazhen.example.com"]]);
   });
 
   it("takes the environment over the file", () => {
