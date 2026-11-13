@@ -25,6 +25,7 @@ import {
 } from "./codex/channel.ts";
 import { CodexMail } from "./codex/mail.ts";
 import { recordCodexVersion } from "./codex/version.ts";
+import { codexSignals } from "./codex/signals.ts";
 import { retire } from "./events/retention.ts";
 import { eventRoute } from "./events/server.ts";
 import { TerminalHub } from "./stream/hub.ts";
@@ -101,6 +102,11 @@ const codex = new CodexChannel({
   listener: allOf(
     codexApprovals(approvals, (threadId) => store.codexAgent(threadId)),
     codexMail.listener,
+    codexSignals({
+      agentOf: (threadId) => store.codexAgent(threadId),
+      record: (agentId, activity) => void store.recordActivity(agentId, activity),
+      resume: (threadId) => codex.resume(threadId),
+    }),
   ),
   connectedTo: (version) => recordCodexVersion(store, localId, version),
 });
