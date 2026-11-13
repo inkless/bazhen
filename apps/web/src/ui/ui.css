@@ -18,7 +18,7 @@ input {
 }
 
 /* A link-styled button inside a sentence keeps the line's height (WCAG 2.5.8's inline exception). */
-button:not(.link),
+button:not(.button-link),
 input {
   min-height: var(--size-hit-min);
 }
@@ -40,5 +40,147 @@ pre {
 @media (forced-colors: active) {
   :focus-visible {
     outline-color: Highlight;
+  }
+}
+
+/* The wrappers in this directory, on React Aria's data-* states. */
+.button {
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-s);
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--easing-standard);
+}
+
+.button[data-hovered] {
+  background: var(--color-surface-hover);
+}
+
+.button[data-pressed] {
+  background: var(--color-surface-selected);
+}
+
+.button[data-focus-visible],
+.segment[data-focus-visible] {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+.button[data-disabled] {
+  color: var(--color-text-muted);
+  cursor: default;
+}
+
+.button-primary {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.button-primary[data-hovered],
+.button-primary[data-pressed] {
+  background: var(--color-accent-hover);
+}
+
+.button-quiet {
+  border-color: transparent;
+  background: none;
+}
+
+.button-link,
+.button-link[data-hovered],
+.button-link[data-pressed] {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-link);
+  text-decoration: underline;
+}
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-s);
+}
+
+.segment {
+  min-height: var(--size-hit-min);
+  padding: 0 var(--space-2);
+  border: 0;
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.segment[data-hovered] {
+  background: var(--color-surface-hover);
+}
+
+.segment[data-selected] {
+  background: var(--color-surface-selected);
+  color: var(--color-text);
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+  background: var(--color-backdrop);
+}
+
+.modal-overlay[data-entering] {
+  animation: fade-in var(--duration-normal) var(--easing-standard);
+}
+
+.modal-overlay[data-exiting] {
+  animation: fade-in var(--duration-fast) var(--easing-standard) reverse;
+}
+
+.modal {
+  max-width: 28rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-m);
+  background: var(--color-bg);
+  box-shadow: var(--shadow-overlay);
+}
+
+.dialog {
+  padding: var(--space-4);
+  outline: none;
+}
+
+.dialog-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-md);
+}
+
+.dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (forced-colors: active) {
+  .segment[data-selected] {
+    outline: 2px solid Highlight;
+  }
+
+  .modal {
+    border-color: CanvasText;
   }
 }

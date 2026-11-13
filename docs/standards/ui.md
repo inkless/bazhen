@@ -3,12 +3,13 @@
 How to build UI in `apps/web`: what the look is made of, and the rules that keep a new screen
 consistent with the rest and cheap to re-theme.
 
-| Rule                                                                      | Enforced by                                         |
-| ------------------------------------------------------------------------- | --------------------------------------------------- |
-| Screens use only semantic tokens: no literal colours, no primitives       | `pnpm check` (`scripts/check-standards.ts`)         |
-| Every text/background pair the UI draws meets WCAG 2.2 AA, in every theme | `pnpm test` (`apps/web/src/ui/token-sheet.test.ts`) |
-| A new pair of foreground and background is added to that test             | review                                              |
-| Interactive targets are at least `--size-hit-min`                         | review                                              |
+| Rule                                                                                         | Enforced by                                         |
+| -------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| Screens use only semantic tokens: no literal colours, no primitives                          | `pnpm check` (`scripts/check-standards.ts`)         |
+| Every text/background pair the UI draws meets WCAG 2.2 AA, in every theme                    | `pnpm test` (`apps/web/src/ui/token-sheet.test.ts`) |
+| A new pair of foreground and background is added to that test                                | review                                              |
+| Screens take interactive widgets from `apps/web/src/ui/`, never from `react-aria-components` | review                                              |
+| Interactive targets are at least `--size-hit-min`                                            | review                                              |
 
 ## Tokens
 
@@ -61,6 +62,27 @@ To see every semantic colour in both themes, open `/swatches.html` on the dev se
 3. Add each pair it is drawn with to `TEXT_ON` or `SEEN_ON` in
    `apps/web/src/ui/token-sheet.test.ts`, and run `pnpm test`.
 4. A new hue is a new 12-step scale in `palette.css`, light and dark.
+
+## Interactive widgets
+
+Behaviour comes from [React Aria Components](https://react-spectrum.adobe.com/react-aria/)
+(Adobe, Apache-2.0): keyboard, touch, focus and screen-reader handling, unstyled. Screens don't
+import it. Each widget is a wrapper in `apps/web/src/ui/` that fixes its props and owns its CSS
+in `ui.css`, styled on React Aria's `data-*` states (`data-hovered`, `data-pressed`,
+`data-focus-visible`, `data-selected`) rather than `:hover` and `:focus`, which stick after a
+tap on a phone.
+
+- `Button` for every action, with a `variant`: `primary`, `secondary`, `quiet`, `link`.
+- `ConfirmDialog` for a button that asks first: a modal that traps focus, returns it to the
+  trigger, and closes on Escape or a tap outside.
+- `ThemeSwitch`, the header's System / Light / Dark choice.
+
+A new widget (a menu, a combo box, a toast) is a new wrapper: import the React Aria component by
+name, style it from semantic tokens, and add the pairs it draws to the contrast test.
+
+Not everything needs one. A list that navigates, like the fleet, stays a native list of
+buttons: React Aria's `GridList` is a selection widget, with `role="grid"`. Native inputs and
+`<details>` stay native too, since React Aria adds nothing to them.
 
 ## Browsers
 

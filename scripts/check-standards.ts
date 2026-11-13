@@ -39,7 +39,10 @@ const COVERED_ELSEWHERE: Record<string, string> = {
   "apps/web/src/terminal/TerminalView.tsx": "tests/e2e/keys.spec.ts",
   "apps/web/src/terminal/scroll-input.ts": "tests/e2e/keys.spec.ts",
   "apps/web/src/terminal/takeover.ts": "tests/e2e/keys.spec.ts",
+  "apps/web/src/ui/Button.tsx": "tests/e2e/dashboard.spec.ts",
+  "apps/web/src/ui/ConfirmDialog.tsx": "tests/e2e/dashboard.spec.ts",
   "apps/web/src/ui/swatches.tsx": "tests/e2e/swatches.spec.ts",
+  "apps/web/src/ui/ThemeSwitch.tsx": "tests/e2e/health.spec.ts",
 };
 
 /** Every file under `dir`, recursively, as repository-relative paths. */

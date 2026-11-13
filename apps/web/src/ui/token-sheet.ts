@@ -49,7 +49,8 @@ export function cssDeclarations(css: string): Declaration[] {
   return found;
 }
 
-const PRIMITIVE = /^oklch\(([\d.]+) ([\d.]+) ([\d.]+)\)$/;
+// A translucent primitive, one with an alpha, is read as its opaque colour.
+const PRIMITIVE = /^oklch\(([\d.]+) ([\d.]+) ([\d.]+)(?: \/ [\d.]+)?\)$/;
 const MAPPED = /^light-dark\(var\(--([\w-]+)\), var\(--([\w-]+)\)\)$/;
 const MORE_CONTRAST = "@media (prefers-contrast: more)";
 const isColour = (d: Declaration) => d.property.startsWith("--color-");

@@ -24,6 +24,7 @@ const TEXT_ON = {
     "color-surface-selected",
   ],
   "color-link": ["color-bg", "color-surface"],
+  "color-on-accent": ["color-accent", "color-accent-hover"],
   "color-ok": ["color-ok-subtle"],
   "color-warn": ["color-warn-subtle"],
   "color-danger": ["color-danger-subtle"],
@@ -136,7 +137,7 @@ describe("the palette", () => {
   test("is inside sRGB, so no contrast here rests on a browser's gamut mapping", () => {
     const outside = [...palette].filter(([, colour]) => !inSrgb(colour)).map(([name]) => name);
     expect(outside).toEqual([]);
-    expect(palette.size).toBe(120);
+    expect(palette.size).toBe(122);
   });
 
   test("can tell a colour outside sRGB", () => {

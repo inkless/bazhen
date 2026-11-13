@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { Button } from "../ui/Button.tsx";
 
 /** The escape hatch: a command to attach a terminal emulator of the user's own (§4.5). */
 export function AttachCommand({ command }: { command: string }) {
@@ -26,9 +27,7 @@ export function AttachCommand({ command }: { command: string }) {
       <pre>
         <code ref={code}>{command}</code>
       </pre>
-      <button type="button" onClick={() => void copy()}>
-        Copy
-      </button>{" "}
+      <Button onPress={() => void copy()}>Copy</Button>{" "}
       {copied === "yes" && <span role="status">Copied</span>}
       {copied === "selected" && <span role="status">Selected; copy it from here</span>}
     </details>

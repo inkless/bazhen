@@ -30,8 +30,21 @@ main {
   margin: 0;
 }
 
+.launch,
+.workspace form,
+.inbox p {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+
 .launch {
   margin: var(--space-3) 0;
+}
+
+.app-head .segmented {
+  margin-left: auto;
 }
 
 .dashboard {
@@ -164,20 +177,9 @@ main {
   font-size: var(--font-size-sm);
 }
 
-button.link,
-.rail .home {
-  align-self: flex-start;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--color-link);
-  font: inherit;
-  text-decoration: underline;
-  cursor: pointer;
-}
-
 /* The rail's links stand alone, so they keep a finger-sized target. */
-.rail > .link {
+.rail > .button-link {
+  align-self: flex-start;
   min-height: var(--size-hit-min);
 }
 
@@ -203,6 +205,10 @@ button.link,
 
 .workspace .cwd {
   margin: var(--space-1) 0 var(--space-2);
+}
+
+.workspace form {
+  margin-bottom: var(--space-2);
 }
 
 .attach {

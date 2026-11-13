@@ -4,6 +4,7 @@ import { answer, launchAgent, watchState } from "./api.ts";
 import { FleetList } from "./fleet/FleetList.tsx";
 import { groupFleet } from "./fleet/model.ts";
 import { Workspace } from "./fleet/Workspace.tsx";
+import { Button } from "./ui/Button.tsx";
 
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -74,40 +75,36 @@ export function Dashboard() {
             placeholder="/path/to/project"
           />
         </label>
-        <button type="submit">Launch Claude Code</button>{" "}
-        <button type="button" onClick={() => launch("codex")}>
-          Launch Codex
-        </button>
+        <Button type="submit" variant="primary">
+          Launch Claude Code
+        </Button>
+        <Button onPress={() => launch("codex")}>Launch Codex</Button>
       </form>
       {actionError !== null && (
         <p>
           <span role="alert">{actionError}</span>{" "}
-          <button type="button" className="link" onClick={() => setActionError(null)}>
+          <Button variant="link" onPress={() => setActionError(null)}>
             Dismiss
-          </button>
+          </Button>
         </p>
       )}
       {streamError !== null && <p role="status">{streamError}</p>}
       <div className="dashboard">
         <nav className="rail" aria-label="fleet">
-          <button type="button" className="home" onClick={() => select(null)}>
+          <Button variant="link" onPress={() => select(null)}>
             Fleet
-          </button>
+          </Button>
           {open.length > 0 && (
             <section aria-label="inbox" className="inbox">
               <h2>Needs you</h2>
               {open.map((item) => (
                 <p key={item.id}>
-                  <button type="button" className="link" onClick={() => select(item.agentId)}>
+                  <Button variant="link" onPress={() => select(item.agentId)}>
                     {projectOf(item.agentId) ?? "An agent"}
-                  </button>{" "}
+                  </Button>{" "}
                   {item.summary}{" "}
-                  <button type="button" onClick={() => void answer(item.id, "allow").catch(failed)}>
-                    Allow
-                  </button>{" "}
-                  <button type="button" onClick={() => void answer(item.id, "deny").catch(failed)}>
-                    Deny
-                  </button>
+                  <Button onPress={() => void answer(item.id, "allow").catch(failed)}>Allow</Button>{" "}
+                  <Button onPress={() => void answer(item.id, "deny").catch(failed)}>Deny</Button>
                 </p>
               ))}
             </section>
@@ -116,9 +113,9 @@ export function Dashboard() {
             <FleetList fleet={fleet} label="agents" selected={selected} onSelect={select} compact />
           )}
           {fleet !== null && (showEnded || fleet.hidden > 0) && (
-            <button type="button" className="link" onClick={() => setShowEnded(!showEnded)}>
+            <Button variant="link" onPress={() => setShowEnded(!showEnded)}>
               {showEnded ? "Hide ended agents" : `Show ended agents (${fleet.hidden})`}
-            </button>
+            </Button>
           )}
         </nav>
         <section className="centre">

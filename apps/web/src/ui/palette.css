@@ -7,9 +7,13 @@
  *   1-2   app backgrounds          6-8   borders: subtle, normal, strong
  *   3-5   component backgrounds:   9-10  solid fills: normal, hover
  *         normal, hover, selected  11-12 text: low contrast, high contrast
- * The -dark scales hold the same roles for a dark background.
+ * The -dark scales hold the same roles for a dark background. The black-a steps are black at
+ * fixed opacities, for scrims and shadows over either.
  */
 :root {
+  --color-black-a5: oklch(0 0 0 / 0.3);
+  --color-black-a8: oklch(0 0 0 / 0.55);
+
   --color-neutral-1: oklch(0.993 0 265);
   --color-neutral-2: oklch(0.978 0.001 265);
   --color-neutral-3: oklch(0.955 0.002 265);
