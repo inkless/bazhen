@@ -156,11 +156,13 @@ a task mails it the brief and the commands to answer with:
 | `bazhen task done [<task>] [--note …] [--cascade]`       | Finish it; a worker finishes only its own part. `--cascade` cancels subtasks  |
 | `bazhen task cancel <task> [--note …] [--cascade]`       | Cancel it                                                                     |
 | `bazhen agents`                                          | The agents running, by id, to delegate to                                     |
+| `bazhen escalate <question> [--task …]`                  | Inside an agent: put a question or problem in the human's inbox               |
 | `bazhen delegate <agent> --title … --brief … [--task …]` | Inside an agent: hand part of a task it coordinates or leads to another agent |
 
 The human assigns any role. A coordinator gives the task to a lead or workers, a lead to workers,
 and a worker to no one. Ending an assignment ends everything granted under it. Every agent
-Bazhen launches is told these commands as it starts, beside its harness's own instructions.
+Bazhen launches is told these commands as it starts, beside its harness's own instructions. When an agent finishes a task you own, or a subtask falls to
+you, it shows in your inbox.
 
 **Who is asking.** Inside an agent, the CLI says which agent it is from `BAZHEN_AGENT_ID`, over the
 daemon's 0600 Unix socket. The daemon takes that at its word, as it must take any process of

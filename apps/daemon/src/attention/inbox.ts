@@ -40,6 +40,12 @@ export interface Raised {
 /** Kinds a harness request stands behind: only that request, or the TUI, settles them. */
 const HARNESS_HELD: ReadonlySet<AttentionKind> = new Set(["approval", "question"]);
 
+/**
+ * Kinds that tell the human something whether or not the agent that raised them is still there:
+ * a task done, or a question about one. They stay open until the human dismisses them.
+ */
+const HUMAN_HELD: ReadonlySet<AttentionKind> = new Set(["escalation", "task_done"]);
+
 const parseReply = (r: unknown) => ReplyAttentionResponse.parse(r);
 const parseResend = (r: unknown) => ResendAttentionResponse.parse(r);
 
@@ -172,7 +178,9 @@ export class Inbox {
       });
     } else if (e.type === "agent.closed") {
       for (const item of this.store.openAttention(e.entityId)) {
-        if (!HARNESS_HELD.has(item.kind)) this.close(item.id, "agent_closed", "system");
+        if (!HARNESS_HELD.has(item.kind) && !HUMAN_HELD.has(item.kind)) {
+          this.close(item.id, "agent_closed", "system");
+        }
       }
     }
   }

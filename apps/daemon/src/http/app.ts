@@ -8,6 +8,8 @@ import {
   AssignTaskRequest,
   CreateTaskRequest,
   DelegateTaskRequest,
+  EscalateRequest,
+  type EscalateResponse,
   FinishTaskRequest,
   UnassignTaskRequest,
   type AssignTaskResponse,
@@ -116,6 +118,7 @@ export interface TaskCommands {
   unassign(caller: Caller, taskId: string, req: UnassignTaskRequest): TaskCommandResponse;
   finish(caller: Caller, taskId: string, req: FinishTaskRequest): TaskCommandResponse;
   delegate(caller: Caller, req: DelegateTaskRequest): CreateTaskResponse;
+  escalate(caller: Caller, req: EscalateRequest): EscalateResponse;
 }
 
 /** Thrown for a caller that says it is an agent with something that is no agent's id. */
@@ -271,6 +274,7 @@ export function createApp(deps: AppDeps): Hono {
   taskRoute("/v1/tasks/delegate", DelegateTaskRequest, (caller, _id, req) =>
     tasks.delegate(caller, req),
   );
+  taskRoute("/v1/escalations", EscalateRequest, (caller, _id, req) => tasks.escalate(caller, req));
   taskRoute("/v1/tasks/:id/assign", AssignTaskRequest, (...a) => tasks.assign(...a));
   taskRoute("/v1/tasks/:id/unassign", UnassignTaskRequest, (...a) => tasks.unassign(...a));
   taskRoute("/v1/tasks/:id/finish", FinishTaskRequest, (...a) => tasks.finish(...a));

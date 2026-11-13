@@ -78,6 +78,8 @@ export interface OpenAttention {
   readonly mainAgent: boolean;
   /** The message it is about, for mail that could not be delivered. */
   readonly messageId: string | null;
+  /** The task it is about, for an escalation or a task done. */
+  readonly taskId: string | null;
 }
 
 export class UnknownDevice extends Error {
@@ -489,7 +491,7 @@ export class Store {
 
   /** Open attention items, for one agent or all, with the tool call each is about. */
   openAttention(agentId?: string): OpenAttention[] {
-    const sql = `SELECT id, agent_session_id, kind, tool_use_id, main_agent, message_id FROM attention_items
+    const sql = `SELECT id, agent_session_id, kind, tool_use_id, main_agent, message_id, task_id FROM attention_items
                  WHERE state = 'open' AND (?1 IS NULL OR agent_session_id = ?1) ORDER BY created_event_id`;
     return this.prepare(sql)
       .all(agentId ?? null)
@@ -503,6 +505,7 @@ export class Store {
                 toolUseId: typeof r.tool_use_id === "string" ? r.tool_use_id : null,
                 mainAgent: r.main_agent === 1,
                 messageId: typeof r.message_id === "string" ? r.message_id : null,
+                taskId: typeof r.task_id === "string" ? r.task_id : null,
               },
             ]
           : [],
@@ -925,6 +928,7 @@ export class Store {
                     toolUseId: typeof tool_use_id === "string" ? tool_use_id : null,
                     mainAgent: main_agent === 1,
                     messageId: typeof r.messageId === "string" ? r.messageId : null,
+                    taskId: typeof r.taskId === "string" ? r.taskId : null,
                   })
                 : [],
           })),

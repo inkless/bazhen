@@ -5,6 +5,7 @@ import { parseArgs } from "node:util";
 import {
   AssignTaskResponse,
   CreateTaskResponse,
+  EscalateResponse,
   Role,
   StateSnapshot,
   TaskCommandResponse,
@@ -24,6 +25,7 @@ export const TASK_USAGE = `usage:
   bazhen task unassign <task> <assignment>
   bazhen task done [<task>] [--note <text>] [--cascade]
   bazhen task cancel <task> [--note <text>] [--cascade]
+  bazhen escalate <question> [--task <task>]
   bazhen delegate <agent> --title <title> (--brief <text> | --brief-file <path>) [--task <task>] [--role lead|worker]`;
 
 /** A command line that doesn't say what to do; the message says why. */
@@ -110,6 +112,18 @@ export function taskVerb(argv: readonly string[], ctx: Context): Verb {
     verb({ method: "POST", path, reply, body: { idempotencyKey: ctx.key(), ...body } }, print);
 
   if (name === "agents") return verb(state, listAgents);
+  if (name === "escalate") {
+    const summary = [sub, ...rest].filter((w) => w !== undefined).join(" ");
+    return post(
+      "/v1/escalations",
+      EscalateResponse,
+      {
+        summary: need(summary, "what to ask the human"),
+        ...(values.task === undefined ? {} : { taskId: values.task }),
+      },
+      (r) => `escalated as ${r.attentionId}; the human answers in the inbox`,
+    );
+  }
   if (name === "delegate") {
     const agentId = need(sub, "the agent to delegate to");
     return post(

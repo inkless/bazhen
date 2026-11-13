@@ -263,7 +263,10 @@ export async function taskFleet() {
   const [lead, worker] = [await launch("launch-lead"), await launch("launch-worker")];
   const mailbox = new Mailbox(store);
   const raised: Raised[] = [];
-  const tasks = new Tasks(store, mailbox, (r) => raised.push(r));
+  const tasks = new Tasks(store, mailbox, (r) => {
+    raised.push(r);
+    return newId("attn");
+  });
   return { store, mailbox, tasks, raised, coordinator, lead, worker };
 }
 

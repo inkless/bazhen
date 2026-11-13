@@ -13,11 +13,13 @@ import {
 import {
   AssignTaskResponse,
   CreateTaskResponse,
+  EscalateResponse,
   TaskCommandResponse,
   type AgentState,
   type AssignTaskRequest,
   type CreateTaskRequest,
   type DelegateTaskRequest,
+  type EscalateRequest,
   type FinishTaskRequest,
   type Role,
   type TaskOutcome,
@@ -52,6 +54,22 @@ export class UnknownTask extends Error {
 const GONE: ReadonlySet<AgentState> = new Set<AgentState>(["closing", "closed", "failed"]);
 
 const actor = (caller: Caller) => caller ?? "human";
+
+/** How many of an agent's escalations may wait for the human at once. */
+const OPEN_ESCALATIONS = 5;
+
+/** The longest summary an inbox item carries; the rest is in the task. */
+const SUMMARY_MAX = 500;
+
+/** Text an agent wrote, made safe to show: no control or escape characters, and bounded. */
+const printable = (text: string) => {
+  const clean = text.replace(/[\p{Cc}\p{Cf}]+/gu, " ").trim();
+  return clean.length > SUMMARY_MAX ? `${clean.slice(0, SUMMARY_MAX - 1)}…` : clean;
+};
+
+/** What the human's inbox says of a task an agent finished. */
+const doneSummary = (task: Named, note: string | null) =>
+  printable(`Task ${task.id} (${task.title}) is done${note === null ? "." : `: ${note}`}`);
 
 /** An agent in one of these states can't act: it is gone, or was never there. */
 const CLOSED_CALLER: ReadonlySet<AgentState> = new Set<AgentState>([
@@ -89,10 +107,10 @@ export class Tasks {
   /** The last event whose orphaned assignments have been told; none at start, so all are. */
   private closesSeen = 0;
 
-  private readonly raise: (raised: Raised) => unknown;
+  private readonly raise: (raised: Raised) => string;
 
-  /** `raise` puts an item in the human's inbox, for a task that falls to the human. */
-  constructor(store: Store, mailbox: Pick<Mailbox, "send">, raise: (raised: Raised) => unknown) {
+  /** `raise` puts an item in the human's inbox, and answers with its id. */
+  constructor(store: Store, mailbox: Pick<Mailbox, "send">, raise: (raised: Raised) => string) {
     this.store = store;
     this.mailbox = mailbox;
     this.raise = raise;
@@ -219,6 +237,11 @@ export class Tasks {
           });
           const giver = this.store.granters(own.id)[0] ?? view.ownerAgentId;
           const body = completedMail(task, own.agentId, note);
+          // The human gave it this part; with no agent to tell, the human hears instead.
+          if (giver === null) {
+            const summary = printable(body);
+            this.raise({ agentId: own.agentId, kind: "task_done", summary, taskId });
+          }
           return {
             eventIds: [
               ended,
@@ -275,11 +298,61 @@ export class Tasks {
       outcome === "cancelled"
         ? cancelledMail(task, caller)
         : finishedMail(task, outcome, caller, note);
+    // The human's task, done by an agent: the human hears through the inbox, not mail.
+    if (outcome === "done" && view.ownerAgentId === null && caller !== null) {
+      this.raise({ agentId: caller, kind: "task_done", summary: doneSummary(task, note), taskId });
+    }
     return [
       finished,
       ...this.tell([...givers], finishedMail(task, outcome, caller, note), caller, `${key}:givers`),
       ...this.tell(workers, told, caller, `${key}:workers`),
     ];
+  }
+
+  /**
+   * Puts an agent's question or problem in the human's inbox, about one of its own tasks when it
+   * names one. Only an agent escalates; the human has nobody to escalate to.
+   */
+  escalate(caller: Caller, req: EscalateRequest): EscalateResponse {
+    const { idempotencyKey, ...request } = req;
+    return this.store.once(
+      idempotencyKey,
+      { caller, ...request },
+      (r) => EscalateResponse.parse(r),
+      () => {
+        if (caller === null) throw new TaskRefused("forbidden", "only an agent escalates");
+        this.checkCaller(caller);
+        const taskId = req.taskId ?? null;
+        if (taskId !== null) {
+          const view = this.view(taskId);
+          if (view.state !== "open")
+            throw new TaskRefused("conflict", `${taskId} is ${view.state}`);
+          const owned = view.ownerHolds && view.ownerAgentId === caller;
+          if (!owned && !view.active.some((a) => a.agentId === caller)) {
+            throw new TaskRefused("forbidden", `${taskId} is not one of your tasks`);
+          }
+        }
+        const open = this.store.openAttention(caller).filter((i) => i.kind === "escalation");
+        const same = open.find((i) => i.taskId === taskId);
+        if (same !== undefined) {
+          throw new TaskRefused(
+            "conflict",
+            `${same.id} already asks the human this; wait for its answer`,
+          );
+        }
+        if (open.length >= OPEN_ESCALATIONS) {
+          throw new TaskRefused(
+            "conflict",
+            `${open.length} of your escalations wait for answers already`,
+          );
+        }
+        const about = taskId === null ? {} : { taskId };
+        const summary = printable(req.summary);
+        return {
+          attentionId: this.raise({ agentId: caller, kind: "escalation", summary, ...about }),
+        };
+      },
+    );
   }
 
   /**

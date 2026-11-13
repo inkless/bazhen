@@ -158,11 +158,12 @@ describe("inbox", () => {
     expect(items(store).map((a) => a.state)).toEqual(["open"]);
   });
 
-  it("closes what its agent raised when the agent closes", async () => {
+  it("keeps what an agent raised for the human open after the agent closes", async () => {
     const { store, agentId, box } = await inbox();
     box.raise({ agentId, kind: "escalation", summary: "Help" });
+    box.raise({ agentId, kind: "task_done", summary: "Done" });
     store.append({ type: "agent.closing", entityId: agentId, actor: "user", payload: {} });
     recordClosed(store, agentId, "user");
-    expect(items(store)).toMatchObject([{ state: "closed", closeReason: "agent_closed" }]);
+    expect(items(store)).toMatchObject([{ state: "open" }, { state: "open" }]);
   });
 });

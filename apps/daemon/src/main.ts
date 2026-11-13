@@ -108,6 +108,7 @@ const tasks: TaskCommands = {
   unassign: (caller, taskId, req) => taskService.unassign(caller, taskId, req),
   finish: (caller, taskId, req) => taskService.finish(caller, taskId, req),
   delegate: (caller, req) => taskService.delegate(caller, req),
+  escalate: (caller, req) => taskService.escalate(caller, req),
 };
 const presence = new Presence();
 // Found once, at start: a notifier installed or built later is picked up by a restart.
