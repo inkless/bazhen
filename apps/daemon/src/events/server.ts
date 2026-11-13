@@ -1,16 +1,17 @@
 import { WebSocketServer } from "ws";
-import { EventStreamQuery, isCompatible } from "@bazhen/protocol";
+import { ClientEventFrame, EventStreamQuery, isCompatible, parseJson } from "@bazhen/protocol";
 import { refuseUpgrade, type UpgradeRoute } from "../http/upgrades.ts";
 import type { Store } from "../store/store.ts";
+import type { Presence } from "../notify/presence.ts";
 import { follow } from "./feed.ts";
 
-/** The client sends nothing on this stream. */
+/** The client sends only whether its page is in sight. */
 const MAX_FRAME_BYTES = 1024;
 /** RFC 6455's close code for a server that can't go on. */
 const INTERNAL_ERROR = 1011;
 
 /** The event stream's WebSocket endpoint, `/v1/events` (foundation-design §5.2). */
-export function eventRoute(store: Store): UpgradeRoute {
+export function eventRoute(store: Store, presence?: Presence): UpgradeRoute {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
   return {
     path: /^\/v1\/events$/,
@@ -33,7 +34,15 @@ export function eventRoute(store: Store): UpgradeRoute {
             ws.close(INTERNAL_ERROR, "internal error");
           },
         });
-        ws.on("close", stop);
+        ws.on("message", (data: Buffer) => {
+          // A frame this build doesn't know is skipped, as clients skip unknown events.
+          const frame = ClientEventFrame.safeParse(parseJson(data.toString("utf8")));
+          if (frame.success) presence?.report(ws, frame.data.visible, Date.now());
+        });
+        ws.on("close", () => {
+          presence?.gone(ws);
+          stop();
+        });
       });
     },
   };

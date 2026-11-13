@@ -66,7 +66,12 @@ passthrough = ["ITERM_PROFILE"] # give agents these, though Bazhen would strip t
 external_origins = [
   "https://bazhen.example.com",
 ] # or BAZHEN_EXTERNAL_ORIGINS, comma-separated; see below
+
+[notifications]
+desktop = true # show what needs you on this machine's desktop while no dashboard is in sight
 ```
+
+Desktop notifications go through `notify-send` on Linux. macOS has none yet.
 
 Agents get the environment a new terminal tab would, minus Bazhen's, tmux's, harnesses' session
 and terminal-presentation variables. By default it is captured once, when `bazhen start` runs.

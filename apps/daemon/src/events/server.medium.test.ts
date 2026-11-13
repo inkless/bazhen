@@ -5,6 +5,7 @@ import { EventFrame, PROTOCOL_VERSION } from "@bazhen/protocol";
 import { Store } from "../store/store.ts";
 import { register, serveUpgrades, tempDb, upgradeOutcome } from "../testing/fixtures.ts";
 import { eventRoute } from "./server.ts";
+import { Presence } from "../notify/presence.ts";
 
 let server: Server | undefined;
 let opened: Store | undefined;
@@ -13,15 +14,27 @@ afterEach(() => {
   opened?.close();
 });
 
-async function serving() {
+async function serving(presence?: Presence) {
   const store = Store.open(tempDb());
   opened = store;
-  const served = await serveUpgrades([eventRoute(store)]);
+  const served = await serveUpgrades([eventRoute(store, presence)]);
   server = served.server;
   return { store, url: (query: string) => `ws://${served.host}/v1/events?${query}` };
 }
 
 describe("event stream endpoint", () => {
+  it("hears whether the client's page is in sight, until its stream closes", async () => {
+    const presence = new Presence();
+    const { store, url } = await serving(presence);
+    const ws = new WebSocket(url(`v=${PROTOCOL_VERSION}&epoch=${store.epoch()}&after=0`));
+    await new Promise((resolve) => ws.once("open", resolve));
+    ws.send("not json");
+    ws.send(JSON.stringify({ type: "visibility", visible: true }));
+    await expect.poll(() => presence.seen(Date.now())).toBe(true);
+    ws.close();
+    await expect.poll(() => presence.seen(Date.now())).toBe(false);
+  });
+
   it("streams the events after the cursor it was opened with", async () => {
     const { store, url } = await serving();
     const skipped = register(store).eventId;
