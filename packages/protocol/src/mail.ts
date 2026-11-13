@@ -81,13 +81,23 @@ export const HookRequest = z.object({
 });
 export type HookRequest = z.infer<typeof HookRequest>;
 
+/** `<message id>-<offer id>`; plain token characters, so every client echoes it verbatim. */
+export const OfferToken = z.string().regex(/^msg_[0-9a-f]{32}-[0-9a-z]{1,32}$/);
+export type OfferToken = z.infer<typeof OfferToken>;
+
+/** The token for one offer of a message. */
+export const offerToken = (messageId: string, offer: string): OfferToken => `${messageId}-${offer}`;
+
+/** The message an offer token is for. */
+export const offeredMessage = (token: OfferToken): string => token.slice(0, token.indexOf("-"));
+
 /**
  * What the hook client prints and exits with, verbatim; it knows no harness format.
  *
  * On the wire it is framed rather than JSON, so a client with no JSON parser (a std-only binary,
  * a `sh` + `curl` script) can read it byte for byte: `Content-Type` is `HOOK_REPLY_TYPE`,
  * `Content-Length` is set, `Bazhen-Exit-Code` carries `exitCode`, `Bazhen-Offered` the
- * comma-separated `offered` IDs, `Bazhen-Stdout-Bytes` the UTF-8 length of `stdout`, and the body
+ * comma-separated `offered` tokens, `Bazhen-Stdout-Bytes` the UTF-8 length of `stdout`, and the body
  * is `stdout` then `stderr`. A client fails open on anything else, or on a body over
  * `HOOK_REPLY_MAX_BYTES`.
  */
@@ -95,8 +105,12 @@ export const HookReply = z.object({
   exitCode: z.number().int().min(0).max(255),
   stdout: z.string(),
   stderr: z.string(),
-  /** Messages this reply hands to the harness; the client acks them once it has written. */
-  offered: z.array(Id("msg")),
+  /**
+   * One token per message this reply hands to the harness, which the client acks once it has
+   * written: the message's id and this offer's own, so an ack names the offer it confirms and a
+   * late one for an earlier offer of the same message confirms nothing (protocol 1.9).
+   */
+  offered: z.array(OfferToken),
 });
 export type HookReply = z.infer<typeof HookReply>;
 
@@ -128,5 +142,5 @@ export function frameHookReply(reply: HookReply): {
   };
 }
 
-export const HookAck = z.object({ agentId: Id("agent"), offered: z.array(Id("msg")) });
+export const HookAck = z.object({ agentId: Id("agent"), offered: z.array(OfferToken) });
 export type HookAck = z.infer<typeof HookAck>;

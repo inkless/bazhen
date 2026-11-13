@@ -2,13 +2,34 @@ import { describe, expect, it } from "vitest";
 import {
   AttentionCloseReason,
   HOOK_REPLY_TYPE,
+  HookAck,
   HookReply,
   SendMessageRequest,
   frameHookReply,
+  offerToken,
+  offeredMessage,
 } from "./mail.ts";
 import { EVENTS } from "./events.ts";
 
+const MSG = "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
+
 describe("mail and attention schemas", () => {
+  it("names an offer by its message and its own id, and reads the message back", () => {
+    const token = offerToken(MSG, "ab12x");
+    expect([token, offeredMessage(token)]).toEqual([`${MSG}-ab12x`, MSG]);
+    expect(
+      HookAck.safeParse({ agentId: "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d", offered: [token] })
+        .success,
+    ).toBe(true);
+  });
+
+  it("refuses an ack that names a message but not which offer of it", () => {
+    expect(
+      HookAck.safeParse({ agentId: "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d", offered: [MSG] })
+        .success,
+    ).toBe(false);
+  });
+
   it("refuses an empty message", () => {
     expect(SendMessageRequest.safeParse({ idempotencyKey: "k", body: "" }).success).toBe(false);
   });

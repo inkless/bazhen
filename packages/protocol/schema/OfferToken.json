@@ -1,0 +1,6 @@
+{
+  "$id": "OfferToken",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "string",
+  "pattern": "^msg_[0-9a-f]{32}-[0-9a-z]{1,32}$"
+}

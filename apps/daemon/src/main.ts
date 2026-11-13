@@ -33,6 +33,7 @@ import { endOpenAttachments, storeLog } from "./stream/log.ts";
 import { streamRoute } from "./stream/server.ts";
 import { Approvals } from "./mailbox/approvals.ts";
 import { HOOK_SCRIPT, hookClient, hookCommand } from "./mailbox/hook-command.ts";
+import { SessionBinding, psTable } from "./mailbox/binding.ts";
 import { hookApp } from "./mailbox/ingress.ts";
 import { Mailbox } from "./mailbox/mailbox.ts";
 import { InvalidConfig, loadSettings } from "./config/config.ts";
@@ -190,6 +191,7 @@ const socketListener = getRequestListener(
       mailbox,
       approvals,
       knows: (agentId) => store.agent(agentId) !== undefined,
+      binding: new SessionBinding(store, psTable),
     }),
     stop: shutdown,
     refreshEnv: async (env) => {

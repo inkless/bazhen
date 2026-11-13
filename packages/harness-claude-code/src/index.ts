@@ -91,7 +91,8 @@ export const APPROVAL_WAIT_MS = 50_000;
 
 /** A Claude Code hook as the daemon acts on it, whatever Claude Code calls it. */
 export type Hook =
-  | { readonly kind: "wait" }
+  /** The waiter; `sessionStarted` when it runs for a SessionStart, which may move the binding. */
+  | { readonly kind: "wait"; readonly sessionStarted: boolean }
   | { readonly kind: "toolStarted"; readonly tool: string; readonly useId: string }
   | { readonly kind: "permission"; readonly summary: string; readonly tool: string }
   | { readonly kind: "promptStarted"; readonly prompt: string; readonly promptId: string | null }
@@ -103,7 +104,7 @@ export type Hook =
 export function readHook(event: string, payload: unknown): Hook {
   switch (event) {
     case "wait":
-      return { kind: "wait" };
+      return { kind: "wait", sessionStarted: field(payload, "hook_event_name") === "SessionStart" };
     case "PreToolUse": {
       const useId = toolUseIdOf(payload);
       return useId === null ? IGNORED : { kind: "toolStarted", tool: toolKey(payload), useId };
@@ -127,6 +128,21 @@ export function readHook(event: string, payload: unknown): Hook {
 }
 
 const IGNORED: Hook = { kind: "ignored" };
+
+/** Which Claude Code session ran a hook, and whether one of its subagents did. */
+export interface HookOrigin {
+  readonly sessionId: string | null;
+  /** A subagent's hook, which carries `agent_id`; compaction runs as one (§3.1). */
+  readonly subagent: boolean;
+}
+
+export function hookOrigin(payload: unknown): HookOrigin {
+  const session = field(payload, "session_id");
+  return {
+    sessionId: typeof session === "string" && session !== "" ? session : null,
+    subagent: typeof field(payload, "agent_id") === "string",
+  };
+}
 
 const field = (payload: unknown, name: string): unknown =>
   typeof payload === "object" && payload !== null ? Reflect.get(payload, name) : undefined;

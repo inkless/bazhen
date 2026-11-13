@@ -418,6 +418,37 @@ export class Store {
     return row === undefined ? undefined : activityOf(row.activity);
   }
 
+  /** The environment an agent runs in. */
+  agentEnvironment(agentId: string): EnvironmentId | undefined {
+    const id = this.prepare("SELECT environment_id FROM agent_sessions WHERE id = ?").get(
+      agentId,
+    )?.environment_id;
+    return typeof id === "string" && isId("env", id) ? id : undefined;
+  }
+
+  /**
+   * The Claude Code session an agent is bound to, and the pid of its pane's process, which is
+   * the TUI Bazhen launched (foundation-design §3.1). Either is null when not known.
+   */
+  claudeBinding(agentId: string): { sessionId: string | null; panePid: number | null } {
+    const row = this.prepare(
+      `SELECT a.external_ref, t.locator FROM agent_sessions a
+       LEFT JOIN terminals t ON t.id = a.terminal_id WHERE a.id = ?`,
+    ).get(agentId);
+    const ref =
+      typeof row?.external_ref === "string"
+        ? ExternalRef.parse(JSON.parse(row.external_ref))
+        : null;
+    const locator: unknown = typeof row?.locator === "string" ? JSON.parse(row.locator) : null;
+    const pid = Number(
+      typeof locator === "object" && locator !== null ? Reflect.get(locator, "panePid") : NaN,
+    );
+    return {
+      sessionId: ref?.kind === "claude-session" ? ref.id : null,
+      panePid: Number.isInteger(pid) && pid > 0 ? pid : null,
+    };
+  }
+
   /** The running Codex agent bound to a thread, if any. */
   codexAgent(threadId: string): string | undefined {
     const sql = `SELECT id FROM agent_sessions WHERE ${RUNNING_CODEX} AND ${THREAD} = ?`;

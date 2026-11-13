@@ -11,7 +11,7 @@
       "type": "array",
       "items": {
         "type": "string",
-        "pattern": "^msg_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+        "pattern": "^msg_[0-9a-f]{32}-[0-9a-z]{1,32}$"
       }
     }
   },
