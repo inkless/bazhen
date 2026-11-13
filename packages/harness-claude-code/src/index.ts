@@ -61,7 +61,7 @@ export class ClaudeCodeHarness implements HarnessAdapter {
     session: string[],
     id: string,
     request: AgentLaunchRequest,
-    { theme }: LaunchOptions,
+    { theme, instructions }: LaunchOptions,
   ): HarnessLaunch {
     const choice = this.opts.statusLine?.(request.cwd) ?? { wrap: null };
     const statusLine =
@@ -77,6 +77,7 @@ export class ClaudeCodeHarness implements HarnessAdapter {
         ...(this.opts.permissionMode === undefined
           ? []
           : ["--permission-mode", this.opts.permissionMode]),
+        ...(instructions === undefined ? [] : ["--append-system-prompt", instructions]),
       ],
       env: {},
       ...(theme && { theme }),

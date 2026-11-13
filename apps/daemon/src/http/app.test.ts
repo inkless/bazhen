@@ -23,6 +23,7 @@ const tasks: TaskCommands = {
   assign: () => ({ assignmentId: newId("asgn"), eventIds: [6] }),
   unassign: () => ({ eventIds: [7] }),
   finish: () => ({ eventIds: [8] }),
+  delegate: () => ({ taskId: newId("task"), assignmentId: newId("asgn"), eventIds: [9] }),
 };
 const deps: AppDeps = {
   appVersion: "0.1.0",

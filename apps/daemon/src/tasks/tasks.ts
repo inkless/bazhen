@@ -1,10 +1,13 @@
 import {
+  checkDelegate,
   checkFinish,
   checkGrant,
   checkUnassign,
+  isId,
   newId,
   TaskRefused,
   type AgentSessionId,
+  type AssignmentId,
   type Caller,
 } from "@bazhen/core";
 import {
@@ -14,11 +17,13 @@ import {
   type AgentState,
   type AssignTaskRequest,
   type CreateTaskRequest,
+  type DelegateTaskRequest,
   type FinishTaskRequest,
   type Role,
   type TaskOutcome,
   type UnassignTaskRequest,
 } from "@bazhen/protocol";
+import type { Raised } from "../attention/inbox.ts";
 import type { Mailbox } from "../mailbox/mailbox.ts";
 import { UnknownAgent, type Store } from "../store/store.ts";
 import {
@@ -28,6 +33,7 @@ import {
   completedMail,
   finishedMail,
   lineEndedMail,
+  ownedMail,
   MAIL_LIMIT,
   unassignedMail,
   type Named,
@@ -83,9 +89,13 @@ export class Tasks {
   /** The last event whose orphaned assignments have been told; none at start, so all are. */
   private closesSeen = 0;
 
-  constructor(store: Store, mailbox: Pick<Mailbox, "send">) {
+  private readonly raise: (raised: Raised) => unknown;
+
+  /** `raise` puts an item in the human's inbox, for a task that falls to the human. */
+  constructor(store: Store, mailbox: Pick<Mailbox, "send">, raise: (raised: Raised) => unknown) {
     this.store = store;
     this.mailbox = mailbox;
+    this.raise = raise;
   }
 
   create(caller: Caller, req: CreateTaskRequest): CreateTaskResponse {
@@ -97,19 +107,31 @@ export class Tasks {
       () => {
         this.checkCaller(caller);
         const parentTaskId = req.parentTaskId ?? null;
+        let delegatedFrom: AssignmentId | null = null;
         if (parentTaskId !== null) {
-          const parent = this.view(parentTaskId).state;
-          if (parent !== "open") throw new TaskRefused("conflict", `the parent task is ${parent}`);
+          const parent = this.view(parentTaskId);
+          if (parent.state !== "open") {
+            throw new TaskRefused("conflict", `the parent task is ${parent.state}`);
+          }
+          // An agent's subtask is a delegation: it needs the authority delegating would.
+          if (caller !== null) delegatedFrom = checkDelegate(parent, caller, "worker");
         }
         const taskId = newId("task");
         const created = this.store.append({
           type: "task.created",
           entityId: taskId,
           actor: actor(caller),
-          payload: { title: req.title, brief: req.brief, ownerAgentId: caller, parentTaskId },
+          payload: {
+            title: req.title,
+            brief: req.brief,
+            ownerAgentId: caller,
+            parentTaskId,
+            delegatedFrom,
+          },
         });
         if (req.assign === undefined) return { taskId, assignmentId: null, eventIds: [created] };
-        const granted = this.grant(caller, taskId, req.assign, idempotencyKey);
+        const from = parentTaskId === null || caller === null ? undefined : delegatedFrom;
+        const granted = this.grant(caller, taskId, req.assign, idempotencyKey, from);
         return { taskId, ...granted, eventIds: [created, ...granted.eventIds] };
       },
     );
@@ -162,7 +184,7 @@ export class Tasks {
             idempotencyKey,
           ),
         ];
-        return { eventIds: [ended, ...mail] };
+        return { eventIds: [ended, ...mail, ...this.liftStranded(idempotencyKey)] };
       },
     );
   }
@@ -201,6 +223,7 @@ export class Tasks {
             eventIds: [
               ended,
               ...this.tell(giver === null ? [] : [giver], body, caller, idempotencyKey),
+              ...this.liftStranded(idempotencyKey),
             ],
           };
         }
@@ -217,7 +240,11 @@ export class Tasks {
           this.end(caller, id, "cancelled", CANCELLED_WITH_PARENT, `${idempotencyKey}:${id}`),
         );
         return {
-          eventIds: [...cancelled, ...this.end(caller, taskId, outcome, note, idempotencyKey)],
+          eventIds: [
+            ...cancelled,
+            ...this.end(caller, taskId, outcome, note, idempotencyKey),
+            ...this.liftStranded(idempotencyKey),
+          ],
         };
       },
     );
@@ -255,12 +282,75 @@ export class Tasks {
     ];
   }
 
+  /**
+   * Hands part of a task the caller coordinates or leads to another agent, as a subtask the
+   * caller owns. Whoever finishes it tells the caller.
+   */
+  delegate(caller: Caller, req: DelegateTaskRequest): CreateTaskResponse {
+    const { idempotencyKey, ...request } = req;
+    return this.store.once(
+      idempotencyKey,
+      { caller, ...request },
+      (r) => CreateTaskResponse.parse(r),
+      () => {
+        if (caller === null) throw new TaskRefused("forbidden", "only an agent delegates");
+        this.checkCaller(caller);
+        const parentTaskId = req.fromTaskId ?? this.delegatingTask(caller);
+        const from = checkDelegate(this.view(parentTaskId), caller, req.role);
+        if (req.agentId === caller)
+          throw new TaskRefused("forbidden", "an agent can't delegate to itself");
+        const above = [
+          ...(from === null ? [] : this.store.granters(from)),
+          ...this.store.aboveOnTree(parentTaskId),
+        ];
+        if (above.some((agent) => agent === req.agentId)) {
+          throw new TaskRefused(
+            "forbidden",
+            `${req.agentId} gave you this work: delegate down, to an agent below you`,
+          );
+        }
+        const taskId = newId("task");
+        const created = this.store.append({
+          type: "task.created",
+          entityId: taskId,
+          actor: caller,
+          payload: {
+            title: req.title,
+            brief: req.brief,
+            ownerAgentId: caller,
+            parentTaskId,
+            delegatedFrom: from,
+          },
+        });
+        const grant = { agentId: req.agentId, role: req.role };
+        const granted = this.grant(caller, taskId, grant, idempotencyKey, from);
+        return { taskId, ...granted, eventIds: [created, ...granted.eventIds] };
+      },
+    );
+  }
+
+  /** The one task the agent coordinates or leads, which an unqualified delegate is part of. */
+  private delegatingTask(agentId: string): string {
+    const held = this.store
+      .assignments({ agentId }, "active")
+      .filter((a) => a.role !== "worker")
+      .map((a) => a.taskId);
+    const [only, ...more] = [...new Set(held)];
+    if (only !== undefined && more.length === 0) return only;
+    const which =
+      only === undefined
+        ? "it coordinates or leads no task"
+        : `name one of ${[only, ...more].join(", ")}`;
+    throw new TaskRefused("conflict", `say which task to delegate from: ${which}`);
+  }
+
   /** Grants the role, then mails the brief, last, so a refused send leaves nothing recorded. */
   private grant(
     caller: Caller,
     taskId: string,
     req: { readonly agentId: string; readonly role: Role },
     key: string,
+    delegatedFrom?: AssignmentId | null,
   ): AssignTaskResponse {
     const agentId = req.agentId;
     if (!this.reachable(agentId)) throw new UnknownAgent(agentId, "that can take a task");
@@ -268,7 +358,8 @@ export class Tasks {
     const detail = this.store.taskDetail(taskId);
     if (detail === undefined) throw new UnknownTask(taskId);
     const body = checkLength(assignedMail(detail, req.role, caller));
-    const parentAssignmentId = checkGrant(view, caller, { agentId, role: req.role });
+    const checked = checkGrant(view, caller, { agentId, role: req.role });
+    const parentAssignmentId = delegatedFrom === undefined ? checked : delegatedFrom;
     const assignmentId = newId("asgn");
     const granted = this.store.append({
       type: "assignment.granted",
@@ -314,11 +405,60 @@ export class Tasks {
   }
 
   /**
+   * Moves each subtask whose owner no longer holds it up to its parent's owner, and tells the new
+   * owner. A move can strand the next level down, so it repeats until none is left; each pass
+   * lifts a subtask one level, so it ends within the tree's depth.
+   */
+  private liftStranded(key: string): number[] {
+    const events: number[] = [];
+    for (
+      let stranded = this.store.stranded();
+      stranded.length > 0;
+      stranded = this.store.stranded()
+    ) {
+      for (const lifted of stranded) {
+        const { taskId } = lifted;
+        const previous = this.view(taskId).ownerAgentId;
+        // An owner that is gone can't take the task; it falls to the human rather than up a tree
+        // whose other owners' standing nothing has checked.
+        const live = lifted.ownerAgentId !== null && this.reachable(lifted.ownerAgentId);
+        const ownerAgentId = live ? lifted.ownerAgentId : null;
+        const from = lifted.delegatedFrom;
+        const delegatedFrom = live && from !== null && isId("asgn", from) ? from : null;
+        events.push(
+          this.store.append({
+            type: "task.owner_changed",
+            entityId: taskId,
+            actor: "system",
+            payload: { ownerAgentId, delegatedFrom },
+          }),
+        );
+        if (ownerAgentId === null) {
+          const task = this.named(taskId);
+          if (previous !== null) {
+            this.raise({
+              agentId: previous,
+              kind: "escalation",
+              summary: `Task ${task.id} (${task.title}) is yours now: ${previous}, who delegated it, no longer holds the work it is part of.`,
+              taskId,
+            });
+          }
+          continue;
+        }
+        const to = [{ agentId: ownerAgentId, id: `owner:${taskId}:${ownerAgentId}` }];
+        events.push(...this.tellEach(to, () => ownedMail(this.named(taskId)), null, key));
+      }
+    }
+    return events;
+  }
+
+  /**
    * Mails the agents whose assignments ended because an agent they were granted under closed.
    * Run after each commit; the mail's key is the assignment's, so a scan after a restart that
    * finds them again mails no one twice.
    */
   private tellOrphans(): void {
+    this.store.transaction(() => this.liftStranded("lifted"));
     for (const a of this.store.endedByClose(this.closesSeen)) {
       this.closesSeen = Math.max(this.closesSeen, a.eventId);
       this.tellEach([a], () => lineEndedMail(this.named(a.taskId)), null, "closed");

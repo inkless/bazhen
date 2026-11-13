@@ -303,12 +303,33 @@ export function project(db: Statements, e: Recorded): void {
       return;
     }
     case "task.created": {
-      const { title, brief, ownerAgentId, parentTaskId } = EVENTS[e.type].payload.parse(e.payload);
+      const { title, brief, ownerAgentId, parentTaskId, delegatedFrom } = EVENTS[
+        e.type
+      ].payload.parse(e.payload);
       db.prepare(
-        `INSERT INTO tasks (id, title, brief, state, owner_agent_id, parent_task_id,
+        `INSERT INTO tasks (id, title, brief, state, owner_agent_id, parent_task_id, delegated_from,
            created_event_id, updated_event_id)
-         VALUES (?, ?, ?, 'open', ?, ?, ?, ?)`,
-      ).run(e.entityId, title, brief, ownerAgentId, parentTaskId, e.id, e.id);
+         VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?)`,
+      ).run(
+        e.entityId,
+        title,
+        brief,
+        ownerAgentId,
+        parentTaskId,
+        delegatedFrom ?? null,
+        e.id,
+        e.id,
+      );
+      return;
+    }
+    case "task.owner_changed": {
+      const { ownerAgentId, delegatedFrom } = EVENTS[e.type].payload.parse(e.payload);
+      const row = db.prepare("SELECT state FROM tasks WHERE id = ?").get(e.entityId);
+      if (row === undefined) throw new UnknownEntity("task", e.entityId);
+      update(db, "tasks", "id", e.entityId, e.id, {
+        owner_agent_id: ownerAgentId,
+        delegated_from: delegatedFrom,
+      });
       return;
     }
     case "task.finished": {

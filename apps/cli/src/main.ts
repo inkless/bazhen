@@ -242,7 +242,9 @@ async function taskCommand(): Promise<number> {
 
 async function run(verb: string): Promise<number> {
   switch (verb) {
+    case "agents":
     case "task":
+    case "delegate":
       return taskCommand();
     case "start":
       return start();

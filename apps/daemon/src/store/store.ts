@@ -152,6 +152,18 @@ export interface AgentTerminal {
 
 const TASK = `SELECT id, title, state, owner_agent_id AS ownerAgentId,
     parent_task_id AS parentTaskId FROM tasks`;
+/**
+ * An open subtask whose agent owner no longer holds what made it the owner: the assignment it was
+ * delegated under ended, or, delegated as the parent's owner, the parent is no longer its.
+ */
+const STRANDED = `t.state = 'open' AND t.owner_agent_id IS NOT NULL AND t.parent_task_id IS NOT NULL
+  AND (
+    (t.delegated_from IS NOT NULL
+      AND (SELECT state FROM assignments WHERE id = t.delegated_from) = 'ended')
+    OR (t.delegated_from IS NULL AND t.owner_agent_id IS NOT
+      (SELECT owner_agent_id FROM tasks WHERE id = t.parent_task_id))
+  )`;
+
 const ASSIGNMENT = `SELECT id, task_id AS taskId, agent_session_id AS agentId, role,
     parent_assignment_id AS parentAssignmentId, state, end_reason AS endReason FROM assignments`;
 
@@ -946,11 +958,14 @@ export class Store {
 
   /** A task with its active assignments, for deciding whether a command on it is allowed. */
   taskView(taskId: string): TaskView | undefined {
-    const row = this.prepare("SELECT state, owner_agent_id FROM tasks WHERE id = ?").get(taskId);
+    const row = this.prepare(
+      `SELECT t.state, t.owner_agent_id, (${STRANDED}) AS stranded FROM tasks t WHERE t.id = ?`,
+    ).get(taskId);
     if (row === undefined) return undefined;
     const owner = row.owner_agent_id;
     return {
       state: TaskState.parse(row.state),
+      ownerHolds: row.stranded !== 1,
       ownerAgentId: typeof owner === "string" && isId("agent", owner) ? owner : null,
       openSubtasks: this.prepare("SELECT id FROM tasks WHERE parent_task_id = ? AND state = 'open'")
         .all(taskId)
@@ -984,6 +999,50 @@ export class Store {
         taskId,
       ),
     });
+  }
+
+  /**
+   * The open subtasks whose owner no longer holds them, each with the owner it moves up to: its
+   * parent's, and what made that one the parent's owner.
+   */
+  stranded(): {
+    taskId: string;
+    ownerAgentId: AgentSessionId | null;
+    delegatedFrom: string | null;
+  }[] {
+    return this.prepare(
+      `SELECT t.id, p.owner_agent_id AS owner, p.delegated_from AS from_assignment
+       FROM tasks t JOIN tasks p ON p.id = t.parent_task_id WHERE ${STRANDED}
+       ORDER BY t.created_event_id`,
+    )
+      .all()
+      .map((r) => ({
+        taskId: String(r.id),
+        ownerAgentId: typeof r.owner === "string" && isId("agent", r.owner) ? r.owner : null,
+        delegatedFrom: typeof r.from_assignment === "string" ? r.from_assignment : null,
+      }));
+  }
+
+  /**
+   * The agents with standing on a task or any task above it: each one's owner, coordinator and
+   * lead. Delegating to one of them would hand work back up.
+   */
+  aboveOnTree(taskId: string): AgentSessionId[] {
+    const rows = this.prepare(
+      `WITH RECURSIVE up (id, parent) AS (
+         SELECT id, parent_task_id FROM tasks WHERE id = ?
+         UNION ALL
+         SELECT t.id, t.parent_task_id FROM tasks t JOIN up ON t.id = up.parent
+       )
+       SELECT owner_agent_id AS agent FROM tasks WHERE id IN (SELECT id FROM up)
+         AND owner_agent_id IS NOT NULL
+       UNION
+       SELECT agent_session_id FROM assignments WHERE task_id IN (SELECT id FROM up)
+         AND state = 'active' AND role IN ('coordinator', 'lead')`,
+    ).all(taskId);
+    return rows.flatMap((r) =>
+      typeof r.agent === "string" && isId("agent", r.agent) ? [r.agent] : [],
+    );
   }
 
   /** The agents an assignment was granted under, nearest first, up through every task. */

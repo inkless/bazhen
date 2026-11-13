@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { FLEET_INSTRUCTIONS } from "../tasks/mail.ts";
 import { describe, expect, it } from "vitest";
 import { LaunchFailed, UnsupportedHarness, type AgentLaunch } from "@bazhen/core";
 import { Store } from "../store/store.ts";
@@ -79,7 +80,10 @@ describe("launchAgent", () => {
     const { store, deps, launches } = setup();
     await launchAgent(deps, { ...request, theme: "light" });
     await launchAgent(deps, { ...request, idempotencyKey: "k-2" });
-    expect(launches.map((l) => l.options)).toEqual([{ theme: "light" }, {}]);
+    expect(launches.map((l) => l.options)).toEqual([
+      { theme: "light", instructions: FLEET_INSTRUCTIONS },
+      { instructions: FLEET_INSTRUCTIONS },
+    ]);
     expect(store.snapshot(testView).agents.map((a) => a.theme)).toEqual(["light", "dark"]);
   });
 

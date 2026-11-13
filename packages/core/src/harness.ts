@@ -19,6 +19,8 @@ export interface HarnessLaunch {
 export interface LaunchOptions {
   /** The background the TUI is shown on; absent, the user's own setting stands. */
   readonly theme?: TuiTheme;
+  /** Text added to the harness's own system instructions for this agent, such as its fleet verbs. */
+  readonly instructions?: string;
 }
 
 /**

@@ -3290,6 +3290,17 @@
                   "type": "null"
                 }
               ]
+            },
+            "delegatedFrom": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^asgn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -3369,6 +3380,95 @@
           },
           "required": [
             "outcome"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "id",
+        "ts",
+        "type",
+        "entityType",
+        "entityId",
+        "actor",
+        "causationId",
+        "correlationId",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "task.owner_changed"
+        },
+        "entityType": {
+          "type": "string",
+          "const": "task"
+        },
+        "entityId": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string"
+        },
+        "causationId": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "correlationId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "ownerAgentId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "delegatedFrom": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^asgn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "ownerAgentId",
+            "delegatedFrom"
           ],
           "additionalProperties": false
         }

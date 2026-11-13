@@ -297,6 +297,14 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE terminals ADD COLUMN current_cwd TEXT;
     `,
   },
+  {
+    version: 19,
+    sql: `
+      -- The assignment an agent delegated the task under; NULL for the human's tasks, and for one
+      -- an agent delegated as the parent's owner.
+      ALTER TABLE tasks ADD COLUMN delegated_from TEXT REFERENCES assignments (id);
+    `,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

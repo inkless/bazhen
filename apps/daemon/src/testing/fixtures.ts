@@ -21,6 +21,7 @@ import { launchAgent, localEnvironmentId } from "../agents/launch.ts";
 import { AgentQueue } from "../agents/queue.ts";
 import { upgrades, type UpgradeRoute } from "../http/upgrades.ts";
 import { Mailbox } from "../mailbox/mailbox.ts";
+import type { Raised } from "../attention/inbox.ts";
 import { Tasks } from "../tasks/tasks.ts";
 import { Store, type SnapshotView } from "../store/store.ts";
 
@@ -261,7 +262,9 @@ export async function taskFleet() {
   };
   const [lead, worker] = [await launch("launch-lead"), await launch("launch-worker")];
   const mailbox = new Mailbox(store);
-  return { store, mailbox, tasks: new Tasks(store, mailbox), coordinator, lead, worker };
+  const raised: Raised[] = [];
+  const tasks = new Tasks(store, mailbox, (r) => raised.push(r));
+  return { store, mailbox, tasks, raised, coordinator, lead, worker };
 }
 
 const SENT = ["queued", "offered", "emitted", "seen", "delivered"] as const;

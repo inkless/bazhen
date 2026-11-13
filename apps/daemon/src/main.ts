@@ -96,7 +96,10 @@ const codexMail = new CodexMail({
   held: (agentId) => codexThreads.held(agentId),
 });
 const mailbox = new Mailbox(store, { codex: (id, agentId) => void codexMail.deliver(id, agentId) });
-const taskService = new Tasks(store, mailbox);
+const approvals = new Approvals(store);
+const inbox = new Inbox(store, approvals, (agentId, req) => mailbox.send(agentId, req));
+inbox.follow();
+const taskService = new Tasks(store, mailbox, (raised) => inbox.raise(raised));
 taskService.watch();
 const tasks: TaskCommands = {
   create: (caller, req) => taskService.create(caller, req),
@@ -104,10 +107,8 @@ const tasks: TaskCommands = {
   assign: (caller, taskId, req) => taskService.assign(caller, taskId, req),
   unassign: (caller, taskId, req) => taskService.unassign(caller, taskId, req),
   finish: (caller, taskId, req) => taskService.finish(caller, taskId, req),
+  delegate: (caller, req) => taskService.delegate(caller, req),
 };
-const approvals = new Approvals(store);
-const inbox = new Inbox(store, approvals, (agentId, req) => mailbox.send(agentId, req));
-inbox.follow();
 const presence = new Presence();
 // Found once, at start: a notifier installed or built later is picked up by a restart.
 const notifiers = {
