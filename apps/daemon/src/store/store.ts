@@ -13,6 +13,7 @@ import {
 } from "@bazhen/core";
 import { z } from "zod";
 import {
+  Activity,
   AgentState,
   EVENTS,
   ExternalRef,
@@ -352,6 +353,42 @@ export class Store {
     return row === undefined ? undefined : { harness: String(row.harness) };
   }
 
+  /**
+   * Records what an agent's harness reports it doing. Nothing is recorded, and null returned,
+   * for a signal that repeats the latest one (the same value, source and detail: a new observed
+   * time or confidence alone is no change, so a stream of tool calls appends one event, and the
+   * standing signal's age shows how long it has held), or for one observed before the latest,
+   * which arrived late, or for an agent whose process has gone (exited, closed, lost): a
+   * harness's last report can land a moment after that, and is about a process no longer there.
+   * An agent this daemon never ran is refused.
+   */
+  recordActivity(agentId: string, activity: Activity): number | null {
+    return this.transaction(() => {
+      const row = this.prepare("SELECT state FROM agent_sessions WHERE id = ?").get(agentId);
+      if (row === undefined) throw new UnknownAgent(agentId);
+      if (!REPORTING.has(AgentState.parse(row.state))) return null;
+      const latest = this.latestActivity(agentId);
+      if (latest !== undefined) {
+        if (Date.parse(activity.observedAt) < Date.parse(latest.observedAt)) return null;
+        if (sameActivity(latest, activity)) return null;
+      }
+      return this.append({
+        type: "agent.activity",
+        entityId: agentId,
+        actor: "system",
+        payload: activity,
+      });
+    });
+  }
+
+  /** What an agent's harness last reported it doing in this process, if anything. */
+  latestActivity(agentId: string): Activity | undefined {
+    const row = this.prepare("SELECT activity FROM activity_latest WHERE agent_session_id = ?").get(
+      agentId,
+    );
+    return row === undefined ? undefined : activityOf(row.activity);
+  }
+
   /** The agents an environment should still be running. */
   runningAgents(environmentId: string): string[] {
     const sql = "SELECT id FROM agent_sessions WHERE environment_id = ? AND state = 'running'";
@@ -463,15 +500,18 @@ export class Store {
         ).all(),
         agents: this.prepare(
           `SELECT a.id, a.environment_id AS environmentId, a.harness, a.project, a.cwd, a.state,
-                  a.terminal_id AS terminalId, t.generation, a.external_ref AS externalRef, t.exit
+                  a.terminal_id AS terminalId, t.generation, a.external_ref AS externalRef, t.exit,
+                  s.activity
            FROM agent_sessions a LEFT JOIN terminals t ON t.id = a.terminal_id
+           LEFT JOIN activity_latest s ON s.agent_session_id = a.id
            ORDER BY a.created_event_id`,
         )
           .all()
-          .map((r) => ({
+          .map(({ activity, ...r }) => ({
             ...r,
             externalRef: typeof r.externalRef === "string" ? JSON.parse(r.externalRef) : null,
             exit: typeof r.exit === "string" ? JSON.parse(r.exit) : null,
+            ...(activity === null ? {} : { activity: activityOf(activity) }),
           })),
         attention: this.prepare(
           `SELECT id, agent_session_id AS agentId, state, close_reason AS closeReason, summary
@@ -625,3 +665,13 @@ function referencedEvents(db: DatabaseSync): string {
 }
 
 export { LATEST_SCHEMA_VERSION };
+
+/** The agent states whose process may still report what it is doing. */
+const REPORTING: ReadonlySet<AgentState> = new Set(["starting", "running", "unknown"]);
+
+/** Two signals that say the same thing, whenever each was observed and however sure. */
+const sameActivity = (a: Activity, b: Activity) =>
+  a.value === b.value && a.source === b.source && a.detail === b.detail;
+
+const activityOf = (column: SQLOutputValue | undefined): Activity =>
+  Activity.parse(JSON.parse(String(column)));

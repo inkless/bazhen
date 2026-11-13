@@ -41,6 +41,33 @@ export const ExternalRef = z.object({
 });
 export type ExternalRef = z.infer<typeof ExternalRef>;
 
+/**
+ * What a harness last reported an agent doing (foundation-design §4.6). A signal never moves the
+ * lifecycle; a missing one leaves the last standing, shown with its age.
+ */
+export const Activity = z.object({
+  value: z.enum([
+    "working",
+    "waiting_input",
+    "needs_approval",
+    "idle",
+    "done",
+    "failed",
+    "unknown",
+  ]),
+  /** Native when the harness said so itself; heuristic when Bazhen inferred it. */
+  source: z.enum(["native", "heuristic"]),
+  confidence: z.number().min(0).max(1),
+  /** When the harness observed it, as an ISO timestamp. */
+  observedAt: z.iso.datetime(),
+  /**
+   * A short reason a human can read, such as the error a turn failed with. Part of what the
+   * signal says, so it names a reason, never per-call data such as a tool's name.
+   */
+  detail: z.string().max(200).optional(),
+});
+export type Activity = z.infer<typeof Activity>;
+
 export const Environment = z.object({
   id: Id("env"),
   kind: EnvironmentKind,
@@ -60,6 +87,11 @@ export const Agent = z.object({
   externalRef: ExternalRef.nullable(),
   /** How its process ended, once it has. */
   exit: ExitStatus.nullable(),
+  /**
+   * What its harness last reported it doing, in this process; absent until the harness reports
+   * anything (protocol 1.7).
+   */
+  activity: Activity.optional(),
 });
 export type Agent = z.infer<typeof Agent>;
 
