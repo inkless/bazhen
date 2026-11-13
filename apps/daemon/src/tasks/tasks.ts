@@ -1,0 +1,363 @@
+import {
+  checkFinish,
+  checkGrant,
+  checkUnassign,
+  newId,
+  TaskRefused,
+  type AgentSessionId,
+  type Caller,
+} from "@bazhen/core";
+import {
+  AssignTaskResponse,
+  CreateTaskResponse,
+  TaskCommandResponse,
+  type AgentState,
+  type AssignTaskRequest,
+  type CreateTaskRequest,
+  type FinishTaskRequest,
+  type Role,
+  type TaskOutcome,
+  type UnassignTaskRequest,
+} from "@bazhen/protocol";
+import type { Mailbox } from "../mailbox/mailbox.ts";
+import { UnknownAgent, type Store } from "../store/store.ts";
+import {
+  assignedMail,
+  CANCELLED_WITH_PARENT,
+  cancelledMail,
+  completedMail,
+  finishedMail,
+  lineEndedMail,
+  MAIL_LIMIT,
+  unassignedMail,
+  type Named,
+} from "./mail.ts";
+
+export class UnknownTask extends Error {
+  readonly taskId: string;
+
+  constructor(taskId: string) {
+    super(`no task ${taskId}`);
+    this.taskId = taskId;
+  }
+}
+
+/** An agent in one of these states will never read what it is sent, so it can't take a task. */
+const GONE: ReadonlySet<AgentState> = new Set<AgentState>(["closing", "closed", "failed"]);
+
+const actor = (caller: Caller) => caller ?? "human";
+
+/** An agent in one of these states can't act: it is gone, or was never there. */
+const CLOSED_CALLER: ReadonlySet<AgentState> = new Set<AgentState>([
+  "closing",
+  "closed",
+  "failed",
+  "lost",
+]);
+
+/** A composed message longer than the mailbox takes: the brief, or the note, is too long. */
+export class MailTooLong extends Error {
+  readonly length: number;
+
+  constructor(length: number) {
+    super(
+      `the message to the agent would be ${length} characters, over the ${MAIL_LIMIT} a message may be: shorten the brief or note`,
+    );
+    this.length = length;
+  }
+}
+
+function checkLength(body: string): string {
+  if (body.length > MAIL_LIMIT) throw new MailTooLong(body.length);
+  return body;
+}
+
+/**
+ * Tasks and their assignments. Every command that gives an agent work, or takes it away, mails
+ * that agent in the same transaction, so a task is never assigned to an agent that won't hear of
+ * it: a target that takes no mail refuses the whole command.
+ */
+export class Tasks {
+  private readonly store: Store;
+  private readonly mailbox: Pick<Mailbox, "send">;
+  /** The last event whose orphaned assignments have been told; none at start, so all are. */
+  private closesSeen = 0;
+
+  constructor(store: Store, mailbox: Pick<Mailbox, "send">) {
+    this.store = store;
+    this.mailbox = mailbox;
+  }
+
+  create(caller: Caller, req: CreateTaskRequest): CreateTaskResponse {
+    const { idempotencyKey, ...request } = req;
+    return this.store.once(
+      idempotencyKey,
+      { caller, ...request },
+      (r) => CreateTaskResponse.parse(r),
+      () => {
+        this.checkCaller(caller);
+        const parentTaskId = req.parentTaskId ?? null;
+        if (parentTaskId !== null) {
+          const parent = this.view(parentTaskId).state;
+          if (parent !== "open") throw new TaskRefused("conflict", `the parent task is ${parent}`);
+        }
+        const taskId = newId("task");
+        const created = this.store.append({
+          type: "task.created",
+          entityId: taskId,
+          actor: actor(caller),
+          payload: { title: req.title, brief: req.brief, ownerAgentId: caller, parentTaskId },
+        });
+        if (req.assign === undefined) return { taskId, assignmentId: null, eventIds: [created] };
+        const granted = this.grant(caller, taskId, req.assign, idempotencyKey);
+        return { taskId, ...granted, eventIds: [created, ...granted.eventIds] };
+      },
+    );
+  }
+
+  assign(caller: Caller, taskId: string, req: AssignTaskRequest): AssignTaskResponse {
+    const { idempotencyKey, ...request } = req;
+    return this.store.once(
+      idempotencyKey,
+      { caller, taskId, ...request },
+      (r) => AssignTaskResponse.parse(r),
+      () => {
+        this.checkCaller(caller);
+        return this.grant(caller, taskId, req, idempotencyKey);
+      },
+    );
+  }
+
+  /** Takes an assignment away, and with it every one granted under it, mailing each agent. */
+  unassign(caller: Caller, taskId: string, req: UnassignTaskRequest): TaskCommandResponse {
+    const { idempotencyKey, assignmentId } = req;
+    return this.store.once(
+      idempotencyKey,
+      { caller, taskId, assignmentId },
+      (r) => TaskCommandResponse.parse(r),
+      () => {
+        this.checkCaller(caller);
+        const view = this.view(taskId);
+        checkUnassign(view, caller, assignmentId, this.store.granters(assignmentId));
+        const target = view.active.find((a) => a.id === assignmentId);
+        const under = this.store.activeUnder([assignmentId]);
+        const ended = this.store.append({
+          type: "assignment.ended",
+          entityId: assignmentId,
+          actor: actor(caller),
+          payload: { reason: "unassigned" },
+        });
+        const task = this.named(taskId);
+        const mail = [
+          ...this.tell(
+            target === undefined ? [] : [target.agentId],
+            unassignedMail(task, caller),
+            caller,
+            idempotencyKey,
+          ),
+          ...this.tellEach(
+            under,
+            (a) => lineEndedMail(this.named(a.taskId)),
+            caller,
+            idempotencyKey,
+          ),
+        ];
+        return { eventIds: [ended, ...mail] };
+      },
+    );
+  }
+
+  /**
+   * Marks a task done or cancelled, cancelling its open subtasks first when asked to. Whoever
+   * gave it out hears how it ended, and so does everyone still working on it, but nobody about
+   * what they did themselves. From a worker, `done` completes only its own assignment, and tells
+   * whoever gave it the work.
+   */
+  finish(caller: Caller, taskId: string, req: FinishTaskRequest): TaskCommandResponse {
+    const { idempotencyKey, outcome } = req;
+    const note = req.note ?? null;
+    const cascade = req.cascade === true;
+    return this.store.once(
+      idempotencyKey,
+      { caller, taskId, outcome, note, cascade },
+      (r) => TaskCommandResponse.parse(r),
+      () => {
+        this.checkCaller(caller);
+        const view = this.view(taskId);
+        const finish = checkFinish(view, caller, outcome, cascade);
+        const task = this.named(taskId);
+        checkLength(finishedMail(task, outcome, caller, note));
+        if (finish.kind === "assignment") {
+          const own = finish.assignment;
+          const ended = this.store.append({
+            type: "assignment.ended",
+            entityId: own.id,
+            actor: actor(caller),
+            payload: { reason: "completed" },
+          });
+          const giver = this.store.granters(own.id)[0] ?? view.ownerAgentId;
+          const body = completedMail(task, own.agentId, note);
+          return {
+            eventIds: [
+              ended,
+              ...this.tell(giver === null ? [] : [giver], body, caller, idempotencyKey),
+            ],
+          };
+        }
+        const subtasks = cascade ? this.store.openSubtasksUnder(taskId) : [];
+        // Cancelling them with it is cancelling each, which no agent may do to the human's.
+        const human = subtasks.filter((id) => this.view(id).ownerAgentId === null);
+        if (caller !== null && human.length > 0) {
+          throw new TaskRefused(
+            "forbidden",
+            `subtasks ${human.join(", ")} are the human's: only the human cancels them`,
+          );
+        }
+        const cancelled = subtasks.flatMap((id) =>
+          this.end(caller, id, "cancelled", CANCELLED_WITH_PARENT, `${idempotencyKey}:${id}`),
+        );
+        return {
+          eventIds: [...cancelled, ...this.end(caller, taskId, outcome, note, idempotencyKey)],
+        };
+      },
+    );
+  }
+
+  /** Records one task finished, and mails who gave it out and who was still on it. */
+  private end(
+    caller: Caller,
+    taskId: string,
+    outcome: TaskOutcome,
+    note: string | null,
+    key: string,
+  ): number[] {
+    const view = this.view(taskId);
+    const task = this.named(taskId);
+    const givers = new Set([
+      ...(view.ownerAgentId === null ? [] : [view.ownerAgentId]),
+      ...view.active.flatMap((a) => this.store.granters(a.id).slice(0, 1)),
+    ]);
+    const workers = view.active.map((a) => a.agentId).filter((id) => !givers.has(id));
+    const finished = this.store.append({
+      type: "task.finished",
+      entityId: taskId,
+      actor: actor(caller),
+      payload: { outcome, note },
+    });
+    const told =
+      outcome === "cancelled"
+        ? cancelledMail(task, caller)
+        : finishedMail(task, outcome, caller, note);
+    return [
+      finished,
+      ...this.tell([...givers], finishedMail(task, outcome, caller, note), caller, `${key}:givers`),
+      ...this.tell(workers, told, caller, `${key}:workers`),
+    ];
+  }
+
+  /** Grants the role, then mails the brief, last, so a refused send leaves nothing recorded. */
+  private grant(
+    caller: Caller,
+    taskId: string,
+    req: { readonly agentId: string; readonly role: Role },
+    key: string,
+  ): AssignTaskResponse {
+    const agentId = req.agentId;
+    if (!this.reachable(agentId)) throw new UnknownAgent(agentId, "that can take a task");
+    const view = this.view(taskId);
+    const detail = this.store.taskDetail(taskId);
+    if (detail === undefined) throw new UnknownTask(taskId);
+    const body = checkLength(assignedMail(detail, req.role, caller));
+    const parentAssignmentId = checkGrant(view, caller, { agentId, role: req.role });
+    const assignmentId = newId("asgn");
+    const granted = this.store.append({
+      type: "assignment.granted",
+      entityId: assignmentId,
+      actor: actor(caller),
+      payload: { taskId, agentId, role: req.role, parentAssignmentId },
+    });
+    const sent = this.mailbox.send(agentId, { idempotencyKey: `${key}:assigned`, body });
+    return { assignmentId, eventIds: [granted, ...sent.eventIds] };
+  }
+
+  /**
+   * Mails each agent but the caller, under keys derived from the command's, so a retry mails no
+   * one twice. An agent that can't take mail now, gone or a Codex agent with no thread, goes
+   * untold: the command already happened, and the dashboard shows it.
+   */
+  private tell(agents: readonly string[], body: string, caller: Caller, key: string): number[] {
+    return this.tellEach(
+      [...new Set(agents)].map((agentId) => ({ agentId, id: agentId })),
+      () => body,
+      caller,
+      key,
+    );
+  }
+
+  /** Mails each one its own body, keyed by the command's key and its `id`. */
+  private tellEach<T extends { readonly agentId: string; readonly id: string }>(
+    to: readonly T[],
+    mail: (t: T) => string,
+    caller: Caller,
+    key: string,
+  ): number[] {
+    return to.flatMap((t) => {
+      if (t.agentId === caller || !this.reachable(t.agentId)) return [];
+      const body = mail(t);
+      try {
+        return this.mailbox.send(t.agentId, { idempotencyKey: `${key}:${t.id}`, body }).eventIds;
+      } catch (err) {
+        if (err instanceof UnknownAgent) return [];
+        throw err;
+      }
+    });
+  }
+
+  /**
+   * Mails the agents whose assignments ended because an agent they were granted under closed.
+   * Run after each commit; the mail's key is the assignment's, so a scan after a restart that
+   * finds them again mails no one twice.
+   */
+  private tellOrphans(): void {
+    for (const a of this.store.endedByClose(this.closesSeen)) {
+      this.closesSeen = Math.max(this.closesSeen, a.eventId);
+      this.tellEach([a], () => lineEndedMail(this.named(a.taskId)), null, "closed");
+    }
+  }
+
+  /** Starts telling agents whose granter closed; returns the stop function. */
+  watch(): () => void {
+    this.tellOrphans();
+    return this.store.onCommit(() => this.tellOrphans());
+  }
+
+  /** Whether the agent runs here and will read what it is sent. */
+  private reachable(agentId: string): agentId is AgentSessionId {
+    const state = this.store.agentTerminal({ agentId })?.state;
+    return state !== undefined && !GONE.has(state);
+  }
+
+  /**
+   * The caller says which agent it is, which is trusted as any local process of the user is
+   * (foundation-design §9.4); it must at least be an agent this daemon runs and that is still
+   * open, so a stale `BAZHEN_AGENT_ID` can't act.
+   */
+  private checkCaller(caller: Caller): void {
+    if (caller === null) return;
+    const state = this.store.agentTerminal({ agentId: caller })?.state;
+    if (state === undefined || CLOSED_CALLER.has(state))
+      throw new UnknownAgent(caller, "that is open");
+  }
+
+  private view(taskId: string) {
+    const view = this.store.taskView(taskId);
+    if (view === undefined) throw new UnknownTask(taskId);
+    return view;
+  }
+
+  private named(taskId: string): Named {
+    const detail = this.store.taskDetail(taskId);
+    if (detail === undefined) throw new UnknownTask(taskId);
+    return detail;
+  }
+}

@@ -127,8 +127,9 @@ export class Mailbox {
         return { messageId, eventIds: [eventId] };
       },
     );
-    // A repeat of the same send gets the first answer, and hands nothing over again.
-    if (created) deliver?.(response.messageId, agentId);
+    // A repeat of the same send gets the first answer, and hands nothing over again. Inside a
+    // larger transaction, as a task's assignment is, it is handed over only once that commits.
+    if (created) this.store.afterCommit(() => deliver?.(response.messageId, agentId));
     return response;
   }
 
