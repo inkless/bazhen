@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Id, IdempotencyKey } from "./ids.ts";
+import { HarnessId, Id, IdempotencyKey } from "./ids.ts";
 
 /** What an assignment lets its agent do on its task (foundation-design §3). */
 export const Role = z.enum(["coordinator", "lead", "worker"]);
@@ -124,14 +124,24 @@ export type TaskCommandResponse = z.infer<typeof TaskCommandResponse>;
  * `POST /v1/tasks/delegate`, an agent's verb: a subtask of a task it coordinates or leads, given
  * to another agent. With no `fromTaskId`, the caller's only such task is the parent.
  */
-export const DelegateTaskRequest = z.object({
-  idempotencyKey: IdempotencyKey,
-  fromTaskId: Id("task").optional(),
-  agentId: Id("agent"),
-  role: Role.exclude(["coordinator"]).default("worker"),
-  title: TaskTitle,
-  brief: TaskBrief,
-});
+export const DelegateTaskRequest = z
+  .object({
+    idempotencyKey: IdempotencyKey,
+    fromTaskId: Id("task").optional(),
+    /** The agent to give the subtask to; or, with `launch`, none yet. */
+    agentId: Id("agent").optional(),
+    /**
+     * Launches a new agent for the subtask instead (protocol 1.31), in `cwd`, or the delegating
+     * agent's own directory.
+     */
+    launch: z.object({ harness: HarnessId, cwd: z.string().min(1).optional() }).optional(),
+    role: Role.exclude(["coordinator"]).default("worker"),
+    title: TaskTitle,
+    brief: TaskBrief,
+  })
+  .refine((r) => (r.agentId === undefined) !== (r.launch === undefined), {
+    message: "name the agent to delegate to, or one to launch, not both",
+  });
 export type DelegateTaskRequest = z.infer<typeof DelegateTaskRequest>;
 
 /**

@@ -128,7 +128,8 @@ export interface TaskCommands {
   assign(caller: Caller, taskId: string, req: AssignTaskRequest): AssignTaskResponse;
   unassign(caller: Caller, taskId: string, req: UnassignTaskRequest): TaskCommandResponse;
   finish(caller: Caller, taskId: string, req: FinishTaskRequest): TaskCommandResponse;
-  delegate(caller: Caller, req: DelegateTaskRequest): CreateTaskResponse;
+  /** Launching the agent to delegate to, when the request asks, is the only async step. */
+  delegate(caller: Caller, req: DelegateTaskRequest): Promise<CreateTaskResponse>;
   escalate(caller: Caller, req: EscalateRequest): EscalateResponse;
 }
 
@@ -288,7 +289,7 @@ export function createApp(deps: AppDeps): Hono {
     app.post(path, async (c) => {
       const body = schema.safeParse(await c.req.json().catch(() => undefined));
       if (!body.success) return invalid(c, body.error);
-      return c.json(run(callerOf(c), c.req.param("id") ?? "", body.data));
+      return c.json(await run(callerOf(c), c.req.param("id") ?? "", body.data));
     });
   const { tasks } = deps;
   taskRoute("/v1/tasks", CreateTaskRequest, (caller, _id, req) => tasks.create(caller, req));

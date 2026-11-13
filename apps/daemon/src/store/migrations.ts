@@ -313,6 +313,13 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE agent_sessions ADD COLUMN transcript TEXT;
     `,
   },
+  {
+    version: 21,
+    sql: `
+      -- The agent that launched this one to delegate to it; NULL when the human launched it.
+      ALTER TABLE agent_sessions ADD COLUMN launched_by TEXT REFERENCES agent_sessions (id);
+    `,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

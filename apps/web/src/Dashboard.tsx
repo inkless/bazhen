@@ -178,7 +178,12 @@ export function Dashboard() {
           ) : agent !== undefined && state !== null ? (
             <>
               <AgentAttention state={state} agentId={agent.id} onOpen={select} failed={failed} />
-              <AgentTasks state={state} agentId={agent.id} onOpenTask={openTask} />
+              <AgentTasks
+                state={state}
+                agentId={agent.id}
+                onOpenTask={openTask}
+                onOpenAgent={select}
+              />
               <Workspace key={agent.id} agent={agent} shells={state.shells} failed={failed} />
             </>
           ) : shell !== undefined ? (

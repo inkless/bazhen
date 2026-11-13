@@ -20,6 +20,7 @@ describe("resolveConfig", () => {
       desktopNotifications: true,
       pairing: "auto",
       pairingRequired: false,
+      launchLimits: { maxLaunched: 5, maxDepth: 3 },
     });
   });
 
@@ -35,7 +36,13 @@ describe("resolveConfig", () => {
       allowInsecureOrigins: false,
       pairing: "auto",
       pairingRequired: false,
+      launchLimits: { maxLaunched: 5, maxDepth: 3 },
     });
+  });
+
+  it("takes how far agents may launch agents from the file", () => {
+    const limits = { agents: { max_launched: 2, max_launch_depth: 1 } };
+    expect(resolveConfig(limits, {}).launchLimits).toEqual({ maxLaunched: 2, maxDepth: 1 });
   });
 
   it("lists the origins the user's own route to the daemon presents, and where they came from", () => {

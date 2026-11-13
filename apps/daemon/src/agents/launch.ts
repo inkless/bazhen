@@ -5,6 +5,7 @@ import {
   newId,
   UnsupportedHarness,
   type EnvironmentAdapter,
+  type AgentSessionId,
   type EnvironmentId,
   type Size,
   type LaunchOptions,
@@ -92,9 +93,11 @@ export const launchOptions = (theme: TuiTheme | undefined): LaunchOptions => ({
   ...(theme === undefined ? {} : { theme }),
 });
 
+/** `launchedBy` is the agent launching this one to delegate to it; none when the human does. */
 export async function launchAgent(
   { store, environment, size, home, queue }: LaunchDeps,
   req: LaunchAgentRequest,
+  launchedBy?: AgentSessionId,
 ): Promise<LaunchAgentResponse> {
   const asked = { harness: req.harness, cwd: req.cwd, project: req.project ?? basename(req.cwd) };
   const prior = store.recall(req.idempotencyKey);
@@ -126,7 +129,12 @@ export async function launchAgent(
         store.append({
           ...event,
           type: "agent.launched",
-          payload: { environmentId: environment.id, ...request, terminalId },
+          payload: {
+            environmentId: environment.id,
+            ...request,
+            terminalId,
+            ...(launchedBy === undefined ? {} : { launchedBy }),
+          },
         }),
       [],
     );

@@ -16,3 +16,7 @@ export type EnvironmentKind = z.infer<typeof EnvironmentKind>;
  * instead of acting twice (foundation-design §5.1).
  */
 export const IdempotencyKey = z.string().min(1).max(200);
+
+/** The harnesses Bazhen runs agents in. */
+export const HarnessId = z.enum(["claude-code", "codex"]);
+export type HarnessId = z.infer<typeof HarnessId>;

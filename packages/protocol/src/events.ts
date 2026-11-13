@@ -62,6 +62,8 @@ export const EVENTS = {
       project: z.string(),
       cwd: z.string(),
       terminalId: Id("term").nullable(),
+      /** The agent that launched it to delegate to it; absent when the human did (1.31). */
+      launchedBy: Id("agent").optional(),
     }),
   },
   "agent.running": {

@@ -19,6 +19,8 @@ import {
   type AssignTaskRequest,
   type CreateTaskRequest,
   type DelegateTaskRequest,
+  type LaunchAgentRequest,
+  type LaunchAgentResponse,
   type EscalateRequest,
   type FinishTaskRequest,
   type Role,
@@ -40,6 +42,15 @@ import {
   unassignedMail,
   type Named,
 } from "./mail.ts";
+
+/** What starts an agent for a delegation, and how far an agent may launch others. */
+export interface Launcher {
+  launch(req: LaunchAgentRequest, launchedBy: AgentSessionId): Promise<LaunchAgentResponse>;
+  /** How many agents one agent may have launched and still open at once. */
+  readonly maxLaunched: number;
+  /** How many launches down an agent may still launch another. */
+  readonly maxDepth: number;
+}
 
 export class UnknownTask extends Error {
   readonly taskId: string;
@@ -109,11 +120,24 @@ export class Tasks {
 
   private readonly raise: (raised: Raised) => string;
 
-  /** `raise` puts an item in the human's inbox, and answers with its id. */
-  constructor(store: Store, mailbox: Pick<Mailbox, "send">, raise: (raised: Raised) => string) {
+  private readonly launcher: Launcher;
+  /** The keys of each agent's launches on their way, by agent. */
+  private readonly launching = new Map<string, Set<string>>();
+
+  /**
+   * `raise` puts an item in the human's inbox, and answers with its id; `launcher` starts the
+   * agent a delegation launches.
+   */
+  constructor(
+    store: Store,
+    mailbox: Pick<Mailbox, "send">,
+    raise: (raised: Raised) => string,
+    launcher: Launcher,
+  ) {
     this.store = store;
     this.mailbox = mailbox;
     this.raise = raise;
+    this.launcher = launcher;
   }
 
   create(caller: Caller, req: CreateTaskRequest): CreateTaskResponse {
@@ -357,36 +381,93 @@ export class Tasks {
 
   /**
    * Hands part of a task the caller coordinates or leads to another agent, as a subtask the
-   * caller owns. Whoever finishes it tells the caller.
+   * caller owns; with `launch`, to a new agent it launches for it. Whoever finishes it tells the
+   * caller.
    */
   delegate(caller: Caller, req: DelegateTaskRequest): CreateTaskResponse {
+    const { idempotencyKey: _key, ...request } = req;
+    if (req.agentId === undefined)
+      throw new TaskRefused("conflict", "name the agent, or launch one");
+    return this.delegateTo(caller, req, req.agentId, { caller, ...request });
+  }
+
+  /** `delegate` to a new agent, started for the subtask as `req.launch` asks. */
+  async launchAndDelegate(caller: Caller, req: DelegateTaskRequest): Promise<CreateTaskResponse> {
     const { idempotencyKey, ...request } = req;
+    const asked = { caller, ...request };
+    if (req.launch === undefined) return this.delegate(caller, req);
+    const prior = this.store.replay(idempotencyKey, asked, (r) => CreateTaskResponse.parse(r));
+    if (prior !== undefined) return prior;
+    // Everything that would refuse the delegation is checked before an agent is started for it.
+    const { parentTaskId } = this.checkDelegation(caller, req);
+    const by = this.agentCaller(caller);
+    const task = { id: newId("task"), title: req.title, brief: req.brief, parentTaskId };
+    checkLength(assignedMail(task, req.role, by));
+    const key = `${idempotencyKey}:launch:${by}`;
+    // A launch this command already made is replayed, not counted again against the limits.
+    const fresh = this.store.recall(key) === undefined;
+    if (fresh) this.checkLaunchLimits(by);
+    const cwd = req.launch.cwd ?? this.store.agentLaunch(by)?.launch.cwd;
+    if (cwd === undefined) throw new UnknownAgent(by);
+    const launch = { idempotencyKey: key, harness: req.launch.harness, cwd };
+    const keys = this.launching.get(by) ?? new Set<string>();
+    this.launching.set(by, keys.add(key));
+    let agentId: string;
+    try {
+      ({ agentId } = await this.launcher.launch(launch, by));
+    } finally {
+      keys.delete(key);
+      if (keys.size === 0) this.launching.delete(by);
+    }
+    try {
+      return this.delegateTo(caller, req, agentId, asked);
+    } catch (err) {
+      // The agent runs, but the work it was started for was refused while it started: the
+      // human decides what becomes of it, rather than it running on unseen.
+      if (fresh && err instanceof Error) {
+        this.raise({
+          agentId,
+          kind: "escalation",
+          summary: printable(
+            `${by} launched this agent to delegate "${req.title}" to it, but the delegation was then refused (${err.message}). Close it if it isn't needed.`,
+          ),
+        });
+      }
+      throw err;
+    }
+  }
+
+  /** The subtask, given to `agentId`, in one transaction under the command's key. */
+  private delegateTo(
+    caller: Caller,
+    req: DelegateTaskRequest,
+    agentId: string,
+    asked: object,
+  ): CreateTaskResponse {
     return this.store.once(
-      idempotencyKey,
-      { caller, ...request },
+      req.idempotencyKey,
+      asked,
       (r) => CreateTaskResponse.parse(r),
       () => {
-        if (caller === null) throw new TaskRefused("forbidden", "only an agent delegates");
-        this.checkCaller(caller);
-        const parentTaskId = req.fromTaskId ?? this.delegatingTask(caller);
-        const from = checkDelegate(this.view(parentTaskId), caller, req.role);
-        if (req.agentId === caller)
+        const { parentTaskId, from } = this.checkDelegation(caller, req);
+        if (agentId === caller) {
           throw new TaskRefused("forbidden", "an agent can't delegate to itself");
+        }
         const above = [
           ...(from === null ? [] : this.store.granters(from)),
           ...this.store.aboveOnTree(parentTaskId),
         ];
-        if (above.some((agent) => agent === req.agentId)) {
+        if (above.some((agent) => agent === agentId)) {
           throw new TaskRefused(
             "forbidden",
-            `${req.agentId} gave you this work: delegate down, to an agent below you`,
+            `${agentId} gave you this work: delegate down, to an agent below you`,
           );
         }
         const taskId = newId("task");
         const created = this.store.append({
           type: "task.created",
           entityId: taskId,
-          actor: caller,
+          actor: String(caller),
           payload: {
             title: req.title,
             brief: req.brief,
@@ -395,11 +476,51 @@ export class Tasks {
             delegatedFrom: from,
           },
         });
-        const grant = { agentId: req.agentId, role: req.role };
-        const granted = this.grant(caller, taskId, grant, idempotencyKey, from);
+        const grant = { agentId, role: req.role };
+        const granted = this.grant(caller, taskId, grant, req.idempotencyKey, from);
         return { taskId, ...granted, eventIds: [created, ...granted.eventIds] };
       },
     );
+  }
+
+  /** The parent a delegation is part of, and the assignment it hands on from, or a refusal. */
+  private checkDelegation(caller: Caller, req: DelegateTaskRequest) {
+    if (caller === null) throw new TaskRefused("forbidden", "only an agent delegates");
+    this.checkCaller(caller);
+    const parentTaskId = req.fromTaskId ?? this.delegatingTask(caller);
+    return { parentTaskId, from: checkDelegate(this.view(parentTaskId), caller, req.role) };
+  }
+
+  /** The caller, as an agent: only an agent delegates. */
+  private agentCaller(caller: Caller): AgentSessionId {
+    if (caller === null) throw new TaskRefused("forbidden", "only an agent delegates");
+    return caller;
+  }
+
+  /**
+   * Checks the agent may launch another now: under its cap of open agents it launched, counting
+   * the launches still on their way, and not itself so far down a chain of launches that another
+   * would run away.
+   */
+  private checkLaunchLimits(by: AgentSessionId): void {
+    const { maxLaunched, maxDepth } = this.launcher;
+    // A launch on its way counts until its agent is recorded, and from then as that agent.
+    const unrecorded = [...(this.launching.get(by) ?? [])].filter(
+      (key) => this.store.recall(key) === undefined,
+    );
+    const open = this.store.liveLaunchedBy(by) + unrecorded.length;
+    if (open >= maxLaunched) {
+      throw new TaskRefused(
+        "conflict",
+        `${open} agents you launched are still open, the most at once (${maxLaunched}): close one you no longer need to launch another`,
+      );
+    }
+    if (this.store.launchDepth(by) >= maxDepth) {
+      throw new TaskRefused(
+        "conflict",
+        `you were launched ${maxDepth} launches down, the deepest that may launch: delegate to an agent that is already running`,
+      );
+    }
   }
 
   /** The one task the agent coordinates or leads, which an unqualified delegate is part of. */

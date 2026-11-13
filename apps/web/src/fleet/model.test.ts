@@ -26,6 +26,7 @@ const agentIn = (project: string, state: AgentState = "running", over: Partial<A
   commands: [],
   resumable: true,
   canOpenShell: false,
+  launchedBy: null,
   ...over,
 });
 

@@ -99,7 +99,15 @@ const mailbox = new Mailbox(store, { codex: (id, agentId) => void codexMail.deli
 const approvals = new Approvals(store);
 const inbox = new Inbox(store, approvals, (agentId, req) => mailbox.send(agentId, req));
 inbox.follow();
-const taskService = new Tasks(store, mailbox, (raised) => inbox.raise(raised));
+const taskService = new Tasks(store, mailbox, (raised) => inbox.raise(raised), {
+  launch: (req, launchedBy) =>
+    launchAgent(
+      { store, environment, size: DEFAULT_SIZE, home: inputs.home, queue },
+      req,
+      launchedBy,
+    ),
+  ...config.launchLimits,
+});
 taskService.watch();
 const tasks: TaskCommands = {
   create: (caller, req) => taskService.create(caller, req),
@@ -107,7 +115,7 @@ const tasks: TaskCommands = {
   assign: (caller, taskId, req) => taskService.assign(caller, taskId, req),
   unassign: (caller, taskId, req) => taskService.unassign(caller, taskId, req),
   finish: (caller, taskId, req) => taskService.finish(caller, taskId, req),
-  delegate: (caller, req) => taskService.delegate(caller, req),
+  delegate: async (caller, req) => taskService.launchAndDelegate(caller, req),
   escalate: (caller, req) => taskService.escalate(caller, req),
 };
 const presence = new Presence();

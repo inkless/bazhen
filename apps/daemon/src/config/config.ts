@@ -20,6 +20,10 @@ const ConfigFile = z.strictObject({
   agents: z
     .strictObject({
       shell: Shell.optional(),
+      /** How many agents one agent may have launched to delegate to and still open at once. */
+      max_launched: z.int().min(0).optional(),
+      /** How many launches down an agent may still launch another. */
+      max_launch_depth: z.int().min(1).optional(),
       env: z
         .strictObject({
           deny: z.array(EnvRule).optional(),
@@ -63,6 +67,8 @@ export interface Config {
    * origin it always must, since a proxy in front can present any request as loopback's.
    */
   readonly pairingRequired: boolean;
+  /** How far agents may launch agents to delegate to: at once, and down a chain. */
+  readonly launchLimits: { readonly maxLaunched: number; readonly maxDepth: number };
 }
 
 export class InvalidConfig extends Error {
@@ -132,6 +138,10 @@ export function resolveConfig(
       passthrough: file.agents?.env?.passthrough ?? [],
     },
     desktopNotifications: file.notifications?.desktop ?? true,
+    launchLimits: {
+      maxLaunched: file.agents?.max_launched ?? 5,
+      maxDepth: file.agents?.max_launch_depth ?? 3,
+    },
     ...withPairing(
       externalOrigins(file, env),
       fromEnv(env, "BAZHEN_PAIRING", PairingMode) ?? file.web?.pairing ?? "auto",

@@ -30,7 +30,7 @@ const tasks: TaskCommands = {
   assign: () => ({ assignmentId: newId("asgn"), eventIds: [6] }),
   unassign: () => ({ eventIds: [7] }),
   finish: () => ({ eventIds: [8] }),
-  delegate: () => ({ taskId: newId("task"), assignmentId: newId("asgn"), eventIds: [9] }),
+  delegate: async () => ({ taskId: newId("task"), assignmentId: newId("asgn"), eventIds: [9] }),
   escalate: () => ({ attentionId: newId("attn") }),
 };
 const deps: AppDeps = {

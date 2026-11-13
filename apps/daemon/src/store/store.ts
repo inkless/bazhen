@@ -901,6 +901,7 @@ export class Store {
           .map((r) => ({ ...r, host: view.host(EnvironmentKind.parse(r.kind)) })),
         agents: this.prepare(
           `SELECT a.id, a.environment_id AS environmentId, a.harness, a.project, a.cwd, a.state,
+                  a.launched_by AS launchedBy,
                   a.terminal_id AS terminalId, t.generation, a.external_ref AS externalRef, t.exit,
                   coalesce(t.theme, 'dark') AS theme, s.activity, a.usage, t.state AS terminalState,
                   t.runtime, t.locator, a.transcript
@@ -1080,6 +1081,28 @@ export class Store {
     return rows.flatMap((r) =>
       typeof r.agent === "string" && isId("agent", r.agent) ? [r.agent] : [],
     );
+  }
+
+  /** How many agents `agentId` launched are still open: not closing, closed, failed or lost. */
+  liveLaunchedBy(agentId: string): number {
+    const row = this.prepare(
+      `SELECT count(*) AS n FROM agent_sessions
+       WHERE launched_by = ? AND state NOT IN ('closing', 'closed', 'failed', 'lost')`,
+    ).get(agentId);
+    return Number(row?.n ?? 0);
+  }
+
+  /** How many agents launched `agentId`, each the one before: 0 for one the human launched. */
+  launchDepth(agentId: string): number {
+    const row = this.prepare(
+      `WITH RECURSIVE up (id, by, depth) AS (
+         SELECT id, launched_by, 0 FROM agent_sessions WHERE id = ?
+         UNION ALL
+         SELECT a.id, a.launched_by, up.depth + 1 FROM agent_sessions a JOIN up ON a.id = up.by
+       )
+       SELECT max(depth) AS depth FROM up`,
+    ).get(agentId);
+    return Number(row?.depth ?? 0);
   }
 
   /** The agents an assignment was granted under, nearest first, up through every task. */

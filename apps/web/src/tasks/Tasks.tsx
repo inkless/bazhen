@@ -14,6 +14,7 @@ import { ConfirmDialog } from "../ui/ConfirmDialog.tsx";
 import {
   agentTasks,
   holdersOf,
+  launcherOf,
   openSubtasksUnder,
   taskTree,
   type Holder,
@@ -375,24 +376,38 @@ export function TaskPage({
   );
 }
 
-/** The open tasks an agent is on, shown above its terminal. */
+/** Who launched the agent, if another agent did, and the open tasks it is on, above its terminal. */
 export function AgentTasks({
   state,
   agentId,
   onOpenTask,
-}: { state: StateSnapshot; agentId: string } & Pick<Opening, "onOpenTask">) {
+  onOpenAgent,
+}: { state: StateSnapshot; agentId: string } & Pick<Opening, "onOpenTask" | "onOpenAgent">) {
   const tasks = agentTasks(state, agentId);
-  if (tasks.length === 0) return null;
+  const launcher = launcherOf(state, agentId);
   return (
-    <ul className="inbox-list agent-tasks" aria-label="assigned tasks">
-      {tasks.map(({ task, role }) => (
-        <li key={task.id}>
-          {role} on{" "}
-          <Button variant="link" onPress={() => onOpenTask(task.id)}>
-            {task.title}
-          </Button>
-        </li>
-      ))}
-    </ul>
+    <>
+      {launcher !== null && (
+        <p className="note agent-tasks">
+          Launched by{" "}
+          <Button variant="link" onPress={() => onOpenAgent(launcher.id)}>
+            {launcher.project ?? "an agent"}
+          </Button>{" "}
+          <span className="id">{shortId(launcher.id)}</span>
+        </p>
+      )}
+      {tasks.length > 0 && (
+        <ul className="inbox-list agent-tasks" aria-label="assigned tasks">
+          {tasks.map(({ task, role }) => (
+            <li key={task.id}>
+              {role} on{" "}
+              <Button variant="link" onPress={() => onOpenTask(task.id)}>
+                {task.title}
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
   );
 }

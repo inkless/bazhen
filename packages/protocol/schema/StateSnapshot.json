@@ -307,6 +307,18 @@
           "canOpenShell": {
             "default": false,
             "type": "boolean"
+          },
+          "launchedBy": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
