@@ -17,6 +17,7 @@ import type { ExitStatus, Signal } from "@bazhen/protocol";
 import {
   GENERATION_OPTION,
   PaneRefused,
+  isSafeEnvEntry,
   signalPane,
   type ConfiguredTmuxServer,
 } from "@bazhen/host-guard";
@@ -138,17 +139,52 @@ export interface TmuxRuntimeOptions {
 export class TmuxRuntime implements RuntimeAdapter {
   readonly kind = "tmux";
   private readonly opts: TmuxRuntimeOptions;
+  /** `opts.env` until `replaceEnv` changes it. */
+  private env: Readonly<Record<string, string>>;
   private readonly exits: ExitWatch;
   private readonly unknownCause = new UnknownCause(UNKNOWN_EXIT_AFTER_MS);
 
   constructor(opts: TmuxRuntimeOptions) {
     this.opts = opts;
+    this.env = opts.env;
     this.exits = new ExitWatch({
       read: () => this.deadTerminals(),
       intervalMs: opts.exitPollMs ?? EXIT_POLL_MS,
       onError: opts.onError ?? ((err) => console.warn("tmux exit polling failed:", err)),
     });
     writeFileSync(opts.server.config, TMUX_CONFIG, { mode: 0o600 });
+  }
+
+  /**
+   * Replaces the environment every new terminal starts from (foundation-design §9.5). A server
+   * already running takes it at once: what changed goes into its global environment through
+   * host-guard's `setEnvironment`, never argv. Terminals already running keep what they have.
+   * Resolves with the names it left as they were, set or removed, whose names or values tmux's
+   * parser can't take as data (an exported shell function, a value with a newline): a new server
+   * gets them right anyway.
+   */
+  async replaceEnv(env: Readonly<Record<string, string>>): Promise<{ refused: string[] }> {
+    if (!this.opts.server.alive()) {
+      this.env = env;
+      return { refused: [] };
+    }
+    // Run with the new environment, and kept only once tmux has taken it, so a failure leaves
+    // the runtime, the server and the daemon's record agreeing on the old one.
+    const show = ["show-environment", "-g"];
+    const out = await this.opts.server.run(show, { env }).catch((cause: unknown) => {
+      throw new TmuxError(show, cause);
+    });
+    const current = parseEnvironment(out);
+    const changed = Object.entries(env).filter(([k, v]) => current.get(k) !== v);
+    const gone = [...current.keys()].filter((k) => !Object.hasOwn(env, k));
+    const set = Object.fromEntries(changed.filter(([k, v]) => isSafeEnvEntry(k, v)));
+    const unset = gone.filter((k) => isSafeEnvEntry(k));
+    await this.opts.server.setEnvironment(set, unset, { env });
+    this.env = env;
+    const refused = [...changed.map(([k]) => k), ...gone].filter(
+      (k) => !Object.hasOwn(set, k) && !unset.includes(k),
+    );
+    return { refused };
   }
 
   private async tmux(...args: string[]): Promise<string> {
@@ -158,7 +194,7 @@ export class TmuxRuntime implements RuntimeAdapter {
   /** What tmux printed, untrimmed: blank lines at its end can be content. */
   private async tmuxOutput(args: readonly string[]): Promise<string> {
     try {
-      return await this.opts.server.run(args, { env: this.opts.env });
+      return await this.opts.server.run(args, { env: this.env });
     } catch (cause) {
       throw new TmuxError(args, cause);
     }
@@ -280,7 +316,7 @@ export class TmuxRuntime implements RuntimeAdapter {
     const proc = this.opts.pty.spawn(
       this.opts.server.argv("attach-session", "-t", session),
       { cols, rows },
-      this.opts.env,
+      this.env,
     );
     const closeHandlers: Array<() => void> = [];
     let closed = false;
@@ -342,7 +378,7 @@ export class TmuxRuntime implements RuntimeAdapter {
     // The process the caller meant, not whichever the pane runs now.
     const expected = { pid: ref.locator.panePid ?? "", generation: ref.locator.generation ?? "" };
     const group = await this.opts.server
-      .paneGroup(target, expected, { env: this.opts.env })
+      .paneGroup(target, expected, { env: this.env })
       .catch((cause: unknown) => {
         if (cause instanceof PaneRefused && cause.reason === "dead") {
           throw new ProcessState(ref.terminalId, "running");
@@ -500,4 +536,17 @@ const sessionOf = (ref: RuntimeRef) => ref.locator.session ?? sessionName(ref.te
 
 export function sessionName(terminalId: TerminalId): string {
   return `bz-${terminalId.slice(-12)}`;
+}
+
+/**
+ * `show-environment -g`: one `NAME=value` per line, and `-NAME` for one marked removed, which
+ * no pane gets either.
+ */
+function parseEnvironment(out: string): Map<string, string> {
+  const vars = new Map<string, string>();
+  for (const line of out.split("\n")) {
+    const at = line.indexOf("=");
+    if (at > 0 && !line.startsWith("-")) vars.set(line.slice(0, at), line.slice(at + 1));
+  }
+  return vars;
 }

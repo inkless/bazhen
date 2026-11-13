@@ -2,6 +2,8 @@ export {
   GENERATION_OPTION,
   PaneRefused,
   TmuxServer,
+  environmentScript,
+  isSafeEnvEntry,
   tmuxVersion,
   type ConfiguredTmuxServer,
   type PaneProcess,

@@ -6,6 +6,7 @@ import { getRequestListener, serve } from "@hono/node-server";
 import { LocalEnvironment } from "@bazhen/env-local";
 import { ClaudeCodeHarness } from "@bazhen/harness-claude-code";
 import { CodexHarness, DAEMON_START_ARGS } from "@bazhen/harness-codex";
+import { filterEnv } from "@bazhen/core";
 import { TmuxServer } from "@bazhen/host-guard";
 import { PROTOCOL_VERSION } from "@bazhen/protocol";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
@@ -53,7 +54,7 @@ if (await answers(paths.socket)) {
 }
 // Captured once: agents get what a new terminal tab would, minus Bazhen's and the launching
 // session's internals (foundation-design §9.5).
-const captured = capture(process.env, config.envRules);
+let captured = { ...capture(process.env, config.envRules), source: "start" as "start" | "refresh" };
 const hostEnv = captured.env;
 const store = Store.open(join(paths.data, "bazhen.db"));
 const codexHome = codexHomeOf(hostEnv, inputs.home);
@@ -167,6 +168,19 @@ const socketListener = getRequestListener(
       knows: (agentId) => store.agent(agentId) !== undefined,
     }),
     stop: shutdown,
+    refreshEnv: async (env) => {
+      const next = filterEnv(env, config.envRules);
+      const { refused } = await runtime.replaceEnv(next.env);
+      captured = { ...next, at: new Date().toISOString(), source: "refresh" };
+      const running = store.snapshot().agents.filter((a) => a.state === "running");
+      return {
+        capturedAt: captured.at,
+        kept: Object.keys(next.env).length,
+        removed: next.removed,
+        refused,
+        unchanged: running.map((a) => a.id),
+      };
+    },
     doctor: async () => {
       const runtimeHealth = await runtime.health();
       return {
@@ -181,6 +195,7 @@ const socketListener = getRequestListener(
         },
         env: {
           capturedAt: captured.at,
+          source: captured.source,
           kept: Object.keys(captured.env).length,
           removed: captured.removed,
         },

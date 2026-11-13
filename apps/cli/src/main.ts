@@ -7,14 +7,20 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { currentInputs, resolvePaths } from "@bazhen/daemon/paths";
 import { DaemonError, DaemonUnreachable, answers, call } from "@bazhen/daemon/client";
-import { DoctorResponse, HealthResponse, StateSnapshot, StopResponse } from "@bazhen/protocol";
+import {
+  DoctorResponse,
+  EnvRefreshResponse,
+  HealthResponse,
+  StateSnapshot,
+  StopResponse,
+} from "@bazhen/protocol";
 
 /** The exit status when the daemon isn't running. */
 const NOT_RUNNING = 3;
 const STOPPED_WITHIN_MS = 5000;
 /** A daemon that holds a status call this long is wedged, and reported as not answering. */
 const CALL_MS = 5000;
-const USAGE = `usage: bazhen <start|stop|status|doctor> [--home <dir>] [--port <port>]`;
+const USAGE = `usage: bazhen <start|stop|status|doctor|env refresh> [--home <dir>] [--port <port>]`;
 
 const { positionals, values } = parseArgs({
   allowPositionals: true,
@@ -92,9 +98,38 @@ async function doctor(): Promise<number> {
   console.log(
     `agents.shell: ${d.agents.shell}${d.agents.loginShell ? ` (${d.agents.loginShell})` : ""}`,
   );
-  console.log(`environment: captured ${d.env.capturedAt}, ${d.env.kept} variables kept`);
+  const source = d.env.source === "start" ? "at start" : "by bazhen env refresh";
+  console.log(`environment: captured ${d.env.capturedAt} ${source}, ${d.env.kept} variables kept`);
   console.log(`  removed: ${removed || "none"}`);
   return d.runtime.state === "unreachable" ? 1 : 0;
+}
+
+/**
+ * Gives agents started from now on this shell's environment, so a rotated token or a fixed
+ * PATH reaches them without restarting anything. Agents already running keep theirs.
+ */
+async function envRefresh(): Promise<number> {
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter((e): e is [string, string] => e[1] !== undefined),
+  );
+  const r = await call(socket, {
+    method: "POST",
+    path: "/v1/daemon/env",
+    reply: EnvRefreshResponse,
+    body: { env },
+  });
+  const removed = Object.entries(r.removed).map(([rule, count]) => `${rule} ${count}`);
+  console.log(
+    `environment refreshed: ${r.kept} variables kept; removed: ${removed.join(", ") || "none"}`,
+  );
+  if (r.refused.length > 0) {
+    console.log(`  left as they were (tmux can't take them as data): ${r.refused.join(", ")}`);
+  }
+  if (r.unchanged.length > 0) {
+    console.log(`  ${r.unchanged.length} running agents keep their environment until respawned:`);
+    for (const id of r.unchanged) console.log(`    ${id}`);
+  }
+  return 0;
 }
 
 async function run(verb: string): Promise<number> {
@@ -107,6 +142,10 @@ async function run(verb: string): Promise<number> {
       return status();
     case "doctor":
       return doctor();
+    case "env":
+      if (positionals[1] === "refresh") return envRefresh();
+      console.error(USAGE);
+      return 2;
     default:
       console.error(USAGE);
       return 2;
