@@ -19,6 +19,7 @@ import {
   type RuntimeRef,
   type RuntimeStream,
   type Size,
+  type ProcessSpec,
   type TerminalSpec,
 } from "../runtime.ts";
 import { decode, encode } from "./platform.ts";
@@ -177,12 +178,13 @@ export class FakeRuntime implements RuntimeAdapter {
     this.serverStart = "";
   }
 
-  async respawn(ref: RuntimeRef, spec: TerminalSpec): Promise<RuntimeRef> {
+  async respawn(ref: RuntimeRef, spec: ProcessSpec): Promise<RuntimeRef> {
     const t = this.paneOf(ref);
     if (t.pane.exit === null) throw new ProcessState(ref.terminalId, "exited");
     assertSameGeneration(ref, String(t.pane.generation));
-    t.spec = spec;
-    t.pane = { ...this.pane(spec), id: t.pane.id };
+    // A respawn replaces the process; the terminal, its id and tags, stays.
+    t.spec = { ...t.spec, ...spec };
+    t.pane = { ...this.pane(t.spec), id: t.pane.id };
     this.reportIfExited(t);
     return this.refOf(t);
   }
@@ -253,7 +255,7 @@ export class FakeRuntime implements RuntimeAdapter {
     if (this.terminals.size === 0) this.serverStart = "";
   }
 
-  private pane(spec: TerminalSpec): Pane {
+  private pane(spec: ProcessSpec): Pane {
     const [program, flag, script] = spec.argv;
     const code = program === "sh" && flag === "-c" ? EXIT.exec(script ?? "")?.[1] : undefined;
     return {

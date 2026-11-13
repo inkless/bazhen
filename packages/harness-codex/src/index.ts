@@ -3,6 +3,7 @@ import type {
   HarnessAdapter,
   HarnessChannelPort,
   HarnessLaunch,
+  LaunchOptions,
 } from "@bazhen/core";
 import type { Activity, ApprovalDecision, ExternalRef } from "@bazhen/protocol";
 import { z } from "zod";
@@ -42,11 +43,14 @@ export class CodexHarness implements HarnessAdapter {
     this.remote = remote;
   }
 
-  async launchSpec(request: { readonly cwd: string }): Promise<HarnessLaunch> {
+  async launchSpec(
+    request: { readonly cwd: string },
+    options: LaunchOptions,
+  ): Promise<HarnessLaunch> {
     const started = await this.channel.request("thread/start", { cwd: request.cwd });
     const threadId = ThreadStarted.parse(started).thread.id;
     await this.channel.request("thread/inject_items", { threadId, items: [BINDING] });
-    return this.tui(threadId);
+    return this.tui(threadId, options);
   }
 
   /**
@@ -56,6 +60,7 @@ export class CodexHarness implements HarnessAdapter {
   async resumeSpec(
     _request: AgentLaunchRequest,
     session: Omit<ExternalRef, "environmentId">,
+    options: LaunchOptions,
   ): Promise<HarnessLaunch> {
     const resumed = await this.channel.request("thread/resume", {
       threadId: session.id,
@@ -64,10 +69,10 @@ export class CodexHarness implements HarnessAdapter {
     // The agent stays on its own thread; a server that answered with another would rebind it.
     const threadId = ThreadStarted.parse(resumed).thread.id;
     if (threadId !== session.id) throw new ThreadMismatch(session.id, threadId);
-    return this.tui(threadId);
+    return this.tui(threadId, options);
   }
 
-  private tui(threadId: string): HarnessLaunch {
+  private tui(threadId: string, { theme }: LaunchOptions): HarnessLaunch {
     return {
       argv: [
         "codex",
@@ -81,12 +86,26 @@ export class CodexHarness implements HarnessAdapter {
         // The TUI keeps its pane's title set to the thread it shows, through /new and /resume.
         "-c",
         'tui.terminal_title=["thread-id"]',
+        ...(theme === undefined ? [] : ["-c", `tui.theme="${SYNTAX_THEME[TERMINAL_REPORTS]}"`]),
       ],
       env: {},
       externalRef: { kind: "codex-thread", id: threadId },
     };
   }
 }
+
+/**
+ * Codex has no light or dark of its own: `tui.theme` picks only its syntax highlighting, from the
+ * themes it bundles, and its other colours follow the background the terminal reports.
+ */
+const SYNTAX_THEME = { light: "one-half-light", dark: "one-half-dark" } as const;
+
+/**
+ * The background the daemon tells a terminal's programs it has (`COLOURS` in the daemon's screen
+ * emulator), which Codex's other colours follow; its syntax highlighting matches that, whatever
+ * theme the client shows, so every client gets one consistent Codex.
+ */
+const TERMINAL_REPORTS = "dark";
 
 /** A Codex request for the human's approval, as the daemon acts on it. */
 export interface CodexApproval {

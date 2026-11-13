@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LaunchAgentRequest, StateSnapshot } from "./agents.ts";
+import { LaunchAgentRequest, RespawnAgentRequest, StateSnapshot } from "./agents.ts";
 
 const launch = { idempotencyKey: "k-1", harness: "claude-code", cwd: "/work" };
 
@@ -21,6 +21,17 @@ describe("LaunchAgentRequest", () => {
 
   it("refuses a harness Bazhen has no adapter for", () => {
     expect(LaunchAgentRequest.safeParse({ ...launch, harness: "pi" }).success).toBe(false);
+  });
+
+  it("takes a light or dark theme for the TUI, or none, and nothing else", () => {
+    const respawn = { idempotencyKey: "k-2", generation: 1 };
+    expect([
+      LaunchAgentRequest.safeParse({ ...launch, theme: "light" }).success,
+      RespawnAgentRequest.safeParse({ ...respawn, theme: "dark" }).success,
+      RespawnAgentRequest.safeParse(respawn).success,
+      LaunchAgentRequest.safeParse({ ...launch, theme: "system" }).success,
+      RespawnAgentRequest.safeParse({ ...respawn, theme: "Light" }).success,
+    ]).toEqual([true, true, true, false, false]);
   });
 });
 

@@ -8,7 +8,10 @@ export const HISTORY_LINES = 2000;
 
 const ESC = "\x1b";
 const ST = `${ESC}\\`;
-/** The web client's xterm.js theme defaults, so programs that ask see the colours they get. */
+/**
+ * Light text on black: a program that asks is told the terminal is dark, so the web client keeps
+ * the terminal of a harness that picks its colours from this answer dark (docs/standards/ui.md).
+ */
 const COLOURS = [
   [10, "rgb:ffff/ffff/ffff"],
   [11, "rgb:0000/0000/0000"],

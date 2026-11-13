@@ -274,6 +274,13 @@ describe("agent lifecycle", () => {
     expect(agent()).toMatchObject({ id: agentId, state: "running", generation: 1, exit: null });
   });
 
+  it("hands the environment the theme the respawn names, not one from the launch", async () => {
+    const { lifecycle, agentId, exit, respawned } = await running();
+    exit("0");
+    await lifecycle.respawn(agentId, { idempotencyKey: "r", generation: 0, theme: "dark" });
+    expect(respawned[0]?.options).toEqual({ theme: "dark" });
+  });
+
   it("keeps a binding the new TUI moved while it started, over the session it resumed", async () => {
     const { lifecycle, agentId, exit, agent } = await running({
       duringRespawn: (store, id) =>

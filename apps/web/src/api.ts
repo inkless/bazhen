@@ -9,6 +9,7 @@ import {
   StateSnapshot,
   type ApprovalDecision,
   type HarnessId,
+  type TuiTheme,
 } from "@bazhen/protocol";
 
 /** The daemon's state, validated as it arrives. */
@@ -134,8 +135,9 @@ function refusal(status: number, text: string): Refused {
   }
 }
 
-export const launchAgent = async (harness: HarnessId, cwd: string) =>
-  LaunchAgentResponse.parse(await act("/v1/agents", { harness, cwd }));
+/** `theme` is the background the agent's terminal shows, which its TUI is started for. */
+export const launchAgent = async (harness: HarnessId, cwd: string, theme: TuiTheme) =>
+  LaunchAgentResponse.parse(await act("/v1/agents", { harness, cwd, theme }));
 
 export const sendMessage = async (agentId: string, body: string) =>
   SendMessageResponse.parse(await act(`/v1/agents/${agentId}/messages`, { body }));
@@ -151,5 +153,5 @@ export const closeAgent = async (agentId: string, generation: number) =>
 export const forceCloseAgent = async (agentId: string, generation: number) =>
   AgentCommandResponse.parse(await act(`/v1/agents/${agentId}/close`, { generation, force: true }));
 
-export const respawnAgent = async (agentId: string, generation: number) =>
-  AgentCommandResponse.parse(await act(`/v1/agents/${agentId}/respawn`, { generation }));
+export const respawnAgent = async (agentId: string, generation: number, theme: TuiTheme) =>
+  AgentCommandResponse.parse(await act(`/v1/agents/${agentId}/respawn`, { generation, theme }));

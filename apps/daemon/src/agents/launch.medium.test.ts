@@ -73,6 +73,14 @@ describe("launchAgent", () => {
     ]);
   });
 
+  it("hands the environment the theme the request names, or none, and stores neither", async () => {
+    const { store, deps, launches } = setup();
+    await launchAgent(deps, { ...request, theme: "light" });
+    await launchAgent(deps, { ...request, idempotencyKey: "k-2" });
+    expect(launches.map((l) => l.options)).toEqual([{ theme: "light" }, {}]);
+    expect(JSON.stringify(store.snapshot(testView))).not.toContain("light");
+  });
+
   it("answers a repeated key from the first answer, though its directory has gone since", async () => {
     const { deps, launches, home } = setup();
     const first = await launchAgent(deps, request);

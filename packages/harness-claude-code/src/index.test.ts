@@ -20,7 +20,10 @@ const claude = (newSessionId: () => string): HarnessAdapter =>
 
 describe("Claude Code harness", () => {
   it("launches with a session id it chose, and reports that session as the agent's", async () => {
-    const launch = await claude(() => "6f1c0b2e-0000-4000-8000-000000000001").launchSpec(request);
+    const launch = await claude(() => "6f1c0b2e-0000-4000-8000-000000000001").launchSpec(
+      request,
+      {},
+    );
     expect(launch.argv.slice(0, 3)).toEqual([
       "claude",
       "--session-id",
@@ -37,8 +40,8 @@ describe("Claude Code harness", () => {
       newSessionId: () => "fresh",
       hookCommand: "bazhen-hook",
     });
-    const resumed = await harness.resumeSpec(request, { kind: "claude-session", id: "s-7" });
-    const launched = await harness.launchSpec();
+    const resumed = await harness.resumeSpec(request, { kind: "claude-session", id: "s-7" }, {});
+    const launched = await harness.launchSpec(request, {});
     expect([resumed.argv.slice(0, 3), resumed.externalRef]).toEqual([
       ["claude", "--resume", "s-7"],
       { kind: "claude-session", id: "s-7" },
@@ -50,13 +53,13 @@ describe("Claude Code harness", () => {
     let n = 0;
     const harness = claude(() => `session-${++n}`);
     expect([
-      (await harness.launchSpec(request)).externalRef?.id,
-      (await harness.launchSpec(request)).externalRef?.id,
+      (await harness.launchSpec(request, {})).externalRef?.id,
+      (await harness.launchSpec(request, {})).externalRef?.id,
     ]).toEqual(["session-1", "session-2"]);
   });
 
   it("installs its hooks with the launch, waking an idle session for mail", async () => {
-    const { argv } = await claude(() => "s").launchSpec(request);
+    const { argv } = await claude(() => "s").launchSpec(request, {});
     const settings: unknown = JSON.parse(String(argv[argv.indexOf("--settings") + 1]));
     expect(settings).toMatchObject({
       hooks: {
@@ -93,10 +96,35 @@ describe("Claude Code harness", () => {
       hookCommand: "h",
       permissionMode: "default",
     });
-    const configured = (await harness.launchSpec(request)).argv;
-    expect([configured.slice(-2), (await claude(() => "s").launchSpec(request)).argv]).toEqual([
+    const configured = (await harness.launchSpec(request, {})).argv;
+    expect([configured.slice(-2), (await claude(() => "s").launchSpec(request, {})).argv]).toEqual([
       ["--permission-mode", "default"],
       expect.not.arrayContaining(["--permission-mode"]),
+    ]);
+  });
+});
+
+const settingsOf = (argv: readonly string[]): unknown =>
+  JSON.parse(String(argv[argv.indexOf("--settings") + 1]));
+
+describe("Claude Code's theme", () => {
+  it("goes with its settings on a launch and a resume, and only when the request names one", async () => {
+    const harness = new ClaudeCodeHarness({ newSessionId: () => "s", hookCommand: "h" });
+    const launched = await harness.launchSpec(request, { theme: "light" });
+    const resumed = await harness.resumeSpec(
+      request,
+      { kind: "claude-session", id: "s-7" },
+      { theme: "dark" },
+    );
+    const unthemed = await harness.launchSpec(request, {});
+    expect([
+      settingsOf(launched.argv),
+      settingsOf(resumed.argv),
+      settingsOf(unthemed.argv),
+    ]).toEqual([
+      expect.objectContaining({ theme: "light", hooks: expect.any(Object) }),
+      expect.objectContaining({ theme: "dark", hooks: expect.any(Object) }),
+      expect.not.objectContaining({ theme: expect.anything() }),
     ]);
   });
 });

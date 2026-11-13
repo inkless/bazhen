@@ -143,4 +143,56 @@
   --color-red-dark-10: oklch(0.74 0.158 25);
   --color-red-dark-11: oklch(0.8 0.114 25);
   --color-red-dark-12: oklch(0.94 0.03 25);
+
+  --color-purple-1: oklch(0.993 0.003 305);
+  --color-purple-2: oklch(0.978 0.01 305);
+  --color-purple-3: oklch(0.955 0.021 305);
+  --color-purple-4: oklch(0.93 0.033 305);
+  --color-purple-5: oklch(0.905 0.046 305);
+  --color-purple-6: oklch(0.875 0.061 305);
+  --color-purple-7: oklch(0.83 0.085 305);
+  --color-purple-8: oklch(0.75 0.124 305);
+  --color-purple-9: oklch(0.55 0.2 305);
+  --color-purple-10: oklch(0.51 0.188 305);
+  --color-purple-11: oklch(0.47 0.17 305);
+  --color-purple-12: oklch(0.25 0.092 305);
+
+  --color-purple-dark-1: oklch(0.17 0.02 305);
+  --color-purple-dark-2: oklch(0.2 0.024 305);
+  --color-purple-dark-3: oklch(0.235 0.04 305);
+  --color-purple-dark-4: oklch(0.265 0.056 305);
+  --color-purple-dark-5: oklch(0.295 0.068 305);
+  --color-purple-dark-6: oklch(0.335 0.08 305);
+  --color-purple-dark-7: oklch(0.39 0.1 305);
+  --color-purple-dark-8: oklch(0.47 0.124 305);
+  --color-purple-dark-9: oklch(0.7 0.158 305);
+  --color-purple-dark-10: oklch(0.74 0.135 305);
+  --color-purple-dark-11: oklch(0.8 0.101 305);
+  --color-purple-dark-12: oklch(0.94 0.028 305);
+
+  --color-cyan-1: oklch(0.993 0.004 205);
+  --color-cyan-2: oklch(0.978 0.011 205);
+  --color-cyan-3: oklch(0.955 0.022 205);
+  --color-cyan-4: oklch(0.93 0.033 205);
+  --color-cyan-5: oklch(0.905 0.045 205);
+  --color-cyan-6: oklch(0.875 0.057 205);
+  --color-cyan-7: oklch(0.83 0.072 205);
+  --color-cyan-8: oklch(0.75 0.093 205);
+  --color-cyan-9: oklch(0.55 0.094 205);
+  --color-cyan-10: oklch(0.51 0.087 205);
+  --color-cyan-11: oklch(0.47 0.08 205);
+  --color-cyan-12: oklch(0.25 0.044 205);
+
+  --color-cyan-dark-1: oklch(0.17 0.015 205);
+  --color-cyan-dark-2: oklch(0.2 0.018 205);
+  --color-cyan-dark-3: oklch(0.235 0.03 205);
+  --color-cyan-dark-4: oklch(0.265 0.042 205);
+  --color-cyan-dark-5: oklch(0.295 0.051 205);
+  --color-cyan-dark-6: oklch(0.335 0.058 205);
+  --color-cyan-dark-7: oklch(0.39 0.067 205);
+  --color-cyan-dark-8: oklch(0.47 0.08 205);
+  --color-cyan-dark-9: oklch(0.7 0.119 205);
+  --color-cyan-dark-10: oklch(0.74 0.12 205);
+  --color-cyan-dark-11: oklch(0.8 0.112 205);
+  --color-cyan-dark-12: oklch(0.94 0.045 205);
 }

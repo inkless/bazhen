@@ -1,4 +1,9 @@
-import type { AgentLaunchRequest, HarnessAdapter, HarnessLaunch } from "@bazhen/core";
+import type {
+  AgentLaunchRequest,
+  HarnessAdapter,
+  HarnessLaunch,
+  LaunchOptions,
+} from "@bazhen/core";
 import type { ApprovalDecision, ExternalRef } from "@bazhen/protocol";
 
 export interface ClaudeCodeOptions {
@@ -22,26 +27,28 @@ export class ClaudeCodeHarness implements HarnessAdapter {
     this.opts = opts;
   }
 
-  async launchSpec(): Promise<HarnessLaunch> {
+  async launchSpec(_request: AgentLaunchRequest, options: LaunchOptions): Promise<HarnessLaunch> {
     const id = this.opts.newSessionId();
-    return this.spec(["--session-id", id], id);
+    return this.spec(["--session-id", id], id, options);
   }
 
   /** The same TUI, with its hooks, on the session the agent already had. */
   async resumeSpec(
     _request: AgentLaunchRequest,
     session: Omit<ExternalRef, "environmentId">,
+    options: LaunchOptions,
   ): Promise<HarnessLaunch> {
-    return this.spec(["--resume", session.id], session.id);
+    return this.spec(["--resume", session.id], session.id, options);
   }
 
-  private spec(session: string[], id: string): HarnessLaunch {
+  /** Claude Code reads a theme in its settings ahead of the user's own, for this launch only. */
+  private spec(session: string[], id: string, { theme }: LaunchOptions): HarnessLaunch {
     return {
       argv: [
         "claude",
         ...session,
         "--settings",
-        JSON.stringify(hooks(this.opts.hookCommand)),
+        JSON.stringify({ ...hooks(this.opts.hookCommand), ...(theme && { theme }) }),
         ...(this.opts.permissionMode === undefined
           ? []
           : ["--permission-mode", this.opts.permissionMode]),

@@ -40,7 +40,7 @@ function channel(result: unknown = { thread: { id: "thr-1" } }, resumes?: string
 describe("Codex harness", () => {
   it("starts the agent's thread and gives it a first item, so the TUI can resume it", async () => {
     const { port, requests } = channel();
-    await new CodexHarness(port, REMOTE).launchSpec({ cwd: "/work" });
+    await new CodexHarness(port, REMOTE).launchSpec({ cwd: "/work" }, {});
     expect(requests).toEqual([
       ["thread/start", { cwd: "/work" }],
       [
@@ -51,7 +51,7 @@ describe("Codex harness", () => {
   });
 
   it("launches the TUI on that thread, on the same server, and binds the agent to it", async () => {
-    const launch = await new CodexHarness(channel().port, REMOTE).launchSpec({ cwd: "/work" });
+    const launch = await new CodexHarness(channel().port, REMOTE).launchSpec({ cwd: "/work" }, {});
     expect(launch).toMatchObject({
       argv: [
         "codex",
@@ -69,7 +69,7 @@ describe("Codex harness", () => {
 
   it("refuses to launch when the server returns no thread", async () => {
     await expect(
-      new CodexHarness(channel({}).port, REMOTE).launchSpec({ cwd: "/work" }),
+      new CodexHarness(channel({}).port, REMOTE).launchSpec({ cwd: "/work" }, {}),
     ).rejects.toThrow(ZodError);
   });
 
@@ -79,6 +79,7 @@ describe("Codex harness", () => {
     const resumed = await harness.resumeSpec(
       { harness: "codex", project: "p", cwd: "/work" },
       { kind: "codex-thread", id: "thr-7" },
+      {},
     );
     expect(requests).toEqual([["thread/resume", { threadId: "thr-7", excludeTurns: true }]]);
     expect([resumed.argv.slice(0, 5), resumed.externalRef]).toEqual([
@@ -93,8 +94,31 @@ describe("Codex harness", () => {
       harness.resumeSpec(
         { harness: "codex", project: "p", cwd: "/work" },
         { kind: "codex-thread", id: "thr-7" },
+        {},
       ),
     ).rejects.toThrow(ThreadMismatch);
+  });
+});
+
+/** The `-c tui.theme=…` overrides in a TUI's argv. */
+const syntaxTheme = (argv: readonly string[]) =>
+  argv.filter((arg, i) => argv[i - 1] === "-c" && arg.startsWith("tui.theme="));
+
+describe("Codex's theme", () => {
+  it("highlights for the dark background the terminal reports, and leaves it to the user's config when the request names no theme", async () => {
+    const harness = new CodexHarness(channel().port, REMOTE);
+    const launched = await harness.launchSpec({ cwd: "/work" }, { theme: "light" });
+    const resumed = await harness.resumeSpec(
+      { harness: "codex", project: "p", cwd: "/work" },
+      { kind: "codex-thread", id: "thr-1" },
+      { theme: "dark" },
+    );
+    const unthemed = await harness.launchSpec({ cwd: "/work" }, {});
+    expect([
+      syntaxTheme(launched.argv),
+      syntaxTheme(resumed.argv),
+      syntaxTheme(unthemed.argv),
+    ]).toEqual([['tui.theme="one-half-dark"'], ['tui.theme="one-half-dark"'], []]);
   });
 });
 

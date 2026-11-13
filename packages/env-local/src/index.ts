@@ -119,13 +119,13 @@ export class LocalEnvironment implements EnvironmentAdapter {
    * Refuses an agent a terminal already carries, live or dead: an agent has one terminal at a time.
    * Only a reachable runtime is read; with no server running its inventory is empty.
    */
-  async launch({ agentId, terminalId, request, size }: AgentLaunch): Promise<AgentRefs> {
+  async launch({ agentId, terminalId, request, options, size }: AgentLaunch): Promise<AgentRefs> {
     const harness = this.harness(request);
     if ((await this.health()).state === "reachable") {
       const carried = (await this.inventory()).some((e) => e.agentId === agentId);
       if (carried) throw new AgentTerminalExists(agentId);
     }
-    const launch = await harness.launchSpec(request);
+    const launch = await harness.launchSpec(request, options);
     const externalRef = this.located(launch);
     const runtime = await this.opts.runtime.create({
       ...this.process(agentId, request, launch, 0),
@@ -142,6 +142,7 @@ export class LocalEnvironment implements EnvironmentAdapter {
   async respawn({
     agentId,
     request,
+    options,
     refs,
     generation,
   }: AgentRespawn): Promise<AgentRefs & { readonly runtime: RuntimeRef }> {
@@ -150,7 +151,7 @@ export class LocalEnvironment implements EnvironmentAdapter {
     if (harness.resumeSpec === undefined || refs.externalRef === null)
       throw new NotResumable(agentId);
     await this.assertExited(refs.runtime);
-    const launch = await harness.resumeSpec(request, refs.externalRef);
+    const launch = await harness.resumeSpec(request, refs.externalRef, options);
     const process = this.process(agentId, request, launch, generation);
     return {
       runtime: await this.opts.runtime.respawn(refs.runtime, process),

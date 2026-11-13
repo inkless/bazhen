@@ -133,6 +133,18 @@ export function linearSrgb({ l, c, h }: Oklch): [number, number, number] {
   ];
 }
 
+/** One linear sRGB channel, clipped and gamma-encoded, as two hex digits. */
+const hexChannel = (v: number) => {
+  const c = Math.min(1, Math.max(0, v));
+  const encoded = c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055;
+  return Math.round(encoded * 255)
+    .toString(16)
+    .padStart(2, "0");
+};
+
+/** An opaque primitive as `#rrggbb`, for what takes no CSS colour function, as xterm.js's theme. */
+export const toHex = (colour: Oklch) => `#${linearSrgb(colour).map(hexChannel).join("")}`;
+
 /** Inside sRGB, allowing for the three decimals the palette is written to. */
 export const inSrgb = (colour: Oklch) =>
   linearSrgb(colour).every((v) => v >= -0.0005 && v <= 1.0005);

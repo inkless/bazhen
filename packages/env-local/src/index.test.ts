@@ -26,6 +26,7 @@ const launch = (harnessId: "claude-code" | "codex" = "claude-code") => ({
   agentId: newId("agent"),
   terminalId: newId("term"),
   request: { harness: harnessId, project: "p", cwd: "/work" },
+  options: {},
   size: { cols: 80, rows: 24 },
 });
 
@@ -58,6 +59,38 @@ describe("local environment", () => {
       size: { cols: 80, rows: 24 },
       generation: 0,
     });
+  });
+
+  it("hands the harness the options a launch and a respawn name", async () => {
+    const seen: unknown[] = [];
+    // A TUI that exits at once, so it can be respawned.
+    const exits = {
+      argv: ["sh", "-c", "exit 0"] as [string, ...string[]],
+      env: {},
+      externalRef: { kind: "claude-session" as const, id: "s-1" },
+    };
+    const recording: HarnessAdapter = {
+      id: "claude-code",
+      launchSpec: async (_request, options) => {
+        seen.push(options);
+        return exits;
+      },
+      resumeSpec: async (_request, _session, options) => {
+        seen.push(options);
+        return exits;
+      },
+    };
+    const runtime = new FakeRuntime();
+    const env = new LocalEnvironment({
+      id: newId("env"),
+      runtime,
+      harnesses: [recording],
+      socket: "/run/b.sock",
+    });
+    const l = { ...launch(), options: { theme: "light" as const } };
+    const refs = await env.launch(l);
+    await env.respawn({ ...l, options: { theme: "dark" }, refs, generation: 1 });
+    expect(seen).toEqual([{ theme: "light" }, { theme: "dark" }]);
   });
 
   it("starts the TUI through the user's login shell, when there is one", async () => {
@@ -193,7 +226,7 @@ describe("local environment", () => {
       ...harness,
       resumeSpec: async () => {
         resumed++;
-        return harness.launchSpec({ harness: "claude-code", project: "p", cwd: "/work" });
+        return harness.launchSpec({ harness: "claude-code", project: "p", cwd: "/work" }, {});
       },
     };
     const env = new LocalEnvironment({
@@ -205,7 +238,7 @@ describe("local environment", () => {
     const l = launch();
     const refs = await env.launch(l);
     await expect(
-      env.respawn({ agentId: l.agentId, request: l.request, refs, generation: 1 }),
+      env.respawn({ agentId: l.agentId, request: l.request, options: {}, refs, generation: 1 }),
     ).rejects.toThrow(ProcessState);
     expect(resumed).toBe(0);
   });
