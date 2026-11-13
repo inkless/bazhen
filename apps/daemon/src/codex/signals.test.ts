@@ -12,7 +12,7 @@ function setup(bound: Record<string, string> = { "thr-1": "agt-1" }) {
   const listener = codexSignals({
     agentOf: (threadId) => bound[threadId],
     record: (agentId, signal) => {
-      if (agentId === "agt-closed") throw new Error("no agent agt-closed");
+      if (agentId === "agt-unknown") throw new Error("no agent agt-unknown");
       recorded.push([agentId, signal]);
     },
     resume: async (threadId) => {
@@ -35,6 +35,7 @@ const userInput = {
   threadId: "thr-1",
   item: { type: "userMessage", content: [{ type: "text", text: "go on" }] },
 };
+const agentReply = { threadId: "thr-1", item: { type: "agentMessage", id: "i1" } };
 
 describe("Codex activity signals", () => {
   it("maps each thread status to its signal, native and certain", () => {
@@ -64,12 +65,33 @@ describe("Codex activity signals", () => {
     expect([s.values(), s.resumed]).toEqual([["idle", "unknown"], []]);
   });
 
-  it("ignores threads no agent is bound to, statuses it doesn't know and other methods", () => {
+  it("ignores threads no agent is bound to, and other methods", () => {
     const s = setup();
     s.status(active(), "thr-other");
-    s.status({ type: "somethingNew" });
     s.notify("thread/tokenUsage/updated", { threadId: "thr-1" });
+    s.notify("turn/completed", { threadId: "thr-1", turn: { id: "t1" } });
     expect([s.values(), s.resumed]).toEqual([[], []]);
+  });
+
+  it("reads a status it doesn't know as unknown, so a stale one isn't left showing", () => {
+    const s = setup();
+    s.status(active());
+    s.status({ type: "somethingNew" });
+    expect([s.values(), s.resumed]).toEqual([["working", "unknown"], []]);
+  });
+
+  it("resumes an unloaded thread once per connection, however often it says so", () => {
+    const s = setup();
+    s.status({ type: "notLoaded" });
+    s.status({ type: "notLoaded" });
+    s.listener.threadResumed?.("thr-1", { thread: { status: { type: "idle" } } });
+    s.status({ type: "notLoaded" });
+    s.listener.disconnected?.();
+    s.status({ type: "notLoaded" });
+    expect([s.values(), s.resumed]).toEqual([
+      ["unknown", "unknown", "idle", "unknown", "unknown"],
+      ["thr-1", "thr-1"],
+    ]);
   });
 
   it("keeps a failed turn failed through the idle status that follows it", () => {
@@ -81,10 +103,18 @@ describe("Codex activity signals", () => {
     expect(s.values()).toEqual(["working", "failed", "working"]);
   });
 
-  it("logs a signal it can't record, for an agent that has just closed", () => {
-    const s = setup({ "thr-1": "agt-closed" });
+  it("forgets a failed turn when the connection ends", () => {
+    const s = setup();
+    s.notify("turn/completed", turnEnded("failed"));
+    s.listener.disconnected?.();
+    s.listener.threadResumed?.("thr-1", { thread: { status: { type: "idle" } } });
+    expect(s.values()).toEqual(["failed", "idle"]);
+  });
+
+  it("logs activity the store refuses, as for an agent it doesn't know, and carries on", () => {
+    const s = setup({ "thr-1": "agt-unknown" });
     s.status(active());
-    expect(s.logged).toEqual([expect.stringContaining("agt-closed")]);
+    expect(s.logged).toEqual([expect.stringContaining("agt-unknown")]);
   });
 
   it("labels a turn cut off by the server's exit and continued by the next server", () => {
@@ -96,15 +126,18 @@ describe("Codex activity signals", () => {
     expect(s.values()).toEqual(["working", `working: ${AUTO_CONTINUED}`, "idle"]);
   });
 
-  it("labels a thread left interrupted until a turn starts, which was the server's own", () => {
+  it("labels a thread left interrupted until a turn starts whose first item isn't input", () => {
     const s = setup();
     s.status(active("waitingOnApproval"));
     s.listener.disconnected?.();
     s.listener.threadResumed?.("thr-1", { thread: { status: { type: "idle" } } });
     s.notify("turn/started", turnStarted);
+    s.notify("item/started", agentReply);
+    s.notify("item/started", agentReply);
     expect(s.values()).toEqual([
       "needs_approval",
       `idle: ${INTERRUPTED}`,
+      "working",
       `working: ${AUTO_CONTINUED}`,
     ]);
   });
@@ -116,7 +149,8 @@ describe("Codex activity signals", () => {
     s.listener.threadResumed?.("thr-1", { thread: { status: { type: "idle" } } });
     s.notify("turn/started", turnStarted);
     s.notify("item/started", userInput);
-    expect(s.values().at(-1)).toBe("working");
+    s.notify("item/started", agentReply);
+    expect(s.values()).toEqual(["working", `idle: ${INTERRUPTED}`, "working"]);
   });
 
   it("labels nothing for a thread that was idle when the connection ended", () => {

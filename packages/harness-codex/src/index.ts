@@ -209,9 +209,9 @@ const ThreadStatus = z.object({
 });
 
 /**
- * A `ThreadStatus` as activity: `active` is working unless a flag says it waits on the human,
- * and `notLoaded` is unknown until the thread is resumed. Null for a status this build doesn't
- * know.
+ * A `ThreadStatus` as activity: `active` is working unless a flag says it waits on the human.
+ * `notLoaded`, and a status this build doesn't know, are unknown, so a stale one isn't left
+ * showing. Null for something that is no status at all.
  */
 export function activityOf(status: unknown): CodexActivity | null {
   const s = ThreadStatus.safeParse(status);
@@ -226,24 +226,34 @@ export function activityOf(status: unknown): CodexActivity | null {
       return "idle";
     case "systemError":
       return "failed";
-    case "notLoaded":
-      return "unknown";
     default:
-      return null;
+      return "unknown";
   }
 }
 
+/** Whether a `ThreadStatus` says the thread is not loaded, and must be resumed to be followed. */
+export const isNotLoaded = (status: unknown) =>
+  ThreadStatus.safeParse(status).data?.type === "notLoaded";
+
 const StatusChanged = z.object({ threadId: z.string(), status: z.unknown() });
 
-/** A thread's new activity, from `thread/status/changed`; null for any other notification. */
+/**
+ * A thread's new activity, from `thread/status/changed`, and whether it unloaded; null for any
+ * other notification.
+ */
 export function readThreadStatus(
   method: string,
   params: unknown,
-): { readonly threadId: string; readonly activity: CodexActivity } | null {
+): {
+  readonly threadId: string;
+  readonly activity: CodexActivity;
+  readonly notLoaded: boolean;
+} | null {
   if (method !== "thread/status/changed") return null;
   const p = StatusChanged.safeParse(params);
   const activity = p.success ? activityOf(p.data.status) : null;
-  return p.success && activity !== null ? { threadId: p.data.threadId, activity } : null;
+  if (!p.success || activity === null) return null;
+  return { threadId: p.data.threadId, activity, notLoaded: isNotLoaded(p.data.status) };
 }
 
 /** The activity of a thread as `thread/start` or `thread/resume` answers with it. */
@@ -254,12 +264,13 @@ export const resultActivity = (result: unknown): CodexActivity | null =>
 
 const TurnEvent = z.object({
   threadId: z.string(),
-  turn: z.object({ status: z.string() }).optional(),
+  turn: z.object({ status: z.string().optional() }).optional(),
 });
 
 /**
  * A turn that started, or one that ended and how (`completed`, `interrupted` or `failed`), from
- * `turn/started` and `turn/completed`; null for any other notification.
+ * `turn/started` and `turn/completed`; null for any other notification, and for an end that
+ * doesn't say how, which the thread's status then tells.
  */
 export function readTurn(
   method: string,
@@ -268,8 +279,21 @@ export function readTurn(
   if (method !== "turn/started" && method !== "turn/completed") return null;
   const p = TurnEvent.safeParse(params);
   if (!p.success) return null;
-  return {
-    threadId: p.data.threadId,
-    ended: method === "turn/started" ? null : (p.data.turn?.status ?? "completed"),
-  };
+  if (method === "turn/started") return { threadId: p.data.threadId, ended: null };
+  const ended = p.data.turn?.status;
+  return ended === undefined ? null : { threadId: p.data.threadId, ended };
+}
+
+const ItemStarted = z.object({ threadId: z.string(), item: z.object({ type: z.string() }) });
+
+/** An item a turn started, and whether it is the user's input; null for any other notification. */
+export function readItemStarted(
+  method: string,
+  params: unknown,
+): { readonly threadId: string; readonly userInput: boolean } | null {
+  if (method !== "item/started") return null;
+  const p = ItemStarted.safeParse(params);
+  return p.success
+    ? { threadId: p.data.threadId, userInput: p.data.item.type === "userMessage" }
+    : null;
 }
