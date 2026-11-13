@@ -1,4 +1,4 @@
-import { useState, useSyncExternalStore, type SubmitEvent } from "react";
+import { useState, type SubmitEvent } from "react";
 import type { Agent, AgentState, Shell } from "@bazhen/protocol";
 import {
   closeAgent,
@@ -14,22 +14,11 @@ import { Button } from "../ui/Button.tsx";
 import { ConfirmDialog } from "../ui/ConfirmDialog.tsx";
 import { AttachCommand } from "./AttachCommand.tsx";
 import { Dock } from "../shells/Dock.tsx";
+import { useDockLayout, useMediaQuery } from "../shells/layout.ts";
 import { linkedShells, shellLabel } from "../shells/model.ts";
 import { agentActions, exitText, shortId } from "./model.ts";
 
 const NARROW = "(max-width: 600px)";
-
-/** Whether `query` matches now, and again whenever that changes. */
-function useMediaQuery(query: string): boolean {
-  return useSyncExternalStore(
-    (changed) => {
-      const list = matchMedia(query);
-      list.addEventListener("change", changed);
-      return () => list.removeEventListener("change", changed);
-    },
-    () => matchMedia(query).matches,
-  );
-}
 
 /** Why an agent that can't be opened shows no terminal. */
 const NO_TERMINAL: Partial<Record<AgentState, string>> = {
@@ -69,7 +58,8 @@ export function Workspace({
       new Map(mine.flatMap((s) => (s.foreground === null ? [] : [[s.id, s.foreground.command]]))),
     );
   };
-  const sharing = mine.length > 0;
+  const dock = useDockLayout();
+  const sharing = mine.length > 0 && !dock.hidden && dock.position === "bottom";
   // Too narrow for the TUI and a shell one above the other: the dock takes the TUI as a tab.
   const narrow = useMediaQuery(NARROW);
   const tui = (terminalId: string, height: string) => (
@@ -196,7 +186,7 @@ export function Workspace({
             <Button type="submit">Send</Button>
           </form>
           {agent.terminalId !== null && (
-            <div className="workspace-body">
+            <div className={`workspace-body dock-${dock.position}`}>
               {narrow ? (
                 <Dock
                   agent={agent}

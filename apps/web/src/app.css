@@ -343,10 +343,18 @@ main {
   margin-top: 0;
 }
 
-/* Shells: the dock under an agent's TUI, and each shell's pane in it. */
+/* Shells: the dock beside an agent's TUI, the rail's standalone group, and a shell's own pane. */
 .workspace-body {
   display: grid;
   gap: var(--space-3);
+}
+
+/* Side by side only where both fit; a narrow screen stacks them, the dock under the TUI. */
+@media (min-width: 70rem) {
+  .workspace-body.dock-right {
+    grid-template-columns: 3fr 2fr;
+    align-items: start;
+  }
 }
 
 .dock,
@@ -364,7 +372,8 @@ main {
 }
 
 .dock-head h3,
-.shell-head h3 {
+.shell-head h3,
+.shells-rail h2 {
   margin: 0;
   font-size: var(--font-size-sm);
 }
@@ -393,6 +402,29 @@ main {
 .busy-dot.busy {
   background: var(--color-ok);
   box-shadow: none;
+}
+
+.shell-chip {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.shells-rail {
+  display: grid;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+}
+
+.shells-rail-head {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+
+.shells-rail ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .close-shells {

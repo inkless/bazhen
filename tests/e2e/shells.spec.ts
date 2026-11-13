@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { launch, screen } from "./page.ts";
 
 const workspace = (page: Page) => page.getByRole("article", { name: "agent" });
@@ -30,6 +30,18 @@ const foregroundOf = (page: Page, shellId: string) =>
     return typeof command === "string" ? command : null;
   }, shellId);
 
+/** Where an element starts across the page, and where its middle is. */
+async function boxOf(element: Locator) {
+  const box = await element.boundingBox();
+  if (box === null) throw new Error("the element isn't on the page");
+  return box;
+}
+const leftOf = async (element: Locator) => (await boxOf(element)).x;
+const middleOf = async (element: Locator) => {
+  const box = await boxOf(element);
+  return box.x + box.width / 2;
+};
+
 /** Every shell open the page sends, as it sends them. */
 function shellOpens(page: Page): string[] {
   const opens: string[] = [];
@@ -55,8 +67,7 @@ async function openBeside(page: Page): Promise<string> {
  * Types a line into a shell's terminal, as a person would at its prompt: the click that takes it
  * over is not sent to it, so typing waits until this view drives it.
  */
-async function typeLine(page: Page, line: string): Promise<void> {
-  const terminal = pane(page);
+async function typeLine(page: Page, line: string, terminal = pane(page)): Promise<void> {
   await terminal.locator(".xterm-screen").click();
   await expect(terminal.getByText("Driving")).toBeVisible();
   await page.keyboard.type(line);
@@ -147,4 +158,67 @@ test('opens one shell however fast "+ Shell here" is tapped twice', async ({ pag
   await first;
   await expect(dock(page).getByRole("tab")).toHaveCount(1);
   expect(opens).toHaveLength(1);
+});
+
+test("opens a standalone shell from the rail, in the directory asked for", async ({ page }) => {
+  await page.goto("/");
+  const rail = page.getByRole("region", { name: "standalone shells" });
+  await rail.getByRole("button", { name: "+ New" }).click();
+  await rail.getByPlaceholder("~").fill(String(process.env["BZ_E2E_WORK"]));
+  await rail.getByRole("button", { name: "Open" }).click();
+  await expect.poll(() => new URL(page.url()).hash).toMatch(/^#\/shell\//);
+  const shellId = new URL(page.url()).hash.replace("#/shell/", "");
+  await typeLine(page, "pwd", page.getByRole("article", { name: /^shell / }));
+  await expect
+    .poll(() => screen(page, shellId), { timeout: 15_000 })
+    .toContain(String(process.env["BZ_E2E_WORK"]));
+});
+
+test("keeps a shell kept from a closing agent in the rail, and opens it there", async ({
+  page,
+}) => {
+  const agentId = await launch(page);
+  const kept = await openBeside(page);
+  await workspace(page).getByRole("button", { name: "Close agent…" }).click();
+  const confirm = page.getByRole("dialog", { name: "Close agent" });
+  await confirm.getByRole("checkbox").check();
+  const answer = page.waitForResponse((r) => r.url().endsWith(`/v1/agents/${agentId}/close`));
+  await confirm.getByRole("button", { name: "Close agent" }).click();
+  expect((await answer).status()).toBe(200);
+  const rail = page.getByRole("region", { name: "standalone shells" });
+  await rail.locator(`button.agent`).last().click();
+  expect(new URL(page.url()).hash).toBe(`#/shell/${kept}`);
+  await expect(page.getByRole("article", { name: /^shell / })).toBeVisible();
+});
+
+test("keeps where the dock sits on this device, across a reload, beside the agent's TUI", async ({
+  page,
+}) => {
+  await launch(page);
+  await openBeside(page);
+  const right = dock(page).getByRole("button", { name: "Dock right" });
+  await right.click();
+  await page.reload();
+  await expect(right).toHaveAttribute("aria-pressed", "true");
+  const tui = workspace(page).getByRole("region", { name: "terminal" }).first();
+  expect(await leftOf(dock(page))).toBeGreaterThan(await middleOf(tui));
+});
+
+test("hides the dock's shells until asked, and streams none meanwhile", async ({ page }) => {
+  await launch(page);
+  await openBeside(page);
+  const hide = dock(page).getByRole("button", { name: "Hide shells" });
+  await expect(hide).toHaveAttribute("aria-expanded", "true");
+  await hide.click();
+  await expect(dock(page).getByRole("tab")).toHaveCount(0);
+  await expect(dock(page).getByRole("region", { name: "terminal" })).toHaveCount(0);
+  await dock(page).getByRole("button", { name: "Show shells (1)" }).click();
+  await expect(dock(page).getByRole("tab")).toHaveCount(1);
+});
+
+test("says a shell is no longer open for a link to one, with a way back", async ({ page }) => {
+  await page.goto("/#/shell/term_0190000000007000800000000000dead");
+  await expect(page.getByText("This shell is no longer open.")).toBeVisible();
+  await page.getByRole("button", { name: "Back to the fleet" }).click();
+  await expect(page.getByRole("list", { name: "fleet overview" })).toBeVisible();
 });
