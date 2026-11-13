@@ -3,6 +3,7 @@ import type { Duplex } from "node:stream";
 import { DEV_ORIGINS_HEADER } from "@bazhen/protocol";
 import { refusal, type Allowlists } from "./guard.ts";
 import { arrivedRemotely, mustPair, tokenFrom, type DeviceGate } from "../auth/devices.ts";
+import type { StoredDevice } from "../store/store.ts";
 
 /** The same statuses as the HTTP surface, so a refused upgrade reads like a refused request. */
 const REFUSAL_STATUS = {
@@ -10,7 +11,10 @@ const REFUSAL_STATUS = {
   origin_not_allowed: "403 Forbidden",
 };
 
-/** A WebSocket endpoint: the path it serves, and what takes an upgrade the guard let through. */
+/**
+ * A WebSocket endpoint: the path it serves, and what takes an upgrade the guard let through.
+ * `device` is the paired device the upgrade came from, or null for a browser that never paired.
+ */
 export interface UpgradeRoute {
   readonly path: RegExp;
   readonly upgrade: (
@@ -19,6 +23,7 @@ export interface UpgradeRoute {
     head: Buffer,
     url: URL,
     match: RegExpExecArray,
+    device: StoredDevice | null,
   ) => void;
 }
 
@@ -50,19 +55,23 @@ export function upgrades(
       const value = req.headers[name];
       return Array.isArray(value) ? value.join(", ") : value;
     };
-    if (gate !== null && mustPair(gate, header)) {
-      const verified = gate.devices.verify(tokenFrom(req.headers.cookie), {
+    // A browser on loopback need not pair, but one that has is still known by its device.
+    const verified =
+      gate?.devices.verify(tokenFrom(req.headers.cookie), {
         touch: false,
         remote: arrivedRemotely(header),
-      });
+      }) ?? null;
+    if (gate !== null && mustPair(gate, header)) {
       if (verified === null) return refuseUpgrade(socket, "401 Unauthorized");
       if (origin === undefined) return refuseUpgrade(socket, REFUSAL_STATUS.origin_not_allowed);
-      gate.devices.hold(verified.device.id, socket);
     }
+    // Held wherever it is named, so a revoked or lapsed device can't go on being named.
+    if (verified !== null) gate?.devices.hold(verified.device.id, socket);
+    const device = verified?.device ?? null;
     const url = new URL(req.url ?? "/", "http://daemon");
     for (const route of routes) {
       const match = route.path.exec(url.pathname);
-      if (match !== null) return route.upgrade(req, socket, head, url, match);
+      if (match !== null) return route.upgrade(req, socket, head, url, match, device);
     }
     refuseUpgrade(socket, "404 Not Found");
   };

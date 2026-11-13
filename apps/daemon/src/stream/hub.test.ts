@@ -423,6 +423,24 @@ describe("terminal hub", () => {
     expect(tokenOf(a)).not.toBe(tokenOf(b));
   });
 
+  it("names the driving view's device to the others, and none it isn't on", async () => {
+    const rt = await fakeRuntime();
+    const hub = new Hub(rt.runtime, memoryLog().log);
+    const laptop = viewer();
+    const l = await hub.join(rt.ref, laptop.v, size);
+    const phone = viewer();
+    const p = await hub.join(rt.ref, { ...phone.v, deviceName: "Phone" }, size);
+    p.engage();
+    const toLaptop = laptop.frames.at(-1);
+    const toPhone = phone.frames.at(-1);
+    l.engage();
+    expect([toLaptop, toPhone, phone.frames.at(-1)]).toEqual([
+      { type: "lease", driver: false, driven: true, epoch: 5, driverDevice: "Phone" },
+      { type: "lease", driver: true, driven: false, epoch: 5 },
+      { type: "lease", driver: false, driven: true, epoch: 6 },
+    ]);
+  });
+
   it("never passes a terminal reply from the driver to the program", async () => {
     const rt = await fakeRuntime();
     const hub = new Hub(rt.runtime, memoryLog().log);

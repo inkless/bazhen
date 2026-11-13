@@ -14,21 +14,17 @@ import {
   type StreamClientFrame,
   type TuiTheme,
 } from "@bazhen/protocol";
+import { Heartbeat, PING_EVERY_MS } from "./heartbeat.ts";
 import { matchKey } from "./keymap.ts";
+import { statusText, type Status } from "./status.ts";
 import { Backoff } from "./reconnect.ts";
 import { wheelAction, type TerminalKind } from "./scroll.ts";
 import { attachScrollInput } from "./scroll-input.ts";
 import { loadSettings } from "./settings.ts";
 import { attachTakeover } from "./takeover.ts";
 import { terminalTheme } from "./theme.ts";
+import { LiveStatus } from "../ui/LiveStatus.tsx";
 import { pageTheme } from "../ui/theme.ts";
-
-type Status =
-  | { kind: "connecting" }
-  | { kind: "viewing" }
-  | { kind: "driving" }
-  | { kind: "reconnecting" }
-  | { kind: "ended"; message: string };
 
 interface Report {
   readonly status: Status;
@@ -64,7 +60,10 @@ export function TerminalView({
       {status.kind === "ended" ? (
         <p role="alert">{status.message}</p>
       ) : (
-        <p aria-live="polite">{STATUS_TEXT[status.kind]}</p>
+        <>
+          <p aria-hidden>{statusText(status)}</p>
+          <LiveStatus text={statusText(status)} />
+        </>
       )}
       {notice !== null && <p role="status">{notice}</p>}
       <div
@@ -79,13 +78,6 @@ export function TerminalView({
     </section>
   );
 }
-
-const STATUS_TEXT = {
-  connecting: "Connecting…",
-  viewing: "Viewing — click to type",
-  driving: "Driving",
-  reconnecting: "Reconnecting…",
-} as const;
 
 /**
  * Renders the terminal's stream into `element` and sends what the user types while this view
@@ -130,12 +122,20 @@ function connect(
 
   const encoder = new TextEncoder();
   const backoff = new Backoff();
+  let heartbeat = new Heartbeat();
   let ws: WebSocket | undefined;
   let attached = false;
   let driving = false;
-  /** The latest lease epoch, and whether the daemon reads the epoch input is typed under. */
+  /** Whether another view drives, and the name of the device it is on, when it is on one. */
+  let driven = false;
+  let driverDevice: string | undefined;
+  /** This view's latest attachment and its token, which a reattach names so the daemon ends it. */
+  let previous: { attachmentId: string; token: string } | undefined;
+  /** Whether this view is coming back from a lost socket. */
+  let returning = false;
+  /** The latest lease epoch, and whether the daemon reads `epoch` and `ping` frames. */
   let epoch: number | undefined;
-  let declares = false;
+  let modern = false;
   let wantsToDrive = false;
   /** Whether the program is on its alternate screen, which only the daemon can see. */
   let alternate = false;
@@ -148,7 +148,7 @@ function connect(
   };
   /** What it types from now on counts only under this epoch (§4.3). */
   const declare = () => {
-    if (declares && epoch !== undefined) send({ type: "epoch", epoch });
+    if (modern && epoch !== undefined) send({ type: "epoch", epoch });
   };
   const engage = () => {
     if (attached) send({ type: "engage" });
@@ -162,10 +162,24 @@ function connect(
     if (driving && ws?.readyState === WebSocket.OPEN) ws.send(bytes);
     else if (keystroke) engage();
   };
+  const leaseStatus = (): Status => {
+    if (driving) return { kind: "driving" };
+    return driven ? { kind: "taken", device: driverDevice } : { kind: "viewing" };
+  };
   const end = (message: string) => {
     over = true;
     ws?.close();
     report({ status: { kind: "ended", message } });
+  };
+
+  /** The socket is gone, or as good as: reattach without waiting for it to say so. */
+  const lost = (socket: WebSocket) => {
+    if (ws !== socket || over) return;
+    ws = undefined;
+    attached = driving = driven = false;
+    returning = true;
+    report({ status: { kind: "reconnecting" }, notice: null });
+    retry = setTimeout(open, backoff.next());
   };
 
   const open = () => {
@@ -174,13 +188,23 @@ function connect(
     );
     ws = socket;
     epoch = undefined;
-    declares = false;
+    modern = false;
+    heartbeat = new Heartbeat();
     socket.binaryType = "arraybuffer";
     socket.addEventListener("open", () => {
       const { cols, rows } = term;
-      send({ type: "hello", protocolVersion: PROTOCOL_VERSION, mode: "interactive", cols, rows });
+      send({
+        type: "hello",
+        protocolVersion: PROTOCOL_VERSION,
+        mode: "interactive",
+        cols,
+        rows,
+        resumes: previous,
+      });
     });
     socket.addEventListener("message", (e: MessageEvent<ArrayBuffer | string>) => {
+      if (ws !== socket) return;
+      if (heartbeat.heard() && status.kind === "checking") report({ status: leaseStatus() });
       if (typeof e.data !== "string") {
         term.write(new Uint8Array(e.data));
         return;
@@ -193,30 +217,50 @@ function connect(
       else if (f.type === "screen") alternate = f.alternate;
       else if (f.type === "attached") {
         attached = true;
-        declares = isAtLeast(f.protocolVersion ?? "1.0", EPOCH_FRAMES_SINCE);
+        modern = isAtLeast(f.protocolVersion ?? "1.0", EPOCH_FRAMES_SINCE);
         declare();
         // A view focused before its socket opened saw no focus event to claim the lease with.
-        if (wantsToDrive || element.contains(document.activeElement)) engage();
-        wantsToDrive = false;
+        // One coming back from a lost socket doesn't take the lease from a view that took it
+        // meanwhile: only the user's next deliberate input does.
+        const claims = wantsToDrive || element.contains(document.activeElement);
+        if (claims && !(returning && driven)) engage();
+        wantsToDrive = returning = false;
+        const token = f.resumeToken;
+        previous = token === undefined ? undefined : { attachmentId: f.attachmentId, token };
       } else if (f.type === "lease") {
         epoch = f.epoch;
         declare();
         driving = f.driver;
-        report({ status: { kind: driving ? "driving" : "viewing" } });
+        driven = f.driven === true;
+        driverDevice = f.driverDevice;
+        report({ status: leaseStatus() });
       } else if (f.type === "notice") report({ notice: f.message });
       else if (f.type === "error") end(`The daemon refused this view: ${f.message}`);
       else if (f.type === "exit") end("The terminal has closed.");
       // The daemon closes the socket next; its close is what reattaches.
       else if (f.type === "ended") report({ status: { kind: "reconnecting" } });
     });
-    socket.addEventListener("close", () => {
-      if (ws !== socket || over) return;
-      attached = driving = false;
-      report({ status: { kind: "reconnecting" }, notice: null });
-      retry = setTimeout(open, backoff.next());
-    });
+    socket.addEventListener("close", () => lost(socket));
   };
   open();
+  // A dead socket's close can take minutes to fire, so missed pongs reattach without it.
+  const beating = setInterval(() => {
+    const socket = ws;
+    if (socket?.readyState !== WebSocket.OPEN || !modern) return;
+    const beat = heartbeat.beat();
+    if (beat === "dead") {
+      lost(socket);
+      socket.close();
+      return;
+    }
+    // Keys typed now may go nowhere; say so.
+    if (beat === "late" && driving) report({ status: { kind: "checking" } });
+    send({ type: "ping" });
+  }, PING_EVERY_MS);
+  const shown = () => {
+    if (document.visibilityState === "visible") heartbeat.resumed();
+  };
+  document.addEventListener("visibilitychange", shown);
 
   term.attachCustomKeyEventHandler((event) => {
     const text = matchKey(event, settings.keyMap);
@@ -245,6 +289,8 @@ function connect(
     over = true;
     unfollow();
     clearTimeout(retry);
+    clearInterval(beating);
+    document.removeEventListener("visibilitychange", shown);
     detachTakeover();
     detachScroll();
     observer.disconnect();

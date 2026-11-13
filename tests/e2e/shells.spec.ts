@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { launch, screen } from "./page.ts";
+import { launch, screen, status } from "./page.ts";
 
 const workspace = (page: Page) => page.getByRole("article", { name: "agent" });
 const dock = (page: Page) => workspace(page).getByRole("region", { name: "shells" });
@@ -69,7 +69,7 @@ async function openBeside(page: Page): Promise<string> {
  */
 async function typeLine(page: Page, line: string, terminal = pane(page)): Promise<void> {
   await terminal.locator(".xterm-screen").click();
-  await expect(terminal.getByText("Driving")).toBeVisible();
+  await expect(status(terminal)).toHaveText("Driving");
   await page.keyboard.type(line);
   await page.keyboard.press("Enter");
 }

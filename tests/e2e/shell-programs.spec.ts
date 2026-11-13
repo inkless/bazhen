@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { TmuxServer } from "@bazhen/host-guard";
-import { atBottom, onAlternateScreen, screen, viewportTop } from "./page.ts";
+import { atBottom, onAlternateScreen, screen, status, viewportTop } from "./page.ts";
 
 // What a person runs in a shell terminal, end to end: the page, the daemon and real tmux, with
 // each program as the distribution ships it. Full-screen programs draw on the alternate screen,
@@ -27,7 +27,7 @@ async function shell(page: Page): Promise<string> {
   await page.goto(`/#/shell/${shellId}`);
   const pane = page.getByRole("article", { name: /^shell / });
   await pane.locator(".xterm-screen").click();
-  await expect(pane.getByText("Driving")).toBeVisible();
+  await expect(status(pane)).toHaveText("Driving");
   await expect.poll(() => screen(page, shellId), { timeout: 15_000 }).toMatch(PROMPT);
   return shellId;
 }

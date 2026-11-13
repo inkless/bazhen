@@ -45,6 +45,7 @@ const COVERED_ELSEWHERE: Record<string, string> = {
   "apps/web/src/inbox/Inbox.tsx": "tests/e2e/inbox.spec.ts",
   "apps/web/src/tasks/Tasks.tsx": "tests/e2e/tasks.spec.ts",
   "apps/web/src/fleet/ThemeNotice.tsx": "tests/e2e/terminal.spec.ts",
+  "apps/web/src/ui/LiveStatus.tsx": "tests/e2e/keys.spec.ts",
   "apps/web/src/terminal/TerminalView.tsx": "tests/e2e/keys.spec.ts",
   "apps/web/src/terminal/scroll-input.ts": "tests/e2e/keys.spec.ts",
   "apps/web/src/terminal/takeover.ts": "tests/e2e/keys.spec.ts",
