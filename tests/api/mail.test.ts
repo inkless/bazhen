@@ -36,6 +36,18 @@ const send = async (key: string, body: string) =>
 
 /** A model request that continues a turn after a tool ran. */
 const withToolResult = (request: string) => request.includes("tool_result");
+/**
+ * Sends Esc to a turn still in progress, and says whether it still is: polled, a keystroke a
+ * slow runner lost is sent again, and none once the turn stops, since Esc at the prompt opens a
+ * menu.
+ */
+const interrupt = (view: { type(text: string): void }) => {
+  const still = busy();
+  if (still) view.type("\x1b");
+  return still;
+};
+/** What the agent's harness last said it is doing. */
+const doing = async () => agentIn(await state())?.activity?.value;
 /** Whether the agent's TUI is in the middle of a turn, offering to interrupt it. */
 const busy = () => /esc to interrupt/i.test(daemon.screen(agentId));
 /** The events a stream received about one entity, in order. */
@@ -50,6 +62,58 @@ const requeueReasons = (events: Event[]) =>
   );
 
 describe("mail to a Claude Code agent", () => {
+  it("reports what the agent is doing: idle once started, working through a turn, idle after", async () => {
+    // A fresh agent's SessionStart says it waits for its first prompt.
+    await expect.poll(doing, { timeout: 20_000 }).toBe("idle");
+    const { messageId } = await send("activity", "[[fake:slow:4000]] Take a moment.");
+    await expect.poll(doing, { timeout: 20_000 }).toBe("working");
+    await expect.poll(() => busy(), { timeout: 20_000 }).toBe(true);
+    expect(await doing()).toBe("working");
+    await expect
+      .poll(async () => (await state()).messages.find((m) => m.id === messageId)?.state, {
+        timeout: 30_000,
+      })
+      .toBe("delivered");
+    await expect.poll(doing, { timeout: 10_000 }).toBe("idle");
+    expect(agentIn(await state())?.activity?.source).toBe("native");
+  });
+
+  it("reports an agent asking to run a tool as needing approval, until it is answered", async () => {
+    const { messageId } = await send("activity-tool", "[[fake:bash:touch activity-tool]]");
+    await expect.poll(() => openItemFor("touch activity-tool"), { timeout: 30_000 }).toBeDefined();
+    expect(await doing()).toBe("needs_approval");
+    await daemon.request(
+      `/v1/attention/${String(await openItemFor("touch activity-tool"))}/answer`,
+      {
+        method: "POST",
+        body: { idempotencyKey: "activity-allow", decision: "allow" },
+      },
+    );
+    await expect
+      .poll(async () => (await state()).messages.find((m) => m.id === messageId)?.state, {
+        timeout: 30_000,
+      })
+      .toBe("delivered");
+    await expect.poll(doing, { timeout: 10_000 }).toBe("idle");
+  });
+
+  it("keeps an agent working while a background subagent outlives the turn that started it", async () => {
+    const { messageId } = await send("subagent", "[[fake:agent]] Start a helper.");
+    // The main turn launches the subagent and stops at once; the subagent answers 8 s later.
+    await expect
+      .poll(async () => (await state()).messages.find((m) => m.id === messageId)?.state, {
+        timeout: 30_000,
+      })
+      .toBe("delivered");
+    await expect.poll(doing, { timeout: 10_000 }).toBe("working");
+    expect(agentIn(await state())?.activity?.detail).toBe("subagent running");
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+    expect(await doing()).toBe("working");
+    // Its result starts one more main turn; when that stops, nothing is left running.
+    await expect.poll(doing, { timeout: 30_000 }).toBe("idle");
+    expect(model.requests.some((r) => r.includes("A background task."))).toBe(true);
+  });
+
   it("wakes the idle agent with the message, and confirms it once that turn ends", async () => {
     const { messageId } = await send("hello", "Reply to confirm you got this.");
     await expect
@@ -119,7 +183,9 @@ describe("mail to a Claude Code agent", () => {
       body: { idempotencyKey: "respawn", generation },
     });
     expect(respawned.status).toBe(200);
-    await waitUntil(() => daemon.screen(agentId).includes("Claude Code"), "the resumed TUI");
+    // The resumed TUI replays the conversation, which can push its banner off the screen; its
+    // SessionStart says it is up, and a respawn's first signal is its own.
+    await expect.poll(doing, { timeout: 30_000 }).toBe("idle");
     const { messageId } = await send("after-respawn", "Reply to confirm, after the respawn.");
     await expect
       .poll(async () => (await state()).messages.find((m) => m.id === messageId)?.state, {
@@ -163,12 +229,12 @@ describe("mail to a Claude Code agent", () => {
   it("offers a message again when the human interrupts its turn, and delivers it after", async () => {
     const now = await state();
     const stream = await daemon.events({ epoch: now.epoch, eventId: now.eventId });
-    const { messageId } = await send("interrupted", "[[fake:slow:6000]] Take your time.");
+    const { messageId } = await send("interrupted", "[[fake:slow:15000]] Take your time.");
     // Mid-reply: the TUI offers to interrupt while the model's answer is held back.
     await expect.poll(() => busy(), { timeout: 20_000 }).toBe(true);
     const view = await daemon.view(String(terminalId), "interactive");
     await view.drive();
-    view.type("\x1b");
+    await expect.poll(() => interrupt(view), { timeout: 10_000, interval: 1_000 }).toBe(false);
     view.close();
     await daemon.prompt({ agentId, terminalId }, "Something else, please.");
     await expect

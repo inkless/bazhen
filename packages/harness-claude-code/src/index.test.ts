@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { HarnessAdapter } from "@bazhen/core";
 import {
+  activityOf,
   approvalReply,
   ClaudeCodeHarness,
   carriesWake,
@@ -13,6 +14,9 @@ import {
 } from "./index.ts";
 
 const toolOf = (h: Hook) => ("tool" in h ? h.tool : "");
+/** What a hook of this name, with this payload, says the agent is doing. */
+const activityAt = (event: string, payload: Record<string, unknown> = {}) =>
+  activityOf(readHook(event, { prompt_id: "p", tool_use_id: "t", ...payload }));
 /** The waiter, run for a hook event of that name. */
 const waiterAt = (hook_event_name: string, source?: string) =>
   readHook("wait", { hook_event_name, session_id: "s", source });
@@ -146,8 +150,46 @@ describe("Claude Code hooks", () => {
       Reflect.get(Object(readHook("wait", { ...at, hook_event_name: "Stop" })), "turnEnd"),
       Reflect.get(Object(readHook("wait", { ...at, hook_event_name: "StopFailure" })), "turnEnd"),
     ]).toEqual([
-      { promptId: "p-1", failed: false },
-      { promptId: "p-1", failed: true },
+      { promptId: "p-1", failed: false, error: null },
+      { promptId: "p-1", failed: true, error: null },
+    ]);
+  });
+
+  it("reads a subagent's start and stop, by its id", () => {
+    expect([
+      readHook("SubagentStart", { agent_id: "x" }),
+      readHook("SubagentStop", { agent_id: "x" }),
+      readHook("SubagentStop", {}),
+    ]).toEqual([
+      { kind: "subagentStarted", subagentId: "x" },
+      { kind: "subagentStopped", subagentId: "x" },
+      { kind: "ignored" },
+    ]);
+  });
+
+  it("says what each hook means the agent is doing, and nothing for the rest", () => {
+    expect([
+      activityAt("UserPromptSubmit", { prompt: "hi" }),
+      activityAt("PreToolUse"),
+      activityAt("PostToolUse"),
+      activityAt("PermissionRequest", { tool_name: "Bash" }),
+      activityAt("Stop"),
+      activityAt("StopFailure", { error: "server_error" }),
+      activityAt("wait", { hook_event_name: "StopFailure", error: "unknown" }),
+      activityAt("wait", { hook_event_name: "SessionStart", source: "startup" }),
+      activityAt("wait", { hook_event_name: "SessionStart", source: "compact" }),
+      activityAt("Notification"),
+    ]).toEqual([
+      { value: "working" },
+      { value: "working" },
+      { value: "working" },
+      { value: "needs_approval" },
+      { value: "idle" },
+      { value: "failed", detail: "server_error" },
+      { value: "failed", detail: "unknown" },
+      { value: "idle" },
+      null,
+      null,
     ]);
   });
 
@@ -155,6 +197,7 @@ describe("Claude Code hooks", () => {
     expect(readHook("StopFailure", { prompt_id: "p-1", error: "rate_limit" })).toEqual({
       kind: "turnFailed",
       promptId: "p-1",
+      error: "rate_limit",
     });
   });
 
@@ -222,19 +265,21 @@ describe("Claude Code hooks", () => {
         kind: "wait",
         sessionStarted: false,
         compacted: false,
-        turnEnd: { promptId: null, failed: false },
+        turnEnd: { promptId: null, failed: false, error: null },
       },
     ]);
   });
 
   it("reads which session ran a hook, and whether a subagent did", () => {
-    expect(hookOrigin({ session_id: "s-1" })).toEqual({ sessionId: "s-1", subagent: false });
+    const main = { subagent: false, subagentId: null };
+    expect(hookOrigin({ session_id: "s-1" })).toEqual({ sessionId: "s-1", ...main });
     expect(hookOrigin({ session_id: "s-1", agent_id: "a-1" })).toEqual({
       sessionId: "s-1",
       subagent: true,
+      subagentId: "a-1",
     });
-    expect(hookOrigin({ session_id: "" })).toEqual({ sessionId: null, subagent: false });
-    expect(hookOrigin(null)).toEqual({ sessionId: null, subagent: false });
+    expect(hookOrigin({ session_id: "" })).toEqual({ sessionId: null, ...main });
+    expect(hookOrigin(null)).toEqual({ sessionId: null, ...main });
   });
 
   it("ignores a hook it did not install", () => {

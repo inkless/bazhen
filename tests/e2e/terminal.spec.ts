@@ -32,6 +32,16 @@ const isLaunch = (r: Request) =>
  */
 const CLAUDE_GREY = { dark: "246", light: "241" } as const;
 
+/** The agent's lifecycle state, as the daemon's state snapshot gives it. */
+async function agentState(page: Page, agentId: string): Promise<unknown> {
+  const state: unknown = await (await page.request.get("/v1/state")).json();
+  const agents: unknown = Reflect.get(Object(state), "agents");
+  const agent: unknown = Array.isArray(agents)
+    ? agents.find((a: unknown) => Reflect.get(Object(a), "id") === agentId)
+    : undefined;
+  return Reflect.get(Object(agent), "state");
+}
+
 /** Launches Claude Code from `page` and waits for its TUI. */
 async function launchClaude(page: Page) {
   await page.getByPlaceholder("/path/to/project").fill(String(process.env["BZ_E2E_WORK"]));
@@ -65,15 +75,16 @@ test("draws an agent's terminal in the theme it started in, and respawns it in t
   expect(await terminalBackground(phone)).toBe(dark);
   await phone.close();
 
-  // Claude Code reports no activity, so whether it is mid-turn can't be told: no respawn yet.
+  // Claude Code reads idle once its TUI is up, waiting for its first prompt: it can be respawned.
   const notice = page.getByRole("status", { name: "theme" });
   const row = notice.getByRole("listitem").filter({ hasText: agentId.slice(-6) });
-  await expect(
-    row.getByRole("button", { name: "Can't tell whether it's mid-turn" }),
-  ).toBeDisabled();
+  await expect(row.getByRole("button", { name: "Respawn in light" })).toBeEnabled({
+    timeout: 10_000,
+  });
 
-  // Once it has exited, it respawns in light, behind the confirm.
+  // Once it has exited, it respawns in light, behind the confirm, without being stopped first.
   expect(await kill(page, agentId)).toBe(200);
+  await expect.poll(() => agentState(page, agentId), { timeout: 10_000 }).toBe("exited");
   const respawn = row.getByRole("button", { name: "Respawn in light" });
   await expect(respawn).toBeEnabled({ timeout: 10_000 });
   await respawn.click();

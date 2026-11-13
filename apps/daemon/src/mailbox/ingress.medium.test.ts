@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { getRequestListener } from "@hono/node-server";
 import { afterEach, describe, expect, it } from "vitest";
 import { CLAUDE_SESSION, PANE_PID, claudeAgent, testView } from "../testing/fixtures.ts";
+import { ActivityTracker } from "./activity.ts";
 import { Approvals } from "./approvals.ts";
 import { SessionBinding } from "./binding.ts";
 import { HOOK_SCRIPT, hookClient } from "./hook-command.ts";
@@ -31,6 +32,7 @@ async function daemon() {
     approvals: new Approvals(store),
     knows: (id) => id === agentId,
     binding,
+    activity: new ActivityTracker((id, activity) => store.recordActivity(id, activity)),
   });
   const listener = getRequestListener(app.fetch);
   dir = mkdtempSync("/tmp/bz-ingress-");
@@ -38,7 +40,8 @@ async function daemon() {
   server = createServer((req, res) => void listener(req, res));
   await new Promise<void>((resolve) => server?.listen(socket, resolve));
   const state = (id: string) => store.snapshot(testView).messages.find((m) => m.id === id)?.state;
-  return { socket, agentId, mailbox, state };
+  const activity = () => store.latestActivity(agentId);
+  return { socket, agentId, mailbox, state, activity };
 }
 
 /** A Stop's payload, from the agent's own session unless another is named. */
@@ -154,5 +157,44 @@ describe.each([
     const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
     const sub = await run(client, "PostToolUse", env, postToolUse({ agent_id: "sub-1" }));
     expect([sub.code, sub.stdout, state(messageId)]).toEqual([0, "", "queued"]);
+  });
+
+  it("records what the agent's own session says it is doing, and nothing another says", async () => {
+    const { socket, agentId, activity } = await daemon();
+    const env = { BAZHEN_AGENT_ID: agentId, BAZHEN_SOCKET: socket };
+    const at = (event: string, more: Record<string, string> = {}) =>
+      run(
+        client,
+        event,
+        env,
+        JSON.stringify({
+          hook_event_name: event,
+          session_id: CLAUDE_SESSION,
+          prompt_id: "p-1",
+          tool_use_id: "t-1",
+          ...more,
+        }),
+      );
+    await at("PreToolUse", { agent_id: "sub-1" });
+    expect(activity()).toMatchObject({ value: "working", source: "native" });
+    await at("SubagentStop", { agent_id: "sub-1" });
+    await at("Stop");
+    expect(activity()?.value).toBe("idle");
+    await at("PreToolUse", { session_id: "66666666-6666-4666-8666-666666666666" });
+    expect(activity()?.value).toBe("idle");
+    await at("StopFailure", { prompt_id: "p-2", error: "server_error" });
+    expect(activity()).toMatchObject({ value: "failed", detail: "server_error" });
+  });
+
+  it("reads a session /clear starts as idle, once the binding has moved to it", async () => {
+    const { socket, agentId, mailbox, activity } = await daemon();
+    const env = { BAZHEN_AGENT_ID: agentId, BAZHEN_SOCKET: socket };
+    await run(client, "PreToolUse", env, postToolUse({ hook_event_name: "PreToolUse" }));
+    expect(activity()?.value).toBe("working");
+    const fresh = "77777777-7777-4777-8777-777777777777";
+    const waiting = run(client, "wait", env, sessionStart(fresh));
+    await expect.poll(() => activity()?.value).toBe("idle");
+    mailbox.send(agentId, { idempotencyKey: "m", body: "release the waiter" });
+    await waiting;
   });
 });
