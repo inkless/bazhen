@@ -8,6 +8,9 @@
     "timed_out",
     "superseded",
     "agent_closed",
-    "stale"
+    "stale",
+    "replied",
+    "dismissed",
+    "resent"
   ]
 }

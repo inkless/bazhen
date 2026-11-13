@@ -11,6 +11,7 @@ import { SessionBinding } from "./binding.ts";
 import { HOOK_SCRIPT, hookClient } from "./hook-command.ts";
 import { hookApp } from "./ingress.ts";
 import { Mailbox } from "./mailbox.ts";
+import { Inbox } from "../attention/inbox.ts";
 
 let server: Server | undefined;
 let dir = "";
@@ -23,13 +24,19 @@ afterEach(() => {
 async function daemon() {
   const { store, agentId } = await claudeAgent();
   const mailbox = new Mailbox(store);
+  const approvals = new Approvals(store);
+  const inbox = new Inbox(store, approvals, (id, req) => mailbox.send(id, req));
   // Every hook here runs through a shell of the pane's process.
   const binding = new SessionBinding(store, {
     parent: async () => ({ ppid: PANE_PID, command: "sh" }),
   });
   const app = hookApp({
     mailbox,
-    approvals: new Approvals(store),
+    approvals,
+    turns: {
+      started: (id) => inbox.turnStarted(id),
+      failed: (id, error) => inbox.turnFailed(id, error),
+    },
     knows: (id) => id === agentId,
     binding,
     activity: new ActivityTracker((id, activity) => store.recordActivity(id, activity)),
@@ -43,7 +50,12 @@ async function daemon() {
   const state = (id: string) => store.snapshot(testView).messages.find((m) => m.id === id)?.state;
   const activity = () => store.latestActivity(agentId);
   const usage = () => store.snapshot(testView).agents[0]?.usage;
-  return { socket, agentId, mailbox, state, activity, usage };
+  const failures = () =>
+    store
+      .snapshot(testView)
+      .attention.filter((a) => a.kind === "failed")
+      .map((a) => `${a.state}:${a.summary}`);
+  return { socket, agentId, mailbox, state, activity, usage, failures };
 }
 
 /** A Stop's payload, from the agent's own session unless another is named. */
@@ -186,6 +198,30 @@ describe.each([
     expect(activity()?.value).toBe("idle");
     await at("StopFailure", { prompt_id: "p-2", error: "server_error" });
     expect(activity()).toMatchObject({ value: "failed", detail: "server_error" });
+  });
+
+  it("puts the agent's own failed turn in the inbox while a subagent works on, until its next turn", async () => {
+    const { socket, agentId, failures } = await daemon();
+    const env = { BAZHEN_AGENT_ID: agentId, BAZHEN_SOCKET: socket };
+    const at = (event: string, more: Record<string, string> = {}) =>
+      run(
+        client,
+        event,
+        env,
+        JSON.stringify({
+          hook_event_name: event,
+          session_id: CLAUDE_SESSION,
+          prompt_id: "p-1",
+          ...more,
+        }),
+      );
+    await at("SubagentStart", { agent_id: "sub-1" });
+    await at("StopFailure", { error: "server_error" });
+    await at("PostToolUse", { agent_id: "sub-1", tool_use_id: "t-9" });
+    await at("UserPromptSubmit", { agent_id: "sub-1", prompt: "sub work" });
+    const during = failures();
+    await at("UserPromptSubmit", { prompt_id: "p-2", prompt: "try again" });
+    expect([during, failures()]).toEqual([["open:server_error"], ["closed:server_error"]]);
   });
 
   it("reads a session /clear starts as idle, once the binding has moved to it", async () => {

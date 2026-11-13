@@ -40,6 +40,20 @@ describe("mail and attention schemas", () => {
     ).toBe(false);
   });
 
+  it("still reads an item opened before kinds, and refuses a kind it doesn't know", () => {
+    const opened = EVENTS["attention.opened"].payload;
+    const before = {
+      agentId: "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      summary: "Bash",
+      toolUseId: null,
+      mainAgent: true,
+    };
+    expect([
+      opened.safeParse(before).success,
+      opened.safeParse({ ...before, kind: "nudge" }).success,
+    ]).toEqual([true, false]);
+  });
+
   it("records an answer as answered, never as a plain close", () => {
     const closed = EVENTS["attention.closed"].payload;
     expect([

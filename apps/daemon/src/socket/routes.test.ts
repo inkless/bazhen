@@ -28,6 +28,9 @@ function app(
 ) {
   const commands = new Hono();
   commands.post("/v1/attention/:id/answer", (c) => c.json({ answered: c.req.param("id") }));
+  commands.post("/v1/attention/:id/reply", (c) => c.json({ replied: c.req.param("id") }));
+  commands.post("/v1/attention/:id/dismiss", (c) => c.json({ dismissed: c.req.param("id") }));
+  commands.post("/v1/attention/:id/resend", (c) => c.json({ resent: c.req.param("id") }));
   commands.get("/v1/state", (c) => c.json({ state: true }));
   const hooks = new Hono();
   hooks.post("/v1/hooks", (c) => c.text("hook"));
@@ -40,6 +43,9 @@ function app(
     paneTitleChanged,
   });
 }
+
+const act = (action: string, headers: Record<string, string>) =>
+  app().request(`/v1/attention/attn_x/${action}`, { method: "POST", headers });
 
 const answer = (headers: Record<string, string> = {}) =>
   app().request("/v1/attention/attn_x/answer", { method: "POST", headers });
@@ -80,6 +86,15 @@ describe("socketApp", () => {
 
   it("lets a caller that presents no agent answer an approval", async () => {
     expect(await (await answer()).json()).toEqual({ answered: "attn_x" });
+  });
+
+  it("refuses a reply, resend or dismissal from a caller that says it is an agent", async () => {
+    const agent = { "bazhen-agent-id": "agent_x" };
+    const refused = await Promise.all(
+      ["reply", "resend", "dismiss"].map(async (a) => (await act(a, agent)).status),
+    );
+    const human = await (await act("reply", {})).json();
+    expect([refused, human]).toEqual([[403, 403, 403], { replied: "attn_x" }]);
   });
 
   it("refuses an approval answer from a caller that says it is an agent", async () => {

@@ -2,6 +2,9 @@ import { Hono, type Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import {
   AnswerAttentionRequest,
+  DismissAttentionRequest,
+  ReplyAttentionRequest,
+  ResendAttentionRequest,
   CloseAgentRequest,
   CloseShellRequest,
   OpenShellRequest,
@@ -12,6 +15,9 @@ import {
   PROTOCOL_VERSION,
   SendMessageRequest,
   type AnswerAttentionResponse,
+  type DismissAttentionResponse,
+  type ReplyAttentionResponse,
+  type ResendAttentionResponse,
   type AgentCommandResponse,
   type SendMessageResponse,
   type ErrorResponse,
@@ -48,6 +54,7 @@ import {
   StaleShellGeneration,
   UnknownShell,
 } from "../shells/lifecycle.ts";
+import { AttentionRefused } from "../attention/inbox.ts";
 import { refusal, type Allowlists } from "./guard.ts";
 
 export interface AppDeps {
@@ -60,6 +67,9 @@ export interface AppDeps {
   readonly launch: (req: LaunchAgentRequest) => Promise<LaunchAgentResponse>;
   readonly send: (agentId: string, req: SendMessageRequest) => SendMessageResponse;
   readonly answer: (attentionId: string, req: AnswerAttentionRequest) => AnswerAttentionResponse;
+  readonly reply: (attentionId: string, req: ReplyAttentionRequest) => ReplyAttentionResponse;
+  readonly dismiss: (attentionId: string, req: DismissAttentionRequest) => DismissAttentionResponse;
+  readonly resend: (attentionId: string, req: ResendAttentionRequest) => ResendAttentionResponse;
   readonly close: (agentId: string, req: CloseAgentRequest) => Promise<AgentCommandResponse>;
   readonly respawn: (agentId: string, req: RespawnAgentRequest) => Promise<AgentCommandResponse>;
   readonly signal: (agentId: string, req: SignalAgentRequest) => Promise<AgentCommandResponse>;
@@ -145,6 +155,9 @@ export function createApp(deps: AppDeps): Hono {
   route("/v1/agents/:id/signal", SignalAgentRequest, deps.signal);
   route("/v1/attention/:id/answer", AnswerAttentionRequest, deps.answer);
   route("/v1/shells/:id/close", CloseShellRequest, deps.closeShell);
+  route("/v1/attention/:id/reply", ReplyAttentionRequest, deps.reply);
+  route("/v1/attention/:id/dismiss", DismissAttentionRequest, deps.dismiss);
+  route("/v1/attention/:id/resend", ResendAttentionRequest, deps.resend);
 
   // Typed failures from the domain become protocol errors in one place; anything else is a bug.
   app.onError((err, c) => {
@@ -153,6 +166,7 @@ export function createApp(deps: AppDeps): Hono {
     if (err instanceof LaunchFailed) return fail(c, 502, "launch_failed", err.message);
     if (err instanceof IdempotencyConflict) return fail(c, 409, "conflict", err.message);
     if (err instanceof AttentionClosed) return fail(c, 409, "conflict", err.message);
+    if (err instanceof AttentionRefused) return fail(c, 409, "conflict", err.message);
     if (err instanceof AttentionUnavailable) return fail(c, 503, "unavailable", err.message);
     if (err instanceof UnknownAgent || err instanceof UnknownShell)
       return fail(c, 404, "not_found", err.message);

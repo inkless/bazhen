@@ -2601,6 +2601,24 @@
                     "summary": {
                       "type": "string"
                     },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "approval",
+                        "question",
+                        "failed",
+                        "undeliverable",
+                        "escalation",
+                        "task_done"
+                      ]
+                    },
+                    "taskId": {
+                      "type": "string"
+                    },
+                    "messageId": {
+                      "type": "string",
+                      "pattern": "^msg_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                    },
                     "toolUseId": {
                       "type": [
                         "string",
@@ -2759,7 +2777,10 @@
                         "timed_out",
                         "superseded",
                         "agent_closed",
-                        "stale"
+                        "stale",
+                        "replied",
+                        "dismissed",
+                        "resent"
                       ]
                     }
                   },

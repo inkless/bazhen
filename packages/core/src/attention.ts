@@ -11,6 +11,9 @@ export const attention = machine<AttentionState, AttentionCloseReason>("attentio
     superseded: "closed",
     agent_closed: "closed",
     stale: "closed",
+    replied: "closed",
+    dismissed: "closed",
+    resent: "closed",
   },
   closed: {},
 });

@@ -29,16 +29,18 @@ export interface SocketParts {
 export function socketApp(parts: SocketParts): Hono<{ Bindings: HttpBindings }> {
   const app = new Hono<{ Bindings: HttpBindings }>();
 
-  // Only a human answers an approval: a caller that says it is an agent is refused (§9.1).
+  // Only a human acts on an attention item: a caller that says it is an agent is refused (§9.1).
   // Advisory against a hostile process of the same user, which could just not say (§9.4).
-  app.use("/v1/attention/:id/answer", async (c, next) => {
-    if (c.req.header("bazhen-agent-id") === undefined) return next();
-    const body: ErrorResponse = {
-      error: "forbidden",
-      message: "an agent can't answer an approval",
-    };
-    return c.json(body, 403);
-  });
+  for (const action of ["answer", "reply", "resend", "dismiss"]) {
+    app.use(`/v1/attention/:id/${action}`, async (c, next) => {
+      if (c.req.header("bazhen-agent-id") === undefined) return next();
+      const body: ErrorResponse = {
+        error: "forbidden",
+        message: `an agent can't ${action} an attention item`,
+      };
+      return c.json(body, 403);
+    });
+  }
 
   app.post("/v1/daemon/stop", (c) => {
     c.env.outgoing.once("finish", parts.stop);

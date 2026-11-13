@@ -345,7 +345,10 @@
                   "timed_out",
                   "superseded",
                   "agent_closed",
-                  "stale"
+                  "stale",
+                  "replied",
+                  "dismissed",
+                  "resent"
                 ]
               },
               {
@@ -355,6 +358,52 @@
           },
           "summary": {
             "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "approval",
+              "question",
+              "failed",
+              "undeliverable",
+              "escalation",
+              "task_done"
+            ]
+          },
+          "taskId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "messageId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^msg_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "openedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "allow",
+                "deny",
+                "reply",
+                "resend",
+                "dismiss"
+              ]
+            }
           }
         },
         "required": [
@@ -362,7 +411,12 @@
           "agentId",
           "state",
           "closeReason",
-          "summary"
+          "summary",
+          "kind",
+          "taskId",
+          "messageId",
+          "openedAt",
+          "actions"
         ],
         "additionalProperties": false
       }

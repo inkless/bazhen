@@ -39,6 +39,11 @@ const snapshot = (agents: Agent[], waitingOn: Agent[] = []): StateSnapshot => ({
     state: "open" as const,
     closeReason: null,
     summary: "Run tests?",
+    kind: "approval" as const,
+    taskId: null,
+    messageId: null,
+    openedAt: "2026-11-12T00:00:00.000Z",
+    actions: ["allow" as const, "deny" as const],
   })),
   messages: [],
 });

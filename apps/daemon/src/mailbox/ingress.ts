@@ -17,6 +17,11 @@ import { QUIET, type Mailbox } from "./mailbox.ts";
 export interface IngressDeps {
   readonly mailbox: Mailbox;
   readonly approvals: Approvals;
+  /** The agent's own turns, as the inbox follows them for failures (foundation-design §4.6). */
+  readonly turns: {
+    started(agentId: string): void;
+    failed(agentId: string, error: string | null): void;
+  };
   /** Whether the daemon runs this agent; a hook from any other is ignored, never adopted. */
   readonly knows: (agentId: string) => boolean;
   /** Which hooks are the agent's own session's, the only ones that take or confirm mail. */
@@ -61,22 +66,30 @@ export function hookApp(deps: IngressDeps): Hono {
         if (read.sessionStarted && !read.compacted) deps.activity.sessionStarted(agentId);
         observe();
         // The waiter runs beside each Stop and StopFailure report, so either ends the turn.
-        if (read.turnEnd?.failed === true) deps.mailbox.turnFailed(agentId, read.turnEnd.promptId);
-        else if (read.turnEnd) deps.mailbox.turnEnded(agentId, read.turnEnd.promptId);
+        if (read.turnEnd?.failed === true) {
+          deps.mailbox.turnFailed(agentId, read.turnEnd.promptId);
+          deps.turns.failed(agentId, read.turnEnd.error);
+        } else if (read.turnEnd) deps.mailbox.turnEnded(agentId, read.turnEnd.promptId);
         return framed(await deps.mailbox.wait(agentId, c.req.raw.signal));
       case "permission":
         return framed(
           await deps.approvals.request(agentId, read.summary, read.tool, c.req.raw.signal),
         );
       case "promptStarted":
-        if (await own()) deps.mailbox.promptStarted(agentId, read.prompt, read.promptId);
+        if (await own()) {
+          deps.mailbox.promptStarted(agentId, read.prompt, read.promptId);
+          deps.turns.started(agentId);
+        }
         break;
       case "turnEnded":
         if (await own()) deps.mailbox.turnEnded(agentId, read.promptId);
         deps.approvals.turnEnded(agentId);
         break;
       case "turnFailed":
-        if (await own()) deps.mailbox.turnFailed(agentId, read.promptId);
+        if (await own()) {
+          deps.mailbox.turnFailed(agentId, read.promptId);
+          deps.turns.failed(agentId, read.error);
+        }
         deps.approvals.turnEnded(agentId);
         break;
       case "toolStarted":

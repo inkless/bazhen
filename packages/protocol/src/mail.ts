@@ -25,6 +25,12 @@ export const AttentionCloseReason = z.enum([
   "superseded",
   "agent_closed",
   "stale",
+  /** The human replied, as mail to the agent or as the answer to its question. */
+  "replied",
+  /** The human saw it and put it away. */
+  "dismissed",
+  /** The human sent the undelivered message again, as a new one. */
+  "resent",
 ]);
 export type AttentionCloseReason = z.infer<typeof AttentionCloseReason>;
 
@@ -34,13 +40,41 @@ export type ApprovalDecision = z.infer<typeof ApprovalDecision>;
 export const Message = z.object({ id: Id("msg"), agentId: Id("agent"), state: MailboxState });
 export type Message = z.infer<typeof Message>;
 
-/** Something that needs the human: in M1, a harness asking to run a tool. */
+/**
+ * What an item is about (foundation-design §4.6): a harness asking to run a tool, a question
+ * the agent asked, a turn that failed, mail that could not be delivered, or something the agent
+ * or a task raised for the human.
+ */
+export const AttentionKind = z.enum([
+  "approval",
+  "question",
+  "failed",
+  "undeliverable",
+  "escalation",
+  "task_done",
+]);
+export type AttentionKind = z.infer<typeof AttentionKind>;
+
+/** What the human can do about an open item now; the daemon decides, the client never guesses. */
+export const AttentionAction = z.enum(["allow", "deny", "reply", "resend", "dismiss"]);
+export type AttentionAction = z.infer<typeof AttentionAction>;
+
+/** Something that needs the human. */
 export const Attention = z.object({
   id: Id("attn"),
   agentId: Id("agent"),
   state: AttentionState,
   closeReason: AttentionCloseReason.nullable(),
   summary: z.string(),
+  kind: AttentionKind,
+  /** The task it is about, for an item a task raised. */
+  taskId: z.string().nullable(),
+  /** The message it is about, for mail that could not be delivered. */
+  messageId: Id("msg").nullable(),
+  /** When it opened, as an ISO timestamp. */
+  openedAt: z.iso.datetime(),
+  /** Empty once it is closed, and for a question only its terminal can answer. */
+  actions: z.array(AttentionAction),
 });
 export type Attention = z.infer<typeof Attention>;
 
@@ -66,6 +100,33 @@ export const AnswerAttentionResponse = z.object({
   eventIds: z.array(z.number().int().positive()),
 });
 export type AnswerAttentionResponse = z.infer<typeof AnswerAttentionResponse>;
+
+/** A reply to an item that offers `reply`; it reaches the agent as mail. */
+export const ReplyAttentionRequest = SendMessageRequest;
+export type ReplyAttentionRequest = z.infer<typeof ReplyAttentionRequest>;
+
+export const ReplyAttentionResponse = z.object({
+  /** The message carrying the reply, whose delivery the mailbox reports. */
+  messageId: Id("msg"),
+  eventIds: z.array(z.number().int().positive()),
+});
+export type ReplyAttentionResponse = z.infer<typeof ReplyAttentionResponse>;
+
+export const DismissAttentionRequest = z.object({ idempotencyKey: IdempotencyKey });
+export type DismissAttentionRequest = z.infer<typeof DismissAttentionRequest>;
+
+export const DismissAttentionResponse = AnswerAttentionResponse;
+export type DismissAttentionResponse = z.infer<typeof DismissAttentionResponse>;
+
+/**
+ * Sends an undelivered message's text again, as a new message with attempts of its own: the
+ * one given up on stays undeliverable, as every final state does (foundation-design §4.7).
+ */
+export const ResendAttentionRequest = DismissAttentionRequest;
+export type ResendAttentionRequest = z.infer<typeof ResendAttentionRequest>;
+
+export const ResendAttentionResponse = ReplyAttentionResponse;
+export type ResendAttentionResponse = z.infer<typeof ResendAttentionResponse>;
 
 /**
  * What the hook client sends for every hook a harness runs, over the daemon's Unix socket
