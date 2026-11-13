@@ -69,6 +69,9 @@ export function fakeEnvironment(
     signal: async () => {},
     close: async () => {},
     gone: async ({ runtime }) => !present().some((e) => e.ref.terminalId === runtime?.terminalId),
+    shells: async () => [],
+    openShell: async ({ terminalId }) => ({ terminalId, runtime: "tmux", locator: {} }),
+    shellBusy: async () => null,
     onExit: () => () => {},
   };
 }

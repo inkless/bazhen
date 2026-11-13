@@ -5,6 +5,7 @@ import { describe, expect, it, onTestFinished } from "vitest";
 import { newId } from "../ids.ts";
 import { decode, delay, encode } from "./platform.ts";
 import {
+  ProcessState,
   StaleIncarnation,
   type RuntimeAdapter,
   type RuntimeRef,
@@ -122,6 +123,21 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       await expect
         .poll(() => exitOf(runtime, ref), { timeout: harness.waitMs })
         .toBeOneOf([{ type: "exited", code: 3 }, UNKNOWN]);
+    });
+
+    it("finds a terminal's own process in its foreground while it starts nothing", async () => {
+      const runtime = fresh();
+      const ref = await runtime.create(spec(sleeping));
+      await expect
+        .poll(() => runtime.foreground(ref), { timeout: harness.waitMs })
+        .toEqual({ command: "sleep", own: true });
+    });
+
+    it("refuses to read the foreground of a terminal whose process has exited", async () => {
+      const runtime = fresh();
+      const ref = await runtime.create(spec(exiting(0)));
+      await deadOf(runtime, ref);
+      await expect(runtime.foreground(ref)).rejects.toThrow(ProcessState);
     });
 
     it("round-trips input through an attached terminal", async () => {

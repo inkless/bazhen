@@ -4,6 +4,7 @@ import { FakeRuntime } from "@bazhen/core/testing";
 import { PROTOCOL_VERSION, type LaunchAgentRequest } from "@bazhen/protocol";
 import { EnvironmentUnavailable, ServerUnconfirmed, StaleGeneration } from "../agents/lifecycle.ts";
 import { AttentionClosed } from "../mailbox/approvals.ts";
+import { ShellBusy, UnknownShell } from "../shells/lifecycle.ts";
 import { createApp } from "./app.ts";
 
 const runtime = new FakeRuntime();
@@ -20,6 +21,7 @@ const app = createApp({
     agents: [],
     attention: [],
     messages: [],
+    shells: [],
   }),
   send: () => ({ messageId: newId("msg"), eventIds: [4] }),
   answer: () => {
@@ -34,6 +36,11 @@ const app = createApp({
     throw new NotResumable(newId("agent"));
   },
   signal: () => Promise.reject(new Error("not used by these tests")),
+  openShell: async () => ({ terminalId: launched.terminalId, eventIds: [5, 6] }),
+  closeShell: async (terminalId, req) => {
+    if (req.confirmBusy === true) throw new UnknownShell(terminalId);
+    throw new ShellBusy(terminalId, "nvim");
+  },
   launch: async (req: LaunchAgentRequest) => {
     if (req.harness === "codex") throw new UnsupportedHarness("codex");
     return launched;
@@ -53,6 +60,13 @@ const close = (generation: number) =>
     method: "POST",
     headers: { host, "content-type": "application/json" },
     body: JSON.stringify({ idempotencyKey: "c", generation }),
+  });
+
+const closeShell = (confirmBusy: boolean) =>
+  app.request(`/v1/shells/${launched.terminalId}/close`, {
+    method: "POST",
+    headers: { host, "content-type": "application/json" },
+    body: JSON.stringify({ idempotencyKey: "sc", generation: 0, confirmBusy }),
   });
 
 describe("HTTP app", () => {
@@ -80,6 +94,7 @@ describe("HTTP app", () => {
       agents: [],
       attention: [],
       messages: [],
+      shells: [],
     });
   });
 
@@ -140,5 +155,32 @@ describe("HTTP app", () => {
       body: JSON.stringify({ idempotencyKey: "r", generation: 0 }),
     });
     expect([res.status, (await res.json()).error]).toEqual([409, "not_resumable"]);
+  });
+
+  it("opens a shell and answers with the events it produced", async () => {
+    const res = await app.request("/v1/shells", {
+      method: "POST",
+      headers: { host, "content-type": "application/json" },
+      body: JSON.stringify({ idempotencyKey: "s", cwd: "/work" }),
+    });
+    expect([res.status, await res.json()]).toEqual([
+      200,
+      { terminalId: launched.terminalId, eventIds: [5, 6] },
+    ]);
+  });
+
+  it("answers a close of a shell running a program as busy, naming it, so the user is asked", async () => {
+    const res = await closeShell(false);
+    const body = await res.json();
+    expect([res.status, body.error, body.message]).toEqual([
+      409,
+      "busy",
+      expect.stringContaining("nvim"),
+    ]);
+  });
+
+  it("answers a command on a shell it doesn't know as not found", async () => {
+    const res = await closeShell(true);
+    expect([res.status, (await res.json()).error]).toEqual([404, "not_found"]);
   });
 });

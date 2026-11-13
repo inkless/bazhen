@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { EnvironmentKind, Id, IdempotencyKey } from "./ids.ts";
 import { Attention, Message } from "./mail.ts";
+import { Shell } from "./shells.ts";
+import { TuiTheme } from "./theme.ts";
 
 export const HarnessId = z.enum(["claude-code", "codex"]);
 export type HarnessId = z.infer<typeof HarnessId>;
@@ -71,30 +73,6 @@ export const Activity = z.object({
   detail: z.string().max(200).optional(),
 });
 export type Activity = z.infer<typeof Activity>;
-
-/**
- * Light or dark: the background a TUI is started for, as the client that starts it shows it. A
- * terminal keeps the one its TUI was started for, and is drawn in it.
- */
-export const TuiTheme = z.enum(["light", "dark"]);
-export type TuiTheme = z.infer<typeof TuiTheme>;
-
-/**
- * The text and background a terminal in each theme is drawn in, as `#rrggbb`: tmux and the daemon
- * tell a program that asks, and the web client's terminal palette (its `--color-terminal-text`
- * and `-bg` tokens) is held to the same colours by a test. tmux also sends a themed terminal's
- * blank cells in these colours, as truecolour, so the browser draws them as given: a terminal
- * override of its text or background (more contrast, say) has to change these too, or it is
- * drawn over.
- */
-export const TERMINAL_COLOURS = {
-  light: { text: "#202225", background: "#fdfdfd" },
-  dark: { text: "#eaebee", background: "#0f0f10" },
-} as const satisfies Record<TuiTheme, { text: string; background: string }>;
-
-/** `#rrggbb` as an OSC 10/11 reply writes it, `rgb:rrrr/gggg/bbbb`. */
-export const oscColour = (hex: string) =>
-  `rgb:${[1, 3, 5].map((i) => hex.slice(i, i + 2).repeat(2)).join("/")}`;
 
 /**
  * What an agent's harness says of the model it runs and how full that model's context is, as a
@@ -219,6 +197,8 @@ export const StateSnapshot = z.object({
   agents: z.array(Agent),
   attention: z.array(Attention),
   messages: z.array(Message),
+  /** Protocol 1.17. */
+  shells: z.array(Shell).default([]),
 });
 export type StateSnapshot = z.infer<typeof StateSnapshot>;
 
@@ -233,6 +213,8 @@ export const ErrorResponse = z.object({
     "unavailable",
     /** A close found no terminal, but the server it ran on may still run it; `force` closes it. */
     "server_unconfirmed",
+    /** A shell close found a program other than the shell running; `confirmBusy` closes it. */
+    "busy",
     "not_found",
     "origin_not_allowed",
     "host_not_allowed",

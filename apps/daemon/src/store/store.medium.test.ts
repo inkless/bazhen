@@ -32,6 +32,14 @@ const running = (agentId: string) => ({
   payload: { externalRef: null, runtimeRef: { runtime: "tmux", locator: { session: "bz-1" } } },
 });
 
+const shellOpened = (terminalId: string, environmentId: string, linkedAgentId: string | null) =>
+  ({
+    type: "terminal.opened",
+    entityId: terminalId,
+    actor: "user",
+    payload: { environmentId, cwd: "/work", linkedAgentId },
+  }) as const;
+
 describe("Store", () => {
   it("migrates a fresh database to the latest schema, and reopening is a no-op", () => {
     const path = dbPath();
@@ -70,6 +78,43 @@ describe("Store", () => {
     const tables = check.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all();
     expect(tables.map((t) => t.name)).toEqual(expect.arrayContaining(["agent_sessions", "leases"]));
     check.close();
+  });
+
+  it("upgrades a schema-12 database to hold shells beside the agents it had", () => {
+    const path = dbPath();
+    const v12 = Store.open(path, MIGRATIONS.slice(0, 12));
+    const { agentId } = launch(v12, withEnvironment(v12));
+    v12.close();
+    const upgraded = Store.open(path);
+    const [environmentId] = upgraded.environments("local");
+    const terminalId = newId("term");
+    upgraded.append(shellOpened(terminalId, String(environmentId), agentId));
+    expect(upgraded.snapshot(testView)).toMatchObject({
+      agents: [{ id: agentId, state: "starting" }],
+      shells: [{ id: terminalId, state: "creating", cwd: "/work", linkedAgentId: agentId }],
+    });
+    upgraded.close();
+  });
+
+  it("moves a shell through its own events, and never an agent's terminal by them", () => {
+    const store = Store.open(dbPath());
+    const environmentId = withEnvironment(store);
+    const { terminalId: agentTerminal } = launch(store, environmentId);
+    const terminalId = newId("term");
+    store.append(shellOpened(terminalId, environmentId, null));
+    const event = (type: "terminal.closing" | "terminal.lost", id = terminalId) =>
+      ({ type, entityId: id, actor: "system", payload: {} }) as const;
+    store.append({
+      type: "terminal.running",
+      entityId: terminalId,
+      actor: "system",
+      payload: { runtimeRef: { runtime: "tmux", locator: { generation: "0" } } },
+    });
+    store.append(event("terminal.lost"));
+    expect(store.shell(terminalId)).toMatchObject({ state: "lost", generation: 0 });
+    expect(() => store.append(event("terminal.closing", agentTerminal))).toThrow(UnknownEntity);
+    expect(store.terminalState(agentTerminal)).toBe("creating");
+    store.close();
   });
 
   it("records no event when its projection refuses it", () => {

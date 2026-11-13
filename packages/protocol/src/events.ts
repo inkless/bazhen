@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { Activity, Usage, ExitStatus, ExternalRef, HarnessId, Signal, TuiTheme } from "./agents.ts";
+import { Activity, Usage, ExitStatus, ExternalRef, HarnessId, Signal } from "./agents.ts";
+import { TuiTheme } from "./theme.ts";
 import { AttachmentMode, EnvironmentKind, Id } from "./ids.ts";
 import { ApprovalDecision, AttentionCloseReason } from "./mail.ts";
 import { ProtocolVersion } from "./version.ts";
@@ -111,6 +112,32 @@ export const EVENTS = {
   "agent.closing": { entity: "agent", payload: z.object({}) },
   /** The agent's terminal is gone, and the agent with it. */
   "agent.closed": { entity: "agent", payload: z.object({}) },
+  /** A shell was asked for; its terminal is recorded before the runtime starts it (§4.8). */
+  "terminal.opened": {
+    entity: "terminal",
+    payload: z.object({
+      environmentId: Id("env"),
+      cwd: z.string(),
+      linkedAgentId: Id("agent").nullable(),
+      /** The theme it is opened for, when one was named. */
+      theme: TuiTheme.optional(),
+    }),
+  },
+  "terminal.running": { entity: "terminal", payload: z.object({ runtimeRef: RuntimeRefPayload }) },
+  "terminal.failed": {
+    entity: "terminal",
+    /** `daemon_restart`: the daemon died while opening it, and its session never appeared. */
+    payload: z.object({ reason: z.enum(["open_rejected", "daemon_restart"]) }),
+  },
+  /** A reachable runtime no longer has the shell, as after a reboot; it can be restarted. */
+  "terminal.lost": { entity: "terminal", payload: z.object({}) },
+  /** A close was asked for, recorded before the terminal is touched. */
+  "terminal.closing": { entity: "terminal", payload: z.object({}) },
+  "terminal.closed": {
+    entity: "terminal",
+    /** `exited`: its shell ended, by `exit` or Ctrl+D, which closes it at once. */
+    payload: z.object({ reason: z.enum(["user", "exited"]) }),
+  },
   /** A view opened a terminal's stream (foundation-design §4.2). */
   "attachment.started": {
     entity: "attachment",

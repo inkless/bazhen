@@ -1,0 +1,31 @@
+{
+  "$id": "OpenShellRequest",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "linkedAgentId": {
+      "type": "string",
+      "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+    },
+    "cwd": {
+      "type": "string",
+      "minLength": 1
+    },
+    "theme": {
+      "type": "string",
+      "enum": [
+        "light",
+        "dark"
+      ]
+    }
+  },
+  "required": [
+    "idempotencyKey"
+  ],
+  "additionalProperties": false
+}

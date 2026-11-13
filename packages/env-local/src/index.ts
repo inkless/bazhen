@@ -14,6 +14,8 @@ import type {
   HarnessAdapter,
   RuntimeAdapter,
   RuntimeRef,
+  ShellInventoryEntry,
+  ShellOpen,
 } from "@bazhen/core";
 import type {
   ExitStatus,
@@ -32,6 +34,8 @@ import {
   UnsupportedHarness,
 } from "@bazhen/core";
 
+const basename = (path: string) => path.split("/").at(-1) ?? path;
+
 /**
  * `argv` started through the user's login shell. The harness's argv goes in as the shell's own
  * arguments, never inside its command string, so no quoting is involved: fish reads them as
@@ -39,7 +43,7 @@ import {
  * the pane's own process.
  */
 export function loginArgv(shell: string, argv: readonly string[]): [string, ...string[]] {
-  return shell.split("/").at(-1) === "fish"
+  return basename(shell) === "fish"
     ? [shell, "-l", "-i", "-c", "exec $argv", ...argv]
     : [shell, "-l", "-i", "-c", 'exec "$@"', "sh", ...argv];
 }
@@ -55,6 +59,8 @@ export interface LocalEnvironmentOptions {
    * re-reading the user's rc as a new terminal tab does (foundation-design §9.5).
    */
   readonly loginShell?: string;
+  /** The user's shell, by absolute path, which shell terminals run; `/bin/sh` without one. */
+  readonly shell?: string;
 }
 
 /**
@@ -101,6 +107,44 @@ export class LocalEnvironment implements EnvironmentAdapter {
       const externalRef = harnessSessionOf(e.tags.harnessSession, this.id);
       return [externalRef === undefined ? entry : { ...entry, externalRef }];
     });
+  }
+
+  async shells(): Promise<ShellInventoryEntry[]> {
+    return (await this.opts.runtime.inventory()).flatMap((e) =>
+      e.tags.kind === "shell" ? [{ ref: e.ref, dead: e.exit !== null }] : [],
+    );
+  }
+
+  /**
+   * The user's shell as an interactive login shell, as a new terminal tab runs it (§4.8). It is
+   * told its terminal and Bazhen's socket, never an agent id: a harness started in it by hand is
+   * not one of Bazhen's agents, so its hooks do nothing.
+   */
+  openShell({ terminalId, cwd, linkedAgentId, size, theme }: ShellOpen): Promise<RuntimeRef> {
+    return this.opts.runtime.create({
+      terminalId,
+      tags: linkedAgentId === undefined ? { kind: "shell" } : { kind: "shell", linkedAgentId },
+      argv: [this.shell, "-l", "-i"],
+      cwd,
+      env: { BAZHEN_TERMINAL_ID: terminalId, BAZHEN_SOCKET: this.opts.socket },
+      size,
+      generation: 0,
+      ...(theme && { theme }),
+    });
+  }
+
+  /**
+   * By the process group holding the terminal, not by name: a shell named otherwise than `$SHELL`,
+   * as after an rc file's `exec zsh`, is still the shell.
+   */
+  async shellBusy(ref: RuntimeRef): Promise<string | null> {
+    const { command, own } = await this.opts.runtime.foreground(ref);
+    // A login shell's process may be named with a leading dash, as `-fish`.
+    return own ? null : command.replace(/^-/, "");
+  }
+
+  private get shell(): string {
+    return this.opts.shell ?? "/bin/sh";
   }
 
   /** Without a recorded terminal there is nothing to prove gone, so it refuses rather than guess. */

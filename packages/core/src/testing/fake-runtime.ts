@@ -13,6 +13,7 @@ import {
   ProcessState,
   StaleIncarnation,
   type Attached,
+  type Foreground,
   type RuntimeAdapter,
   type RuntimeHealth,
   type RuntimeInventoryEntry,
@@ -39,6 +40,8 @@ interface Pane {
   readonly generation: number;
   readonly echo: boolean;
   exit: ExitStatus | null;
+  /** A program it started in the foreground, by name; none while it is at its prompt. */
+  child?: string;
 }
 
 interface Terminal {
@@ -197,6 +200,13 @@ export class FakeRuntime implements RuntimeAdapter {
     this.reportIfExited(t);
   }
 
+  async foreground(ref: RuntimeRef): Promise<Foreground> {
+    const t = this.paneOf(ref);
+    if (t.pane.exit !== null) throw new ProcessState(ref.terminalId, "running");
+    const own = t.spec.argv[0].split("/").at(-1) ?? "";
+    return { command: t.pane.child ?? own, own: t.pane.child === undefined };
+  }
+
   /** Reports every terminal already dead on the next turn, as a poll would, then each exit. */
   onExit(cb: ExitListener): () => void {
     this.listeners.add(cb);
@@ -230,6 +240,20 @@ export class FakeRuntime implements RuntimeAdapter {
   /** Lines that have scrolled off the terminal's screen, oldest first, which attach returns. */
   scroll(ref: RuntimeRef, history: string): void {
     this.terminalOf(ref).history = history;
+  }
+
+  /** The terminal's process starts `command` in the foreground, or, given null, gets it back. */
+  runInForeground(ref: RuntimeRef, command: string | null): void {
+    const { pane } = this.terminalOf(ref);
+    if (command === null) delete pane.child;
+    else pane.child = command;
+  }
+
+  /** The pane's process exits, as a shell does on `exit`. */
+  exitProcess(ref: RuntimeRef, status: ExitStatus = { type: "exited", code: 0 }): void {
+    const t = this.terminalOf(ref);
+    t.pane.exit = status;
+    this.reportIfExited(t);
   }
 
   /** The pane is replaced inside the terminal, as a split and a kill by hand would. */

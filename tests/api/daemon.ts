@@ -139,6 +139,17 @@ export interface DaemonOptions {
   readonly responsesUrl?: string;
 }
 
+/** A process's environment, from /proc (Linux only). */
+function processEnv(pid: number): Record<string, string> {
+  const environ = readFileSync(`/proc/${pid}/environ`, "utf8");
+  return Object.fromEntries(
+    environ
+      .split("\0")
+      .filter((entry) => entry.includes("="))
+      .map((entry) => [entry.slice(0, entry.indexOf("=")), entry.slice(entry.indexOf("=") + 1)]),
+  );
+}
+
 export class Daemon {
   readonly home: string;
   readonly work: string;
@@ -328,12 +339,15 @@ export class Daemon {
     return this.paneFact(agentId, "session_name");
   }
 
-  /** A tmux format value of the agent's pane, found by the tag Bazhen wrote on it. */
-  private paneFact(agentId: string, format: string): string | undefined {
-    const panes = this.tmux("list-panes", "-a", "-F", `#{@bazhen_agent_id} #{${format}}`);
+  /**
+   * A tmux format value of the agent's pane, found by the tag Bazhen wrote on it: its agent id,
+   * or with `tag`, another of its tags, such as a shell's terminal id.
+   */
+  paneFact(id: string, format: string, tag = "@bazhen_agent_id"): string | undefined {
+    const panes = this.tmux("list-panes", "-a", "-F", `#{${tag}} #{${format}}`);
     return panes
       .split("\n")
-      .find((l) => l.startsWith(`${agentId} `))
+      .find((l) => l.startsWith(`${id} `))
       ?.split(" ")[1];
   }
 
@@ -344,13 +358,12 @@ export class Daemon {
 
   /** The environment the agent's process runs with, as its own tools see it (Linux only). */
   agentEnv(agentId: string): Record<string, string> {
-    const environ = readFileSync(`/proc/${this.panePid(agentId)}/environ`, "utf8");
-    return Object.fromEntries(
-      environ
-        .split("\0")
-        .filter((entry) => entry.includes("="))
-        .map((entry) => [entry.slice(0, entry.indexOf("=")), entry.slice(entry.indexOf("=") + 1)]),
-    );
+    return processEnv(this.panePid(agentId));
+  }
+
+  /** The environment a shell terminal's process runs with (Linux only). */
+  shellEnv(terminalId: string): Record<string, string> {
+    return processEnv(Number(this.paneFact(terminalId, "pane_pid", "@bazhen_terminal_id")));
   }
 
   /**

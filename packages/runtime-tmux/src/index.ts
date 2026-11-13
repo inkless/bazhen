@@ -1,6 +1,7 @@
 import { writeFileSync } from "node:fs";
 import type {
   Attached,
+  Foreground,
   ProcessSpec,
   PtySpawner,
   RuntimeAdapter,
@@ -19,6 +20,7 @@ import {
   PaneRefused,
   isSafeEnvEntry,
   signalPane,
+  terminalForeground,
   type ConfiguredTmuxServer,
   type ServerIdentity,
 } from "@bazhen/host-guard";
@@ -457,6 +459,29 @@ export class TmuxRuntime implements RuntimeAdapter {
       ]),
     );
     return { ...ref, locator: this.locator(LOCATION.parse(location)) };
+  }
+
+  /**
+   * The pane's foreground, from the PTY, never the screen: tmux names the foreground group's
+   * leader, and `ps` says which group holds the terminal, the pane's own process's or another.
+   */
+  async foreground(ref: RuntimeRef): Promise<Foreground> {
+    const pane = await this.paneOf(ref);
+    assertSameGeneration(ref, pane.ref.locator.generation);
+    if (pane.exit !== null) throw new ProcessState(ref.terminalId, "running");
+    const command = await this.tmux(
+      "display-message",
+      "-p",
+      "-t",
+      located(pane.ref, "paneId"),
+      "#{pane_current_command}",
+    );
+    const pid = Number(pane.ref.locator.panePid);
+    const group = await terminalForeground(pid);
+    if (group === "absent") throw new ProcessState(ref.terminalId, "running");
+    if (group === "unreadable")
+      throw new Error(`can't read terminal ${ref.terminalId}'s foreground`);
+    return { command, own: group === pid };
   }
 
   async signal(ref: RuntimeRef, signal: Signal): Promise<void> {

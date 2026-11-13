@@ -275,7 +275,7 @@ const respawnable = (state: AgentState) => agentCommands(state).includes("respaw
 const running = (state: AgentState) => agentCommands(state).includes("signal");
 
 /** A close failure force may record past: unconfirmed, or the environment out of reach. */
-const forceable = (cause: unknown) =>
+export const forceable = (cause: unknown) =>
   cause instanceof TerminalUnconfirmed ||
   ![StaleIncarnation, NoTerminal, NotResumable, ProcessState].some((e) => cause instanceof e);
 

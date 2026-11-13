@@ -49,6 +49,13 @@ export interface RuntimeRef {
   readonly locator: Readonly<Record<string, string>>;
 }
 
+export interface Foreground {
+  /** The foreground process's name, as the OS reports it, such as `nvim` or `-zsh`. */
+  readonly command: string;
+  /** The terminal's own process leads the foreground: nothing it started holds it. */
+  readonly own: boolean;
+}
+
 export interface RuntimeHealth {
   readonly state: RuntimeHealthState;
   readonly version: string | null;
@@ -167,6 +174,12 @@ export interface RuntimeAdapter {
   gone(ref: RuntimeRef): Promise<boolean>;
   /** Starts a new process in a terminal whose process has exited, and returns the new ref. */
   respawn(ref: RuntimeRef, spec: ProcessSpec): Promise<RuntimeRef>;
+  /**
+   * What holds the terminal's foreground, from process facts: whether it is the terminal's own
+   * process, as a shell at its prompt is, and the name of the process that leads it. A terminal
+   * whose process has exited is `ProcessState`.
+   */
+  foreground(ref: RuntimeRef): Promise<Foreground>;
   /** Signals the terminal's process and its process group. */
   signal(ref: RuntimeRef, signal: Signal): Promise<void>;
   /**
