@@ -46,7 +46,7 @@ const bin = fileURLToPath(new URL("node_modules/.bin", import.meta.url));
 /** A stand-in login shell for `agents.shell = "login"`. */
 export const LOGIN_SHELL = fileURLToPath(new URL("fixtures/login-shell.sh", import.meta.url));
 
-async function freePort(): Promise<number> {
+export async function freePort(): Promise<number> {
   const server = createServer();
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
@@ -100,7 +100,7 @@ export function bazhen(
 }
 
 /** A daemon's environment on `home`: the login session's, and nothing of the test run's. */
-function homeEnv(home: string): Record<string, string> {
+export function homeEnv(home: string): Record<string, string> {
   return { ...loginEnv(), PATH: process.env["PATH"] ?? "/usr/bin:/bin", BAZHEN_HOME: home };
 }
 

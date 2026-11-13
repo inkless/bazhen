@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "pnpm run build:hook && pnpm --parallel --filter @bazhen/daemon --filter @bazhen/web run dev",
+    "dev": "pnpm run build:hook && pnpm --parallel --filter @bazhen/daemon --filter @bazhen/web run dev < /dev/null",
     "bazhen": "node --disable-warning=ExperimentalWarning apps/cli/src/main.ts",
     "build": "pnpm run build:hook && tsc -b && pnpm --filter @bazhen/web run build",
     "typecheck": "tsc -b",
