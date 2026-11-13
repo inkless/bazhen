@@ -16,17 +16,17 @@ client. Agents, tasks, and orchestration come later.
 
 ## Commands
 
-| Command                          | Does                                                                                                                |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `pnpm install --frozen-lockfile` | Install exactly what the lockfile records, and the git hooks (husky)                                                |
-| `pnpm dev`                       | Start the daemon (`http://127.0.0.1:7900`) and the web client (`http://127.0.0.1:7901`); no vite keyboard shortcuts |
-| `pnpm bazhen <verb>`             | The CLI: `start`, `stop`, `status`, `doctor`, `env refresh`, `pair`, `devices [revoke <id>]`                        |
-| `pnpm check`                     | Standards check, lint, format check, type-check, small and medium tests                                             |
-| `pnpm test`                      | Small tests                                                                                                         |
-| `pnpm test:real [suite…]`        | The tests that run real tmux, in a throwaway Linux container: integration, api, e2e                                 |
-| `pnpm test:falsify`              | Run the branch's new tests against the base's source; CI runs it on pull requests                                   |
-| `pnpm build`                     | Compile packages to `dist/` and build the web bundle                                                                |
-| `pnpm format`                    | Rewrite files with oxfmt                                                                                            |
+| Command                          | Does                                                                                                                    |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `pnpm install --frozen-lockfile` | Install exactly what the lockfile records, and the git hooks (husky)                                                    |
+| `pnpm dev`                       | Start the daemon (`http://127.0.0.1:7900`) and the web dev server (`http://127.0.0.1:7901`); no vite keyboard shortcuts |
+| `pnpm bazhen <verb>`             | The CLI: `start`, `stop`, `status`, `doctor`, `env refresh`, `pair`, `devices [revoke <id>]`                            |
+| `pnpm check`                     | Standards check, lint, format check, type-check, small and medium tests                                                 |
+| `pnpm test`                      | Small tests                                                                                                             |
+| `pnpm test:real [suite…]`        | The tests that run real tmux, in a throwaway Linux container: integration, api, e2e                                     |
+| `pnpm test:falsify`              | Run the branch's new tests against the base's source; CI runs it on pull requests                                       |
+| `pnpm build`                     | Compile packages to `dist/` and build the web bundle, which the daemon serves at `http://127.0.0.1:7900`                |
+| `pnpm format`                    | Rewrite files with oxfmt                                                                                                |
 
 Contributing, for people and agents: [AGENTS.md](AGENTS.md) and [docs/standards/](docs/standards/).
 
@@ -94,13 +94,17 @@ must be an absolute path), so your rc files run again at every launch, like a ne
 Bazhen listens on `127.0.0.1` only and never terminates TLS. To open it from a phone, bring your
 own route to that port that runs on this machine, such as a local reverse proxy: a proxy on
 another host can't reach a loopback port. [docs/caddy.md](docs/caddy.md) sets up Caddy, with
-your own domain or without one. Point it at the web dev server,
-`http://127.0.0.1:7901`, while you run `pnpm dev`, and list the address it presents, exactly as
-the browser shows it (scheme, host and any port), in `BAZHEN_EXTERNAL_ORIGINS`:
-`BAZHEN_EXTERNAL_ORIGINS=https://bazhen.example.com pnpm dev`. The daemon and the dev server then
-accept that address, and refuse every other non-loopback one; the daemon logs it at start, and
-`bazhen doctor` lists it. The dev server reads only the variable; `web.external_origins` sets it
-for the daemon alone. Plain `http://` to another host is refused unless
+your own domain or without one. Build the web app (`pnpm build`), point the route at the daemon,
+`http://127.0.0.1:7900`, which serves the built app as well as the API, and list the address it
+presents, exactly as the browser shows it (scheme, host and any port), in
+`BAZHEN_EXTERNAL_ORIGINS` or `web.external_origins`:
+`BAZHEN_EXTERNAL_ORIGINS=https://bazhen.example.com pnpm bazhen start`. The daemon then accepts that
+address, and refuses every other non-loopback one; it logs it at start, and `bazhen doctor`
+lists it. Build again after you pull: the daemon serves whatever was built last, from the next
+page load on. Never point a route at the web dev server (`pnpm dev`, port 7901): it serves the
+repository's source. It refuses a request with another Host, another page's Origin, or a proxy's
+forwarding header, but a forwarder that presents a loopback Host and adds no header (`socat`,
+`ssh -R`, a proxy set to rewrite Host) gets through, and with it the source. Plain `http://` to another host is refused unless
 `web.allow_insecure_origins = true` (or `BAZHEN_ALLOW_INSECURE_ORIGINS=true`), since anyone on the
 network could read the traffic.
 
@@ -119,10 +123,9 @@ keeps strangers away from the pairing form.
 With no external origin (`web.pairing = "auto"`, the default), Bazhen serves loopback only and
 asks no browser to pair: any process or user on this machine that can reach the daemon's port
 can drive your agents, as `bazhen doctor` says. A request a proxy forwarded from another
-machine (its `X-Forwarded-For` or `Forwarded` header names one) must pair whatever the setting,
-and the dev server won't start with an external origin the daemon doesn't have. A forwarder that
-adds no such header, such as `ssh -R` or `socat` onto the daemon's or the dev server's port, isn't
-noticed: with one, set `web.pairing = "always"`. On a machine other people log in to, set
+machine (its `X-Forwarded-For` or `Forwarded` header names one) must pair whatever the setting.
+A forwarder that adds no such header, such as `ssh -R` or `socat` onto the daemon's or the dev
+server's port, isn't noticed: with one, set `web.pairing = "always"`. On a machine other people log in to, set
 `web.pairing = "always"` (or `BAZHEN_PAIRING=always`) to require pairing on loopback too.
 
 ## The inbox

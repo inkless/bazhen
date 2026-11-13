@@ -64,17 +64,3 @@ describe("allowlists", () => {
     ]).toEqual([null, "origin_not_allowed", "host_not_allowed"]);
   });
 });
-
-describe("a request the web dev server proxied", () => {
-  const daemon = { hosts: ["127.0.0.1:7900"], origins: ["https://bazhen.example.com"] };
-  const via = (devOrigins: string) =>
-    refusal(daemon, { host: "127.0.0.1:7900", origin: undefined, acting: false, devOrigins });
-
-  it("is refused when the dev server admits an origin the daemon doesn't", () => {
-    expect([via(""), via("https://bazhen.example.com"), via("https://other.example.com")]).toEqual([
-      null,
-      null,
-      "host_not_allowed",
-    ]);
-  });
-});

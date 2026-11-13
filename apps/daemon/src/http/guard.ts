@@ -1,4 +1,3 @@
-import { originList } from "@bazhen/protocol";
 export interface Allowlists {
   /** Host header values accepted; anything else is refused as a DNS-rebinding defence. */
   readonly hosts: readonly string[];
@@ -33,8 +32,6 @@ export interface Arrival {
   readonly origin: string | undefined;
   /** It changes state or opens a socket, rather than only reading. */
   readonly acting: boolean;
-  /** The external origins the web dev server that proxied it admits, as its header lists them. */
-  readonly devOrigins?: string | undefined;
 }
 
 /**
@@ -47,10 +44,6 @@ export function refusal(
   arrival: Arrival,
 ): "host_not_allowed" | "origin_not_allowed" | null {
   if (!allow.hosts.includes(arrival.host ?? "")) return "host_not_allowed";
-  // The dev server's proxy turns every Host into the daemon's own, so one that admits a host
-  // the daemon doesn't would pass that host's requests off as loopback's.
-  const devOrigins = originList(arrival.devOrigins);
-  if (devOrigins.some((o) => !allow.origins.includes(o))) return "host_not_allowed";
   const { origin } = arrival;
   if (arrival.acting && origin !== undefined && !allow.origins.includes(origin)) {
     return "origin_not_allowed";

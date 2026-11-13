@@ -64,6 +64,8 @@ export const DoctorResponse = z.object({
        * Absent from a daemon before 1.29.
        */
       pairing: z.object({ mode: z.enum(["auto", "always"]), required: z.boolean() }).optional(),
+      /** The built web client the daemon serves, or null before `pnpm build`. Absent before 1.33. */
+      app: z.string().nullable().optional(),
     })
     .optional(),
   /**

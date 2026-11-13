@@ -5,23 +5,28 @@ so the only unencrypted hop never leaves the machine and Bazhen keeps listening 
 alone. A proxy on another host can't do that: it would reach Bazhen over the network, which
 Bazhen refuses to listen on.
 
-Under `pnpm dev` Caddy forwards to the web dev server, `127.0.0.1:7901`, which proxies the API to
-the daemon. Caddy passes WebSockets through as they are, and says in `X-Forwarded-For` which
-device each request came from. The daemon asks every such request to pair, even if it was
-started without the external origin, and the dev server won't start with an external origin the
-daemon doesn't have. Only a proxy that says where a request came from is noticed this way: a
-forwarder that adds no header, such as `ssh -R` or `socat`, needs `web.pairing = "always"`.
+Caddy forwards to the daemon, `127.0.0.1:7900`, which serves the built web app and the API on
+one origin. Build the app first (`pnpm build`), and again after you pull: the daemon serves
+whatever was built last, from the next page load on. Caddy passes WebSockets through as they
+are, and says in `X-Forwarded-For` which device each request came from. The daemon asks every
+such request to pair, even if it was started without the external origin. Only a proxy that
+says where a request came from is noticed this way: a forwarder that adds no header, such as
+`ssh -R` or `socat`, needs `web.pairing = "always"`.
+
+Never point Caddy, or any other forwarder, at the web dev server (`pnpm dev`, port 7901). It
+serves the repository's source, `/@fs/` paths included. It refuses a request with a Host other
+than loopback's, another page's Origin, or a proxy's forwarding header (`X-Forwarded-For`,
+`Forwarded`, `Via`, `X-Real-IP`, `X-Forwarded-Host`, `X-Forwarded-Proto`), but it can't tell a
+forwarder that presents a loopback Host and adds none of them, such as `socat`, `ssh -R`, or a
+proxy set to rewrite Host, from this machine's own browser.
 
 ## Before you start: what protects it
 
 With an external origin configured, every browser must pair (`bazhen pair`) before it reaches
-anything, but a paired phone can do anything you can, and the pairing form itself is open to
-whoever reaches Caddy. Pairing guards only the API: whoever gets past Caddy also reaches the
-web dev server itself, which serves this repository's source (its `/@fs/` paths among them), and
-Vite has had flaws that let a request read files outside it. Serving the built web app from the
-daemon, which is planned, takes Vite off this path and leaves only the paired API exposed; until
-then, keep this setup to testing on a network only you use. Two lines in the Caddyfile below
-keep strangers from reaching it at all:
+the API, but a paired phone can do anything you can, and the pairing form itself is open to
+whoever reaches Caddy. The page itself loads unpaired, since it shows the pairing form: it is the
+same built bundle for everyone and holds nothing secret. Two lines in the Caddyfile below keep
+strangers from reaching it at all:
 
 - **`bind`** makes Caddy listen on this machine's LAN address only. Without it, Caddy listens on
   ports 80 and 443 of every interface, a VPN's included, and anyone on any of those networks can
@@ -73,7 +78,7 @@ domain.
    	}
    	@others not remote_ip 192.168.1.30 192.168.1.31
    	abort @others
-   	reverse_proxy 127.0.0.1:7901
+   	reverse_proxy 127.0.0.1:7900
    }
    ```
 
@@ -81,7 +86,8 @@ domain.
 
    ```sh
    caddy run --config Caddyfile --envfile ~/.config/caddy/cloudflare.env
-   BAZHEN_EXTERNAL_ORIGINS=https://bazhen.example.com pnpm dev
+   pnpm build
+   BAZHEN_EXTERNAL_ORIGINS=https://bazhen.example.com pnpm bazhen start
    ```
 
 ## Without a domain
@@ -98,7 +104,7 @@ trusts that authority once.
    	tls internal
    	@others not remote_ip 192.168.1.30 192.168.1.31
    	abort @others
-   	reverse_proxy 127.0.0.1:7901
+   	reverse_proxy 127.0.0.1:7900
    }
    ```
 
@@ -115,7 +121,8 @@ trusts that authority once.
 
    ```sh
    caddy run --config Caddyfile
-   BAZHEN_EXTERNAL_ORIGINS=https://192.168.1.20,https://my-mac.local pnpm dev
+   pnpm build
+   BAZHEN_EXTERNAL_ORIGINS=https://192.168.1.20,https://my-mac.local pnpm bazhen start
    ```
 
 The root certificate lets whoever holds its key sign a certificate that device trusts for any
@@ -126,6 +133,7 @@ credentials → User; on this machine, run `caddy untrust`.
 
 ## Checking it
 
-`bazhen doctor` lists the external origins the daemon admits. If the page loads but the terminal
+`bazhen doctor` lists the external origins the daemon admits, and where it serves the web app
+from; a page that says the app isn't built needs `pnpm build`. If the page loads but the terminal
 says the daemon refused the view, the address in the browser's bar differs from the one in
 `BAZHEN_EXTERNAL_ORIGINS`: they must match exactly, scheme and port included.

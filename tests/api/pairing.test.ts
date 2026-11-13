@@ -106,14 +106,6 @@ describe('a request a proxy forwarded, under web.pairing = "auto" with no extern
       paired.status,
     ]).toEqual([401, 200, 401]);
   });
-
-  it("is refused when the dev server that proxied it admits an origin the daemon doesn't", async () => {
-    const res = await daemon.request("/v1/health", {
-      cookie: null,
-      headers: { "bazhen-dev-origins": "https://bazhen.example.com" },
-    });
-    expect(res.status).toBe(421);
-  });
 });
 
 describe.each([
@@ -141,6 +133,14 @@ describe.each([
     expect((await bazhen(["doctor"], daemon.env)).out).toContain(
       "pairing: required on every origin",
     );
+  });
+
+  it("serves the page outside pairing, which says to build the app when it isn't built", async () => {
+    const page = await daemon.request("/", {
+      cookie: null,
+      headers: { "x-forwarded-for": "192.168.1.30, 127.0.0.1" },
+    });
+    expect([page.status, String(page.body).includes("pnpm build")]).toEqual([404, true]);
   });
 });
 

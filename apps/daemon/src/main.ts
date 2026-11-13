@@ -55,6 +55,7 @@ import { ensurePrivateDir } from "./config/private-dir.ts";
 import { createApp, type AppDeps, type TaskCommands } from "./http/app.ts";
 import { allowlists } from "./http/guard.ts";
 import { upgrades } from "./http/upgrades.ts";
+import { BUNDLE, built } from "./http/web.ts";
 import { DeviceAuth } from "./auth/devices.ts";
 import { PairingCodes } from "./auth/pairing.ts";
 import { socketApp } from "./socket/routes.ts";
@@ -259,6 +260,11 @@ console.log(
     : 'bazhen: pairing not required on loopback (web.pairing = "auto", no external origins); ' +
         "a request forwarded from another machine must still pair",
 );
+console.log(
+  (await built(BUNDLE))
+    ? `bazhen: serving the web app from ${BUNDLE}`
+    : `bazhen: the web app isn't built (${BUNDLE}); \`pnpm build\` builds it, serving only the API until then`,
+);
 const pairing = new PairingCodes();
 const devices = new DeviceAuth(store);
 // Pairing as configured, and for any request a proxy forwarded from another machine regardless.
@@ -301,6 +307,7 @@ const app = createApp({
   allow,
   pairing: { codes: pairing, devices },
   gate,
+  web: { root: BUNDLE },
 });
 
 const attachments = storeLog(store);
@@ -391,6 +398,7 @@ const socketListener = getRequestListener(
           from: config.externalOriginsFrom,
           allowInsecureOrigins: config.allowInsecureOrigins,
           pairing: { mode: config.pairing, required: config.pairingRequired },
+          app: (await built(BUNDLE)) ? BUNDLE : null,
         },
         notifications: {
           desktop: desktop !== null,

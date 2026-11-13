@@ -141,6 +141,13 @@ function printWeb(web: NonNullable<DoctorResponse["web"]>): void {
       `  warning: plain HTTP to another host (${plain.join(", ")}); anyone on the network can read the traffic, device tokens included`,
     );
   }
+  if (web.app !== undefined) {
+    console.log(
+      web.app === null
+        ? "web app: not built; `pnpm build` builds it, and the daemon serves only the API until then"
+        : `web app: served from ${web.app}`,
+    );
+  }
   if (web.pairing === undefined) return;
   const { mode, required } = web.pairing;
   if (required) {
