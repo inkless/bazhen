@@ -8,24 +8,57 @@ Bazhen refuses to listen on.
 Under `pnpm dev` Caddy forwards to the web dev server, `127.0.0.1:7901`, which proxies the API to
 the daemon. Caddy passes WebSockets through as they are.
 
-Until device pairing exists, nothing authenticates a request: whatever reaches Caddy can drive
-every terminal. Both setups below let in only the devices you name, by address.
+## Before you start: what protects it
+
+Until device pairing exists, nothing authenticates a request, and whatever reaches Caddy can
+drive every terminal and run any command as you. In the setups below, two lines in the Caddyfile
+are the only protection:
+
+- **`bind`** makes Caddy listen on this machine's LAN address only. Without it, Caddy listens on
+  ports 80 and 443 of every interface, a VPN's included, and anyone on any of those networks can
+  reach it.
+- **`remote_ip`** admits only the devices you name, by address. An address names a device only
+  while that device holds it: when your phone is away, another device on the network can take its
+  address and be let in. So give each phone a fixed address:
+  - Turn off its private Wi-Fi address for this network (iOS: Settings → Wi-Fi → ⓘ → Private
+    Wi-Fi Address → Off; Android: Wi-Fi → the network → Privacy → Use device MAC), so it keeps
+    one hardware address instead of rotating it.
+  - Then reserve an address for that hardware address in your router's DHCP settings, and name
+    the reserved address in the Caddyfile.
+
+Keep this to a network only you use. The examples use `192.168.1.20` for this machine and
+`192.168.1.30` and `192.168.1.31` for the phones; replace them with yours.
 
 ## With your own domain
 
 The browser trusts the certificate, with nothing to install on the phone. Caddy gets it from
 Let's Encrypt through a DNS challenge, which works for a name that resolves only on your own
-network.
+network. Every Let's Encrypt certificate is published in the public Certificate Transparency
+logs, so the hostname becomes public even though it resolves only at home. Pick one you don't
+mind being seen, or get a wildcard certificate (`*.example.com`) so the logs show only the
+domain.
 
 1. Point the name at this machine in your local DNS, for example a rewrite of
    `bazhen.example.com` to `192.168.1.20` in AdGuard Home or Pi-hole.
 2. Get a Caddy build with your DNS provider's module. For Cloudflare, run
    `caddy add-package github.com/caddy-dns/cloudflare`, or download a build with it from
-   caddyserver.com/download. Create an API token that can edit the zone's DNS records.
-3. Write a `Caddyfile`, naming the devices that may connect:
+   caddyserver.com/download.
+3. Create an API token limited to Zone → DNS → Edit on this one zone, and keep it in a file only
+   you can read, outside any git repository, rather than on the command line, where it would land
+   in your shell history:
+
+   ```sh
+   mkdir -p ~/.config/caddy
+   (umask 077 && printf 'CF_API_TOKEN=%s\n' "$(pbpaste)" > ~/.config/caddy/cloudflare.env)
+   ```
+
+   (`pbpaste` reads the token you copied, on macOS; the file is created with mode 0600.)
+
+4. Write a `Caddyfile`:
 
    ```caddyfile
    bazhen.example.com {
+   	bind 192.168.1.20
    	tls {
    		dns cloudflare {env.CF_API_TOKEN}
    	}
@@ -35,10 +68,10 @@ network.
    }
    ```
 
-4. Start Caddy, then start Bazhen with the domain as an external origin:
+5. Start Caddy, then start Bazhen with the domain as an external origin:
 
    ```sh
-   CF_API_TOKEN=… caddy run --config Caddyfile
+   caddy run --config Caddyfile --envfile ~/.config/caddy/cloudflare.env
    BAZHEN_EXTERNAL_ORIGINS=https://bazhen.example.com pnpm dev
    ```
 
@@ -52,6 +85,7 @@ trusts that authority once.
 
    ```caddyfile
    https://192.168.1.20, https://my-mac.local {
+   	bind 192.168.1.20
    	tls internal
    	@others not remote_ip 192.168.1.30 192.168.1.31
    	abort @others
@@ -76,7 +110,10 @@ trusts that authority once.
    ```
 
 The root certificate lets whoever holds its key sign a certificate that device trusts for any
-site. Caddy keeps the key on this machine; don't copy it anywhere else.
+site. Caddy keeps the key on this machine; don't copy it anywhere else. When you no longer reach
+Bazhen this way, remove the root from each device: on iOS, delete the profile under Settings →
+General → VPN & Device Management; on Android, remove it under Settings → Security → Trusted
+credentials → User; on this machine, run `caddy untrust`.
 
 ## Checking it
 
