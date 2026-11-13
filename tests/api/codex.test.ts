@@ -62,6 +62,42 @@ async function openItemFor(command: string): Promise<string> {
 const closeReasonOf = async (id: string) =>
   (await state()).attention.find((a) => a.id === id)?.closeReason;
 
+/**
+ * Waits for the model to be asked for `text`, a prompt submitted at `submittedAt`. If it isn't,
+ * the failure says what had happened by then: when Codex reported the agent working, if it did,
+ * how many requests the model had, and the end of the screen. This tells a turn that never
+ * started from one whose model call came late.
+ */
+async function untilAsked(
+  agent: LaunchAgentResponse,
+  text: string,
+  submittedAt: number,
+  timeoutMs = 20_000,
+) {
+  let workingAfterMs: number | null = null;
+  const asked = () => model.requests.some((r) => r.includes(text));
+  while (!asked() && Date.now() - submittedAt < timeoutMs) {
+    const activity = (await state()).agents.find((a) => a.id === agent.agentId)?.activity;
+    if (workingAfterMs === null && activity?.value === "working") {
+      workingAfterMs = Date.now() - submittedAt;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  const seen = asked()
+    ? { asked: true }
+    : {
+        asked: false,
+        workingAfterMs,
+        modelRequests: model.requests.length,
+        screen: daemon
+          .screen(agent.agentId)
+          .split("\n")
+          .filter((line) => line.trim() !== "")
+          .slice(-12),
+      };
+  expect(seen).toEqual({ asked: true });
+}
+
 describe("a Codex agent", () => {
   it("is bound to the thread Bazhen started for it, before its TUI runs", async () => {
     expect((await state()).agents.find((a) => a.id === launched.agentId)).toMatchObject({
@@ -102,9 +138,7 @@ describe("a Codex agent", () => {
   it("delivers each of two messages that wait for the same turn boundary", async () => {
     await daemon.prompt(asker, "[[fake:slow:8000]] keep busy");
     // The turn is under way once the model has been asked; its reply is held back.
-    await expect
-      .poll(() => model.requests.some((r) => r.includes("keep busy")), { timeout: 20_000 })
-      .toBe(true);
+    await untilAsked(asker, "keep busy", Date.now());
     const send = async (key: string, body: string) =>
       SendMessageResponse.parse(
         (
