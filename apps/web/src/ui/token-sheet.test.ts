@@ -28,7 +28,8 @@ const TEXT_ON = {
   "color-ok": ["color-ok-subtle"],
   "color-warn": ["color-warn-subtle"],
   "color-danger": ["color-danger-subtle"],
-  "color-terminal-text": ["color-terminal-bg", "color-terminal-selection"],
+  "color-terminal-text": ["color-terminal-bg"],
+  "color-terminal-selection-text": ["color-terminal-selection"],
 };
 // Non-text that must be seen (WCAG 1.4.11): focus ring, input borders, the needs-you dot.
 const SEEN_ON = {
@@ -41,19 +42,22 @@ const SEEN_ON = {
   ],
   "color-warn": ["color-bg", "color-surface-hover", "color-surface-selected"],
   "color-terminal-cursor": ["color-terminal-bg"],
+  // Selected text keeps its place on screen; the selection must stand out from what is around it.
+  "color-terminal-selection": ["color-terminal-bg"],
 };
 
 const ANSI = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"].flatMap(
   (name) => [`color-terminal-ansi-${name}`, `color-terminal-ansi-bright-${name}`],
 );
 /**
- * ANSI's colours assume a black background, so in each theme one of them is the background's own
- * end of the scale. Programs paint cells with it (`\e[40m`, `\e[107m`) rather than write with it,
- * so it is held to carrying text, not to being text; `opposite` is what they write on it.
+ * ANSI's colours assume a black background, so in dark `black` is the background's own end of the
+ * scale. Programs paint cells with it (`\e[40m`) rather than write in it, so it is held to carrying
+ * text, not to being text; `opposite` is what they write on it. Light has no such exception:
+ * `bright-white` is text there too (`\e[97m`), so it is a grey that reads, not a white.
  */
 const BACKGROUND_END = {
-  light: { ansi: "color-terminal-ansi-bright-white", opposite: "color-terminal-ansi-black" },
-  dark: { ansi: "color-terminal-ansi-black", opposite: "color-terminal-ansi-white" },
+  light: [],
+  dark: [{ ansi: "color-terminal-ansi-black", opposite: "color-terminal-ansi-white" }],
 } as const;
 
 const pairs = (table: Record<string, string[]>) =>
@@ -82,17 +86,18 @@ describe.each(THEMES)("the %s theme (more contrast: %s)", (scheme, more) => {
     expect(ratio(fg, bg)).toBeGreaterThanOrEqual(3);
   });
 
-  const end = BACKGROUND_END[scheme];
-  test.each(ANSI.filter((name) => name !== end.ansi))(
+  const ends: readonly { ansi: string; opposite: string }[] = BACKGROUND_END[scheme];
+  const exempt = new Set(ends.map((end) => end.ansi));
+  test.each(ANSI.filter((name) => !exempt.has(name)))(
     "%s is readable text on the terminal (4.5:1)",
     (name) => {
       expect(ratio(name, "color-terminal-bg")).toBeGreaterThanOrEqual(4.5);
     },
   );
 
-  test(`${end.ansi}, the background's own end, carries text (4.5:1)`, () => {
-    expect(ratio("color-terminal-text", end.ansi)).toBeGreaterThanOrEqual(4.5);
-    expect(ratio(end.opposite, end.ansi)).toBeGreaterThanOrEqual(4.5);
+  test.each(ends)("$ansi, the background's own end, carries text (4.5:1)", ({ ansi, opposite }) => {
+    expect(ratio("color-terminal-text", ansi)).toBeGreaterThanOrEqual(4.5);
+    expect(ratio(opposite, ansi)).toBeGreaterThanOrEqual(4.5);
   });
 });
 

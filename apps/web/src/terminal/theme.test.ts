@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { toHex } from "../ui/token-sheet.ts";
-import { terminalTheme } from "./theme.ts";
+import { keepsLaunchTheme, terminalTheme } from "./theme.ts";
 
 const COLOUR_KEYS = [
   "background",
@@ -40,5 +40,16 @@ describe("terminalTheme", () => {
     expect(grey(light.foreground)).toBeLessThan(80);
     expect(grey(dark.background)).toBeLessThan(40);
     expect(grey(dark.foreground)).toBeGreaterThan(200);
+  });
+});
+
+describe("keepsLaunchTheme", () => {
+  test("is true while an agent whose terminal follows the theme runs, and only then", () => {
+    expect([
+      keepsLaunchTheme([{ state: "running", harness: "claude-code" }]),
+      keepsLaunchTheme([{ state: "exited", harness: "claude-code" }]),
+      keepsLaunchTheme([{ state: "running", harness: "codex" }]),
+      keepsLaunchTheme([]),
+    ]).toEqual([true, false, false, false]);
   });
 });

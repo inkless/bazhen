@@ -30,7 +30,8 @@
   --color-terminal-bg: light-dark(var(--color-neutral-1), var(--color-neutral-dark-1));
   --color-terminal-text: light-dark(var(--color-neutral-12), var(--color-neutral-dark-12));
   --color-terminal-cursor: light-dark(var(--color-neutral-12), var(--color-neutral-dark-12));
-  --color-terminal-selection: light-dark(var(--color-blue-5), var(--color-blue-dark-5));
+  --color-terminal-selection: light-dark(var(--color-blue-9), var(--color-blue-dark-9));
+  --color-terminal-selection-text: light-dark(var(--color-neutral-1), var(--color-neutral-dark-1));
   --color-terminal-ansi-black: light-dark(var(--color-neutral-12), var(--color-neutral-dark-3));
   --color-terminal-ansi-red: light-dark(var(--color-red-11), var(--color-red-dark-9));
   --color-terminal-ansi-green: light-dark(var(--color-green-11), var(--color-green-dark-9));
@@ -56,7 +57,7 @@
   );
   --color-terminal-ansi-bright-cyan: light-dark(var(--color-cyan-10), var(--color-cyan-dark-11));
   --color-terminal-ansi-bright-white: light-dark(
-    var(--color-neutral-3),
+    var(--color-neutral-10),
     var(--color-neutral-dark-12)
   );
 

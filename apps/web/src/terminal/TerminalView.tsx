@@ -96,6 +96,9 @@ function connect(
   const colours = () => terminalTheme(shownScheme(palette), page.moreContrast());
   const term = new Xterm({
     theme: colours(),
+    // Bold is weight, not colour: bright white in light, or bright black in dark, is another
+    // colour a program didn't ask for.
+    drawBoldTextInBrightColors: false,
     allowProposedApi: true,
     cursorBlink: true,
     macOptionIsMeta: settings.optionIsMeta,

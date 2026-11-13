@@ -105,7 +105,7 @@ const syntaxTheme = (argv: readonly string[]) =>
   argv.filter((arg, i) => argv[i - 1] === "-c" && arg.startsWith("tui.theme="));
 
 describe("Codex's theme", () => {
-  it("picks the bundled syntax theme for the background, and none when the request names none", async () => {
+  it("highlights for the dark background the terminal reports, and leaves it to the user's config when the request names no theme", async () => {
     const harness = new CodexHarness(channel().port, REMOTE);
     const launched = await harness.launchSpec({ cwd: "/work" }, { theme: "light" });
     const resumed = await harness.resumeSpec(
@@ -118,7 +118,7 @@ describe("Codex's theme", () => {
       syntaxTheme(launched.argv),
       syntaxTheme(resumed.argv),
       syntaxTheme(unthemed.argv),
-    ]).toEqual([['tui.theme="one-half-light"'], ['tui.theme="one-half-dark"'], []]);
+    ]).toEqual([['tui.theme="one-half-dark"'], ['tui.theme="one-half-dark"'], []]);
   });
 });
 

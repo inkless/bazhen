@@ -86,7 +86,7 @@ export class CodexHarness implements HarnessAdapter {
         // The TUI keeps its pane's title set to the thread it shows, through /new and /resume.
         "-c",
         'tui.terminal_title=["thread-id"]',
-        ...(theme === undefined ? [] : ["-c", `tui.theme="${SYNTAX_THEME[theme]}"`]),
+        ...(theme === undefined ? [] : ["-c", `tui.theme="${SYNTAX_THEME[TERMINAL_REPORTS]}"`]),
       ],
       env: {},
       externalRef: { kind: "codex-thread", id: threadId },
@@ -99,6 +99,13 @@ export class CodexHarness implements HarnessAdapter {
  * themes it bundles, and its other colours follow the background the terminal reports.
  */
 const SYNTAX_THEME = { light: "one-half-light", dark: "one-half-dark" } as const;
+
+/**
+ * The background the daemon tells a terminal's programs it has (`COLOURS` in the daemon's screen
+ * emulator), which Codex's other colours follow; its syntax highlighting matches that, whatever
+ * theme the client shows, so every client gets one consistent Codex.
+ */
+const TERMINAL_REPORTS = "dark";
 
 /** A Codex request for the human's approval, as the daemon acts on it. */
 export interface CodexApproval {

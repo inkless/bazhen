@@ -62,6 +62,10 @@ test("recolours an open terminal with the theme and the system's scheme, on the 
   await theme.getByRole("radio", { name: "Light" }).click();
   await expect.poll(() => terminalBackground(page)).not.toBe(dark);
   const light = await terminalBackground(page);
+  // Claude Code itself keeps the theme it started in, and the page says so.
+  await expect(
+    page.getByRole("status").filter({ hasText: "until they are respawned" }),
+  ).toBeVisible();
   // The strip below the last row, which xterm.js doesn't paint, follows too.
   expect(await hostBackground(page)).not.toBe(darkHost);
   await theme.getByRole("radio", { name: "System" }).click();

@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { HarnessId, StateSnapshot } from "@bazhen/protocol";
 import { answer, launchAgent, watchState } from "./api.ts";
 import { FleetList } from "./fleet/FleetList.tsx";
 import { groupFleet } from "./fleet/model.ts";
 import { Workspace } from "./fleet/Workspace.tsx";
-import { harnessPalette, shownScheme } from "./terminal/theme.ts";
+import { harnessPalette, keepsLaunchTheme, shownScheme } from "./terminal/theme.ts";
+import { pageTheme } from "./ui/theme.ts";
 import { Button } from "./ui/Button.tsx";
 
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -37,6 +38,20 @@ export function Dashboard() {
   const [streamError, setStreamError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const failed = (e: unknown) => setActionError(messageOf(e));
+  const keepTheirTheme = useRef(false);
+  const [themeNotice, setThemeNotice] = useState(false);
+  useEffect(() => {
+    keepTheirTheme.current = keepsLaunchTheme(state?.agents ?? []);
+  }, [state]);
+  useEffect(() => {
+    const page = pageTheme();
+    let shown = page.scheme();
+    return page.subscribe(() => {
+      const now = page.scheme();
+      if (now !== shown && keepTheirTheme.current) setThemeNotice(true);
+      shown = now;
+    });
+  }, []);
 
   useEffect(
     () =>
@@ -93,6 +108,14 @@ export function Dashboard() {
         </p>
       )}
       {streamError !== null && <p role="status">{streamError}</p>}
+      {themeNotice && (
+        <p role="status">
+          Running agents keep the theme they started in until they are respawned.{" "}
+          <Button variant="link" onPress={() => setThemeNotice(false)}>
+            Dismiss
+          </Button>
+        </p>
+      )}
       <div className="dashboard">
         <nav className="rail" aria-label="fleet">
           <Button variant="link" onPress={() => select(null)}>

@@ -1,5 +1,5 @@
 import type { ITheme } from "@xterm/xterm";
-import type { HarnessId, TuiTheme } from "@bazhen/protocol";
+import type { Agent, HarnessId, TuiTheme } from "@bazhen/protocol";
 import paletteCss from "../ui/palette.css?raw";
 import { paletteOf, themeOf, toHex, type Scheme } from "../ui/token-sheet.ts";
 import { pageTheme } from "../ui/theme.ts";
@@ -19,6 +19,13 @@ export type TerminalPalette = "theme" | "dark";
 
 export const harnessPalette = (harness: HarnessId): TerminalPalette =>
   harness === "codex" ? "dark" : "theme";
+
+/**
+ * Whether a change of theme leaves an agent drawing in the one it started with: a running TUI picks
+ * its colours once, so only a respawn brings it the new one.
+ */
+export const keepsLaunchTheme = (agents: readonly Pick<Agent, "state" | "harness">[]) =>
+  agents.some((a) => a.state === "running" && harnessPalette(a.harness) === "theme");
 
 /** The background a terminal with `palette` shows now, which its TUI is started for. */
 export const shownScheme = (palette: TerminalPalette): TuiTheme =>
@@ -48,6 +55,6 @@ export function terminalTheme(scheme: Scheme, moreContrast: boolean): ITheme {
     cursorAccent: colour("bg"),
     selectionBackground: colour("selection"),
     selectionInactiveBackground: colour("selection"),
-    selectionForeground: colour("text"),
+    selectionForeground: colour("selection-text"),
   };
 }
