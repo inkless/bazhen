@@ -12,12 +12,17 @@ import {
   type MessageId,
   type RuntimeRef,
   type TerminalId,
+  type TaskView,
 } from "@bazhen/core";
 import { z } from "zod";
 import {
   Activity,
   Usage,
   AgentState,
+  Assignment,
+  TaskDetail,
+  TaskState,
+  type AssignmentState,
   EVENTS,
   ExternalRef,
   HarnessId,
@@ -111,6 +116,11 @@ export interface AgentTerminal {
   readonly generation: number | null;
   readonly runtime: RuntimeRef | null;
 }
+
+const TASK = `SELECT id, title, state, owner_agent_id AS ownerAgentId,
+    parent_task_id AS parentTaskId FROM tasks`;
+const ASSIGNMENT = `SELECT id, task_id AS taskId, agent_session_id AS agentId, role,
+    parent_assignment_id AS parentAssignmentId, state, end_reason AS endReason FROM assignments`;
 
 const AGENT_TERMINAL = `SELECT a.id, a.state AS agent_state, t.id AS terminal_id,
          t.state AS terminal_state, t.generation, t.runtime, t.locator
@@ -227,6 +237,7 @@ export class Store {
   private host = "";
   private depth = 0;
   private appended = false;
+  private afterCommits: (() => void)[] = [];
   private readonly listeners = new Set<() => void>();
   private readonly reactors = new Set<(event: Recorded) => void>();
   /** Every event a projection still points at; retention keeps them, as it keeps projections. */
@@ -825,8 +836,125 @@ export class Store {
               commands: shellCommands(state, r.linkedAgentId !== null),
             };
           }),
+        tasks: this.prepare(`${TASK} ORDER BY created_event_id`).all(),
+        assignments: this.prepare(`${ASSIGNMENT} ORDER BY created_event_id`).all(),
       }),
     );
+  }
+
+  /** A task with its active assignments, for deciding whether a command on it is allowed. */
+  taskView(taskId: string): TaskView | undefined {
+    const row = this.prepare("SELECT state, owner_agent_id FROM tasks WHERE id = ?").get(taskId);
+    if (row === undefined) return undefined;
+    const owner = row.owner_agent_id;
+    return {
+      state: TaskState.parse(row.state),
+      ownerAgentId: typeof owner === "string" && isId("agent", owner) ? owner : null,
+      openSubtasks: this.prepare("SELECT id FROM tasks WHERE parent_task_id = ? AND state = 'open'")
+        .all(taskId)
+        .map((r) => String(r.id)),
+      active: this.assignments({ taskId }, "active").flatMap(({ id, agentId, role, ...a }) => {
+        const parent = a.parentAssignmentId;
+        if (!isId("asgn", id) || !isId("agent", agentId)) return [];
+        return [
+          {
+            id,
+            agentId,
+            role,
+            parentAssignmentId: parent !== null && isId("asgn", parent) ? parent : null,
+          },
+        ];
+      }),
+    };
+  }
+
+  /** A task in full: its brief and note, every assignment it has had, and its subtasks. */
+  taskDetail(taskId: string): TaskDetail | undefined {
+    const row = this.prepare(`${TASK} WHERE id = ?`).get(taskId);
+    if (row === undefined) return undefined;
+    const text = this.prepare("SELECT brief, note FROM tasks WHERE id = ?").get(taskId);
+    return TaskDetail.parse({
+      ...row,
+      brief: text?.brief,
+      note: text?.note ?? null,
+      assignments: this.assignments({ taskId }),
+      subtasks: this.prepare(`${TASK} WHERE parent_task_id = ? ORDER BY created_event_id`).all(
+        taskId,
+      ),
+    });
+  }
+
+  /** The agents an assignment was granted under, nearest first, up through every task. */
+  granters(assignmentId: string): AgentSessionId[] {
+    const rows = this.prepare(
+      `WITH RECURSIVE up (id, parent, agent, depth) AS (
+         SELECT id, parent_assignment_id, agent_session_id, 0 FROM assignments WHERE id = ?
+         UNION ALL
+         SELECT a.id, a.parent_assignment_id, a.agent_session_id, up.depth + 1
+           FROM assignments a JOIN up ON a.id = up.parent
+       )
+       SELECT agent FROM up WHERE depth > 0 ORDER BY depth`,
+    ).all(assignmentId);
+    return rows.flatMap((r) =>
+      typeof r.agent === "string" && isId("agent", r.agent) ? [r.agent] : [],
+    );
+  }
+
+  /** The active assignments granted under any of `assignmentIds`, however deep. */
+  activeUnder(assignmentIds: readonly string[]): Assignment[] {
+    if (assignmentIds.length === 0) return [];
+    const marks = assignmentIds.map(() => "?").join(", ");
+    return this.prepare(
+      `WITH RECURSIVE under (id) AS (
+         SELECT id FROM assignments WHERE parent_assignment_id IN (${marks})
+         UNION
+         SELECT a.id FROM assignments a JOIN under ON a.parent_assignment_id = under.id
+       )
+       ${ASSIGNMENT} WHERE state = 'active' AND id IN (SELECT id FROM under) ORDER BY created_event_id`,
+    )
+      .all(...assignmentIds)
+      .map((r) => Assignment.parse(r));
+  }
+
+  /** A task's open subtasks, however deep, the deepest first, so each can finish before its parent. */
+  openSubtasksUnder(taskId: string): string[] {
+    return this.prepare(
+      `WITH RECURSIVE down (id, depth) AS (
+         SELECT id, 1 FROM tasks WHERE parent_task_id = ?
+         UNION ALL
+         SELECT t.id, down.depth + 1 FROM tasks t JOIN down ON t.parent_task_id = down.id
+       )
+       SELECT d.id FROM down d JOIN tasks t ON t.id = d.id WHERE t.state = 'open'
+       ORDER BY d.depth DESC, t.created_event_id`,
+    )
+      .all(taskId)
+      .map((r) => String(r.id));
+  }
+
+  /**
+   * The assignments a close ended because they were granted under the closing agent's, after
+   * event `afterId`, with the event that ended them.
+   */
+  endedByClose(afterId: number): (Assignment & { eventId: number })[] {
+    return this.prepare(
+      `SELECT a.id, a.task_id AS taskId, a.agent_session_id AS agentId, a.role,
+              a.parent_assignment_id AS parentAssignmentId, a.state, a.end_reason AS endReason,
+              a.updated_event_id AS eventId
+       FROM assignments a JOIN events e ON e.id = a.updated_event_id
+       WHERE a.end_reason = 'parent_ended' AND e.type = 'agent.closed' AND a.updated_event_id > ?
+       ORDER BY a.updated_event_id`,
+    )
+      .all(afterId)
+      .map(({ eventId, ...r }) => ({ ...Assignment.parse(r), eventId: Number(eventId) }));
+  }
+
+  /** A task's or an agent's assignments, oldest first, optionally only those in `state`. */
+  assignments(by: { taskId: string } | { agentId: string }, state?: AssignmentState): Assignment[] {
+    const [column, id] = "taskId" in by ? ["task_id", by.taskId] : ["agent_session_id", by.agentId];
+    const filter = state === undefined ? "" : " AND state = ?";
+    return this.prepare(`${ASSIGNMENT} WHERE ${column} = ?${filter} ORDER BY created_event_id`)
+      .all(...(state === undefined ? [id] : [id, state]))
+      .map((r) => Assignment.parse(r));
   }
 
   /** The id of the latest event of `type` about an entity, if there is one. */
@@ -908,18 +1036,49 @@ export class Store {
     if (this.depth > 0) return fn();
     this.db.exec(args.length === 1 ? "BEGIN IMMEDIATE" : "BEGIN DEFERRED");
     this.depth++;
+    let out: T;
     try {
-      const out = fn();
+      out = fn();
       this.db.exec("COMMIT");
-      if (this.appended) this.notify();
-      return out;
     } catch (err) {
       this.db.exec("ROLLBACK");
+      this.afterCommits = [];
+      this.appended = false;
       throw err;
     } finally {
-      this.appended = false;
       this.depth--;
     }
+    const appended = this.appended;
+    this.appended = false;
+    this.runAfterCommits();
+    if (appended) this.notify();
+    return out;
+  }
+
+  /**
+   * Runs the work queued for after the commit just made, each in a transaction of its own. The
+   * command it followed has committed, so a failure is logged rather than reported as the
+   * command's: what failed is left as it was, as mail left queued is offered again later.
+   */
+  private runAfterCommits(): void {
+    const queued = this.afterCommits;
+    this.afterCommits = [];
+    for (const run of queued) {
+      try {
+        this.transaction(run);
+      } catch (err) {
+        console.error("work after a commit failed", err);
+      }
+    }
+  }
+
+  /**
+   * Runs `fn` once the transaction in progress commits, and never if it rolls back; at once when
+   * none is. For acting outside the store, as handing mail to a hook, only on what was kept.
+   */
+  afterCommit(fn: () => void): void {
+    if (this.depth === 0) fn();
+    else this.afterCommits.push(fn);
   }
 
   /**

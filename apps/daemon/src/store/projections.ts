@@ -2,19 +2,24 @@ import type { SQLInputValue, StatementSync } from "node:sqlite";
 import {
   advanceTerminal,
   agent,
+  assignment,
   attention,
   mailbox,
+  task,
   type AgentEvent,
   type MailboxEvent,
   type TerminalEvent,
 } from "@bazhen/core";
 import {
   AgentState,
+  AssignmentState,
   AttentionCloseReason,
   AttentionState,
   EVENTS,
   MailboxState,
+  TaskState,
   TerminalState,
+  type AssignmentEndReason,
   type EventType,
 } from "@bazhen/protocol";
 
@@ -148,6 +153,8 @@ export function project(db: Statements, e: Recorded): void {
         agent: { usage: null },
       });
       forgetActivity(db, e.entityId);
+      endAssignments(db, e.id, "agent_session_id", e.entityId, "agent_closed");
+      endDescendants(db, e.id);
       return;
     case "terminal.opened": {
       const { environmentId, cwd, linkedAgentId, theme } = EVENTS[e.type].payload.parse(e.payload);
@@ -280,6 +287,43 @@ export function project(db: Statements, e: Recorded): void {
       ).run(e.entityId, JSON.stringify(activity), e.id);
       return;
     }
+    case "task.created": {
+      const { title, brief, ownerAgentId, parentTaskId } = EVENTS[e.type].payload.parse(e.payload);
+      db.prepare(
+        `INSERT INTO tasks (id, title, brief, state, owner_agent_id, parent_task_id,
+           created_event_id, updated_event_id)
+         VALUES (?, ?, ?, 'open', ?, ?, ?, ?)`,
+      ).run(e.entityId, title, brief, ownerAgentId, parentTaskId, e.id, e.id);
+      return;
+    }
+    case "task.finished": {
+      const { outcome, note } = EVENTS[e.type].payload.parse(e.payload);
+      const row = db.prepare("SELECT state FROM tasks WHERE id = ?").get(e.entityId);
+      if (row === undefined) throw new UnknownEntity("task", e.entityId);
+      const state = task.next(TaskState.parse(row.state), outcome);
+      update(db, "tasks", "id", e.entityId, e.id, { state, note });
+      endAssignments(db, e.id, "task_id", e.entityId, "task_finished");
+      endDescendants(db, e.id);
+      return;
+    }
+    case "assignment.granted": {
+      const { taskId, agentId, role, parentAssignmentId } = EVENTS[e.type].payload.parse(e.payload);
+      db.prepare(
+        `INSERT INTO assignments (id, task_id, agent_session_id, role, parent_assignment_id, state,
+           created_event_id, updated_event_id)
+         VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`,
+      ).run(e.entityId, taskId, agentId, role, parentAssignmentId, e.id, e.id);
+      return;
+    }
+    case "assignment.ended": {
+      const { reason } = EVENTS[e.type].payload.parse(e.payload);
+      const row = db.prepare("SELECT state FROM assignments WHERE id = ?").get(e.entityId);
+      if (row === undefined) throw new UnknownEntity("assignment", e.entityId);
+      const state = assignment.next(AssignmentState.parse(row.state), reason);
+      update(db, "assignments", "id", e.entityId, e.id, { state, end_reason: reason });
+      endDescendants(db, e.id);
+      return;
+    }
     case "lease.granted": {
       const { attachmentId, epoch } = EVENTS[e.type].payload.parse(e.payload);
       db.prepare(
@@ -290,6 +334,37 @@ export function project(db: Statements, e: Recorded): void {
       return;
     }
   }
+}
+
+/** Ends every active assignment of a task or an agent, as the event that ends them all is applied. */
+function endAssignments(
+  db: Statements,
+  eventId: number,
+  by: "task_id" | "agent_session_id",
+  id: string,
+  reason: AssignmentEndReason,
+): void {
+  db.prepare(
+    `UPDATE assignments SET state = 'ended', end_reason = ?, updated_event_id = ?
+     WHERE ${by} = ? AND state = 'active'`,
+  ).run(reason, eventId, id);
+}
+
+/**
+ * Ends every active assignment granted under one this event ended, however deep, as
+ * `parent_ended`: no agent keeps authority it was given by one that has lost it.
+ */
+function endDescendants(db: Statements, eventId: number): void {
+  db.prepare(
+    `WITH RECURSIVE under (id) AS (
+       SELECT a.id FROM assignments a JOIN assignments p ON a.parent_assignment_id = p.id
+         WHERE p.updated_event_id = ? AND p.state = 'ended'
+       UNION
+       SELECT a.id FROM assignments a JOIN under ON a.parent_assignment_id = under.id
+     )
+     UPDATE assignments SET state = 'ended', end_reason = 'parent_ended', updated_event_id = ?
+     WHERE state = 'active' AND id IN (SELECT id FROM under)`,
+  ).run(eventId, eventId);
 }
 
 type Columns = Readonly<Record<string, SQLInputValue>>;

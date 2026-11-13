@@ -1,0 +1,45 @@
+{
+  "$id": "DelegateTaskRequest",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "fromTaskId": {
+      "type": "string",
+      "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+    },
+    "agentId": {
+      "type": "string",
+      "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+    },
+    "role": {
+      "default": "worker",
+      "type": "string",
+      "enum": [
+        "lead",
+        "worker"
+      ]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "brief": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 20000
+    }
+  },
+  "required": [
+    "idempotencyKey",
+    "agentId",
+    "title",
+    "brief"
+  ],
+  "additionalProperties": false
+}

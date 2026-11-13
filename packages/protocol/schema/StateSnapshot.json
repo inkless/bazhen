@@ -547,6 +547,134 @@
         ],
         "additionalProperties": false
       }
+    },
+    "tasks": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+          },
+          "title": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "open",
+              "done",
+              "cancelled"
+            ]
+          },
+          "ownerAgentId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "parentTaskId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "state",
+          "ownerAgentId",
+          "parentTaskId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "assignments": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^asgn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+          },
+          "taskId": {
+            "type": "string",
+            "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+          },
+          "agentId": {
+            "type": "string",
+            "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "coordinator",
+              "lead",
+              "worker"
+            ]
+          },
+          "parentAssignmentId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^asgn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "ended"
+            ]
+          },
+          "endReason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "unassigned",
+                  "completed",
+                  "task_finished",
+                  "agent_closed",
+                  "parent_ended"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "taskId",
+          "agentId",
+          "role",
+          "parentAssignmentId",
+          "state",
+          "endReason"
+        ],
+        "additionalProperties": false
+      }
     }
   },
   "required": [

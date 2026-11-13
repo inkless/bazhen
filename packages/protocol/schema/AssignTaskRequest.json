@@ -1,0 +1,30 @@
+{
+  "$id": "AssignTaskRequest",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "agentId": {
+      "type": "string",
+      "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+    },
+    "role": {
+      "type": "string",
+      "enum": [
+        "coordinator",
+        "lead",
+        "worker"
+      ]
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    }
+  },
+  "required": [
+    "agentId",
+    "role",
+    "idempotencyKey"
+  ],
+  "additionalProperties": false
+}

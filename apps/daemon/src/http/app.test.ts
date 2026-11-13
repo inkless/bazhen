@@ -21,6 +21,8 @@ const app = createApp({
     eventId: 3,
     environments: [],
     agents: [],
+    tasks: [],
+    assignments: [],
     attention: [],
     messages: [],
     shells: [],
@@ -116,6 +118,8 @@ describe("HTTP app", () => {
       attention: [],
       messages: [],
       shells: [],
+      tasks: [],
+      assignments: [],
     });
   });
 

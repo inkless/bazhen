@@ -3018,6 +3018,343 @@
                 "payload"
               ],
               "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "ts": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string",
+                  "const": "task.created"
+                },
+                "entityType": {
+                  "type": "string",
+                  "const": "task"
+                },
+                "entityId": {
+                  "type": "string"
+                },
+                "actor": {
+                  "type": "string"
+                },
+                "causationId": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "correlationId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "payload": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "ownerAgentId": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "parentTaskId": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "title",
+                    "ownerAgentId",
+                    "parentTaskId"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "id",
+                "ts",
+                "type",
+                "entityType",
+                "entityId",
+                "actor",
+                "causationId",
+                "correlationId",
+                "payload"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "ts": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string",
+                  "const": "task.finished"
+                },
+                "entityType": {
+                  "type": "string",
+                  "const": "task"
+                },
+                "entityId": {
+                  "type": "string"
+                },
+                "actor": {
+                  "type": "string"
+                },
+                "causationId": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "correlationId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "payload": {
+                  "type": "object",
+                  "properties": {
+                    "outcome": {
+                      "type": "string",
+                      "enum": [
+                        "done",
+                        "cancelled"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "outcome"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "id",
+                "ts",
+                "type",
+                "entityType",
+                "entityId",
+                "actor",
+                "causationId",
+                "correlationId",
+                "payload"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "ts": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string",
+                  "const": "assignment.granted"
+                },
+                "entityType": {
+                  "type": "string",
+                  "const": "assignment"
+                },
+                "entityId": {
+                  "type": "string"
+                },
+                "actor": {
+                  "type": "string"
+                },
+                "causationId": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "correlationId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "payload": {
+                  "type": "object",
+                  "properties": {
+                    "taskId": {
+                      "type": "string",
+                      "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                    },
+                    "agentId": {
+                      "type": "string",
+                      "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                    },
+                    "role": {
+                      "type": "string",
+                      "enum": [
+                        "coordinator",
+                        "lead",
+                        "worker"
+                      ]
+                    },
+                    "parentAssignmentId": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^asgn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "taskId",
+                    "agentId",
+                    "role",
+                    "parentAssignmentId"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "id",
+                "ts",
+                "type",
+                "entityType",
+                "entityId",
+                "actor",
+                "causationId",
+                "correlationId",
+                "payload"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "ts": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string",
+                  "const": "assignment.ended"
+                },
+                "entityType": {
+                  "type": "string",
+                  "const": "assignment"
+                },
+                "entityId": {
+                  "type": "string"
+                },
+                "actor": {
+                  "type": "string"
+                },
+                "causationId": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "correlationId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "payload": {
+                  "type": "object",
+                  "properties": {
+                    "reason": {
+                      "type": "string",
+                      "enum": [
+                        "unassigned",
+                        "completed"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "reason"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "id",
+                "ts",
+                "type",
+                "entityType",
+                "entityId",
+                "actor",
+                "causationId",
+                "correlationId",
+                "payload"
+              ],
+              "additionalProperties": false
             }
           ]
         }

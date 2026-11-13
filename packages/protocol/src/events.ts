@@ -3,9 +3,17 @@ import { Activity, Usage, ExitStatus, ExternalRef, HarnessId, Signal } from "./a
 import { TuiTheme } from "./theme.ts";
 import { AttachmentMode, EnvironmentKind, Id } from "./ids.ts";
 import { ApprovalDecision, AttentionCloseReason, AttentionKind } from "./mail.ts";
+import { Role, TaskBrief, TaskOutcome, TaskTitle } from "./tasks.ts";
 import { ProtocolVersion } from "./version.ts";
 
 const queued = z.object({ agentId: Id("agent"), body: z.string() });
+const taskCreated = z.object({
+  title: TaskTitle,
+  brief: TaskBrief,
+  ownerAgentId: Id("agent").nullable(),
+  parentTaskId: Id("task").nullable(),
+});
+const taskFinished = z.object({ outcome: TaskOutcome, note: z.string().nullable() });
 
 /** A terminal's runtime incarnation, as RuntimeRef names it, minus the terminal it is for. */
 const RuntimeRefPayload = z.object({
@@ -236,6 +244,36 @@ export const EVENTS = {
   "lease.granted": {
     entity: "terminal",
     payload: z.object({ attachmentId: Id("att"), epoch: z.number().int().positive() }),
+  },
+  /** The stream leaves the brief out, as it does a message's body. */
+  "task.created": {
+    entity: "task",
+    payload: taskCreated,
+    streamed: taskCreated.omit({ brief: true }),
+  },
+  /** Ends every active assignment on the task, as `task_finished`. */
+  "task.finished": {
+    entity: "task",
+    payload: taskFinished,
+    streamed: taskFinished.omit({ note: true }),
+  },
+  "assignment.granted": {
+    entity: "assignment",
+    payload: z.object({
+      taskId: Id("task"),
+      agentId: Id("agent"),
+      role: Role,
+      parentAssignmentId: Id("asgn").nullable(),
+    }),
+  },
+  /**
+   * Taken away, or its worker's part done. A task finishing or an agent closing ends assignments
+   * through its own event. Every assignment granted under an ended one ends with it, as
+   * `parent_ended`.
+   */
+  "assignment.ended": {
+    entity: "assignment",
+    payload: z.object({ reason: z.enum(["unassigned", "completed"]) }),
   },
 } as const;
 

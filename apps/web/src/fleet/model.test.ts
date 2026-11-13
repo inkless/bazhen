@@ -33,6 +33,8 @@ const snapshot = (agents: Agent[], waitingOn: Agent[] = []): StateSnapshot => ({
   environments: [{ id: environmentId, kind: "local", host: "laptop" }],
   agents,
   shells: [],
+  tasks: [],
+  assignments: [],
   attention: waitingOn.map((a) => ({
     id: newId("attn"),
     agentId: a.id,

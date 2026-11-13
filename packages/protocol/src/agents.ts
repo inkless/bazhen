@@ -3,6 +3,7 @@ import { EnvironmentKind, Id, IdempotencyKey } from "./ids.ts";
 import { Attention, Message } from "./mail.ts";
 import { Shell } from "./shells.ts";
 import { TuiTheme } from "./theme.ts";
+import { Assignment, Task } from "./tasks.ts";
 
 export const HarnessId = z.enum(["claude-code", "codex"]);
 export type HarnessId = z.infer<typeof HarnessId>;
@@ -209,6 +210,10 @@ export const StateSnapshot = z.object({
   messages: z.array(Message),
   /** Protocol 1.17. */
   shells: z.array(Shell).default([]),
+  /** Protocol 1.20. */
+  tasks: z.array(Task).default([]),
+  /** Protocol 1.20. */
+  assignments: z.array(Assignment).default([]),
 });
 export type StateSnapshot = z.infer<typeof StateSnapshot>;
 

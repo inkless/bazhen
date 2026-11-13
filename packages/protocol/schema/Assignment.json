@@ -1,0 +1,72 @@
+{
+  "$id": "Assignment",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^asgn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+    },
+    "taskId": {
+      "type": "string",
+      "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+    },
+    "agentId": {
+      "type": "string",
+      "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+    },
+    "role": {
+      "type": "string",
+      "enum": [
+        "coordinator",
+        "lead",
+        "worker"
+      ]
+    },
+    "parentAssignmentId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^asgn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "active",
+        "ended"
+      ]
+    },
+    "endReason": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "unassigned",
+            "completed",
+            "task_finished",
+            "agent_closed",
+            "parent_ended"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "id",
+    "taskId",
+    "agentId",
+    "role",
+    "parentAssignmentId",
+    "state",
+    "endReason"
+  ],
+  "additionalProperties": false
+}

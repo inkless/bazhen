@@ -11,6 +11,7 @@ export * from "./mail.ts";
 export * from "./shells.ts";
 export * from "./stream.ts";
 export * from "./theme.ts";
+export * from "./tasks.ts";
 export * from "./version.ts";
 
 export const RuntimeHealthState = z.enum(["healthy", "unreachable", "not-running"]);

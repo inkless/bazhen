@@ -29,6 +29,8 @@ const snapshot = (attention: Attention[]): StateSnapshot => ({
   attention,
   messages: [],
   shells: [],
+  tasks: [],
+  assignments: [],
 });
 
 const boom = () => {

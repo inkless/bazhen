@@ -1,0 +1,54 @@
+{
+  "$id": "CreateTaskRequest",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "brief": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 20000
+    },
+    "parentTaskId": {
+      "type": "string",
+      "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+    },
+    "assign": {
+      "type": "object",
+      "properties": {
+        "agentId": {
+          "type": "string",
+          "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "coordinator",
+            "lead",
+            "worker"
+          ]
+        }
+      },
+      "required": [
+        "agentId",
+        "role"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "idempotencyKey",
+    "title",
+    "brief"
+  ],
+  "additionalProperties": false
+}
