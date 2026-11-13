@@ -18,6 +18,7 @@ import {
 import { z } from "zod";
 import { IdempotencyConflict, runtimePayload, type Store } from "../store/store.ts";
 import { resolveDirectory } from "./cwd.ts";
+import type { AgentQueue } from "./queue.ts";
 
 /** The local environment's id, registering it on the first run (foundation-design §3). */
 export function localEnvironmentId(store: Store): EnvironmentId {
@@ -48,6 +49,8 @@ export interface LaunchDeps {
   readonly size: Size;
   /** The daemon user's home, which a launch directory's leading `~` names. */
   readonly home: string;
+  /** The agents' command queue: a launch holds its new agent's slot until its last event. */
+  readonly queue: AgentQueue;
 }
 
 /**
@@ -87,7 +90,7 @@ export const launchOptions = (theme: TuiTheme | undefined): LaunchOptions =>
   theme === undefined ? {} : { theme };
 
 export async function launchAgent(
-  { store, environment, size, home }: LaunchDeps,
+  { store, environment, size, home, queue }: LaunchDeps,
   req: LaunchAgentRequest,
 ): Promise<LaunchAgentResponse> {
   const asked = { harness: req.harness, cwd: req.cwd, project: req.project ?? basename(req.cwd) };
@@ -101,50 +104,54 @@ export async function launchAgent(
 
   const agentId = newId("agent");
   const terminalId = newId("term");
-  const event = { entityId: agentId, actor: "system" };
-  // Each step's event and the key's answer are written together, so a repeat sees exactly
-  // what the first request has done so far.
-  const record = (append: () => number, earlier: number[], failed = false) =>
-    store.transaction(() => {
-      const response = { agentId, terminalId, eventIds: [...earlier, append()] };
-      const remembered: LaunchRecord = { request: asked, response, failed };
-      store.remember(req.idempotencyKey, remembered);
-      return response;
-    });
+  // Nothing else may settle the agent while its launch is in flight, so the launch holds its slot
+  // from before it is recorded.
+  return queue.run(agentId, async () => {
+    const event = { entityId: agentId, actor: "system" };
+    // Each step's event and the key's answer are written together, so a repeat sees exactly
+    // what the first request has done so far.
+    const record = (append: () => number, earlier: number[], failed = false) =>
+      store.transaction(() => {
+        const response = { agentId, terminalId, eventIds: [...earlier, append()] };
+        const remembered: LaunchRecord = { request: asked, response, failed };
+        store.remember(req.idempotencyKey, remembered);
+        return response;
+      });
 
-  const launched = record(
-    () =>
-      store.append({
-        ...event,
-        type: "agent.launched",
-        payload: { environmentId: environment.id, ...request, terminalId },
-      }),
-    [],
-  );
-  const options = launchOptions(req.theme);
-  const launching = environment.launch({ agentId, terminalId, request, options, size });
-  const refs = await launching.catch((cause) => {
-    // The client learns only that it failed; the daemon's log says why.
-    console.error(`agent ${agentId} failed to launch:`, cause);
-    record(
+    const launched = record(
       () =>
-        store.append({ ...event, type: "agent.failed", payload: { reason: "launch_rejected" } }),
-      launched.eventIds,
-      true,
+        store.append({
+          ...event,
+          type: "agent.launched",
+          payload: { environmentId: environment.id, ...request, terminalId },
+        }),
+      [],
     );
-    throw new LaunchFailed(agentId, cause);
+    const options = launchOptions(req.theme);
+    const launching = environment.launch({ agentId, terminalId, request, options, size });
+    const refs = await launching.catch((cause) => {
+      // The client learns only that it failed; the daemon's log says why.
+      console.error(`agent ${agentId} failed to launch:`, cause);
+      record(
+        () =>
+          store.append({ ...event, type: "agent.failed", payload: { reason: "launch_rejected" } }),
+        launched.eventIds,
+        true,
+      );
+      throw new LaunchFailed(agentId, cause);
+    });
+    return record(
+      () =>
+        store.append({
+          ...event,
+          type: "agent.running",
+          payload: {
+            externalRef: refs.externalRef,
+            runtimeRef: refs.runtime && runtimePayload(refs.runtime),
+            ...(refs.theme && { theme: refs.theme }),
+          },
+        }),
+      launched.eventIds,
+    );
   });
-  return record(
-    () =>
-      store.append({
-        ...event,
-        type: "agent.running",
-        payload: {
-          externalRef: refs.externalRef,
-          runtimeRef: refs.runtime && runtimePayload(refs.runtime),
-          ...(refs.theme && { theme: refs.theme }),
-        },
-      }),
-    launched.eventIds,
-  );
 }

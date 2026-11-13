@@ -17,6 +17,7 @@ import {
   type EnvironmentAdapter,
 } from "@bazhen/core";
 import { launchAgent, localEnvironmentId } from "../agents/launch.ts";
+import { AgentQueue } from "../agents/queue.ts";
 import { upgrades, type UpgradeRoute } from "../http/upgrades.ts";
 import { Store, type SnapshotView } from "../store/store.ts";
 
@@ -80,7 +81,13 @@ export async function withAgent(
   const store = Store.open(path);
   const env = environment(store);
   const launched = await launchAgent(
-    { store, environment: env, size: { cols: 80, rows: 24 }, home: tmpdir() },
+    {
+      store,
+      environment: env,
+      size: { cols: 80, rows: 24 },
+      home: tmpdir(),
+      queue: new AgentQueue(),
+    },
     { idempotencyKey: "launch", harness: "claude-code", cwd: "~" },
   );
   const { agentId, terminalId } = launched;
@@ -194,7 +201,7 @@ export async function withCodexAgents(...threads: (string | null)[]) {
       harnesses: ["codex"],
     };
     const { agentId } = await launchAgent(
-      { store, environment, size: { cols: 80, rows: 24 }, home: tmpdir() },
+      { store, environment, size: { cols: 80, rows: 24 }, home: tmpdir(), queue: new AgentQueue() },
       { idempotencyKey: `codex-${String(threadId)}`, harness: "codex", cwd: "~" },
     );
     agents.set(threadId, agentId);

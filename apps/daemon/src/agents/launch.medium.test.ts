@@ -8,6 +8,7 @@ import { fakeEnvironment, tempDb, testView } from "../testing/fixtures.ts";
 import { IdempotencyConflict } from "../store/store.ts";
 import { InvalidDirectory } from "./cwd.ts";
 import { launchAgent, localEnvironmentId } from "./launch.ts";
+import { AgentQueue } from "./queue.ts";
 
 function setup(fail = false) {
   // The daemon user's home, with the project a launch names as ~/repo.
@@ -24,7 +25,7 @@ function setup(fail = false) {
       ...(l.options.theme && { theme: l.options.theme }),
     };
   });
-  const deps = { store, environment, size: { cols: 120, rows: 40 }, home };
+  const deps = { store, environment, size: { cols: 120, rows: 40 }, home, queue: new AgentQueue() };
   return { store, deps, launches, home };
 }
 

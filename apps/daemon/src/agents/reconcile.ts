@@ -37,7 +37,7 @@ export async function reconcile(
  * server that may still run it, its socket taken by a new one, is no proof. An agent with no
  * terminal yet has nothing to prove gone.
  */
-async function provablyGone(
+export async function provablyGone(
   environment: EnvironmentAdapter,
   { agentId, runtime }: AgentTerminal,
   log: (message: string) => void,
@@ -52,7 +52,11 @@ async function provablyGone(
 }
 
 /** One agent's events, from what the store says of it and what the environment still has. */
-function settle(store: Store, agent: AgentTerminal, found: AgentInventoryEntry | undefined): void {
+export function settle(
+  store: Store,
+  agent: AgentTerminal,
+  found: AgentInventoryEntry | undefined,
+): void {
   const { agentId, state, terminalState, generation } = agent;
   const system = { entityId: agentId, actor: "system" } as const;
   if (state === "starting" && terminalState === "creating") {

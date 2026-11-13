@@ -15,6 +15,7 @@ import { Mailbox } from "../mailbox/mailbox.ts";
 import { IdempotencyConflict, type Store } from "../store/store.ts";
 import { fakeEnvironment, withAgent, testView } from "../testing/fixtures.ts";
 import { launchAgent, localEnvironmentId } from "./launch.ts";
+import { AgentQueue } from "./queue.ts";
 import {
   AgentStateConflict,
   EnvironmentUnavailable,
@@ -80,7 +81,7 @@ async function running({
       },
     };
   });
-  const lifecycle = new Lifecycle(store, environment);
+  const lifecycle = new Lifecycle(store, environment, new AgentQueue());
   lifecycle.watch();
   const exit = (generation: string, status: ExitStatus = { type: "exited", code: 1 }) =>
     report?.({ terminalId, runtime: "tmux", locator: { generation } }, status);
@@ -107,7 +108,7 @@ async function failedLaunch(store: Store): Promise<string> {
   const environment = fakeEnvironment(store, () => Promise.reject(new Error("no tmux")));
   const request = { idempotencyKey: "launch-2", harness: "claude-code", cwd: "~" } as const;
   const failed = await launchAgent(
-    { store, environment, size: { cols: 80, rows: 24 }, home: tmpdir() },
+    { store, environment, size: { cols: 80, rows: 24 }, home: tmpdir(), queue: new AgentQueue() },
     request,
   )
     .then(() => undefined)

@@ -486,6 +486,10 @@ export class Daemon {
   }
 
   /** Deletes the private server's socket under it, as a temp cleaner would; the server runs on. */
+  tmuxSocketExists(): boolean {
+    return existsSync(this.tmuxServer.socket);
+  }
+
   deleteTmuxSocket(): void {
     rmSync(this.tmuxServer.socket);
   }

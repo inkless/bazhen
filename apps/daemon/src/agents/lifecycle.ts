@@ -22,6 +22,7 @@ import {
   type SignalAgentRequest,
 } from "@bazhen/protocol";
 import { launchOptions } from "./launch.ts";
+import type { AgentQueue } from "./queue.ts";
 import { runtimePayload, UnknownAgent, type AgentTerminal, type Store } from "../store/store.ts";
 
 /** A command named a generation the agent's terminal has moved past (foundation-design §10). */
@@ -100,11 +101,12 @@ export function recordClosed(store: Store, agentId: string, actor: "user" | "sys
 export class Lifecycle {
   private readonly store: Store;
   private readonly environment: EnvironmentAdapter;
-  private readonly queues = new Map<string, Promise<unknown>>();
+  private readonly queue: AgentQueue;
 
-  constructor(store: Store, environment: EnvironmentAdapter) {
+  constructor(store: Store, environment: EnvironmentAdapter, queue: AgentQueue) {
     this.store = store;
     this.environment = environment;
+    this.queue = queue;
   }
 
   /** Records agents' exits as the environment reports them; returns the stop function. */
@@ -238,7 +240,7 @@ export class Lifecycle {
     act: (found: AgentTerminal) => Promise<() => number[]>,
   ): Promise<AgentCommandResponse> {
     const request = { command: name, agentId, ...req };
-    return this.serially(agentId, async () => {
+    return this.queue.run(agentId, async () => {
       const prior = this.store.replay(req.idempotencyKey, request, (r) =>
         AgentCommandResponse.parse(r),
       );
@@ -262,17 +264,6 @@ export class Lifecycle {
     payload: EventPayload<T>,
   ): number {
     return this.store.append({ type, entityId: agentId, actor: "user", payload });
-  }
-
-  private serially<T>(agentId: string, run: () => Promise<T>): Promise<T> {
-    const next = (this.queues.get(agentId) ?? Promise.resolve()).then(run);
-    // The queue only orders commands; each caller gets its own command's failure from `next`.
-    const settled = next.catch(() => {});
-    this.queues.set(agentId, settled);
-    void settled.then(() => {
-      if (this.queues.get(agentId) === settled) this.queues.delete(agentId);
-    });
-    return next;
   }
 }
 
