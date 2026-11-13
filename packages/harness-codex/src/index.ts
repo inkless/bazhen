@@ -22,16 +22,10 @@ const BINDING = {
 
 /**
  * Codex has no light or dark of its own: `tui.theme` picks only its syntax highlighting, from the
- * themes it bundles, and its other colours follow the background the terminal reports.
+ * themes it bundles, and its other colours follow the background the terminal reports, which the
+ * runtime sets from the theme the launch names.
  */
 const SYNTAX_THEME = { light: "one-half-light", dark: "one-half-dark" } as const;
-
-/**
- * The theme a Codex TUI draws for, whatever was asked: it asks the terminal's background as it
- * starts, before any client of the terminal can answer, and draws for dark when nobody does. Its
- * syntax highlighting and its terminal follow that, so every client gets one consistent Codex.
- */
-const STARTS_IN = "dark";
 
 /** The app-server resumed a thread other than the agent's own. */
 export class ThreadMismatch extends Error {
@@ -47,7 +41,7 @@ export class ThreadMismatch extends Error {
  */
 export class CodexHarness implements HarnessAdapter {
   readonly id = "codex";
-  readonly themes = [STARTS_IN] as const;
+  readonly themes = ["light", "dark"] as const;
   private readonly channel: HarnessChannelPort;
   /** The same server, as the TUI reaches it with `--remote`. */
   private readonly remote: string;
@@ -100,10 +94,10 @@ export class CodexHarness implements HarnessAdapter {
         // The TUI keeps its pane's title set to the thread it shows, through /new and /resume.
         "-c",
         'tui.terminal_title=["thread-id"]',
-        ...(theme === undefined ? [] : ["-c", `tui.theme="${SYNTAX_THEME[STARTS_IN]}"`]),
+        ...(theme === undefined ? [] : ["-c", `tui.theme="${SYNTAX_THEME[theme]}"`]),
       ],
       env: {},
-      ...(theme && { theme: STARTS_IN }),
+      ...(theme && { theme }),
       externalRef: { kind: "codex-thread", id: threadId },
     };
   }

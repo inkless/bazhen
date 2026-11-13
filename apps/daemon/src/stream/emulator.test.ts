@@ -1,6 +1,6 @@
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import headless from "@xterm/headless";
-import { TERMINAL_COLOURS, type TuiTheme } from "@bazhen/protocol";
+import { oscColour, TERMINAL_COLOURS, type TuiTheme } from "@bazhen/protocol";
 import { describe, expect, it } from "vitest";
 import { ScreenEmulator, TerminalClosed } from "./emulator.ts";
 
@@ -54,7 +54,9 @@ describe("the daemon's screen emulator", () => {
   });
 
   it("answers a query for both in one sequence, and one ended in BEL, each in ST as tmux ends its own", async () => {
-    const { text, background } = TERMINAL_COLOURS.light;
+    const [text, background] = [TERMINAL_COLOURS.light.text, TERMINAL_COLOURS.light.background].map(
+      oscColour,
+    );
     expect([
       await answersTo(`${ESC}]10;?;?${ST}`, "light"),
       await answersTo(`${ESC}]11;?\x07`, "light"),

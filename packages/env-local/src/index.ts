@@ -204,6 +204,7 @@ export class LocalEnvironment implements EnvironmentAdapter {
       cwd: request.cwd,
       env: { ...launch.env, BAZHEN_AGENT_ID: agentId, BAZHEN_SOCKET: this.opts.socket },
       generation,
+      ...(launch.theme && { theme: launch.theme }),
     };
   }
 

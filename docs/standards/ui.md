@@ -83,14 +83,18 @@ launch and a respawn send the theme the page shows, and the daemon passes it to 
 
 - Claude Code gets `theme` in the settings it is started with, over the user's own.
 - Codex has no light or dark of its own: its colours follow the background the terminal reports,
-  and it asks before any view can answer, so it starts dark, with the bundled `one-half-dark`
-  syntax highlighting (its `tui.theme`), over the user's own.
+  and it gets the bundled `one-half-light` or `one-half-dark` syntax highlighting (its
+  `tui.theme`), over the user's own.
 
-The daemon records the theme each terminal was started in, and tells a program that asks for
-the terminal's text or background (OSC 10/11) that theme's colours, from `TERMINAL_COLOURS` in
-`@bazhen/protocol`; a test holds them to `terminalTheme()`. Each agent says which themes its
-harness can start in. The page itself, and a terminal's contrast preference, still follow the
-device live.
+A program that asks for the terminal's text or background (OSC 10/11) is told the colours of the
+theme its process started for, from its first query, before any view has attached: tmux answers
+from the window's style, which the runtime sets in the same command that starts the process. The
+daemon, whose client a view's stream comes through, answers the same, and both read
+`TERMINAL_COLOURS` in `@bazhen/protocol`, which a test holds to `terminalTheme()`. tmux also
+paints the terminal's blank cells in those colours, which is what the terminal is drawn in
+anyway; attaching to it from your own terminal shows the theme's background too. Each agent says
+which themes its harness can start in. The page itself, and a terminal's contrast preference,
+still follow the device live.
 
 When the page's theme differs from an open agent's, the page lists it with "Respawn in <theme>",
 behind a confirm. An exited agent respawns at once; a running one is stopped and respawned, and

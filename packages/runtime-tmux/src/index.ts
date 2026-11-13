@@ -13,7 +13,7 @@ import type {
   TerminalSpec,
   TerminalTags,
 } from "@bazhen/core";
-import type { ExitStatus, Signal } from "@bazhen/protocol";
+import { TERMINAL_COLOURS, type ExitStatus, type Signal, type TuiTheme } from "@bazhen/protocol";
 import {
   GENERATION_OPTION,
   PaneRefused,
@@ -250,15 +250,20 @@ export class TmuxRuntime implements RuntimeAdapter {
     const session = sessionName(spec.terminalId);
     const { cols, rows } = spec.size;
     await this.tmux(
-      "new-session",
-      "-d",
-      "-s",
-      session,
-      "-x",
-      String(cols),
-      "-y",
-      String(rows),
-      ...processArgs(spec),
+      ...sequence([
+        [
+          "new-session",
+          "-d",
+          "-s",
+          session,
+          "-x",
+          String(cols),
+          "-y",
+          String(rows),
+          ...processArgs(spec),
+        ],
+        styleCommand(windowOf(session), spec.theme),
+      ]),
     );
     const location = await this.tmux(
       ...sequence([
@@ -446,6 +451,7 @@ export class TmuxRuntime implements RuntimeAdapter {
     const location = await this.tmux(
       ...sequence([
         generationCommand(target, spec.generation),
+        styleCommand(target, spec.theme),
         ["respawn-pane", "-t", target, ...processArgs(spec)],
         ["display-message", "-p", "-t", target, LOCATION.format],
       ]),
@@ -651,6 +657,19 @@ export function paneHook(argv: readonly string[]): string {
 }
 
 /** Several tmux commands as one invocation: a lone `;` argument separates them. */
+/**
+ * The window's style in the theme its process starts for. tmux answers a pane's OSC 10/11 query
+ * from it, so a program asking at its first instruction, before any client attaches, is told the
+ * terminal's colours (and painted in them, which is what the terminal is drawn in). Set in the
+ * same command list as the process it is for, so tmux reads none of the process's output before.
+ * With no theme it is unset, and a query goes to an attached client, as tmux does by default.
+ */
+function styleCommand(target: string, theme: TuiTheme | undefined): string[] {
+  if (theme === undefined) return ["set-option", "-w", "-u", "-t", target, "window-style"];
+  const { text, background } = TERMINAL_COLOURS[theme];
+  return ["set-option", "-w", "-t", target, "window-style", `fg=${text},bg=${background}`];
+}
+
 function sequence(commands: string[][]): string[] {
   return commands.flatMap((command, i) => (i === 0 ? command : [";", ...command]));
 }

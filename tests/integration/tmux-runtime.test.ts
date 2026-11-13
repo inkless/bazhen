@@ -59,6 +59,18 @@ describe("tmux runtime on a private server", () => {
     stream.close();
   });
 
+  it("sends a themed terminal's blank cells to its client in the theme's colours, as truecolour", async () => {
+    const ref = await runtime.create({ ...spec(["sleep", "30"]), theme: "light" });
+    const { stream } = await runtime.attach(ref, size, 0);
+    let seen = "";
+    stream.onData((b) => (seen += Buffer.from(b).toString("latin1")));
+    // The light theme's text #202225 and background #fdfdfd, which the browser then draws as given.
+    await expect
+      .poll(() => seen, { timeout: 3000 })
+      .toContain("\x1b[38;2;32;34;37m\x1b[48;2;253;253;253m");
+    stream.close();
+  });
+
   it("passes Ctrl-B to the program instead of treating it as a tmux prefix", async () => {
     const ref = await runtime.create(spec(["cat"]));
     const { stream } = await runtime.attach(ref, size, 0);

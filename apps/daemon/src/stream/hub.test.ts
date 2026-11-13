@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { newId, type Attached, type AttachmentId, type TerminalId } from "@bazhen/core";
 import { FakeRuntime } from "@bazhen/core/testing";
 import {
+  oscColour,
   TERMINAL_COLOURS,
   type AttachmentMode,
   type StreamServerFrame,
@@ -277,8 +278,8 @@ describe("terminal hub", () => {
     await expect
       .poll(() => rt.written)
       .toEqual([
-        `\x1b]11;${TERMINAL_COLOURS.dark.background}\x1b\\`,
-        `\x1b]11;${TERMINAL_COLOURS.light.background}\x1b\\`,
+        `\x1b]11;${oscColour(TERMINAL_COLOURS.dark.background)}\x1b\\`,
+        `\x1b]11;${oscColour(TERMINAL_COLOURS.light.background)}\x1b\\`,
       ]);
   });
 
