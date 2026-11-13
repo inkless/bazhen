@@ -10,10 +10,13 @@ import { Workspace } from "./fleet/Workspace.tsx";
 import { AgentTasks, TaskPage, TasksView } from "./tasks/Tasks.tsx";
 import { pageTheme } from "./ui/theme.ts";
 import { Button } from "./ui/Button.tsx";
+import { ShellPane } from "./shells/ShellPane.tsx";
+import { ShellsRail } from "./shells/ShellsRail.tsx";
 
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 const AGENT_HASH = /^#\/agent\/(.+)$/;
+const SHELL_HASH = /^#\/shell\/(.+)$/;
 const INBOX_HASH = "#/inbox";
 const TASKS_HASH = "#/tasks";
 const TASK_HASH = /^#\/task\/(.+)$/;
@@ -21,13 +24,14 @@ const selectionOf = (hash: string) => AGENT_HASH.exec(hash)?.[1] ?? null;
 
 const viewOf = () => ({
   selected: selectionOf(location.hash),
+  shell: SHELL_HASH.exec(location.hash)?.[1] ?? null,
   inbox: location.hash === INBOX_HASH,
   tasks: location.hash === TASKS_HASH,
   task: TASK_HASH.exec(location.hash)?.[1] ?? null,
 });
 
 /**
- * The selected agent, the inbox, the tasks or one task, kept in the URL so reload, back and a
+ * The selected agent or shell, the inbox, the tasks or one task, kept in the URL so reload, back and a
  * pasted link keep it.
  */
 function useSelection(): ReturnType<typeof viewOf> {
@@ -48,10 +52,12 @@ function select(agentId: string | null): void {
   location.hash = agentId === null ? "" : `#/agent/${agentId}`;
 }
 
+const selectShell = (terminalId: string) => (location.hash = `#/shell/${terminalId}`);
+
 /** The fleet in the rail and, in the centre, the selected agent's workspace or the whole fleet. */
 export function Dashboard() {
   const [state, setState] = useState<StateSnapshot | null>(null);
-  const { selected, inbox, tasks, task } = useSelection();
+  const { selected, shell: shellId, inbox, tasks, task } = useSelection();
   const [showEnded, setShowEnded] = useState(false);
   const [cwd, setCwd] = useState("");
   // Kept apart: every state read clears a stream error, and a refusal must outlast them.
@@ -79,6 +85,7 @@ export function Dashboard() {
   };
   const fleet = state === null ? null : groupFleet(state, showEnded);
   const agent = state?.agents.find((a) => a.id === selected);
+  const shell = state?.shells.find((s) => s.id === shellId);
   const open = state?.attention.filter((a) => a.state === "open").length ?? 0;
   const openTasks = state?.tasks.filter((t) => t.state === "open").length ?? 0;
   const opening = { onOpenTask: openTask, onOpenAgent: select, failed };
@@ -138,12 +145,27 @@ export function Dashboard() {
             {open === 1 ? "1 item needs you" : `${open} items need you`}
           </span>
           {fleet !== null && (
-            <FleetList fleet={fleet} label="agents" selected={selected} onSelect={select} compact />
+            <FleetList
+              fleet={fleet}
+              label="agents"
+              selected={selected}
+              onSelect={select}
+              compact
+              shells={state?.shells ?? []}
+            />
           )}
           {fleet !== null && (showEnded || fleet.hidden > 0) && (
             <Button variant="link" onPress={() => setShowEnded(!showEnded)}>
               {showEnded ? "Hide ended agents" : `Show ended agents (${fleet.hidden})`}
             </Button>
+          )}
+          {state !== null && (
+            <ShellsRail
+              shells={state.shells}
+              selected={shellId}
+              onSelect={selectShell}
+              failed={failed}
+            />
           )}
         </nav>
         <section className="centre">
@@ -159,6 +181,21 @@ export function Dashboard() {
               <AgentTasks state={state} agentId={agent.id} onOpenTask={openTask} />
               <Workspace key={agent.id} agent={agent} shells={state.shells} failed={failed} />
             </>
+          ) : shell !== undefined ? (
+            <ShellPane
+              key={shell.id}
+              shell={shell}
+              height="70vh"
+              onRestarted={selectShell}
+              failed={failed}
+            />
+          ) : shellId !== null && state !== null ? (
+            <section aria-label="shell" className="gone">
+              <p>This shell is no longer open.</p>
+              <Button variant="link" onPress={() => select(null)}>
+                Back to the fleet
+              </Button>
+            </section>
           ) : (
             fleet !== null && (
               <FleetList
@@ -167,6 +204,7 @@ export function Dashboard() {
                 selected={null}
                 onSelect={select}
                 compact={false}
+                shells={state?.shells ?? []}
               />
             )
           )}
