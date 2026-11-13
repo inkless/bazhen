@@ -1,5 +1,16 @@
-import { describe, expect, it } from "vitest";
-import { looksSecret, parseArgs, pins } from "./test-real.ts";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  looksSecret,
+  ownerOf,
+  parseArgs,
+  pins,
+  run,
+  stopper,
+  sweep,
+  type DockerCall,
+  type DockerResult,
+  type Host,
+} from "./test-real.ts";
 
 const repo: Record<string, string> = {
   ".nvmrc": "26.13.0\n",
@@ -53,5 +64,330 @@ describe("pnpm test:real", () => {
     const kept = ["src/tokens.test.ts", "environment.ts", "keys.test.ts", "README.md"];
     expect([...secret, ...secretToo].filter((p) => !looksSecret(p))).toEqual([]);
     expect(kept.filter(looksSecret)).toEqual([]);
+  });
+});
+
+const OWN_PID = 4242;
+const HOST = "this-host";
+const RUN = `bz-real-${OWN_PID}-AbC123`;
+const IMAGE = `bazhen-test-real:${RUN}`;
+
+const result = (code: number | null, out = "", err = ""): DockerResult => ({ code, out, err });
+
+/**
+ * What a fake host answers one docker command with. A pending call settles when it is stopped,
+ * as docker does when a signal reaches it; a wedged one never settles, as on a stuck daemon.
+ */
+type Answer = DockerResult | "pending" | "wedged";
+
+const never = new Promise<never>(() => {});
+
+/** A host in memory. `answer` decides each docker command's result. */
+function fakeHost(
+  answer: (args: readonly string[]) => Answer,
+  more: { alive?: number[]; dirs?: string[]; prepare?: () => never; timeouts?: boolean } = {},
+) {
+  const calls: string[][] = [];
+  const stopped: NodeJS.Signals[] = [];
+  const removed: string[] = [];
+  const waiting: string[][] = [];
+  const handlers = new Set<(signal: NodeJS.Signals) => void>();
+  const host: Host = {
+    pid: OWN_PID,
+    id: HOST,
+    docker(args): DockerCall {
+      calls.push([...args]);
+      const answered = answer(args);
+      if (typeof answered === "object") return { done: Promise.resolve(answered), stop: () => {} };
+      let settle!: (r: DockerResult) => void;
+      const done = new Promise<DockerResult>((resolve) => (settle = resolve));
+      waiting.push([...args]);
+      const stop = (signal: NodeJS.Signals) => {
+        stopped.push(signal);
+        if (answered === "pending") settle(result(130));
+      };
+      return { done, stop };
+    },
+    prepare: more.prepare ?? (() => ({ dir: `/tmp/${RUN}`, buildArgs: { NODE_VERSION: "26" } })),
+    removeDir: (dir) => removed.push(dir),
+    runDirs: () => more.dirs ?? [],
+    isAlive: (pid) => (more.alive ?? []).includes(pid),
+    onSignal(handler) {
+      handlers.add(handler);
+      return () => handlers.delete(handler);
+    },
+    after: () => (more.timeouts === true ? Promise.resolve() : never),
+  };
+  const signal = (s: NodeJS.Signals) => {
+    for (const handler of handlers) handler(s);
+  };
+  /** The command most recently left waiting, by its first two words. */
+  const waitingOn = () => waiting.at(-1)?.slice(0, 2).join(" ");
+  return { host, calls, stopped, removed, handlers, signal, waitingOn };
+}
+
+const verb = (args: readonly string[]) => args.slice(0, 2).join(" ");
+const passing = (): Answer => result(0);
+const isIntegration = (args: readonly string[]) =>
+  args[0] === "run" && args.includes("test:integration");
+const buildFails = (args: readonly string[]) => (args[0] === "build" ? result(1) : passing());
+const buildHangs = (args: readonly string[]) => (args[0] === "build" ? "pending" : passing());
+const integrationFails = (args: readonly string[]) => (isIntegration(args) ? result(1) : passing());
+const integrationHangs = (args: readonly string[]) => (isIntegration(args) ? "pending" : passing());
+const imageRmHangs = (args: readonly string[]): Answer =>
+  verb(args) === "image rm" ? "pending" : passing();
+const imageRmWedged = (args: readonly string[]): Answer =>
+  verb(args) === "image rm" ? "wedged" : passing();
+const integrationHangsThenRmWedged = (args: readonly string[]): Answer =>
+  args[0] === "rm" ? "wedged" : integrationHangs(args);
+const rmConflicts = (args: readonly string[]): Answer =>
+  args[0] === "rm" ? result(1, "", "Error response from daemon: conflict") : passing();
+const rmFindsNothing = (args: readonly string[]): Answer =>
+  args[0] === "rm"
+    ? result(1, "", `Error response from daemon: No such container: ${RUN}-api`)
+    : passing();
+const failing = () => {
+  throw new Error("no such ref");
+};
+const isRemoval = (c: string[]) => c[0] === "rm" || verb(c) === "image rm";
+const cleanup = (calls: string[][]) => calls.filter(isRemoval);
+const quietly = () => vi.spyOn(console, "warn").mockImplementation(() => {});
+afterEach(() => vi.restoreAllMocks());
+
+describe("pnpm test:real cleans up after itself", () => {
+  it("names its run, image and containers by its own pid and host, and labels them with both", async () => {
+    const fake = fakeHost(passing);
+    expect(await run(["api"], fake.host)).toBe(0);
+    const build = fake.calls.find((c) => c[0] === "build");
+    const suite = fake.calls.find((c) => c[0] === "run");
+    expect(build).toEqual(expect.arrayContaining(["--tag", IMAGE, "org.bazhen.test-real=1"]));
+    expect(build).toContain(`org.bazhen.test-real.owner-pid=${OWN_PID}`);
+    expect(build).toContain(`org.bazhen.test-real.host=${HOST}`);
+    expect(suite).toEqual(expect.arrayContaining(["--name", `${RUN}-api`, IMAGE]));
+    expect(suite).toContain(`org.bazhen.test-real.owner-pid=${OWN_PID}`);
+    expect(suite).toContain(`org.bazhen.test-real.host=${HOST}`);
+    expect(ownerOf(RUN)).toBe(OWN_PID);
+  });
+
+  it("removes its image and context when the build fails, and runs no suite", async () => {
+    const fake = fakeHost(buildFails);
+    expect(await run(["api"], fake.host)).toBe(1);
+    expect(fake.calls.some((c) => c[0] === "run")).toBe(false);
+    expect(cleanup(fake.calls)).toEqual([["image", "rm", IMAGE]]);
+    expect(fake.removed).toEqual([`/tmp/${RUN}`]);
+    expect(fake.handlers.size).toBe(0);
+  });
+
+  it("removes its containers, image and context when a suite fails, after running the rest", async () => {
+    const fake = fakeHost(integrationFails);
+    expect(await run(["integration", "api"], fake.host)).toBe(1);
+    expect(fake.calls.filter((c) => c[0] === "run")).toHaveLength(2);
+    expect(cleanup(fake.calls)).toEqual([
+      ["rm", "--force", `${RUN}-integration`, `${RUN}-api`],
+      ["image", "rm", IMAGE],
+    ]);
+    expect(fake.removed).toEqual([`/tmp/${RUN}`]);
+  });
+
+  it("stops the running suite on SIGTERM, runs no other, cleans up and exits 143", async () => {
+    const fake = fakeHost(integrationHangs);
+    const exit = run(["integration", "api"], fake.host);
+    await expect.poll(fake.waitingOn).toBe("run --rm");
+    fake.signal("SIGTERM");
+    expect(await exit).toBe(143);
+    expect(fake.stopped).toEqual(["SIGTERM"]);
+    expect(fake.calls.filter((c) => c[0] === "run")).toHaveLength(1);
+    expect(cleanup(fake.calls)).toEqual([
+      ["rm", "--force", `${RUN}-integration`],
+      ["image", "rm", IMAGE],
+    ]);
+    expect(fake.removed).toEqual([`/tmp/${RUN}`]);
+    expect(fake.handlers.size).toBe(0);
+  });
+
+  it("stops an interrupted build, removes whatever it tagged and exits 130 on SIGINT", async () => {
+    const fake = fakeHost(buildHangs);
+    const exit = run(["api"], fake.host);
+    await expect.poll(fake.waitingOn).toBe("build --tag");
+    fake.signal("SIGINT");
+    expect(await exit).toBe(130);
+    expect(fake.stopped).toEqual(["SIGINT"]);
+    expect(fake.calls.some((c) => c[0] === "run")).toBe(false);
+    expect(cleanup(fake.calls)).toEqual([["image", "rm", IMAGE]]);
+    expect(fake.removed).toEqual([`/tmp/${RUN}`]);
+  });
+
+  it("exits 128 + the signal's number when it arrives during a passing run's cleanup", async () => {
+    const fake = fakeHost(imageRmHangs);
+    const exit = run(["api"], fake.host);
+    await expect.poll(fake.waitingOn).toBe("image rm");
+    fake.signal("SIGHUP");
+    expect(await exit).toBe(129);
+    expect(fake.stopped).toEqual(["SIGHUP"]);
+  });
+
+  it("abandons the rest of its cleanup on a second signal, and says what it left", async () => {
+    const warn = quietly();
+    const fake = fakeHost(integrationHangsThenRmWedged);
+    const exit = run(["integration"], fake.host);
+    await expect.poll(fake.waitingOn).toBe("run --rm");
+    fake.signal("SIGTERM");
+    await expect.poll(fake.waitingOn).toBe("rm --force");
+    fake.signal("SIGINT");
+    await expect.poll(() => fake.stopped).toEqual(["SIGTERM", "SIGKILL"]);
+    expect(await exit).toBe(143);
+    expect(fake.calls.some((c) => verb(c) === "image rm")).toBe(false);
+    expect(fake.removed).toEqual([`/tmp/${RUN}`]);
+    expect(fake.handlers.size).toBe(0);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`${RUN}-integration, ${IMAGE}`));
+  });
+
+  it("gives up a cleanup command that hangs, stops it, and says what it left", async () => {
+    const warn = quietly();
+    const fake = fakeHost(imageRmWedged, { timeouts: true });
+    const exit = run(["api"], fake.host);
+    await expect.poll(() => fake.stopped).toEqual(["SIGTERM"]);
+    expect(await exit).toBe(0);
+    expect(fake.removed).toEqual([`/tmp/${RUN}`]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`left ${IMAGE}`));
+  });
+
+  it("goes on cleaning up after a step fails, and reports only a real failure", async () => {
+    const warn = quietly();
+    const conflict = fakeHost(rmConflicts);
+    expect(await run(["api"], conflict.host)).toBe(0);
+    expect(cleanup(conflict.calls).map(verb)).toEqual(["rm --force", "image rm"]);
+    expect(conflict.removed).toEqual([`/tmp/${RUN}`]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`left ${RUN}-api;`));
+    warn.mockClear();
+    expect(await run(["api"], fakeHost(rmFindsNothing).host)).toBe(0);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("stops listening for signals when the context can't be prepared", async () => {
+    const fake = fakeHost(passing, { prepare: failing });
+    await expect(run(["api"], fake.host)).rejects.toThrow("no such ref");
+    expect(fake.calls.some((c) => c[0] === "build")).toBe(false);
+    expect(fake.handlers.size).toBe(0);
+  });
+});
+
+/** A grace period that ends when the test says. */
+function grace() {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  return { wait: () => promise, elapse: () => resolve() };
+}
+
+describe("pnpm test:real's stop", () => {
+  it("kills a command still running when the grace period ends", async () => {
+    const sent: NodeJS.Signals[] = [];
+    const clock = grace();
+    const stop = stopper(
+      (s) => sent.push(s),
+      () => false,
+      clock.wait,
+    );
+    stop("SIGTERM");
+    stop("SIGINT");
+    clock.elapse();
+    await expect.poll(() => sent).toEqual(["SIGTERM", "SIGINT", "SIGKILL"]);
+  });
+
+  it("never signals a command that has exited", async () => {
+    const sent: NodeJS.Signals[] = [];
+    let exited = false;
+    const clock = grace();
+    const stop = stopper(
+      (s) => sent.push(s),
+      () => exited,
+      clock.wait,
+    );
+    stop("SIGTERM");
+    exited = true;
+    clock.elapse();
+    stop("SIGINT");
+    await Promise.resolve();
+    expect(sent).toEqual(["SIGTERM"]);
+  });
+});
+
+const dead = "bazhen-test-real:bz-real-111-aaaaaa";
+const live = "bazhen-test-real:bz-real-222-bbbbbb";
+const inUse = "bazhen-test-real:bz-real-333-cccccc";
+const unlabelled = "bazhen-test-real:bz-real-444-dddddd";
+const foreign = "postgres:bz-real-555-eeeeee";
+const elsewhere = "bazhen-test-real:bz-real-666-ffffff";
+const labels: Record<string, string> = {
+  [dead]: `111\t${HOST}`,
+  [live]: `222\t${HOST}`,
+  [inUse]: `333\t${HOST}`,
+  [unlabelled]: "\t",
+  [foreign]: `555\t${HOST}`,
+  [elsewhere]: "666\tdevcontainer",
+};
+const stoppedContainers = [
+  `bz-real-111-aaaaaa-api\t111\t${HOST}`,
+  `bz-real-222-bbbbbb-api\t222\t${HOST}`,
+  "bz-real-777-gggggg-e2e\t777\tdevcontainer",
+  `postgres-db\t111\t${HOST}`,
+];
+const host = (args: readonly string[]): Answer => {
+  const last = args.at(-1) ?? "";
+  if (verb(args) === "image ls") return result(0, `${Object.keys(labels).join("\n")}\n`);
+  if (verb(args) === "image inspect") return result(0, `${labels[last] ?? ""}\n`);
+  if (args.includes("status=exited")) return result(0, `${stoppedContainers.join("\n")}\n`);
+  if (args[0] === "ps") return result(0, last.endsWith(`=${inUse}`) ? "f00d\n" : "");
+  return result(0);
+};
+
+const isList = (c: string[]) => verb(c) === "image ls" || c.includes("status=exited");
+
+describe("pnpm test:real's sweep of runs that died", () => {
+  it("asks docker only for what this script labelled on this host", async () => {
+    const fake = fakeHost(host, { alive: [222] });
+    await sweep(fake.host);
+    const lists = fake.calls.filter(isList);
+    expect(lists).toHaveLength(2);
+    for (const list of lists) {
+      expect(list).toEqual(
+        expect.arrayContaining([
+          "label=org.bazhen.test-real.owner-pid",
+          `label=org.bazhen.test-real.host=${HOST}`,
+        ]),
+      );
+    }
+    expect(fake.calls.find((c) => verb(c) === "image ls")).toContain("reference=bazhen-test-real");
+  });
+
+  it("removes only a labelled image of this host whose owner is gone and that no container uses", async () => {
+    const fake = fakeHost(host, { alive: [222] });
+    await sweep(fake.host);
+    expect(fake.calls.filter((c) => verb(c) === "image rm")).toEqual([["image", "rm", dead]]);
+  });
+
+  it("removes the stopped containers of this host's gone runs, before judging their images", async () => {
+    const fake = fakeHost(host, { alive: [222] });
+    await sweep(fake.host);
+    const removals = fake.calls.filter(isRemoval);
+    expect(removals).toEqual([
+      ["rm", "bz-real-111-aaaaaa-api"],
+      ["image", "rm", dead],
+    ]);
+  });
+
+  it("removes only the context dirs of runs that are gone, never its own", async () => {
+    const dirs = [
+      "/tmp/bz-real-111-xxxxxx",
+      "/tmp/bz-real-222-yyyyyy",
+      `/tmp/bz-real-${OWN_PID}-zzzzzz`,
+    ];
+    const fake = fakeHost(host, { alive: [222], dirs });
+    await sweep(fake.host);
+    expect(fake.removed).toEqual(["/tmp/bz-real-111-xxxxxx"]);
+  });
+
+  it("reads no owner from a name this script didn't make", () => {
+    expect(ownerOf("bz-real-WDZqbF")).toBeUndefined();
+    expect(ownerOf("bz-real-1-abcdef")).toBeUndefined();
   });
 });

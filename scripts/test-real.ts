@@ -3,11 +3,18 @@
 // falsify's base, overlaid with the worktree's uncommitted files, so falsify judges commits and
 // the other suites test what is on disk. Each suite gets a container of its own, with nothing of
 // the host's: no mount, no socket, no network.
+//
+// A run removes its containers, image and context on every exit it can observe, a signal
+// included: docker runs asynchronously in a process group of its own, and a signal is forwarded
+// to it rather than ending this process mid-step; a second signal abandons the cleanup. What a run
+// killed outright or abandoned left is removed by the next run's sweep, which goes by the owner
+// pid and host each run's names and labels carry.
 
-import { execFileSync, spawnSync } from "node:child_process";
-import { cpSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { execFileSync, type ChildProcess } from "node:child_process";
+import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { constants, hostname, tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { isAlive, signalGroup, spawnGroup } from "@bazhen/host-guard";
 import { isMain } from "./is-main.ts";
 
 const SUITES = {
@@ -75,8 +82,38 @@ const git = (cwd: string, ...args: string[]) =>
 const gitFiles = (top: string, flag: string) =>
   git(top, "ls-files", "-z", flag, "--exclude-standard").split("\0").filter(Boolean);
 
-function buildContext(top: string, base: string): string {
-  const dir = mkdtempSync(join(tmpdir(), "bz-real-"));
+const REPOSITORY = "bazhen-test-real";
+const LABEL = "org.bazhen.test-real";
+const OWNER_LABEL = `${LABEL}.owner-pid`;
+/** Which machine's pids the owner label counts in: a pid means nothing on another host. */
+const HOST_LABEL = `${LABEL}.host`;
+const RUN_NAME = /^bz-real-(\d+)-[\w.-]+$/;
+/** How long docker gets to stop after a forwarded signal before its group is killed. */
+const STOP_GRACE_MS = 10_000;
+/** How long a sweep or cleanup command may take: a wedged daemon must not hold the run. */
+const QUIET_TIMEOUT_MS = 30_000;
+
+/** A run's name, `bz-real-<owner pid>-<random>`: its context dir, image tag and containers. */
+const runPrefix = (pid: number) => `bz-real-${pid}-`;
+
+/** The pid of the run a context dir or image tag belongs to. */
+export function ownerOf(name: string): number | undefined {
+  const pid = Number(RUN_NAME.exec(name)?.[1]);
+  return Number.isInteger(pid) && pid > 1 ? pid : undefined;
+}
+
+function buildContext(top: string, base: string, prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  try {
+    fillContext(dir, top, base);
+  } catch (error) {
+    rmSync(dir, { recursive: true, force: true });
+    throw error;
+  }
+  return dir;
+}
+
+function fillContext(dir: string, top: string, base: string): void {
   git(dir, "init", "--quiet");
   git(
     dir,
@@ -98,43 +135,219 @@ function buildContext(top: string, base: string): string {
     }
   }
   if (skipped.length > 0) console.warn(`test:real: left out of the image: ${skipped.join(", ")}`);
-  return dir;
 }
 
-// The host's own architecture: a shell's default platform can name one Docker would emulate.
-const { DOCKER_DEFAULT_PLATFORM: _emulated, ...dockerEnv } = process.env;
-
-function docker(args: string[]): boolean {
-  return spawnSync("docker", args, { stdio: "inherit", env: dockerEnv }).status === 0;
+export interface DockerResult {
+  readonly code: number | null;
+  readonly out: string;
+  readonly err: string;
 }
 
-function main(args: string[]): number {
-  const { suites, base } = parseArgs(args);
-  const top = git(process.cwd(), "rev-parse", "--show-toplevel");
-  const context = buildContext(top, base);
-  // A tag of this run's own, so a run elsewhere never removes the image this one is using.
-  const image = `bazhen-test-real:${basename(context).replace(/[^\w.-]/g, "")}`;
-  let built = false;
-  try {
-    built = docker([
-      "build",
-      "--tag",
-      image,
-      ...Object.entries(pins((p) => readFileSync(join(context, p), "utf8"))).flatMap(([k, v]) => [
-        "--build-arg",
-        `${k}=${v}`,
-      ]),
-      "-f",
-      join(context, "tests/real/Dockerfile"),
-      context,
+/** One docker command in flight. */
+export interface DockerCall {
+  readonly done: Promise<DockerResult>;
+  /** Passes a signal on to the command, which then gets a grace period to stop. */
+  stop(signal: NodeJS.Signals): void;
+}
+
+/** Starts docker with `args`; a quiet call captures its output instead of printing it. */
+export type Docker = (args: readonly string[], quiet?: boolean) => DockerCall;
+
+/** Everything a run does to the host, so a test can stand in for it. */
+export interface Host {
+  readonly pid: number;
+  /** This machine, as the host label records it. */
+  readonly id: string;
+  readonly docker: Docker;
+  /** Creates this run's build context, a dir named by `runPrefix`, and its build arguments. */
+  prepare(base: string, prefix: string): { dir: string; buildArgs: Record<string, string> };
+  removeDir(dir: string): void;
+  /** Every run's context dir on this host, by path. */
+  runDirs(): string[];
+  isAlive(pid: number): boolean;
+  /** Subscribes to SIGINT, SIGTERM and SIGHUP in place of their default exit; returns the undo. */
+  onSignal(handler: (signal: NodeJS.Signals) => void): () => void;
+  /** Settles after `ms`, without keeping the process alive. */
+  after(ms: number): Promise<void>;
+}
+
+/** Runs one quiet docker command to its end, or its timeout. */
+export type Quiet = (args: readonly string[]) => Promise<DockerResult>;
+
+const failed = (err: string): DockerResult => ({ code: null, out: "", err });
+
+/** A quiet call's result, or a failure once `QUIET_TIMEOUT_MS` passes, the call then stopped. */
+async function withTimeout(host: Host, call: DockerCall, args: readonly string[]) {
+  const timedOut = host.after(QUIET_TIMEOUT_MS).then(() => undefined);
+  const result = await Promise.race([call.done, timedOut]);
+  if (result !== undefined) return result;
+  call.stop("SIGTERM");
+  return failed(`docker ${args.slice(0, 2).join(" ")} timed out`);
+}
+
+/** Quiet commands, each bounded by `QUIET_TIMEOUT_MS`. */
+export const bounded =
+  (host: Host): Quiet =>
+  (args) =>
+    withTimeout(host, host.docker(args, true), args);
+
+/** The lines a quiet docker command printed, or none when it failed. */
+async function lines(quiet: Quiet, args: readonly string[]): Promise<string[]> {
+  const { code, out } = await quiet(args);
+  return code === 0 ? out.split("\n").filter(Boolean) : [];
+}
+
+/** Whether a removal failed only because there was nothing left to remove. */
+const gone = ({ code, err }: DockerResult) =>
+  code === 0 ||
+  (code !== null && err.split("\n").every((line) => line === "" || /no such/i.test(line)));
+
+/**
+ * Removes what runs on this host that died without cleaning up left behind: their stopped
+ * containers, then each image of this repository labelled by this script whose owner is gone and
+ * which no container uses, then their context dirs. A pid that was reused reads as alive, so the
+ * sweep can only keep a dead run's leftovers longer, never take a live run's. Nothing is forced.
+ */
+export async function sweep(host: Host, quiet: Quiet = bounded(host)): Promise<void> {
+  const dead = (pid: number | undefined) =>
+    pid !== undefined && pid > 1 && pid !== host.pid && !host.isAlive(pid);
+  const ours = ["--filter", `label=${OWNER_LABEL}`, "--filter", `label=${HOST_LABEL}=${host.id}`];
+  const stopped = await lines(quiet, [
+    "ps",
+    "--all",
+    ...ours,
+    "--filter",
+    "status=created",
+    "--filter",
+    "status=exited",
+    "--filter",
+    "status=dead",
+    "--format",
+    `{{.Names}}\t{{.Label "${OWNER_LABEL}"}}\t{{.Label "${HOST_LABEL}"}}`,
+  ]);
+  for (const line of stopped) {
+    const [name = "", owner, id] = line.split("\t");
+    if (RUN_NAME.test(name) && id === host.id && dead(Number(owner))) {
+      await quiet(["rm", name]);
+    }
+  }
+  const refs = await lines(quiet, [
+    "image",
+    "ls",
+    "--filter",
+    `reference=${REPOSITORY}`,
+    ...ours,
+    "--format",
+    "{{.Repository}}:{{.Tag}}",
+  ]);
+  for (const ref of refs.filter((r) => r.startsWith(`${REPOSITORY}:`))) {
+    const [labels = ""] = await lines(quiet, [
+      "image",
+      "inspect",
+      "--format",
+      `{{index .Config.Labels "${OWNER_LABEL}"}}\t{{index .Config.Labels "${HOST_LABEL}"}}`,
+      ref,
     ]);
-    if (!built) return 1;
-    const failed = suites.filter(
-      (suite) =>
-        !docker([
+    const [owner, id] = labels.split("\t");
+    if (id !== host.id || !dead(Number(owner))) continue;
+    const users = await lines(quiet, ["ps", "--all", "--quiet", "--filter", `ancestor=${ref}`]);
+    if (users.length > 0) continue;
+    const removed = await quiet(["image", "rm", ref]);
+    console.warn(
+      removed.code === 0
+        ? `test:real: removed ${ref}, left by a run that is gone`
+        : `test:real: kept ${ref}: ${removed.err.trim()}`,
+    );
+  }
+  for (const dir of host.runDirs()) {
+    if (dead(ownerOf(basename(dir)))) host.removeDir(dir);
+  }
+}
+
+const exitCodeFor = (signal: NodeJS.Signals) => 128 + constants.signals[signal];
+
+/**
+ * Runs the suites in `args`; the exit code, 128 + the signal's number once one arrived. The first
+ * signal stops the command in flight and the run cleans up; a second abandons the cleanup, so a
+ * wedged Docker can't hold the run, and the next run's sweep removes what was left.
+ */
+export async function run(args: readonly string[], host: Host): Promise<number> {
+  const { suites, base } = parseArgs(args);
+  const inFlight = new Set<DockerCall>();
+  let interrupted: NodeJS.Signals | undefined;
+  const { promise: abandoned, resolve: abandon } = Promise.withResolvers<undefined>();
+  let isAbandoned = false;
+  // Stays subscribed through cleanup, so a second signal can still cut it short.
+  const unsubscribe = host.onSignal((signal) => {
+    if (interrupted === undefined) {
+      interrupted = signal;
+      for (const call of inFlight) call.stop(signal);
+    } else if (!isAbandoned) {
+      isAbandoned = true;
+      abandon(undefined);
+      for (const call of inFlight) call.stop("SIGKILL");
+    }
+  });
+  const track = async (call: DockerCall, done: Promise<DockerResult>) => {
+    inFlight.add(call);
+    const result = await Promise.race([done, abandoned]);
+    inFlight.delete(call);
+    return result ?? failed("abandoned");
+  };
+  const step = async (dockerArgs: readonly string[]) => {
+    if (interrupted !== undefined) return false;
+    const call = host.docker(dockerArgs);
+    return (await track(call, call.done)).code === 0;
+  };
+  const quiet: Quiet = async (dockerArgs) => {
+    if (isAbandoned) return failed("abandoned");
+    const call = host.docker(dockerArgs, true);
+    return track(call, withTimeout(host, call, dockerArgs));
+  };
+  let dir: string | undefined;
+  let image: string | undefined;
+  const containers: string[] = [];
+  let code = 1;
+  try {
+    code = await (async () => {
+      await sweep(host, (a) =>
+        interrupted === undefined ? quiet(a) : Promise.resolve(failed("interrupted")),
+      );
+      if (interrupted !== undefined) return 1;
+      const prepared = host.prepare(base, runPrefix(host.pid));
+      dir = prepared.dir;
+      const name = basename(dir);
+      image = `${REPOSITORY}:${name}`;
+      const labels = [
+        "--label",
+        `${LABEL}=1`,
+        "--label",
+        `${OWNER_LABEL}=${host.pid}`,
+        "--label",
+        `${HOST_LABEL}=${host.id}`,
+      ];
+      const built = await step([
+        "build",
+        "--tag",
+        image,
+        ...labels,
+        ...Object.entries(prepared.buildArgs).flatMap(([k, v]) => ["--build-arg", `${k}=${v}`]),
+        "-f",
+        join(dir, "tests/real/Dockerfile"),
+        dir,
+      ]);
+      if (!built) return 1;
+      const failedSuites: Suite[] = [];
+      for (const suite of suites) {
+        const container = `${name}-${suite}`;
+        containers.push(container);
+        const passed = await step([
           "run",
           "--rm",
           "--init",
+          "--name",
+          container,
+          ...labels,
           "--network",
           "none",
           // Chromium needs more shared memory than a container's default 64 MB.
@@ -144,18 +357,119 @@ function main(args: string[]): number {
           "pnpm",
           SUITES[suite],
           ...(suite === "falsify" ? ["--base", BASE_REF] : []),
-        ]),
-    );
-    console.log(
-      failed.length === 0
-        ? `test:real: ${suites.join(", ")} passed`
-        : `test:real: ${failed.join(", ")} failed`,
-    );
-    return failed.length === 0 ? 0 : 1;
+        ]);
+        if (interrupted !== undefined) return 1;
+        if (!passed) failedSuites.push(suite);
+      }
+      console.log(
+        failedSuites.length === 0
+          ? `test:real: ${suites.join(", ")} passed`
+          : `test:real: ${failedSuites.join(", ")} failed`,
+      );
+      return failedSuites.length === 0 ? 0 : 1;
+    })();
   } finally {
-    if (built) docker(["image", "rm", image]);
-    rmSync(context, { recursive: true, force: true });
+    const left: string[] = [];
+    // `--rm` usually got there first; a container whose docker client died did not.
+    if (containers.length > 0 && !gone(await quiet(["rm", "--force", ...containers]))) {
+      left.push(...containers);
+    }
+    // By tag, unforced: another run's tag on the same image keeps it.
+    if (image !== undefined && !gone(await quiet(["image", "rm", image]))) left.push(image);
+    if (dir !== undefined) host.removeDir(dir);
+    unsubscribe();
+    if (left.length > 0) {
+      console.warn(`test:real: left ${left.join(", ")}; the next run's sweep removes them`);
+    }
   }
+  return interrupted === undefined ? code : exitCodeFor(interrupted);
 }
 
-if (isMain(import.meta)) process.exitCode = main(process.argv.slice(2));
+// The host's own architecture: a shell's default platform can name one Docker would emulate.
+const { DOCKER_DEFAULT_PLATFORM: _emulated, ...dockerEnv } = process.env;
+
+const after = (ms: number) =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, ms).unref();
+  });
+
+/**
+ * A command's `stop`: passes the signal on, then kills the command if it is still running
+ * `STOP_GRACE_MS` later. A command that has exited is never signalled again.
+ */
+export function stopper(
+  send: (signal: NodeJS.Signals) => void,
+  hasExited: () => boolean,
+  wait: (ms: number) => Promise<void>,
+): (signal: NodeJS.Signals) => void {
+  let escalating = false;
+  return (signal) => {
+    if (hasExited()) return;
+    send(signal);
+    if (escalating || signal === "SIGKILL") return;
+    escalating = true;
+    void wait(STOP_GRACE_MS).then(() => {
+      if (!hasExited()) send("SIGKILL");
+    });
+  };
+}
+
+const exited = (child: ChildProcess) => child.exitCode !== null || child.signalCode !== null;
+
+const docker: Docker = (args, quietly = false) => {
+  const child = spawnGroup("docker", args, {
+    env: dockerEnv,
+    stdio: quietly ? ["ignore", "pipe", "pipe"] : ["ignore", "inherit", "inherit"],
+  });
+  let out = "";
+  let err = "";
+  child.stdout?.setEncoding("utf8").on("data", (chunk: string) => (out += chunk));
+  child.stderr?.setEncoding("utf8").on("data", (chunk: string) => (err += chunk));
+  const done = new Promise<DockerResult>((resolve) => {
+    child.once("error", (error) => resolve({ code: null, out, err: err + error.message }));
+    child.once("close", (code) => resolve({ code, out, err }));
+  });
+  return {
+    done,
+    stop: stopper(
+      (signal) => signalGroup(child, signal),
+      () => exited(child),
+      after,
+    ),
+  };
+};
+
+const SIGNALS: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP"];
+
+const host: Host = {
+  pid: process.pid,
+  id: hostname(),
+  docker,
+  prepare(base, prefix) {
+    const dir = buildContext(git(process.cwd(), "rev-parse", "--show-toplevel"), base, prefix);
+    return { dir, buildArgs: pins((p) => readFileSync(join(dir, p), "utf8")) };
+  },
+  removeDir: (dir) => rmSync(dir, { recursive: true, force: true }),
+  runDirs: () =>
+    readdirSync(tmpdir())
+      .filter((name) => RUN_NAME.test(name))
+      .map((name) => join(tmpdir(), name)),
+  isAlive,
+  after,
+  onSignal(handler) {
+    for (const signal of SIGNALS) process.on(signal, handler);
+    return () => {
+      for (const signal of SIGNALS) process.off(signal, handler);
+    };
+  },
+};
+
+if (isMain(import.meta)) {
+  run(process.argv.slice(2), host).then(
+    (code) => (process.exitCode = code),
+    (error: unknown) => {
+      console.error(`test:real: ${error instanceof Error ? error.message : String(error)}`);
+      process.exitCode = 1;
+    },
+  );
+}

@@ -38,8 +38,17 @@ The other three sizes run real tmux, so they run only on a disposable host: the 
 disposable host is Linux with `/etc/bazhen-disposable-host`; their setup refuses to start
 anywhere else. Never create that file on a machine you work on. Inside a container or CI they
 are the `pnpm test:integration`, `test:api` and `test:e2e` scripts, one worker each. Each run's
-image is removed when it ends, and its containers have no network; Docker's build cache keeps the
-layers, so `docker builder prune` reclaims that space.
+containers have no network. A run removes its containers, image and build context on every exit
+it sees, Ctrl-C, SIGTERM and SIGHUP included, and gives each cleanup command 30 seconds; a second
+signal abandons the cleanup. What a run killed outright or abandoned left, the next run on the
+same machine removes: it sweeps the stopped containers, images and contexts whose owning process
+is gone, and an image only once no container uses it.
+Docker's build cache keeps the layers, so repeat runs are fast; BuildKit's garbage collection
+bounds it, and `docker builder prune` reclaims it on a machine of your own.
+
+**Remove every scratch Docker image and container you build,** by its own tag or name, when you
+are done with it. Several agents share one Docker host, so never prune, and never remove an image
+you did not build: another run may be using it.
 
 Write the smallest test that can fail for the right reason. E2E tests cover only wiring that
 crosses processes; a behaviour that a medium test can reach belongs in a medium test.
