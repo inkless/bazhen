@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { HealthResponse, isCompatible } from "@bazhen/protocol";
-import { Fleet } from "./Fleet.tsx";
+import { Dashboard } from "./Dashboard.tsx";
 
 type Status =
   | { kind: "loading" }
@@ -26,24 +26,26 @@ export function App() {
   }, []);
 
   return (
-    <main style={{ fontFamily: "system-ui", padding: 24 }}>
-      <h1>Bazhen</h1>
-      {status.kind === "loading" && <p>Connecting to the daemon…</p>}
-      {status.kind === "error" && <p role="alert">Daemon unavailable: {status.message}</p>}
-      {status.kind === "ok" && (
-        <dl>
-          <dt>Daemon</dt>
-          <dd>{status.health.appVersion}</dd>
-          <dt>Protocol</dt>
-          <dd>{status.health.protocolVersion}</dd>
-          <dt>tmux</dt>
-          <dd>
-            {status.health.runtime.state}
-            {status.health.runtime.version ? ` (${status.health.runtime.version})` : ""}
-          </dd>
-        </dl>
-      )}
-      {status.kind === "ok" && <Fleet />}
+    <main>
+      <header className="app-head">
+        <h1>Bazhen</h1>
+        {status.kind === "loading" && <p>Connecting to the daemon…</p>}
+        {status.kind === "error" && <p role="alert">Daemon unavailable: {status.message}</p>}
+        {status.kind === "ok" && (
+          <dl>
+            <dt>Daemon</dt>
+            <dd>{status.health.appVersion}</dd>
+            <dt>Protocol</dt>
+            <dd>{status.health.protocolVersion}</dd>
+            <dt>tmux</dt>
+            <dd>
+              {status.health.runtime.state}
+              {status.health.runtime.version ? ` (${status.health.runtime.version})` : ""}
+            </dd>
+          </dl>
+        )}
+      </header>
+      {status.kind === "ok" && <Dashboard />}
     </main>
   );
 }
