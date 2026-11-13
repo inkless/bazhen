@@ -120,6 +120,12 @@ describe("Claude Code hooks", () => {
     expect([own, subagent].map((h) => isMainAgentTool(toolOf(h)))).toEqual([true, false]);
   });
 
+  // Allowing a question runs it without answering it, so the agent waits on, or asks again.
+  it("leaves a question for the human to the TUI, which an inbox allow or deny can't answer", () => {
+    const question = { tool_name: "AskUserQuestion", tool_input: { questions: [] } };
+    expect(readHook("PermissionRequest", question)).toEqual({ kind: "ignored" });
+  });
+
   it("ignores a hook it did not install", () => {
     expect(readHook("Notification", {})).toEqual({ kind: "ignored" });
   });

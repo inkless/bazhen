@@ -109,6 +109,8 @@ export function readHook(event: string, payload: unknown): Hook {
       return useId === null ? IGNORED : { kind: "toolStarted", tool: toolKey(payload), useId };
     }
     case "PermissionRequest":
+      // A question wants the human's choice, which allow or deny can't give: the TUI asks it.
+      if (field(payload, "tool_name") === "AskUserQuestion") return IGNORED;
       return { kind: "permission", summary: approvalSummary(payload), tool: toolKey(payload) };
     case "UserPromptSubmit":
       return { kind: "promptStarted", prompt: promptOf(payload), promptId: promptIdOf(payload) };
