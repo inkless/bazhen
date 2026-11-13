@@ -40,9 +40,18 @@ describe("local environment", () => {
   it("runs the harness's TUI in a terminal tagged with its agent, with Bazhen's variables", async () => {
     const runtime = new FakeRuntime();
     const l = launch();
-    expect(runtime.specOf(await terminalOf(environment(runtime), l))).toEqual({
+    const env = environment(runtime);
+    expect(runtime.specOf(await terminalOf(env, l))).toEqual({
       terminalId: l.terminalId,
-      tags: { kind: "agent", agentId: l.agentId },
+      tags: {
+        kind: "agent",
+        agentId: l.agentId,
+        harnessSession: JSON.stringify({
+          kind: "claude-session",
+          id: "s-1",
+          environmentId: env.id,
+        }),
+      },
       argv: ["claude", "--session-id", "s-1"],
       cwd: "/work",
       env: { HARNESS_OWN: "1", BAZHEN_AGENT_ID: l.agentId, BAZHEN_SOCKET: "/run/b.sock" },
@@ -118,6 +127,50 @@ describe("local environment", () => {
     expect(states).toEqual(["reachable", "reachable", "unreachable"]);
   });
 
+  it("carries the harness session on the terminal, so an inventory reads it back", async () => {
+    const runtime = new FakeRuntime();
+    const env = environment(runtime);
+    const l = launch();
+    await env.launch(l);
+    expect((await env.inventory())[0]?.externalRef).toEqual({
+      environmentId: env.id,
+      kind: "claude-session",
+      id: "s-1",
+    });
+  });
+
+  it("reads back only a harness session of its own, never another environment's, a flag, or one that doesn't parse", async () => {
+    const runtime = new FakeRuntime();
+    const env = environment(runtime);
+    const own = { environmentId: env.id, kind: "codex-thread", id: "t-1" } as const;
+    const foreign = { ...own, environmentId: newId("env") };
+    const flag = { ...own, id: "--dangerously-skip-permissions" };
+    const tags = [
+      JSON.stringify(own),
+      JSON.stringify(foreign),
+      JSON.stringify(flag),
+      "{not json",
+      '{"kind":"other"}',
+    ];
+    for (const harnessSession of tags)
+      await runtime.create({
+        terminalId: newId("term"),
+        tags: { kind: "agent", agentId: newId("agent"), harnessSession },
+        argv: ["sleep", "300"],
+        cwd: "/w",
+        env: {},
+        size: { cols: 80, rows: 24 },
+        generation: 0,
+      });
+    expect((await env.inventory()).map((e) => e.externalRef)).toEqual([
+      own,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+  });
+
   it("lists only agent terminals, by the agent their tags name", async () => {
     const runtime = new FakeRuntime();
     const env = environment(runtime);
@@ -128,7 +181,9 @@ describe("local environment", () => {
       terminalId: newId("term"),
       tags: { kind: "shell" },
     });
-    expect(await env.inventory()).toEqual([{ agentId: l.agentId, ref, dead: false }]);
+    expect(
+      (await env.inventory()).map(({ agentId, ref: at, dead }) => ({ agentId, ref: at, dead })),
+    ).toEqual([{ agentId: l.agentId, ref, dead: false }]);
   });
 
   it("refuses to respawn a terminal whose process still runs, before the harness resumes anything", async () => {

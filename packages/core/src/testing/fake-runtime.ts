@@ -115,7 +115,8 @@ export class FakeRuntime implements RuntimeAdapter {
   }
 
   async attach(ref: RuntimeRef, size: Size | null, historyLines: number): Promise<Attached> {
-    const t = this.terminalOf(ref);
+    const t = this.onServer(ref);
+    if (t === undefined) throw new StaleIncarnation(ref.terminalId, "gone");
     t.clients.attaches.push(size);
     if (size !== null) t.size = size;
     const data: ((bytes: Uint8Array) => void)[] = [];
@@ -156,9 +157,24 @@ export class FakeRuntime implements RuntimeAdapter {
     return { stream, history: lines, alternate: t.alternate };
   }
 
+  /** A fake server that is replaced is gone, so a terminal no server carries is closed. */
   async close(ref: RuntimeRef): Promise<void> {
+    this.read();
+    if (!this.terminals.has(ref.terminalId)) return;
     const t = this.onServer(ref);
     if (t !== undefined) this.remove(t);
+  }
+
+  /** A fake server that is replaced is gone, so only a terminal it carries is not. */
+  async gone(ref: RuntimeRef): Promise<boolean> {
+    this.read();
+    return !this.terminals.has(ref.terminalId);
+  }
+
+  /** Ends the server and every terminal on it, as a reboot would; the next create starts another. */
+  killServer(): void {
+    this.terminals.clear();
+    this.serverStart = "";
   }
 
   async respawn(ref: RuntimeRef, spec: TerminalSpec): Promise<RuntimeRef> {

@@ -11,7 +11,15 @@ export interface Size {
  * the join from the runtime alone (foundation-design §3.2).
  */
 export type TerminalTags =
-  | { readonly kind: "agent"; readonly agentId: AgentSessionId }
+  | {
+      readonly kind: "agent";
+      readonly agentId: AgentSessionId;
+      /**
+       * The harness session the agent was launched on, opaque here, so a daemon that died before
+       * recording it can still resume it.
+       */
+      readonly harnessSession?: string;
+    }
   | { readonly kind: "shell"; readonly linkedAgentId?: AgentSessionId };
 
 export interface TerminalSpec {
@@ -74,6 +82,19 @@ export function assertSameGeneration(ref: RuntimeRef, current: string | undefine
   if (recorded !== current) throw new StaleIncarnation(ref.terminalId, "process-replaced");
 }
 
+/**
+ * The runtime no longer shows the terminal, but the server it was made on may still run it, its
+ * socket deleted or taken by another, so it can't be called ended (foundation-design §7.1).
+ */
+export class TerminalUnconfirmed extends Error {
+  readonly terminalId: TerminalId;
+
+  constructor(terminalId: TerminalId, cause: unknown) {
+    super(`terminal ${terminalId}: its server may still be running it`, { cause });
+    this.terminalId = terminalId;
+  }
+}
+
 /** The right incarnation, but its process is not in the state the request needs. */
 export class ProcessState extends Error {
   readonly terminalId: TerminalId;
@@ -129,8 +150,16 @@ export interface RuntimeAdapter {
    * to `historyLines` of the history above its screen.
    */
   attach(ref: RuntimeRef, size: Size | null, historyLines: number): Promise<Attached>;
-  /** Ends the terminal. A terminal the runtime positively no longer has counts as closed. */
+  /**
+   * Ends the terminal. A terminal the runtime positively no longer has counts as closed; one whose
+   * server may still run it is `TerminalUnconfirmed`.
+   */
   close(ref: RuntimeRef): Promise<void>;
+  /**
+   * Whether the runtime positively no longer has the terminal: nothing carries it, and the server
+   * it was made on answers or is provably gone. Close and reconciliation both go by this.
+   */
+  gone(ref: RuntimeRef): Promise<boolean>;
   /** Starts a new process in a terminal whose process has exited, and returns the new ref. */
   respawn(ref: RuntimeRef, spec: ProcessSpec): Promise<RuntimeRef>;
   /** Signals the terminal's process and its process group. */

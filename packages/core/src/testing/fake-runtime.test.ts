@@ -13,6 +13,7 @@ runtimeContract("FakeRuntime", {
   unreadable: (runtime) => fakeOf(runtime).disconnect(),
   replacePane: (runtime, ref) => fakeOf(runtime).replacePane(ref),
   vanish: (runtime, ref) => fakeOf(runtime).vanish(ref),
+  killServer: (runtime) => fakeOf(runtime).killServer(),
   cwd: "/w",
   waitMs: 1_000,
 });

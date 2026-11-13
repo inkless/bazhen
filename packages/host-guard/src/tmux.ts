@@ -191,7 +191,7 @@ export function parsePsLine(line: string): { start: number; rest: string } | und
  * tmux: a tmux command, `socket` itself in its arguments, and the recorded start. The server keeps
  * the arguments of the command that started it, so its `-S <socket>`, unless its process title was
  * set to `tmux: server (<socket>)`, as tmux does where it can. It is gone only if no process has
- * the pid, or one that is neither the server nor started when it did. A process that looks like
+ * the pid, or one with nothing of tmux or this socket about it that started at another time. A process that looks like
  * the server but started at another time is unsure: on Linux, a step of the wall clock moves
  * `lstart`.
  */
@@ -209,7 +209,11 @@ export function serverVerdict(
   const recorded = /^\d+$/.test(identity.start) ? Number(identity.start) : undefined;
   const sameStart = recorded !== undefined && Math.abs(reading.start - recorded) <= START_SKEW_S;
   if (ours && sameStart) return { is: "serves" };
-  if (!ours && !sameStart && recorded !== undefined) return { is: "gone" };
+  // Gone only for a process nothing ties to tmux or to this socket: a live server that fails the
+  // strict test (a wrapped binary, a socket spelled another way) while a clock step skews its
+  // start must not read as dead.
+  const tmuxLike = basename(reading.comm).includes("tmux") || args.includes(socket);
+  if (!tmuxLike && !sameStart && recorded !== undefined) return { is: "gone" };
   return {
     is: "unsure",
     why: ours ? "it started at another time" : `${reading.comm} is not this socket's server`,
@@ -344,6 +348,16 @@ export class TmuxServer {
   }
 
   /**
+   * What `ps` shows of the server `identity` names, whether or not the socket reaches it.
+   * Sends nothing.
+   */
+  async verdict(identity: ServerIdentity): Promise<ServerVerdict> {
+    const pid = pidOf(identity);
+    if (pid === undefined) return { is: "unsure", why: `pid ${identity.pid} names no process` };
+    return serverVerdict(await readProcess(pid), identity, this.socket);
+  }
+
+  /**
    * Makes the server `identity` names recreate its socket with `SIGUSR1`, once `ps` shows it still
    * runs as this socket's server: a temp cleaner can delete the socket under a live server
    * (foundation-design §7.1). Sends nothing unless it serves. Between the check and the signal a
@@ -351,10 +365,9 @@ export class TmuxServer {
    * the server exiting and its pid going to a new process within the ~10 ms between them.
    */
   async recreateSocket(identity: ServerIdentity): Promise<ServerVerdict> {
+    const verdict = await this.verdict(identity);
     const pid = pidOf(identity);
-    if (pid === undefined) return { is: "unsure", why: `pid ${identity.pid} names no process` };
-    const verdict = serverVerdict(await readProcess(pid), identity, this.socket);
-    if (verdict.is !== "serves") return verdict;
+    if (verdict.is !== "serves" || pid === undefined) return verdict;
     return signalServer(vouchServer({ pid, socket: this.socket })) ? verdict : { is: "gone" };
   }
 

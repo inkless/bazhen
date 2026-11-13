@@ -56,7 +56,8 @@ export const EVENTS = {
   },
   "agent.failed": {
     entity: "agent",
-    payload: z.object({ reason: z.enum(["launch_rejected"]) }),
+    /** `daemon_restart`: the daemon died mid-launch, and its terminal never appeared (§7.1). */
+    payload: z.object({ reason: z.enum(["launch_rejected", "daemon_restart"]) }),
   },
   /** A reachable environment no longer has the agent's terminal (§4.5, §7.1). */
   "agent.lost": { entity: "agent", payload: z.object({}) },
@@ -74,7 +75,14 @@ export const EVENTS = {
   "agent.respawn_rejected": {
     entity: "agent",
     payload: z.object({
-      reason: z.enum(["not_resumable", "no_terminal", "terminal_changed", "unavailable"]),
+      /** `daemon_restart`: the daemon died mid-respawn, before the new process started (§7.1). */
+      reason: z.enum([
+        "not_resumable",
+        "no_terminal",
+        "terminal_changed",
+        "unavailable",
+        "daemon_restart",
+      ]),
     }),
   },
   /**

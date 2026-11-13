@@ -44,6 +44,7 @@ runtimeContract("TmuxRuntime", {
   vanish: (runtime, ref) => {
     tmuxOut(serverOf(runtime), "kill-session", "-t", String(ref.locator.sessionId));
   },
+  killServer: (runtime) => serverOf(runtime).kill(),
   cwd: mkdtempSync(join(tmpdir(), "bz-contract-")),
   // A loaded CI runner can take a second or more to reap a pane's process.
   waitMs: 10_000,

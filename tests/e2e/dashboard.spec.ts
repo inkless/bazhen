@@ -52,6 +52,31 @@ function launchElsewhere(page: Page): Promise<number> {
 }
 
 const workspace = (page: Page) => page.getByRole("article", { name: "agent" });
+
+const json = (status: number, body: object) => ({
+  status,
+  contentType: "application/json",
+  body: JSON.stringify(body),
+});
+
+/**
+ * Answers every close of `agentId` from the page as a daemon whose agent's old tmux server may
+ * still run it: refused unconfirmed, and a forced one accepted. Returns the forced bodies.
+ */
+async function unconfirmedCloses(page: Page, agentId: string): Promise<unknown[]> {
+  const forced: unknown[] = [];
+  await page.route(`**/v1/agents/${agentId}/close`, async (route) => {
+    const body: unknown = route.request().postDataJSON();
+    const force = Reflect.get(Object(body), "force") === true;
+    if (force) forced.push(body);
+    await route.fulfill(
+      force
+        ? json(200, { agentId, eventIds: [] })
+        : json(409, { error: "server_unconfirmed", message: "its old server may still run it" }),
+    );
+  });
+  return forced;
+}
 const stateOf = (page: Page, state: string) =>
   workspace(page).locator(".workspace-head").getByText(state, { exact: true });
 
@@ -117,4 +142,34 @@ test("copies the attach command on a page with no clipboard API, as over plain h
   await expect(workspace(page).getByRole("status").filter({ hasText: "Copied" })).toBeVisible();
   const command = await workspace(page).locator(".attach code").textContent();
   expect(await page.evaluate(() => Reflect.get(globalThis, "copiedText"))).toBe(command);
+});
+
+test("offers a forced close only once a close comes back unconfirmed, and sends it behind a confirm", async ({
+  page,
+}) => {
+  const agentId = await launch(page);
+  const forced = await unconfirmedCloses(page, agentId);
+  const force = workspace(page).getByRole("button", { name: "Force close…" });
+  await expect(force).toHaveCount(0);
+
+  await workspace(page).getByRole("button", { name: "Close agent…" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Close agent" }).click();
+  await expect(force).toBeVisible();
+
+  const asked: string[] = [];
+  page.once("dialog", (d) => {
+    asked.push(d.type());
+    void d.dismiss();
+  });
+  await force.click();
+  await expect.poll(() => asked).toEqual(["confirm"]);
+  expect(forced).toEqual([]);
+
+  page.once("dialog", (d) => {
+    asked.push(d.type());
+    void d.accept();
+  });
+  await force.click();
+  await expect.poll(() => forced.length).toBe(1);
+  expect(forced[0]).toMatchObject({ force: true });
 });

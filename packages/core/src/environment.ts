@@ -20,6 +20,8 @@ export interface AgentInventoryEntry {
   readonly agentId: AgentSessionId;
   readonly ref: RuntimeRef;
   readonly dead: boolean;
+  /** The harness session it was launched on, as its terminal carries it, if it does. */
+  readonly externalRef?: ExternalRef;
 }
 
 /** A launch, with every Bazhen id already minted by the daemon (foundation-design §8.1). */
@@ -116,6 +118,8 @@ export interface EnvironmentAdapter {
   signal(refs: AgentRefs, signal: Signal): Promise<void>;
   /** Ends what runs the agent. What the environment positively no longer has counts as ended. */
   close(refs: AgentRefs): Promise<void>;
+  /** Whether the environment positively no longer has what ran the agent (RuntimeAdapter.gone). */
+  gone(refs: AgentRefs): Promise<boolean>;
   /** Reports every terminal whose process has ended, as the runtime does (RuntimeAdapter.onExit). */
   onExit(cb: (ref: RuntimeRef, status: ExitStatus) => void): () => void;
 }

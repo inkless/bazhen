@@ -21,6 +21,8 @@ export interface ContractHarness {
   replacePane(runtime: RuntimeAdapter, ref: RuntimeRef): void;
   /** Ends the terminal outside Bazhen, as a killed session would. */
   vanish(runtime: RuntimeAdapter, ref: RuntimeRef): void;
+  /** Ends `runtime`'s server and every terminal on it, as a reboot would. */
+  killServer(runtime: RuntimeAdapter): void;
   /** Where the terminals' programs run. */
   readonly cwd: string;
   /** How long to wait for a process to exit; a loaded runner can take a second or more. */
@@ -103,6 +105,15 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
         { kind: "shell", linkedAgentId: agentId },
       ]);
       expect(of(agent.terminalId)?.exit).toBeNull();
+    });
+
+    it("keeps an agent's harness session in its tags, as written", async () => {
+      const runtime = fresh();
+      const harnessSession = '{"kind":"claude-session","id":"s; 1"}';
+      const s = spec(sleeping, { kind: "agent", agentId: newId("agent"), harnessSession });
+      await runtime.create(s);
+      const entry = (await runtime.inventory()).find((e) => e.ref.terminalId === s.terminalId);
+      expect(entry?.tags).toEqual(s.tags);
     });
 
     it("keeps an exited terminal with its exit status", async () => {
@@ -212,6 +223,31 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       await expect(runtime.close(forged)).rejects.toThrow(StaleIncarnation);
       await expect(runtime.signal(forged, "SIGKILL")).rejects.toThrow(StaleIncarnation);
       expect((await running(runtime, ref)).dead).toBe(false);
+    });
+
+    it("refuses to attach from a ref whose server is not the one the terminal was created on", async () => {
+      const runtime = fresh();
+      const ref = await runtime.create(spec(sleeping));
+      const forged = { ...ref, locator: { ...ref.locator, serverStart: "1" } };
+      await expect(runtime.attach(forged, null, 0)).rejects.toMatchObject({
+        reason: "server-replaced",
+      });
+    });
+
+    it("closes a terminal whose server has ended, with no server running", async () => {
+      const runtime = fresh();
+      const ref = await runtime.create(spec(sleeping));
+      harness.killServer(runtime);
+      await expect(runtime.close(ref)).resolves.toBeUndefined();
+    });
+
+    it("closes a terminal whose server has ended, once another server runs", async () => {
+      const runtime = fresh();
+      const ref = await runtime.create(spec(sleeping));
+      harness.killServer(runtime);
+      const next = await runtime.create(spec(sleeping));
+      await runtime.close(ref);
+      expect((await runtime.inventory()).map((e) => e.ref.terminalId)).toEqual([next.terminalId]);
     });
 
     it("refuses to respawn from a ref whose server is not the one the terminal was created on", async () => {

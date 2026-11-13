@@ -5,6 +5,7 @@ import {
   newId,
   NotResumable,
   StaleIncarnation,
+  TerminalUnconfirmed,
   type AgentRefs,
   type AgentRespawn,
   type RuntimeRef,
@@ -18,9 +19,23 @@ import {
   AgentStateConflict,
   EnvironmentUnavailable,
   Lifecycle,
+  ServerUnconfirmed,
   StaleGeneration,
   TerminalReplaced,
 } from "./lifecycle.ts";
+
+/**
+ * An agent left closing by an environment out of reach, then forced closed once it is back
+ * (`recovered`) or still away: its state after, and how many closes reached the environment.
+ */
+async function unreachableThenForced(recovered: boolean) {
+  const { lifecycle, agentId, agent, fail, closed } = await running();
+  fail(new Error("tmux unreachable"));
+  await lifecycle.close(agentId, { idempotencyKey: "c", generation: 0 }).catch(() => {});
+  fail(recovered ? undefined : new Error("tmux unreachable"));
+  await lifecycle.close(agentId, { idempotencyKey: "f", generation: 0, force: true });
+  return [agent()?.state, closed.length];
+}
 
 /**
  * A running agent whose environment records closes, respawns and signals, fails them on demand,
@@ -154,6 +169,49 @@ describe("agent lifecycle", () => {
       TerminalReplaced,
     );
     expect(agent()?.state).toBe("closing");
+  });
+
+  it("leaves the agent closing when its old server may still run it, until a forced close", async () => {
+    const { lifecycle, agentId, agent, fail, closed } = await running();
+    fail(new TerminalUnconfirmed(newId("term"), new Error("no server running")));
+    const refused = await lifecycle
+      .close(agentId, { idempotencyKey: "c", generation: 0 })
+      .catch((e: unknown) => e);
+    const kept = agent()?.state;
+    await lifecycle.close(agentId, { idempotencyKey: "f", generation: 0, force: true });
+    expect([refused instanceof ServerUnconfirmed, kept, agent()?.state, closed]).toEqual([
+      true,
+      "closing",
+      "closed",
+      [],
+    ]);
+  });
+
+  it("forces a close past an environment out of reach, but still ends a terminal it now can", async () => {
+    expect([await unreachableThenForced(false), await unreachableThenForced(true)]).toEqual([
+      ["closed", 0],
+      ["closed", 1],
+    ]);
+  });
+
+  it("never forces a running terminal's close, nor one past a terminal another server carries", async () => {
+    const live = await running();
+    const onRunning = await live.lifecycle
+      .close(live.agentId, { idempotencyKey: "f", generation: 0, force: true })
+      .catch((e: unknown) => e);
+    const replaced = await running();
+    replaced.fail(new StaleIncarnation(newId("term"), "server-replaced"));
+    const close = (key: string, force?: true) =>
+      replaced.lifecycle.close(replaced.agentId, { idempotencyKey: key, generation: 0, force });
+    await close("c").catch(() => {});
+    const pastReplaced = await close("f", true).catch((e: unknown) => e);
+    expect([
+      onRunning instanceof AgentStateConflict,
+      live.agent()?.state,
+      live.closed,
+      pastReplaced instanceof TerminalReplaced,
+      replaced.agent()?.state,
+    ]).toEqual([true, "running", [], true, "closing"]);
   });
 
   it("leaves the agent closing when the environment can't be reached, and finishes on a retry", async () => {

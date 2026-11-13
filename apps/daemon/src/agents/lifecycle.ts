@@ -7,6 +7,7 @@ import {
   ProcessState,
   StaleIncarnation,
   terminal,
+  TerminalUnconfirmed,
   type EnvironmentAdapter,
   type RuntimeRef,
 } from "@bazhen/core";
@@ -45,6 +46,20 @@ export class TerminalReplaced extends Error {
     super(`agent ${agentId}'s terminal is not the one recorded; its server or pane has changed`, {
       cause,
     });
+  }
+}
+
+/**
+ * The agent's terminal is gone from view, but the server it ran on may still run it, so close
+ * can't call it ended; only a forced close records it closed (foundation-design §7.1).
+ */
+export class ServerUnconfirmed extends Error {
+  constructor(agentId: string, cause: unknown) {
+    super(
+      `agent ${agentId}'s terminal is not on the tmux server, but the server it ran on may still ` +
+        "be running it; close it with force to record it closed anyway",
+      { cause },
+    );
   }
 }
 
@@ -119,7 +134,9 @@ export class Lifecycle {
    * A lost agent's terminal is already gone, so it closes without the environment.
    */
   close(agentId: string, req: CloseAgentRequest): Promise<AgentCommandResponse> {
-    return this.command("close", agentId, req, closable, async (found) => {
+    // Force only finishes a close already refused: anything else still ends its terminal.
+    const accepts = req.force === true ? (state: AgentState) => state === "closing" : closable;
+    return this.command("close", agentId, req, accepts, async (found) => {
       if (found.state === "closed") return () => [];
       const closing =
         found.state === "closing"
@@ -128,7 +145,16 @@ export class Lifecycle {
       if (found.state !== "lost") {
         await this.environment
           .close({ runtime: found.runtime, externalRef: null })
-          .catch((cause: unknown) => fromEnvironment(agentId, cause));
+          .catch((cause: unknown) => {
+            // Force records closed only what a close could not end: a terminal its old server may
+            // still run, or one an environment that can't be reached holds. It never skips a close
+            // that would work, so a terminal on a reachable server is still ended.
+            if (req.force !== true || !forceable(cause)) fromEnvironment(agentId, cause);
+            console.warn(
+              `agent ${agentId} closed by force; its terminal's tmux server ` +
+                `(pid ${found.runtime?.locator.serverPid ?? "unknown"}) may still be running it`,
+            );
+          });
       }
       return () => [
         ...(closing === undefined ? [] : [closing]),
@@ -254,9 +280,15 @@ const closable = (state: AgentState) =>
 const respawnable = (state: AgentState) => agentCommands(state).includes("respawn");
 const running = (state: AgentState) => agentCommands(state).includes("signal");
 
+/** A close failure force may record past: unconfirmed, or the environment out of reach. */
+const forceable = (cause: unknown) =>
+  cause instanceof TerminalUnconfirmed ||
+  ![StaleIncarnation, NoTerminal, NotResumable, ProcessState].some((e) => cause instanceof e);
+
 /** An environment's failure as the command's: typed where the caller can act on it. */
 function fromEnvironment(agentId: string, cause: unknown): never {
   if (cause instanceof StaleIncarnation) throw new TerminalReplaced(agentId, cause);
+  if (cause instanceof TerminalUnconfirmed) throw new ServerUnconfirmed(agentId, cause);
   if (cause instanceof NoTerminal || cause instanceof NotResumable || cause instanceof ProcessState)
     throw cause;
   throw new EnvironmentUnavailable(agentId, cause);

@@ -49,8 +49,13 @@ export interface LaunchDeps {
  * starts anything (foundation-design §8.1), and the request's key makes a retry return the first
  * answer instead of launching twice (§5.1).
  */
-/** The first answer a key got: the same response, or the same failure. */
+/**
+ * The first answer a key got: the same response, or the same failure. A launch the daemon died
+ * in the middle of is settled after the key was answered, by reconciliation, so whether it failed
+ * is read from the agent as well.
+ */
 function replay(
+  store: Store,
   prior: LaunchRecord,
   key: string,
   request: LaunchRecord["request"],
@@ -60,7 +65,8 @@ function replay(
     prior.request.cwd === request.cwd &&
     prior.request.project === request.project;
   if (!same) throw new IdempotencyConflict(key);
-  if (prior.failed) {
+  const settled = store.agentTerminal({ agentId: prior.response.agentId })?.state;
+  if (prior.failed || settled === "failed") {
     const agentId = prior.response.agentId;
     throw new LaunchFailed(
       isId("agent", agentId) ? agentId : newId("agent"),
@@ -77,7 +83,8 @@ export async function launchAgent(
   const asked = { harness: req.harness, cwd: req.cwd, project: req.project ?? basename(req.cwd) };
   const prior = store.recall(req.idempotencyKey);
   // A retry gets the first answer, whatever has happened to the directory since.
-  if (prior !== undefined) return replay(LaunchRecord.parse(prior), req.idempotencyKey, asked);
+  if (prior !== undefined)
+    return replay(store, LaunchRecord.parse(prior), req.idempotencyKey, asked);
   if (!environment.harnesses.includes(req.harness)) throw new UnsupportedHarness(req.harness);
   const cwd = resolveDirectory(req.cwd, home);
   const request = { harness: req.harness, cwd, project: req.project ?? basename(cwd) };

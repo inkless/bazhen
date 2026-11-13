@@ -1,11 +1,18 @@
 import { describe, expect, it } from "vitest";
-import type { HarnessAdapter, RuntimeRef } from "@bazhen/core";
+import { tmpdir } from "node:os";
+import {
+  isId,
+  LaunchFailed,
+  type EnvironmentAdapter,
+  type HarnessAdapter,
+  type RuntimeRef,
+} from "@bazhen/core";
 import { FakeRuntime } from "@bazhen/core/testing";
 import { LocalEnvironment } from "@bazhen/env-local";
 import { Mailbox } from "../mailbox/mailbox.ts";
 import type { Store } from "../store/store.ts";
 import { fakeEnvironment, testView, withAgent } from "../testing/fixtures.ts";
-import { localEnvironmentId } from "./launch.ts";
+import { launchAgent, localEnvironmentId } from "./launch.ts";
 import { reconcile } from "./reconcile.ts";
 
 const stateOf = (store: Awaited<ReturnType<typeof withAgent>>["store"]) =>
@@ -34,6 +41,60 @@ const exited = (store: Store, agentId: string) =>
     actor: "system",
     payload: { exit: { type: "exited", code: 0 } },
   });
+
+/**
+ * A launch the daemon died in the middle of: recorded and keyed as `launch-cut`, with the
+ * environment never answering. Retrying the key replays it.
+ */
+async function launchCut(store: Store) {
+  const deps = (environment: EnvironmentAdapter) => ({
+    store,
+    environment,
+    size: { cols: 80, rows: 24 },
+    home: tmpdir(),
+  });
+  const req = { idempotencyKey: "launch-cut", harness: "claude-code", cwd: "~" } as const;
+  const hung = { ...fakeEnvironment(store), launch: () => new Promise<never>(() => {}) };
+  void launchAgent(deps(hung), req);
+  const agent = store.snapshot(testView).agents.find((a) => a.state === "starting");
+  if (agent?.terminalId == null || !isId("term", agent.terminalId) || !isId("agent", agent.id))
+    throw new Error("no launch");
+  const retry = () => launchAgent(deps(fakeEnvironment(store)), req);
+  return { agentId: agent.id, terminalId: agent.terminalId, retry };
+}
+
+/** An agent the daemon died respawning: exited at generation 0, then a respawn asked for. */
+async function midRespawn() {
+  const fixture = await withAgent();
+  exited(fixture.store, fixture.agentId);
+  fixture.store.append({
+    type: "agent.respawn_requested",
+    entityId: fixture.agentId,
+    actor: "user",
+    payload: {},
+  });
+  return fixture;
+}
+
+const atGeneration = (terminalId: RuntimeRef["terminalId"], generation: string): RuntimeRef => ({
+  terminalId,
+  runtime: "tmux",
+  locator: { generation },
+});
+
+const agentOf = (store: Store) => store.snapshot(testView).agents[0];
+const lastReason = (
+  store: Store,
+  agentId: string,
+  type: "agent.failed" | "agent.respawn_rejected",
+) =>
+  store
+    .events(0)
+    .filter((e) => e.entityId === agentId && e.type === type)
+    .map((e) => e.payload);
+
+/** An environment that can't show any terminal it lacks is gone, as with an old server unsure. */
+const unproven = (s: Store) => ({ ...fakeEnvironment(s), gone: async () => false });
 
 describe("reconcile", () => {
   it("leaves an agent the environment still runs as it was", async () => {
@@ -93,6 +154,86 @@ describe("reconcile", () => {
     await reconcile(store, fakeEnvironment(store));
     const mail = store.snapshot(testView).messages.find((m) => m.id === messageId)?.state;
     expect([kept, stateOf(store), mail]).toEqual(["closing", "closed", "undeliverable"]);
+  });
+
+  it("settles an agent the daemon died launching as running, on the harness session its terminal carries", async () => {
+    const { store } = await withAgent();
+    const { agentId, terminalId, retry } = await launchCut(store);
+    const externalRef = {
+      environmentId: localEnvironmentId(store),
+      kind: "claude-session",
+      id: "s-9",
+    } as const;
+    const ref = atGeneration(terminalId, "0");
+    const entry = { agentId, ref, dead: false, externalRef };
+    await reconcile(
+      store,
+      fakeEnvironment(store, undefined, () => [entry]),
+    );
+    const settled = store.snapshot(testView).agents.find((a) => a.id === agentId);
+    const again = await retry();
+    expect([settled?.state, settled?.externalRef, again.agentId]).toEqual([
+      "running",
+      externalRef,
+      agentId,
+    ]);
+  });
+
+  it("settles an agent the daemon died launching as failed when no session carries it, and its key says so", async () => {
+    const { store } = await withAgent();
+    const { agentId, retry } = await launchCut(store);
+    await reconcile(store, fakeEnvironment(store));
+    const state = store.snapshot(testView).agents.find((a) => a.id === agentId)?.state;
+    const replayed = await retry().catch((e: unknown) => e);
+    expect([
+      state,
+      lastReason(store, agentId, "agent.failed"),
+      replayed instanceof LaunchFailed,
+    ]).toEqual(["failed", [{ reason: "daemon_restart" }], true]);
+  });
+
+  it("settles an agent the daemon died respawning as respawned, once its pane runs the next generation", async () => {
+    const { store, agentId, terminalId } = await midRespawn();
+    const ref = atGeneration(terminalId, "1");
+    await reconcile(
+      store,
+      fakeEnvironment(store, undefined, () => [{ agentId, ref, dead: false }]),
+    );
+    expect([agentOf(store)?.state, agentOf(store)?.generation]).toEqual(["running", 1]);
+  });
+
+  it("settles an agent the daemon died respawning as exited, when its pane is still the old one", async () => {
+    const { store, agentId, terminalId } = await midRespawn();
+    const ref = atGeneration(terminalId, "0");
+    await reconcile(
+      store,
+      fakeEnvironment(store, undefined, () => [{ agentId, ref, dead: true }]),
+    );
+    expect([
+      agentOf(store)?.state,
+      agentOf(store)?.generation,
+      lastReason(store, agentId, "agent.respawn_rejected"),
+    ]).toEqual(["exited", 0, [{ reason: "daemon_restart" }]]);
+  });
+
+  it("settles an agent the daemon died respawning as lost, when its terminal is gone", async () => {
+    const { store } = await midRespawn();
+    await reconcile(store, fakeEnvironment(store));
+    expect(agentOf(store)?.state).toBe("lost");
+  });
+
+  it("concludes nothing of an agent whose old server may still run its terminal", async () => {
+    const { store, agentId } = await withAgent();
+    const second = await withAgent();
+    closing(second.store, second.agentId);
+    const logged: string[] = [];
+    await reconcile(store, unproven(store), (m) => logged.push(m));
+    await reconcile(second.store, unproven(second.store), () => {});
+    expect([stateOf(store), stateOf(second.store), logged.join()]).toEqual([
+      "running",
+      "closing",
+      expect.stringContaining(agentId),
+    ]);
   });
 
   it.each(["unknown", "unreachable"] as const)(

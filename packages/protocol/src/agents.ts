@@ -130,6 +130,11 @@ export type LaunchAgentResponse = z.infer<typeof LaunchAgentResponse>;
 export const CloseAgentRequest = z.object({
   idempotencyKey: IdempotencyKey,
   generation: z.number().int().nonnegative(),
+  /**
+   * For an agent left closing because its terminal's old server can't be shown gone
+   * (`server_unconfirmed`): records it closed without ending anything. That server may still run.
+   */
+  force: z.boolean().optional(),
 });
 export type CloseAgentRequest = z.infer<typeof CloseAgentRequest>;
 
@@ -175,6 +180,8 @@ export const ErrorResponse = z.object({
     "stale_generation",
     "not_resumable",
     "unavailable",
+    /** A close found no terminal, but the server it ran on may still run it; `force` closes it. */
+    "server_unconfirmed",
     "not_found",
     "origin_not_allowed",
     "host_not_allowed",

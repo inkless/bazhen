@@ -436,7 +436,8 @@
             "reason": {
               "type": "string",
               "enum": [
-                "launch_rejected"
+                "launch_rejected",
+                "daemon_restart"
               ]
             }
           },
@@ -757,7 +758,8 @@
                 "not_resumable",
                 "no_terminal",
                 "terminal_changed",
-                "unavailable"
+                "unavailable",
+                "daemon_restart"
               ]
             }
           },
