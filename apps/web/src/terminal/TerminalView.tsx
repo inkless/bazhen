@@ -280,7 +280,8 @@ function swallowReplies(term: Xterm): void {
 const swallow = () => true;
 
 /**
- * For browser tests, per view: the screen as text, the top line in view, whether the daemon
+ * For browser tests, per view: the screen as text, the top line in view, whether the view is at
+ * the bottom (not scrolled back into the page's own scrollback), whether the daemon
  * reported the alternate screen, the background it paints, and the colours a program wrote text
  * in, whichever renderer draws.
  */
@@ -290,6 +291,7 @@ function exposeForTests(terminalId: string, term: Xterm, alternate: () => boolea
   views[terminalId] = {
     screen: () => screenText(term),
     viewportTop: () => term.buffer.active.viewportY,
+    atBottom: () => term.buffer.active.viewportY === term.buffer.active.baseY,
     alternate,
     background: () => term.options.theme?.background,
     foregrounds: () => foregrounds(term),
