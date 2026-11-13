@@ -5,6 +5,7 @@ import {
   newId,
   NotResumable,
   StaleIncarnation,
+  TerminalUnconfirmed,
   type AgentRefs,
   type AgentRespawn,
   type RuntimeRef,
@@ -18,6 +19,7 @@ import {
   AgentStateConflict,
   EnvironmentUnavailable,
   Lifecycle,
+  ServerUnconfirmed,
   StaleGeneration,
   TerminalReplaced,
 } from "./lifecycle.ts";
@@ -154,6 +156,29 @@ describe("agent lifecycle", () => {
       TerminalReplaced,
     );
     expect(agent()?.state).toBe("closing");
+  });
+
+  it("leaves the agent closing when its old server may still run it, until a forced close", async () => {
+    const { lifecycle, agentId, agent, fail, closed } = await running();
+    fail(new TerminalUnconfirmed(newId("term"), new Error("no server running")));
+    const refused = await lifecycle
+      .close(agentId, { idempotencyKey: "c", generation: 0 })
+      .catch((e: unknown) => e);
+    const kept = agent()?.state;
+    await lifecycle.close(agentId, { idempotencyKey: "f", generation: 0, force: true });
+    expect([refused instanceof ServerUnconfirmed, kept, agent()?.state, closed]).toEqual([
+      true,
+      "closing",
+      "closed",
+      [],
+    ]);
+  });
+
+  it("forces only a close already refused, never one that would still end a running terminal", async () => {
+    const { lifecycle, agentId, agent, closed } = await running();
+    const forced = lifecycle.close(agentId, { idempotencyKey: "f", generation: 0, force: true });
+    await expect(forced).rejects.toThrow(AgentStateConflict);
+    expect([agent()?.state, closed]).toEqual(["running", []]);
   });
 
   it("leaves the agent closing when the environment can't be reached, and finishes on a retry", async () => {

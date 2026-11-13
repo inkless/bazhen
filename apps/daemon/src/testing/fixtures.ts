@@ -60,6 +60,7 @@ export function fakeEnvironment(
     },
     signal: async () => {},
     close: async () => {},
+    gone: async ({ runtime }) => !present().some((e) => e.ref.terminalId === runtime?.terminalId),
     onExit: () => () => {},
   };
 }

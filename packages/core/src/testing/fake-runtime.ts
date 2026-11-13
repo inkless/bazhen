@@ -165,6 +165,12 @@ export class FakeRuntime implements RuntimeAdapter {
     if (t !== undefined) this.remove(t);
   }
 
+  /** A fake server that is replaced is gone, so only a terminal it carries is not. */
+  async gone(ref: RuntimeRef): Promise<boolean> {
+    this.read();
+    return !this.terminals.has(ref.terminalId);
+  }
+
   /** Ends the server and every terminal on it, as a reboot would; the next create starts another. */
   killServer(): void {
     this.terminals.clear();

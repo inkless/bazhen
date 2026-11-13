@@ -107,6 +107,15 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       expect(of(agent.terminalId)?.exit).toBeNull();
     });
 
+    it("keeps an agent's harness session in its tags, as written", async () => {
+      const runtime = fresh();
+      const harnessSession = '{"kind":"claude-session","id":"s; 1"}';
+      const s = spec(sleeping, { kind: "agent", agentId: newId("agent"), harnessSession });
+      await runtime.create(s);
+      const entry = (await runtime.inventory()).find((e) => e.ref.terminalId === s.terminalId);
+      expect(entry?.tags).toEqual(s.tags);
+    });
+
     it("keeps an exited terminal with its exit status", async () => {
       const runtime = fresh();
       const ref = await runtime.create(spec(exiting(3)));

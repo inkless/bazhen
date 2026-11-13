@@ -1,6 +1,6 @@
 import { useRef, useState, type SubmitEvent } from "react";
 import type { Agent, AgentState } from "@bazhen/protocol";
-import { closeAgent, respawnAgent, sendMessage } from "../api.ts";
+import { closeAgent, forceCloseAgent, Refused, respawnAgent, sendMessage } from "../api.ts";
 import { TerminalView } from "../terminal/TerminalView.tsx";
 import { AttachCommand } from "./AttachCommand.tsx";
 import { agentActions, exitText, shortId } from "./model.ts";
@@ -22,6 +22,8 @@ export function Workspace({ agent, failed }: { agent: Agent; failed: (e: unknown
   // since a second click before then would name the generation the first one replaced.
   const [sentAt, setSentAt] = useState<string | null>(null);
   const [message, setMessage] = useState("");
+  // A close refused because the terminal's old server may still run it: only then is force offered.
+  const [unconfirmed, setUnconfirmed] = useState(false);
   const removing = buttons.includes("remove");
   const closable = removing || buttons.includes("close");
   const position = `${agent.state}:${agent.generation}`;
@@ -32,6 +34,7 @@ export function Workspace({ agent, failed }: { agent: Agent; failed: (e: unknown
     setSentAt(position);
     command(agent.id, agent.generation).catch((e: unknown) => {
       setSentAt(null);
+      if (e instanceof Refused && e.code === "server_unconfirmed") setUnconfirmed(true);
       failed(e);
     });
   };
@@ -57,6 +60,23 @@ export function Workspace({ agent, failed }: { agent: Agent; failed: (e: unknown
         {closable && (
           <button type="button" disabled={busy} onClick={() => dialog.current?.showModal()}>
             {removing ? "Remove…" : "Close agent…"}
+          </button>
+        )}
+        {unconfirmed && agent.state === "closing" && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              if (
+                window.confirm(
+                  `Force close ${agent.project}? Bazhen can't show its old tmux server has ended; ` +
+                    "it is recorded closed, and that server may still be running it.",
+                )
+              )
+                run(forceCloseAgent);
+            }}
+          >
+            Force close…
           </button>
         )}
       </header>

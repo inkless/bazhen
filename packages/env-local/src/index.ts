@@ -92,17 +92,23 @@ export class LocalEnvironment implements EnvironmentAdapter {
   }
 
   async inventory(): Promise<AgentInventoryEntry[]> {
-    return (await this.opts.runtime.inventory()).flatMap((e) =>
-      e.tags.kind === "agent"
-        ? [{ agentId: e.tags.agentId, ref: e.ref, dead: e.exit !== null }]
-        : [],
-    );
+    return (await this.opts.runtime.inventory()).flatMap((e) => {
+      if (e.tags.kind !== "agent") return [];
+      const entry = { agentId: e.tags.agentId, ref: e.ref, dead: e.exit !== null };
+      const externalRef = harnessSessionOf(e.tags.harnessSession, this.id);
+      return [externalRef === undefined ? entry : { ...entry, externalRef }];
+    });
   }
 
   /** Without a recorded terminal there is nothing to prove gone, so it refuses rather than guess. */
   async close(refs: AgentRefs): Promise<void> {
     if (refs.runtime === null) throw new NoTerminal();
     await this.opts.runtime.close(refs.runtime);
+  }
+
+  async gone(refs: AgentRefs): Promise<boolean> {
+    if (refs.runtime === null) throw new NoTerminal();
+    return this.opts.runtime.gone(refs.runtime);
   }
 
   onExit(cb: (ref: RuntimeRef, status: ExitStatus) => void): () => void {
@@ -120,13 +126,17 @@ export class LocalEnvironment implements EnvironmentAdapter {
       if (carried) throw new AgentTerminalExists(agentId);
     }
     const launch = await harness.launchSpec(request);
+    const externalRef = this.located(launch);
     const runtime = await this.opts.runtime.create({
       ...this.process(agentId, request, launch, 0),
       terminalId,
-      tags: { kind: "agent", agentId },
+      // Carried on the terminal too: a daemon that dies before recording it can still resume it.
+      tags: externalRef
+        ? { kind: "agent", agentId, harnessSession: JSON.stringify(externalRef) }
+        : { kind: "agent", agentId },
       size,
     });
-    return { runtime, externalRef: this.located(launch) };
+    return { runtime, externalRef };
   }
 
   async respawn({
@@ -195,4 +205,26 @@ export class LocalEnvironment implements EnvironmentAdapter {
   private located(launch: HarnessLaunch): ExternalRef | null {
     return launch.externalRef && { ...launch.externalRef, environmentId: this.id };
   }
+}
+
+/** The harness session a terminal's tag carries, if it is one of this environment's. */
+function harnessSessionOf(
+  tag: string | undefined,
+  environmentId: EnvironmentId,
+): ExternalRef | undefined {
+  if (!tag) return undefined;
+  let value: unknown;
+  try {
+    value = JSON.parse(tag);
+  } catch {
+    return undefined;
+  }
+  const field = (key: string): unknown =>
+    typeof value === "object" && value !== null ? Reflect.get(value, key) : undefined;
+  const kind = field("kind");
+  const id = field("id");
+  if (field("environmentId") !== environmentId || typeof id !== "string" || id === "")
+    return undefined;
+  if (kind !== "claude-session" && kind !== "codex-thread") return undefined;
+  return { environmentId, kind, id };
 }

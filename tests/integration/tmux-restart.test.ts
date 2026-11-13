@@ -10,7 +10,13 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { filterEnv, newId, type RuntimeRef, type TerminalSpec } from "@bazhen/core";
+import {
+  filterEnv,
+  newId,
+  TerminalUnconfirmed,
+  type RuntimeRef,
+  type TerminalSpec,
+} from "@bazhen/core";
 import { isAlive, type ConfiguredTmuxServer } from "@bazhen/host-guard";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
 import { nodePtySpawner } from "@bazhen/daemon/pty";
@@ -84,7 +90,7 @@ describe("a live tmux server whose socket was deleted", () => {
     rmSync(server.socket);
     const whileLive = await runtime.close(ref).then(
       () => "closed",
-      () => "refused",
+      (e: unknown) => e,
     );
     await runtime.health([ref]);
     await waitFor(() => existsSync(server.socket));
@@ -94,7 +100,11 @@ describe("a live tmux server whose socket was deleted", () => {
       () => "closed",
       () => "refused",
     );
-    expect([whileLive, kept, onceGone]).toEqual(["refused", [ref.terminalId], "closed"]);
+    expect([whileLive, kept, onceGone]).toEqual([
+      expect.any(TerminalUnconfirmed),
+      [ref.terminalId],
+      "closed",
+    ]);
   });
 
   it("is unreachable against the refs it recorded, and gets its socket back", async () => {

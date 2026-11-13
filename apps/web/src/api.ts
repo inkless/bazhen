@@ -110,16 +110,27 @@ async function act(path: string, body: object): Promise<unknown> {
     body: JSON.stringify({ idempotencyKey: crypto.randomUUID(), ...body }),
   });
   const text = await res.text();
-  if (!res.ok) throw new Error(refusal(res.status, text));
+  if (!res.ok) throw refusal(res.status, text);
   return JSON.parse(text);
 }
 
+/** A request the daemon refused, with its code where it gave one. */
+export class Refused extends Error {
+  readonly code: ErrorResponse["error"] | null;
+
+  constructor(code: ErrorResponse["error"] | null, message: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
 /** What the daemon said when it refused, in its own words, or the status if it said nothing. */
-function refusal(status: number, text: string): string {
+function refusal(status: number, text: string): Refused {
   try {
-    return ErrorResponse.parse(JSON.parse(text)).message;
+    const { error, message } = ErrorResponse.parse(JSON.parse(text));
+    return new Refused(error, message);
   } catch {
-    return `the daemon refused the request (${status})`;
+    return new Refused(null, `the daemon refused the request (${status})`);
   }
 }
 
@@ -135,6 +146,10 @@ export const answer = async (attentionId: string, decision: ApprovalDecision) =>
 /** Names the generation the UI saw, so a command meant for an earlier incarnation is refused. */
 export const closeAgent = async (agentId: string, generation: number) =>
   AgentCommandResponse.parse(await act(`/v1/agents/${agentId}/close`, { generation }));
+
+/** Records a closing agent closed without ending anything, once a close came back unconfirmed. */
+export const forceCloseAgent = async (agentId: string, generation: number) =>
+  AgentCommandResponse.parse(await act(`/v1/agents/${agentId}/close`, { generation, force: true }));
 
 export const respawnAgent = async (agentId: string, generation: number) =>
   AgentCommandResponse.parse(await act(`/v1/agents/${agentId}/respawn`, { generation }));

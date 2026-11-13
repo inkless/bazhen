@@ -154,6 +154,7 @@ describe("the recorded tmux server, by what ps shows of it", () => {
     const skewed = 1_794_000_010;
     for (const facts of [
       { ...linux, start: skewed, comm: ".tmux-wrapped" },
+      { comm: ".tmux-wrapped", start: skewed, args: "/nix/store/x/bin/.tmux-wrapped new-session" },
       { ...linux, start: skewed, args: `tmux -u -S /private${socket} new-session` },
       { comm: "node", start: skewed, args: `node watcher.js ${socket}` },
     ])

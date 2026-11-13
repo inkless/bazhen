@@ -25,8 +25,30 @@ export async function reconcile(
     log(`reconcile: could not read environment ${environment.id}: ${String(err)}`);
     return;
   }
-  for (const agent of agents)
-    store.transaction(() => settle(store, agent, present.get(agent.agentId)));
+  for (const agent of agents) {
+    const found = present.get(agent.agentId);
+    if (found === undefined && !(await provablyGone(environment, agent, log))) continue;
+    store.transaction(() => settle(store, agent, found));
+  }
+}
+
+/**
+ * Whether what ran an agent the inventory lacks is provably gone, by the rule close goes by: a
+ * server that may still run it, its socket taken by a new one, is no proof. An agent with no
+ * terminal yet has nothing to prove gone.
+ */
+async function provablyGone(
+  environment: EnvironmentAdapter,
+  { agentId, runtime }: AgentTerminal,
+  log: (message: string) => void,
+): Promise<boolean> {
+  if (runtime === null) return true;
+  const gone = await environment.gone({ runtime, externalRef: null }).catch((err: unknown) => {
+    log(`reconcile: could not tell whether agent ${agentId}'s terminal is gone: ${String(err)}`);
+    return false;
+  });
+  if (!gone) log(`reconcile: agent ${agentId}'s terminal may still run on its old server; left`);
+  return gone;
 }
 
 /** One agent's events, from what the store says of it and what the environment still has. */
@@ -34,14 +56,18 @@ function settle(store: Store, agent: AgentTerminal, found: AgentInventoryEntry |
   const { agentId, state, terminalState, generation } = agent;
   const system = { entityId: agentId, actor: "system" } as const;
   if (state === "starting" && terminalState === "creating") {
-    // The daemon died mid-launch: the tagged session is the launch, or there is none.
+    // The daemon died mid-launch: the tagged session is the launch, with the harness session it
+    // carries, or there is none.
     store.append(
       found === undefined
         ? { ...system, type: "agent.failed", payload: { reason: "daemon_restart" } }
         : {
             ...system,
             type: "agent.running",
-            payload: { externalRef: null, runtimeRef: runtimePayload(found.ref) },
+            payload: {
+              externalRef: found.externalRef ?? null,
+              runtimeRef: runtimePayload(found.ref),
+            },
           },
     );
     return;

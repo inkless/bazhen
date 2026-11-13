@@ -31,6 +31,7 @@ import {
   AgentStateConflict,
   TerminalReplaced,
   EnvironmentUnavailable,
+  ServerUnconfirmed,
   StaleGeneration,
 } from "../agents/lifecycle.ts";
 import { AttentionClosed, AttentionUnavailable } from "../mailbox/approvals.ts";
@@ -131,6 +132,7 @@ export function createApp(deps: AppDeps): Hono {
     if (err instanceof UnknownAgent) return fail(c, 404, "not_found", err.message);
     if (err instanceof StaleGeneration) return fail(c, 409, "stale_generation", err.message);
     if (err instanceof NotResumable) return fail(c, 409, "not_resumable", err.message);
+    if (err instanceof ServerUnconfirmed) return fail(c, 409, "server_unconfirmed", err.message);
     const conflict = [AgentStateConflict, TerminalReplaced, NoTerminal, ProcessState].some(
       (e) => err instanceof e,
     );

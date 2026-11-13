@@ -13,6 +13,7 @@
         "stale_generation",
         "not_resumable",
         "unavailable",
+        "server_unconfirmed",
         "not_found",
         "origin_not_allowed",
         "host_not_allowed",

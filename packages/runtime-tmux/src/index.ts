@@ -22,7 +22,13 @@ import {
   type ConfiguredTmuxServer,
   type ServerIdentity,
 } from "@bazhen/host-guard";
-import { assertSameGeneration, isId, ProcessState, StaleIncarnation } from "@bazhen/core";
+import {
+  assertSameGeneration,
+  isId,
+  ProcessState,
+  StaleIncarnation,
+  TerminalUnconfirmed,
+} from "@bazhen/core";
 import { exitStatus, UnknownCause } from "./exit-status.ts";
 import { shellCommand } from "./shell.ts";
 
@@ -38,6 +44,7 @@ const COLUMN = {
   kind: "@bazhen_kind",
   agentId: "@bazhen_agent_id",
   linkedAgentId: "@bazhen_linked_agent_id",
+  harnessSession: "@bazhen_harness_session",
   session: "session_name",
   serverPid: "pid",
   serverStart: "start_time",
@@ -78,6 +85,7 @@ const PANE = columns([
   "kind",
   "agentId",
   "linkedAgentId",
+  "harnessSession",
   ...LOCATION_KEYS,
   "dead",
   "status",
@@ -366,28 +374,41 @@ export class TmuxRuntime implements RuntimeAdapter {
   }
 
   /**
-   * A terminal the socket no longer carries counts as closed when its own server answers, or when
-   * that server no longer runs, since a terminal ends with its server (foundation-design §7.1).
-   * One whose server still runs, its socket deleted or taken by another, is left for a later try.
+   * A terminal the socket no longer carries counts as closed once it is provably gone (`gone`).
+   * One whose server may still run, its socket deleted or taken by another, is unconfirmed, and
+   * only a forced close records it closed (foundation-design §7.1).
    */
   async close(ref: RuntimeRef): Promise<void> {
     const [pane] = await this.panesOf(ref).catch(async (err: unknown) => {
-      if (await this.endedWithServer(ref, err)) return [];
-      throw err;
+      const serverAway =
+        (err instanceof TmuxError && noServer(err)) ||
+        (err instanceof StaleIncarnation && err.reason === "server-replaced");
+      // Another server carrying the terminal's tag is not its end.
+      if (!serverAway || (await this.carries(ref))) throw err;
+      if (await this.gone(ref)) return [];
+      throw new TerminalUnconfirmed(ref.terminalId, err);
     });
     if (pane !== undefined) await this.tmux("kill-session", "-t", located(pane.ref, "sessionId"));
   }
 
-  /** Whether `err`, from finding `ref`'s panes, means only that its server ended, and it too. */
-  private async endedWithServer(ref: RuntimeRef, err: unknown): Promise<boolean> {
-    const serverAway =
-      (err instanceof TmuxError && noServer(err)) ||
-      (err instanceof StaleIncarnation && err.reason === "server-replaced");
-    if (!serverAway) return false;
-    // Another server carrying the terminal's tag is not its end.
-    if ((await this.inventory()).some((e) => e.ref.terminalId === ref.terminalId)) return false;
-    // Only a server provably gone took the terminal with it; one that can't be told apart may not.
+  /**
+   * Nothing on the socket carries the terminal, and the server it was made on is the one
+   * answering, or is provably gone: a terminal ends with its server. One that can't be told apart
+   * from it is no proof.
+   */
+  async gone(ref: RuntimeRef): Promise<boolean> {
+    if (await this.carries(ref)) return false;
+    const current = await this.server().catch((err: unknown) => {
+      if (err instanceof TmuxError && noServer(err)) return undefined;
+      throw err;
+    });
+    const { serverPid, serverStart } = ref.locator;
+    if (current?.serverPid === serverPid && current?.serverStart === serverStart) return true;
     return (await this.opts.server.verdict(identityOf(ref))).is === "gone";
+  }
+
+  private async carries(ref: RuntimeRef): Promise<boolean> {
+    return (await this.inventory()).some((e) => e.ref.terminalId === ref.terminalId);
   }
 
   async respawn(ref: RuntimeRef, spec: ProcessSpec): Promise<RuntimeRef> {
@@ -531,8 +552,10 @@ function tagCommands(session: string, terminalId: TerminalId, tags: TerminalTags
     [COLUMN.terminalId, terminalId],
     [COLUMN.kind, tags.kind],
   ];
-  if (tags.kind === "agent") options.push([COLUMN.agentId, tags.agentId]);
-  else if (tags.linkedAgentId) options.push([COLUMN.linkedAgentId, tags.linkedAgentId]);
+  if (tags.kind === "agent") {
+    options.push([COLUMN.agentId, tags.agentId]);
+    if (tags.harnessSession) options.push([COLUMN.harnessSession, tags.harnessSession]);
+  } else if (tags.linkedAgentId) options.push([COLUMN.linkedAgentId, tags.linkedAgentId]);
   return options.map(([option, value]) => ["set-option", "-t", session, option, value]);
 }
 
@@ -543,7 +566,12 @@ function decodeTags(row: Row): { terminalId: TerminalId; tags: TerminalTags } | 
   const linked = row("linkedAgentId");
   if (!isId("term", terminalId)) return null;
   if (row("kind") === "agent") {
-    return isId("agent", agentId) ? { terminalId, tags: { kind: "agent", agentId } } : null;
+    if (!isId("agent", agentId)) return null;
+    const session = row("harnessSession");
+    const tags: TerminalTags = session
+      ? { kind: "agent", agentId, harnessSession: session }
+      : { kind: "agent", agentId };
+    return { terminalId, tags };
   }
   if (row("kind") !== "shell") return null;
   return {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { newId, NotResumable, UnsupportedHarness } from "@bazhen/core";
 import { FakeRuntime } from "@bazhen/core/testing";
 import { PROTOCOL_VERSION, type LaunchAgentRequest } from "@bazhen/protocol";
-import { EnvironmentUnavailable, StaleGeneration } from "../agents/lifecycle.ts";
+import { EnvironmentUnavailable, ServerUnconfirmed, StaleGeneration } from "../agents/lifecycle.ts";
 import { AttentionClosed } from "../mailbox/approvals.ts";
 import { createApp } from "./app.ts";
 
@@ -26,6 +26,7 @@ const app = createApp({
     throw new AttentionClosed("attn_x");
   },
   close: async (agentId, req) => {
+    if (req.generation === 3) throw new ServerUnconfirmed(agentId, new Error("no server running"));
     if (req.generation !== 2) throw new StaleGeneration(agentId, 2);
     throw new EnvironmentUnavailable(agentId, new Error("tmux unreachable"));
   },
@@ -125,6 +126,11 @@ describe("HTTP app", () => {
     const [stale, unavailable] = await Promise.all([close(1), close(2)]);
     expect([stale.status, (await stale.json()).error]).toEqual([409, "stale_generation"]);
     expect([unavailable.status, (await unavailable.json()).error]).toEqual([503, "unavailable"]);
+  });
+
+  it("says a close found its terminal's old server may still run it, so a forced close can follow", async () => {
+    const res = await close(3);
+    expect([res.status, (await res.json()).error]).toEqual([409, "server_unconfirmed"]);
   });
 
   it("answers a respawn of an agent with no session to resume as not resumable", async () => {
