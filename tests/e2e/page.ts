@@ -1,6 +1,6 @@
 import { expect, type Browser, type BrowserContextOptions, type Page } from "@playwright/test";
 
-type Hook = "screen" | "viewportTop" | "alternate";
+type Hook = "screen" | "viewportTop" | "alternate" | "background" | "foregrounds";
 
 /** Reads one of the terminal view's test hooks: the page shows one terminal at a time. */
 const read = (page: Page, hook: Hook) =>
@@ -25,6 +25,18 @@ export async function viewportTop(page: Page): Promise<number> {
 
 /** Whether the daemon has told the page the program is on its alternate screen. */
 export const onAlternateScreen = async (page: Page) => (await read(page, "alternate")) === true;
+
+/** The background the terminal paints, as xterm.js's theme sets it. */
+export async function terminalBackground(page: Page): Promise<string | null> {
+  const colour = await read(page, "background");
+  return typeof colour === "string" ? colour : null;
+}
+
+/** Each colour the terminal's text is written in: `#rrggbb`, a palette index, or `default`. */
+export async function foregrounds(page: Page): Promise<string[]> {
+  const colours = await read(page, "foregrounds");
+  return Array.isArray(colours) ? colours.filter((c) => typeof c === "string") : [];
+}
 
 /** A second device: another browser opened on the newest agent's terminal, showing `text`. */
 export async function openSecondView(

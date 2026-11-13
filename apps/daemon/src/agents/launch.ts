@@ -7,8 +7,14 @@ import {
   type EnvironmentAdapter,
   type EnvironmentId,
   type Size,
+  type LaunchOptions,
 } from "@bazhen/core";
-import { HarnessId, LaunchAgentResponse, type LaunchAgentRequest } from "@bazhen/protocol";
+import {
+  HarnessId,
+  LaunchAgentResponse,
+  type LaunchAgentRequest,
+  type TuiTheme,
+} from "@bazhen/protocol";
 import { z } from "zod";
 import { IdempotencyConflict, runtimePayload, type Store } from "../store/store.ts";
 import { resolveDirectory } from "./cwd.ts";
@@ -76,6 +82,10 @@ function replay(
   return prior.response;
 }
 
+/** The options a request names; one without a theme leaves it to the harness. Never stored. */
+export const launchOptions = (theme: TuiTheme | undefined): LaunchOptions =>
+  theme === undefined ? {} : { theme };
+
 export async function launchAgent(
   { store, environment, size, home }: LaunchDeps,
   req: LaunchAgentRequest,
@@ -111,7 +121,9 @@ export async function launchAgent(
       }),
     [],
   );
-  const refs = await environment.launch({ agentId, terminalId, request, size }).catch((cause) => {
+  const options = launchOptions(req.theme);
+  const launching = environment.launch({ agentId, terminalId, request, options, size });
+  const refs = await launching.catch((cause) => {
     // The client learns only that it failed; the daemon's log says why.
     console.error(`agent ${agentId} failed to launch:`, cause);
     record(

@@ -1,5 +1,5 @@
 import type { AgentLaunchRequest } from "./agent.ts";
-import type { ExternalRef, HarnessId } from "@bazhen/protocol";
+import type { ExternalRef, HarnessId, TuiTheme } from "@bazhen/protocol";
 
 /** How to start one harness's TUI; the local environment turns it into a terminal. */
 export interface HarnessLaunch {
@@ -8,6 +8,12 @@ export interface HarnessLaunch {
   readonly env: Readonly<Record<string, string>>;
   /** The harness session the launch creates, when it is known before the TUI starts. */
   readonly externalRef: Omit<ExternalRef, "environmentId"> | null;
+}
+
+/** What one start of a TUI asks for beyond the agent's launch request; nothing here is stored. */
+export interface LaunchOptions {
+  /** The background the TUI is shown on; absent, the user's own setting stands. */
+  readonly theme?: TuiTheme;
 }
 
 /**
@@ -27,7 +33,7 @@ export interface HarnessChannelPort {
  */
 export interface HarnessAdapter {
   readonly id: HarnessId;
-  launchSpec(request: AgentLaunchRequest): Promise<HarnessLaunch>;
+  launchSpec(request: AgentLaunchRequest, options: LaunchOptions): Promise<HarnessLaunch>;
   /**
    * How to start the TUI again on the agent's existing harness session. A harness without it
    * can't be respawned: a fresh session would rebind the agent (foundation-design §3.1).
@@ -35,5 +41,6 @@ export interface HarnessAdapter {
   resumeSpec?(
     request: AgentLaunchRequest,
     session: Omit<ExternalRef, "environmentId">,
+    options: LaunchOptions,
   ): Promise<HarnessLaunch>;
 }

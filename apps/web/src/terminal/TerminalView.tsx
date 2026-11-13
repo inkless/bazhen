@@ -17,6 +17,8 @@ import { wheelAction, type TerminalKind } from "./scroll.ts";
 import { attachScrollInput } from "./scroll-input.ts";
 import { loadSettings } from "./settings.ts";
 import { attachTakeover } from "./takeover.ts";
+import { shownScheme, terminalTheme, type TerminalPalette } from "./theme.ts";
+import { pageTheme } from "../ui/theme.ts";
 
 type Status =
   | { kind: "connecting" }
@@ -32,14 +34,22 @@ interface Report {
 }
 
 /** One terminal's real screen, interactive, as foundation-design §5.9 sets it out. */
-export function TerminalView({ terminalId, kind }: { terminalId: string; kind: TerminalKind }) {
+export function TerminalView({
+  terminalId,
+  kind,
+  palette = "theme",
+}: {
+  terminalId: string;
+  kind: TerminalKind;
+  palette?: TerminalPalette;
+}) {
   const host = useRef<HTMLDivElement>(null);
   const [report, setReport] = useState<Report>({ status: { kind: "connecting" }, notice: null });
 
   useEffect(() => {
     const element = host.current;
-    return element === null ? undefined : connect(element, terminalId, kind, setReport);
-  }, [terminalId, kind]);
+    return element === null ? undefined : connect(element, terminalId, kind, palette, setReport);
+  }, [terminalId, kind, palette]);
 
   const { status, notice } = report;
   return (
@@ -50,7 +60,15 @@ export function TerminalView({ terminalId, kind }: { terminalId: string; kind: T
         <p aria-live="polite">{STATUS_TEXT[status.kind]}</p>
       )}
       {notice !== null && <p role="status">{notice}</p>}
-      <div ref={host} style={{ height: "70vh" }} />
+      <div
+        ref={host}
+        // xterm.js paints whole rows; the strip below the last one is the host's.
+        style={{
+          height: "70vh",
+          background: "var(--color-terminal-bg)",
+          colorScheme: palette === "dark" ? "dark" : undefined,
+        }}
+      />
     </section>
   );
 }
@@ -70,10 +88,14 @@ function connect(
   element: HTMLElement,
   terminalId: string,
   kind: TerminalKind,
+  palette: TerminalPalette,
   onReport: (report: Report) => void,
 ) {
   const settings = loadSettings(localStorage);
+  const page = pageTheme();
+  const colours = () => terminalTheme(shownScheme(palette), page.moreContrast());
   const term = new Xterm({
+    theme: colours(),
     allowProposedApi: true,
     cursorBlink: true,
     macOptionIsMeta: settings.optionIsMeta,
@@ -192,8 +214,13 @@ function connect(
   const observer = new ResizeObserver(() => fit.fit());
   observer.observe(element);
   const detachTakeover = attachTakeover(element, engage);
+  // Repaints in place: the stream and the lease are untouched.
+  const unfollow = page.subscribe(() => {
+    term.options.theme = colours();
+  });
   return () => {
     over = true;
+    unfollow();
     clearTimeout(retry);
     detachTakeover();
     detachScroll();
@@ -245,8 +272,9 @@ function swallowReplies(term: Xterm): void {
 const swallow = () => true;
 
 /**
- * For browser tests, per view: the screen as text, the top line in view and whether the daemon
- * reported the alternate screen, whichever renderer draws.
+ * For browser tests, per view: the screen as text, the top line in view, whether the daemon
+ * reported the alternate screen, the background it paints, and the colours a program wrote text
+ * in, whichever renderer draws.
  */
 function exposeForTests(terminalId: string, term: Xterm, alternate: () => boolean): () => void {
   const views: Record<string, unknown> = Reflect.get(globalThis, "bazhenViews") ?? {};
@@ -255,8 +283,31 @@ function exposeForTests(terminalId: string, term: Xterm, alternate: () => boolea
     screen: () => screenText(term),
     viewportTop: () => term.buffer.active.viewportY,
     alternate,
+    background: () => term.options.theme?.background,
+    foregrounds: () => foregrounds(term),
   };
   return () => delete views[terminalId];
+}
+
+/**
+ * Each colour the screen's text is written in, once, as the program named it: `#rrggbb`, a
+ * palette index, or `default`.
+ */
+function foregrounds(term: Xterm): string[] {
+  const buffer = term.buffer.active;
+  const seen = new Set<string>();
+  for (let y = 0; y < buffer.length; y++) {
+    const line = buffer.getLine(y);
+    const width = line?.length ?? 0;
+    for (let x = 0; x < width; x++) {
+      const cell = line?.getCell(x);
+      if (cell === undefined || cell.getChars().trim() === "") continue;
+      if (cell.isFgRGB()) seen.add(`#${cell.getFgColor().toString(16).padStart(6, "0")}`);
+      else if (cell.isFgPalette()) seen.add(String(cell.getFgColor()));
+      else seen.add("default");
+    }
+  }
+  return [...seen];
 }
 
 function screenText(term: Xterm): string {

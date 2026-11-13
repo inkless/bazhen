@@ -21,6 +21,7 @@ import {
   type RespawnAgentRequest,
   type SignalAgentRequest,
 } from "@bazhen/protocol";
+import { launchOptions } from "./launch.ts";
 import { runtimePayload, UnknownAgent, type AgentTerminal, type Store } from "../store/store.ts";
 
 /** A command named a generation the agent's terminal has moved past (foundation-design §10). */
@@ -190,6 +191,7 @@ export class Lifecycle {
         .respawn({
           agentId: found.agentId,
           request: launch,
+          options: launchOptions(req.theme),
           refs: { runtime: found.runtime, externalRef },
           generation: next.generation,
         })

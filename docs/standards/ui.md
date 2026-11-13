@@ -63,6 +63,32 @@ To see every semantic colour in both themes, open `/swatches.html` on the dev se
    `apps/web/src/ui/token-sheet.test.ts`, and run `pnpm test`.
 4. A new hue is a new 12-step scale in `palette.css`, light and dark.
 
+## The terminal
+
+xterm.js draws from its own theme object, not CSS, so `terminalTheme()`
+(`apps/web/src/terminal/theme.ts`) builds it from the `--color-terminal-*` tokens in `tokens.css`:
+background, text, cursor, selection and the 16 ANSI colours, each mapped onto the palette like any
+other colour. The contrast test holds the text and every ANSI colour to 4.5:1 on the terminal's
+background, in every theme, with one exception per theme: ANSI assumes a black background, so
+`ansi-black` in dark and `ansi-bright-white` in light are the background's own end of the scale.
+Programs paint cells with those rather than write in them, so the test holds the text and the
+opposite end of the scale written on them to 4.5:1 instead.
+
+An open terminal recolours in place when the theme changes, here, in another tab of the device,
+or in the system's settings under "System"; its stream is untouched.
+
+An agent's TUI picks its own colours when it starts, so a launch and a respawn tell the daemon
+the theme its terminal shows, and the daemon passes it to the harness for that start only:
+
+- Claude Code gets `theme` in the settings it is started with, over the user's own.
+- Codex has no light or dark of its own: `tui.theme` gets the bundled `one-half-light` or
+  `one-half-dark` syntax highlighting, over the user's own, and the rest of its colours follow
+  the background the terminal reports, which the daemon answers as black. A Codex terminal
+  therefore stays on the dark palette in every theme.
+
+A running agent keeps the theme it started with until it is respawned. An agent started without
+the web client, from the CLI or by a daemon restart, keeps the user's own setting.
+
 ## Interactive widgets
 
 Behaviour comes from [React Aria Components](https://react-spectrum.adobe.com/react-aria/)

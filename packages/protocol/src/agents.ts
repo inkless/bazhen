@@ -109,12 +109,21 @@ export const Agent = z.object({
 });
 export type Agent = z.infer<typeof Agent>;
 
+/**
+ * Light or dark, as the client that starts a TUI shows it, so the harness draws for that
+ * background. Per request, never stored: absent, the harness keeps the user's own setting.
+ */
+export const TuiTheme = z.enum(["light", "dark"]);
+export type TuiTheme = z.infer<typeof TuiTheme>;
+
 export const LaunchAgentRequest = z.object({
   idempotencyKey: IdempotencyKey,
   harness: HarnessId,
   /** An absolute path, or `~` or `~/…` for the daemon user's home. */
   cwd: z.string().min(1),
   project: z.string().min(1).optional(),
+  /** Protocol 1.13. */
+  theme: TuiTheme.optional(),
 });
 export type LaunchAgentRequest = z.infer<typeof LaunchAgentRequest>;
 
@@ -142,6 +151,8 @@ export type CloseAgentRequest = z.infer<typeof CloseAgentRequest>;
 export const RespawnAgentRequest = z.object({
   idempotencyKey: IdempotencyKey,
   generation: z.number().int().nonnegative(),
+  /** Protocol 1.13. */
+  theme: TuiTheme.optional(),
 });
 export type RespawnAgentRequest = z.infer<typeof RespawnAgentRequest>;
 

@@ -1,4 +1,5 @@
 import type { AgentLaunchRequest } from "./agent.ts";
+import type { LaunchOptions } from "./harness.ts";
 import type { EnvironmentKind, ExitStatus, ExternalRef, HarnessId, Signal } from "@bazhen/protocol";
 import type { AgentSessionId, EnvironmentId, TerminalId } from "./ids.ts";
 import type { RuntimeRef, Size } from "./runtime.ts";
@@ -29,6 +30,7 @@ export interface AgentLaunch {
   readonly agentId: AgentSessionId;
   readonly terminalId: TerminalId;
   readonly request: AgentLaunchRequest;
+  readonly options: LaunchOptions;
   readonly size: Size;
 }
 
@@ -36,6 +38,7 @@ export interface AgentLaunch {
 export interface AgentRespawn {
   readonly agentId: AgentSessionId;
   readonly request: AgentLaunchRequest;
+  readonly options: LaunchOptions;
   readonly refs: AgentRefs;
   readonly generation: number;
 }

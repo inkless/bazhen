@@ -4,6 +4,7 @@ import { answer, launchAgent, watchState } from "./api.ts";
 import { FleetList } from "./fleet/FleetList.tsx";
 import { groupFleet } from "./fleet/model.ts";
 import { Workspace } from "./fleet/Workspace.tsx";
+import { harnessPalette, shownScheme } from "./terminal/theme.ts";
 import { Button } from "./ui/Button.tsx";
 
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -51,7 +52,10 @@ export function Dashboard() {
 
   const launch = (harness: HarnessId) => {
     setActionError(null);
-    void launchAgent(harness, cwd).then((r) => select(r.agentId), failed);
+    void launchAgent(harness, cwd, shownScheme(harnessPalette(harness))).then(
+      (r) => select(r.agentId),
+      failed,
+    );
   };
   const fleet = state === null ? null : groupFleet(state, showEnded);
   const agent = state?.agents.find((a) => a.id === selected);

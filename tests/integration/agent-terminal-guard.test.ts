@@ -31,6 +31,7 @@ const launch = (agentId: ReturnType<typeof newId<"agent">>, project = "runs") =>
     agentId,
     terminalId: newId("term"),
     request: { harness: "claude-code", project, cwd: process.cwd() },
+    options: {},
     size: { cols: 80, rows: 24 },
   });
 
