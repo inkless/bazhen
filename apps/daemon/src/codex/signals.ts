@@ -13,6 +13,11 @@ export interface CodexSignalsOptions {
   /** The running agent bound to a thread, if any. */
   readonly agentOf: (threadId: string) => string | undefined;
   readonly record: (agentId: string, signal: Activity) => void;
+  /** The thread's turns, as the inbox follows them for failures. */
+  readonly turns?: {
+    started(agentId: string): void;
+    failed(agentId: string, error: string | null): void;
+  };
   /** Resumes a thread that unloaded, which loads it again and subscribes to it. */
   readonly resume: (threadId: string) => Promise<void>;
   readonly now?: () => Date;
@@ -127,7 +132,9 @@ export function codexSignals(opts: CodexSignalsOptions): Partial<ChannelListener
       const turn = readTurn(method, params);
       if (turn !== null) {
         const { threadId, started, ended } = turn;
+        const agentId = opts.agentOf(threadId);
         if (started) {
+          if (agentId !== undefined) opts.turns?.started(agentId);
           failed.delete(threadId);
           if (labels.get(threadId) === INTERRUPTED) {
             labels.delete(threadId);
@@ -138,6 +145,7 @@ export function codexSignals(opts: CodexSignalsOptions): Partial<ChannelListener
         firstItem.delete(threadId);
         if (labels.get(threadId) === AUTO_CONTINUED) labels.delete(threadId);
         if (ended === "failed") {
+          if (agentId !== undefined) opts.turns?.failed(agentId, null);
           failed.add(threadId);
           return signal(threadId, "failed");
         }

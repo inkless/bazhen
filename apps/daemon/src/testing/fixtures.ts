@@ -27,6 +27,10 @@ export const testView: SnapshotView = {
   attachCommand: (ref) => `attach ${ref.terminalId}`,
   resumable: ["claude-code"],
   themes: () => ["light", "dark"],
+  attentionActions: (item) => {
+    if (item.kind === "approval") return ["allow", "deny"];
+    return item.kind === "question" ? [] : ["reply", "dismiss"];
+  },
 };
 
 export const tempDb = () => join(mkdtempSync(join(tmpdir(), "bz-store-")), "bazhen.db");

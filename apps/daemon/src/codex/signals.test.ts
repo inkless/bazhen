@@ -122,6 +122,22 @@ describe("Codex activity signals", () => {
     expect(s.resumed).toEqual(["thr-1"]);
   });
 
+  it("tells the inbox a turn failed and when the next one starts, for the agent bound to it", () => {
+    const turns: string[] = [];
+    const listener = codexSignals({
+      agentOf: () => "agt-1",
+      record: () => undefined,
+      resume: async () => undefined,
+      turns: {
+        started: (agentId) => turns.push(`started ${agentId}`),
+        failed: (agentId) => turns.push(`failed ${agentId}`),
+      },
+    });
+    listener.notification?.("turn/completed", turnEnded("failed"));
+    listener.notification?.("turn/started", turnStarted);
+    expect(turns).toEqual(["failed agt-1", "started agt-1"]);
+  });
+
   it("keeps a failed turn failed through the idle status that follows it", () => {
     const s = setup();
     s.notify("turn/started", turnStarted);

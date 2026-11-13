@@ -38,6 +38,7 @@ import { ShellLifecycle } from "./shells/lifecycle.ts";
 import { reconcileShells } from "./shells/reconcile.ts";
 import { streamRoute } from "./stream/server.ts";
 import { Approvals } from "./mailbox/approvals.ts";
+import { Inbox } from "./attention/inbox.ts";
 import { HOOK_SCRIPT, hookClient, hookCommand } from "./mailbox/hook-command.ts";
 import { ActivityTracker } from "./mailbox/activity.ts";
 import { SessionBinding, psTable } from "./mailbox/binding.ts";
@@ -89,6 +90,8 @@ const codexMail = new CodexMail({
 });
 const mailbox = new Mailbox(store, { codex: (id, agentId) => void codexMail.deliver(id, agentId) });
 const approvals = new Approvals(store);
+const inbox = new Inbox(store, approvals, (agentId, req) => mailbox.send(agentId, req));
+inbox.follow();
 // What the daemon was holding when it last stopped is gone with its sockets (§7 step 2).
 endOpenAttachments(store);
 mailbox.requeueInFlight();
@@ -134,6 +137,10 @@ const codex = new CodexChannel({
       agentOf: (threadId) => store.codexAgent(threadId),
       record: (agentId, activity) => void store.recordActivity(agentId, activity),
       resume: (threadId) => codex.resume(threadId),
+      turns: {
+        started: (agentId) => inbox.turnStarted(agentId),
+        failed: (agentId, error) => inbox.turnFailed(agentId, error),
+      },
     }),
     codexThreads.listener,
   ),
@@ -196,6 +203,7 @@ const snapshotView: SnapshotView = {
   attachCommand: (ref) => runtime.attachCommand(ref),
   resumable: environment.resumable,
   themes: (harness) => environment.themes[harness] ?? [],
+  attentionActions: (item) => inbox.actions(item),
 };
 for (const a of store.snapshot(snapshotView).agents) {
   if (a.harness === "claude-code" && a.state === "running") activity.restarted(a.id);
@@ -209,6 +217,9 @@ const commands = {
     launchAgent({ store, environment, size: DEFAULT_SIZE, home: inputs.home, queue }, req),
   send: (agentId, req) => mailbox.send(agentId, req),
   answer: (attentionId, req) => approvals.answer(attentionId, req),
+  reply: (attentionId, req) => inbox.reply(attentionId, req),
+  dismiss: (attentionId, req) => inbox.dismiss(attentionId, req),
+  resend: (attentionId, req) => inbox.resend(attentionId, req),
   close: (agentId, req) => lifecycle.close(agentId, req),
   respawn: (agentId, req) => lifecycle.respawn(agentId, req),
   signal: (agentId, req) => lifecycle.signal(agentId, req),
@@ -246,6 +257,10 @@ const socketListener = getRequestListener(
     hooks: hookApp({
       mailbox,
       approvals,
+      turns: {
+        started: (agentId) => inbox.turnStarted(agentId),
+        failed: (agentId, error) => inbox.turnFailed(agentId, error),
+      },
       knows: (agentId) => store.agent(agentId) !== undefined,
       binding: new SessionBinding(store, psTable),
       activity,

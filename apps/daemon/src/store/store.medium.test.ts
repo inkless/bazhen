@@ -82,9 +82,9 @@ describe("Store", () => {
 
   it("upgrades a schema-12 database to hold shells beside the agents it had", () => {
     const path = dbPath();
-    const v12 = Store.open(path, MIGRATIONS.slice(0, 12));
-    const { agentId } = launch(v12, withEnvironment(v12));
-    v12.close();
+    const v13 = Store.open(path, MIGRATIONS.slice(0, 13));
+    const { agentId } = launch(v13, withEnvironment(v13));
+    v13.close();
     const upgraded = Store.open(path);
     const [environmentId] = upgraded.environments("local");
     const terminalId = newId("term");
@@ -209,6 +209,7 @@ describe("Store snapshot view", () => {
     attachCommand: (ref: { locator: Record<string, string> }) => `attach ${ref.locator.session}`,
     resumable: ["claude-code" as const],
     themes: () => ["light", "dark"] as const,
+    attentionActions: () => [],
   };
 
   it("names each environment's host as the view says", () => {
@@ -284,6 +285,21 @@ describe("Store event log", () => {
       expect.stringMatching(/^[0-9a-f]{32}$/),
       null,
     ]);
+    upgraded.close();
+  });
+
+  it("reads every attention item of a schema-13 database as an approval once upgraded", () => {
+    const path = dbPath();
+    const v13 = Store.open(path, MIGRATIONS.slice(0, 13));
+    const { agentId } = launch(v13, withEnvironment(v13));
+    v13.close();
+    const id = newId("attn");
+    const raw = new DatabaseSync(path);
+    raw.exec(`INSERT INTO attention_items VALUES ('${id}', '${agentId}', 'open', NULL, 'Bash',
+              NULL, 1, 1, 1)`);
+    raw.close();
+    const upgraded = Store.open(path);
+    expect(upgraded.openAttention()).toMatchObject([{ id, kind: "approval" }]);
     upgraded.close();
   });
 

@@ -1,0 +1,12 @@
+{
+  "$id": "AttentionAction",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "string",
+  "enum": [
+    "allow",
+    "deny",
+    "reply",
+    "resend",
+    "dismiss"
+  ]
+}

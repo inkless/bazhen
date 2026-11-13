@@ -2,7 +2,7 @@ import { z } from "zod";
 import { Activity, Usage, ExitStatus, ExternalRef, HarnessId, Signal } from "./agents.ts";
 import { TuiTheme } from "./theme.ts";
 import { AttachmentMode, EnvironmentKind, Id } from "./ids.ts";
-import { ApprovalDecision, AttentionCloseReason } from "./mail.ts";
+import { ApprovalDecision, AttentionCloseReason, AttentionKind } from "./mail.ts";
 import { ProtocolVersion } from "./version.ts";
 
 const queued = z.object({ agentId: Id("agent"), body: z.string() });
@@ -202,12 +202,16 @@ export const EVENTS = {
       ]),
     }),
   },
-  /** A harness asks the human, here to run a tool (§4.6, §5.6). */
+  /** Something needs the human: a harness asking to run a tool, a failure, a question (§4.6). */
   "attention.opened": {
     entity: "attention",
     payload: z.object({
       agentId: Id("agent"),
       summary: z.string(),
+      /** Absent on items recorded before kinds, which were all approvals. */
+      kind: AttentionKind.optional(),
+      taskId: z.string().optional(),
+      messageId: Id("msg").optional(),
       /** The tool call it is for, whose result closes it; null if no call was seen to start. */
       toolUseId: z.string().nullable(),
       /** Asked by the agent itself, whose turn ending closes it, rather than by a subagent. */

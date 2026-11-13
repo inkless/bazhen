@@ -27,6 +27,10 @@ export class AttentionUnavailable extends Error {
   }
 }
 
+/** Items a harness request stands behind, which only that request, or the TUI, settles. */
+export const isRequest = (item: OpenAttention) =>
+  item.kind === "approval" || item.kind === "question";
+
 export type CloseReason = EventPayload<"attention.closed">["reason"];
 
 /** Hands the inbox's decision to the harness, or null when the request ended without one. */
@@ -116,10 +120,15 @@ export class Approvals {
       type: "attention.opened",
       entityId: id,
       actor: "system",
-      payload: { agentId, summary, toolUseId, mainAgent },
+      payload: { agentId, summary, toolUseId, mainAgent, kind: "approval" },
     });
     this.pending.set(id, reply);
     return id;
+  }
+
+  /** Whether an answer to the item would reach the harness now. */
+  canAnswer(id: AttentionId): boolean {
+    return this.pending.has(id) && this.answerable.get(id)?.() !== false;
   }
 
   answer(id: string, req: AnswerAttentionRequest): AnswerAttentionResponse {
@@ -173,13 +182,18 @@ export class Approvals {
 
   private settleWhere(agentId: string, matches: (item: OpenAttention) => boolean): void {
     for (const item of this.store.openAttention(agentId)) {
-      if (matches(item)) this.withdraw(item.id, "answered_in_tui");
+      if (isRequest(item) && matches(item)) this.withdraw(item.id, "answered_in_tui");
     }
   }
 
-  /** The hooks behind open items died with the daemon; their requests are gone. */
+  /**
+   * The hooks behind open requests died with the daemon; their requests are gone. Items no
+   * request stands behind, such as a failure, still need the human.
+   */
   closeAbandoned(): void {
-    for (const item of this.store.openAttention()) this.close(item.id, "stale");
+    for (const item of this.store.openAttention()) {
+      if (isRequest(item)) this.close(item.id, "stale");
+    }
   }
 
   /** The reply still waiting for an item's answer, which only the first answer gets. */

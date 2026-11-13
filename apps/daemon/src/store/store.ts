@@ -25,6 +25,8 @@ import {
   StateSnapshot,
   TerminalState,
   EnvironmentKind,
+  AttentionKind,
+  type AttentionAction,
   type MailboxState,
   type ResetReason,
   type EventPayload,
@@ -32,7 +34,7 @@ import {
   type ShellCommand,
 } from "@bazhen/protocol";
 import { LATEST_SCHEMA_VERSION, MIGRATIONS, type Migration } from "./migrations.ts";
-import { project, type Statements } from "./projections.ts";
+import { project, type Recorded, type Statements } from "./projections.ts";
 
 export interface NewEvent<T extends EventType> {
   readonly type: T;
@@ -64,8 +66,12 @@ function rowIds<P extends IdPrefix>(rows: readonly Record<string, SQLOutputValue
 /** A key reused for a different request: answering with the first one would be a lie. */
 export interface OpenAttention {
   readonly id: AttentionId;
+  readonly agentId: string;
+  readonly kind: AttentionKind;
   readonly toolUseId: string | null;
   readonly mainAgent: boolean;
+  /** The message it is about, for mail that could not be delivered. */
+  readonly messageId: string | null;
 }
 
 /** No agent the command can act on: none by that id or, given `qualifier`, none that is so. */
@@ -91,6 +97,8 @@ export interface SnapshotView {
   readonly resumable: readonly HarnessId[];
   /** The themes a harness can start its TUI in. */
   themes(harness: HarnessId): readonly TuiTheme[];
+  /** What the human can do about an open item now. */
+  attentionActions(item: OpenAttention): readonly AttentionAction[];
 }
 
 /** Terminal states whose runtime target still exists, so a human can attach to it. */
@@ -204,6 +212,7 @@ export class Store {
   private depth = 0;
   private appended = false;
   private readonly listeners = new Set<() => void>();
+  private readonly reactors = new Set<(event: Recorded) => void>();
   /** Every event a projection still points at; retention keeps them, as it keeps projections. */
   private referenced = "";
   private readonly cache = new Map<string, StatementSync>();
@@ -289,11 +298,13 @@ export class Store {
       this.appended = true;
       // The projection parses the payload with its type's schema, rolling the event back if
       // it doesn't match.
+      const recorded = { id, hostId: this.host, ...event };
       try {
-        project(this.statements, { id, hostId: this.host, ...event });
+        project(this.statements, recorded);
       } catch (err) {
         throw err instanceof z.ZodError ? new InvalidEvent(event.type, err) : err;
       }
+      for (const reactor of this.reactors) reactor(recorded);
       return id;
     });
   }
@@ -398,7 +409,7 @@ export class Store {
 
   /** Open attention items, for one agent or all, with the tool call each is about. */
   openAttention(agentId?: string): OpenAttention[] {
-    const sql = `SELECT id, tool_use_id, main_agent FROM attention_items
+    const sql = `SELECT id, agent_session_id, kind, tool_use_id, main_agent, message_id FROM attention_items
                  WHERE state = 'open' AND (?1 IS NULL OR agent_session_id = ?1) ORDER BY created_event_id`;
     return this.prepare(sql)
       .all(agentId ?? null)
@@ -407,8 +418,11 @@ export class Store {
           ? [
               {
                 id: r.id,
+                agentId: String(r.agent_session_id),
+                kind: AttentionKind.parse(r.kind),
                 toolUseId: typeof r.tool_use_id === "string" ? r.tool_use_id : null,
                 mainAgent: r.main_agent === 1,
+                messageId: typeof r.message_id === "string" ? r.message_id : null,
               },
             ]
           : [],
@@ -416,9 +430,17 @@ export class Store {
   }
 
   /** One agent's harness, if this daemon runs it. */
-  agent(agentId: string): { harness: string } | undefined {
-    const row = this.prepare("SELECT harness FROM agent_sessions WHERE id = ?").get(agentId);
-    return row === undefined ? undefined : { harness: String(row.harness) };
+  agent(agentId: string): { harness: string; state: AgentState } | undefined {
+    const row = this.prepare("SELECT harness, state FROM agent_sessions WHERE id = ?").get(agentId);
+    return row === undefined
+      ? undefined
+      : { harness: String(row.harness), state: AgentState.parse(row.state) };
+  }
+
+  /** The agent a message is for. */
+  messageAgent(messageId: string): string | undefined {
+    const row = this.prepare("SELECT agent_session_id FROM mailbox WHERE id = ?").get(messageId);
+    return row === undefined ? undefined : String(row.agent_session_id);
   }
 
   /**
@@ -725,9 +747,27 @@ export class Store {
             };
           }),
         attention: this.prepare(
-          `SELECT id, agent_session_id AS agentId, state, close_reason AS closeReason, summary
-           FROM attention_items ORDER BY created_event_id`,
-        ).all(),
+          `SELECT i.id, i.agent_session_id AS agentId, i.state, i.close_reason AS closeReason,
+                  i.summary, i.kind, i.task_id AS taskId, i.message_id AS messageId,
+                  i.tool_use_id, i.main_agent, e.ts AS openedAt
+           FROM attention_items i JOIN events e ON e.id = i.created_event_id
+           ORDER BY i.created_event_id`,
+        )
+          .all()
+          .map(({ tool_use_id, main_agent, ...r }) => ({
+            ...r,
+            actions:
+              r.state === "open" && typeof r.id === "string" && isId("attn", r.id)
+                ? view.attentionActions({
+                    id: r.id,
+                    agentId: String(r.agentId),
+                    kind: AttentionKind.parse(r.kind),
+                    toolUseId: typeof tool_use_id === "string" ? tool_use_id : null,
+                    mainAgent: main_agent === 1,
+                    messageId: typeof r.messageId === "string" ? r.messageId : null,
+                  })
+                : [],
+          })),
         messages: this.prepare(
           "SELECT id, agent_session_id AS agentId, state FROM mailbox ORDER BY created_event_id",
         ).all(),
@@ -843,6 +883,15 @@ export class Store {
       this.appended = false;
       this.depth--;
     }
+  }
+
+  /**
+   * Calls `reactor` with each event as it is recorded, inside its transaction, so what the
+   * reactor appends in turn is committed or rolled back with the event that caused it.
+   */
+  react(reactor: (event: Recorded) => void): () => void {
+    this.reactors.add(reactor);
+    return () => this.reactors.delete(reactor);
   }
 
   /**

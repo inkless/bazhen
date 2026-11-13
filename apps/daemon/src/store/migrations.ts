@@ -219,6 +219,15 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX terminals_linked_agent ON terminals (linked_agent_id);
     `,
   },
+  {
+    version: 14,
+    sql: `
+      -- What an item is about (foundation-design §4.6); every item before kinds was an approval.
+      ALTER TABLE attention_items ADD COLUMN kind TEXT NOT NULL DEFAULT 'approval';
+      ALTER TABLE attention_items ADD COLUMN task_id TEXT;
+      ALTER TABLE attention_items ADD COLUMN message_id TEXT;
+    `,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

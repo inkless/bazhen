@@ -5,9 +5,11 @@ import { PROTOCOL_VERSION, type LaunchAgentRequest } from "@bazhen/protocol";
 import { EnvironmentUnavailable, ServerUnconfirmed, StaleGeneration } from "../agents/lifecycle.ts";
 import { AttentionClosed } from "../mailbox/approvals.ts";
 import { ShellBusy, UnknownShell } from "../shells/lifecycle.ts";
+import { AttentionRefused } from "../attention/inbox.ts";
 import { createApp } from "./app.ts";
 
 const runtime = new FakeRuntime();
+
 const launched = { agentId: newId("agent"), terminalId: newId("term"), eventIds: [2, 3] };
 const app = createApp({
   appVersion: "0.1.0",
@@ -26,6 +28,15 @@ const app = createApp({
   send: () => ({ messageId: newId("msg"), eventIds: [4] }),
   answer: () => {
     throw new AttentionClosed("attn_x");
+  },
+  reply: () => {
+    throw new AttentionRefused("attn_x", "reply");
+  },
+  dismiss: () => {
+    throw new AttentionClosed("attn_x");
+  },
+  resend: () => {
+    throw new AttentionRefused("attn_x", "resend");
   },
   close: async (agentId, req) => {
     if (req.generation === 3) throw new ServerUnconfirmed(agentId, new Error("no server running"));
@@ -48,6 +59,13 @@ const app = createApp({
 });
 
 const host = "127.0.0.1:7900";
+
+const act = (action: string, body: object) =>
+  app.request(`/v1/attention/attn_x/${action}`, {
+    method: "POST",
+    headers: { host, "content-type": "application/json" },
+    body: JSON.stringify({ idempotencyKey: "a", ...body }),
+  });
 const post = (body: unknown, headers: Record<string, string> = {}) =>
   app.request("/v1/agents", {
     method: "POST",
@@ -135,6 +153,15 @@ describe("HTTP app", () => {
       body: JSON.stringify({ idempotencyKey: "a", decision: "allow" }),
     });
     expect(res.status).toBe(409);
+  });
+
+  it("answers a reply or dismissal the item can't take with a conflict", async () => {
+    const statuses = [
+      (await act("reply", { body: "ok" })).status,
+      (await act("resend", {})).status,
+      (await act("dismiss", {})).status,
+    ];
+    expect(statuses).toEqual([409, 409, 409]);
   });
 
   it("tells a stale generation from an environment that can't be reached, on close", async () => {

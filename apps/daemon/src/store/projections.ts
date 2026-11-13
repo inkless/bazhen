@@ -234,12 +234,23 @@ export function project(db: Statements, e: Recorded): void {
       return;
     }
     case "attention.opened": {
-      const { agentId, summary, toolUseId, mainAgent } = EVENTS[e.type].payload.parse(e.payload);
+      const p = EVENTS[e.type].payload.parse(e.payload);
       db.prepare(
         `INSERT INTO attention_items (id, agent_session_id, state, summary, tool_use_id,
-           main_agent, created_event_id, updated_event_id)
-         VALUES (?, ?, 'open', ?, ?, ?, ?, ?)`,
-      ).run(e.entityId, agentId, summary, toolUseId, mainAgent ? 1 : 0, e.id, e.id);
+           main_agent, kind, task_id, message_id, created_event_id, updated_event_id)
+         VALUES (?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        e.entityId,
+        p.agentId,
+        p.summary,
+        p.toolUseId,
+        p.mainAgent ? 1 : 0,
+        p.kind ?? "approval",
+        p.taskId ?? null,
+        p.messageId ?? null,
+        e.id,
+        e.id,
+      );
       return;
     }
     case "attention.answered":

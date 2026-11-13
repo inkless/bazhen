@@ -348,4 +348,35 @@ describe("mail to a Claude Code agent", () => {
       true,
     );
   });
+
+  it("puts mail it gave up on and the failed turn in the inbox, and sends a reply as mail", async () => {
+    const before = await state();
+    const shown = before.attention.map((a) => `${a.kind}:${a.state}:${a.actions.join("+")}`);
+    expect(shown).toEqual(
+      expect.arrayContaining([
+        "undeliverable:open:reply+resend+dismiss",
+        "failed:open:reply+dismiss",
+      ]),
+    );
+    const undeliverable = openItems(before).find((a) => a.kind === "undeliverable");
+    const failed = openItems(before).find((a) => a.kind === "failed");
+    const replied = await daemon.request(`/v1/attention/${undeliverable?.id}/reply`, {
+      method: "POST",
+      body: { idempotencyKey: "reply", body: "Never mind that, just say hello." },
+    });
+    const { messageId } = SendMessageResponse.parse(replied.body);
+    // The failed prompt still sits unanswered before the reply, so the fake model fails the
+    // reply's turn too: reaching the model is as far as this agent can show it.
+    await expect
+      .poll(() => model.requests.some((r) => r.includes("Never mind that, just say hello.")), {
+        timeout: 30_000,
+      })
+      .toBe(true);
+    const after = await state();
+    expect([
+      after.messages.find((m) => m.id === messageId)?.agentId,
+      after.attention.find((a) => a.id === undeliverable?.id)?.closeReason,
+      after.attention.find((a) => a.id === failed?.id)?.state,
+    ]).toEqual([agentId, "replied", "closed"]);
+  });
 });
