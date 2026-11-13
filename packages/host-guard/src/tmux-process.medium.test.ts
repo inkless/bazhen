@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isAlive } from "./signal.ts";
-import { readProcess, terminalForeground } from "./tmux.ts";
+import { readProcess, terminalForeground, terminalGroups } from "./tmux.ts";
 
 describe("what ps shows of a process", () => {
   it("reads this process's whole command, start and argument line", async () => {
@@ -27,5 +27,17 @@ describe("a process's terminal foreground", () => {
       typeof (await terminalForeground(process.pid)),
       await terminalForeground(Number(free)),
     ]).toEqual(["number", "absent"]);
+  });
+});
+
+describe("many processes' foreground groups at once", () => {
+  it("reads a group for each live process, and leaves out a pid no process has", async () => {
+    const free = [...Array(1000).keys()].map((i) => 99_999 - i).find((pid) => !isAlive(pid));
+    const read = await terminalGroups([process.pid, Number(free)]);
+    expect(read).toEqual(new Map([[process.pid, expect.any(Number)]]));
+  });
+
+  it("is unreadable, never half read, when ps prints more than it may", async () => {
+    expect(await terminalGroups([process.pid], 4)).toBe("unreadable");
   });
 });

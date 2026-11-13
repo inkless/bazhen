@@ -33,6 +33,11 @@ export const Shell = z.object({
   linkedAgentId: Id("agent").nullable(),
   /** A name the user gave it; without one, a client names it from its directory. */
   name: z.string().nullable().default(null),
+  /**
+   * What runs in its foreground when that isn't the shell, by name, and since when, as the
+   * daemon last saw it; null at the shell's prompt (protocol 1.23).
+   */
+  foreground: z.object({ command: z.string(), since: z.iso.datetime() }).nullable().default(null),
   /** The theme it was opened for, which it is drawn in and tells programs that ask. */
   theme: TuiTheme,
   /** As an agent's: null while the runtime holds no terminal for it. */

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   environmentScript,
+  parseGroups,
   parseLstart,
   parsePsLine,
   psFailure,
@@ -192,5 +193,17 @@ describe("the recorded tmux server, by what ps shows of it", () => {
 
   it("is unsure, never gone, against a recorded start it can't read", () => {
     expect(is({ comm: "node", start: 1, args: "node" }, { pid: "4242", start: "" })).toBe("unsure");
+  });
+});
+
+describe("foreground groups read back", () => {
+  it("reads each pid's group, a process with no terminal's as -1, and skips any other line", () => {
+    const out = "  4242  4250\n    17    -1\nnot a row\n  9 x\n";
+    expect(parseGroups(out)).toEqual(
+      new Map([
+        [4242, 4250],
+        [17, -1],
+      ]),
+    );
   });
 });

@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -373,6 +373,23 @@ describe("a lost shell", () => {
     failOpens(false);
     const again = await shells.restart(terminalId, { idempotencyKey: "r2", generation: 0 });
     expect([stateOf(terminalId), stateOf(again.terminalId)]).toEqual(["closed", "running"]);
+  });
+
+  it("restarts in the directory it was last seen in, not the one it opened in", async () => {
+    const { shells, terminalId, runtime, refOf, store } = await lost();
+    const moved = mkdtempSync(join(tmpdir(), "bz-moved-"));
+    store.noteShellCwd(terminalId, moved);
+    const restarted = await shells.restart(terminalId, { idempotencyKey: "r", generation: 0 });
+    expect(runtime.specOf(refOf(restarted.terminalId)).cwd).toBe(moved);
+  });
+
+  it("restarts in the directory it opened in once the one it was last seen in is gone", async () => {
+    const { shells, terminalId, runtime, refOf, store } = await lost();
+    const moved = mkdtempSync(join(tmpdir(), "bz-moved-"));
+    store.noteShellCwd(terminalId, moved);
+    rmSync(moved, { recursive: true });
+    const restarted = await shells.restart(terminalId, { idempotencyKey: "r", generation: 0 });
+    expect(runtime.specOf(refOf(restarted.terminalId)).cwd).toBe(tmpdir());
   });
 
   it("restarts standalone once its agent has closed", async () => {

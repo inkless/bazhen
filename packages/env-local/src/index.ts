@@ -14,6 +14,7 @@ import type {
   HarnessAdapter,
   RuntimeAdapter,
   RuntimeRef,
+  ShellForeground,
   ShellInventoryEntry,
   ShellOpen,
 } from "@bazhen/core";
@@ -149,6 +150,16 @@ export class LocalEnvironment implements EnvironmentAdapter {
     const { command, own } = await this.opts.runtime.foreground(ref);
     // A login shell's process may be named with a leading dash, as `-fish`.
     return own ? null : command.replace(/^-/, "");
+  }
+
+  async shellForegrounds(refs: readonly RuntimeRef[]): Promise<ShellForeground[]> {
+    const asked = new Set<string>(refs.map((r) => r.terminalId));
+    return (await this.opts.runtime.foregrounds(asked)).map((f) => ({
+      ref: f.ref,
+      // A login shell's process may be named with a leading dash, as `-fish`.
+      command: f.own ? null : f.command.replace(/^-/, ""),
+      cwd: f.cwd,
+    }));
   }
 
   unlinkShell(ref: RuntimeRef): Promise<void> {

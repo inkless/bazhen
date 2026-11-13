@@ -151,6 +151,14 @@ export const EVENTS = {
      */
     payload: z.object({ reason: z.enum(["user", "exited", "agent_closed", "restarted"]) }),
   },
+  /**
+   * What runs in a shell's foreground changed: a program's name, or null back at the prompt. Its
+   * command line is never carried: it can hold a secret the user typed (§4.8).
+   */
+  "terminal.foreground_changed": {
+    entity: "terminal",
+    payload: z.object({ command: z.string().max(200).nullable() }),
+  },
   /** A linked shell became standalone; its agent's close no longer takes it. */
   "terminal.unlinked": { entity: "terminal", payload: z.object({}) },
   /** A shell's name, as the user gave it, or null when taken away. */

@@ -69,6 +69,22 @@ describe("a shell terminal", () => {
     view.close();
   });
 
+  it("shows what runs in it by name, and nothing once it ends", async () => {
+    const terminalId = await open(daemon);
+    const view = await driving(terminalId);
+    view.type("sleep 301\r");
+    await expect
+      .poll(async () => (await shellOf(daemon, terminalId))?.foreground?.command, {
+        timeout: 15_000,
+      })
+      .toBe("sleep");
+    view.type("\x03");
+    await expect
+      .poll(async () => (await shellOf(daemon, terminalId))?.foreground, { timeout: 15_000 })
+      .toBeNull();
+    view.close();
+  });
+
   it("closes a shell at its prompt without asking first", async () => {
     const terminalId = await open(daemon);
     const view = await driving(terminalId);
@@ -116,7 +132,16 @@ describe("a shell after its tmux server died", () => {
   beforeAll(async () => {
     restarted = await Daemon.start();
     terminalId = await open(restarted);
-    await waitUntil(() => hasSession(restarted, terminalId), "the shell's session");
+    const view = await restarted.view(terminalId, "interactive");
+    await view.drive();
+    // Seen in a directory of its own, which a restart then opens in: the read that sees sleep
+    // start there is the one that records the directory.
+    view.type("mkdir -p moved && cd moved && sleep 30\r");
+    await waitUntil(
+      async () => (await shellOf(restarted, terminalId))?.foreground?.command === "sleep",
+      "a foreground read in the new directory",
+    );
+    view.close();
     await restarted.kill();
     restarted.tmuxServer.kill();
     await restarted.restart();
@@ -125,7 +150,7 @@ describe("a shell after its tmux server died", () => {
     await restarted?.stop();
   });
 
-  it("shows as lost, and restarts as a new shell in the same directory", async () => {
+  it("shows as lost, and restarts in the directory it was last seen in", async () => {
     expect((await shellOf(restarted, terminalId))?.state).toBe("lost");
     const res = await restarted.request(`/v1/shells/${terminalId}/restart`, {
       method: "POST",
@@ -133,7 +158,9 @@ describe("a shell after its tmux server died", () => {
     });
     const replacement = ShellCommandResponse.parse(res.body).terminalId;
     await waitUntil(() => hasSession(restarted, replacement), "the new shell's session");
-    expect(restarted.paneFact(replacement, "pane_current_path", TAG)).toBe(restarted.work);
+    expect(restarted.paneFact(replacement, "pane_current_path", TAG)).toBe(
+      `${restarted.work}/moved`,
+    );
     expect(await shellOf(restarted, terminalId)).toBeUndefined();
   });
 });

@@ -4,6 +4,7 @@ export {
   TmuxServer,
   environmentScript,
   isSafeEnvEntry,
+  terminalGroups,
   terminalForeground,
   tmuxVersion,
   type ConfiguredTmuxServer,

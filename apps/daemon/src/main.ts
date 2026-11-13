@@ -36,6 +36,7 @@ import { TerminalHub } from "./stream/hub.ts";
 import { endOpenAttachments, storeLog } from "./stream/log.ts";
 import { ShellLifecycle } from "./shells/lifecycle.ts";
 import { reconcileShells } from "./shells/reconcile.ts";
+import { ForegroundWatch } from "./shells/foreground.ts";
 import { streamRoute } from "./stream/server.ts";
 import { Approvals } from "./mailbox/approvals.ts";
 import { Inbox } from "./attention/inbox.ts";
@@ -204,6 +205,7 @@ const shells = new ShellLifecycle({
 });
 await reconcileShells(store, environment, shells);
 await shells.settleOrphans();
+const foreground = new ForegroundWatch({ store, environment });
 // A title that changed while the daemon was down, or a move it was waiting on, is read again;
 // until it has been, those agents' mail waits, so none goes to a thread the TUI has left.
 codexThreads.followAll();
@@ -215,7 +217,10 @@ const serverWatch = new ServerWatch({
   store,
   environment,
   queue,
-  alsoEachTick: () => shells.settleOrphans(),
+  alsoEachTick: async () => {
+    await shells.settleOrphans();
+    await foreground.refresh();
+  },
 });
 serverWatch.start();
 shells.watch();
@@ -267,7 +272,15 @@ const commands = {
 } satisfies Omit<AppDeps, "allow">;
 const app = createApp({ ...commands, allow, pairing: { codes: pairing, devices } });
 
-const hub = new TerminalHub(runtime, storeLog(store));
+const attachments = storeLog(store);
+const hub = new TerminalHub(runtime, {
+  ...attachments,
+  // A view that opens a shell sees what runs in it now, not as of the last tick (§4.8).
+  started: (attachment, terminalId, mode) => {
+    attachments.started(attachment, terminalId, mode);
+    if (store.shell(terminalId) !== undefined) void foreground.refresh();
+  },
+});
 const server = serve({ fetch: app.fetch, hostname: HOSTNAME, port }, (info) => {
   console.log(`bazhen daemon listening on http://${HOSTNAME}:${info.port} (data: ${paths.data})`);
 });
