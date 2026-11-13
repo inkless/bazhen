@@ -1,0 +1,78 @@
+/*
+ * Semantic tier: the only tokens screens and components use (docs/standards/ui.md). A CSS name is
+ * its DTCG path with dots as hyphens: --color-text is color.text, aliasing {color.neutral.12}.
+ */
+:root {
+  color-scheme: light dark;
+
+  /* $type: color. The theme mapping, light then dark, one line per token. */
+  --color-bg: light-dark(var(--color-neutral-1), var(--color-neutral-dark-1));
+  --color-surface: light-dark(var(--color-neutral-3), var(--color-neutral-dark-3));
+  --color-surface-hover: light-dark(var(--color-neutral-4), var(--color-neutral-dark-4));
+  --color-surface-selected: light-dark(var(--color-neutral-5), var(--color-neutral-dark-5));
+  --color-border-strong: light-dark(var(--color-neutral-9), var(--color-neutral-dark-9));
+  --color-text: light-dark(var(--color-neutral-12), var(--color-neutral-dark-12));
+  --color-text-muted: light-dark(var(--color-neutral-11), var(--color-neutral-dark-11));
+  --color-link: light-dark(var(--color-blue-11), var(--color-blue-dark-11));
+  --color-focus-ring: light-dark(var(--color-blue-9), var(--color-blue-dark-9));
+  --color-ok: light-dark(var(--color-green-11), var(--color-green-dark-11));
+  --color-ok-subtle: light-dark(var(--color-green-3), var(--color-green-dark-3));
+  --color-warn: light-dark(var(--color-amber-11), var(--color-amber-dark-11));
+  --color-warn-subtle: light-dark(var(--color-amber-3), var(--color-amber-dark-3));
+  --color-danger: light-dark(var(--color-red-11), var(--color-red-dark-11));
+  --color-danger-subtle: light-dark(var(--color-red-3), var(--color-red-dark-3));
+
+  /* $type: dimension */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --radius-s: 4px;
+  --radius-pill: 999px;
+  --size-hit-min: 24px;
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.85rem;
+  --font-size-md: 1rem;
+  --font-size-lg: 1.25rem;
+
+  /* $type: fontFamily */
+  --font-family-sans: system-ui, sans-serif;
+  --font-family-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* $type: number */
+  --line-height-body: 1.4;
+
+  /* $type: duration, cubicBezier */
+  --duration-fast: 100ms;
+  --easing-standard: cubic-bezier(0.2, 0, 0, 1);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+/* More contrast: the theme mapping's overrides, light then dark. */
+@media (prefers-contrast: more) {
+  :root {
+    --color-text-muted: light-dark(var(--color-neutral-12), var(--color-neutral-dark-12));
+    --color-link: light-dark(var(--color-blue-12), var(--color-blue-dark-12));
+  }
+}
+
+/* Phones over the LAN: WCAG 2.5.5's 44px targets for a finger, 24px (2.5.8) for a pointer. */
+@media (pointer: coarse) {
+  :root {
+    --size-hit-min: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0s;
+  }
+}

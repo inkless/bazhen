@@ -1,0 +1,44 @@
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-family-sans);
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-body);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+/* A link-styled button inside a sentence keeps the line's height (WCAG 2.5.8's inline exception). */
+button:not(.link),
+input {
+  min-height: var(--size-hit-min);
+}
+
+input {
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-s);
+  background: var(--color-bg);
+  color: inherit;
+}
+
+code,
+pre {
+  font-family: var(--font-family-mono);
+}
+
+/* Forced colours drop backgrounds, so anything a background alone marks needs a border too. */
+@media (forced-colors: active) {
+  :focus-visible {
+    outline-color: Highlight;
+  }
+}

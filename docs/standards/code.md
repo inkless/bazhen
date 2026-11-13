@@ -18,6 +18,7 @@ for something no check covers.
 | Comments explain _why_, never _what_                                   | review                                                                               |
 | Dependencies are pinned exactly, with a reason for any pre-release     | review                                                                               |
 | The committed JSON Schema matches the protocol's zod schemas           | `pnpm check` (`scripts/protocol-schema.ts --check`)                                  |
+| `apps/web` screens use only semantic design tokens (`ui.md`)           | `pnpm check` (`scripts/check-standards.ts`)                                          |
 
 ## Boundaries
 

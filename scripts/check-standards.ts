@@ -5,6 +5,7 @@ import { existsSync, readdirSync, readFileSync, readlinkSync, statSync } from "n
 import { stripTypeScriptTypes } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { cssDeclarations } from "../apps/web/src/ui/token-sheet.ts";
 import { isMain } from "./is-main.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -38,18 +39,22 @@ const COVERED_ELSEWHERE: Record<string, string> = {
   "apps/web/src/terminal/TerminalView.tsx": "tests/e2e/keys.spec.ts",
   "apps/web/src/terminal/scroll-input.ts": "tests/e2e/keys.spec.ts",
   "apps/web/src/terminal/takeover.ts": "tests/e2e/keys.spec.ts",
+  "apps/web/src/ui/swatches.tsx": "tests/e2e/swatches.spec.ts",
 };
 
-function sourceFiles(dir: string): string[] {
+/** Every file under `dir`, recursively, as repository-relative paths. */
+function filesUnder(dir: string): string[] {
   if (!existsSync(join(root, dir))) return [];
   return readdirSync(join(root, dir)).flatMap((name) => {
     const rel = `${dir}/${name}`;
-    if (statSync(join(root, rel)).isDirectory()) return sourceFiles(rel);
-    return /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name) && !name.endsWith(".d.ts")
-      ? [rel]
-      : [];
+    return statSync(join(root, rel)).isDirectory() ? filesUnder(rel) : [rel];
   });
 }
+
+const sourceFiles = (dir: string) =>
+  filesUnder(dir).filter(
+    (f) => /\.tsx?$/.test(f) && !/\.test\.tsx?$/.test(f) && !f.endsWith(".d.ts"),
+  );
 
 /** Removes comments, leaving string and template literals intact. */
 function stripComments(js: string): string {
@@ -117,6 +122,134 @@ function checkSiblingTests(): void {
   }
 }
 
+// apps/web's screens use only its semantic tokens (docs/standards/ui.md); oxlint doesn't read CSS.
+const PALETTE_CSS = "apps/web/src/ui/palette.css";
+const TOKENS_CSS = "apps/web/src/ui/tokens.css";
+const COLOUR_FUNCTION = /\b(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color|color-mix|light-dark)\(/i;
+const HEX_COLOUR = /(#|%23)[0-9a-f]{3,8}\b/i;
+const NAMED_COLOURS = new Set(
+  (
+    "aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue " +
+    "blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk " +
+    "crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki " +
+    "darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen " +
+    "darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue " +
+    "dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite " +
+    "gold goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki " +
+    "lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan " +
+    "lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen " +
+    "lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen " +
+    "magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen " +
+    "mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream " +
+    "mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid " +
+    "palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum " +
+    "powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown " +
+    "seagreen seashell sienna silver skyblue slateblue slategray slategrey snow springgreen " +
+    "steelblue tan teal thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen"
+  ).split(" "),
+);
+
+// Forced colours (Windows High Contrast) is the one place a system colour belongs.
+const SYSTEM_COLOURS = new Set(
+  (
+    "accentcolor accentcolortext activetext buttonborder buttonface buttontext canvas canvastext " +
+    "field fieldtext graytext highlight highlighttext linktext mark marktext selecteditem " +
+    "selecteditemtext visitedtext"
+  ).split(" "),
+);
+const FORCED_COLOURS = "@media (forced-colors: active)";
+const BORDER_STYLE = /\b(solid|dashed|dotted|double|groove|ridge|inset|outset)\b/;
+/** The token files, and the code that reads them and draws every token from their text. */
+const TOKEN_FILES = new Set([
+  PALETTE_CSS,
+  TOKENS_CSS,
+  "apps/web/src/ui/token-sheet.ts",
+  "apps/web/src/ui/swatches.tsx",
+]);
+
+/** The custom properties a stylesheet declares, wherever it declares them. */
+export function declaredTokens(css: string): Set<string> {
+  return new Set(
+    cssDeclarations(css)
+      .filter((d) => d.property.startsWith("--"))
+      .map((d) => d.property.slice(2)),
+  );
+}
+
+const wordsOf = (value: string) => value.toLowerCase().split(/[^a-z-]+/);
+
+/** A var() naming anything but a declared token, a computed name included. */
+const unknownVar = (value: string, tokens: Set<string>) =>
+  [...value.matchAll(/var\(\s*--([^\s,)]*)/g)].some(([, n = ""]) => !tokens.has(n));
+
+/** Whether a CSS value sets a colour of its own rather than naming a semantic token. */
+function offTokenValue(value: string, tokens: Set<string>, forcedColours: boolean): boolean {
+  const w = wordsOf(value);
+  return (
+    HEX_COLOUR.test(value) ||
+    COLOUR_FUNCTION.test(value) ||
+    w.some((x) => NAMED_COLOURS.has(x)) ||
+    (!forcedColours && w.some((x) => SYSTEM_COLOURS.has(x))) ||
+    unknownVar(value, tokens)
+  );
+}
+
+/** Whether a string literal in a script or markup is, or carries, a colour of its own. */
+function offTokenLiteral(literal: string, tokens: Set<string>): boolean {
+  const w = wordsOf(literal.trim());
+  const colourWord = w.some((x) => NAMED_COLOURS.has(x) || SYSTEM_COLOURS.has(x));
+  return (
+    HEX_COLOUR.test(literal) ||
+    COLOUR_FUNCTION.test(literal) ||
+    unknownVar(literal, tokens) ||
+    (colourWord && (w.length === 1 || BORDER_STYLE.test(literal)))
+  );
+}
+
+/**
+ * Lines of a file in apps/web that go around the semantic tokens: a hex colour (`%23` in a data
+ * URI too), a colour function, a named colour, a system colour outside forced colours, or a
+ * `var()` naming anything but one of `tokens`. CSS is read declaration by declaration; scripts and
+ * markup by their string literals and attribute values, so prose and comments don't count.
+ */
+export function offTokenLines(
+  source: string,
+  kind: "css" | "script",
+  tokens: Set<string>,
+): { line: number; text: string }[] {
+  const lines = source.split("\n");
+  if (kind === "css") {
+    return cssDeclarations(source)
+      .filter((d) => offTokenValue(d.value, tokens, d.within.includes(FORCED_COLOURS)))
+      .map((d) => ({ line: d.line, text: `${d.property}: ${d.value}` }));
+  }
+  return lines.flatMap((text, i) =>
+    [...text.matchAll(/(["'`])((?:\\.|(?!\1)[^\\])*)\1/g)].some(([, , literal = ""]) =>
+      offTokenLiteral(literal, tokens),
+    )
+      ? [{ line: i + 1, text: text.trim() }]
+      : [],
+  );
+}
+
+function checkWebTokens(): void {
+  const tokens = declaredTokens(readFileSync(join(root, TOKENS_CSS), "utf8"));
+  const files = filesUnder("apps/web")
+    .filter((f) => !/\/(node_modules|dist|dist-types)\//.test(f))
+    .filter((f) => /\.(css|tsx?|html|svg)$/.test(f) && !/\.test\.tsx?$/.test(f));
+  for (const file of files) {
+    if (TOKEN_FILES.has(file)) continue;
+    const source = readFileSync(join(root, file), "utf8");
+    const kind = file.endsWith(".css") ? "css" : "script";
+    for (const { line, text } of offTokenLines(source, kind, tokens)) {
+      failures.push(
+        `${file}:${line}: \`${text}\` goes around the semantic tokens; use one ${TOKENS_CSS} ` +
+          "defines, adding it there (mapped onto palette.css) if none fits (docs/standards/ui.md).",
+      );
+    }
+  }
+}
+
 // Agent context is read on every session, so it stays short, and every path and command it names
 // must exist: stale context misleads every agent that reads it.
 const AGENTS_MAX_LINES = 60;
@@ -125,6 +258,7 @@ const CONTEXT_DOCS = [
   "docs/standards/code.md",
   "docs/standards/testing.md",
   "docs/standards/review.md",
+  "docs/standards/ui.md",
 ];
 const PNPM_BUILTINS = new Set(["install", "exec", "add", "remove", "update"]);
 // pnpm options that take a value as the next word; every other option is a bare flag.
@@ -275,6 +409,7 @@ if (isMain(import.meta)) {
   checkSiblingTests();
   checkAgentContext();
   checkSkills(scriptNames());
+  checkWebTokens();
 
   if (failures.length > 0) {
     console.error(`Standards check failed:\n${failures.map((f) => `  - ${f}`).join("\n")}`);

@@ -40,6 +40,9 @@
     },
     {
       "path": "apps/cli"
+    },
+    {
+      "path": "apps/web"
     }
   ]
 }
