@@ -2,6 +2,7 @@
 // without an account. Each reply is picked by a marker in the latest user text:
 //   [[fake:bash:<command>]]  a Bash tool call running <command>, then "done" once it has run
 //   [[fake:slow:<ms>]]       a short text reply, sent <ms> milliseconds late
+//   [[fake:error]]           an API error Claude Code doesn't retry, ending the turn in StopFailure
 //   anything else            a short text reply
 // Every request is kept, so a test can check what the model was sent.
 
@@ -142,6 +143,12 @@ function delayOf(req: Request): number {
   return Number(/\[\[fake:slow:(\d+)\]\]/.exec(textOf(last?.content))?.[1] ?? 0);
 }
 
+/** Whether a fresh `error` marker in the latest user text asks for an API error. */
+function failsOn(req: Request): boolean {
+  const last = (req.messages ?? []).filter((m) => m.role === "user").at(-1);
+  return textOf(last?.content).includes("[[fake:error]]");
+}
+
 export async function startFakeModel(): Promise<FakeModel> {
   const requests: string[] = [];
   const server = createServer((r, res) => {
@@ -159,6 +166,15 @@ export async function startFakeModel(): Promise<FakeModel> {
       }
       requests.push(text);
       const req: Request = text === "" ? {} : JSON.parse(text);
+      if (failsOn(req)) {
+        res.writeHead(400, { "content-type": "application/json" }).end(
+          JSON.stringify({
+            type: "error",
+            error: { type: "invalid_request_error", message: "fake error" },
+          }),
+        );
+        return;
+      }
       const answer = reply(req);
       setTimeout(() => respond(res, req, answer), delayOf(req));
     });

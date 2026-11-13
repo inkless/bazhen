@@ -177,7 +177,8 @@ export function project(db: Statements, e: Recorded): void {
     case "mailbox.offered":
       moveMessage(db, e, "offer");
       db.prepare(
-        `UPDATE mailbox SET first_offered_event_id = coalesce(first_offered_event_id, ?) WHERE id = ?`,
+        `UPDATE mailbox SET first_offered_event_id = coalesce(first_offered_event_id, ?)
+         WHERE id = ?`,
       ).run(e.id, e.entityId);
       return;
     case "mailbox.emitted":
@@ -195,9 +196,14 @@ export function project(db: Statements, e: Recorded): void {
       const { reason } = EVENTS[e.type].payload.parse(e.payload);
       return moveMessage(db, e, reason === "agent_closed" ? "agent_closed" : "give_up");
     }
-    case "mailbox.requeued":
-      EVENTS[e.type].payload.parse(e.payload);
-      return moveMessage(db, e, "requeue", { prompt_id: null });
+    case "mailbox.requeued": {
+      const { reason } = EVENTS[e.type].payload.parse(e.payload);
+      moveMessage(db, e, "requeue", { prompt_id: null });
+      if (AGENT_FAILURES.has(reason)) {
+        db.prepare("UPDATE mailbox SET failures = failures + 1 WHERE id = ?").run(e.entityId);
+      }
+      return;
+    }
     case "attention.opened": {
       const { agentId, summary, toolUseId, mainAgent } = EVENTS[e.type].payload.parse(e.payload);
       db.prepare(
@@ -259,6 +265,9 @@ function closeAttention(db: Statements, e: Recorded, reason: AttentionCloseReaso
 function forgetActivity(db: Statements, agentId: string): void {
   db.prepare("DELETE FROM activity_latest WHERE agent_session_id = ?").run(agentId);
 }
+
+/** Requeue reasons the agent's side caused, which count toward the re-offer cap (§5.6). */
+const AGENT_FAILURES: ReadonlySet<string> = new Set(["stop_failed", "interrupted", "not_seen"]);
 
 /** Moves an agent and its terminal together: a local agent's terminal is its process (§4.5). */
 function advance(

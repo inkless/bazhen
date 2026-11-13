@@ -1976,7 +1976,10 @@
                       "enum": [
                         "not_written",
                         "daemon_restart",
-                        "session_started"
+                        "session_started",
+                        "stop_failed",
+                        "interrupted",
+                        "not_seen"
                       ]
                     }
                   },

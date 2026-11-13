@@ -4,7 +4,9 @@ import { machine } from "./machine.ts";
 /**
  * - `offer`: a waiter or a PostToolUse hook takes the message; `ack`: the hook client wrote it.
  * - `seen`: a wake's UserPromptSubmit carried its id; `confirm`: the receiving turn's Stop, or,
- *   for Codex, the turn that carries its label.
+ *   for Codex, the turn that carries its label. A wake held back (a dialog open in the TUI) can
+ *   land after its message went back to the queue or out again: its prompt still means the
+ *   agent has it, so it is seen from those states too, and never offered again.
  * - `accept`: `codex queue` stored it, with or without a live app-server; only the turn that
  *   carries it delivers it, and that turn may start before the queue command has returned.
  */
@@ -25,10 +27,11 @@ export const mailbox = machine<MailboxState, MailboxEvent>("mailbox message", {
     offer: "offered",
     accept: "queued_in_codex",
     confirm: "delivered",
+    seen: "seen",
     give_up: "undeliverable",
     agent_closed: "undeliverable",
   },
-  offered: { ack: "emitted", requeue: "queued", agent_closed: "undeliverable" },
+  offered: { ack: "emitted", seen: "seen", requeue: "queued", agent_closed: "undeliverable" },
   emitted: { seen: "seen", confirm: "delivered", requeue: "queued", agent_closed: "undeliverable" },
   seen: { confirm: "delivered", requeue: "queued", agent_closed: "undeliverable" },
   queued_in_codex: { confirm: "delivered", agent_closed: "undeliverable" },

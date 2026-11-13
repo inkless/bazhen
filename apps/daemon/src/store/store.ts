@@ -326,7 +326,7 @@ export class Store {
   mail(agentId: string, states: readonly MailboxState[]) {
     const marks = states.map(() => "?").join(", ");
     const rows = this.prepare(
-      `SELECT m.id, m.body, m.prompt_id, e.ts AS first_offered FROM mailbox m
+      `SELECT m.id, m.body, m.prompt_id, m.failures, e.ts AS first_offered FROM mailbox m
        LEFT JOIN events e ON e.id = m.first_offered_event_id
        WHERE m.agent_session_id = ? AND m.state IN (${marks}) ORDER BY m.created_event_id`,
     ).all(agentId, ...states);
@@ -338,6 +338,7 @@ export class Store {
               body: String(r.body),
               promptId: typeof r.prompt_id === "string" ? r.prompt_id : null,
               firstOffered: typeof r.first_offered === "string" ? r.first_offered : null,
+              failures: Number(r.failures),
             },
           ]
         : [],
