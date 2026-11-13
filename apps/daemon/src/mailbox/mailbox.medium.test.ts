@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { HOOK_REPLY_MAX_BYTES } from "@bazhen/protocol";
 import { Store } from "../store/store.ts";
-import { withAgent } from "../testing/fixtures.ts";
+import { withAgent, testView } from "../testing/fixtures.ts";
 import { UnknownAgent } from "../store/store.ts";
 import { Mailbox } from "./mailbox.ts";
 
 const stateOf = (store: Store, id: string) =>
-  store.snapshot().messages.find((m) => m.id === id)?.state;
+  store.snapshot(testView).messages.find((m) => m.id === id)?.state;
 const live = () => new AbortController().signal;
 
 describe("mailbox", () => {
@@ -108,7 +108,7 @@ describe("mailbox", () => {
     const first = mailbox.send(agentId, { idempotencyKey: "same", body: "hi" });
     expect([
       mailbox.send(agentId, { idempotencyKey: "same", body: "hi" }),
-      store.snapshot().messages.length,
+      store.snapshot(testView).messages.length,
     ]).toEqual([first, 1]);
   });
 });

@@ -33,6 +33,10 @@ export const ExitStatus = z.discriminatedUnion("type", [
 ]);
 export type ExitStatus = z.infer<typeof ExitStatus>;
 
+/** A command on an agent: each is a `POST /v1/agents/:id/<command>`. */
+export const AgentCommand = z.enum(["close", "respawn", "signal"]);
+export type AgentCommand = z.infer<typeof AgentCommand>;
+
 /** A harness- or server-side object, such as a Claude Code session or a Codex thread. */
 export const ExternalRef = z.object({
   environmentId: Id("env"),
@@ -71,6 +75,8 @@ export type Activity = z.infer<typeof Activity>;
 export const Environment = z.object({
   id: Id("env"),
   kind: EnvironmentKind,
+  /** The machine it runs on, as a human names it: the local hostname for the local environment. */
+  host: z.string().default(""),
 });
 export type Environment = z.infer<typeof Environment>;
 
@@ -92,6 +98,14 @@ export const Agent = z.object({
    * anything (protocol 1.7).
    */
   activity: Activity.optional(),
+  /**
+   * A shell command that attaches a terminal emulator to its terminal, for a human to copy when the
+   * web view is unusable (foundation-design §4.5). Null while the runtime holds no terminal for
+   * it, so there is none to view either.
+   */
+  attachCommand: z.string().nullable().default(null),
+  /** The commands the daemon would take on it now, so a client never restates its lifecycle. */
+  commands: z.array(AgentCommand).default([]),
 });
 export type Agent = z.infer<typeof Agent>;
 

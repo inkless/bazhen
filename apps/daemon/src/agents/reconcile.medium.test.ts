@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { fakeEnvironment, withAgent } from "../testing/fixtures.ts";
+import { fakeEnvironment, withAgent, testView } from "../testing/fixtures.ts";
 import { reconcile } from "./reconcile.ts";
 
 const stateOf = (store: Awaited<ReturnType<typeof withAgent>>["store"]) =>
-  store.snapshot().agents[0]?.state;
+  store.snapshot(testView).agents[0]?.state;
 
 describe("reconcile", () => {
   it("leaves an agent the environment still runs as it was", async () => {

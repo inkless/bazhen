@@ -4,7 +4,7 @@ import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { getRequestListener } from "@hono/node-server";
 import { afterEach, describe, expect, it } from "vitest";
-import { withAgent } from "../testing/fixtures.ts";
+import { withAgent, testView } from "../testing/fixtures.ts";
 import { Approvals } from "./approvals.ts";
 import { HOOK_SCRIPT, hookClient } from "./hook-command.ts";
 import { hookApp } from "./ingress.ts";
@@ -27,7 +27,7 @@ async function daemon() {
   const socket = join(dir, "bazhen.sock");
   server = createServer((req, res) => void listener(req, res));
   await new Promise<void>((resolve) => server?.listen(socket, resolve));
-  const state = (id: string) => store.snapshot().messages.find((m) => m.id === id)?.state;
+  const state = (id: string) => store.snapshot(testView).messages.find((m) => m.id === id)?.state;
   return { socket, agentId, mailbox, state };
 }
 

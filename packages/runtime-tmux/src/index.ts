@@ -23,6 +23,9 @@ import {
 } from "@bazhen/host-guard";
 import { assertSameGeneration, isId, ProcessState, StaleIncarnation } from "@bazhen/core";
 import { exitStatus, UnknownCause } from "./exit-status.ts";
+import { shellCommand } from "./shell.ts";
+
+export { shellCommand };
 import { ExitWatch, type DeadTerminal } from "./exit-watch.ts";
 
 const EXIT_POLL_MS = 1_000;
@@ -393,6 +396,14 @@ export class TmuxRuntime implements RuntimeAdapter {
 
   onExit(cb: (ref: RuntimeRef, status: ExitStatus) => void): () => void {
     return this.exits.subscribe(cb);
+  }
+
+  /** By session id, which no other session can take while this one lives, unlike its name. */
+  attachCommand(ref: RuntimeRef): string {
+    const target = ref.locator.sessionId || sessionOf(ref);
+    const argv = this.opts.server.argv("attach-session", "-t", target);
+    // Unset, or tmux inside the user's own tmux refuses to nest.
+    return shellCommand(["env", "-u", "TMUX", ...argv]);
   }
 
   private async deadTerminals(): Promise<DeadTerminal[]> {

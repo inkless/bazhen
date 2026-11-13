@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { LaunchFailed, UnsupportedHarness, type AgentLaunch } from "@bazhen/core";
 import { Store } from "../store/store.ts";
-import { fakeEnvironment, tempDb } from "../testing/fixtures.ts";
+import { fakeEnvironment, tempDb, testView } from "../testing/fixtures.ts";
 import { IdempotencyConflict } from "../store/store.ts";
 import { InvalidDirectory } from "./cwd.ts";
 import { launchAgent, localEnvironmentId } from "./launch.ts";
@@ -36,9 +36,9 @@ describe("localEnvironmentId", () => {
     const id = localEnvironmentId(first);
     first.close();
     const again = Store.open(path);
-    expect([localEnvironmentId(again), again.snapshot().environments]).toEqual([
+    expect([localEnvironmentId(again), again.snapshot(testView).environments]).toEqual([
       id,
-      [{ id, kind: "local" }],
+      [{ id, kind: "local", host: "test-host" }],
     ]);
     again.close();
   });
@@ -53,7 +53,7 @@ describe("launchAgent", () => {
       "agent.launched",
       "agent.running",
     ]);
-    expect(store.snapshot().agents).toEqual([
+    expect(store.snapshot(testView).agents).toEqual([
       expect.objectContaining({
         id: answer.agentId,
         terminalId: answer.terminalId,
@@ -67,7 +67,7 @@ describe("launchAgent", () => {
   it("launches in the daemon user's home for a ~/ directory", async () => {
     const { store, deps, launches, home } = setup();
     await launchAgent(deps, request);
-    expect([launches[0]?.request.cwd, store.snapshot().agents[0]?.cwd]).toEqual([
+    expect([launches[0]?.request.cwd, store.snapshot(testView).agents[0]?.cwd]).toEqual([
       join(home, "repo"),
       join(home, "repo"),
     ]);
@@ -96,14 +96,17 @@ describe("launchAgent", () => {
     await expect(launchAgent(deps, { ...request, harness: "codex" })).rejects.toThrow(
       UnsupportedHarness,
     );
-    expect([store.snapshot().agents, launches]).toEqual([[], []]);
+    expect([store.snapshot(testView).agents, launches]).toEqual([[], []]);
   });
 
   it("records a rejected launch as failed, and answers a repeat with the same failure", async () => {
     const { store, deps, launches } = setup(true);
     await expect(launchAgent(deps, request)).rejects.toThrow(LaunchFailed);
     await expect(launchAgent(deps, request)).rejects.toThrow(LaunchFailed);
-    expect([store.snapshot().agents.map((a) => a.state), launches.length]).toEqual([["failed"], 1]);
+    expect([store.snapshot(testView).agents.map((a) => a.state), launches.length]).toEqual([
+      ["failed"],
+      1,
+    ]);
   });
 
   it("refuses a key reused for a different launch, rather than answering for the first", async () => {

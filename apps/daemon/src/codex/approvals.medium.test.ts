@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { Store } from "../store/store.ts";
-import { withAgent } from "../testing/fixtures.ts";
+import { withAgent, testView } from "../testing/fixtures.ts";
 import { AttentionClosed, AttentionUnavailable, Approvals } from "../mailbox/approvals.ts";
 import { codexApprovals } from "./approvals.ts";
 
-const items = (store: Store) => store.snapshot().attention;
+const items = (store: Store) => store.snapshot(testView).attention;
 const command = {
   threadId: "thr-1",
   turnId: "t-1",

@@ -18,7 +18,14 @@ import {
 } from "@bazhen/core";
 import { launchAgent, localEnvironmentId } from "../agents/launch.ts";
 import { upgrades, type UpgradeRoute } from "../http/upgrades.ts";
-import { Store } from "../store/store.ts";
+import { Store, type SnapshotView } from "../store/store.ts";
+
+/** What a test's state snapshot shows beyond the store: a fixed host, and Claude Code resumable. */
+export const testView: SnapshotView = {
+  host: () => "test-host",
+  attachCommand: (ref) => `attach ${ref.terminalId}`,
+  resumable: ["claude-code"],
+};
 
 export const tempDb = () => join(mkdtempSync(join(tmpdir(), "bz-store-")), "bazhen.db");
 

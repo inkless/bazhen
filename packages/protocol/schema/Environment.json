@@ -13,6 +13,10 @@
         "local",
         "opencode-server"
       ]
+    },
+    "host": {
+      "default": "",
+      "type": "string"
     }
   },
   "required": [

@@ -12,7 +12,7 @@ import {
 import type { ExitStatus, Signal } from "@bazhen/protocol";
 import { Mailbox } from "../mailbox/mailbox.ts";
 import { IdempotencyConflict, type Store } from "../store/store.ts";
-import { fakeEnvironment, withAgent } from "../testing/fixtures.ts";
+import { fakeEnvironment, withAgent, testView } from "../testing/fixtures.ts";
 import { launchAgent, localEnvironmentId } from "./launch.ts";
 import {
   AgentStateConflict,
@@ -51,7 +51,7 @@ async function running({ session = true } = {}) {
         signalled.push(signal);
       },
       close: async (refs) => {
-        statesAtClose.push(s.snapshot().agents[0]?.state);
+        statesAtClose.push(s.snapshot(testView).agents[0]?.state);
         if (failure !== undefined) throw failure;
         closed.push(refs);
       },
@@ -65,8 +65,8 @@ async function running({ session = true } = {}) {
   lifecycle.watch();
   const exit = (generation: string, status: ExitStatus = { type: "exited", code: 1 }) =>
     report?.({ terminalId, runtime: "tmux", locator: { generation } }, status);
-  const agent = () => store.snapshot().agents[0];
-  const events = () => store.snapshot().eventId;
+  const agent = () => store.snapshot(testView).agents[0];
+  const events = () => store.snapshot(testView).eventId;
   const fail = (with_?: Error) => (failure = with_);
   return {
     store,
@@ -131,7 +131,9 @@ describe("agent lifecycle", () => {
     const { lifecycle, agentId, store } = await running();
     const { messageId } = new Mailbox(store).send(agentId, { idempotencyKey: "m", body: "hi" });
     await lifecycle.close(agentId, { idempotencyKey: "c", generation: 0 });
-    expect(store.snapshot().messages.find((m) => m.id === messageId)?.state).toBe("undeliverable");
+    expect(store.snapshot(testView).messages.find((m) => m.id === messageId)?.state).toBe(
+      "undeliverable",
+    );
   });
 
   // A view that loses its terminal tells a close from a disconnect by this order.

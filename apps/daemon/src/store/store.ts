@@ -1,6 +1,7 @@
 import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqlite";
 import {
   isId,
+  offeredCommands,
   newId,
   type AgentLaunchRequest,
   type AgentSessionId,
@@ -20,7 +21,7 @@ import {
   HarnessId,
   StateSnapshot,
   TerminalState,
-  type EnvironmentKind,
+  EnvironmentKind,
   type MailboxState,
   type ResetReason,
   type EventPayload,
@@ -75,6 +76,19 @@ export class UnknownAgent extends Error {
 
 /** A runtime incarnation as an event records it: the ref, minus the terminal it is for. */
 export const runtimePayload = ({ runtime, locator }: RuntimeRef) => ({ runtime, locator });
+
+/** What the state snapshot shows that the store doesn't record. */
+export interface SnapshotView {
+  /** The machine an environment of this kind runs on. */
+  host(kind: EnvironmentKind): string;
+  /** How a human attaches to a terminal, or null when they can't. */
+  attachCommand(ref: RuntimeRef): string | null;
+  /** The harnesses whose agents a respawn can resume. */
+  readonly resumable: readonly HarnessId[];
+}
+
+/** Terminal states whose runtime target still exists, so a human can attach to it. */
+const ATTACHABLE: ReadonlySet<string> = new Set<TerminalState>(["running", "unknown", "exited"]);
 
 export interface AgentTerminal {
   readonly agentId: AgentSessionId;
@@ -489,30 +503,50 @@ export class Store {
     };
   }
 
-  /** Every projection the state snapshot shows, with the last event it reflects. */
-  snapshot(): StateSnapshot {
+  /**
+   * Every projection the state snapshot shows, with the last event it reflects. `view` adds what
+   * only the daemon's surroundings know.
+   */
+  snapshot(view: SnapshotView): StateSnapshot {
     return this.transaction("read", () =>
       StateSnapshot.parse({
         epoch: this.epoch(),
         eventId: Number(this.prepare("SELECT coalesce(max(id), 0) AS id FROM events").get()?.id),
-        environments: this.prepare(
-          "SELECT id, kind FROM environments ORDER BY created_event_id",
-        ).all(),
+        environments: this.prepare("SELECT id, kind FROM environments ORDER BY created_event_id")
+          .all()
+          .map((r) => ({ ...r, host: view.host(EnvironmentKind.parse(r.kind)) })),
         agents: this.prepare(
           `SELECT a.id, a.environment_id AS environmentId, a.harness, a.project, a.cwd, a.state,
                   a.terminal_id AS terminalId, t.generation, a.external_ref AS externalRef, t.exit,
-                  s.activity
+                  s.activity, t.state AS terminalState, t.runtime, t.locator
            FROM agent_sessions a LEFT JOIN terminals t ON t.id = a.terminal_id
            LEFT JOIN activity_latest s ON s.agent_session_id = a.id
            ORDER BY a.created_event_id`,
         )
           .all()
-          .map(({ activity, ...r }) => ({
-            ...r,
-            externalRef: typeof r.externalRef === "string" ? JSON.parse(r.externalRef) : null,
-            exit: typeof r.exit === "string" ? JSON.parse(r.exit) : null,
-            ...(activity === null ? {} : { activity: activityOf(activity) }),
-          })),
+          .map(({ activity, terminalState, runtime, locator, ...r }) => {
+            const ref = ATTACHABLE.has(String(terminalState))
+              ? refFrom(r.terminalId, { runtime: runtime ?? null, locator: locator ?? null })
+              : null;
+            const externalRef =
+              typeof r.externalRef === "string" ? JSON.parse(r.externalRef) : null;
+            return {
+              ...r,
+              externalRef,
+              exit: typeof r.exit === "string" ? JSON.parse(r.exit) : null,
+              ...(activity === null ? {} : { activity: activityOf(activity) }),
+              attachCommand: ref === null ? null : view.attachCommand(ref),
+              commands: offeredCommands(
+                {
+                  state: AgentState.parse(r.state),
+                  generation: typeof r.generation === "number" ? r.generation : null,
+                  harness: HarnessId.parse(r.harness),
+                  externalRef,
+                },
+                view.resumable,
+              ),
+            };
+          }),
         attention: this.prepare(
           `SELECT id, agent_session_id AS agentId, state, close_reason AS closeReason, summary
            FROM attention_items ORDER BY created_event_id`,

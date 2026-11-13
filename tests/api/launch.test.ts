@@ -60,7 +60,24 @@ describe("launching an agent", () => {
       state: "running",
       cwd: daemon.work,
       externalRef: { kind: "claude-session" },
+      commands: ["close", "signal"],
     });
+  });
+
+  it("names the host and a pasteable command that attaches to the agent's own session", async () => {
+    const { agentId } = LaunchAgentResponse.parse((await launch("attach")).body);
+    const state = StateSnapshot.parse((await daemon.request("/v1/state")).body);
+    const [command = ""] = state.agents
+      .filter((a) => a.id === agentId)
+      .map((a) => String(a.attachCommand));
+    const socket = daemon.tmux("display-message", "-p", "#{socket_path}").trim();
+    const target = String(command.split(" attach-session -t ").at(-1)).replaceAll("'", "");
+    expect([
+      state.environments.map((e) => e.host),
+      command.startsWith("env -u TMUX tmux "),
+      command.includes(` -S ${socket} `),
+      daemon.tmux("display-message", "-p", "-t", target, "#{@bazhen_agent_id}").trim(),
+    ]).toEqual([[daemon.tmux("display-message", "-p", "#{host}").trim()], true, true, agentId]);
   });
 
   it("launches once for a repeated key", async () => {

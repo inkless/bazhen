@@ -135,6 +135,11 @@ export interface RuntimeAdapter {
    * later report, never the other way. Returns the unsubscribe function.
    */
   onExit(cb: (ref: RuntimeRef, status: ExitStatus) => void): () => void;
+  /**
+   * A shell command a human can paste to attach their own terminal emulator to the terminal, for
+   * when no Bazhen client works. Only formatted, never run by the daemon.
+   */
+  attachCommand(ref: RuntimeRef): string;
 }
 
 /** The PTY seam: the only place a PTY library is named. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LaunchAgentRequest } from "./agents.ts";
+import { LaunchAgentRequest, StateSnapshot } from "./agents.ts";
 
 const launch = { idempotencyKey: "k-1", harness: "claude-code", cwd: "/work" };
 
@@ -21,5 +21,38 @@ describe("LaunchAgentRequest", () => {
 
   it("refuses a harness Bazhen has no adapter for", () => {
     expect(LaunchAgentRequest.safeParse({ ...launch, harness: "pi" }).success).toBe(false);
+  });
+});
+
+describe("StateSnapshot", () => {
+  it("still reads a snapshot from a daemon older than its host, attach and command fields", () => {
+    const environmentId = "env_01900000000070008000000000000001";
+    const older = {
+      epoch: "e",
+      eventId: 1,
+      environments: [{ id: environmentId, kind: "local" }],
+      agents: [
+        {
+          id: "agent_01900000000070008000000000000002",
+          environmentId,
+          harness: "codex",
+          project: "p",
+          cwd: "/p",
+          state: "running",
+          terminalId: null,
+          generation: null,
+          externalRef: null,
+          exit: null,
+        },
+      ],
+      attention: [],
+      messages: [],
+    };
+    const read = StateSnapshot.parse(older);
+    expect([
+      read.environments[0]?.host,
+      read.agents[0]?.attachCommand,
+      read.agents[0]?.commands,
+    ]).toEqual(["", null, []]);
   });
 });

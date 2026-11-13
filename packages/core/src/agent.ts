@@ -1,4 +1,4 @@
-import type { AgentState, ExternalRef, HarnessId } from "@bazhen/protocol";
+import type { AgentCommand, AgentState, ExternalRef, HarnessId } from "@bazhen/protocol";
 import type { AgentSessionId, EnvironmentId, TerminalId } from "./ids.ts";
 import { machine } from "./machine.ts";
 
@@ -67,3 +67,39 @@ export const agent = machine<AgentState, AgentEvent>("agent session", {
   closed: {},
   failed: {},
 });
+
+/**
+ * The commands an agent in `state` takes, by its lifecycle alone. A closing agent takes close
+ * again, which finishes what an unreachable environment stopped; a closed one answers it with
+ * nothing to do, so it isn't offered.
+ */
+export function agentCommands(state: AgentState): AgentCommand[] {
+  return [
+    ...(agent.accepts(state, "close.requested") || state === "closing" ? ["close" as const] : []),
+    ...(agent.accepts(state, "respawn.requested") ? ["respawn" as const] : []),
+    ...(state === "running" ? ["signal" as const] : []),
+  ];
+}
+
+/** Whether a respawn can resume the agent: it has a harness session, on a harness that resumes. */
+export const canResume = (
+  a: { readonly harness: HarnessId; readonly externalRef: ExternalRef | null },
+  resumable: readonly HarnessId[],
+) => a.externalRef !== null && resumable.includes(a.harness);
+
+/**
+ * The commands the daemon would take on an agent now, as a client is offered them. Every command
+ * names a generation, so an agent without one is offered none.
+ */
+export function offeredCommands(
+  a: {
+    readonly state: AgentState;
+    readonly generation: number | null;
+    readonly harness: HarnessId;
+    readonly externalRef: ExternalRef | null;
+  },
+  resumable: readonly HarnessId[],
+): AgentCommand[] {
+  if (a.generation === null) return [];
+  return agentCommands(a.state).filter((c) => c !== "respawn" || canResume(a, resumable));
+}
