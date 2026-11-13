@@ -13,7 +13,9 @@ import { PROTOCOL_VERSION } from "@bazhen/protocol";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
 import { launchAgent, localEnvironmentId } from "./agents/launch.ts";
 import { Lifecycle } from "./agents/lifecycle.ts";
+import { AgentQueue } from "./agents/queue.ts";
 import { reconcile } from "./agents/reconcile.ts";
+import { ServerWatch } from "./agents/server-watch.ts";
 import { statusLineChoice } from "./agents/status-line.ts";
 import { codexApprovals } from "./codex/approvals.ts";
 import {
@@ -162,8 +164,11 @@ const activity = new ActivityTracker((agentId, a) => store.recordActivity(agentI
 codexThreads.followAll();
 // The Codex agents' threads lost their subscriber with the last daemon (§7 step 4).
 codex.keepConnected();
-const lifecycle = new Lifecycle(store, environment);
+const queue = new AgentQueue();
+const lifecycle = new Lifecycle(store, environment, queue);
 lifecycle.watch();
+const serverWatch = new ServerWatch({ store, environment, queue });
+serverWatch.start();
 const allowedHosts = [`${HOSTNAME}:${port}`, `localhost:${port}`];
 // The web dev server proxies to the daemon, and the browser's requests keep its origin. It is
 // allowed only when the dev scripts name its port; a built daemon serves the client itself.
@@ -187,7 +192,8 @@ const commands = {
   schemaVersion: () => store.schemaVersion(),
   runtime,
   state: () => store.snapshot(snapshotView),
-  launch: (req) => launchAgent({ store, environment, size: DEFAULT_SIZE, home: inputs.home }, req),
+  launch: (req) =>
+    launchAgent({ store, environment, size: DEFAULT_SIZE, home: inputs.home, queue }, req),
   send: (agentId, req) => mailbox.send(agentId, req),
   answer: (attentionId, req) => approvals.answer(attentionId, req),
   close: (agentId, req) => lifecycle.close(agentId, req),
@@ -277,6 +283,7 @@ socketServer.listen(paths.socket, () => chmodSync(paths.socket, 0o600));
 function shutdown() {
   shuttingDown.abort();
   clearInterval(retention);
+  serverWatch.stop();
   server.close();
   socketServer.close();
   codex.close();

@@ -13,6 +13,7 @@ import { Mailbox } from "../mailbox/mailbox.ts";
 import type { Store } from "../store/store.ts";
 import { fakeEnvironment, testView, withAgent } from "../testing/fixtures.ts";
 import { launchAgent, localEnvironmentId } from "./launch.ts";
+import { AgentQueue } from "./queue.ts";
 import { reconcile } from "./reconcile.ts";
 
 const stateOf = (store: Awaited<ReturnType<typeof withAgent>>["store"]) =>
@@ -53,10 +54,15 @@ async function launchCut(store: Store) {
     environment,
     size: { cols: 80, rows: 24 },
     home: tmpdir(),
+    queue: new AgentQueue(),
   });
   const req = { idempotencyKey: "launch-cut", harness: "claude-code", cwd: "~" } as const;
   const hung = { ...fakeEnvironment(store), launch: () => new Promise<never>(() => {}) };
   void launchAgent(deps(hung), req);
+  // The launch is recorded once it holds its agent's slot, a moment after it is asked for.
+  await expect
+    .poll(() => store.snapshot(testView).agents.some((a) => a.state === "starting"))
+    .toBe(true);
   const agent = store.snapshot(testView).agents.find((a) => a.state === "starting");
   if (agent?.terminalId == null || !isId("term", agent.terminalId) || !isId("agent", agent.id))
     throw new Error("no launch");
