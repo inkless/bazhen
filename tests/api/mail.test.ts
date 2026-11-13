@@ -6,10 +6,11 @@ import { startFakeModel, type FakeModel } from "./fake-model.ts";
 let model: FakeModel;
 let daemon: Daemon;
 let agentId = "";
+let terminalId: string | null = null;
 beforeAll(async () => {
   model = await startFakeModel();
   daemon = await Daemon.start({ modelUrl: model.url });
-  agentId = (await daemon.launch("mail")).agentId;
+  ({ agentId, terminalId } = await daemon.launch("mail"));
   await waitUntil(() => daemon.screen(agentId).includes("Claude Code"), "Claude Code's TUI");
 });
 afterAll(async () => {
@@ -93,6 +94,22 @@ describe("mail to a Claude Code agent", () => {
     expect(respawned.status).toBe(200);
     await waitUntil(() => daemon.screen(agentId).includes("Claude Code"), "the resumed TUI");
     const { messageId } = await send("after-respawn", "Reply to confirm, after the respawn.");
+    await expect
+      .poll(async () => (await state()).messages.find((m) => m.id === messageId)?.state, {
+        timeout: 30_000,
+      })
+      .toBe("delivered");
+  });
+
+  it("follows the agent to the session /clear starts, and its mail with it", async () => {
+    const before = agentIn(await state())?.externalRef?.id;
+    expect(before).toEqual(expect.any(String));
+    await daemon.prompt({ agentId, terminalId }, "/clear");
+    // The new session's SessionStart, from the pane's own process, moves the binding.
+    await expect
+      .poll(async () => agentIn(await state())?.externalRef?.id, { timeout: 20_000 })
+      .not.toBe(before);
+    const { messageId } = await send("after-clear", "Reply to confirm, after the clear.");
     await expect
       .poll(async () => (await state()).messages.find((m) => m.id === messageId)?.state, {
         timeout: 30_000,

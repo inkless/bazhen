@@ -1,7 +1,10 @@
+import { randomBytes } from "node:crypto";
 import { newId, type AgentSessionId, type MessageId } from "@bazhen/core";
 import {
   HOOK_REPLY_MAX_BYTES,
   SendMessageResponse,
+  offerToken,
+  type OfferToken,
   type EventPayload,
   type HookReply,
   type SendMessageRequest,
@@ -40,11 +43,14 @@ export class Mailbox {
   private readonly ackDeadlineMs: number;
   private readonly codex: MailboxOptions["codex"];
   private readonly waiters = new Map<string, (reply: HookReply) => void>();
-  /** Messages handed to a hook and not yet written, with the agent each is for. */
+  /** Each message handed to a hook and not yet written: its offer's token, and the timer. */
   private readonly unacked = new Map<
     MessageId,
-    { agentId: string; timer: ReturnType<typeof setTimeout> }
+    { token: OfferToken; timer: ReturnType<typeof setTimeout> }
   >();
+  /** Offer ids: this daemon's own prefix, then a count, so no two offers share one. */
+  private readonly offerPrefix = randomBytes(4).toString("hex");
+  private offers = 0;
 
   constructor(store: Store, opts: MailboxOptions = {}) {
     this.store = store;
@@ -104,10 +110,13 @@ export class Mailbox {
     });
   }
 
-  /** The hook client wrote what it was handed. */
-  ack(offered: readonly string[]): void {
-    for (const [id, { timer }] of this.unacked) {
-      if (!offered.includes(id)) continue;
+  /**
+   * The hook client wrote what it was handed. Only the offer it names is confirmed: an ack from a
+   * client whose offer was since taken back and made again confirms nothing.
+   */
+  ack(offered: readonly OfferToken[]): void {
+    for (const [id, { token, timer }] of this.unacked) {
+      if (!offered.includes(token)) continue;
       clearTimeout(timer);
       this.unacked.delete(id);
       this.record("mailbox.emitted", id, {});
@@ -129,6 +138,18 @@ export class Mailbox {
     }
   }
 
+  /**
+   * The agent's session started over, as /clear, fork or a resume start one: nothing handed over
+   * and not yet seen can reach it. The waiter that held it may belong to the old session, so it
+   * goes first, and the requeued mail waits for the new session's waiter.
+   */
+  sessionStarted(agentId: string): void {
+    this.waiters.get(agentId)?.(QUIET);
+    for (const m of this.store.mail(agentId, ["offered", "emitted"])) {
+      this.requeue(agentId, m.id, "session_started");
+    }
+  }
+
   /** The hooks holding mail died with the daemon's socket (§7 step 2). */
   requeueInFlight(): void {
     for (const { id, agentId } of this.store.inFlight())
@@ -143,14 +164,16 @@ export class Mailbox {
     this.store.transaction(() => {
       for (const m of queued) this.record("mailbox.offered", m.id, {});
     });
-    for (const m of queued) {
+    const tokens = queued.map((m) => {
+      const token = offerToken(m.id, `${this.offerPrefix}${(++this.offers).toString(36)}`);
       const timer = setTimeout(
         () => this.requeue(agentId, m.id, "not_written"),
         this.ackDeadlineMs,
       );
-      this.unacked.set(m.id, { agentId, timer });
-    }
-    waiter({ exitCode: 2, stdout: "", stderr: wakeText(queued), offered: queued.map((m) => m.id) });
+      this.unacked.set(m.id, { token, timer });
+      return token;
+    });
+    waiter({ exitCode: 2, stdout: "", stderr: wakeText(queued), offered: tokens });
   }
 
   /** Back to the queue, and straight to a waiter if one is already waiting. */
@@ -159,6 +182,7 @@ export class Mailbox {
     id: MessageId,
     reason: EventPayload<"mailbox.requeued">["reason"],
   ): void {
+    clearTimeout(this.unacked.get(id)?.timer);
     this.unacked.delete(id);
     this.record("mailbox.requeued", id, { reason });
     this.offer(agentId);

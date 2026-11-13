@@ -3,6 +3,7 @@ import type { HarnessAdapter } from "@bazhen/core";
 import {
   approvalReply,
   ClaudeCodeHarness,
+  hookOrigin,
   isMainAgentTool,
   readHook,
   wakeText,
@@ -10,6 +11,9 @@ import {
 } from "./index.ts";
 
 const toolOf = (h: Hook) => ("tool" in h ? h.tool : "");
+/** The waiter, run for a hook event of that name. */
+const waiterAt = (hook_event_name: string) =>
+  readHook("wait", { hook_event_name, session_id: "s" });
 const request = { harness: "claude-code" as const, project: "p", cwd: "/work" };
 const claude = (newSessionId: () => string): HarnessAdapter =>
   new ClaudeCodeHarness({ newSessionId, hookCommand: "bazhen-hook" });
@@ -124,6 +128,23 @@ describe("Claude Code hooks", () => {
   it("leaves a question for the human to the TUI, which an inbox allow or deny can't answer", () => {
     const question = { tool_name: "AskUserQuestion", tool_input: { questions: [] } };
     expect(readHook("PermissionRequest", question)).toEqual({ kind: "ignored" });
+  });
+
+  it("tells the waiter a SessionStart ran it, which may move the binding", () => {
+    expect([waiterAt("SessionStart"), waiterAt("Stop")]).toEqual([
+      { kind: "wait", sessionStarted: true },
+      { kind: "wait", sessionStarted: false },
+    ]);
+  });
+
+  it("reads which session ran a hook, and whether a subagent did", () => {
+    expect(hookOrigin({ session_id: "s-1" })).toEqual({ sessionId: "s-1", subagent: false });
+    expect(hookOrigin({ session_id: "s-1", agent_id: "a-1" })).toEqual({
+      sessionId: "s-1",
+      subagent: true,
+    });
+    expect(hookOrigin({ session_id: "" })).toEqual({ sessionId: null, subagent: false });
+    expect(hookOrigin(null)).toEqual({ sessionId: null, subagent: false });
   });
 
   it("ignores a hook it did not install", () => {

@@ -7,8 +7,9 @@ import {
   isCompatible,
   type HookReply,
 } from "@bazhen/protocol";
-import { readHook } from "@bazhen/harness-claude-code";
+import { hookOrigin, readHook } from "@bazhen/harness-claude-code";
 import type { Approvals } from "./approvals.ts";
+import type { SessionBinding } from "./binding.ts";
 import { QUIET, type Mailbox } from "./mailbox.ts";
 
 export interface IngressDeps {
@@ -16,6 +17,8 @@ export interface IngressDeps {
   readonly approvals: Approvals;
   /** Whether the daemon runs this agent; a hook from any other is ignored, never adopted. */
   readonly knows: (agentId: string) => boolean;
+  /** Which hooks are the agent's own session's, the only ones that take or confirm mail. */
+  readonly binding: SessionBinding;
 }
 
 /**
@@ -29,21 +32,30 @@ export function hookApp(deps: IngressDeps): Hono {
   app.post("/v1/hooks", async (c) => {
     const hook = HookRequest.safeParse(await c.req.json().catch(() => undefined));
     if (!hook.success || !isCompatible(hook.data.protocolVersion)) return framed(QUIET);
-    const { agentId, event, payload } = hook.data;
+    const { agentId, event, payload, ppid } = hook.data;
     if (!isId("agent", agentId) || !deps.knows(agentId)) return framed(QUIET);
     const read = readHook(event, payload);
+    const origin = hookOrigin(payload);
+    // Subagents and other sessions may still raise approvals, but never take or confirm mail.
+    const own = () =>
+      deps.binding.owns(agentId, origin, {
+        sessionStarted: read.kind === "wait" && read.sessionStarted,
+        ppid,
+      });
     switch (read.kind) {
       case "wait":
+        if (!(await own())) return framed(QUIET);
+        if (read.sessionStarted) deps.mailbox.sessionStarted(agentId);
         return framed(await deps.mailbox.wait(agentId, c.req.raw.signal));
       case "permission":
         return framed(
           await deps.approvals.request(agentId, read.summary, read.tool, c.req.raw.signal),
         );
       case "promptStarted":
-        deps.mailbox.promptStarted(agentId, read.prompt, read.promptId);
+        if (await own()) deps.mailbox.promptStarted(agentId, read.prompt, read.promptId);
         break;
       case "turnEnded":
-        deps.mailbox.turnEnded(agentId, read.promptId);
+        if (await own()) deps.mailbox.turnEnded(agentId, read.promptId);
         deps.approvals.turnEnded(agentId);
         break;
       case "toolStarted":

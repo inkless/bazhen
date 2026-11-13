@@ -125,6 +125,17 @@ export function project(db: Statements, e: Recorded): void {
       EVENTS[e.type].payload.parse(e.payload);
       advance(db, e.id, e.entityId, ["respawn.rejected", null]);
       return;
+    case "agent.external_ref_updated": {
+      const { externalRef } = EVENTS[e.type].payload.parse(e.payload);
+      const row = db
+        .prepare("SELECT 1 AS present FROM agent_sessions WHERE id = ?")
+        .get(e.entityId);
+      if (row === undefined) throw new UnknownEntity("agent session", e.entityId);
+      update(db, "agent_sessions", "id", e.entityId, e.id, {
+        external_ref: JSON.stringify(externalRef),
+      });
+      return;
+    }
     case "agent.signalled":
       EVENTS[e.type].payload.parse(e.payload);
       return;

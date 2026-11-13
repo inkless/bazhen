@@ -26,7 +26,10 @@ import {
  * A running agent whose environment records closes, respawns and signals, fails them on demand,
  * and reports exits.
  */
-async function running({ session = true } = {}) {
+async function running({
+  session = true,
+  duringRespawn = (_store: Store, _agentId: string) => {},
+} = {}) {
   const closed: AgentRefs[] = [];
   const respawned: AgentRespawn[] = [];
   const signalled: Signal[] = [];
@@ -44,6 +47,7 @@ async function running({ session = true } = {}) {
       respawn: async (r) => {
         if (failure !== undefined) throw failure;
         respawned.push(r);
+        duringRespawn(s, r.agentId);
         return base.respawn(r);
       },
       signal: async (_refs, signal) => {
@@ -210,6 +214,27 @@ describe("agent lifecycle", () => {
     const res = await lifecycle.respawn(agentId, { idempotencyKey: "r", generation: 0 });
     expect([res.eventIds.length, respawned[0]?.generation]).toEqual([2, 1]);
     expect(agent()).toMatchObject({ id: agentId, state: "running", generation: 1, exit: null });
+  });
+
+  it("keeps a binding the new TUI moved while it started, over the session it resumed", async () => {
+    const { lifecycle, agentId, exit, agent } = await running({
+      duringRespawn: (store, id) =>
+        store.append({
+          type: "agent.external_ref_updated",
+          entityId: id,
+          actor: "system",
+          payload: {
+            externalRef: {
+              environmentId: localEnvironmentId(store),
+              kind: "claude-session",
+              id: "s-2",
+            },
+          },
+        }),
+    });
+    exit("0");
+    await lifecycle.respawn(agentId, { idempotencyKey: "r", generation: 0 });
+    expect(agent()?.externalRef?.id).toBe("s-2");
   });
 
   it("records the next exit under the new generation, and drops one about the old", async () => {

@@ -82,6 +82,27 @@ export async function withAgent(
   return { path, store, agentId, terminalId, environment: env };
 }
 
+/** The Claude Code session `claudeAgent` launches on, and its pane's process. */
+export const CLAUDE_SESSION = "11111111-1111-4111-8111-111111111111";
+export const PANE_PID = 4242;
+
+/** A store with one running Claude Code agent bound to `CLAUDE_SESSION` in pane `PANE_PID`. */
+export const claudeAgent = () =>
+  withAgent((store) =>
+    fakeEnvironment(store, async (l) => ({
+      runtime: {
+        terminalId: l.terminalId,
+        runtime: "tmux",
+        locator: { panePid: String(PANE_PID) },
+      },
+      externalRef: {
+        environmentId: localEnvironmentId(store),
+        kind: "claude-session",
+        id: CLAUDE_SESSION,
+      },
+    })),
+  );
+
 /** A view that came and went: two events no projection points at once it has ended. */
 export function visit(store: Store, terminalId: string) {
   const attachmentId = newId("att");

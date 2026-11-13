@@ -172,9 +172,16 @@ export class Lifecycle {
           return fromEnvironment(agentId, cause);
         });
       const runtimeRef = runtimePayload(refs.runtime);
+      // The new TUI can move its binding while it starts, as a quick /clear does; that rebind is
+      // newer than the session it resumed, so it stands.
+      const current = this.store.agentLaunch(agentId)?.externalRef ?? null;
+      const rebound = current !== null && current.id !== externalRef.id;
       return () => [
         requested,
-        this.record(agentId, "agent.respawned", { externalRef: refs.externalRef, runtimeRef }),
+        this.record(agentId, "agent.respawned", {
+          externalRef: rebound ? current : refs.externalRef,
+          runtimeRef,
+        }),
       ];
     });
   }

@@ -77,6 +77,14 @@ export const EVENTS = {
       reason: z.enum(["not_resumable", "no_terminal", "terminal_changed", "unavailable"]),
     }),
   },
+  /**
+   * The agent is bound to another harness session, which its own process moved to, such as a
+   * Claude Code `/clear` or fork (foundation-design §3.1). Respawn resumes this one.
+   */
+  "agent.external_ref_updated": {
+    entity: "agent",
+    payload: z.object({ externalRef: ExternalRef }),
+  },
   /** The agent's process was sent a signal; any exit it causes is recorded on its own. */
   "agent.signalled": { entity: "agent", payload: z.object({ signal: Signal }) },
   /** The agent's harness reported what it is doing; the latest per process is kept (§4.6). */
@@ -133,7 +141,14 @@ export const EVENTS = {
   },
   "mailbox.requeued": {
     entity: "message",
-    payload: z.object({ reason: z.enum(["not_written", "daemon_restart"]) }),
+    payload: z.object({
+      reason: z.enum([
+        "not_written",
+        "daemon_restart",
+        /** The session started over, as /clear does, before the agent saw it. */
+        "session_started",
+      ]),
+    }),
   },
   /** A harness asks the human, here to run a tool (§4.6, §5.6). */
   "attention.opened": {
