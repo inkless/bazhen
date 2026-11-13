@@ -33,6 +33,7 @@ async function daemon() {
     knows: (id) => id === agentId,
     binding,
     activity: new ActivityTracker((id, activity) => store.recordActivity(id, activity)),
+    recordUsage: (id, usage) => store.recordUsage(id, usage),
   });
   const listener = getRequestListener(app.fetch);
   dir = mkdtempSync("/tmp/bz-ingress-");
@@ -41,7 +42,8 @@ async function daemon() {
   await new Promise<void>((resolve) => server?.listen(socket, resolve));
   const state = (id: string) => store.snapshot(testView).messages.find((m) => m.id === id)?.state;
   const activity = () => store.latestActivity(agentId);
-  return { socket, agentId, mailbox, state, activity };
+  const usage = () => store.snapshot(testView).agents[0]?.usage;
+  return { socket, agentId, mailbox, state, activity, usage };
 }
 
 /** A Stop's payload, from the agent's own session unless another is named. */
@@ -196,5 +198,21 @@ describe.each([
     await expect.poll(() => activity()?.value).toBe("idle");
     mailbox.send(agentId, { idempotencyKey: "m", body: "release the waiter" });
     await waiting;
+  });
+
+  it("records the model and context use the agent's own status line reports", async () => {
+    const { socket, agentId, usage } = await daemon();
+    const env = { BAZHEN_AGENT_ID: agentId, BAZHEN_SOCKET: socket };
+    const line = (session: string, model: string) =>
+      run(
+        client,
+        "statusline",
+        env,
+        JSON.stringify({ session_id: session, model: { display_name: model } }),
+      );
+    await line("88888888-8888-4888-8888-888888888888", "Not this one");
+    expect(usage()).toBeUndefined();
+    await line(CLAUDE_SESSION, "Opus 5.5");
+    expect(usage()).toEqual({ model: "Opus 5.5" });
   });
 });

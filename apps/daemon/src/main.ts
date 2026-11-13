@@ -14,6 +14,7 @@ import { TmuxRuntime } from "@bazhen/runtime-tmux";
 import { launchAgent, localEnvironmentId } from "./agents/launch.ts";
 import { Lifecycle } from "./agents/lifecycle.ts";
 import { reconcile } from "./agents/reconcile.ts";
+import { statusLineChoice } from "./agents/status-line.ts";
 import { codexApprovals } from "./codex/approvals.ts";
 import {
   allOf,
@@ -141,6 +142,8 @@ const environment = new LocalEnvironment({
     new ClaudeCodeHarness({
       newSessionId: randomUUID,
       hookCommand: hookCommand(hookRunner),
+      statusLine: (cwd) =>
+        statusLineChoice(cwd, hostEnv["CLAUDE_CONFIG_DIR"] ?? join(inputs.home, ".claude")),
       // A mode every agent starts in, overriding the user's settings; unset by default.
       ...(process.env.BAZHEN_CLAUDE_PERMISSION_MODE
         ? { permissionMode: process.env.BAZHEN_CLAUDE_PERMISSION_MODE }
@@ -152,6 +155,8 @@ const environment = new LocalEnvironment({
   ...(config.loginShell === undefined ? {} : { loginShell: config.loginShell }),
 });
 await reconcile(store, environment);
+// What a Claude Code agent was doing went with the last daemon's memory (foundation-design §4.6).
+const activity = new ActivityTracker((agentId, a) => store.recordActivity(agentId, a));
 // A title that changed while the daemon was down, or a move it was waiting on, is read again;
 // until it has been, those agents' mail waits, so none goes to a thread the TUI has left.
 codexThreads.followAll();
@@ -174,6 +179,9 @@ const snapshotView: SnapshotView = {
   resumable: environment.resumable,
   themes: (harness) => environment.themes[harness] ?? [],
 };
+for (const a of store.snapshot(snapshotView).agents) {
+  if (a.harness === "claude-code" && a.state === "running") activity.restarted(a.id);
+}
 const commands = {
   appVersion: APP_VERSION,
   schemaVersion: () => store.schemaVersion(),
@@ -219,7 +227,8 @@ const socketListener = getRequestListener(
       approvals,
       knows: (agentId) => store.agent(agentId) !== undefined,
       binding: new SessionBinding(store, psTable),
-      activity: new ActivityTracker((agentId, activity) => store.recordActivity(agentId, activity)),
+      activity,
+      recordUsage: (agentId, usage) => store.recordUsage(agentId, usage),
     }),
     stop: shutdown,
     paneTitleChanged: (pane) => void codexThreads.paneTitleChanged(pane),

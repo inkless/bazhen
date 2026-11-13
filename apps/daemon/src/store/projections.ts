@@ -115,7 +115,8 @@ export function project(db: Statements, e: Recorded): void {
     case "agent.respawned": {
       const { externalRef, runtimeRef, theme } = EVENTS[e.type].payload.parse(e.payload);
       advance(db, e.id, e.entityId, ["launch.confirmed", "respawned"], {
-        agent: { external_ref: externalRef && JSON.stringify(externalRef) },
+        // A new process reports its own usage, as it does its own activity.
+        agent: { external_ref: externalRef && JSON.stringify(externalRef), usage: null },
         terminal: { ...incarnation(runtimeRef), exit: null, theme: theme ?? null },
       });
       forgetActivity(db, e.entityId);
@@ -143,7 +144,9 @@ export function project(db: Statements, e: Recorded): void {
       advance(db, e.id, e.entityId, ["close.requested", "close.requested"]);
       return;
     case "agent.closed":
-      advance(db, e.id, e.entityId, ["close.completed", "close.completed"]);
+      advance(db, e.id, e.entityId, ["close.completed", "close.completed"], {
+        agent: { usage: null },
+      });
       forgetActivity(db, e.entityId);
       return;
     case "attachment.started": {
@@ -220,6 +223,15 @@ export function project(db: Statements, e: Recorded): void {
       return closeAttention(db, e, "answered");
     case "attention.closed":
       return closeAttention(db, e, EVENTS[e.type].payload.parse(e.payload).reason);
+    case "agent.usage": {
+      const usage = EVENTS[e.type].payload.parse(e.payload);
+      const row = db
+        .prepare("SELECT 1 AS present FROM agent_sessions WHERE id = ?")
+        .get(e.entityId);
+      if (row === undefined) throw new UnknownEntity("agent session", e.entityId);
+      update(db, "agent_sessions", "id", e.entityId, e.id, { usage: JSON.stringify(usage) });
+      return;
+    }
     case "agent.activity": {
       const activity = EVENTS[e.type].payload.parse(e.payload);
       db.prepare(

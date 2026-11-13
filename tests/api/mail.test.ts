@@ -10,6 +10,10 @@ let terminalId: string | null = null;
 beforeAll(async () => {
   model = await startFakeModel();
   daemon = await Daemon.start({ modelUrl: model.url });
+  // The user's own status line, which Bazhen's must keep drawing.
+  daemon.claudeSettings({
+    statusLine: { type: "command", command: "printf 'user line: '; cat >/dev/null; printf ok" },
+  });
   ({ agentId, terminalId } = await daemon.launch("mail"));
   await waitUntil(() => daemon.screen(agentId).includes("Claude Code"), "Claude Code's TUI");
 });
@@ -46,10 +50,16 @@ const interrupt = (view: { type(text: string): void }) => {
   if (still) view.type("\x1b");
   return still;
 };
+/** The model the agent runs and its context use, as its status line reported them. */
+const usage = async () => agentIn(await state())?.usage;
 /** What the agent's harness last said it is doing. */
 const doing = async () => agentIn(await state())?.activity?.value;
-/** Whether the agent's TUI is in the middle of a turn, offering to interrupt it. */
-const busy = () => /esc to interrupt/i.test(daemon.screen(agentId));
+/**
+ * Whether the agent's TUI is in the middle of a turn: its spinner, a glyph then a verb that ends
+ * in "…" (a finished turn's line, "✻ Worked for 3s", has none). With a status line set, as
+ * Bazhen always sets one, the TUI shows no "esc to interrupt" hint.
+ */
+const busy = () => /^\s*[·✢✳✶✻✽*] \S[^\n]*…/m.test(daemon.screen(agentId));
 /** The events a stream received about one entity, in order. */
 const eventsAbout = (stream: EventClient, entityId: string): Event[] =>
   stream.frames.flatMap((f) =>
@@ -62,6 +72,14 @@ const requeueReasons = (events: Event[]) =>
   );
 
 describe("mail to a Claude Code agent", () => {
+  it("keeps drawing the user's own status line, and learns the model and context use from it", async () => {
+    await expect.poll(() => daemon.screen(agentId), { timeout: 20_000 }).toContain("user line: ok");
+    await expect
+      .poll(async () => (await usage())?.model, { timeout: 20_000 })
+      .toEqual(expect.any(String));
+    expect(await usage()).toMatchObject({ contextWindowTokens: expect.any(Number) });
+  });
+
   it("reports what the agent is doing: idle once started, working through a turn, idle after", async () => {
     // A fresh agent's SessionStart says it waits for its first prompt.
     await expect.poll(doing, { timeout: 20_000 }).toBe("idle");

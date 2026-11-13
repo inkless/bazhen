@@ -514,3 +514,72 @@ describe("Store activity signals", () => {
     expect(reopened.latestActivity(agentId)?.value).toBe("idle");
   });
 });
+
+describe("Store usage", () => {
+  it("keeps the model and context use its harness last reported, recording only a change", async () => {
+    const { store, agentId } = await withAgent();
+    const usage = { model: "Opus 5.5", contextUsedPercent: 3, contextWindowTokens: 1_000_000 };
+    expect(store.snapshot(testView).agents[0]).not.toHaveProperty("usage");
+    const first = store.recordUsage(agentId, usage);
+    const again = store.recordUsage(agentId, { ...usage });
+    const grown = store.recordUsage(agentId, { ...usage, contextUsedPercent: 4 });
+    expect([first, again, grown].map((id) => id === null)).toEqual([false, true, false]);
+    expect(store.snapshot(testView).agents[0]?.usage).toEqual({ ...usage, contextUsedPercent: 4 });
+  });
+
+  it("records no usage for an agent whose process has exited, and refuses one it never ran", async () => {
+    const { store, agentId } = await withAgent();
+    store.append({
+      type: "agent.exited",
+      entityId: agentId,
+      actor: "system",
+      payload: { exit: { type: "exited", code: 0 } },
+    });
+    expect(store.recordUsage(agentId, { model: "Opus" })).toBeNull();
+    expect(() => store.recordUsage(newId("agent"), { model: "Opus" })).toThrow(UnknownAgent);
+  });
+
+  it("forgets an agent's usage when its process is replaced or it is closed", async () => {
+    const respawned = await withAgent();
+    respawned.store.recordUsage(respawned.agentId, { model: "Opus" });
+    respawned.store.append({
+      type: "agent.exited",
+      entityId: respawned.agentId,
+      actor: "system",
+      payload: { exit: { type: "exited", code: 0 } },
+    });
+    respawned.store.append({
+      type: "agent.respawn_requested",
+      entityId: respawned.agentId,
+      actor: "system",
+      payload: {},
+    });
+    respawned.store.append({
+      type: "agent.respawned",
+      entityId: respawned.agentId,
+      actor: "system",
+      payload: { externalRef: null, runtimeRef: { runtime: "tmux", locator: { generation: "1" } } },
+    });
+    const closed = await withAgent();
+    closed.store.recordUsage(closed.agentId, { model: "Opus" });
+    closed.store.append({
+      type: "agent.closing",
+      entityId: closed.agentId,
+      actor: "system",
+      payload: {},
+    });
+    closed.store.append({
+      type: "agent.closed",
+      entityId: closed.agentId,
+      actor: "system",
+      payload: {},
+    });
+    expect([
+      respawned.store.snapshot(testView).agents[0],
+      closed.store.snapshot(testView).agents[0],
+    ]).toEqual([
+      expect.not.objectContaining({ usage: expect.anything() }),
+      expect.not.objectContaining({ usage: expect.anything() }),
+    ]);
+  });
+});

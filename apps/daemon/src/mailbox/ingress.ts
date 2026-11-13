@@ -3,6 +3,7 @@ import { isId } from "@bazhen/core";
 import {
   HookAck,
   HookRequest,
+  type Usage,
   frameHookReply,
   isCompatible,
   type HookReply,
@@ -22,6 +23,8 @@ export interface IngressDeps {
   readonly binding: SessionBinding;
   /** What the agent's hooks say it is doing (foundation-design §4.6). */
   readonly activity: ActivityTracker;
+  /** Records the model the agent runs and its context use (§11.2). */
+  readonly recordUsage: (agentId: string, usage: Usage) => void;
 }
 
 /**
@@ -84,6 +87,9 @@ export function hookApp(deps: IngressDeps): Hono {
         if (read.fold !== null && (await own())) {
           return framed(deps.mailbox.fold(agentId, read.fold.promptId));
         }
+        break;
+      case "statusline":
+        if (deps.binding.inSession(agentId, origin)) deps.recordUsage(agentId, read.usage);
         break;
       case "subagentStarted":
       case "subagentStopped":

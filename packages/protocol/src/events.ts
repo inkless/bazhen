@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Activity, ExitStatus, ExternalRef, HarnessId, Signal, TuiTheme } from "./agents.ts";
+import { Activity, Usage, ExitStatus, ExternalRef, HarnessId, Signal, TuiTheme } from "./agents.ts";
 import { AttachmentMode, EnvironmentKind, Id } from "./ids.ts";
 import { ApprovalDecision, AttentionCloseReason } from "./mail.ts";
 import { ProtocolVersion } from "./version.ts";
@@ -102,6 +102,8 @@ export const EVENTS = {
   "agent.signalled": { entity: "agent", payload: z.object({ signal: Signal }) },
   /** The agent's harness reported what it is doing; the latest per process is kept (§4.6). */
   "agent.activity": { entity: "agent", payload: Activity },
+  /** The model the agent runs, or its context use, changed (§11.2). */
+  "agent.usage": { entity: "agent", payload: Usage },
   /** The agent's process ended; its terminal stays, with its last screen (§4.1, §4.5). */
   "agent.exited": { entity: "agent", payload: z.object({ exit: ExitStatus }) },
   /** A close was asked for. Recorded before the terminal is touched, so a view that loses its

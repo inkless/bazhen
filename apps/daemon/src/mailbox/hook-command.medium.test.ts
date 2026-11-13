@@ -125,8 +125,16 @@ function listen(socket: string, answers: (Buffer | Held | null)[]) {
  * Runs the hook client for `event` as a harness would, and resolves with how it exited. No test
  * here waits on a clock: a client that wrongly retries is caught by what the stub hands it next.
  */
-function run(client: string, event: string, env: Record<string, string>, stdin = "{}") {
-  const child = spawnGroup(client, [event], { env: { PATH: process.env["PATH"] ?? "", ...env } });
+function run(
+  client: string,
+  event: string,
+  env: Record<string, string>,
+  stdin = "{}",
+  args: readonly string[] = [],
+) {
+  const child = spawnGroup(client, [event, ...args], {
+    env: { PATH: process.env["PATH"] ?? "", ...env },
+  });
   running.add(child);
   stage(`spawned the client for ${event}`);
   const { stdin: input, stdout: out, stderr: err } = child;
@@ -268,6 +276,41 @@ describe.each(clients)("hook client (%s)", { timeout: 30_000 }, (_kind, client) 
     });
     // Every tool call waits on it: 2 s, never the 10 min backstop or the hook's own timeout.
     expect([result, performance.now() - started < 8_000]).toEqual([QUIET, true]);
+  });
+
+  it("runs the user's status line on the same input, passes its line through, and tells the daemon", async () => {
+    const socket = socketPath();
+    const { seen, ready } = listen(socket, [
+      framed({ exitCode: 0, stdout: "", stderr: "", offered: [] }),
+    ]);
+    await ready;
+    const result = await run(
+      client,
+      "statusline-wrap",
+      { BAZHEN_AGENT_ID: newId("agent"), BAZHEN_SOCKET: socket },
+      '{"model":{"display_name":"Opus"}}',
+      ["sh", "-c", "printf 'mine: '; cat"],
+    );
+    expect([result.code, result.stdout]).toEqual([0, 'mine: {"model":{"display_name":"Opus"}}']);
+    await expect.poll(() => seen.length).toBe(1);
+    expect(JSON.parse(bodyOf(seen, 0))).toMatchObject({
+      event: "statusline",
+      payload: { model: { display_name: "Opus" } },
+    });
+  });
+
+  it("exits as a shell would when a signal ends the user's status line command", async () => {
+    const result = await run(client, "statusline-wrap", {}, "{}", ["sh", "-c", "kill -TERM $$"]);
+    expect(result.code).toBe(143);
+  });
+
+  it("draws the user's status line outside a Bazhen agent, and with no daemon to tell", async () => {
+    const result = await run(client, "statusline-wrap", {}, "{}", [
+      "sh",
+      "-c",
+      "printf mine; exit 3",
+    ]);
+    expect([result.code, result.stdout]).toEqual([3, "mine"]);
   });
 
   it("gives up at once on any other hook when the daemon drops it", async () => {
