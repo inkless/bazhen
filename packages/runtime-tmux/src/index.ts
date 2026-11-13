@@ -207,7 +207,7 @@ export class TmuxRuntime implements RuntimeAdapter {
   /**
    * With no server answering, a server `recorded` names that still runs had its socket deleted
    * under it (macOS temp cleaners do): it is sent SIGUSR1 to recreate it, and is `unreachable`
-   * meanwhile. Only once every recorded server is gone is nothing running (foundation-design §7.1).
+   * meanwhile. Nothing runs only once every recorded server is gone (foundation-design §7.1).
    */
   async health(recorded: readonly RuntimeRef[] = []): Promise<RuntimeHealth> {
     let version: string;
@@ -223,8 +223,11 @@ export class TmuxRuntime implements RuntimeAdapter {
       if (!(err instanceof TmuxError)) throw err;
       if (!noServer(err)) return { state: "unreachable", version };
     }
+    // Only once every recorded server is provably gone: one that serves, or can't be told apart,
+    // concludes nothing.
     for (const identity of identities(recorded)) {
-      if (await this.opts.server.recreateSocket(identity)) return { state: "unreachable", version };
+      const verdict = await this.opts.server.recreateSocket(identity);
+      if (verdict.is !== "gone") return { state: "unreachable", version };
     }
     return { state: "not-running", version };
   }

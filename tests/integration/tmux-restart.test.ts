@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { filterEnv, newId, type RuntimeRef, type TerminalSpec } from "@bazhen/core";
-import type { ConfiguredTmuxServer } from "@bazhen/host-guard";
+import { isAlive, type ConfiguredTmuxServer } from "@bazhen/host-guard";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
 import { nodePtySpawner } from "@bazhen/daemon/pty";
 import { sleep, testServer } from "./helpers.ts";
@@ -54,6 +54,10 @@ async function waitFor(condition: () => boolean, ms = 5_000): Promise<boolean> {
   return condition();
 }
 
+/** A pid no process has just now, inside every system's range (macOS's ends at 99999). */
+const freePid = () =>
+  String([...Array(2000).keys()].map((i) => 32_767 - i).find((pid) => !isAlive(pid)));
+
 const withIdentity = (ref: RuntimeRef, serverPid: string, serverStart: string): RuntimeRef => ({
   ...ref,
   locator: { ...ref.locator, serverPid, serverStart },
@@ -83,33 +87,47 @@ describe("a live tmux server whose socket was deleted", () => {
     expect((await runtime.inventory()).map((e) => e.ref.terminalId)).toEqual([ref.terminalId]);
   });
 
-  const forged: [string, (ref: RuntimeRef) => RuntimeRef][] = [
-    ["a pid no process has", (ref) => withIdentity(ref, "4194305", ref.locator.serverStart ?? "")],
+  // Not running only where the recorded server is provably gone; anything that can't be told
+  // apart from it concludes nothing. Either way nothing is sent, and each case ends with the true
+  // ref recovering the server, so what held it back was the identity.
+  const thisStart = String(Math.round(Date.now() / 1000 - process.uptime()));
+  const forged: [string, "not-running" | "unreachable", (ref: RuntimeRef) => RuntimeRef][] = [
+    ["a pid no process has", "not-running", (ref) => withIdentity(ref, freePid(), "1")],
     [
-      "a pid that is not tmux",
-      (ref) => withIdentity(ref, String(process.pid), ref.locator.serverStart ?? ""),
+      "a process neither the server nor started when it did",
+      "not-running",
+      (ref) => withIdentity(ref, String(process.pid), "1"),
     ],
     [
-      "a start more than two seconds off",
+      "a live process started when the server did that is not tmux",
+      "unreachable",
+      (ref) => withIdentity(ref, String(process.pid), thisStart),
+    ],
+    [
+      "the server itself, started more than two seconds off",
+      "unreachable",
       (ref) =>
-        withIdentity(ref, ref.locator.serverPid ?? "", String(Number(ref.locator.serverStart) + 5)),
+        withIdentity(
+          ref,
+          String(ref.locator.serverPid),
+          String(Number(ref.locator.serverStart) + 5),
+        ),
     ],
   ];
-  // Each ends with the true ref recovering the server, so the refusal was the identity's.
-  it.each(forged)("is not running, and nothing is sent, against %s", async (_, forge) => {
+  it.each(forged)("sends nothing against %s, and reads %s", async (_, expected, forge) => {
     const { server, runtime, ref } = await started();
     rmSync(server.socket);
-    const refused = (await runtime.health([forge(ref)])).state;
+    const read = (await runtime.health([forge(ref)])).state;
     await sleep(500);
     const untouched = !existsSync(server.socket);
-    expect([refused, untouched, (await runtime.health([ref])).state]).toEqual([
-      "not-running",
+    expect([read, untouched, (await runtime.health([ref])).state]).toEqual([
+      expected,
       true,
       "unreachable",
     ]);
   });
 
-  it("is not running against a live tmux server on another socket, which is sent nothing", async () => {
+  it("sends nothing against a live tmux server on another socket, and concludes nothing", async () => {
     const ours = await started();
     const other = await started();
     rmSync(ours.server.socket);
@@ -119,11 +137,11 @@ describe("a live tmux server whose socket was deleted", () => {
       String(other.ref.locator.serverPid),
       String(other.ref.locator.serverStart),
     );
-    const refused = (await ours.runtime.health([theirs])).state;
+    const read = (await ours.runtime.health([theirs])).state;
     await sleep(500);
     const untouched = [existsSync(ours.server.socket), existsSync(other.server.socket)];
-    expect([refused, untouched, (await ours.runtime.health([ours.ref])).state]).toEqual([
-      "not-running",
+    expect([read, untouched, (await ours.runtime.health([ours.ref])).state]).toEqual([
+      "unreachable",
       [false, false],
       "unreachable",
     ]);

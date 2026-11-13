@@ -1,18 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { processFacts } from "./tmux.ts";
+import { isAlive } from "./signal.ts";
+import { readProcess } from "./tmux.ts";
 
-describe("what ps says of a process", () => {
-  it("reads this process's command, start and argument line", async () => {
+describe("what ps shows of a process", () => {
+  it("reads this process's whole command, start and argument line", async () => {
     const started = Date.now() / 1000 - process.uptime();
-    expect(await processFacts(process.pid)).toEqual({
+    expect(await readProcess(process.pid)).toEqual({
       comm: expect.stringMatching(/(^|\/)node$/),
       start: expect.toSatisfy((start: number) => Math.abs(start - started) <= 2),
       args: expect.stringContaining(String(process.argv[1])),
     });
   });
 
-  it("finds nothing for a pid no process has", async () => {
-    // Above every system's pid limit (Linux's 2^22, macOS's 99999).
-    expect(await processFacts(2 ** 22 + 1)).toBeUndefined();
+  it("finds a pid no process has absent", async () => {
+    // Within every system's pid range (macOS's tops out at 99999), and free just now.
+    const free = [...Array(1000).keys()].map((i) => 99_999 - i).find((pid) => !isAlive(pid));
+    expect(await readProcess(Number(free))).toBe("absent");
   });
 });

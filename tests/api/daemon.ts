@@ -466,12 +466,12 @@ export class Daemon {
     return () => chmodSync(socket, mode);
   }
 
-  /** Ends the agent's terminal, as if its tmux session had been killed by hand. */
   /** Deletes the private server's socket under it, as a temp cleaner would; the server runs on. */
   deleteTmuxSocket(): void {
     rmSync(this.tmuxServer.socket);
   }
 
+  /** Ends the agent's terminal, as if its tmux session had been killed by hand. */
   endTerminal(agentId: string): void {
     const session = this.session(agentId);
     if (session === undefined) throw new Error(`no terminal for ${agentId}`);
