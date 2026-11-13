@@ -105,7 +105,7 @@ describe("local environment", () => {
     expect((await runtime.health()).state).toBe("not-running");
   });
 
-  it("is reachable only while its tmux server runs, and unknown while none does", async () => {
+  it("is reachable while its tmux server runs or none does, and unreachable while it can't be read", async () => {
     const running = new FakeRuntime();
     await environment(running).launch(launch());
     const unreadable = new FakeRuntime();
@@ -115,7 +115,7 @@ describe("local environment", () => {
     const states = await Promise.all(
       runtimes.map(async (runtime) => (await environment(runtime).health()).state),
     );
-    expect(states).toEqual(["reachable", "unknown", "unreachable"]);
+    expect(states).toEqual(["reachable", "reachable", "unreachable"]);
   });
 
   it("lists only agent terminals, by the agent their tags name", async () => {

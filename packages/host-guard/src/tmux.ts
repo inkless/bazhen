@@ -6,7 +6,7 @@ import { execFile, execFileSync, type StdioOptions } from "node:child_process";
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { vouch, type PaneGroup } from "./signal.ts";
+import { signalServer, vouch, vouchServer, type PaneGroup } from "./signal.ts";
 
 const run = promisify(execFile);
 const TIMEOUT_MS = 5_000;
@@ -131,6 +131,126 @@ export function environmentScript(
     .join("");
 }
 
+/** A tmux server as a runtime ref records it: its `#{pid}` and `#{start_time}` (epoch seconds). */
+export interface ServerIdentity {
+  readonly pid: string;
+  readonly start: string;
+}
+
+/** One process as `ps` describes it: its command, start (epoch seconds) and argument line. */
+export interface ProcessFacts {
+  readonly comm: string;
+  readonly start: number;
+  readonly args: string;
+}
+
+/**
+ * What `ps` showed of a pid: the process, provably none (`absent`), or nothing that can be relied
+ * on (`unreadable`: an unexpected exit or a line that won't parse).
+ */
+export type PsReading = ProcessFacts | "absent" | "unreadable";
+
+/**
+ * Whether the server a ref recorded still runs: `serves` only when every check holds, `gone` only
+ * when the pid provably has no process or a different one, and `unsure` for anything else, which
+ * concludes nothing (foundation-design §7.1).
+ */
+export type ServerVerdict =
+  | { readonly is: "serves" }
+  | { readonly is: "gone" }
+  | { readonly is: "unsure"; readonly why: string };
+
+/** How far a process's start, as `ps` prints it, may lie from tmux's `#{start_time}`. */
+const START_SKEW_S = 2;
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** `ps -o lstart=` in the C locale and UTC, `Thu Nov 12 17:10:38 2026`, as epoch seconds. */
+export function parseLstart(text: string): number | undefined {
+  const match = /^\w{3} +(\w{3}) +(\d{1,2}) (\d{2}):(\d{2}):(\d{2}) (\d{4})$/.exec(text.trim());
+  if (match === null) return undefined;
+  const [, mon = "", day, h, m, sec, year] = match;
+  const month = MONTHS.indexOf(mon);
+  if (month === -1) return undefined;
+  return Date.UTC(Number(year), month, Number(day), Number(h), Number(m), Number(sec)) / 1000;
+}
+
+/** A tmux server's command: its binary, by name or path, or the name Linux's tmux gives it. */
+const TMUX_COMM = /^(?:\S*\/)?tmux(?:: server)?$/;
+
+/** One line of `ps -o lstart=,<column>=`: the start, then the column, which may hold spaces. */
+export function parsePsLine(line: string): { start: number; rest: string } | undefined {
+  const match = /^(\w{3} +\w{3} +\d{1,2} \d{2}:\d{2}:\d{2} \d{4}) +(.+)$/.exec(line.trim());
+  const start = parseLstart(match?.[1] ?? "");
+  const rest = match?.[2];
+  return start === undefined || rest === undefined ? undefined : { start, rest };
+}
+
+/**
+ * Whether the process `ps` showed is the tmux server `identity` recorded for `socket`. It
+ * serves only if all of it holds, since the signal that follows ends any process that is not
+ * tmux: a tmux command, `socket` itself in its arguments, and the recorded start. The server keeps
+ * the arguments of the command that started it, so its `-S <socket>`, unless its process title was
+ * set to `tmux: server (<socket>)`, as tmux does where it can. It is gone only if no process has
+ * the pid, or one that is neither the server nor started when it did. A process that looks like
+ * the server but started at another time is unsure: on Linux, a step of the wall clock moves
+ * `lstart`.
+ */
+export function serverVerdict(
+  reading: PsReading,
+  identity: ServerIdentity,
+  socket: string,
+): ServerVerdict {
+  if (reading === "absent") return { is: "gone" };
+  if (reading === "unreadable") return { is: "unsure", why: "ps could not be read" };
+  const args = reading.args.trim();
+  const ours =
+    TMUX_COMM.test(reading.comm) &&
+    (args === `tmux: server (${socket})` || ` ${args} `.includes(` -S ${socket} `));
+  const recorded = /^\d+$/.test(identity.start) ? Number(identity.start) : undefined;
+  const sameStart = recorded !== undefined && Math.abs(reading.start - recorded) <= START_SKEW_S;
+  if (ours && sameStart) return { is: "serves" };
+  if (!ours && !sameStart && recorded !== undefined) return { is: "gone" };
+  return {
+    is: "unsure",
+    why: ours ? "it started at another time" : `${reading.comm} is not this socket's server`,
+  };
+}
+
+const PS_ENV = { LC_ALL: "C", TZ: "UTC", PATH: process.env["PATH"] ?? "/usr/bin:/bin" };
+
+/**
+ * What `ps` shows of `pid`. Two calls, since macOS cuts the command to 16 characters unless it is
+ * the last column; each also prints the start, and the two must agree, so both describe one
+ * process. It exits 1 and prints nothing for a pid with no process; any other failure, a line that
+ * won't parse, or two that disagree, is unreadable rather than absent.
+ */
+export async function readProcess(pid: number): Promise<PsReading> {
+  const ps = async (column: "comm" | "args") => {
+    const args = ["-ww", "-p", String(pid), "-o", `lstart=,${column}=`];
+    const { stdout } = await run("ps", args, { env: PS_ENV, timeout: TIMEOUT_MS });
+    return parsePsLine(stdout);
+  };
+  try {
+    const comm = await ps("comm");
+    const args = await ps("args");
+    if (comm === undefined || args === undefined || comm.start !== args.start) return "unreadable";
+    return { start: comm.start, comm: comm.rest, args: args.rest };
+  } catch (err) {
+    return psFailure(err);
+  }
+}
+
+/** A failed `ps -p`: absent only for exit 1 with nothing printed, as for a pid with no process. */
+export function psFailure(err: unknown): "absent" | "unreadable" {
+  const quiet = (key: string) => String(Reflect.get(Object(err), key) ?? "").trim() === "";
+  const code = Reflect.get(Object(err), "code");
+  return code === 1 && quiet("stdout") && quiet("stderr") ? "absent" : "unreadable";
+}
+
+/** The pid a ref recorded, if it can name a process at all. */
+const pidOf = (identity: ServerIdentity) =>
+  /^\d+$/.test(identity.pid) && Number(identity.pid) > 1 ? Number(identity.pid) : undefined;
+
 /** A server whose configuration file is known, as a runtime that writes one needs. */
 export type ConfiguredTmuxServer = TmuxServer & { readonly config: string };
 
@@ -221,6 +341,21 @@ export class TmuxServer {
       );
       child.stdin?.end(script);
     });
+  }
+
+  /**
+   * Makes the server `identity` names recreate its socket with `SIGUSR1`, once `ps` shows it still
+   * runs as this socket's server: a temp cleaner can delete the socket under a live server
+   * (foundation-design §7.1). Sends nothing unless it serves. Between the check and the signal a
+   * pid could in principle be reused; macOS has no pidfd to close that window, and it would take
+   * the server exiting and its pid going to a new process within the ~10 ms between them.
+   */
+  async recreateSocket(identity: ServerIdentity): Promise<ServerVerdict> {
+    const pid = pidOf(identity);
+    if (pid === undefined) return { is: "unsure", why: `pid ${identity.pid} names no process` };
+    const verdict = serverVerdict(await readProcess(pid), identity, this.socket);
+    if (verdict.is !== "serves") return verdict;
+    return signalServer(vouchServer({ pid, socket: this.socket })) ? verdict : { is: "gone" };
   }
 
   /** Ends this server, if it runs. */

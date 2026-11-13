@@ -57,15 +57,20 @@ export interface LocalEnvironmentOptions {
 }
 
 /**
- * The machine Bazhen runs on: agents are terminals in the private runtime, each running one
- * harness's TUI (foundation-design §8.1).
+ * How the runtime's health reads as the environment's (foundation-design §4.4). The runtime says
+ * `not-running` only once every server the daemon recorded is gone, so nothing running is a
+ * reachable environment with nothing in it: what lets a reconcile conclude `lost`.
  */
 const HEALTH: Record<RuntimeHealthState, EnvironmentHealthState> = {
   healthy: "reachable",
-  "not-running": "unknown",
+  "not-running": "reachable",
   unreachable: "unreachable",
 };
 
+/**
+ * The machine Bazhen runs on: agents are terminals in the private runtime, each running one
+ * harness's TUI (foundation-design §8.1).
+ */
 export class LocalEnvironment implements EnvironmentAdapter {
   readonly kind = "local";
   readonly id: EnvironmentId;
@@ -80,13 +85,9 @@ export class LocalEnvironment implements EnvironmentAdapter {
     this.opts = opts;
   }
 
-  /**
-   * Only a running server can say an agent is gone (§4.4). No server running says nothing yet:
-   * it can't be told apart from a server that died taking its agents, until the server's pid and
-   * start time are recorded.
-   */
-  async health(): Promise<EnvironmentHealth> {
-    const { state, version } = await this.opts.runtime.health();
+  /** `known`'s servers, by their pid and start time, tell a dead server from a lost socket (§7.1). */
+  async health(known: readonly RuntimeRef[] = []): Promise<EnvironmentHealth> {
+    const { state, version } = await this.opts.runtime.health(known);
     return { state: HEALTH[state], version };
   }
 
@@ -110,7 +111,7 @@ export class LocalEnvironment implements EnvironmentAdapter {
 
   /**
    * Refuses an agent a terminal already carries, live or dead: an agent has one terminal at a time.
-   * With no server running there is no terminal to find, so only a reachable runtime is read.
+   * Only a reachable runtime is read; with no server running its inventory is empty.
    */
   async launch({ agentId, terminalId, request, size }: AgentLaunch): Promise<AgentRefs> {
     const harness = this.harness(request);

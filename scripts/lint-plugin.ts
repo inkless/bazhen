@@ -19,7 +19,8 @@ const TMUX =
   "Run tmux only through @bazhen/host-guard (TmuxServer), which names its server by a socket " +
   "path the caller owns (docs/standards/code.md).";
 const KILL =
-  "Send signals only through @bazhen/host-guard (spawnGroup, signalGroup, signalPane, isAlive) " +
+  "Send signals only through @bazhen/host-guard (spawnGroup, signalGroup, signalPane, " +
+  "TmuxServer.recreateSocket, isAlive) " +
   "(docs/standards/code.md).";
 
 /** child_process's process-starting calls, and the names wrappers of them go by here. */

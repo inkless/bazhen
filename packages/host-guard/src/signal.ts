@@ -1,6 +1,7 @@
 // The one module that sends signals. A signal reaches only a process group this process started,
-// or the process of a pane that one of Bazhen's own tmux servers vouched for: a stray pid ends
-// someone else's work, and a stray negative one their whole session.
+// the process of a pane that one of Bazhen's own tmux servers vouched for, or one of those
+// servers itself, once its process was checked to be that server: a stray pid ends someone
+// else's work, and a stray negative one their whole session.
 
 import { spawn, type SpawnOptions } from "node:child_process";
 
@@ -28,6 +29,35 @@ export function vouch(group: PaneGroup, now = Date.now()): PaneGroup {
   const proof = Object.freeze({ ...group });
   vouched.set(proof, now + PROOF_MS);
   return proof;
+}
+
+/** A tmux server's own process, checked to be the server on `socket`. */
+export interface ServerProcess {
+  readonly pid: number;
+  readonly socket: string;
+}
+
+const servers = new WeakMap<ServerProcess, number>();
+
+/** A checked server process, as one `signalServer` may reach once. Only tmux.ts calls this. */
+export function vouchServer(server: ServerProcess, now = Date.now()): ServerProcess {
+  if (!isPid(server.pid)) throw new RangeError(`refusing to vouch for pid ${server.pid}`);
+  const proof = Object.freeze({ ...server });
+  servers.set(proof, now + PROOF_MS);
+  return proof;
+}
+
+/**
+ * Sends a checked tmux server `SIGUSR1`, which makes it recreate its socket. Only that signal,
+ * and only to the pid itself: the default action of SIGUSR1 ends any process that is not tmux.
+ * Whether the server was still there.
+ */
+export function signalServer(server: ServerProcess, now = Date.now()): boolean {
+  const expiry = servers.get(server);
+  servers.delete(server);
+  if (expiry === undefined) throw new RangeError(`refusing to signal ${server.pid}: unvouched`);
+  if (now > expiry) throw new RangeError(`refusing to signal ${server.pid}: stale proof`);
+  return send(server.pid, "SIGUSR1");
 }
 
 /** Whether the target existed; a group that already exited is the caller's to notice. */

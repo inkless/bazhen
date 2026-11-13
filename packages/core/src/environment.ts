@@ -99,8 +99,12 @@ export interface EnvironmentAdapter {
   readonly harnesses: readonly HarnessId[];
   /** The harnesses whose agents can be respawned on their session; a respawn of any other is refused first. */
   readonly resumable: readonly HarnessId[];
-  /** Only a reachable environment can say an agent is gone (foundation-design §4.4). */
-  health(): Promise<EnvironmentHealth>;
+  /**
+   * Only a reachable environment can say an agent is gone (foundation-design §4.4). `known` are
+   * the refs the daemon recorded, by which an environment tells a dead runtime from one it can't
+   * reach just now.
+   */
+  health(known?: readonly RuntimeRef[]): Promise<EnvironmentHealth>;
   inventory(): Promise<AgentInventoryEntry[]>;
   launch(launch: AgentLaunch): Promise<AgentRefs>;
   /** Starts the agent's exited terminal again, on its existing harness session. */
