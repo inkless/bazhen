@@ -99,6 +99,13 @@ export class SessionBinding {
     this.table = table;
   }
 
+  /** Whether a hook ran in the agent's bound session, its subagents' included. */
+  inSession(agentId: string, origin: HookOrigin): boolean {
+    return (
+      origin.sessionId !== null && origin.sessionId === this.store.claudeBinding(agentId).sessionId
+    );
+  }
+
   async owns(
     agentId: string,
     origin: HookOrigin,

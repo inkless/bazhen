@@ -33,7 +33,11 @@ async function bound() {
   ) =>
     binding.owns(
       agentId,
-      { sessionId, subagent: more.subagent ?? false },
+      {
+        sessionId,
+        subagent: more.subagent ?? false,
+        subagentId: more.subagent === true ? "sub-1" : null,
+      },
       { sessionStarted: more.started ?? false, ppid: more.ppid ?? 900 },
     );
   const session = () => store.snapshot(testView).agents[0]?.externalRef?.id;

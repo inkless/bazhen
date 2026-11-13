@@ -34,6 +34,7 @@ import { endOpenAttachments, storeLog } from "./stream/log.ts";
 import { streamRoute } from "./stream/server.ts";
 import { Approvals } from "./mailbox/approvals.ts";
 import { HOOK_SCRIPT, hookClient, hookCommand } from "./mailbox/hook-command.ts";
+import { ActivityTracker } from "./mailbox/activity.ts";
 import { SessionBinding, psTable } from "./mailbox/binding.ts";
 import { hookApp } from "./mailbox/ingress.ts";
 import { Mailbox } from "./mailbox/mailbox.ts";
@@ -218,6 +219,7 @@ const socketListener = getRequestListener(
       approvals,
       knows: (agentId) => store.agent(agentId) !== undefined,
       binding: new SessionBinding(store, psTable),
+      activity: new ActivityTracker((agentId, activity) => store.recordActivity(agentId, activity)),
     }),
     stop: shutdown,
     paneTitleChanged: (pane) => void codexThreads.paneTitleChanged(pane),

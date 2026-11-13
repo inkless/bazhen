@@ -2,6 +2,8 @@
 // without an account. Each reply is picked by a marker in the latest user text:
 //   [[fake:bash:<command>]]  a Bash tool call running <command>, then "done" once it has run
 //   [[fake:slow:<ms>]]       a short text reply, sent <ms> milliseconds late
+//   [[fake:agent]]           an Agent tool call that starts a background subagent, whose own reply
+//                            comes 8 s late, so it outlives the turn that started it
 //   [[fake:error]]           an API error Claude Code doesn't retry, ending the turn in StopFailure
 //   anything else            a short text reply
 // Every request is kept, so a test can check what the model was sent.
@@ -39,8 +41,16 @@ const textOf = (content: unknown): string =>
           .join("\n")
       : "";
 
-/** The reply to a request: a Bash call for a fresh `bash` marker, otherwise text. */
-function reply(req: Request): { tool?: { command: string }; text: string } {
+interface Tool {
+  readonly name: string;
+  readonly input: Record<string, string>;
+}
+
+/** What the subagent `[[fake:agent]]` starts is asked to do: answer, slowly. */
+export const SUBAGENT_PROMPT = "A background task. [[fake:slow:8000]]";
+
+/** The reply to a request: a tool call for a fresh `bash` or `agent` marker, otherwise text. */
+function reply(req: Request): { tool?: Tool; text: string } {
   const users = (req.messages ?? []).filter((m) => m.role === "user");
   const last = users.at(-1);
   const continuing =
@@ -52,7 +62,18 @@ function reply(req: Request): { tool?: { command: string }; text: string } {
       .matchAll(/\[\[fake:bash:([^\]]+)\]\]/g),
   ].at(-1);
   if (marker !== undefined && !continuing && textOf(last?.content).includes(marker[0])) {
-    return { tool: { command: marker[1] ?? "true" }, text: "" };
+    return {
+      tool: { name: "Bash", input: { command: marker[1] ?? "true", description: "test command" } },
+      text: "",
+    };
+  }
+  if (!continuing && textOf(last?.content).includes("[[fake:agent]]")) {
+    const input = {
+      description: "Background task",
+      prompt: SUBAGENT_PROMPT,
+      subagent_type: "general-purpose",
+    };
+    return { tool: { name: "Agent", input }, text: "" };
   }
   return { text: continuing ? "done" : "ok" };
 }
@@ -78,20 +99,14 @@ function stream(res: ServerResponse, req: Request, answer: ReturnType<typeof rep
     },
   });
   const block = answer.tool
-    ? { type: "tool_use", id: nextId("toolu"), name: "Bash", input: {} }
+    ? { type: "tool_use", id: nextId("toolu"), name: answer.tool.name, input: {} }
     : { type: "text", text: "" };
   event("content_block_start", { type: "content_block_start", index: 0, content_block: block });
   event("content_block_delta", {
     type: "content_block_delta",
     index: 0,
     delta: answer.tool
-      ? {
-          type: "input_json_delta",
-          partial_json: JSON.stringify({
-            command: answer.tool.command,
-            description: "test command",
-          }),
-        }
+      ? { type: "input_json_delta", partial_json: JSON.stringify(answer.tool.input) }
       : { type: "text_delta", text: answer.text },
   });
   event("content_block_stop", { type: "content_block_stop", index: 0 });
@@ -114,14 +129,7 @@ export async function body(r: IncomingMessage): Promise<string> {
 function respond(res: ServerResponse, req: Request, answer: ReturnType<typeof reply>): void {
   if (req.stream) return stream(res, req, answer);
   const content = answer.tool
-    ? [
-        {
-          type: "tool_use",
-          id: nextId("toolu"),
-          name: "Bash",
-          input: { command: answer.tool.command },
-        },
-      ]
+    ? [{ type: "tool_use", id: nextId("toolu"), name: answer.tool.name, input: answer.tool.input }]
     : [{ type: "text", text: answer.text }];
   res.writeHead(200, { "content-type": "application/json" }).end(
     JSON.stringify({

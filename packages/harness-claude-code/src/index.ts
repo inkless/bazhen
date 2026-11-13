@@ -4,7 +4,7 @@ import type {
   HarnessLaunch,
   LaunchOptions,
 } from "@bazhen/core";
-import type { ApprovalDecision, ExternalRef } from "@bazhen/protocol";
+import type { Activity, ApprovalDecision, ExternalRef } from "@bazhen/protocol";
 
 export interface ClaudeCodeOptions {
   readonly newSessionId: () => string;
@@ -92,6 +92,10 @@ function hooks(hook: string) {
       // Not async: its reply can fold mail into the running turn, so each tool call waits on it.
       PostToolUse: [{ matcher: "*", hooks: [run("PostToolUse", FOLD_TIMEOUT_S)] }],
       PostToolUseFailure: [{ matcher: "*", hooks: [report("PostToolUseFailure")] }],
+      // A background subagent outlives the turn that started it: these say it is still at work.
+      // Not async, so its start arrives before its first tool call.
+      SubagentStart: [{ hooks: [run("SubagentStart", 10)] }],
+      SubagentStop: [{ hooks: [run("SubagentStop", 10)] }],
     },
   };
 }
@@ -113,19 +117,30 @@ export type Hook =
       readonly sessionStarted: boolean;
       readonly compacted: boolean;
       /** The turn whose end this waiter runs for, as the Stop or StopFailure report says too. */
-      readonly turnEnd: { readonly promptId: string | null; readonly failed: boolean } | null;
+      readonly turnEnd: {
+        readonly promptId: string | null;
+        readonly failed: boolean;
+        readonly error: string | null;
+      } | null;
     }
   | { readonly kind: "toolStarted"; readonly tool: string; readonly useId: string }
   | { readonly kind: "permission"; readonly summary: string; readonly tool: string }
   | { readonly kind: "promptStarted"; readonly prompt: string; readonly promptId: string | null }
   | { readonly kind: "turnEnded"; readonly promptId: string | null }
-  | { readonly kind: "turnFailed"; readonly promptId: string | null }
+  | {
+      readonly kind: "turnFailed";
+      readonly promptId: string | null;
+      /** Claude Code's name for the API error, such as `server_error`. */
+      readonly error: string | null;
+    }
   | {
       readonly kind: "toolSettled";
       readonly useId: string;
       /** A PostToolUse, whose reply can fold mail into the turn; a failed call's can't. */
       readonly fold: { readonly promptId: string | null } | null;
     }
+  /** One of the agent's subagents started or ended, by its `agent_id`. */
+  | { readonly kind: "subagentStarted" | "subagentStopped"; readonly subagentId: string }
   | { readonly kind: "ignored" };
 
 /** Reads one of the hooks `launchSpec` installed; the daemon never sees Claude Code's formats. */
@@ -142,6 +157,15 @@ export function readHook(event: string, payload: unknown): Hook {
       const useId = toolUseIdOf(payload);
       return useId === null ? IGNORED : { kind: "toolStarted", tool: toolKey(payload), useId };
     }
+    case "SubagentStart":
+    case "SubagentStop": {
+      const id = field(payload, "agent_id");
+      if (typeof id !== "string" || id === "") return IGNORED;
+      return {
+        kind: event === "SubagentStart" ? "subagentStarted" : "subagentStopped",
+        subagentId: id,
+      };
+    }
     case "PermissionRequest":
       // A question wants the human's choice, which allow or deny can't give: the TUI asks it.
       if (field(payload, "tool_name") === "AskUserQuestion") return IGNORED;
@@ -151,7 +175,7 @@ export function readHook(event: string, payload: unknown): Hook {
     case "Stop":
       return { kind: "turnEnded", promptId: promptIdOf(payload) };
     case "StopFailure":
-      return { kind: "turnFailed", promptId: promptIdOf(payload) };
+      return { kind: "turnFailed", promptId: promptIdOf(payload), error: errorOf(payload) };
     case "PostToolUse":
     case "PostToolUseFailure": {
       const useId = toolUseIdOf(payload);
@@ -165,11 +189,56 @@ export function readHook(event: string, payload: unknown): Hook {
 
 const IGNORED: Hook = { kind: "ignored" };
 
+const failure = (error: string | null): Pick<Activity, "value" | "detail"> =>
+  error === null ? { value: "failed" } : { value: "failed", detail: error };
+
+/**
+ * What a hook says the agent is doing (foundation-design §4.6), or null for one that says
+ * nothing: a prompt or a tool call means working, a permission request needs the human, a turn's
+ * end leaves it idle, and an API error that ends the turn is a failure.
+ */
+export function activityOf(hook: Hook): Pick<Activity, "value" | "detail"> | null {
+  switch (hook.kind) {
+    case "promptStarted":
+    case "toolStarted":
+    case "toolSettled":
+      return { value: "working" };
+    case "permission":
+      return { value: "needs_approval" };
+    case "turnEnded":
+      return { value: "idle" };
+    case "turnFailed":
+      return failure(hook.error);
+    case "wait":
+      // A session that starts or starts over waits for its first prompt; a compaction is mid-turn.
+      if (hook.sessionStarted) return hook.compacted ? null : { value: "idle" };
+      if (hook.turnEnd === null) return null;
+      return hook.turnEnd.failed ? failure(hook.turnEnd.error) : { value: "idle" };
+    case "subagentStarted":
+    case "subagentStopped":
+    case "ignored":
+      break;
+  }
+  return null;
+}
+
 /** The turn a Stop or StopFailure payload ends, for a hook that runs beside those reports. */
-function turnEndOf(payload: unknown): { promptId: string | null; failed: boolean } | null {
+function turnEndOf(
+  payload: unknown,
+): { promptId: string | null; failed: boolean; error: string | null } | null {
   const event = field(payload, "hook_event_name");
   if (event !== "Stop" && event !== "StopFailure") return null;
-  return { promptId: promptIdOf(payload), failed: event === "StopFailure" };
+  return {
+    promptId: promptIdOf(payload),
+    failed: event === "StopFailure",
+    error: errorOf(payload),
+  };
+}
+
+/** Claude Code's name for the API error a StopFailure reports, such as `server_error`. */
+function errorOf(payload: unknown): string | null {
+  const error = field(payload, "error");
+  return typeof error === "string" ? error.slice(0, 200) : null;
 }
 
 /** Which Claude Code session ran a hook, and whether one of its subagents did. */
@@ -177,13 +246,17 @@ export interface HookOrigin {
   readonly sessionId: string | null;
   /** A subagent's hook, which carries `agent_id`; compaction runs as one (§3.1). */
   readonly subagent: boolean;
+  /** That subagent's `agent_id`, unique among the agent's subagents. */
+  readonly subagentId: string | null;
 }
 
 export function hookOrigin(payload: unknown): HookOrigin {
   const session = field(payload, "session_id");
+  const subagent = field(payload, "agent_id");
   return {
     sessionId: typeof session === "string" && session !== "" ? session : null,
-    subagent: typeof field(payload, "agent_id") === "string",
+    subagent: typeof subagent === "string",
+    subagentId: typeof subagent === "string" ? subagent : null,
   };
 }
 

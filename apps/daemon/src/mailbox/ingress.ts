@@ -8,6 +8,7 @@ import {
   type HookReply,
 } from "@bazhen/protocol";
 import { hookOrigin, readHook } from "@bazhen/harness-claude-code";
+import type { ActivityTracker } from "./activity.ts";
 import type { Approvals } from "./approvals.ts";
 import type { SessionBinding } from "./binding.ts";
 import { QUIET, type Mailbox } from "./mailbox.ts";
@@ -19,6 +20,8 @@ export interface IngressDeps {
   readonly knows: (agentId: string) => boolean;
   /** Which hooks are the agent's own session's, the only ones that take or confirm mail. */
   readonly binding: SessionBinding;
+  /** What the agent's hooks say it is doing (foundation-design §4.6). */
+  readonly activity: ActivityTracker;
 }
 
 /**
@@ -36,6 +39,12 @@ export function hookApp(deps: IngressDeps): Hono {
     if (!isId("agent", agentId) || !deps.knows(agentId)) return framed(QUIET);
     const read = readHook(event, payload);
     const origin = hookOrigin(payload);
+    // Subagents' hooks say what the agent is doing too; another session's never do.
+    const observe = () => {
+      if (deps.binding.inSession(agentId, origin)) deps.activity.observe(agentId, origin, read);
+    };
+    // A waiter's SessionStart may move the binding first, so it is observed once it has.
+    if (read.kind !== "wait") observe();
     // Subagents and other sessions may still raise approvals, but never take or confirm mail.
     const own = () =>
       deps.binding.owns(agentId, origin, {
@@ -46,6 +55,8 @@ export function hookApp(deps: IngressDeps): Hono {
       case "wait":
         if (!(await own())) return framed(QUIET);
         if (read.sessionStarted) deps.mailbox.sessionStarted(agentId, read.compacted);
+        if (read.sessionStarted && !read.compacted) deps.activity.sessionStarted(agentId);
+        observe();
         // The waiter runs beside each Stop and StopFailure report, so either ends the turn.
         if (read.turnEnd?.failed === true) deps.mailbox.turnFailed(agentId, read.turnEnd.promptId);
         else if (read.turnEnd) deps.mailbox.turnEnded(agentId, read.turnEnd.promptId);
@@ -74,6 +85,8 @@ export function hookApp(deps: IngressDeps): Hono {
           return framed(deps.mailbox.fold(agentId, read.fold.promptId));
         }
         break;
+      case "subagentStarted":
+      case "subagentStopped":
       case "ignored":
         break;
     }
