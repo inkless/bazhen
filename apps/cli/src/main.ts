@@ -11,6 +11,7 @@ import {
   DoctorResponse,
   EnvRefreshResponse,
   HealthResponse,
+  isPlainRemote,
   StateSnapshot,
   StopResponse,
 } from "@bazhen/protocol";
@@ -103,10 +104,29 @@ async function doctor(): Promise<number> {
     const server = daemon === null ? "not connected yet" : `${daemon} (as last connected)`;
     console.log(`codex: app-server ${server}, cli ${cli ?? "not found"}`);
   }
+  if (d.web !== undefined) printExternalOrigins(d.web);
   const source = d.env.source === "start" ? "at start" : "by bazhen env refresh";
   console.log(`environment: captured ${d.env.capturedAt} ${source}, ${d.env.kept} variables kept`);
   console.log(`  removed: ${removed || "none"}`);
   return d.runtime.state === "unreachable" ? 1 : 0;
+}
+
+/** The origins the daemon admits besides loopback, and why each is a risk until pairing. */
+function printExternalOrigins(web: NonNullable<DoctorResponse["web"]>): void {
+  if (web.from === null) {
+    console.log("external origins: none (loopback only)");
+    return;
+  }
+  console.log(`external origins: ${web.externalOrigins.join(", ")} (from ${web.from})`);
+  console.log(
+    "  warning: no authentication until device pairing; whatever reaches these origins can drive every terminal, so keep the route behind its own login",
+  );
+  const plain = web.externalOrigins.filter(isPlainRemote);
+  if (plain.length > 0) {
+    console.log(
+      `  warning: plain HTTP to another host (${plain.join(", ")}); anyone on the network can read the traffic`,
+    );
+  }
 }
 
 /**

@@ -50,6 +50,7 @@ import { answers } from "./socket/client.ts";
 import { currentInputs } from "./config/paths.ts";
 import { ensurePrivateDir } from "./config/private-dir.ts";
 import { createApp, type AppDeps } from "./http/app.ts";
+import { allowlists } from "./http/guard.ts";
 import { upgrades } from "./http/upgrades.ts";
 import { socketApp } from "./socket/routes.ts";
 import { nodePtySpawner } from "./pty/node-pty.ts";
@@ -195,15 +196,18 @@ const serverWatch = new ServerWatch({
 });
 serverWatch.start();
 shells.watch();
-const allowedHosts = [`${HOSTNAME}:${port}`, `localhost:${port}`];
-// The web dev server proxies to the daemon, and the browser's requests keep its origin. It is
-// allowed only when the dev scripts name its port; a built daemon serves the client itself.
-const webPort = process.env.BAZHEN_WEB_PORT;
-const webDevHosts = webPort ? [`${HOSTNAME}:${webPort}`, `localhost:${webPort}`] : [];
-const allow = {
-  hosts: allowedHosts,
-  origins: [...allowedHosts, ...webDevHosts].map((host) => `http://${host}`),
-};
+const allow = allowlists({
+  port,
+  webPort: process.env.BAZHEN_WEB_PORT || undefined,
+  externalOrigins: config.externalOrigins,
+});
+if (config.externalOriginsFrom !== null) {
+  console.warn(
+    `bazhen: admitting external origins from ${config.externalOriginsFrom}: ` +
+      `${config.externalOrigins.join(", ")}. Nothing authenticates them until device pairing: ` +
+      "whatever reaches them can drive every terminal.",
+  );
+}
 const snapshotView: SnapshotView = {
   host: (kind) => (kind === "local" ? hostname() : ""),
   attachCommand: (ref) => runtime.attachCommand(ref),
@@ -304,6 +308,11 @@ const socketListener = getRequestListener(
           loginShell: config.loginShell ?? null,
         },
         codex: { daemon: codex.version, cli: await codexCliRead },
+        web: {
+          externalOrigins: [...config.externalOrigins],
+          from: config.externalOriginsFrom,
+          allowInsecureOrigins: config.allowInsecureOrigins,
+        },
         env: {
           capturedAt: captured.at,
           source: captured.source,

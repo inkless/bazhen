@@ -11,7 +11,7 @@
     "./start": "./src/start.ts"
   },
   "scripts": {
-    "dev": "BAZHEN_WEB_PORT=${BAZHEN_WEB_PORT:-5173} node --watch --watch-preserve-output src/main.ts",
+    "dev": "BAZHEN_WEB_PORT=${BAZHEN_WEB_PORT:-7901} node --watch --watch-preserve-output src/main.ts",
     "start": "node src/main.ts"
   },
   "dependencies": {

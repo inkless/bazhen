@@ -155,6 +155,7 @@ describe("bazhen doctor", () => {
     expect(code).toBe(0);
     expect(out).toContain("CLAUDECODE 1");
     expect(out).toContain(`config: ${daemon.home}/config/config.toml\n`);
+    expect(out).toContain("external origins: none (loopback only)\n");
     expect(out).not.toContain("sentinel-value-never-shown");
   });
 });

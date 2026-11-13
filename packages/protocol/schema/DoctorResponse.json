@@ -111,6 +111,40 @@
       ],
       "additionalProperties": false
     },
+    "web": {
+      "type": "object",
+      "properties": {
+        "externalOrigins": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "from": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "BAZHEN_EXTERNAL_ORIGINS",
+                "config"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "allowInsecureOrigins": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "externalOrigins",
+        "from",
+        "allowInsecureOrigins"
+      ],
+      "additionalProperties": false
+    },
     "env": {
       "type": "object",
       "properties": {

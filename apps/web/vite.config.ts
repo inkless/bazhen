@@ -1,8 +1,21 @@
 import optimizeLocales from "@react-aria/optimize-locales-plugin";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
+import { originList, originsProblem } from "@bazhen/protocol";
 
 const daemon = `http://127.0.0.1:${process.env.BAZHEN_PORT ?? 7900}`;
+
+/**
+ * The hosts of the external origins the daemon admits too (BAZHEN_EXTERNAL_ORIGINS), so the dev
+ * server answers them and no other host. Checked as the daemon checks them, so a bad list stops
+ * both rather than one admitting what the other refuses.
+ */
+function externalHosts(env: NodeJS.ProcessEnv): string[] {
+  const origins = originList(env.BAZHEN_EXTERNAL_ORIGINS);
+  const problem = originsProblem(origins, env.BAZHEN_ALLOW_INSECURE_ORIGINS === "true");
+  if (problem !== null) throw new Error(`BAZHEN_EXTERNAL_ORIGINS: ${problem}`);
+  return origins.map((origin) => new URL(origin).hostname);
+}
 
 /**
  * Vite's CLI closes the dev server on SIGTERM only, so Ctrl-C killed it and `pnpm dev` reported
@@ -29,8 +42,9 @@ export default defineConfig({
   plugins: [react(), optimizeLocales.vite({ locales: ["en-US"] }), closeOnSigint()],
   server: {
     host: "127.0.0.1",
-    port: Number(process.env.BAZHEN_WEB_PORT ?? 5173),
+    port: Number(process.env.BAZHEN_WEB_PORT ?? 7901),
     strictPort: true,
+    allowedHosts: externalHosts(process.env),
     proxy: { "/v1": { target: daemon, changeOrigin: true, ws: true } },
   },
 });

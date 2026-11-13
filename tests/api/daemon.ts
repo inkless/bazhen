@@ -137,6 +137,8 @@ export interface DaemonOptions {
   readonly modelUrl?: string;
   /** The fake Responses API's base URL, for Codex. */
   readonly responsesUrl?: string;
+  /** More of the daemon's environment, such as a setting's variable. */
+  readonly env?: Record<string, string>;
 }
 
 /** A process's environment, from /proc (Linux only). */
@@ -159,6 +161,7 @@ export class Daemon {
   readonly env: Record<string, string>;
   private port = 0;
   private process: ChildProcess | undefined;
+  private output = "";
 
   private constructor(home: string, opts: DaemonOptions) {
     this.home = home;
@@ -170,6 +173,7 @@ export class Daemon {
       ...homeEnv(home),
       PATH: `${bin}:${process.env["PATH"] ?? "/usr/bin:/bin"}`,
       ...agentHomes(home, this.work, { anthropic: opts.modelUrl, responses: opts.responsesUrl }),
+      ...opts.env,
     };
   }
 
@@ -196,6 +200,11 @@ export class Daemon {
       throw new Error(`bazhen start failed:\n${started.out}`);
     }
     return daemon;
+  }
+
+  /** What the daemon has printed since it last started. */
+  log(): string {
+    return this.output;
   }
 
   /** Launches an agent in the work directory, keyed by `key`. */
@@ -240,9 +249,9 @@ export class Daemon {
       { env: { ...this.env, BAZHEN_PORT: String(this.port) }, stdio: ["ignore", "pipe", "pipe"] },
     );
     this.process = child;
-    let output = "";
-    child.stdout.on("data", (d: Buffer) => (output += d.toString()));
-    child.stderr.on("data", (d: Buffer) => (output += d.toString()));
+    this.output = "";
+    child.stdout.on("data", (d: Buffer) => (this.output += d.toString()));
+    child.stderr.on("data", (d: Buffer) => (this.output += d.toString()));
     for (let i = 0; i < 100 && child.exitCode === null; i++) {
       if (
         await fetch(`${this.url}/v1/health`).then(
@@ -259,7 +268,7 @@ export class Daemon {
       await new Promise((r) => setTimeout(r, 100));
     }
     await this.stop();
-    throw new Error(`the daemon did not start:\n${output}`);
+    throw new Error(`the daemon did not start:\n${this.output}`);
   }
 
   async request(path: string, init: { method?: string; body?: unknown; origin?: string } = {}) {
@@ -300,7 +309,7 @@ export class Daemon {
   /** Opens the event stream as a browser would, resuming after `cursor`. */
   async events(
     cursor: { epoch: string; eventId: number },
-    opts: { origin?: string; version?: string; path?: string } = {},
+    opts: { origin?: string; host?: string; version?: string; path?: string } = {},
   ): Promise<EventClient> {
     const query = new URLSearchParams({
       v: opts.version ?? PROTOCOL_VERSION,
@@ -310,7 +319,10 @@ export class Daemon {
     const ws = new WebSocket(
       `${this.url.replace("http", "ws")}${opts.path ?? "/v1/events"}?${query}`,
       {
-        headers: { origin: opts.origin ?? this.url },
+        headers: {
+          origin: opts.origin ?? this.url,
+          ...(opts.host === undefined ? {} : { host: opts.host }),
+        },
       },
     );
     const client = new EventClient(ws);

@@ -3,11 +3,14 @@ import { join } from "node:path";
 import { parse } from "smol-toml";
 import { z } from "zod";
 import { ENV_RULE, type EnvRules } from "@bazhen/core";
+import { isOrigin, originList, originsProblem } from "@bazhen/protocol";
 import { resolvePaths, type PathInputs } from "./paths.ts";
 
 const Port = z.int().min(1).max(65_535);
 const Shell = z.enum(["direct", "login"]);
 const EnvRule = z.string().regex(ENV_RULE, "must be a variable name, or a prefix ending in *");
+const Origin = z.string().refine(isOrigin, "must be an origin, such as https://bazhen.example.com");
+const Flag = z.enum(["true", "false"]).transform((value) => value === "true");
 
 /** The keys `config.toml` may hold. Unknown keys are refused, so a typo never means "default". */
 const ConfigFile = z.strictObject({
@@ -24,6 +27,12 @@ const ConfigFile = z.strictObject({
         .optional(),
     })
     .optional(),
+  web: z
+    .strictObject({
+      external_origins: z.array(Origin).optional(),
+      allow_insecure_origins: z.boolean().optional(),
+    })
+    .optional(),
 });
 type ConfigFile = z.infer<typeof ConfigFile>;
 
@@ -34,6 +43,15 @@ export interface Config {
   readonly envRules: Required<EnvRules>;
   /** With `agents.shell = "login"`, the shell every agent starts through; otherwise none. */
   readonly loginShell: string | undefined;
+  /**
+   * Origins the user's own route to the daemon presents, such as a tunnel's domain, which join
+   * the Host and Origin allowlists (foundation-design §9.2).
+   */
+  readonly externalOrigins: readonly string[];
+  /** Where they came from, for the start-up log and `bazhen doctor`; null when there are none. */
+  readonly externalOriginsFrom: "BAZHEN_EXTERNAL_ORIGINS" | "config" | null;
+  /** Whether plain HTTP to another host may be among them. */
+  readonly allowInsecureOrigins: boolean;
 }
 
 export class InvalidConfig extends Error {
@@ -102,6 +120,31 @@ export function resolveConfig(
       deny: file.agents?.env?.deny ?? [],
       passthrough: file.agents?.env?.passthrough ?? [],
     },
+    ...externalOrigins(file, env),
+  };
+}
+
+/** The external origins, from the environment over the file, each checked as the dev server does. */
+function externalOrigins(file: ConfigFile, env: Readonly<Record<string, string | undefined>>) {
+  const fromVariable = originList(env["BAZHEN_EXTERNAL_ORIGINS"]);
+  const fromFile = file.web?.external_origins ?? [];
+  const [origins, from] =
+    fromVariable.length > 0
+      ? [fromVariable, "BAZHEN_EXTERNAL_ORIGINS" as const]
+      : fromFile.length > 0
+        ? [fromFile, "config" as const]
+        : [[], null];
+  const allowInsecure =
+    fromEnv(env, "BAZHEN_ALLOW_INSECURE_ORIGINS", Flag) ??
+    file.web?.allow_insecure_origins ??
+    false;
+  const problem = originsProblem(origins, allowInsecure);
+  const where = from === "BAZHEN_EXTERNAL_ORIGINS" ? from : "web.external_origins";
+  if (problem !== null) throw new InvalidConfig(`${where}: ${problem}`);
+  return {
+    externalOrigins: origins,
+    externalOriginsFrom: from,
+    allowInsecureOrigins: allowInsecure,
   };
 }
 
