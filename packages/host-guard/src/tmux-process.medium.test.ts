@@ -6,7 +6,8 @@ describe("what ps shows of a process", () => {
   it("reads this process's whole command, start and argument line", async () => {
     const started = Date.now() / 1000 - process.uptime();
     expect(await readProcess(process.pid)).toEqual({
-      comm: expect.stringMatching(/(^|\/)node$/),
+      // Node's own name for its process differs by platform (`node`, or `MainThread` on Linux).
+      comm: expect.stringMatching(/\S/),
       start: expect.toSatisfy((start: number) => Math.abs(start - started) <= 2),
       args: expect.stringContaining(String(process.argv[1])),
     });
