@@ -1,41 +1,42 @@
-import type { NotifierCommand, RunOutcome } from "@bazhen/host-guard";
+import { fileURLToPath } from "node:url";
+import { linuxNotifier, macNotifier, type ShowNotification } from "@bazhen/host-guard";
 import { EVENTS, type AttentionKind } from "@bazhen/protocol";
 import type { Store } from "../store/store.ts";
 import type { Presence } from "./presence.ts";
 
-/** Runs a notifier by argv with a time limit; host-guard's `runNotifier` in the daemon. */
-export type Run = (command: NotifierCommand, args: readonly string[]) => Promise<RunOutcome>;
-
 /** Shows one notification on the host's desktop. */
 export type Notify = (title: string, body: string) => void;
 
+/** Bazhen.app where `pnpm build:notify` builds it by default. */
+export const MAC_APP = fileURLToPath(
+  new URL("../../../notify-mac/dist/Bazhen.app", import.meta.url),
+);
+
 /**
- * The command that shows a notification on this platform, or null where Bazhen has none yet.
- * macOS gets its own notifier app later; osascript is never used, since its argv parsing lets a
+ * The notifier for this host, from host-guard, or null where Bazhen has none: notify-send on
+ * Linux, Bazhen.app on macOS once it is built. osascript is never used: its argv parsing lets a
  * title that starts with "-" add a script of its own.
  */
-export function notificationCommand(
+export function hostNotifier(
   platform: NodeJS.Platform,
-  title: string,
-  body: string,
-): { command: NotifierCommand; args: string[] } | null {
-  if (platform !== "linux") return null;
-  // "--" ends notify-send's options, so a title or body that starts with "-" stays text.
-  return { command: "notify-send", args: ["--app-name=Bazhen", "--", title, body] };
+  found: { readonly notifySend: string | null; readonly macApp: string | null },
+  port: number,
+): ShowNotification | null {
+  if (platform === "linux" && found.notifySend !== null) return linuxNotifier(found.notifySend);
+  if (platform === "darwin" && found.macApp !== null) return macNotifier(found.macApp, port);
+  return null;
 }
 
 /**
- * Desktop notifications through the platform's own command, or null on a platform with none.
- * One runs at a time: what opens while one is showing is gathered into a single "N items need
- * you" once it returns, so a burst starts two processes, not fifty. A command that isn't
- * installed turns them off; that, and any other failure, is logged once and never thrown.
+ * Desktop notifications through `show`. One runs at a time: what opens while one is showing is
+ * gathered into a single "N items need you" once it returns, so a burst starts two notifiers,
+ * not fifty. A notifier that can't start turns them off; that, and any other failure, is logged
+ * once and never thrown.
  */
 export function desktopNotifier(
-  platform: NodeJS.Platform,
-  run: Run,
+  show: ShowNotification,
   log: (message: string) => void = console.warn,
-): Notify | null {
-  if (notificationCommand(platform, "", "") === null) return null;
+): Notify {
   let off = false;
   let warned = false;
   let showing = false;
@@ -45,28 +46,27 @@ export function desktopNotifier(
     warned = true;
     log(message);
   };
-  const show = (title: string, body: string) => {
-    const shown = notificationCommand(platform, title, body);
-    if (off || shown === null) return;
+  const next = (title: string, body: string) => {
+    if (off) return;
     showing = true;
-    void run(shown.command, shown.args).then((outcome) => {
+    void show({ title, body }).then((outcome) => {
       showing = false;
       if (outcome === "missing") {
         off = true;
-        warn(`bazhen: desktop notifications are off: ${shown.command} is not installed`);
+        warn("bazhen: desktop notifications are off: the notifier would not start");
       } else if (outcome !== "ok") {
-        warn(`bazhen: desktop notifications failed (${shown.command}: ${outcome})`);
+        warn(`bazhen: desktop notifications failed (${outcome})`);
       }
       const gathered = waiting;
       waiting = 0;
       if (gathered > 0)
-        show("Bazhen", gathered === 1 ? "1 item needs you" : `${gathered} items need you`);
+        next("Bazhen", gathered === 1 ? "1 item needs you" : `${gathered} items need you`);
     });
   };
   return (title, body) => {
     if (off) return;
     if (showing) waiting++;
-    else show(title, body);
+    else next(title, body);
   };
 }
 

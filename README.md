@@ -71,7 +71,10 @@ external_origins = [
 desktop = true # show what needs you on this machine's desktop while no dashboard is in sight
 ```
 
-Desktop notifications go through `notify-send` on Linux. macOS has none yet.
+Desktop notifications go through `notify-send` on Linux, and on macOS through Bazhen's own
+notifier app, which `pnpm build:notify` builds with Xcode's command-line tools (restart the
+daemon after). The first notification asks for permission for "Bazhen"; clicking one opens the
+inbox. `bazhen doctor` says when the app isn't built.
 
 Agents get the environment a new terminal tab would, minus Bazhen's, tmux's, harnesses' session
 and terminal-presentation variables. By default it is captured once, when `bazhen start` runs.

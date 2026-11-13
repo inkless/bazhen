@@ -24,6 +24,7 @@
     "test:file": "vitest run",
     "test:real": "node scripts/test-real.ts",
     "build:hook": "cargo build --release --quiet --manifest-path apps/hook/Cargo.toml",
+    "build:notify": "node --disable-warning=ExperimentalWarning scripts/build-notify-mac.ts",
     "test:hook": "cargo fmt --check --manifest-path apps/hook/Cargo.toml && cargo clippy --quiet --manifest-path apps/hook/Cargo.toml -- -D warnings && cargo test --quiet --manifest-path apps/hook/Cargo.toml",
     "bench:hook": "node scripts/hook-bench.ts",
     "test:bench": "pnpm run build:hook && vitest run --project bench"

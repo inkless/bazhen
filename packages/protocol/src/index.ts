@@ -61,6 +61,12 @@ export const DoctorResponse = z.object({
       allowInsecureOrigins: z.boolean(),
     })
     .optional(),
+  /**
+   * Whether desktop notifications are on, and the notifier they go through: Bazhen.app on macOS,
+   * notify-send on Linux, or null where there is none (on macOS, `pnpm build:notify` builds it).
+   * Absent from a daemon before 1.24.
+   */
+  notifications: z.object({ desktop: z.boolean(), notifier: z.string().nullable() }).optional(),
   env: z.object({
     capturedAt: z.string(),
     /** Captured when the daemon started, or by the latest `bazhen env refresh`. */

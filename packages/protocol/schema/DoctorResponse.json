@@ -145,6 +145,25 @@
       ],
       "additionalProperties": false
     },
+    "notifications": {
+      "type": "object",
+      "properties": {
+        "desktop": {
+          "type": "boolean"
+        },
+        "notifier": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "desktop",
+        "notifier"
+      ],
+      "additionalProperties": false
+    },
     "env": {
       "type": "object",
       "properties": {

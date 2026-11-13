@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
@@ -8,7 +8,7 @@ import { LocalEnvironment } from "@bazhen/env-local";
 import { ClaudeCodeHarness } from "@bazhen/harness-claude-code";
 import { CodexHarness, DAEMON_START_ARGS } from "@bazhen/harness-codex";
 import { filterEnv } from "@bazhen/core";
-import { TmuxServer, runNotifier } from "@bazhen/host-guard";
+import { TmuxServer, findNotifySend } from "@bazhen/host-guard";
 import { PROTOCOL_VERSION } from "@bazhen/protocol";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
 import { launchAgent, localEnvironmentId } from "./agents/launch.ts";
@@ -40,7 +40,7 @@ import { ForegroundWatch } from "./shells/foreground.ts";
 import { streamRoute } from "./stream/server.ts";
 import { Approvals } from "./mailbox/approvals.ts";
 import { Inbox } from "./attention/inbox.ts";
-import { desktopNotifier, notifyOnAttention } from "./notify/desktop.ts";
+import { MAC_APP, desktopNotifier, hostNotifier, notifyOnAttention } from "./notify/desktop.ts";
 import { Presence } from "./notify/presence.ts";
 import { HOOK_SCRIPT, hookClient, hookCommand } from "./mailbox/hook-command.ts";
 import { ActivityTracker } from "./mailbox/activity.ts";
@@ -109,13 +109,13 @@ const approvals = new Approvals(store);
 const inbox = new Inbox(store, approvals, (agentId, req) => mailbox.send(agentId, req));
 inbox.follow();
 const presence = new Presence();
-/** notify-send returns at once; one that hangs is killed rather than piling up. */
-const NOTIFY_TIMEOUT_MS = 5_000;
-const desktop = config.desktopNotifications
-  ? desktopNotifier(process.platform, (command, args) =>
-      runNotifier(command, args, { timeoutMs: NOTIFY_TIMEOUT_MS }),
-    )
-  : null;
+// Found once, at start: a notifier installed or built later is picked up by a restart.
+const notifiers = {
+  notifySend: findNotifySend(),
+  macApp: existsSync(MAC_APP) ? MAC_APP : null,
+};
+const show = config.desktopNotifications ? hostNotifier(process.platform, notifiers, port) : null;
+const desktop = show === null ? null : desktopNotifier(show);
 if (desktop !== null) notifyOnAttention(store, presence, desktop);
 // What the daemon was holding when it last stopped is gone with its sockets (§7 step 2).
 endOpenAttachments(store);
@@ -358,6 +358,10 @@ const socketListener = getRequestListener(
           externalOrigins: [...config.externalOrigins],
           from: config.externalOriginsFrom,
           allowInsecureOrigins: config.allowInsecureOrigins,
+        },
+        notifications: {
+          desktop: desktop !== null,
+          notifier: process.platform === "darwin" ? notifiers.macApp : notifiers.notifySend,
         },
         env: {
           capturedAt: captured.at,

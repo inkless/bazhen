@@ -114,6 +114,14 @@ async function doctor(): Promise<number> {
     console.log(`codex: app-server ${server}, cli ${cli ?? "not found"}`);
   }
   if (d.web !== undefined) printExternalOrigins(d.web);
+  if (d.notifications !== undefined) {
+    console.log(`desktop notifications: ${d.notifications.desktop ? "on" : "off"}`);
+    if (process.platform === "darwin" && d.notifications.notifier === null) {
+      console.log(
+        "  warning: Bazhen.app is not built; run pnpm build:notify for macOS notifications",
+      );
+    }
+  }
   const source = d.env.source === "start" ? "at start" : "by bazhen env refresh";
   console.log(`environment: captured ${d.env.capturedAt} ${source}, ${d.env.kept} variables kept`);
   console.log(`  removed: ${removed || "none"}`);

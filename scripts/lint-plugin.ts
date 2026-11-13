@@ -36,7 +36,8 @@ const STARTS = new Set([
   // host-guard's own process starts: none of them can be pointed at tmux either.
   "spawnGroup",
   "runBounded",
-  "runNotifier",
+  "linuxNotifier",
+  "macNotifier",
 ]);
 const CHILD_PROCESS = new Set(["child_process", "node:child_process"]);
 const PROCESS = new Set(["process", "node:process"]);
