@@ -194,6 +194,14 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE mailbox ADD COLUMN failures INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    version: 11,
+    sql: `
+      -- The theme the terminal's process was started for, light or dark; NULL when none was
+      -- named, which is drawn and reported as dark.
+      ALTER TABLE terminals ADD COLUMN theme TEXT;
+    `,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

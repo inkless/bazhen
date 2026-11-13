@@ -12,6 +12,7 @@ import { LocalEnvironment, loginArgv } from "./index.ts";
 
 const harness: HarnessAdapter = {
   id: "claude-code",
+  themes: ["light", "dark"],
   launchSpec: async () => ({
     argv: ["claude", "--session-id", "s-1"],
     env: { HARNESS_OWN: "1" },
@@ -61,7 +62,7 @@ describe("local environment", () => {
     });
   });
 
-  it("hands the harness the options a launch and a respawn name", async () => {
+  it("hands the harness the options a launch and a respawn name, and reports the theme each started in", async () => {
     const seen: unknown[] = [];
     // A TUI that exits at once, so it can be respawned.
     const exits = {
@@ -71,13 +72,14 @@ describe("local environment", () => {
     };
     const recording: HarnessAdapter = {
       id: "claude-code",
+      themes: ["light", "dark"],
       launchSpec: async (_request, options) => {
         seen.push(options);
-        return exits;
+        return { ...exits, theme: "dark" };
       },
       resumeSpec: async (_request, _session, options) => {
         seen.push(options);
-        return exits;
+        return { ...exits, theme: "light" };
       },
     };
     const runtime = new FakeRuntime();
@@ -89,8 +91,9 @@ describe("local environment", () => {
     });
     const l = { ...launch(), options: { theme: "light" as const } };
     const refs = await env.launch(l);
-    await env.respawn({ ...l, options: { theme: "dark" }, refs, generation: 1 });
+    const again = await env.respawn({ ...l, options: { theme: "dark" }, refs, generation: 1 });
     expect(seen).toEqual([{ theme: "light" }, { theme: "dark" }]);
+    expect([refs.theme, again.theme]).toEqual(["dark", "light"]);
   });
 
   it("starts the TUI through the user's login shell, when there is one", async () => {

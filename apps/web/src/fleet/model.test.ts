@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Agent, AgentState, StateSnapshot } from "@bazhen/protocol";
-import { agentActions, groupFleet } from "./model.ts";
+import { agentActions, groupFleet, themeRespawn } from "./model.ts";
 
 let serial = 0;
 /** An id of the protocol's shape: a prefix and 32 hex digits, version 7. */
@@ -20,6 +20,8 @@ const agentIn = (project: string, state: AgentState = "running", over: Partial<A
   generation: 0,
   externalRef: { environmentId, kind: "claude-session" as const, id: "s" },
   exit: null,
+  theme: "dark" as const,
+  themes: ["light" as const, "dark" as const],
   attachCommand: "tmux attach",
   commands: [],
   ...over,
@@ -97,6 +99,34 @@ describe("groupFleet", () => {
     expect([count(false), count(true)]).toEqual([
       [2, 2],
       [4, 0],
+    ]);
+  });
+});
+
+/** An activity signal its harness reported, with `value`. */
+const activity = (value: "idle" | "waiting_input" | "working" | "needs_approval") => ({
+  value,
+  source: "native" as const,
+  confidence: 1,
+  observedAt: "2026-11-13T00:00:00.000Z",
+});
+
+describe("themeRespawn", () => {
+  it("allows an exited agent, and a running one only between turns as its harness reports it", () => {
+    expect([
+      themeRespawn({ state: "exited" }),
+      themeRespawn({ state: "running", activity: activity("idle") }),
+      themeRespawn({ state: "running", activity: activity("waiting_input") }),
+      themeRespawn({ state: "running", activity: activity("working") }),
+      themeRespawn({ state: "running", activity: activity("needs_approval") }),
+      themeRespawn({ state: "running" }),
+    ]).toEqual([
+      null,
+      null,
+      null,
+      "Mid-turn: wait for it to finish",
+      "Mid-turn: wait for it to finish",
+      "Can't tell whether it's mid-turn",
     ]);
   });
 });

@@ -77,21 +77,28 @@ would vanish, and a cell painted with it carries light text poorly. Bold is draw
 colour, not the bright one. The selection is a solid fill, 3:1 against the background, with its
 own text colour.
 
-An open terminal recolours in place when the theme changes, here, in another tab of the device,
-or in the system's settings under "System"; its stream is untouched.
-
-An agent's TUI picks its own colours when it starts, so a launch and a respawn tell the daemon
-the theme its terminal shows, and the daemon passes it to the harness for that start only:
+An agent's TUI picks its colours once, as it starts, so its terminal is drawn in the theme it
+was started for, whatever the page's: a TUI drawn for dark is unreadable on a light terminal. A
+launch and a respawn send the theme the page shows, and the daemon passes it to the harness:
 
 - Claude Code gets `theme` in the settings it is started with, over the user's own.
-- Codex has no light or dark of its own: its colours follow the background the terminal
-  reports, which the daemon answers as black, so a Codex terminal stays on the dark palette in
-  every theme and the daemon gives Codex the bundled `one-half-dark` syntax highlighting (its
-  `tui.theme`), over the user's own.
+- Codex has no light or dark of its own: its colours follow the background the terminal reports,
+  and it asks before any view can answer, so it starts dark, with the bundled `one-half-dark`
+  syntax highlighting (its `tui.theme`), over the user's own.
 
-A running agent keeps the theme it started with until it is respawned, and the page says so when
-the theme changes while one runs. An agent started without the web client, from the CLI or by a
-daemon restart, keeps the user's own setting.
+The daemon records the theme each terminal was started in, and tells a program that asks for
+the terminal's text or background (OSC 10/11) that theme's colours, from `TERMINAL_COLOURS` in
+`@bazhen/protocol`; a test holds them to `terminalTheme()`. Each agent says which themes its
+harness can start in. The page itself, and a terminal's contrast preference, still follow the
+device live.
+
+When the page's theme differs from an open agent's, the page lists it with "Respawn in <theme>",
+behind a confirm. An exited agent respawns at once; a running one is stopped and respawned, and
+only between turns as its harness reports them, so an agent whose harness reports nothing says it
+can't tell. The confirm checks that again against the latest snapshot, and an agent that hasn't
+exited 15 seconds after the stop is left as it is, with a message. If the page goes away between
+the stop and the respawn, the agent is left exited, with its own Respawn. An agent started without the web client, from the CLI or by a daemon
+restart, is drawn dark and keeps the user's own setting.
 
 ## Interactive widgets
 

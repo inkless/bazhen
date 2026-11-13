@@ -21,6 +21,7 @@ export interface ClaudeCodeOptions {
  */
 export class ClaudeCodeHarness implements HarnessAdapter {
   readonly id = "claude-code";
+  readonly themes = ["light", "dark"] as const;
   private readonly opts: ClaudeCodeOptions;
 
   constructor(opts: ClaudeCodeOptions) {
@@ -54,6 +55,7 @@ export class ClaudeCodeHarness implements HarnessAdapter {
           : ["--permission-mode", this.opts.permissionMode]),
       ],
       env: {},
+      ...(theme && { theme }),
       externalRef: { kind: "claude-session", id },
     };
   }

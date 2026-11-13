@@ -135,6 +135,7 @@ describe("Claude Code's theme", () => {
       expect.objectContaining({ theme: "dark", hooks: expect.any(Object) }),
       expect.not.objectContaining({ theme: expect.anything() }),
     ]);
+    expect([launched.theme, resumed.theme, unthemed.theme]).toEqual(["light", "dark", undefined]);
   });
 });
 

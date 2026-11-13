@@ -72,6 +72,23 @@ export const Activity = z.object({
 });
 export type Activity = z.infer<typeof Activity>;
 
+/**
+ * Light or dark: the background a TUI is started for, as the client that starts it shows it. A
+ * terminal keeps the one its TUI was started for, and is drawn in it.
+ */
+export const TuiTheme = z.enum(["light", "dark"]);
+export type TuiTheme = z.infer<typeof TuiTheme>;
+
+/**
+ * The text and background a terminal in each theme is drawn in, as `rgb:rrrr/gggg/bbbb` for an
+ * OSC 10/11 reply: the daemon tells a program that asks, and the web client's terminal palette
+ * (its `--color-terminal-text` and `-bg` tokens) is held to the same colours by a test.
+ */
+export const TERMINAL_COLOURS = {
+  light: { text: "rgb:2020/2222/2525", background: "rgb:fdfd/fdfd/fdfd" },
+  dark: { text: "rgb:eaea/ebeb/eeee", background: "rgb:0f0f/0f0f/1010" },
+} as const satisfies Record<TuiTheme, { text: string; background: string }>;
+
 export const Environment = z.object({
   id: Id("env"),
   kind: EnvironmentKind,
@@ -94,6 +111,13 @@ export const Agent = z.object({
   /** How its process ended, once it has. */
   exit: ExitStatus.nullable(),
   /**
+   * The theme its TUI was started for, which its terminal is drawn in; dark when none was named,
+   * as the terminal has always told programs that ask (protocol 1.15).
+   */
+  theme: TuiTheme.default("dark"),
+  /** The themes its harness can start its TUI in, so a respawn in another is offered only here. */
+  themes: z.array(TuiTheme).default(["dark"]),
+  /**
    * What its harness last reported it doing, in this process; absent until the harness reports
    * anything (protocol 1.7).
    */
@@ -108,13 +132,6 @@ export const Agent = z.object({
   commands: z.array(AgentCommand).default([]),
 });
 export type Agent = z.infer<typeof Agent>;
-
-/**
- * Light or dark, as the client that starts a TUI shows it, so the harness draws for that
- * background. Per request, never stored: absent, the harness keeps the user's own setting.
- */
-export const TuiTheme = z.enum(["light", "dark"]);
-export type TuiTheme = z.infer<typeof TuiTheme>;
 
 export const LaunchAgentRequest = z.object({
   idempotencyKey: IdempotencyKey,

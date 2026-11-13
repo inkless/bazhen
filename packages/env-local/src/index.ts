@@ -21,6 +21,7 @@ import type {
   HarnessId,
   RuntimeHealthState,
   Signal,
+  TuiTheme,
 } from "@bazhen/protocol";
 import {
   AgentTerminalExists,
@@ -76,12 +77,14 @@ export class LocalEnvironment implements EnvironmentAdapter {
   readonly id: EnvironmentId;
   readonly harnesses: readonly HarnessId[];
   readonly resumable: readonly HarnessId[];
+  readonly themes: Readonly<Partial<Record<HarnessId, readonly TuiTheme[]>>>;
   private readonly opts: LocalEnvironmentOptions;
 
   constructor(opts: LocalEnvironmentOptions) {
     this.id = opts.id;
     this.harnesses = opts.harnesses.map((h) => h.id);
     this.resumable = opts.harnesses.flatMap((h) => (h.resumeSpec === undefined ? [] : [h.id]));
+    this.themes = Object.fromEntries(opts.harnesses.map((h) => [h.id, h.themes]));
     this.opts = opts;
   }
 
@@ -136,7 +139,7 @@ export class LocalEnvironment implements EnvironmentAdapter {
         : { kind: "agent", agentId },
       size,
     });
-    return { runtime, externalRef };
+    return { runtime, externalRef, ...(launch.theme && { theme: launch.theme }) };
   }
 
   async respawn({
@@ -156,6 +159,7 @@ export class LocalEnvironment implements EnvironmentAdapter {
     return {
       runtime: await this.opts.runtime.respawn(refs.runtime, process),
       externalRef: this.located(launch),
+      ...(launch.theme && { theme: launch.theme }),
     };
   }
 

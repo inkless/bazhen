@@ -89,10 +89,10 @@ export function project(db: Statements, e: Recorded): void {
       return;
     }
     case "agent.running": {
-      const { externalRef, runtimeRef } = EVENTS[e.type].payload.parse(e.payload);
+      const { externalRef, runtimeRef, theme } = EVENTS[e.type].payload.parse(e.payload);
       advance(db, e.id, e.entityId, ["launch.confirmed", "runtime.confirmed"], {
         agent: { external_ref: externalRef && JSON.stringify(externalRef) },
-        ...(runtimeRef && { terminal: incarnation(runtimeRef) }),
+        ...(runtimeRef && { terminal: { ...incarnation(runtimeRef), theme: theme ?? null } }),
       });
       return;
     }
@@ -113,10 +113,10 @@ export function project(db: Statements, e: Recorded): void {
       advance(db, e.id, e.entityId, ["respawn.requested", null]);
       return;
     case "agent.respawned": {
-      const { externalRef, runtimeRef } = EVENTS[e.type].payload.parse(e.payload);
+      const { externalRef, runtimeRef, theme } = EVENTS[e.type].payload.parse(e.payload);
       advance(db, e.id, e.entityId, ["launch.confirmed", "respawned"], {
         agent: { external_ref: externalRef && JSON.stringify(externalRef) },
-        terminal: { ...incarnation(runtimeRef), exit: null },
+        terminal: { ...incarnation(runtimeRef), exit: null, theme: theme ?? null },
       });
       forgetActivity(db, e.entityId);
       return;

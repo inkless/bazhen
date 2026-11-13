@@ -2,7 +2,12 @@ import headless from "@xterm/headless";
 import { describe, expect, it } from "vitest";
 import { newId, type Attached, type AttachmentId, type TerminalId } from "@bazhen/core";
 import { FakeRuntime } from "@bazhen/core/testing";
-import type { AttachmentMode, StreamServerFrame } from "@bazhen/protocol";
+import {
+  TERMINAL_COLOURS,
+  type AttachmentMode,
+  type StreamServerFrame,
+  type TuiTheme,
+} from "@bazhen/protocol";
 import { TerminalClosed } from "./emulator.ts";
 import { HUB_DEFAULTS, TerminalHub, ViewEnded, type AttachmentLog, type Viewer } from "./hub.ts";
 
@@ -104,6 +109,7 @@ function memoryLog(closing = false) {
       events.push(`granted ${a} ${epoch}`),
     epoch: () => 4,
     closing: () => closing,
+    theme: () => "dark",
   };
   return { log, events };
 }
@@ -256,6 +262,24 @@ describe("terminal hub", () => {
     await hub.join(rt.ref, a.v, size);
     rt.emit("\x1b[>q");
     await expect.poll(() => rt.written).toEqual(["\x1bP>|bazhen\x1b\\"]);
+  });
+
+  it("tells a program that asks the background of its terminal's current theme, which a respawn changes", async () => {
+    const rt = await fakeRuntime();
+    let theme: TuiTheme = "dark";
+    const hub = new TerminalHub(rt.runtime, { ...memoryLog().log, theme: () => theme });
+    await hub.join(rt.ref, viewer().v, size);
+    rt.emit("\x1b]11;?\x1b\\");
+    await expect.poll(() => rt.written).toHaveLength(1);
+    // A respawn in light keeps the terminal's client, and its emulator, alive.
+    theme = "light";
+    rt.emit("\x1b]11;?\x1b\\");
+    await expect
+      .poll(() => rt.written)
+      .toEqual([
+        `\x1b]11;${TERMINAL_COLOURS.dark.background}\x1b\\`,
+        `\x1b]11;${TERMINAL_COLOURS.light.background}\x1b\\`,
+      ]);
   });
 
   it("moves the lease to the view the user engages, and tells every view", async () => {

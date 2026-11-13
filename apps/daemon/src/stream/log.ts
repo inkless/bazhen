@@ -4,6 +4,7 @@ import type { AttachmentLog } from "./hub.ts";
 /** Attachments and leases are evented for audit; payloads carry no terminal bytes (§4.2, §9.1). */
 export function storeLog(store: Store): AttachmentLog {
   return {
+    theme: (terminal) => store.terminalTheme(terminal),
     started: (attachment, terminalId, mode) =>
       void store.append({
         type: "attachment.started",

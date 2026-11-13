@@ -25,6 +25,7 @@ export const testView: SnapshotView = {
   host: () => "test-host",
   attachCommand: (ref) => `attach ${ref.terminalId}`,
   resumable: ["claude-code"],
+  themes: () => ["light", "dark"],
 };
 
 export const tempDb = () => join(mkdtempSync(join(tmpdir(), "bz-store-")), "bazhen.db");
@@ -50,13 +51,19 @@ export function fakeEnvironment(
     kind: "local",
     harnesses: ["claude-code"],
     resumable: ["claude-code"],
+    themes: { "claude-code": ["light", "dark"] },
     health: async () => ({ state: "reachable", version: null }),
     inventory: async () => present(),
     launch,
-    respawn: async ({ refs, generation }) => {
+    respawn: async ({ refs, generation, options }) => {
       if (refs.runtime === null) throw new NoTerminal();
       const locator = { ...refs.runtime.locator, generation: String(generation) };
-      return { runtime: { ...refs.runtime, locator }, externalRef: refs.externalRef };
+      const runtime = { ...refs.runtime, locator };
+      return {
+        runtime,
+        externalRef: refs.externalRef,
+        ...(options.theme && { theme: options.theme }),
+      };
     },
     signal: async () => {},
     close: async () => {},

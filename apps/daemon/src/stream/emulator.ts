@@ -8,14 +8,7 @@ export const HISTORY_LINES = 2000;
 
 const ESC = "\x1b";
 const ST = `${ESC}\\`;
-/**
- * Light text on black: a program that asks is told the terminal is dark, so the web client keeps
- * the terminal of a harness that picks its colours from this answer dark (docs/standards/ui.md).
- */
-const COLOURS = [
-  [10, "rgb:ffff/ffff/ffff"],
-  [11, "rgb:0000/0000/0000"],
-] as const;
+
 /**
  * Private modes the serializer leaves out, with their defaults: the cursor's visibility and the
  * mouse report encodings. tmux sets each once and re-sends it only when it changes, so a view
@@ -52,7 +45,15 @@ export class ScreenEmulator {
   /** Snapshots waiting their turn in the write queue, failed if the terminal closes first. */
   private readonly pending = new Set<(err: TerminalClosed) => void>();
 
-  constructor(size: Size, reply: (bytes: Uint8Array) => void) {
+  /**
+   * `colours` says what a program that asks is told the terminal's text and background are, read
+   * at each query: a respawn can start the terminal's next process in another theme.
+   */
+  constructor(
+    size: Size,
+    reply: (bytes: Uint8Array) => void,
+    colours: () => { readonly text: string; readonly background: string },
+  ) {
     this.term = new headless.Terminal({
       ...size,
       scrollback: HISTORY_LINES,
@@ -78,13 +79,22 @@ export class ScreenEmulator {
       answer(`${ESC}[4;0;0t`);
       return true;
     });
-    for (const [id, colour] of COLOURS) {
-      parser.registerOscHandler(id, (data) => {
-        if (data !== "?") return false;
-        answer(`${ESC}]${id};${colour}${ST}`);
-        return true;
-      });
-    }
+    // `10;?;?` asks for the text and then the background, as xterm reads it; a cursor colour asked
+    // for after them (12) goes unanswered, as any query this terminal doesn't know. Replies end in ST
+    // whatever the query ended in: xterm.js doesn't say, and the only program that asks here is
+    // tmux's client, whose queries end in ST.
+    const dynamic = (first: 10 | 11) => (data: string) => {
+      const asked = data.split(";");
+      if (asked.some((p) => p !== "?")) return false;
+      const { text, background } = colours();
+      const colour = { 10: text, 11: background } as const;
+      for (const id of [10, 11] as const) {
+        if (id >= first && id - first < asked.length) answer(`${ESC}]${id};${colour[id]}${ST}`);
+      }
+      return true;
+    };
+    parser.registerOscHandler(10, dynamic(10));
+    parser.registerOscHandler(11, dynamic(11));
     // The handlers below only watch: returning false lets xterm.js apply the sequence too.
     for (const [final, on] of [
       ["h", true],

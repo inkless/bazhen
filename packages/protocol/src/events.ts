@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Activity, ExitStatus, ExternalRef, HarnessId, Signal } from "./agents.ts";
+import { Activity, ExitStatus, ExternalRef, HarnessId, Signal, TuiTheme } from "./agents.ts";
 import { AttachmentMode, EnvironmentKind, Id } from "./ids.ts";
 import { ApprovalDecision, AttentionCloseReason } from "./mail.ts";
 import { ProtocolVersion } from "./version.ts";
@@ -52,6 +52,8 @@ export const EVENTS = {
       externalRef: ExternalRef.nullable(),
       /** Null with no local terminal. */
       runtimeRef: RuntimeRefPayload.nullable(),
+      /** The theme the TUI was started for, when one was named. */
+      theme: TuiTheme.optional(),
     }),
   },
   "agent.failed": {
@@ -69,6 +71,8 @@ export const EVENTS = {
     payload: z.object({
       externalRef: ExternalRef.nullable(),
       runtimeRef: RuntimeRefPayload,
+      /** The theme the TUI was started for, when one was named. */
+      theme: TuiTheme.optional(),
     }),
   },
   /** The respawn failed; the agent is exited again, with its terminal, and still closable. */

@@ -119,6 +119,13 @@ describe("Codex's theme", () => {
       syntaxTheme(resumed.argv),
       syntaxTheme(unthemed.argv),
     ]).toEqual([['tui.theme="one-half-dark"'], ['tui.theme="one-half-dark"'], []]);
+    // It reports the theme it starts in, dark, so its terminal is drawn and answered dark too.
+    expect([launched.theme, resumed.theme, unthemed.theme, harness.themes]).toEqual([
+      "dark",
+      "dark",
+      undefined,
+      ["dark"],
+    ]);
   });
 });
 

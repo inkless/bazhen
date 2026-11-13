@@ -21,6 +21,7 @@ function setup(fail = false) {
     return {
       runtime: { terminalId: l.terminalId, runtime: "tmux", locator: { session: "bz-1" } },
       externalRef: { environmentId: environment.id, kind: "claude-session", id: "s-1" },
+      ...(l.options.theme && { theme: l.options.theme }),
     };
   });
   const deps = { store, environment, size: { cols: 120, rows: 40 }, home };
@@ -73,12 +74,12 @@ describe("launchAgent", () => {
     ]);
   });
 
-  it("hands the environment the theme the request names, or none, and stores neither", async () => {
+  it("hands the environment the theme the request names, and shows the one its TUI started in", async () => {
     const { store, deps, launches } = setup();
     await launchAgent(deps, { ...request, theme: "light" });
     await launchAgent(deps, { ...request, idempotencyKey: "k-2" });
     expect(launches.map((l) => l.options)).toEqual([{ theme: "light" }, {}]);
-    expect(JSON.stringify(store.snapshot(testView))).not.toContain("light");
+    expect(store.snapshot(testView).agents.map((a) => a.theme)).toEqual(["light", "dark"]);
   });
 
   it("answers a repeated key from the first answer, though its directory has gone since", async () => {

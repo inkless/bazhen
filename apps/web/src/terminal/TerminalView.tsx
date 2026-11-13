@@ -10,6 +10,7 @@ import {
   StreamServerFrame,
   withoutEventReports,
   type StreamClientFrame,
+  type TuiTheme,
 } from "@bazhen/protocol";
 import { matchKey } from "./keymap.ts";
 import { Backoff } from "./reconnect.ts";
@@ -17,7 +18,7 @@ import { wheelAction, type TerminalKind } from "./scroll.ts";
 import { attachScrollInput } from "./scroll-input.ts";
 import { loadSettings } from "./settings.ts";
 import { attachTakeover } from "./takeover.ts";
-import { shownScheme, terminalTheme, type TerminalPalette } from "./theme.ts";
+import { terminalTheme } from "./theme.ts";
 import { pageTheme } from "../ui/theme.ts";
 
 type Status =
@@ -37,19 +38,20 @@ interface Report {
 export function TerminalView({
   terminalId,
   kind,
-  palette = "theme",
+  scheme,
 }: {
   terminalId: string;
   kind: TerminalKind;
-  palette?: TerminalPalette;
+  /** The theme its program was started for, which it is drawn in whatever the page's. */
+  scheme: TuiTheme;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const [report, setReport] = useState<Report>({ status: { kind: "connecting" }, notice: null });
 
   useEffect(() => {
     const element = host.current;
-    return element === null ? undefined : connect(element, terminalId, kind, palette, setReport);
-  }, [terminalId, kind, palette]);
+    return element === null ? undefined : connect(element, terminalId, kind, scheme, setReport);
+  }, [terminalId, kind, scheme]);
 
   const { status, notice } = report;
   return (
@@ -66,7 +68,7 @@ export function TerminalView({
         style={{
           height: "70vh",
           background: "var(--color-terminal-bg)",
-          colorScheme: palette === "dark" ? "dark" : undefined,
+          colorScheme: scheme,
         }}
       />
     </section>
@@ -88,12 +90,12 @@ function connect(
   element: HTMLElement,
   terminalId: string,
   kind: TerminalKind,
-  palette: TerminalPalette,
+  scheme: TuiTheme,
   onReport: (report: Report) => void,
 ) {
   const settings = loadSettings(localStorage);
   const page = pageTheme();
-  const colours = () => terminalTheme(shownScheme(palette), page.moreContrast());
+  const colours = () => terminalTheme(scheme, page.moreContrast());
   const term = new Xterm({
     theme: colours(),
     // Bold is weight, not colour: bright white in light, or bright black in dark, is another
@@ -217,7 +219,7 @@ function connect(
   const observer = new ResizeObserver(() => fit.fit());
   observer.observe(element);
   const detachTakeover = attachTakeover(element, engage);
-  // Repaints in place: the stream and the lease are untouched.
+  // A contrast preference can change while it is open; it repaints in place.
   const unfollow = page.subscribe(() => {
     term.options.theme = colours();
   });
@@ -293,13 +295,13 @@ function exposeForTests(terminalId: string, term: Xterm, alternate: () => boolea
 }
 
 /**
- * Each colour the screen's text is written in, once, as the program named it: `#rrggbb`, a
- * palette index, or `default`.
+ * Each colour the text on screen, not in its history, is written in, once, as the program named
+ * it: `#rrggbb`, a palette index, or `default`.
  */
 function foregrounds(term: Xterm): string[] {
   const buffer = term.buffer.active;
   const seen = new Set<string>();
-  for (let y = 0; y < buffer.length; y++) {
+  for (let y = buffer.viewportY; y < buffer.viewportY + term.rows; y++) {
     const line = buffer.getLine(y);
     const width = line?.length ?? 0;
     for (let x = 0; x < width; x++) {

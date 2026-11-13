@@ -208,6 +208,7 @@ describe("tmux runtime on a private server", () => {
       granted: () => {},
       epoch: () => 0,
       closing: () => false,
+      theme: () => "dark",
     });
     const viewer = {
       mode: "interactive" as const,

@@ -38,6 +38,27 @@ export async function foregrounds(page: Page): Promise<string[]> {
   return Array.isArray(colours) ? colours.filter((c) => typeof c === "string") : [];
 }
 
+/** Ends the agent's process from outside, as a crash would, through the daemon's signal command. */
+export function kill(page: Page, agentId: string): Promise<number> {
+  return page.evaluate(async (id) => {
+    const state: unknown = await (await fetch("/v1/state")).json();
+    const agents: unknown = Reflect.get(Object(state), "agents");
+    const agent: unknown = Array.isArray(agents)
+      ? agents.find((a: unknown) => Reflect.get(Object(a), "id") === id)
+      : undefined;
+    const res = await fetch(`/v1/agents/${id}/signal`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        idempotencyKey: crypto.randomUUID(),
+        generation: Reflect.get(Object(agent), "generation"),
+        signal: "SIGKILL",
+      }),
+    });
+    return res.status;
+  }, agentId);
+}
+
 /** A second device: another browser opened on the newest agent's terminal, showing `text`. */
 export async function openSecondView(
   browser: Browser,

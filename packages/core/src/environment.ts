@@ -1,6 +1,13 @@
 import type { AgentLaunchRequest } from "./agent.ts";
 import type { LaunchOptions } from "./harness.ts";
-import type { EnvironmentKind, ExitStatus, ExternalRef, HarnessId, Signal } from "@bazhen/protocol";
+import type {
+  EnvironmentKind,
+  ExitStatus,
+  ExternalRef,
+  HarnessId,
+  Signal,
+  TuiTheme,
+} from "@bazhen/protocol";
 import type { AgentSessionId, EnvironmentId, TerminalId } from "./ids.ts";
 import type { RuntimeRef, Size } from "./runtime.ts";
 
@@ -47,6 +54,8 @@ export interface AgentRespawn {
 export interface AgentRefs {
   readonly runtime: RuntimeRef | null;
   readonly externalRef: ExternalRef | null;
+  /** The theme its TUI was started for, when one was named. */
+  readonly theme?: TuiTheme;
 }
 
 /** The harness has no adapter in this environment, so the request is refused, never emulated. */
@@ -104,6 +113,8 @@ export interface EnvironmentAdapter {
   readonly harnesses: readonly HarnessId[];
   /** The harnesses whose agents can be respawned on their session; a respawn of any other is refused first. */
   readonly resumable: readonly HarnessId[];
+  /** The themes each harness it runs can start its TUI in. */
+  readonly themes: Readonly<Partial<Record<HarnessId, readonly TuiTheme[]>>>;
   /**
    * Only a reachable environment can say an agent is gone (foundation-design §4.4). `known` are
    * the refs the daemon recorded, by which an environment tells a dead runtime from one it can't

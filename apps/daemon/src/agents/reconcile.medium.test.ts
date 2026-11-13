@@ -20,6 +20,7 @@ const stateOf = (store: Awaited<ReturnType<typeof withAgent>>["store"]) =>
 
 const claude: HarnessAdapter = {
   id: "claude-code",
+  themes: ["light", "dark"],
   launchSpec: async () => ({ argv: ["claude"], env: {}, externalRef: null }),
 };
 

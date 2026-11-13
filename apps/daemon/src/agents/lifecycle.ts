@@ -209,6 +209,7 @@ export class Lifecycle {
         this.record(agentId, "agent.respawned", {
           externalRef: rebound ? current : refs.externalRef,
           runtimeRef,
+          ...(refs.theme && { theme: refs.theme }),
         }),
       ];
     });

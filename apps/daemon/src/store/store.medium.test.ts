@@ -163,6 +163,7 @@ describe("Store snapshot view", () => {
     host: (kind: string) => `${kind}-host`,
     attachCommand: (ref: { locator: Record<string, string> }) => `attach ${ref.locator.session}`,
     resumable: ["claude-code" as const],
+    themes: () => ["light", "dark"] as const,
   };
 
   it("names each environment's host as the view says", () => {
