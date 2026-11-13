@@ -16,17 +16,17 @@ client. Agents, tasks, and orchestration come later.
 
 ## Commands
 
-| Command                          | Does                                                                                    |
-| -------------------------------- | --------------------------------------------------------------------------------------- |
-| `pnpm install --frozen-lockfile` | Install exactly what the lockfile records, and the git hooks (husky)                    |
-| `pnpm dev`                       | Start the daemon (`http://127.0.0.1:7900`) and the web client (`http://127.0.0.1:5173`) |
-| `pnpm bazhen <verb>`             | The CLI: `start`, `stop`, `status`, `doctor`                                            |
-| `pnpm check`                     | Standards check, lint, format check, type-check, small and medium tests                 |
-| `pnpm test`                      | Small tests                                                                             |
-| `pnpm test:real [suite…]`        | The tests that run real tmux, in a throwaway Linux container: integration, api, e2e     |
-| `pnpm test:falsify`              | Run the branch's new tests against the base's source; CI runs it on pull requests       |
-| `pnpm build`                     | Compile packages to `dist/` and build the web bundle                                    |
-| `pnpm format`                    | Rewrite files with oxfmt                                                                |
+| Command                          | Does                                                                                                                |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `pnpm install --frozen-lockfile` | Install exactly what the lockfile records, and the git hooks (husky)                                                |
+| `pnpm dev`                       | Start the daemon (`http://127.0.0.1:7900`) and the web client (`http://127.0.0.1:5173`); no vite keyboard shortcuts |
+| `pnpm bazhen <verb>`             | The CLI: `start`, `stop`, `status`, `doctor`                                                                        |
+| `pnpm check`                     | Standards check, lint, format check, type-check, small and medium tests                                             |
+| `pnpm test`                      | Small tests                                                                                                         |
+| `pnpm test:real [suite…]`        | The tests that run real tmux, in a throwaway Linux container: integration, api, e2e                                 |
+| `pnpm test:falsify`              | Run the branch's new tests against the base's source; CI runs it on pull requests                                   |
+| `pnpm build`                     | Compile packages to `dist/` and build the web bundle                                                                |
+| `pnpm format`                    | Rewrite files with oxfmt                                                                                            |
 
 Contributing, for people and agents: [AGENTS.md](AGENTS.md) and [docs/standards/](docs/standards/).
 
