@@ -28,7 +28,6 @@ import {
   HealthResponse,
   LaunchAgentRequest,
   PROTOCOL_VERSION,
-  DEV_ORIGINS_HEADER,
   PairRequest,
   SendMessageRequest,
   type AnswerAttentionResponse,
@@ -70,6 +69,7 @@ import { ShellBusy, ShellOpenFailed, ShellsUnsettled, UnknownShell } from "../sh
 import { AttentionRefused } from "../attention/inbox.ts";
 import { MailTooLong, UnknownTask } from "../tasks/tasks.ts";
 import { refusal, type Allowlists } from "./guard.ts";
+import { webPage } from "./web.ts";
 import {
   arrivedRemotely,
   deviceCookie,
@@ -90,6 +90,8 @@ export interface AppDeps {
   readonly pairing?: { readonly codes: PairingCodes; readonly devices: DeviceAuth };
   /** When a request other than the pairing exchange must come from a paired device (§9.2). */
   readonly gate?: DeviceGate;
+  /** The built web client's directory, served on every path outside `/v1`; absent on the socket. */
+  readonly web?: { readonly root: string };
   readonly state: () => StateSnapshot;
   readonly launch: (req: LaunchAgentRequest) => Promise<LaunchAgentResponse>;
   readonly send: (agentId: string, req: SendMessageRequest) => SendMessageResponse;
@@ -162,8 +164,7 @@ export function createApp(deps: AppDeps): Hono {
       const host = c.req.header("host");
       const origin = c.req.header("origin");
       const acting = !SAFE_METHODS.has(c.req.method) || c.req.header("upgrade") !== undefined;
-      const devOrigins = c.req.header(DEV_ORIGINS_HEADER);
-      const refused = refusal(allow, { host, origin, acting, devOrigins });
+      const refused = refusal(allow, { host, origin, acting });
       if (refused === "host_not_allowed") return fail(c, 421, refused, host ?? "");
       if (refused !== null) return fail(c, 403, refused, origin ?? "");
       return next();
@@ -172,7 +173,8 @@ export function createApp(deps: AppDeps): Hono {
 
   const { gate } = deps;
   if (gate !== undefined) {
-    app.use("*", async (c, next) => {
+    // The API only: the page holds no secret, and must load unpaired to show the pairing form.
+    app.use("/v1/*", async (c, next) => {
       if (c.req.method === "POST" && c.req.path === PAIRING_PATH) return next();
       if (!mustPair(gate, (name) => c.req.header(name))) return next();
       const origin = c.req.header("origin");
@@ -305,6 +307,9 @@ export function createApp(deps: AppDeps): Hono {
     if (detail === undefined) throw new UnknownTask(c.req.param("id"));
     return c.json(detail);
   });
+
+  // Last, so it answers only a path no API route did.
+  if (deps.web !== undefined) app.get("*", webPage(deps.web.root));
 
   // Typed failures from the domain become protocol errors in one place; anything else is a bug.
   app.onError((err, c) => {

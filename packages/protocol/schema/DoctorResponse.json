@@ -156,6 +156,12 @@
             "required"
           ],
           "additionalProperties": false
+        },
+        "app": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

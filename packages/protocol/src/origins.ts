@@ -1,5 +1,5 @@
-// The external origins a user's own route to the daemon presents (foundation-design §9.2). The
-// daemon and the web dev server both admit them, so both check them here, the same way.
+// The external origins a user's own route to the daemon presents (foundation-design §9.2), checked
+// here so the daemon and the CLI read them the same way.
 
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
@@ -37,9 +37,3 @@ export function originsProblem(origins: readonly string[], allowInsecure: boolea
   }
   return null;
 }
-
-/**
- * The header the web dev server's proxy adds to every request: the external origins it admits,
- * comma-separated. The daemon refuses one naming an origin it doesn't admit itself.
- */
-export const DEV_ORIGINS_HEADER = "bazhen-dev-origins";

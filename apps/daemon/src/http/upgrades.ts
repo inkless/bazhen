@@ -1,6 +1,5 @@
 import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
-import { DEV_ORIGINS_HEADER } from "@bazhen/protocol";
 import { refusal, type Allowlists } from "./guard.ts";
 import { arrivedRemotely, mustPair, tokenFrom, type DeviceGate } from "../auth/devices.ts";
 import type { StoredDevice } from "../store/store.ts";
@@ -43,13 +42,7 @@ export function upgrades(
 ) {
   return (req: IncomingMessage, socket: Duplex, head: Buffer): void => {
     const { host, origin } = req.headers;
-    const devOrigins = req.headers[DEV_ORIGINS_HEADER];
-    const refused = refusal(allow, {
-      host,
-      origin,
-      acting: true,
-      devOrigins: Array.isArray(devOrigins) ? devOrigins.join(",") : devOrigins,
-    });
+    const refused = refusal(allow, { host, origin, acting: true });
     if (refused !== null) return refuseUpgrade(socket, REFUSAL_STATUS[refused]);
     const header = (name: string) => {
       const value = req.headers[name];
