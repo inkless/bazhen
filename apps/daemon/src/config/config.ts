@@ -32,6 +32,7 @@ const ConfigFile = z.strictObject({
     .strictObject({
       external_origins: z.array(Origin).optional(),
       allow_insecure_origins: z.boolean().optional(),
+      pairing: z.enum(["auto", "always"]).optional(),
     })
     .optional(),
 });
@@ -55,6 +56,13 @@ export interface Config {
   readonly allowInsecureOrigins: boolean;
   /** Whether what needs the human is shown on the host's desktop when no dashboard is. */
   readonly desktopNotifications: boolean;
+  /** `web.pairing`: "always", or "auto", which pairs only once an external origin is set. */
+  readonly pairing: "auto" | "always";
+  /**
+   * Whether every browser must pair, on loopback too (foundation-design §9.2). With an external
+   * origin it always must, since a proxy in front can present any request as loopback's.
+   */
+  readonly pairingRequired: boolean;
 }
 
 export class InvalidConfig extends Error {
@@ -124,9 +132,23 @@ export function resolveConfig(
       passthrough: file.agents?.env?.passthrough ?? [],
     },
     desktopNotifications: file.notifications?.desktop ?? true,
-    ...externalOrigins(file, env),
+    ...withPairing(
+      externalOrigins(file, env),
+      fromEnv(env, "BAZHEN_PAIRING", PairingMode) ?? file.web?.pairing ?? "auto",
+    ),
   };
 }
+
+const PairingMode = z.enum(["auto", "always"]);
+
+const withPairing = <T extends { externalOrigins: readonly string[] }>(
+  origins: T,
+  pairing: "auto" | "always",
+) => ({
+  ...origins,
+  pairing,
+  pairingRequired: pairing === "always" || origins.externalOrigins.length > 0,
+});
 
 /** The external origins, from the environment over the file, each checked as the dev server does. */
 function externalOrigins(file: ConfigFile, env: Readonly<Record<string, string | undefined>>) {

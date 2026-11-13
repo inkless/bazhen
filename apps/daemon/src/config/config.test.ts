@@ -18,6 +18,8 @@ describe("resolveConfig", () => {
       externalOriginsFrom: null,
       allowInsecureOrigins: false,
       desktopNotifications: true,
+      pairing: "auto",
+      pairingRequired: false,
     });
   });
 
@@ -31,6 +33,8 @@ describe("resolveConfig", () => {
       externalOrigins: [],
       externalOriginsFrom: null,
       allowInsecureOrigins: false,
+      pairing: "auto",
+      pairingRequired: false,
     });
   });
 
@@ -102,5 +106,20 @@ describe("resolveConfig", () => {
     expect(() => resolveConfig({}, { [name]: value })).toThrow(
       new InvalidConfig(`${name}=${value}`).message,
     );
+  });
+
+  it("asks browsers to pair only once an external origin is set, unless pairing is always", () => {
+    const external = { web: { external_origins: ["https://bazhen.example.com"] } };
+    const always = { web: { pairing: "always" as const } };
+    expect([
+      resolveConfig({}, {}).pairingRequired,
+      resolveConfig(external, {}).pairingRequired,
+      resolveConfig(always, {}).pairingRequired,
+      resolveConfig({}, { BAZHEN_PAIRING: "always" }).pairingRequired,
+    ]).toEqual([false, true, true, true]);
+  });
+
+  it("refuses a pairing mode it doesn't know, so a typo never turns pairing off", () => {
+    expect(() => resolveConfig({}, { BAZHEN_PAIRING: "never" })).toThrow(InvalidConfig);
   });
 });

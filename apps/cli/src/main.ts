@@ -113,7 +113,7 @@ async function doctor(): Promise<number> {
     const server = daemon === null ? "not connected yet" : `${daemon} (as last connected)`;
     console.log(`codex: app-server ${server}, cli ${cli ?? "not found"}`);
   }
-  if (d.web !== undefined) printExternalOrigins(d.web);
+  if (d.web !== undefined) printWeb(d.web);
   if (d.notifications !== undefined) {
     console.log(`desktop notifications: ${d.notifications.desktop ? "on" : "off"}`);
     if (process.platform === "darwin" && d.notifications.notifier === null) {
@@ -128,22 +128,31 @@ async function doctor(): Promise<number> {
   return d.runtime.state === "unreachable" ? 1 : 0;
 }
 
-/** The origins the daemon admits besides loopback, and why each is a risk until pairing. */
-function printExternalOrigins(web: NonNullable<DoctorResponse["web"]>): void {
-  if (web.from === null) {
-    console.log("external origins: none (loopback only)");
-    return;
-  }
-  console.log(`external origins: ${web.externalOrigins.join(", ")} (from ${web.from})`);
+/** The origins the daemon admits besides loopback, whether browsers must pair, and the risks. */
+function printWeb(web: NonNullable<DoctorResponse["web"]>): void {
   console.log(
-    "  warning: no authentication until device pairing; whatever reaches these origins can drive every terminal, so keep the route behind its own login",
+    web.from === null
+      ? "external origins: none (loopback only)"
+      : `external origins: ${web.externalOrigins.join(", ")} (from ${web.from})`,
   );
   const plain = web.externalOrigins.filter(isPlainRemote);
   if (plain.length > 0) {
     console.log(
-      `  warning: plain HTTP to another host (${plain.join(", ")}); anyone on the network can read the traffic`,
+      `  warning: plain HTTP to another host (${plain.join(", ")}); anyone on the network can read the traffic, device tokens included`,
     );
   }
+  if (web.pairing === undefined) return;
+  const { mode, required } = web.pairing;
+  if (required) {
+    console.log(`pairing: required on every origin (web.pairing = "${mode}"); \`bazhen pair\``);
+    return;
+  }
+  console.log(
+    `pairing: not required on loopback (web.pairing = "${mode}", no external origins); a request a proxy forwards from another machine must still pair`,
+  );
+  console.log(
+    '  warning: any local process or other user of this machine who can reach the daemon\'s port on 127.0.0.1 controls the agents; set web.pairing = "always" on a shared machine',
+  );
 }
 
 /**

@@ -30,13 +30,18 @@ describe("readConfigFile", () => {
         "[web]",
         'external_origins = ["https://bazhen.example.com"]',
         "allow_insecure_origins = false",
+        'pairing = "always"',
       ].join("\n"),
     );
     expect(readConfigFile(file)).toEqual({
       daemon: { port: 8100 },
       bank: { path: "/bank" },
       agents: { shell: "login", env: { deny: ["SECRET_*"], passthrough: ["TERM"] } },
-      web: { external_origins: ["https://bazhen.example.com"], allow_insecure_origins: false },
+      web: {
+        external_origins: ["https://bazhen.example.com"],
+        allow_insecure_origins: false,
+        pairing: "always",
+      },
     });
   });
 

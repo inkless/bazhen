@@ -13,6 +13,7 @@ import {
   ResendAttentionResponse,
   EventFrame,
   LaunchAgentResponse,
+  PairResponse,
   PROTOCOL_VERSION,
   VISIBILITY_HEARTBEAT_MS,
   type ClientEventFrame,
@@ -26,9 +27,26 @@ import {
   type TuiTheme,
 } from "@bazhen/protocol";
 
+const unpairedListeners = new Set<() => void>();
+
+/**
+ * Calls `listener` whenever the daemon answers that this browser isn't paired: never was, or was
+ * revoked or left unused too long. Answers a function that stops it.
+ */
+export function onUnpaired(listener: () => void): () => void {
+  unpairedListeners.add(listener);
+  return () => unpairedListeners.delete(listener);
+}
+
+/** `res`, after telling the listeners when it says this browser must pair. */
+export function noticeUnpaired(res: Response): Response {
+  if (res.status === 401) for (const listener of unpairedListeners) listener();
+  return res;
+}
+
 /** The daemon's state, validated as it arrives. */
 export async function fetchState(): Promise<StateSnapshot> {
-  const res = await fetch("/v1/state");
+  const res = noticeUnpaired(await fetch("/v1/state"));
   if (!res.ok) throw new Error(`daemon answered ${res.status}`);
   return StateSnapshot.parse(await res.json());
 }
@@ -136,11 +154,13 @@ export function watchState(
 
 /** A mutation, with a fresh key per click so a retried request acts once. */
 async function act(path: string, body: object): Promise<unknown> {
-  const res = await fetch(path, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ idempotencyKey: crypto.randomUUID(), ...body }),
-  });
+  const res = noticeUnpaired(
+    await fetch(path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ idempotencyKey: crypto.randomUUID(), ...body }),
+    }),
+  );
   const text = await res.text();
   if (!res.ok) throw refusal(res.status, text);
   return JSON.parse(text);
@@ -171,6 +191,18 @@ function refusal(status: number, text: string): Refused {
   } catch {
     return new Refused(null, `the daemon refused the request (${status})`);
   }
+}
+
+/** Trades a code `bazhen pair` printed for this browser's device cookie, which the daemon sets. */
+export async function pairDevice(code: string, name: string): Promise<PairResponse> {
+  const res = await fetch("/v1/pairing", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ code, ...(name.trim() === "" ? {} : { name }) }),
+  });
+  const text = await res.text();
+  if (!res.ok) throw refusal(res.status, text);
+  return PairResponse.parse(JSON.parse(text));
 }
 
 /** `theme` is the background the agent's terminal shows, which its TUI is started for. */
@@ -243,7 +275,7 @@ export const createTask = async (
 
 /** A task in full: its brief, note, every assignment it has had, and its subtasks. */
 export async function fetchTask(taskId: string): Promise<TaskDetail> {
-  const res = await fetch(`/v1/tasks/${encodeURIComponent(taskId)}`);
+  const res = noticeUnpaired(await fetch(`/v1/tasks/${encodeURIComponent(taskId)}`));
   const text = await res.text();
   if (!res.ok) throw refusal(res.status, text);
   return TaskDetail.parse(JSON.parse(text));

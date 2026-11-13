@@ -37,3 +37,9 @@ export function originsProblem(origins: readonly string[], allowInsecure: boolea
   }
   return null;
 }
+
+/**
+ * The header the web dev server's proxy adds to every request: the external origins it admits,
+ * comma-separated. The daemon refuses one naming an origin it doesn't admit itself.
+ */
+export const DEV_ORIGINS_HEADER = "bazhen-dev-origins";

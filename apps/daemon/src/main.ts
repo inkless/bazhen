@@ -240,14 +240,21 @@ const allow = allowlists({
   externalOrigins: config.externalOrigins,
 });
 if (config.externalOriginsFrom !== null) {
-  console.warn(
+  console.log(
     `bazhen: admitting external origins from ${config.externalOriginsFrom}: ` +
-      `${config.externalOrigins.join(", ")}. Nothing authenticates them until device pairing: ` +
-      "whatever reaches them can drive every terminal.",
+      config.externalOrigins.join(", "),
   );
 }
+console.log(
+  config.pairingRequired
+    ? `bazhen: pairing required on every origin (web.pairing = "${config.pairing}")`
+    : 'bazhen: pairing not required on loopback (web.pairing = "auto", no external origins); ' +
+        "a request forwarded from another machine must still pair",
+);
 const pairing = new PairingCodes();
 const devices = new DeviceAuth(store);
+// Pairing as configured, and for any request a proxy forwarded from another machine regardless.
+const gate = { devices, always: config.pairingRequired };
 const snapshotView: SnapshotView = {
   host: (kind) => (kind === "local" ? hostname() : ""),
   attachCommand: (ref) => runtime.attachCommand(ref),
@@ -281,7 +288,12 @@ const commands = {
   unlinkShell: (terminalId, req) => shells.unlink(terminalId, req),
   tasks,
 } satisfies Omit<AppDeps, "allow">;
-const app = createApp({ ...commands, allow, pairing: { codes: pairing, devices } });
+const app = createApp({
+  ...commands,
+  allow,
+  pairing: { codes: pairing, devices },
+  gate,
+});
 
 const attachments = storeLog(store);
 const hub = new TerminalHub(runtime, {
@@ -297,10 +309,11 @@ const server = serve({ fetch: app.fetch, hostname: HOSTNAME, port }, (info) => {
 });
 server.on(
   "upgrade",
-  upgrades(allow, [
-    streamRoute({ hub, runtimeRef: (id) => store.runtimeRef(id) }),
-    eventRoute(store, presence),
-  ]),
+  upgrades(
+    allow,
+    [streamRoute({ hub, runtimeRef: (id) => store.runtimeRef(id) }), eventRoute(store, presence)],
+    gate,
+  ),
 );
 
 const RETIRE_EVERY_MS = 60 * 60 * 1000;
@@ -369,6 +382,7 @@ const socketListener = getRequestListener(
           externalOrigins: [...config.externalOrigins],
           from: config.externalOriginsFrom,
           allowInsecureOrigins: config.allowInsecureOrigins,
+          pairing: { mode: config.pairing, required: config.pairingRequired },
         },
         notifications: {
           desktop: desktop !== null,

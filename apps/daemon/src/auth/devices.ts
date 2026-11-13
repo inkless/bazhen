@@ -3,6 +3,7 @@ import { parse } from "hono/utils/cookie";
 import type { DeviceId } from "@bazhen/core";
 import { DEVICE_NAME_MAX, type Device } from "@bazhen/protocol";
 import type { Store, StoredDevice } from "../store/store.ts";
+import { forwardedFromElsewhere } from "./forwarded.ts";
 
 /**
  * On HTTPS, a `__Host-` cookie: Secure, for this host only, every path. Plain HTTP is loopback in
@@ -75,12 +76,21 @@ export class DeviceAuth {
    * the cookie again records the use: one that couldn't would restart the daemon's lifetime but
    * not the browser's.
    */
-  verify(token: string | undefined, opts: { touch: boolean } = { touch: true }): Verified | null {
-    if (token === undefined || !TOKEN.test(token)) return null;
-    const device = this.store.deviceByToken(hashToken(token));
+  verify(
+    presented: Presented | undefined,
+    opts: { touch?: boolean; remote?: boolean } = {},
+  ): Verified | null {
+    if (presented === undefined || !TOKEN.test(presented.token)) return null;
+    const device = this.store.deviceByToken(hashToken(presented.token));
     if (device === undefined || device.revoked || this.lapsed(device)) return null;
+    // Each cookie carries only the token of a device paired over its scheme, so a token copied
+    // off a loopback port can't pass as the HTTPS one, nor the reverse.
+    if (device.secure !== presented.secure) return null;
+    // A request from another machine, or over HTTPS, takes only a device paired over HTTPS:
+    // a loopback token, which other local ports can read, is good on loopback alone.
+    if (opts.remote === true && !device.secure) return null;
     const idle = this.now().getTime() - Date.parse(device.lastSeenAt);
-    if (idle < TOUCH_EVERY_MS || !opts.touch) return { device, refresh: false };
+    if (idle < TOUCH_EVERY_MS || opts.touch === false) return { device, refresh: false };
     this.store.touchDevice(device.id, this.now());
     return { device, refresh: true };
   }
@@ -132,12 +142,43 @@ export class DeviceAuth {
   }
 }
 
+/** A device token as a request presented it: which of the two cookies carried it. */
+export interface Presented {
+  readonly token: string;
+  readonly secure: boolean;
+}
+
 /** The device token a `Cookie` header carries, if any. */
-export function tokenFrom(header: string | undefined): string | undefined {
+export function tokenFrom(header: string | undefined): Presented | undefined {
   if (header === undefined) return undefined;
   const cookies = parse(header);
-  return cookies[SECURE_COOKIE] ?? cookies[LOOPBACK_COOKIE];
+  const secure = cookies[SECURE_COOKIE];
+  if (secure !== undefined) return { token: secure, secure: true };
+  const loopback = cookies[LOOPBACK_COOKIE];
+  return loopback === undefined ? undefined : { token: loopback, secure: false };
 }
+
+/**
+ * When a request must come from a paired device: always, under the configured mode, or when a
+ * proxy says it came from another machine, whatever the mode (foundation-design §9.2).
+ */
+export interface DeviceGate {
+  readonly devices: DeviceAuth;
+  readonly always: boolean;
+}
+
+export const mustPair = (gate: DeviceGate, header: (name: string) => string | undefined): boolean =>
+  gate.always || forwarded(header);
+
+const forwarded = (header: (name: string) => string | undefined) =>
+  forwardedFromElsewhere({
+    xForwardedFor: header("x-forwarded-for"),
+    forwarded: header("forwarded"),
+  });
+
+/** Whether a request came from another machine or over HTTPS, rather than straight from loopback. */
+export const arrivedRemotely = (header: (name: string) => string | undefined): boolean =>
+  forwarded(header) || (header("origin")?.startsWith("https:") ?? false);
 
 /** The `Set-Cookie` value that carries a device's token. */
 export function deviceCookie(token: string, secure: boolean): string {

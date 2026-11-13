@@ -33,6 +33,7 @@ const COVERED_ELSEWHERE: Record<string, string> = {
   "apps/web/src/main.tsx": "tests/e2e/health.spec.ts",
   "apps/web/src/api.ts": "tests/e2e/terminal.spec.ts",
   "apps/web/src/Dashboard.tsx": "tests/e2e/dashboard.spec.ts",
+  "apps/web/src/Pairing.tsx": "tests/e2e/pairing.spec.ts",
   "apps/web/src/fleet/AttachCommand.tsx": "tests/e2e/dashboard.spec.ts",
   "apps/web/src/fleet/FleetList.tsx": "tests/e2e/dashboard.spec.ts",
   "apps/web/src/fleet/Workspace.tsx": "tests/e2e/dashboard.spec.ts",
