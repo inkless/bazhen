@@ -1,9 +1,10 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, type ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { newId } from "@bazhen/core";
+import { signalGroup, spawnGroup } from "@bazhen/host-guard";
 import { HOOK_REPLY_TYPE, HookRequest, frameHookReply, isCompatible } from "@bazhen/protocol";
 import { HOOK_SCRIPT, hookClient, hookCommand } from "./hook-command.ts";
 
@@ -14,7 +15,11 @@ const clients = [
 
 let server: Server | undefined;
 let dir = "";
+/** Clients still running when a case ends, which only a case that timed out leaves. */
+const running = new Set<ChildProcess>();
 afterEach(() => {
+  for (const child of running) signalGroup(child, "SIGKILL");
+  running.clear();
   server?.close();
   rmSync(dir, { recursive: true, force: true });
 });
@@ -87,26 +92,28 @@ function listen(socket: string, answers: (Buffer | null)[]) {
 }
 
 /**
- * Runs the hook client for `event` as a harness would, and resolves with how it exited. A client
- * still running after 8 s is killed, and resolves with a null code, so a client that hangs fails
- * on its assertion rather than on the test's timeout.
+ * Runs the hook client for `event` as a harness would, and resolves with how it exited. No test
+ * here waits on a clock: a client that wrongly retries is caught by what the stub hands it next.
  */
 function run(client: string, event: string, env: Record<string, string>, stdin = "{}") {
-  const child = spawn(client, [event], {
-    env: { PATH: process.env["PATH"] ?? "", ...env },
-    timeout: 8000,
-  });
+  const child = spawnGroup(client, [event], { env: { PATH: process.env["PATH"] ?? "", ...env } });
+  running.add(child);
+  const { stdin: input, stdout: out, stderr: err } = child;
+  if (input === null || out === null || err === null) throw new Error("spawned without pipes");
   let stdout = "";
   let stderr = "";
-  child.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
-  child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
+  out.on("data", (d: Buffer) => (stdout += d.toString()));
+  err.on("data", (d: Buffer) => (stderr += d.toString()));
   return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
     // A client that exits without reading its input, as outside an agent, closes the pipe first.
-    child.stdin.on("error", (err: NodeJS.ErrnoException) => {
-      if (err.code !== "EPIPE") reject(err);
+    input.on("error", (e: NodeJS.ErrnoException) => {
+      if (e.code !== "EPIPE") reject(e);
     });
-    child.stdin.end(stdin);
-    child.on("exit", (code) => resolve({ code, stdout, stderr }));
+    input.end(stdin);
+    child.on("exit", (code) => {
+      running.delete(child);
+      resolve({ code, stdout, stderr });
+    });
   });
 }
 
@@ -129,7 +136,13 @@ describe("hook command", () => {
   });
 });
 
-describe.each(clients)("hook client (%s)", { timeout: 10_000 }, (_kind, client) => {
+describe.each(clients)("hook client (%s)", { timeout: 30_000 }, (_kind, client) => {
+  // The first run of a freshly built binary pays the OS's one-time check of it (on macOS, seconds
+  // under load); paying it here keeps it out of every case below.
+  beforeAll(async () => {
+    await run(client, "Stop", {});
+  }, 30_000);
+
   it("does nothing outside a Bazhen agent", async () => {
     const socket = socketPath();
     const { seen, ready } = listen(socket, [framed(MAIL)]);
@@ -202,15 +215,26 @@ describe.each(clients)("hook client (%s)", { timeout: 10_000 }, (_kind, client) 
     expect(seen).toHaveLength(2);
   });
 
-  it("gives up at once on any other hook when the daemon is down", async () => {
-    const started = Date.now();
-    expect(
-      await run(client, "PermissionRequest", {
-        BAZHEN_AGENT_ID: newId("agent"),
-        BAZHEN_SOCKET: socketPath(),
-      }),
-    ).toEqual(QUIET);
-    expect(Date.now() - started).toBeLessThan(1000);
+  it("gives up on any other hook when nothing listens", async () => {
+    // A client that looked again forever would hit the describe's timeout instead.
+    const result = await run(client, "PermissionRequest", {
+      BAZHEN_AGENT_ID: newId("agent"),
+      BAZHEN_SOCKET: socketPath(),
+    });
+    expect(result).toEqual(QUIET);
+  });
+
+  it("gives up at once on any other hook when the daemon drops it", async () => {
+    // Mail waits on a second try, which only a client that wrongly retries would make.
+    const socket = socketPath();
+    const { seen, ready } = listen(socket, [null, framed(MAIL)]);
+    await ready;
+    const result = await run(client, "PermissionRequest", {
+      BAZHEN_AGENT_ID: newId("agent"),
+      BAZHEN_SOCKET: socket,
+    });
+    expect(result).toEqual(QUIET);
+    expect(seen).toHaveLength(1);
   });
 
   const good = {
