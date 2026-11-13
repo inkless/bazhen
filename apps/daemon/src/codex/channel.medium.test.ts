@@ -30,6 +30,14 @@ const resumesOnlyThr1 = (method: string, _connection: number, params: unknown) =
     ? { error: { code: -32600, message: "no such thread" } }
     : { result: "ok" };
 
+const idleThread = (threadId: string) => ({ thread: { id: threadId, status: { type: "idle" } } });
+
+/** A server that answers a resume with the thread it was asked for, idle. */
+const answersResumeWithItsThread = (method: string, _connection: number, params: unknown) =>
+  method === "thread/resume"
+    ? { result: idleThread(JSON.stringify(params).includes("thr-2") ? "thr-2" : "thr-1") }
+    : { result: "ok" };
+
 const DRAINING = {
   error: { code: -32600, message: "Server is draining", data: { reason: "serverShuttingDown" } },
 };
@@ -171,6 +179,29 @@ describe("Codex channel", () => {
     });
     await channel.request("thread/start", {});
     expect(resumed).toEqual([["thr-1"]]);
+    channel.close();
+  });
+
+  it("tells its listener each thread's resume answer, on connecting and when asked", async () => {
+    const { codexHome, socket } = home();
+    await fakeServer(socket, codexHome, answersResumeWithItsThread);
+    const answers: unknown[] = [];
+    const channel = channelOn(codexHome, {
+      boundThreads: () => ["thr-1"],
+      listener: {
+        request: () => {},
+        notification: () => {},
+        disconnected: () => {},
+        resumed: () => {},
+        threadResumed: (threadId, result) => answers.push([threadId, result]),
+      },
+    });
+    await channel.request("thread/start", {});
+    await channel.resume("thr-2");
+    expect(answers).toEqual([
+      ["thr-1", idleThread("thr-1")],
+      ["thr-2", idleThread("thr-2")],
+    ]);
     channel.close();
   });
 

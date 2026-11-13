@@ -11,6 +11,8 @@ export interface ChannelListener extends Listener {
   disconnected(): void;
   /** A connection that is still open resumed these threads, and has sent what it holds of them. */
   resumed(threads: readonly string[]): void;
+  /** One thread was resumed, and `result` is the server's answer, with the thread's status. */
+  threadResumed?(threadId: string, result: unknown): void;
 }
 
 const run = promisify(execFile);
@@ -141,6 +143,15 @@ export class CodexChannel implements HarnessChannelPort {
     this.attempt(0);
   }
 
+  /**
+   * Resumes one thread on the current connection, as one that unloaded while it had no
+   * subscriber must be, and tells the listener its status.
+   */
+  async resume(threadId: string): Promise<void> {
+    const result = await this.request("thread/resume", { threadId, excludeTurns: true });
+    this.opts.listener?.threadResumed?.(threadId, result);
+  }
+
   close(): void {
     this.closing = true;
     clearTimeout(this.retry);
@@ -207,7 +218,10 @@ export class CodexChannel implements HarnessChannelPort {
     const resumed: string[] = [];
     for (const threadId of this.opts.boundThreads()) {
       await server.request("thread/resume", { threadId, excludeTurns: true }).then(
-        () => resumed.push(threadId),
+        (result) => {
+          resumed.push(threadId);
+          listener?.threadResumed?.(threadId, result);
+        },
         (err: unknown) => this.log(`codex thread ${threadId} could not be resumed: ${String(err)}`),
       );
     }
@@ -244,5 +258,8 @@ export const allOf = (...listeners: Partial<ChannelListener>[]): ChannelListener
   },
   resumed: (threads) => {
     for (const l of listeners) l.resumed?.(threads);
+  },
+  threadResumed: (threadId, result) => {
+    for (const l of listeners) l.threadResumed?.(threadId, result);
   },
 });
