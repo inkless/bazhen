@@ -1,0 +1,19 @@
+{
+  "$id": "PairRequest",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "code": {
+      "type": "string",
+      "maxLength": 32
+    },
+    "name": {
+      "type": "string",
+      "maxLength": 64
+    }
+  },
+  "required": [
+    "code"
+  ],
+  "additionalProperties": false
+}

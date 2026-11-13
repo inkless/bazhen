@@ -16,11 +16,13 @@ import {
   HealthResponse,
   LaunchAgentRequest,
   PROTOCOL_VERSION,
+  PairRequest,
   SendMessageRequest,
   type AnswerAttentionResponse,
   type DismissAttentionResponse,
   type ReplyAttentionResponse,
   type ResendAttentionResponse,
+  type PairResponse,
   type AgentCommandResponse,
   type SendMessageResponse,
   type ErrorResponse,
@@ -50,6 +52,8 @@ import { AttentionClosed, AttentionUnavailable } from "../mailbox/approvals.ts";
 import { ShellBusy, ShellOpenFailed, ShellsUnsettled, UnknownShell } from "../shells/lifecycle.ts";
 import { AttentionRefused } from "../attention/inbox.ts";
 import { refusal, type Allowlists } from "./guard.ts";
+import { deviceCookie, tokenFrom, type DeviceAuth } from "../auth/devices.ts";
+import type { PairingCodes } from "../auth/pairing.ts";
 
 export interface AppDeps {
   readonly appVersion: string;
@@ -57,6 +61,10 @@ export interface AppDeps {
   readonly runtime: RuntimeAdapter;
   /** Null on the Unix socket, whose 0600 permission is the authentication (§9.1). */
   readonly allow: Allowlists | null;
+  /** Where a browser trades a pairing code for a device; absent on the Unix socket. */
+  readonly pairing?: { readonly codes: PairingCodes; readonly devices: DeviceAuth };
+  /** Every request but the pairing exchange must come from a paired device (§9.1, §9.2). */
+  readonly requireDevice?: DeviceAuth;
   readonly state: () => StateSnapshot;
   readonly launch: (req: LaunchAgentRequest) => Promise<LaunchAgentResponse>;
   readonly send: (agentId: string, req: SendMessageRequest) => SendMessageResponse;
@@ -87,6 +95,7 @@ export interface AppDeps {
 }
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+const PAIRING_PATH = "/v1/pairing";
 
 /** A request that doesn't parse, described in words rather than as the parser's issue list. */
 const invalid = (c: Context, error: z.ZodError) =>
@@ -115,6 +124,50 @@ export function createApp(deps: AppDeps): Hono {
       if (refused === "host_not_allowed") return fail(c, 421, refused, host ?? "");
       if (refused !== null) return fail(c, 403, refused, origin ?? "");
       return next();
+    });
+  }
+
+  const { requireDevice } = deps;
+  if (requireDevice !== undefined) {
+    app.use("*", async (c, next) => {
+      if (c.req.method === "POST" && c.req.path === PAIRING_PATH) return next();
+      const token = tokenFrom(c.req.header("cookie"));
+      const verified = requireDevice.verify(token);
+      if (verified === null || token === undefined)
+        return fail(c, 401, "unpaired", "pair this browser: run `bazhen pair`");
+      // A paired browser acts only from an allowed origin; SameSite is the second layer.
+      if (!SAFE_METHODS.has(c.req.method) && c.req.header("origin") === undefined) {
+        return fail(c, 403, "origin_not_allowed", "");
+      }
+      await next();
+      if (verified.refresh)
+        c.header("set-cookie", deviceCookie(token, verified.device.secure), {
+          append: true,
+        });
+    });
+  }
+
+  const { pairing } = deps;
+  if (pairing !== undefined) {
+    app.post(PAIRING_PATH, async (c) => {
+      const origin = c.req.header("origin");
+      if (origin === undefined) return fail(c, 403, "origin_not_allowed", "");
+      const body = PairRequest.safeParse(await c.req.json().catch(() => undefined));
+      if (!body.success) return invalid(c, body.error);
+      const attempt = pairing.codes.attempt(body.data.code, origin);
+      if (attempt.kind === "rate_limited") {
+        c.header("retry-after", String(attempt.retryAfterSeconds));
+        return fail(c, 429, "rate_limited", "too many attempts; wait a minute");
+      }
+      if (attempt.kind === "failed") {
+        return fail(c, 401, "pairing_failed", "that code is wrong or has expired");
+      }
+      // HTTPS gets the cookie only HTTPS can carry; plain HTTP is loopback (§9.2).
+      const secure = origin.startsWith("https:");
+      const { deviceId, name, token } = pairing.devices.pair(body.data.name, secure);
+      c.header("set-cookie", deviceCookie(token, secure));
+      const res: PairResponse = { deviceId, name };
+      return c.json(res);
     });
   }
 

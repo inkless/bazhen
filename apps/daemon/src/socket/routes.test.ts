@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
-import type { DoctorResponse } from "@bazhen/protocol";
+import { newId } from "@bazhen/core";
+import type { Device, DoctorResponse } from "@bazhen/protocol";
+import { UnknownDevice } from "../store/store.ts";
 import { socketApp } from "./routes.ts";
 
 const report: DoctorResponse = {
@@ -22,6 +24,25 @@ const doctor = async () => report;
 type Env = Readonly<Record<string, string>>;
 const refreshed = { capturedAt: "t", kept: 1, removed: {}, refused: [], unchanged: [] };
 
+const device: Device = {
+  id: newId("dev"),
+  name: "Phone",
+  pairedAt: "2026-11-12T00:00:00.000Z",
+  lastSeenAt: "2026-11-12T00:00:00.000Z",
+  expiresAt: "2026-12-12T00:00:00.000Z",
+};
+const revoked: string[] = [];
+const devices = {
+  list: () => [device],
+  revoke: (id: string) => {
+    if (id !== device.id) throw new UnknownDevice(id);
+    revoked.push(id);
+  },
+};
+const pairing = {
+  issue: () => ({ code: "ABCD2345", expiresAt: new Date("2026-11-12T00:05:00.000Z") }),
+};
+
 function app(
   refreshEnv = async (_env: Env) => refreshed,
   paneTitleChanged = (_pane: string) => {},
@@ -41,6 +62,9 @@ function app(
     doctor,
     refreshEnv,
     paneTitleChanged,
+    pairing,
+    devices,
+    externalOrigins: ["https://laptop.example.ts.net"],
   });
 }
 
@@ -100,5 +124,32 @@ describe("socketApp", () => {
   it("refuses an approval answer from a caller that says it is an agent", async () => {
     const res = await answer({ "bazhen-agent-id": "agent_x" });
     expect([res.status, (await res.json()).error]).toEqual([403, "forbidden"]);
+  });
+
+  it("issues a pairing code with the addresses to open, to a caller that isn't an agent", async () => {
+    const res = await app().request("/v1/pairing/codes", { method: "POST" });
+    expect(await res.json()).toEqual({
+      code: "ABCD2345",
+      expiresAt: "2026-11-12T00:05:00.000Z",
+      origins: ["https://laptop.example.ts.net"],
+    });
+  });
+
+  it("refuses to pair or revoke for a caller that says it is an agent", async () => {
+    const agent = { "bazhen-agent-id": "agent_x" };
+    const paths = ["/v1/pairing/codes", `/v1/devices/${device.id}/revoke`];
+    const statuses = await Promise.all(
+      paths.map(async (p) => (await app().request(p, { method: "POST", headers: agent })).status),
+    );
+    expect([statuses, revoked]).toEqual([[403, 403], []]);
+  });
+
+  it("lists devices, revokes one by id, and answers 404 for an id it doesn't know", async () => {
+    const daemon = app();
+    expect(await (await daemon.request("/v1/devices")).json()).toEqual({ devices: [device] });
+    const revoke = (id: string) => daemon.request(`/v1/devices/${id}/revoke`, { method: "POST" });
+    expect((await revoke(device.id)).status).toBe(200);
+    expect((await revoke(newId("dev"))).status).toBe(404);
+    expect(revoked).toEqual([device.id]);
   });
 });

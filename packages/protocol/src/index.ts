@@ -3,6 +3,7 @@ import { Id } from "./ids.ts";
 import { ProtocolVersion } from "./version.ts";
 
 export * from "./agents.ts";
+export * from "./devices.ts";
 export * from "./events.ts";
 export * from "./ids.ts";
 export * from "./input.ts";

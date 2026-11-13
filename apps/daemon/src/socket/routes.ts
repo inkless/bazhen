@@ -1,9 +1,15 @@
 import type { HttpBindings } from "@hono/node-server";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
+import type { DeviceAuth } from "../auth/devices.ts";
+import type { PairingCodes } from "../auth/pairing.ts";
+import { UnknownDevice } from "../store/store.ts";
 import {
   EnvRefreshRequest,
   PaneTitleChanged,
+  type DevicesResponse,
   type DoctorResponse,
+  type PairingCodeResponse,
+  type RevokeDeviceResponse,
   type EnvRefreshResponse,
   type ErrorResponse,
   type StopResponse,
@@ -20,7 +26,16 @@ export interface SocketParts {
   readonly refreshEnv: (env: Readonly<Record<string, string>>) => Promise<EnvRefreshResponse>;
   /** A tmux pane's title changed; the daemon reads it itself (foundation-design §5.8). */
   readonly paneTitleChanged: (pane: string) => void;
+  readonly pairing: Pick<PairingCodes, "issue">;
+  readonly devices: Pick<DeviceAuth, "list" | "revoke">;
+  /** The configured external origins, which `bazhen pair` shows as the addresses to open. */
+  readonly externalOrigins: readonly string[];
 }
+
+const forbidden = (c: Context, message: string) => {
+  const body: ErrorResponse = { error: "forbidden", message };
+  return c.json(body, 403);
+};
 
 /**
  * What the daemon's 0600 Unix socket serves: the hook ingress, the full command set, and routes a
@@ -29,18 +44,47 @@ export interface SocketParts {
 export function socketApp(parts: SocketParts): Hono<{ Bindings: HttpBindings }> {
   const app = new Hono<{ Bindings: HttpBindings }>();
 
-  // Only a human acts on an attention item: a caller that says it is an agent is refused (§9.1).
-  // Advisory against a hostile process of the same user, which could just not say (§9.4).
+  // Only a human acts on an attention item, pairs a browser or revokes one: a caller that says it
+  // is an agent is refused (§9.1). Advisory against a hostile process of the same user, which
+  // could just not say (§9.4).
+  const humansOnly = (path: string, message: string) =>
+    app.use(path, async (c, next) =>
+      c.req.header("bazhen-agent-id") === undefined ? next() : forbidden(c, message),
+    );
   for (const action of ["answer", "reply", "resend", "dismiss"]) {
-    app.use(`/v1/attention/:id/${action}`, async (c, next) => {
-      if (c.req.header("bazhen-agent-id") === undefined) return next();
-      const body: ErrorResponse = {
-        error: "forbidden",
-        message: `an agent can't ${action} an attention item`,
-      };
-      return c.json(body, 403);
-    });
+    humansOnly(`/v1/attention/:id/${action}`, `an agent can't ${action} an attention item`);
   }
+  humansOnly("/v1/pairing/codes", "an agent can't pair a device");
+  humansOnly("/v1/devices/:id/revoke", "an agent can't revoke a device");
+
+  // The code is in this reply only, to the person who ran `bazhen pair`; the daemon never logs it.
+  app.post("/v1/pairing/codes", (c) => {
+    const { code, expiresAt } = parts.pairing.issue();
+    const body: PairingCodeResponse = {
+      code,
+      expiresAt: expiresAt.toISOString(),
+      origins: [...parts.externalOrigins],
+    };
+    return c.json(body);
+  });
+
+  app.get("/v1/devices", (c) => {
+    const body: DevicesResponse = { devices: parts.devices.list() };
+    return c.json(body);
+  });
+
+  app.post("/v1/devices/:id/revoke", (c) => {
+    const id = c.req.param("id");
+    try {
+      parts.devices.revoke(id);
+    } catch (err) {
+      if (!(err instanceof UnknownDevice)) throw err;
+      const body: ErrorResponse = { error: "not_found", message: err.message };
+      return c.json(body, 404);
+    }
+    const body: RevokeDeviceResponse = {};
+    return c.json(body);
+  });
 
   app.post("/v1/daemon/stop", (c) => {
     c.env.outgoing.once("finish", parts.stop);

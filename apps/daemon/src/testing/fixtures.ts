@@ -1,6 +1,7 @@
 // Shared fixtures for the daemon's medium tests: a store on a temporary file and a fake local
 // environment, so each test states only what it changes.
 
+import type { DeviceAuth } from "../auth/devices.ts";
 import { mkdtempSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
@@ -159,13 +160,17 @@ export function register(store: Store) {
 /** Resolves once the listeners a commit queued have run. */
 export const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-/** A server on a free port whose upgrades go through the daemon's guard to `routes`. */
+/**
+ * A server on a free port whose upgrades go through the daemon's guard to `routes`, and given
+ * `devices`, its device check.
+ */
 export async function serveUpgrades(
   routes: readonly UpgradeRoute[],
+  devices: DeviceAuth | null = null,
 ): Promise<{ server: Server; host: string }> {
   const server = createServer();
   const allow = { hosts: [] as string[], origins: [] as string[] };
-  server.on("upgrade", upgrades(allow, routes));
+  server.on("upgrade", upgrades(allow, routes, devices));
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("no port");

@@ -145,6 +145,12 @@ export function project(db: Statements, e: Recorded): void {
     case "agent.signalled":
       EVENTS[e.type].payload.parse(e.payload);
       return;
+    // The devices table carries the token's hash, which no event may, so the store writes it
+    // beside these events rather than from them.
+    case "device.paired":
+    case "device.revoked":
+      EVENTS[e.type].payload.parse(e.payload);
+      return;
     case "agent.closing":
       advance(db, e.id, e.entityId, ["close.requested", "close.requested"]);
       return;

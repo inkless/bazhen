@@ -18,7 +18,10 @@
         "not_found",
         "origin_not_allowed",
         "host_not_allowed",
-        "forbidden"
+        "forbidden",
+        "unpaired",
+        "pairing_failed",
+        "rate_limited"
       ]
     },
     "message": {

@@ -52,6 +52,8 @@ import { ensurePrivateDir } from "./config/private-dir.ts";
 import { createApp, type AppDeps } from "./http/app.ts";
 import { allowlists } from "./http/guard.ts";
 import { upgrades } from "./http/upgrades.ts";
+import { DeviceAuth } from "./auth/devices.ts";
+import { PairingCodes } from "./auth/pairing.ts";
 import { socketApp } from "./socket/routes.ts";
 import { nodePtySpawner } from "./pty/node-pty.ts";
 import { Store, type SnapshotView } from "./store/store.ts";
@@ -208,6 +210,8 @@ if (config.externalOriginsFrom !== null) {
       "whatever reaches them can drive every terminal.",
   );
 }
+const pairing = new PairingCodes();
+const devices = new DeviceAuth(store);
 const snapshotView: SnapshotView = {
   host: (kind) => (kind === "local" ? hostname() : ""),
   attachCommand: (ref) => runtime.attachCommand(ref),
@@ -239,7 +243,7 @@ const commands = {
   renameShell: (terminalId, req) => shells.rename(terminalId, req),
   unlinkShell: (terminalId, req) => shells.unlink(terminalId, req),
 } satisfies Omit<AppDeps, "allow">;
-const app = createApp({ ...commands, allow });
+const app = createApp({ ...commands, allow, pairing: { codes: pairing, devices } });
 
 const hub = new TerminalHub(runtime, storeLog(store));
 const server = serve({ fetch: app.fetch, hostname: HOSTNAME, port }, (info) => {
@@ -261,6 +265,10 @@ const retireOld = () =>
   );
 void retireOld();
 const retention = setInterval(() => void retireOld(), RETIRE_EVERY_MS);
+// A device that lapses while it watches loses its views within a minute, as a revoked one does
+// at once.
+const SWEEP_DEVICES_EVERY_MS = 60 * 1000;
+const deviceSweep = setInterval(() => devices.sweep(), SWEEP_DEVICES_EVERY_MS);
 
 // The CLI's commands and hook ingress (socketApp). A waiter holds its request for hours, so
 // requests have no time limit.
@@ -280,6 +288,9 @@ const socketListener = getRequestListener(
       recordUsage: (agentId, usage) => store.recordUsage(agentId, usage),
     }),
     stop: shutdown,
+    pairing,
+    devices,
+    externalOrigins: config.externalOrigins,
     paneTitleChanged: (pane) => void codexThreads.paneTitleChanged(pane),
     refreshEnv: async (env) => {
       const next = filterEnv(env, config.envRules);
@@ -331,6 +342,7 @@ socketServer.listen(paths.socket, () => chmodSync(paths.socket, 0o600));
 function shutdown() {
   shuttingDown.abort();
   clearInterval(retention);
+  clearInterval(deviceSweep);
   serverWatch.stop();
   server.close();
   socketServer.close();
