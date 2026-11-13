@@ -11,9 +11,20 @@
 // pid and host each run's names and labels carry.
 
 import { execFileSync, type ChildProcess } from "node:child_process";
-import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import {
+  cpSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
 import { constants, hostname, tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { isAlive, signalGroup, spawnGroup } from "@bazhen/host-guard";
 import { isMain } from "./is-main.ts";
 
@@ -70,7 +81,7 @@ const SECRET_NAME =
   /^(\.env(\..*)?|.*\.(pem|key|p12|pfx)|id_(rsa|dsa|ecdsa|ed25519).*|\.npmrc|\.netrc)$/i;
 const SECRET_WORD = /credential|secret/i;
 
-/** Whether an untracked file looks like a secret, which never goes into an image. */
+/** Whether a file HEAD doesn't have looks like a secret, which never goes into an image. */
 export function looksSecret(path: string): boolean {
   const name = basename(path);
   return SECRET_NAME.test(name) || SECRET_WORD.test(name);
@@ -79,8 +90,51 @@ export function looksSecret(path: string): boolean {
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 
-const gitFiles = (top: string, flag: string) =>
-  git(top, "ls-files", "-z", flag, "--exclude-standard").split("\0").filter(Boolean);
+const gitList = (top: string, ...args: string[]) =>
+  execFileSync("git", args, { cwd: top, encoding: "utf8" }).split("\0").filter(Boolean);
+
+/** Whether `file`'s directory, its symlinks resolved, lies within `top`. */
+export function isInside(top: string, file: string): boolean {
+  const rel = relative(realpathSync(top), realpathSync(dirname(join(top, file))));
+  return !isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`);
+}
+
+/** How the worktree at `top` differs from HEAD, as files to copy over HEAD and files to remove. */
+export interface Overlay {
+  readonly copy: string[];
+  readonly remove: string[];
+  /** New files that look like secrets, left out. */
+  readonly skipped: string[];
+}
+
+/**
+ * The worktree's difference from HEAD, staged or not: what `git diff HEAD` names, a rename as a
+ * removal and an addition, plus the untracked files. A file HEAD lacks is left out when it looks
+ * like a secret. A file whose directory resolves outside `top` throws: nothing outside the
+ * repository goes into an image.
+ */
+export function overlay(top: string): Overlay {
+  const copy: string[] = [];
+  const remove: string[] = [];
+  const skipped: string[] = [];
+  const add = (file: string, isNew: boolean) => {
+    if (isNew && looksSecret(file)) skipped.push(file);
+    else if (isInside(top, file)) copy.push(file);
+    else throw new Error(`${file} lies outside the repository, through a symlink`);
+  };
+  const changes = gitList(top, "diff", "-z", "--name-status", "--no-renames", "HEAD", "--");
+  for (let i = 0; i + 1 < changes.length; i += 2) {
+    const file = changes[i + 1] ?? "";
+    if (changes[i] === "D") remove.push(file);
+    else add(file, changes[i] === "A");
+  }
+  // A file whose deletion is staged and which was then recreated is listed here too, so is
+  // copied after its removal.
+  for (const file of gitList(top, "ls-files", "-z", "--others", "--exclude-standard")) {
+    add(file, true);
+  }
+  return { copy: [...new Set(copy)], remove, skipped };
+}
 
 const REPOSITORY = "bazhen-test-real";
 const LABEL = "org.bazhen.test-real";
@@ -102,7 +156,8 @@ export function ownerOf(name: string): number | undefined {
   return Number.isInteger(pid) && pid > 1 ? pid : undefined;
 }
 
-function buildContext(top: string, base: string, prefix: string): string {
+/** A dir named by `prefix` holding HEAD and `base` with the worktree at `top` checked out on it. */
+export function buildContext(top: string, base: string, prefix: string): string {
   const dir = mkdtempSync(join(tmpdir(), prefix));
   try {
     fillContext(dir, top, base);
@@ -124,17 +179,22 @@ function fillContext(dir: string, top: string, base: string): void {
     `+${git(top, "rev-parse", base)}:${BASE_REF}`,
   );
   git(dir, "checkout", "--quiet", "work");
-  // `--modified` lists deleted files too.
-  const deleted = new Set(gitFiles(top, "--deleted"));
-  for (const file of deleted) rmSync(join(dir, file), { force: true });
-  const untracked = gitFiles(top, "--others");
-  const skipped = untracked.filter(looksSecret);
-  for (const file of [...gitFiles(top, "--modified"), ...untracked]) {
-    if (!deleted.has(file) && !skipped.includes(file)) {
-      cpSync(join(top, file), join(dir, file), { force: true });
-    }
-  }
+  const { copy, remove, skipped } = overlay(top);
+  for (const file of remove) rmSync(join(dir, file), { force: true });
+  for (const file of copy) copyEntry(join(top, file), join(dir, file));
   if (skipped.length > 0) console.warn(`test:real: left out of the image: ${skipped.join(", ")}`);
+}
+
+/** Copies a file, or a symlink as the same link, never what it points at. */
+function copyEntry(from: string, to: string): void {
+  if (!lstatSync(from).isSymbolicLink()) {
+    cpSync(from, to, { force: true });
+    return;
+  }
+  mkdirSync(dirname(to), { recursive: true });
+  // A link may replace a directory HEAD has.
+  rmSync(to, { recursive: true, force: true });
+  symlinkSync(readlinkSync(from), to);
 }
 
 export interface DockerResult {
