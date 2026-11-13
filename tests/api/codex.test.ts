@@ -1,8 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { SendMessageResponse, StateSnapshot, type LaunchAgentResponse } from "@bazhen/protocol";
+import { LaunchAgentResponse, SendMessageResponse, StateSnapshot } from "@bazhen/protocol";
 import { BANNER, Daemon, waitUntil } from "./daemon.ts";
 import { startFakeResponses } from "./fake-responses.ts";
 import type { FakeModel } from "./fake-model.ts";
+
+/** The 256-colour background Codex 0.166 draws its prompt on, told a light terminal. */
+const LIGHT_TINT = "\x1b[48;5;255m";
 
 let model: FakeModel;
 let daemon: Daemon;
@@ -119,6 +122,25 @@ async function untilAsked(agent: LaunchAgentResponse, text: string) {
 }
 
 describe("a Codex agent", () => {
+  it("starts in the theme its launch names, told the terminal's background from its first query", async () => {
+    const res = await daemon.request("/v1/agents", {
+      method: "POST",
+      body: { idempotencyKey: "codex-light", harness: "codex", cwd: daemon.work, theme: "light" },
+    });
+    const light = LaunchAgentResponse.parse(res.body);
+    await waitUntil(
+      () => daemon.screen(light.agentId).includes(BANNER.codex),
+      "Codex's TUI",
+      30_000,
+    );
+    expect(daemon.agentCommand(light.agentId)).toContain('tui.theme="one-half-light"');
+    expect((await state()).agents.find((a) => a.id === light.agentId)?.theme).toBe("light");
+    // Codex tints its prompt from the background it was told: a light grey on light. Told nothing,
+    // as the agents launched without a theme are, it draws no tint at all.
+    await expect.poll(() => daemon.capture(light.agentId, 0, true)).toContain(LIGHT_TINT);
+    expect(daemon.capture(asker.agentId, 0, true)).not.toContain("\x1b[48;5;");
+  });
+
   it("is bound to the thread Bazhen started for it, before its TUI runs", async () => {
     expect((await state()).agents.find((a) => a.id === launched.agentId)).toMatchObject({
       harness: "codex",

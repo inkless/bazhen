@@ -2,6 +2,7 @@ import { SerializeAddon } from "@xterm/addon-serialize";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import headless from "@xterm/headless";
 import type { Size } from "@bazhen/core";
+import { oscColour } from "@bazhen/protocol";
 
 /** How much history above the screen a view gets when it opens (foundation-design §12 item 2). */
 export const HISTORY_LINES = 2000;
@@ -79,6 +80,9 @@ export class ScreenEmulator {
       answer(`${ESC}[4;0;0t`);
       return true;
     });
+    // tmux's client asks these as it attaches, and tmux answers a pane's own query from the reply
+    // only when the pane's window has no style: a themed terminal is answered by tmux from its
+    // style, so this is what a terminal started with no theme is told (dark, its default).
     // `10;?;?` asks for the text and then the background, as xterm reads it; a cursor colour asked
     // for after them (12) goes unanswered, as any query this terminal doesn't know. Replies end in ST
     // whatever the query ended in: xterm.js doesn't say, and the only program that asks here is
@@ -89,7 +93,9 @@ export class ScreenEmulator {
       const { text, background } = colours();
       const colour = { 10: text, 11: background } as const;
       for (const id of [10, 11] as const) {
-        if (id >= first && id - first < asked.length) answer(`${ESC}]${id};${colour[id]}${ST}`);
+        if (id >= first && id - first < asked.length) {
+          answer(`${ESC}]${id};${oscColour(colour[id])}${ST}`);
+        }
       }
       return true;
     };

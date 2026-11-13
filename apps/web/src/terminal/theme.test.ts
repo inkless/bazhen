@@ -44,11 +44,7 @@ describe("terminalTheme", () => {
   });
 });
 
-/** `#rrggbb` as an OSC 10/11 reply writes it, `rgb:rrrr/gggg/bbbb`. */
-const asReply = (hex = "") =>
-  `rgb:${[1, 3, 5].map((i) => hex.slice(i, i + 2).repeat(2)).join("/")}`;
-
-describe("the colours the daemon tells programs", () => {
+describe("the colours tmux and the daemon tell programs", () => {
   // Every variant terminalTheme() draws, so a more-contrast override can't drift from them.
   const variants = (["light", "dark"] as const).flatMap((scheme) =>
     [false, true].map((more) => [scheme, more] as const),
@@ -58,8 +54,8 @@ describe("the colours the daemon tells programs", () => {
     (scheme, more) => {
       const theme = terminalTheme(scheme, more);
       expect({
-        text: asReply(theme.foreground),
-        background: asReply(theme.background),
+        text: theme.foreground,
+        background: theme.background,
       }).toEqual(TERMINAL_COLOURS[scheme]);
     },
   );

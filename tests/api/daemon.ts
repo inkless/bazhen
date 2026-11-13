@@ -434,9 +434,21 @@ export class Daemon {
     return ids;
   }
 
-  /** The visible screen and up to `history` lines above it, as tmux holds them. */
-  capture(agentId: string, history = 0): string {
-    return this.tmux("capture-pane", "-p", "-t", this.requireSession(agentId), "-S", `-${history}`);
+  /**
+   * The visible screen and up to `history` lines above it, as tmux holds them; with `escapes`,
+   * with the colours and attributes as escape sequences.
+   */
+  capture(agentId: string, history = 0, escapes = false): string {
+    const session = this.requireSession(agentId);
+    return this.tmux(
+      "capture-pane",
+      "-p",
+      ...(escapes ? ["-e"] : []),
+      "-t",
+      session,
+      "-S",
+      `-${history}`,
+    );
   }
 
   /** Where tmux has the program's cursor: column and row on the screen, from zero. */

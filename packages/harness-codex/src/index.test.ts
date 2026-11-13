@@ -105,7 +105,7 @@ const syntaxTheme = (argv: readonly string[]) =>
   argv.filter((arg, i) => argv[i - 1] === "-c" && arg.startsWith("tui.theme="));
 
 describe("Codex's theme", () => {
-  it("highlights for the dark background the terminal reports, and leaves it to the user's config when the request names no theme", async () => {
+  it("highlights for the theme the request names, starts in it, and leaves it to the user's config when it names none", async () => {
     const harness = new CodexHarness(channel().port, REMOTE);
     const launched = await harness.launchSpec({ cwd: "/work" }, { theme: "light" });
     const resumed = await harness.resumeSpec(
@@ -115,16 +115,13 @@ describe("Codex's theme", () => {
     );
     const unthemed = await harness.launchSpec({ cwd: "/work" }, {});
     expect([
-      syntaxTheme(launched.argv),
-      syntaxTheme(resumed.argv),
-      syntaxTheme(unthemed.argv),
-    ]).toEqual([['tui.theme="one-half-dark"'], ['tui.theme="one-half-dark"'], []]);
-    // It reports the theme it starts in, dark, so its terminal is drawn and answered dark too.
-    expect([launched.theme, resumed.theme, unthemed.theme, harness.themes]).toEqual([
-      "dark",
-      "dark",
-      undefined,
-      ["dark"],
+      [syntaxTheme(launched.argv), launched.theme],
+      [syntaxTheme(resumed.argv), resumed.theme],
+      [syntaxTheme(unthemed.argv), unthemed.theme],
+    ]).toEqual([
+      [['tui.theme="one-half-light"'], "light"],
+      [['tui.theme="one-half-dark"'], "dark"],
+      [[], undefined],
     ]);
   });
 });

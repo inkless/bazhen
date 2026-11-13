@@ -1,4 +1,4 @@
-import type { ExitStatus, RuntimeHealthState, Signal } from "@bazhen/protocol";
+import type { ExitStatus, RuntimeHealthState, Signal, TuiTheme } from "@bazhen/protocol";
 import type { AgentSessionId, TerminalId } from "./ids.ts";
 
 export interface Size {
@@ -32,10 +32,15 @@ export interface TerminalSpec {
   readonly size: Size;
   /** The incarnation this starts: 0 at create, the next one at each respawn (§3). */
   readonly generation: number;
+  /**
+   * The theme its process starts for, whose text and background a program that asks is told from
+   * its first query on; none, and the runtime says nothing of its own.
+   */
+  readonly theme?: TuiTheme;
 }
 
 /** What a terminal runs: a respawn keeps the terminal, its tags and its size, and replaces this. */
-export type ProcessSpec = Pick<TerminalSpec, "argv" | "cwd" | "env" | "generation">;
+export type ProcessSpec = Pick<TerminalSpec, "argv" | "cwd" | "env" | "generation" | "theme">;
 
 /** Locates one runtime incarnation of a terminal. Diagnostic and routing only, never identity. */
 export interface RuntimeRef {
