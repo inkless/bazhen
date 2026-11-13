@@ -5,6 +5,7 @@
 //   [[fake:agent]]           an Agent tool call that starts a background subagent, whose own reply
 //                            comes 8 s late, so it outlives the turn that started it
 //   [[fake:error]]           an API error Claude Code doesn't retry, ending the turn in StopFailure
+//   [[fake:ask]]             an AskUserQuestion tool call, one question with two choices
 //   anything else            a short text reply
 // Every request is kept, so a test can check what the model was sent.
 
@@ -43,13 +44,16 @@ const textOf = (content: unknown): string =>
 
 interface Tool {
   readonly name: string;
-  readonly input: Record<string, string>;
+  readonly input: Record<string, unknown>;
 }
+
+/** The question `[[fake:ask]]` asks. */
+export const FAKE_QUESTION = "Which database should it use?";
 
 /** What the subagent `[[fake:agent]]` starts is asked to do: answer, slowly. */
 export const SUBAGENT_PROMPT = "A background task. [[fake:slow:8000]]";
 
-/** The reply to a request: a tool call for a fresh `bash` or `agent` marker, otherwise text. */
+/** The reply to a request: a tool call for a fresh `bash`, `ask` or `agent` marker, else text. */
 function reply(req: Request): { tool?: Tool; text: string } {
   const users = (req.messages ?? []).filter((m) => m.role === "user");
   const last = users.at(-1);
@@ -66,6 +70,14 @@ function reply(req: Request): { tool?: Tool; text: string } {
       tool: { name: "Bash", input: { command: marker[1] ?? "true", description: "test command" } },
       text: "",
     };
+  }
+  if (!continuing && textOf(last?.content).includes("[[fake:ask]]")) {
+    const options = [
+      { label: "Postgres", description: "A server" },
+      { label: "SQLite", description: "A file" },
+    ];
+    const question = { question: FAKE_QUESTION, header: "Database", multiSelect: false, options };
+    return { tool: { name: "AskUserQuestion", input: { questions: [question] } }, text: "" };
   }
   if (!continuing && textOf(last?.content).includes("[[fake:agent]]")) {
     const input = {

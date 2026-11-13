@@ -75,6 +75,22 @@ must be an absolute path), so your rc files run again at every launch, like a ne
   guard such lines on it, for example `[ -z "$TMUX" ] && [ -z "$BAZHEN_AGENT_ID" ] && exec tmux`
   (fish: `set -q BAZHEN_AGENT_ID`).
 
+## The inbox
+
+Everything an agent needs you for collects in the inbox, and each item offers only what can be
+done about it now:
+
+- **Approvals** (a tool call asking to run): Allow or Deny, while the harness is still waiting.
+  Answering in the agent's terminal instead closes the item.
+- **Questions**: a Claude Code `AskUserQuestion` is answered in the terminal; the inbox links to
+  it. A Codex question (`request_user_input`) can be answered from the inbox when it is a single
+  question and not a secret. Codex 0.166 lets an agent ask one only in **Plan mode** (switched
+  in its TUI), or with `[features] default_mode_request_user_input = true` in your Codex config,
+  an under-development setting; otherwise Codex refuses the question before it reaches Bazhen.
+  MCP servers' elicitations and permission requests are answered in the terminal.
+- **Failed turns**, **mail that couldn't be delivered**, and what an agent raises: Reply (sent to
+  the agent as a message), Send the message again, or Dismiss.
+
 ## Where Bazhen keeps data
 
 macOS and Linux both follow XDG (`~/.config/bazhen`, `~/.local/share/bazhen`, …). The socket

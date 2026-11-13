@@ -143,6 +143,95 @@ export const approvalResult = (decision: ApprovalDecision) => ({
   decision: decision === "allow" ? "accept" : "decline",
 });
 
+/**
+ * A Codex request that asks the human something other than allow or deny: a question for the
+ * user, an MCP server's elicitation, or a grant of more permissions. Only a single free-text
+ * question can be answered from the inbox; the TUI takes the rest.
+ */
+export interface CodexQuestion {
+  readonly threadId: string;
+  /** The tool call it is for; null for an elicitation, which names none. */
+  readonly itemId: string | null;
+  /**
+   * What tells it apart on its thread, the same when a resumed thread sends it again: its tool
+   * call, or for an elicitation its server and message, since it names no call.
+   */
+  readonly key: string;
+  readonly summary: string;
+  /** The question a text reply answers, or null when only the TUI can answer it. */
+  readonly answers: string | null;
+}
+
+const UserInput = z.object({
+  threadId: z.string(),
+  itemId: z.string(),
+  questions: z.array(
+    z.object({
+      id: z.string(),
+      question: z.string(),
+      isOther: z.boolean().optional(),
+      isSecret: z.boolean().optional(),
+      options: z.array(z.unknown()).nullish(),
+    }),
+  ),
+});
+
+const Elicitation = z.object({
+  threadId: z.string(),
+  serverName: z.string(),
+  message: z.string().optional(),
+});
+
+const Permissions = z.object({
+  threadId: z.string(),
+  itemId: z.string(),
+  reason: z.string().nullish(),
+});
+
+/** Reads a request as a question for the inbox, or null for any other request. */
+export function readQuestion(method: string, params: unknown): CodexQuestion | null {
+  if (method === "item/tool/requestUserInput") {
+    const p = UserInput.safeParse(params);
+    if (!p.success) return null;
+    const [only, ...more] = p.data.questions;
+    // A secret is typed where it is asked, never through the inbox; a choice is made in the TUI.
+    const freeText =
+      only !== undefined &&
+      more.length === 0 &&
+      only.isSecret !== true &&
+      ((only.options ?? []).length === 0 || only.isOther === true);
+    const summary = p.data.questions.map((q) => q.question).join(" / ");
+    return {
+      threadId: p.data.threadId,
+      itemId: p.data.itemId,
+      key: p.data.itemId,
+      summary: summary === "" ? "The agent asks you a question" : summary.slice(0, 300),
+      answers: freeText ? only.id : null,
+    };
+  }
+  if (method === "mcpServer/elicitation/request") {
+    const p = Elicitation.safeParse(params);
+    if (!p.success) return null;
+    const { threadId, serverName, message } = p.data;
+    const summary = `${serverName} asks: ${message ?? "input in the terminal"}`.slice(0, 300);
+    const key = JSON.stringify(["elicitation", serverName, message ?? null]);
+    return { threadId, itemId: null, key, summary, answers: null };
+  }
+  if (method === "item/permissions/requestApproval") {
+    const p = Permissions.safeParse(params);
+    if (!p.success) return null;
+    const { threadId, itemId, reason } = p.data;
+    const summary = reason ? `Grant more permissions (${reason})` : "Grant more permissions";
+    return { threadId, itemId, key: itemId, summary, answers: null };
+  }
+  return null;
+}
+
+/** The result that answers a single question with the human's text. */
+export const questionResult = (questionId: string, text: string) => ({
+  answers: { [questionId]: { answers: [text] } },
+});
+
 /** The id of one of the app-server's own requests, unique on its connection. */
 export const RequestId = z.union([z.number(), z.string()]);
 export type RequestId = z.infer<typeof RequestId>;

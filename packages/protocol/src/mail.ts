@@ -101,13 +101,16 @@ export const AnswerAttentionResponse = z.object({
 });
 export type AnswerAttentionResponse = z.infer<typeof AnswerAttentionResponse>;
 
-/** A reply to an item that offers `reply`; it reaches the agent as mail. */
+/** A reply to an item that offers `reply`: the answer to its question, or else mail to the agent. */
 export const ReplyAttentionRequest = SendMessageRequest;
 export type ReplyAttentionRequest = z.infer<typeof ReplyAttentionRequest>;
 
 export const ReplyAttentionResponse = z.object({
-  /** The message carrying the reply, whose delivery the mailbox reports. */
-  messageId: Id("msg"),
+  /**
+   * The message carrying the reply, whose delivery the mailbox reports; null when the reply went
+   * to the harness as the answer to the question it asked.
+   */
+  messageId: Id("msg").nullable(),
   eventIds: z.array(z.number().int().positive()),
 });
 export type ReplyAttentionResponse = z.infer<typeof ReplyAttentionResponse>;
@@ -125,7 +128,11 @@ export type DismissAttentionResponse = z.infer<typeof DismissAttentionResponse>;
 export const ResendAttentionRequest = DismissAttentionRequest;
 export type ResendAttentionRequest = z.infer<typeof ResendAttentionRequest>;
 
-export const ResendAttentionResponse = ReplyAttentionResponse;
+export const ResendAttentionResponse = z.object({
+  /** The new message carrying the text again. */
+  messageId: Id("msg"),
+  eventIds: z.array(z.number().int().positive()),
+});
 export type ResendAttentionResponse = z.infer<typeof ResendAttentionResponse>;
 
 /**

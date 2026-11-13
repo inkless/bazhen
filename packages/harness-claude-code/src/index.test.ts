@@ -172,6 +172,9 @@ describe("Claude Code's theme", () => {
   });
 });
 
+const askedQuestions = (questions: unknown[]) =>
+  readHook("PermissionRequest", { tool_name: "AskUserQuestion", tool_input: { questions } });
+
 describe("Claude Code hooks", () => {
   it("tells the waiter which turn's end it runs beside, so either report ends the turn", () => {
     const at = { session_id: "s", prompt_id: "p-1" };
@@ -291,9 +294,19 @@ describe("Claude Code hooks", () => {
   });
 
   // Allowing a question runs it without answering it, so the agent waits on, or asks again.
-  it("leaves a question for the human to the TUI, which an inbox allow or deny can't answer", () => {
-    const question = { tool_name: "AskUserQuestion", tool_input: { questions: [] } };
-    expect(readHook("PermissionRequest", question)).toEqual({ kind: "ignored" });
+  it("reads a question for the human as a question, never an approval allow or deny could answer", () => {
+    expect([
+      askedQuestions([{ question: "Which DB?" }, { question: "Migrate now?" }]),
+      askedQuestions([]),
+    ]).toEqual([
+      { kind: "question", summary: "Which DB? / Migrate now?", tool: expect.any(String) },
+      { kind: "question", summary: "The agent asks you a question", tool: expect.any(String) },
+    ]);
+  });
+
+  it("reports an agent asking a question as waiting on the human", () => {
+    const hook = readHook("PermissionRequest", { tool_name: "AskUserQuestion", tool_input: {} });
+    expect(activityOf(hook)).toEqual({ value: "waiting_input" });
   });
 
   it("tells the waiter a SessionStart ran it, which may move the binding", () => {

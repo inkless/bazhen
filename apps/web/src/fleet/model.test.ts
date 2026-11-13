@@ -129,7 +129,7 @@ describe("themeRespawn", () => {
     ]).toEqual([
       null,
       null,
-      null,
+      "Waiting on your answer in its terminal",
       "Mid-turn: wait for it to finish",
       "Mid-turn: wait for it to finish",
       "Can't tell whether it's mid-turn",

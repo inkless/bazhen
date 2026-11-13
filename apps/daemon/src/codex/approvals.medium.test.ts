@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { isId } from "@bazhen/core";
 import type { Store } from "../store/store.ts";
 import { withAgent, testView } from "../testing/fixtures.ts";
 import { AttentionClosed, AttentionUnavailable, Approvals } from "../mailbox/approvals.ts";
 import { codexApprovals } from "./approvals.ts";
+import { Inbox } from "../attention/inbox.ts";
 
 const items = (store: Store) => store.snapshot(testView).attention;
 const command = {
@@ -37,6 +39,98 @@ async function codexFor() {
   ) => codex.request(method, params, id, (result) => on.push(result));
   return { store, approvals, codex, ask, answered, running, alive };
 }
+
+const userInput = (questions: object[]) => ({
+  threadId: "thr-1",
+  turnId: "t-1",
+  itemId: "call_2",
+  questions,
+});
+const canReply = (approvals: Approvals, id: string) =>
+  isId("attn", id) && approvals.canReplyText(id);
+const freeText = userInput([{ id: "q1", header: "Branch", question: "Which branch?" }]);
+
+describe("Codex questions", () => {
+  it("answers a free-text question with the human's reply, closing it as replied", async () => {
+    const { store, approvals, ask, answered } = await codexFor();
+    ask(3, freeText, "item/tool/requestUserInput");
+    const item = items(store)[0];
+    approvals.replyText(String(item?.id), { idempotencyKey: "r", body: "main" });
+    expect([item?.kind, item?.summary, answered, items(store)[0]?.closeReason]).toEqual([
+      "question",
+      "Which branch?",
+      [{ answers: { q1: { answers: ["main"] } } }],
+      "replied",
+    ]);
+  });
+
+  it("leaves a choice or an elicitation to the TUI, and closes it when the TUI answers", async () => {
+    const { store, approvals, codex, ask } = await codexFor();
+    const choice = {
+      id: "q1",
+      header: "H",
+      question: "Pick",
+      options: [{ label: "a", description: "" }],
+    };
+    ask(4, userInput([choice]), "item/tool/requestUserInput");
+    ask(
+      5,
+      { threadId: "thr-1", turnId: null, serverName: "gh", mode: "url", message: "Log in" },
+      "mcpServer/elicitation/request",
+    );
+    const ids = items(store).map((i) => i.id);
+    const replyable = ids.map((id) => canReply(approvals, id));
+    codex.notification("serverRequest/resolved", { threadId: "thr-1", requestId: 5 });
+    expect([replyable, items(store).map((i) => i.closeReason)]).toEqual([
+      [false, false],
+      [null, "answered_in_tui"],
+    ]);
+  });
+
+  it("takes an inbox reply to a question as its answer, sending no mail", async () => {
+    const { store, approvals, ask, answered } = await codexFor();
+    const mail: string[] = [];
+    const inbox = new Inbox(store, approvals, (_agent, req) => {
+      mail.push(req.body);
+      throw new Error("no mail for a question");
+    });
+    ask(3, freeText, "item/tool/requestUserInput");
+    const item = store.openAttention()[0];
+    const offered = store.openAttention().map((i) => inbox.actions(i))[0];
+    const replied = inbox.reply(String(item?.id), { idempotencyKey: "r", body: "main" });
+    expect([offered, replied.messageId, answered, mail]).toEqual([
+      ["reply"],
+      null,
+      [{ answers: { q1: { answers: ["main"] } } }],
+      [],
+    ]);
+  });
+
+  it("finds an elicitation a resumed thread sends again under a new request id, opening no second item", async () => {
+    const { store, codex, ask } = await codexFor();
+    const login = {
+      threadId: "thr-1",
+      turnId: null,
+      serverName: "gh",
+      mode: "url",
+      message: "Log in",
+    };
+    ask(5, login, "mcpServer/elicitation/request");
+    codex.disconnected();
+    ask(12, login, "mcpServer/elicitation/request");
+    codex.resumed?.(["thr-1"]);
+    expect(items(store).map((i) => i.state)).toEqual(["open"]);
+  });
+
+  it("refuses a text reply while the connection that asked is down", async () => {
+    const { store, approvals, codex, ask } = await codexFor();
+    ask(3, freeText, "item/tool/requestUserInput");
+    codex.disconnected();
+    expect(() =>
+      approvals.replyText(String(items(store)[0]?.id), { idempotencyKey: "r", body: "main" }),
+    ).toThrow(AttentionUnavailable);
+  });
+});
 
 describe("Codex approvals", () => {
   it("opens an item for a request to run a command, and answers it with the inbox's decision", async () => {

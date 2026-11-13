@@ -165,6 +165,8 @@ export type Hook =
     }
   | { readonly kind: "toolStarted"; readonly tool: string; readonly useId: string }
   | { readonly kind: "permission"; readonly summary: string; readonly tool: string }
+  /** The agent asks the human a question, which only the TUI can take an answer to. */
+  | { readonly kind: "question"; readonly summary: string; readonly tool: string }
   | { readonly kind: "promptStarted"; readonly prompt: string; readonly promptId: string | null }
   | { readonly kind: "turnEnded"; readonly promptId: string | null }
   | {
@@ -212,7 +214,9 @@ export function readHook(event: string, payload: unknown): Hook {
     }
     case "PermissionRequest":
       // A question wants the human's choice, which allow or deny can't give: the TUI asks it.
-      if (field(payload, "tool_name") === "AskUserQuestion") return IGNORED;
+      if (field(payload, "tool_name") === "AskUserQuestion") {
+        return { kind: "question", summary: questionSummary(payload), tool: toolKey(payload) };
+      }
       return { kind: "permission", summary: approvalSummary(payload), tool: toolKey(payload) };
     case "UserPromptSubmit":
       return { kind: "promptStarted", prompt: promptOf(payload), promptId: promptIdOf(payload) };
@@ -267,6 +271,8 @@ export function activityOf(hook: Hook): Pick<Activity, "value" | "detail"> | nul
       return { value: "working" };
     case "permission":
       return { value: "needs_approval" };
+    case "question":
+      return { value: "waiting_input" };
     case "turnEnded":
       return { value: "idle" };
     case "turnFailed":
@@ -362,7 +368,25 @@ function toolKey(payload: unknown): string {
 /** The key of a tool call the agent itself made, as opposed to one of its subagents. */
 export const isMainAgentTool = (tool: string) => tool.startsWith('["main",');
 
+/** Who made a tool call (a subagent's id, or null for the agent's own) and in which prompt. */
+export function toolOrigin(tool: string): { caller: string | null; promptId: string | null } {
+  const [caller, promptId]: unknown[] = JSON.parse(tool);
+  return {
+    caller: typeof caller === "string" && caller !== "main" ? caller : null,
+    promptId: typeof promptId === "string" ? promptId : null,
+  };
+}
+
 /** What a permission request is for, as the inbox shows it. */
+/** The questions an AskUserQuestion asks, as one line. */
+function questionSummary(payload: unknown): string {
+  const questions = field(field(payload, "tool_input"), "questions");
+  const asked = Array.isArray(questions)
+    ? questions.map((q) => field(q, "question")).filter((q) => typeof q === "string")
+    : [];
+  return asked.length === 0 ? "The agent asks you a question" : asked.join(" / ").slice(0, 300);
+}
+
 function approvalSummary(payload: unknown): string {
   const tool = field(payload, "tool_name");
   const input = JSON.stringify(field(payload, "tool_input") ?? {});

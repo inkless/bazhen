@@ -4,8 +4,15 @@
   "type": "object",
   "properties": {
     "messageId": {
-      "type": "string",
-      "pattern": "^msg_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^msg_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "eventIds": {
       "type": "array",

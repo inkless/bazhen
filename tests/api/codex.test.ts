@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { LaunchAgentResponse, SendMessageResponse, StateSnapshot } from "@bazhen/protocol";
 import { BANNER, Daemon, waitUntil } from "./daemon.ts";
-import { startFakeResponses } from "./fake-responses.ts";
+import { FAKE_CODEX_QUESTION, startFakeResponses } from "./fake-responses.ts";
 import type { FakeModel } from "./fake-model.ts";
 
 /** The 256-colour background Codex 0.166 draws its prompt on, told a light terminal. */
@@ -48,6 +48,22 @@ function userInputs(request: string): string[] {
 }
 
 const inputs = () => model.requests.flatMap(userInputs);
+
+/** Every tool call's output the model was sent, as JSON text. */
+const toolOutputs = () =>
+  model.requests.flatMap((r) => {
+    const input: unknown = Reflect.get(Object(JSON.parse(r)), "input");
+    return (Array.isArray(input) ? input : [])
+      .filter((item) => Reflect.get(Object(item), "type") === "function_call_output")
+      .map((item) => JSON.stringify(item));
+  });
+
+/** The names of the tools each model request offered. */
+const offered = () =>
+  model.requests.flatMap((r) => {
+    const tools: unknown = Reflect.get(Object(JSON.parse(r)), "tools");
+    return (Array.isArray(tools) ? tools : []).map((t) => String(Reflect.get(Object(t), "name")));
+  });
 
 const state = async () => StateSnapshot.parse((await daemon.request("/v1/state")).body);
 /** The id of the open item whose summary names this command, once there is one. */
@@ -237,6 +253,33 @@ describe("a Codex agent", () => {
     await expect.poll(() => closeReasonOf(id), { timeout: 20_000 }).toBe("answered_in_tui");
     expect(daemon.hasFile("never-run")).toBe(false);
     view.close();
+  });
+
+  it("answers the agent's question from the inbox, the human's text going back as the answer", async () => {
+    const before = model.requests.length;
+    await daemon.prompt(asker, "[[fake:ask]]");
+    // Codex answers the call itself where the tool isn't allowed: say what it made of the call
+    // rather than time out on an item that never opens.
+    await expect.poll(() => model.requests.length, { timeout: 30_000 }).toBeGreaterThan(before);
+    expect(offered()).toContain("request_user_input");
+    const id = await openItemFor(FAKE_CODEX_QUESTION).catch((err: unknown) => {
+      throw new Error(`${String(err)}; tool outputs: ${toolOutputs().join(" | ").slice(-600)}`);
+    });
+    const item = (await state()).attention.find((a) => a.id === id);
+    const replied = await daemon.request(`/v1/attention/${id}/reply`, {
+      method: "POST",
+      body: { idempotencyKey: "answer", body: "release-7" },
+    });
+    await expect
+      .poll(() => toolOutputs().some((output) => output.includes("release-7")), { timeout: 30_000 })
+      .toBe(true);
+    expect([
+      offered().includes("request_user_input"),
+      item?.kind,
+      item?.actions,
+      replied.status,
+      await closeReasonOf(id),
+    ]).toEqual([true, "question", ["reply"], 200, "replied"]);
   });
 
   it("resumes the agent's thread itself after a kill -9, with no TUI to do it", async () => {

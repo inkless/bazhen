@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { EVENTS, SendMessageResponse, StateSnapshot, type Event } from "@bazhen/protocol";
 import { Daemon, waitUntil, type EventClient } from "./daemon.ts";
-import { startFakeModel, type FakeModel } from "./fake-model.ts";
+import { FAKE_QUESTION, startFakeModel, type FakeModel } from "./fake-model.ts";
 
 let model: FakeModel;
 let daemon: Daemon;
@@ -52,6 +52,15 @@ const interrupt = (view: { type(text: string): void }) => {
 };
 /** The model the agent runs and its context use, as its status line reported them. */
 const usage = async () => agentIn(await state())?.usage;
+/**
+ * Presses Enter in the agent's TUI while the item stays open, and says whether it still is: Enter
+ * takes a question's first choice, then submits, and none is typed once it has closed.
+ */
+const pressEnterWhileOpen = async (view: { type(text: string): void }, id: string) => {
+  const open = (await state()).attention.find((a) => a.id === id)?.state === "open";
+  if (open) view.type("\r");
+  return open;
+};
 /** What the agent's harness last said it is doing. */
 const doing = async () => agentIn(await state())?.activity?.value;
 /**
@@ -65,6 +74,14 @@ const eventsAbout = (stream: EventClient, entityId: string): Event[] =>
   stream.frames.flatMap((f) =>
     f.type === "event" && f.event.entityId === entityId ? [f.event] : [],
   );
+/** An item's events and the agent's activity values between them, in the order they came. */
+const itemAndActivity = (stream: EventClient, itemId: string): string[] =>
+  stream.frames.flatMap((f) => {
+    if (f.type !== "event") return [];
+    if (f.event.entityId === itemId) return [f.event.type];
+    if (f.event.type !== "agent.activity" || f.event.entityId !== agentId) return [];
+    return [EVENTS[f.event.type].payload.parse(f.event.payload).value];
+  });
 /** Why each requeue among these events happened. */
 const requeueReasons = (events: Event[]) =>
   events.flatMap((e) =>
@@ -322,6 +339,39 @@ describe("mail to a Claude Code agent", () => {
     stream.close();
     expect(story.map((e) => e.type)).toContain("mailbox.seen");
     expect(model.requests.join()).toContain(`${"z".repeat(12_000)} END-OF-LONG`);
+  });
+
+  it("shows a question the agent asks, which only the terminal answers, until its answer comes back", async () => {
+    const now = await state();
+    const stream = await daemon.events({ epoch: now.epoch, eventId: now.eventId });
+    const { messageId } = await send("ask", "[[fake:ask]]");
+    const question = async () => openItems(await state()).find((a) => a.kind === "question");
+    await expect
+      .poll(async () => (await question())?.summary, { timeout: 30_000 })
+      .toBe(FAKE_QUESTION);
+    expect([(await question())?.actions, await doing()]).toEqual([[], "waiting_input"]);
+    const id = String((await question())?.id);
+    const view = await daemon.view(String(terminalId), "interactive");
+    await view.drive();
+    await expect
+      .poll(() => pressEnterWhileOpen(view, id), { timeout: 20_000, interval: 1_000 })
+      .toBe(false);
+    view.close();
+    await expect
+      .poll(async () => (await state()).messages.find((m) => m.id === messageId)?.state, {
+        timeout: 30_000,
+      })
+      .toBe("delivered");
+    // The answer's tool result closes it, before the turn's end would have: the agent reads
+    // working again in between, and idle only after.
+    const story = itemAndActivity(stream, id);
+    stream.close();
+    const closed = story.indexOf("attention.closed");
+    expect([
+      (await state()).attention.find((a) => a.id === id)?.closeReason,
+      story.slice(closed - 1, closed),
+      story.slice(closed + 1).includes("idle"),
+    ]).toEqual(["answered_in_tui", ["working"], true]);
   });
 
   it("offers a message again after the turn carrying it fails, and gives up after four", async () => {

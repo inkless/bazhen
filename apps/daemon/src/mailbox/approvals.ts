@@ -1,12 +1,19 @@
 import { isId, newId, type AttentionId } from "@bazhen/core";
 import {
   AnswerAttentionResponse,
+  ReplyAttentionResponse,
   type AnswerAttentionRequest,
+  type ReplyAttentionRequest,
   type ApprovalDecision,
   type EventPayload,
   type HookReply,
 } from "@bazhen/protocol";
-import { APPROVAL_WAIT_MS, approvalReply, isMainAgentTool } from "@bazhen/harness-claude-code";
+import {
+  APPROVAL_WAIT_MS,
+  approvalReply,
+  isMainAgentTool,
+  toolOrigin,
+} from "@bazhen/harness-claude-code";
 import type { OpenAttention, Store } from "../store/store.ts";
 import { QUIET } from "./mailbox.ts";
 
@@ -36,6 +43,9 @@ export type CloseReason = EventPayload<"attention.closed">["reason"];
 /** Hands the inbox's decision to the harness, or null when the request ended without one. */
 export type Reply = (decision: ApprovalDecision | null) => void;
 
+/** Hands the human's text to the harness as its question's answer, or null when it ended without. */
+export type TextReply = (text: string | null) => void;
+
 /**
  * A harness asking to run a tool becomes an attention item while it waits for an answer (§5.6,
  * §5.8). The first answer wins: the inbox's goes to the harness, which dismisses the TUI's
@@ -49,8 +59,12 @@ export class Approvals {
   private readonly store: Store;
   private readonly waitMs: number;
   private readonly pending = new Map<AttentionId, Reply>();
+  /** Questions the harness takes a text answer to, waiting for one. */
+  private readonly texts = new Map<AttentionId, TextReply>();
   /** Whether an item's harness can take an answer now; one without is always answerable. */
   private readonly answerable = new Map<AttentionId, () => boolean>();
+  /** Who asked each Claude Code question, and in which prompt. */
+  private readonly askedBy = new Map<AttentionId, ReturnType<typeof toolOrigin>>();
   /** Each agent's tool calls that have started, have no request yet and haven't finished. */
   private readonly started = new Map<string, { tool: string; useId: string }[]>();
 
@@ -76,10 +90,44 @@ export class Approvals {
           clearTimeout(timer);
           resolve(d === null ? QUIET : { ...QUIET, stdout: approvalReply(d) });
         },
+        "approval",
       );
       const timer = setTimeout(() => this.withdraw(id, "timed_out"), this.waitMs);
       // The hook was killed, as Esc does: the TUI took the request back.
       signal.addEventListener("abort", () => this.withdraw(id, "answered_in_tui"), { once: true });
+    });
+  }
+
+  /**
+   * Claude Code's AskUserQuestion: an item that says so, while the TUI takes the answer. Its tool
+   * call's result, or the turn ending, closes it, as for a request answered in the TUI.
+   */
+  question(agentId: string, summary: string, tool: string): void {
+    const id = this.open(
+      agentId,
+      summary,
+      this.claim(agentId, tool),
+      isMainAgentTool(tool),
+      null,
+      "question",
+    );
+    this.askedBy.set(id, toolOrigin(tool));
+  }
+
+  /** A subagent finished: what it asked and the TUI still shows is over with it. */
+  subagentStopped(agentId: string, subagentId: string): void {
+    this.settleWhere(agentId, (item) => this.askedBy.get(item.id)?.caller === subagentId);
+  }
+
+  /**
+   * The agent's own prompt `promptId` started. One with a new id ends the turn before it, as an
+   * interrupt does with no Stop, so the questions that turn asked are over; a prompt typed
+   * mid-turn joins its turn and keeps its id.
+   */
+  promptStarted(agentId: string, promptId: string | null): void {
+    this.settleWhere(agentId, (item) => {
+      const by = this.askedBy.get(item.id);
+      return by !== undefined && by.caller === null && by.promptId !== promptId;
     });
   }
 
@@ -94,18 +142,68 @@ export class Approvals {
     reply: Reply,
     answerable: () => boolean,
   ): AttentionId {
-    const id = this.open(agentId, summary, toolUseId, true, reply);
+    const id = this.open(agentId, summary, toolUseId, true, reply, "approval");
     this.answerable.set(id, answerable);
     return id;
   }
 
+  /**
+   * A question the harness holds open itself, such as Codex's request for user input; `answer`
+   * gets the human's text, or is null when only the TUI can answer it.
+   */
+  askQuestion(
+    agentId: string,
+    summary: string,
+    toolUseId: string | null,
+    answer: TextReply | null,
+    answerable: () => boolean,
+  ): AttentionId {
+    const id = this.open(agentId, summary, toolUseId, true, null, "question");
+    if (answer !== null) this.texts.set(id, answer);
+    this.answerable.set(id, answerable);
+    return id;
+  }
+
+  /** Whether a text reply to the item would reach the harness as its question's answer now. */
+  canReplyText(id: AttentionId): boolean {
+    return this.texts.has(id) && this.answerable.get(id)?.() !== false;
+  }
+
+  /** Answers a question with the human's text, closing it as replied. */
+  replyText(id: string, req: ReplyAttentionRequest): ReplyAttentionResponse {
+    const response = this.store.once(
+      req.idempotencyKey,
+      { attention: id, reply: req.body },
+      (r) => ReplyAttentionResponse.parse(r),
+      () => {
+        if (!isId("attn", id) || !this.openIds().includes(id)) throw new AttentionClosed(id);
+        if (!this.canReplyText(id)) throw new AttentionUnavailable(id);
+        const eventId = this.store.append({
+          type: "attention.closed",
+          entityId: id,
+          actor: "user",
+          payload: { reason: "replied" },
+        });
+        return { messageId: null, eventIds: [eventId] };
+      },
+    );
+    if (isId("attn", id)) {
+      const text = this.texts.get(id);
+      this.take(id);
+      text?.(req.body);
+    }
+    return response;
+  }
+
   /** The request behind an item ended without the inbox's answer, for `reason`. */
   withdraw(id: AttentionId, reason: CloseReason): void {
+    const text = isId("attn", id) ? this.texts.get(id) : undefined;
     const reply = this.take(id);
     // An item answered or closed already stays as it is.
-    if (reply === undefined && !this.openIds().includes(id)) return;
+    if (reply === undefined && text === undefined && !this.openIds().includes(id)) return;
     this.close(id, reason);
     reply?.(null);
+    text?.(null);
   }
 
   private open(
@@ -113,16 +211,17 @@ export class Approvals {
     summary: string,
     toolUseId: string | null,
     mainAgent: boolean,
-    reply: Reply,
+    reply: Reply | null,
+    kind: "approval" | "question",
   ): AttentionId {
     const id = newId("attn");
     this.store.append({
       type: "attention.opened",
       entityId: id,
       actor: "system",
-      payload: { agentId, summary, toolUseId, mainAgent, kind: "approval" },
+      payload: { agentId, summary, toolUseId, mainAgent, kind },
     });
-    this.pending.set(id, reply);
+    if (reply !== null) this.pending.set(id, reply);
     return id;
   }
 
@@ -200,6 +299,8 @@ export class Approvals {
   private take(id: AttentionId): Reply | undefined {
     const reply = this.pending.get(id);
     this.pending.delete(id);
+    this.texts.delete(id);
+    this.askedBy.delete(id);
     this.answerable.delete(id);
     return reply;
   }
