@@ -3,6 +3,7 @@ import {
   readThreadStatus,
   readTurn,
   resultActivity,
+  resultNotLoaded,
   type CodexActivity,
 } from "@bazhen/harness-codex";
 import type { Activity } from "@bazhen/protocol";
@@ -16,7 +17,11 @@ export interface CodexSignalsOptions {
   readonly resume: (threadId: string) => Promise<void>;
   readonly now?: () => Date;
   readonly log?: (message: string) => void;
+  /** The first wait before resuming again after a resume that failed; it doubles to a minute. */
+  readonly retryMs?: number;
 }
+
+const MAX_RETRY_MS = 60_000;
 
 export const AUTO_CONTINUED = "auto-continued after a Codex restart";
 export const INTERRUPTED = "interrupted by a Codex restart";
@@ -28,7 +33,8 @@ const busy = (a: CodexActivity | undefined) =>
 /**
  * Codex agents' activity, from their threads' status on the app-server (foundation-design §4.6,
  * §5.8). Each status becomes a native signal. `notLoaded` reads unknown and makes the thread be
- * resumed, once per connection, so it doesn't stick.
+ * resumed, so it doesn't stick: once for each time it unloads, however often it says so, and
+ * again with backoff while a resume fails or answers that it is still not loaded.
  *
  * A connection ends only when its server exits, and a turn running then ends with it. A new
  * server continues such a turn by itself after a restart or update, with no client attached, and
@@ -48,13 +54,16 @@ export function codexSignals(opts: CodexSignalsOptions): Partial<ChannelListener
   let failed = new Set<string>();
   /** Interrupted threads whose new turn hasn't shown its first item yet. */
   const firstItem = new Set<string>();
-  /** Threads resumed for having unloaded on this connection: each is resumed once. */
-  let reloaded = new Set<string>();
+  /** Unloaded threads being resumed, until one resume answers loaded; and the retries' timers. */
+  const reloading = new Map<string, { attempts: number; timer?: ReturnType<typeof setTimeout> }>();
+  const retryMs = opts.retryMs ?? 1000;
   const labels = new Map<string, string>();
 
   /** A thread no running agent is bound to any more is forgotten. */
   const forget = (threadId: string) => {
-    for (const s of [cutOff, failed, firstItem, reloaded]) s.delete(threadId);
+    for (const s of [cutOff, failed, firstItem]) s.delete(threadId);
+    clearTimeout(reloading.get(threadId)?.timer);
+    reloading.delete(threadId);
     labels.delete(threadId);
     activity.delete(threadId);
   };
@@ -79,13 +88,27 @@ export function codexSignals(opts: CodexSignalsOptions): Partial<ChannelListener
     }
   };
 
-  const unloaded = (threadId: string) => {
-    signal(threadId, "unknown");
-    if (opts.agentOf(threadId) === undefined || reloaded.has(threadId)) return;
-    reloaded.add(threadId);
+  const reload = (threadId: string) => {
+    if (opts.agentOf(threadId) === undefined) return forget(threadId);
     opts.resume(threadId).catch((err: unknown) => {
       log(`codex thread ${threadId} could not be resumed: ${String(err)}`);
+      retry(threadId);
     });
+  };
+
+  const retry = (threadId: string) => {
+    const r = reloading.get(threadId);
+    if (r === undefined) return;
+    const wait = Math.min(retryMs * 2 ** r.attempts, MAX_RETRY_MS);
+    r.attempts++;
+    r.timer = setTimeout(() => reload(threadId), wait);
+  };
+
+  const unloaded = (threadId: string) => {
+    signal(threadId, "unknown");
+    if (opts.agentOf(threadId) === undefined || reloading.has(threadId)) return;
+    reloading.set(threadId, { attempts: 0 });
+    reload(threadId);
   };
 
   const status = (threadId: string, value: CodexActivity) => {
@@ -103,8 +126,8 @@ export function codexSignals(opts: CodexSignalsOptions): Partial<ChannelListener
       }
       const turn = readTurn(method, params);
       if (turn !== null) {
-        const { threadId, ended } = turn;
-        if (ended === null) {
+        const { threadId, started, ended } = turn;
+        if (started) {
           failed.delete(threadId);
           if (labels.get(threadId) === INTERRUPTED) {
             labels.delete(threadId);
@@ -118,7 +141,8 @@ export function codexSignals(opts: CodexSignalsOptions): Partial<ChannelListener
           failed.add(threadId);
           return signal(threadId, "failed");
         }
-        return signal(threadId, "idle");
+        // One that doesn't say how it ended is left to the thread's status.
+        return ended === null ? undefined : signal(threadId, "idle");
       }
       const item = readItemStarted(method, params);
       if (item === null || !firstItem.delete(item.threadId) || item.userInput) return;
@@ -130,11 +154,17 @@ export function codexSignals(opts: CodexSignalsOptions): Partial<ChannelListener
       for (const [threadId, a] of activity) if (busy(a)) cutOff.add(threadId);
       activity = new Map();
       failed = new Set();
-      reloaded = new Set();
+      // The next connection resumes every bound thread itself.
+      for (const r of reloading.values()) clearTimeout(r.timer);
+      reloading.clear();
       firstItem.clear();
     },
     threadResumed(threadId, result) {
       const value = resultActivity(result);
+      if (reloading.has(threadId)) {
+        if (resultNotLoaded(result)) retry(threadId);
+        else reloading.delete(threadId);
+      }
       if (cutOff.delete(threadId)) {
         labels.set(threadId, busy(value ?? undefined) ? AUTO_CONTINUED : INTERRUPTED);
       }

@@ -256,11 +256,15 @@ export function readThreadStatus(
   return { threadId: p.data.threadId, activity, notLoaded: isNotLoaded(p.data.status) };
 }
 
+const statusIn = (result: unknown) =>
+  z.object({ thread: z.object({ status: z.unknown() }) }).safeParse(result).data?.thread.status;
+
 /** The activity of a thread as `thread/start` or `thread/resume` answers with it. */
 export const resultActivity = (result: unknown): CodexActivity | null =>
-  activityOf(
-    z.object({ thread: z.object({ status: z.unknown() }) }).safeParse(result).data?.thread.status,
-  );
+  activityOf(statusIn(result));
+
+/** Whether a `thread/resume` answered that the thread is still not loaded. */
+export const resultNotLoaded = (result: unknown): boolean => isNotLoaded(statusIn(result));
 
 const TurnEvent = z.object({
   threadId: z.string(),
@@ -268,20 +272,27 @@ const TurnEvent = z.object({
 });
 
 /**
- * A turn that started, or one that ended and how (`completed`, `interrupted` or `failed`), from
- * `turn/started` and `turn/completed`; null for any other notification, and for an end that
- * doesn't say how, which the thread's status then tells.
+ * A turn that started, or one that ended and how (`completed`, `interrupted`, `failed`, or null
+ * when it doesn't say, which the thread's status then tells), from `turn/started` and
+ * `turn/completed`; null for any other notification.
  */
 export function readTurn(
   method: string,
   params: unknown,
-): { readonly threadId: string; readonly ended: string | null } | null {
+): {
+  readonly threadId: string;
+  readonly started: boolean;
+  readonly ended: string | null;
+} | null {
   if (method !== "turn/started" && method !== "turn/completed") return null;
   const p = TurnEvent.safeParse(params);
   if (!p.success) return null;
-  if (method === "turn/started") return { threadId: p.data.threadId, ended: null };
-  const ended = p.data.turn?.status;
-  return ended === undefined ? null : { threadId: p.data.threadId, ended };
+  const started = method === "turn/started";
+  return {
+    threadId: p.data.threadId,
+    started,
+    ended: started ? null : (p.data.turn?.status ?? null),
+  };
 }
 
 const ItemStarted = z.object({ threadId: z.string(), item: z.object({ type: z.string() }) });

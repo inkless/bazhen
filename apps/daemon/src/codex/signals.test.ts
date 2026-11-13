@@ -5,7 +5,8 @@ import { AUTO_CONTINUED, codexSignals, INTERRUPTED } from "./signals.ts";
 const AT = new Date("2026-11-12T10:00:00.000Z");
 
 /** The listener on thread `thr-1`, bound to `agt-1`, with what it records and resumes. */
-function setup(bound: Record<string, string> = { "thr-1": "agt-1" }) {
+function setup(bound: Record<string, string> = { "thr-1": "agt-1" }, failingResumes = 0) {
+  let failing = failingResumes;
   const recorded: [string, Activity][] = [];
   const resumed: string[] = [];
   const logged: string[] = [];
@@ -17,7 +18,9 @@ function setup(bound: Record<string, string> = { "thr-1": "agt-1" }) {
     },
     resume: async (threadId) => {
       resumed.push(threadId);
+      if (failing-- > 0) throw new Error("no reply in 30000 ms");
     },
+    retryMs: 5,
     now: () => AT,
     log: (m) => logged.push(m),
   });
@@ -80,18 +83,43 @@ describe("Codex activity signals", () => {
     expect([s.values(), s.resumed]).toEqual([["working", "unknown"], []]);
   });
 
-  it("resumes an unloaded thread once per connection, however often it says so", () => {
+  it("resumes an unloaded thread once each time it unloads, however often it says so", () => {
     const s = setup();
     s.status({ type: "notLoaded" });
     s.status({ type: "notLoaded" });
     s.listener.threadResumed?.("thr-1", { thread: { status: { type: "idle" } } });
     s.status({ type: "notLoaded" });
-    s.listener.disconnected?.();
     s.status({ type: "notLoaded" });
     expect([s.values(), s.resumed]).toEqual([
       ["unknown", "unknown", "idle", "unknown", "unknown"],
       ["thr-1", "thr-1"],
     ]);
+  });
+
+  it("resumes again, with backoff, after a resume that failed", async () => {
+    const s = setup(undefined, 2);
+    s.status({ type: "notLoaded" });
+    await expect.poll(() => s.resumed).toEqual(["thr-1", "thr-1", "thr-1"]);
+    s.listener.threadResumed?.("thr-1", { thread: { status: { type: "idle" } } });
+    expect(s.logged).toEqual([
+      expect.stringContaining("no reply"),
+      expect.stringContaining("no reply"),
+    ]);
+  });
+
+  it("resumes again after a resume that answers the thread is still not loaded", async () => {
+    const s = setup();
+    s.status({ type: "notLoaded" });
+    s.listener.threadResumed?.("thr-1", { thread: { status: { type: "notLoaded" } } });
+    await expect.poll(() => s.resumed).toEqual(["thr-1", "thr-1"]);
+  });
+
+  it("leaves resuming to the next connection once this one ends", async () => {
+    const s = setup(undefined, 1);
+    s.status({ type: "notLoaded" });
+    s.listener.disconnected?.();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(s.resumed).toEqual(["thr-1"]);
   });
 
   it("keeps a failed turn failed through the idle status that follows it", () => {
@@ -151,6 +179,16 @@ describe("Codex activity signals", () => {
     s.notify("item/started", userInput);
     s.notify("item/started", agentReply);
     expect(s.values()).toEqual(["working", `idle: ${INTERRUPTED}`, "working"]);
+  });
+
+  it("takes the label off a continued turn that ends without saying how", () => {
+    const s = setup();
+    s.status(active());
+    s.listener.disconnected?.();
+    s.listener.threadResumed?.("thr-1", { thread: { status: active() } });
+    s.notify("turn/completed", { threadId: "thr-1", turn: { id: "t1" } });
+    s.status({ type: "idle" });
+    expect(s.values()).toEqual(["working", `working: ${AUTO_CONTINUED}`, "idle"]);
   });
 
   it("labels nothing for a thread that was idle when the connection ended", () => {
