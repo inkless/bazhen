@@ -98,6 +98,11 @@ async function doctor(): Promise<number> {
   console.log(
     `agents.shell: ${d.agents.shell}${d.agents.loginShell ? ` (${d.agents.loginShell})` : ""}`,
   );
+  if (d.codex !== undefined) {
+    const { daemon, cli } = d.codex;
+    const server = daemon === null ? "not connected yet" : `${daemon} (as last connected)`;
+    console.log(`codex: app-server ${server}, cli ${cli ?? "not found"}`);
+  }
   const source = d.env.source === "start" ? "at start" : "by bazhen env refresh";
   console.log(`environment: captured ${d.env.capturedAt} ${source}, ${d.env.kept} variables kept`);
   console.log(`  removed: ${removed || "none"}`);

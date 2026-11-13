@@ -14,8 +14,16 @@ import { launchAgent, localEnvironmentId } from "./agents/launch.ts";
 import { Lifecycle } from "./agents/lifecycle.ts";
 import { reconcile } from "./agents/reconcile.ts";
 import { codexApprovals } from "./codex/approvals.ts";
-import { allOf, appServerAddress, CodexChannel, codexCli, codexHomeOf } from "./codex/channel.ts";
+import {
+  allOf,
+  appServerAddress,
+  CodexChannel,
+  codexCli,
+  codexCliVersion,
+  codexHomeOf,
+} from "./codex/channel.ts";
 import { CodexMail } from "./codex/mail.ts";
+import { recordCodexVersion } from "./codex/version.ts";
 import { retire } from "./events/retention.ts";
 import { eventRoute } from "./events/server.ts";
 import { TerminalHub } from "./stream/hub.ts";
@@ -60,6 +68,8 @@ const store = Store.open(join(paths.data, "bazhen.db"));
 const codexHome = codexHomeOf(hostEnv, inputs.home);
 // The Codex CLI, in the environment the agents get, which names their Codex home.
 const codexCommand = codexCli(hostEnv);
+// Read ahead of doctor, which waits on it, and again for each refreshed environment.
+let codexCliRead = codexCliVersion(hostEnv);
 const codexMail = new CodexMail({
   store,
   remote: appServerAddress(codexHome),
@@ -81,6 +91,7 @@ const runtime = new TmuxRuntime({
 });
 const hookRunner = hookClient();
 if (hookRunner === HOOK_SCRIPT) console.warn(`bazhen-hook is not built; hooks use ${HOOK_SCRIPT}`);
+const localId = localEnvironmentId(store);
 // Agents use the user's own Codex home and its managed app-server, connected on first use.
 const codex = new CodexChannel({
   codexHome,
@@ -90,9 +101,10 @@ const codex = new CodexChannel({
     codexApprovals(approvals, (threadId) => store.codexAgent(threadId)),
     codexMail.listener,
   ),
+  connectedTo: (version) => recordCodexVersion(store, localId, version),
 });
 const environment = new LocalEnvironment({
-  id: localEnvironmentId(store),
+  id: localId,
   runtime,
   harnesses: [
     new ClaudeCodeHarness({
@@ -172,6 +184,7 @@ const socketListener = getRequestListener(
       const next = filterEnv(env, config.envRules);
       const { refused } = await runtime.replaceEnv(next.env);
       captured = { ...next, at: new Date().toISOString(), source: "refresh" };
+      codexCliRead = codexCliVersion(next.env);
       const running = store.snapshot().agents.filter((a) => a.state === "running");
       return {
         capturedAt: captured.at,
@@ -193,6 +206,7 @@ const socketListener = getRequestListener(
           shell: config.loginShell === undefined ? "direct" : "login",
           loginShell: config.loginShell ?? null,
         },
+        codex: { daemon: codex.version, cli: await codexCliRead },
         env: {
           capturedAt: captured.at,
           source: captured.source,

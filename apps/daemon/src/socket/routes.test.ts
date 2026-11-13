@@ -10,6 +10,7 @@ const report: DoctorResponse = {
   hookClient: { path: "/bin/bazhen-hook", fallback: false },
   config: { path: "/c/config.toml", found: false },
   agents: { shell: "direct", loginShell: null },
+  codex: { daemon: "0.167.2", cli: "0.166.0" },
   env: {
     capturedAt: "2026-11-12T00:00:00.000Z",
     source: "start",

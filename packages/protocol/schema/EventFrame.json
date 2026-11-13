@@ -97,6 +97,91 @@
                 },
                 "type": {
                   "type": "string",
+                  "const": "environment.harness_version"
+                },
+                "entityType": {
+                  "type": "string",
+                  "const": "environment"
+                },
+                "entityId": {
+                  "type": "string"
+                },
+                "actor": {
+                  "type": "string"
+                },
+                "causationId": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "correlationId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "payload": {
+                  "type": "object",
+                  "properties": {
+                    "harness": {
+                      "type": "string",
+                      "enum": [
+                        "claude-code",
+                        "codex"
+                      ]
+                    },
+                    "version": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "previous": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "harness",
+                    "version",
+                    "previous"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "id",
+                "ts",
+                "type",
+                "entityType",
+                "entityId",
+                "actor",
+                "causationId",
+                "correlationId",
+                "payload"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "ts": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string",
                   "const": "agent.launched"
                 },
                 "entityType": {

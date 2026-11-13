@@ -56,6 +56,16 @@ export function project(db: Statements, e: Recorded): void {
       );
       return;
     }
+    case "environment.harness_version": {
+      const { harness, version } = EVENTS[e.type].payload.parse(e.payload);
+      db.prepare(
+        `INSERT INTO harness_versions (environment_id, harness, version, updated_event_id)
+           VALUES (?, ?, ?, ?)
+         ON CONFLICT (environment_id, harness)
+           DO UPDATE SET version = excluded.version, updated_event_id = excluded.updated_event_id`,
+      ).run(e.entityId, harness, version, e.id);
+      return;
+    }
     case "agent.launched": {
       const {
         environmentId,

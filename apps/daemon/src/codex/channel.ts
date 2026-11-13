@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import type { HarnessChannelPort } from "@bazhen/core";
 import { AppServer, AppServerError, realPath, type Listener } from "./app-server.ts";
+import { cliVersion } from "./version.ts";
 
 /** What each connection's server sends of its own accord, and when connections come and go. */
 export interface ChannelListener extends Listener {
@@ -24,6 +25,19 @@ export const codexCli =
   (args: readonly string[]): Promise<void> =>
     run("codex", args, { env, timeout: 60_000 }).then(() => undefined);
 
+/**
+ * The version of the Codex CLI that `env`'s PATH finds, or null if it doesn't answer within a
+ * second: `bazhen doctor` waits on it.
+ */
+export async function codexCliVersion(env: Readonly<Record<string, string>>) {
+  try {
+    const { stdout } = await run("codex", ["--version"], { env, timeout: 1_000 });
+    return cliVersion(stdout);
+  } catch {
+    return null;
+  }
+}
+
 /** The managed app-server's control socket in a Codex home. */
 const socketIn = (codexHome: string) =>
   join(codexHome, "app-server-control", "app-server-control.sock");
@@ -38,6 +52,8 @@ export interface CodexChannelOptions {
   /** The threads of the agents Bazhen runs, each resumed on every new connection. */
   readonly boundThreads: () => readonly string[];
   readonly listener?: ChannelListener;
+  /** The version the server answered on, told on every new connection that names one. */
+  readonly connectedTo?: (version: string) => void;
   readonly log?: (message: string) => void;
   /** The first wait before reconnecting after a connection ends; it doubles to a minute. */
   readonly reconnectMs?: number;
@@ -75,7 +91,7 @@ export class CodexChannel implements HarnessChannelPort {
   private readonly log: (message: string) => void;
   private connection: Promise<AppServer> | undefined;
   private current: AppServer | undefined;
-  private lastVersion: string | undefined;
+  private lastVersion: string | null = null;
   private readonly firstRetryMs: number;
   private retryMs: number;
   private retry: ReturnType<typeof setTimeout> | undefined;
@@ -107,6 +123,14 @@ export class CodexChannel implements HarnessChannelPort {
         await server.closed;
       }
     }
+  }
+
+  /**
+   * The version of the server last connected to, still after that connection ends; null before
+   * the first connection, or when its server named none.
+   */
+  get version(): string | null {
+    return this.lastVersion;
   }
 
   /**
@@ -170,10 +194,14 @@ export class CodexChannel implements HarnessChannelPort {
       server.listen(listener);
       void server.closed.then(() => listener.disconnected());
     }
-    if (this.lastVersion !== undefined && server.version !== this.lastVersion) {
-      this.log(`codex app-server updated from ${this.lastVersion} to ${server.version}`);
-    }
+    // An update is announced by nothing but the socket ending, so every connection reports it.
     this.lastVersion = server.version;
+    // Only a report: a failure to record it must not cost the connection.
+    try {
+      if (server.version !== null) this.opts.connectedTo?.(server.version);
+    } catch (err) {
+      this.log(`codex: could not record app-server version ${server.version}: ${String(err)}`);
+    }
     // Only a client that started or resumed a thread receives its events and approvals, and a
     // thread with no subscriber unloads; after any reconnect, every bound thread is resumed.
     const resumed: string[] = [];

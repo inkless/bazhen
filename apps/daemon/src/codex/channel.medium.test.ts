@@ -121,16 +121,38 @@ describe("Codex channel", () => {
     channel.close();
   });
 
-  it("reports a server that came back on a different version", async () => {
+  it("reports the version of every server it connects to, as one that updated itself", async () => {
     const { codexHome, socket } = home();
-    const logged: string[] = [];
-    const channel = channelOn(codexHome, { log: (m) => logged.push(m) });
+    const versions: string[] = [];
+    const channel = channelOn(codexHome, { connectedTo: (v) => versions.push(v) });
+    expect(channel.version).toBeNull();
     const first = await fakeServer(socket, codexHome, () => ({ result: "ok" }), "0.166.0");
     await channel.request("thread/start", {});
     await first.close();
     await fakeServer(socket, codexHome, () => ({ result: "ok" }), "0.167.2");
     await expect.poll(() => channel.request("thread/start", {})).toBe("ok");
-    expect(logged).toEqual([expect.stringContaining("from 0.166.0 to 0.167.2")]);
+    expect([versions, channel.version]).toEqual([["0.166.0", "0.167.2"], "0.167.2"]);
+    channel.close();
+  });
+
+  it("keeps its one connection when the version it reports can't be recorded", async () => {
+    const { codexHome, socket } = home();
+    const connections: WebSocket[] = [];
+    const logged: string[] = [];
+    const { wss } = await fakeServer(socket, codexHome, () => ({ result: "ok" }));
+    wss.on("connection", (ws) => connections.push(ws));
+    const channel = channelOn(codexHome, {
+      connectedTo: () => {
+        throw new Error("database is locked");
+      },
+      log: (m) => logged.push(m),
+    });
+    expect(await channel.request("thread/start", {})).toBe("ok");
+    expect(await channel.request("thread/start", {})).toBe("ok");
+    expect([connections.length, logged]).toEqual([
+      1,
+      [expect.stringContaining("database is locked")],
+    ]);
     channel.close();
   });
 
