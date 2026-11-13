@@ -29,6 +29,7 @@ import {
   LaunchAgentResponse,
   PROTOCOL_VERSION,
   StreamServerFrame,
+  PairingCodeResponse,
 } from "@bazhen/protocol";
 import { agentHomes, codexDaemonStarted, loginEnv } from "../support/agent-env.ts";
 import { giveTranscript } from "../support/transcript.ts";
@@ -254,9 +255,10 @@ export class Daemon {
     child.stdout.on("data", (d: Buffer) => (this.output += d.toString()));
     child.stderr.on("data", (d: Buffer) => (this.output += d.toString()));
     for (let i = 0; i < 100 && child.exitCode === null; i++) {
+      // An unpaired caller is answered 401, which is answer enough that the daemon is up.
       if (
         await fetch(`${this.url}/v1/health`).then(
-          (r) => r.ok,
+          (r) => r.ok || r.status === 401,
           () => false,
         )
       ) {
@@ -272,11 +274,58 @@ export class Daemon {
     throw new Error(`the daemon did not start:\n${this.output}`);
   }
 
-  async request(path: string, init: { method?: string; body?: unknown; origin?: string } = {}) {
-    const headers: Record<string, string> = { "content-type": "application/json" };
-    if (init.origin !== undefined) headers["origin"] = init.origin;
+  /**
+   * The cookie of the browser this daemon's requests and streams come from, paired through
+   * `bazhen pair`'s route on first use. The device outlives a restart, as a browser's does.
+   */
+  async cookie(): Promise<string> {
+    this.device ??= this.pairBrowser();
+    return this.device;
+  }
+
+  private device: Promise<string> | undefined;
+
+  /**
+   * Pairs a new browser on `origin`: a code over the socket, traded over HTTP for the device
+   * cookie. One on an HTTPS origin gets the cookie a request from elsewhere needs.
+   */
+  async pairBrowser(name = "api test", origin = this.url): Promise<string> {
+    const issued = await overSocket(this.socket, "POST", "/v1/pairing/codes");
+    const { code } = PairingCodeResponse.parse(issued.body);
+    const res = await fetch(`${this.url}/v1/pairing`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({ code, name }),
+    });
+    if (!res.ok) throw new Error(`pairing failed: ${res.status} ${await res.text()}`);
+    return (res.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+  }
+
+  /**
+   * A request as the paired browser makes it, from the daemon's own origin when it acts.
+   * `cookie: null` sends it as a browser that never paired.
+   */
+  async request(
+    path: string,
+    init: {
+      method?: string;
+      body?: unknown;
+      origin?: string;
+      cookie?: string | null;
+      headers?: Record<string, string>;
+    } = {},
+  ) {
+    const method = init.method ?? "GET";
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+      ...init.headers,
+    };
+    const origin = init.origin ?? (method === "GET" ? undefined : this.url);
+    if (origin !== undefined) headers["origin"] = origin;
+    const cookie = init.cookie === undefined ? await this.cookie() : init.cookie;
+    if (cookie !== null) headers["cookie"] = cookie;
     const res = await fetch(`${this.url}${path}`, {
-      method: init.method ?? "GET",
+      method,
       headers,
       ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
     });
@@ -294,11 +343,12 @@ export class Daemon {
     mode: "observe" | "interactive",
     origin = this.url,
     size = { cols: 100, rows: 30 },
+    cookie?: string,
   ): Promise<View> {
     const ws = new WebSocket(
       `${this.url.replace("http", "ws")}/v1/terminals/${terminalId}/stream`,
       {
-        headers: { origin },
+        headers: { origin, cookie: cookie ?? (await this.cookie()) },
       },
     );
     const view = new View(ws);
@@ -310,7 +360,7 @@ export class Daemon {
   /** Opens the event stream as a browser would, resuming after `cursor`. */
   async events(
     cursor: { epoch: string; eventId: number },
-    opts: { origin?: string; host?: string; version?: string; path?: string } = {},
+    opts: { origin?: string; host?: string; version?: string; path?: string; cookie?: string } = {},
   ): Promise<EventClient> {
     const query = new URLSearchParams({
       v: opts.version ?? PROTOCOL_VERSION,
@@ -322,6 +372,7 @@ export class Daemon {
       {
         headers: {
           origin: opts.origin ?? this.url,
+          cookie: opts.cookie ?? (await this.cookie()),
           ...(opts.host === undefined ? {} : { host: opts.host }),
         },
       },

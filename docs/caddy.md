@@ -6,13 +6,22 @@ alone. A proxy on another host can't do that: it would reach Bazhen over the net
 Bazhen refuses to listen on.
 
 Under `pnpm dev` Caddy forwards to the web dev server, `127.0.0.1:7901`, which proxies the API to
-the daemon. Caddy passes WebSockets through as they are.
+the daemon. Caddy passes WebSockets through as they are, and says in `X-Forwarded-For` which
+device each request came from. The daemon asks every such request to pair, even if it was
+started without the external origin, and the dev server won't start with an external origin the
+daemon doesn't have. Only a proxy that says where a request came from is noticed this way: a
+forwarder that adds no header, such as `ssh -R` or `socat`, needs `web.pairing = "always"`.
 
 ## Before you start: what protects it
 
-Until device pairing exists, nothing authenticates a request, and whatever reaches Caddy can
-drive every terminal and run any command as you. In the setups below, two lines in the Caddyfile
-are the only protection:
+With an external origin configured, every browser must pair (`bazhen pair`) before it reaches
+anything, but a paired phone can do anything you can, and the pairing form itself is open to
+whoever reaches Caddy. Pairing guards only the API: whoever gets past Caddy also reaches the
+web dev server itself, which serves this repository's source (its `/@fs/` paths among them), and
+Vite has had flaws that let a request read files outside it. Serving the built web app from the
+daemon, which is planned, takes Vite off this path and leaves only the paired API exposed; until
+then, keep this setup to testing on a network only you use. Two lines in the Caddyfile below
+keep strangers from reaching it at all:
 
 - **`bind`** makes Caddy listen on this machine's LAN address only. Without it, Caddy listens on
   ports 80 and 443 of every interface, a VPN's included, and anyone on any of those networks can

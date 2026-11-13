@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig, devices } from "@playwright/test";
 import { agentHomes, loginEnv } from "../support/agent-env.ts";
 import { requireDisposableHost } from "../support/disposable-host.ts";
+import { storageState } from "./pairing.ts";
 
 requireDisposableHost();
 
@@ -62,6 +63,8 @@ const env: Record<string, string> = {
   BAZHEN_HOME: process.env["BZ_E2E_HOME"],
   BAZHEN_PORT: String(daemonPort),
   BAZHEN_WEB_PORT: String(webPort),
+  // With no external origin, "auto" asks no browser to pair; the suite pairs, as a phone would.
+  BAZHEN_PAIRING: "always",
   PATH: `${claudeBin}:${process.env["PATH"] ?? ""}`,
   ...agentHomes(process.env["BZ_E2E_HOME"], process.env["BZ_E2E_WORK"]),
 };
@@ -81,8 +84,9 @@ export default defineConfig({
   testMatch: "*.spec.ts",
   workers: 1,
   reporter: "list",
+  globalSetup: "./global-setup.ts",
   globalTeardown: "./global-teardown.ts",
-  use: { baseURL: `http://127.0.0.1:${webPort}` },
+  use: { baseURL: `http://127.0.0.1:${webPort}`, storageState: storageState() },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: [
     {

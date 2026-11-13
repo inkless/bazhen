@@ -66,6 +66,7 @@ passthrough = ["ITERM_PROFILE"] # give agents these, though Bazhen would strip t
 external_origins = [
   "https://bazhen.example.com",
 ] # or BAZHEN_EXTERNAL_ORIGINS, comma-separated; see below
+pairing = "auto" # or "always" (BAZHEN_PAIRING); see below
 
 [notifications]
 desktop = true # show what needs you on this machine's desktop while no dashboard is in sight
@@ -103,12 +104,26 @@ for the daemon alone. Plain `http://` to another host is refused unless
 `web.allow_insecure_origins = true` (or `BAZHEN_ALLOW_INSECURE_ORIGINS=true`), since anyone on the
 network could read the traffic.
 
-Device pairing is not built yet, and nothing else authenticates a request. The Origin check
-stops only a browser page on another site: a request with no Origin, as curl or any script
-sends, passes it, so whatever reaches the route can type into your agents' terminals and run any
-command as you. Until pairing, the route's own access control (the tunnel's login, a proxy's
-access list) is the only protection. Keep it on a network only you use, behind that login, and
-never on the public internet.
+Once any external origin is set, every browser must pair before it can reach anything, on
+loopback too. A proxy in front can make any request look like loopback's, so loopback alone
+proves nothing. Run `bazhen pair` and enter the code it prints on the page. The code works once,
+for 5 minutes, and after 20 wrong tries it is burned and `bazhen pair` must issue another. A
+browser paired over HTTPS stays paired until it goes 30 days unused. One paired over plain HTTP
+stays paired for a day: a browser sends a cookie to every port on a host, so other servers on
+this machine's loopback can receive that one. `bazhen devices` lists paired browsers, and
+`bazhen devices revoke <id>` ends one, closing the views it has open. Pairing guards the route,
+but a paired phone can do anything you can: never put the route on the public internet. Limit
+who can reach it with the route's own filter, such as Caddy's `remote_ip` matcher, which also
+keeps strangers away from the pairing form.
+
+With no external origin (`web.pairing = "auto"`, the default), Bazhen serves loopback only and
+asks no browser to pair: any process or user on this machine that can reach the daemon's port
+can drive your agents, as `bazhen doctor` says. A request a proxy forwarded from another
+machine (its `X-Forwarded-For` or `Forwarded` header names one) must pair whatever the setting,
+and the dev server won't start with an external origin the daemon doesn't have. A forwarder that
+adds no such header, such as `ssh -R` or `socat` onto the daemon's or the dev server's port, isn't
+noticed: with one, set `web.pairing = "always"`. On a machine other people log in to, set
+`web.pairing = "always"` (or `BAZHEN_PAIRING=always`) to require pairing on loopback too.
 
 ## The inbox
 

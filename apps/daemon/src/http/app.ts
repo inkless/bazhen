@@ -28,6 +28,7 @@ import {
   HealthResponse,
   LaunchAgentRequest,
   PROTOCOL_VERSION,
+  DEV_ORIGINS_HEADER,
   PairRequest,
   SendMessageRequest,
   type AnswerAttentionResponse,
@@ -69,7 +70,14 @@ import { ShellBusy, ShellOpenFailed, ShellsUnsettled, UnknownShell } from "../sh
 import { AttentionRefused } from "../attention/inbox.ts";
 import { MailTooLong, UnknownTask } from "../tasks/tasks.ts";
 import { refusal, type Allowlists } from "./guard.ts";
-import { deviceCookie, tokenFrom, type DeviceAuth } from "../auth/devices.ts";
+import {
+  arrivedRemotely,
+  deviceCookie,
+  mustPair,
+  tokenFrom,
+  type DeviceAuth,
+  type DeviceGate,
+} from "../auth/devices.ts";
 import type { PairingCodes } from "../auth/pairing.ts";
 
 export interface AppDeps {
@@ -80,8 +88,8 @@ export interface AppDeps {
   readonly allow: Allowlists | null;
   /** Where a browser trades a pairing code for a device; absent on the Unix socket. */
   readonly pairing?: { readonly codes: PairingCodes; readonly devices: DeviceAuth };
-  /** Every request but the pairing exchange must come from a paired device (§9.1, §9.2). */
-  readonly requireDevice?: DeviceAuth;
+  /** When a request other than the pairing exchange must come from a paired device (§9.2). */
+  readonly gate?: DeviceGate;
   readonly state: () => StateSnapshot;
   readonly launch: (req: LaunchAgentRequest) => Promise<LaunchAgentResponse>;
   readonly send: (agentId: string, req: SendMessageRequest) => SendMessageResponse;
@@ -153,28 +161,37 @@ export function createApp(deps: AppDeps): Hono {
       const host = c.req.header("host");
       const origin = c.req.header("origin");
       const acting = !SAFE_METHODS.has(c.req.method) || c.req.header("upgrade") !== undefined;
-      const refused = refusal(allow, { host, origin, acting });
+      const devOrigins = c.req.header(DEV_ORIGINS_HEADER);
+      const refused = refusal(allow, { host, origin, acting, devOrigins });
       if (refused === "host_not_allowed") return fail(c, 421, refused, host ?? "");
       if (refused !== null) return fail(c, 403, refused, origin ?? "");
       return next();
     });
   }
 
-  const { requireDevice } = deps;
-  if (requireDevice !== undefined) {
+  const { gate } = deps;
+  if (gate !== undefined) {
     app.use("*", async (c, next) => {
       if (c.req.method === "POST" && c.req.path === PAIRING_PATH) return next();
-      const token = tokenFrom(c.req.header("cookie"));
-      const verified = requireDevice.verify(token);
-      if (verified === null || token === undefined)
+      if (!mustPair(gate, (name) => c.req.header(name))) return next();
+      const origin = c.req.header("origin");
+      // A page elsewhere can't even read; a paired browser acts only from an allowed origin,
+      // which it always sends then. SameSite is the second layer.
+      if (origin !== undefined && !allow?.origins.includes(origin)) {
+        return fail(c, 403, "origin_not_allowed", origin);
+      }
+      const presented = tokenFrom(c.req.header("cookie"));
+      const verified = gate.devices.verify(presented, {
+        remote: arrivedRemotely((name) => c.req.header(name)),
+      });
+      if (verified === null || presented === undefined)
         return fail(c, 401, "unpaired", "pair this browser: run `bazhen pair`");
-      // A paired browser acts only from an allowed origin; SameSite is the second layer.
-      if (!SAFE_METHODS.has(c.req.method) && c.req.header("origin") === undefined) {
+      if (!SAFE_METHODS.has(c.req.method) && origin === undefined) {
         return fail(c, 403, "origin_not_allowed", "");
       }
       await next();
       if (verified.refresh)
-        c.header("set-cookie", deviceCookie(token, verified.device.secure), {
+        c.header("set-cookie", deviceCookie(presented.token, verified.device.secure), {
           append: true,
         });
     });

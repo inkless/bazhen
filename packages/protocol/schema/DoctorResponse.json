@@ -136,6 +136,26 @@
         },
         "allowInsecureOrigins": {
           "type": "boolean"
+        },
+        "pairing": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "always"
+              ]
+            },
+            "required": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "mode",
+            "required"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [

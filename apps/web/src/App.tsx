@@ -1,19 +1,24 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { HealthResponse, isCompatible } from "@bazhen/protocol";
+import { noticeUnpaired, onUnpaired } from "./api.ts";
 import { Dashboard } from "./Dashboard.tsx";
+import { Pairing } from "./Pairing.tsx";
 import { ThemeSwitch } from "./ui/ThemeSwitch.tsx";
 
 type Status =
   | { kind: "loading" }
+  | { kind: "unpaired" }
   | { kind: "ok"; health: HealthResponse }
   | { kind: "error"; message: string };
 
 export function App() {
   const [status, setStatus] = useState<Status>({ kind: "loading" });
 
-  useEffect(() => {
+  const probe = useCallback(() => {
     fetch("/v1/health")
+      .then(noticeUnpaired)
       .then(async (res) => {
+        if (res.status === 401) return;
         if (!res.ok) throw new Error(`daemon answered ${res.status}`);
         const health = HealthResponse.parse(await res.json());
         if (!isCompatible(health.protocolVersion)) {
@@ -25,6 +30,11 @@ export function App() {
       })
       .catch((err: unknown) => setStatus({ kind: "error", message: String(err) }));
   }, []);
+
+  // Any answer that says this browser must pair, from the probe or a later request, as after
+  // `bazhen devices revoke`, swaps the dashboard for the pairing form.
+  useEffect(() => onUnpaired(() => setStatus({ kind: "unpaired" })), []);
+  useEffect(probe, [probe]);
 
   return (
     <main>
@@ -47,6 +57,7 @@ export function App() {
         )}
         <ThemeSwitch />
       </header>
+      {status.kind === "unpaired" && <Pairing onPaired={probe} />}
       {status.kind === "ok" && <Dashboard />}
     </main>
   );

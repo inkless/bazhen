@@ -25,6 +25,10 @@ function auth() {
   return { path, store, clock, logged, devices };
 }
 
+/** A token as the HTTPS cookie presents it; `overHttp` as the loopback one does. */
+const https = (token: string) => ({ token, secure: true });
+const overHttp = (token: string) => ({ token, secure: false });
+
 /** `token` with its last character changed. */
 const tamper = (token: string) => `${token.slice(0, -1)}${token.endsWith("A") ? "B" : "A"}`;
 
@@ -42,9 +46,9 @@ describe("DeviceAuth", () => {
     const { token, deviceId } = devices.pair("Phone", true);
     const laptop = devices.pair("Laptop", true);
     expect([
-      devices.verify(token)?.device.id,
-      devices.verify(laptop.token)?.device.id,
-      devices.verify(tamper(token)),
+      devices.verify(https(token))?.device.id,
+      devices.verify(https(laptop.token))?.device.id,
+      devices.verify(https(tamper(token))),
       devices.verify(undefined),
     ]).toEqual([deviceId, laptop.deviceId, null, null]);
   });
@@ -95,7 +99,7 @@ describe("DeviceAuth", () => {
     const { devices } = auth();
     const { token, deviceId } = devices.pair("Phone", true);
     devices.revoke(deviceId);
-    expect([devices.verify(token), devices.list()]).toEqual([null, []]);
+    expect([devices.verify(https(token)), devices.list()]).toEqual([null, []]);
   });
 
   it("records one revocation however often it is asked for, and refuses an unknown id", () => {
@@ -123,18 +127,18 @@ describe("DeviceAuth", () => {
     const { devices, clock } = auth();
     const { token } = devices.pair("Phone", true);
     clock.now += SECURE_IDLE_MS - 1;
-    const before = devices.verify(token, { touch: false });
+    const before = devices.verify(https(token), { touch: false });
     clock.now += 1;
-    expect([before?.device.name, devices.verify(token)]).toEqual(["Phone", null]);
+    expect([before?.device.name, devices.verify(https(token))]).toEqual(["Phone", null]);
   });
 
   it("lapses a device paired over plain HTTP after a day unused", () => {
     const { devices, clock } = auth();
     const { token } = devices.pair("Laptop", false);
     clock.now += LOOPBACK_IDLE_MS - 1;
-    const before = devices.verify(token, { touch: false });
+    const before = devices.verify(overHttp(token), { touch: false });
     clock.now += 1;
-    expect([before?.device.name, devices.verify(token)]).toEqual(["Laptop", null]);
+    expect([before?.device.name, devices.verify(overHttp(token))]).toEqual(["Laptop", null]);
   });
 
   it("closes a lapsed device's sockets when swept, and leaves a live one's open", () => {
@@ -153,19 +157,31 @@ describe("DeviceAuth", () => {
     const { devices, clock } = auth();
     const { token } = devices.pair("Phone", true);
     clock.now += TOUCH_EVERY_MS - 1;
-    expect(devices.verify(token)?.refresh).toBe(false);
+    expect(devices.verify(https(token))?.refresh).toBe(false);
     clock.now += 1;
-    expect(devices.verify(token)?.refresh).toBe(true);
+    expect(devices.verify(https(token))?.refresh).toBe(true);
     clock.now += SECURE_IDLE_MS - 1;
-    expect(devices.verify(token)).not.toBeNull();
+    expect(devices.verify(https(token))).not.toBeNull();
+  });
+
+  it("accepts a token only in the cookie of the scheme its device was paired over", () => {
+    const { devices } = auth();
+    const phone = devices.pair("Phone", true).token;
+    const laptop = devices.pair("Laptop", false).token;
+    expect([
+      devices.verify(https(phone))?.device.name,
+      devices.verify(overHttp(phone)),
+      devices.verify(overHttp(laptop))?.device.name,
+      devices.verify(https(laptop)),
+    ]).toEqual(["Phone", null, "Laptop", null]);
   });
 
   it("records no use for a caller that can't set the cookie again, such as an upgrade", () => {
     const { devices, clock } = auth();
     const { token } = devices.pair("Phone", true);
     clock.now += TOUCH_EVERY_MS;
-    devices.verify(token, { touch: false });
-    expect(devices.verify(token)?.refresh).toBe(true);
+    devices.verify(https(token), { touch: false });
+    expect(devices.verify(https(token))?.refresh).toBe(true);
   });
 });
 
@@ -189,6 +205,6 @@ describe("the device cookie", () => {
       tokenFrom(`theme=dark; __Host-bazhen_device=${token}`),
       tokenFrom(`bazhen_device=${token}`),
       tokenFrom("theme=dark"),
-    ]).toEqual([token, token, undefined]);
+    ]).toEqual([https(token), overHttp(token), undefined]);
   });
 });

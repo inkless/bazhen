@@ -20,7 +20,7 @@ const refuse = () => {
 /** The `name=value` a response's Set-Cookie carries, or "" for none. */
 const cookieOf = (res: Response) => (res.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
 
-function daemon() {
+function daemon(always = true) {
   const clock = { now: Date.parse("2026-11-12T00:00:00.000Z") };
   const store = Store.open(tempDb());
   const devices = new DeviceAuth(store, { now: () => new Date(clock.now), log: () => {} });
@@ -66,7 +66,7 @@ function daemon() {
       escalate: refuse,
     },
     pairing: { codes, devices },
-    requireDevice: devices,
+    gate: { devices, always },
   };
   const app = createApp(deps);
   const request = (
@@ -92,7 +92,53 @@ function daemon() {
   return { request, pair, paired, codes, devices, clock };
 }
 
+describe("device auth when pairing is not always required", () => {
+  it("serves loopback's own requests unpaired, and asks one a proxy forwarded from elsewhere", async () => {
+    const { request } = daemon(false);
+    const statuses = await Promise.all(
+      [
+        {},
+        { "x-forwarded-for": "127.0.0.1" },
+        { "x-forwarded-for": "192.168.1.30, 127.0.0.1" },
+      ].map(async (headers) => (await request("/v1/state", { headers })).status),
+    );
+    expect(statuses).toEqual([200, 200, 401]);
+  });
+
+  it("asks for pairing on a request whose Forwarded header names another machine", async () => {
+    const { request } = daemon(false);
+    const res = await request("/v1/state", {
+      headers: { forwarded: "for=192.168.1.30;proto=https" },
+    });
+    expect(res.status).toBe(401);
+  });
+});
+
 describe("device auth on the TCP app", () => {
+  it("takes a loopback-paired token on direct loopback only, an HTTPS-paired one forwarded too", async () => {
+    const { request, pair, paired, codes } = daemon();
+    const { cookie } = await paired();
+    const externalHost = new URL(external).host;
+    const https = cookieOf(await pair(codes.issue().code, external, { host: externalHost }));
+    const forwarded = { "x-forwarded-for": "192.168.1.30, 127.0.0.1" };
+    const statuses = await Promise.all(
+      [
+        { cookie },
+        { cookie, ...forwarded },
+        { cookie, origin: external, host: externalHost },
+        { cookie: https, host: externalHost, ...forwarded },
+      ].map(async (headers) => (await request("/v1/state", { headers })).status),
+    );
+    expect(statuses).toEqual([200, 401, 401, 200]);
+  });
+
+  it("refuses a paired browser's read from a page on another origin", async () => {
+    const { request, paired } = daemon();
+    const { cookie } = await paired();
+    const res = await request("/v1/state", { headers: { cookie, origin: "http://evil.example" } });
+    expect(res.status).toBe(403);
+  });
+
   it("answers an unpaired browser 401 everywhere, health and reads included", async () => {
     const { request } = daemon();
     const answers = await Promise.all(
@@ -200,9 +246,9 @@ afterEach(() => {
   server?.close();
 });
 
-async function serving() {
+async function serving(always = true) {
   const store = Store.open(tempDb());
-  const devices = new DeviceAuth(store);
+  const devices = new DeviceAuth(store, { log: () => {} });
   const wss = new WebSocketServer({ noServer: true });
   const served = await serveUpgrades(
     [
@@ -211,7 +257,7 @@ async function serving() {
         upgrade: (req, socket, head) => wss.handleUpgrade(req, socket, head, (ws) => ws.send("hi")),
       },
     ],
-    devices,
+    { devices, always },
   );
   server = served.server;
   const { token, deviceId } = devices.pair("Phone", false);
@@ -224,6 +270,17 @@ async function serving() {
 }
 
 describe("device auth on WebSocket upgrades", () => {
+  it("lets loopback's own upgrades through unpaired when not always, but not a forwarded one", async () => {
+    const { url, pageOrigin } = await serving(false);
+    const outcomes = [
+      await upgradeOutcome(new WebSocket(url, { origin: pageOrigin })),
+      await upgradeOutcome(
+        new WebSocket(url, { origin: pageOrigin, headers: { "x-forwarded-for": "192.168.1.30" } }),
+      ),
+    ];
+    expect(outcomes).toEqual(["open", 401]);
+  });
+
   it("refuses an upgrade without a paired device's cookie, 401, or without Origin, 403", async () => {
     const { url, pageOrigin, cookie } = await serving();
     const outcomes = [
@@ -232,6 +289,15 @@ describe("device auth on WebSocket upgrades", () => {
       await upgradeOutcome(new WebSocket(url, { origin: pageOrigin, headers: { cookie } })),
     ];
     expect(outcomes).toEqual([401, 403, "open"]);
+  });
+
+  it("refuses a loopback-paired token on an upgrade a proxy forwarded", async () => {
+    const { url, pageOrigin, cookie } = await serving();
+    const forwarded = new WebSocket(url, {
+      origin: pageOrigin,
+      headers: { cookie, "x-forwarded-for": "192.168.1.30" },
+    });
+    expect(await upgradeOutcome(forwarded)).toBe(401);
   });
 
   it("closes a revoked device's open sockets", async () => {

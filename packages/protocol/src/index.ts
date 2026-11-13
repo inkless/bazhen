@@ -59,6 +59,11 @@ export const DoctorResponse = z.object({
       externalOrigins: z.array(z.string()),
       from: z.enum(["BAZHEN_EXTERNAL_ORIGINS", "config"]).nullable(),
       allowInsecureOrigins: z.boolean(),
+      /**
+       * `web.pairing`, and whether browsers must pair under it: always with an external origin.
+       * Absent from a daemon before 1.29.
+       */
+      pairing: z.object({ mode: z.enum(["auto", "always"]), required: z.boolean() }).optional(),
     })
     .optional(),
   /**

@@ -1,7 +1,8 @@
 import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
+import { DEV_ORIGINS_HEADER } from "@bazhen/protocol";
 import { refusal, type Allowlists } from "./guard.ts";
-import { tokenFrom, type DeviceAuth } from "../auth/devices.ts";
+import { arrivedRemotely, mustPair, tokenFrom, type DeviceGate } from "../auth/devices.ts";
 
 /** The same statuses as the HTTP surface, so a refused upgrade reads like a refused request. */
 const REFUSAL_STATUS = {
@@ -26,24 +27,37 @@ export function refuseUpgrade(socket: Duplex, status: string): void {
 }
 
 /**
- * The server's one `upgrade` listener: every WebSocket passes the Host and Origin guard and, given
- * `devices`, comes from a paired browser, which always sends Origin on an upgrade. The device
+ * The server's one `upgrade` listener: every WebSocket passes the Host and Origin guard and, when
+ * `gate` asks, comes from a paired browser, which always sends Origin on an upgrade. The device
  * holds the socket, so revoking it closes the socket.
  */
 export function upgrades(
   allow: Allowlists,
   routes: readonly UpgradeRoute[],
-  devices: DeviceAuth | null = null,
+  gate: DeviceGate | null = null,
 ) {
   return (req: IncomingMessage, socket: Duplex, head: Buffer): void => {
     const { host, origin } = req.headers;
-    const refused = refusal(allow, { host, origin, acting: true });
+    const devOrigins = req.headers[DEV_ORIGINS_HEADER];
+    const refused = refusal(allow, {
+      host,
+      origin,
+      acting: true,
+      devOrigins: Array.isArray(devOrigins) ? devOrigins.join(",") : devOrigins,
+    });
     if (refused !== null) return refuseUpgrade(socket, REFUSAL_STATUS[refused]);
-    if (devices !== null) {
-      const verified = devices.verify(tokenFrom(req.headers.cookie), { touch: false });
+    const header = (name: string) => {
+      const value = req.headers[name];
+      return Array.isArray(value) ? value.join(", ") : value;
+    };
+    if (gate !== null && mustPair(gate, header)) {
+      const verified = gate.devices.verify(tokenFrom(req.headers.cookie), {
+        touch: false,
+        remote: arrivedRemotely(header),
+      });
       if (verified === null) return refuseUpgrade(socket, "401 Unauthorized");
       if (origin === undefined) return refuseUpgrade(socket, REFUSAL_STATUS.origin_not_allowed);
-      devices.hold(verified.device.id, socket);
+      gate.devices.hold(verified.device.id, socket);
     }
     const url = new URL(req.url ?? "/", "http://daemon");
     for (const route of routes) {

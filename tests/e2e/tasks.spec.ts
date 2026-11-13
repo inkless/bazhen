@@ -53,9 +53,13 @@ test("gives an agent a task from the page, shows it on the agent, unassigns it, 
   await expect(page.getByRole("region", { name: "tasks" })).toContainText("No open tasks.");
 });
 
-/** Makes a task through the daemon's API, as an agent or another page would; answers its id. */
+/**
+ * Makes a task through the daemon's API, as another page would; answers its id. It sends the
+ * page's Origin, as a browser does on a POST: a paired browser's action without one is refused.
+ */
 async function makeTask(page: Page, title: string, extra: object = {}): Promise<string> {
   const res = await page.request.post("/v1/tasks", {
+    headers: { origin: new URL(page.url()).origin },
     data: { idempotencyKey: crypto.randomUUID(), title, brief: `${title}, in full.`, ...extra },
   });
   expect(res.ok()).toBe(true);
