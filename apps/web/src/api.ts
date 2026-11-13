@@ -1,7 +1,10 @@
 import {
   AgentCommandResponse,
   AnswerAttentionResponse,
+  DismissAttentionResponse,
   ErrorResponse,
+  ReplyAttentionResponse,
+  ResendAttentionResponse,
   EventFrame,
   LaunchAgentResponse,
   PROTOCOL_VERSION,
@@ -145,6 +148,17 @@ export const sendMessage = async (agentId: string, body: string) =>
 
 export const answer = async (attentionId: string, decision: ApprovalDecision) =>
   AnswerAttentionResponse.parse(await act(`/v1/attention/${attentionId}/answer`, { decision }));
+
+/** A reply to an item: its question's answer, or mail to its agent. */
+export const reply = async (attentionId: string, body: string) =>
+  ReplyAttentionResponse.parse(await act(`/v1/attention/${attentionId}/reply`, { body }));
+
+/** Sends an undelivered message's own text again, as a new message. */
+export const resend = async (attentionId: string) =>
+  ResendAttentionResponse.parse(await act(`/v1/attention/${attentionId}/resend`, {}));
+
+export const dismiss = async (attentionId: string) =>
+  DismissAttentionResponse.parse(await act(`/v1/attention/${attentionId}/dismiss`, {}));
 
 /** Names the generation the UI saw, so a command meant for an earlier incarnation is refused. */
 export const closeAgent = async (agentId: string, generation: number) =>

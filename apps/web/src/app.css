@@ -32,7 +32,9 @@ main {
 
 .launch,
 .workspace form,
-.inbox p {
+.inbox-line,
+.inbox-actions,
+.inbox-reply {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -167,14 +169,76 @@ main {
   color: var(--color-danger);
 }
 
-.inbox h2 {
+/* Same shape as a state chip; the tone says how much the item holds an agent up. */
+.badge {
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  box-shadow: inset 0 0 0 1px var(--color-border-strong);
+  font-size: var(--font-size-xs);
+}
+
+.badge-warn {
+  box-shadow: none;
+  background: var(--color-warn-subtle);
+  color: var(--color-warn);
+}
+
+.badge-danger {
+  box-shadow: none;
+  background: var(--color-danger-subtle);
+  color: var(--color-danger);
+}
+
+.inbox-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.inbox-head h2 {
   margin: 0;
+  font-size: var(--font-size-lg);
+}
+
+.inbox-head .note {
+  color: var(--color-text-muted);
   font-size: var(--font-size-sm);
 }
 
-.inbox p {
+.inbox-head .spacer {
+  flex: 1;
+}
+
+.inbox-list {
+  margin: var(--space-2) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.inbox-item {
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-border-strong);
+}
+
+.inbox-item p {
   margin: var(--space-1) 0;
-  font-size: var(--font-size-sm);
+}
+
+.inbox-item .summary {
+  overflow-wrap: anywhere;
+}
+
+.inbox-list .waited {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.inbox-reply textarea {
+  min-width: min(40ch, 100%);
+}
+
+.agent-attention {
+  margin-top: 0;
 }
 
 /* The rail's links stand alone, so they keep a finger-sized target. */
