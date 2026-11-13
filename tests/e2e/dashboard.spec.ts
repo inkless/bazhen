@@ -1,15 +1,6 @@
 import { hostname } from "node:os";
 import { expect, test, type Page } from "@playwright/test";
-import { givePageAgentTranscript, kill, screen } from "./page.ts";
-
-/** Launches Claude Code from the page and waits for its TUI; answers the agent's id. */
-async function launch(page: Page): Promise<string> {
-  await page.goto("/");
-  await page.getByPlaceholder("/path/to/project").fill(String(process.env["BZ_E2E_WORK"]));
-  await page.getByRole("button", { name: "Launch Claude Code" }).click();
-  await expect.poll(() => screen(page), { timeout: 20_000 }).toContain("Claude Code");
-  return new URL(page.url()).hash.replace("#/agent/", "");
-}
+import { givePageAgentTranscript, kill, launch, screen } from "./page.ts";
 
 /** Launches an agent from outside the page, as another device would; answers the status. */
 function launchElsewhere(page: Page): Promise<number> {

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Dialog, DialogTrigger, Heading, Modal, ModalOverlay } from "react-aria-components";
 import { Button } from "./Button.tsx";
 
@@ -13,18 +13,28 @@ export function ConfirmDialog({
   message,
   confirm,
   onConfirm,
+  onOpen,
   isDisabled,
 }: {
   trigger: string;
   title: string;
-  message: string;
+  /** What the confirm does, in words, or a body of its own, as a list of what it takes with it. */
+  message: ReactNode;
   confirm: string;
   onConfirm: () => void;
+  /** Each time it opens, as for a body that starts afresh rather than as it was left. */
+  onOpen?: () => void;
   isDisabled: boolean;
 }) {
   const [confirmed, setConfirmed] = useState(false);
   return (
-    <DialogTrigger onOpenChange={(open) => open && setConfirmed(false)}>
+    <DialogTrigger
+      onOpenChange={(open) => {
+        if (!open) return;
+        setConfirmed(false);
+        onOpen?.();
+      }}
+    >
       <Button isDisabled={isDisabled}>{trigger}</Button>
       <ModalOverlay isDismissable className="modal-overlay">
         <Modal className="modal">
@@ -34,7 +44,7 @@ export function ConfirmDialog({
                 <Heading slot="title" className="dialog-title">
                   {title}
                 </Heading>
-                <p>{message}</p>
+                {typeof message === "string" ? <p>{message}</p> : message}
                 <div className="dialog-actions">
                   <Button onPress={close}>Cancel</Button>
                   <Button

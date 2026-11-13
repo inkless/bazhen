@@ -3,19 +3,35 @@ import { giveTranscript } from "../support/transcript.ts";
 
 type Hook = "screen" | "viewportTop" | "alternate" | "background" | "foregrounds";
 
-/** Reads one of the terminal view's test hooks: the page shows one terminal at a time. */
-const read = (page: Page, hook: Hook) =>
-  page.evaluate((name) => {
-    const views: unknown = Reflect.get(globalThis, "bazhenViews");
-    const view: unknown = Object.values(Object(views))[0];
-    const fn: unknown = Reflect.get(Object(view), name);
-    return typeof fn === "function" ? (fn() as unknown) : undefined;
-  }, hook);
+/**
+ * Reads one of a terminal view's test hooks: `terminalId`'s, or with none the page's first, as
+ * when it shows a single terminal.
+ */
+const read = (page: Page, hook: Hook, terminalId?: string) =>
+  page.evaluate(
+    ([name, id]) => {
+      const views: unknown = Reflect.get(globalThis, "bazhenViews");
+      const view: unknown =
+        id === undefined ? Object.values(Object(views))[0] : Reflect.get(Object(views), id);
+      const fn: unknown = Reflect.get(Object(view), name);
+      return typeof fn === "function" ? (fn() as unknown) : undefined;
+    },
+    [hook, terminalId] as const,
+  );
 
-/** The terminal's screen as text, read from xterm's buffer whichever renderer draws it. */
-export async function screen(page: Page): Promise<string> {
-  const text = await read(page, "screen");
+/** A terminal's screen as text, read from xterm's buffer whichever renderer draws it. */
+export async function screen(page: Page, terminalId?: string): Promise<string> {
+  const text = await read(page, "screen", terminalId);
   return typeof text === "string" ? text : "";
+}
+
+/** Launches Claude Code from the page and waits for its TUI; answers the agent's id. */
+export async function launch(page: Page): Promise<string> {
+  await page.goto("/");
+  await page.getByPlaceholder("/path/to/project").fill(String(process.env["BZ_E2E_WORK"]));
+  await page.getByRole("button", { name: "Launch Claude Code" }).click();
+  await expect.poll(() => screen(page), { timeout: 20_000 }).toContain("Claude Code");
+  return new URL(page.url()).hash.replace("#/agent/", "");
 }
 
 /** The buffer line at the top of the terminal's view: lower once it has scrolled back. */

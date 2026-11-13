@@ -157,7 +157,7 @@ export function Dashboard() {
             <>
               <AgentAttention state={state} agentId={agent.id} onOpen={select} failed={failed} />
               <AgentTasks state={state} agentId={agent.id} onOpenTask={openTask} />
-              <Workspace key={agent.id} agent={agent} failed={failed} />
+              <Workspace key={agent.id} agent={agent} shells={state.shells} failed={failed} />
             </>
           ) : (
             fleet !== null && (

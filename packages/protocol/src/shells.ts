@@ -62,6 +62,10 @@ export const OpenShellRequest = z
   });
 export type OpenShellRequest = z.infer<typeof OpenShellRequest>;
 
+/** A program the user was shown running in a shell, and chose to end with it. */
+export const BusyShell = z.object({ terminalId: Id("term"), program: z.string().max(200) });
+export type BusyShell = z.infer<typeof BusyShell>;
+
 /** Ends a shell and everything running in it; a lost shell is only taken off the list. */
 export const CloseShellRequest = z.object({
   idempotencyKey: IdempotencyKey,
@@ -71,6 +75,11 @@ export const CloseShellRequest = z.object({
    * close is refused as `busy`, naming that program, so the user is asked first.
    */
   confirmBusy: z.boolean().optional(),
+  /**
+   * The program the user was shown running, and confirmed: the close ends that one, and is still
+   * refused as `busy` if another runs by then (protocol 1.28).
+   */
+  confirmedProgram: z.string().max(200).optional(),
   /** As an agent's close: records closed a shell whose old server can't be shown gone. */
   force: z.boolean().optional(),
 });

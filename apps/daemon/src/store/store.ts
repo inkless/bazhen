@@ -196,6 +196,9 @@ function refFrom(
   return { terminalId, runtime: row.runtime, locator };
 }
 
+/** Agent states whose directory still holds their work, so a shell can be opened beside them. */
+export const LINKABLE: ReadonlySet<AgentState> = new Set(["running", "exited"]);
+
 /** A shell terminal as its lifecycle needs it. */
 export interface ShellTerminal {
   readonly terminalId: TerminalId;
@@ -928,6 +931,7 @@ export class Store {
               attachCommand: ref === null ? null : view.attachCommand(ref),
               themes: view.themes(HarnessId.parse(r.harness)),
               resumable: view.resumes(evidence),
+              canOpenShell: LINKABLE.has(AgentState.parse(r.state)),
               commands: offeredCommands(
                 {
                   state: AgentState.parse(r.state),

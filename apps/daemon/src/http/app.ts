@@ -299,7 +299,10 @@ export function createApp(deps: AppDeps): Hono {
     if (err instanceof AttentionUnavailable) return fail(c, 503, "unavailable", err.message);
     if (err instanceof UnknownAgent || err instanceof UnknownShell)
       return fail(c, 404, "not_found", err.message);
-    if (err instanceof ShellBusy) return fail(c, 409, "busy", err.message);
+    if (err instanceof ShellBusy) {
+      const body: ErrorResponse = { error: "busy", message: err.message, busy: [...err.busy] };
+      return c.json(body, 409);
+    }
     if (err instanceof ShellOpenFailed) return fail(c, 502, "launch_failed", err.message);
     if (err instanceof ShellsUnsettled) return fail(c, 503, "unavailable", err.message);
     if (err instanceof UnknownTask) return fail(c, 404, "not_found", err.message);

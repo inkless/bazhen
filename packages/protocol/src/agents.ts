@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { EnvironmentKind, Id, IdempotencyKey } from "./ids.ts";
 import { Attention, Message } from "./mail.ts";
-import { Shell } from "./shells.ts";
+import { BusyShell, Shell } from "./shells.ts";
 import { TuiTheme } from "./theme.ts";
 import { Assignment, Task } from "./tasks.ts";
 
@@ -137,6 +137,8 @@ export const Agent = z.object({
    * fresh session only when asked to (protocol 1.27).
    */
   resumable: z.boolean().default(false),
+  /** Whether a shell can be opened beside it now: its directory still holds its work (protocol 1.28). */
+  canOpenShell: z.boolean().default(false),
 });
 export type Agent = z.infer<typeof Agent>;
 
@@ -178,6 +180,11 @@ export const CloseAgentRequest = z.object({
    * it such a close is refused as `busy`, naming those programs (protocol 1.19).
    */
   confirmBusy: z.boolean().optional(),
+  /**
+   * The programs the user was shown running in the shells it takes, and confirmed: any of those
+   * shells running something else by then is refused as `busy` (protocol 1.28).
+   */
+  confirmedBusy: z.array(BusyShell).optional(),
 });
 export type CloseAgentRequest = z.infer<typeof CloseAgentRequest>;
 
@@ -260,6 +267,8 @@ export const ErrorResponse = z.object({
     "rate_limited",
   ]),
   message: z.string(),
+  /** With `busy`: each shell, and what runs in it, that the close would end (protocol 1.28). */
+  busy: z.array(BusyShell).optional(),
 });
 export type ErrorResponse = z.infer<typeof ErrorResponse>;
 

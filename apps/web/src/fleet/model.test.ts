@@ -25,6 +25,7 @@ const agentIn = (project: string, state: AgentState = "running", over: Partial<A
   attachCommand: "tmux attach",
   commands: [],
   resumable: true,
+  canOpenShell: false,
   ...over,
 });
 

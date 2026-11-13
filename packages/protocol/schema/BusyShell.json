@@ -1,0 +1,20 @@
+{
+  "$id": "BusyShell",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "terminalId": {
+      "type": "string",
+      "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+    },
+    "program": {
+      "type": "string",
+      "maxLength": 200
+    }
+  },
+  "required": [
+    "terminalId",
+    "program"
+  ],
+  "additionalProperties": false
+}

@@ -89,7 +89,12 @@ async function setup() {
   const linked = async () =>
     (await shells.open({ idempotencyKey: `linked-${++keys}`, linkedAgentId: agentId })).terminalId;
   const closeAgent = (
-    asked: { keepShells?: string[]; confirmBusy?: boolean; idempotencyKey?: string } = {},
+    asked: {
+      keepShells?: string[];
+      confirmBusy?: boolean;
+      confirmedBusy?: { terminalId: string; program: string }[];
+      idempotencyKey?: string;
+    } = {},
   ) =>
     shells.closeAgent(
       agentId,
@@ -123,6 +128,13 @@ async function setup() {
 
 const carried = async (runtime: FakeRuntime, terminalId: string) =>
   (await runtime.inventory()).some((e) => e.ref.terminalId === terminalId);
+
+/** A shell close the user confirmed after being shown nvim running in it. */
+const confirmingNvim = (key: string) => ({
+  idempotencyKey: key,
+  generation: 0,
+  confirmedProgram: "nvim",
+});
 
 const agentClosed = (store: Store, agentId: string) => {
   store.append({ type: "agent.closing", entityId: agentId, actor: "user", payload: {} });
@@ -191,6 +203,16 @@ describe("closing a shell", () => {
     runtime.exitProcess(refOf(terminalId));
     await shells.close(terminalId, { idempotencyKey: "c", generation: 0 });
     expect([stateOf(terminalId), await carried(runtime, terminalId)]).toEqual(["closed", false]);
+  });
+
+  it("closes for the program the user confirmed, and refuses one started since", async () => {
+    const { shells, runtime, refOf, stateOf, open } = await setup();
+    const [confirmed, replaced] = [await open("a"), await open("b")];
+    runtime.runInForeground(refOf(confirmed), "nvim");
+    runtime.runInForeground(refOf(replaced), "htop");
+    await shells.close(confirmed, confirmingNvim("c1"));
+    await expect(shells.close(replaced, confirmingNvim("c2"))).rejects.toThrow(ShellBusy);
+    expect([stateOf(confirmed), stateOf(replaced)]).toEqual(["closed", "running"]);
   });
 
   it("closes a shell at its prompt without asking, and lists it no more", async () => {
@@ -281,6 +303,19 @@ describe("a shell beside an agent", () => {
       "running",
       "running",
     ]);
+  });
+
+  it("closes an agent for the programs confirmed in its shells, and names any other", async () => {
+    const { runtime, refOf, store, agentId, linked, closeAgent } = await setup();
+    const [shown, started] = [await linked(), await linked()];
+    runtime.runInForeground(refOf(shown), "nvim");
+    runtime.runInForeground(refOf(started), "npm");
+    const refused = closeAgent({ confirmedBusy: [{ terminalId: shown, program: "nvim" }] });
+    await expect(refused).rejects.toThrow(ShellBusy);
+    await expect(refused).rejects.toMatchObject({
+      busy: [{ terminalId: started, program: "npm" }],
+    });
+    expect(store.agentTerminal({ agentId })?.state).toBe("running");
   });
 
   it("answers a repeated close the same, the kept shell standalone by then", async () => {
