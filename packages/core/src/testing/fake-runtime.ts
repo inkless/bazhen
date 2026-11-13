@@ -189,6 +189,10 @@ export class FakeRuntime implements RuntimeAdapter {
     return () => void this.listeners.delete(cb);
   }
 
+  attachCommand(ref: RuntimeRef): string {
+    return `fake-attach ${ref.terminalId}`;
+  }
+
   /** What the terminal was created or last respawned with. */
   specOf(ref: RuntimeRef): TerminalSpec {
     return this.terminalOf(ref).spec;

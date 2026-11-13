@@ -197,6 +197,25 @@
         "observedAt"
       ],
       "additionalProperties": false
+    },
+    "attachCommand": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "commands": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "close",
+          "respawn",
+          "signal"
+        ]
+      }
     }
   },
   "required": [

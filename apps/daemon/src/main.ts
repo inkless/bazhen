@@ -2,6 +2,7 @@ import { chmodSync, mkdirSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
+import { hostname } from "node:os";
 import { getRequestListener, serve } from "@hono/node-server";
 import { LocalEnvironment } from "@bazhen/env-local";
 import { ClaudeCodeHarness } from "@bazhen/harness-claude-code";
@@ -42,7 +43,7 @@ import { createApp, type AppDeps } from "./http/app.ts";
 import { upgrades } from "./http/upgrades.ts";
 import { socketApp } from "./socket/routes.ts";
 import { nodePtySpawner } from "./pty/node-pty.ts";
-import { Store } from "./store/store.ts";
+import { Store, type SnapshotView } from "./store/store.ts";
 
 const APP_VERSION = "0.1.0";
 const HOSTNAME = "127.0.0.1";
@@ -134,11 +135,16 @@ const allow = {
   hosts: allowedHosts,
   origins: [...allowedHosts, ...webDevHosts].map((host) => `http://${host}`),
 };
+const snapshotView: SnapshotView = {
+  host: (kind) => (kind === "local" ? hostname() : ""),
+  attachCommand: (ref) => runtime.attachCommand(ref),
+  resumable: environment.resumable,
+};
 const commands = {
   appVersion: APP_VERSION,
   schemaVersion: () => store.schemaVersion(),
   runtime,
-  state: () => store.snapshot(),
+  state: () => store.snapshot(snapshotView),
   launch: (req) => launchAgent({ store, environment, size: DEFAULT_SIZE, home: inputs.home }, req),
   send: (agentId, req) => mailbox.send(agentId, req),
   answer: (attentionId, req) => approvals.answer(attentionId, req),
@@ -185,7 +191,7 @@ const socketListener = getRequestListener(
       const { refused } = await runtime.replaceEnv(next.env);
       captured = { ...next, at: new Date().toISOString(), source: "refresh" };
       codexCliRead = codexCliVersion(next.env);
-      const running = store.snapshot().agents.filter((a) => a.state === "running");
+      const running = store.snapshot(snapshotView).agents.filter((a) => a.state === "running");
       return {
         capturedAt: captured.at,
         kept: Object.keys(next.env).length,

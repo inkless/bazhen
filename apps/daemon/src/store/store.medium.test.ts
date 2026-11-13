@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { InvalidTransition, newId } from "@bazhen/core";
-import { age, register, settled, visit, withAgent } from "../testing/fixtures.ts";
+import { age, register, settled, visit, withAgent, testView } from "../testing/fixtures.ts";
 import { MIGRATIONS } from "./migrations.ts";
 import { UnknownEntity } from "./projections.ts";
 import { LATEST_SCHEMA_VERSION, SchemaTooNew, Store, UnknownAgent } from "./store.ts";
@@ -75,9 +75,9 @@ describe("Store", () => {
   it("records no event when its projection refuses it", () => {
     const store = Store.open(dbPath());
     launch(store, withEnvironment(store));
-    const before = store.snapshot().eventId;
+    const before = store.snapshot(testView).eventId;
     expect(() => store.append(running(newId("agent")))).toThrow(UnknownEntity);
-    expect(store.snapshot().eventId).toBe(before);
+    expect(store.snapshot(testView).eventId).toBe(before);
     store.close();
   });
 
@@ -85,9 +85,11 @@ describe("Store", () => {
     const path = dbPath();
     const store = Store.open(path);
     const { agentId, terminalId } = launch(store, withEnvironment(store));
-    expect(store.snapshot().agents).toMatchObject([{ id: agentId, state: "starting", terminalId }]);
+    expect(store.snapshot(testView).agents).toMatchObject([
+      { id: agentId, state: "starting", terminalId },
+    ]);
     store.append(running(agentId));
-    expect(store.snapshot().agents).toMatchObject([{ id: agentId, state: "running" }]);
+    expect(store.snapshot(testView).agents).toMatchObject([{ id: agentId, state: "running" }]);
     expect(() => store.append(running(agentId))).toThrow(InvalidTransition);
     store.close();
     const raw = new DatabaseSync(path);
@@ -114,7 +116,7 @@ describe("Store", () => {
   it("orders events by id for resumable streams", () => {
     const store = Store.open(dbPath());
     const environmentId = withEnvironment(store);
-    const a = store.snapshot().eventId;
+    const a = store.snapshot(testView).eventId;
     launch(store, environmentId);
     expect(store.events(a).map((e) => e.type)).toEqual(["agent.launched"]);
     store.close();
@@ -135,19 +137,80 @@ describe("Store", () => {
 
   it("rolls a transaction back whole, nested appends included", () => {
     const store = Store.open(dbPath());
-    const before = store.snapshot().eventId;
+    const before = store.snapshot(testView).eventId;
     expect(() =>
       store.transaction(() => {
         withEnvironment(store);
         throw new Error("abandoned");
       }),
     ).toThrow("abandoned");
-    expect(store.snapshot()).toMatchObject({ eventId: before, environments: [] });
+    expect(store.snapshot(testView)).toMatchObject({ eventId: before, environments: [] });
     store.close();
   });
 });
 
 const CUTOFF = new Date("2026-02-01T00:00:00.000Z");
+
+const exited = (agentId: string) => ({
+  type: "agent.exited" as const,
+  entityId: agentId,
+  actor: "system",
+  payload: { exit: { type: "exited" as const, code: 0 } },
+});
+
+describe("Store snapshot view", () => {
+  const view = {
+    host: (kind: string) => `${kind}-host`,
+    attachCommand: (ref: { locator: Record<string, string> }) => `attach ${ref.locator.session}`,
+    resumable: ["claude-code" as const],
+  };
+
+  it("names each environment's host as the view says", () => {
+    const store = Store.open(dbPath());
+    withEnvironment(store);
+    expect(store.snapshot(view).environments).toMatchObject([
+      { kind: "local", host: "local-host" },
+    ]);
+    store.close();
+  });
+
+  it("offers an attach command only while the agent's terminal exists in the runtime", () => {
+    const store = Store.open(dbPath());
+    const { agentId } = launch(store, withEnvironment(store));
+    const attach = () => store.snapshot(view).agents[0]?.attachCommand;
+    const seen = [attach()];
+    store.append(running(agentId));
+    seen.push(attach());
+    store.append(exited(agentId));
+    seen.push(attach());
+    store.append({ type: "agent.lost", entityId: agentId, actor: "system", payload: {} });
+    seen.push(attach());
+    expect(seen).toEqual([null, "attach bz-1", "attach bz-1", null]);
+    store.close();
+  });
+
+  it("offers respawn only to an exited agent with a session, on a harness that resumes", () => {
+    const store = Store.open(dbPath());
+    const environmentId = withEnvironment(store);
+    const bare = launch(store, environmentId).agentId;
+    const resumable = launch(store, environmentId).agentId;
+    store.append(running(bare));
+    const ref = { environmentId, kind: "claude-session" as const, id: "s-1" };
+    store.append({
+      ...running(resumable),
+      payload: { ...running(resumable).payload, externalRef: ref },
+    });
+    store.append(exited(bare));
+    store.append(exited(resumable));
+    const commands = (resumes: readonly "claude-code"[]) =>
+      store.snapshot({ ...view, resumable: resumes }).agents.map((a) => a.commands);
+    expect([commands(["claude-code"]), commands([])]).toEqual([
+      [["close"], ["close", "respawn"]],
+      [["close"], ["close"]],
+    ]);
+    store.close();
+  });
+});
 
 describe("Store event log", () => {
   it("gives each database its own epoch, kept across reopen and carried by the snapshot", () => {
@@ -158,7 +221,7 @@ describe("Store event log", () => {
     const again = Store.open(path);
     const other = Store.open(dbPath());
     expect(epoch).toMatch(/^[0-9a-f]{32}$/);
-    expect([again.epoch(), again.snapshot().epoch]).toEqual([epoch, epoch]);
+    expect([again.epoch(), again.snapshot(testView).epoch]).toEqual([epoch, epoch]);
     expect(other.epoch()).not.toBe(epoch);
     again.close();
     other.close();
@@ -170,7 +233,7 @@ describe("Store event log", () => {
     withEnvironment(v5);
     v5.close();
     const upgraded = Store.open(path);
-    const { epoch, eventId } = upgraded.snapshot();
+    const { epoch, eventId } = upgraded.snapshot(testView);
     expect([epoch, upgraded.cursorFault(epoch, eventId)]).toEqual([
       expect.stringMatching(/^[0-9a-f]{32}$/),
       null,
@@ -227,7 +290,7 @@ describe("Store event log", () => {
     store.onCommit(() => (told = true));
     withEnvironment(store);
     await settled();
-    expect([told, store.snapshot().environments.length]).toEqual([true, 1]);
+    expect([told, store.snapshot(testView).environments.length]).toEqual([true, 1]);
     store.close();
   });
 
@@ -289,7 +352,7 @@ describe("Store event log", () => {
   it("calls a cursor foreign when it names another store or an event this one never had", () => {
     const store = Store.open(dbPath());
     withEnvironment(store);
-    const { epoch, eventId } = store.snapshot();
+    const { epoch, eventId } = store.snapshot(testView);
     expect([
       store.cursorFault("0".repeat(32), eventId),
       store.cursorFault(epoch, eventId + 1),
@@ -335,11 +398,11 @@ const activityEvents = (store: Store) => store.events(0).filter((e) => e.type ==
 describe("Store activity signals", () => {
   it("keeps the latest signal per agent, and shows it with the agent in the snapshot", async () => {
     const { store, agentId } = await withAgent();
-    expect(store.snapshot().agents[0]).not.toHaveProperty("activity");
+    expect(store.snapshot(testView).agents[0]).not.toHaveProperty("activity");
     store.recordActivity(agentId, activity("working", "2026-11-12T10:00:00.000Z"));
     store.recordActivity(agentId, activity("idle", "2026-11-12T10:00:05.000Z"));
     expect(store.latestActivity(agentId)?.value).toBe("idle");
-    expect(store.snapshot().agents[0]?.activity).toEqual(
+    expect(store.snapshot(testView).agents[0]?.activity).toEqual(
       activity("idle", "2026-11-12T10:00:05.000Z"),
     );
   });
@@ -427,7 +490,7 @@ describe("Store activity signals", () => {
     store.append({ type: "agent.closing", entityId: agentId, actor: "system", payload: {} });
     store.append({ type: "agent.closed", entityId: agentId, actor: "system", payload: {} });
     expect(store.latestActivity(agentId)).toBeUndefined();
-    expect(store.snapshot().agents[0]).not.toHaveProperty("activity");
+    expect(store.snapshot(testView).agents[0]).not.toHaveProperty("activity");
   });
 
   it("keeps the latest signal across reopen", async () => {

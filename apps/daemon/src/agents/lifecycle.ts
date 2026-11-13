@@ -1,6 +1,7 @@
 import {
   advanceTerminal,
-  agent,
+  agentCommands,
+  canResume,
   NoTerminal,
   NotResumable,
   ProcessState,
@@ -140,7 +141,10 @@ export class Lifecycle {
         throw new NoTerminal();
       // Known before anything happens, so it is refused with nothing recorded.
       const { externalRef, launch } = launched;
-      if (externalRef === null || !this.environment.resumable.includes(launch.harness))
+      if (
+        externalRef === null ||
+        !canResume({ harness: launch.harness, externalRef }, this.environment.resumable)
+      )
         throw new NotResumable(found.agentId);
       const next = advanceTerminal(
         { state: found.terminalState, generation: found.generation },
@@ -230,9 +234,9 @@ export class Lifecycle {
 type AgentEventType = Extract<EventType, `agent.${string}`>;
 
 const closable = (state: AgentState) =>
-  state === "closing" || state === "closed" || agent.accepts(state, "close.requested");
-const respawnable = (state: AgentState) => agent.accepts(state, "respawn.requested");
-const running = (state: AgentState) => state === "running";
+  state === "closed" || agentCommands(state).includes("close");
+const respawnable = (state: AgentState) => agentCommands(state).includes("respawn");
+const running = (state: AgentState) => agentCommands(state).includes("signal");
 
 /** An environment's failure as the command's: typed where the caller can act on it. */
 function fromEnvironment(agentId: string, cause: unknown): never {

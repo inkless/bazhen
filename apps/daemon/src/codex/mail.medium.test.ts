@@ -3,7 +3,7 @@ import { messageText } from "@bazhen/harness-codex";
 import { newId } from "@bazhen/core";
 import { Mailbox } from "../mailbox/mailbox.ts";
 import { UnknownAgent } from "../store/store.ts";
-import { withCodexAgents } from "../testing/fixtures.ts";
+import { withCodexAgents, testView } from "../testing/fixtures.ts";
 import { CodexMail } from "./mail.ts";
 
 /**
@@ -44,7 +44,7 @@ async function mailFor(
     await Promise.all(handed);
     return messageId;
   };
-  const stateOf = (id: string) => store.snapshot().messages.find((m) => m.id === id)?.state;
+  const stateOf = (id: string) => store.snapshot(testView).messages.find((m) => m.id === id)?.state;
   return { ran, send, stateOf, turn, store, mail, mailbox, agentOn };
 }
 

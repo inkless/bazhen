@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest";
 import { readHook } from "@bazhen/harness-claude-code";
 import type { Store } from "../store/store.ts";
 import { IdempotencyConflict } from "../store/store.ts";
-import { withAgent } from "../testing/fixtures.ts";
+import { withAgent, testView } from "../testing/fixtures.ts";
 import { AttentionClosed, Approvals } from "./approvals.ts";
 
 const summary = 'Bash: {"command":"touch x"}';
 const live = () => new AbortController().signal;
-const items = (store: Store) => store.snapshot().attention;
+const items = (store: Store) => store.snapshot(testView).attention;
 const call = (command: string, caller?: string) => ({
   prompt_id: "p-1",
   tool_name: "Bash",

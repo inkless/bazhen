@@ -14,4 +14,13 @@ describe("jsonSchemas", () => {
     const schema: unknown = JSON.parse(String(jsonSchemas()["TerminalState.json"]));
     expect(schema).toMatchObject({ $id: "TerminalState", enum: protocol.TerminalState.options });
   });
+
+  it("leaves a field with a default out of required, since an older peer omits it", () => {
+    const schema: unknown = JSON.parse(String(jsonSchemas()["Environment.json"]));
+    const properties: unknown = Reflect.get(Object(schema), "properties");
+    expect([Object.keys(Object(properties)), Reflect.get(Object(schema), "required")]).toEqual([
+      ["id", "kind", "host"],
+      ["id", "kind"],
+    ]);
+  });
 });
