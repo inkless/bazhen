@@ -174,13 +174,15 @@ export function project(db: Statements, e: Recorded): void {
       ).run(e.entityId, agentId, body, e.id, e.id);
       return;
     }
-    case "mailbox.offered":
-      moveMessage(db, e, "offer");
+    case "mailbox.offered": {
+      const { promptId } = EVENTS[e.type].payload.parse(e.payload);
+      moveMessage(db, e, "offer", { prompt_id: promptId ?? null });
       db.prepare(
         `UPDATE mailbox SET first_offered_event_id = coalesce(first_offered_event_id, ?)
          WHERE id = ?`,
       ).run(e.id, e.entityId);
       return;
+    }
     case "mailbox.emitted":
       return moveMessage(db, e, "ack");
     case "mailbox.seen": {

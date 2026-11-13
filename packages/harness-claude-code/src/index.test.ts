@@ -3,6 +3,8 @@ import type { HarnessAdapter } from "@bazhen/core";
 import {
   approvalReply,
   ClaudeCodeHarness,
+  carriesWake,
+  foldReply,
   hookOrigin,
   isMainAgentTool,
   readHook,
@@ -84,6 +86,13 @@ describe("Claude Code harness", () => {
           {
             matcher: "*",
             hooks: [expect.objectContaining({ command: "bazhen-hook PermissionRequest" })],
+          },
+        ],
+        // Synchronous, so its reply can fold mail into the turn.
+        PostToolUse: [
+          {
+            matcher: "*",
+            hooks: [{ type: "command", command: "bazhen-hook PostToolUse", timeout: 10 }],
           },
         ],
       },
@@ -169,8 +178,22 @@ describe("Claude Code hooks", () => {
     ]).toEqual([
       { kind: "toolStarted", tool: toolOf(asked), useId: "t-1" },
       { kind: "permission", summary: 'Bash: {"command":"touch x"}', tool: toolOf(asked) },
-      { kind: "toolSettled", useId: "t-1" },
+      { kind: "toolSettled", useId: "t-1", fold: null },
     ]);
+  });
+
+  it("lets a finished tool call's PostToolUse fold mail into its turn", () => {
+    expect(readHook("PostToolUse", { prompt_id: "p-1", tool_use_id: "t-1" })).toEqual({
+      kind: "toolSettled",
+      useId: "t-1",
+      fold: { promptId: "p-1" },
+    });
+  });
+
+  it("folds mail in the shape Claude Code adds beside a tool's result", () => {
+    expect(JSON.parse(foldReply("hello"))).toEqual({
+      hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: "hello" },
+    });
   });
 
   it("tells a subagent's tool call apart from the same call by the agent itself", () => {
@@ -221,6 +244,14 @@ describe("Claude Code hooks", () => {
     expect(JSON.parse(approvalReply("allow"))).toEqual({
       hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "allow" } },
     });
+  });
+
+  it("knows a prompt that carries a wake from one that only names the message", () => {
+    const wake = wakeText([{ id: "msg_1", body: "hi", firstOffered: "2026-11-12T08:00:00Z" }]);
+    expect([carriesWake(wake, "msg_1"), carriesWake("what is msg_1?", "msg_1")]).toEqual([
+      true,
+      false,
+    ]);
   });
 
   it("labels each woken message with its id, so its prompt confirms it was seen", () => {

@@ -132,7 +132,11 @@ export const EVENTS = {
     streamed: queued.omit({ body: true }),
   },
   /** A hook took the message to hand to the harness. */
-  "mailbox.offered": { entity: "message", payload: z.object({}) },
+  "mailbox.offered": {
+    entity: "message",
+    /** A fold's offer names the prompt of the turn it is folded into, whose Stop delivers it. */
+    payload: z.object({ promptId: z.string().optional() }),
+  },
   /** The hook client wrote it where the harness reads it. */
   "mailbox.emitted": { entity: "message", payload: z.object({}) },
   /** A prompt carrying its id started; that prompt's end delivers it. */

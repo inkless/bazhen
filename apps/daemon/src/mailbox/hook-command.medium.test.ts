@@ -257,6 +257,19 @@ describe.each(clients)("hook client (%s)", { timeout: 30_000 }, (_kind, client) 
     expect(result).toEqual(QUIET);
   });
 
+  it("gives a PostToolUse up within seconds on a daemon that never answers", async () => {
+    const socket = socketPath();
+    const { ready } = listen(socket, [{ held: Buffer.alloc(0) }]);
+    await ready;
+    const started = performance.now();
+    const result = await run(client, "PostToolUse", {
+      BAZHEN_AGENT_ID: newId("agent"),
+      BAZHEN_SOCKET: socket,
+    });
+    // Every tool call waits on it: 2 s, never the 10 min backstop or the hook's own timeout.
+    expect([result, performance.now() - started < 8_000]).toEqual([QUIET, true]);
+  });
+
   it("gives up at once on any other hook when the daemon drops it", async () => {
     // Mail waits on a second try, which only a client that wrongly retries would make.
     const socket = socketPath();

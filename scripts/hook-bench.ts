@@ -156,6 +156,7 @@ function time(
   env: Record<string, string>,
   leftMs: number,
   hangMs = HANG_MS,
+  payload = PAYLOAD,
 ): Promise<number | undefined> {
   const start = performance.now();
   // A run that hangs fails the measurement instead of holding it for the client's 10 min backstop.
@@ -169,7 +170,7 @@ function time(
     child.stdin.on("error", (err: NodeJS.ErrnoException) => {
       if (err.code !== "EPIPE") reject(err);
     });
-    child.stdin.end(PAYLOAD);
+    child.stdin.end(payload);
     child.on("error", reject);
     child.on("exit", (_code, signal) => {
       if (signal === null) resolve(performance.now() - start);
@@ -194,14 +195,30 @@ export function overloaded(
 }
 
 /**
- * Times `client` and the floor alternately, so a change in the machine's load hits both sides
- * alike, until the samples settle the verdict or `MEASURE_MS` runs out.
+ * A daemon to time the client against instead of the stub: its socket, an agent it runs, and the
+ * hook to send, so what its ingress does for that hook is in the time too.
  */
-export async function measure(client = BINARY, pairs: Pairs = PAIRS): Promise<Verdict> {
+export interface Target {
+  readonly socket: string;
+  readonly agentId: string;
+  readonly event: string;
+  readonly payload: string;
+}
+
+/**
+ * Times `client` and the floor alternately, so a change in the machine's load hits both sides
+ * alike, until the samples settle the verdict or `MEASURE_MS` runs out. Against the stub daemon
+ * unless a `target` is given.
+ */
+export async function measure(
+  client = BINARY,
+  pairs: Pairs = PAIRS,
+  target?: Target,
+): Promise<Verdict> {
   const deadline = performance.now() + MEASURE_MS;
   const left = () => deadline - performance.now();
   const dir = mkdtempSync("/tmp/bz-bench-");
-  const socket = join(dir, "bazhen.sock");
+  const socket = target?.socket ?? join(dir, "bazhen.sock");
   // Answers once the whole request has arrived, as the daemon does.
   const server = createServer((conn) => {
     let request = Buffer.alloc(0);
@@ -212,20 +229,23 @@ export async function measure(client = BINARY, pairs: Pairs = PAIRS): Promise<Ve
       if (end !== -1 && request.length >= end + 4 + length) conn.end(QUIET);
     });
   });
-  await new Promise<void>((resolve) => server.listen(socket, resolve));
+  if (target === undefined) await new Promise<void>((resolve) => server.listen(socket, resolve));
   const env = {
     PATH: process.env["PATH"] ?? "",
-    BAZHEN_AGENT_ID: "agent_bench",
+    BAZHEN_AGENT_ID: target?.agentId ?? "agent_bench",
     BAZHEN_SOCKET: socket,
     BZ_HOOK_CLIENT: client,
+    BZ_HOOK_EVENT: target?.event ?? "PreToolUse",
   };
+  const payload = target?.payload ?? PAYLOAD;
   const samples = { floor: [] as number[], client: [] as number[] };
-  const run = ["sh", "-c", '"$BZ_HOOK_CLIENT" PreToolUse'] as const;
+  const run = ["sh", "-c", '"$BZ_HOOK_CLIENT" "$BZ_HOOK_EVENT"'] as const;
+  const timeClient = (hangMs?: number) => time([...run], env, left(), hangMs, payload);
   try {
-    let inTime = (await time([...run], env, left(), PRIME_MS)) !== undefined;
+    let inTime = (await timeClient(PRIME_MS)) !== undefined;
     for (let i = 0; inTime && (i < WARM_UP || !judge(samples, pairs).conclusive); i++) {
       const floorMs = await time(["sh", "-c", "true"], env, left());
-      const clientMs = floorMs === undefined ? undefined : await time([...run], env, left());
+      const clientMs = floorMs === undefined ? undefined : await timeClient();
       if (clientMs === undefined || floorMs === undefined) inTime = false;
       else if (i >= WARM_UP) {
         samples.floor.push(floorMs);
@@ -233,7 +253,7 @@ export async function measure(client = BINARY, pairs: Pairs = PAIRS): Promise<Ve
       }
     }
   } finally {
-    server.close();
+    if (target === undefined) server.close();
     rmSync(dir, { recursive: true, force: true });
   }
   return judge(samples, pairs);
