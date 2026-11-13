@@ -70,6 +70,9 @@ export function hookApp(deps: IngressDeps): Hono {
         break;
       case "toolSettled":
         deps.approvals.toolSettled(agentId, read.useId);
+        if (read.fold !== null && (await own())) {
+          return framed(deps.mailbox.fold(agentId, read.fold.promptId));
+        }
         break;
       case "ignored":
         break;

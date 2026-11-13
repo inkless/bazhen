@@ -24,6 +24,9 @@ const HOOK_DEADLINE: Duration = Duration::from_secs(10 * 60);
 /// The waiter outlives a daemon restart by reconnecting, and gives up before its hook's timeout.
 const WAIT_DEADLINE: Duration = Duration::from_secs(23 * 3600);
 const ACK_DEADLINE: Duration = Duration::from_secs(5);
+/// PostToolUse runs on every tool call, and a fold it misses waits for a wake, so a slow daemon
+/// costs a tool call at most this; with the ack after it, well inside the hook's 10 s timeout.
+const FOLD_DEADLINE: Duration = Duration::from_secs(2);
 /// How long the rest of a reply may take once its first byte is in: the waiter may wait hours
 /// for a reply to begin, but a daemon that stops partway through one has failed.
 const REPLY_STALL: Duration = Duration::from_secs(5);
@@ -54,7 +57,12 @@ fn run() -> Option<i32> {
     let mut payload = Vec::new();
     io::stdin().read_to_end(&mut payload).ok()?;
     let request = hook_request(&payload, &agent, &event, id(), parent_id());
-    let reply = ask(&socket, &request, event == "wait")?;
+    let deadline = match event.as_str() {
+        "wait" => WAIT_DEADLINE,
+        "PostToolUse" => FOLD_DEADLINE,
+        _ => HOOK_DEADLINE,
+    };
+    let reply = ask(&socket, &request, event == "wait", deadline)?;
     io::stdout().write_all(&reply.stdout).ok()?;
     io::stdout().flush().ok()?;
     io::stderr().write_all(&reply.stderr).ok()?;
@@ -103,13 +111,8 @@ fn hook_ack(agent: &str, offered: &[String]) -> Vec<u8> {
 
 /// A waiter retries until its deadline when the daemon can't be reached or drops the request,
 /// as it does across a restart; any other hook gives up at once.
-fn ask(socket: &str, request: &[u8], waiting: bool) -> Option<Reply> {
-    let deadline = Instant::now()
-        + if waiting {
-            WAIT_DEADLINE
-        } else {
-            HOOK_DEADLINE
-        };
+fn ask(socket: &str, request: &[u8], waiting: bool, within: Duration) -> Option<Reply> {
+    let deadline = Instant::now() + within;
     loop {
         let left = deadline
             .checked_duration_since(Instant::now())

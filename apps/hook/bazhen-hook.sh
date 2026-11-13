@@ -35,7 +35,9 @@ if [ "$1" = wait ]; then
     sleep 1
   done
 else
-  post /v1/hooks "$dir/request" 600 || exit 0
+  # PostToolUse runs on every tool call, and a fold it misses waits for a wake.
+  [ "$1" = PostToolUse ] && limit=2 || limit=600
+  post /v1/hooks "$dir/request" "$limit" || exit 0
 fi
 
 # One pass over the head: the status, then each header as a lower-cased name and its value.

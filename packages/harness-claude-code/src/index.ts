@@ -87,7 +87,8 @@ function hooks(hook: string) {
       PermissionRequest: [
         { matcher: "*", hooks: [run("PermissionRequest", APPROVAL_WAIT_MS / 1000 + 10)] },
       ],
-      PostToolUse: [{ matcher: "*", hooks: [report("PostToolUse")] }],
+      // Not async: its reply can fold mail into the running turn, so each tool call waits on it.
+      PostToolUse: [{ matcher: "*", hooks: [run("PostToolUse", FOLD_TIMEOUT_S)] }],
       PostToolUseFailure: [{ matcher: "*", hooks: [report("PostToolUseFailure")] }],
     },
   };
@@ -117,7 +118,12 @@ export type Hook =
   | { readonly kind: "promptStarted"; readonly prompt: string; readonly promptId: string | null }
   | { readonly kind: "turnEnded"; readonly promptId: string | null }
   | { readonly kind: "turnFailed"; readonly promptId: string | null }
-  | { readonly kind: "toolSettled"; readonly useId: string }
+  | {
+      readonly kind: "toolSettled";
+      readonly useId: string;
+      /** A PostToolUse, whose reply can fold mail into the turn; a failed call's can't. */
+      readonly fold: { readonly promptId: string | null } | null;
+    }
   | { readonly kind: "ignored" };
 
 /** Reads one of the hooks `launchSpec` installed; the daemon never sees Claude Code's formats. */
@@ -147,7 +153,8 @@ export function readHook(event: string, payload: unknown): Hook {
     case "PostToolUse":
     case "PostToolUseFailure": {
       const useId = toolUseIdOf(payload);
-      return useId === null ? IGNORED : { kind: "toolSettled", useId };
+      const fold = event === "PostToolUse" ? { promptId: promptIdOf(payload) } : null;
+      return useId === null ? IGNORED : { kind: "toolSettled", useId, fold };
     }
     default:
       return IGNORED;
@@ -236,6 +243,39 @@ export function approvalReply(decision: ApprovalDecision): string {
 }
 
 /**
+ * How long a tool call may wait on the PostToolUse hook. The client gives up on the daemon after
+ * 2 s and acks within 5 s more, so it is done well before Claude Code would kill it and drop
+ * what it wrote.
+ */
+const FOLD_TIMEOUT_S = 10;
+
+/**
+ * The most text a fold hands over: Claude Code 2.1.322 cuts a PostToolUse's
+ * `additionalContext` at about 10,000 characters, where a wake's stderr arrives whole. Mail that
+ * doesn't fit waits for a wake.
+ */
+export const FOLD_MAX_CHARS = 9_000;
+
+/**
+ * The PostToolUse output that folds mail into the running turn: the model reads it beside the
+ * tool's result (foundation-design §5.6), in the same words a wake uses.
+ */
+export function foldReply(text: string): string {
+  return JSON.stringify({
+    hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: text },
+  });
+}
+
+/** How a woken message is introduced to the model; only a prompt carrying it saw the message. */
+const wakeLabel = (id: string) => `Message for you from Bazhen (${id}):`;
+
+/**
+ * Whether a prompt carries this message as a wake handed it over, rather than naming its id in
+ * passing, as a human or a background subagent quoting it might.
+ */
+export const carriesWake = (prompt: string, id: string) => prompt.includes(wakeLabel(id));
+
+/**
  * What a wake hands the model: Claude Code shows it as a system notification, not user input,
  * and its UserPromptSubmit carries it verbatim, so each message's id confirms it was seen. A
  * message offered before may already have reached the agent, and says so (foundation-design §5.6).
@@ -249,7 +289,7 @@ export function wakeText(
         m.firstOffered === null
           ? ""
           : `(possible re-delivery of ${m.id}, first offered ${m.firstOffered})\n`;
-      return `Message for you from Bazhen (${m.id}):\n${again}${m.body}`;
+      return `${wakeLabel(m.id)}\n${again}${m.body}`;
     })
     .join("\n\n");
 }

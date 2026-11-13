@@ -34,6 +34,8 @@ const send = async (key: string, body: string) =>
     ).body,
   );
 
+/** A model request that continues a turn after a tool ran. */
+const withToolResult = (request: string) => request.includes("tool_result");
 /** Whether the agent's TUI is in the middle of a turn, offering to interrupt it. */
 const busy = () => /esc to interrupt/i.test(daemon.screen(agentId));
 /** The events a stream received about one entity, in order. */
@@ -61,7 +63,7 @@ describe("mail to a Claude Code agent", () => {
   });
 
   it("asks the inbox before the agent runs a tool, and runs it once allowed", async () => {
-    await send("tool", "[[fake:bash:touch approved-by-inbox]]");
+    const { messageId } = await send("tool", "[[fake:bash:touch approved-by-inbox]]");
     const opened = async () => openItems(await state())[0];
     await expect
       .poll(async () => (await opened())?.summary, { timeout: 30_000 })
@@ -77,6 +79,12 @@ describe("mail to a Claude Code agent", () => {
       state: "closed",
       closeReason: "answered",
     });
+    // Its turn ends before the next test's mail, which would otherwise be folded into it.
+    await expect
+      .poll(async () => (await state()).messages.find((m) => m.id === messageId)?.state, {
+        timeout: 30_000,
+      })
+      .toBe("delivered");
   });
 
   it("refuses an answer to an item that is already closed", async () => {
@@ -171,6 +179,65 @@ describe("mail to a Claude Code agent", () => {
     const story = eventsAbout(stream, messageId);
     stream.close();
     expect(requeueReasons(story)).toEqual(["interrupted"]);
+  });
+
+  it("folds mail sent during a turn into it at the next tool call, and delivers it with the turn", async () => {
+    const now = await state();
+    const stream = await daemon.events({ epoch: now.epoch, eventId: now.eventId });
+    const first = await send("fold-tool", "[[fake:bash:touch fold-tool-ran]]");
+    // The wake took the waiter; the turn now waits for the inbox to allow its tool call.
+    await expect.poll(() => openItemFor("touch fold-tool-ran"), { timeout: 30_000 }).toBeDefined();
+    const folded = await send("folded", "A message for the running turn.");
+    const id = String(await openItemFor("touch fold-tool-ran"));
+    await daemon.request(`/v1/attention/${id}/answer`, {
+      method: "POST",
+      body: { idempotencyKey: "fold-allow", decision: "allow" },
+    });
+    for (const { messageId } of [first, folded]) {
+      await expect
+        .poll(async () => (await state()).messages.find((m) => m.id === messageId)?.state, {
+          timeout: 30_000,
+        })
+        .toBe("delivered");
+    }
+    const story = eventsAbout(stream, folded.messageId);
+    stream.close();
+    // Folded, not woken: no prompt carried it, so it was never `seen`.
+    expect(story.map((e) => e.type)).toEqual([
+      "mailbox.queued",
+      "mailbox.offered",
+      "mailbox.emitted",
+      "mailbox.delivered",
+    ]);
+    // The model read it beside the tool's result, in the same turn.
+    expect(model.requests.filter(withToolResult).join()).toContain(
+      "A message for the running turn.",
+    );
+  });
+
+  it("leaves mail too long to fold for a wake, which hands it over whole", async () => {
+    const now = await state();
+    const stream = await daemon.events({ epoch: now.epoch, eventId: now.eventId });
+    const first = await send("long-tool", "[[fake:bash:touch long-tool-ran]]");
+    await expect.poll(() => openItemFor("touch long-tool-ran"), { timeout: 30_000 }).toBeDefined();
+    // Claude Code cuts a fold's text at about 10,000 characters; a wake's arrives whole.
+    const long = await send("long", `${"z".repeat(12_000)} END-OF-LONG`);
+    const id = String(await openItemFor("touch long-tool-ran"));
+    await daemon.request(`/v1/attention/${id}/answer`, {
+      method: "POST",
+      body: { idempotencyKey: "long-allow", decision: "allow" },
+    });
+    for (const { messageId } of [first, long]) {
+      await expect
+        .poll(async () => (await state()).messages.find((m) => m.id === messageId)?.state, {
+          timeout: 30_000,
+        })
+        .toBe("delivered");
+    }
+    const story = eventsAbout(stream, long.messageId);
+    stream.close();
+    expect(story.map((e) => e.type)).toContain("mailbox.seen");
+    expect(model.requests.join()).toContain(`${"z".repeat(12_000)} END-OF-LONG`);
   });
 
   it("offers a message again after the turn carrying it fails, and gives up after four", async () => {

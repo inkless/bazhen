@@ -9,7 +9,7 @@ import {
   type HookReply,
   type SendMessageRequest,
 } from "@bazhen/protocol";
-import { wakeText } from "@bazhen/harness-claude-code";
+import { FOLD_MAX_CHARS, carriesWake, foldReply, wakeText } from "@bazhen/harness-claude-code";
 import { UnknownAgent, type Store } from "../store/store.ts";
 
 /** A reply that lets the hook go with no effect on the harness. */
@@ -85,7 +85,7 @@ export class Mailbox {
   /** Each message handed to a hook and not yet written: its offer's token, and the timer. */
   private readonly unacked = new Map<
     MessageId,
-    { token: OfferToken; timer: ReturnType<typeof setTimeout> }
+    { token: OfferToken; timer: ReturnType<typeof setTimeout>; fold: boolean }
   >();
   /** Offer ids: this daemon's own prefix, then a count, so no two offers share one. */
   private readonly offerPrefix = randomBytes(4).toString("hex");
@@ -155,13 +155,14 @@ export class Mailbox {
    * client whose offer was since taken back and made again confirms nothing.
    */
   ack(offered: readonly OfferToken[]): void {
-    for (const [id, { token, timer }] of this.unacked) {
+    for (const [id, { token, timer, fold }] of this.unacked) {
       if (!offered.includes(token)) continue;
       clearTimeout(timer);
       this.unacked.delete(id);
       this.record("mailbox.emitted", id, {});
+      // A fold is never seen in a prompt: its turn's Stop delivers it, however long that takes.
       const agentId = this.owners.get(id);
-      if (agentId !== undefined) this.watchUnseen(agentId, id);
+      if (agentId !== undefined && !fold) this.watchUnseen(agentId, id);
     }
   }
 
@@ -190,7 +191,8 @@ export class Mailbox {
     if (promptId === null) return;
     const current = this.turns.get(agentId);
     if (current !== undefined && current !== promptId) {
-      for (const m of this.store.mail(agentId, ["seen"])) {
+      // Seen in that turn's prompt, or folded into it.
+      for (const m of this.store.mail(agentId, ["seen", "emitted"])) {
         if (m.promptId === current) this.requeue(agentId, m.id, "interrupted");
       }
     }
@@ -198,7 +200,7 @@ export class Mailbox {
     // Written, or a wake held back past its deadline and since requeued or offered again: the
     // prompt carrying its label means the agent has it, and the re-offer is called off.
     for (const m of this.store.mail(agentId, ["emitted", "queued", "offered"])) {
-      if (!prompt.includes(m.id) || m.firstOffered === null) continue;
+      if (!carriesWake(prompt, m.id) || m.firstOffered === null) continue;
       clearTimeout(this.unacked.get(m.id)?.timer);
       this.unacked.delete(m.id);
       clearTimeout(this.unseen.get(m.id));
@@ -219,8 +221,11 @@ export class Mailbox {
   turnEnded(agentId: string, promptId: string | null): void {
     if (this.heardEnd(agentId, promptId)) return;
     this.turns.delete(agentId);
-    for (const m of this.store.mail(agentId, ["seen"])) {
-      if (m.promptId === promptId) this.record("mailbox.delivered", m.id, {});
+    // Seen in the turn's prompt, or folded into the turn (written, with the turn's prompt id).
+    for (const m of this.store.mail(agentId, ["seen", "emitted"])) {
+      if (m.promptId !== null && m.promptId === promptId) {
+        this.record("mailbox.delivered", m.id, {});
+      }
     }
     this.turnBoundary(agentId);
   }
@@ -229,8 +234,10 @@ export class Mailbox {
   turnFailed(agentId: string, promptId: string | null): void {
     if (this.heardEnd(agentId, promptId)) return;
     this.turns.delete(agentId);
-    for (const m of this.store.mail(agentId, ["seen"])) {
-      if (m.promptId === promptId) this.requeue(agentId, m.id, "stop_failed");
+    for (const m of this.store.mail(agentId, ["seen", "emitted"])) {
+      if (m.promptId !== null && m.promptId === promptId) {
+        this.requeue(agentId, m.id, "stop_failed");
+      }
     }
     this.turnBoundary(agentId);
   }
@@ -258,11 +265,19 @@ export class Mailbox {
    */
   sessionStarted(agentId: string, compacted = false): void {
     this.waiters.get(agentId)?.(QUIET);
-    const lost = compacted ? (["offered", "emitted"] as const) : IN_FLIGHT;
-    for (const m of this.store.mail(agentId, lost)) {
-      this.requeue(agentId, m.id, "session_started");
+    // A compaction keeps the turn going, and with it what was folded into it, which the model
+    // has already read, as it keeps what the turn saw.
+    const lost = compacted
+      ? [
+          ...this.store.mail(agentId, ["offered"]),
+          ...this.store.mail(agentId, ["emitted"]).filter((m) => m.promptId === null),
+        ]
+      : this.store.mail(agentId, IN_FLIGHT);
+    for (const m of lost) this.requeue(agentId, m.id, "session_started");
+    if (!compacted) {
+      this.turns.delete(agentId);
+      this.ended.delete(agentId);
     }
-    if (!compacted) this.turns.delete(agentId);
   }
 
   /** The hooks holding mail died with the daemon's socket (§7 step 2). */
@@ -271,25 +286,55 @@ export class Mailbox {
       this.requeue(agentId, id, "daemon_restart");
   }
 
+  /**
+   * A tool call in the agent's running turn finished: queued mail is folded into the turn
+   * through the PostToolUse reply, and the turn's Stop delivers it (foundation-design §5.6).
+   * With nothing queued, the call goes on at once.
+   */
+  fold(agentId: string, promptId: string | null): HookReply {
+    const queued = fitting(this.store.mail(agentId, ["queued"]), (m) => wakeText([m]).length, {
+      max: FOLD_MAX_CHARS,
+      firstAlways: false,
+    });
+    if (queued.length === 0 || promptId === null) return QUIET;
+    // A tool call finishing means a turn is under way, even one whose prompt came before a restart.
+    if (!this.turns.has(agentId)) this.turns.set(agentId, promptId);
+    const offered = this.hand(agentId, queued, promptId);
+    return { exitCode: 0, stdout: foldReply(wakeText(queued)), stderr: "", offered };
+  }
+
   private offer(agentId: string): void {
     const waiter = this.waiters.get(agentId);
     if (waiter === undefined) return;
-    const queued = fitting(this.store.mail(agentId, ["queued"]));
+    const queued = fitting(this.store.mail(agentId, ["queued"]), (m) =>
+      Buffer.byteLength(wakeText([m])),
+    );
     if (queued.length === 0) return;
+    const offered = this.hand(agentId, queued);
+    waiter({ exitCode: 2, stdout: "", stderr: wakeText(queued), offered });
+  }
+
+  /** Records each message offered, and starts its ack deadline; returns the offers' tokens. */
+  private hand(
+    agentId: string,
+    queued: readonly { id: MessageId }[],
+    promptId?: string,
+  ): OfferToken[] {
     this.store.transaction(() => {
-      for (const m of queued) this.record("mailbox.offered", m.id, {});
+      for (const m of queued) {
+        this.record("mailbox.offered", m.id, promptId === undefined ? {} : { promptId });
+      }
     });
-    const tokens = queued.map((m) => {
+    return queued.map((m) => {
       const token = offerToken(m.id, `${this.offerPrefix}${(++this.offers).toString(36)}`);
       const timer = setTimeout(
         () => this.requeue(agentId, m.id, "not_written"),
         this.ackDeadlineMs,
       );
-      this.unacked.set(m.id, { token, timer });
+      this.unacked.set(m.id, { token, timer, fold: promptId !== undefined });
       this.owners.set(m.id, agentId);
       return token;
     });
-    waiter({ exitCode: 2, stdout: "", stderr: wakeText(queued), offered: tokens });
   }
 
   /**
@@ -329,17 +374,22 @@ const IN_FLIGHT = ["offered", "emitted", "seen"] as const;
 const MAX_WAKE_MESSAGES = 100;
 
 /**
- * The oldest messages whose wake fits one hook reply: a client refuses a larger one, which would
- * hold back all of them. The rest stay queued for the agent's next waiter. One message always fits,
- * since a body is at most 20,000 characters.
+ * The oldest messages whose text fits within `max`, each of `size`: a wake's within one hook
+ * reply, since a client refuses a larger one, which would hold back all of them, and a fold's
+ * within what Claude Code passes on whole. The rest stay queued. A wake always takes the first,
+ * since a body is at most 20,000 characters; a fold takes none it would cut short.
  */
-function fitting<M extends Parameters<typeof wakeText>[0][number]>(queued: readonly M[]): M[] {
+function fitting<M extends Parameters<typeof wakeText>[0][number]>(
+  queued: readonly M[],
+  size: (m: M) => number,
+  { max = HOOK_REPLY_MAX_BYTES, firstAlways = true } = {},
+): M[] {
   const fit: M[] = [];
-  // Each message's own wake, plus the blank line wakeText puts between two.
-  let bytes = -2;
+  // Each message's own text, plus the blank line wakeText puts between two.
+  let total = -2;
   for (const m of queued.slice(0, MAX_WAKE_MESSAGES)) {
-    bytes += Buffer.byteLength(wakeText([m])) + 2;
-    if (fit.length > 0 && bytes > HOOK_REPLY_MAX_BYTES) break;
+    total += size(m) + 2;
+    if (total > max && (fit.length > 0 || !firstAlways)) break;
     fit.push(m);
   }
   return fit;

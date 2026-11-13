@@ -44,17 +44,28 @@ async function daemon() {
 /** A Stop's payload, from the agent's own session unless another is named. */
 const stop = (session = CLAUDE_SESSION, promptId = "p-1") =>
   JSON.stringify({ hook_event_name: "Stop", session_id: session, prompt_id: promptId });
+/** A finished tool call's PostToolUse, from the agent itself or one of its subagents. */
+const postToolUse = (more: Record<string, string> = {}) =>
+  JSON.stringify({
+    hook_event_name: "PostToolUse",
+    session_id: CLAUDE_SESSION,
+    prompt_id: "p-1",
+    tool_use_id: "t-1",
+    ...more,
+  });
 /** A SessionStart's payload, as /clear starts a new session. */
 const sessionStart = (session: string) =>
   JSON.stringify({ hook_event_name: "SessionStart", session_id: session, source: "clear" });
 
 function run(client: string, event: string, env: Record<string, string>, payload = stop()) {
   const child = spawn(client, [event], { env: { PATH: process.env["PATH"] ?? "", ...env } });
+  let stdout = "";
   let stderr = "";
+  child.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
   child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
   child.stdin.end(payload);
-  return new Promise<{ code: number | null; stderr: string }>((resolve) =>
-    child.on("exit", (code) => resolve({ code, stderr })),
+  return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) =>
+    child.on("exit", (code) => resolve({ code, stdout, stderr })),
   );
 }
 
@@ -112,11 +123,36 @@ describe.each([
     const wake = run(client, "wait", env, stop(CLAUDE_SESSION, "p-0"));
     expect((await wake).code).toBe(2);
     await expect.poll(() => state(messageId)).toBe("emitted");
-    mailbox.promptStarted(agentId, `woken by ${messageId}`, "p-1");
+    mailbox.promptStarted(agentId, `Message for you from Bazhen (${messageId}):`, "p-1");
     // Only the waiter that runs beside p-1's Stop reaches the daemon.
     const beside = run(client, "wait", env, stop());
     await expect.poll(() => state(messageId)).toBe("delivered");
     mailbox.send(agentId, { idempotencyKey: "m2", body: "release the waiter" });
     await beside;
+  });
+
+  it("folds mail into the agent's running turn through PostToolUse, and the ack marks it", async () => {
+    const { socket, agentId, mailbox, state } = await daemon();
+    const env = { BAZHEN_AGENT_ID: agentId, BAZHEN_SOCKET: socket };
+    const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
+    const folded = await run(client, "PostToolUse", env, postToolUse());
+    expect([folded.code, JSON.parse(folded.stdout)]).toEqual([
+      0,
+      {
+        hookSpecificOutput: {
+          hookEventName: "PostToolUse",
+          additionalContext: expect.stringContaining(`(${messageId}):\nhello`),
+        },
+      },
+    ]);
+    await expect.poll(() => state(messageId)).toBe("emitted");
+  });
+
+  it("never folds mail into a subagent's tool call", async () => {
+    const { socket, agentId, mailbox, state } = await daemon();
+    const env = { BAZHEN_AGENT_ID: agentId, BAZHEN_SOCKET: socket };
+    const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
+    const sub = await run(client, "PostToolUse", env, postToolUse({ agent_id: "sub-1" }));
+    expect([sub.code, sub.stdout, state(messageId)]).toEqual([0, "", "queued"]);
   });
 });

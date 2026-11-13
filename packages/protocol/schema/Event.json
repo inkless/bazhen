@@ -1564,7 +1564,11 @@
         },
         "payload": {
           "type": "object",
-          "properties": {},
+          "properties": {
+            "promptId": {
+              "type": "string"
+            }
+          },
           "additionalProperties": false
         }
       },
