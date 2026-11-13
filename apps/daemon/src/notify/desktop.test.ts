@@ -1,73 +1,66 @@
 import { describe, expect, it } from "vitest";
-import type { RunOutcome } from "@bazhen/host-guard";
-import { desktopNotifier, notificationCommand } from "./desktop.ts";
+import type { DesktopNotification, RunOutcome } from "@bazhen/host-guard";
+import { desktopNotifier, hostNotifier } from "./desktop.ts";
 
-/** A run that holds each call until `finish` answers it, and the commands it was given. */
-function runs() {
-  const calls: string[][] = [];
+/** A notifier that holds each notification until `finish` answers it, and what it was shown. */
+function notifier() {
+  const shown: DesktopNotification[] = [];
   const pending: ((outcome: RunOutcome) => void)[] = [];
-  const run = (command: string, args: readonly string[]) => {
-    calls.push([command, ...args]);
+  const show = (n: DesktopNotification) => {
+    shown.push(n);
     return new Promise<RunOutcome>((resolve) => pending.push(resolve));
   };
   const finish = async (outcome: RunOutcome) => {
     pending.shift()?.(outcome);
     await new Promise((resolve) => setTimeout(resolve, 0));
   };
-  return { run, calls, finish };
+  return { show, shown, finish };
 }
 
+const none = { notifySend: null, macApp: null };
+
 describe("desktop notifications", () => {
-  it("keeps a title or body that starts with a dash as text, and never uses osascript", () => {
-    const sneaky = '-edo shell script "touch /tmp/x"';
+  it("uses notify-send on Linux and Bazhen.app on macOS, each only where it was found", () => {
+    const found = { notifySend: "/usr/bin/notify-send", macApp: "/b/Bazhen.app" };
     expect([
-      notificationCommand("linux", sneaky, sneaky),
-      notificationCommand("darwin", sneaky, sneaky),
-      notificationCommand("win32", sneaky, sneaky),
-    ]).toEqual([
-      { command: "notify-send", args: ["--app-name=Bazhen", "--", sneaky, sneaky] },
-      null,
-      null,
-    ]);
+      typeof hostNotifier("linux", found, 7900),
+      typeof hostNotifier("darwin", found, 7900),
+      hostNotifier("linux", none, 7900),
+      hostNotifier("darwin", none, 7900),
+      hostNotifier("win32", found, 7900),
+    ]).toEqual(["function", "function", null, null, null]);
   });
 
   it("shows one at a time, and gathers what opens meanwhile into one that counts them", async () => {
-    const { run, calls, finish } = runs();
-    const notify = desktopNotifier("linux", run, () => undefined);
-    for (const project of ["a", "b", "c", "d"]) notify?.(project, "A turn failed");
+    const { show, shown, finish } = notifier();
+    const notify = desktopNotifier(show, () => undefined);
+    for (const project of ["a", "b", "c", "d"]) notify(project, "A turn failed");
     await finish("ok");
     await finish("ok");
-    expect(calls.map((c) => c.slice(-2))).toEqual([
-      ["a", "A turn failed"],
-      ["Bazhen", "3 items need you"],
+    expect(shown).toEqual([
+      { title: "a", body: "A turn failed" },
+      { title: "Bazhen", body: "3 items need you" },
     ]);
   });
 
-  it("turns itself off where the command isn't installed, and says so once", async () => {
-    const { run, calls, finish } = runs();
+  it("turns itself off when its notifier won't start, and says so once", async () => {
+    const { show, shown, finish } = notifier();
     const logged: string[] = [];
-    const notify = desktopNotifier("linux", run, (m) => logged.push(m));
-    notify?.("a", "b");
+    const notify = desktopNotifier(show, (m) => logged.push(m));
+    notify("a", "b");
     await finish("missing");
-    notify?.("c", "d");
-    expect([calls.length, logged.length]).toEqual([1, 1]);
+    notify("c", "d");
+    expect([shown.length, logged.length]).toEqual([1, 1]);
   });
 
   it("says once that notifications fail, and keeps trying them", async () => {
-    const { run, calls, finish } = runs();
+    const { show, shown, finish } = notifier();
     const logged: string[] = [];
-    const notify = desktopNotifier("linux", run, (m) => logged.push(m));
-    notify?.("a", "b");
+    const notify = desktopNotifier(show, (m) => logged.push(m));
+    notify("a", "b");
     await finish("failed");
-    notify?.("c", "d");
+    notify("c", "d");
     await finish("timed_out");
-    expect([calls.length, logged.length]).toEqual([2, 1]);
-  });
-
-  it("offers none on a platform it has no notifier for yet", () => {
-    expect([desktopNotifier("darwin", runs().run), desktopNotifier("win32", runs().run)]).toEqual([
-      null,
-      null,
-    ]);
+    expect([shown.length, logged.length]).toEqual([2, 1]);
   });
 });

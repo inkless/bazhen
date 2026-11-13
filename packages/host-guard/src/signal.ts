@@ -84,7 +84,7 @@ export type RunOutcome = "ok" | "failed" | "timed_out" | "missing";
 /**
  * Runs a command by argv, with no shell, in a group of its own, and kills that group if it
  * outlives `timeoutMs`. Never throws: a command that can't start answers `missing`. Not exported
- * from the package: `runNotifier` is the only way in, so no caller gets a general way to run argv.
+ * from the package: the notifiers in notify.ts are the only way in, each with its own argv.
  */
 export function runBounded(
   command: string,
@@ -111,22 +111,6 @@ export function runBounded(
     });
   });
 }
-
-/** The desktop notifiers the daemon may run, and nothing else. */
-export type NotifierCommand = "notify-send";
-
-/** Shows a desktop notification through `command`, with the bounds of `runBounded`. */
-export function runNotifier(
-  command: NotifierCommand,
-  args: readonly string[],
-  opts: { readonly timeoutMs: number },
-): Promise<RunOutcome> {
-  // The type can be cast around; this can't.
-  if (!NOTIFIERS.has(command)) throw new RangeError(`refusing to run ${command}`);
-  return runBounded(command, args, opts);
-}
-
-const NOTIFIERS: ReadonlySet<string> = new Set<NotifierCommand>(["notify-send"]);
 
 const forget = (child: { readonly pid?: number | undefined }) => {
   if (child.pid !== undefined) groups.delete(child.pid);

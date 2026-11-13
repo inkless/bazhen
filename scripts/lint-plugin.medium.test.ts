@@ -64,9 +64,9 @@ const FIXTURE = [
   'describe("tmux runtime on a private server");',
   "void new Error(`tmux ${bin} failed`);",
   "void [kill, stop];",
-  "declare const runNotifier: (command: string, args: string[]) => void;",
-  'runNotifier("tmux", ["kill-server"]);',
-  'runNotifier("notify-send", ["--", "a", "b"]);',
+  "declare const linuxNotifier: (binary: string) => void;",
+  'linuxNotifier("/usr/bin/tmux");',
+  'linuxNotifier("/usr/bin/notify-send");',
   "declare const spawnGroup: (command: string, args: string[]) => void;",
   'spawnGroup("tmux", ["kill-server"]);',
 ].join("\n");

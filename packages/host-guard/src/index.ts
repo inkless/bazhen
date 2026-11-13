@@ -14,11 +14,17 @@ export {
 } from "./tmux.ts";
 export {
   isAlive,
-  runNotifier,
   signalGroup,
   signalPane,
   spawnGroup,
-  type NotifierCommand,
   type PaneGroup,
   type RunOutcome,
 } from "./signal.ts";
+export {
+  NOTIFY_SEND_PATHS,
+  findNotifySend,
+  linuxNotifier,
+  macNotifier,
+  type DesktopNotification,
+  type ShowNotification,
+} from "./notify.ts";

@@ -1,14 +1,6 @@
 import { once } from "node:events";
 import { describe, expect, it } from "vitest";
-import {
-  isAlive,
-  runBounded,
-  runNotifier,
-  signalGroup,
-  signalPane,
-  spawnGroup,
-  vouch,
-} from "./signal.ts";
+import { isAlive, runBounded, signalGroup, signalPane, spawnGroup, vouch } from "./signal.ts";
 
 describe("signalling a group this process started", () => {
   it("reaches the child and the process it started, then finds them gone", async () => {
@@ -45,16 +37,5 @@ describe("a bounded run", () => {
     const started = Date.now();
     const outcome = await runBounded("sh", ["-c", "sleep 300 & wait"], { timeoutMs: 200 });
     expect([outcome, Date.now() - started < 5_000]).toEqual(["timed_out", true]);
-  });
-});
-
-/** runNotifier asked for a shell, as a caller that cast its type around would. */
-const castToShell = () => {
-  Reflect.apply(runNotifier, undefined, ["sh", ["-c", "true"], { timeoutMs: 1_000 }]);
-};
-
-describe("running a notifier", () => {
-  it("refuses any command but a notifier's, whatever its type was cast to", () => {
-    expect(castToShell).toThrow(RangeError);
   });
 });
