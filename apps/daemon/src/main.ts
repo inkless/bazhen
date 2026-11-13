@@ -68,7 +68,8 @@ const store = Store.open(join(paths.data, "bazhen.db"));
 const codexHome = codexHomeOf(hostEnv, inputs.home);
 // The Codex CLI, in the environment the agents get, which names their Codex home.
 const codexCommand = codexCli(hostEnv);
-const codexVersion = codexCliVersion(hostEnv);
+// Read ahead of doctor, which waits on it, and again for each refreshed environment.
+let codexCliRead = codexCliVersion(hostEnv);
 const codexMail = new CodexMail({
   store,
   remote: appServerAddress(codexHome),
@@ -183,6 +184,7 @@ const socketListener = getRequestListener(
       const next = filterEnv(env, config.envRules);
       const { refused } = await runtime.replaceEnv(next.env);
       captured = { ...next, at: new Date().toISOString(), source: "refresh" };
+      codexCliRead = codexCliVersion(next.env);
       const running = store.snapshot().agents.filter((a) => a.state === "running");
       return {
         capturedAt: captured.at,
@@ -204,7 +206,7 @@ const socketListener = getRequestListener(
           shell: config.loginShell === undefined ? "direct" : "login",
           loginShell: config.loginShell ?? null,
         },
-        codex: { daemon: codex.version, cli: await codexVersion() },
+        codex: { daemon: codex.version, cli: await codexCliRead },
         env: {
           capturedAt: captured.at,
           source: captured.source,

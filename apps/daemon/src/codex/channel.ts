@@ -25,16 +25,18 @@ export const codexCli =
   (args: readonly string[]): Promise<void> =>
     run("codex", args, { env, timeout: 60_000 }).then(() => undefined);
 
-/** The Codex CLI's version on the home `env` names, or null if it doesn't run. */
-export const codexCliVersion =
-  (env: Readonly<Record<string, string>>) => async (): Promise<string | null> => {
-    try {
-      const { stdout } = await run("codex", ["--version"], { env, timeout: 5_000 });
-      return cliVersion(stdout);
-    } catch {
-      return null;
-    }
-  };
+/**
+ * The version of the Codex CLI that `env`'s PATH finds, or null if it doesn't answer within a
+ * second: `bazhen doctor` waits on it.
+ */
+export async function codexCliVersion(env: Readonly<Record<string, string>>) {
+  try {
+    const { stdout } = await run("codex", ["--version"], { env, timeout: 1_000 });
+    return cliVersion(stdout);
+  } catch {
+    return null;
+  }
+}
 
 /** The managed app-server's control socket in a Codex home. */
 const socketIn = (codexHome: string) =>
@@ -50,7 +52,7 @@ export interface CodexChannelOptions {
   /** The threads of the agents Bazhen runs, each resumed on every new connection. */
   readonly boundThreads: () => readonly string[];
   readonly listener?: ChannelListener;
-  /** The version the server answered on, told on every new connection. */
+  /** The version the server answered on, told on every new connection that names one. */
   readonly connectedTo?: (version: string) => void;
   readonly log?: (message: string) => void;
   /** The first wait before reconnecting after a connection ends; it doubles to a minute. */
@@ -124,14 +126,17 @@ export class CodexChannel implements HarnessChannelPort {
   }
 
   /**
-   * Connects now, if any thread is bound, so its approvals reach the inbox without waiting for a
-   * request, and keeps trying with backoff until a connection holds.
+   * The version of the server last connected to, still after that connection ends; null before
+   * the first connection, or when its server named none.
    */
-  /** The version of the server last connected to, or null before the first connection. */
   get version(): string | null {
     return this.lastVersion;
   }
 
+  /**
+   * Connects now, if any thread is bound, so its approvals reach the inbox without waiting for a
+   * request, and keeps trying with backoff until a connection holds.
+   */
   keepConnected(): void {
     this.attempt(0);
   }
@@ -191,7 +196,12 @@ export class CodexChannel implements HarnessChannelPort {
     }
     // An update is announced by nothing but the socket ending, so every connection reports it.
     this.lastVersion = server.version;
-    this.opts.connectedTo?.(server.version);
+    // Only a report: a failure to record it must not cost the connection.
+    try {
+      if (server.version !== null) this.opts.connectedTo?.(server.version);
+    } catch (err) {
+      this.log(`codex: could not record app-server version ${server.version}: ${String(err)}`);
+    }
     // Only a client that started or resumed a thread receives its events and approvals, and a
     // thread with no subscriber unloads; after any reconnect, every bound thread is resumed.
     const resumed: string[] = [];

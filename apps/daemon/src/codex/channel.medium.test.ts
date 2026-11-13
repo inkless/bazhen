@@ -135,6 +135,27 @@ describe("Codex channel", () => {
     channel.close();
   });
 
+  it("keeps its one connection when the version it reports can't be recorded", async () => {
+    const { codexHome, socket } = home();
+    const connections: WebSocket[] = [];
+    const logged: string[] = [];
+    const { wss } = await fakeServer(socket, codexHome, () => ({ result: "ok" }));
+    wss.on("connection", (ws) => connections.push(ws));
+    const channel = channelOn(codexHome, {
+      connectedTo: () => {
+        throw new Error("database is locked");
+      },
+      log: (m) => logged.push(m),
+    });
+    expect(await channel.request("thread/start", {})).toBe("ok");
+    expect(await channel.request("thread/start", {})).toBe("ok");
+    expect([connections.length, logged]).toEqual([
+      1,
+      [expect.stringContaining("database is locked")],
+    ]);
+    channel.close();
+  });
+
   it("tells its listener which threads resumed, leaving out one that couldn't be", async () => {
     const { codexHome, socket } = home();
     await fakeServer(socket, codexHome, resumesOnlyThr1);

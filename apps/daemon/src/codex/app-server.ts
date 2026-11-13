@@ -83,7 +83,7 @@ export class AppServer {
   private readonly ws: WebSocket;
   private readonly pending = new Map<number, Pending>();
   private nextId = 0;
-  private serverVersion = "unknown";
+  private serverVersion: string | null = null;
   private listener: Listener | undefined;
 
   private constructor(ws: WebSocket) {
@@ -96,9 +96,9 @@ export class AppServer {
 
   /**
    * The server's version. `initialize` has no field for it: it is the token after the client's
-   * name in `userAgent` (`bazhen/0.166.0 (Mac OS 26.7.1; arm64) …`).
+   * name in `userAgent` (`bazhen/0.166.0 (Mac OS 26.7.1; arm64) …`), or null if it names none.
    */
-  get version(): string {
+  get version(): string | null {
     return this.serverVersion;
   }
 
@@ -123,7 +123,7 @@ export class AppServer {
         }),
       );
       if (realPath(found) !== codexHome) throw new WrongCodexHome(codexHome, found);
-      server.serverVersion = /^[^/\s]+\/(\S+)/.exec(userAgent)?.[1] ?? "unknown";
+      server.serverVersion = /^[^/\s]+\/(\S+)/.exec(userAgent)?.[1] ?? null;
       server.send({ method: "initialized" });
       return server;
     } catch (err) {

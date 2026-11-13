@@ -6,7 +6,6 @@ import type { Store } from "../store/store.ts";
  * one, so a daemon restart on the same version records nothing.
  */
 export function recordCodexVersion(store: Store, environmentId: string, version: string): void {
-  if (version === "unknown") return;
   const previous = store.harnessVersion(environmentId, "codex") ?? null;
   if (previous === version) return;
   store.append({

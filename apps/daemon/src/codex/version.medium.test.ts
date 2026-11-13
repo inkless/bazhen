@@ -37,11 +37,4 @@ describe("Codex's version", () => {
     recordCodexVersion(second, environmentId, "0.167.2");
     expect(versionEvents(second)).toHaveLength(1);
   });
-
-  it("is not recorded when the server's user agent named none", () => {
-    const store = Store.open(dbPath());
-    const { environmentId } = register(store);
-    recordCodexVersion(store, environmentId, "unknown");
-    expect(versionEvents(store)).toEqual([]);
-  });
 });
