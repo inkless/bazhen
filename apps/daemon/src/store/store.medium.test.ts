@@ -96,6 +96,25 @@ describe("Store", () => {
     upgraded.close();
   });
 
+  it("upgrades a schema-14 database, its shells unnamed until they are named", () => {
+    const path = dbPath();
+    const v14 = Store.open(path, MIGRATIONS.slice(0, 14));
+    const environmentId = withEnvironment(v14);
+    const terminalId = newId("term");
+    v14.append(shellOpened(terminalId, environmentId, null));
+    v14.close();
+    const upgraded = Store.open(path);
+    const before = upgraded.snapshot(testView).shells[0]?.name;
+    upgraded.append({
+      type: "terminal.renamed",
+      entityId: terminalId,
+      actor: "user",
+      payload: { name: "logs" },
+    });
+    expect([before, upgraded.snapshot(testView).shells[0]?.name]).toEqual([null, "logs"]);
+    upgraded.close();
+  });
+
   it("moves a shell through its own events, and never an agent's terminal by them", () => {
     const store = Store.open(dbPath());
     const environmentId = withEnvironment(store);

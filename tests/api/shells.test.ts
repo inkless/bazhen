@@ -91,6 +91,25 @@ describe("a shell terminal", () => {
   });
 });
 
+describe("shells beside an agent", () => {
+  it("close with it, except the one kept, which runs on standalone", async () => {
+    const { agentId } = await daemon.program(["sleep", "300"]);
+    const [closing, kept] = [
+      await open(daemon, { cwd: undefined, linkedAgentId: agentId }),
+      await open(daemon, { cwd: undefined, linkedAgentId: agentId }),
+    ];
+    await waitUntil(() => hasSession(daemon, kept), "the kept shell's session");
+    const closed = await daemon.request(`/v1/agents/${agentId}/close`, {
+      method: "POST",
+      body: { idempotencyKey: `close-agent-${++keys}`, generation: 0, keepShells: [kept] },
+    });
+    expect(closed.status).toBe(200);
+    expect([hasSession(daemon, closing), hasSession(daemon, kept)]).toEqual([false, true]);
+    expect(daemon.paneFact(kept, "@bazhen_linked_agent_id", TAG)).toBe("");
+    expect((await shellOf(daemon, kept))?.linkedAgentId).toBeNull();
+  });
+});
+
 describe("a shell after its tmux server died", () => {
   let restarted: Daemon;
   let terminalId: string;
@@ -106,9 +125,15 @@ describe("a shell after its tmux server died", () => {
     await restarted?.stop();
   });
 
-  it("shows as lost, and is taken off the list when dismissed", async () => {
+  it("shows as lost, and restarts as a new shell in the same directory", async () => {
     expect((await shellOf(restarted, terminalId))?.state).toBe("lost");
-    const dismissed = await close(restarted, terminalId);
-    expect([dismissed.status, await shellOf(restarted, terminalId)]).toEqual([200, undefined]);
+    const res = await restarted.request(`/v1/shells/${terminalId}/restart`, {
+      method: "POST",
+      body: { idempotencyKey: `restart-${++keys}`, generation: 0 },
+    });
+    const replacement = ShellCommandResponse.parse(res.body).terminalId;
+    await waitUntil(() => hasSession(restarted, replacement), "the new shell's session");
+    expect(restarted.paneFact(replacement, "pane_current_path", TAG)).toBe(restarted.work);
+    expect(await shellOf(restarted, terminalId)).toBeUndefined();
   });
 });

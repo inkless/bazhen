@@ -228,6 +228,13 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE attention_items ADD COLUMN message_id TEXT;
     `,
   },
+  {
+    version: 15,
+    sql: `
+      -- The name a user gave a shell; NULL until they do.
+      ALTER TABLE terminals ADD COLUMN name TEXT;
+    `,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

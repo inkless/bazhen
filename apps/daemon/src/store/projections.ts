@@ -173,6 +173,10 @@ export function project(db: Statements, e: Recorded): void {
     case "terminal.closed":
       EVENTS[e.type].payload.parse(e.payload);
       return moveShell(db, e, "close.completed");
+    case "terminal.unlinked":
+      return setShell(db, e, { linked_agent_id: null });
+    case "terminal.renamed":
+      return setShell(db, e, { name: EVENTS[e.type].payload.parse(e.payload).name });
     case "attachment.started": {
       const { terminalId, mode } = EVENTS[e.type].payload.parse(e.payload);
       db.prepare(
@@ -314,6 +318,15 @@ function moveShell(db: Statements, e: Recorded, event: TerminalEvent, columns: C
     event,
   );
   update(db, "terminals", "id", e.entityId, e.id, { ...at, ...columns });
+}
+
+/** Changes what a shell is, never where it is in its lifecycle. */
+function setShell(db: Statements, e: Recorded, columns: Columns) {
+  const row = db
+    .prepare("SELECT 1 AS present FROM terminals WHERE id = ? AND kind = 'shell'")
+    .get(e.entityId);
+  if (row === undefined) throw new UnknownEntity("shell", e.entityId);
+  update(db, "terminals", "id", e.entityId, e.id, columns);
 }
 
 function closeAttention(db: Statements, e: Recorded, reason: AttentionCloseReason) {

@@ -484,6 +484,11 @@ export class TmuxRuntime implements RuntimeAdapter {
     return { command, own: group === pid };
   }
 
+  async unlink(ref: RuntimeRef): Promise<void> {
+    const pane = await this.paneOf(ref);
+    await this.tmux("set-option", "-u", "-t", located(pane.ref, "sessionId"), COLUMN.linkedAgentId);
+  }
+
   async signal(ref: RuntimeRef, signal: Signal): Promise<void> {
     const pane = await this.paneOf(ref);
     if (pane.exit !== null) throw new ProcessState(ref.terminalId, "running");

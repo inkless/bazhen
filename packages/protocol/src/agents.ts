@@ -162,6 +162,16 @@ export const CloseAgentRequest = z.object({
    * (`server_unconfirmed`): records it closed without ending anything. That server may still run.
    */
   force: z.boolean().optional(),
+  /**
+   * Its linked shells to keep running, made standalone; every other one closes with it, whatever
+   * runs in it (protocol 1.19).
+   */
+  keepShells: z.array(Id("term")).optional(),
+  /**
+   * Close the shells it takes even though a program other than the shell runs in them. Without
+   * it such a close is refused as `busy`, naming those programs (protocol 1.19).
+   */
+  confirmBusy: z.boolean().optional(),
 });
 export type CloseAgentRequest = z.infer<typeof CloseAgentRequest>;
 

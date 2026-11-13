@@ -111,7 +111,15 @@ export class LocalEnvironment implements EnvironmentAdapter {
 
   async shells(): Promise<ShellInventoryEntry[]> {
     return (await this.opts.runtime.inventory()).flatMap((e) =>
-      e.tags.kind === "shell" ? [{ ref: e.ref, dead: e.exit !== null }] : [],
+      e.tags.kind !== "shell"
+        ? []
+        : [
+            {
+              ref: e.ref,
+              dead: e.exit !== null,
+              ...(e.tags.linkedAgentId && { linkedAgentId: e.tags.linkedAgentId }),
+            },
+          ],
     );
   }
 
@@ -141,6 +149,10 @@ export class LocalEnvironment implements EnvironmentAdapter {
     const { command, own } = await this.opts.runtime.foreground(ref);
     // A login shell's process may be named with a leading dash, as `-fish`.
     return own ? null : command.replace(/^-/, "");
+  }
+
+  unlinkShell(ref: RuntimeRef): Promise<void> {
+    return this.opts.runtime.unlink(ref);
   }
 
   private get shell(): string {

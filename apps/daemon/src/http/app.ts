@@ -8,6 +8,9 @@ import {
   CloseAgentRequest,
   CloseShellRequest,
   OpenShellRequest,
+  RenameShellRequest,
+  RestartShellRequest,
+  UnlinkShellRequest,
   RespawnAgentRequest,
   SignalAgentRequest,
   HealthResponse,
@@ -37,23 +40,14 @@ import { z } from "zod";
 import { InvalidDirectory } from "../agents/cwd.ts";
 import { IdempotencyConflict, UnknownAgent } from "../store/store.ts";
 import {
-  AgentStateConflict,
-  TerminalReplaced,
   EnvironmentUnavailable,
   ServerUnconfirmed,
   StaleGeneration,
-} from "../agents/lifecycle.ts";
+  StateConflict,
+  TerminalReplaced,
+} from "../commands.ts";
 import { AttentionClosed, AttentionUnavailable } from "../mailbox/approvals.ts";
-import {
-  ShellBusy,
-  ShellEnvironmentUnavailable,
-  ShellOpenFailed,
-  ShellReplaced,
-  ShellServerUnconfirmed,
-  ShellStateConflict,
-  StaleShellGeneration,
-  UnknownShell,
-} from "../shells/lifecycle.ts";
+import { ShellBusy, ShellOpenFailed, ShellsUnsettled, UnknownShell } from "../shells/lifecycle.ts";
 import { AttentionRefused } from "../attention/inbox.ts";
 import { refusal, type Allowlists } from "./guard.ts";
 
@@ -77,6 +71,18 @@ export interface AppDeps {
   readonly closeShell: (
     terminalId: string,
     req: CloseShellRequest,
+  ) => Promise<ShellCommandResponse>;
+  readonly restartShell: (
+    terminalId: string,
+    req: RestartShellRequest,
+  ) => Promise<ShellCommandResponse>;
+  readonly renameShell: (
+    terminalId: string,
+    req: RenameShellRequest,
+  ) => Promise<ShellCommandResponse>;
+  readonly unlinkShell: (
+    terminalId: string,
+    req: UnlinkShellRequest,
   ) => Promise<ShellCommandResponse>;
 }
 
@@ -158,6 +164,9 @@ export function createApp(deps: AppDeps): Hono {
   route("/v1/attention/:id/reply", ReplyAttentionRequest, deps.reply);
   route("/v1/attention/:id/dismiss", DismissAttentionRequest, deps.dismiss);
   route("/v1/attention/:id/resend", ResendAttentionRequest, deps.resend);
+  route("/v1/shells/:id/restart", RestartShellRequest, deps.restartShell);
+  route("/v1/shells/:id/rename", RenameShellRequest, deps.renameShell);
+  route("/v1/shells/:id/unlink", UnlinkShellRequest, deps.unlinkShell);
 
   // Typed failures from the domain become protocol errors in one place; anything else is a bug.
   app.onError((err, c) => {
@@ -172,16 +181,11 @@ export function createApp(deps: AppDeps): Hono {
       return fail(c, 404, "not_found", err.message);
     if (err instanceof ShellBusy) return fail(c, 409, "busy", err.message);
     if (err instanceof ShellOpenFailed) return fail(c, 502, "launch_failed", err.message);
-    if (err instanceof StaleShellGeneration) return fail(c, 409, "stale_generation", err.message);
-    if (err instanceof ShellServerUnconfirmed)
-      return fail(c, 409, "server_unconfirmed", err.message);
-    if (err instanceof ShellStateConflict || err instanceof ShellReplaced)
-      return fail(c, 409, "conflict", err.message);
-    if (err instanceof ShellEnvironmentUnavailable) return fail(c, 503, "unavailable", err.message);
+    if (err instanceof ShellsUnsettled) return fail(c, 503, "unavailable", err.message);
     if (err instanceof StaleGeneration) return fail(c, 409, "stale_generation", err.message);
     if (err instanceof NotResumable) return fail(c, 409, "not_resumable", err.message);
     if (err instanceof ServerUnconfirmed) return fail(c, 409, "server_unconfirmed", err.message);
-    const conflict = [AgentStateConflict, TerminalReplaced, NoTerminal, ProcessState].some(
+    const conflict = [StateConflict, TerminalReplaced, NoTerminal, ProcessState].some(
       (e) => err instanceof e,
     );
     if (conflict) return fail(c, 409, "conflict", err.message);

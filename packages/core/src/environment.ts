@@ -36,6 +36,8 @@ export interface AgentInventoryEntry {
 export interface ShellInventoryEntry {
   readonly ref: RuntimeRef;
   readonly dead: boolean;
+  /** The agent its terminal still names, if it does. */
+  readonly linkedAgentId?: AgentSessionId;
 }
 
 /** A shell to open, its TerminalId minted by the daemon, which recorded it first. */
@@ -157,6 +159,8 @@ export interface EnvironmentAdapter {
    * when the shell is at its prompt. Read from process facts, never from the screen.
    */
   shellBusy(ref: RuntimeRef): Promise<string | null>;
+  /** Makes a linked shell standalone where it runs: its terminal no longer names the agent. */
+  unlinkShell(ref: RuntimeRef): Promise<void>;
   /** Reports every terminal whose process has ended, as the runtime does (RuntimeAdapter.onExit). */
   onExit(cb: (ref: RuntimeRef, status: ExitStatus) => void): () => void;
 }

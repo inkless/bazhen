@@ -140,6 +140,15 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       await expect(runtime.foreground(ref)).rejects.toThrow(ProcessState);
     });
 
+    it("drops a shell's agent link from its tags, and keeps the rest", async () => {
+      const runtime = fresh();
+      const s = spec(sleeping, { kind: "shell", linkedAgentId: newId("agent") });
+      const ref = await runtime.create(s);
+      await runtime.unlink(ref);
+      const entry = (await runtime.inventory()).find((e) => e.ref.terminalId === s.terminalId);
+      expect([entry?.tags, entry?.exit]).toEqual([{ kind: "shell" }, null]);
+    });
+
     it("round-trips input through an attached terminal", async () => {
       const runtime = fresh();
       const ref = await runtime.create(spec(["cat"]));

@@ -60,6 +60,9 @@ async function settle(
   }
   if (found !== undefined) {
     if (found.dead) await shells.closeExited(shell);
+    // A shell kept as standalone whose session kept its agent's tag: the store is what links it.
+    else if (found.linkedAgentId !== undefined && shell.linkedAgentId === null)
+      await environment.unlinkShell(found.ref);
     return;
   }
   if (shell.runtime !== null) {
