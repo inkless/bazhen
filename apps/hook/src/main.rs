@@ -22,6 +22,9 @@ const HOOK_DEADLINE: Duration = Duration::from_secs(10 * 60);
 /// The waiter outlives a daemon restart by reconnecting, and gives up before its hook's timeout.
 const WAIT_DEADLINE: Duration = Duration::from_secs(23 * 3600);
 const ACK_DEADLINE: Duration = Duration::from_secs(5);
+/// How long the rest of a reply may take once its first byte is in: the waiter may wait hours
+/// for a reply to begin, but a daemon that stops partway through one has failed.
+const REPLY_STALL: Duration = Duration::from_secs(5);
 
 #[derive(Debug, PartialEq)]
 struct Reply {
@@ -125,14 +128,65 @@ fn post(socket: &str, path: &str, body: &[u8], timeout: Duration) -> io::Result<
     );
     stream.write_all(head.as_bytes())?;
     stream.write_all(body)?;
-    let mut response = Vec::new();
-    stream
-        .take((MAX_HEAD + 4 + MAX_BODY + 1) as u64)
-        .read_to_end(&mut response)?;
+    let response = read_response(&mut stream, REPLY_STALL.min(timeout))?;
     if is_truncated(&response) {
         return Err(io::ErrorKind::UnexpectedEof.into());
     }
     Ok(response)
+}
+
+/// Reads one response, up to the end of the body its `Content-Length` promises, so it never
+/// waits on the daemon closing the connection: a reader blocked on that close has been seen to
+/// miss it and hang with the whole reply in hand. A response without a usable length is read to
+/// the end of the stream, for `parse_reply` to refuse. Once the reply has begun, each read gets
+/// `stall` at most, so one that stops short of its length times out rather than hangs.
+fn read_response(stream: &mut UnixStream, stall: Duration) -> io::Result<Vec<u8>> {
+    const LIMIT: usize = MAX_HEAD + 4 + MAX_BODY + 1;
+    let mut response = Vec::new();
+    let mut chunk = [0; 64 << 10];
+    while response.len() < LIMIT {
+        if let Some(end) = promised_end(&response) {
+            response.truncate(end);
+            break;
+        }
+        let want = chunk.len().min(LIMIT - response.len());
+        match stream.read(&mut chunk[..want]) {
+            Ok(0) => break,
+            Ok(n) => {
+                if response.is_empty() {
+                    bound_reads(stream, stall)?;
+                }
+                response.extend_from_slice(&chunk[..n]);
+            }
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(response)
+}
+
+fn bound_reads(stream: &UnixStream, stall: Duration) -> io::Result<()> {
+    bound_or_unblock(stream, stream.set_read_timeout(Some(stall)))
+}
+
+/// macOS refuses a read timeout (EINVAL) on a connection the daemon has already closed. Its
+/// bytes are all in by then, so the reads that remain need not wait at all: they turn
+/// non-blocking rather than keep the deadline, which a reader waiting for that close can sit out.
+fn bound_or_unblock(stream: &UnixStream, set: io::Result<()>) -> io::Result<()> {
+    match set {
+        Err(e) if e.kind() == io::ErrorKind::InvalidInput && e.raw_os_error().is_some() => {
+            stream.set_nonblocking(true)
+        }
+        result => result,
+    }
+}
+
+/// Where the response ends by its own `Content-Length`, once that much of it has arrived.
+fn promised_end(response: &[u8]) -> Option<usize> {
+    let (head, body) = split_head(response)?;
+    let length = content_length(head).filter(|&n| n <= MAX_BODY)?;
+    let head_len = response.len() - body.len();
+    (body.len() >= length).then_some(head_len + length)
 }
 
 /// Whether the response ended early: in its head, or short of the body its `Content-Length`
@@ -323,6 +377,69 @@ mod tests {
     fn refuses_a_body_over_the_cap() {
         let body = vec![b'x'; MAX_BODY + 1];
         assert_eq!(parse_reply(&framed("0", "", "0", &body)), None);
+    }
+
+    const STALL: Duration = Duration::from_millis(200);
+
+    /// The client's end of a connection on which the daemon has written `data` and, unless
+    /// `close`, kept the connection open; the daemon's end is returned to hold it so.
+    fn daemon_wrote(data: &[u8], close: bool) -> (UnixStream, Option<UnixStream>) {
+        let (client, mut daemon) = UnixStream::pair().unwrap();
+        daemon.write_all(data).unwrap();
+        // A read that waits for a close that never comes fails the test instead of hanging it.
+        client
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        (client, (!close).then_some(daemon))
+    }
+
+    #[test]
+    fn reads_a_reply_to_its_length_without_waiting_for_the_close() {
+        let ok = framed("2", "", "2", b"hi");
+        let (mut client, _open) = daemon_wrote(&ok, false);
+        assert_eq!(read_response(&mut client, STALL).unwrap(), ok);
+    }
+
+    #[test]
+    fn ignores_what_follows_the_promised_body() {
+        let ok = framed("2", "", "2", b"hi");
+        let (mut client, _open) = daemon_wrote(&[&ok[..], b"junk"].concat(), false);
+        assert_eq!(read_response(&mut client, STALL).unwrap(), ok);
+    }
+
+    #[test]
+    fn reads_a_reply_without_a_length_to_the_end_of_the_stream() {
+        let unframed = edit(&framed("2", "", "2", b"hi"), "Content-Length: 2\r\n", "");
+        let (mut client, _) = daemon_wrote(&unframed, true);
+        assert_eq!(read_response(&mut client, STALL).unwrap(), unframed);
+    }
+
+    #[test]
+    fn gives_up_on_a_reply_that_stops_short_of_its_length() {
+        let ok = framed("2", "", "2", b"hi");
+        let (mut client, _open) = daemon_wrote(&ok[..ok.len() - 1], false);
+        let start = Instant::now();
+        assert!(read_response(&mut client, STALL).is_err());
+        assert!(
+            start.elapsed() < Duration::from_secs(1),
+            "{:?}",
+            start.elapsed()
+        );
+    }
+
+    #[test]
+    fn reads_without_waiting_once_the_closed_connection_refuses_a_timeout() {
+        let unframed = edit(&framed("2", "", "2", b"hi"), "Content-Length: 2\r\n", "");
+        // Held open, so a read that still blocked would wait out the 2 s timeout.
+        let (mut client, _open) = daemon_wrote(&unframed, false);
+        let einval = Err(io::Error::from_raw_os_error(22));
+        bound_or_unblock(&client, einval).unwrap();
+        let start = Instant::now();
+        let mut response = Vec::new();
+        let rest = (&client).read_to_end(&mut response);
+        assert_eq!(response, unframed);
+        assert_eq!(rest.map_err(|e| e.kind()), Err(io::ErrorKind::WouldBlock));
+        assert!(start.elapsed() < Duration::from_secs(1));
     }
 
     #[test]
