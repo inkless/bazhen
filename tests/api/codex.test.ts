@@ -62,25 +62,39 @@ async function openItemFor(command: string): Promise<string> {
 const closeReasonOf = async (id: string) =>
   (await state()).attention.find((a) => a.id === id)?.closeReason;
 
+/** The agent's latest activity, or the error that kept the daemon from answering within 2 s. */
+async function activityOf(agentId: string) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error("no answer from /v1/state in 2 s")), 2000);
+  });
+  try {
+    const snapshot = await Promise.race([state(), late]);
+    return { value: snapshot.agents.find((a) => a.id === agentId)?.activity?.value };
+  } catch (err) {
+    return { error: String(err) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
- * Waits for the model to be asked for `text`, a prompt submitted at `submittedAt`. If it isn't,
- * the failure says what had happened by then: when Codex reported the agent working, if it did,
- * how many requests the model had, and the end of the screen. This tells a turn that never
- * started from one whose model call came late.
+ * Waits 20 s for the model to be asked for `text`, a prompt just submitted. If it isn't, the
+ * failure says what had happened by then: when the daemon first saw the agent working, if it did,
+ * how many requests the model had in all and on the agent's thread, and the end of the screen.
+ * This tells a turn that never started from one whose model call came late.
  */
-async function untilAsked(
-  agent: LaunchAgentResponse,
-  text: string,
-  submittedAt: number,
-  timeoutMs = 20_000,
-) {
+async function untilAsked(agent: LaunchAgentResponse, text: string) {
+  const start = Date.now();
+  const thread = (await state()).agents.find((a) => a.id === agent.agentId)?.externalRef?.id;
   let workingAfterMs: number | null = null;
+  const stateErrors: string[] = [];
   const asked = () => model.requests.some((r) => r.includes(text));
-  while (!asked() && Date.now() - submittedAt < timeoutMs) {
-    const activity = (await state()).agents.find((a) => a.id === agent.agentId)?.activity;
-    if (workingAfterMs === null && activity?.value === "working") {
-      workingAfterMs = Date.now() - submittedAt;
-    }
+  while (!asked() && Date.now() - start < 20_000) {
+    const activity = await activityOf(agent.agentId);
+    if (activity.error !== undefined) stateErrors.push(activity.error);
+    if (workingAfterMs === null && activity.value === "working")
+      workingAfterMs = Date.now() - start;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   const seen = asked()
@@ -88,7 +102,13 @@ async function untilAsked(
     : {
         asked: false,
         workingAfterMs,
-        modelRequests: model.requests.length,
+        stateErrors: stateErrors.slice(-3),
+        modelRequests: {
+          all: model.requests.length,
+          // Codex keys each request's prompt cache by its thread.
+          onItsThread: model.requests.filter((r) => thread !== undefined && r.includes(thread))
+            .length,
+        },
         screen: daemon
           .screen(agent.agentId)
           .split("\n")
@@ -138,7 +158,7 @@ describe("a Codex agent", () => {
   it("delivers each of two messages that wait for the same turn boundary", async () => {
     await daemon.prompt(asker, "[[fake:slow:8000]] keep busy");
     // The turn is under way once the model has been asked; its reply is held back.
-    await untilAsked(asker, "keep busy", Date.now());
+    await untilAsked(asker, "keep busy");
     const send = async (key: string, body: string) =>
       SendMessageResponse.parse(
         (
