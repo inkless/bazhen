@@ -153,17 +153,20 @@ export class Mailbox {
 
   /**
    * The hook client wrote what it was handed. Only the offer it names is confirmed: an ack from a
-   * client whose offer was since taken back and made again confirms nothing.
+   * client whose offer was since taken back and made again confirms nothing, nor does one for a
+   * message no longer offered, as when its agent closed.
    */
   ack(offered: readonly OfferToken[]): void {
     for (const [id, { token, timer, fold }] of this.unacked) {
       if (!offered.includes(token)) continue;
       clearTimeout(timer);
       this.unacked.delete(id);
+      const agentId = this.owners.get(id);
+      if (agentId === undefined || !this.store.mail(agentId, ["offered"]).some((m) => m.id === id))
+        continue;
       this.record("mailbox.emitted", id, {});
       // A fold is never seen in a prompt: its turn's Stop delivers it, however long that takes.
-      const agentId = this.owners.get(id);
-      if (agentId !== undefined && !fold) this.watchUnseen(agentId, id);
+      if (!fold) this.watchUnseen(agentId, id);
     }
   }
 
@@ -340,7 +343,8 @@ export class Mailbox {
 
   /**
    * Back to the queue, and straight to a waiter if one is already waiting. A message the agent's
-   * side has now failed `MAX_FAILURES` times is given up instead (§5.6, step 5).
+   * side has now failed `MAX_FAILURES` times is given up instead (§5.6, step 5). One no longer in
+   * flight is left alone: a deadline can outlive its offer, as when the agent closes.
    */
   private requeue(
     agentId: string,
@@ -352,8 +356,9 @@ export class Mailbox {
     clearTimeout(this.unseen.get(id));
     this.unseen.delete(id);
     this.unseenAtTurnEnd.get(agentId)?.delete(id);
-    const failed = this.store.mail(agentId, IN_FLIGHT).find((m) => m.id === id)?.failures ?? 0;
-    const givesUp = AGENT_FAILURES.has(reason) && failed + 1 >= MAX_FAILURES;
+    const message = this.store.mail(agentId, IN_FLIGHT).find((m) => m.id === id);
+    if (message === undefined) return;
+    const givesUp = AGENT_FAILURES.has(reason) && message.failures + 1 >= MAX_FAILURES;
     this.store.transaction(() => {
       this.record("mailbox.requeued", id, { reason });
       if (givesUp) this.record("mailbox.undeliverable", id, { reason: "gave_up" });
