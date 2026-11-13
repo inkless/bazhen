@@ -322,7 +322,20 @@ export type EventStreamQuery = z.infer<typeof EventStreamQuery>;
 export const ResetReason = z.enum(["stale", "foreign"]);
 export type ResetReason = z.infer<typeof ResetReason>;
 
-/** Text frames on `/v1/events`; the client sends none. */
+/**
+ * What a client sends on `/v1/events`: whether its page is in sight, when it opens, whenever that
+ * changes, and every `VISIBILITY_HEARTBEAT_MS` while it is. The host's desktop notifications wait
+ * while some page is, since that page already shows what opened.
+ */
+export const ClientEventFrame = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("visibility"), visible: z.boolean() }),
+]);
+export type ClientEventFrame = z.infer<typeof ClientEventFrame>;
+
+/** A page in sight says so this often; one silent for twice as long counts as out of sight. */
+export const VISIBILITY_HEARTBEAT_MS = 30_000;
+
+/** Text frames the daemon sends on `/v1/events`. */
 export const EventFrame = z.discriminatedUnion("type", [
   z.object({ type: z.literal("event"), event: Event }),
   /**

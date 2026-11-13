@@ -64,12 +64,17 @@ const FIXTURE = [
   'describe("tmux runtime on a private server");',
   "void new Error(`tmux ${bin} failed`);",
   "void [kill, stop];",
+  "declare const runNotifier: (command: string, args: string[]) => void;",
+  'runNotifier("tmux", ["kill-server"]);',
+  'runNotifier("notify-send", ["--", "a", "b"]);',
+  "declare const spawnGroup: (command: string, args: string[]) => void;",
+  'spawnGroup("tmux", ["kill-server"]);',
 ].join("\n");
 
 describe("the host-guard lint rule", () => {
-  it("flags every tmux command and signal outside host-guard, and nothing that only names tmux", () => {
+  it("flags every tmux command and signal outside host-guard, a notifier or a process group pointed at tmux included, and nothing that only names tmux", () => {
     expect(flagged(FIXTURE)).toEqual([
-      4, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
+      4, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 36, 39,
     ]);
   });
 });

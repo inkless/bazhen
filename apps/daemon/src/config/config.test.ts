@@ -17,6 +17,7 @@ describe("resolveConfig", () => {
       externalOrigins: [],
       externalOriginsFrom: null,
       allowInsecureOrigins: false,
+      desktopNotifications: true,
     });
   });
 
@@ -26,6 +27,7 @@ describe("resolveConfig", () => {
       bank: "/bank",
       loginShell: undefined,
       envRules: { deny: ["SECRET_*"], passthrough: ["TERM"] },
+      desktopNotifications: true,
       externalOrigins: [],
       externalOriginsFrom: null,
       allowInsecureOrigins: false,
@@ -62,6 +64,14 @@ describe("resolveConfig", () => {
       resolveConfig(allowed, {}).allowInsecureOrigins,
       resolveConfig(plain, { BAZHEN_ALLOW_INSECURE_ORIGINS: "true" }).externalOrigins,
     ]).toEqual([true, ["http://bazhen.example.com"]]);
+  });
+
+  it("turns desktop notifications off only when the file says so", () => {
+    const off = resolveConfig({ notifications: { desktop: false } }, {});
+    expect([
+      off.desktopNotifications,
+      resolveConfig({ notifications: {} }, {}).desktopNotifications,
+    ]).toEqual([false, true]);
   });
 
   it("takes the environment over the file", () => {

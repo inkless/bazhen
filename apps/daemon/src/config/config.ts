@@ -16,6 +16,7 @@ const Flag = z.enum(["true", "false"]).transform((value) => value === "true");
 const ConfigFile = z.strictObject({
   daemon: z.strictObject({ port: Port.optional() }).optional(),
   bank: z.strictObject({ path: z.string().startsWith("/").optional() }).optional(),
+  notifications: z.strictObject({ desktop: z.boolean().optional() }).optional(),
   agents: z
     .strictObject({
       shell: Shell.optional(),
@@ -52,6 +53,8 @@ export interface Config {
   readonly externalOriginsFrom: "BAZHEN_EXTERNAL_ORIGINS" | "config" | null;
   /** Whether plain HTTP to another host may be among them. */
   readonly allowInsecureOrigins: boolean;
+  /** Whether what needs the human is shown on the host's desktop when no dashboard is. */
+  readonly desktopNotifications: boolean;
 }
 
 export class InvalidConfig extends Error {
@@ -120,6 +123,7 @@ export function resolveConfig(
       deny: file.agents?.env?.deny ?? [],
       passthrough: file.agents?.env?.passthrough ?? [],
     },
+    desktopNotifications: file.notifications?.desktop ?? true,
     ...externalOrigins(file, env),
   };
 }

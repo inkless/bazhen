@@ -536,11 +536,17 @@ export class Store {
   }
 
   /** One agent's harness, if this daemon runs it. */
-  agent(agentId: string): { harness: string; state: AgentState } | undefined {
-    const row = this.prepare("SELECT harness, state FROM agent_sessions WHERE id = ?").get(agentId);
+  agent(agentId: string): { harness: string; state: AgentState; project: string } | undefined {
+    const row = this.prepare("SELECT harness, state, project FROM agent_sessions WHERE id = ?").get(
+      agentId,
+    );
     return row === undefined
       ? undefined
-      : { harness: String(row.harness), state: AgentState.parse(row.state) };
+      : {
+          harness: String(row.harness),
+          state: AgentState.parse(row.state),
+          project: String(row.project),
+        };
   }
 
   /** The agent a message is for. */
@@ -1034,6 +1040,11 @@ export class Store {
     return this.prepare(`${ASSIGNMENT} WHERE ${column} = ?${filter} ORDER BY created_event_id`)
       .all(...(state === undefined ? [id] : [id, state]))
       .map((r) => Assignment.parse(r));
+  }
+
+  /** The id of the newest event, or 0 for an empty log. */
+  latestEventId(): number {
+    return Number(this.prepare("SELECT coalesce(max(id), 0) AS id FROM events").get()?.id);
   }
 
   /** The id of the latest event of `type` about an entity, if there is one. */

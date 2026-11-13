@@ -78,6 +78,60 @@ export function spawnGroup(command: string, args: readonly string[], opts: Spawn
   return child;
 }
 
+/** How a bounded run ended: it exited 0, exited otherwise, ran out of time, or never started. */
+export type RunOutcome = "ok" | "failed" | "timed_out" | "missing";
+
+/**
+ * Runs a command by argv, with no shell, in a group of its own, and kills that group if it
+ * outlives `timeoutMs`. Never throws: a command that can't start answers `missing`. Not exported
+ * from the package: `runNotifier` is the only way in, so no caller gets a general way to run argv.
+ */
+export function runBounded(
+  command: string,
+  args: readonly string[],
+  opts: { readonly timeoutMs: number; readonly env?: NodeJS.ProcessEnv },
+): Promise<RunOutcome> {
+  return new Promise((resolve) => {
+    const child = spawnGroup(command, args, { stdio: "ignore", env: opts.env ?? process.env });
+    const timer = setTimeout(() => {
+      signalGroup(child, "SIGKILL");
+      resolve("timed_out");
+    }, opts.timeoutMs);
+    child.once("error", () => {
+      clearTimeout(timer);
+      forget(child);
+      resolve("missing");
+    });
+    child.once("exit", (code) => {
+      clearTimeout(timer);
+      // A notifier that exited on its own leaves nothing to stop; one that timed out stays
+      // signalable until its group is gone.
+      if (code !== null) forget(child);
+      resolve(code === 0 ? "ok" : "failed");
+    });
+  });
+}
+
+/** The desktop notifiers the daemon may run, and nothing else. */
+export type NotifierCommand = "notify-send";
+
+/** Shows a desktop notification through `command`, with the bounds of `runBounded`. */
+export function runNotifier(
+  command: NotifierCommand,
+  args: readonly string[],
+  opts: { readonly timeoutMs: number },
+): Promise<RunOutcome> {
+  // The type can be cast around; this can't.
+  if (!NOTIFIERS.has(command)) throw new RangeError(`refusing to run ${command}`);
+  return runBounded(command, args, opts);
+}
+
+const NOTIFIERS: ReadonlySet<string> = new Set<NotifierCommand>(["notify-send"]);
+
+const forget = (child: { readonly pid?: number | undefined }) => {
+  if (child.pid !== undefined) groups.delete(child.pid);
+};
+
 /** Signals the whole group of a child that `spawnGroup` started, and nothing else. */
 export function signalGroup(child: { readonly pid?: number | undefined }, signal: NodeJS.Signals) {
   const pid = child.pid;

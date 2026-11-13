@@ -8,7 +8,7 @@ import { LocalEnvironment } from "@bazhen/env-local";
 import { ClaudeCodeHarness } from "@bazhen/harness-claude-code";
 import { CodexHarness, DAEMON_START_ARGS } from "@bazhen/harness-codex";
 import { filterEnv } from "@bazhen/core";
-import { TmuxServer } from "@bazhen/host-guard";
+import { TmuxServer, runNotifier } from "@bazhen/host-guard";
 import { PROTOCOL_VERSION } from "@bazhen/protocol";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
 import { launchAgent, localEnvironmentId } from "./agents/launch.ts";
@@ -39,6 +39,8 @@ import { reconcileShells } from "./shells/reconcile.ts";
 import { streamRoute } from "./stream/server.ts";
 import { Approvals } from "./mailbox/approvals.ts";
 import { Inbox } from "./attention/inbox.ts";
+import { desktopNotifier, notifyOnAttention } from "./notify/desktop.ts";
+import { Presence } from "./notify/presence.ts";
 import { HOOK_SCRIPT, hookClient, hookCommand } from "./mailbox/hook-command.ts";
 import { ActivityTracker } from "./mailbox/activity.ts";
 import { SessionBinding, psTable } from "./mailbox/binding.ts";
@@ -105,6 +107,15 @@ const tasks: TaskCommands = {
 const approvals = new Approvals(store);
 const inbox = new Inbox(store, approvals, (agentId, req) => mailbox.send(agentId, req));
 inbox.follow();
+const presence = new Presence();
+/** notify-send returns at once; one that hangs is killed rather than piling up. */
+const NOTIFY_TIMEOUT_MS = 5_000;
+const desktop = config.desktopNotifications
+  ? desktopNotifier(process.platform, (command, args) =>
+      runNotifier(command, args, { timeoutMs: NOTIFY_TIMEOUT_MS }),
+    )
+  : null;
+if (desktop !== null) notifyOnAttention(store, presence, desktop);
 // What the daemon was holding when it last stopped is gone with its sockets (§7 step 2).
 endOpenAttachments(store);
 mailbox.requeueInFlight();
@@ -264,7 +275,7 @@ server.on(
   "upgrade",
   upgrades(allow, [
     streamRoute({ hub, runtimeRef: (id) => store.runtimeRef(id) }),
-    eventRoute(store),
+    eventRoute(store, presence),
   ]),
 );
 

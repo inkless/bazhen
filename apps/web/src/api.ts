@@ -8,6 +8,8 @@ import {
   EventFrame,
   LaunchAgentResponse,
   PROTOCOL_VERSION,
+  VISIBILITY_HEARTBEAT_MS,
+  type ClientEventFrame,
   SendMessageResponse,
   StateSnapshot,
   type ApprovalDecision,
@@ -77,7 +79,22 @@ export function watchState(
     const ws = new WebSocket(`${location.origin.replace(/^http/, "ws")}/v1/events?${query}`);
     socket = ws;
     let state: "connecting" | "open" | "reset" = "connecting";
-    ws.addEventListener("open", () => (state = "open"));
+    // Whether this page is in sight, so the host's desktop notifications wait while it is.
+    const sendVisibility = () => {
+      const frame: ClientEventFrame = {
+        type: "visibility",
+        visible: document.visibilityState === "visible",
+      };
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(frame));
+    };
+    const heartbeat = setInterval(() => {
+      if (document.visibilityState === "visible") sendVisibility();
+    }, VISIBILITY_HEARTBEAT_MS);
+    document.addEventListener("visibilitychange", sendVisibility);
+    ws.addEventListener("open", () => {
+      state = "open";
+      sendVisibility();
+    });
     ws.addEventListener("message", (message) => {
       const frame = EventFrame.safeParse(JSON.parse(String(message.data)));
       // The close that follows a reset reads the state again. Anything else is a change, an event
@@ -86,6 +103,8 @@ export function watchState(
       else read().catch(failed);
     });
     ws.addEventListener("close", () => {
+      clearInterval(heartbeat);
+      document.removeEventListener("visibilitychange", sendVisibility);
       // A stream that was healthy, as before a daemon restart, reconnects at once. A browser
       // isn't told why an upgrade was refused, so a refusal is shown rather than retried unseen.
       if (state === "open") delay = 0;
