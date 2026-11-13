@@ -62,6 +62,7 @@ function daemon() {
       unassign: refuse,
       finish: refuse,
       delegate: refuse,
+      escalate: refuse,
     },
     pairing: { codes, devices },
     requireDevice: devices,

@@ -89,6 +89,15 @@ describe("tasks and delegation, through the CLI", () => {
     ]);
   });
 
+  it("puts an agent's escalation in the human's inbox", async () => {
+    const out = await asAgent(worker.agentId, ["escalate", "Pin", "24", "or", "26?"]);
+    expect(out).toMatchObject({ code: 0, out: expect.stringContaining("escalated as attn_") });
+    const items = (await state()).attention.filter((a) => a.agentId === worker.agentId);
+    expect(items).toContainEqual(
+      expect.objectContaining({ kind: "escalation", summary: "Pin 24 or 26?", state: "open" }),
+    );
+  });
+
   it("refuses a worker that delegates, and says why", async () => {
     const out = await asAgent(worker.agentId, [
       "delegate",

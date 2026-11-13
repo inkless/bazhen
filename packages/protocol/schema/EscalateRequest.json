@@ -1,0 +1,26 @@
+{
+  "$id": "EscalateRequest",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "taskId": {
+      "type": "string",
+      "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+    }
+  },
+  "required": [
+    "idempotencyKey",
+    "summary"
+  ],
+  "additionalProperties": false
+}

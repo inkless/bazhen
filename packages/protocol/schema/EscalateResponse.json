@@ -1,0 +1,15 @@
+{
+  "$id": "EscalateResponse",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "attentionId": {
+      "type": "string",
+      "pattern": "^attn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+    }
+  },
+  "required": [
+    "attentionId"
+  ],
+  "additionalProperties": false
+}

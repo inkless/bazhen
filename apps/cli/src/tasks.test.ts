@@ -76,6 +76,14 @@ describe("bazhen task verbs", () => {
     ]);
   });
 
+  it("escalates the words given as one question, about the task named", () => {
+    const verb = taskVerb(["escalate", "Pin", "24", "or", "26?", "--task", TASK], ctx(AGENT));
+    expect([verb.call.path, verb.call.body]).toEqual([
+      "/v1/escalations",
+      { idempotencyKey: "key", summary: "Pin 24 or 26?", taskId: TASK },
+    ]);
+  });
+
   it("reads a brief from a file", () => {
     const verb = taskVerb(["task", "create", "--title", "t", "--brief-file", "plan.md"], ctx());
     expect(verb.call.body).toMatchObject({ brief: "brief from plan.md" });

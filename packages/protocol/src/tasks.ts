@@ -133,3 +133,17 @@ export const DelegateTaskRequest = z.object({
   brief: TaskBrief,
 });
 export type DelegateTaskRequest = z.infer<typeof DelegateTaskRequest>;
+
+/**
+ * `POST /v1/escalations`, an agent's verb: a question or problem for the human's inbox, about
+ * one of its tasks when it names one (protocol 1.26).
+ */
+export const EscalateRequest = z.object({
+  idempotencyKey: IdempotencyKey,
+  summary: z.string().trim().min(1).max(2000),
+  taskId: Id("task").optional(),
+});
+export type EscalateRequest = z.infer<typeof EscalateRequest>;
+
+export const EscalateResponse = z.object({ attentionId: Id("attn") });
+export type EscalateResponse = z.infer<typeof EscalateResponse>;

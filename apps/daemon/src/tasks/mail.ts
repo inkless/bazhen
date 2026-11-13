@@ -26,6 +26,7 @@ export function assignedMail(
     "When it is finished, run:",
     `  bazhen task done ${task.id} --note "<what you did, in a sentence or two>"`,
     ...(role === "worker" ? [] : [DELEGATE(task.id, role)]),
+    `If you are stuck, or need the human to decide: bazhen escalate "<question>" --task ${task.id}`,
     `To read the task again: bazhen task show ${task.id}`,
   ].join("\n\n");
 }
@@ -83,4 +84,5 @@ export const FLEET_INSTRUCTIONS = `You are an agent in a Bazhen fleet, launched 
 Tasks reach you as messages from Bazhen, and you answer them with the bazhen command:
 - bazhen task list: the tasks you are assigned; bazhen task show <task>: one in full.
 - bazhen task done <task> --note "<what you did>": report a task finished, to whoever gave it to you.
+- bazhen escalate "<question>" [--task <task>]: put a question or problem in the human's inbox.
 - As a task's coordinator or lead, bazhen agents lists the other agents, and bazhen delegate <agent-id> --task <task> --title "<title>" --brief "<instructions>" hands part of it to one of them.`;
