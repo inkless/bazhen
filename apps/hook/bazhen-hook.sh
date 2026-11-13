@@ -3,6 +3,31 @@
 # apps/hook/src/main.rs, several times slower. Outside a Bazhen agent, or on any failure, it exits
 # 0 with no output, so the harness carries on as it would without Bazhen.
 
+# The status line: run the user's own command (the rest of the arguments) on the same input,
+# its output passed through, and hand that input to the daemon in passing (see statusline.rs).
+if [ "$1" = statusline-wrap ]; then
+  shift
+  input=$(mktemp) || exit 0
+  trap 'rm -f "$input"' EXIT
+  cat >"$input"
+  if [ -n "$BAZHEN_AGENT_ID" ] && [ -n "$BAZHEN_SOCKET" ]; then
+    case "$BAZHEN_AGENT_ID" in *[!A-Za-z0-9_-]*) ;; *)
+      {
+        printf '{"payload":'
+        if grep -q '[^[:space:]]' "$input"; then cat "$input"; else printf null; fi
+        printf ',"protocolVersion":"1.0","agentId":"%s","event":"statusline","pid":%d,"ppid":%d}' \
+          "$BAZHEN_AGENT_ID" "$$" "$PPID"
+      } | curl -sS --unix-socket "$BAZHEN_SOCKET" --max-time 0.2 -H 'Content-Type: application/json' \
+        -H 'Expect:' --data-binary @- -o /dev/null http://localhost/v1/hooks 2>/dev/null &
+      ;;
+    esac
+  fi
+  code=0
+  [ "$#" -gt 0 ] && { "$@" <"$input"; code=$?; }
+  wait
+  exit "$code"
+fi
+
 [ -n "$BAZHEN_AGENT_ID" ] && [ -n "$BAZHEN_SOCKET" ] && [ -n "$1" ] || exit 0
 case "$BAZHEN_AGENT_ID$1" in *[!A-Za-z0-9_-]*) exit 0 ;; esac
 

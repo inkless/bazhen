@@ -21,6 +21,12 @@ export class ActivityTracker {
   private readonly main = new Map<string, Doing>();
   /** Per agent, each open subagent by its id, and whether it waits on a permission. */
   private readonly subagents = new Map<string, Map<string, Doing>>();
+  /**
+   * Agents the daemon restarted under, which a waiter can't vouch for: a waiter outlives the
+   * restart by posting its first request again, a SessionStart or a Stop from before it, which
+   * says nothing of now. Until another of the main agent's hooks arrives, waiters are ignored.
+   */
+  private readonly unvouched = new Set<string>();
 
   constructor(record: (agentId: string, activity: Activity) => void) {
     this.record = record;
@@ -31,6 +37,10 @@ export class ActivityTracker {
     const open = this.subagents.get(agentId) ?? new Map<string, Doing>();
     this.subagents.set(agentId, open);
     const doing = activityOf(hook);
+    if (this.unvouched.has(agentId) && origin.subagentId === null) {
+      if (hook.kind === "wait") return;
+      if (doing !== null) this.unvouched.delete(agentId);
+    }
     if (hook.kind === "subagentStarted") open.set(hook.subagentId, { value: "working" });
     else if (hook.kind === "subagentStopped") open.delete(hook.subagentId);
     else if (origin.subagentId !== null) {
@@ -43,6 +53,23 @@ export class ActivityTracker {
     this.record(agentId, {
       ...now,
       source: "native",
+      confidence: 1,
+      observedAt: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * The daemon started with this agent already running: what its subagents are doing went with
+   * the last daemon's memory, so it reads unknown, never idle, until a main hook other than a
+   * waiter (a prompt, a tool call, a turn's Stop report) says what it is doing.
+   */
+  restarted(agentId: string): void {
+    this.unvouched.add(agentId);
+    this.main.set(agentId, { value: "unknown", detail: "daemon restarted" });
+    this.record(agentId, {
+      value: "unknown",
+      detail: "daemon restarted",
+      source: "heuristic",
       confidence: 1,
       observedAt: new Date().toISOString(),
     });

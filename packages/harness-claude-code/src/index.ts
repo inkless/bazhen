@@ -4,7 +4,7 @@ import type {
   HarnessLaunch,
   LaunchOptions,
 } from "@bazhen/core";
-import type { Activity, ApprovalDecision, ExternalRef } from "@bazhen/protocol";
+import type { Activity, ApprovalDecision, ExternalRef, Usage } from "@bazhen/protocol";
 
 export interface ClaudeCodeOptions {
   readonly newSessionId: () => string;
@@ -12,6 +12,20 @@ export interface ClaudeCodeOptions {
   readonly hookCommand: string;
   /** A permission mode every agent starts in; unset, each starts in the user's own. */
   readonly permissionMode?: string;
+  /**
+   * Which status line Bazhen's runs inside it for a session started in `cwd`, or "leave" to set
+   * none, leaving Claude Code's own (foundation-design §11.2).
+   */
+  readonly statusLine?: (cwd: string) => StatusLineChoice;
+}
+
+/** The user's status line to wrap (none: Bazhen's draws nothing), or "leave" Claude's alone. */
+export type StatusLineChoice = { readonly wrap: UserStatusLine | null } | "leave";
+
+/** A Claude Code `statusLine` setting of the command kind. */
+export interface UserStatusLine {
+  readonly command: string;
+  readonly padding?: number;
 }
 
 /**
@@ -28,28 +42,38 @@ export class ClaudeCodeHarness implements HarnessAdapter {
     this.opts = opts;
   }
 
-  async launchSpec(_request: AgentLaunchRequest, options: LaunchOptions): Promise<HarnessLaunch> {
+  async launchSpec(request: AgentLaunchRequest, options: LaunchOptions): Promise<HarnessLaunch> {
     const id = this.opts.newSessionId();
-    return this.spec(["--session-id", id], id, options);
+    return this.spec(["--session-id", id], id, request, options);
   }
 
   /** The same TUI, with its hooks, on the session the agent already had. */
   async resumeSpec(
-    _request: AgentLaunchRequest,
+    request: AgentLaunchRequest,
     session: Omit<ExternalRef, "environmentId">,
     options: LaunchOptions,
   ): Promise<HarnessLaunch> {
-    return this.spec(["--resume", session.id], session.id, options);
+    return this.spec(["--resume", session.id], session.id, request, options);
   }
 
   /** Claude Code reads a theme in its settings ahead of the user's own, for this launch only. */
-  private spec(session: string[], id: string, { theme }: LaunchOptions): HarnessLaunch {
+  private spec(
+    session: string[],
+    id: string,
+    request: AgentLaunchRequest,
+    { theme }: LaunchOptions,
+  ): HarnessLaunch {
+    const choice = this.opts.statusLine?.(request.cwd) ?? { wrap: null };
+    const statusLine =
+      choice === "leave"
+        ? {}
+        : { statusLine: wrappedStatusLine(this.opts.hookCommand, choice.wrap) };
     return {
       argv: [
         "claude",
         ...session,
         "--settings",
-        JSON.stringify({ ...hooks(this.opts.hookCommand), ...(theme && { theme }) }),
+        JSON.stringify({ ...hooks(this.opts.hookCommand), ...statusLine, ...(theme && { theme }) }),
         ...(this.opts.permissionMode === undefined
           ? []
           : ["--permission-mode", this.opts.permissionMode]),
@@ -67,6 +91,22 @@ export class ClaudeCodeHarness implements HarnessAdapter {
  * waiter gives up first. A permission request waits for an inbox answer, bounded below
  * Claude Code's own wait.
  */
+/** One shell word, whatever the string holds. */
+const shellWord = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
+
+/**
+ * Bazhen's status line: the hook client's wrapper, which runs the user's own command inside it,
+ * its output passed through unchanged, and reports the line's input to the daemon.
+ */
+function wrappedStatusLine(hook: string, user: UserStatusLine | null) {
+  const inner = user === null ? "" : ` sh -c ${shellWord(user.command)}`;
+  return {
+    type: "command",
+    command: `${hook} statusline-wrap${inner}`,
+    ...(user?.padding === undefined ? {} : { padding: user.padding }),
+  };
+}
+
 function hooks(hook: string) {
   const run = (event: string, timeout: number) => ({
     type: "command",
@@ -139,6 +179,8 @@ export type Hook =
       /** A PostToolUse, whose reply can fold mail into the turn; a failed call's can't. */
       readonly fold: { readonly promptId: string | null } | null;
     }
+  /** The status line redrew, saying which model runs and how full its context is. */
+  | { readonly kind: "statusline"; readonly usage: Usage }
   /** One of the agent's subagents started or ended, by its `agent_id`. */
   | { readonly kind: "subagentStarted" | "subagentStopped"; readonly subagentId: string }
   | { readonly kind: "ignored" };
@@ -157,6 +199,8 @@ export function readHook(event: string, payload: unknown): Hook {
       const useId = toolUseIdOf(payload);
       return useId === null ? IGNORED : { kind: "toolStarted", tool: toolKey(payload), useId };
     }
+    case "statusline":
+      return { kind: "statusline", usage: usageOf(payload) };
     case "SubagentStart":
     case "SubagentStop": {
       const id = field(payload, "agent_id");
@@ -189,6 +233,24 @@ export function readHook(event: string, payload: unknown): Hook {
 
 const IGNORED: Hook = { kind: "ignored" };
 
+/** The model and context use a status line's input gives, as far as it gives them. */
+function usageOf(payload: unknown): Usage {
+  const name = field(field(payload, "model"), "display_name");
+  const window = field(payload, "context_window");
+  const used = field(window, "used_percentage");
+  const size = field(window, "context_window_size");
+  return {
+    ...(typeof name === "string" && name !== "" ? { model: name.slice(0, 200) } : {}),
+    // Whole percent: a finer change isn't worth an event.
+    ...(typeof used === "number" && used >= 0 && used <= 100
+      ? { contextUsedPercent: Math.round(used) }
+      : {}),
+    ...(typeof size === "number" && Number.isInteger(size) && size > 0
+      ? { contextWindowTokens: size }
+      : {}),
+  };
+}
+
 const failure = (error: string | null): Pick<Activity, "value" | "detail"> =>
   error === null ? { value: "failed" } : { value: "failed", detail: error };
 
@@ -216,6 +278,7 @@ export function activityOf(hook: Hook): Pick<Activity, "value" | "detail"> | nul
       return hook.turnEnd.failed ? failure(hook.turnEnd.error) : { value: "idle" };
     case "subagentStarted":
     case "subagentStopped":
+    case "statusline":
     case "ignored":
       break;
   }

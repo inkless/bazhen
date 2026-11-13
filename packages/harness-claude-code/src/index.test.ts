@@ -11,6 +11,7 @@ import {
   readHook,
   wakeText,
   type Hook,
+  type StatusLineChoice,
 } from "./index.ts";
 
 const toolOf = (h: Hook) => ("tool" in h ? h.tool : "");
@@ -23,6 +24,18 @@ const waiterAt = (hook_event_name: string, source?: string) =>
 const request = { harness: "claude-code" as const, project: "p", cwd: "/work" };
 const claude = (newSessionId: () => string): HarnessAdapter =>
   new ClaudeCodeHarness({ newSessionId, hookCommand: "bazhen-hook" });
+
+/** The status line a launch sets, given which status line to wrap; absent when it sets none. */
+const statusLineOf = async (choice: StatusLineChoice) => {
+  const harness = new ClaudeCodeHarness({
+    newSessionId: () => "s",
+    hookCommand: "bazhen-hook",
+    statusLine: () => choice,
+  });
+  const { argv } = await harness.launchSpec(request, {});
+  const settings: unknown = JSON.parse(String(argv[argv.indexOf("--settings") + 1]));
+  return Reflect.get(Object(settings), "statusLine");
+};
 
 describe("Claude Code harness", () => {
   it("launches with a session id it chose, and reports that session as the agent's", async () => {
@@ -103,6 +116,22 @@ describe("Claude Code harness", () => {
     });
   });
 
+  it("runs its status line around the user's own, quoted whole, alone, or sets none to leave Claude's", async () => {
+    expect([
+      await statusLineOf({ wrap: { command: "echo 'hi' $X", padding: 1 } }),
+      await statusLineOf({ wrap: null }),
+      await statusLineOf("leave"),
+    ]).toEqual([
+      {
+        type: "command",
+        command: "bazhen-hook statusline-wrap sh -c 'echo '\\''hi'\\'' $X'",
+        padding: 1,
+      },
+      { type: "command", command: "bazhen-hook statusline-wrap" },
+      undefined,
+    ]);
+  });
+
   it("starts in a configured permission mode, and in the user's own otherwise", async () => {
     const harness: HarnessAdapter = new ClaudeCodeHarness({
       newSessionId: () => "s",
@@ -152,6 +181,20 @@ describe("Claude Code hooks", () => {
     ]).toEqual([
       { promptId: "p-1", failed: false, error: null },
       { promptId: "p-1", failed: true, error: null },
+    ]);
+  });
+
+  it("reads the model and context use, in whole percent, from a status line's input, as far as it gives them", () => {
+    const window = { context_window_size: 1_000_000, used_percentage: 12.5 };
+    expect([
+      readHook("statusline", { model: { display_name: "Opus 5.5" }, context_window: window }),
+      readHook("statusline", { context_window: { context_window_size: 0, used_percentage: null } }),
+    ]).toEqual([
+      {
+        kind: "statusline",
+        usage: { model: "Opus 5.5", contextUsedPercent: 13, contextWindowTokens: 1_000_000 },
+      },
+      { kind: "statusline", usage: {} },
     ]);
   });
 

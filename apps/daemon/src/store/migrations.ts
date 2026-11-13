@@ -202,6 +202,13 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE terminals ADD COLUMN theme TEXT;
     `,
   },
+  {
+    version: 12,
+    sql: `
+      -- The model the agent runs and its context use, as JSON, once its harness reports them.
+      ALTER TABLE agent_sessions ADD COLUMN usage TEXT;
+    `,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

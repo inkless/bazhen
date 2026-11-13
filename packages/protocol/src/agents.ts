@@ -96,6 +96,20 @@ export const TERMINAL_COLOURS = {
 export const oscColour = (hex: string) =>
   `rgb:${[1, 3, 5].map((i) => hex.slice(i, i + 2).repeat(2)).join("/")}`;
 
+/**
+ * What an agent's harness says of the model it runs and how full that model's context is, as a
+ * Claude Code status line reports them (foundation-design §11.2). Each part is absent until the
+ * harness says it.
+ */
+export const Usage = z.object({
+  model: z.string().max(200).optional(),
+  /** The share of the context window in use, 0 to 100. */
+  contextUsedPercent: z.number().min(0).max(100).optional(),
+  /** The context window's size, in tokens. */
+  contextWindowTokens: z.number().int().positive().optional(),
+});
+export type Usage = z.infer<typeof Usage>;
+
 export const Environment = z.object({
   id: Id("env"),
   kind: EnvironmentKind,
@@ -129,6 +143,8 @@ export const Agent = z.object({
    * anything (protocol 1.7).
    */
   activity: Activity.optional(),
+  /** The model it runs and its context use, once its harness says (protocol 1.16). */
+  usage: Usage.optional(),
   /**
    * A shell command that attaches a terminal emulator to its terminal, for a human to copy when the
    * web view is unusable (foundation-design §4.5). Null while the runtime holds no terminal for

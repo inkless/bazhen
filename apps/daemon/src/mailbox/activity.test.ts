@@ -58,4 +58,32 @@ describe("ActivityTracker", () => {
     hook("Stop");
     expect(now()).toEqual(["idle", undefined]);
   });
+
+  it("reads an agent the daemon restarted under as unknown, never idle, until its main turn speaks", () => {
+    const { tracker, hook, now } = tracked();
+    tracker.restarted("a");
+    expect(now()).toEqual(["unknown", "daemon restarted"]);
+    // A subagent the last daemon heard start, still running, then done: still no word from the main.
+    hook("PostToolUse", sub("z"), { agent_id: "z" });
+    expect(now()).toEqual(["working", "subagent running"]);
+    hook("SubagentStop", sub("z"), { agent_id: "z" });
+    expect(now()).toEqual(["unknown", "daemon restarted"]);
+    hook("Stop");
+    expect(now()).toEqual(["idle", undefined]);
+  });
+
+  it("takes no word from a waiter that outlived the restart, only from the main agent's next hook", () => {
+    const { tracker, hook, now } = tracked();
+    tracker.restarted("a");
+    // A waiter reconnects by posting its SessionStart or Stop from before the restart again.
+    hook("wait", MAIN, { hook_event_name: "SessionStart", source: "startup" });
+    hook("wait", MAIN, { hook_event_name: "Stop" });
+    expect(now()).toEqual(["unknown", "daemon restarted"]);
+    hook("Stop");
+    expect(now()).toEqual(["idle", undefined]);
+    // Vouched for again, a later waiter's turn end counts as before.
+    hook("UserPromptSubmit", MAIN, { prompt: "go" });
+    hook("wait", MAIN, { hook_event_name: "Stop" });
+    expect(now()).toEqual(["idle", undefined]);
+  });
 });

@@ -6,6 +6,7 @@
 //! The reply's framing is documented beside `HookReply` in packages/protocol/src/mail.ts.
 
 mod pane_title;
+mod statusline;
 
 use std::env;
 use std::io::{self, Read, Write};
@@ -42,6 +43,7 @@ struct Reply {
 fn main() {
     let ran = match env::args().nth(1).as_deref() {
         Some("pane-title") => pane_title::run(env::args().skip(2)),
+        Some("statusline-wrap") => statusline::run(env::args().skip(2)),
         _ => run(),
     };
     exit(ran.unwrap_or(0));

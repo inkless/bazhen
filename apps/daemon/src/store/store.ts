@@ -15,6 +15,7 @@ import {
 import { z } from "zod";
 import {
   Activity,
+  Usage,
   AgentState,
   EVENTS,
   ExternalRef,
@@ -414,6 +415,27 @@ export class Store {
     });
   }
 
+  /**
+   * Records the model an agent runs and its context use, as its harness reports them, unless
+   * they are what it reported last: a status line redraws often, and only a change is an event.
+   * Returns the event id, or null when nothing was recorded, as for an agent whose process has
+   * gone. An agent this daemon never ran is refused.
+   */
+  recordUsage(agentId: string, usage: Usage): number | null {
+    return this.transaction(() => {
+      const row = this.prepare("SELECT state, usage FROM agent_sessions WHERE id = ?").get(agentId);
+      if (row === undefined) throw new UnknownAgent(agentId);
+      if (!REPORTING.has(AgentState.parse(row.state))) return null;
+      if (typeof row.usage === "string" && row.usage === JSON.stringify(usage)) return null;
+      return this.append({
+        type: "agent.usage",
+        entityId: agentId,
+        actor: "system",
+        payload: usage,
+      });
+    });
+  }
+
   /** What an agent's harness last reported it doing in this process, if anything. */
   latestActivity(agentId: string): Activity | undefined {
     const row = this.prepare("SELECT activity FROM activity_latest WHERE agent_session_id = ?").get(
@@ -622,13 +644,14 @@ export class Store {
         agents: this.prepare(
           `SELECT a.id, a.environment_id AS environmentId, a.harness, a.project, a.cwd, a.state,
                   a.terminal_id AS terminalId, t.generation, a.external_ref AS externalRef, t.exit,
-                  coalesce(t.theme, 'dark') AS theme, s.activity, t.state AS terminalState, t.runtime, t.locator
+                  coalesce(t.theme, 'dark') AS theme, s.activity, a.usage, t.state AS terminalState,
+                  t.runtime, t.locator
            FROM agent_sessions a LEFT JOIN terminals t ON t.id = a.terminal_id
            LEFT JOIN activity_latest s ON s.agent_session_id = a.id
            ORDER BY a.created_event_id`,
         )
           .all()
-          .map(({ activity, terminalState, runtime, locator, ...r }) => {
+          .map(({ activity, usage, terminalState, runtime, locator, ...r }) => {
             const ref = ATTACHABLE.has(String(terminalState))
               ? refFrom(r.terminalId, { runtime: runtime ?? null, locator: locator ?? null })
               : null;
@@ -639,6 +662,7 @@ export class Store {
               externalRef,
               exit: typeof r.exit === "string" ? JSON.parse(r.exit) : null,
               ...(activity === null ? {} : { activity: activityOf(activity) }),
+              ...(typeof usage === "string" ? { usage: Usage.parse(JSON.parse(usage)) } : {}),
               attachCommand: ref === null ? null : view.attachCommand(ref),
               themes: view.themes(HarnessId.parse(r.harness)),
               commands: offeredCommands(

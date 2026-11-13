@@ -307,6 +307,13 @@ export class Daemon {
     return client;
   }
 
+  /** Adds `settings` to the user's own Claude Code settings, read at each agent's launch. */
+  claudeSettings(settings: Record<string, unknown>): void {
+    const file = join(this.home, "claude", "settings.json");
+    const current: unknown = JSON.parse(readFileSync(file, "utf8"));
+    writeFileSync(file, JSON.stringify({ ...Object(current), ...settings }));
+  }
+
   /** Whether a file exists in the agents' work directory. */
   hasFile(name: string): boolean {
     return existsSync(join(this.work, name));
