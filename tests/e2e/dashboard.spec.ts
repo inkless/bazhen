@@ -1,0 +1,120 @@
+import { hostname } from "node:os";
+import { expect, test, type Page } from "@playwright/test";
+import { screen } from "./page.ts";
+
+/** Launches Claude Code from the page and waits for its TUI; answers the agent's id. */
+async function launch(page: Page): Promise<string> {
+  await page.goto("/");
+  await page.getByPlaceholder("/path/to/project").fill(String(process.env["BZ_E2E_WORK"]));
+  await page.getByRole("button", { name: "Launch Claude Code" }).click();
+  await expect.poll(() => screen(page), { timeout: 20_000 }).toContain("Claude Code");
+  return new URL(page.url()).hash.replace("#/agent/", "");
+}
+
+/** Ends the agent's process from outside, as a crash would, through the daemon's signal command. */
+function kill(page: Page, agentId: string): Promise<number> {
+  return page.evaluate(async (id) => {
+    const state: unknown = await (await fetch("/v1/state")).json();
+    const agents: unknown = Reflect.get(Object(state), "agents");
+    const agent: unknown = Array.isArray(agents)
+      ? agents.find((a: unknown) => Reflect.get(Object(a), "id") === id)
+      : undefined;
+    const res = await fetch(`/v1/agents/${id}/signal`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        idempotencyKey: crypto.randomUUID(),
+        generation: Reflect.get(Object(agent), "generation"),
+        signal: "SIGKILL",
+      }),
+    });
+    return res.status;
+  }, agentId);
+}
+
+/** Launches an agent from outside the page, as another device would; answers the status. */
+function launchElsewhere(page: Page): Promise<number> {
+  return page.evaluate(
+    async (cwd) =>
+      (
+        await fetch("/v1/agents", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            idempotencyKey: crypto.randomUUID(),
+            harness: "claude-code",
+            cwd,
+          }),
+        })
+      ).status,
+    String(process.env["BZ_E2E_WORK"]),
+  );
+}
+
+const workspace = (page: Page) => page.getByRole("article", { name: "agent" });
+const stateOf = (page: Page, state: string) =>
+  workspace(page).locator(".workspace-head").getByText(state, { exact: true });
+
+test("shows the fleet under its host, and closes an agent from its workspace", async ({ page }) => {
+  const agentId = await launch(page);
+  const agents = page.getByRole("list", { name: "agents" });
+  await expect(agents.getByRole("heading", { level: 2 })).toHaveText(new RegExp(`^${hostname()}`));
+  await expect(agents.locator('[aria-current="true"]')).toBeVisible();
+
+  await workspace(page).getByText("Attach from a terminal").click();
+  await expect(workspace(page).locator(".attach code")).toContainText(" attach-session -t ");
+
+  await workspace(page).getByRole("button", { name: "Close agent…" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Close agent" }).click();
+  await expect(stateOf(page, "closed")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("region", { name: "terminal" })).toHaveCount(0);
+  await expect(workspace(page).getByRole("button", { name: /Close agent|Respawn/ })).toHaveCount(0);
+  await expect(agents.locator('[aria-current="true"]')).toHaveCount(0);
+
+  await page.getByRole("button", { name: /Show ended agents/ }).click();
+  await agents.locator('[aria-current="true"]').click();
+  expect(new URL(page.url()).hash).toBe(`#/agent/${agentId}`);
+  await expect(page.getByRole("region", { name: "terminal" })).toHaveCount(0);
+});
+
+test("respawns an agent whose process ended, onto a fresh terminal", async ({ page }) => {
+  const agentId = await launch(page);
+  const killed = await kill(page, agentId);
+  expect(killed).toBe(200);
+  await expect(stateOf(page, "exited")).toBeVisible({ timeout: 10_000 });
+
+  await workspace(page).getByRole("button", { name: "Respawn" }).click();
+  await expect(stateOf(page, "running")).toBeVisible({ timeout: 20_000 });
+  await expect.poll(() => screen(page), { timeout: 20_000 }).toContain("Claude Code");
+});
+
+test("keeps a refusal on screen while the fleet goes on changing", async ({ page }) => {
+  await page.goto("/");
+  await page.getByPlaceholder("/path/to/project").fill("relative/dir");
+  await page.getByRole("button", { name: "Launch Claude Code" }).click();
+  const refusal = page.getByRole("alert");
+  await expect(refusal).toContainText("is not a full path");
+  const agents = page.getByRole("list", { name: "agents" }).locator("button.agent");
+  const before = await agents.count();
+  expect(await launchElsewhere(page)).toBe(200);
+  await expect(agents).toHaveCount(before + 1);
+  await expect(refusal).toContainText("is not a full path");
+});
+
+test("copies the attach command on a page with no clipboard API, as over plain http", async ({
+  page,
+}) => {
+  // Runs in the page, which has the DOM this package's types leave out.
+  await page.addInitScript({
+    content: `
+      Object.defineProperty(Navigator.prototype, "clipboard", { get: () => undefined });
+      document.addEventListener("copy", () => { globalThis.copiedText = String(getSelection()); });
+    `,
+  });
+  await launch(page);
+  await workspace(page).getByText("Attach from a terminal").click();
+  await workspace(page).getByRole("button", { name: "Copy" }).click();
+  await expect(workspace(page).getByRole("status").filter({ hasText: "Copied" })).toBeVisible();
+  const command = await workspace(page).locator(".attach code").textContent();
+  expect(await page.evaluate(() => Reflect.get(globalThis, "copiedText"))).toBe(command);
+});

@@ -1,4 +1,5 @@
 import {
+  AgentCommandResponse,
   AnswerAttentionResponse,
   ErrorResponse,
   EventFrame,
@@ -130,3 +131,10 @@ export const sendMessage = async (agentId: string, body: string) =>
 
 export const answer = async (attentionId: string, decision: ApprovalDecision) =>
   AnswerAttentionResponse.parse(await act(`/v1/attention/${attentionId}/answer`, { decision }));
+
+/** Names the generation the UI saw, so a command meant for an earlier incarnation is refused. */
+export const closeAgent = async (agentId: string, generation: number) =>
+  AgentCommandResponse.parse(await act(`/v1/agents/${agentId}/close`, { generation }));
+
+export const respawnAgent = async (agentId: string, generation: number) =>
+  AgentCommandResponse.parse(await act(`/v1/agents/${agentId}/respawn`, { generation }));
