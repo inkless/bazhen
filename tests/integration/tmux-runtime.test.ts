@@ -228,6 +228,7 @@ describe("tmux runtime on a private server", () => {
       notify: () => {},
       unsent: () => 0,
       close: () => {},
+      declaresEpoch: true,
     };
     const baseline = ptyHandleCount();
     for (let i = 0; i < 30; i++) {

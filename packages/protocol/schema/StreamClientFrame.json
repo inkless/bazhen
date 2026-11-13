@@ -29,6 +29,24 @@
           "type": "integer",
           "minimum": 2,
           "maximum": 1000
+        },
+        "resumes": {
+          "type": "object",
+          "properties": {
+            "attachmentId": {
+              "type": "string",
+              "pattern": "^att_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            },
+            "token": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          "required": [
+            "attachmentId",
+            "token"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -71,6 +89,38 @@
         "type": {
           "type": "string",
           "const": "engage"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "epoch"
+        },
+        "epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "type",
+        "epoch"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "ping"
         }
       },
       "required": [

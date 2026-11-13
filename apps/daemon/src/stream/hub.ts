@@ -1,3 +1,4 @@
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import {
   acceptsInput,
   engage,
@@ -12,6 +13,7 @@ import {
   type TerminalId,
 } from "@bazhen/core";
 import {
+  PROTOCOL_VERSION,
   TERMINAL_COLOURS,
   type AttachmentMode,
   type EventPayload,
@@ -25,6 +27,11 @@ import { Settle } from "./settle.ts";
 /** One browser view of a terminal, as the hub sees it. */
 export interface Viewer {
   readonly mode: AttachmentMode;
+  /**
+   * Whether the view declares the epoch its input is typed under. One that doesn't, from before
+   * protocol 1.30, is held to the epoch of its own grant.
+   */
+  readonly declaresEpoch: boolean;
   send(bytes: Uint8Array): void;
   notify(frame: StreamServerFrame): void;
   /** Bytes sent to the view that have not reached it yet. */
@@ -75,15 +82,30 @@ export interface Attachment {
   readonly id: AttachmentId;
   input(bytes: Uint8Array): void;
   engage(): void;
+  /** The epoch the view's following input is typed under. */
+  declareEpoch(epoch: number): void;
   resize(size: Size): void;
-  leave(): void;
+  leave(reason?: LeaveReason): void;
+}
+
+/** Why a view's own side ended: it closed, or its socket stopped answering. */
+export type LeaveReason = Extract<EndReason, "client_closed" | "timed_out">;
+
+/** A view's claim on its own earlier attachment, when it reattaches. */
+export interface Resume {
+  readonly attachmentId: AttachmentId;
+  readonly token: string;
 }
 
 interface Entry {
   readonly viewer: Viewer;
+  /** The digest of the token that lets this view end this attachment when it reattaches. */
+  readonly resumeDigest: Buffer;
   size: Size;
-  /** The epoch this view was granted the lease at; its input counts only under that epoch. */
+  /** The epoch this view was granted the lease at, for a view that declares none. */
   grantedEpoch?: number;
+  /** The epoch the view says its input is typed under; a grant never changes it. */
+  declaredEpoch?: number;
   /** Live bytes held while the view's snapshot is on its way, and how many there are. */
   queue?: Uint8Array[];
   held: number;
@@ -129,15 +151,26 @@ export class TerminalHub {
     this.opts = opts;
   }
 
-  async join(ref: RuntimeRef, viewer: Viewer, size: Size): Promise<Attachment> {
+  /**
+   * `resumes` names the view's own earlier attachment, when it reattaches after losing its
+   * socket; that one is ended before the view is told who drives, if the token is the one that
+   * attachment was given.
+   */
+  async join(ref: RuntimeRef, viewer: Viewer, size: Size, resumes?: Resume): Promise<Attachment> {
     // An observer never sizes the terminal, not even by being the first to open it (§5.4).
     const opening = viewer.mode === "interactive" ? size : null;
     const { watched, opened } = await this.watch(ref, opening);
     const id = newId("att");
     // From here the view's live bytes are held, and the snapshot covers every byte before them.
     const queue: Uint8Array[] = [];
-    const entry: Entry = { viewer, size, queue, held: 0 };
+    const resumeToken = randomBytes(16).toString("base64url");
+    const entry: Entry = { viewer, size, queue, held: 0, resumeDigest: digest(resumeToken) };
     watched.viewers.set(id, entry);
+    const replaced = resumes && watched.viewers.get(resumes.attachmentId);
+    if (resumes && replaced && timingSafeEqual(digest(resumes.token), replaced.resumeDigest)) {
+      replaced.viewer.close();
+      this.end(watched, resumes.attachmentId, "replaced");
+    }
     const snapshot = watched.emulator.snapshot();
     this.log.started(id, watched.terminal, viewer.mode);
     viewer.notify(leaseFrame(watched, id));
@@ -154,13 +187,19 @@ export class TerminalHub {
     if (!opened) this.fitTo(watched);
     // Last: a view may send input and engage as soon as it is told, and they need the handle
     // returned below.
-    viewer.notify({ type: "attached", attachmentId: id });
+    viewer.notify({
+      type: "attached",
+      attachmentId: id,
+      protocolVersion: PROTOCOL_VERSION,
+      resumeToken,
+    });
     return {
       id,
       input: (bytes) => this.input(watched, id, bytes),
       engage: () => this.engage(watched, id),
+      declareEpoch: (epoch) => this.declareEpoch(watched, id, epoch),
       resize: (next) => this.resize(watched, id, next),
-      leave: () => this.leave(watched, id),
+      leave: (reason = "client_closed") => this.end(watched, id, reason),
     };
   }
 
@@ -275,21 +314,25 @@ export class TerminalHub {
    * Keystrokes reach the terminal only from its driver. Any other view's are dropped, never
    * queued: an interactive view's keystroke takes the lease instead (§4.3), and an observer is
    * told once per lease. Terminal replies never reach the program, and neither replies nor focus
-   * and mouse reports count as keystrokes: an old driver's blur must not take the lease back. The epoch
-   * check fences stale input once input frames carry the epoch they were typed under; until then
-   * it is the epoch of this view's own grant.
+   * and mouse reports count as keystrokes: an old driver's blur must not take the lease back.
+   * Input is applied only under the epoch the view declared, and only a keystroke typed under the
+   * current epoch takes the lease over. A key typed before its view learnt of a takeover is
+   * stale: applying it would send what the user typed for one screen to another, and taking the
+   * lease back for it would move the lease on every key while two views type at once.
    */
   private input(watched: Watched, id: AttachmentId, bytes: Uint8Array): void {
     const entry = watched.viewers.get(id);
     if (entry === undefined) return;
     const input = classifyInput(bytes);
-    if (acceptsInput(watched.lease, id, entry.grantedEpoch ?? -1)) {
+    const { declaresEpoch } = entry.viewer;
+    const epoch = declaresEpoch ? entry.declaredEpoch : entry.grantedEpoch;
+    if (acceptsInput(watched.lease, id, epoch ?? -1)) {
       if (input.bytes.length > 0) watched.stream.write(input.bytes);
       return;
     }
     if (!input.keystrokes) return;
     if (entry.viewer.mode === "interactive") {
-      this.engage(watched, id);
+      if (!declaresEpoch || epoch === watched.lease.epoch) this.engage(watched, id);
       return;
     }
     if (entry.toldDropped) return;
@@ -307,6 +350,11 @@ export class TerminalHub {
     this.log.granted(watched.terminal, id, next.epoch);
     this.announceLease(watched);
     this.fitTo(watched);
+  }
+
+  private declareEpoch(watched: Watched, id: AttachmentId, epoch: number): void {
+    const entry = watched.viewers.get(id);
+    if (entry !== undefined) entry.declaredEpoch = epoch;
   }
 
   private announceLease(watched: Watched): void {
@@ -362,10 +410,6 @@ export class TerminalHub {
       });
   }
 
-  private leave(watched: Watched, id: AttachmentId): void {
-    this.end(watched, id, "client_closed");
-  }
-
   private end(watched: Watched, id: AttachmentId, reason: EndReason): void {
     if (!watched.viewers.delete(id)) return;
     this.log.ended(id, reason);
@@ -382,6 +426,8 @@ export class TerminalHub {
   }
 }
 
+const digest = (token: string) => createHash("sha256").update(token).digest();
+
 /** Tells a view why its stream is over, and closes it. */
 function dismiss(entry: Entry, frame: StreamServerFrame): void {
   entry.viewer.notify(frame);
@@ -389,5 +435,6 @@ function dismiss(entry: Entry, frame: StreamServerFrame): void {
 }
 
 function leaseFrame(watched: Watched, id: AttachmentId): StreamServerFrame {
-  return { type: "lease", driver: watched.lease.holder === id, epoch: watched.lease.epoch };
+  const { holder, epoch } = watched.lease;
+  return { type: "lease", driver: holder === id, driven: holder !== null && holder !== id, epoch };
 }

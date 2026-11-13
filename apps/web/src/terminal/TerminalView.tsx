@@ -5,6 +5,8 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as Xterm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import {
+  EPOCH_FRAMES_SINCE,
+  isAtLeast,
   parseJson,
   PROTOCOL_VERSION,
   StreamServerFrame,
@@ -131,6 +133,9 @@ function connect(
   let ws: WebSocket | undefined;
   let attached = false;
   let driving = false;
+  /** The latest lease epoch, and whether the daemon reads the epoch input is typed under. */
+  let epoch: number | undefined;
+  let declares = false;
   let wantsToDrive = false;
   /** Whether the program is on its alternate screen, which only the daemon can see. */
   let alternate = false;
@@ -140,6 +145,10 @@ function connect(
 
   const send = (frame: StreamClientFrame) => {
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(frame));
+  };
+  /** What it types from now on counts only under this epoch (§4.3). */
+  const declare = () => {
+    if (declares && epoch !== undefined) send({ type: "epoch", epoch });
   };
   const engage = () => {
     if (attached) send({ type: "engage" });
@@ -164,6 +173,8 @@ function connect(
       `${location.origin.replace("http", "ws")}/v1/terminals/${terminalId}/stream`,
     );
     ws = socket;
+    epoch = undefined;
+    declares = false;
     socket.binaryType = "arraybuffer";
     socket.addEventListener("open", () => {
       const { cols, rows } = term;
@@ -182,10 +193,14 @@ function connect(
       else if (f.type === "screen") alternate = f.alternate;
       else if (f.type === "attached") {
         attached = true;
+        declares = isAtLeast(f.protocolVersion ?? "1.0", EPOCH_FRAMES_SINCE);
+        declare();
         // A view focused before its socket opened saw no focus event to claim the lease with.
         if (wantsToDrive || element.contains(document.activeElement)) engage();
         wantsToDrive = false;
       } else if (f.type === "lease") {
+        epoch = f.epoch;
+        declare();
         driving = f.driver;
         report({ status: { kind: driving ? "driving" : "viewing" } });
       } else if (f.type === "notice") report({ notice: f.message });
