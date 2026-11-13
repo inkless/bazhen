@@ -5,6 +5,8 @@
 //!
 //! The reply's framing is documented beside `HookReply` in packages/protocol/src/mail.ts.
 
+mod pane_title;
+
 use std::env;
 use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream;
@@ -35,7 +37,11 @@ struct Reply {
 }
 
 fn main() {
-    exit(run().unwrap_or(0));
+    let ran = match env::args().nth(1).as_deref() {
+        Some("pane-title") => pane_title::run(env::args().skip(2)),
+        _ => run(),
+    };
+    exit(ran.unwrap_or(0));
 }
 
 fn run() -> Option<i32> {

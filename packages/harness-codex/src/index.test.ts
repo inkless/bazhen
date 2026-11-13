@@ -4,12 +4,16 @@ import { ZodError } from "zod";
 import {
   approvalResult,
   CodexHarness,
+  matching,
   messageText,
   queueArgs,
   readApproval,
   readResolved,
+  readThreadList,
+  readThreadStarted,
   readUserMessage,
   ThreadMismatch,
+  titlePrefix,
 } from "./index.ts";
 
 const REMOTE = "unix:///codex/app-server-control.sock";
@@ -170,5 +174,42 @@ describe("Codex mail", () => {
       readUserMessage("item/started", input(quoting))?.messageId,
       readUserMessage("item/started", input(`fwd: ${messageText("msg_2", "x")}`))?.messageId,
     ]).toEqual(["msg_1", null]);
+  });
+});
+
+const started = (thread: object) => readThreadStarted("thread/started", { thread });
+
+describe("Codex thread titles", () => {
+  const ID = "01a1ce15-39c0-7183-b5b6-f6f2f0000001";
+
+  it("reads a thread id from a title, whole or cut to 29 characters by the TUI", () => {
+    const titles = [ID, `${ID.slice(0, 29)}...`, `${ID.slice(0, 29)}…`, ` ${ID} `];
+    expect(titles.map(titlePrefix)).toEqual([ID, ID.slice(0, 29), ID.slice(0, 29), ID]);
+  });
+
+  it("reads no id from a title that isn't one", () => {
+    const titles = ["", "codex", "01a1ce15", "my repo 01a1ce15-39c0-7183-b5b6-f6f2f...", `${ID}x`];
+    expect(titles.map(titlePrefix)).toEqual(titles.map(() => null));
+  });
+
+  it("matches each id that starts with the prefix, once", () => {
+    expect(matching("01a1", ["01a1-a", "02b2-b", "01a1-a", "01a1-c"])).toEqual([
+      "01a1-a",
+      "01a1-c",
+    ]);
+  });
+
+  it("takes new threads a human could be shown, and not the ones that write titles", () => {
+    expect([
+      started({ id: "thr-1", ephemeral: false }),
+      started({ id: "thr-2", ephemeral: true }),
+      started({ id: "thr-3", threadSource: "thread_title" }),
+      readThreadStarted("thread/status/changed", { thread: { id: "thr-4" } }),
+    ]).toEqual(["thr-1", null, null, null]);
+  });
+
+  it("lists the shown threads of a thread/list answer, and none of one it can't read", () => {
+    const listed = { data: [{ id: "a" }, { id: "b", ephemeral: true }, { name: "no id" }] };
+    expect([readThreadList(listed), readThreadList({ threads: [] })]).toEqual([["a"], []]);
   });
 });

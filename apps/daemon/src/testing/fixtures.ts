@@ -164,17 +164,21 @@ export const upgradeOutcome = (ws: WebSocket) =>
     ws.once("error", (err) => resolve(err.message));
   });
 
+/** The tmux server the Codex fixtures' agents run on. */
+export const FIXTURE_TMUX_SOCKET = "/run/bazhen/tmux.sock";
+
 /**
  * A store with a running Codex agent bound to each of `threads`, by thread; a null thread gives
- * an agent bound to none.
+ * an agent bound to none. The nth agent's terminal is in pane `%n` on FIXTURE_TMUX_SOCKET.
  */
 export async function withCodexAgents(...threads: (string | null)[]) {
   const store = Store.open(tempDb());
   const agents = new Map<string | null, string>();
-  for (const threadId of threads) {
+  for (const [i, threadId] of threads.entries()) {
+    const locator = { socket: FIXTURE_TMUX_SOCKET, paneId: `%${i}` };
     const environment: EnvironmentAdapter = {
       ...fakeEnvironment(store, async (l) => ({
-        runtime: { terminalId: l.terminalId, runtime: "tmux", locator: {} },
+        runtime: { terminalId: l.terminalId, runtime: "tmux", locator },
         externalRef:
           threadId === null
             ? null

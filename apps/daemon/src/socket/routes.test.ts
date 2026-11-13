@@ -22,13 +22,23 @@ const doctor = async () => report;
 type Env = Readonly<Record<string, string>>;
 const refreshed = { capturedAt: "t", kept: 1, removed: {}, refused: [], unchanged: [] };
 
-function app(refreshEnv = async (_env: Env) => refreshed) {
+function app(
+  refreshEnv = async (_env: Env) => refreshed,
+  paneTitleChanged = (_pane: string) => {},
+) {
   const commands = new Hono();
   commands.post("/v1/attention/:id/answer", (c) => c.json({ answered: c.req.param("id") }));
   commands.get("/v1/state", (c) => c.json({ state: true }));
   const hooks = new Hono();
   hooks.post("/v1/hooks", (c) => c.text("hook"));
-  return socketApp({ commands, hooks, stop: () => undefined, doctor, refreshEnv });
+  return socketApp({
+    commands,
+    hooks,
+    stop: () => undefined,
+    doctor,
+    refreshEnv,
+    paneTitleChanged,
+  });
 }
 
 const answer = (headers: Record<string, string> = {}) =>
@@ -55,6 +65,17 @@ describe("socketApp", () => {
     expect((await refresh({ env: { A: "1" } })).status).toBe(200);
     expect((await refresh({ env: { A: 1 } })).status).toBe(400);
     expect(received).toEqual([{ A: "1" }]);
+  });
+
+  it("hands on the pane a title changed in, and refuses anything but a pane id", async () => {
+    const panes: string[] = [];
+    const daemon = app(undefined, (pane) => panes.push(pane));
+    const notify = (body: unknown) =>
+      daemon.request("/v1/codex/pane-title", { method: "POST", body: JSON.stringify(body) });
+    expect((await notify({ pane: "%12" })).status).toBe(204);
+    expect((await notify({ pane: "%12; rm" })).status).toBe(400);
+    expect((await notify({ title: "x" })).status).toBe(400);
+    expect(panes).toEqual(["%12"]);
   });
 
   it("lets a caller that presents no agent answer an approval", async () => {

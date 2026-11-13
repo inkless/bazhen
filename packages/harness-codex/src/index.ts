@@ -308,3 +308,50 @@ export function readItemStarted(
     ? { threadId: p.data.threadId, userInput: p.data.item.type === "userMessage" }
     : null;
 }
+
+const StartedThread = z.object({
+  id: z.string(),
+  ephemeral: z.boolean().nullish(),
+  threadSource: z.string().nullish(),
+});
+
+/** A thread a human could be shown: not one Codex makes to write a title, which is ephemeral. */
+const shown = (t: z.infer<typeof StartedThread>) =>
+  t.ephemeral !== true && t.threadSource !== "thread_title";
+
+/**
+ * A new thread's id, from `thread/started`, as a TUI's `/new` or `/fork` makes; null for a
+ * title thread or any other notification.
+ */
+export function readThreadStarted(method: string, params: unknown): string | null {
+  if (method !== "thread/started") return null;
+  const p = z.object({ thread: StartedThread }).safeParse(params);
+  return p.success && shown(p.data.thread) ? p.data.thread.id : null;
+}
+
+/** The shown threads in a `thread/list` answer, newest first as the server sorts them. */
+export function readThreadList(result: unknown): string[] {
+  const p = z.object({ data: z.array(z.unknown()) }).safeParse(result);
+  if (!p.success) return [];
+  return p.data.data.flatMap((t) => {
+    const thread = StartedThread.safeParse(t);
+    return thread.success && shown(thread.data) ? [thread.data.id] : [];
+  });
+}
+
+/** A thread id, whole or cut short with `...` or `…`, as the TUI's terminal title shows it. */
+const TITLE = /^([0-9a-f]{8}-[0-9a-f-]{20,27})(?:\.\.\.|…)?$/;
+
+/**
+ * The thread id a TUI's terminal title names, as the prefix every id it could be starts with;
+ * null for a title that isn't one, as the user's own title config makes (foundation-design §5.8).
+ */
+export function titlePrefix(title: string): string | null {
+  const m = TITLE.exec(title.trim());
+  return m?.[1] ?? null;
+}
+
+/** The ids among `ids` that start with `prefix`, each once. */
+export const matching = (prefix: string, ids: Iterable<string>): string[] => [
+  ...new Set([...ids].filter((id) => id.startsWith(prefix))),
+];

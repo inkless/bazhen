@@ -2,6 +2,7 @@ import type { HttpBindings } from "@hono/node-server";
 import { Hono } from "hono";
 import {
   EnvRefreshRequest,
+  PaneTitleChanged,
   type DoctorResponse,
   type EnvRefreshResponse,
   type ErrorResponse,
@@ -17,6 +18,8 @@ export interface SocketParts {
   readonly doctor: () => Promise<DoctorResponse>;
   /** Agents started from now on get `env`, filtered as at start-up (foundation-design §9.5). */
   readonly refreshEnv: (env: Readonly<Record<string, string>>) => Promise<EnvRefreshResponse>;
+  /** A tmux pane's title changed; the daemon reads it itself (foundation-design §5.8). */
+  readonly paneTitleChanged: (pane: string) => void;
 }
 
 /**
@@ -53,6 +56,17 @@ export function socketApp(parts: SocketParts): Hono<{ Bindings: HttpBindings }> 
       return c.json(body, 400);
     }
     return c.json(await parts.refreshEnv(req.data.env));
+  });
+
+  // tmux's hook, through the hook client: it names a pane, and nothing it says is trusted further.
+  app.post("/v1/codex/pane-title", async (c) => {
+    const req = PaneTitleChanged.safeParse(await c.req.json().catch(() => undefined));
+    if (!req.success) {
+      const body: ErrorResponse = { error: "invalid_request", message: "expected { pane }" };
+      return c.json(body, 400);
+    }
+    parts.paneTitleChanged(req.data.pane);
+    return c.body(null, 204);
   });
 
   app.route("/", parts.hooks);

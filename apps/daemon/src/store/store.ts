@@ -449,11 +449,46 @@ export class Store {
     };
   }
 
-  /** The running Codex agent bound to a thread, if any. */
+  /**
+   * The running Codex agent bound to a thread, if exactly one is: of two, neither is guessed at,
+   * so nothing meant for one reaches the other.
+   */
   codexAgent(threadId: string): string | undefined {
+    const sql = `SELECT id FROM agent_sessions WHERE ${RUNNING_CODEX} AND ${THREAD} = ? LIMIT 2`;
+    const rows = this.prepare(sql).all(threadId);
+    return rows.length === 1 ? String(rows[0]?.id) : undefined;
+  }
+
+  /** Every running Codex agent bound to a thread. */
+  codexAgentsOn(threadId: string): string[] {
     const sql = `SELECT id FROM agent_sessions WHERE ${RUNNING_CODEX} AND ${THREAD} = ?`;
-    const row = this.prepare(sql).get(threadId);
-    return row === undefined ? undefined : String(row.id);
+    return this.prepare(sql)
+      .all(threadId)
+      .map((r) => String(r.id));
+  }
+
+  /**
+   * The running Codex agent a message is for, while it is queued or queued in Codex, and whether
+   * Codex has taken it yet.
+   */
+  codexMessageAgent(messageId: string): { agentId: string; inCodex: boolean } | undefined {
+    const sql = `SELECT a.id, m.state FROM mailbox m JOIN agent_sessions a ON a.id = m.agent_session_id
+                 WHERE m.id = ? AND m.state IN ('queued', 'queued_in_codex')
+                   AND a.harness = 'codex' AND a.state = 'running'`;
+    const row = this.prepare(sql).get(messageId);
+    if (row === undefined) return undefined;
+    return { agentId: String(row.id), inCodex: row.state === "queued_in_codex" };
+  }
+
+  /** The panes of the running Codex agents on the tmux server at `socket`. */
+  codexPanes(socket: string): string[] {
+    const sql = `SELECT json_extract(t.locator, '$.paneId') AS pane
+                 FROM agent_sessions a JOIN terminals t ON t.id = a.terminal_id
+                 WHERE a.harness = 'codex' AND a.state = 'running'
+                   AND json_extract(t.locator, '$.socket') = ?`;
+    return this.prepare(sql)
+      .all(socket)
+      .flatMap((r) => (typeof r.pane === "string" ? [r.pane] : []));
   }
 
   /** The thread a running Codex agent is bound to, if it is one. */
@@ -461,6 +496,26 @@ export class Store {
     const sql = `SELECT ${THREAD} AS thread FROM agent_sessions WHERE ${RUNNING_CODEX} AND id = ?`;
     const row = this.prepare(sql).get(agentId);
     return row === undefined ? undefined : String(row.thread);
+  }
+
+  /**
+   * The running Codex agent in a tmux pane, on the tmux server at `socket`, with its thread and
+   * its terminal's current incarnation.
+   */
+  codexAgentInPane(socket: string, pane: string) {
+    const sql = `SELECT a.id, a.environment_id, json_extract(a.external_ref, '$.id') AS thread,
+                        t.id AS terminal_id, t.runtime, t.locator
+                 FROM agent_sessions a JOIN terminals t ON t.id = a.terminal_id
+                 WHERE a.harness = 'codex' AND a.state = 'running'
+                   AND json_extract(a.external_ref, '$.kind') = 'codex-thread'
+                   AND json_extract(t.locator, '$.socket') = ?
+                   AND json_extract(t.locator, '$.paneId') = ?`;
+    const row = this.prepare(sql).get(socket, pane);
+    const runtime = row === undefined ? null : refFrom(row.terminal_id, row);
+    if (row === undefined || runtime === null) return undefined;
+    const environmentId = String(row.environment_id);
+    if (!isId("env", environmentId)) return undefined;
+    return { agentId: String(row.id), environmentId, threadId: String(row.thread), runtime };
   }
 
   /** The Codex threads the running Codex agents are bound to. */

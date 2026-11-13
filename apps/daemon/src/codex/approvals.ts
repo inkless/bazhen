@@ -6,6 +6,7 @@ import type { ChannelListener } from "./channel.ts";
 /** One open item, and how to answer the request behind it on the connection it last came on. */
 interface Asked {
   readonly item: AttentionId;
+  readonly agentId: string;
   readonly threadId: string;
   respond: ((result: unknown) => void) | undefined;
 }
@@ -20,11 +21,13 @@ interface Asked {
  * requests again, and each finds its item by its thread and tool call. Until then the inbox
  * can't answer it: an answer with no connection to carry it would be recorded and lost. One a
  * resumed thread doesn't send again was lost with a server that restarted, and goes stale; one
- * whose agent no longer runs closes with it.
+ * whose agent no longer runs closes with it, and one whose agent has moved to another thread is
+ * superseded: the TUI still shows it there, but the inbox can't reach it.
  */
 export function codexApprovals(
   approvals: Approvals,
   agentOf: (threadId: string) => string | undefined,
+  running: (agentId: string) => boolean,
 ): ChannelListener {
   const asked = new Map<string, Asked>();
   /** The current connection's request ids, to the tool call each is for. */
@@ -49,6 +52,7 @@ export function codexApprovals(
         return;
       }
       const a: Asked = {
+        agentId,
         threadId: request.threadId,
         respond,
         item: approvals.ask(
@@ -73,7 +77,8 @@ export function codexApprovals(
       requests = new Map();
       for (const [key, a] of asked) {
         a.respond = undefined;
-        if (agentOf(a.threadId) === undefined) close(key, "agent_closed");
+        if (!running(a.agentId)) close(key, "agent_closed");
+        else if (agentOf(a.threadId) !== a.agentId) close(key, "superseded");
       }
     },
     resumed(threads) {

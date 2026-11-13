@@ -15,6 +15,7 @@ import { CodexMail } from "./mail.ts";
 async function mailFor(
   refuses: (args: readonly string[]) => boolean = () => false,
   startsTurn = false,
+  held: (agentId: string) => boolean = () => false,
 ) {
   const { store, agentOn } = await withCodexAgents("thr-1", "thr-2", null);
   const agentId = agentOn("thr-1");
@@ -34,6 +35,7 @@ async function mailFor(
     },
     log: () => {},
     retryMs: 1,
+    held,
   });
   const handed: Promise<void>[] = [];
   const mailbox = new Mailbox(store, {
@@ -77,6 +79,52 @@ describe("Codex mail", () => {
     expect(stateOf(id)).toBe("queued_in_codex");
     turn("thr-1", messageText(id, "hello"));
     expect(stateOf(id)).toBe("delivered");
+  });
+
+  it("delivers a message queued in Codex on a thread its agent has since moved off", async () => {
+    const { send, stateOf, turn, store, agentOn } = await mailFor();
+    const id = await send("hello");
+    const agentId = agentOn("thr-1");
+    const environmentId = String(store.agentEnvironment(agentId));
+    store.append({
+      type: "agent.external_ref_updated",
+      entityId: agentId,
+      actor: "system",
+      payload: { externalRef: { environmentId, kind: "codex-thread", id: "thr-new" } },
+    });
+    turn("thr-1", messageText(id, "hello"));
+    expect(stateOf(id)).toBe("delivered");
+  });
+
+  it("confirms nothing on a thread no agent is on for a message Codex was never handed", async () => {
+    const { send, stateOf, turn } = await mailFor(undefined, false, () => true);
+    const id = await send("hello");
+    expect(stateOf(id)).toBe("queued");
+    turn("thr-nobody", messageText(id, "hello"));
+    expect(stateOf(id)).toBe("queued");
+  });
+
+  it("holds a message while its agent waits to move, and hands it to the new thread after", async () => {
+    let holding = true;
+    const { send, stateOf, ran, store, agentOn, mail } = await mailFor(
+      undefined,
+      false,
+      () => holding,
+    );
+    const id = await send("hello");
+    expect([stateOf(id), ran]).toEqual(["queued", []]);
+    const agentId = agentOn("thr-1");
+    const environmentId = String(store.agentEnvironment(agentId));
+    store.append({
+      type: "agent.external_ref_updated",
+      entityId: agentId,
+      actor: "system",
+      payload: { externalRef: { environmentId, kind: "codex-thread", id: "thr-new" } },
+    });
+    holding = false;
+    mail.deliverQueued(agentId);
+    await expect.poll(() => stateOf(id)).toBe("queued_in_codex");
+    expect(ran.map((args) => args[2])).toEqual(["thr-new"]);
   });
 
   it("stores it in the Codex home when no app-server takes it", async () => {
