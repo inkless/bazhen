@@ -5,6 +5,14 @@ import {
   DismissAttentionRequest,
   ReplyAttentionRequest,
   ResendAttentionRequest,
+  AssignTaskRequest,
+  CreateTaskRequest,
+  FinishTaskRequest,
+  UnassignTaskRequest,
+  type AssignTaskResponse,
+  type CreateTaskResponse,
+  type TaskCommandResponse,
+  type TaskDetail,
   CloseAgentRequest,
   CloseShellRequest,
   OpenShellRequest,
@@ -31,7 +39,10 @@ import {
   type StateSnapshot,
 } from "@bazhen/protocol";
 import {
+  isId,
   LaunchFailed,
+  TaskRefused,
+  type Caller,
   NoTerminal,
   NotResumable,
   ProcessState,
@@ -51,6 +62,7 @@ import {
 import { AttentionClosed, AttentionUnavailable } from "../mailbox/approvals.ts";
 import { ShellBusy, ShellOpenFailed, ShellsUnsettled, UnknownShell } from "../shells/lifecycle.ts";
 import { AttentionRefused } from "../attention/inbox.ts";
+import { MailTooLong, UnknownTask } from "../tasks/tasks.ts";
 import { refusal, type Allowlists } from "./guard.ts";
 import { deviceCookie, tokenFrom, type DeviceAuth } from "../auth/devices.ts";
 import type { PairingCodes } from "../auth/pairing.ts";
@@ -92,7 +104,20 @@ export interface AppDeps {
     terminalId: string,
     req: UnlinkShellRequest,
   ) => Promise<ShellCommandResponse>;
+  readonly tasks: TaskCommands;
 }
+
+/** Task commands, each told who asks: an agent by its id, or the human as null. */
+export interface TaskCommands {
+  create(caller: Caller, req: CreateTaskRequest): CreateTaskResponse;
+  show(taskId: string): TaskDetail | undefined;
+  assign(caller: Caller, taskId: string, req: AssignTaskRequest): AssignTaskResponse;
+  unassign(caller: Caller, taskId: string, req: UnassignTaskRequest): TaskCommandResponse;
+  finish(caller: Caller, taskId: string, req: FinishTaskRequest): TaskCommandResponse;
+}
+
+/** Thrown for a caller that says it is an agent with something that is no agent's id. */
+class NotAnAgent extends Error {}
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const PAIRING_PATH = "/v1/pairing";
@@ -221,6 +246,35 @@ export function createApp(deps: AppDeps): Hono {
   route("/v1/shells/:id/rename", RenameShellRequest, deps.renameShell);
   route("/v1/shells/:id/unlink", UnlinkShellRequest, deps.unlinkShell);
 
+  // Only the Unix socket's callers can be agents: a browser over TCP is always the human, so no
+  // page can act as an agent, whatever header it sends (§9.1, §9.4).
+  const callerOf = (c: Context): Caller => {
+    const said = allow === null ? c.req.header("bazhen-agent-id") : undefined;
+    if (said === undefined) return null;
+    if (!isId("agent", said)) throw new NotAnAgent(`not an agent id: ${said}`);
+    return said;
+  };
+  const taskRoute = <T, R>(
+    path: string,
+    schema: z.ZodType<T>,
+    run: (caller: Caller, id: string, req: T) => R,
+  ) =>
+    app.post(path, async (c) => {
+      const body = schema.safeParse(await c.req.json().catch(() => undefined));
+      if (!body.success) return invalid(c, body.error);
+      return c.json(run(callerOf(c), c.req.param("id") ?? "", body.data));
+    });
+  const { tasks } = deps;
+  taskRoute("/v1/tasks", CreateTaskRequest, (caller, _id, req) => tasks.create(caller, req));
+  taskRoute("/v1/tasks/:id/assign", AssignTaskRequest, (...a) => tasks.assign(...a));
+  taskRoute("/v1/tasks/:id/unassign", UnassignTaskRequest, (...a) => tasks.unassign(...a));
+  taskRoute("/v1/tasks/:id/finish", FinishTaskRequest, (...a) => tasks.finish(...a));
+  app.get("/v1/tasks/:id", (c) => {
+    const detail = tasks.show(c.req.param("id"));
+    if (detail === undefined) throw new UnknownTask(c.req.param("id"));
+    return c.json(detail);
+  });
+
   // Typed failures from the domain become protocol errors in one place; anything else is a bug.
   app.onError((err, c) => {
     if (err instanceof UnsupportedHarness) return fail(c, 422, "unsupported", err.message);
@@ -235,6 +289,14 @@ export function createApp(deps: AppDeps): Hono {
     if (err instanceof ShellBusy) return fail(c, 409, "busy", err.message);
     if (err instanceof ShellOpenFailed) return fail(c, 502, "launch_failed", err.message);
     if (err instanceof ShellsUnsettled) return fail(c, 503, "unavailable", err.message);
+    if (err instanceof UnknownTask) return fail(c, 404, "not_found", err.message);
+    if (err instanceof MailTooLong) return fail(c, 400, "invalid_request", err.message);
+    if (err instanceof NotAnAgent) return fail(c, 400, "invalid_request", err.message);
+    if (err instanceof TaskRefused) {
+      return err.code === "forbidden"
+        ? fail(c, 403, "forbidden", err.message)
+        : fail(c, 409, "conflict", err.message);
+    }
     if (err instanceof StaleGeneration) return fail(c, 409, "stale_generation", err.message);
     if (err instanceof NotResumable) return fail(c, 409, "not_resumable", err.message);
     if (err instanceof ServerUnconfirmed) return fail(c, 409, "server_unconfirmed", err.message);

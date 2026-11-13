@@ -1,17 +1,30 @@
 import { describe, expect, it } from "vitest";
-import { newId, NotResumable, UnsupportedHarness } from "@bazhen/core";
+import { newId, NotResumable, TaskRefused, UnsupportedHarness, type Caller } from "@bazhen/core";
 import { FakeRuntime } from "@bazhen/core/testing";
 import { PROTOCOL_VERSION, type LaunchAgentRequest } from "@bazhen/protocol";
 import { EnvironmentUnavailable, ServerUnconfirmed, StaleGeneration } from "../agents/lifecycle.ts";
 import { AttentionClosed } from "../mailbox/approvals.ts";
 import { ShellBusy, UnknownShell } from "../shells/lifecycle.ts";
 import { AttentionRefused } from "../attention/inbox.ts";
-import { createApp } from "./app.ts";
+import { createApp, type AppDeps, type TaskCommands } from "./app.ts";
 
 const runtime = new FakeRuntime();
 
 const launched = { agentId: newId("agent"), terminalId: newId("term"), eventIds: [2, 3] };
-const app = createApp({
+const callers: Caller[] = [];
+const tasks: TaskCommands = {
+  create: (caller, req) => {
+    callers.push(caller);
+    if (req.title === "forbidden") throw new TaskRefused("forbidden", "a worker can't");
+    if (req.title === "conflict") throw new TaskRefused("conflict", "the task is done");
+    return { taskId: newId("task"), assignmentId: null, eventIds: [5] };
+  },
+  show: () => undefined,
+  assign: () => ({ assignmentId: newId("asgn"), eventIds: [6] }),
+  unassign: () => ({ eventIds: [7] }),
+  finish: () => ({ eventIds: [8] }),
+};
+const deps: AppDeps = {
   appVersion: "0.1.0",
   schemaVersion: () => 1,
   runtime,
@@ -61,7 +74,10 @@ const app = createApp({
     if (req.harness === "codex") throw new UnsupportedHarness("codex");
     return launched;
   },
-});
+  tasks,
+};
+const app = createApp(deps);
+const socket = createApp({ ...deps, allow: null });
 
 const host = "127.0.0.1:7900";
 
@@ -216,5 +232,46 @@ describe("HTTP app", () => {
   it("answers a command on a shell it doesn't know as not found", async () => {
     const res = await closeShell(true);
     expect([res.status, (await res.json()).error]).toEqual([404, "not_found"]);
+  });
+});
+
+const agentId = newId("agent");
+const createTask = (on: typeof app, title: string, headers: Record<string, string> = {}) =>
+  on.request("/v1/tasks", {
+    method: "POST",
+    headers: { host, "content-type": "application/json", ...headers },
+    body: JSON.stringify({ idempotencyKey: `t-${title}`, title, brief: "b" }),
+  });
+
+describe("HTTP task routes", () => {
+  it("takes a socket caller that names its agent as that agent", async () => {
+    const res = await createTask(socket, "mine", { "bazhen-agent-id": agentId });
+    expect([res.status, callers.at(-1)]).toEqual([200, agentId]);
+  });
+
+  it("treats a browser's request as the human's, whatever agent it names", async () => {
+    const res = await createTask(app, "page", { "bazhen-agent-id": agentId });
+    expect([res.status, callers.at(-1)]).toEqual([200, null]);
+  });
+
+  it("refuses a socket caller whose agent id is malformed", async () => {
+    const res = await createTask(socket, "bad", { "bazhen-agent-id": "%3" });
+    expect(res.status).toBe(400);
+  });
+
+  it("tells a command the caller may not give from one nobody may give now", async () => {
+    const statuses = [
+      (await createTask(app, "forbidden")).status,
+      (await createTask(app, "conflict")).status,
+    ];
+    expect(statuses).toEqual([403, 409]);
+  });
+
+  it("answers a read of a task it doesn't have with not found", async () => {
+    const res = await app.request(`/v1/tasks/${newId("task")}`, { headers: { host } });
+    expect([res.status, await res.json()]).toEqual([
+      404,
+      expect.objectContaining({ error: "not_found" }),
+    ]);
   });
 });

@@ -49,12 +49,13 @@ import { capture } from "./env/capture.ts";
 import { answers } from "./socket/client.ts";
 import { currentInputs } from "./config/paths.ts";
 import { ensurePrivateDir } from "./config/private-dir.ts";
-import { createApp, type AppDeps } from "./http/app.ts";
+import { createApp, type AppDeps, type TaskCommands } from "./http/app.ts";
 import { allowlists } from "./http/guard.ts";
 import { upgrades } from "./http/upgrades.ts";
 import { DeviceAuth } from "./auth/devices.ts";
 import { PairingCodes } from "./auth/pairing.ts";
 import { socketApp } from "./socket/routes.ts";
+import { Tasks } from "./tasks/tasks.ts";
 import { nodePtySpawner } from "./pty/node-pty.ts";
 import { Store, type SnapshotView } from "./store/store.ts";
 
@@ -92,6 +93,15 @@ const codexMail = new CodexMail({
   held: (agentId) => codexThreads.held(agentId),
 });
 const mailbox = new Mailbox(store, { codex: (id, agentId) => void codexMail.deliver(id, agentId) });
+const taskService = new Tasks(store, mailbox);
+taskService.watch();
+const tasks: TaskCommands = {
+  create: (caller, req) => taskService.create(caller, req),
+  show: (taskId) => store.taskDetail(taskId),
+  assign: (caller, taskId, req) => taskService.assign(caller, taskId, req),
+  unassign: (caller, taskId, req) => taskService.unassign(caller, taskId, req),
+  finish: (caller, taskId, req) => taskService.finish(caller, taskId, req),
+};
 const approvals = new Approvals(store);
 const inbox = new Inbox(store, approvals, (agentId, req) => mailbox.send(agentId, req));
 inbox.follow();
@@ -242,6 +252,7 @@ const commands = {
   restartShell: (terminalId, req) => shells.restart(terminalId, req),
   renameShell: (terminalId, req) => shells.rename(terminalId, req),
   unlinkShell: (terminalId, req) => shells.unlink(terminalId, req),
+  tasks,
 } satisfies Omit<AppDeps, "allow">;
 const app = createApp({ ...commands, allow, pairing: { codes: pairing, devices } });
 

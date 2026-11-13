@@ -55,6 +55,7 @@ function daemon() {
     restartShell: unused,
     renameShell: unused,
     unlinkShell: unused,
+    tasks: { create: refuse, show: refuse, assign: refuse, unassign: refuse, finish: refuse },
     pairing: { codes, devices },
     requireDevice: devices,
   };

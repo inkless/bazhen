@@ -3,6 +3,8 @@
 // the daemon's API over its Unix socket, except `start`, which runs the daemon's own start-up.
 
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { currentInputs, resolvePaths } from "@bazhen/daemon/paths";
@@ -18,21 +20,25 @@ import {
   StateSnapshot,
   StopResponse,
 } from "@bazhen/protocol";
+import { TASK_USAGE, Usage, taskVerb, type Verb } from "./tasks.ts";
 
 /** The exit status when the daemon isn't running. */
 const NOT_RUNNING = 3;
 const STOPPED_WITHIN_MS = 5000;
 /** A daemon that holds a status call this long is wedged, and reported as not answering. */
 const CALL_MS = 5000;
-const USAGE = `usage: bazhen <start|stop|status|doctor|env refresh|pair|devices [revoke <id>]> [--home <dir>] [--port <port>]`;
+const USAGE = `usage: bazhen <start|stop|status|doctor|env refresh|pair|devices [revoke <id>]> [--home <dir>] [--port <port>]
+${TASK_USAGE}`;
 
+// Not strict: the task verbs take options of their own, which they parse themselves.
 const { positionals, values } = parseArgs({
   allowPositionals: true,
+  strict: false,
   options: { home: { type: "string" }, port: { type: "string" } },
 });
 // The flags reach the daemon as the variables it reads, above any already set.
-if (values.home !== undefined) process.env["BAZHEN_HOME"] = values.home;
-if (values.port !== undefined) process.env["BAZHEN_PORT"] = values.port;
+if (typeof values.home === "string") process.env["BAZHEN_HOME"] = values.home;
+if (typeof values.port === "string") process.env["BAZHEN_PORT"] = values.port;
 const { socket } = resolvePaths(currentInputs());
 
 /** Runs the daemon's own start-up, which detaches it and reports whether it came up. */
@@ -207,8 +213,29 @@ async function devices(): Promise<number> {
   return 0;
 }
 
+/** A task verb: its call, then the call its answer names, until one prints. */
+async function taskCommand(): Promise<number> {
+  let next: string | Verb;
+  try {
+    next = taskVerb(process.argv.slice(2), {
+      agentId: process.env["BAZHEN_AGENT_ID"],
+      readFile: (path) => readFileSync(path, "utf8"),
+      key: () => randomUUID(),
+    });
+    while (typeof next !== "string") next = next.answer(await call(socket, next.call, CALL_MS));
+  } catch (err) {
+    if (!(err instanceof Usage)) throw err;
+    console.error(`${err.message}\n${TASK_USAGE}`);
+    return 2;
+  }
+  console.log(next);
+  return 0;
+}
+
 async function run(verb: string): Promise<number> {
   switch (verb) {
+    case "task":
+      return taskCommand();
     case "start":
       return start();
     case "stop":

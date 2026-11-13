@@ -20,6 +20,8 @@ import {
 import { launchAgent, localEnvironmentId } from "../agents/launch.ts";
 import { AgentQueue } from "../agents/queue.ts";
 import { upgrades, type UpgradeRoute } from "../http/upgrades.ts";
+import { Mailbox } from "../mailbox/mailbox.ts";
+import { Tasks } from "../tasks/tasks.ts";
 import { Store, type SnapshotView } from "../store/store.ts";
 
 /** What a test's state snapshot shows beyond the store: a fixed host, and Claude Code resumable. */
@@ -233,3 +235,36 @@ export async function withCodexAgent(threadId = "thr-1") {
   const { store, agentOn } = await withCodexAgents(threadId);
   return { store, agentId: agentOn(threadId) };
 }
+
+/**
+ * A store with three running Claude Code agents, to coordinate, lead and work on tasks, and the
+ * task service on the store's real mailbox.
+ */
+export async function taskFleet() {
+  const { store, agentId: coordinator, environment } = await withAgent();
+  const deps = {
+    store,
+    environment,
+    size: { cols: 80, rows: 24 },
+    home: tmpdir(),
+    queue: new AgentQueue(),
+  };
+  const launch = async (key: string) => {
+    const { agentId } = await launchAgent(deps, {
+      idempotencyKey: key,
+      harness: "claude-code",
+      cwd: "~",
+    });
+    if (!isId("agent", agentId)) throw new Error("launched no agent");
+    return agentId;
+  };
+  const [lead, worker] = [await launch("launch-lead"), await launch("launch-worker")];
+  const mailbox = new Mailbox(store);
+  return { store, mailbox, tasks: new Tasks(store, mailbox), coordinator, lead, worker };
+}
+
+const SENT = ["queued", "offered", "emitted", "seen", "delivered"] as const;
+
+/** The bodies of the mail an agent has been sent, oldest first. */
+export const inbox = (store: Store, agentId: string) =>
+  store.mail(agentId, SENT).map((m) => m.body);

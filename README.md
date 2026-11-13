@@ -132,3 +132,26 @@ Bazhen only ever manages its own tmux server, by the socket `tmux.sock` in its r
 `tmux -S "$TMPDIR/bazhen/tmux.sock" ls` on macOS, `tmux -S "$XDG_RUNTIME_DIR/bazhen/tmux.sock" ls`
 on Linux, or `<BAZHEN_HOME>/run/tmux.sock` under a relocated home. A runtime directory whose
 socket path would be too long moves to `/tmp/bazhen-<uid>-<hash>`.
+
+## Tasks
+
+A task is a title and a brief, given to agents as its coordinator, lead or worker. Giving an agent
+a task mails it the brief and the commands to answer with:
+
+| Command                                                  | Does                                                                          |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `bazhen task list [--all]`                               | Open tasks; inside an agent, its own                                          |
+| `bazhen task show <task>`                                | One task in full: brief, assignments, subtasks, note                          |
+| `bazhen task create --title … --brief …\|--brief-file …` | A new task, optionally `--assign <agent> --role <role>`, or `--parent <task>` |
+| `bazhen task assign <task> <agent> [--role …]`           | Give the task to another agent                                                |
+| `bazhen task unassign <task> <assignment>`               | Take it back, with everything that agent handed on                            |
+| `bazhen task done [<task>] [--note …] [--cascade]`       | Finish it; a worker finishes only its own part. `--cascade` cancels subtasks  |
+| `bazhen task cancel <task> [--note …] [--cascade]`       | Cancel it                                                                     |
+
+The human assigns any role. A coordinator gives the task to a lead or workers, a lead to workers,
+and a worker to no one. Ending an assignment ends everything granted under it.
+
+**Who is asking.** Inside an agent, the CLI says which agent it is from `BAZHEN_AGENT_ID`, over the
+daemon's 0600 Unix socket. The daemon takes that at its word, as it must take any process of
+yours, which could drive the agent's terminal anyway, but refuses an agent that is closed, lost
+or unknown. Over TCP, from the web client, the caller is always you.
