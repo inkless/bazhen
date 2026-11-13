@@ -38,7 +38,7 @@ jobs:
           cache: pnpm
       - name: Install tmux
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux fish zsh
       - name: Install tmux
         if: runner.os == 'macOS'
         run: command -v tmux || brew install tmux
@@ -75,7 +75,7 @@ jobs:
           cache: pnpm
       - name: Install tmux
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux fish zsh
       - name: Install tmux
         if: runner.os == 'macOS'
         run: command -v tmux || brew install tmux
@@ -96,7 +96,7 @@ jobs:
           node-version: 26.13.0
           cache: pnpm
       - name: Install tmux
-        run: sudo apt-get update && sudo apt-get install -y tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux fish zsh
       - name: Mark the runner disposable
         run: sudo touch /etc/bazhen-disposable-host
       - uses: dtolnay/rust-toolchain@stable
@@ -119,7 +119,7 @@ jobs:
           node-version: 26.13.0
           cache: pnpm
       - name: Install tmux
-        run: sudo apt-get update && sudo apt-get install -y tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux fish zsh
       - name: Mark the runner disposable
         run: sudo touch /etc/bazhen-disposable-host
       - uses: dtolnay/rust-toolchain@stable

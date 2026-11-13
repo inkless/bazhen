@@ -7,14 +7,14 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { currentInputs, resolvePaths } from "@bazhen/daemon/paths";
 import { DaemonError, DaemonUnreachable, answers, call } from "@bazhen/daemon/client";
-import { HealthResponse, StateSnapshot, StopResponse } from "@bazhen/protocol";
+import { DoctorResponse, HealthResponse, StateSnapshot, StopResponse } from "@bazhen/protocol";
 
 /** The exit status when the daemon isn't running. */
 const NOT_RUNNING = 3;
 const STOPPED_WITHIN_MS = 5000;
 /** A daemon that holds a status call this long is wedged, and reported as not answering. */
 const CALL_MS = 5000;
-const USAGE = `usage: bazhen <start|stop|status> [--home <dir>] [--port <port>]`;
+const USAGE = `usage: bazhen <start|stop|status|doctor> [--home <dir>] [--port <port>]`;
 
 const { positionals, values } = parseArgs({
   allowPositionals: true,
@@ -65,6 +65,38 @@ async function status(): Promise<number> {
   return 0;
 }
 
+/**
+ * What the daemon runs with, for diagnosing it. Fails when the daemon or its tmux server can't be
+ * reached; a missing hook binary is a warning, since hooks still work through the slower script.
+ */
+async function doctor(): Promise<number> {
+  if (!(await answers(socket))) {
+    console.log(`daemon: not running (no answer on ${socket})`);
+    return 1;
+  }
+  const d = await call(
+    socket,
+    { method: "GET", path: "/v1/daemon/doctor", reply: DoctorResponse },
+    CALL_MS,
+  );
+  const removed = Object.entries(d.env.removed)
+    .map(([rule, count]) => `${rule} ${count}`)
+    .join(", ");
+  console.log(`bazhen ${d.appVersion} (protocol ${d.protocolVersion})`);
+  console.log(`tmux: ${d.runtime.state}${d.runtime.version ? ` ${d.runtime.version}` : ""}`);
+  console.log(`hook client: ${d.hookClient.path}`);
+  if (d.hookClient.fallback) {
+    console.log("  warning: bazhen-hook is not built; hooks use the slower curl script");
+  }
+  console.log(`config: ${d.config.path}${d.config.found ? "" : " (none; defaults)"}`);
+  console.log(
+    `agents.shell: ${d.agents.shell}${d.agents.loginShell ? ` (${d.agents.loginShell})` : ""}`,
+  );
+  console.log(`environment: captured ${d.env.capturedAt}, ${d.env.kept} variables kept`);
+  console.log(`  removed: ${removed || "none"}`);
+  return d.runtime.state === "unreachable" ? 1 : 0;
+}
+
 async function run(verb: string): Promise<number> {
   switch (verb) {
     case "start":
@@ -73,6 +105,8 @@ async function run(verb: string): Promise<number> {
       return stop();
     case "status":
       return status();
+    case "doctor":
+      return doctor();
     default:
       console.error(USAGE);
       return 2;

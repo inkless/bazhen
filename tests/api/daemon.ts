@@ -43,6 +43,8 @@ const SIZE = { cols: 120, rows: 40 };
 
 const repo = fileURLToPath(new URL("../..", import.meta.url));
 const bin = fileURLToPath(new URL("node_modules/.bin", import.meta.url));
+/** A stand-in login shell for `agents.shell = "login"`. */
+export const LOGIN_SHELL = fileURLToPath(new URL("fixtures/login-shell.sh", import.meta.url));
 
 async function freePort(): Promise<number> {
   const server = createServer();
@@ -377,6 +379,13 @@ export class Daemon {
       }
     }
     throw new Error(`no daemon for ${this.home}`);
+  }
+
+  /** The command line of the agent's process (Linux only). */
+  agentCommand(agentId: string): string[] {
+    return readFileSync(`/proc/${this.panePid(agentId)}/cmdline`, "utf8")
+      .split("\0")
+      .filter(Boolean);
   }
 
   /** Whether the agent still has a tmux session. */

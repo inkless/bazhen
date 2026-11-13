@@ -18,6 +18,7 @@ const COVERED_ELSEWHERE: Record<string, string> = {
   "apps/daemon/src/main.ts": "tests/e2e/health.spec.ts",
   "apps/cli/src/main.ts": "tests/api/cli.test.ts",
   "apps/daemon/src/start.ts": "tests/api/cli.test.ts",
+  "apps/daemon/src/detach.ts": "tests/api/cli.test.ts",
   "apps/daemon/src/store/migrations.ts": "apps/daemon/src/store/store.medium.test.ts",
   "apps/daemon/src/store/projections.ts": "apps/daemon/src/store/store.medium.test.ts",
   "apps/daemon/src/mailbox/ingress.ts": "tests/api/mail.test.ts",

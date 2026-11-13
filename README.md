@@ -20,6 +20,7 @@ client. Agents, tasks, and orchestration come later.
 | -------------------------------- | --------------------------------------------------------------------------------------- |
 | `pnpm install --frozen-lockfile` | Install exactly what the lockfile records, and the git hooks (husky)                    |
 | `pnpm dev`                       | Start the daemon (`http://127.0.0.1:7900`) and the web client (`http://127.0.0.1:5173`) |
+| `pnpm bazhen <verb>`             | The CLI: `start`, `stop`, `status`, `doctor`                                            |
 | `pnpm check`                     | Standards check, lint, format check, type-check, small and medium tests                 |
 | `pnpm test`                      | Small tests                                                                             |
 | `pnpm test:real [suite…]`        | The tests that run real tmux, in a throwaway Linux container: integration, api, e2e     |
@@ -32,12 +33,47 @@ Contributing, for people and agents: [AGENTS.md](AGENTS.md) and [docs/standards/
 ## Layout
 
 - `apps/daemon` — the service: configuration and paths, HTTP API, SQLite store, PTY seam
+- `apps/cli` — the `bazhen` command, a client of the daemon's Unix socket
+- `apps/hook` — `bazhen-hook`, the hook client harnesses run (Rust, standard library only)
 - `apps/web` — React + Vite client
 - `packages/protocol` — shared types, schemas, and the protocol version
 - `packages/core` — domain model and state machines; no platform imports
 - `packages/runtime-tmux` — the tmux runtime adapter
 - `tests/integration` — tests against a private tmux server (container or CI only)
 - `tests/e2e` — Playwright browser tests
+
+## Configuration
+
+`~/.config/bazhen/config.toml` (or `<BAZHEN_HOME>/config/config.toml`). An unknown key or a wrong
+value stops the daemon with a message naming the file and the key; `bazhen doctor` shows what it
+runs with.
+
+```toml
+[daemon]
+port = 7900 # or BAZHEN_PORT
+
+[bank]
+path = "/abs/path" # or BAZHEN_BANK
+
+[agents]
+shell = "direct" # or "login" (BAZHEN_AGENTS_SHELL)
+
+[agents.env]
+deny = ["MY_SESSION_*"] # never give agents these: names, or prefixes ending in *
+passthrough = ["ITERM_PROFILE"] # give agents these, though Bazhen would strip them
+```
+
+Agents get the environment a new terminal tab would, minus Bazhen's, tmux's, harnesses' session
+and terminal-presentation variables. By default it is captured once, when `bazhen start` runs.
+
+With `agents.shell = "login"`, each agent starts through your login shell (`$SHELL -l -i`, which
+must be an absolute path), so your rc files run again at every launch, like a new tab. Be aware:
+
+- Your rc can export variables Bazhen strips, and they reach the agent.
+- An rc that prompts, or that starts tmux when `$TMUX` is empty (`[ -z "$TMUX" ] && exec tmux`),
+  stops the agent from launching. Every agent has `BAZHEN_AGENT_ID` set before your rc runs, so
+  guard such lines on it, for example `[ -z "$TMUX" ] && [ -z "$BAZHEN_AGENT_ID" ] && exec tmux`
+  (fish: `set -q BAZHEN_AGENT_ID`).
 
 ## Where Bazhen keeps data
 

@@ -8,7 +8,7 @@ import {
   type RuntimeAdapter,
 } from "@bazhen/core";
 import { FakeRuntime } from "@bazhen/core/testing";
-import { LocalEnvironment } from "./index.ts";
+import { LocalEnvironment, loginArgv } from "./index.ts";
 
 const harness: HarnessAdapter = {
   id: "claude-code",
@@ -49,6 +49,41 @@ describe("local environment", () => {
       size: { cols: 80, rows: 24 },
       generation: 0,
     });
+  });
+
+  it("starts the TUI through the user's login shell, when there is one", async () => {
+    const runtime = new FakeRuntime();
+    const env = new LocalEnvironment({
+      id: newId("env"),
+      runtime,
+      harnesses: [harness],
+      socket: "/run/b.sock",
+      loginShell: "/bin/zsh",
+    });
+    expect(runtime.specOf(await terminalOf(env, launch())).argv).toEqual(
+      loginArgv("/bin/zsh", ["claude", "--session-id", "s-1"]),
+    );
+  });
+
+  it("hands a login shell the TUI's argv as its own arguments, quoting nothing", () => {
+    const argv = ["claude", "it's", "a\\b", "$HOME;#{x}"];
+    expect(loginArgv("/usr/bin/fish", argv)).toEqual([
+      "/usr/bin/fish",
+      "-l",
+      "-i",
+      "-c",
+      "exec $argv",
+      ...argv,
+    ]);
+    expect(loginArgv("/bin/bash", argv)).toEqual([
+      "/bin/bash",
+      "-l",
+      "-i",
+      "-c",
+      'exec "$@"',
+      "sh",
+      ...argv,
+    ]);
   });
 
   it("names the harness session it launched, in this environment", async () => {

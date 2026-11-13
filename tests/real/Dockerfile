@@ -14,9 +14,10 @@ ARG TMUX_VERSION=3.5a-3
 # the runtime reads back. CI runners and login sessions set one.
 ENV HUSKY=0 CI=1 LANG=C.UTF-8
 
-# cargo builds the hook client (apps/hook, std only, so offline) before the suites run it.
+# cargo builds the hook client (apps/hook, std only, so offline) before the suites run it; fish
+# and zsh are login shells agents.shell = "login" is tested against.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends "tmux=${TMUX_VERSION}" cargo \
+  && apt-get install -y --no-install-recommends "tmux=${TMUX_VERSION}" cargo fish zsh \
   && npx -y "playwright@${PLAYWRIGHT_VERSION}" install-deps chromium \
   && rm -rf /var/lib/apt/lists/* \
   && npm install -g "pnpm@${PNPM_VERSION}" \

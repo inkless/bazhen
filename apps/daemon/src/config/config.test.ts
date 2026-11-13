@@ -12,6 +12,7 @@ describe("resolveConfig", () => {
     expect(resolveConfig({}, {})).toEqual({
       port: 7900,
       bank: undefined,
+      loginShell: undefined,
       envRules: { deny: [], passthrough: [] },
     });
   });
@@ -20,12 +21,26 @@ describe("resolveConfig", () => {
     expect(resolveConfig(file, {})).toEqual({
       port: 8100,
       bank: "/bank",
+      loginShell: undefined,
       envRules: { deny: ["SECRET_*"], passthrough: ["TERM"] },
     });
   });
 
   it("takes the environment over the file", () => {
     expect(resolveConfig(file, { BAZHEN_PORT: "8200" }).port).toBe(8200);
+  });
+
+  it("starts agents through the user's login shell only when asked", () => {
+    const login = { agents: { shell: "login" as const } };
+    expect(resolveConfig(login, { SHELL: "/bin/zsh" }).loginShell).toBe("/bin/zsh");
+    expect(resolveConfig({}, { SHELL: "/bin/zsh" }).loginShell).toBeUndefined();
+    expect(resolveConfig({}, { SHELL: "/bin/zsh", BAZHEN_AGENTS_SHELL: "login" }).loginShell).toBe(
+      "/bin/zsh",
+    );
+  });
+
+  it.each([{}, { SHELL: "zsh" }])("refuses a login shell it can't find (%o)", (env) => {
+    expect(() => resolveConfig({ agents: { shell: "login" } }, env)).toThrow(InvalidConfig);
   });
 
   it("treats an empty variable as unset", () => {

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { Daemon, bazhen, cliHome, overSocket } from "./daemon.ts";
+import { Daemon, LOGIN_SHELL, bazhen, cliHome, overSocket } from "./daemon.ts";
 
 describe("the daemon's Unix socket", () => {
   let daemon: Daemon;
@@ -86,6 +86,13 @@ describe("bazhen stop with no daemon", () => {
     await home?.cleanup();
   });
 
+  it("fails bazhen doctor, saying the daemon isn't running", async () => {
+    expect(await bazhen(["doctor"], home.env)).toMatchObject({
+      code: 1,
+      out: expect.stringContaining("daemon: not running"),
+    });
+  });
+
   it("says it isn't running, and succeeds: stopping is idempotent", async () => {
     expect(await bazhen(["stop"], home.env)).toEqual({ code: 0, out: "bazhen is not running\n" });
   });
@@ -131,5 +138,44 @@ describe("bazhen start's environment", () => {
     const env = daemon.agentEnv(agentId);
     expect(env["CLAUDECODE"]).toBeUndefined();
     expect(env["ITERM_PROFILE"]).toBe("kept-by-config");
+  });
+});
+
+describe("bazhen doctor", () => {
+  let daemon: Daemon;
+  beforeAll(async () => {
+    daemon = await Daemon.startWithCli("", { CLAUDECODE: "sentinel-value-never-shown" });
+  });
+  afterAll(async () => {
+    await daemon?.stop();
+  });
+
+  it("shows what the daemon runs with: counts per rule, never a variable's value", async () => {
+    const { code, out } = await bazhen(["doctor"], daemon.env);
+    expect(code).toBe(0);
+    expect(out).toContain("CLAUDECODE 1");
+    expect(out).toContain(`config: ${daemon.home}/config/config.toml\n`);
+    expect(out).not.toContain("sentinel-value-never-shown");
+  });
+});
+
+describe('agents.shell = "login"', () => {
+  let daemon: Daemon;
+  beforeAll(async () => {
+    daemon = await Daemon.startWithCli('[agents]\nshell = "login"\n', { SHELL: LOGIN_SHELL });
+  });
+  afterAll(async () => {
+    await daemon?.stop();
+  });
+
+  it("starts each agent through the user's login shell, which hands over to the TUI", async () => {
+    const { agentId } = await daemon.launch("login");
+    await expect.poll(() => daemon.hasTerminal(agentId)).toBe(true);
+    const env = daemon.agentEnv(agentId);
+    expect([env["BZ_LOGIN_SHELL_ARGS"], env["FROM_RC"]]).toEqual(["-l -i -c", "1"]);
+    // The pane's process is the TUI itself, with its own arguments, not a shell left waiting on it.
+    const [program, ...args] = daemon.agentCommand(agentId);
+    expect(program).not.toMatch(/(^|\/)(sh|bash|zsh|fish|login-shell\.sh)$/);
+    expect(args).toContain("--settings");
   });
 });

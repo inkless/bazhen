@@ -1,6 +1,6 @@
 import type { HttpBindings } from "@hono/node-server";
 import { Hono } from "hono";
-import type { ErrorResponse, StopResponse } from "@bazhen/protocol";
+import type { DoctorResponse, ErrorResponse, StopResponse } from "@bazhen/protocol";
 
 export interface SocketParts {
   /** The `/v1` command routes, unguarded: the socket's permission is the authentication. */
@@ -8,6 +8,7 @@ export interface SocketParts {
   readonly hooks: Hono;
   /** Stops the daemon; called once the reply to `stop` has been written. */
   readonly stop: () => void;
+  readonly doctor: () => Promise<DoctorResponse>;
 }
 
 /**
@@ -33,6 +34,8 @@ export function socketApp(parts: SocketParts): Hono<{ Bindings: HttpBindings }> 
     const body: StopResponse = {};
     return c.json(body);
   });
+
+  app.get("/v1/daemon/doctor", async (c) => c.json(await parts.doctor()));
 
   app.route("/", parts.hooks);
   app.route("/", parts.commands);
