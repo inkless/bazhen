@@ -1,7 +1,7 @@
 import type { Agent, Environment, ExitStatus, StateSnapshot } from "@bazhen/protocol";
 
 /** A button the workspace shows; `remove` is close, said of an agent whose terminal is gone. */
-export type AgentButton = "respawn" | "close" | "remove";
+export type AgentButton = "respawn" | "relaunch" | "close" | "remove";
 
 export interface AgentActions {
   /** Whether its terminal can be shown: the runtime still holds one. */
@@ -13,6 +13,7 @@ export interface AgentActions {
 export function agentActions(a: Agent): AgentActions {
   const buttons: AgentButton[] = [];
   if (a.commands.includes("respawn")) buttons.push("respawn");
+  if (a.commands.includes("relaunch")) buttons.push("relaunch");
   if (a.commands.includes("close")) buttons.push(a.state === "lost" ? "remove" : "close");
   return { open: a.terminalId !== null && a.attachCommand !== null, buttons };
 }
@@ -81,12 +82,15 @@ export function exitText(exit: ExitStatus): string {
 export const shortId = (id: string) => id.slice(-6);
 
 /**
- * Whether an agent can be respawned in another theme now, and why not. A running one is stopped
+ * Whether an agent can be respawned in another theme now, and why not: only on the session it
+ * has, so not before that session has a conversation to resume. A running one is stopped
  * first, so only between turns, as its harness reports it: stopping it mid-turn would cut the turn
  * off, and an agent whose harness reports nothing can't be shown to be between turns. Waiting on
  * the human's input is mid-turn too: the turn goes on once the question is answered.
  */
-export function themeRespawn(a: Pick<Agent, "state" | "activity">): string | null {
+export function themeRespawn(a: Pick<Agent, "state" | "activity" | "resumable">): string | null {
+  // Stopped, it could only be started on a new session, which a theme isn't worth.
+  if (!a.resumable) return "No conversation to resume yet";
   if (a.state === "exited") return null;
   const value = a.activity?.value;
   if (value === undefined || value === "unknown") return "Can't tell whether it's mid-turn";

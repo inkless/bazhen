@@ -30,9 +30,10 @@ const respawn = (agentId: string, key: string, generation = 0) =>
 const signal = (agentId: string, key: string, sig: string, generation = 0) =>
   command("signal", agentId, { idempotencyKey: key, generation, signal: sig });
 
-/** An agent whose process has exited, as the daemon has seen. */
+/** An agent whose process has exited, as the daemon has seen, on a session it can resume. */
 async function exitedAgent(): Promise<string> {
   const { agentId } = await daemon.program(["sleep", "300"]);
+  await daemon.giveTranscript(agentId, String((await agentOf(agentId))?.externalRef?.id));
   await daemon.signalAgent(agentId, "SIGKILL");
   await becomes(agentId, "exited");
   return agentId;
@@ -88,9 +89,10 @@ describe("an agent's lifecycle after launch", () => {
   it("respawns an exited agent under the same id, at the next generation, on its session", async () => {
     const { agentId } = await daemon.program(["sleep", "300"]);
     const before = daemon.panePid(agentId);
+    const session = (await agentOf(agentId))?.externalRef;
+    await daemon.giveTranscript(agentId, String(session?.id));
     await daemon.signalAgent(agentId, "SIGKILL");
     await becomes(agentId, "exited");
-    const session = (await agentOf(agentId))?.externalRef;
     const res = await respawn(agentId, "respawn");
     expect([res.status, AgentCommandResponse.parse(res.body).eventIds.length]).toEqual([200, 2]);
     expect(await agentOf(agentId)).toMatchObject({

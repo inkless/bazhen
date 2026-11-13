@@ -22,6 +22,7 @@ import {
   RenameShellRequest,
   RestartShellRequest,
   UnlinkShellRequest,
+  RelaunchAgentRequest,
   RespawnAgentRequest,
   SignalAgentRequest,
   HealthResponse,
@@ -42,6 +43,7 @@ import {
   type StateSnapshot,
 } from "@bazhen/protocol";
 import {
+  AgentTerminalExists,
   isId,
   LaunchFailed,
   TaskRefused,
@@ -89,6 +91,7 @@ export interface AppDeps {
   readonly resend: (attentionId: string, req: ResendAttentionRequest) => ResendAttentionResponse;
   readonly close: (agentId: string, req: CloseAgentRequest) => Promise<AgentCommandResponse>;
   readonly respawn: (agentId: string, req: RespawnAgentRequest) => Promise<AgentCommandResponse>;
+  readonly relaunch: (agentId: string, req: RelaunchAgentRequest) => Promise<AgentCommandResponse>;
   readonly signal: (agentId: string, req: SignalAgentRequest) => Promise<AgentCommandResponse>;
   readonly openShell: (req: OpenShellRequest) => Promise<ShellCommandResponse>;
   readonly closeShell: (
@@ -241,6 +244,7 @@ export function createApp(deps: AppDeps): Hono {
   route("/v1/agents/:id/messages", SendMessageRequest, deps.send);
   route("/v1/agents/:id/close", CloseAgentRequest, deps.close);
   route("/v1/agents/:id/respawn", RespawnAgentRequest, deps.respawn);
+  route("/v1/agents/:id/relaunch", RelaunchAgentRequest, deps.relaunch);
   route("/v1/agents/:id/signal", SignalAgentRequest, deps.signal);
   route("/v1/attention/:id/answer", AnswerAttentionRequest, deps.answer);
   route("/v1/shells/:id/close", CloseShellRequest, deps.closeShell);
@@ -309,9 +313,13 @@ export function createApp(deps: AppDeps): Hono {
     if (err instanceof StaleGeneration) return fail(c, 409, "stale_generation", err.message);
     if (err instanceof NotResumable) return fail(c, 409, "not_resumable", err.message);
     if (err instanceof ServerUnconfirmed) return fail(c, 409, "server_unconfirmed", err.message);
-    const conflict = [StateConflict, TerminalReplaced, NoTerminal, ProcessState].some(
-      (e) => err instanceof e,
-    );
+    const conflict = [
+      StateConflict,
+      TerminalReplaced,
+      NoTerminal,
+      ProcessState,
+      AgentTerminalExists,
+    ].some((e) => err instanceof e);
     if (conflict) return fail(c, 409, "conflict", err.message);
     if (err instanceof EnvironmentUnavailable) return fail(c, 503, "unavailable", err.message);
     throw err;

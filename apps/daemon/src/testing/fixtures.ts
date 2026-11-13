@@ -16,6 +16,7 @@ import {
   type AgentLaunch,
   type AgentRefs,
   type EnvironmentAdapter,
+  type Resumes,
 } from "@bazhen/core";
 import { launchAgent, localEnvironmentId } from "../agents/launch.ts";
 import { AgentQueue } from "../agents/queue.ts";
@@ -25,17 +26,23 @@ import type { Raised } from "../attention/inbox.ts";
 import { Tasks } from "../tasks/tasks.ts";
 import { Store, type SnapshotView } from "../store/store.ts";
 
+/** Claude Code sessions resume, whatever their transcript; a test of the transcript says its own. */
+export const resumesClaude: Resumes = (a) => a.harness === "claude-code" && a.externalRef !== null;
+
 /** What a test's state snapshot shows beyond the store: a fixed host, and Claude Code resumable. */
 export const testView: SnapshotView = {
   host: () => "test-host",
   attachCommand: (ref) => `attach ${ref.terminalId}`,
-  resumable: ["claude-code"],
+  resumes: resumesClaude,
   themes: () => ["light", "dark"],
   attentionActions: (item) => {
     if (item.kind === "approval") return ["allow", "deny"];
     return item.kind === "question" ? [] : ["reply", "dismiss"];
   },
 };
+
+/** What starting an agent again needs, for a test that doesn't look at it. */
+export const quietStartAgain = { size: { cols: 80, rows: 24 }, replaced: () => {} };
 
 export const tempDb = () => join(mkdtempSync(join(tmpdir(), "bz-store-")), "bazhen.db");
 
@@ -59,7 +66,7 @@ export function fakeEnvironment(
     id: localEnvironmentId(store),
     kind: "local",
     harnesses: ["claude-code"],
-    resumable: ["claude-code"],
+    resumes: resumesClaude,
     themes: { "claude-code": ["light", "dark"] },
     health: async () => ({ state: "reachable", version: null }),
     inventory: async () => present(),

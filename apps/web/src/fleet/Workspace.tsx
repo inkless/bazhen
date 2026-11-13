@@ -1,6 +1,13 @@
 import { useState, type SubmitEvent } from "react";
 import type { Agent, AgentState } from "@bazhen/protocol";
-import { closeAgent, forceCloseAgent, Refused, respawnAgent, sendMessage } from "../api.ts";
+import {
+  closeAgent,
+  forceCloseAgent,
+  Refused,
+  relaunchAgent,
+  respawnAgent,
+  sendMessage,
+} from "../api.ts";
 import { TerminalView } from "../terminal/TerminalView.tsx";
 import { pageTheme } from "../ui/theme.ts";
 import { Button } from "../ui/Button.tsx";
@@ -11,7 +18,9 @@ import { agentActions, exitText, shortId } from "./model.ts";
 /** Why an agent that can't be opened shows no terminal. */
 const NO_TERMINAL: Partial<Record<AgentState, string>> = {
   starting: "Starting…",
-  lost: "Its terminal is gone, as after a reboot. Remove it to take it off the fleet.",
+  lost:
+    "Its terminal is gone, as after a reboot. Relaunch it in a new terminal, or remove it to " +
+    "take it off the fleet.",
   closing: "Closing. If it stays here, close it again to finish.",
   closed: "Closed.",
   failed: "It failed to start.",
@@ -61,6 +70,24 @@ export function Workspace({ agent, failed }: { agent: Agent; failed: (e: unknown
           >
             Respawn
           </Button>
+        )}
+        {buttons.includes("relaunch") && (
+          <ConfirmDialog
+            key={String(agent.resumable)}
+            isDisabled={busy}
+            trigger="Relaunch…"
+            title="Relaunch agent"
+            message={
+              agent.resumable
+                ? `Relaunch ${agent.project}? Its ${agent.harness} session starts again in a new terminal.`
+                : `Relaunch ${agent.project} on a new ${agent.harness} session? Its last session ` +
+                  "can't be resumed, so its conversation isn't carried over."
+            }
+            confirm={agent.resumable ? "Relaunch" : "Relaunch fresh"}
+            onConfirm={() =>
+              run((id, gen) => relaunchAgent(id, gen, pageTheme().scheme(), !agent.resumable))
+            }
+          />
         )}
         {/* Remounted the moment close changes name, and gone once it is no longer offered, so a
             confirm left open can't send it. */}

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { newId } from "@bazhen/core";
 import { readHook } from "@bazhen/harness-claude-code";
+import { localEnvironmentId } from "../agents/launch.ts";
 import type { Store } from "../store/store.ts";
 import { IdempotencyConflict } from "../store/store.ts";
 import { withAgent, testView } from "../testing/fixtures.ts";
@@ -163,5 +165,49 @@ describe("approvals", () => {
     void ask(new Approvals(store), agentId, "t-1");
     new Approvals(store).closeAbandoned();
     expect(items(store)[0]?.closeReason).toBe("stale");
+  });
+
+  it("supersedes an agent's open requests when its process is replaced, not its other items or another agent's", async () => {
+    const { store, agentId } = await withAgent();
+    const other = newId("agent");
+    store.append({
+      type: "agent.launched",
+      entityId: other,
+      actor: "system",
+      payload: {
+        environmentId: localEnvironmentId(store),
+        harness: "claude-code",
+        project: "q",
+        cwd: "/q",
+        terminalId: null,
+      },
+    });
+    const approvals = new Approvals(store);
+    const waiting = ask(approvals, agentId, "t-1");
+    void ask(approvals, other, "t-2");
+    // A failed turn is the agent's to look at, not a request the dead process held.
+    store.append({
+      type: "attention.opened",
+      entityId: newId("attn"),
+      actor: "system",
+      payload: {
+        agentId,
+        summary: "turn failed",
+        kind: "failed",
+        toolUseId: null,
+        mainAgent: true,
+      },
+    });
+    approvals.supersede(agentId);
+    const [replaced, kept, failure] = items(store);
+    expect([(await waiting).stdout, replaced?.closeReason, kept?.state, failure?.state]).toEqual([
+      "",
+      "superseded",
+      "open",
+      "open",
+    ]);
+    expect(() =>
+      approvals.answer(String(replaced?.id), { idempotencyKey: "late", decision: "allow" }),
+    ).toThrow(AttentionClosed);
   });
 });

@@ -1,5 +1,12 @@
 import { expect, test, type Page, type Request } from "@playwright/test";
-import { foregrounds, kill, openSecondView, screen, terminalBackground } from "./page.ts";
+import {
+  foregrounds,
+  givePageAgentTranscript,
+  kill,
+  openSecondView,
+  screen,
+  terminalBackground,
+} from "./page.ts";
 
 test("launches Claude Code from the page and types into its terminal", async ({ page }) => {
   await page.goto("/");
@@ -75,24 +82,25 @@ test("draws an agent's terminal in the theme it started in, and respawns it in t
   expect(await terminalBackground(phone)).toBe(dark);
   await phone.close();
 
-  // Claude Code reads idle once its TUI is up, waiting for its first prompt: it can be respawned.
+  // It never reaches a model, so it has no conversation to resume: it isn't stopped for a theme.
   const notice = page.getByRole("status", { name: "theme" });
   const row = notice.getByRole("listitem").filter({ hasText: agentId.slice(-6) });
-  await expect(row.getByRole("button", { name: "Respawn in light" })).toBeEnabled({
+  await expect(row.getByRole("button", { name: "No conversation to resume yet" })).toBeDisabled({
     timeout: 10_000,
   });
 
-  // Once it has exited, it respawns in light, behind the confirm, without being stopped first.
+  // Once it has exited with a conversation, it respawns in light, behind the confirm.
   expect(await kill(page, agentId)).toBe(200);
   await expect.poll(() => agentState(page, agentId), { timeout: 10_000 }).toBe("exited");
+  await givePageAgentTranscript(page, agentId);
   const respawn = row.getByRole("button", { name: "Respawn in light" });
   await expect(respawn).toBeEnabled({ timeout: 10_000 });
   await respawn.click();
   const respawned = page.waitForRequest(isRespawn);
   await page.getByRole("dialog").getByRole("button", { name: "Respawn in light" }).click();
   expect((await respawned).postDataJSON()).toMatchObject({ theme: "light" });
-  // Its new incarnation is drawn light. (A Claude Code that never reached a model has no
-  // conversation to resume, so what it draws here says nothing; the launch test covers that.)
+  // Its new incarnation is drawn light. (The conversation it was given is no real one, so what it
+  // draws here says nothing; the launch test covers that.)
   await expect.poll(() => terminalBackground(page), { timeout: 20_000 }).not.toBe(dark);
   await expect(row).toBeHidden();
 });

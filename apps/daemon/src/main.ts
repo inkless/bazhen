@@ -180,6 +180,7 @@ const environment = new LocalEnvironment({
     new ClaudeCodeHarness({
       newSessionId: randomUUID,
       hookCommand: hookCommand(hookRunner),
+      exists: existsSync,
       statusLine: (cwd) =>
         statusLineChoice(cwd, hostEnv["CLAUDE_CONFIG_DIR"] ?? join(inputs.home, ".claude")),
       // A mode every agent starts in, overriding the user's settings; unset by default.
@@ -213,7 +214,14 @@ const foreground = new ForegroundWatch({ store, environment });
 codexThreads.followAll();
 // The Codex agents' threads lost their subscriber with the last daemon (§7 step 4).
 codex.keepConnected();
-const lifecycle = new Lifecycle(store, environment, queue);
+const lifecycle = new Lifecycle(store, environment, queue, {
+  size: DEFAULT_SIZE,
+  replaced: (agentId) => {
+    mailbox.sessionStarted(agentId);
+    activity.replaced(agentId);
+    approvals.supersede(agentId);
+  },
+});
 lifecycle.watch();
 const serverWatch = new ServerWatch({
   store,
@@ -243,7 +251,7 @@ const devices = new DeviceAuth(store);
 const snapshotView: SnapshotView = {
   host: (kind) => (kind === "local" ? hostname() : ""),
   attachCommand: (ref) => runtime.attachCommand(ref),
-  resumable: environment.resumable,
+  resumes: environment.resumes,
   themes: (harness) => environment.themes[harness] ?? [],
   attentionActions: (item) => inbox.actions(item),
 };
@@ -264,6 +272,7 @@ const commands = {
   resend: (attentionId, req) => inbox.resend(attentionId, req),
   close: (agentId, req) => shells.closeAgent(agentId, req, (r) => lifecycle.close(agentId, r)),
   respawn: (agentId, req) => lifecycle.respawn(agentId, req),
+  relaunch: (agentId, req) => lifecycle.relaunch(agentId, req),
   signal: (agentId, req) => lifecycle.signal(agentId, req),
   openShell: (req) => shells.open(req),
   closeShell: (terminalId, req) => shells.close(terminalId, req),

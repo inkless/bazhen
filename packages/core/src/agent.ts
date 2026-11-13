@@ -32,6 +32,7 @@ export type AgentEvent =
   | "respawn.requested"
   | "respawn.rejected"
   | "relaunch.requested"
+  | "relaunch.rejected"
   | "close.requested"
   | "close.completed";
 
@@ -39,11 +40,13 @@ export type AgentEvent =
 // environment that positively lacks the target makes it lost (foundation-design §4.4, §4.5).
 export const agent = machine<AgentState, AgentEvent>("agent session", {
   // A rejected respawn returns to exited, where the terminal still is: it stays closable, and
-  // failed would leave its tmux session with nothing to close it.
+  // failed would leave its tmux session with nothing to close it. A rejected relaunch returns to
+  // lost the same way, so it can be relaunched again or removed.
   starting: {
     "launch.confirmed": "running",
     "launch.rejected": "failed",
     "respawn.rejected": "exited",
+    "relaunch.rejected": "lost",
   },
   running: {
     "process.exited": "exited",
@@ -78,14 +81,22 @@ export function agentCommands(state: AgentState): AgentCommand[] {
     ...(agent.accepts(state, "close.requested") || state === "closing" ? ["close" as const] : []),
     ...(agent.accepts(state, "respawn.requested") ? ["respawn" as const] : []),
     ...(state === "running" ? ["signal" as const] : []),
+    ...(agent.accepts(state, "relaunch.requested") ? ["relaunch" as const] : []),
   ];
 }
 
-/** Whether a respawn can resume the agent: it has a harness session, on a harness that resumes. */
-export const canResume = (
-  a: { readonly harness: HarnessId; readonly externalRef: ExternalRef | null },
-  resumable: readonly HarnessId[],
-) => a.externalRef !== null && resumable.includes(a.harness);
+/**
+ * What says whether an agent's harness session can be resumed: the session, and where its
+ * harness keeps the conversation, as the harness's hooks last reported it.
+ */
+export interface ResumeEvidence {
+  readonly harness: HarnessId;
+  readonly externalRef: ExternalRef | null;
+  readonly transcript: string | null;
+}
+
+/** Whether starting the agent again resumes its harness session, as its environment judges. */
+export type Resumes = (a: ResumeEvidence) => boolean;
 
 /**
  * The commands the daemon would take on an agent now, as a client is offered them. Every command
@@ -95,11 +106,9 @@ export function offeredCommands(
   a: {
     readonly state: AgentState;
     readonly generation: number | null;
-    readonly harness: HarnessId;
-    readonly externalRef: ExternalRef | null;
-  },
-  resumable: readonly HarnessId[],
+  } & ResumeEvidence,
+  resumes: Resumes,
 ): AgentCommand[] {
   if (a.generation === null) return [];
-  return agentCommands(a.state).filter((c) => c !== "respawn" || canResume(a, resumable));
+  return agentCommands(a.state).filter((c) => c !== "respawn" || resumes(a));
 }

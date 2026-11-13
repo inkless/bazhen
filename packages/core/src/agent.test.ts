@@ -18,6 +18,11 @@ describe("agent session lifecycle", () => {
     expect([rejected, agent.accepts(rejected, "close.requested")]).toEqual(["exited", true]);
   });
 
+  it("returns to lost, still closable and relaunchable, when a relaunch is rejected", () => {
+    const rejected = agent.next(agent.next("lost", "relaunch.requested"), "relaunch.rejected");
+    expect([rejected, agentCommands(rejected)]).toEqual(["lost", ["close", "relaunch"]]);
+  });
+
   it("cannot be respawned while still running", () => {
     expect(() => agent.next("running", "respawn.requested")).toThrow(InvalidTransition);
   });
@@ -31,7 +36,7 @@ describe("agentCommands", () => {
       running: ["close", "signal"],
       unknown: ["close"],
       exited: ["close", "respawn"],
-      lost: ["close"],
+      lost: ["close", "relaunch"],
       closing: ["close"],
       closed: [],
       failed: [],
@@ -42,23 +47,37 @@ describe("agentCommands", () => {
   });
 });
 
+const yes = () => true;
+const no = () => false;
+
 describe("offeredCommands", () => {
   const exited = {
     state: "exited" as const,
     generation: 1,
     harness: "codex" as const,
     externalRef: { environmentId: "env_1", kind: "codex-thread" as const, id: "thr" },
+    transcript: null,
   };
 
-  it("offers respawn only with a session on a harness the environment resumes", () => {
+  it("offers respawn only when the environment says the session resumes", () => {
+    expect([offeredCommands(exited, yes), offeredCommands(exited, no)]).toEqual([
+      ["close", "respawn"],
+      ["close"],
+    ]);
+  });
+
+  it("offers relaunch to a lost agent whether or not it can resume, since fresh is asked for", () => {
+    const lost = { ...exited, state: "lost" as const };
     expect([
-      offeredCommands(exited, ["codex"]),
-      offeredCommands(exited, ["claude-code"]),
-      offeredCommands({ ...exited, externalRef: null }, ["codex"]),
-    ]).toEqual([["close", "respawn"], ["close"], ["close"]]);
+      offeredCommands(lost, yes),
+      offeredCommands({ ...lost, externalRef: null }, no),
+    ]).toEqual([
+      ["close", "relaunch"],
+      ["close", "relaunch"],
+    ]);
   });
 
   it("offers nothing without a generation for a command to name", () => {
-    expect(offeredCommands({ ...exited, generation: null }, ["codex"])).toEqual([]);
+    expect(offeredCommands({ ...exited, generation: null }, yes)).toEqual([]);
   });
 });

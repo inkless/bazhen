@@ -46,6 +46,7 @@ function daemon() {
     answer: refuse,
     close: unused,
     respawn: unused,
+    relaunch: unused,
     signal: unused,
     reply: refuse,
     dismiss: refuse,

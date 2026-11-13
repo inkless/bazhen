@@ -1,7 +1,8 @@
 import {
   advanceTerminal,
+  AgentTerminalExists,
   agentCommands,
-  canResume,
+  newId,
   NoTerminal,
   NotResumable,
   ProcessState,
@@ -9,6 +10,7 @@ import {
   terminal,
   type EnvironmentAdapter,
   type RuntimeRef,
+  type Size,
 } from "@bazhen/core";
 import {
   AgentCommandResponse,
@@ -17,6 +19,7 @@ import {
   type EventPayload,
   type EventType,
   type ExitStatus,
+  type RelaunchAgentRequest,
   type RespawnAgentRequest,
   type SignalAgentRequest,
 } from "@bazhen/protocol";
@@ -37,6 +40,17 @@ export {
   StateConflict as AgentStateConflict,
   TerminalReplaced,
 } from "../commands.ts";
+
+/** What starting an agent again, by respawn or relaunch, needs beyond store and environment. */
+export interface StartAgainDeps {
+  /** The new terminal's size until a view attaches and sets its own. */
+  readonly size: Size;
+  /**
+   * The agent's last process is gone for good: what its hooks held (mail handed over, approvals
+   * asked, what it was doing) is settled before the new one starts.
+   */
+  readonly replaced: (agentId: string) => void;
+}
 
 /** A message's states before it reaches its agent or can't. */
 const IN_FLIGHT = ["queued", "offered", "emitted", "seen", "queued_in_codex"] as const;
@@ -68,11 +82,18 @@ export class Lifecycle {
   private readonly store: Store;
   private readonly environment: EnvironmentAdapter;
   private readonly queue: AgentQueue;
+  private readonly startAgain: StartAgainDeps;
 
-  constructor(store: Store, environment: EnvironmentAdapter, queue: AgentQueue) {
+  constructor(
+    store: Store,
+    environment: EnvironmentAdapter,
+    queue: AgentQueue,
+    startAgain: StartAgainDeps,
+  ) {
     this.store = store;
     this.environment = environment;
     this.queue = queue;
+    this.startAgain = startAgain;
   }
 
   /** Records agents' exits as the environment reports them; returns the stop function. */
@@ -144,10 +165,10 @@ export class Lifecycle {
       if (launched === undefined || found.terminalState === null || found.generation === null)
         throw new NoTerminal();
       // Known before anything happens, so it is refused with nothing recorded.
-      const { externalRef, launch } = launched;
+      const { externalRef, launch, transcript } = launched;
       if (
         externalRef === null ||
-        !canResume({ harness: launch.harness, externalRef }, this.environment.resumable)
+        !this.environment.resumes({ harness: launch.harness, externalRef, transcript })
       )
         throw new NotResumable(found.agentId);
       const next = advanceTerminal(
@@ -155,6 +176,7 @@ export class Lifecycle {
         "respawned",
       );
       const requested = this.record(agentId, "agent.respawn_requested", {});
+      this.startAgain.replaced(agentId);
       const refs = await this.environment
         .respawn({
           agentId: found.agentId,
@@ -175,6 +197,62 @@ export class Lifecycle {
       return () => [
         requested,
         this.record(agentId, "agent.respawned", {
+          externalRef: rebound ? current : refs.externalRef,
+          runtimeRef,
+          ...(refs.theme && { theme: refs.theme }),
+        }),
+      ];
+    });
+  }
+
+  /**
+   * Starts a lost agent again on a new terminal, at the next generation (foundation-design §4.1).
+   * It resumes the agent's harness session, or starts a new one only when `fresh` asks; one that
+   * can't resume is refused with nothing recorded. A rejected relaunch leaves the agent lost on
+   * its old terminal, still closable.
+   */
+  relaunch(agentId: string, req: RelaunchAgentRequest): Promise<AgentCommandResponse> {
+    return this.command("relaunch", agentId, req, relaunchable, async (found) => {
+      const launched = this.store.agentLaunch(agentId);
+      if (launched === undefined || found.generation === null) throw new NoTerminal();
+      const { externalRef, launch, transcript } = launched;
+      const fresh = req.fresh === true;
+      if (!fresh && !this.environment.resumes({ harness: launch.harness, externalRef, transcript }))
+        throw new NotResumable(found.agentId);
+      const terminalId = newId("term");
+      const generation = found.generation + 1;
+      const requested = this.record(agentId, "agent.relaunch_requested", {
+        terminalId,
+        generation,
+        fresh,
+      });
+      this.startAgain.replaced(agentId);
+      const refs = await this.environment
+        .launch({
+          agentId: found.agentId,
+          terminalId,
+          generation,
+          resume: fresh ? null : externalRef,
+          request: launch,
+          options: launchOptions(req.theme),
+          size: this.startAgain.size,
+        })
+        .then(({ runtime, ...rest }) => {
+          if (runtime === null) throw new NoTerminal();
+          return { ...rest, runtime };
+        })
+        .catch((cause: unknown) => {
+          this.record(agentId, "agent.relaunch_rejected", { reason: relaunchRejection(cause) });
+          if (cause instanceof AgentTerminalExists) throw cause;
+          return fromEnvironment(agentId, cause);
+        });
+      const runtimeRef = runtimePayload(refs.runtime);
+      // As after a respawn, a binding the new TUI moved to while it started is the newer one.
+      const current = this.store.agentLaunch(agentId)?.externalRef ?? null;
+      const rebound = current !== null && current.id !== externalRef?.id;
+      return () => [
+        requested,
+        this.record(agentId, "agent.relaunched", {
           externalRef: rebound ? current : refs.externalRef,
           runtimeRef,
           ...(refs.theme && { theme: refs.theme }),
@@ -239,6 +317,7 @@ type AgentEventType = Extract<EventType, `agent.${string}`>;
 const closable = (state: AgentState) =>
   state === "closed" || agentCommands(state).includes("close");
 const respawnable = (state: AgentState) => agentCommands(state).includes("respawn");
+const relaunchable = (state: AgentState) => agentCommands(state).includes("relaunch");
 const running = (state: AgentState) => agentCommands(state).includes("signal");
 
 function rejection(cause: unknown): EventPayload<"agent.respawn_rejected">["reason"] {
@@ -251,3 +330,9 @@ function rejection(cause: unknown): EventPayload<"agent.respawn_rejected">["reas
 /** An environment's failure as a command on the agent's. */
 const fromEnvironment = (agentId: string, cause: unknown): never =>
   failed(`agent ${agentId}`, cause);
+
+function relaunchRejection(cause: unknown): EventPayload<"agent.relaunch_rejected">["reason"] {
+  if (cause instanceof NotResumable) return "not_resumable";
+  if (cause instanceof AgentTerminalExists) return "terminal_exists";
+  return "unavailable";
+}

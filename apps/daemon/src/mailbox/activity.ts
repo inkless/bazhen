@@ -75,6 +75,16 @@ export class ActivityTracker {
     });
   }
 
+  /**
+   * The agent's process was replaced, as a respawn or relaunch replaces it: nothing the last one
+   * was doing, its own turn's or its subagents', says anything of the new one.
+   */
+  replaced(agentId: string): void {
+    this.main.delete(agentId);
+    this.subagents.delete(agentId);
+    this.unvouched.delete(agentId);
+  }
+
   /** The session started over: its subagents went with it. */
   sessionStarted(agentId: string): void {
     this.subagents.delete(agentId);

@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   newId,
   NoTerminal,
+  NotResumable,
   ProcessState,
   UnsupportedHarness,
+  type AgentLaunch,
   type HarnessAdapter,
   type RuntimeAdapter,
 } from "@bazhen/core";
@@ -23,13 +25,24 @@ const harness: HarnessAdapter = {
 const environment = (runtime: RuntimeAdapter) =>
   new LocalEnvironment({ id: newId("env"), runtime, harnesses: [harness], socket: "/run/b.sock" });
 
-const launch = (harnessId: "claude-code" | "codex" = "claude-code") => ({
+const launch = (harnessId: "claude-code" | "codex" = "claude-code"): AgentLaunch => ({
   agentId: newId("agent"),
   terminalId: newId("term"),
+  generation: 0,
+  resume: null,
   request: { harness: harnessId, project: "p", cwd: "/work" },
   options: {},
   size: { cols: 80, rows: 24 },
 });
+
+/** A local environment running only `h`, on a runtime of its own. */
+const runningOnly = (h: HarnessAdapter) =>
+  new LocalEnvironment({
+    id: newId("env"),
+    runtime: new FakeRuntime(),
+    harnesses: [h],
+    socket: "/s",
+  });
 
 /** The terminal a launch made; every launch here makes one. */
 async function terminalOf(env: LocalEnvironment, l: ReturnType<typeof launch>) {
@@ -244,5 +257,67 @@ describe("local environment", () => {
       env.respawn({ agentId: l.agentId, request: l.request, options: {}, refs, generation: 1 }),
     ).rejects.toThrow(ProcessState);
     expect(resumed).toBe(0);
+  });
+
+  it("relaunches on the session it is given, in a new terminal at the agent's next generation", async () => {
+    const runtime = new FakeRuntime();
+    const resumed: unknown[] = [];
+    const resumable: HarnessAdapter = {
+      ...harness,
+      resumeSpec: async (_request, session) => {
+        resumed.push(session.id);
+        return { argv: ["claude", "--resume", session.id], env: {}, externalRef: session };
+      },
+    };
+    const env = new LocalEnvironment({
+      id: newId("env"),
+      runtime,
+      harnesses: [resumable],
+      socket: "/run/b.sock",
+    });
+    const session = { environmentId: env.id, kind: "claude-session", id: "s-9" } as const;
+    const l = { ...launch(), generation: 3, resume: session };
+    const terminal = await terminalOf(env, l);
+    expect([resumed, runtime.specOf(terminal).argv, terminal.locator.generation]).toEqual([
+      ["s-9"],
+      ["claude", "--resume", "s-9"],
+      "3",
+    ]);
+  });
+
+  it("refuses to relaunch on a session its harness can't resume, before it starts anything", async () => {
+    const runtime = new FakeRuntime();
+    const env = environment(runtime);
+    const session = { environmentId: env.id, kind: "claude-session", id: "s-9" } as const;
+    await expect(env.launch({ ...launch(), generation: 1, resume: session })).rejects.toThrow(
+      NotResumable,
+    );
+    expect(await env.inventory()).toEqual([]);
+  });
+
+  it("resumes a session only on a harness that resumes, and as that harness judges it", () => {
+    const withoutJudgement: HarnessAdapter = {
+      ...harness,
+      resumeSpec: async () =>
+        harness.launchSpec({ harness: "claude-code", project: "p", cwd: "/" }, {}),
+    };
+    const judged: HarnessAdapter = {
+      ...withoutJudgement,
+      canResume: ({ transcript }) => transcript === "/t.jsonl",
+    };
+    const session = { environmentId: newId("env"), kind: "claude-session", id: "s" } as const;
+    const ask = (h: HarnessAdapter, transcript: string | null, externalRef = session) =>
+      runningOnly(h).resumes({ harness: "claude-code", externalRef, transcript });
+    expect([
+      ask(judged, "/t.jsonl"),
+      ask(judged, null),
+      ask(withoutJudgement, null),
+      ask(harness, "/t.jsonl"),
+      runningOnly(judged).resumes({
+        harness: "claude-code",
+        externalRef: null,
+        transcript: "/t.jsonl",
+      }),
+    ]).toEqual([true, false, true, false, false]);
   });
 });

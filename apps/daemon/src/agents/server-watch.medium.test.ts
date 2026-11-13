@@ -4,7 +4,13 @@ import { isId, type AgentRefs, type EnvironmentAdapter, type HarnessAdapter } fr
 import { FakeRuntime } from "@bazhen/core/testing";
 import { LocalEnvironment } from "@bazhen/env-local";
 import type { Store } from "../store/store.ts";
-import { claudeAgent, fakeEnvironment, testView, withAgent } from "../testing/fixtures.ts";
+import {
+  claudeAgent,
+  fakeEnvironment,
+  quietStartAgain,
+  testView,
+  withAgent,
+} from "../testing/fixtures.ts";
 import { launchAgent, localEnvironmentId } from "./launch.ts";
 import { Lifecycle } from "./lifecycle.ts";
 import { AgentQueue } from "./queue.ts";
@@ -176,7 +182,7 @@ describe("ServerWatch", () => {
         return environment.respawn(r);
       },
     };
-    const respawning = new Lifecycle(store, slow, queue).respawn(agentId, {
+    const respawning = new Lifecycle(store, slow, queue, quietStartAgain).respawn(agentId, {
       idempotencyKey: "r-1",
       generation: 0,
     });
@@ -191,7 +197,7 @@ describe("ServerWatch", () => {
   it("leaves alone an agent a command settled while the check was reading the environment", async () => {
     const { store, agentId, environment } = await withAgent();
     const queue = new AgentQueue();
-    const lifecycle = new Lifecycle(store, environment, queue);
+    const lifecycle = new Lifecycle(store, environment, queue, quietStartAgain);
     const closingMeanwhile: EnvironmentAdapter = {
       ...environment,
       inventory: async () => {

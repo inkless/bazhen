@@ -3,8 +3,18 @@ import { readHook, type HookOrigin } from "@bazhen/harness-claude-code";
 import type { Activity } from "@bazhen/protocol";
 import { ActivityTracker } from "./activity.ts";
 
-const MAIN: HookOrigin = { sessionId: "s", subagent: false, subagentId: null };
-const sub = (id: string): HookOrigin => ({ sessionId: "s", subagent: true, subagentId: id });
+const MAIN: HookOrigin = {
+  sessionId: "s",
+  transcriptPath: null,
+  subagent: false,
+  subagentId: null,
+};
+const sub = (id: string): HookOrigin => ({
+  sessionId: "s",
+  transcriptPath: null,
+  subagent: true,
+  subagentId: id,
+});
 
 /** A tracker for agent `a`, and what it has recorded so far, as value and detail. */
 function tracked() {
@@ -31,6 +41,18 @@ describe("ActivityTracker", () => {
     expect(now()).toEqual(["working", "subagent running"]);
     hook("SubagentStop", sub("x"), { agent_id: "x" });
     expect(now()).toEqual(["idle", undefined]);
+  });
+
+  it("forgets what a replaced process was doing, so a new one's subagent isn't read through it", () => {
+    const { tracker, hook, now } = tracked();
+    hook("PermissionRequest", MAIN, { tool_name: "Bash" });
+    const before = now();
+    tracker.replaced("a");
+    hook("PreToolUse", sub("x"), { agent_id: "x" });
+    expect([before, now()]).toEqual([
+      ["needs_approval", undefined],
+      ["working", "subagent running"],
+    ]);
   });
 
   it("needs approval while a subagent waits on one, and works on after it", () => {

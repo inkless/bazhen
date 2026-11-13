@@ -254,9 +254,14 @@
         "enum": [
           "close",
           "respawn",
-          "signal"
+          "signal",
+          "relaunch"
         ]
       }
+    },
+    "resumable": {
+      "default": false,
+      "type": "boolean"
     }
   },
   "required": [

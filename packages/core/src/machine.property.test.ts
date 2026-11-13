@@ -143,6 +143,8 @@ const AGENT_EVENTS: [AgentEvent, number][] = [
   ["target.absent", 1],
   ["respawn.requested", 3],
   ["relaunch.requested", 2],
+  ["relaunch.rejected", 2],
+  ["respawn.rejected", 1],
   ["close.requested", 1],
   ["close.completed", 1],
 ];
@@ -157,10 +159,15 @@ describe("agent session, over any sequence of events", () => {
     ]);
   });
 
-  it("becomes lost only when a reachable environment lacks the target", () => {
+  // A launch's starting and a relaunch's look the same here; the store refuses a rejected
+  // relaunch for an agent with no lost terminal to return to.
+  it("becomes lost only when a reachable environment lacks the target, or a relaunch fails", () => {
     expect(
-      check(agentWalks, (steps) => entersOnlyBy(steps, "lost", ["target.absent"])),
+      check(agentWalks, (steps) =>
+        entersOnlyBy(steps, "lost", ["target.absent", "relaunch.rejected"]),
+      ),
     ).not.toThrow();
+    expect(tryNext(agent, "starting", "relaunch.rejected")).toBe("lost");
   });
 
   it("starts again only on an explicit respawn or relaunch", () => {

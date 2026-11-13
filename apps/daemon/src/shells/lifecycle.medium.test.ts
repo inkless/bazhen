@@ -10,7 +10,7 @@ import { Lifecycle } from "../agents/lifecycle.ts";
 import { AgentQueue } from "../agents/queue.ts";
 import { StaleGeneration, StateConflict } from "../commands.ts";
 import { IdempotencyConflict, type Store } from "../store/store.ts";
-import { testView, withAgent } from "../testing/fixtures.ts";
+import { quietStartAgain, testView, withAgent } from "../testing/fixtures.ts";
 import {
   ShellBusy,
   ShellLifecycle,
@@ -84,7 +84,7 @@ async function setup() {
   };
   const stateOf = (terminalId: string) => store.shell(terminalId)?.state;
   const open = async (key = "open") => (await shells.open({ idempotencyKey: key })).terminalId;
-  const lifecycle = new Lifecycle(store, watched, queue);
+  const lifecycle = new Lifecycle(store, watched, queue, quietStartAgain);
   let keys = 0;
   const linked = async () =>
     (await shells.open({ idempotencyKey: `linked-${++keys}`, linkedAgentId: agentId })).terminalId;
