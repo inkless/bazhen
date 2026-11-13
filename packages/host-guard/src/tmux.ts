@@ -244,6 +244,24 @@ export async function readProcess(pid: number): Promise<PsReading> {
   }
 }
 
+/**
+ * The foreground process group of the terminal `pid` is attached to, as `ps` reports it (`tpgid`):
+ * a shell at its prompt leads it; a program it runs in the foreground leads another. A process
+ * with no terminal reports none, as -1 or 0.
+ */
+export async function terminalForeground(pid: number): Promise<number | "absent" | "unreadable"> {
+  try {
+    const { stdout } = await run("ps", ["-p", String(pid), "-o", "tpgid="], {
+      env: PS_ENV,
+      timeout: TIMEOUT_MS,
+    });
+    const group = Number(stdout.trim());
+    return stdout.trim() !== "" && Number.isInteger(group) ? group : "unreadable";
+  } catch (err) {
+    return psFailure(err);
+  }
+}
+
 /** A failed `ps -p`: absent only for exit 1 with nothing printed, as for a pid with no process. */
 export function psFailure(err: unknown): "absent" | "unreadable" {
   const quiet = (key: string) => String(Reflect.get(Object(err), key) ?? "").trim() === "";

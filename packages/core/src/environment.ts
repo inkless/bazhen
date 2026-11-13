@@ -32,6 +32,21 @@ export interface AgentInventoryEntry {
   readonly externalRef?: ExternalRef;
 }
 
+/** A Bazhen-opened shell the environment still has, for reconciliation (foundation-design §4.8). */
+export interface ShellInventoryEntry {
+  readonly ref: RuntimeRef;
+  readonly dead: boolean;
+}
+
+/** A shell to open, its TerminalId minted by the daemon, which recorded it first. */
+export interface ShellOpen {
+  readonly terminalId: TerminalId;
+  readonly cwd: string;
+  readonly linkedAgentId?: AgentSessionId;
+  readonly size: Size;
+  readonly theme?: TuiTheme;
+}
+
 /** A launch, with every Bazhen id already minted by the daemon (foundation-design §8.1). */
 export interface AgentLaunch {
   readonly agentId: AgentSessionId;
@@ -134,6 +149,14 @@ export interface EnvironmentAdapter {
   close(refs: AgentRefs): Promise<void>;
   /** Whether the environment positively no longer has what ran the agent (RuntimeAdapter.gone). */
   gone(refs: AgentRefs): Promise<boolean>;
+  /** The shells it holds, live or dead; an unreadable environment throws. */
+  shells(): Promise<ShellInventoryEntry[]>;
+  openShell(open: ShellOpen): Promise<RuntimeRef>;
+  /**
+   * What runs in the shell's foreground when it is not the shell itself, such as `nvim`, or null
+   * when the shell is at its prompt. Read from process facts, never from the screen.
+   */
+  shellBusy(ref: RuntimeRef): Promise<string | null>;
   /** Reports every terminal whose process has ended, as the runtime does (RuntimeAdapter.onExit). */
   onExit(cb: (ref: RuntimeRef, status: ExitStatus) => void): () => void;
 }

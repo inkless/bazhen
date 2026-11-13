@@ -149,6 +149,30 @@ export function project(db: Statements, e: Recorded): void {
       });
       forgetActivity(db, e.entityId);
       return;
+    case "terminal.opened": {
+      const { environmentId, cwd, linkedAgentId, theme } = EVENTS[e.type].payload.parse(e.payload);
+      db.prepare(
+        `INSERT INTO terminals
+           (id, host_id, state, generation, runtime, locator, environment_id, kind, cwd,
+            linked_agent_id, theme, created_event_id, updated_event_id)
+         VALUES (?, ?, 'creating', 0, NULL, NULL, ?, 'shell', ?, ?, ?, ?, ?)`,
+      ).run(e.entityId, e.hostId, environmentId, cwd, linkedAgentId, theme ?? null, e.id, e.id);
+      return;
+    }
+    case "terminal.running": {
+      const { runtimeRef } = EVENTS[e.type].payload.parse(e.payload);
+      return moveShell(db, e, "runtime.confirmed", incarnation(runtimeRef));
+    }
+    case "terminal.failed":
+      EVENTS[e.type].payload.parse(e.payload);
+      return moveShell(db, e, "runtime.rejected");
+    case "terminal.lost":
+      return moveShell(db, e, "target.absent");
+    case "terminal.closing":
+      return moveShell(db, e, "close.requested");
+    case "terminal.closed":
+      EVENTS[e.type].payload.parse(e.payload);
+      return moveShell(db, e, "close.completed");
     case "attachment.started": {
       const { terminalId, mode } = EVENTS[e.type].payload.parse(e.payload);
       db.prepare(
@@ -266,6 +290,19 @@ function moveMessage(db: Statements, e: Recorded, event: MailboxEvent, columns: 
   if (row === undefined) throw new UnknownEntity("message", e.entityId);
   const state = mailbox.next(MailboxState.parse(row.state), event);
   update(db, "mailbox", "id", e.entityId, e.id, { state, ...columns });
+}
+
+/** A shell's own events move only its terminal: no agent session sits above it (§4.8). */
+function moveShell(db: Statements, e: Recorded, event: TerminalEvent, columns: Columns = {}) {
+  const row = db
+    .prepare("SELECT state, generation FROM terminals WHERE id = ? AND kind = 'shell'")
+    .get(e.entityId);
+  if (row === undefined) throw new UnknownEntity("shell", e.entityId);
+  const at = advanceTerminal(
+    { state: TerminalState.parse(row.state), generation: Number(row.generation) },
+    event,
+  );
+  update(db, "terminals", "id", e.entityId, e.id, { ...at, ...columns });
 }
 
 function closeAttention(db: Statements, e: Recorded, reason: AttentionCloseReason) {

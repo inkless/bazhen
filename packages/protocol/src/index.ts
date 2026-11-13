@@ -8,7 +8,9 @@ export * from "./ids.ts";
 export * from "./input.ts";
 export * from "./json.ts";
 export * from "./mail.ts";
+export * from "./shells.ts";
 export * from "./stream.ts";
+export * from "./theme.ts";
 export * from "./version.ts";
 
 export const RuntimeHealthState = z.enum(["healthy", "unreachable", "not-running"]);
@@ -80,15 +82,3 @@ export const EnvRefreshResponse = z.object({
   unchanged: z.array(Id("agent")),
 });
 export type EnvRefreshResponse = z.infer<typeof EnvRefreshResponse>;
-
-export const TerminalState = z.enum([
-  "creating",
-  "running",
-  "exited",
-  "unknown",
-  "lost",
-  "closing",
-  "closed",
-  "failed",
-]);
-export type TerminalState = z.infer<typeof TerminalState>;

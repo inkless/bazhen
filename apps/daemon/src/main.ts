@@ -34,6 +34,8 @@ import { retire } from "./events/retention.ts";
 import { eventRoute } from "./events/server.ts";
 import { TerminalHub } from "./stream/hub.ts";
 import { endOpenAttachments, storeLog } from "./stream/log.ts";
+import { ShellLifecycle } from "./shells/lifecycle.ts";
+import { reconcileShells } from "./shells/reconcile.ts";
 import { streamRoute } from "./stream/server.ts";
 import { Approvals } from "./mailbox/approvals.ts";
 import { HOOK_SCRIPT, hookClient, hookCommand } from "./mailbox/hook-command.ts";
@@ -155,20 +157,31 @@ const environment = new LocalEnvironment({
   ],
   socket: paths.socket,
   ...(config.loginShell === undefined ? {} : { loginShell: config.loginShell }),
+  // The shell a new terminal tab would run; a relative or missing SHELL falls back to /bin/sh.
+  ...(hostEnv.SHELL?.startsWith("/") === true && { shell: hostEnv.SHELL }),
 });
 await reconcile(store, environment);
 // What a Claude Code agent was doing went with the last daemon's memory (foundation-design §4.6).
 const activity = new ActivityTracker((agentId, a) => store.recordActivity(agentId, a));
+const queue = new AgentQueue();
+const shells = new ShellLifecycle({
+  store,
+  environment,
+  queue,
+  size: DEFAULT_SIZE,
+  home: inputs.home,
+});
+await reconcileShells(store, environment, shells);
 // A title that changed while the daemon was down, or a move it was waiting on, is read again;
 // until it has been, those agents' mail waits, so none goes to a thread the TUI has left.
 codexThreads.followAll();
 // The Codex agents' threads lost their subscriber with the last daemon (§7 step 4).
 codex.keepConnected();
-const queue = new AgentQueue();
 const lifecycle = new Lifecycle(store, environment, queue);
 lifecycle.watch();
 const serverWatch = new ServerWatch({ store, environment, queue });
 serverWatch.start();
+shells.watch();
 const allowedHosts = [`${HOSTNAME}:${port}`, `localhost:${port}`];
 // The web dev server proxies to the daemon, and the browser's requests keep its origin. It is
 // allowed only when the dev scripts name its port; a built daemon serves the client itself.
@@ -199,6 +212,8 @@ const commands = {
   close: (agentId, req) => lifecycle.close(agentId, req),
   respawn: (agentId, req) => lifecycle.respawn(agentId, req),
   signal: (agentId, req) => lifecycle.signal(agentId, req),
+  openShell: (req) => shells.open(req),
+  closeShell: (terminalId, req) => shells.close(terminalId, req),
 } satisfies Omit<AppDeps, "allow">;
 const app = createApp({ ...commands, allow });
 

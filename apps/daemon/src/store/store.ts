@@ -11,6 +11,7 @@ import {
   type IdPrefix,
   type MessageId,
   type RuntimeRef,
+  type TerminalId,
 } from "@bazhen/core";
 import { z } from "zod";
 import {
@@ -28,6 +29,7 @@ import {
   type ResetReason,
   type EventPayload,
   type EventType,
+  type ShellCommand,
 } from "@bazhen/protocol";
 import { LATEST_SCHEMA_VERSION, MIGRATIONS, type Migration } from "./migrations.ts";
 import { project, type Statements } from "./projections.ts";
@@ -127,6 +129,38 @@ function refFrom(
   const locator: Record<string, string> = JSON.parse(String(row.locator));
   return { terminalId, runtime: row.runtime, locator };
 }
+
+/** A shell terminal as its lifecycle needs it. */
+export interface ShellTerminal {
+  readonly terminalId: TerminalId;
+  readonly environmentId: EnvironmentId;
+  readonly state: TerminalState;
+  readonly generation: number;
+  readonly runtime: RuntimeRef | null;
+}
+
+const SHELL_TERMINAL = `SELECT id, environment_id, state, generation, runtime, locator FROM terminals
+  WHERE kind = 'shell'`;
+
+function shellFrom(row: Record<string, SQLOutputValue>): ShellTerminal | undefined {
+  const { id, environment_id: environmentId } = row;
+  if (typeof id !== "string" || !isId("term", id)) return undefined;
+  if (typeof environmentId !== "string" || !isId("env", environmentId)) return undefined;
+  return {
+    terminalId: id,
+    environmentId,
+    state: TerminalState.parse(row.state),
+    generation: Number(row.generation),
+    runtime: refFrom(id, row),
+  };
+}
+
+/** The shell states a close can still act on; a closed one is answered with nothing to do. */
+const SHELL_CLOSABLE: ReadonlySet<TerminalState> = new Set(["running", "lost", "closing"]);
+
+/** The commands a shell takes in `state` (foundation-design §4.8). */
+export const shellCommands = (state: TerminalState): ShellCommand[] =>
+  SHELL_CLOSABLE.has(state) ? ["close"] : [];
 
 export class IdempotencyConflict extends Error {
   readonly key: string;
@@ -629,6 +663,20 @@ export class Store {
       .flatMap((row) => agentTerminalFrom(row) ?? []);
   }
 
+  shell(terminalId: string): ShellTerminal | undefined {
+    const row = this.prepare(`${SHELL_TERMINAL} AND id = ?`).get(terminalId);
+    return row === undefined ? undefined : shellFrom(row);
+  }
+
+  /** An environment's shells that a restart may have left behind: every one not yet final. */
+  recoverableShells(environmentId: string): ShellTerminal[] {
+    const sql = `${SHELL_TERMINAL} AND environment_id = ?
+                 AND state NOT IN ('lost', 'closed', 'failed') ORDER BY created_event_id`;
+    return this.prepare(sql)
+      .all(environmentId)
+      .flatMap((row) => shellFrom(row) ?? []);
+  }
+
   /**
    * Every projection the state snapshot shows, with the last event it reflects. `view` adds what
    * only the daemon's surroundings know.
@@ -683,6 +731,23 @@ export class Store {
         messages: this.prepare(
           "SELECT id, agent_session_id AS agentId, state FROM mailbox ORDER BY created_event_id",
         ).all(),
+        shells: this.prepare(
+          `SELECT id, environment_id AS environmentId, state, generation, cwd,
+                  linked_agent_id AS linkedAgentId, coalesce(theme, 'dark') AS theme, runtime, locator
+           FROM terminals WHERE kind = 'shell' AND state NOT IN ('closed', 'failed') ORDER BY created_event_id`,
+        )
+          .all()
+          .map(({ runtime, locator, ...r }) => {
+            const state = TerminalState.parse(r.state);
+            const ref = ATTACHABLE.has(state)
+              ? refFrom(r.id, { runtime: runtime ?? null, locator: locator ?? null })
+              : null;
+            return {
+              ...r,
+              attachCommand: ref === null ? null : view.attachCommand(ref),
+              commands: shellCommands(state),
+            };
+          }),
       }),
     );
   }

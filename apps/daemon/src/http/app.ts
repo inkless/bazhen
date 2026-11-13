@@ -3,6 +3,8 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import {
   AnswerAttentionRequest,
   CloseAgentRequest,
+  CloseShellRequest,
+  OpenShellRequest,
   RespawnAgentRequest,
   SignalAgentRequest,
   HealthResponse,
@@ -14,6 +16,7 @@ import {
   type SendMessageResponse,
   type ErrorResponse,
   type LaunchAgentResponse,
+  type ShellCommandResponse,
   type StateSnapshot,
 } from "@bazhen/protocol";
 import {
@@ -35,6 +38,16 @@ import {
   StaleGeneration,
 } from "../agents/lifecycle.ts";
 import { AttentionClosed, AttentionUnavailable } from "../mailbox/approvals.ts";
+import {
+  ShellBusy,
+  ShellEnvironmentUnavailable,
+  ShellOpenFailed,
+  ShellReplaced,
+  ShellServerUnconfirmed,
+  ShellStateConflict,
+  StaleShellGeneration,
+  UnknownShell,
+} from "../shells/lifecycle.ts";
 import { refusal, type Allowlists } from "./guard.ts";
 
 export interface AppDeps {
@@ -50,6 +63,11 @@ export interface AppDeps {
   readonly close: (agentId: string, req: CloseAgentRequest) => Promise<AgentCommandResponse>;
   readonly respawn: (agentId: string, req: RespawnAgentRequest) => Promise<AgentCommandResponse>;
   readonly signal: (agentId: string, req: SignalAgentRequest) => Promise<AgentCommandResponse>;
+  readonly openShell: (req: OpenShellRequest) => Promise<ShellCommandResponse>;
+  readonly closeShell: (
+    terminalId: string,
+    req: CloseShellRequest,
+  ) => Promise<ShellCommandResponse>;
 }
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -104,6 +122,12 @@ export function createApp(deps: AppDeps): Hono {
     return c.json(await deps.launch(body.data));
   });
 
+  app.post("/v1/shells", async (c) => {
+    const body = OpenShellRequest.safeParse(await c.req.json().catch(() => undefined));
+    if (!body.success) return invalid(c, body.error);
+    return c.json(await deps.openShell(body.data));
+  });
+
   /** A request about one entity: the body is checked against its schema, then handed to `run`. */
   const route = <T, R>(
     path: `/v1/${string}/:id/${string}`,
@@ -120,6 +144,7 @@ export function createApp(deps: AppDeps): Hono {
   route("/v1/agents/:id/respawn", RespawnAgentRequest, deps.respawn);
   route("/v1/agents/:id/signal", SignalAgentRequest, deps.signal);
   route("/v1/attention/:id/answer", AnswerAttentionRequest, deps.answer);
+  route("/v1/shells/:id/close", CloseShellRequest, deps.closeShell);
 
   // Typed failures from the domain become protocol errors in one place; anything else is a bug.
   app.onError((err, c) => {
@@ -129,7 +154,16 @@ export function createApp(deps: AppDeps): Hono {
     if (err instanceof IdempotencyConflict) return fail(c, 409, "conflict", err.message);
     if (err instanceof AttentionClosed) return fail(c, 409, "conflict", err.message);
     if (err instanceof AttentionUnavailable) return fail(c, 503, "unavailable", err.message);
-    if (err instanceof UnknownAgent) return fail(c, 404, "not_found", err.message);
+    if (err instanceof UnknownAgent || err instanceof UnknownShell)
+      return fail(c, 404, "not_found", err.message);
+    if (err instanceof ShellBusy) return fail(c, 409, "busy", err.message);
+    if (err instanceof ShellOpenFailed) return fail(c, 502, "launch_failed", err.message);
+    if (err instanceof StaleShellGeneration) return fail(c, 409, "stale_generation", err.message);
+    if (err instanceof ShellServerUnconfirmed)
+      return fail(c, 409, "server_unconfirmed", err.message);
+    if (err instanceof ShellStateConflict || err instanceof ShellReplaced)
+      return fail(c, 409, "conflict", err.message);
+    if (err instanceof ShellEnvironmentUnavailable) return fail(c, 503, "unavailable", err.message);
     if (err instanceof StaleGeneration) return fail(c, 409, "stale_generation", err.message);
     if (err instanceof NotResumable) return fail(c, 409, "not_resumable", err.message);
     if (err instanceof ServerUnconfirmed) return fail(c, 409, "server_unconfirmed", err.message);
