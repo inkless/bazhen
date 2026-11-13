@@ -7,7 +7,7 @@ import { InvalidTransition, newId } from "@bazhen/core";
 import { age, register, settled, visit, withAgent } from "../testing/fixtures.ts";
 import { MIGRATIONS } from "./migrations.ts";
 import { UnknownEntity } from "./projections.ts";
-import { LATEST_SCHEMA_VERSION, SchemaTooNew, Store } from "./store.ts";
+import { LATEST_SCHEMA_VERSION, SchemaTooNew, Store, UnknownAgent } from "./store.ts";
 
 const dbPath = () => join(mkdtempSync(join(tmpdir(), "bz-store-")), "bazhen.db");
 
@@ -45,7 +45,7 @@ describe("Store", () => {
     const path = dbPath();
     Store.open(path, [
       { version: 1, sql: "SELECT 1" },
-      { version: 9, sql: "SELECT 1" },
+      { version: LATEST_SCHEMA_VERSION + 1, sql: "SELECT 1" },
     ]).close();
     expect(() => Store.open(path)).toThrow(SchemaTooNew);
   });
@@ -321,5 +321,132 @@ describe("Store event log", () => {
     const keptAfterEnd = store.events(0).some((e) => e.id === started);
     expect([keptWhileOpen, keptAfterEnd]).toEqual([[started], false]);
     store.close();
+  });
+});
+
+const activity = (
+  value: "working" | "idle",
+  observedAt: string,
+  more: { detail?: string; confidence?: number } = {},
+) => ({ value, source: "native" as const, confidence: more.confidence ?? 1, observedAt, ...more });
+
+const activityEvents = (store: Store) => store.events(0).filter((e) => e.type === "agent.activity");
+
+describe("Store activity signals", () => {
+  it("keeps the latest signal per agent, and shows it with the agent in the snapshot", async () => {
+    const { store, agentId } = await withAgent();
+    expect(store.snapshot().agents[0]).not.toHaveProperty("activity");
+    store.recordActivity(agentId, activity("working", "2026-11-12T10:00:00.000Z"));
+    store.recordActivity(agentId, activity("idle", "2026-11-12T10:00:05.000Z"));
+    expect(store.latestActivity(agentId)?.value).toBe("idle");
+    expect(store.snapshot().agents[0]?.activity).toEqual(
+      activity("idle", "2026-11-12T10:00:05.000Z"),
+    );
+  });
+
+  it("appends nothing for a repeat, whenever it was seen and however sure", async () => {
+    const { store, agentId } = await withAgent();
+    const first = store.recordActivity(agentId, activity("working", "2026-11-12T10:00:00.000Z"));
+    const again = store.recordActivity(
+      agentId,
+      activity("working", "2026-11-12T10:00:09.000Z", { confidence: 0.5 }),
+    );
+    // The first of the repeats stands, so its age shows how long the agent has been working.
+    expect(store.latestActivity(agentId)?.observedAt).toBe("2026-11-12T10:00:00.000Z");
+    const changed = store.recordActivity(
+      agentId,
+      activity("working", "2026-11-12T10:00:10.000Z", { detail: "auto-continued" }),
+    );
+    expect(first).toBeTypeOf("number");
+    expect(again).toBeNull();
+    expect(changed).toBeTypeOf("number");
+    expect(activityEvents(store)).toHaveLength(2);
+  });
+
+  it("drops a signal observed before the latest, which arrived late", async () => {
+    const { store, agentId } = await withAgent();
+    store.recordActivity(agentId, activity("idle", "2026-11-12T10:00:05.000Z"));
+    expect(
+      store.recordActivity(agentId, activity("working", "2026-11-12T10:00:00.000Z")),
+    ).toBeNull();
+    expect(store.latestActivity(agentId)?.value).toBe("idle");
+    expect(activityEvents(store)).toHaveLength(1);
+  });
+
+  it("refuses a signal for an agent it doesn't run, recording nothing", async () => {
+    const { store } = await withAgent();
+    expect(() =>
+      store.recordActivity(newId("agent"), activity("idle", "2026-11-12T10:00:00.000Z")),
+    ).toThrow(UnknownAgent);
+    expect(activityEvents(store)).toHaveLength(0);
+  });
+
+  it("records nothing for an agent whose process has exited", async () => {
+    const { store, agentId } = await withAgent();
+    store.append({
+      type: "agent.exited",
+      entityId: agentId,
+      actor: "system",
+      payload: { exit: { type: "exited", code: 0 } },
+    });
+    expect(store.recordActivity(agentId, activity("idle", "2026-11-12T10:00:00.000Z"))).toBeNull();
+    expect(activityEvents(store)).toHaveLength(0);
+  });
+
+  it("forgets the old process's signal when the agent is respawned", async () => {
+    const { store, agentId } = await withAgent();
+    store.recordActivity(agentId, activity("working", "2026-11-12T10:00:00.000Z"));
+    store.append({
+      type: "agent.exited",
+      entityId: agentId,
+      actor: "system",
+      payload: { exit: { type: "exited", code: 0 } },
+    });
+    store.append({
+      type: "agent.respawn_requested",
+      entityId: agentId,
+      actor: "system",
+      payload: {},
+    });
+    store.append({
+      type: "agent.respawned",
+      entityId: agentId,
+      actor: "system",
+      payload: { externalRef: null, runtimeRef: { runtime: "tmux", locator: { generation: "1" } } },
+    });
+    expect(store.latestActivity(agentId)).toBeUndefined();
+    // The new process's first signal is news, not a repeat of the old process's.
+    expect(
+      store.recordActivity(agentId, activity("working", "2026-11-12T10:01:00.000Z")),
+    ).toBeTypeOf("number");
+  });
+
+  it("forgets an agent's signal once it is closed", async () => {
+    const { store, agentId } = await withAgent();
+    store.recordActivity(agentId, activity("idle", "2026-11-12T10:00:00.000Z"));
+    store.append({ type: "agent.closing", entityId: agentId, actor: "system", payload: {} });
+    store.append({ type: "agent.closed", entityId: agentId, actor: "system", payload: {} });
+    expect(store.latestActivity(agentId)).toBeUndefined();
+    expect(store.snapshot().agents[0]).not.toHaveProperty("activity");
+  });
+
+  it("keeps the latest signal across reopen", async () => {
+    const { path, store, agentId } = await withAgent();
+    store.recordActivity(agentId, activity("idle", "2026-11-12T10:00:00.000Z"));
+    store.close();
+    expect(Store.open(path).latestActivity(agentId)?.value).toBe("idle");
+  });
+
+  it("never retires the event behind an agent's latest signal", async () => {
+    const { path, store, agentId, terminalId } = await withAgent();
+    const kept = store.recordActivity(agentId, activity("idle", "2026-11-12T10:00:00.000Z"));
+    // Retention always keeps the newest event, so a later one makes the signal's prunable.
+    visit(store, terminalId);
+    store.close();
+    age(path);
+    const reopened = Store.open(path);
+    reopened.pruneBatch(new Date());
+    expect(reopened.events(0).map((e) => e.id)).toContain(kept);
+    expect(reopened.latestActivity(agentId)?.value).toBe("idle");
   });
 });

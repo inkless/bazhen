@@ -118,6 +118,7 @@ export function project(db: Statements, e: Recorded): void {
         agent: { external_ref: externalRef && JSON.stringify(externalRef) },
         terminal: { ...incarnation(runtimeRef), exit: null },
       });
+      forgetActivity(db, e.entityId);
       return;
     }
     case "agent.respawn_rejected":
@@ -132,6 +133,7 @@ export function project(db: Statements, e: Recorded): void {
       return;
     case "agent.closed":
       advance(db, e.id, e.entityId, ["close.completed", "close.completed"]);
+      forgetActivity(db, e.entityId);
       return;
     case "attachment.started": {
       const { terminalId, mode } = EVENTS[e.type].payload.parse(e.payload);
@@ -199,6 +201,15 @@ export function project(db: Statements, e: Recorded): void {
       return closeAttention(db, e, "answered");
     case "attention.closed":
       return closeAttention(db, e, EVENTS[e.type].payload.parse(e.payload).reason);
+    case "agent.activity": {
+      const activity = EVENTS[e.type].payload.parse(e.payload);
+      db.prepare(
+        `INSERT INTO activity_latest (agent_session_id, activity, updated_event_id) VALUES (?, ?, ?)
+         ON CONFLICT (agent_session_id) DO UPDATE SET activity = excluded.activity,
+           updated_event_id = excluded.updated_event_id`,
+      ).run(e.entityId, JSON.stringify(activity), e.id);
+      return;
+    }
     case "lease.granted": {
       const { attachmentId, epoch } = EVENTS[e.type].payload.parse(e.payload);
       db.prepare(
@@ -231,6 +242,11 @@ function closeAttention(db: Statements, e: Recorded, reason: AttentionCloseReaso
   if (row === undefined) throw new UnknownEntity("attention item", e.entityId);
   const state = attention.next(AttentionState.parse(row.state), reason);
   update(db, "attention_items", "id", e.entityId, e.id, { state, close_reason: reason });
+}
+
+/** A new or closed process says nothing yet: the last one's signal goes with it. */
+function forgetActivity(db: Statements, agentId: string): void {
+  db.prepare("DELETE FROM activity_latest WHERE agent_session_id = ?").run(agentId);
 }
 
 /** Moves an agent and its terminal together: a local agent's terminal is its process (§4.5). */
