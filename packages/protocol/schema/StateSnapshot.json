@@ -501,6 +501,13 @@
               }
             ]
           },
+          "name": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "theme": {
             "type": "string",
             "enum": [
@@ -519,7 +526,10 @@
             "items": {
               "type": "string",
               "enum": [
-                "close"
+                "close",
+                "restart",
+                "rename",
+                "unlink"
               ]
             }
           }

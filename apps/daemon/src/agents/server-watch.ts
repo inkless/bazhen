@@ -12,6 +12,8 @@ export interface ServerWatchOptions {
   readonly environment: EnvironmentAdapter;
   /** The agents' command queue; an agent a command holds is in flight, and is left to it. */
   readonly queue: AgentQueue;
+  /** Runs on every tick after the agents' check, whatever it found, as shells settle theirs. */
+  readonly alsoEachTick?: () => Promise<void>;
   readonly intervalMs?: number;
   readonly now?: () => number;
   readonly log?: (message: string) => void;
@@ -66,6 +68,7 @@ export class ServerWatch {
    */
   tick(): Promise<void> {
     this.ticking ??= this.check()
+      .then(() => this.opts.alsoEachTick?.())
       .then(() => (this.fault = undefined))
       .catch((err: unknown) => {
         const fault = `server watch: check failed: ${String(err)}`;

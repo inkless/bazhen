@@ -145,10 +145,14 @@ export interface ShellTerminal {
   readonly state: TerminalState;
   readonly generation: number;
   readonly runtime: RuntimeRef | null;
+  readonly cwd: string;
+  readonly linkedAgentId: string | null;
+  readonly theme: TuiTheme | null;
 }
 
-const SHELL_TERMINAL = `SELECT id, environment_id, state, generation, runtime, locator FROM terminals
-  WHERE kind = 'shell'`;
+const SHELL_TERMINAL = `SELECT id, environment_id, state, generation, runtime, locator, cwd,
+    linked_agent_id, theme
+  FROM terminals WHERE kind = 'shell'`;
 
 function shellFrom(row: Record<string, SQLOutputValue>): ShellTerminal | undefined {
   const { id, environment_id: environmentId } = row;
@@ -160,15 +164,27 @@ function shellFrom(row: Record<string, SQLOutputValue>): ShellTerminal | undefin
     state: TerminalState.parse(row.state),
     generation: Number(row.generation),
     runtime: refFrom(id, row),
+    cwd: String(row.cwd),
+    linkedAgentId: typeof row.linked_agent_id === "string" ? row.linked_agent_id : null,
+    theme: row.theme === null ? null : TuiTheme.parse(row.theme),
   };
 }
 
 /** The shell states a close can still act on; a closed one is answered with nothing to do. */
 const SHELL_CLOSABLE: ReadonlySet<TerminalState> = new Set(["running", "lost", "closing"]);
 
-/** The commands a shell takes in `state` (foundation-design §4.8). */
-export const shellCommands = (state: TerminalState): ShellCommand[] =>
-  SHELL_CLOSABLE.has(state) ? ["close"] : [];
+/** The shell states that are still a shell someone may name. */
+const SHELL_LISTED: ReadonlySet<TerminalState> = new Set([...SHELL_CLOSABLE, "creating"]);
+
+/** The commands a shell takes, where it is in its lifecycle and linked or not (§4.8). */
+export function shellCommands(state: TerminalState, linked: boolean): ShellCommand[] {
+  return [
+    ...(SHELL_CLOSABLE.has(state) ? (["close"] as const) : []),
+    ...(state === "lost" ? (["restart"] as const) : []),
+    ...(SHELL_LISTED.has(state) ? (["rename"] as const) : []),
+    ...(linked && state === "running" ? (["unlink"] as const) : []),
+  ];
+}
 
 export class IdempotencyConflict extends Error {
   readonly key: string;
@@ -690,6 +706,26 @@ export class Store {
     return row === undefined ? undefined : shellFrom(row);
   }
 
+  /** The shells linked to an agent that have not closed yet, oldest first. */
+  linkedShells(agentId: string): ShellTerminal[] {
+    const sql = `${SHELL_TERMINAL} AND linked_agent_id = ?
+                 AND state NOT IN ('closed', 'failed') ORDER BY created_event_id`;
+    return this.prepare(sql)
+      .all(agentId)
+      .flatMap((row) => shellFrom(row) ?? []);
+  }
+
+  /** Agents that have closed or failed but still have shells linked to them, not yet closed. */
+  agentsWithOrphanedShells(): string[] {
+    const sql = `SELECT DISTINCT t.linked_agent_id AS id FROM terminals t
+                 JOIN agent_sessions a ON a.id = t.linked_agent_id
+                 WHERE t.kind = 'shell' AND t.state NOT IN ('closed', 'failed')
+                 AND a.state IN ('closed', 'failed')`;
+    return this.prepare(sql)
+      .all()
+      .map((r) => String(r.id));
+  }
+
   /** An environment's shells that a restart may have left behind: every one not yet final. */
   recoverableShells(environmentId: string): ShellTerminal[] {
     const sql = `${SHELL_TERMINAL} AND environment_id = ?
@@ -773,7 +809,8 @@ export class Store {
         ).all(),
         shells: this.prepare(
           `SELECT id, environment_id AS environmentId, state, generation, cwd,
-                  linked_agent_id AS linkedAgentId, coalesce(theme, 'dark') AS theme, runtime, locator
+                  linked_agent_id AS linkedAgentId, name, coalesce(theme, 'dark') AS theme,
+                  runtime, locator
            FROM terminals WHERE kind = 'shell' AND state NOT IN ('closed', 'failed') ORDER BY created_event_id`,
         )
           .all()
@@ -785,7 +822,7 @@ export class Store {
             return {
               ...r,
               attachCommand: ref === null ? null : view.attachCommand(ref),
-              commands: shellCommands(state),
+              commands: shellCommands(state, r.linkedAgentId !== null),
             };
           }),
       }),

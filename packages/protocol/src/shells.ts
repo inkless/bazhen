@@ -15,7 +15,7 @@ export const TerminalState = z.enum([
 export type TerminalState = z.infer<typeof TerminalState>;
 
 /** A command on a shell: each is a `POST /v1/shells/:id/<command>` (protocol 1.17). */
-export const ShellCommand = z.enum(["close"]);
+export const ShellCommand = z.enum(["close", "restart", "rename", "unlink"]);
 export type ShellCommand = z.infer<typeof ShellCommand>;
 
 /**
@@ -31,6 +31,8 @@ export const Shell = z.object({
   cwd: z.string(),
   /** The agent it is shown with, whose close takes it; null for a standalone shell. */
   linkedAgentId: Id("agent").nullable(),
+  /** A name the user gave it; without one, a client names it from its directory. */
+  name: z.string().nullable().default(null),
   /** The theme it was opened for, which it is drawn in and tells programs that ask. */
   theme: TuiTheme,
   /** As an agent's: null while the runtime holds no terminal for it. */
@@ -69,8 +71,54 @@ export const CloseShellRequest = z.object({
 });
 export type CloseShellRequest = z.infer<typeof CloseShellRequest>;
 
+/** Opens a new shell in a lost one's directory, beside the same agent if it still runs (§4.8). */
+export const RestartShellRequest = z.object({
+  idempotencyKey: IdempotencyKey,
+  generation: z.number().int().nonnegative(),
+  theme: TuiTheme.optional(),
+});
+export type RestartShellRequest = z.infer<typeof RestartShellRequest>;
+
+/** C0 and C1 control characters, and the bidirectional embeddings, overrides and isolates. */
+const unshowable = (code: number) =>
+  code < 0x20 ||
+  (code >= 0x7f && code <= 0x9f) ||
+  (code >= 0x202a && code <= 0x202e) ||
+  (code >= 0x2066 && code <= 0x2069);
+
+/** Every one of them is in the Basic Multilingual Plane, so UTF-16 units find them all. */
+function showable(name: string): boolean {
+  for (let i = 0; i < name.length; i++) if (unshowable(name.charCodeAt(i))) return false;
+  return true;
+}
+
+/**
+ * A shell's name, as a person gives it. A client draws it, so it can't carry a control character
+ * (an escape sequence, a newline) or a bidirectional override that reorders the text around it.
+ */
+export const ShellName = z.string().trim().min(1).max(80).refine(showable, {
+  message: "a shell's name can't hold control characters or bidirectional overrides",
+});
+
+export const RenameShellRequest = z.object({
+  idempotencyKey: IdempotencyKey,
+  name: ShellName.nullable(),
+});
+export type RenameShellRequest = z.infer<typeof RenameShellRequest>;
+
+/**
+ * Makes a linked shell standalone: its agent's close no longer takes it. It keeps running as it
+ * is, and is never linked again.
+ */
+export const UnlinkShellRequest = z.object({
+  idempotencyKey: IdempotencyKey,
+  generation: z.number().int().nonnegative(),
+});
+export type UnlinkShellRequest = z.infer<typeof UnlinkShellRequest>;
+
 /** What a command on a shell produced: the events it recorded, none if there was nothing to do. */
 export const ShellCommandResponse = z.object({
+  /** The shell the command was on; a restart's new shell. */
   terminalId: Id("term"),
   eventIds: z.array(z.number().int().positive()),
 });

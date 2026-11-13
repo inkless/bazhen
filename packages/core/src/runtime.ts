@@ -180,6 +180,8 @@ export interface RuntimeAdapter {
    * whose process has exited is `ProcessState`.
    */
   foreground(ref: RuntimeRef): Promise<Foreground>;
+  /** Drops a shell terminal's agent link from its tags, so a reconcile never links it again. */
+  unlink(ref: RuntimeRef): Promise<void>;
   /** Signals the terminal's process and its process group. */
   signal(ref: RuntimeRef, signal: Signal): Promise<void>;
   /**

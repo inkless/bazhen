@@ -7,7 +7,6 @@ import {
   ProcessState,
   StaleIncarnation,
   terminal,
-  TerminalUnconfirmed,
   type EnvironmentAdapter,
   type RuntimeRef,
 } from "@bazhen/core";
@@ -21,56 +20,23 @@ import {
   type RespawnAgentRequest,
   type SignalAgentRequest,
 } from "@bazhen/protocol";
+import {
+  forceable,
+  fromEnvironment as failed,
+  StaleGeneration,
+  StateConflict,
+} from "../commands.ts";
 import { launchOptions } from "./launch.ts";
 import type { AgentQueue } from "./queue.ts";
 import { runtimePayload, UnknownAgent, type AgentTerminal, type Store } from "../store/store.ts";
 
-/** A command named a generation the agent's terminal has moved past (foundation-design §10). */
-export class StaleGeneration extends Error {
-  constructor(agentId: string, current: number | null) {
-    super(`agent ${agentId} is at generation ${String(current)}`);
-  }
-}
-
-/** The agent's state does not allow the command, and never will. */
-export class AgentStateConflict extends Error {
-  constructor(agentId: string, state: string) {
-    super(`agent ${agentId} is ${state}`);
-  }
-}
-
-/**
- * The terminal's tmux server or pane is not the one recorded, so it can't be acted on safely.
- * Repeating the command won't help; restart recovery settles what happened to it.
- */
-export class TerminalReplaced extends Error {
-  constructor(agentId: string, cause: unknown) {
-    super(`agent ${agentId}'s terminal is not the one recorded; its server or pane has changed`, {
-      cause,
-    });
-  }
-}
-
-/**
- * The agent's terminal is gone from view, but the server it ran on may still run it, so close
- * can't call it ended; only a forced close records it closed (foundation-design §7.1).
- */
-export class ServerUnconfirmed extends Error {
-  constructor(agentId: string, cause: unknown) {
-    super(
-      `agent ${agentId}'s terminal is not on the tmux server, but the server it ran on may still ` +
-        "be running it; close it with force to record it closed anyway",
-      { cause },
-    );
-  }
-}
-
-/** The environment could not act just now; the command can be repeated. */
-export class EnvironmentUnavailable extends Error {
-  constructor(agentId: string, cause: unknown) {
-    super(`could not reach the environment running agent ${agentId}`, { cause });
-  }
-}
+export {
+  EnvironmentUnavailable,
+  ServerUnconfirmed,
+  StaleGeneration,
+  StateConflict as AgentStateConflict,
+  TerminalReplaced,
+} from "../commands.ts";
 
 /** A message's states before it reaches its agent or can't. */
 const IN_FLIGHT = ["queued", "offered", "emitted", "seen", "queued_in_codex"] as const;
@@ -247,8 +213,9 @@ export class Lifecycle {
       if (prior !== undefined) return prior;
       const found = this.store.agentTerminal({ agentId });
       if (found === undefined) throw new UnknownAgent(agentId);
-      if (!accepts(found.state)) throw new AgentStateConflict(agentId, found.state);
-      if (found.generation !== req.generation) throw new StaleGeneration(agentId, found.generation);
+      if (!accepts(found.state)) throw new StateConflict(`agent ${agentId}`, found.state);
+      if (found.generation !== req.generation)
+        throw new StaleGeneration(`agent ${agentId}`, found.generation);
       const last = await act(found);
       return this.store.transaction(() => {
         const response = { agentId, eventIds: last() };
@@ -274,23 +241,13 @@ const closable = (state: AgentState) =>
 const respawnable = (state: AgentState) => agentCommands(state).includes("respawn");
 const running = (state: AgentState) => agentCommands(state).includes("signal");
 
-/** A close failure force may record past: unconfirmed, or the environment out of reach. */
-export const forceable = (cause: unknown) =>
-  cause instanceof TerminalUnconfirmed ||
-  ![StaleIncarnation, NoTerminal, NotResumable, ProcessState].some((e) => cause instanceof e);
-
-/** An environment's failure as the command's: typed where the caller can act on it. */
-function fromEnvironment(agentId: string, cause: unknown): never {
-  if (cause instanceof StaleIncarnation) throw new TerminalReplaced(agentId, cause);
-  if (cause instanceof TerminalUnconfirmed) throw new ServerUnconfirmed(agentId, cause);
-  if (cause instanceof NoTerminal || cause instanceof NotResumable || cause instanceof ProcessState)
-    throw cause;
-  throw new EnvironmentUnavailable(agentId, cause);
-}
-
 function rejection(cause: unknown): EventPayload<"agent.respawn_rejected">["reason"] {
   if (cause instanceof NotResumable) return "not_resumable";
   if (cause instanceof NoTerminal) return "no_terminal";
   if (cause instanceof StaleIncarnation || cause instanceof ProcessState) return "terminal_changed";
   return "unavailable";
 }
+
+/** An environment's failure as a command on the agent's. */
+const fromEnvironment = (agentId: string, cause: unknown): never =>
+  failed(`agent ${agentId}`, cause);

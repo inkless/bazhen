@@ -48,6 +48,9 @@ const app = createApp({
   },
   signal: () => Promise.reject(new Error("not used by these tests")),
   openShell: async () => ({ terminalId: launched.terminalId, eventIds: [5, 6] }),
+  restartShell: () => Promise.reject(new Error("not used by these tests")),
+  renameShell: () => Promise.reject(new Error("not used by these tests")),
+  unlinkShell: () => Promise.reject(new Error("not used by these tests")),
   closeShell: async (terminalId, req) => {
     if (req.confirmBusy === true) throw new UnknownShell(terminalId);
     throw new ShellBusy(terminalId, "nvim");

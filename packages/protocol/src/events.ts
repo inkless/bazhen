@@ -121,6 +121,8 @@ export const EVENTS = {
       linkedAgentId: Id("agent").nullable(),
       /** The theme it is opened for, when one was named. */
       theme: TuiTheme.optional(),
+      /** The lost shell it was opened to restart. */
+      restartOf: Id("term").optional(),
     }),
   },
   "terminal.running": { entity: "terminal", payload: z.object({ runtimeRef: RuntimeRefPayload }) },
@@ -135,9 +137,16 @@ export const EVENTS = {
   "terminal.closing": { entity: "terminal", payload: z.object({}) },
   "terminal.closed": {
     entity: "terminal",
-    /** `exited`: its shell ended, by `exit` or Ctrl+D, which closes it at once. */
-    payload: z.object({ reason: z.enum(["user", "exited"]) }),
+    /**
+     * `exited`: its shell ended, by `exit` or Ctrl+D, which closes it at once. `agent_closed`: the
+     * agent it was linked to closed. `restarted`: a lost shell a new one replaced.
+     */
+    payload: z.object({ reason: z.enum(["user", "exited", "agent_closed", "restarted"]) }),
   },
+  /** A linked shell became standalone; its agent's close no longer takes it. */
+  "terminal.unlinked": { entity: "terminal", payload: z.object({}) },
+  /** A shell's name, as the user gave it, or null when taken away. */
+  "terminal.renamed": { entity: "terminal", payload: z.object({ name: z.string().nullable() }) },
   /** A view opened a terminal's stream (foundation-design §4.2). */
   "attachment.started": {
     entity: "attachment",

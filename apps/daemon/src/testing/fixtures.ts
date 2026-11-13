@@ -76,6 +76,7 @@ export function fakeEnvironment(
     shells: async () => [],
     openShell: async ({ terminalId }) => ({ terminalId, runtime: "tmux", locator: {} }),
     shellBusy: async () => null,
+    unlinkShell: async () => {},
     onExit: () => () => {},
   };
 }

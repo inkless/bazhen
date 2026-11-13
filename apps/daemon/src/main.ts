@@ -179,6 +179,7 @@ const shells = new ShellLifecycle({
   home: inputs.home,
 });
 await reconcileShells(store, environment, shells);
+await shells.settleOrphans();
 // A title that changed while the daemon was down, or a move it was waiting on, is read again;
 // until it has been, those agents' mail waits, so none goes to a thread the TUI has left.
 codexThreads.followAll();
@@ -186,7 +187,12 @@ codexThreads.followAll();
 codex.keepConnected();
 const lifecycle = new Lifecycle(store, environment, queue);
 lifecycle.watch();
-const serverWatch = new ServerWatch({ store, environment, queue });
+const serverWatch = new ServerWatch({
+  store,
+  environment,
+  queue,
+  alsoEachTick: () => shells.settleOrphans(),
+});
 serverWatch.start();
 shells.watch();
 const allowedHosts = [`${HOSTNAME}:${port}`, `localhost:${port}`];
@@ -220,11 +226,14 @@ const commands = {
   reply: (attentionId, req) => inbox.reply(attentionId, req),
   dismiss: (attentionId, req) => inbox.dismiss(attentionId, req),
   resend: (attentionId, req) => inbox.resend(attentionId, req),
-  close: (agentId, req) => lifecycle.close(agentId, req),
+  close: (agentId, req) => shells.closeAgent(agentId, req, (r) => lifecycle.close(agentId, r)),
   respawn: (agentId, req) => lifecycle.respawn(agentId, req),
   signal: (agentId, req) => lifecycle.signal(agentId, req),
   openShell: (req) => shells.open(req),
   closeShell: (terminalId, req) => shells.close(terminalId, req),
+  restartShell: (terminalId, req) => shells.restart(terminalId, req),
+  renameShell: (terminalId, req) => shells.rename(terminalId, req),
+  unlinkShell: (terminalId, req) => shells.unlink(terminalId, req),
 } satisfies Omit<AppDeps, "allow">;
 const app = createApp({ ...commands, allow });
 

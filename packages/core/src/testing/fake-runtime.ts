@@ -207,6 +207,11 @@ export class FakeRuntime implements RuntimeAdapter {
     return { command: t.pane.child ?? own, own: t.pane.child === undefined };
   }
 
+  async unlink(ref: RuntimeRef): Promise<void> {
+    const t = this.paneOf(ref);
+    if (t.spec.tags.kind === "shell") t.spec = { ...t.spec, tags: { kind: "shell" } };
+  }
+
   /** Reports every terminal already dead on the next turn, as a poll would, then each exit. */
   onExit(cb: ExitListener): () => void {
     this.listeners.add(cb);

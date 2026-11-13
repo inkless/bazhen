@@ -114,6 +114,29 @@ describe("reconciling shells after a restart", () => {
     expect(await runtime.inventory()).toEqual([]);
   });
 
+  it("drops the agent tag from a kept shell's session that still carries it", async () => {
+    const { store, runtime, environment, restart, stateOf } = setup();
+    const terminalId = newId("term");
+    const linkedAgentId = newId("agent");
+    store.append({
+      type: "terminal.opened",
+      entityId: terminalId,
+      actor: "user",
+      payload: { environmentId: environment.id, cwd: "/", linkedAgentId: null },
+    });
+    const size = { cols: 80, rows: 24 };
+    const ref = await environment.openShell({ terminalId, cwd: "/", size, linkedAgentId });
+    store.append({
+      type: "terminal.running",
+      entityId: terminalId,
+      actor: "system",
+      payload: { runtimeRef: { runtime: ref.runtime, locator: ref.locator } },
+    });
+    await restart();
+    const tags = (await runtime.inventory()).find((e) => e.ref.terminalId === terminalId)?.tags;
+    expect([stateOf(terminalId), tags]).toEqual(["running", { kind: "shell" }]);
+  });
+
   it("concludes nothing while the runtime can't be read", async () => {
     const { runtime, restart, open, stateOf } = setup();
     const terminalId = await open();
