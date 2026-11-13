@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
 import { TmuxServer } from "@bazhen/host-guard";
 import { readKeyLog } from "../support/key-log.ts";
-import { onAlternateScreen, openSecondView, screen, viewportTop } from "./page.ts";
+import { onAlternateScreen, openSecondView, screen, viewportTop, status } from "./page.ts";
 
 // The page's terminal against the real daemon and tmux. Each test launches an agent from the page,
 // then runs a key probe in its terminal in place of the agent: the probe logs exactly the bytes
@@ -98,7 +98,7 @@ async function reopen(page: Page): Promise<void> {
 
 async function drive(page: Page): Promise<void> {
   await page.getByRole("region", { name: "terminal" }).locator(".xterm-screen").click();
-  await expect(page.getByText("Driving")).toBeVisible();
+  await expect(status(page)).toHaveText("Driving");
 }
 
 /**
@@ -112,6 +112,37 @@ function reattachDelay(sockets: Probe["sockets"]): number {
 }
 
 const hex = (text: string) => Buffer.from(text, "latin1").toString("hex");
+
+/**
+ * Passes every terminal stream the page opens through the test. `silenceNewest` cuts the latest
+ * both ways, as a laptop's socket is after it sleeps: open as far as the page can tell, reaching
+ * nothing.
+ */
+async function routeStreams(page: Page) {
+  const streams: { silent: boolean }[] = [];
+  await page.routeWebSocket(/\/v1\/terminals\//, (ws) => {
+    const stream = { silent: false };
+    streams.push(stream);
+    const server = ws.connectToServer();
+    ws.onMessage((message) => stream.silent || server.send(message));
+    server.onMessage((message) => stream.silent || ws.send(message));
+    // A dead socket's close never reaches the daemon either: it keeps the attachment, whose
+    // pings the test's own connection goes on answering.
+    ws.onClose(() => stream.silent || server.close());
+    server.onClose(() => ws.close());
+  });
+  return {
+    count: () => streams.length,
+    silenceNewest: () => {
+      const newest = streams.at(-1);
+      if (newest === undefined) throw new Error("the page opened no terminal stream");
+      newest.silent = true;
+    },
+  };
+}
+
+/** What a view that drove shows once another view, on the device every spec pairs as, takes the lease. */
+const TAKEN_OVER = "Viewing — e2e is driving";
 
 test("sends ESC CR for Shift+Enter, and a plain CR for Enter", async ({ page }) => {
   const program = await launchProbe(page);
@@ -188,7 +219,11 @@ test("moves the lease to the view clicked on another device, and its first key a
   await drive(page);
   const phone = await openSecondView(browser, "key-probe ready");
   await drive(phone);
-  await expect(page.getByText("Viewing — click to type")).toBeVisible();
+  await expect(status(page)).toContainText(TAKEN_OVER);
+  // Read out to a screen reader too, once it has held for a second.
+  await expect(page.locator('section[aria-label="terminal"] [aria-live="polite"]')).toContainText(
+    TAKEN_OVER,
+  );
   const since = Date.now();
   await phone.keyboard.type("x");
   await expect.poll(() => program.received(since)).toContain(hex("x"));
@@ -203,13 +238,13 @@ test("leaves the lease where it is when a view that isn't driving loses focus", 
   await drive(page);
   const phone = await openSecondView(browser, "key-probe ready");
   await drive(phone);
-  await expect(page.getByText("Viewing — click to type")).toBeVisible();
+  await expect(status(page)).toContainText(TAKEN_OVER);
   // xterm.js reports losing focus, as tmux asked it to, and the report must not take the lease.
   await page.getByRole("textbox", { name: "Terminal input" }).blur();
   const since = Date.now();
   await phone.keyboard.type("k");
   await expect.poll(() => program.received(since)).toContain(hex("k"));
-  await expect(phone.getByText("Driving")).toBeVisible();
+  await expect(status(phone)).toHaveText("Driving");
   await phone.context().close();
 });
 
@@ -218,8 +253,8 @@ test("takes the lease when its window gains focus", async ({ page, browser }) =>
   await drive(page);
   const phone = await openSecondView(browser, "key-probe ready");
   await phone.evaluate('window.dispatchEvent(new FocusEvent("focus"))');
-  await expect(phone.getByText("Driving")).toBeVisible();
-  await expect(page.getByText("Viewing — click to type")).toBeVisible();
+  await expect(status(phone)).toHaveText("Driving");
+  await expect(status(page)).toContainText(TAKEN_OVER);
   await phone.context().close();
 });
 
@@ -243,14 +278,14 @@ test("scrolls a watching phone on a swipe without taking the lease, and takes it
   const since = Date.now();
   await page.keyboard.type("w");
   await expect.poll(() => program.received(since)).toContain(hex("w"));
-  await expect(page.getByText("Driving")).toBeVisible();
+  await expect(status(page)).toHaveText("Driving");
   await phone.locator(".xterm-screen").tap();
-  await expect(phone.getByText("Driving")).toBeVisible();
+  await expect(status(phone)).toHaveText("Driving");
   // Tapped again once the laptop has taken over: the phone keeps focus, so no focus event fires.
   await page.locator(".xterm-screen").click();
-  await expect(phone.getByText("Viewing — click to type")).toBeVisible();
+  await expect(status(phone)).toContainText(TAKEN_OVER);
   await phone.locator(".xterm-screen").tap();
-  await expect(phone.getByText("Driving")).toBeVisible();
+  await expect(status(phone)).toHaveText("Driving");
   await phone.context().close();
 });
 
@@ -260,14 +295,61 @@ test("reattaches after the daemon's tmux client is lost, at once, and drives aga
   const program = await launchProbe(page);
   await drive(page);
   tmux("detach-client", "-s", program.session);
-  await expect(page.getByText("Reconnecting…")).toBeVisible();
+  await expect(status(page)).toHaveText("Reconnecting…");
   // The page still has focus, which no event will announce again: it claims the lease itself.
-  await expect(page.getByText("Driving")).toBeVisible({ timeout: 10_000 });
+  await expect(status(page)).toHaveText("Driving", { timeout: 10_000 });
   // One backoff step, 250 ms, not two: the lost socket is retried once.
   expect(reattachDelay(program.sockets)).toBeLessThan(450);
   const since = Date.now();
   await page.keyboard.type("y");
   await expect.poll(() => program.received(since)).toContain(hex("y"));
+});
+
+test("gives up a socket that went silent, drops what was typed on it, and drives again", async ({
+  page,
+}) => {
+  const streams = await routeStreams(page);
+  await page.clock.install();
+  const program = await launchProbe(page);
+  await drive(page);
+  const opened = streams.count();
+  streams.silenceNewest();
+  const before = Date.now();
+  await page.keyboard.type("z");
+  // Two heartbeats: a ping, then a beat that finds it unanswered, which the view warns of.
+  await page.clock.runFor(15_000);
+  await expect(status(page)).toHaveText("Checking the connection…");
+  // The second miss gives the socket up.
+  await page.clock.runFor(20_000);
+  await expect.poll(() => streams.count(), { timeout: 10_000 }).toBeGreaterThan(opened);
+  await expect(status(page)).toHaveText("Driving", { timeout: 10_000 });
+  await page.keyboard.type("y");
+  await expect.poll(() => program.received(before)).toContain(hex("y"));
+  // `z` went only into the silenced stream: this holds as long as nothing types it again on the new one.
+  expect(program.received(before)).not.toContain(hex("z"));
+});
+
+test("comes back from a silent socket without taking the lease from a view that took it", async ({
+  page,
+  browser,
+}) => {
+  const streams = await routeStreams(page);
+  await page.clock.install();
+  const program = await launchProbe(page);
+  await drive(page);
+  const opened = streams.count();
+  streams.silenceNewest();
+  const phone = await openSecondView(browser, "key-probe ready");
+  await drive(phone);
+  await page.clock.runFor(35_000);
+  await expect.poll(() => streams.count(), { timeout: 10_000 }).toBeGreaterThan(opened);
+  // Back, focused, and told another view drives: it waits for the user rather than taking over.
+  await expect(status(page)).toContainText(TAKEN_OVER, { timeout: 10_000 });
+  const since = Date.now();
+  await phone.keyboard.type("p");
+  await expect.poll(() => program.received(since)).toContain(hex("p"));
+  await expect(status(phone)).toHaveText("Driving");
+  await phone.context().close();
 });
 
 test("answers none of tmux's terminal queries itself", async ({ page }) => {

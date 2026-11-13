@@ -63,6 +63,11 @@ export const StreamServerFrame = z.discriminatedUnion("type", [
     epoch: z.number().int().nonnegative(),
     /** Whether another view drives; absent from a daemon before 1.30. */
     driven: z.boolean().optional(),
+    /**
+     * The name of the paired device another view drives from; absent when it is on none, or
+     * from a daemon before 1.32.
+     */
+    driverDevice: z.string().optional(),
   }),
   z.object({ type: z.literal("pong") }),
   /**

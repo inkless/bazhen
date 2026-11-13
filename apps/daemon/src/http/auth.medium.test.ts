@@ -250,11 +250,16 @@ async function serving(always = true) {
   const store = Store.open(tempDb());
   const devices = new DeviceAuth(store, { log: () => {} });
   const wss = new WebSocketServer({ noServer: true });
+  /** The device each upgrade the route took came from, by name. */
+  const from: (string | null)[] = [];
   const served = await serveUpgrades(
     [
       {
         path: /^\/echo$/,
-        upgrade: (req, socket, head) => wss.handleUpgrade(req, socket, head, (ws) => ws.send("hi")),
+        upgrade: (req, socket, head, _url, _match, device) => {
+          from.push(device?.name ?? null);
+          wss.handleUpgrade(req, socket, head, (ws) => ws.send("hi"));
+        },
       },
     ],
     { devices, always },
@@ -266,6 +271,7 @@ async function serving(always = true) {
     pageOrigin: `http://${served.host}`,
     cookie: `bazhen_device=${token}`,
     revoke: () => devices.revoke(deviceId),
+    from,
   };
 }
 
@@ -298,6 +304,30 @@ describe("device auth on WebSocket upgrades", () => {
       headers: { cookie, "x-forwarded-for": "192.168.1.30" },
     });
     expect(await upgradeOutcome(forwarded)).toBe(401);
+  });
+
+  it("tells the route which device an upgrade came from, on loopback too, and none for a browser that never paired", async () => {
+    const { url, pageOrigin, cookie, from } = await serving(false);
+    await upgradeOutcome(new WebSocket(url, { origin: pageOrigin, headers: { cookie } }));
+    await upgradeOutcome(new WebSocket(url, { origin: pageOrigin }));
+    expect(from).toEqual(["Phone", null]);
+  });
+
+  it("names no device for a revoked one's cookie on loopback, and lets it through unpaired", async () => {
+    const { url, pageOrigin, cookie, from, revoke } = await serving(false);
+    const upgrade = () =>
+      upgradeOutcome(new WebSocket(url, { origin: pageOrigin, headers: { cookie } }));
+    await upgrade();
+    revoke();
+    expect([await upgrade(), from]).toEqual(["open", ["Phone", null]]);
+  });
+
+  it("closes a device's sockets on loopback too when it is revoked, so it is named no longer", async () => {
+    const { url, pageOrigin, cookie, revoke } = await serving(false);
+    const ws = new WebSocket(url, { origin: pageOrigin, headers: { cookie } });
+    await new Promise((resolve) => ws.once("message", resolve));
+    revoke();
+    await expect.poll(() => ws.readyState, { timeout: 1_000 }).toBe(WebSocket.CLOSED);
   });
 
   it("closes a revoked device's open sockets", async () => {

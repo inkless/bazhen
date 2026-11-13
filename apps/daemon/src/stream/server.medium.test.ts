@@ -4,7 +4,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { newId } from "@bazhen/core";
 import { EPOCH_FRAMES_SINCE, PROTOCOL_VERSION } from "@bazhen/protocol";
-import { serveUpgrades } from "../testing/fixtures.ts";
+import { DeviceAuth } from "../auth/devices.ts";
+import { Store } from "../store/store.ts";
+import { serveUpgrades, tempDb } from "../testing/fixtures.ts";
 import type { Attachment, LeaveReason, Viewer } from "./hub.ts";
 import { streamRoute, type StreamDeps } from "./server.ts";
 
@@ -128,6 +130,48 @@ describe("stream endpoint", () => {
     // Answered with a pong if the hello was taken.
     ws.send(JSON.stringify({ type: "ping" }));
     expect([await refusal, joins()]).toEqual(['{"type":"error","message":"unreadable frame"}', 0]);
+  });
+
+  it("tells the hub which paired device a view is on, and none for one that never paired", async () => {
+    const store = Store.open(tempDb());
+    try {
+      const devices = new DeviceAuth(store, { log: () => {} });
+      const viewers: Viewer[] = [];
+      const hub: StreamDeps["hub"] = {
+        join: (_ref, viewer) => {
+          viewers.push(viewer);
+          return new Promise<never>(() => {});
+        },
+      };
+      const served = await serveUpgrades(
+        [
+          streamRoute({
+            hub,
+            runtimeRef: (id) => ({ terminalId, runtime: "fake", locator: { id } }),
+          }),
+        ],
+        { devices, always: false },
+      );
+      server = served.server;
+      const { token } = devices.pair("Phone", false);
+      const view = async (headers: Record<string, string>) => {
+        const ws = new WebSocket(`ws://${served.host}/v1/terminals/${terminalId}/stream`, {
+          origin: `http://${served.host}`,
+          headers,
+        });
+        await opened(ws);
+        ws.send(JSON.stringify(hello));
+        return ws;
+      };
+      const paired = await view({ cookie: `bazhen_device=${token}` });
+      const unpaired = await view({});
+      await expect.poll(() => viewers.length).toBe(2);
+      expect(viewers.map((v) => v.deviceName)).toEqual(["Phone", undefined]);
+      paired.close();
+      unpaired.close();
+    } finally {
+      store.close();
+    }
   });
 
   it("ends a view that stops answering pings as timed out", async () => {

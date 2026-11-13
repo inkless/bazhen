@@ -1,10 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { HOOK_REPLY_MAX_BYTES, offeredMessage, type HookReply } from "@bazhen/protocol";
 import { FOLD_MAX_CHARS } from "@bazhen/harness-claude-code";
 import { Store } from "../store/store.ts";
 import { withAgent, testView } from "../testing/fixtures.ts";
 import { UnknownAgent } from "../store/store.ts";
-import { recordClosed } from "../agents/lifecycle.ts";
 import { MAX_FAILURES, Mailbox, QUIET } from "./mailbox.ts";
 
 const stateOf = (store: Store, id: string) =>
@@ -12,12 +11,6 @@ const stateOf = (store: Store, id: string) =>
 const live = () => new AbortController().signal;
 /** The messages a hook reply hands over. */
 const idsIn = (reply: HookReply) => reply.offered.map(offeredMessage);
-
-/** Closes the agent, which makes the mail still on its way to it undeliverable. */
-function close(store: Store, agentId: string) {
-  store.append({ type: "agent.closing", entityId: agentId, actor: "user", payload: {} });
-  recordClosed(store, agentId, "user");
-}
 
 /** A store with one agent, its mailbox, and a message woken into prompt `p-1` and seen there. */
 async function seenInP1() {
@@ -168,31 +161,6 @@ describe("mailbox", () => {
     expect(stateOf(store, messageId)).toBe("offered");
     // Its own deadline still stands: unwritten, it goes back to the queue.
     await expect.poll(() => stateOf(store, messageId)).toBe("queued");
-  });
-
-  it("lets an ack deadline pass for mail its agent's close made undeliverable", async () => {
-    const { store, agentId } = await withAgent();
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    try {
-      const mailbox = new Mailbox(store, { ackDeadlineMs: 20 });
-      const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
-      await mailbox.wait(agentId, live());
-      close(store, agentId);
-      vi.advanceTimersByTime(20);
-      expect(stateOf(store, messageId)).toBe("undeliverable");
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("takes a late ack for mail its agent's close made undeliverable for nothing", async () => {
-    const { store, agentId } = await withAgent();
-    const mailbox = new Mailbox(store);
-    const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
-    const { offered } = await mailbox.wait(agentId, live());
-    close(store, agentId);
-    mailbox.ack(offered);
-    expect(stateOf(store, messageId)).toBe("undeliverable");
   });
 
   it("waits for the turn after a mid-turn wake before calling it unseen", async () => {

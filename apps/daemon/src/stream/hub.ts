@@ -32,6 +32,8 @@ export interface Viewer {
    * protocol 1.30, is held to the epoch of its own grant.
    */
   readonly declaresEpoch: boolean;
+  /** The name of the paired device the view is on, if it is on one. */
+  readonly deviceName?: string | undefined;
   send(bytes: Uint8Array): void;
   notify(frame: StreamServerFrame): void;
   /** Bytes sent to the view that have not reached it yet. */
@@ -436,5 +438,13 @@ function dismiss(entry: Entry, frame: StreamServerFrame): void {
 
 function leaseFrame(watched: Watched, id: AttachmentId): StreamServerFrame {
   const { holder, epoch } = watched.lease;
-  return { type: "lease", driver: holder === id, driven: holder !== null && holder !== id, epoch };
+  const driven = holder !== null && holder !== id;
+  const driverDevice = driven ? watched.viewers.get(holder)?.viewer.deviceName : undefined;
+  return {
+    type: "lease",
+    driver: holder === id,
+    driven,
+    epoch,
+    ...(driverDevice === undefined ? {} : { driverDevice }),
+  };
 }

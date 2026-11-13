@@ -1,4 +1,10 @@
-import { expect, type Browser, type BrowserContextOptions, type Page } from "@playwright/test";
+import {
+  expect,
+  type Browser,
+  type BrowserContextOptions,
+  type Locator,
+  type Page,
+} from "@playwright/test";
 import { giveTranscript } from "../support/transcript.ts";
 
 type Hook = "screen" | "viewportTop" | "atBottom" | "alternate" | "background" | "foregrounds";
@@ -113,3 +119,10 @@ export async function givePageAgentTranscript(page: Page, agentId: string): Prom
   }, agentId);
   await giveTranscript(String(process.env["BZ_E2E_HOME"]), protocolVersion, agentId, session);
 }
+
+/**
+ * A terminal view's status as the page shows it. A screen reader hears it from a separate live
+ * region, once it has held for a second.
+ */
+export const status = (within: Page | Locator) =>
+  within.locator('section[aria-label="terminal"] > p[aria-hidden="true"]');

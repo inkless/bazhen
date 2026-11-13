@@ -40,12 +40,17 @@ export function streamRoute(deps: StreamDeps): UpgradeRoute {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
   return {
     path: /^\/v1\/terminals\/([^/]+)\/stream$/,
-    upgrade: (req, socket, head, _url, [, terminalId = ""]) =>
-      wss.handleUpgrade(req, socket, head, (ws) => serve(deps, ws, terminalId)),
+    upgrade: (req, socket, head, _url, [, terminalId = ""], device) =>
+      wss.handleUpgrade(req, socket, head, (ws) => serve(deps, ws, terminalId, device?.name)),
   };
 }
 
-function serve(deps: StreamDeps, ws: WebSocket, terminalId: string): void {
+function serve(
+  deps: StreamDeps,
+  ws: WebSocket,
+  terminalId: string,
+  deviceName: string | undefined,
+): void {
   const notify = (frame: StreamServerFrame) => ws.send(JSON.stringify(frame));
   const refuse = (message: string) => {
     notify({ type: "error", message });
@@ -87,6 +92,7 @@ function serve(deps: StreamDeps, ws: WebSocket, terminalId: string): void {
       if (ref === undefined) return refuse(`no running terminal ${terminalId}`);
       const viewer = {
         mode: f.mode,
+        deviceName,
         declaresEpoch: isAtLeast(f.protocolVersion, EPOCH_FRAMES_SINCE),
         send: (out: Uint8Array) => ws.send(out, { binary: true }),
         notify,

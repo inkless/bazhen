@@ -5,6 +5,7 @@ import {
   kill,
   openSecondView,
   screen,
+  status,
   terminalBackground,
 } from "./page.ts";
 
@@ -15,7 +16,7 @@ test("launches Claude Code from the page and types into its terminal", async ({ 
   const terminal = page.getByRole("region", { name: "terminal" });
   await expect.poll(() => screen(page), { timeout: 20_000 }).toContain("Claude Code");
   await terminal.locator(".xterm-screen").click();
-  await expect(terminal.getByText("Driving")).toBeVisible();
+  await expect(status(page)).toHaveText("Driving");
   await page.keyboard.type("typed in the browser");
   await expect.poll(() => screen(page)).toContain("typed in the browser");
 });
