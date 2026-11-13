@@ -27,12 +27,15 @@ describe("readConfigFile", () => {
         "[agents.env]",
         'deny = ["SECRET_*"]',
         'passthrough = ["TERM"]',
+        "[web]",
+        'external_origins = ["https://bazhen.example.com"]',
       ].join("\n"),
     );
     expect(readConfigFile(file)).toEqual({
       daemon: { port: 8100 },
       bank: { path: "/bank" },
       agents: { shell: "login", env: { deny: ["SECRET_*"], passthrough: ["TERM"] } },
+      web: { external_origins: ["https://bazhen.example.com"] },
     });
   });
 
@@ -47,6 +50,21 @@ describe("readConfigFile", () => {
     ["a relative bank", '[bank]\npath = "bank"', "bank.path:"],
     ["a value of the wrong kind", '[agents.env]\ndeny = "SECRET_*"', "agents.env.deny:"],
     ["a rule that names no variable", '[agents.env]\ndeny = ["*"]', "agents.env.deny.0:"],
+    [
+      "an origin with a path",
+      '[web]\nexternal_origins = ["https://b.example.com/x"]',
+      "web.external_origins.0:",
+    ],
+    [
+      "an origin without a scheme",
+      '[web]\nexternal_origins = ["b.example.com"]',
+      "web.external_origins.0:",
+    ],
+    [
+      "an origin that isn't web",
+      '[web]\nexternal_origins = ["ftp://b.example.com"]',
+      "web.external_origins.0:",
+    ],
     ["broken TOML", "[daemon\nport = 1", "config.toml:"],
   ])("refuses %s, naming the file and the key", (_what, text, message) => {
     const file = write(text);

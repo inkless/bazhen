@@ -19,7 +19,7 @@ client. Agents, tasks, and orchestration come later.
 | Command                          | Does                                                                                                                |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | `pnpm install --frozen-lockfile` | Install exactly what the lockfile records, and the git hooks (husky)                                                |
-| `pnpm dev`                       | Start the daemon (`http://127.0.0.1:7900`) and the web client (`http://127.0.0.1:5173`); no vite keyboard shortcuts |
+| `pnpm dev`                       | Start the daemon (`http://127.0.0.1:7900`) and the web client (`http://127.0.0.1:7901`); no vite keyboard shortcuts |
 | `pnpm bazhen <verb>`             | The CLI: `start`, `stop`, `status`, `doctor`                                                                        |
 | `pnpm check`                     | Standards check, lint, format check, type-check, small and medium tests                                             |
 | `pnpm test`                      | Small tests                                                                                                         |
@@ -61,6 +61,11 @@ shell = "direct" # or "login" (BAZHEN_AGENTS_SHELL)
 [agents.env]
 deny = ["MY_SESSION_*"] # never give agents these: names, or prefixes ending in *
 passthrough = ["ITERM_PROFILE"] # give agents these, though Bazhen would strip them
+
+[web]
+external_origins = [
+  "https://bazhen.example.com",
+] # or BAZHEN_EXTERNAL_ORIGINS, comma-separated; see below
 ```
 
 Agents get the environment a new terminal tab would, minus Bazhen's, tmux's, harnesses' session
@@ -74,6 +79,20 @@ must be an absolute path), so your rc files run again at every launch, like a ne
   stops the agent from launching. Every agent has `BAZHEN_AGENT_ID` set before your rc runs, so
   guard such lines on it, for example `[ -z "$TMUX" ] && [ -z "$BAZHEN_AGENT_ID" ] && exec tmux`
   (fish: `set -q BAZHEN_AGENT_ID`).
+
+### Reaching Bazhen from another device
+
+Bazhen listens on `127.0.0.1` only and never terminates TLS. To open it from a phone, bring your
+own route to that port, such as a Cloudflare Tunnel or a reverse proxy on this machine. Point it
+at the web dev server, `http://127.0.0.1:7901`, while you run `pnpm dev`, and list the address it
+presents, exactly as the browser shows it (scheme, host and any port), in
+`BAZHEN_EXTERNAL_ORIGINS`: `BAZHEN_EXTERNAL_ORIGINS=https://bazhen.example.com pnpm dev`. The
+daemon and the dev server then accept that address, and refuse every other non-loopback one. The
+dev server reads only the variable; `web.external_origins` sets it for the daemon alone.
+
+Device pairing is not built yet, so anyone who can reach that address can type into your agents'
+terminals, and so run any command as you. Keep the route on a network only you use, or behind
+the route's own login, and never on the public internet.
 
 ## The inbox
 

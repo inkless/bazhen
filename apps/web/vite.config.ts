@@ -5,6 +5,16 @@ import { defineConfig, type Plugin } from "vite";
 const daemon = `http://127.0.0.1:${process.env.BAZHEN_PORT ?? 7900}`;
 
 /**
+ * The hosts of the external origins the daemon admits too (BAZHEN_EXTERNAL_ORIGINS, which
+ * overrides web.external_origins), so the dev server answers them and no other host. The daemon
+ * checks each origin and stops on a bad one.
+ */
+const externalHosts = (process.env.BAZHEN_EXTERNAL_ORIGINS ?? "")
+  .split(",")
+  .filter((origin) => URL.canParse(origin))
+  .map((origin) => new URL(origin).hostname);
+
+/**
  * Vite's CLI closes the dev server on SIGTERM only, so Ctrl-C killed it and `pnpm dev` reported
  * it failed. This closes it the same way on SIGINT. A restarted server adds its own handler, so
  * each one removes its handler when it closes.
@@ -29,8 +39,9 @@ export default defineConfig({
   plugins: [react(), optimizeLocales.vite({ locales: ["en-US"] }), closeOnSigint()],
   server: {
     host: "127.0.0.1",
-    port: Number(process.env.BAZHEN_WEB_PORT ?? 5173),
+    port: Number(process.env.BAZHEN_WEB_PORT ?? 7901),
     strictPort: true,
+    allowedHosts: externalHosts,
     proxy: { "/v1": { target: daemon, changeOrigin: true, ws: true } },
   },
 });

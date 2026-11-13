@@ -14,6 +14,7 @@ describe("resolveConfig", () => {
       bank: undefined,
       loginShell: undefined,
       envRules: { deny: [], passthrough: [] },
+      externalOrigins: [],
     });
   });
 
@@ -23,7 +24,25 @@ describe("resolveConfig", () => {
       bank: "/bank",
       loginShell: undefined,
       envRules: { deny: ["SECRET_*"], passthrough: ["TERM"] },
+      externalOrigins: [],
     });
+  });
+
+  it("lists the origins the user's own route to the daemon presents", () => {
+    const web = { web: { external_origins: ["https://bazhen.example.com"] } };
+    expect(resolveConfig(web, {}).externalOrigins).toEqual(["https://bazhen.example.com"]);
+  });
+
+  it("takes external origins from the environment over the file, and refuses one that isn't", () => {
+    const web = { web: { external_origins: ["https://bazhen.example.com"] } };
+    const env = { BAZHEN_EXTERNAL_ORIGINS: "https://a.example.com, http://b.example.com:8080" };
+    expect(resolveConfig(web, env).externalOrigins).toEqual([
+      "https://a.example.com",
+      "http://b.example.com:8080",
+    ]);
+    expect(() => resolveConfig({}, { BAZHEN_EXTERNAL_ORIGINS: "a.example.com" })).toThrow(
+      InvalidConfig,
+    );
   });
 
   it("takes the environment over the file", () => {

@@ -8,6 +8,12 @@ import { resolvePaths, type PathInputs } from "./paths.ts";
 const Port = z.int().min(1).max(65_535);
 const Shell = z.enum(["direct", "login"]);
 const EnvRule = z.string().regex(ENV_RULE, "must be a variable name, or a prefix ending in *");
+/** A web origin exactly as a browser sends it: scheme, host and any port, and nothing more. */
+const Origin = z.string().refine((value) => {
+  if (!URL.canParse(value)) return false;
+  const url = new URL(value);
+  return (url.protocol === "https:" || url.protocol === "http:") && url.origin === value;
+}, "must be an origin, such as https://bazhen.example.com");
 
 /** The keys `config.toml` may hold. Unknown keys are refused, so a typo never means "default". */
 const ConfigFile = z.strictObject({
@@ -24,6 +30,7 @@ const ConfigFile = z.strictObject({
         .optional(),
     })
     .optional(),
+  web: z.strictObject({ external_origins: z.array(Origin).optional() }).optional(),
 });
 type ConfigFile = z.infer<typeof ConfigFile>;
 
@@ -34,6 +41,11 @@ export interface Config {
   readonly envRules: Required<EnvRules>;
   /** With `agents.shell = "login"`, the shell every agent starts through; otherwise none. */
   readonly loginShell: string | undefined;
+  /**
+   * Origins the user's own route to the daemon presents, such as a tunnel's domain, which join
+   * the Host and Origin allowlists (foundation-design §9.2).
+   */
+  readonly externalOrigins: readonly string[];
 }
 
 export class InvalidConfig extends Error {
@@ -82,6 +94,9 @@ const fromEnv = <T>(
   return parsed.data;
 };
 
+/** A comma-separated list, as an environment variable holds one. */
+const list = (value: string) => value.split(",").map((item) => item.trim());
+
 /** Each setting from the environment, then the file, then the default. CLI flags reach it as the
  * environment (`bazhen --port` sets BAZHEN_PORT). */
 export function resolveConfig(
@@ -102,6 +117,10 @@ export function resolveConfig(
       deny: file.agents?.env?.deny ?? [],
       passthrough: file.agents?.env?.passthrough ?? [],
     },
+    externalOrigins:
+      fromEnv(env, "BAZHEN_EXTERNAL_ORIGINS", z.string().transform(list).pipe(z.array(Origin))) ??
+      file.web?.external_origins ??
+      [],
   };
 }
 

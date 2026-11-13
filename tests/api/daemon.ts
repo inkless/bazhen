@@ -137,6 +137,8 @@ export interface DaemonOptions {
   readonly modelUrl?: string;
   /** The fake Responses API's base URL, for Codex. */
   readonly responsesUrl?: string;
+  /** More of the daemon's environment, such as a setting's variable. */
+  readonly env?: Record<string, string>;
 }
 
 /** A process's environment, from /proc (Linux only). */
@@ -170,6 +172,7 @@ export class Daemon {
       ...homeEnv(home),
       PATH: `${bin}:${process.env["PATH"] ?? "/usr/bin:/bin"}`,
       ...agentHomes(home, this.work, { anthropic: opts.modelUrl, responses: opts.responsesUrl }),
+      ...opts.env,
     };
   }
 
@@ -300,7 +303,7 @@ export class Daemon {
   /** Opens the event stream as a browser would, resuming after `cursor`. */
   async events(
     cursor: { epoch: string; eventId: number },
-    opts: { origin?: string; version?: string; path?: string } = {},
+    opts: { origin?: string; host?: string; version?: string; path?: string } = {},
   ): Promise<EventClient> {
     const query = new URLSearchParams({
       v: opts.version ?? PROTOCOL_VERSION,
@@ -310,7 +313,10 @@ export class Daemon {
     const ws = new WebSocket(
       `${this.url.replace("http", "ws")}${opts.path ?? "/v1/events"}?${query}`,
       {
-        headers: { origin: opts.origin ?? this.url },
+        headers: {
+          origin: opts.origin ?? this.url,
+          ...(opts.host === undefined ? {} : { host: opts.host }),
+        },
       },
     );
     const client = new EventClient(ws);
