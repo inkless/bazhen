@@ -79,6 +79,24 @@ describe("a tmux server that is gone", () => {
 });
 
 describe("a live tmux server whose socket was deleted", () => {
+  it("keeps its terminals from being counted closed, until the server itself is gone", async () => {
+    const { server, runtime, ref } = await started();
+    rmSync(server.socket);
+    const whileLive = await runtime.close(ref).then(
+      () => "closed",
+      () => "refused",
+    );
+    await runtime.health([ref]);
+    await waitFor(() => existsSync(server.socket));
+    const kept = (await runtime.inventory()).map((e) => e.ref.terminalId);
+    server.kill();
+    const onceGone = await runtime.close(ref).then(
+      () => "closed",
+      () => "refused",
+    );
+    expect([whileLive, kept, onceGone]).toEqual(["refused", [ref.terminalId], "closed"]);
+  });
+
   it("is unreachable against the refs it recorded, and gets its socket back", async () => {
     const { server, runtime, ref } = await started();
     rmSync(server.socket);

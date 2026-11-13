@@ -150,6 +150,16 @@ describe("the recorded tmux server, by what ps shows of it", () => {
     });
   });
 
+  it("is unsure, never gone, of anything tmux-like or naming our socket with a skewed start", () => {
+    const skewed = 1_794_000_010;
+    for (const facts of [
+      { ...linux, start: skewed, comm: ".tmux-wrapped" },
+      { ...linux, start: skewed, args: `tmux -u -S /private${socket} new-session` },
+      { comm: "node", start: skewed, args: `node watcher.js ${socket}` },
+    ])
+      expect(is(facts)).toBe("unsure");
+  });
+
   it("is unsure of the server itself started at another time, as a clock step makes it look", () => {
     expect(is({ ...linux, start: 1_794_000_003 })).toBe("unsure");
   });

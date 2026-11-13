@@ -295,11 +295,11 @@ export class TmuxRuntime implements RuntimeAdapter {
   }
 
   async attach(ref: RuntimeRef, size: Size | null, historyLines: number): Promise<Attached> {
-    const session = sessionOf(ref);
-    // Asked plainly: other commands answer a missing target with an error or with blank fields.
-    await this.tmux("has-session", "-t", session).catch(() => {
-      throw new StaleIncarnation(ref.terminalId, "gone");
-    });
+    // Found by its tag on the server it was made on: a session name or number alone could, after a
+    // restart, name another terminal.
+    const [pane] = await this.panesOf(ref);
+    if (pane === undefined) throw new StaleIncarnation(ref.terminalId, "gone");
+    const session = located(pane.ref, "sessionId");
     const resizeWindow = (next: Size) => this.tmux(...resizeArgs(session, next));
     if (size !== null) await resizeWindow(size);
     const [cols = 80, rows = 24, held = 0, alternate = 0] = (
@@ -365,9 +365,29 @@ export class TmuxRuntime implements RuntimeAdapter {
     return { stream, history, alternate: alternate === 1 };
   }
 
+  /**
+   * A terminal the socket no longer carries counts as closed when its own server answers, or when
+   * that server no longer runs, since a terminal ends with its server (foundation-design §7.1).
+   * One whose server still runs, its socket deleted or taken by another, is left for a later try.
+   */
   async close(ref: RuntimeRef): Promise<void> {
-    const [pane] = await this.panesOf(ref);
+    const [pane] = await this.panesOf(ref).catch(async (err: unknown) => {
+      if (await this.endedWithServer(ref, err)) return [];
+      throw err;
+    });
     if (pane !== undefined) await this.tmux("kill-session", "-t", located(pane.ref, "sessionId"));
+  }
+
+  /** Whether `err`, from finding `ref`'s panes, means only that its server ended, and it too. */
+  private async endedWithServer(ref: RuntimeRef, err: unknown): Promise<boolean> {
+    const serverAway =
+      (err instanceof TmuxError && noServer(err)) ||
+      (err instanceof StaleIncarnation && err.reason === "server-replaced");
+    if (!serverAway) return false;
+    // Another server carrying the terminal's tag is not its end.
+    if ((await this.inventory()).some((e) => e.ref.terminalId === ref.terminalId)) return false;
+    // Only a server provably gone took the terminal with it; one that can't be told apart may not.
+    return (await this.opts.server.verdict(identityOf(ref))).is === "gone";
   }
 
   async respawn(ref: RuntimeRef, spec: ProcessSpec): Promise<RuntimeRef> {
@@ -532,13 +552,18 @@ function decodeTags(row: Row): { terminalId: TerminalId; tags: TerminalTags } | 
   };
 }
 
+/** The server `ref` was made on. */
+const identityOf = ({ locator }: RuntimeRef): ServerIdentity => ({
+  pid: locator.serverPid ?? "",
+  start: locator.serverStart ?? "",
+});
+
 /** The distinct servers `refs` were made on. */
 function identities(refs: readonly RuntimeRef[]): ServerIdentity[] {
   const seen = new Map<string, ServerIdentity>();
-  for (const { locator } of refs) {
-    const pid = locator.serverPid ?? "";
-    const start = locator.serverStart ?? "";
-    if (pid !== "" && start !== "") seen.set(`${pid} ${start}`, { pid, start });
+  for (const identity of refs.map(identityOf)) {
+    if (identity.pid !== "" && identity.start !== "")
+      seen.set(`${identity.pid} ${identity.start}`, identity);
   }
   return [...seen.values()];
 }

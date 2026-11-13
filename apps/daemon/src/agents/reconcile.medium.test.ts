@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { HarnessAdapter, RuntimeRef } from "@bazhen/core";
+import { newId, type HarnessAdapter, type RuntimeRef } from "@bazhen/core";
 import { FakeRuntime } from "@bazhen/core/testing";
 import { LocalEnvironment } from "@bazhen/env-local";
 import { Mailbox } from "../mailbox/mailbox.ts";
@@ -34,6 +34,55 @@ const exited = (store: Store, agentId: string) =>
     actor: "system",
     payload: { exit: { type: "exited", code: 0 } },
   });
+
+/** An agent the daemon died launching: recorded launched, with no answer from the environment. */
+function midLaunch(store: Store) {
+  const agentId = newId("agent");
+  const terminalId = newId("term");
+  store.append({
+    type: "agent.launched",
+    entityId: agentId,
+    actor: "system",
+    payload: {
+      environmentId: localEnvironmentId(store),
+      harness: "claude-code",
+      project: "p",
+      cwd: "/w",
+      terminalId,
+    },
+  });
+  return { agentId, terminalId };
+}
+
+/** An agent the daemon died respawning: exited at generation 0, then a respawn asked for. */
+async function midRespawn() {
+  const fixture = await withAgent();
+  exited(fixture.store, fixture.agentId);
+  fixture.store.append({
+    type: "agent.respawn_requested",
+    entityId: fixture.agentId,
+    actor: "user",
+    payload: {},
+  });
+  return fixture;
+}
+
+const atGeneration = (terminalId: RuntimeRef["terminalId"], generation: string): RuntimeRef => ({
+  terminalId,
+  runtime: "tmux",
+  locator: { generation },
+});
+
+const agentOf = (store: Store) => store.snapshot(testView).agents[0];
+const lastReason = (
+  store: Store,
+  agentId: string,
+  type: "agent.failed" | "agent.respawn_rejected",
+) =>
+  store
+    .events(0)
+    .filter((e) => e.entityId === agentId && e.type === type)
+    .map((e) => e.payload);
 
 describe("reconcile", () => {
   it("leaves an agent the environment still runs as it was", async () => {
@@ -93,6 +142,57 @@ describe("reconcile", () => {
     await reconcile(store, fakeEnvironment(store));
     const mail = store.snapshot(testView).messages.find((m) => m.id === messageId)?.state;
     expect([kept, stateOf(store), mail]).toEqual(["closing", "closed", "undeliverable"]);
+  });
+
+  it("settles an agent the daemon died launching as running, when its tagged session is there", async () => {
+    const { store } = await withAgent();
+    const { agentId, terminalId } = midLaunch(store);
+    const ref = atGeneration(terminalId, "0");
+    await reconcile(
+      store,
+      fakeEnvironment(store, undefined, () => [{ agentId, ref, dead: false }]),
+    );
+    expect(store.snapshot(testView).agents.find((a) => a.id === agentId)?.state).toBe("running");
+  });
+
+  it("settles an agent the daemon died launching as failed, when no session carries it", async () => {
+    const { store } = await withAgent();
+    const { agentId } = midLaunch(store);
+    await reconcile(store, fakeEnvironment(store));
+    expect([
+      store.snapshot(testView).agents.find((a) => a.id === agentId)?.state,
+      lastReason(store, agentId, "agent.failed"),
+    ]).toEqual(["failed", [{ reason: "daemon_restart" }]]);
+  });
+
+  it("settles an agent the daemon died respawning as respawned, once its pane runs the next generation", async () => {
+    const { store, agentId, terminalId } = await midRespawn();
+    const ref = atGeneration(terminalId, "1");
+    await reconcile(
+      store,
+      fakeEnvironment(store, undefined, () => [{ agentId, ref, dead: false }]),
+    );
+    expect([agentOf(store)?.state, agentOf(store)?.generation]).toEqual(["running", 1]);
+  });
+
+  it("settles an agent the daemon died respawning as exited, when its pane is still the old one", async () => {
+    const { store, agentId, terminalId } = await midRespawn();
+    const ref = atGeneration(terminalId, "0");
+    await reconcile(
+      store,
+      fakeEnvironment(store, undefined, () => [{ agentId, ref, dead: true }]),
+    );
+    expect([
+      agentOf(store)?.state,
+      agentOf(store)?.generation,
+      lastReason(store, agentId, "agent.respawn_rejected"),
+    ]).toEqual(["exited", 0, [{ reason: "daemon_restart" }]]);
+  });
+
+  it("settles an agent the daemon died respawning as lost, when its terminal is gone", async () => {
+    const { store } = await midRespawn();
+    await reconcile(store, fakeEnvironment(store));
+    expect(agentOf(store)?.state).toBe("lost");
   });
 
   it.each(["unknown", "unreachable"] as const)(
