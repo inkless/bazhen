@@ -83,8 +83,9 @@ must be an absolute path), so your rc files run again at every launch, like a ne
 ### Reaching Bazhen from another device
 
 Bazhen listens on `127.0.0.1` only and never terminates TLS. To open it from a phone, bring your
-own route to that port that runs on this machine, such as a Cloudflare Tunnel or a local reverse
-proxy: a proxy on another host can't reach a loopback port. Point it at the web dev server,
+own route to that port that runs on this machine, such as a local reverse proxy: a proxy on
+another host can't reach a loopback port. [docs/caddy.md](docs/caddy.md) sets up Caddy, with
+your own domain or without one. Point it at the web dev server,
 `http://127.0.0.1:7901`, while you run `pnpm dev`, and list the address it presents, exactly as
 the browser shows it (scheme, host and any port), in `BAZHEN_EXTERNAL_ORIGINS`:
 `BAZHEN_EXTERNAL_ORIGINS=https://bazhen.example.com pnpm dev`. The daemon and the dev server then
