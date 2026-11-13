@@ -142,16 +142,19 @@ export class Lifecycle {
         found.state === "closing"
           ? this.store.lastEventId(agentId, "agent.closing")
           : this.record(agentId, "agent.closing", {});
-      if (req.force === true) {
-        // Recorded closed without ending anything: what it ran on can't be shown gone.
-        console.warn(
-          `agent ${agentId} closed by force; its terminal's old tmux server ` +
-            `(pid ${found.runtime?.locator.serverPid ?? "unknown"}) may still be running it`,
-        );
-      } else if (found.state !== "lost") {
+      if (found.state !== "lost") {
         await this.environment
           .close({ runtime: found.runtime, externalRef: null })
-          .catch((cause: unknown) => fromEnvironment(agentId, cause));
+          .catch((cause: unknown) => {
+            // Force records closed only what a close could not end: a terminal its old server may
+            // still run, or one an environment that can't be reached holds. It never skips a close
+            // that would work, so a terminal on a reachable server is still ended.
+            if (req.force !== true || !forceable(cause)) fromEnvironment(agentId, cause);
+            console.warn(
+              `agent ${agentId} closed by force; its terminal's tmux server ` +
+                `(pid ${found.runtime?.locator.serverPid ?? "unknown"}) may still be running it`,
+            );
+          });
       }
       return () => [
         ...(closing === undefined ? [] : [closing]),
@@ -276,6 +279,11 @@ const closable = (state: AgentState) =>
   state === "closed" || agentCommands(state).includes("close");
 const respawnable = (state: AgentState) => agentCommands(state).includes("respawn");
 const running = (state: AgentState) => agentCommands(state).includes("signal");
+
+/** A close failure force may record past: unconfirmed, or the environment out of reach. */
+const forceable = (cause: unknown) =>
+  cause instanceof TerminalUnconfirmed ||
+  ![StaleIncarnation, NoTerminal, NotResumable, ProcessState].some((e) => cause instanceof e);
 
 /** An environment's failure as the command's: typed where the caller can act on it. */
 function fromEnvironment(agentId: string, cause: unknown): never {

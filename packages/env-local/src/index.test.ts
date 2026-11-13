@@ -139,12 +139,19 @@ describe("local environment", () => {
     });
   });
 
-  it("reads back only a harness session of its own, never another environment's or one that doesn't parse", async () => {
+  it("reads back only a harness session of its own, never another environment's, a flag, or one that doesn't parse", async () => {
     const runtime = new FakeRuntime();
     const env = environment(runtime);
     const own = { environmentId: env.id, kind: "codex-thread", id: "t-1" } as const;
     const foreign = { ...own, environmentId: newId("env") };
-    const tags = [JSON.stringify(own), JSON.stringify(foreign), "{not json", '{"kind":"other"}'];
+    const flag = { ...own, id: "--dangerously-skip-permissions" };
+    const tags = [
+      JSON.stringify(own),
+      JSON.stringify(foreign),
+      JSON.stringify(flag),
+      "{not json",
+      '{"kind":"other"}',
+    ];
     for (const harnessSession of tags)
       await runtime.create({
         terminalId: newId("term"),
@@ -157,6 +164,7 @@ describe("local environment", () => {
       });
     expect((await env.inventory()).map((e) => e.externalRef)).toEqual([
       own,
+      undefined,
       undefined,
       undefined,
       undefined,

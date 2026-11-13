@@ -403,7 +403,12 @@ export class TmuxRuntime implements RuntimeAdapter {
       throw err;
     });
     const { serverPid, serverStart } = ref.locator;
-    if (current?.serverPid === serverPid && current?.serverStart === serverStart) return true;
+    if (
+      current !== undefined &&
+      current.serverPid === serverPid &&
+      current.serverStart === serverStart
+    )
+      return true;
     return (await this.opts.server.verdict(identityOf(ref))).is === "gone";
   }
 

@@ -62,7 +62,7 @@ export function Workspace({ agent, failed }: { agent: Agent; failed: (e: unknown
             {removing ? "Remove…" : "Close agent…"}
           </button>
         )}
-        {unconfirmed && agent.state === "closing" && (
+        {unconfirmed && closable && (
           <button
             type="button"
             disabled={busy}

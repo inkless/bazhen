@@ -207,6 +207,9 @@ export class LocalEnvironment implements EnvironmentAdapter {
   }
 }
 
+/** A harness session id as Claude Code and Codex mint them: a UUID-like word, never a flag. */
+const SESSION_ID = /^\w[\w.:-]*$/;
+
 /** The harness session a terminal's tag carries, if it is one of this environment's. */
 function harnessSessionOf(
   tag: string | undefined,
@@ -223,7 +226,8 @@ function harnessSessionOf(
     typeof value === "object" && value !== null ? Reflect.get(value, key) : undefined;
   const kind = field("kind");
   const id = field("id");
-  if (field("environmentId") !== environmentId || typeof id !== "string" || id === "")
+  // A harness gets the id as an argument (`--resume <id>`): one starting with `-` would be a flag.
+  if (field("environmentId") !== environmentId || typeof id !== "string" || !SESSION_ID.test(id))
     return undefined;
   if (kind !== "claude-session" && kind !== "codex-thread") return undefined;
   return { environmentId, kind, id };
