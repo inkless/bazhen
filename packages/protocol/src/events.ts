@@ -23,6 +23,19 @@ export const EVENTS = {
     entity: "environment",
     payload: z.object({ kind: EnvironmentKind }),
   },
+  /**
+   * A harness's own server answers on a version other than the last one recorded, as after a
+   * Codex self-update, which nothing announces but the socket ending (foundation-design §5.8).
+   */
+  "environment.harness_version": {
+    entity: "environment",
+    payload: z.object({
+      harness: HarnessId,
+      version: z.string().min(1),
+      /** Null for the first version recorded. */
+      previous: z.string().nullable(),
+    }),
+  },
   "agent.launched": {
     entity: "agent",
     payload: z.object({

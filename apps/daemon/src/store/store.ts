@@ -259,6 +259,14 @@ export class Store {
     return rowIds(rows.all(kind), "env");
   }
 
+  /** The version a harness's own server last answered on in an environment, if one has. */
+  harnessVersion(environmentId: string, harness: HarnessId): string | undefined {
+    const row = this.prepare(
+      "SELECT version FROM harness_versions WHERE environment_id = ? AND harness = ?",
+    ).get(environmentId, harness);
+    return typeof row?.version === "string" ? row.version : undefined;
+  }
+
   terminalState(terminalId: string): TerminalState | undefined {
     const row = this.prepare("SELECT state FROM terminals WHERE id = ?").get(terminalId);
     return row === undefined ? undefined : TerminalState.parse(row.state);

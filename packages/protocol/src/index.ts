@@ -39,6 +39,11 @@ export const DoctorResponse = z.object({
   config: z.object({ path: z.string(), found: z.boolean() }),
   /** `agents.shell`, and the login shell agents start through when it is "login". */
   agents: z.object({ shell: z.enum(["direct", "login"]), loginShell: z.string().nullable() }),
+  /**
+   * Codex's managed app-server, as last connected to, and the CLI agents run; null for one
+   * not reached. They update apart (foundation-design §5.8). Absent from a daemon before 1.6.
+   */
+  codex: z.object({ daemon: z.string().nullable(), cli: z.string().nullable() }).optional(),
   env: z.object({
     capturedAt: z.string(),
     /** Captured when the daemon started, or by the latest `bazhen env refresh`. */

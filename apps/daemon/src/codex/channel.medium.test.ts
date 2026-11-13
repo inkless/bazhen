@@ -121,16 +121,17 @@ describe("Codex channel", () => {
     channel.close();
   });
 
-  it("reports a server that came back on a different version", async () => {
+  it("reports the version of every server it connects to, as one that updated itself", async () => {
     const { codexHome, socket } = home();
-    const logged: string[] = [];
-    const channel = channelOn(codexHome, { log: (m) => logged.push(m) });
+    const versions: string[] = [];
+    const channel = channelOn(codexHome, { connectedTo: (v) => versions.push(v) });
+    expect(channel.version).toBeNull();
     const first = await fakeServer(socket, codexHome, () => ({ result: "ok" }), "0.166.0");
     await channel.request("thread/start", {});
     await first.close();
     await fakeServer(socket, codexHome, () => ({ result: "ok" }), "0.167.2");
     await expect.poll(() => channel.request("thread/start", {})).toBe("ok");
-    expect(logged).toEqual([expect.stringContaining("from 0.166.0 to 0.167.2")]);
+    expect([versions, channel.version]).toEqual([["0.166.0", "0.167.2"], "0.167.2"]);
     channel.close();
   });
 

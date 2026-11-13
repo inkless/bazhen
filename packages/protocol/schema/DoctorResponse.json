@@ -89,6 +89,28 @@
       ],
       "additionalProperties": false
     },
+    "codex": {
+      "type": "object",
+      "properties": {
+        "daemon": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cli": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "daemon",
+        "cli"
+      ],
+      "additionalProperties": false
+    },
     "env": {
       "type": "object",
       "properties": {
