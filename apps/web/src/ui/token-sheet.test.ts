@@ -31,7 +31,7 @@ const TEXT_ON = {
   "color-terminal-text": ["color-terminal-bg"],
   "color-terminal-selection-text": ["color-terminal-selection"],
 };
-// Non-text that must be seen (WCAG 1.4.11): focus ring, input borders, the needs-you dot.
+// Non-text that must be seen (WCAG 1.4.11): focus ring, input borders, the needs-you and busy dots.
 const SEEN_ON = {
   "color-focus-ring": ["color-bg", "color-surface", "color-surface-selected"],
   "color-border-strong": [
@@ -41,6 +41,8 @@ const SEEN_ON = {
     "color-surface-selected",
   ],
   "color-warn": ["color-bg", "color-surface-hover", "color-surface-selected"],
+  // A shell's busy dot, on a tab, a selected tab or a rail row.
+  "color-ok": ["color-bg", "color-surface", "color-surface-hover", "color-surface-selected"],
   "color-terminal-cursor": ["color-terminal-bg"],
   // Selected text keeps its place on screen; the selection must stand out from what is around it.
   "color-terminal-selection": ["color-terminal-bg"],

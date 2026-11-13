@@ -342,3 +342,76 @@ main {
 .agent-tasks {
   margin-top: 0;
 }
+
+/* Shells: the dock under an agent's TUI, and each shell's pane in it. */
+.workspace-body {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.dock,
+.shell {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.dock-head,
+.shell-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.dock-head h3,
+.shell-head h3 {
+  margin: 0;
+  font-size: var(--font-size-sm);
+}
+
+.dock-head .spacer,
+.shell-head .spacer {
+  flex: 1;
+}
+
+.shell-head .cwd {
+  color: var(--color-text-muted);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+}
+
+/* A hollow ring at the prompt, filled while a program runs: told apart by shape, not colour. */
+.busy-dot {
+  display: inline-block;
+  flex: none;
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: var(--radius-pill);
+  box-shadow: inset 0 0 0 1px var(--color-border-strong);
+}
+
+.busy-dot.busy {
+  background: var(--color-ok);
+  box-shadow: none;
+}
+
+.close-shells {
+  display: grid;
+  gap: var(--space-1);
+  margin: var(--space-3) 0 0;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-s);
+}
+
+.close-shells label {
+  min-height: var(--size-hit-min);
+  display: flex;
+  gap: var(--space-1);
+  align-items: center;
+}
+
+@media (forced-colors: active) {
+  .busy-dot.busy {
+    background: CanvasText;
+  }
+}

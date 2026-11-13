@@ -16,6 +16,10 @@
     "confirmBusy": {
       "type": "boolean"
     },
+    "confirmedProgram": {
+      "type": "string",
+      "maxLength": 200
+    },
     "force": {
       "type": "boolean"
     }

@@ -81,7 +81,7 @@ const deps: AppDeps = {
   unlinkShell: () => Promise.reject(new Error("not used by these tests")),
   closeShell: async (terminalId, req) => {
     if (req.confirmBusy === true) throw new UnknownShell(terminalId);
-    throw new ShellBusy(terminalId, "nvim");
+    throw new ShellBusy(`shell ${terminalId}`, [{ terminalId, program: "nvim" }]);
   },
   launch: async (req: LaunchAgentRequest) => {
     if (req.harness === "codex") throw new UnsupportedHarness("codex");
@@ -238,13 +238,13 @@ describe("HTTP app", () => {
     ]);
   });
 
-  it("answers a close of a shell running a program as busy, naming it, so the user is asked", async () => {
+  it("answers a close of a shell running a program as busy, naming the shell and program", async () => {
     const res = await closeShell(false);
     const body = await res.json();
-    expect([res.status, body.error, body.message]).toEqual([
+    expect([res.status, body.error, body.busy]).toEqual([
       409,
       "busy",
-      expect.stringContaining("nvim"),
+      [{ terminalId: launched.terminalId, program: "nvim" }],
     ]);
   });
 

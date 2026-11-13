@@ -17,8 +17,10 @@ import {
   VISIBILITY_HEARTBEAT_MS,
   type ClientEventFrame,
   SendMessageResponse,
+  ShellCommandResponse,
   StateSnapshot,
   type ApprovalDecision,
+  type BusyShell,
   type HarnessId,
   type Signal,
   type TuiTheme,
@@ -147,18 +149,25 @@ async function act(path: string, body: object): Promise<unknown> {
 /** A request the daemon refused, with its code where it gave one. */
 export class Refused extends Error {
   readonly code: ErrorResponse["error"] | null;
+  /** With `busy`: the shells a close would end with a program in each. */
+  readonly busy: readonly BusyShell[];
 
-  constructor(code: ErrorResponse["error"] | null, message: string) {
+  constructor(
+    code: ErrorResponse["error"] | null,
+    message: string,
+    busy: readonly BusyShell[] = [],
+  ) {
     super(message);
     this.code = code;
+    this.busy = busy;
   }
 }
 
 /** What the daemon said when it refused, in its own words, or the status if it said nothing. */
 function refusal(status: number, text: string): Refused {
   try {
-    const { error, message } = ErrorResponse.parse(JSON.parse(text));
-    return new Refused(error, message);
+    const { error, message, busy } = ErrorResponse.parse(JSON.parse(text));
+    return new Refused(error, message, busy);
   } catch {
     return new Refused(null, `the daemon refused the request (${status})`);
   }
@@ -185,9 +194,17 @@ export const resend = async (attentionId: string) =>
 export const dismiss = async (attentionId: string) =>
   DismissAttentionResponse.parse(await act(`/v1/attention/${attentionId}/dismiss`, {}));
 
-/** Names the generation the UI saw, so a command meant for an earlier incarnation is refused. */
-export const closeAgent = async (agentId: string, generation: number) =>
-  AgentCommandResponse.parse(await act(`/v1/agents/${agentId}/close`, { generation }));
+/**
+ * Names the generation the UI saw, so a command meant for an earlier incarnation is refused. Its
+ * linked shells close with it, but for `keepShells`; one running a program is refused as busy
+ * unless `confirmedBusy` names that program, as the user was shown it.
+ */
+export const closeAgent = async (
+  agentId: string,
+  generation: number,
+  shells: { keepShells?: string[]; confirmedBusy?: BusyShell[] } = {},
+) =>
+  AgentCommandResponse.parse(await act(`/v1/agents/${agentId}/close`, { generation, ...shells }));
 
 /** Signals a running agent's process, at the generation the UI saw. */
 export const signalAgent = async (agentId: string, generation: number, signal: Signal) =>
@@ -250,3 +267,29 @@ export const finishTask = async (taskId: string, outcome: TaskOutcome, cascade: 
       ...(cascade ? { cascade } : {}),
     }),
   );
+
+/** A shell beside an agent, in its directory, or standalone in `cwd`; drawn in `theme`. */
+export const openShell = async (
+  where: { linkedAgentId: string } | { cwd: string },
+  theme: TuiTheme,
+) => ShellCommandResponse.parse(await act("/v1/shells", { ...where, theme }));
+
+const shellCommand = async (terminalId: string, command: string, body: object) =>
+  ShellCommandResponse.parse(await act(`/v1/shells/${terminalId}/${command}`, body));
+
+/** Refused as `busy` while a program runs in it, unless it is `confirmedProgram`. */
+export const closeShell = (terminalId: string, generation: number, confirmedProgram?: string) =>
+  shellCommand(terminalId, "close", {
+    generation,
+    ...(confirmedProgram !== undefined && { confirmedProgram }),
+  });
+
+/** A new shell in a lost one's directory; the answer names the new one. */
+export const restartShell = (terminalId: string, generation: number) =>
+  shellCommand(terminalId, "restart", { generation });
+
+export const renameShell = (terminalId: string, name: string | null) =>
+  shellCommand(terminalId, "rename", { name });
+
+export const unlinkShell = (terminalId: string, generation: number) =>
+  shellCommand(terminalId, "unlink", { generation });

@@ -303,6 +303,10 @@
           "resumable": {
             "default": false,
             "type": "boolean"
+          },
+          "canOpenShell": {
+            "default": false,
+            "type": "boolean"
           }
         },
         "required": [

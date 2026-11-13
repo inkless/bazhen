@@ -11,6 +11,7 @@ import {
 import {
   ShellCommandResponse,
   type AgentCommandResponse,
+  type BusyShell,
   type CloseAgentRequest,
   type CloseShellRequest,
   type RenameShellRequest,
@@ -32,6 +33,7 @@ import {
 } from "../commands.ts";
 import type { AgentQueue } from "../agents/queue.ts";
 import {
+  LINKABLE,
   UnknownAgent,
   runtimePayload,
   shellCommands,
@@ -47,11 +49,15 @@ export class UnknownShell extends Error {
 
 /** Something other than the shell runs in it, so a close must be confirmed (§4.8). */
 export class ShellBusy extends Error {
-  readonly command: string;
+  /** Each shell the close would end with a program in it, and that program. */
+  readonly busy: readonly BusyShell[];
 
-  constructor(subject: string, command: string) {
-    super(`${command} is running in ${subject}; close it anyway to end it`);
-    this.command = command;
+  constructor(subject: string, busy: readonly BusyShell[]) {
+    const programs = busy.map((b) => b.program).join(", ");
+    super(
+      `${programs} ${busy.length === 1 ? "is" : "are"} running in ${subject}; close anyway to end it`,
+    );
+    this.busy = busy;
   }
 }
 
@@ -74,9 +80,6 @@ export class ShellOpenFailed extends Error {
 
 /** Shell states in which a dead pane is still to be ended and recorded closed. */
 const ENDING: ReadonlySet<string> = new Set(["running", "closing"]);
-
-/** Agent states whose directory still holds their work, so a shell can be opened beside them. */
-const LINKABLE: ReadonlySet<string> = new Set(["running", "exited"]);
 
 export interface ShellDeps {
   readonly store: Store;
@@ -154,7 +157,8 @@ export class ShellLifecycle {
       (force ? state === "closing" : shellCommands(state, false).includes("close"));
     return this.command("close", terminalId, req, accepts, async (found) => {
       if (found.state === "closed") return () => ({ terminalId, eventIds: [] });
-      if (found.state === "running" && req.confirmBusy !== true) await this.refuseBusy(found);
+      if (found.state === "running" && req.confirmBusy !== true)
+        await this.refuseBusy(`shell ${terminalId}`, [found], (_shell) => req.confirmedProgram);
       const closing =
         found.state === "closing" ? [] : [this.record(terminalId, "terminal.closing", {})];
       if (found.state !== "lost") await this.end(found, force);
@@ -214,8 +218,9 @@ export class ShellLifecycle {
   }
 
   /**
-   * Closes an agent and its linked shells together (§4.8). Unless `confirmBusy`, it is refused
-   * while a program other than the shell runs in a shell it would close, naming them. The shells
+   * Closes an agent and its linked shells together (§4.8). It is refused while a shell it would
+   * close runs a program the user didn't confirm in `confirmedBusy`, naming them, unless
+   * `confirmBusy` confirms everything. The shells
    * named in `keepShells` are made standalone before the agent closes, so a shell still linked to
    * a closed agent, after a crash or a failure here, was never kept: `settleOrphans` closes it.
    * Every other one is closed once the agent is; any that can't be is reported, and repeating
@@ -238,7 +243,9 @@ export class ShellLifecycle {
           throw new StateConflict(`shell ${id}`, `not running beside agent ${agentId}`);
       }
       const closing = linked.filter((s) => !keep.has(s.terminalId));
-      if (req.confirmBusy !== true) await this.refuseBusyShells(agentId, closing);
+      const confirmed = new Map((req.confirmedBusy ?? []).map((b) => [b.terminalId, b.program]));
+      if (req.confirmBusy !== true)
+        await this.refuseBusy(`agent ${agentId}'s shells`, closing, (id) => confirmed.get(id));
       for (const shell of linked.filter((s) => keep.has(s.terminalId))) await this.keep(shell);
     }
     const response = await closeAgent(req);
@@ -283,22 +290,6 @@ export class ShellLifecycle {
         ),
       );
     });
-  }
-
-  /** Refuses an agent's close while a shell it would close runs anything but its shell. */
-  private async refuseBusyShells(agentId: string, shells: readonly ShellTerminal[]): Promise<void> {
-    const busy: string[] = [];
-    for (const shell of shells) {
-      if (shell.state !== "running" || shell.runtime === null) continue;
-      const command = await this.deps.environment
-        .shellBusy(shell.runtime)
-        .catch((cause: unknown) => {
-          if (cause instanceof ProcessState) return null;
-          return fromEnvironment(shell.terminalId, cause);
-        });
-      if (command !== null) busy.push(command);
-    }
-    if (busy.length > 0) throw new ShellBusy(`agent ${agentId}'s shells`, busy.join(", "));
   }
 
   /** Closes a shell its agent's close takes; it was recorded closing before anything ended. */
@@ -439,17 +430,29 @@ export class ShellLifecycle {
   }
 
   /**
-   * Refuses the close while a program other than the shell holds the foreground. One the user
-   * starts between this check and the close is ended with it: the check is a warning, not a lock,
-   * as for any terminal. A shell already dead has nothing running to warn about.
+   * Refuses a close while any of `shells` runs a program other than the shell, but for the one
+   * `confirmed` says the user was shown running in it and chose to end. A program the user wasn't
+   * shown, one started since, still stops the close. The check is a warning, not a lock: one
+   * started between it and the close is ended with it. A shell already dead runs nothing.
    */
-  private async refuseBusy(found: ShellTerminal): Promise<void> {
-    if (found.runtime === null) return;
-    const command = await this.deps.environment.shellBusy(found.runtime).catch((cause: unknown) => {
-      if (cause instanceof ProcessState) return null;
-      return fromEnvironment(found.terminalId, cause);
-    });
-    if (command !== null) throw new ShellBusy(`shell ${found.terminalId}`, command);
+  private async refuseBusy(
+    subject: string,
+    shells: readonly ShellTerminal[],
+    confirmed: (terminalId: string) => string | undefined,
+  ): Promise<void> {
+    const busy: BusyShell[] = [];
+    for (const shell of shells) {
+      if (shell.state !== "running" || shell.runtime === null) continue;
+      const program = await this.deps.environment
+        .shellBusy(shell.runtime)
+        .catch((cause: unknown) => {
+          if (cause instanceof ProcessState) return null;
+          return fromEnvironment(shell.terminalId, cause);
+        });
+      if (program !== null && program !== confirmed(shell.terminalId))
+        busy.push({ terminalId: shell.terminalId, program });
+    }
+    if (busy.length > 0) throw new ShellBusy(subject, busy);
   }
 
   private async end(found: ShellTerminal, force: boolean): Promise<void> {

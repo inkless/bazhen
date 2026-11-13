@@ -39,11 +39,14 @@ export function TerminalView({
   terminalId,
   kind,
   scheme,
+  height = "70vh",
 }: {
   terminalId: string;
   kind: TerminalKind;
   /** The theme its program was started for, which it is drawn in whatever the page's. */
   scheme: TuiTheme;
+  /** How tall it is drawn, as a CSS length: less when a shell dock shares the screen. */
+  height?: string;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const [report, setReport] = useState<Report>({ status: { kind: "connecting" }, notice: null });
@@ -66,7 +69,7 @@ export function TerminalView({
         ref={host}
         // xterm.js paints whole rows; the strip below the last one is the host's.
         style={{
-          height: "70vh",
+          height,
           background: "var(--color-terminal-bg)",
           colorScheme: scheme,
         }}
