@@ -14,6 +14,9 @@ export default defineConfig({
           ],
           exclude: ["**/*.medium.test.ts", "**/node_modules/**"],
           env: { BAZHEN_HOME: "/nonexistent/bazhen-unit-tests" },
+          // Vitest blanks CSS it isn't told to keep, even imported as ?raw text; the web tokens
+          // are tested by reading their text.
+          css: { include: [/apps\/web\/src\/ui\/.+\.css/] },
         },
       },
       {

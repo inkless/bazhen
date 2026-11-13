@@ -38,6 +38,7 @@ const COVERED_ELSEWHERE: Record<string, string> = {
   "apps/web/src/terminal/TerminalView.tsx": "tests/e2e/keys.spec.ts",
   "apps/web/src/terminal/scroll-input.ts": "tests/e2e/keys.spec.ts",
   "apps/web/src/terminal/takeover.ts": "tests/e2e/keys.spec.ts",
+  "apps/web/src/ui/swatches.tsx": "tests/e2e/swatches.spec.ts",
 };
 
 function sourceFiles(dir: string): string[] {
@@ -117,6 +118,87 @@ function checkSiblingTests(): void {
   }
 }
 
+// apps/web's screens use only its semantic tokens (docs/standards/ui.md); oxlint doesn't read CSS.
+const PALETTE_CSS = "apps/web/src/ui/palette.css";
+const TOKENS_CSS = "apps/web/src/ui/tokens.css";
+const COLOUR_FUNCTION = /\b(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color|color-mix|light-dark)\(/i;
+const HEX_COLOUR = /#[0-9a-f]{3,8}\b/i;
+const NAMED_COLOURS = new Set(
+  (
+    "aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue " +
+    "blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk " +
+    "crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki " +
+    "darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen " +
+    "darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue " +
+    "dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite " +
+    "gold goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki " +
+    "lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan " +
+    "lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen " +
+    "lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen " +
+    "magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen " +
+    "mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream " +
+    "mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid " +
+    "palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum " +
+    "powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown " +
+    "seagreen seashell sienna silver skyblue slateblue slategray slategrey snow springgreen " +
+    "steelblue tan teal thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen"
+  ).split(" "),
+);
+
+/** The custom properties a stylesheet declares. */
+export function declaredTokens(css: string): Set<string> {
+  return new Set([...css.matchAll(/^\s*--([\w-]+):/gm)].map(([, name = ""]) => name));
+}
+
+/**
+ * Lines of `source` that go around the semantic tokens: a hex colour, a colour function, a named
+ * colour in a CSS declaration, or a `var()` naming anything but one of `tokens`.
+ */
+export function offTokenLines(
+  source: string,
+  css: boolean,
+  tokens: Set<string>,
+): { line: number; text: string }[] {
+  const found: { line: number; text: string }[] = [];
+  const lines = (
+    css ? source.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, " ")) : source
+  ).split("\n");
+  lines.forEach((text, i) => {
+    const declaration = css && !text.trimEnd().endsWith("{");
+    const value = !css ? text : declaration ? text.slice(text.indexOf(":") + 1) : "";
+    const named =
+      declaration && value.split(/[^a-z-]+/i).some((w) => NAMED_COLOURS.has(w.toLowerCase()));
+    const unknown = [...value.matchAll(/var\(--([\w-]+)/g)].some(([, n = ""]) => !tokens.has(n));
+    if (HEX_COLOUR.test(value) || COLOUR_FUNCTION.test(value) || named || unknown) {
+      found.push({ line: i + 1, text: text.trim() });
+    }
+  });
+  return found;
+}
+
+function checkWebTokens(): void {
+  const tokens = declaredTokens(readFileSync(join(root, TOKENS_CSS), "utf8"));
+  for (const file of filesUnder("apps/web/src", /\.(css|tsx?)$/)) {
+    if (file === PALETTE_CSS || file === TOKENS_CSS || /\.test\.tsx?$/.test(file)) continue;
+    const source = readFileSync(join(root, file), "utf8");
+    for (const { line, text } of offTokenLines(source, file.endsWith(".css"), tokens)) {
+      failures.push(
+        `${file}:${line}: \`${text}\` goes around the semantic tokens; use one ${TOKENS_CSS} ` +
+          "defines, adding it there (mapped onto palette.css) if none fits (docs/standards/ui.md).",
+      );
+    }
+  }
+}
+
+function filesUnder(dir: string, name: RegExp): string[] {
+  if (!existsSync(join(root, dir))) return [];
+  return readdirSync(join(root, dir)).flatMap((entry) => {
+    const rel = `${dir}/${entry}`;
+    if (statSync(join(root, rel)).isDirectory()) return filesUnder(rel, name);
+    return name.test(entry) ? [rel] : [];
+  });
+}
+
 // Agent context is read on every session, so it stays short, and every path and command it names
 // must exist: stale context misleads every agent that reads it.
 const AGENTS_MAX_LINES = 60;
@@ -125,6 +207,7 @@ const CONTEXT_DOCS = [
   "docs/standards/code.md",
   "docs/standards/testing.md",
   "docs/standards/review.md",
+  "docs/standards/ui.md",
 ];
 const PNPM_BUILTINS = new Set(["install", "exec", "add", "remove", "update"]);
 // pnpm options that take a value as the next word; every other option is a bare flag.
@@ -275,6 +358,7 @@ if (isMain(import.meta)) {
   checkSiblingTests();
   checkAgentContext();
   checkSkills(scriptNames());
+  checkWebTokens();
 
   if (failures.length > 0) {
     console.error(`Standards check failed:\n${failures.map((f) => `  - ${f}`).join("\n")}`);

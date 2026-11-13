@@ -17,4 +17,4 @@ TypeScript throughout, in a pnpm workspace.
 ## Standards
 
 Why the rules and checks exist, and the checklist to review against: `docs/standards/code.md`,
-`docs/standards/testing.md`, `docs/standards/review.md`.
+`docs/standards/testing.md`, `docs/standards/review.md`; for web UI, `docs/standards/ui.md`.
