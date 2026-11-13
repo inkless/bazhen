@@ -285,6 +285,13 @@ export class Approvals {
     }
   }
 
+  /** The agent's process was replaced: the requests it asked can no longer be answered there. */
+  supersede(agentId: string): void {
+    for (const item of this.store.openAttention(agentId)) {
+      if (isRequest(item)) this.withdraw(item.id, "superseded");
+    }
+  }
+
   /**
    * The hooks behind open requests died with the daemon; their requests are gone. Items no
    * request stands behind, such as a failure, still need the human.

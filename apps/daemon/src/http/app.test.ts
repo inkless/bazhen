@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { newId, NotResumable, TaskRefused, UnsupportedHarness, type Caller } from "@bazhen/core";
+import {
+  AgentTerminalExists,
+  newId,
+  NotResumable,
+  TaskRefused,
+  UnsupportedHarness,
+  type Caller,
+} from "@bazhen/core";
 import { FakeRuntime } from "@bazhen/core/testing";
 import { PROTOCOL_VERSION, type LaunchAgentRequest } from "@bazhen/protocol";
 import { EnvironmentUnavailable, ServerUnconfirmed, StaleGeneration } from "../agents/lifecycle.ts";
@@ -63,6 +70,10 @@ const deps: AppDeps = {
   respawn: async () => {
     throw new NotResumable(newId("agent"));
   },
+  relaunch: async (agentId, req) => {
+    if (req.fresh === true) return { agentId, eventIds: [9] };
+    throw new AgentTerminalExists(newId("agent"));
+  },
   signal: () => Promise.reject(new Error("not used by these tests")),
   openShell: async () => ({ terminalId: launched.terminalId, eventIds: [5, 6] }),
   restartShell: () => Promise.reject(new Error("not used by these tests")),
@@ -96,6 +107,12 @@ const post = (body: unknown, headers: Record<string, string> = {}) =>
     body: JSON.stringify(body),
   });
 const launch = { idempotencyKey: "k-1", harness: "claude-code", cwd: "/work" };
+const relaunch = (body: unknown) =>
+  app.request("/v1/agents/agent_x/relaunch", {
+    method: "POST",
+    headers: { host, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
 const close = (generation: number) =>
   app.request("/v1/agents/agent_x/close", {
     method: "POST",
@@ -234,6 +251,18 @@ describe("HTTP app", () => {
   it("answers a command on a shell it doesn't know as not found", async () => {
     const res = await closeShell(true);
     expect([res.status, (await res.json()).error]).toEqual([404, "not_found"]);
+  });
+
+  it("relaunches as the body asks, and answers one the runtime still carries as a conflict", async () => {
+    const fresh = await relaunch({ idempotencyKey: "f", generation: 0, fresh: true });
+    const carried = await relaunch({ idempotencyKey: "c", generation: 0, theme: "light" });
+    expect([
+      [fresh.status, (await fresh.json()).eventIds],
+      [carried.status, (await carried.json()).error],
+    ]).toEqual([
+      [200, [9]],
+      [409, "conflict"],
+    ]);
   });
 });
 

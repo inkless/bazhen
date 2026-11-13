@@ -19,6 +19,10 @@ const taskCreated = z.object({
   delegatedFrom: Id("asgn").nullable().optional(),
 });
 const taskFinished = z.object({ outcome: TaskOutcome, note: z.string().nullable() });
+const transcript = z.object({
+  sessionId: z.string().min(1),
+  path: z.string().startsWith("/").max(4096),
+});
 
 /** A terminal's runtime incarnation, as RuntimeRef names it, minus the terminal it is for. */
 const RuntimeRefPayload = z.object({
@@ -104,6 +108,37 @@ export const EVENTS = {
     }),
   },
   /**
+   * A lost agent is starting again, on a new terminal at `generation`; the lost one stays lost
+   * (foundation-design §4.1).
+   */
+  "agent.relaunch_requested": {
+    entity: "agent",
+    payload: z.object({
+      terminalId: Id("term"),
+      generation: z.number().int().positive(),
+      /** On a new harness session, which the old one's conversation doesn't carry into. */
+      fresh: z.boolean(),
+    }),
+  },
+  /** The relaunched agent's new terminal runs, on the harness session it started with. */
+  "agent.relaunched": {
+    entity: "agent",
+    payload: z.object({
+      externalRef: ExternalRef.nullable(),
+      runtimeRef: RuntimeRefPayload,
+      /** The theme the TUI was started for, when one was named. */
+      theme: TuiTheme.optional(),
+    }),
+  },
+  /** The relaunch failed: its new terminal failed, and the agent is lost on its old one again. */
+  "agent.relaunch_rejected": {
+    entity: "agent",
+    payload: z.object({
+      /** `daemon_restart`: the daemon died mid-relaunch, and the new terminal never appeared. */
+      reason: z.enum(["not_resumable", "terminal_exists", "unavailable", "daemon_restart"]),
+    }),
+  },
+  /**
    * The agent is bound to another harness session, which its own process moved to, such as a
    * Claude Code `/clear` or fork, or a Codex TUI's `/new`, `/fork` or `/resume` (foundation-design
    * §3.1, §5.8). Respawn resumes this one.
@@ -111,6 +146,15 @@ export const EVENTS = {
   "agent.external_ref_updated": {
     entity: "agent",
     payload: z.object({ externalRef: ExternalRef }),
+  },
+  /**
+   * Where the harness keeps the bound session's conversation, as its own hooks report it: a
+   * Claude Code session can be resumed only once that file exists. The stream leaves the path out.
+   */
+  "agent.transcript_recorded": {
+    entity: "agent",
+    payload: transcript,
+    streamed: transcript.omit({ path: true }),
   },
   /** The agent's process was sent a signal; any exit it causes is recorded on its own. */
   "agent.signalled": { entity: "agent", payload: z.object({ signal: Signal }) },

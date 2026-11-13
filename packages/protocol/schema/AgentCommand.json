@@ -5,6 +5,7 @@
   "enum": [
     "close",
     "respawn",
-    "signal"
+    "signal",
+    "relaunch"
   ]
 }

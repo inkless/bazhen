@@ -8,6 +8,7 @@
   "include": [
     "*.ts",
     "../support/agent-env.ts",
+    "../support/transcript.ts",
     "../support/disposable-host.ts",
     "../support/key-*.ts"
   ],

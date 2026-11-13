@@ -1,4 +1,4 @@
-import type { SQLInputValue, StatementSync } from "node:sqlite";
+import type { SQLInputValue, SQLOutputValue, StatementSync } from "node:sqlite";
 import {
   advanceTerminal,
   agent,
@@ -21,6 +21,7 @@ import {
   TerminalState,
   type AssignmentEndReason,
   type EventType,
+  type ExternalRef,
 } from "@bazhen/protocol";
 
 /** Prepares a statement once and reuses it: the store runs on the loop every hook waits on. */
@@ -98,7 +99,7 @@ export function project(db: Statements, e: Recorded): void {
     case "agent.running": {
       const { externalRef, runtimeRef, theme } = EVENTS[e.type].payload.parse(e.payload);
       advance(db, e.id, e.entityId, ["launch.confirmed", "runtime.confirmed"], {
-        agent: { external_ref: externalRef && JSON.stringify(externalRef) },
+        agent: boundTo(db, e.entityId, externalRef),
         ...(runtimeRef && { terminal: { ...incarnation(runtimeRef), theme: theme ?? null } }),
       });
       return;
@@ -123,10 +124,51 @@ export function project(db: Statements, e: Recorded): void {
       const { externalRef, runtimeRef, theme } = EVENTS[e.type].payload.parse(e.payload);
       advance(db, e.id, e.entityId, ["launch.confirmed", "respawned"], {
         // A new process reports its own usage, as it does its own activity.
-        agent: { external_ref: externalRef && JSON.stringify(externalRef), usage: null },
+        agent: { ...boundTo(db, e.entityId, externalRef), usage: null },
         terminal: { ...incarnation(runtimeRef), exit: null, theme: theme ?? null },
       });
       forgetActivity(db, e.entityId);
+      return;
+    }
+    case "agent.relaunch_requested": {
+      const { terminalId, generation } = EVENTS[e.type].payload.parse(e.payload);
+      const environmentId = db
+        .prepare("SELECT environment_id FROM agent_sessions WHERE id = ?")
+        .get(e.entityId)?.environment_id;
+      // The lost terminal is final (§4.1): the agent moves to a new one, and the lost one stays.
+      advance(db, e.id, e.entityId, ["relaunch.requested", null], {
+        agent: { terminal_id: terminalId, usage: null },
+      });
+      db.prepare(
+        `INSERT INTO terminals
+           (id, host_id, state, generation, runtime, locator, environment_id, kind, agent_session_id,
+            created_event_id, updated_event_id)
+         VALUES (?, ?, 'creating', ?, NULL, NULL, ?, 'agent', ?, ?, ?)`,
+      ).run(terminalId, e.hostId, generation, environmentId ?? null, e.entityId, e.id, e.id);
+      forgetActivity(db, e.entityId);
+      return;
+    }
+    case "agent.relaunched": {
+      const { externalRef, runtimeRef, theme } = EVENTS[e.type].payload.parse(e.payload);
+      advance(db, e.id, e.entityId, ["launch.confirmed", "runtime.confirmed"], {
+        agent: boundTo(db, e.entityId, externalRef),
+        terminal: { ...incarnation(runtimeRef), theme: theme ?? null },
+      });
+      return;
+    }
+    case "agent.relaunch_rejected": {
+      EVENTS[e.type].payload.parse(e.payload);
+      // Back to the terminal it was lost on, which close still takes; the new one failed. An
+      // agent with none was never lost, so this was no relaunch.
+      const lost = db
+        .prepare(
+          `SELECT id FROM terminals WHERE agent_session_id = ? AND state = 'lost'
+           ORDER BY created_event_id DESC LIMIT 1`,
+        )
+        .get(e.entityId)?.id;
+      if (typeof lost !== "string") throw new UnknownEntity("lost terminal of agent", e.entityId);
+      advance(db, e.id, e.entityId, ["relaunch.rejected", "runtime.rejected"]);
+      update(db, "agent_sessions", "id", e.entityId, e.id, { terminal_id: lost });
       return;
     }
     case "agent.respawn_rejected":
@@ -139,9 +181,18 @@ export function project(db: Statements, e: Recorded): void {
         .prepare("SELECT 1 AS present FROM agent_sessions WHERE id = ?")
         .get(e.entityId);
       if (row === undefined) throw new UnknownEntity("agent session", e.entityId);
-      update(db, "agent_sessions", "id", e.entityId, e.id, {
-        external_ref: JSON.stringify(externalRef),
-      });
+      update(db, "agent_sessions", "id", e.entityId, e.id, boundTo(db, e.entityId, externalRef));
+      return;
+    }
+    case "agent.transcript_recorded": {
+      const { sessionId, path } = EVENTS[e.type].payload.parse(e.payload);
+      const row = db
+        .prepare("SELECT external_ref FROM agent_sessions WHERE id = ?")
+        .get(e.entityId);
+      if (row === undefined) throw new UnknownEntity("agent session", e.entityId);
+      // Only the bound session's: a report about one the agent has left says nothing of this one.
+      if (sessionIdOf(row.external_ref ?? null) !== sessionId) return;
+      update(db, "agent_sessions", "id", e.entityId, e.id, { transcript: path });
       return;
     }
     case "agent.signalled":
@@ -447,6 +498,22 @@ function closeAttention(db: Statements, e: Recorded, reason: AttentionCloseReaso
   update(db, "attention_items", "id", e.entityId, e.id, { state, close_reason: reason });
 }
 
+/**
+ * The columns that bind an agent to `externalRef`. Moving to another session forgets where the
+ * last one kept its conversation, so it can't be resumed until the new one's hooks say.
+ */
+function boundTo(db: Statements, agentId: string, externalRef: ExternalRef | null): Columns {
+  const row = db.prepare("SELECT external_ref FROM agent_sessions WHERE id = ?").get(agentId);
+  const moved = sessionIdOf(row?.external_ref ?? null) !== (externalRef?.id ?? null);
+  return {
+    external_ref: externalRef === null ? null : JSON.stringify(externalRef),
+    ...(moved && { transcript: null }),
+  };
+}
+
+const sessionIdOf = (stored: SQLOutputValue | null): unknown =>
+  typeof stored === "string" ? Reflect.get(Object(JSON.parse(stored)), "id") : null;
+
 /** A new or closed process says nothing yet: the last one's signal goes with it. */
 function forgetActivity(db: Statements, agentId: string): void {
   db.prepare("DELETE FROM activity_latest WHERE agent_session_id = ?").run(agentId);
@@ -470,15 +537,19 @@ function advance(
     ...columns.agent,
   });
   if (terminalEvent === null) return;
+  // An agent relaunched has had more than one terminal; only the one it is on moves.
   const term = db
-    .prepare("SELECT state, generation FROM terminals WHERE agent_session_id = ?")
+    .prepare(
+      `SELECT t.id, t.state, t.generation FROM terminals t
+       JOIN agent_sessions a ON t.id = a.terminal_id WHERE a.id = ?`,
+    )
     .get(agentId);
   if (term === undefined) return;
   const at = advanceTerminal(
     { state: TerminalState.parse(term.state), generation: Number(term.generation) },
     terminalEvent,
   );
-  update(db, "terminals", "agent_session_id", agentId, eventId, { ...at, ...columns.terminal });
+  update(db, "terminals", "id", String(term.id), eventId, { ...at, ...columns.terminal });
 }
 
 function update(

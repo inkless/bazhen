@@ -31,6 +31,7 @@ import {
   StreamServerFrame,
 } from "@bazhen/protocol";
 import { agentHomes, codexDaemonStarted, loginEnv } from "../support/agent-env.ts";
+import { giveTranscript } from "../support/transcript.ts";
 import { replay } from "./fixtures/browser.ts";
 
 const run = promisify(execFile);
@@ -447,6 +448,11 @@ export class Daemon {
     const session = this.session(agentId);
     if (session === undefined) throw new Error(`no terminal for ${agentId}`);
     return session;
+  }
+
+  /** Gives the agent's bound Claude Code session a conversation to resume (`giveTranscript`). */
+  giveTranscript(agentId: string, sessionId: string): Promise<void> {
+    return giveTranscript(this.home, PROTOCOL_VERSION, agentId, sessionId);
   }
 
   /** What the agent's terminal shows, or nothing while it has no terminal yet. */

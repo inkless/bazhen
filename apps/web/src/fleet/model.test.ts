@@ -24,6 +24,7 @@ const agentIn = (project: string, state: AgentState = "running", over: Partial<A
   themes: ["light" as const, "dark" as const],
   attachCommand: "tmux attach",
   commands: [],
+  resumable: true,
   ...over,
 });
 
@@ -61,9 +62,10 @@ describe("agentActions", () => {
   it("shows the daemon's commands, and close on a lost agent as remove", () => {
     expect([
       agentActions(agentIn("p", "exited", { commands: ["close", "respawn"] })).buttons,
+      agentActions(agentIn("p", "lost", { commands: ["close", "relaunch"] })).buttons,
       agentActions(agentIn("p", "lost", { commands: ["close"] })).buttons,
       agentActions(agentIn("p", "running", { commands: ["close", "signal"] })).buttons,
-    ]).toEqual([["respawn", "close"], ["remove"], ["close"]]);
+    ]).toEqual([["respawn", "close"], ["relaunch", "remove"], ["remove"], ["close"]]);
   });
 });
 
@@ -121,13 +123,14 @@ const activity = (value: "idle" | "waiting_input" | "working" | "needs_approval"
 
 describe("themeRespawn", () => {
   it("allows an exited agent, and a running one only between turns as its harness reports it", () => {
+    const resumable = true;
     expect([
-      themeRespawn({ state: "exited" }),
-      themeRespawn({ state: "running", activity: activity("idle") }),
-      themeRespawn({ state: "running", activity: activity("waiting_input") }),
-      themeRespawn({ state: "running", activity: activity("working") }),
-      themeRespawn({ state: "running", activity: activity("needs_approval") }),
-      themeRespawn({ state: "running" }),
+      themeRespawn({ state: "exited", resumable }),
+      themeRespawn({ state: "running", resumable, activity: activity("idle") }),
+      themeRespawn({ state: "running", resumable, activity: activity("waiting_input") }),
+      themeRespawn({ state: "running", resumable, activity: activity("working") }),
+      themeRespawn({ state: "running", resumable, activity: activity("needs_approval") }),
+      themeRespawn({ state: "running", resumable }),
     ]).toEqual([
       null,
       null,
@@ -136,5 +139,12 @@ describe("themeRespawn", () => {
       "Mid-turn: wait for it to finish",
       "Can't tell whether it's mid-turn",
     ]);
+  });
+
+  it("allows none whose session has no conversation to resume, rather than stop it for nothing", () => {
+    expect([
+      themeRespawn({ state: "exited", resumable: false }),
+      themeRespawn({ state: "running", resumable: false, activity: activity("idle") }),
+    ]).toEqual(["No conversation to resume yet", "No conversation to resume yet"]);
   });
 });

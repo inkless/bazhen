@@ -131,7 +131,15 @@ export async function launchAgent(
       [],
     );
     const options = launchOptions(req.theme);
-    const launching = environment.launch({ agentId, terminalId, request, options, size });
+    const launching = environment.launch({
+      agentId,
+      terminalId,
+      generation: 0,
+      resume: null,
+      request,
+      options,
+      size,
+    });
     const refs = await launching.catch((cause) => {
       // The client learns only that it failed; the daemon's log says why.
       console.error(`agent ${agentId} failed to launch:`, cause);

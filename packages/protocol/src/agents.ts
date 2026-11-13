@@ -37,7 +37,7 @@ export const ExitStatus = z.discriminatedUnion("type", [
 export type ExitStatus = z.infer<typeof ExitStatus>;
 
 /** A command on an agent: each is a `POST /v1/agents/:id/<command>`. */
-export const AgentCommand = z.enum(["close", "respawn", "signal"]);
+export const AgentCommand = z.enum(["close", "respawn", "signal", "relaunch"]);
 export type AgentCommand = z.infer<typeof AgentCommand>;
 
 /** A harness- or server-side object, such as a Claude Code session or a Codex thread. */
@@ -132,6 +132,11 @@ export const Agent = z.object({
   attachCommand: z.string().nullable().default(null),
   /** The commands the daemon would take on it now, so a client never restates its lifecycle. */
   commands: z.array(AgentCommand).default([]),
+  /**
+   * Whether starting it again resumes its harness session; a relaunch of one that can't starts a
+   * fresh session only when asked to (protocol 1.27).
+   */
+  resumable: z.boolean().default(false),
 });
 export type Agent = z.infer<typeof Agent>;
 
@@ -184,6 +189,20 @@ export const RespawnAgentRequest = z.object({
   theme: TuiTheme.optional(),
 });
 export type RespawnAgentRequest = z.infer<typeof RespawnAgentRequest>;
+
+/**
+ * Starts a lost agent again on a new terminal, at the next generation (foundation-design §4.1,
+ * §4.5). It resumes the agent's harness session; one that can't be resumed is refused unless
+ * `fresh` asks for a new session, which the old one's conversation doesn't carry into.
+ * Protocol 1.27.
+ */
+export const RelaunchAgentRequest = z.object({
+  idempotencyKey: IdempotencyKey,
+  generation: z.number().int().nonnegative(),
+  theme: TuiTheme.optional(),
+  fresh: z.boolean().optional(),
+});
+export type RelaunchAgentRequest = z.infer<typeof RelaunchAgentRequest>;
 
 /** Signals a running agent's process, in place of typing a key into it. */
 export const SignalAgentRequest = z.object({

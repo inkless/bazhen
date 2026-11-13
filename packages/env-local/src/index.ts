@@ -12,6 +12,7 @@ import type {
   EnvironmentHealthState,
   EnvironmentId,
   HarnessAdapter,
+  Resumes,
   RuntimeAdapter,
   RuntimeRef,
   ShellForeground,
@@ -83,14 +84,18 @@ export class LocalEnvironment implements EnvironmentAdapter {
   readonly kind = "local";
   readonly id: EnvironmentId;
   readonly harnesses: readonly HarnessId[];
-  readonly resumable: readonly HarnessId[];
+  readonly resumes: Resumes;
   readonly themes: Readonly<Partial<Record<HarnessId, readonly TuiTheme[]>>>;
   private readonly opts: LocalEnvironmentOptions;
 
   constructor(opts: LocalEnvironmentOptions) {
     this.id = opts.id;
     this.harnesses = opts.harnesses.map((h) => h.id);
-    this.resumable = opts.harnesses.flatMap((h) => (h.resumeSpec === undefined ? [] : [h.id]));
+    this.resumes = ({ harness: id, externalRef, transcript }) => {
+      const harness = opts.harnesses.find((h) => h.id === id);
+      if (harness?.resumeSpec === undefined || externalRef === null) return false;
+      return harness.canResume?.({ transcript }) ?? true;
+    };
     this.themes = Object.fromEntries(opts.harnesses.map((h) => [h.id, h.themes]));
     this.opts = opts;
   }
@@ -189,16 +194,28 @@ export class LocalEnvironment implements EnvironmentAdapter {
    * Refuses an agent a terminal already carries, live or dead: an agent has one terminal at a time.
    * Only a reachable runtime is read; with no server running its inventory is empty.
    */
-  async launch({ agentId, terminalId, request, options, size }: AgentLaunch): Promise<AgentRefs> {
+  async launch({
+    agentId,
+    terminalId,
+    generation,
+    resume,
+    request,
+    options,
+    size,
+  }: AgentLaunch): Promise<AgentRefs> {
     const harness = this.harness(request);
+    if (resume !== null && harness.resumeSpec === undefined) throw new NotResumable(agentId);
     if ((await this.health()).state === "reachable") {
       const carried = (await this.inventory()).some((e) => e.agentId === agentId);
       if (carried) throw new AgentTerminalExists(agentId);
     }
-    const launch = await harness.launchSpec(request, options);
+    const launch =
+      resume === null || harness.resumeSpec === undefined
+        ? await harness.launchSpec(request, options)
+        : await harness.resumeSpec(request, resume, options);
     const externalRef = this.located(launch);
     const runtime = await this.opts.runtime.create({
-      ...this.process(agentId, request, launch, 0),
+      ...this.process(agentId, request, launch, generation),
       terminalId,
       // Carried on the terminal too: a daemon that dies before recording it can still resume it.
       tags: externalRef

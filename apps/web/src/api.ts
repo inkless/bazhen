@@ -197,6 +197,20 @@ export const signalAgent = async (agentId: string, generation: number, signal: S
 export const forceCloseAgent = async (agentId: string, generation: number) =>
   AgentCommandResponse.parse(await act(`/v1/agents/${agentId}/close`, { generation, force: true }));
 
+/**
+ * Starts a lost agent again on a new terminal, in `theme`. `fresh` starts a new harness session,
+ * for an agent whose own can't be resumed; only the user's explicit choice sends it.
+ */
+export const relaunchAgent = async (
+  agentId: string,
+  generation: number,
+  theme: TuiTheme,
+  fresh: boolean,
+) =>
+  AgentCommandResponse.parse(
+    await act(`/v1/agents/${agentId}/relaunch`, { generation, theme, fresh }),
+  );
+
 export const respawnAgent = async (agentId: string, generation: number, theme: TuiTheme) =>
   AgentCommandResponse.parse(await act(`/v1/agents/${agentId}/respawn`, { generation, theme }));
 

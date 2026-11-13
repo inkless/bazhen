@@ -52,4 +52,9 @@ export interface HarnessAdapter {
     session: Omit<ExternalRef, "environmentId">,
     options: LaunchOptions,
   ): Promise<HarnessLaunch>;
+  /**
+   * Whether `resumeSpec` would find the session, by what its hooks reported of it (`transcript`,
+   * null when none did). Without it, every session with `resumeSpec` can be resumed.
+   */
+  canResume?(session: { readonly transcript: string | null }): boolean;
 }

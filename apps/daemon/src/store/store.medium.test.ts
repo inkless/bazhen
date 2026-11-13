@@ -3,8 +3,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { InvalidTransition, newId } from "@bazhen/core";
-import { age, register, settled, visit, withAgent, testView } from "../testing/fixtures.ts";
+import { InvalidTransition, newId, type ResumeEvidence } from "@bazhen/core";
+import type { ExternalRef } from "@bazhen/protocol";
+import {
+  age,
+  register,
+  resumesClaude,
+  settled,
+  visit,
+  withAgent,
+  testView,
+} from "../testing/fixtures.ts";
 import { MIGRATIONS } from "./migrations.ts";
 import { UnknownEntity } from "./projections.ts";
 import { LATEST_SCHEMA_VERSION, SchemaTooNew, Store, UnknownAgent } from "./store.ts";
@@ -250,7 +259,7 @@ describe("Store snapshot view", () => {
   const view = {
     host: (kind: string) => `${kind}-host`,
     attachCommand: (ref: { locator: Record<string, string> }) => `attach ${ref.locator.session}`,
-    resumable: ["claude-code" as const],
+    resumes: resumesClaude,
     themes: () => ["light", "dark"] as const,
     attentionActions: () => [],
   };
@@ -279,7 +288,7 @@ describe("Store snapshot view", () => {
     store.close();
   });
 
-  it("offers respawn only to an exited agent with a session, on a harness that resumes", () => {
+  it("offers respawn only to an exited agent whose session resumes, by the transcript it recorded", () => {
     const store = Store.open(dbPath());
     const environmentId = withEnvironment(store);
     const bare = launch(store, environmentId).agentId;
@@ -292,11 +301,13 @@ describe("Store snapshot view", () => {
     });
     store.append(exited(bare));
     store.append(exited(resumable));
-    const commands = (resumes: readonly "claude-code"[]) =>
-      store.snapshot({ ...view, resumable: resumes }).agents.map((a) => a.commands);
-    expect([commands(["claude-code"]), commands([])]).toEqual([
-      [["close"], ["close", "respawn"]],
+    const onTranscript = { ...view, resumes: (a: ResumeEvidence) => a.transcript !== null };
+    const commands = () => store.snapshot(onTranscript).agents.map((a) => a.commands);
+    const before = commands();
+    store.recordTranscript(resumable, "s-1", "/c/s-1.jsonl");
+    expect([before, commands()]).toEqual([
       [["close"], ["close"]],
+      [["close"], ["close", "respawn"]],
     ]);
     store.close();
   });
@@ -685,5 +696,136 @@ describe("Store usage", () => {
       expect.not.objectContaining({ usage: expect.anything() }),
       expect.not.objectContaining({ usage: expect.anything() }),
     ]);
+  });
+});
+
+const event = (agentId: string) => ({ entityId: agentId, actor: "user" });
+
+/** A launched agent whose terminal was lost, on a Claude Code session. */
+function lostAgent(store: Store) {
+  const environmentId = withEnvironment(store);
+  const { agentId, terminalId } = launch(store, environmentId);
+  const ref = { environmentId, kind: "claude-session" as const, id: "s-1" };
+  store.append({
+    ...running(agentId),
+    payload: { ...running(agentId).payload, externalRef: ref },
+  });
+  store.recordUsage(agentId, { model: "Opus" });
+  store.append({ ...event(agentId), type: "agent.lost", payload: {} });
+  return { agentId, lostTerminal: terminalId, session: ref };
+}
+
+const requested = (agentId: string, terminalId: string) => ({
+  ...event(agentId),
+  type: "agent.relaunch_requested" as const,
+  payload: { terminalId, generation: 1, fresh: false },
+});
+
+describe("Store relaunch", () => {
+  it("moves a relaunched agent to a new terminal at the next generation, leaving the lost one lost", () => {
+    const store = Store.open(dbPath());
+    const { agentId, lostTerminal } = lostAgent(store);
+    const terminalId = newId("term");
+    store.append(requested(agentId, terminalId));
+    store.append({
+      ...event(agentId),
+      type: "agent.relaunched",
+      payload: { externalRef: null, runtimeRef: { runtime: "tmux", locator: { session: "bz-2" } } },
+    });
+    const agent = store.snapshot(testView).agents[0];
+    expect([
+      agent?.state,
+      agent?.terminalId,
+      agent?.generation,
+      agent?.usage,
+      store.terminalState(lostTerminal),
+    ]).toEqual(["running", terminalId, 1, undefined, "lost"]);
+    store.close();
+  });
+
+  it("returns a rejected relaunch to the terminal it was lost on, which close still ends", () => {
+    const store = Store.open(dbPath());
+    const { agentId, lostTerminal } = lostAgent(store);
+    const terminalId = newId("term");
+    store.append(requested(agentId, terminalId));
+    store.append({
+      ...event(agentId),
+      type: "agent.relaunch_rejected",
+      payload: { reason: "unavailable" },
+    });
+    const rejected = store.snapshot(testView).agents[0];
+    store.append({ ...event(agentId), type: "agent.closing", payload: {} });
+    store.append({ ...event(agentId), type: "agent.closed", payload: {} });
+    expect([
+      rejected?.state,
+      rejected?.terminalId,
+      store.terminalState(terminalId),
+      store.terminalState(lostTerminal),
+    ]).toEqual(["lost", lostTerminal, "failed", "closed"]);
+    store.close();
+  });
+
+  it("keeps the transcript across a relaunch on the same session, and forgets it on a fresh one", () => {
+    const store = Store.open(dbPath());
+    const { agentId, session } = lostAgent(store);
+    store.recordTranscript(agentId, "s-1", "/c/s-1.jsonl");
+    const relaunch = (externalRef: ExternalRef | null) => {
+      store.append(requested(agentId, newId("term")));
+      store.append({
+        ...event(agentId),
+        type: "agent.relaunched",
+        payload: { externalRef, runtimeRef: { runtime: "tmux", locator: { session: "bz-2" } } },
+      });
+      const kept = store.agentLaunch(agentId)?.transcript;
+      store.append({ ...event(agentId), type: "agent.lost", payload: {} });
+      return kept;
+    };
+    const resumed = relaunch(session);
+    const fresh = relaunch({ ...session, id: "s-2" });
+    expect([resumed, fresh]).toEqual(["/c/s-1.jsonl", null]);
+    store.close();
+  });
+
+  it("takes a transcript only for the session the agent is bound to", () => {
+    const store = Store.open(dbPath());
+    const { agentId } = lostAgent(store);
+    const record = (sessionId: string, path: string) =>
+      store.append({
+        ...event(agentId),
+        type: "agent.transcript_recorded",
+        payload: { sessionId, path },
+      });
+    record("s-1", "/c/s-1.jsonl");
+    record("s-old", "/c/s-old.jsonl");
+    expect(store.agentLaunch(agentId)?.transcript).toBe("/c/s-1.jsonl");
+    store.close();
+  });
+
+  it("refuses a rejected relaunch for an agent never lost, which a launch's start can't take", () => {
+    const store = Store.open(dbPath());
+    const { agentId } = launch(store, withEnvironment(store));
+    expect(() =>
+      store.append({
+        ...event(agentId),
+        type: "agent.relaunch_rejected",
+        payload: { reason: "unavailable" },
+      }),
+    ).toThrow(UnknownEntity);
+    expect(store.agentTerminal({ agentId })?.state).toBe("starting");
+    store.close();
+  });
+
+  it("offers relaunch to a lost agent, saying whether it would resume its session", () => {
+    const store = Store.open(dbPath());
+    lostAgent(store);
+    const offered = (resumes: boolean) => {
+      const a = store.snapshot({ ...testView, resumes: () => resumes }).agents[0];
+      return [a?.commands, a?.resumable];
+    };
+    expect([offered(true), offered(false)]).toEqual([
+      [["close", "relaunch"], true],
+      [["close", "relaunch"], false],
+    ]);
+    store.close();
   });
 });

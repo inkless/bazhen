@@ -1,4 +1,4 @@
-import type { AgentLaunchRequest } from "./agent.ts";
+import type { AgentLaunchRequest, Resumes } from "./agent.ts";
 import type { LaunchOptions } from "./harness.ts";
 import type {
   EnvironmentKind,
@@ -58,10 +58,16 @@ export interface ShellOpen {
   readonly theme?: TuiTheme;
 }
 
-/** A launch, with every Bazhen id already minted by the daemon (foundation-design §8.1). */
+/**
+ * A launch, with every Bazhen id already minted by the daemon (foundation-design §8.1). A relaunch
+ * is one too: a new terminal at the agent's next generation, on the session `resume` names, or on
+ * a new one when it is null.
+ */
 export interface AgentLaunch {
   readonly agentId: AgentSessionId;
   readonly terminalId: TerminalId;
+  readonly generation: number;
+  readonly resume: ExternalRef | null;
   readonly request: AgentLaunchRequest;
   readonly options: LaunchOptions;
   readonly size: Size;
@@ -137,8 +143,11 @@ export interface EnvironmentAdapter {
   readonly kind: EnvironmentKind;
   /** The harnesses it can run; a launch of any other is refused before anything is recorded. */
   readonly harnesses: readonly HarnessId[];
-  /** The harnesses whose agents can be respawned on their session; a respawn of any other is refused first. */
-  readonly resumable: readonly HarnessId[];
+  /**
+   * Whether an agent's harness session can be resumed here, as a respawn or relaunch would: one
+   * it says no to is refused first, or relaunched only on a fresh session when that is asked for.
+   */
+  readonly resumes: Resumes;
   /** The themes each harness it runs can start its TUI in. */
   readonly themes: Readonly<Partial<Record<HarnessId, readonly TuiTheme[]>>>;
   /**

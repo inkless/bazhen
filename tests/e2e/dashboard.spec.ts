@@ -1,6 +1,6 @@
 import { hostname } from "node:os";
 import { expect, test, type Page } from "@playwright/test";
-import { kill, screen } from "./page.ts";
+import { givePageAgentTranscript, kill, screen } from "./page.ts";
 
 /** Launches Claude Code from the page and waits for its TUI; answers the agent's id. */
 async function launch(page: Page): Promise<string> {
@@ -96,6 +96,8 @@ test("respawns an agent whose process ended, onto a fresh terminal", async ({ pa
   const killed = await kill(page, agentId);
   expect(killed).toBe(200);
   await expect(stateOf(page, "exited")).toBeVisible({ timeout: 10_000 });
+  // It never reached a model; given a conversation, its session can be resumed.
+  await givePageAgentTranscript(page, agentId);
 
   await workspace(page).getByRole("button", { name: "Respawn" }).click();
   await expect(stateOf(page, "running")).toBeVisible({ timeout: 20_000 });

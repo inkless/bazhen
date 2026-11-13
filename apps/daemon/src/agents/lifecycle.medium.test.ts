@@ -4,9 +4,11 @@ import { describe, expect, it } from "vitest";
 import {
   LaunchFailed,
   newId,
+  NoTerminal,
   NotResumable,
   StaleIncarnation,
   TerminalUnconfirmed,
+  type AgentLaunch,
   type AgentRefs,
   type AgentRespawn,
   type RuntimeRef,
@@ -14,7 +16,7 @@ import {
 import type { ExitStatus, Signal } from "@bazhen/protocol";
 import { Mailbox } from "../mailbox/mailbox.ts";
 import { IdempotencyConflict, type Store } from "../store/store.ts";
-import { fakeEnvironment, withAgent, testView } from "../testing/fixtures.ts";
+import { fakeEnvironment, quietStartAgain, testView, withAgent } from "../testing/fixtures.ts";
 import { launchAgent, localEnvironmentId } from "./launch.ts";
 import { AgentQueue } from "./queue.ts";
 import {
@@ -48,6 +50,8 @@ async function running({
   duringRespawn = (_store: Store, _agentId: string) => {},
 } = {}) {
   const closed: AgentRefs[] = [];
+  const launches: AgentLaunch[] = [];
+  const replaced: string[] = [];
   const respawned: AgentRespawn[] = [];
   const signalled: Signal[] = [];
   let failure: Error | undefined;
@@ -55,10 +59,20 @@ async function running({
   let report: ((ref: RuntimeRef, status: ExitStatus) => void) | undefined;
   const { store, agentId, terminalId, environment } = await withAgent((s) => {
     const environmentId = localEnvironmentId(s);
-    const base = fakeEnvironment(s, async (l) => ({
-      runtime: { terminalId: l.terminalId, runtime: "tmux", locator: { generation: "0" } },
-      externalRef: session ? { environmentId, kind: "claude-session", id: "s-1" } : null,
-    }));
+    const base = fakeEnvironment(s, async (l) => {
+      if (failure !== undefined) throw failure;
+      launches.push(l);
+      const fresh = { environmentId, kind: "claude-session" as const, id: `s-${launches.length}` };
+      return {
+        runtime: {
+          terminalId: l.terminalId,
+          runtime: "tmux",
+          locator: { generation: String(l.generation) },
+        },
+        externalRef: l.resume ?? (session ? fresh : null),
+        ...(l.options.theme && { theme: l.options.theme }),
+      };
+    });
     return {
       ...base,
       respawn: async (r) => {
@@ -82,7 +96,10 @@ async function running({
       },
     };
   });
-  const lifecycle = new Lifecycle(store, environment, new AgentQueue());
+  const lifecycle = new Lifecycle(store, environment, new AgentQueue(), {
+    size: { cols: 80, rows: 24 },
+    replaced: (id) => replaced.push(id),
+  });
   lifecycle.watch();
   const exit = (generation: string, status: ExitStatus = { type: "exited", code: 1 }) =>
     report?.({ terminalId, runtime: "tmux", locator: { generation } }, status);
@@ -94,6 +111,8 @@ async function running({
     lifecycle,
     agentId,
     closed,
+    launches,
+    replaced,
     respawned,
     signalled,
     statesAtClose,
@@ -276,6 +295,13 @@ describe("agent lifecycle", () => {
     expect(agent()).toMatchObject({ id: agentId, state: "running", generation: 1, exit: null });
   });
 
+  it("settles what the exited process held before a respawn starts the next one", async () => {
+    const { lifecycle, agentId, exit, replaced } = await running();
+    exit("0");
+    await lifecycle.respawn(agentId, { idempotencyKey: "r", generation: 0 });
+    expect(replaced).toEqual([agentId]);
+  });
+
   it("respawns in the theme the respawn names, and shows the one its TUI started in", async () => {
     const { lifecycle, agentId, exit, agent, respawned } = await running();
     exit("0");
@@ -391,5 +417,119 @@ describe("agent lifecycle", () => {
     await expect(lifecycle.close(agentId, { idempotencyKey: "k", generation: 0 })).rejects.toThrow(
       IdempotencyConflict,
     );
+  });
+});
+
+/** A running agent whose terminal was then lost, as when its tmux server died. */
+async function lost(opts: Parameters<typeof running>[0] = {}) {
+  const r = await running(opts);
+  r.store.append({ type: "agent.lost", entityId: r.agentId, actor: "system", payload: {} });
+  return r;
+}
+
+describe("relaunching a lost agent", () => {
+  it("resumes its session on a new terminal at the next generation, in the theme asked for", async () => {
+    const { lifecycle, agentId, agent, launches, replaced } = await lost();
+    const before = agent()?.terminalId;
+    await lifecycle.relaunch(agentId, { idempotencyKey: "l", generation: 0, theme: "light" });
+    const after = agent();
+    expect([
+      after?.state,
+      after?.terminalId === before,
+      after?.generation,
+      after?.theme,
+      after?.externalRef?.id,
+      launches[1]?.resume?.id,
+      replaced,
+    ]).toEqual(["running", false, 1, "light", "s-1", "s-1", [agentId]]);
+  });
+
+  it("refuses an agent it can't resume unless asked for a fresh session, recording nothing", async () => {
+    const { lifecycle, agentId, agent, events, launches, replaced } = await lost({
+      session: false,
+    });
+    const before = events();
+    await expect(
+      lifecycle.relaunch(agentId, { idempotencyKey: "l", generation: 0 }),
+    ).rejects.toThrow(NotResumable);
+    expect([events(), launches.length, replaced]).toEqual([before, 1, []]);
+    await lifecycle.relaunch(agentId, { idempotencyKey: "f", generation: 0, fresh: true });
+    expect([agent()?.state, launches[1]?.resume, agent()?.externalRef]).toEqual([
+      "running",
+      null,
+      null,
+    ]);
+  });
+
+  it("starts a fresh session when asked, though the old one could be resumed", async () => {
+    const { lifecycle, store, agentId, agent, launches } = await lost();
+    await lifecycle.relaunch(agentId, { idempotencyKey: "f", generation: 0, fresh: true });
+    // The log says the old conversation was left behind, not only that a new session appeared.
+    const asked = store.events(0).find((e) => e.type === "agent.relaunch_requested")?.payload;
+    expect([launches[1]?.resume, agent()?.externalRef?.id, asked]).toEqual([
+      null,
+      "s-2",
+      expect.objectContaining({ fresh: true }),
+    ]);
+  });
+
+  it("leaves a rejected relaunch lost on its old terminal, to be relaunched again or removed", async () => {
+    const { lifecycle, agentId, agent, fail } = await lost();
+    const before = agent()?.terminalId;
+    fail(new Error("tmux unreachable"));
+    await expect(
+      lifecycle.relaunch(agentId, { idempotencyKey: "l-1", generation: 0 }),
+    ).rejects.toThrow(EnvironmentUnavailable);
+    const rejected = agent();
+    fail(undefined);
+    await lifecycle.relaunch(agentId, { idempotencyKey: "l-2", generation: 0 });
+    expect([
+      [rejected?.state, rejected?.terminalId === before, rejected?.commands],
+      [agent()?.state, agent()?.generation],
+    ]).toEqual([
+      ["lost", true, ["close", "relaunch"]],
+      ["running", 1],
+    ]);
+  });
+
+  it("leaves an agent lost when the environment starts it without a terminal", async () => {
+    const { store, agentId, environment } = await withAgent((s) =>
+      fakeEnvironment(s, async () => ({ runtime: null, externalRef: null })),
+    );
+    store.append({ type: "agent.lost", entityId: agentId, actor: "system", payload: {} });
+    const lifecycle = new Lifecycle(store, environment, new AgentQueue(), quietStartAgain);
+    await expect(
+      lifecycle.relaunch(agentId, { idempotencyKey: "l", generation: 0, fresh: true }),
+    ).rejects.toThrow(NoTerminal);
+    expect(store.snapshot(testView).agents[0]?.state).toBe("lost");
+  });
+
+  it("refuses to relaunch an agent that isn't lost, or one at a stale generation", async () => {
+    const live = await running();
+    const gone = await lost();
+    await expect(
+      live.lifecycle.relaunch(live.agentId, { idempotencyKey: "l", generation: 0 }),
+    ).rejects.toThrow(AgentStateConflict);
+    await expect(
+      gone.lifecycle.relaunch(gone.agentId, { idempotencyKey: "l", generation: 3 }),
+    ).rejects.toThrow(StaleGeneration);
+  });
+
+  it("answers a repeated relaunch with the first answer, launching once", async () => {
+    const { lifecycle, agentId, launches } = await lost();
+    const req = { idempotencyKey: "l", generation: 0 };
+    const first = await lifecycle.relaunch(agentId, req);
+    expect([await lifecycle.relaunch(agentId, req), launches.length]).toEqual([first, 2]);
+  });
+
+  it("closes a relaunched agent's new terminal, not the lost one", async () => {
+    const { lifecycle, agentId, agent, closed } = await lost();
+    await lifecycle.relaunch(agentId, { idempotencyKey: "l", generation: 0 });
+    const terminalId = agent()?.terminalId;
+    await lifecycle.close(agentId, { idempotencyKey: "c", generation: 1 });
+    expect([agent()?.state, closed.map((r) => r.runtime?.terminalId)]).toEqual([
+      "closed",
+      [terminalId],
+    ]);
   });
 });

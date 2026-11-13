@@ -4,6 +4,7 @@ import {
   offeredCommands,
   newId,
   type AgentLaunchRequest,
+  type Resumes,
   type AgentSessionId,
   type AttachmentId,
   type AttentionId,
@@ -133,8 +134,8 @@ export interface SnapshotView {
   host(kind: EnvironmentKind): string;
   /** How a human attaches to a terminal, or null when they can't. */
   attachCommand(ref: RuntimeRef): string | null;
-  /** The harnesses whose agents a respawn can resume. */
-  readonly resumable: readonly HarnessId[];
+  /** Whether an agent's harness session can be resumed, as a respawn or relaunch would. */
+  readonly resumes: Resumes;
   /** The themes a harness can start its TUI in. */
   themes(harness: HarnessId): readonly TuiTheme[];
   /** What the human can do about an open item now. */
@@ -782,9 +783,11 @@ export class Store {
   /** What an agent was launched with, and the harness session it is on, to start it again. */
   agentLaunch(
     agentId: string,
-  ): { launch: AgentLaunchRequest; externalRef: ExternalRef | null } | undefined {
+  ):
+    | { launch: AgentLaunchRequest; externalRef: ExternalRef | null; transcript: string | null }
+    | undefined {
     const row = this.prepare(
-      "SELECT harness, project, cwd, external_ref FROM agent_sessions WHERE id = ?",
+      "SELECT harness, project, cwd, external_ref, transcript FROM agent_sessions WHERE id = ?",
     ).get(agentId);
     if (row === undefined) return undefined;
     const ref = row.external_ref;
@@ -795,7 +798,26 @@ export class Store {
         cwd: String(row.cwd),
       },
       externalRef: typeof ref === "string" ? ExternalRef.parse(JSON.parse(ref)) : null,
+      transcript: typeof row.transcript === "string" ? row.transcript : null,
     };
+  }
+
+  /**
+   * Where the agent's bound session keeps its conversation, as a hook of that session reported
+   * it; a report already recorded records nothing.
+   */
+  recordTranscript(agentId: string, sessionId: string, path: string): void {
+    const row = this.prepare(
+      "SELECT external_ref, transcript FROM agent_sessions WHERE id = ?",
+    ).get(agentId);
+    const bound = typeof row?.external_ref === "string" ? JSON.parse(row.external_ref) : null;
+    if (Reflect.get(Object(bound), "id") !== sessionId || row?.transcript === path) return;
+    this.append({
+      type: "agent.transcript_recorded",
+      entityId: agentId,
+      actor: "system",
+      payload: { sessionId, path },
+    });
   }
 
   /**
@@ -878,18 +900,25 @@ export class Store {
           `SELECT a.id, a.environment_id AS environmentId, a.harness, a.project, a.cwd, a.state,
                   a.terminal_id AS terminalId, t.generation, a.external_ref AS externalRef, t.exit,
                   coalesce(t.theme, 'dark') AS theme, s.activity, a.usage, t.state AS terminalState,
-                  t.runtime, t.locator
+                  t.runtime, t.locator, a.transcript
            FROM agent_sessions a LEFT JOIN terminals t ON t.id = a.terminal_id
            LEFT JOIN activity_latest s ON s.agent_session_id = a.id
            ORDER BY a.created_event_id`,
         )
           .all()
-          .map(({ activity, usage, terminalState, runtime, locator, ...r }) => {
+          .map(({ activity, usage, terminalState, runtime, locator, transcript, ...r }) => {
             const ref = ATTACHABLE.has(String(terminalState))
               ? refFrom(r.terminalId, { runtime: runtime ?? null, locator: locator ?? null })
               : null;
             const externalRef =
-              typeof r.externalRef === "string" ? JSON.parse(r.externalRef) : null;
+              typeof r.externalRef === "string"
+                ? ExternalRef.parse(JSON.parse(r.externalRef))
+                : null;
+            const evidence = {
+              harness: HarnessId.parse(r.harness),
+              externalRef,
+              transcript: typeof transcript === "string" ? transcript : null,
+            };
             return {
               ...r,
               externalRef,
@@ -898,14 +927,14 @@ export class Store {
               ...(typeof usage === "string" ? { usage: Usage.parse(JSON.parse(usage)) } : {}),
               attachCommand: ref === null ? null : view.attachCommand(ref),
               themes: view.themes(HarnessId.parse(r.harness)),
+              resumable: view.resumes(evidence),
               commands: offeredCommands(
                 {
                   state: AgentState.parse(r.state),
                   generation: typeof r.generation === "number" ? r.generation : null,
-                  harness: HarnessId.parse(r.harness),
-                  externalRef,
+                  ...evidence,
                 },
-                view.resumable,
+                view.resumes,
               ),
             };
           }),

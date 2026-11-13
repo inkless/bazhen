@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { newId } from "@bazhen/core";
 import { CLAUDE_SESSION, PANE_PID, claudeAgent, testView } from "../testing/fixtures.ts";
 import { SessionBinding, type ProcessEntry } from "./binding.ts";
 
@@ -29,12 +30,13 @@ async function bound() {
   const binding = new SessionBinding(store, table);
   const own = (
     sessionId: string | null,
-    more: { subagent?: boolean; started?: boolean; ppid?: number } = {},
+    more: { subagent?: boolean; started?: boolean; ppid?: number; transcript?: string } = {},
   ) =>
     binding.owns(
       agentId,
       {
         sessionId,
+        transcriptPath: more.transcript ?? null,
         subagent: more.subagent ?? false,
         subagentId: more.subagent === true ? "sub-1" : null,
       },
@@ -42,7 +44,8 @@ async function bound() {
     );
   const session = () => store.snapshot(testView).agents[0]?.externalRef?.id;
   const rebinds = () => store.events(0).filter((e) => e.type === "agent.external_ref_updated");
-  return { own, session, rebinds };
+  const transcript = () => store.agentLaunch(agentId)?.transcript;
+  return { own, session, rebinds, transcript, store };
 }
 
 describe("SessionBinding", () => {
@@ -107,5 +110,78 @@ describe("SessionBinding", () => {
     await expect(broken).rejects.toThrow("the process table broke");
     expect(await next).toBe(true);
     expect(session()).toBe(LATER_SESSION);
+  });
+
+  it("records where the bound session keeps its conversation, from its own hooks only", async () => {
+    const { own, transcript } = await bound();
+    await own(CLAUDE_SESSION, { subagent: true, transcript: "/c/sub.jsonl" });
+    await own("someone-else", { transcript: "/c/other.jsonl" });
+    const fromOthers = transcript();
+    await own(CLAUDE_SESSION, { transcript: "/c/own.jsonl" });
+    expect([fromOthers, transcript()]).toEqual([null, "/c/own.jsonl"]);
+  });
+
+  it("forgets the last session's transcript on a rebind, until the new one's hooks name theirs", async () => {
+    const { own, transcript } = await bound();
+    await own(CLAUDE_SESSION, { transcript: "/c/own.jsonl" });
+    await own(NEW_SESSION, { started: true });
+    const rebound = transcript();
+    await own(NEW_SESSION, { transcript: "/c/cleared.jsonl" });
+    expect([rebound, transcript()]).toEqual([null, "/c/cleared.jsonl"]);
+  });
+
+  it("records a transcript once, though every hook names it", async () => {
+    const { own, store } = await bound();
+    await own(CLAUDE_SESSION, { transcript: "/c/own.jsonl" });
+    await own(CLAUDE_SESSION, { transcript: "/c/own.jsonl" });
+    expect(store.events(0).filter((e) => e.type === "agent.transcript_recorded")).toHaveLength(1);
+  });
+
+  it("judges a new session's SessionStart that comes before its relaunch is recorded, once it is", async () => {
+    const { store, agentId } = await claudeAgent();
+    const binding = new SessionBinding(store, table);
+    const system = { entityId: agentId, actor: "system" } as const;
+    store.append({ ...system, type: "agent.lost", payload: {} });
+    store.append({
+      ...system,
+      type: "agent.relaunch_requested",
+      payload: { terminalId: newId("term"), generation: 1, fresh: true },
+    });
+    const owned = binding.owns(
+      agentId,
+      { sessionId: NEW_SESSION, transcriptPath: null, subagent: false, subagentId: null },
+      { sessionStarted: true, ppid: 900 },
+    );
+    // Recorded only once the SessionStart is being judged, as a slow start's is.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const environmentId = String(store.agentEnvironment(agentId));
+    store.append({
+      ...system,
+      type: "agent.relaunched",
+      payload: {
+        externalRef: { environmentId, kind: "claude-session", id: NEW_SESSION },
+        runtimeRef: { runtime: "tmux", locator: { panePid: String(PANE_PID) } },
+      },
+    });
+    expect(await owned).toBe(true);
+  });
+
+  it("refuses a SessionStart whose agent stays starting past the wait, with no pane to check", async () => {
+    const { store, agentId } = await claudeAgent();
+    const binding = new SessionBinding(store, table, 10);
+    const system = { entityId: agentId, actor: "system" } as const;
+    store.append({ ...system, type: "agent.lost", payload: {} });
+    store.append({
+      ...system,
+      type: "agent.relaunch_requested",
+      payload: { terminalId: newId("term"), generation: 1, fresh: true },
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const owned = await binding.owns(
+      agentId,
+      { sessionId: NEW_SESSION, transcriptPath: null, subagent: false, subagentId: null },
+      { sessionStarted: true, ppid: 900 },
+    );
+    expect(owned).toBe(false);
   });
 });

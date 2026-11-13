@@ -305,6 +305,14 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE tasks ADD COLUMN delegated_from TEXT REFERENCES assignments (id);
     `,
   },
+  {
+    version: 20,
+    sql: `
+      -- Where the bound harness session keeps its conversation, as its hooks last said; NULL
+      -- until they say, and again whenever the agent moves to another session.
+      ALTER TABLE agent_sessions ADD COLUMN transcript TEXT;
+    `,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

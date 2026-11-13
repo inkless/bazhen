@@ -59,6 +59,27 @@ export function settle(
 ): void {
   const { agentId, state, terminalState, generation } = agent;
   const system = { entityId: agentId, actor: "system" } as const;
+  if (
+    state === "starting" &&
+    terminalState === "creating" &&
+    store.lastEventId(agentId, "agent.relaunch_requested") !== undefined
+  ) {
+    // The daemon died mid-relaunch: the tagged session is the new terminal, or the agent is lost
+    // again, never failed, as a relaunch that can't start leaves it.
+    store.append(
+      found === undefined
+        ? { ...system, type: "agent.relaunch_rejected", payload: { reason: "daemon_restart" } }
+        : {
+            ...system,
+            type: "agent.relaunched",
+            payload: {
+              externalRef: found.externalRef ?? store.agentLaunch(agentId)?.externalRef ?? null,
+              runtimeRef: runtimePayload(found.ref),
+            },
+          },
+    );
+    return;
+  }
   if (state === "starting" && terminalState === "creating") {
     // The daemon died mid-launch: the tagged session is the launch, with the harness session it
     // carries, or there is none.

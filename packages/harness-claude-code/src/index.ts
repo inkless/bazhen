@@ -17,6 +17,10 @@ export interface ClaudeCodeOptions {
    * none, leaving Claude Code's own (foundation-design §11.2).
    */
   readonly statusLine?: (cwd: string) => StatusLineChoice;
+  /** Whether a file is there, to tell a session with a conversation to resume from one without. */
+  readonly exists: (path: string) => boolean;
+  /** The time in ms, for how long a file's answer stands; the clock by default. */
+  readonly now?: () => number;
 }
 
 /** The user's status line to wrap (none: Bazhen's draws nothing), or "leave" Claude's alone. */
@@ -28,12 +32,17 @@ export interface UserStatusLine {
   readonly padding?: number;
 }
 
+/** How long a transcript's existence is taken as read before the file is looked at again. */
+const TRANSCRIPT_CHECK_MS = 2_000;
+
 /**
  * Claude Code, reached through its hooks (foundation-design §5.6). Bazhen picks the session id
  * itself, so the agent's first binding is known before any hook fires (§3.1), and passes its
  * hooks with the launch, beside the user's own, so nothing is written to the user's settings.
  */
 export class ClaudeCodeHarness implements HarnessAdapter {
+  /** Each transcript asked about lately, and whether it was there: a snapshot asks per agent. */
+  private readonly checked = new Map<string, { exists: boolean; at: number }>();
   readonly id = "claude-code";
   readonly themes = ["light", "dark"] as const;
   private readonly opts: ClaudeCodeOptions;
@@ -45,6 +54,22 @@ export class ClaudeCodeHarness implements HarnessAdapter {
   async launchSpec(request: AgentLaunchRequest, options: LaunchOptions): Promise<HarnessLaunch> {
     const id = this.opts.newSessionId();
     return this.spec(["--session-id", id], id, request, options);
+  }
+
+  /**
+   * `--resume` finds a session only once Claude Code has written its transcript, which a session
+   * killed before its first turn never has; its hooks name the file.
+   */
+  canResume({ transcript }: { readonly transcript: string | null }): boolean {
+    if (transcript === null) return false;
+    const now = (this.opts.now ?? Date.now)();
+    const known = this.checked.get(transcript);
+    if (known !== undefined && now - known.at < TRANSCRIPT_CHECK_MS) return known.exists;
+    for (const [path, { at }] of this.checked)
+      if (now - at >= TRANSCRIPT_CHECK_MS) this.checked.delete(path);
+    const exists = this.opts.exists(transcript);
+    this.checked.set(transcript, { exists, at: now });
+    return exists;
   }
 
   /** The same TUI, with its hooks, on the session the agent already had. */
@@ -314,6 +339,8 @@ function errorOf(payload: unknown): string | null {
 /** Which Claude Code session ran a hook, and whether one of its subagents did. */
 export interface HookOrigin {
   readonly sessionId: string | null;
+  /** Where that session's conversation is kept, as an absolute path, when the hook names it. */
+  readonly transcriptPath: string | null;
   /** A subagent's hook, which carries `agent_id`; compaction runs as one (§3.1). */
   readonly subagent: boolean;
   /** That subagent's `agent_id`, unique among the agent's subagents. */
@@ -323,8 +350,11 @@ export interface HookOrigin {
 export function hookOrigin(payload: unknown): HookOrigin {
   const session = field(payload, "session_id");
   const subagent = field(payload, "agent_id");
+  const transcript = field(payload, "transcript_path");
   return {
     sessionId: typeof session === "string" && session !== "" ? session : null,
+    transcriptPath:
+      typeof transcript === "string" && transcript.startsWith("/") ? transcript : null,
     subagent: typeof subagent === "string",
     subagentId: typeof subagent === "string" ? subagent : null,
   };

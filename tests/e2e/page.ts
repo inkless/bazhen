@@ -1,4 +1,5 @@
 import { expect, type Browser, type BrowserContextOptions, type Page } from "@playwright/test";
+import { giveTranscript } from "../support/transcript.ts";
 
 type Hook = "screen" | "viewportTop" | "alternate" | "background" | "foregrounds";
 
@@ -70,4 +71,24 @@ export async function openSecondView(
   await page.getByRole("list", { name: "agents" }).getByRole("button").last().click();
   await expect.poll(() => screen(page)).toContain(text);
   return page;
+}
+
+/**
+ * Gives an agent's Claude Code session a conversation to resume, as its hooks would report it.
+ * Its own TUI names a transcript it hasn't written, so only once that TUI has exited.
+ */
+export async function givePageAgentTranscript(page: Page, agentId: string): Promise<void> {
+  const { session, protocolVersion } = await page.evaluate(async (id) => {
+    const state: unknown = await (await fetch("/v1/state")).json();
+    const agents: unknown = Reflect.get(Object(state), "agents");
+    const agent: unknown = Array.isArray(agents)
+      ? agents.find((a: unknown) => Reflect.get(Object(a), "id") === id)
+      : undefined;
+    const health: unknown = await (await fetch("/v1/health")).json();
+    return {
+      session: String(Reflect.get(Object(Reflect.get(Object(agent), "externalRef")), "id")),
+      protocolVersion: String(Reflect.get(Object(health), "protocolVersion")),
+    };
+  }, agentId);
+  await giveTranscript(String(process.env["BZ_E2E_HOME"]), protocolVersion, agentId, session);
 }

@@ -3,6 +3,9 @@ import { basename } from "node:path";
 import type { HookOrigin } from "@bazhen/harness-claude-code";
 import type { Store } from "../store/store.ts";
 
+/** How long a SessionStart waits for its agent's start to be recorded before it is judged. */
+const START_WAIT_MS = 30_000;
+
 /** One process's parent and command name, as the OS reports them. */
 export interface ProcessEntry {
   readonly ppid: number;
@@ -94,9 +97,12 @@ export class SessionBinding {
   /** Per agent, the rebind checks still running, so they settle in the order they arrived. */
   private readonly rebinding = new Map<string, Promise<unknown>>();
 
-  constructor(store: Store, table: ProcessTable) {
+  private readonly startWaitMs: number;
+
+  constructor(store: Store, table: ProcessTable, startWaitMs = START_WAIT_MS) {
     this.store = store;
     this.table = table;
+    this.startWaitMs = startWaitMs;
   }
 
   /** Whether a hook ran in the agent's bound session, its subagents' included. */
@@ -106,7 +112,23 @@ export class SessionBinding {
     );
   }
 
+  /**
+   * Whether a hook is the bound session's own, rebinding on its pane's SessionStart of a new one.
+   * An owned hook that names where the session keeps its conversation records it: a respawn or
+   * relaunch resumes the session only once that file exists.
+   */
   async owns(
+    agentId: string,
+    origin: HookOrigin,
+    hook: { readonly sessionStarted: boolean; readonly ppid: number },
+  ): Promise<boolean> {
+    const owned = await this.ownsSession(agentId, origin, hook);
+    if (owned && origin.sessionId !== null && origin.transcriptPath !== null)
+      this.store.recordTranscript(agentId, origin.sessionId, origin.transcriptPath);
+    return owned;
+  }
+
+  private async ownsSession(
     agentId: string,
     origin: HookOrigin,
     hook: { readonly sessionStarted: boolean; readonly ppid: number },
@@ -129,6 +151,10 @@ export class SessionBinding {
   }
 
   private async rebindIfPane(agentId: string, sessionId: string, ppid: number): Promise<boolean> {
+    // A TUI started again can report its new session before its start is recorded, while there
+    // is no pane to check it against; the start, once recorded, may have bound it already.
+    await this.started(agentId);
+    if (sessionId === this.store.claudeBinding(agentId).sessionId) return true;
     const { panePid } = this.store.claudeBinding(agentId);
     if (panePid === null || !(await ranByPane(this.table, ppid, panePid))) {
       console.error(
@@ -138,6 +164,23 @@ export class SessionBinding {
     }
     this.rebind(agentId, sessionId);
     return true;
+  }
+
+  /** Resolves once the agent is no longer starting, or after `startWaitMs` if it stays so. */
+  private started(agentId: string): Promise<void> {
+    const starting = () => this.store.agentTerminal({ agentId })?.state === "starting";
+    if (!starting()) return Promise.resolve();
+    return new Promise((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        stop();
+        resolve();
+      };
+      const timer = setTimeout(done, this.startWaitMs);
+      const stop = this.store.onCommit(() => {
+        if (!starting()) done();
+      });
+    });
   }
 
   private rebind(agentId: string, sessionId: string): void {

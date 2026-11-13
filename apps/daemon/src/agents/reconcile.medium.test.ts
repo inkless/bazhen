@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import {
   isId,
   LaunchFailed,
+  newId,
   type EnvironmentAdapter,
   type HarnessAdapter,
   type RuntimeRef,
@@ -83,6 +84,21 @@ async function midRespawn() {
   return fixture;
 }
 
+/** An agent the daemon died relaunching: lost, then a relaunch onto a new terminal asked for. */
+async function midRelaunch() {
+  const fixture = await withAgent();
+  const { store, agentId } = fixture;
+  store.append({ type: "agent.lost", entityId: agentId, actor: "system", payload: {} });
+  const terminalId = newId("term");
+  store.append({
+    type: "agent.relaunch_requested",
+    entityId: agentId,
+    actor: "user",
+    payload: { terminalId, generation: 1, fresh: false },
+  });
+  return { ...fixture, lostTerminal: fixture.terminalId, terminalId };
+}
+
 const atGeneration = (terminalId: RuntimeRef["terminalId"], generation: string): RuntimeRef => ({
   terminalId,
   runtime: "tmux",
@@ -93,7 +109,7 @@ const agentOf = (store: Store) => store.snapshot(testView).agents[0];
 const lastReason = (
   store: Store,
   agentId: string,
-  type: "agent.failed" | "agent.respawn_rejected",
+  type: "agent.failed" | "agent.respawn_rejected" | "agent.relaunch_rejected",
 ) =>
   store
     .events(0)
@@ -227,6 +243,32 @@ describe("reconcile", () => {
     const { store } = await midRespawn();
     await reconcile(store, fakeEnvironment(store));
     expect(agentOf(store)?.state).toBe("lost");
+  });
+
+  it("settles an agent the daemon died relaunching as running on its new terminal, once it is there", async () => {
+    const { store, agentId, terminalId } = await midRelaunch();
+    const ref = atGeneration(terminalId, "1");
+    await reconcile(
+      store,
+      fakeEnvironment(store, undefined, () => [{ agentId, ref, dead: false }]),
+    );
+    const agent = agentOf(store);
+    expect([agent?.state, agent?.terminalId, agent?.generation]).toEqual([
+      "running",
+      terminalId,
+      1,
+    ]);
+  });
+
+  it("settles an agent the daemon died relaunching as lost again, never failed, when nothing started", async () => {
+    const { store, agentId, lostTerminal } = await midRelaunch();
+    await reconcile(store, fakeEnvironment(store));
+    const agent = agentOf(store);
+    expect([
+      agent?.state,
+      agent?.terminalId,
+      lastReason(store, agentId, "agent.relaunch_rejected"),
+    ]).toEqual(["lost", lostTerminal, [{ reason: "daemon_restart" }]]);
   });
 
   it("concludes nothing of an agent whose old server may still run its terminal", async () => {
