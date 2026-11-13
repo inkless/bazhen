@@ -22,7 +22,7 @@ import {
   type EventType,
   type OpenShellRequest,
 } from "@bazhen/protocol";
-import { resolveDirectory } from "../agents/cwd.ts";
+import { InvalidDirectory, resolveDirectory } from "../agents/cwd.ts";
 import {
   forceable,
   fromEnvironment as failed,
@@ -178,7 +178,7 @@ export class ShellLifecycle {
         const agent = found.linkedAgentId && store.agentTerminal({ agentId: found.linkedAgentId });
         const linkedAgentId = agent && LINKABLE.has(agent.state) ? agent.agentId : null;
         const response = await this.start(
-          { cwd: found.cwd, linkedAgentId, theme, restartOf: found.terminalId },
+          { cwd: this.restartCwd(found), linkedAgentId, theme, restartOf: found.terminalId },
           (first) => store.answered(req.idempotencyKey, request, first),
         );
         // Taken off the list only once its replacement runs: a restart that fails leaves it lost,
@@ -463,6 +463,19 @@ export class ShellLifecycle {
             `(pid ${found.runtime?.locator.serverPid ?? "unknown"}) may still be running it`,
         );
       });
+  }
+
+  /**
+   * Where a restart opens: the directory the shell was last seen in, while it is still a
+   * directory, else the one it opened in.
+   */
+  private restartCwd(found: ShellTerminal): string {
+    try {
+      return resolveDirectory(found.currentCwd, this.deps.home);
+    } catch (err) {
+      if (!(err instanceof InvalidDirectory)) throw err;
+      return found.cwd;
+    }
   }
 
   /** The agent a shell is to be linked to, and the directory it opens in: the agent's own. */

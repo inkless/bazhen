@@ -40,6 +40,15 @@ export interface ShellInventoryEntry {
   readonly linkedAgentId?: AgentSessionId;
 }
 
+/** What a live shell runs in its foreground, read from process facts (foundation-design §4.8). */
+export interface ShellForeground {
+  readonly ref: RuntimeRef;
+  /** The program's name, as `nvim`; null at the shell's prompt. */
+  readonly command: string | null;
+  /** The directory the shell is in now; null when it couldn't be read whole. */
+  readonly cwd: string | null;
+}
+
 /** A shell to open, its TerminalId minted by the daemon, which recorded it first. */
 export interface ShellOpen {
   readonly terminalId: TerminalId;
@@ -159,6 +168,11 @@ export interface EnvironmentAdapter {
    * when the shell is at its prompt. Read from process facts, never from the screen.
    */
   shellBusy(ref: RuntimeRef): Promise<string | null>;
+  /**
+   * The foregrounds of the shells `refs` names, in one read; an unreadable environment throws.
+   * Nothing is read for none.
+   */
+  shellForegrounds(refs: readonly RuntimeRef[]): Promise<ShellForeground[]>;
   /** Makes a linked shell standalone where it runs: its terminal no longer names the agent. */
   unlinkShell(ref: RuntimeRef): Promise<void>;
   /** Reports every terminal whose process has ended, as the runtime does (RuntimeAdapter.onExit). */

@@ -15,6 +15,7 @@ import {
   type Attached,
   type Foreground,
   type RuntimeAdapter,
+  type TerminalForeground,
   type RuntimeHealth,
   type RuntimeInventoryEntry,
   type RuntimeRef,
@@ -245,6 +246,22 @@ export class FakeRuntime implements RuntimeAdapter {
   /** Lines that have scrolled off the terminal's screen, oldest first, which attach returns. */
   scroll(ref: RuntimeRef, history: string): void {
     this.terminalOf(ref).history = history;
+  }
+
+  async foregrounds(terminalIds: ReadonlySet<string>): Promise<TerminalForeground[]> {
+    this.read();
+    return [...this.terminals.values()].flatMap((t) => {
+      if (t.pane.exit !== null || !terminalIds.has(t.spec.terminalId)) return [];
+      const own = t.pane.child === undefined;
+      return [
+        {
+          ref: this.refOf(t),
+          command: t.pane.child ?? t.spec.argv[0].split("/").at(-1) ?? "",
+          own,
+          cwd: t.spec.cwd,
+        },
+      ];
+    });
   }
 
   /** The terminal's process starts `command` in the foreground, or, given null, gets it back. */

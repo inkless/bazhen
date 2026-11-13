@@ -250,16 +250,44 @@ export async function readProcess(pid: number): Promise<PsReading> {
  * with no terminal reports none, as -1 or 0.
  */
 export async function terminalForeground(pid: number): Promise<number | "absent" | "unreadable"> {
+  const read = await terminalGroups([pid]);
+  if (read === "unreadable") return read;
+  return read.get(pid) ?? "absent";
+}
+
+/** The most `terminalGroups` reads back: two short numbers a line, for a few hundred terminals. */
+const GROUPS_MAX_BYTES = 64 * 1024;
+
+/**
+ * The foreground process group of each of `pids` that has a process, by pid: absent pids are
+ * left out, and a run in which none has one is an empty map. A run that fails otherwise, or
+ * prints more than a few hundred terminals could, is unreadable rather than half read.
+ */
+export async function terminalGroups(
+  pids: readonly number[],
+  maxBytes = GROUPS_MAX_BYTES,
+): Promise<Map<number, number> | "unreadable"> {
+  if (pids.length === 0) return new Map();
   try {
-    const { stdout } = await run("ps", ["-p", String(pid), "-o", "tpgid="], {
+    const args = ["-p", pids.join(","), "-o", "pid=,tpgid="];
+    const { stdout } = await run("ps", args, {
       env: PS_ENV,
       timeout: TIMEOUT_MS,
+      maxBuffer: maxBytes,
     });
-    const group = Number(stdout.trim());
-    return stdout.trim() !== "" && Number.isInteger(group) ? group : "unreadable";
+    return parseGroups(stdout);
   } catch (err) {
-    return psFailure(err);
+    return psFailure(err) === "absent" ? new Map() : "unreadable";
   }
+}
+
+/** `ps -o pid=,tpgid=` lines, by pid. */
+export function parseGroups(out: string): Map<number, number> {
+  const rows = out.split("\n").flatMap((line) => {
+    const match = /^\s*(\d+)\s+(-?\d+)\s*$/.exec(line);
+    return match === null ? [] : [[Number(match[1]), Number(match[2])] as const];
+  });
+  return new Map(rows);
 }
 
 /** A failed `ps -p`: absent only for exit 1 with nothing printed, as for a pid with no process. */

@@ -191,10 +191,15 @@ export interface ShellTerminal {
   readonly cwd: string;
   readonly linkedAgentId: string | null;
   readonly theme: TuiTheme | null;
+  /** What runs in its foreground, by name, as its events last said; null at its prompt. */
+  readonly foreground: string | null;
+  /** The directory it was last seen in, or the one it opened in. */
+  readonly currentCwd: string;
 }
 
 const SHELL_TERMINAL = `SELECT id, environment_id, state, generation, runtime, locator, cwd,
-    linked_agent_id, theme
+    linked_agent_id, theme, json_extract(foreground, '$.command') AS foreground,
+    current_cwd
   FROM terminals WHERE kind = 'shell'`;
 
 function shellFrom(row: Record<string, SQLOutputValue>): ShellTerminal | undefined {
@@ -210,6 +215,8 @@ function shellFrom(row: Record<string, SQLOutputValue>): ShellTerminal | undefin
     cwd: String(row.cwd),
     linkedAgentId: typeof row.linked_agent_id === "string" ? row.linked_agent_id : null,
     theme: row.theme === null ? null : TuiTheme.parse(row.theme),
+    foreground: typeof row.foreground === "string" ? row.foreground : null,
+    currentCwd: String(row.current_cwd ?? row.cwd),
   };
 }
 
@@ -339,13 +346,14 @@ export class Store {
    * fails, neither is recorded.
    */
   append<T extends EventType>(event: NewEvent<T>): number {
+    const ts = new Date().toISOString();
     return this.transaction(() => {
       const result = this.prepare(
         `INSERT INTO events (host_id, ts, type, entity_type, entity_id, actor, causation_id, correlation_id, payload)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         this.host,
-        new Date().toISOString(),
+        ts,
         event.type,
         EVENTS[event.type].entity,
         event.entityId,
@@ -358,7 +366,7 @@ export class Store {
       this.appended = true;
       // The projection parses the payload with its type's schema, rolling the event back if
       // it doesn't match.
-      const recorded = { id, hostId: this.host, ...event };
+      const recorded = { id, ts, hostId: this.host, ...event };
       try {
         project(this.statements, recorded);
       } catch (err) {
@@ -811,6 +819,14 @@ export class Store {
       .flatMap((row) => shellFrom(row) ?? []);
   }
 
+  /** The directory a live shell was last seen in, written only when it changed. */
+  noteShellCwd(terminalId: string, cwd: string): void {
+    this.prepare(
+      `UPDATE terminals SET current_cwd = ?
+       WHERE id = ? AND kind = 'shell' AND current_cwd IS NOT ?`,
+    ).run(cwd, terminalId, cwd);
+  }
+
   /** Agents that have closed or failed but still have shells linked to them, not yet closed. */
   agentsWithOrphanedShells(): string[] {
     const sql = `SELECT DISTINCT t.linked_agent_id AS id FROM terminals t
@@ -906,17 +922,18 @@ export class Store {
         shells: this.prepare(
           `SELECT id, environment_id AS environmentId, state, generation, cwd,
                   linked_agent_id AS linkedAgentId, name, coalesce(theme, 'dark') AS theme,
-                  runtime, locator
+                  foreground, runtime, locator
            FROM terminals WHERE kind = 'shell' AND state NOT IN ('closed', 'failed') ORDER BY created_event_id`,
         )
           .all()
-          .map(({ runtime, locator, ...r }) => {
+          .map(({ runtime, locator, foreground, ...r }) => {
             const state = TerminalState.parse(r.state);
             const ref = ATTACHABLE.has(state)
               ? refFrom(r.id, { runtime: runtime ?? null, locator: locator ?? null })
               : null;
             return {
               ...r,
+              foreground: typeof foreground === "string" ? JSON.parse(foreground) : null,
               attachCommand: ref === null ? null : view.attachCommand(ref),
               commands: shellCommands(state, r.linkedAgentId !== null),
             };

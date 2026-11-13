@@ -56,6 +56,13 @@ export interface Foreground {
   readonly own: boolean;
 }
 
+/** A live terminal's foreground, as one read of every terminal reports it. */
+export interface TerminalForeground extends Foreground {
+  readonly ref: RuntimeRef;
+  /** The directory the terminal's own process is in now; null when it couldn't be read whole. */
+  readonly cwd: string | null;
+}
+
 export interface RuntimeHealth {
   readonly state: RuntimeHealthState;
   readonly version: string | null;
@@ -180,6 +187,11 @@ export interface RuntimeAdapter {
    * whose process has exited is `ProcessState`.
    */
   foreground(ref: RuntimeRef): Promise<Foreground>;
+  /**
+   * The foregrounds of the live terminals among `terminalIds`, in one read, never a screen's. An
+   * unreadable server throws; a terminal whose processes can't be read is left out.
+   */
+  foregrounds(terminalIds: ReadonlySet<string>): Promise<TerminalForeground[]>;
   /** Drops a shell terminal's agent link from its tags, so a reconcile never links it again. */
   unlink(ref: RuntimeRef): Promise<void>;
   /** Signals the terminal's process and its process group. */

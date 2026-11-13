@@ -39,6 +39,8 @@ export class UnknownEntity extends Error {
 /** An event as written, with its id and the installation that wrote it. */
 export interface Recorded {
   readonly id: number;
+  /** When it was recorded, as an ISO timestamp. */
+  readonly ts: string;
   readonly hostId: string;
   readonly type: EventType;
   readonly entityId: string;
@@ -180,12 +182,19 @@ export function project(db: Statements, e: Recorded): void {
       EVENTS[e.type].payload.parse(e.payload);
       return moveShell(db, e, "runtime.rejected");
     case "terminal.lost":
-      return moveShell(db, e, "target.absent");
+      // Nothing runs in a shell that is gone.
+      return moveShell(db, e, "target.absent", { foreground: null });
     case "terminal.closing":
       return moveShell(db, e, "close.requested");
     case "terminal.closed":
       EVENTS[e.type].payload.parse(e.payload);
       return moveShell(db, e, "close.completed");
+    case "terminal.foreground_changed": {
+      const { command } = EVENTS[e.type].payload.parse(e.payload);
+      return setShell(db, e, {
+        foreground: command === null ? null : JSON.stringify({ command, since: e.ts }),
+      });
+    }
     case "terminal.unlinked":
       return setShell(db, e, { linked_agent_id: null });
     case "terminal.renamed":

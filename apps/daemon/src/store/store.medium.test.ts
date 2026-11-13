@@ -115,6 +115,30 @@ describe("Store", () => {
     upgraded.close();
   });
 
+  it("upgrades a schema-17 database, its shells running nothing until one is seen to", () => {
+    const path = dbPath();
+    const v17 = Store.open(path, MIGRATIONS.slice(0, 17));
+    const environmentId = withEnvironment(v17);
+    const terminalId = newId("term");
+    v17.append(shellOpened(terminalId, environmentId, null));
+    v17.close();
+    const upgraded = Store.open(path);
+    const before = upgraded.snapshot(testView).shells[0]?.foreground;
+    upgraded.append({
+      type: "terminal.foreground_changed",
+      entityId: terminalId,
+      actor: "system",
+      payload: { command: "make" },
+    });
+    upgraded.noteShellCwd(terminalId, "/work/sub");
+    expect([before, upgraded.snapshot(testView).shells[0]?.foreground?.command]).toEqual([
+      null,
+      "make",
+    ]);
+    expect(upgraded.shell(terminalId)?.currentCwd).toBe("/work/sub");
+    upgraded.close();
+  });
+
   it("moves a shell through its own events, and never an agent's terminal by them", () => {
     const store = Store.open(dbPath());
     const environmentId = withEnvironment(store);

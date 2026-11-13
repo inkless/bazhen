@@ -133,6 +133,20 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
         .toEqual({ command: "sleep", own: true });
     });
 
+    it("reads the live terminals' foregrounds it is asked for at once, with their directories", async () => {
+      const runtime = fresh();
+      const ref = await runtime.create(spec(sleeping));
+      const dead = await runtime.create(spec(exiting(0)));
+      await runtime.create(spec(sleeping));
+      await deadOf(runtime, dead);
+      const asked = new Set<string>([ref.terminalId, dead.terminalId]);
+      const read = async () =>
+        (await runtime.foregrounds(asked)).map((f) => ({ ...f, ref: f.ref.terminalId }));
+      await expect
+        .poll(read, { timeout: harness.waitMs })
+        .toEqual([{ ref: ref.terminalId, command: "sleep", own: true, cwd: harness.cwd }]);
+    });
+
     it("refuses to read the foreground of a terminal whose process has exited", async () => {
       const runtime = fresh();
       const ref = await runtime.create(spec(exiting(0)));

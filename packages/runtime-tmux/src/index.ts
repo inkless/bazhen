@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs";
 import type {
   Attached,
   Foreground,
+  TerminalForeground,
   ProcessSpec,
   PtySpawner,
   RuntimeAdapter,
@@ -20,6 +21,7 @@ import {
   PaneRefused,
   isSafeEnvEntry,
   signalPane,
+  terminalGroups,
   terminalForeground,
   type ConfiguredTmuxServer,
   type ServerIdentity,
@@ -32,6 +34,7 @@ import {
   TerminalUnconfirmed,
 } from "@bazhen/core";
 import { exitStatus, UnknownCause } from "./exit-status.ts";
+import { redacted } from "./redact.ts";
 import { shellCommand } from "./shell.ts";
 
 export { shellCommand };
@@ -57,6 +60,8 @@ const COLUMN = {
   dead: "pane_dead",
   status: "pane_dead_status",
   deadSignal: "pane_dead_signal",
+  currentCommand: "pane_current_command",
+  currentPath: "pane_current_path",
 } as const;
 type Column = keyof typeof COLUMN;
 type Row = (column: Column) => string;
@@ -64,6 +69,7 @@ type Row = (column: Column) => string;
 /** A tmux format for `keys`, and a parser that reads a printed line back by column name. */
 function columns(keys: readonly Column[]) {
   return {
+    width: keys.length,
     format: keys.map((k) => `#{${COLUMN[k]}}`).join("\t"),
     parse: (line: string): Row => {
       const values = line.split("\t");
@@ -94,6 +100,17 @@ const PANE = columns([
   "deadSignal",
 ]);
 const SERVER = columns(["serverPid", "serverStart"]);
+const FOREGROUND = columns([
+  "terminalId",
+  "kind",
+  "agentId",
+  "linkedAgentId",
+  "harnessSession",
+  ...LOCATION_KEYS,
+  "dead",
+  "currentCommand",
+  "currentPath",
+]);
 
 /**
  * The private server's configuration. With tmux's defaults, Ctrl-B would be swallowed as a prefix
@@ -122,6 +139,7 @@ set -ga terminal-overrides ",xterm-256color:smcup@:rmcup@"
 `;
 
 export class TmuxError extends Error {
+  /** The command as a log may show it: values the user's own text could be in are redacted. */
   readonly args: readonly string[];
   readonly stderr: string;
 
@@ -129,8 +147,14 @@ export class TmuxError extends Error {
     const raw: unknown =
       typeof cause === "object" && cause !== null ? Reflect.get(cause, "stderr") : "";
     const stderr = typeof raw === "string" ? raw.trim() : "";
-    super(`tmux ${args.join(" ")} failed${stderr ? `: ${stderr}` : ""}`, { cause });
-    this.args = args;
+    const shown = redacted(args);
+    const code: unknown =
+      typeof cause === "object" && cause !== null ? Reflect.get(cause, "code") : undefined;
+    // The child process's own error names the whole command line, so it is not kept as the cause.
+    super(`tmux ${shown.join(" ")} failed${stderr ? `: ${stderr}` : ""}`, {
+      cause: Object.assign(new Error(`tmux exited ${String(code)}`), { code }),
+    });
+    this.args = shown;
     this.stderr = stderr;
   }
 }
@@ -482,6 +506,42 @@ export class TmuxRuntime implements RuntimeAdapter {
     if (group === "unreadable")
       throw new Error(`can't read terminal ${ref.terminalId}'s foreground`);
     return { command, own: group === pid };
+  }
+
+  /**
+   * One `list-panes`, kept to the terminals asked for, then one `ps` for which process group holds
+   * each of them; nothing at all when none is asked for.
+   */
+  async foregrounds(terminalIds: ReadonlySet<string>): Promise<TerminalForeground[]> {
+    if (terminalIds.size === 0) return [];
+    const out = await this.tmux("list-panes", "-a", "-F", FOREGROUND.format).catch(
+      (err: unknown) => {
+        if (err instanceof TmuxError && noServer(err)) return "";
+        throw err;
+      },
+    );
+    const lines = out.split("\n");
+    const panes = lines.flatMap((line, i) => {
+      const row = FOREGROUND.parse(line);
+      const tagged = decodeTags(row);
+      const pid = Number(row("panePid"));
+      if (tagged === null || !terminalIds.has(tagged.terminalId)) return [];
+      if (row("dead") === "1" || !Number.isInteger(pid)) return [];
+      const ref = { terminalId: tagged.terminalId, runtime: this.kind, locator: this.locator(row) };
+      // The path is the last column and tmux prints it raw: a tab in it makes extra columns, and a
+      // newline carries its end onto a line of its own. Either way what was read is not the path.
+      const next = lines[i + 1] ?? "";
+      const cut =
+        line.split("\t").length !== FOREGROUND.width ||
+        (next !== "" && decodeTags(FOREGROUND.parse(next)) === null);
+      return [{ ref, pid, command: row("currentCommand"), cwd: cut ? null : row("currentPath") }];
+    });
+    const groups = await terminalGroups(panes.map((p) => p.pid));
+    if (groups === "unreadable") throw new Error("can't read the terminals' foreground groups");
+    return panes.flatMap(({ ref, pid, command, cwd }) => {
+      const group = groups.get(pid);
+      return group !== undefined && group > 0 ? [{ ref, command, own: group === pid, cwd }] : [];
+    });
   }
 
   async unlink(ref: RuntimeRef): Promise<void> {
