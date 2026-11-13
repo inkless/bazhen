@@ -8,7 +8,10 @@ import { parseArgs } from "node:util";
 import { currentInputs, resolvePaths } from "@bazhen/daemon/paths";
 import { DaemonError, DaemonUnreachable, answers, call } from "@bazhen/daemon/client";
 import {
+  DevicesResponse,
   DoctorResponse,
+  PairingCodeResponse,
+  RevokeDeviceResponse,
   EnvRefreshResponse,
   HealthResponse,
   isPlainRemote,
@@ -21,7 +24,7 @@ const NOT_RUNNING = 3;
 const STOPPED_WITHIN_MS = 5000;
 /** A daemon that holds a status call this long is wedged, and reported as not answering. */
 const CALL_MS = 5000;
-const USAGE = `usage: bazhen <start|stop|status|doctor|env refresh> [--home <dir>] [--port <port>]`;
+const USAGE = `usage: bazhen <start|stop|status|doctor|env refresh|pair|devices [revoke <id>]> [--home <dir>] [--port <port>]`;
 
 const { positionals, values } = parseArgs({
   allowPositionals: true,
@@ -157,6 +160,53 @@ async function envRefresh(): Promise<number> {
   return 0;
 }
 
+/** A name a browser chose, safe to write to a terminal: no escape or other control characters. */
+const printable = (name: string) => name.replace(/[\p{Cc}\p{Cf}]/gu, "?");
+
+/** A code for pairing a browser: shown to whoever ran this, and nowhere else. */
+async function pair(): Promise<number> {
+  const r = await call(socket, {
+    method: "POST",
+    path: "/v1/pairing/codes",
+    reply: PairingCodeResponse,
+  });
+  const expires = new Date(r.expiresAt).toLocaleTimeString();
+  console.log(`pairing code: ${r.code.slice(0, 4)}-${r.code.slice(4)}`);
+  console.log(`enter it in the browser to pair; it works once, until ${expires}`);
+  for (const origin of r.origins) console.log(`  open ${origin}`);
+  return 0;
+}
+
+async function devices(): Promise<number> {
+  if (positionals[1] === "revoke") {
+    const id = positionals[2];
+    if (id === undefined) {
+      console.error("usage: bazhen devices revoke <id>");
+      return 2;
+    }
+    await call(socket, {
+      method: "POST",
+      path: `/v1/devices/${encodeURIComponent(id)}/revoke`,
+      reply: RevokeDeviceResponse,
+    });
+    console.log(`revoked ${id}; its open views are closed`);
+    return 0;
+  }
+  if (positionals[1] !== undefined) {
+    console.error(USAGE);
+    return 2;
+  }
+  const r = await call(socket, { method: "GET", path: "/v1/devices", reply: DevicesResponse });
+  if (r.devices.length === 0) console.log("no paired devices; pair one with `bazhen pair`");
+  for (const d of r.devices) {
+    const lapsed = Date.parse(d.expiresAt) <= Date.now() ? " (expired)" : "";
+    console.log(
+      `${d.id}  ${printable(d.name)}  paired ${d.pairedAt}, last used ${d.lastSeenAt}${lapsed}`,
+    );
+  }
+  return 0;
+}
+
 async function run(verb: string): Promise<number> {
   switch (verb) {
     case "start":
@@ -167,6 +217,10 @@ async function run(verb: string): Promise<number> {
       return status();
     case "doctor":
       return doctor();
+    case "pair":
+      return pair();
+    case "devices":
+      return devices();
     case "env":
       if (positionals[1] === "refresh") return envRefresh();
       console.error(USAGE);

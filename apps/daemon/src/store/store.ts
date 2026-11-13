@@ -7,6 +7,7 @@ import {
   type AgentSessionId,
   type AttachmentId,
   type AttentionId,
+  type DeviceId,
   type EnvironmentId,
   type IdPrefix,
   type MessageId,
@@ -77,6 +78,38 @@ export interface OpenAttention {
   readonly mainAgent: boolean;
   /** The message it is about, for mail that could not be delivered. */
   readonly messageId: string | null;
+}
+
+export class UnknownDevice extends Error {
+  override readonly name = "UnknownDevice";
+  constructor(id: string) {
+    super(`no device ${id}`);
+  }
+}
+
+export interface StoredDevice {
+  readonly id: DeviceId;
+  readonly name: string;
+  readonly pairedAt: string;
+  readonly lastSeenAt: string;
+  readonly revoked: boolean;
+  /** Paired over HTTPS. */
+  readonly secure: boolean;
+}
+
+const DEVICE_COLUMNS = "id, name, paired_at, last_seen_at, revoked_at, secure";
+
+function storedDevice(row: Record<string, SQLOutputValue>): StoredDevice {
+  const id = String(row.id);
+  if (!isId("dev", id)) throw new RangeError(`not a device id: ${id}`);
+  return {
+    id,
+    name: String(row.name),
+    pairedAt: String(row.paired_at),
+    lastSeenAt: String(row.last_seen_at),
+    revoked: row.revoked_at !== null,
+    secure: row.secure === 1,
+  };
 }
 
 /** No agent the command can act on: none by that id or, given `qualifier`, none that is so. */
@@ -454,6 +487,52 @@ export class Store {
             ]
           : [],
       );
+  }
+
+  /** Records a newly paired device under the hash of its token; the token itself never comes here. */
+  pairDevice(name: string, tokenHash: string, secure: boolean, now: Date): DeviceId {
+    return this.transaction(() => {
+      const id = newId("dev");
+      const at = now.toISOString();
+      this.prepare(
+        `INSERT INTO devices (id, name, token_hash, paired_at, last_seen_at, secure)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run(id, name, tokenHash, at, at, secure ? 1 : 0);
+      this.append({ type: "device.paired", entityId: id, actor: "user", payload: { name } });
+      return id;
+    });
+  }
+
+  /** The device whose token hashes to `tokenHash`, revoked or not. */
+  deviceByToken(tokenHash: string): StoredDevice | undefined {
+    const row = this.prepare(`SELECT ${DEVICE_COLUMNS} FROM devices WHERE token_hash = ?`).get(
+      tokenHash,
+    );
+    return row === undefined ? undefined : storedDevice(row);
+  }
+
+  touchDevice(id: DeviceId, now: Date): void {
+    this.prepare("UPDATE devices SET last_seen_at = ? WHERE id = ?").run(now.toISOString(), id);
+  }
+
+  /** Every device not revoked, oldest first. */
+  devices(): StoredDevice[] {
+    return this.prepare(
+      `SELECT ${DEVICE_COLUMNS} FROM devices WHERE revoked_at IS NULL ORDER BY paired_at, id`,
+    )
+      .all()
+      .map(storedDevice);
+  }
+
+  /** Revokes a device; one already revoked is left as it is, with no second event. */
+  revokeDevice(id: string, now: Date): void {
+    this.transaction(() => {
+      const row = this.prepare("SELECT revoked_at FROM devices WHERE id = ?").get(id);
+      if (row === undefined) throw new UnknownDevice(id);
+      if (row.revoked_at !== null) return;
+      this.prepare("UPDATE devices SET revoked_at = ? WHERE id = ?").run(now.toISOString(), id);
+      this.append({ type: "device.revoked", entityId: id, actor: "user", payload: {} });
+    });
   }
 
   /** One agent's harness, if this daemon runs it. */

@@ -241,6 +241,9 @@ export const EVENTS = {
     payload: z.object({ reason: AttentionCloseReason.exclude(["answered"]) }),
   },
   /** An engaged view became the terminal's driver; the epoch rises on every grant (§4.3). */
+  /** Never the token, its hash or the code it was paired with. */
+  "device.paired": { entity: "device", payload: z.object({ name: z.string() }) },
+  "device.revoked": { entity: "device", payload: z.object({}) },
   "lease.granted": {
     entity: "terminal",
     payload: z.object({ attachmentId: Id("att"), epoch: z.number().int().positive() }),

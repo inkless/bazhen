@@ -234,6 +234,11 @@ export const ErrorResponse = z.object({
     "origin_not_allowed",
     "host_not_allowed",
     "forbidden",
+    /** No device cookie, or one revoked or expired: the browser must pair. */
+    "unpaired",
+    /** The code was wrong, expired, used or burned; which one is not said. */
+    "pairing_failed",
+    "rate_limited",
   ]),
   message: z.string(),
 });

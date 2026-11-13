@@ -20,7 +20,7 @@ client. Agents, tasks, and orchestration come later.
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | `pnpm install --frozen-lockfile` | Install exactly what the lockfile records, and the git hooks (husky)                                                |
 | `pnpm dev`                       | Start the daemon (`http://127.0.0.1:7900`) and the web client (`http://127.0.0.1:7901`); no vite keyboard shortcuts |
-| `pnpm bazhen <verb>`             | The CLI: `start`, `stop`, `status`, `doctor`                                                                        |
+| `pnpm bazhen <verb>`             | The CLI: `start`, `stop`, `status`, `doctor`, `env refresh`, `pair`, `devices [revoke <id>]`                        |
 | `pnpm check`                     | Standards check, lint, format check, type-check, small and medium tests                                             |
 | `pnpm test`                      | Small tests                                                                                                         |
 | `pnpm test:real [suite…]`        | The tests that run real tmux, in a throwaway Linux container: integration, api, e2e                                 |
