@@ -1,5 +1,11 @@
 import {
   AgentCommandResponse,
+  AssignTaskResponse,
+  CreateTaskResponse,
+  TaskCommandResponse,
+  TaskDetail,
+  type Role,
+  type TaskOutcome,
   AnswerAttentionResponse,
   DismissAttentionResponse,
   ErrorResponse,
@@ -193,3 +199,40 @@ export const forceCloseAgent = async (agentId: string, generation: number) =>
 
 export const respawnAgent = async (agentId: string, generation: number, theme: TuiTheme) =>
   AgentCommandResponse.parse(await act(`/v1/agents/${agentId}/respawn`, { generation, theme }));
+
+/** A new task for the human; assigning it in the same request mails the agent its brief. */
+export const createTask = async (
+  title: string,
+  brief: string,
+  assign?: { agentId: string; role: Role },
+) =>
+  CreateTaskResponse.parse(
+    await act("/v1/tasks", { title, brief, ...(assign === undefined ? {} : { assign }) }),
+  );
+
+/** A task in full: its brief, note, every assignment it has had, and its subtasks. */
+export async function fetchTask(taskId: string): Promise<TaskDetail> {
+  const res = await fetch(`/v1/tasks/${encodeURIComponent(taskId)}`);
+  const text = await res.text();
+  if (!res.ok) throw refusal(res.status, text);
+  return TaskDetail.parse(JSON.parse(text));
+}
+
+export const assignTask = async (taskId: string, agentId: string, role: Role) =>
+  AssignTaskResponse.parse(
+    await act(`/v1/tasks/${encodeURIComponent(taskId)}/assign`, { agentId, role }),
+  );
+
+export const unassignTask = async (taskId: string, assignmentId: string) =>
+  TaskCommandResponse.parse(
+    await act(`/v1/tasks/${encodeURIComponent(taskId)}/unassign`, { assignmentId }),
+  );
+
+/** Marks the task done or cancelled; `cascade` cancels its open subtasks with it. */
+export const finishTask = async (taskId: string, outcome: TaskOutcome, cascade: boolean) =>
+  TaskCommandResponse.parse(
+    await act(`/v1/tasks/${encodeURIComponent(taskId)}/finish`, {
+      outcome,
+      ...(cascade ? { cascade } : {}),
+    }),
+  );
