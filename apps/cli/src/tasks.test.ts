@@ -58,6 +58,24 @@ const usage = (argv: string[], context = ctx()) => {
 };
 
 describe("bazhen task verbs", () => {
+  it("delegates as a worker unless told otherwise, from the task named", () => {
+    const verb = taskVerb(
+      ["delegate", OTHER, "--title", "t", "--brief", "b", "--task", TASK],
+      ctx(AGENT),
+    );
+    expect([verb.call.path, verb.call.body]).toEqual([
+      "/v1/tasks/delegate",
+      {
+        idempotencyKey: "key",
+        agentId: OTHER,
+        role: "worker",
+        title: "t",
+        brief: "b",
+        fromTaskId: TASK,
+      },
+    ]);
+  });
+
   it("reads a brief from a file", () => {
     const verb = taskVerb(["task", "create", "--title", "t", "--brief-file", "plan.md"], ctx());
     expect(verb.call.body).toMatchObject({ brief: "brief from plan.md" });

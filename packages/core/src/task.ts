@@ -39,6 +39,12 @@ export interface ActiveAssignment {
 export interface TaskView {
   readonly state: TaskState;
   readonly ownerAgentId: AgentSessionId | null;
+  /**
+   * Whether the owner still holds what made it the owner. A subtask an agent delegated is its
+   * owner's only while the assignment it was delegated under is active, or, delegated as the
+   * parent's owner, while it still owns the parent; until it moves up, it gives no authority.
+   */
+  readonly ownerHolds: boolean;
   readonly active: readonly ActiveAssignment[];
   /** Its subtasks still open, which keep it from finishing unless they are cancelled with it. */
   readonly openSubtasks: readonly string[];
@@ -53,6 +59,10 @@ export class TaskRefused extends Error {
     this.code = code;
   }
 }
+
+/** Whether `caller` is the task's agent owner, with the authority owning it gives. */
+const owns = (view: TaskView, caller: Caller) =>
+  caller !== null && view.ownerHolds && view.ownerAgentId === caller;
 
 /** Only one agent at a time coordinates a task, and only one leads it. */
 const SINGLE: ReadonlySet<Role> = new Set<Role>(["coordinator", "lead"]);
@@ -76,7 +86,7 @@ export function grantingAssignment(view: TaskView, caller: Caller): ActiveAssign
   const held = view.active.filter((a) => a.agentId === caller && GRANTS[a.role].length > 0);
   const strongest = held.find((a) => a.role === "coordinator") ?? held[0];
   if (strongest !== undefined) return strongest;
-  if (view.ownerAgentId === caller) return null;
+  if (owns(view, caller)) return null;
   throw new TaskRefused("forbidden", "only the task's coordinator, lead or owner can assign it");
 }
 
@@ -142,7 +152,7 @@ export function checkUnassign(
   if (!view.active.some((a) => a.id === assignmentId)) {
     throw new TaskRefused("conflict", `${assignmentId} is not active`);
   }
-  if (caller === null || view.ownerAgentId === caller || granters.includes(caller)) return;
+  if (caller === null || owns(view, caller) || granters.includes(caller)) return;
   throw new TaskRefused(
     "forbidden",
     "only an agent it was granted under, the owner or the human can unassign it",
@@ -171,8 +181,7 @@ export function checkFinish(
     throw new TaskRefused("forbidden", "the human's task: only the human cancels it");
   }
   const mine = view.active.filter((a) => a.agentId === caller);
-  const runsIt =
-    caller === null || view.ownerAgentId === caller || mine.some((a) => a.role !== "worker");
+  const runsIt = caller === null || owns(view, caller) || mine.some((a) => a.role !== "worker");
   if (!runsIt) {
     const own = mine[0];
     if (own !== undefined && outcome === "done") return { kind: "assignment", assignment: own };

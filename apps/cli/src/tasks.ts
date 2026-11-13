@@ -9,19 +9,22 @@ import {
   StateSnapshot,
   TaskCommandResponse,
   TaskDetail,
+  type Agent,
   type Assignment,
   type Task,
 } from "@bazhen/protocol";
 import type { Call } from "@bazhen/daemon/client";
 
 export const TASK_USAGE = `usage:
+  bazhen agents
   bazhen task list [--all]
   bazhen task show <task>
   bazhen task create --title <title> (--brief <text> | --brief-file <path>) [--parent <task>] [--assign <agent> [--role <role>]]
   bazhen task assign <task> <agent> [--role coordinator|lead|worker]
   bazhen task unassign <task> <assignment>
   bazhen task done [<task>] [--note <text>] [--cascade]
-  bazhen task cancel <task> [--note <text>] [--cascade]`;
+  bazhen task cancel <task> [--note <text>] [--cascade]
+  bazhen delegate <agent> --title <title> (--brief <text> | --brief-file <path>) [--task <task>] [--role lead|worker]`;
 
 /** A command line that doesn't say what to do; the message says why. */
 export class Usage extends Error {}
@@ -63,6 +66,7 @@ const OPTIONS = {
   assign: { type: "string" },
   role: { type: "string" },
   note: { type: "string" },
+  task: { type: "string" },
   all: { type: "boolean" },
   cascade: { type: "boolean" },
   home: { type: "string" },
@@ -105,6 +109,22 @@ export function taskVerb(argv: readonly string[], ctx: Context): Verb {
   const post = <T>(path: string, reply: Call<T>["reply"], body: object, print: (r: T) => string) =>
     verb({ method: "POST", path, reply, body: { idempotencyKey: ctx.key(), ...body } }, print);
 
+  if (name === "agents") return verb(state, listAgents);
+  if (name === "delegate") {
+    const agentId = need(sub, "the agent to delegate to");
+    return post(
+      "/v1/tasks/delegate",
+      CreateTaskResponse,
+      {
+        agentId,
+        role: role("worker"),
+        title: need(values.title, "--title"),
+        brief: brief(),
+        ...(values.task === undefined ? {} : { fromTaskId: values.task }),
+      },
+      (r) => `delegated ${r.taskId} to ${agentId}`,
+    );
+  }
   if (name !== "task") throw new Usage(`unknown verb ${name ?? ""}`);
   switch (sub) {
     case "list":
@@ -186,6 +206,14 @@ function ownTask(ctx: Context, finish: (id: string) => Verb): Verb {
 
 const activeFor = (s: StateSnapshot, agentId: string) =>
   s.assignments.filter((a) => a.agentId === agentId && a.state === "active");
+
+export function listAgents(s: StateSnapshot): string {
+  const live = s.agents.filter((a) => a.state !== "closed" && a.state !== "failed");
+  if (live.length === 0) return "no agents";
+  return live
+    .map((a: Agent) => `${a.id}  ${a.harness}  ${a.state}  ${a.project}  ${a.cwd}`)
+    .join("\n");
+}
 
 /**
  * Open tasks, each with its assignees. Given an agent, only the tasks it is assigned or owns, and

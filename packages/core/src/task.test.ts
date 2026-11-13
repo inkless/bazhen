@@ -29,7 +29,7 @@ const open = (
   active: ActiveAssignment[],
   ownerAgentId: AgentSessionId | null = null,
   openSubtasks: string[] = [],
-) => ({ state: "open", ownerAgentId, active, openSubtasks }) satisfies TaskView;
+) => ({ state: "open", ownerAgentId, ownerHolds: true, active, openSubtasks }) satisfies TaskView;
 
 const refusal = (fn: () => unknown) => {
   try {
@@ -78,6 +78,14 @@ describe("who may assign", () => {
     );
   });
 
+  it("gives an owner that no longer holds its subtask's authority no say over it", () => {
+    const view = { ...open([], A), ownerHolds: false };
+    expect([
+      refusal(() => checkGrant(view, A, { agentId: B, role: "worker" })),
+      refusal(() => checkFinish(view, A, "cancelled", false)),
+    ]).toEqual(["forbidden", "forbidden"]);
+  });
+
   it("refuses a second lead while one is active, but takes any number of workers", () => {
     const view = open([asgn(A, "lead"), asgn(B, "worker")]);
     expect(refusal(() => checkGrant(view, null, { agentId: C, role: "lead" }))).toBe("conflict");
@@ -85,7 +93,13 @@ describe("who may assign", () => {
   });
 
   it("refuses to assign anyone to a finished task", () => {
-    const view: TaskView = { state: "done", ownerAgentId: null, active: [], openSubtasks: [] };
+    const view: TaskView = {
+      state: "done",
+      ownerAgentId: null,
+      ownerHolds: true,
+      active: [],
+      openSubtasks: [],
+    };
     expect(refusal(() => checkGrant(view, null, { agentId: A, role: "worker" }))).toBe("conflict");
   });
 });

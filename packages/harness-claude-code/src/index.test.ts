@@ -37,6 +37,9 @@ const statusLineOf = async (choice: StatusLineChoice) => {
   return Reflect.get(Object(settings), "statusLine");
 };
 
+/** The text a launch adds to Claude Code's system prompt. */
+const flag = (argv: readonly string[]) => argv[argv.indexOf("--append-system-prompt") + 1];
+
 describe("Claude Code harness", () => {
   it("launches with a session id it chose, and reports that session as the agent's", async () => {
     const launch = await claude(() => "6f1c0b2e-0000-4000-8000-000000000001").launchSpec(
@@ -66,6 +69,17 @@ describe("Claude Code harness", () => {
       { kind: "claude-session", id: "s-7" },
     ]);
     expect(resumed.argv.slice(3)).toEqual(launched.argv.slice(3));
+  });
+
+  it("adds Bazhen's instructions to Claude Code's system prompt, on a resume too", async () => {
+    const harness = new ClaudeCodeHarness({ newSessionId: () => "s", hookCommand: "bazhen-hook" });
+    const options = { instructions: "Use bazhen task done." };
+    const launched = await harness.launchSpec(request, options);
+    const resumed = await harness.resumeSpec(request, { kind: "claude-session", id: "s" }, options);
+    expect([flag(launched.argv), flag(resumed.argv)]).toEqual([
+      "Use bazhen task done.",
+      "Use bazhen task done.",
+    ]);
   });
 
   it("gives every launch its own session", async () => {

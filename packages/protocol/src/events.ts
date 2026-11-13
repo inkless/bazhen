@@ -12,6 +12,11 @@ const taskCreated = z.object({
   brief: TaskBrief,
   ownerAgentId: Id("agent").nullable(),
   parentTaskId: Id("task").nullable(),
+  /**
+   * The assignment an agent delegated it under, whose ending moves the task up to the parent's
+   * owner; null when delegated as the parent's owner. Absent before protocol 1.25.
+   */
+  delegatedFrom: Id("asgn").nullable().optional(),
 });
 const taskFinished = z.object({ outcome: TaskOutcome, note: z.string().nullable() });
 
@@ -267,6 +272,17 @@ export const EVENTS = {
     entity: "task",
     payload: taskFinished,
     streamed: taskFinished.omit({ note: true }),
+  },
+  /**
+   * The task moved up to its parent's owner: what made its owner the owner ended, as the
+   * assignment it was delegated under (protocol 1.25).
+   */
+  "task.owner_changed": {
+    entity: "task",
+    payload: z.object({
+      ownerAgentId: Id("agent").nullable(),
+      delegatedFrom: Id("asgn").nullable(),
+    }),
   },
   "assignment.granted": {
     entity: "assignment",

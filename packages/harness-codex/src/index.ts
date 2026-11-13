@@ -14,10 +14,18 @@ const ThreadStarted = z.object({ thread: z.object({ id: z.string() }) });
  * The first item of every agent's thread. A thread with no history can't be resumed, and a
  * developer message makes one without a model call (foundation-design §5.8).
  */
-const BINDING = {
-  type: "message",
-  role: "developer",
-  content: [{ type: "input_text", text: "This thread belongs to an agent that Bazhen runs." }],
+const binding = (instructions: string | undefined) => {
+  const text = "This thread belongs to an agent that Bazhen runs.";
+  return {
+    type: "message",
+    role: "developer",
+    content: [
+      {
+        type: "input_text",
+        text: instructions === undefined ? text : `${text}\n\n${instructions}`,
+      },
+    ],
+  };
 };
 
 /**
@@ -57,7 +65,9 @@ export class CodexHarness implements HarnessAdapter {
   ): Promise<HarnessLaunch> {
     const started = await this.channel.request("thread/start", { cwd: request.cwd });
     const threadId = ThreadStarted.parse(started).thread.id;
-    await this.channel.request("thread/inject_items", { threadId, items: [BINDING] });
+    // The thread keeps the item, so the instructions outlive a resume of it, as a launch flag would not.
+    const items = [binding(options.instructions)];
+    await this.channel.request("thread/inject_items", { threadId, items });
     return this.tui(threadId, options);
   }
 

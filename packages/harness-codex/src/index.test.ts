@@ -52,6 +52,22 @@ describe("Codex harness", () => {
     ]);
   });
 
+  it("tells the agent's thread Bazhen's instructions once, in its first item, and not again on a resume", async () => {
+    const { port, requests } = channel();
+    const harness = new CodexHarness(port, REMOTE);
+    const options = { instructions: "Use bazhen task done." };
+    await harness.launchSpec({ cwd: "/work" }, options);
+    await harness.resumeSpec(
+      { harness: "codex", project: "p", cwd: "/work" },
+      { kind: "codex-thread", id: "thr-1" },
+      options,
+    );
+    const told = requests.filter(([, params]) =>
+      JSON.stringify(params).includes("Use bazhen task done."),
+    );
+    expect(told.map(([method]) => method)).toEqual(["thread/inject_items"]);
+  });
+
   it("launches the TUI on that thread, on the same server, and binds the agent to it", async () => {
     const launch = await new CodexHarness(channel().port, REMOTE).launchSpec({ cwd: "/work" }, {});
     expect(launch).toMatchObject({

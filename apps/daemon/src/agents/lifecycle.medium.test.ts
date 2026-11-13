@@ -1,4 +1,5 @@
 import { tmpdir } from "node:os";
+import { FLEET_INSTRUCTIONS } from "../tasks/mail.ts";
 import { describe, expect, it } from "vitest";
 import {
   LaunchFailed,
@@ -279,7 +280,10 @@ describe("agent lifecycle", () => {
     const { lifecycle, agentId, exit, agent, respawned } = await running();
     exit("0");
     await lifecycle.respawn(agentId, { idempotencyKey: "r", generation: 0, theme: "light" });
-    expect([respawned[0]?.options, agent()?.theme]).toEqual([{ theme: "light" }, "light"]);
+    expect([respawned[0]?.options, agent()?.theme]).toEqual([
+      { theme: "light", instructions: FLEET_INSTRUCTIONS },
+      "light",
+    ]);
     exit("1");
     await lifecycle.respawn(agentId, { idempotencyKey: "r2", generation: 1 });
     expect(agent()?.theme).toBe("dark");

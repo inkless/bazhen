@@ -17,6 +17,7 @@ import {
 } from "@bazhen/protocol";
 import { z } from "zod";
 import { IdempotencyConflict, runtimePayload, type Store } from "../store/store.ts";
+import { FLEET_INSTRUCTIONS } from "../tasks/mail.ts";
 import { resolveDirectory } from "./cwd.ts";
 import type { AgentQueue } from "./queue.ts";
 
@@ -86,8 +87,10 @@ function replay(
 }
 
 /** The options a request names; one without a theme leaves it to the harness. Never stored. */
-export const launchOptions = (theme: TuiTheme | undefined): LaunchOptions =>
-  theme === undefined ? {} : { theme };
+export const launchOptions = (theme: TuiTheme | undefined): LaunchOptions => ({
+  instructions: FLEET_INSTRUCTIONS,
+  ...(theme === undefined ? {} : { theme }),
+});
 
 export async function launchAgent(
   { store, environment, size, home, queue }: LaunchDeps,
