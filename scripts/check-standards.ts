@@ -5,6 +5,7 @@ import { existsSync, readdirSync, readFileSync, readlinkSync, statSync } from "n
 import { stripTypeScriptTypes } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { cssDeclarations } from "../apps/web/src/ui/token-sheet.ts";
 import { isMain } from "./is-main.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -41,16 +42,19 @@ const COVERED_ELSEWHERE: Record<string, string> = {
   "apps/web/src/ui/swatches.tsx": "tests/e2e/swatches.spec.ts",
 };
 
-function sourceFiles(dir: string): string[] {
+/** Every file under `dir`, recursively, as repository-relative paths. */
+function filesUnder(dir: string): string[] {
   if (!existsSync(join(root, dir))) return [];
   return readdirSync(join(root, dir)).flatMap((name) => {
     const rel = `${dir}/${name}`;
-    if (statSync(join(root, rel)).isDirectory()) return sourceFiles(rel);
-    return /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name) && !name.endsWith(".d.ts")
-      ? [rel]
-      : [];
+    return statSync(join(root, rel)).isDirectory() ? filesUnder(rel) : [rel];
   });
 }
+
+const sourceFiles = (dir: string) =>
+  filesUnder(dir).filter(
+    (f) => /\.tsx?$/.test(f) && !/\.test\.tsx?$/.test(f) && !f.endsWith(".d.ts"),
+  );
 
 /** Removes comments, leaving string and template literals intact. */
 function stripComments(js: string): string {
@@ -122,7 +126,7 @@ function checkSiblingTests(): void {
 const PALETTE_CSS = "apps/web/src/ui/palette.css";
 const TOKENS_CSS = "apps/web/src/ui/tokens.css";
 const COLOUR_FUNCTION = /\b(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color|color-mix|light-dark)\(/i;
-const HEX_COLOUR = /#[0-9a-f]{3,8}\b/i;
+const HEX_COLOUR = /(#|%23)[0-9a-f]{3,8}\b/i;
 const NAMED_COLOURS = new Set(
   (
     "aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue " +
@@ -145,58 +149,105 @@ const NAMED_COLOURS = new Set(
   ).split(" "),
 );
 
-/** The custom properties a stylesheet declares. */
+// Forced colours (Windows High Contrast) is the one place a system colour belongs.
+const SYSTEM_COLOURS = new Set(
+  (
+    "accentcolor accentcolortext activetext buttonborder buttonface buttontext canvas canvastext " +
+    "field fieldtext graytext highlight highlighttext linktext mark marktext selecteditem " +
+    "selecteditemtext visitedtext"
+  ).split(" "),
+);
+const FORCED_COLOURS = "@media (forced-colors: active)";
+const BORDER_STYLE = /\b(solid|dashed|dotted|double|groove|ridge|inset|outset)\b/;
+/** The token files, and the code that reads them and draws every token from their text. */
+const TOKEN_FILES = new Set([
+  PALETTE_CSS,
+  TOKENS_CSS,
+  "apps/web/src/ui/token-sheet.ts",
+  "apps/web/src/ui/swatches.tsx",
+]);
+
+/** The custom properties a stylesheet declares, wherever it declares them. */
 export function declaredTokens(css: string): Set<string> {
-  return new Set([...css.matchAll(/^\s*--([\w-]+):/gm)].map(([, name = ""]) => name));
+  return new Set(
+    cssDeclarations(css)
+      .filter((d) => d.property.startsWith("--"))
+      .map((d) => d.property.slice(2)),
+  );
+}
+
+const wordsOf = (value: string) => value.toLowerCase().split(/[^a-z-]+/);
+
+/** A var() naming anything but a declared token, a computed name included. */
+const unknownVar = (value: string, tokens: Set<string>) =>
+  [...value.matchAll(/var\(\s*--([^\s,)]*)/g)].some(([, n = ""]) => !tokens.has(n));
+
+/** Whether a CSS value sets a colour of its own rather than naming a semantic token. */
+function offTokenValue(value: string, tokens: Set<string>, forcedColours: boolean): boolean {
+  const w = wordsOf(value);
+  return (
+    HEX_COLOUR.test(value) ||
+    COLOUR_FUNCTION.test(value) ||
+    w.some((x) => NAMED_COLOURS.has(x)) ||
+    (!forcedColours && w.some((x) => SYSTEM_COLOURS.has(x))) ||
+    unknownVar(value, tokens)
+  );
+}
+
+/** Whether a string literal in a script or markup is, or carries, a colour of its own. */
+function offTokenLiteral(literal: string, tokens: Set<string>): boolean {
+  const w = wordsOf(literal.trim());
+  const colourWord = w.some((x) => NAMED_COLOURS.has(x) || SYSTEM_COLOURS.has(x));
+  return (
+    HEX_COLOUR.test(literal) ||
+    COLOUR_FUNCTION.test(literal) ||
+    unknownVar(literal, tokens) ||
+    (colourWord && (w.length === 1 || BORDER_STYLE.test(literal)))
+  );
 }
 
 /**
- * Lines of `source` that go around the semantic tokens: a hex colour, a colour function, a named
- * colour in a CSS declaration, or a `var()` naming anything but one of `tokens`.
+ * Lines of a file in apps/web that go around the semantic tokens: a hex colour (`%23` in a data
+ * URI too), a colour function, a named colour, a system colour outside forced colours, or a
+ * `var()` naming anything but one of `tokens`. CSS is read declaration by declaration; scripts and
+ * markup by their string literals and attribute values, so prose and comments don't count.
  */
 export function offTokenLines(
   source: string,
-  css: boolean,
+  kind: "css" | "script",
   tokens: Set<string>,
 ): { line: number; text: string }[] {
-  const found: { line: number; text: string }[] = [];
-  const lines = (
-    css ? source.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, " ")) : source
-  ).split("\n");
-  lines.forEach((text, i) => {
-    const declaration = css && !text.trimEnd().endsWith("{");
-    const value = !css ? text : declaration ? text.slice(text.indexOf(":") + 1) : "";
-    const named =
-      declaration && value.split(/[^a-z-]+/i).some((w) => NAMED_COLOURS.has(w.toLowerCase()));
-    const unknown = [...value.matchAll(/var\(--([\w-]+)/g)].some(([, n = ""]) => !tokens.has(n));
-    if (HEX_COLOUR.test(value) || COLOUR_FUNCTION.test(value) || named || unknown) {
-      found.push({ line: i + 1, text: text.trim() });
-    }
-  });
-  return found;
+  const lines = source.split("\n");
+  if (kind === "css") {
+    return cssDeclarations(source)
+      .filter((d) => offTokenValue(d.value, tokens, d.within.includes(FORCED_COLOURS)))
+      .map((d) => ({ line: d.line, text: `${d.property}: ${d.value}` }));
+  }
+  return lines.flatMap((text, i) =>
+    [...text.matchAll(/(["'`])((?:\\.|(?!\1)[^\\])*)\1/g)].some(([, , literal = ""]) =>
+      offTokenLiteral(literal, tokens),
+    )
+      ? [{ line: i + 1, text: text.trim() }]
+      : [],
+  );
 }
 
 function checkWebTokens(): void {
   const tokens = declaredTokens(readFileSync(join(root, TOKENS_CSS), "utf8"));
-  for (const file of filesUnder("apps/web/src", /\.(css|tsx?)$/)) {
-    if (file === PALETTE_CSS || file === TOKENS_CSS || /\.test\.tsx?$/.test(file)) continue;
+  const files = filesUnder("apps/web")
+    .filter((f) => !/\/(node_modules|dist|dist-types)\//.test(f))
+    .filter((f) => /\.(css|tsx?|html|svg)$/.test(f) && !/\.test\.tsx?$/.test(f));
+  for (const file of files) {
+    if (TOKEN_FILES.has(file)) continue;
     const source = readFileSync(join(root, file), "utf8");
-    for (const { line, text } of offTokenLines(source, file.endsWith(".css"), tokens)) {
+    const kind = file.endsWith(".css") ? "css" : "script";
+    for (const { line, text } of offTokenLines(source, kind, tokens)) {
       failures.push(
         `${file}:${line}: \`${text}\` goes around the semantic tokens; use one ${TOKENS_CSS} ` +
           "defines, adding it there (mapped onto palette.css) if none fits (docs/standards/ui.md).",
       );
     }
   }
-}
-
-function filesUnder(dir: string, name: RegExp): string[] {
-  if (!existsSync(join(root, dir))) return [];
-  return readdirSync(join(root, dir)).flatMap((entry) => {
-    const rel = `${dir}/${entry}`;
-    if (statSync(join(root, rel)).isDirectory()) return filesUnder(rel, name);
-    return name.test(entry) ? [rel] : [];
-  });
 }
 
 // Agent context is read on every session, so it stays short, and every path and command it names

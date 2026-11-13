@@ -23,7 +23,7 @@ Two tiers, both CSS custom properties in `apps/web/src/ui/`:
   nothing else.
 
 Spacing, radius, sizes, type and motion have one tier, also in `tokens.css`: the scale is the
-token (`--space-1` to `--space-6` on 4px steps, `--font-size-sm`, `--duration-fast`). A category
+token (`--space-1` to `--space-5` on 4px steps, `--font-size-sm`, `--duration-fast`). A category
 gets a second tier when a theme first needs to remap it. Layout widths and breakpoints stay
 literal; they belong to one screen's layout, not to the look.
 

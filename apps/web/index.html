@@ -4,6 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Bazhen</title>
+    <!-- Before the first paint, so a device's pinned theme never flashes the system's. Storage
+         can throw (site data blocked), and then the system's theme stands. -->
+    <script>
+      try {
+        const theme = localStorage.getItem("bazhen.theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

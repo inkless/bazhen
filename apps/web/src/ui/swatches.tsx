@@ -38,9 +38,9 @@ function Swatches() {
                     <span
                       style={{
                         display: "inline-block",
-                        width: "var(--space-6)",
-                        height: "var(--space-5)",
-                        border: "1px solid var(--color-border)",
+                        width: "var(--space-5)",
+                        height: "var(--space-4)",
+                        border: "1px solid var(--color-border-strong)",
                         background: `var(--${name})`,
                       }}
                     />

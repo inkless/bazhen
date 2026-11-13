@@ -14,8 +14,13 @@ body {
 
 button,
 input {
-  min-height: var(--size-hit-min);
   font: inherit;
+}
+
+/* A link-styled button inside a sentence keeps the line's height (WCAG 2.5.8's inline exception). */
+button:not(.link),
+input {
+  min-height: var(--size-hit-min);
 }
 
 input {
@@ -31,18 +36,9 @@ pre {
   font-family: var(--font-family-mono);
 }
 
-/* Forced colours drop backgrounds, so anything a background marks gets a border or outline. */
+/* Forced colours drop backgrounds, so anything a background alone marks needs a border too. */
 @media (forced-colors: active) {
   :focus-visible {
     outline-color: Highlight;
-  }
-
-  .state,
-  .needs-you {
-    border: 1px solid CanvasText;
-  }
-
-  .fleet .agent[aria-current="true"] {
-    outline: 2px solid Highlight;
   }
 }
