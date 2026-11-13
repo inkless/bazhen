@@ -2,7 +2,8 @@ import { execFileSync, type ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
 import { join } from "node:path";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { performance } from "node:perf_hooks";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { newId } from "@bazhen/core";
 import { signalGroup, spawnGroup } from "@bazhen/host-guard";
 import { HOOK_REPLY_TYPE, HookRequest, frameHookReply, isCompatible } from "@bazhen/protocol";
@@ -17,11 +18,26 @@ let server: Server | undefined;
 let dir = "";
 /** Clients still running when a case ends, which only a case that timed out leaves. */
 const running = new Set<ChildProcess>();
+/** Connections a stub holds open, which closing the server leaves be. */
+const held = new Set<Socket>();
+/** What each case's client and stub did, and when, for a case that timed out to report. */
+let trace: string[] = [];
+let caseStart = performance.now();
+const stage = (what: string) =>
+  trace.push(`${Math.round(performance.now() - caseStart)} ms: ${what}`);
+beforeEach(() => {
+  trace = [];
+  caseStart = performance.now();
+});
 afterEach(() => {
+  const hung = running.size > 0;
   for (const child of running) signalGroup(child, "SIGKILL");
   running.clear();
+  for (const conn of held) conn.destroy();
+  held.clear();
   server?.close();
   rmSync(dir, { recursive: true, force: true });
+  if (hung) throw new Error(`a client was still running; it got as far as:\n${trace.join("\n")}`);
 });
 
 /** Under /tmp: a socket path must fit in about 104 bytes. */
@@ -72,19 +88,33 @@ function framed(reply: Parameters<typeof frameHookReply>[0]) {
   return raw(headers, Buffer.from(body));
 }
 
+/** An answer written without closing the connection, as a daemon that keeps it alive might. */
+interface Held {
+  readonly held: Buffer;
+}
+
 /**
- * A socket answering each request with the next of `answers`: bytes to write, or null to drop
- * the connection after reading the request. Records every request it reads.
+ * A socket answering each request with the next of `answers`: bytes to write and close, bytes to
+ * write holding the connection open, or null to drop the connection after reading the request.
+ * Records every request it reads.
  */
-function listen(socket: string, answers: (Buffer | null)[]) {
+function listen(socket: string, answers: (Buffer | Held | null)[]) {
   const seen: Exchange[] = [];
   server = createServer((conn) => {
     void readRequest(conn).then((request) => {
       seen.push(request);
+      stage(`stub read ${request.path}`);
       const answer =
         request.path === "/v1/hooks/ack" ? raw({ "content-length": "2" }, "{}") : answers.shift();
-      if (answer === null || answer === undefined) conn.destroy();
-      else conn.end(answer);
+      if (answer === null || answer === undefined) {
+        conn.destroy();
+        stage("stub dropped the connection");
+      } else if (Buffer.isBuffer(answer)) {
+        conn.end(answer, () => stage("stub answered and closed"));
+      } else {
+        held.add(conn);
+        conn.write(answer.held, () => stage("stub answered, holding the connection open"));
+      }
     });
   });
   server.listen(socket);
@@ -98,6 +128,7 @@ function listen(socket: string, answers: (Buffer | null)[]) {
 function run(client: string, event: string, env: Record<string, string>, stdin = "{}") {
   const child = spawnGroup(client, [event], { env: { PATH: process.env["PATH"] ?? "", ...env } });
   running.add(child);
+  stage(`spawned the client for ${event}`);
   const { stdin: input, stdout: out, stderr: err } = child;
   if (input === null || out === null || err === null) throw new Error("spawned without pipes");
   let stdout = "";
@@ -110,8 +141,10 @@ function run(client: string, event: string, env: Record<string, string>, stdin =
       if (e.code !== "EPIPE") reject(e);
     });
     input.end(stdin);
-    child.on("exit", (code) => {
+    // On close, not exit: a child can exit before its output has all been read.
+    child.on("close", (code) => {
       running.delete(child);
+      stage(`client exited ${code}`);
       resolve({ code, stdout, stderr });
     });
   });
@@ -237,6 +270,17 @@ describe.each(clients)("hook client (%s)", { timeout: 30_000 }, (_kind, client) 
     expect(seen).toHaveLength(1);
   });
 
+  it("prints a reply the daemon keeps the connection open after, without waiting for the close", async () => {
+    const socket = socketPath();
+    const { ready } = listen(socket, [{ held: framed(MAIL) }]);
+    await ready;
+    const result = await run(client, "PermissionRequest", {
+      BAZHEN_AGENT_ID: newId("agent"),
+      BAZHEN_SOCKET: socket,
+    });
+    expect(result).toEqual({ code: 2, stdout: "", stderr: "mail" });
+  });
+
   const good = {
     "content-type": HOOK_REPLY_TYPE,
     "content-length": "4",
@@ -296,5 +340,21 @@ describe.each(clients)("hook client (%s)", { timeout: 30_000 }, (_kind, client) 
         BAZHEN_SOCKET: socket,
       }),
     ).toEqual(QUIET);
+  });
+});
+
+// The script's curl has no timeout that starts at a reply's first byte, only one over the whole
+// exchange, which the waiter needs to span hours; so this bound is the binary's alone.
+describe("hook client (binary), on a stalled reply", { timeout: 30_000 }, () => {
+  it("fails open on a reply that stops short of its length and never closes", async () => {
+    const socket = socketPath();
+    const whole = framed(MAIL);
+    const { ready } = listen(socket, [{ held: whole.subarray(0, whole.length - 1) }]);
+    await ready;
+    const result = await run(hookClient(), "PermissionRequest", {
+      BAZHEN_AGENT_ID: newId("agent"),
+      BAZHEN_SOCKET: socket,
+    });
+    expect(result).toEqual(QUIET);
   });
 });
