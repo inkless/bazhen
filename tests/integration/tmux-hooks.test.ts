@@ -44,11 +44,11 @@ const titler = (): TerminalSpec => ({
   generation: 0,
 });
 
-/** A hook client that logs the pane it was run for, then does `then`. */
-function client(name: string, then = ""): { path: string; log: string } {
+/** A hook client that does `first`, then logs the pane it was run for, then does `last`. */
+function client(name: string, first = "", last = ""): { path: string; log: string } {
   const path = join(dir, `${name}.sh`);
   const log = join(dir, `${name}.log`);
-  writeFileSync(path, `#!/bin/sh\necho "$1" >> '${log}'\n${then}`, { mode: 0o755 });
+  writeFileSync(path, `#!/bin/sh\n${first}echo "$1" >> '${log}'\n${last}`, { mode: 0o755 });
   return { path, log };
 }
 
@@ -90,6 +90,14 @@ describe("the pane-title hook on a server an older daemon started", () => {
     ]);
   });
 
+  it("is removed by a terminal a daemon with no pane-title client creates", async () => {
+    const server = newServer();
+    const before = client("removed-by-create");
+    await runtimeOn(server, [before.path]).create(titler());
+    await runtimeOn(server).create(titler());
+    expect(tmuxOut(server, "show-hooks", "-gw")).not.toContain(before.path);
+  });
+
   it("is not applied, and no server started, when none runs", async () => {
     const server = newServer();
     await runtimeOn(server).applyServerSettings();
@@ -100,12 +108,13 @@ describe("the pane-title hook on a server an older daemon started", () => {
 describe("a pane-title hook that fails", () => {
   it("leaves the pane out of view mode, whatever it printed or returned", async () => {
     const server = newServer();
-    const failing = client("failing", "echo printed\necho complained >&2\nexit 127\n");
+    const failing = client("failing", "echo printed\necho complained >&2\n", "exit 127\n");
     const ref = await runtimeOn(server, [failing.path]).create(titler());
     const pane = String(ref.locator.paneId);
     title(server, pane, "three");
     await expect.poll(() => logged(failing.log), { timeout: 5_000 }).toBe(`${pane}\n`);
-    // The hook's job has exited by the time this one, queued after it, has run.
+    // The hook has printed by now and only exits after; a job of its own gives tmux time to
+    // finish the hook's.
     tmuxOut(server, "run-shell", "true");
     expect(inMode(server, pane)).toBe("0");
   });
@@ -132,7 +141,10 @@ describe("a pane in view mode", () => {
     const runtime = runtimeOn(server);
     const ref = await runtime.create(titler());
     const pane = String(ref.locator.paneId);
+    // tmux takes vi keys from an EDITOR naming vi, so the table in use is fixed, and both emptied.
+    tmuxOut(server, "set-option", "-g", "mode-keys", "emacs");
     tmuxOut(server, "unbind-key", "-a", "-T", "copy-mode");
+    tmuxOut(server, "unbind-key", "-a", "-T", "copy-mode-vi");
     await runtime.applyServerSettings();
     tmuxOut(server, "run-shell", "-t", pane, "echo shown");
     tmuxOut(server, "send-keys", "-t", pane, "q");

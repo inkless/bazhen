@@ -4,7 +4,7 @@ export class UnsafeRuntimeDir extends Error {
   readonly path: string;
 
   constructor(path: string, reason: string, options?: ErrorOptions) {
-    super(`refusing to use ${path} as the runtime directory: ${reason}`, options);
+    super(`refusing to use ${path} as a private directory: ${reason}`, options);
     this.path = path;
   }
 }

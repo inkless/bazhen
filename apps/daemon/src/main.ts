@@ -137,7 +137,7 @@ mailbox.requeueInFlight();
 approvals.closeAbandoned();
 const hookRunner = hookClient();
 if (hookRunner === HOOK_SCRIPT) console.warn(`bazhen-hook is not built; hooks use ${HOOK_SCRIPT}`);
-const hookPath = stableHookClient(paths.state, hookRunner);
+const hookPath = stableHookClient(join(paths.state, "hook"), hookRunner, inputs.uid);
 const runtime = new TmuxRuntime({
   server: TmuxServer.at(paths.tmuxSocket, {
     root: paths.run,
@@ -147,9 +147,6 @@ const runtime = new TmuxRuntime({
   env: hostEnv,
   // Codex TUIs title their panes with their thread; the script client has no pane-title command.
   ...(hookRunner === HOOK_SCRIPT ? {} : { onPaneTitle: paneTitleCommand(hookPath, paths.socket) }),
-});
-await runtime.applyServerSettings().catch((err: unknown) => {
-  console.warn("tmux server settings were not applied:", err);
 });
 // Follows Codex TUIs from thread to thread, by their panes' titles (§5.8).
 const codexThreads = new CodexThreads({
@@ -210,6 +207,10 @@ const environment = new LocalEnvironment({
   ...(hostEnv.SHELL?.startsWith("/") === true && { shell: hostEnv.SHELL }),
 });
 await reconcile(store, environment);
+// After reconcile, whose health check brings back a server whose socket was deleted.
+await runtime.applyServerSettings().catch((err: unknown) => {
+  console.warn("tmux server settings were not applied:", err);
+});
 // What a Claude Code agent was doing went with the last daemon's memory (foundation-design §4.6).
 const activity = new ActivityTracker((agentId, a) => store.recordActivity(agentId, a));
 const queue = new AgentQueue();
