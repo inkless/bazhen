@@ -98,7 +98,8 @@ export type TestEvent = { test: string; event: string; stdout: string };
 
 /**
  * Each test's result in the output of a nextest `--message-format libtest-json-plus` run, the test
- * named `<target> <test path>`. A result from a binary whose prefix maps to no target is dropped.
+ * named `<target> <test path>`. Suite events carry no name, and a result from a binary whose prefix
+ * maps to no target is dropped.
  */
 export function testEvents(output: string, targets: Map<string, string>): TestEvent[] {
   const events: TestEvent[] = [];
@@ -110,9 +111,7 @@ export function testEvents(output: string, targets: Map<string, string>): TestEv
     } catch {
       continue;
     }
-    if (!isObject(parsed) || parsed["type"] !== "test" || typeof parsed["name"] !== "string") {
-      continue;
-    }
+    if (!isObject(parsed) || typeof parsed["name"] !== "string") continue;
     const name = parsed["name"];
     const split = name.indexOf("$");
     const target = split < 0 ? undefined : targets.get(name.slice(0, split));

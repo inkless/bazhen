@@ -1,9 +1,11 @@
 // Runs scripts/falsify.ts against a branch in a linked worktree of a throwaway repository, with a
 // bogus GIT_DIR and GIT_INDEX_FILE in its environment that must never reach git or the tests. A
 // stub `pnpm` stands in for install and vitest, and logs what it saw; a stub `cargo-nextest` lists
-// the Rust tests named in the tree's rust-tests.txt.
+// the Rust tests named in the tree's rust-tests.txt and runs them, failing each on the line of
+// kills.txt whose marker the Rust source holds; a stub `cargo-mutants` lists mutants.json.
 
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
 import {
   chmodSync,
   existsSync,
@@ -51,17 +53,51 @@ esac
 exit 1
 `;
 
+const LIB = "crates/x/src/lib.rs";
+
 const STUB_NEXTEST = `#!/bin/sh
 echo "NEXTEST: $*" >> "$STUB_LOG"
 [ "\${STUB_NEXTEST_FAIL:-}" = 1 ] && exit 1
 [ -e nextest-fails ] && exit 1
-printf '{"rust-suites":{"hook":{"testcases":{'
+if [ "$2" = run ]; then
+  [ "\${NEXTEST_EXPERIMENTAL_LIBTEST_JSON:-}" = 1 ] || exit 101
+  echo "RUN: $(tr '\\n' ' ' < ${LIB})" >> "$STUB_LOG"
+  if [ "\${STUB_HANG:-}" = 1 ] && grep -q MUTATED ${LIB}; then
+    echo HANGING >> "$STUB_LOG"
+    sleep 60
+  fi
+  while read -r name; do
+    case "$*" in *"test(=$name)"*) ;; *) continue ;; esac
+    at=""
+    if [ -e kills.txt ]; then
+      while IFS='|' read -r marker test location; do
+        if [ "$test" = "$name" ] && grep -q "$marker" ${LIB}; then at="$location"; fi
+      done < kills.txt
+    fi
+    printf '{"type":"test","event":"started","name":"hook::hook$%s"}\\n' "$name"
+    # A backtrace lists the product frames a panic passed through.
+    if [ -n "$at" ] && [ -n "\${RUST_BACKTRACE:-}" ]; then at="$at, at ${LIB}:5:5"; fi
+    if [ -n "$at" ]; then
+      printf '{"type":"test","event":"failed","name":"hook::hook$%s","stdout":"panicked at %s: assertion failed"}\\n' "$name" "$at"
+    else
+      printf '{"type":"test","event":"ok","name":"hook::hook$%s"}\\n' "$name"
+    fi
+  done < rust-tests.txt
+  exit 0
+fi
+printf '{"rust-suites":{"hook":{"package-name":"hook","binary-name":"hook","testcases":{'
 sep=""
 while read -r name; do
   printf '%s"%s":{}' "$sep" "$name"
   sep=","
 done < rust-tests.txt
 printf '}}}}'
+`;
+
+const STUB_MUTANTS = `#!/bin/sh
+echo "MUTANTS: $*" >> "$STUB_LOG"
+[ "\${STUB_MUTANTS_FAIL:-}" = 1 ] && exit 1
+if [ -e mutants.json ]; then cat mutants.json; else echo "[]"; fi
 `;
 
 type Fixture = {
@@ -115,6 +151,8 @@ beforeEach(() => {
   chmodSync(join(root, "bin/pnpm"), 0o755);
   write(root, "bin/cargo-nextest", STUB_NEXTEST);
   chmodSync(join(root, "bin/cargo-nextest"), 0o755);
+  write(root, "bin/cargo-mutants", STUB_MUTANTS);
+  chmodSync(join(root, "bin/cargo-mutants"), 0o755);
   writeFileSync(fx.log, "");
 
   mkdirSync(fx.repo);
@@ -348,4 +386,197 @@ describe("falsify on a branch of a tree that already has Rust", () => {
     });
     expect(leftovers()).toEqual([]);
   });
+});
+
+const LIB_BEFORE = "fn a() -> u8 {\n    1\n}\n";
+const LIB_AFTER = `${LIB_BEFORE}fn b() -> u8 {\n    2\n}\n`;
+const B_SPAN = { start: { line: 4, column: 1 }, end: { line: 6, column: 2 } };
+
+/** A cargo-mutants listing entry for a mutant of `b`, whose patch makes `from` into `to`. */
+function mutantOfB(name: string, from = "    2", to = "    0 /* MUTATED */") {
+  return {
+    name: `${LIB}:5:5: ${name}`,
+    file: LIB,
+    span: { start: { line: 5, column: 5 }, end: { line: 5, column: 6 } },
+    function: { function_name: "b", return_type: "-> u8", span: B_SPAN },
+    diff: `--- ${LIB}\n+++ ${name}\n@@ -4,3 +4,3 @@\n fn b() -> u8 {\n-${from}\n+${to}\n }\n`,
+  };
+}
+
+const ASSERTION = `${LIB}:20:9`;
+const IN_PRODUCT = `${LIB}:5:5`;
+
+/**
+ * Main has a crate whose test is tests::kept; the branch adds `b` and `tests`, with these mutants
+ * listed and these `marker|test|panic location` kills, under a trailer that names no Rust test.
+ */
+function mutatedBranch(tests: string[], mutants: unknown[], kills: string[] = []): void {
+  rustOnMain(["tests::kept"], { [LIB]: LIB_BEFORE });
+  write(fx.linked, LIB, LIB_AFTER);
+  write(fx.linked, "rust-tests.txt", ["tests::kept", ...tests].map((n) => `${n}\n`).join(""));
+  write(fx.linked, "mutants.json", JSON.stringify(mutants));
+  write(fx.linked, "kills.txt", kills.map((k) => `${k}\n`).join(""));
+  git(fx.linked, "add", LIB, "rust-tests.txt", "mutants.json", "kills.txt");
+  git(fx.linked, "commit", "--quiet", "-m", "feat: b", "-m", CONTROL);
+}
+
+const runs = () => stubLog().match(/^RUN: /gm)?.length ?? 0;
+
+describe("falsify judging new Rust tests by mutating the change", () => {
+  it("needs no trailer for a test a mutant fails on its assertion, and names the mutant", () => {
+    mutatedBranch(
+      ["tests::b_is_two"],
+      [mutantOfB("replace b -> u8 with 0")],
+      [`MUTATED|tests::b_is_two|${ASSERTION}`],
+    );
+    const result = againstBase();
+    expect({
+      status: result.status,
+      killed: result.output.includes(
+        `KILLED   hook › tests::b_is_two (by ${LIB}:5:5: replace b -> u8 with 0)`,
+      ),
+      ranMutated: stubLog().includes("RUN: fn a() -> u8 {     1 } fn b() -> u8 {     0 /*"),
+      ranUnmutatedFirst: stubLog().indexOf("RUN: fn a() -> u8 {     1 } fn b() -> u8 {     2"),
+      ranKept: stubLog().includes("test(=tests::kept)"),
+    }).toEqual({
+      status: 0,
+      killed: true,
+      ranMutated: true,
+      ranUnmutatedFirst: stubLog().indexOf("RUN: "),
+      ranKept: false,
+    });
+    expect({ status: git(fx.linked, "status", "--porcelain"), leftovers: leftovers() }).toEqual({
+      status: "",
+      leftovers: [],
+    });
+  });
+
+  it("keeps the caller's RUST_BACKTRACE out of the run, whose frames would read as a crash", () => {
+    mutatedBranch(
+      ["tests::b_is_two"],
+      [mutantOfB("replace b -> u8 with 0")],
+      [`MUTATED|tests::b_is_two|${ASSERTION}`],
+    );
+    expect(againstBase({ RUST_BACKTRACE: "1" })).toEqual({
+      status: 0,
+      output: expect.stringContaining("KILLED   hook › tests::b_is_two"),
+    });
+  });
+
+  it("still asks a trailer naming a test no mutant fails", () => {
+    mutatedBranch(
+      ["tests::b_is_two", "tests::weak"],
+      [mutantOfB("replace b -> u8 with 0")],
+      [`MUTATED|tests::b_is_two|${ASSERTION}`],
+    );
+    const result = againstBase();
+    expect({
+      status: result.status,
+      asksWeak: result.output.includes("Control: tests::weak:"),
+      asksKilled: result.output.includes("Control: tests::b_is_two:"),
+    }).toEqual({ status: 1, asksWeak: true, asksKilled: false });
+  });
+
+  it("doesn't count a failure whose panic is in product code", () => {
+    mutatedBranch(
+      ["tests::b_is_two"],
+      [mutantOfB("replace b -> u8 with 0")],
+      [`MUTATED|tests::b_is_two|${IN_PRODUCT}`],
+    );
+    expect(againstBase()).toEqual({
+      status: 1,
+      output: expect.stringContaining("Control: tests::b_is_two:"),
+    });
+  });
+
+  it("doesn't judge a test that fails without a mutant", () => {
+    mutatedBranch(
+      ["tests::b_is_two"],
+      [mutantOfB("replace b -> u8 with 0")],
+      [`fn b|tests::b_is_two|${ASSERTION}`],
+    );
+    expect(againstBase()).toEqual({
+      status: 1,
+      output: expect.stringContaining("tests::b_is_two (Rust: fails or doesn't run unmutated"),
+    });
+  });
+
+  it("reports a mutant whose patch leaves the file unchanged, and never runs it", () => {
+    mutatedBranch(
+      ["tests::b_is_two"],
+      [
+        mutantOfB("stale context", "    3", "    0 /* MUTATED */"),
+        mutantOfB("no-op", "    2", "    2"),
+        mutantOfB("replace b -> u8 with 0"),
+      ],
+      [`MUTATED|tests::b_is_two|${ASSERTION}`],
+    );
+    const result = againstBase();
+    expect({
+      status: result.status,
+      stale: result.output.includes(`INVALID  mutant ${LIB}:5:5: stale context (its patch left`),
+      noOp: result.output.includes(`INVALID  mutant ${LIB}:5:5: no-op (its patch left`),
+      killedBy: result.output.includes("(by crates/x/src/lib.rs:5:5: replace b -> u8 with 0)"),
+      runs: runs(),
+    }).toEqual({ status: 0, stale: true, noOp: true, killedBy: true, runs: 2 });
+  });
+
+  it("stops once every new test is killed", () => {
+    mutatedBranch(
+      ["tests::b_is_two"],
+      [
+        mutantOfB("replace b -> u8 with 0"),
+        mutantOfB("replace b -> u8 with 1", "    2", "    1 /* MUTATED */"),
+      ],
+      [`MUTATED|tests::b_is_two|${ASSERTION}`],
+    );
+    expect({ status: againstBase().status, runs: runs() }).toEqual({ status: 0, runs: 2 });
+  });
+
+  it("runs at most 100 mutants, and says so of a test none of them failed", () => {
+    const mutants = Array.from({ length: 101 }, (_, i) => mutantOfB(`mutant ${i}`));
+    mutatedBranch(["tests::b_is_two"], mutants);
+    const result = againstBase();
+    expect({
+      status: result.status,
+      capped: result.output.includes("no mutant failed it on an assertion within the first 100"),
+      summary: result.output.includes("100 of the change's 101 Rust mutants run"),
+      runs: runs(),
+    }).toEqual({ status: 1, capped: true, summary: true, runs: 101 });
+  }, 60_000);
+
+  it("fails with the install command, and leaves nothing behind, when cargo-mutants can't list", () => {
+    mutatedBranch(["tests::b_is_two"], [mutantOfB("replace b -> u8 with 0")]);
+    expect(againstBase({ STUB_MUTANTS_FAIL: "1" })).toEqual({
+      status: 1,
+      output: expect.stringContaining("cargo install --locked cargo-mutants@27.1.0"),
+    });
+    expect(leftovers()).toEqual([]);
+  });
+
+  it.each([
+    ["SIGINT", 130],
+    ["SIGTERM", 143],
+  ] as const)(
+    "on %s mid-mutant, stops the run and leaves the checkout clean and no worktree behind",
+    async (signal, code) => {
+      mutatedBranch(["tests::b_is_two"], [mutantOfB("replace b -> u8 with 0")]);
+      const child = spawn("node", [FALSIFY, "--base", fx.base], {
+        cwd: fx.linked,
+        env: env({ STUB_HANG: "1" }),
+        stdio: "ignore",
+      });
+      const exited = once(child, "exit");
+      await expect.poll(() => stubLog().includes("HANGING"), { timeout: 20_000 }).toBe(true);
+      child.kill(signal);
+      const [status] = await exited;
+      expect({
+        status,
+        checkout: git(fx.linked, "status", "--porcelain"),
+        source: readFileSync(join(fx.linked, LIB), "utf8"),
+        leftovers: leftovers(),
+      }).toEqual({ status: code, checkout: "", source: LIB_AFTER, leftovers: [] });
+    },
+    30_000,
+  );
 });
