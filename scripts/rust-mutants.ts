@@ -9,15 +9,6 @@ export type RustTest = { file: string; title: string };
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
-function lineSpan(file: string, span: unknown, what: string): LineSpan {
-  const start = isObject(span) && isObject(span["start"]) ? span["start"]["line"] : undefined;
-  const end = isObject(span) && isObject(span["end"]) ? span["end"]["line"] : undefined;
-  if (typeof start !== "number" || typeof end !== "number") {
-    throw new Error(`not a cargo-mutants listing: ${what} has no span`);
-  }
-  return { file, start, end };
-}
-
 function entries(listing: unknown): Record<string, unknown>[] {
   if (!Array.isArray(listing)) throw new Error("not a cargo-mutants listing: not an array");
   return listing.map((entry: unknown) => {
@@ -47,25 +38,6 @@ export function parseMutants(listing: unknown): Mutant[] {
       throw new Error(`not a cargo-mutants listing: ${name} has no diff`);
     return { name, file, patch: `--- a/${file}\n+++ b/${file}\n${body[1]}` };
   });
-}
-
-/**
- * The lines of every function cargo-mutants would mutate in a full `--list --json`: the product
- * code. Tests are never in it, since cargo-mutants skips `#[cfg(test)]` code and `#[test]` fns.
- */
-export function productSpans(listing: unknown): LineSpan[] {
-  const spans = new Map<string, LineSpan>();
-  for (const entry of entries(listing)) {
-    const fn = entry["function"];
-    if (fn === null || fn === undefined) continue;
-    const span = lineSpan(
-      String(entry["file"]),
-      isObject(fn) ? fn["span"] : undefined,
-      "a function",
-    );
-    spans.set(`${span.file}:${span.start}:${span.end}`, span);
-  }
-  return [...spans.values()];
 }
 
 /**
@@ -150,33 +122,97 @@ export function unmutate(patch: string, file: string): Unmutate {
   };
 }
 
-const WORKSPACE_SOURCE = /^crates\//;
+const INTEGRATION_TEST = /^crates\/[^/]+\/tests\//;
+
+/**
+ * The test code in a Rust file: all of a file in a crate's `tests/`, and elsewhere each top-level
+ * item under a bare `#[cfg(test)]`, to its closing brace. rustfmt, which the gates enforce, puts
+ * a top-level item's closing brace alone at column 0 and indents everything inside it, so the
+ * first such line ends the item. A test module nested in another item isn't found, which only
+ * ever costs a kill.
+ */
+export function testCode(file: string, source: string): LineSpan[] {
+  const lines = source.split("\n");
+  if (INTEGRATION_TEST.test(file)) return [{ file, start: 1, end: lines.length }];
+  const spans: LineSpan[] = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    if (lines[i] !== "#[cfg(test)]") continue;
+    let item = i + 1;
+    while (lines[item]?.startsWith("#[") === true) item += 1;
+    const header = lines[item];
+    if (header === undefined) break;
+    let end = item;
+    if (!/[;}]\s*$/.test(header)) {
+      end = lines.indexOf("}", item + 1);
+      if (end < 0) break;
+    }
+    spans.push({ file, start: i + 1, end: end + 1 });
+    i = end;
+  }
+  return spans;
+}
+
+/**
+ * The product functions marked `#[track_caller]` in a file: a panic in one names its caller's
+ * line, so a test's line that calls one is not the test's own assertion.
+ */
+export function trackCallers(source: string, tests: LineSpan[]): string[] {
+  const names: string[] = [];
+  const lines = source.split("\n");
+  lines.forEach((line, i) => {
+    if (line.trim() !== "#[track_caller]") return;
+    if (tests.some((s) => i + 1 >= s.start && i + 1 <= s.end)) return;
+    const fn = lines
+      .slice(i + 1, i + 6)
+      .map((next) => /\bfn\s+(\w+)/.exec(next)?.[1])
+      .find((name) => name !== undefined);
+    if (fn !== undefined) names.push(fn);
+  });
+  return names;
+}
+
+/** Where a test's failure may point for it to be the test's own: a line of test code. */
+export type InTestCode = (file: string, line: number) => boolean;
+
+/**
+ * Whether a place in the source `sources` holds (the workspace's Rust files, unmutated), read
+ * back through `original` from the mutated tree, is a line of test code that calls no product
+ * `#[track_caller]` function.
+ */
+export function inTestCode(sources: Map<string, string>): (original: Unmutate) => InTestCode {
+  const files = new Map(
+    [...sources].map(([file, source]) => [
+      file,
+      { lines: source.split("\n"), tests: testCode(file, source) },
+    ]),
+  );
+  const callers = [...sources].flatMap(([file, source]) =>
+    trackCallers(source, files.get(file)?.tests ?? []),
+  );
+  const callsOne = (text: string) =>
+    callers.some((name) => new RegExp(`\\b${name}\\s*\\(`).test(text));
+  return (original) => (file, at) => {
+    const code = files.get(file);
+    const line = original(file, at);
+    if (code === undefined || line === undefined) return false;
+    return (
+      code.tests.some((s) => line >= s.start && line <= s.end) &&
+      !callsOne(code.lines[line - 1] ?? "")
+    );
+  };
+}
 
 /**
  * Whether a result is a failure on the test's own assertion: it failed, it panicked, and every
- * place its output names is workspace source outside product code. That rules out a crash, a
- * timeout, a panic product code raised (an overflow the mutant caused), and one raised inside the
- * standard library or a dependency, whose location is an absolute path; proptest reports each of
- * these from inside the test, with the place it came from.
+ * place its output names is test code. That rules out a crash, a timeout, and a panic raised
+ * anywhere else: in product code, whether or not cargo-mutants lists it (an overflow the mutant
+ * caused, a `-> !` function, an initialiser), in the standard library or in a dependency;
+ * proptest reports each of these from inside the test, with the place it came from.
  */
-export function failedOnAssertion(
-  result: TestEvent,
-  product: LineSpan[],
-  original: Unmutate = (_file, line) => line,
-): boolean {
+export function failedOnAssertion(result: TestEvent, isTestCode: InTestCode): boolean {
   if (result.event !== "failed" || !PANIC.test(result.stdout)) return false;
   const places = [...result.stdout.matchAll(LOCATION)];
-  return (
-    places.length > 0 &&
-    places.every(([, file = "", at]) => {
-      const line = original(file, Number(at));
-      return (
-        WORKSPACE_SOURCE.test(file) &&
-        line !== undefined &&
-        !product.some((s) => s.file === file && line >= s.start && line <= s.end)
-      );
-    })
-  );
+  return places.length > 0 && places.every(([, file = "", at]) => isTestCode(file, Number(at)));
 }
 
 const RUST_PATH = /^\w+(?:::\w+)*$/;

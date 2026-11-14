@@ -44,7 +44,7 @@ case "$1" in
     exit 0
     ;;
   exec)
-    if [ "\${STUB_HANG:-}" = 1 ]; then
+    if [ "\${STUB_HANG_VITEST:-}" = 1 ]; then
       echo "HANGING $$" >> "$STUB_LOG"
       trap 'echo TERMED >> "$STUB_LOG"' TERM
       i=0
@@ -69,7 +69,9 @@ echo "NEXTEST: $*" >> "$STUB_LOG"
 if [ "$2" = run ]; then
   [ "\${NEXTEST_EXPERIMENTAL_LIBTEST_JSON:-}" = 1 ] || exit 101
   echo "RUN: $(tr '\\n' ' ' < ${LIB})" >> "$STUB_LOG"
-  if [ "\${STUB_HANG:-}" = 1 ] && grep -q MUTATED ${LIB}; then
+  hang=""
+  if grep -q MUTATED ${LIB}; then hang="\${STUB_HANG:-}"; else hang="\${STUB_HANG_UNMUTATED:-}"; fi
+  if [ "$hang" = 1 ]; then
     echo "HANGING $$" >> "$STUB_LOG"
     if [ "\${STUB_STUBBORN:-}" = 1 ]; then
       # Outlasts SIGTERM, so falsify waits out its grace before SIGKILL.
@@ -90,6 +92,10 @@ if [ "$2" = run ]; then
     printf '{"type":"test","event":"started","name":"hook::hook$%s"}\\n' "$name"
     # A backtrace lists the product frames a panic passed through.
     if [ -n "$at" ] && [ -n "\${RUST_BACKTRACE:-}" ]; then at="$at, at ${LIB}:5:5"; fi
+    # A test that leaves state behind passes once, then fails on what it left.
+    if [ "\${STUB_LEFTOVER:-}" = 1 ]; then
+      if [ -e "$STUB_LOG.state" ]; then at="${LIB}:13:9"; else : > "$STUB_LOG.state"; fi
+    fi
     # A flaky test fails once, then passes.
     if [ -n "$at" ] && [ "\${STUB_FLAKY:-}" = 1 ]; then
       if [ -e "$STUB_LOG.flaked" ]; then at=""; else : > "$STUB_LOG.flaked"; fi
@@ -121,16 +127,10 @@ printf '}}'
 const STUB_MUTANTS = `#!/bin/sh
 echo "MUTANTS: $*" >> "$STUB_LOG"
 [ "\${STUB_MUTANTS_FAIL:-}" = 1 ] && exit 1
-case "$*" in
-  *--in-diff*)
-    # Only the mutants of the change, and only when given the branch's diff of its Rust source.
-    for diff in "$@"; do :; done
-    if [ -e mutants.json ] && grep -q '^+fn b' "$diff"; then cat mutants.json; else echo "[]"; fi
-    ;;
-  *)
-    if [ -e all-mutants.json ]; then cat all-mutants.json; else echo "[]"; fi
-    ;;
-esac
+case "$*" in *--in-diff*) ;; *) exit 1 ;; esac
+# Only the mutants of the change, and only when given the branch's diff of its Rust source.
+for diff in "$@"; do :; done
+if [ -e mutants.json ] && grep -q '^+fn b' "$diff"; then cat mutants.json; else echo "[]"; fi
 `;
 
 type Fixture = {
@@ -423,7 +423,12 @@ describe("falsify on a branch of a tree that already has Rust", () => {
 });
 
 const LIB_BEFORE = "fn a() -> u8 {\n    1\n}\n";
-const LIB_AFTER = `${LIB_BEFORE}fn b() -> u8 {\n    2\n}\n`;
+// `b`, then its tests, as rustfmt writes them; the tests' lines are 8 to 15.
+const LIB_AFTER = [
+  LIB_BEFORE,
+  "fn b() -> u8 {\n    2\n}\n",
+  "\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    fn twice() {\n        assert_eq!(b(), 2);\n    }\n}\n",
+].join("");
 const B_SPAN = { start: { line: 4, column: 1 }, end: { line: 6, column: 2 } };
 
 /** A cargo-mutants listing entry for a mutant of `b`, whose patch makes `from` into `to`. */
@@ -437,19 +442,7 @@ function mutantOfB(name: string, from = "    2", to = "    0 /* MUTATED */") {
   };
 }
 
-/** A mutant of `a`, which the branch doesn't change: only the whole workspace's listing has it. */
-const MUTANT_OF_A = {
-  name: `${LIB}:2:5: replace a -> u8 with 0`,
-  file: LIB,
-  span: { start: { line: 2, column: 5 }, end: { line: 2, column: 6 } },
-  function: {
-    function_name: "a",
-    return_type: "-> u8",
-    span: { start: { line: 1, column: 1 }, end: { line: 3, column: 2 } },
-  },
-};
-
-const ASSERTION = `${LIB}:20:9`;
+const ASSERTION = `${LIB}:13:9`;
 const IN_PRODUCT = `${LIB}:5:5`;
 const IN_UNCHANGED_PRODUCT = `${LIB}:2:5`;
 
@@ -467,10 +460,9 @@ function mutatedBranch(
   write(fx.linked, LIB, LIB_AFTER);
   write(fx.linked, "rust-tests.txt", ["tests::kept", ...tests].map((n) => `${n}\n`).join(""));
   write(fx.linked, "mutants.json", JSON.stringify(mutants));
-  write(fx.linked, "all-mutants.json", JSON.stringify([MUTANT_OF_A, ...mutants]));
   write(fx.linked, "kills.txt", kills.map((k) => `${k}\n`).join(""));
   for (const [file, text] of Object.entries(extra)) write(fx.linked, file, text);
-  const files = ["rust-tests.txt", "mutants.json", "all-mutants.json", "kills.txt"];
+  const files = ["rust-tests.txt", "mutants.json", "kills.txt"];
   git(fx.linked, "add", LIB, ...files, ...Object.keys(extra));
   git(fx.linked, "commit", "--quiet", "-m", "feat: b", "-m", CONTROL);
 }
@@ -564,6 +556,41 @@ describe("falsify judging new Rust tests by mutating the change", () => {
     }).toEqual({ status: 1, unkilled: true, runs: 2 });
   });
 
+  it("doesn't credit a test that fails from what an earlier run left, mutant or not", () => {
+    // Like `File::create_new(temp_dir().join(..)).unwrap()`: it passes once, then fails on its
+    // own leftover, asserting nothing about the code.
+    mutatedBranch(["tests::b_is_two"], [mutantOfB("replace b -> u8 with 0")]);
+    const result = againstBase({ STUB_LEFTOVER: "1" });
+    expect({
+      status: result.status,
+      asks: result.output.includes("Control: tests::b_is_two:"),
+      runs: runs(),
+    }).toEqual({ status: 1, asks: true, runs: 4 });
+  });
+
+  it("says a mutant's run timed out, and judges the test by the others", () => {
+    mutatedBranch(["tests::b_is_two"], [mutantOfB("replace b -> u8 with 0")]);
+    const result = againstBase({ STUB_HANG: "1", FALSIFY_RUST_TIMEOUT_MS: "2000" });
+    expect({
+      status: result.status,
+      timedOut: result.output.includes(
+        `INVALID  mutant ${LIB}:5:5: replace b -> u8 with 0 (its run timed out after 2 s)`,
+      ),
+      asks: result.output.includes("Control: tests::b_is_two:"),
+    }).toEqual({ status: 1, timedOut: true, asks: true });
+  }, 20_000);
+
+  it("says the unmutated run timed out, rather than that the test fails", () => {
+    mutatedBranch(["tests::b_is_two"], [mutantOfB("replace b -> u8 with 0")]);
+    const result = againstBase({ STUB_HANG_UNMUTATED: "1", FALSIFY_RUST_TIMEOUT_MS: "2000" });
+    expect({
+      status: result.status,
+      timedOut: result.output.includes(
+        "tests::b_is_two (Rust: the unmutated run timed out after 2 s",
+      ),
+    }).toEqual({ status: 1, timedOut: true });
+  }, 20_000);
+
   it("doesn't credit a test that fails under a mutant only once", () => {
     mutatedBranch(
       ["tests::b_is_two"],
@@ -593,7 +620,7 @@ describe("falsify judging new Rust tests by mutating the change", () => {
       t1: result.output.includes("tests::t1 (by crates/x/src/lib.rs:5:5: replace b -> u8 with 0)"),
       t2: result.output.includes("tests::t2 (by crates/x/src/lib.rs:5:5: replace b -> u8 with 1)"),
       runsOfT1: stubLog().match(/^NEXTEST: nextest run .*test\(=tests::t1\)/gm)?.length,
-    }).toEqual({ status: 0, t1: true, t2: true, runsOfT1: 3 });
+    }).toEqual({ status: 0, t1: true, t2: true, runsOfT1: 4 });
   });
 
   it("doesn't judge a test whose name can't be selected alone", () => {
@@ -680,7 +707,7 @@ describe("falsify judging new Rust tests by mutating the change", () => {
       killedBy: result.output.includes("(by crates/x/src/lib.rs:5:5: replace b -> u8 with 0)"),
       runs: runs(),
       summary: result.output.includes("1 of the change's 3 Rust mutants run"),
-    }).toEqual({ status: 0, stale: true, noOp: true, killedBy: true, runs: 3, summary: true });
+    }).toEqual({ status: 0, stale: true, noOp: true, killedBy: true, runs: 4, summary: true });
   });
 
   it("stops once every new test is killed", () => {
@@ -692,7 +719,7 @@ describe("falsify judging new Rust tests by mutating the change", () => {
       ],
       [`MUTATED|tests::b_is_two|${ASSERTION}`],
     );
-    expect({ status: againstBase().status, runs: runs() }).toEqual({ status: 0, runs: 3 });
+    expect({ status: againstBase().status, runs: runs() }).toEqual({ status: 0, runs: 4 });
   });
 
   it("runs at most 100 mutants, and says so of a test none of them failed", () => {
@@ -769,7 +796,7 @@ describe("falsify judging new Rust tests by mutating the change", () => {
       branch();
       const child = spawn("node", [FALSIFY, "--base", fx.base], {
         cwd: fx.linked,
-        env: env({ STUB_HANG: "1", STUB_STUBBORN: "1" }),
+        env: env({ STUB_HANG: "1", STUB_HANG_VITEST: "1", STUB_STUBBORN: "1" }),
         stdio: "ignore",
       });
       const exited = once(child, "exit");

@@ -5,7 +5,9 @@ import {
   libtestTargets,
   nextestFilter,
   parseMutants,
-  productSpans,
+  inTestCode,
+  testCode,
+  trackCallers,
   testEvents,
   unmutate,
 } from "./rust-mutants.ts";
@@ -77,15 +79,6 @@ describe("parseMutants", () => {
   });
 });
 
-describe("productSpans", () => {
-  it("takes each mutated function's lines once, and nothing for a mutant outside a function", () => {
-    const fn = { start: 84, end: 91 };
-    expect(productSpans([mutant("a", fn), mutant("b", fn), mutant("c", null)])).toEqual([
-      { file: LIB, start: 84, end: 91 },
-    ]);
-  });
-});
-
 describe("libtestTargets", () => {
   it("maps each binary's libtest prefix to its target, a crate's lib and bins sharing one", () => {
     expect(
@@ -140,52 +133,113 @@ describe("testEvents", () => {
   });
 });
 
+// A crate's source as rustfmt writes it: product code, a test module, and product code after it.
+const SOURCE = [
+  "pub fn double(x: u32) -> u32 {",
+  "    x * 2",
+  "}",
+  "",
+  "#[track_caller]",
+  "pub fn checked(x: u32) -> u32 {",
+  "    x",
+  "}",
+  "",
+  "pub fn never() -> ! {",
+  '    panic!("never")',
+  "}",
+  "",
+  "#[cfg(test)]",
+  "mod tests {",
+  "    use super::*;",
+  "",
+  "    #[test]",
+  "    fn doubles() {",
+  "        assert_eq!(double(2), 4);",
+  "        assert_eq!(checked(1), 1);",
+  "    }",
+  "}",
+  "",
+  "pub fn after() {}",
+  "",
+].join("\n");
+
+const TESTS = { file: LIB, start: 14, end: 23 };
+const unchanged = (_file: string, line: number) => line;
+
+describe("testCode", () => {
+  it("is each item under #[cfg(test)], to its closing brace at column 0", () => {
+    expect(testCode(LIB, SOURCE)).toEqual([TESTS]);
+  });
+
+  it("is one line for an item that ends on its own line, and none for an item left open", () => {
+    expect({
+      oneLine: testCode(LIB, "#[cfg(test)]\n#[allow(x)]\nconst N: u8 = 1;\nfn f() {}\n"),
+      open: testCode(LIB, "#[cfg(test)]\nmod tests {\n    fn t() {}\n"),
+      notBare: testCode(LIB, "#[cfg(all(test, unix))]\nmod tests {\n}\n"),
+    }).toEqual({ oneLine: [{ file: LIB, start: 1, end: 3 }], open: [], notBare: [] });
+  });
+
+  it("is the whole of a file in a crate's tests/", () => {
+    expect(testCode("crates/bazhen-hook/tests/reply.rs", "fn a() {}\nfn b() {}")).toEqual([
+      { file: "crates/bazhen-hook/tests/reply.rs", start: 1, end: 2 },
+    ]);
+  });
+});
+
+describe("trackCallers", () => {
+  it("names the product functions marked #[track_caller], not the tests'", () => {
+    const inTests = `${SOURCE}#[cfg(test)]\nmod more {\n    #[track_caller]\n    fn helper() {}\n}\n`;
+    expect(trackCallers(inTests, testCode(LIB, inTests))).toEqual(["checked"]);
+  });
+});
+
 const result = (outcome: string, stdout: string) => ({ test: "t", event: outcome, stdout });
 
 describe("failedOnAssertion", () => {
-  const product = [{ file: LIB, start: 84, end: 91 }];
+  const isTest = inTestCode(new Map([[LIB, SOURCE]]))(unchanged);
 
-  it("counts a failure that panicked at a line outside product code", () => {
-    expect(failedOnAssertion(result("failed", panic(`${LIB}:386:13`)), product)).toBe(true);
+  it("counts a failure that panicked at a line of test code", () => {
+    expect(failedOnAssertion(result("failed", panic(`${LIB}:20:9`)), isTest)).toBe(true);
   });
 
-  it("doesn't count a pass, a failure with no panic, or a panic product code raised", () => {
+  it("doesn't count a pass, a failure with no panic, or a panic anywhere but test code", () => {
+    const at = (place: string) => failedOnAssertion(result("failed", panic(place)), isTest);
     expect({
-      passed: failedOnAssertion(result("ok", panic(`${LIB}:386:13`)), product),
-      noPanic: failedOnAssertion(result("failed", "test timed out"), product),
-      inProduct: failedOnAssertion(
-        result("failed", panic(`${LIB}:88:5`, "attempt to add with overflow")),
-        product,
+      passed: failedOnAssertion(result("ok", panic(`${LIB}:20:9`)), isTest),
+      noPanic: failedOnAssertion(result("failed", "test timed out"), isTest),
+      productNoMutantLists: at(`${LIB}:11:5`),
+      productAfterTheTests: at(`${LIB}:25:1`),
+      trackCallerProduct: at(`${LIB}:21:9`),
+      std: at(
+        "/rustc/4d91de4e48198da2e33413efdcd9cd2cc0c46688/library/std/src/collections/hash/map.rs:1456:23",
       ),
+      dependency: at("/home/u/.cargo/registry/src/index.crates.io-1/serde-1.0.0/src/de.rs:10:5"),
+      unknownFile: at("crates/other/src/lib.rs:20:9"),
       proptestReport: failedOnAssertion(
-        result(
-          "failed",
-          panic(`${LIB}:400:5`, `Test failed: attempt to add with overflow at ${LIB}:90:9.`),
-        ),
-        product,
+        result("failed", panic(`${LIB}:20:9`, `Test failed: never at ${LIB}:11:5.`)),
+        isTest,
       ),
-    }).toEqual({ passed: false, noPanic: false, inProduct: false, proptestReport: false });
-  });
-
-  it("doesn't count a panic raised in the standard library or a dependency", () => {
-    const std =
-      "/rustc/4d91de4e48198da2e33413efdcd9cd2cc0c46688/library/std/src/collections/hash/map.rs:1456:23";
-    const dependency = "/home/u/.cargo/registry/src/index.crates.io-1/serde-1.0.0/src/de.rs:10:5";
-    expect({
-      std: failedOnAssertion(result("failed", panic(std, "no entry found for key")), product),
-      dependency: failedOnAssertion(result("failed", panic(dependency)), product),
-    }).toEqual({ std: false, dependency: false });
+    }).toEqual({
+      passed: false,
+      noPanic: false,
+      productNoMutantLists: false,
+      productAfterTheTests: false,
+      trackCallerProduct: false,
+      std: false,
+      dependency: false,
+      unknownFile: false,
+      proptestReport: false,
+    });
   });
 
   it("reads a place in the mutated file as the line it was before the mutant", () => {
-    // The mutant made lines 84-91 into 84-86, so the old 120 is now 115.
-    const shrunk = unmutate("@@ -84,8 +84,3 @@\n", LIB);
-    const at = (line: number) => result("failed", panic(`${LIB}:${line}:9`));
+    // The mutant made `double`'s three lines one, so every later line moved up two.
+    const shrunk = inTestCode(new Map([[LIB, SOURCE]]))(unmutate("@@ -1,3 +1,1 @@\n", LIB));
     expect({
-      movedIntoProduct: failedOnAssertion(at(87), [{ file: LIB, start: 92, end: 95 }], shrunk),
-      inTheMutant: failedOnAssertion(at(85), [], shrunk),
-      after: failedOnAssertion(at(115), [{ file: LIB, start: 115, end: 115 }], shrunk),
-    }).toEqual({ movedIntoProduct: false, inTheMutant: false, after: true });
+      movedTestLine: shrunk(LIB, 18),
+      movedPastTheTests: shrunk(LIB, 22),
+      inTheMutant: shrunk(LIB, 1),
+    }).toEqual({ movedTestLine: true, movedPastTheTests: false, inTheMutant: false });
   });
 });
 
