@@ -879,6 +879,23 @@ mod tests {
         }
 
         #[test]
+        fn takes_exactly_a_frames_own_bytes_and_leaves_the_next_frames_alone(
+            first in request(),
+            next in request(),
+            at in any::<prop::sample::Index>(),
+        ) {
+            let next_bytes = next.encode().unwrap();
+            let (head, tail) = next_bytes.split_at(at.index(next_bytes.len()));
+            let mut decoder = request_decoder();
+            decoder.push(&[first.encode().unwrap().as_slice(), head].concat());
+            prop_assert_eq!(decoder.next_frame().unwrap(), Some(first));
+            prop_assert_eq!(decoder.next_frame().unwrap(), None);
+            decoder.push(tail);
+            prop_assert_eq!(decoder.next_frame().unwrap(), Some(next));
+            prop_assert_eq!(decoder.next_frame().unwrap(), None);
+        }
+
+        #[test]
         fn holds_every_strict_prefix_of_a_frame_until_the_rest_arrives(
             frame in request(),
             at in any::<prop::sample::Index>(),
