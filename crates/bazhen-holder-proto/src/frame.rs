@@ -649,12 +649,20 @@ mod tests {
         VersionText, Versions,
     };
 
+    /// Every frame `chunks` hold. A frame is at least 5 bytes, so a decoder that returns more
+    /// frames than bytes were sent isn't consuming what it decodes, and would otherwise be read
+    /// until memory runs out.
     fn decode_all<F>(mut decoder: FrameDecoder<F>, chunks: &[&[u8]]) -> Result<Vec<F>, Malformed> {
+        let sent: usize = chunks.iter().map(|chunk| chunk.len()).sum();
         let mut frames = Vec::new();
         for chunk in chunks {
             decoder.push(chunk);
             while let Some(frame) = decoder.next_frame()? {
                 frames.push(frame);
+                assert!(
+                    frames.len() <= sent,
+                    "decoded more frames than the {sent} bytes sent hold"
+                );
             }
         }
         Ok(frames)
