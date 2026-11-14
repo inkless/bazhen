@@ -291,6 +291,16 @@ mod tests {
     }
 
     #[test]
+    fn a_tab_forward_or_a_substitute_char_may_wrap_a_waiting_row() {
+        // After a cursor move each may wrap: one row each.
+        assert_eq!(stretch(b"\x1b[H\x1b[I").1, 1);
+        assert_eq!(stretch(b"\x1b[H\x1a").1, 1);
+        // With the column known at zero, neither can.
+        assert_eq!(stretch(b"\r\x1b[I").1, 0);
+        assert_eq!(stretch(b"\r\x1a").1, 0);
+    }
+
+    #[test]
     fn it_stops_right_after_a_switch_to_or_from_the_alternate_screen() {
         for switch in ["\x1b[?1049h", "\x1b[?47l", "\x1b[?25;1047h"] {
             let stream = format!("{switch}more");
