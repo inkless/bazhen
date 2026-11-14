@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { offersInstall, suggestsApp, type Here, type Platform } from "./install.ts";
+import { closeNotice, offersInstall, suggestsApp, type Here, type Platform } from "./install.ts";
 
 const desktop = (userAgent: string, maxTouchPoints = 0): Platform => ({
   coarse: false,
@@ -66,5 +66,22 @@ describe("suggesting the app to a user who lost Ctrl+W to the tab", () => {
         { ...installable, inApp: true },
       ].map(suggestsApp),
     ).toEqual([false, false, false, false]);
+  });
+});
+
+describe("what a terminal says after the user stays through a close", () => {
+  const tab: Here = { secure: true, prompts: true, linked: true, inApp: false };
+
+  it("in the app's window, that Ctrl+Shift+W closes it, since Ctrl+W already gets through", () => {
+    expect(closeNotice({ ...tab, inApp: true })).toBe(
+      "Ctrl+Shift+W closes this window. Ctrl+W alone reaches the terminal.",
+    );
+  });
+
+  it("in a tab, that the tab took Ctrl+W, and the app where it can be installed", () => {
+    expect([closeNotice(tab), closeNotice({ ...tab, prompts: false })]).toEqual([
+      "Ctrl+W closes the tab, so the terminal can't get it. In Bazhen installed as an app, it can.",
+      "Ctrl+W closes the tab, so the terminal can't get it.",
+    ]);
   });
 });

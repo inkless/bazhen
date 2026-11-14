@@ -150,9 +150,11 @@ LAN on a current OS.
 
 On a Linux, Windows or ChromeOS desktop a browser tab keeps Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+Shift+W
 and Ctrl+Tab: the page never sees them, so nothing it does can pass them to a terminal. An
-installed app's window offers the page every key first, and xterm.js sends them on. So there, and
-only there, the page links its manifest and app icon (`apps/web/src/install.ts`), and in a tab
-`apps/web/src/terminal/close-guard.ts` asks before a close while Ctrl is down in a focused
-terminal. A Mac doesn't lose these keys, and a phone or a tablet is touch-first, so they get
-neither. Playwright's keys skip the browser's own shortcuts, so no e2e test presses the real
-Ctrl+W: check a change here by hand, in a tab and in the installed app.
+installed app's window offers the page every key first, and xterm.js sends Ctrl+W, Ctrl+T, Ctrl+N,
+Ctrl+Tab and Ctrl+Shift+Tab on; it sends no Ctrl+Shift letter, so Ctrl+Shift+W still closes the
+window. So there, and only there, the page links its manifest and app icon
+(`apps/web/src/install.ts`), and `apps/web/src/terminal/close-guard.ts` asks before a close, in a
+tab or the app's window, while Ctrl is down in a focused terminal. A Mac doesn't lose these keys,
+and a phone or a tablet is touch-first, so they get neither. Playwright's keys skip the browser's
+own shortcuts, so no e2e test presses the real Ctrl+W: check a change here by hand, in a tab and in
+the installed app.

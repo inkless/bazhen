@@ -1,9 +1,9 @@
 /**
- * In a browser tab on Linux, Windows and ChromeOS, Ctrl+W closes the tab and never reaches the page, so a
- * terminal can't have it. While Ctrl is down in a focused terminal this makes a close ask first,
- * and calls `onStayed` if the user stays. The browser keeps the W but passes on Ctrl's own keydown
- * and keyup, so the guard is armed only while Ctrl is down, and a reload or a close with the mouse
- * otherwise goes through.
+ * In a browser tab on Linux, Windows and ChromeOS, Ctrl+W closes the tab and never reaches the
+ * page, and in the installed app's window Ctrl+Shift+W closes the window. While Ctrl is down in a
+ * focused terminal this makes a close ask first, and calls `onStayed` if the user stays. The
+ * browser keeps the W but passes on Ctrl's own keydown and keyup, so the guard is armed only while
+ * Ctrl is down, and a reload or a close with the mouse otherwise goes through.
  *
  * The `beforeunload` listener is added only while armed: Firefox keeps a page that has one out of
  * its back-forward cache.
@@ -28,11 +28,9 @@ export function guardClose(
     else page.window.removeEventListener("beforeunload", ask);
   };
   const key = (event: Event) => arm(ctrl(event) && holdsFocus());
-  // A Ctrl released over the prompt, or after Alt+Tab or a tab switch, sends this page no keyup;
-  // the pointer's next event, or the blur, says it is up.
-  const pointer = (event: Event) => {
-    if (!ctrl(event)) arm(false);
-  };
+  // A Ctrl released over the prompt, or after Alt+Tab or a tab switch, sends this page no keyup,
+  // and one still held after the prompt sends no keydown; the pointer says which, or the blur.
+  const pointer = (event: Event) => arm(ctrl(event) && holdsFocus());
   const disarm = () => arm(false);
   // Input in capture, so the terminal can't stop it on the way; the window's own blur only.
   const listeners = [

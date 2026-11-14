@@ -19,7 +19,7 @@ import {
 import { Heartbeat, PING_EVERY_MS } from "./heartbeat.ts";
 import { barBytes, keyBar, settled, withCtrl, type BarTarget } from "./bar-keys.ts";
 import { guardClose } from "./close-guard.ts";
-import { here, inAppWindow, offersInstall, suggestsApp, thisPlatform } from "../install.ts";
+import { closeNotice, offersInstall, pageNow, thisPlatform } from "../install.ts";
 import { isApple, matchKey } from "./keymap.ts";
 import { statusText, type Status } from "./status.ts";
 import { Backoff } from "./reconnect.ts";
@@ -328,12 +328,12 @@ function connect(
     holdsFocus: () => element.contains(document.activeElement),
   };
   const unregister = bar.register(target);
-  // A tab moved into the app's window as it installs keeps this view, so the window is read on use.
   const unguard = offersInstall(thisPlatform())
     ? guardClose(
         { window, document },
-        () => target.holdsFocus() && !inAppWindow(),
-        () => report({ notice: suggestsApp(here()) ? CLOSE_KEY_APP : CLOSE_KEY }),
+        () => target.holdsFocus(),
+        // Read on use: a tab Chrome moves into the app's window as it installs keeps this view.
+        () => report({ notice: closeNotice(pageNow()) }),
       )
     : () => {};
   const typed = term.onData((data) => {
@@ -420,12 +420,6 @@ function connect(
 
 /** How long the viewport stays still before a focused terminal is brought into view. */
 const REVEAL_SETTLE_MS = 150;
-
-/** After the user stays through a close Ctrl+W asked for, where the browser can install Bazhen. */
-const CLOSE_KEY_APP =
-  "Ctrl+W closes the tab, so the terminal can't get it. In Bazhen installed as an app, it can.";
-/** The same, where it can't. */
-const CLOSE_KEY = "Ctrl+W closes the tab, so the terminal can't get it.";
 
 /**
  * WebGL where it draws correctly, xterm.js's DOM renderer otherwise. Under phone emulation WebGL

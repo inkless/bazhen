@@ -101,6 +101,21 @@ describe("the close guard", () => {
     expect(p.asks()).toBe(false);
   });
 
+  it("asks again once the pointer moves with Ctrl still down, as after staying with Ctrl held", () => {
+    const p = page();
+    p.key("keydown", true);
+    p.window.dispatchEvent(new Event("blur"));
+    p.pointer(true);
+    expect(p.asks()).toBe(true);
+  });
+
+  it("never arms from the pointer while focus is outside the terminal", () => {
+    const p = page();
+    p.focus(false);
+    p.pointer(true);
+    expect(p.window.unloadListeners).toBe(0);
+  });
+
   it("stops asking at a click without Ctrl", () => {
     const p = page();
     p.key("keydown", true);
