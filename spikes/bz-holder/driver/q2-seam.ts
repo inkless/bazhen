@@ -91,7 +91,7 @@ for (let i = 0; i < CYCLES; i++) {
   if (gap) totals.gaps++;
   if (!clean(d)) {
     totals.seamDiffs++;
-    if (failures.length < 3) failures.push(JSON.stringify({ cycle: i, start, end, d }));
+    if (failures.length < 3) failures.push(JSON.stringify({ cycle: i, start: String(start), end: String(end), d }));
   }
   if (missing + duplicated > 0 && failures.length < 3) {
     failures.push(JSON.stringify({ cycle: i, missing, duplicated, sample: lines.slice(0, 3) }));
