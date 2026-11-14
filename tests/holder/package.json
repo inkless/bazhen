@@ -1,0 +1,10 @@
+{
+  "name": "@bazhen/holder-tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@bazhen/protocol": "workspace:*",
+    "@bazhen/runtime-holder": "workspace:*"
+  }
+}

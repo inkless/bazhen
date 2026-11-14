@@ -11,6 +11,8 @@ TypeScript in a pnpm workspace, and Rust in a Cargo workspace (`crates/`).
 - Tests that run real tmux (integration, api, e2e, and falsify of them) run only through
   `pnpm test:real`, in a throwaway container, never on the host: one wrong socket there ends
   every tmux session on the machine. They refuse to start anywhere else
+- Holder tests (`pnpm test:holder`) run real PTYs and `bazhen-holder` processes on the host.
+  They create everything under a temporary `BAZHEN_HOME`, and never point at a real one
 - With parallel agents: stage files by name, never `git add -A`; don't use `git stash`;
   rebase, don't merge
 

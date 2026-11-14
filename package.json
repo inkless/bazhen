@@ -13,8 +13,9 @@
     "format:check": "node --disable-warning=ExperimentalWarning scripts/cargo-gate.ts fmt && oxfmt --check",
     "test": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
+    "test:holder": "vitest run --project holder",
     "test:api": "pnpm run build:hook && vitest run --project api",
-    "check": "node --disable-warning=ExperimentalWarning scripts/check-standards.ts && node --disable-warning=ExperimentalWarning scripts/protocol-schema.ts --check && pnpm run lint && pnpm run format:check && pnpm run typecheck && pnpm run lint:rust && pnpm run deny && pnpm run test:rust && pnpm run test && pnpm run test:medium && pnpm run test:bench",
+    "check": "node --disable-warning=ExperimentalWarning scripts/check-standards.ts && node --disable-warning=ExperimentalWarning scripts/protocol-schema.ts --check && pnpm run lint && pnpm run format:check && pnpm run typecheck && pnpm run lint:rust && pnpm run deny && pnpm run test:rust && pnpm run test && pnpm run test:medium && pnpm run test:holder && pnpm run test:bench",
     "test:e2e": "pnpm run build:hook && pnpm --filter @bazhen/e2e-tests run test",
     "lint:config": "node scripts/lint-config.ts",
     "schema": "node --disable-warning=ExperimentalWarning scripts/protocol-schema.ts",
@@ -33,6 +34,7 @@
   },
   "devDependencies": {
     "@bazhen/host-guard": "workspace:*",
+    "@bazhen/runtime-holder": "workspace:*",
     "@types/node": "26.6.6",
     "husky": "9.1.7",
     "lint-staged": "17.6.0",
