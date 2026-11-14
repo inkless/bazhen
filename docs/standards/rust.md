@@ -221,10 +221,9 @@ whose output the harness reads, logs nothing.
 - **`pnpm deny`** runs cargo-deny with `deny.toml`. It fails on a licence outside the allow-list
   (dev-dependencies included), an advisory or a yanked crate, two versions of one crate, a
   wildcard version, or a source other than crates.io. A new licence joins the allow-list in the
-  commit that needs it, naming the crate. The first crate to take `thiserror` or `tracing` meets
-  both limits: they bring `unicode-ident`, under Unicode-3.0, and may bring a second version of a
-  crate already in the tree (`syn`, say). Add the licence with that reason, and align the versions
-  rather than relaxing `multiple-versions`.
+  commit that needs it, naming the crate: Unicode-3.0 is there for `unicode-ident`, which
+  `serde_derive` and `thiserror-impl` build on. A crate that brings a second version of one
+  already in the tree (`syn`, say) aligns the versions rather than relaxing `multiple-versions`.
 - **An advisory fails `pnpm check` on every branch the day it is published,** main included,
   with no code change. That is deliberate: the fix is to upgrade the crate, or, when the advisory
   can't reach our use of it, to list its id in `deny.toml`'s `[advisories] ignore` with the
@@ -248,7 +247,10 @@ What differs:
   file a mutant produced.
 - **Snapshots with insta, for protocol frames only.** An encoder's output is a contract other
   languages read, so a reviewed snapshot of it is the right assertion. insta joins
-  `[workspace.dependencies]` with the first crate that needs it. This is the one exception
+  `[workspace.dependencies]` with the first crate that needs it. A protocol whose source is a
+  TypeScript schema is pinned instead by the fixtures that source writes, which the crate must
+  match frame by frame: `crates/bazhen-holder-proto/tests/fixtures.rs` reads
+  `packages/protocol/fixtures/holder/`. This is the one exception
   to `testing.md`'s "no snapshots of terminal output": screen contents are still asserted byte by
   byte.
 - **A cargo-fuzz target for every decoder.** Bytes a peer sends are whatever it sends, so every

@@ -1,0 +1,31 @@
+# The holder protocol's fuzz targets. libFuzzer needs nightly, so this crate is a workspace of its
+# own, built only by `cargo +nightly fuzz` (.github/workflows/fuzz.yml).
+[package]
+name = "bazhen-holder-proto-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+bazhen-holder-proto = { path = ".." }
+libfuzzer-sys = "=0.4.13"
+serde_json = "=1.0.154"
+
+[[bin]]
+name = "frame"
+path = "fuzz_targets/frame.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "spawn_spec"
+path = "fuzz_targets/spawn_spec.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

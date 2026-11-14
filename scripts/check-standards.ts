@@ -605,6 +605,9 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-hook/src/lib.rs::header": "parse_reply",
   "crates/bazhen-hook/src/lib.rs::content_length": "parse_reply",
   "crates/bazhen-hook/src/pane_title.rs::body": "pane_title",
+  "crates/bazhen-holder-proto/src/frame.rs::FrameDecoder::push": "frame",
+  "crates/bazhen-holder-proto/src/frame.rs::FrameDecoder::next_frame": "frame",
+  "crates/bazhen-holder-proto/src/lib.rs::decode_spawn_spec": "spawn_spec",
 };
 const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-hook/src/lib.rs::hook_request": "an encoder: it writes the request",
@@ -618,6 +621,43 @@ const NOT_DECODERS: Record<string, string> = {
     "reached only through parse_reply, promised_end and is_truncated, all fuzzed",
   "crates/bazhen-hook/src/statusline.rs::report":
     "forwards the status line's input to the daemon in a hook request, without parsing it",
+  "crates/bazhen-holder-proto/src/frame.rs::frame":
+    "an encoder: it writes a frame's header before its payload",
+  "crates/bazhen-holder-proto/src/frame.rs::with_json":
+    "an encoder: it appends a body's JSON to a frame's binary prefix",
+  "crates/bazhen-holder-proto/src/frame.rs::with_offset":
+    "an encoder: it appends an offset to a frame's binary prefix",
+  "crates/bazhen-holder-proto/src/frame.rs::Request::name": "names the variant; reads no bytes",
+  "crates/bazhen-holder-proto/src/frame.rs::Request::code":
+    "names the variant's type byte; reads no bytes",
+  "crates/bazhen-holder-proto/src/frame.rs::Request::id":
+    "returns the variant's id; reads no bytes",
+  "crates/bazhen-holder-proto/src/frame.rs::Request::encode": "an encoder: it writes the request",
+  "crates/bazhen-holder-proto/src/frame.rs::Reply::name": "names the variant; reads no bytes",
+  "crates/bazhen-holder-proto/src/frame.rs::Reply::code":
+    "names the variant's type byte; reads no bytes",
+  "crates/bazhen-holder-proto/src/frame.rs::Reply::encode": "an encoder: it writes the reply",
+  "crates/bazhen-holder-proto/src/frame.rs::FrameDecoder::new": "sets a decoder up; reads nothing",
+  "crates/bazhen-holder-proto/src/frame.rs::split_u32":
+    "reached only through FrameDecoder::next_frame, fuzzed",
+  "crates/bazhen-holder-proto/src/frame.rs::split_id":
+    "reached only through FrameDecoder::next_frame, fuzzed",
+  "crates/bazhen-holder-proto/src/frame.rs::split_offset":
+    "reached only through FrameDecoder::next_frame, fuzzed",
+  "crates/bazhen-holder-proto/src/frame.rs::parse":
+    "reached only through FrameDecoder::next_frame, fuzzed",
+  "crates/bazhen-holder-proto/src/frame.rs::body":
+    "reached only through FrameDecoder::next_frame, fuzzed",
+  "crates/bazhen-holder-proto/src/frame.rs::hello_request":
+    "reached only through FrameDecoder::next_frame, fuzzed",
+  "crates/bazhen-holder-proto/src/frame.rs::hello_reply":
+    "reached only through FrameDecoder::next_frame, fuzzed",
+  "crates/bazhen-holder-proto/src/frame.rs::decode_request":
+    "reached only through FrameDecoder::next_frame, fuzzed",
+  "crates/bazhen-holder-proto/src/frame.rs::decode_reply":
+    "reached only through FrameDecoder::next_frame, fuzzed",
+  "crates/bazhen-holder-proto/src/frame.rs::FrameDecoder::take":
+    "reached only through FrameDecoder::next_frame, fuzzed",
 };
 
 // An impl block, whose associated types its trait requires, so they aren't aliases. (A trait's
@@ -979,7 +1019,7 @@ export const DENY_CONFIG = [
   "[advisories]",
   'yanked = "deny"',
   "[licenses]",
-  'allow = ["Apache-2.0", "MIT"]',
+  'allow = ["Apache-2.0", "MIT", "Unicode-3.0"]',
   "include-dev = true",
   "private = { ignore = true }",
   "[bans]",
