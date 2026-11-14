@@ -117,7 +117,10 @@ export interface FakeHolderServer {
  */
 export async function listenFakeHolder(
   path: string,
-  options: FakeHolderOptions = {},
+  options: FakeHolderOptions & {
+    /** False leaves `close` to the test, like a holder that ignores it. */
+    readonly answersClose?: boolean;
+  } = {},
 ): Promise<FakeHolderServer> {
   const sockets = new Set<Socket>();
   const connected: FakeHolder[] = [];
@@ -125,7 +128,8 @@ export async function listenFakeHolder(
   const server = createServer((socket) => {
     sockets.add(socket);
     socket.on("close", () => sockets.delete(socket));
-    const holder = new FakeHolder(socket, { ...options, onClose: answerClose });
+    const onClose = options.answersClose === false ? undefined : answerClose;
+    const holder = new FakeHolder(socket, onClose ? { ...options, onClose } : options);
     const waiter = waiting.shift();
     if (waiter === undefined) connected.push(holder);
     else waiter(holder);

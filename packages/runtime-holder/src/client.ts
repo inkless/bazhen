@@ -81,7 +81,10 @@ export class HolderDisconnected extends Error {
 }
 
 export interface HolderClientOptions {
-  /** Called for every event, synchronously and in the order the holder sent them. */
+  /**
+   * Called for every event, synchronously and in the order the holder sent them. One that throws
+   * ends the connection with that error.
+   */
   readonly onEvent: (event: HolderEvent) => void;
   /** Ask for the slot whose `input` the holder takes; `hello.writer` says whether it was given. */
   readonly writer?: boolean;
@@ -227,9 +230,17 @@ class Connection {
   private read(chunk: Uint8Array): void {
     if (this.end !== null) return;
     const { frames, malformed } = this.decoder.push(chunk);
-    for (const frame of frames) {
-      this.dispatch(frame);
-      if (this.end !== null) return;
+    try {
+      for (const frame of frames) {
+        this.dispatch(frame);
+        if (this.end !== null) return;
+      }
+    } catch (thrown) {
+      // From `onEvent`: the frames after it are lost, so the connection can't go on in step.
+      const error = thrown instanceof Error ? thrown : new Error(String(thrown));
+      this.finish({ reason: "error", error });
+      this.stream.destroy();
+      return;
     }
     if (malformed !== null) this.breakProtocol(malformed);
   }
@@ -257,7 +268,8 @@ class Connection {
     const error = new HolderRequestError(frame.body);
     const pending = this.pending.get(frame.id);
     if (pending === undefined) {
-      this.onEvent({ type: "refused", id: frame.id, error });
+      // An `error` answering an aborted request is dropped, as any late answer is.
+      if (frame.body.request === "input") this.onEvent({ type: "refused", id: frame.id, error });
       return;
     }
     this.pending.delete(frame.id);
