@@ -1,5 +1,5 @@
 /**
- * In a browser tab on Linux and Windows, Ctrl+W closes the tab and never reaches the page, so a
+ * In a browser tab on Linux, Windows and ChromeOS, Ctrl+W closes the tab and never reaches the page, so a
  * terminal can't have it. While Ctrl is down in a focused terminal this makes a close ask first,
  * and calls `onStayed` if the user stays. The browser keeps the W but passes on Ctrl's own keydown
  * and keyup, so the guard is armed only while Ctrl is down, and a reload or a close with the mouse
@@ -27,7 +27,6 @@ export function guardClose(
     if (on) page.window.addEventListener("beforeunload", ask);
     else page.window.removeEventListener("beforeunload", ask);
   };
-  // Capture, so the terminal can't stop it on the way.
   const key = (event: Event) => arm(ctrl(event) && holdsFocus());
   // A Ctrl released over the prompt, or after Alt+Tab or a tab switch, sends this page no keyup;
   // the pointer's next event, or the blur, says it is up.
@@ -35,20 +34,23 @@ export function guardClose(
     if (!ctrl(event)) arm(false);
   };
   const disarm = () => arm(false);
+  // Input in capture, so the terminal can't stop it on the way; the window's own blur only.
   const listeners = [
-    [page.window, "keydown", key],
-    [page.window, "keyup", key],
-    [page.window, "pointerdown", pointer],
-    [page.window, "pointermove", pointer],
-    [page.window, "blur", disarm],
-    [page.document, "visibilitychange", disarm],
+    [page.window, "keydown", key, true],
+    [page.window, "keyup", key, true],
+    [page.window, "pointerdown", pointer, true],
+    [page.window, "pointermove", pointer, true],
+    [page.window, "blur", disarm, false],
+    [page.document, "visibilitychange", disarm, false],
   ] as const;
-  for (const [target, type, listener] of listeners) target.addEventListener(type, listener, true);
+  for (const [target, type, listener, capture] of listeners) {
+    target.addEventListener(type, listener, capture);
+  }
   return () => {
     disarm();
     clearTimeout(stayed);
-    for (const [target, type, listener] of listeners) {
-      target.removeEventListener(type, listener, true);
+    for (const [target, type, listener, capture] of listeners) {
+      target.removeEventListener(type, listener, capture);
     }
   };
 }

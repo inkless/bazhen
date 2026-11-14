@@ -689,9 +689,7 @@ test("offers itself as an app on a desktop that isn't a Mac, standalone in its o
     .toEqual({ path: "/manifest.webmanifest", errors: [], display: "standalone" });
 });
 
-test("leaves an iPad or a Mac with no manifest, so Add to Home Screen is as it was", async ({
-  browser,
-}) => {
+test("leaves a Mac with no manifest, so Add to Home Screen is as it was", async ({ browser }) => {
   const page = await (await browser.newContext({ userAgent: MAC })).newPage();
   await page.goto("/");
   await expect(page.getByRole("button", { name: "Launch Claude Code" })).toBeVisible();
@@ -732,4 +730,21 @@ test("closes without asking once Ctrl is up", async ({ page }) => {
   await page.close({ runBeforeUnload: true });
   await expect.poll(() => page.isClosed()).toBe(true);
   expect(dialogs).toEqual([]);
+});
+
+test("never asks before a close on a Mac, which doesn't lose Ctrl+W", async ({ browser }) => {
+  const page = await (await browser.newContext({ userAgent: MAC })).newPage();
+  await launchProbe(page);
+  await drive(page);
+  const dialogs: string[] = [];
+  page.on("dialog", (dialog) => {
+    dialogs.push(dialog.type());
+    // Accepted, so the page closes either way and the assertion below says what it saw.
+    void dialog.accept();
+  });
+  await page.keyboard.down("Control");
+  await page.close({ runBeforeUnload: true });
+  await expect.poll(() => page.isClosed()).toBe(true);
+  expect(dialogs).toEqual([]);
+  await page.context().close();
 });

@@ -33,7 +33,7 @@ function page() {
     stop,
     focus: (now: boolean) => (focused = now),
     key: (type: "keydown" | "keyup", ctrlKey: boolean) => send(type, ctrlKey),
-    pointer: (ctrlKey: boolean) => send("pointermove", ctrlKey),
+    pointer: (ctrlKey: boolean, type = "pointermove") => send(type, ctrlKey),
     /** Whether a close now asks first. */
     asks: () => {
       const close = new Event("beforeunload", { cancelable: true });
@@ -66,11 +66,11 @@ describe("the close guard", () => {
     expect(p.asks()).toBe(false);
   });
 
-  it("never asks while focus is outside the terminal", () => {
+  it("never arms while focus is outside the terminal", () => {
     const p = page();
     p.focus(false);
     p.key("keydown", true);
-    expect(p.asks()).toBe(false);
+    expect([p.window.unloadListeners, p.asks()]).toEqual([0, false]);
   });
 
   it("doesn't ask once focus has left the terminal with Ctrl still down", () => {
@@ -87,10 +87,24 @@ describe("the close guard", () => {
     expect(p.asks()).toBe(false);
   });
 
+  it("stops asking at the next key pressed without Ctrl, as after staying by keyboard", () => {
+    const p = page();
+    p.key("keydown", true);
+    p.key("keydown", false);
+    expect(p.asks()).toBe(false);
+  });
+
   it("stops asking once the pointer moves without Ctrl, as after staying with the mouse", () => {
     const p = page();
     p.key("keydown", true);
     p.pointer(false);
+    expect(p.asks()).toBe(false);
+  });
+
+  it("stops asking at a click without Ctrl", () => {
+    const p = page();
+    p.key("keydown", true);
+    p.pointer(false, "pointerdown");
     expect(p.asks()).toBe(false);
   });
 

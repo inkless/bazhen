@@ -19,7 +19,7 @@ import {
 import { Heartbeat, PING_EVERY_MS } from "./heartbeat.ts";
 import { barBytes, keyBar, settled, withCtrl, type BarTarget } from "./bar-keys.ts";
 import { guardClose } from "./close-guard.ts";
-import { canInstall, offersInstall, thisDevice } from "../install.ts";
+import { here, inAppWindow, offersInstall, suggestsApp, thisPlatform } from "../install.ts";
 import { isApple, matchKey } from "./keymap.ts";
 import { statusText, type Status } from "./status.ts";
 import { Backoff } from "./reconnect.ts";
@@ -328,15 +328,14 @@ function connect(
     holdsFocus: () => element.contains(document.activeElement),
   };
   const unregister = bar.register(target);
-  // An installed app's window, and a Mac, a phone or a tablet, already pass Ctrl+W on.
-  const unguard =
-    offersInstall(thisDevice()) && !matchMedia("(display-mode: standalone)").matches
-      ? guardClose(
-          { window, document },
-          () => target.holdsFocus(),
-          () => report({ notice: canInstall() ? CLOSE_KEY_APP : CLOSE_KEY }),
-        )
-      : () => {};
+  // A tab moved into the app's window as it installs keeps this view, so the window is read on use.
+  const unguard = offersInstall(thisPlatform())
+    ? guardClose(
+        { window, document },
+        () => target.holdsFocus() && !inAppWindow(),
+        () => report({ notice: suggestsApp(here()) ? CLOSE_KEY_APP : CLOSE_KEY }),
+      )
+    : () => {};
   const typed = term.onData((data) => {
     // The bar's Ctrl, armed for the next key, applies to a letter typed on the soft keyboard.
     if (withoutEventReports(data) !== "") keystroke((ctrl) => (ctrl ? withCtrl(data) : data));

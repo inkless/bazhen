@@ -1,13 +1,18 @@
 import { describe, expect, it } from "vitest";
-import type { Device } from "./terminal/bar-keys.ts";
-import { offersInstall } from "./install.ts";
+import { offersInstall, suggestsApp, type Here, type Platform } from "./install.ts";
 
-const desktop = (userAgent: string, maxTouchPoints = 0): Device => ({
+const desktop = (userAgent: string, maxTouchPoints = 0): Platform => ({
   coarse: false,
   maxTouchPoints,
   userAgent,
+  mobile: false,
 });
-const touch = (userAgent: string): Device => ({ coarse: true, maxTouchPoints: 5, userAgent });
+const touch = (userAgent: string): Platform => ({
+  coarse: true,
+  maxTouchPoints: 5,
+  userAgent,
+  mobile: true,
+});
 
 const LINUX =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36";
@@ -35,7 +40,31 @@ describe("offering Bazhen as an installed app", () => {
     ).toEqual([false, false, false, false]);
   });
 
+  it("leaves Android with a mouse, as in a desktop mode, as it was", () => {
+    expect(offersInstall(desktop(ANDROID))).toBe(false);
+  });
+
   it("leaves an Android tablet asking for the desktop site, with a Linux user agent, as it was", () => {
-    expect(offersInstall(touch(LINUX))).toBe(false);
+    const withTrackpad: Platform = { ...desktop(LINUX, 5), mobile: true };
+    expect([touch(LINUX), withTrackpad].map(offersInstall)).toEqual([false, false]);
+  });
+});
+
+describe("suggesting the app to a user who lost Ctrl+W to the tab", () => {
+  const installable: Here = { secure: true, prompts: true, linked: true, inApp: false };
+
+  it("suggests it where the browser can install Bazhen from this page", () => {
+    expect(suggestsApp(installable)).toBe(true);
+  });
+
+  it("doesn't on a plain-http origin, in Firefox, without the manifest, or in the app itself", () => {
+    expect(
+      [
+        { ...installable, secure: false },
+        { ...installable, prompts: false },
+        { ...installable, linked: false },
+        { ...installable, inApp: true },
+      ].map(suggestsApp),
+    ).toEqual([false, false, false, false]);
   });
 });

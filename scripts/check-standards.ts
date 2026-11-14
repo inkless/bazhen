@@ -186,8 +186,7 @@ const TOKEN_FILES = new Set([
 ]);
 /**
  * The app icon, which the browser and the OS draw as an image outside any page, where no token
- * resolves. Its colours are `--color-neutral-12`, `--color-neutral-1` and `--color-blue-dark-9`
- * in sRGB (docs/standards/ui.md).
+ * resolves. docs/standards/ui.md, under Adding a colour, names the palette steps it holds.
  */
 const ICON_FILES = new Set(["apps/web/public/icon.svg"]);
 
