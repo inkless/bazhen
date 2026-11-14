@@ -128,6 +128,8 @@ interface Sending<K extends AnswerName> {
    * which output could run without its snapshot.
    */
   readonly endsOn?: "abort" | "failure";
+  /** False while an answer would come out of turn, which breaks the protocol. */
+  readonly inTurn?: () => boolean;
 }
 
 const asError = (value: unknown) => (value instanceof Error ? value : new Error(String(value)));
@@ -194,7 +196,7 @@ class Connection {
       this.pending.set(request.id, {
         request: request.type,
         accept: (reply) => {
-          if (!isReplyOf(reply, expects)) return false;
+          if (!isReplyOf(reply, expects) || sending.inTurn?.() === false) return false;
           stop();
           sending.onAnswer?.(reply);
           resolve(reply);
@@ -362,22 +364,29 @@ export class HolderClient {
    */
   async attach(options?: RequestOptions): Promise<void> {
     const batch: Uint8Array[] = [];
-    const onAnswer = (snapshot: HolderSnapshot) => this.connection.emit(snapshot);
+    let snapshotIn = false;
+    const onAnswer = (snapshot: HolderSnapshot) => {
+      snapshotIn = true;
+      this.connection.emit(snapshot);
+    };
     const answers = [
       this.connection.ask((id) => ({ type: "snapshot", id }), "snapshot", options, {
         batch,
         onAnswer,
         endsOn: "failure",
       }),
+      // The holder answers in the order it read the two; output before the snapshot is unplaceable.
       this.connection.ask((id) => ({ type: "subscribe", id, body: {} }), "ok", options, {
         batch,
         endsOn: "failure",
+        inTurn: () => snapshotIn,
       }),
     ];
     this.connection.write(batch);
     await Promise.all(answers);
   }
 
+  /** Moves the connection's one subscription, an attach's included, to output from `from`. */
   async subscribe(from?: HolderSubscribeRequest["from"], options?: RequestOptions): Promise<void> {
     const body = from === undefined ? {} : { from };
     await this.connection.ask((id) => ({ type: "subscribe", id, body }), "ok", options, {

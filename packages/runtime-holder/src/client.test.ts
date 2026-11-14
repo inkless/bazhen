@@ -252,6 +252,20 @@ describe("HolderClient", () => {
     await expect(client.ended).resolves.toMatchObject({ reason: "error" });
   });
 
+  it("ends the connection when an attach's subscription is answered before its snapshot", async () => {
+    const { client, holder, events } = await connected();
+    const attached = client.attach();
+    const snapshot = await holder.request();
+    const subscribe = await holder.request();
+    holder.send(
+      { type: "ok", id: subscribe.id, body: { request: "subscribe" } },
+      { type: "data", offset: 0, bytes: Uint8Array.of(0x78) },
+      { type: "snapshot", id: snapshot.id, offset: 0, droppedLines: 0, bytes: new Uint8Array() },
+    );
+    await expect(attached).rejects.toMatchObject({ end: { reason: "malformed" } });
+    expect(events).toEqual([]);
+  });
+
   it("ends the connection when an attach's snapshot is refused but its subscription taken", async () => {
     const { client, holder, events } = await connected();
     const attached = client.attach();
