@@ -166,3 +166,26 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: pnpm test:falsify --base "origin/$BASE_REF"
+      # The falsify that judges a branch is the branch's own, so a branch that weakens it could
+      # pass on the weakened check. When the branch changes falsify, anything it imports, or how
+      # it is run, the base's falsify judges the branch as well. The files are the base's list and
+      # the branch's together, so a branch can't shorten the list to skip this. A base whose
+      # falsify has no --harness lists nothing, and the branch's list stands alone.
+      - name: pnpm test:falsify with the base's falsify, when the branch changes falsify
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          base=$(git merge-base "origin/$BASE_REF" HEAD)
+          dir="$RUNNER_TEMP/base-falsify"
+          git worktree add --quiet --detach "$dir" "$base"
+          pnpm --dir "$dir" install --frozen-lockfile --prefer-offline --ignore-scripts --silent
+          mapfile -t harness < <(
+            (cd "$dir" && node scripts/falsify.ts --harness) || true
+            node scripts/falsify.ts --harness || true
+            printf '%s\n' .github/workflows/ci.yml package.json
+          )
+          if git diff --quiet "$base" HEAD -- "${harness[@]}"; then
+            echo "falsify, its imports and how CI runs it are unchanged."
+            exit 0
+          fi
+          node "$dir/scripts/falsify.ts" --base "origin/$BASE_REF"

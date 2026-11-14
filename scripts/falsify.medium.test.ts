@@ -33,8 +33,8 @@ const STUB_PNPM = `#!/bin/sh
   echo "ARGS: $*"
   env | grep '^GIT_'
   echo "PWD: $(pwd)"
-  echo "SOURCE: $(cat ${SOURCE})"
-  echo "TEST: $(cat ${TEST})"
+  echo "SOURCE: $(cat "\${STUB_SOURCE:-${SOURCE}}")"
+  echo "TEST: $(cat "\${STUB_TEST:-${TEST}}")"
 } >> "$STUB_LOG"
 case "$1" in
   install)
@@ -50,10 +50,15 @@ case "$1" in
       i=0
       while [ $i -lt 20 ]; do sleep 1; i=$((i + 1)); done
     fi
+    # A test that starts falsify again, in the worktree falsify is running it in.
+    if [ "\${STUB_NEST:-0}" -gt 0 ]; then
+      STUB_NEST=$((STUB_NEST - 1)) node "$STUB_FALSIFY" --base "$STUB_BASE" >> "$STUB_LOG" 2>&1
+      echo "NESTED EXIT $?" >> "$STUB_LOG"
+    fi
     for arg in "$@"; do
       case "$arg" in --outputFile=*) out="\${arg#--outputFile=}" ;; esac
     done
-    printf '{"testResults":[{"name":"%s/${TEST}","status":"failed","assertionResults":[{"title":"caps","status":"%s","failureMessages":[]}]}]}' "$(pwd)" "$STUB_STATUS" > "$out"
+    printf '{"testResults":[{"name":"%s/%s","status":"failed","assertionResults":[{"title":"caps","status":"%s","failureMessages":[]}]}]}' "$(pwd)" "\${STUB_TEST:-${TEST}}" "$STUB_STATUS" > "$out"
     exit 0
     ;;
 esac
@@ -272,6 +277,16 @@ describe("falsify on a branch in a linked worktree", () => {
     });
   });
 
+  it("refuses a falsify the run starts on the repository it is judging, and leaves none behind", () => {
+    const result = againstBase({ STUB_NEST: "1", STUB_FALSIFY: FALSIFY, STUB_BASE: fx.base });
+    expect({
+      status: result.status,
+      nested: /falsify run is already judging this repository[\s\S]*NESTED EXIT 2/.test(stubLog()),
+      branch: git(fx.linked, "status", "--porcelain"),
+      leftovers: leftovers(),
+    }).toEqual({ status: 0, nested: true, branch: "", leftovers: [] });
+  });
+
   it("fails when the new test passes without the change", () => {
     expect(againstBase({ STUB_STATUS: "passed" })).toEqual({
       status: 1,
@@ -315,6 +330,139 @@ describe("falsify on a branch in a linked worktree", () => {
       deadFolder: existsSync(dead),
       liveFolder: existsSync(live),
     }).toEqual({ listed: [`worktree ${live}`], deadFolder: false, liveFolder: true });
+  });
+});
+
+const SCRIPT = "scripts/x.ts";
+
+/**
+ * Commits `source` as the base has it on the branch, then a change to it with `test`, and runs
+ * falsify against that first commit.
+ */
+function changeScript(
+  source: string,
+  test: { path: string; text: string },
+  extra: Record<string, string> = {},
+) {
+  write(fx.linked, source, "export const s = 1;\n");
+  git(fx.linked, "add", source);
+  git(fx.linked, "commit", "--quiet", "-m", "feat: s1");
+  const base = git(fx.linked, "rev-parse", "HEAD").trim();
+  write(fx.linked, source, "export const s = 2;\n");
+  write(fx.linked, test.path, test.text);
+  git(fx.linked, "add", source, test.path);
+  git(fx.linked, "commit", "--quiet", "-m", "feat: s2");
+  return falsify(["--base", base], { STUB_SOURCE: source, STUB_TEST: test.path, ...extra });
+}
+
+/** `head`, then the `caps` test the branch adds to packages/a, which the stub reports. */
+const branchTest = (head: string) => {
+  const caps = readFileSync(join(fx.linked, TEST), "utf8")
+    .split("\n")
+    .filter((line) => line.includes('"caps"'));
+  return `${head}${caps.join("\n")}\n`;
+};
+
+const scriptTest = () => ({
+  path: "scripts/x.test.ts",
+  text: branchTest('import { s } from "./x.ts";\n'),
+});
+
+/**
+ * Commits a generator's `source` and its committed `output` on the branch, then a change to both
+ * with `test`, and runs falsify against the first commit with the stub showing the output.
+ */
+function changeGenerated(source: string, output: string, test: { path: string; text: string }) {
+  write(fx.linked, source, "export const g = 1;\n");
+  write(fx.linked, output, '{"generated":1}\n');
+  git(fx.linked, "add", source, output);
+  git(fx.linked, "commit", "--quiet", "-m", "feat: g1");
+  const base = git(fx.linked, "rev-parse", "HEAD").trim();
+  write(fx.linked, source, "export const g = 2;\n");
+  write(fx.linked, output, '{"generated":2}\n');
+  write(fx.linked, test.path, test.text);
+  git(fx.linked, "add", source, output, test.path);
+  git(fx.linked, "commit", "--quiet", "-m", "feat: g2");
+  return falsify(["--base", base], { STUB_SOURCE: output, STUB_TEST: test.path });
+}
+
+const sawBaseOutput = () => stubLog().includes('SOURCE: {"generated":1}');
+
+describe("falsify on a branch that changes a script", () => {
+  it("runs the script's new test against the base's script", () => {
+    const result = changeScript(SCRIPT, scriptTest());
+    expect({
+      status: result.status,
+      killed: result.output.includes("KILLED   scripts/x.test.ts › caps"),
+      sawOldScript: stubLog().includes("SOURCE: export const s = 1;"),
+    }).toEqual({ status: 0, killed: true, sawOldScript: true });
+  });
+
+  it("fails when the script's new test passes without the change", () => {
+    expect(changeScript(SCRIPT, scriptTest(), { STUB_STATUS: "passed" })).toEqual({
+      status: 1,
+      output: expect.stringContaining("SURVIVED scripts/x.test.ts › caps"),
+    });
+  });
+
+  it("asks a control for a passing test that imports no script the branch changed", () => {
+    const unrelated = { path: "scripts/y.test.ts", text: branchTest("") };
+    const before = changeScript(SCRIPT, unrelated, { STUB_STATUS: "passed" });
+    git(fx.linked, "commit", "--quiet", "--allow-empty", "-m", "test: control", "-m", CONTROL);
+    const after = falsify(["--base", git(fx.linked, "rev-parse", "HEAD~2").trim()], {
+      STUB_SOURCE: SCRIPT,
+      STUB_TEST: unrelated.path,
+      STUB_STATUS: "passed",
+    });
+    expect({ before, after: after.status }).toEqual({
+      before: {
+        status: 1,
+        output: expect.stringContaining("(passed; unrelated to the source change)"),
+      },
+      after: 0,
+    });
+  });
+
+  it("reverts a generator's committed output with it, so a test reading the output sees the base's", () => {
+    const test = "scripts/lint-config.medium.test.ts";
+    const result = changeGenerated("scripts/lint-config.ts", ".oxlintrc.json", {
+      path: test,
+      text: branchTest('import { g } from "./lint-config.ts";\n'),
+    });
+    expect({
+      status: result.status,
+      killed: result.output.includes(`KILLED   ${test} › caps`),
+      sawBaseOutput: sawBaseOutput(),
+    }).toEqual({ status: 0, killed: true, sawBaseOutput: true });
+  });
+
+  it("reverts the holder fixtures with the protocol source they are generated from", () => {
+    const test = "packages/protocol/src/holder.test.ts";
+    const result = changeGenerated(
+      "packages/protocol/src/holder.ts",
+      "packages/protocol/fixtures/holder/1.0/frames.json",
+      { path: test, text: branchTest('import { g } from "./holder.ts";\n') },
+    );
+    expect({
+      status: result.status,
+      killed: result.output.includes(`KILLED   ${test} › caps`),
+      sawBaseOutput: sawBaseOutput(),
+    }).toEqual({ status: 0, killed: true, sawBaseOutput: true });
+  });
+
+  it("judges a change to falsify.ts by reverting it, so a test that only runs it can survive", () => {
+    const runsIt = {
+      path: "scripts/falsify.medium.test.ts",
+      text: branchTest('const FALSIFY = fileURLToPath(new URL("falsify.ts", import.meta.url));\n'),
+    };
+    const result = changeScript("scripts/falsify.ts", runsIt, { STUB_STATUS: "passed" });
+    expect({ result, sawOldHarness: stubLog().includes("SOURCE: export const s = 1;") }).toEqual({
+      result: {
+        status: 1,
+        output: expect.stringContaining("SURVIVED scripts/falsify.medium.test.ts › caps"),
+      },
+      sawOldHarness: true,
+    });
   });
 });
 

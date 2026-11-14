@@ -1,12 +1,14 @@
 // Falsification harness (docs/standards/testing.md). It answers one question about the tests a
 // branch adds: would they fail if the branch's source change were not there?
 //
-// It runs the branch's new tests against the base's version of the source, in a throwaway
-// worktree, and classifies each new test:
+// It runs the branch's new tests against the base's version of the source (anything under an
+// app's or package's src/ and TypeScript under scripts/, tests aside), in a throwaway worktree,
+// and classifies each new test:
 //   KILLED    it failed: the test depends on the change. Good.
 //   SURVIVED  it passed without the change: it cannot detect the change. Not allowed. Only a test
-//             that directly imports a reverted file can survive; one that passes otherwise is
-//             unrelated to the source change and comes out INVALID.
+//             that directly imports a reverted file, or runs one it names with `new URL`, can
+//             survive; one that passes otherwise is unrelated to the source change and comes out
+//             INVALID.
 //   INVALID   no verdict: it couldn't load, timed out, was skipped, its title couldn't be read or
 //             isn't unique, or it passed but is unrelated to the source change; a branch that
 //             adds tests without a source change also lands here. Every test of a brand-new
@@ -33,8 +35,10 @@
 //
 // Usage:
 //   node scripts/falsify.ts [--base <ref>]
+//   node scripts/falsify.ts --harness
 // The branch is compared with its merge base with <ref>; <ref> defaults to origin/main, or main
-// when there is no origin.
+// when there is no origin. `--harness` prints falsify's own files, one per line, for CI: a branch
+// that changes one is judged by the base's falsify too, so a weakened falsify can't pass itself.
 
 import { execFileSync, type ChildProcess } from "node:child_process";
 import {
@@ -44,7 +48,9 @@ import {
   openSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -70,7 +76,7 @@ export type Outcome = "KILLED" | "SURVIVED" | "INVALID";
 export type Change = { status: string; path: string; oldPath?: string };
 
 const TEST_FILE = /(^|\/)[^/]+\.test\.tsx?$/;
-const REVERTIBLE = /^(apps|packages)\/[^/]+\/src\//;
+const REVERTIBLE = /^(?:(?:apps|packages)\/[^/]+\/src\/|scripts\/.+\.tsx?$)/;
 const TITLE = /(?<![.\w])(?:it|test)(?:\.\w+(?:\([^()]*\))?)*\(\s*(["'`])((?:\\.|(?!\1).)+)\1/g;
 const TEST_CALL = /(?<![.\w])(?:it|test)(?:\.\w+)*\s*\(/;
 const CONTROL_TRAILER = /^Control: .+ -> .+$/m;
@@ -93,6 +99,7 @@ const TEST_BUILD = GATES.test.slice(
   GATES.test.indexOf("--status-level"),
 );
 const KILL_GRACE_MS = 2000;
+const JUDGING = "BZ_FALSIFY_JUDGING";
 
 // Inherited, these point every git command at another repository or index: git exports them to
 // hooks, and a caller may set them. Every git command here, and everything run in the temporary
@@ -120,6 +127,45 @@ const git = (args: string[], cwd = process.cwd()) =>
     maxBuffer: 64 * 1024 * 1024,
     stdio: ["ignore", "pipe", "pipe"],
   });
+
+/**
+ * Whether a changed path is source the revert check puts back as the base had it: anything under
+ * an app's or package's `src/`, and TypeScript under `scripts/`, but never a test. These are the
+ * folders the sibling-test rule in check-standards.ts reads source from.
+ */
+export const isRevertible = (path: string): boolean =>
+  REVERTIBLE.test(path) && !TEST_FILE.test(path);
+
+/**
+ * Committed files a generator writes, by the sources it generates them from, each a path or a
+ * folder ending in `/`. When any of a generator's sources is reverted, the outputs the branch
+ * changed are reverted with it, so a test that reads an output sees what the base generated.
+ */
+const GENERATED: readonly { sources: readonly string[]; outputs: readonly string[] }[] = [
+  { sources: ["scripts/lint-config.ts"], outputs: [".oxlintrc.json"] },
+  {
+    sources: ["scripts/protocol-schema.ts", "packages/protocol/src/"],
+    outputs: ["packages/protocol/schema/", "packages/protocol/fixtures/"],
+  },
+];
+
+const within = (path: string, entries: readonly string[]) =>
+  entries.some((e) => path === e || (e.endsWith("/") && path.startsWith(e)));
+
+const pathsOf = (c: Change) => (c.oldPath === undefined ? [c.path] : [c.path, c.oldPath]);
+
+/**
+ * The changes the revert check puts back as the base had them: the revertible source, and the
+ * changed outputs of every generator whose source that includes.
+ */
+export function revertsOf(changes: Change[]): Change[] {
+  const source = changes.filter((c) => pathsOf(c).some(isRevertible));
+  const reverted = source.flatMap(pathsOf);
+  const outputs = GENERATED.filter((g) => reverted.some((p) => within(p, g.sources))).flatMap(
+    (g) => g.outputs,
+  );
+  return changes.filter((c) => source.includes(c) || pathsOf(c).some((p) => within(p, outputs)));
+}
 
 export function parseNameStatus(out: string): Change[] {
   return out
@@ -266,14 +312,62 @@ export function classify(report: VitestReport, file: string, title: string): Out
 // `import("…")`. A type-only import can't change what a test does at run time.
 const STATIC_IMPORT = /\b(?:import|export)\s+(type\s+)?[^;'"]*?\bfrom\s*["']([^"']+)["']/g;
 const BARE_IMPORT = /\bimport\s*\(?\s*["']([^"']+)["']/g;
+// A script a test runs as a child process rather than importing it.
+const FILE_URL = /\bnew\s+URL\(\s*["']([^"':]+)["']\s*,\s*import\.meta\.url\s*\)/g;
 const WORKSPACE = /^(@bazhen\/[^/]+)/;
+
+const runtimeSpecifiers = (source: string): string[] =>
+  [
+    ...[...source.matchAll(STATIC_IMPORT)].filter((m) => !m[1]).map((m) => m[2]),
+    ...[...source.matchAll(BARE_IMPORT)].map((m) => m[1]),
+  ].filter((s): s is string => s !== undefined);
+
+/** The paths a relative specifier in the file `from` may name. */
+function namedPaths(from: string, specifier: string): string[] {
+  const path = posix.join(posix.dirname(from), specifier);
+  return /\.[cm]?[jt]sx?$/.test(path)
+    ? [path]
+    : [path, `${path}.ts`, `${path}.tsx`, `${path}/index.ts`];
+}
+
+/**
+ * falsify's own files: this script and everything it imports at run time, followed through its
+ * relative imports, with each workspace package it imports as that package's folder. `read`
+ * returns a file's text, or undefined when there is no such file.
+ */
+export function harnessFiles(
+  read: (path: string) => string | undefined,
+  packages: Record<string, string>,
+): string[] {
+  const files = new Set<string>();
+  const folders = new Set<string>();
+  const queue = [HARNESS];
+  for (let path = queue.shift(); path !== undefined; path = queue.shift()) {
+    const source = files.has(path) ? undefined : read(path);
+    if (source === undefined) continue;
+    files.add(path);
+    for (const specifier of runtimeSpecifiers(source)) {
+      if (specifier.startsWith(".")) {
+        const found = namedPaths(path, specifier).find((c) => read(c) !== undefined);
+        if (found !== undefined) queue.push(found);
+      } else {
+        const dir = packages[WORKSPACE.exec(specifier)?.[1] ?? ""];
+        if (dir !== undefined) folders.add(`${dir}/`);
+      }
+    }
+  }
+  return [...files, ...folders].toSorted();
+}
+
+const HARNESS = "scripts/falsify.ts";
 
 /**
  * The reverted paths a test file imports directly: a relative specifier resolved against the
  * test's folder (with `.ts`, `.tsx` or `/index.ts` tried when it has no extension), or a
  * workspace package (`@bazhen/x`, `@bazhen/x/sub`), which counts every reverted path under that
- * package's folder. `packages` maps package names to folders, e.g. `@bazhen/core` →
- * `packages/core`.
+ * package's folder. A `new URL("<path>", import.meta.url)` naming a reverted file counts too, so
+ * a test that runs a script instead of importing it is related to it. `packages` maps package
+ * names to folders, e.g. `@bazhen/core` → `packages/core`.
  */
 export function relatedReverts(
   testPath: string,
@@ -281,18 +375,15 @@ export function relatedReverts(
   revertedPaths: string[],
   packages: Record<string, string>,
 ): string[] {
-  const specifiers = [
-    ...[...testSource.matchAll(STATIC_IMPORT)].filter((m) => !m[1]).map((m) => m[2]),
-    ...[...testSource.matchAll(BARE_IMPORT)].map((m) => m[1]),
-  ].filter((s): s is string => s !== undefined);
   const related = new Set<string>();
-  for (const specifier of specifiers) {
+  for (const [, url = ""] of testSource.matchAll(FILE_URL)) {
+    const path = posix.join(posix.dirname(testPath), url);
+    if (revertedPaths.includes(path)) related.add(path);
+  }
+  for (const specifier of runtimeSpecifiers(testSource)) {
     if (specifier.startsWith(".")) {
-      const path = posix.join(posix.dirname(testPath), specifier);
-      const candidates = /\.[cm]?[jt]sx?$/.test(path)
-        ? [path]
-        : [path, `${path}.ts`, `${path}.tsx`, `${path}/index.ts`];
-      for (const r of revertedPaths) if (candidates.includes(r)) related.add(r);
+      const named = namedPaths(testPath, specifier);
+      for (const r of revertedPaths) if (named.includes(r)) related.add(r);
     } else {
       const dir = packages[WORKSPACE.exec(specifier)?.[1] ?? ""];
       if (dir === undefined) continue;
@@ -785,11 +876,15 @@ async function judgeRustTests(top: string, base: string, head: string) {
   }
 }
 
-const USAGE = "usage: node scripts/falsify.ts [--base <ref>]";
+const USAGE = "usage: node scripts/falsify.ts [--base <ref> | --harness]";
 
-/** The `--base` ref from the arguments, or undefined; throws on anything else. */
-export function parseArgs(args: string[]): { base?: string } {
+/**
+ * The `--base` ref from the arguments, or `--harness`, which lists falsify's own files instead of
+ * judging; throws on anything else.
+ */
+export function parseArgs(args: string[]): { base?: string; harness?: true } {
   if (args.length === 0) return {};
+  if (args.length === 1 && args[0] === "--harness") return { harness: true };
   const [flag, value, ...rest] = args;
   if (flag !== "--base" || value === undefined || value.startsWith("-") || rest.length > 0) {
     throw new Error(USAGE);
@@ -819,7 +914,7 @@ function mergeBase(ref: string | undefined): string {
 }
 
 async function main(args: string[]): Promise<number> {
-  let options: { base?: string };
+  let options: { base?: string; harness?: true };
   try {
     options = parseArgs(args);
   } catch (error) {
@@ -827,6 +922,28 @@ async function main(args: string[]): Promise<number> {
     return 2;
   }
   const top = git(["rev-parse", "--show-toplevel"]).trim();
+  if (options.harness) {
+    const read = (path: string) => {
+      const file = join(top, path);
+      return existsSync(file) && statSync(file).isFile() ? readFileSync(file, "utf8") : undefined;
+    };
+    console.log(harnessFiles(read, workspacePackages(top)).join("\n"));
+    return 0;
+  }
+  // A test of falsify run in falsify's own worktree may start falsify again. Against a throwaway
+  // repository that is the test; against the repository being judged it would judge it again,
+  // in a worktree of its own, without end.
+  const repository = realpathSync(
+    git(["rev-parse", "--path-format=absolute", "--git-common-dir"]).trim(),
+  );
+  if (process.env[JUDGING] === repository) {
+    console.error(
+      "falsify: a falsify run is already judging this repository, and something it ran started " +
+        "falsify on it again. A test must start falsify only on a repository of its own.",
+    );
+    return 2;
+  }
+  process.env[JUDGING] = repository;
   const head = git(["rev-parse", "--verify", "HEAD^{commit}"]).trim();
   let base: string;
   try {
@@ -875,11 +992,7 @@ async function main(args: string[]): Promise<number> {
     return 0;
   }
 
-  const reverts = changes.filter(
-    (c) =>
-      (REVERTIBLE.test(c.path) && !TEST_FILE.test(c.path)) ||
-      (c.oldPath !== undefined && REVERTIBLE.test(c.oldPath) && !TEST_FILE.test(c.oldPath)),
-  );
+  const reverts = revertsOf(changes);
   const results: {
     file: string;
     title: string;
@@ -942,7 +1055,7 @@ async function main(args: string[]): Promise<number> {
       }
       // A passing test that imports none of the reverted files is a test of code the branch didn't
       // change (a characterization or property test): no verdict, so it needs a control.
-      const revertedPaths = reverts.flatMap((c) => (c.oldPath ? [c.oldPath, c.path] : [c.path]));
+      const revertedPaths = reverts.flatMap(pathsOf);
       const packages = workspacePackages(dir);
       for (const t of targets) {
         const outcome = classify(report, t.file, t.title);
