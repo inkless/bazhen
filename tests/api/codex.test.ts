@@ -4,8 +4,8 @@ import { BANNER, Daemon, waitUntil } from "./daemon.ts";
 import { FAKE_CODEX_QUESTION, startFakeResponses } from "./fake-responses.ts";
 import type { FakeModel } from "./fake-model.ts";
 
-/** The 256-colour background Codex 0.166 draws its prompt on, told a light terminal. */
-const LIGHT_TINT = "\x1b[48;5;255m";
+/** The 24-bit background Codex 0.166 draws its prompt on, told a light terminal. */
+const LIGHT_TINT = "\x1b[48;2;242;242;242m";
 
 let model: FakeModel;
 let daemon: Daemon;
@@ -154,7 +154,7 @@ describe("a Codex agent", () => {
     // Codex tints its prompt from the background it was told: a light grey on light. Told nothing,
     // as the agents launched without a theme are, it draws no tint at all.
     await expect.poll(() => daemon.capture(light.agentId, 0, true)).toContain(LIGHT_TINT);
-    expect(daemon.capture(asker.agentId, 0, true)).not.toContain("\x1b[48;5;");
+    expect(daemon.capture(asker.agentId, 0, true)).not.toContain("\x1b[48;2;");
   });
 
   it("is bound to the thread Bazhen started for it, before its TUI runs", async () => {

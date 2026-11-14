@@ -62,6 +62,32 @@ async function newTerminalEnv(): Promise<Record<string, string>> {
   );
 }
 
+/** `$COLORTERM` as a terminal started with `env` sees it. */
+async function colorterm(env: Record<string, string>): Promise<string> {
+  const out = join(dir, `colorterm-${newId("term")}`);
+  await runtime.create({
+    terminalId: newId("term"),
+    tags: { kind: "agent", agentId: newId("agent") },
+    argv: [
+      "sh",
+      "-c",
+      `printf %s "$COLORTERM" > '${out}.tmp' && mv '${out}.tmp' '${out}'; sleep 60`,
+    ],
+    cwd: dir,
+    env,
+    size: { cols: 80, rows: 24 },
+    generation: 0,
+  });
+  await expect.poll(() => existsSync(out), { timeout: 10_000 }).toBe(true);
+  return readFileSync(out, "utf8");
+}
+
+describe("a terminal's colour depth", () => {
+  it("is 24-bit in a terminal whose spec names none, whatever tmux version runs", async () => {
+    expect(await colorterm({})).toBe("truecolor");
+  });
+});
+
 describe("replacing a running tmux server's environment", () => {
   it("gives new terminals hostile values exactly, drops removed names, and runs nothing", async () => {
     expect((await newTerminalEnv())["BZ_OLD"]).toBe("old");

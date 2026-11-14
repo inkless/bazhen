@@ -679,12 +679,21 @@ function located(ref: RuntimeRef, key: "sessionId" | "paneId"): string {
 }
 
 /**
+ * What a terminal's programs read to choose 24-bit colour. tmux 3.6 sets it in every pane, over
+ * whatever `-e` or the server's environment says, and earlier versions don't set it. So it is
+ * given to the pane's process by `env`, which runs after tmux: a terminal draws the same on
+ * whichever tmux runs, and a value the spec carries wins, as a user's `agents.env.passthrough` of
+ * it is deliberate.
+ */
+const DEFAULT_COLORTERM = "truecolor";
+
+/**
  * The process half of a terminal: its directory, Bazhen's variables and its argv. tmux sets TMUX
  * and TMUX_PANE in every pane, whatever the server's environment, and with them a terminal's
  * `tmux kill-server` would end Bazhen's private server and every terminal on it. A new terminal
  * tab has neither, so `env` drops them and then execs the argv, which stays the pane's process.
  */
-const processArgs = (spec: ProcessSpec) => [
+export const processArgs = (spec: ProcessSpec) => [
   "-c",
   spec.cwd,
   ...Object.entries(spec.env).flatMap(([k, v]) => ["-e", escapeTrailingSemicolon(`${k}=${v}`)]),
@@ -695,6 +704,7 @@ const processArgs = (spec: ProcessSpec) => [
   "-u",
   "TMUX_PANE",
   "--",
+  escapeTrailingSemicolon(`COLORTERM=${spec.env["COLORTERM"] ?? DEFAULT_COLORTERM}`),
   ...spec.argv.map(escapeTrailingSemicolon),
 ];
 
