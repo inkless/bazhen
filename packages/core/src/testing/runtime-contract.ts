@@ -550,7 +550,8 @@ export function snapshotContract(name: string, harness: SnapshotHarness): void {
       const late = await snapshotClient(runtime, next);
       first.stream.write(encode("after\r"));
       await expect.poll(() => first.live(), { timeout: harness.waitMs }).toContain("after");
-      expect([late.offset, first.respawns]).toEqual([
+      expect([late.generation, late.offset, first.respawns]).toEqual([
+        1,
         0,
         [{ generation: 1, after: expect.not.stringContaining("after") }],
       ]);
@@ -626,9 +627,15 @@ export function snapshotContract(name: string, harness: SnapshotHarness): void {
       const runtime = fresh();
       const ref = await runtime.create({ ...spec, terminalId: newId("term") });
       const client = await snapshotClient(runtime, ref);
-      const pending = client.stream.snapshot();
+      const order: string[] = [];
+      client.stream.onClose(() => order.push("closed"));
+      const pending = client.stream.snapshot().catch((err: unknown) => {
+        order.push("rejected");
+        throw err;
+      });
       client.stream.close();
       await expect(pending).rejects.toBeInstanceOf(Error);
+      expect(order).toEqual(["closed", "rejected"]);
       await expect(client.stream.snapshot()).rejects.toBeInstanceOf(Error);
     });
 

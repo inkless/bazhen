@@ -1,5 +1,4 @@
 import headless from "@xterm/headless";
-import { setTimeout as delay } from "node:timers/promises";
 import { assert, describe, expect, it, vi } from "vitest";
 import {
   newId,
@@ -1175,16 +1174,36 @@ describe("terminal hub: snapshot streams", () => {
   );
 
   it("leaves a program's queries to its runtime to answer", async () => {
-    const history = await fakeRuntime();
     const snapshot = await fakeRuntime("earlier output", { attach: "snapshot" });
-    for (const rt of [history, snapshot]) {
+    const history = await fakeRuntime();
+    // The snapshot terminal's queries come first: an emulator answering them would have answered
+    // by the time the history terminal's, written after them, are answered.
+    for (const rt of [snapshot, history]) {
       const hub = new Hub(rt.runtime, memoryLog().log);
       await hub.join(rt.ref, viewer().v, size);
       rt.emit("\x1b[>q\x1b[6n");
     }
-    await expect.poll(() => history.written.length).toBeGreaterThan(0);
-    await delay(50);
+    await expect.poll(() => history.written.length).toBe(2);
     expect(snapshot.written).toEqual([]);
+  });
+
+  it("opens the first view on the snapshot it attached on, asking for no other", async () => {
+    const runtime = new FakeRuntime({ attach: "snapshot" });
+    const ref = await runtime.create({
+      terminalId: newId("term"),
+      tags: { kind: "shell" },
+      argv: ["sleep", "300"],
+      cwd: "/w",
+      env: {},
+      size,
+      generation: 0,
+    });
+    runtime.output(ref, "before");
+    const hold = runtime.holdSnapshots(ref);
+    const first = viewer();
+    void new Hub(runtime, memoryLog().log).join(ref, first.v, size);
+    await vi.waitFor(() => expect(first.frames.at(-1)?.type).toBe("attached"));
+    expect([hold.asked(), await screenOf(first.seen)]).toEqual([0, ["before"]]);
   });
 
   it.each([
@@ -1259,7 +1278,12 @@ describe("terminal hub: snapshot streams", () => {
     const { late, joined } = await openHeld(o);
     o.r.fallBehind(o.ref);
     await expect(joined).rejects.toThrow(ViewEnded);
-    expect([late.frames.some((f) => f.type === "attached"), late.closed()]).toEqual([false, true]);
+    expect([
+      late.frames.some((f) => f.type === "attached"),
+      late.frames.at(-1),
+      late.closed(),
+      o.events.filter((e) => e.endsWith("evicted_slow")).length,
+    ]).toEqual([false, { type: "ended", reason: "evicted_slow" }, true, 2]);
   });
 });
 

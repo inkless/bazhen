@@ -151,8 +151,8 @@ export interface RuntimeStream {
    */
   onFailure(cb: (failure: StreamFailure) => void): void;
   /**
-   * A snapshot client's terminal has a new process, the generation given: called before its first
-   * byte. The consumer applies `RESPAWN_RESET`, as the runtime did. A client that redraws, as
+   * A snapshot client's terminal has a new process, the generation given, always higher than the
+   * last: called before its first byte. The consumer applies `RESPAWN_RESET`, as the runtime did. A client that redraws, as
    * tmux's does, is never told: its runtime redraws it instead.
    */
   onRespawn(cb: (generation: number) => void): void;
@@ -218,7 +218,10 @@ export interface Snapshot {
    * `Number.MAX_SAFE_INTEGER`.
    */
   readonly offset: number;
-  /** The process's generation, as its `ProcessSpec` and `onRespawn` give it. */
+  /**
+   * The process's generation, as its `ProcessSpec` and `onRespawn` give it. Each respawn's is
+   * higher than the last, so positions order by generation, then offset.
+   */
   readonly generation: number;
 }
 
@@ -233,7 +236,8 @@ export interface SnapshotStream extends RuntimeStream {
    * earlier than the stream's position at the call, the generation and offset of the next byte
    * it would deliver, and no later than that position as it resolves: every byte before its
    * offset, and any respawn before it, has reached the stream's callbacks by then. Several may be
-   * outstanding at once. Rejects if the stream closes first; any other failure rejects and leaves
+   * outstanding at once. Rejects if the stream closes first, and only once its `onClose`
+   * callbacks have run, so a consumer can tell the two apart; any other failure rejects and leaves
    * the stream open.
    */
   snapshot(): Promise<Snapshot>;

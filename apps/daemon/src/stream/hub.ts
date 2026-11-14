@@ -54,7 +54,7 @@ export class ViewEnded extends Error {
   }
 }
 
-/** A view was turned away before it opened, for want of room. */
+/** A view was turned away before it opened: for want of room, or with no screen it could be sent. */
 export class ViewRefused extends Error {
   constructor(message: string) {
     super(message);
