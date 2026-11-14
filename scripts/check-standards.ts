@@ -284,12 +284,19 @@ const PNPM_VALUE_FLAGS = new Set(["--filter", "-F", "--dir", "-C", "--reporter",
 const LINT_RULE = /^(import|vitest|typescript|unicorn|react|react-hooks|eslint|bazhen)\//;
 const PATH_LIKE = /^(\.?[\w@-]+\/)+[\w.@-]*$|^\.?[\w-]+\.(ts|tsx|md|json)$/;
 
-function scriptNames(): Set<string> {
-  const pkg: unknown = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+/** package.json's scripts, by name, read with `read`. */
+function packageScripts(read: (path: string) => string): Record<string, string> {
+  const pkg: unknown = JSON.parse(read("package.json"));
   const scripts =
     typeof pkg === "object" && pkg !== null && "scripts" in pkg ? pkg.scripts : undefined;
-  return new Set(typeof scripts === "object" && scripts !== null ? Object.keys(scripts) : []);
+  if (typeof scripts !== "object" || scripts === null) return {};
+  return Object.fromEntries(
+    Object.entries(scripts).flatMap(([k, v]) => (typeof v === "string" ? [[k, v]] : [])),
+  );
 }
+
+const scriptNames = () =>
+  new Set(Object.keys(packageScripts((p) => readFileSync(join(root, p), "utf8"))));
 
 /** The text of every inline code span, and every whitespace-separated word in fenced blocks. */
 function codeSpans(text: string): string[] {
@@ -375,15 +382,17 @@ function checkAgentContext(): void {
 }
 
 // The modules that may hold `unsafe` code, each with why it must (docs/standards/rust.md § Unsafe).
-// Each may set `#[expect(unsafe_code, reason = "...")]`, and nothing else in crates/ may.
+// Each may set `#![expect(unsafe_code, reason = "...")]`, and nothing else in crates/ may.
 const UNSAFE_MODULES: Record<string, string> = {};
 
 const RAW_STRING = /r(#*)"/y;
 const isIdent = (c: string | undefined) => c !== undefined && /\w/.test(c);
+const newlinesIn = (text: string) => text.replaceAll(/[^\n]/g, "");
 
 /**
  * Rust source with its comments removed and every string and char literal emptied, so neither a
- * `//` in a string nor an attribute quoted in one changes what the attributes are.
+ * `//` in a string nor an attribute quoted in one changes what the attributes are. Newlines are
+ * kept, so a line in the result is the same line in the source.
  */
 export function rustCode(source: string): string {
   let out = "";
@@ -391,6 +400,7 @@ export function rustCode(source: string): string {
   while (i < source.length) {
     const c = source[i] ?? "";
     const next = source[i + 1];
+    const start = i;
     if (c === "/" && next === "/") {
       while (i < source.length && source[i] !== "\n") i++;
     } else if (c === "/" && next === "*") {
@@ -402,8 +412,11 @@ export function rustCode(source: string): string {
         depth += step;
         i += step === 0 ? 1 : 2;
       }
-      out += " ";
-    } else if (c === "r" && !isIdent(source[i - 1] === "b" ? source[i - 2] : source[i - 1])) {
+      out += ` ${newlinesIn(source.slice(start, i))}`;
+    } else if (
+      c === "r" &&
+      !isIdent(/[bc]/.test(source[i - 1] ?? "") ? source[i - 2] : source[i - 1])
+    ) {
       RAW_STRING.lastIndex = i;
       const raw = RAW_STRING.exec(source);
       if (raw === null) {
@@ -414,12 +427,12 @@ export function rustCode(source: string): string {
       const close = `"${raw[1] ?? ""}`;
       const end = source.indexOf(close, i + raw[0].length);
       i = end === -1 ? source.length : end + close.length;
-      out += '""';
+      out += `""${newlinesIn(source.slice(start, i))}`;
     } else if (c === '"') {
       i++;
       while (i < source.length && source[i] !== '"') i += source[i] === "\\" ? 2 : 1;
       i++;
-      out += '""';
+      out += `""${newlinesIn(source.slice(start, i))}`;
     } else if (c === "'" && (next === "\\" || source[i + 2] === "'")) {
       i += next === "\\" ? 3 : 1;
       while (i < source.length && source[i] !== "'") i++;
@@ -433,37 +446,107 @@ export function rustCode(source: string): string {
   return out;
 }
 
-const LINT_LEVEL = /#\s*!?\s*\[\s*(?:cfg_attr\s*\([^\]]*?,\s*)?(allow|expect)\s*\(([^)]*)\)/g;
-
-/** Each `allow(...)` or `expect(...)` lint attribute in Rust source, comments and strings aside. */
-export function lintSuppressions(source: string): { level: string; lints: string[] }[] {
-  return [...rustCode(source).matchAll(LINT_LEVEL)].map(([, level = "", list = ""]) => ({
-    level,
-    lints: list
-      .replace(/reason\s*=\s*""/g, "")
-      .split(",")
-      .map((l) => l.trim())
-      .filter((l) => l !== ""),
-  }));
+/** The index just past the `]` that closes the `[` at `open`, or the end of `code`. */
+function closingBracket(code: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < code.length; i++) {
+    if (code[i] === "[") depth++;
+    else if (code[i] === "]" && --depth === 0) return i + 1;
+  }
+  return code.length;
 }
 
-/** Why each lint suppression in `file` is not allowed: none at all, but `unsafe_code` in an unsafe module. */
-export function suppressionFailures(
+const UNSAFE_EXPECT = /^expect\s*\(\s*unsafe_code\s*,\s*reason\s*=\s*""\s*,?\s*\)$/;
+const SEE_RUST_MD = "(docs/standards/rust.md § Lints).";
+
+/**
+ * Why the attributes in a Rust file don't hold to the standard. Every `#` must begin an attribute
+ * written out in full, so a macro can't assemble one from tokens no scan reads; no attribute may
+ * allow or expect a lint, but an unsafe module's `#![expect(unsafe_code)]`; and no code may come
+ * from a file the scan doesn't read (`include!`, `#[path]`).
+ */
+export function attributeFailures(
   file: string,
   source: string,
   unsafeModules: Record<string, string>,
 ): string[] {
-  return lintSuppressions(source)
-    .filter(
-      ({ level, lints }) =>
-        !(file in unsafeModules && level === "expect" && lints.join() === "unsafe_code"),
-    )
-    .map(
-      ({ level, lints }) =>
-        `${file}: #[${level}(${lints.join(", ")})] suppresses a lint. Fix the code instead; the ` +
-        "only exceptions are the workspace allow-list in Cargo.toml and UNSAFE_MODULES in " +
-        "scripts/check-standards.ts (docs/standards/rust.md).",
+  const code = rustCode(source);
+  const out: string[] = [];
+  const at = (i: number) => `${file}:${code.slice(0, i).split("\n").length}`;
+  for (let i = code.indexOf("#"); i !== -1; i = code.indexOf("#", i + 1)) {
+    if (code[i - 1] === "r" && !isIdent(code[i - 2]) && isIdent(code[i + 1])) continue;
+    const head = /^#\s*(!?)\s*\[/.exec(code.slice(i));
+    if (head === null) {
+      out.push(
+        `${at(i)}: a \`#\` that doesn't begin an attribute, as a macro building one from tokens ` +
+          `writes it. Write the attribute out in full ${SEE_RUST_MD}`,
+      );
+      continue;
+    }
+    const end = closingBracket(code, i + head[0].length - 1);
+    const body = code.slice(i + head[0].length, end - 1).trim();
+    const where = at(i);
+    const attribute = `#${head[1]}[${body.replaceAll(/\s+/g, " ")}]`;
+    i = end - 1;
+    if (body.includes("$")) {
+      out.push(
+        `${where}: ${attribute} is built by a macro, so it could carry a lint suppression no check ` +
+          `sees. Write the attribute out ${SEE_RUST_MD}`,
+      );
+    } else if (/\bpath\s*=/.test(body)) {
+      out.push(
+        `${where}: ${attribute} loads a module from a path the checks don't read. Put the module ` +
+          "where Rust looks for it by default.",
+      );
+    } else if (/\b(allow|expect)\b/.test(body)) {
+      const allowed = file in unsafeModules && head[1] === "!" && UNSAFE_EXPECT.test(body);
+      if (!allowed) {
+        out.push(
+          `${where}: ${attribute} suppresses a lint. Fix the code instead; the only exceptions are ` +
+            "the workspace allow-list in Cargo.toml and an unsafe module's " +
+            "#![expect(unsafe_code)] (UNSAFE_MODULES in scripts/check-standards.ts, " +
+            "docs/standards/rust.md).",
+        );
+      }
+    } else if (/\b(ignore|should_panic)\b/.test(body)) {
+      out.push(
+        `${where}: ${attribute} skips a test, or passes it when it fails. A test runs, and fails ` +
+          "on what it asserts; check an error with a Result, not a panic.",
+      );
+    } else if (/\bclippy\b/.test(body)) {
+      out.push(
+        `${where}: ${attribute} hides code from clippy or changes how it lints. Clippy reads ` +
+          `all of the code, under the workspace's lints ${SEE_RUST_MD}`,
+      );
+    }
+  }
+  for (const m of code.matchAll(/\binclude\b|\$\s*\w+\s*!/g)) {
+    out.push(
+      `${at(m.index)}: \`${m[0]}\` brings in code the checks don't read, or a macro the scan ` +
+        "can't name. Write the code in a module of the crate.",
     );
+  }
+  return out;
+}
+
+const CRATE_ROOT = /^crates\/[^/]+\/(?:src\/(?:lib|main)\.rs|src\/bin\/.+|build\.rs)$/;
+
+/** Why an unsafe module could let `unsafe` reach beyond its own file. */
+export function unsafeModuleFailures(file: string, source: string): string[] {
+  const out: string[] = [];
+  if (CRATE_ROOT.test(file)) {
+    out.push(
+      `${file}: is a crate root, so its #![expect(unsafe_code)] would cover the whole crate. Keep ` +
+        "the unsafe code in a module of its own (docs/standards/rust.md § Unsafe).",
+    );
+  }
+  for (const m of rustCode(source).matchAll(/\bmod\s+\w+\s*[;{]/g)) {
+    out.push(
+      `${file}: \`${m[0]}\` declares a child module, which its #![expect(unsafe_code)] would ` +
+        "cover too. An unsafe module has no child modules (docs/standards/rust.md § Unsafe).",
+    );
+  }
+  return out;
 }
 
 /** Whether a crate's manifest takes the workspace's lints. */
@@ -478,28 +561,28 @@ export function inheritsWorkspaceLints(manifest: string): boolean {
 export const WORKSPACE_LINTS = [
   "[workspace.lints.rust]",
   'unsafe_code = "deny"',
-  'unsafe_op_in_unsafe_fn = "deny"',
-  'missing_debug_implementations = "deny"',
-  'unreachable_pub = "deny"',
+  'unsafe_op_in_unsafe_fn = "forbid"',
+  'missing_debug_implementations = "forbid"',
+  'unreachable_pub = "forbid"',
   'rust_2018_idioms = { level = "deny", priority = -1 }',
   "[workspace.lints.clippy]",
-  'pedantic = { level = "warn", priority = -1 }',
+  'pedantic = { level = "deny", priority = -1 }',
   'must_use_candidate = "allow"',
-  'unwrap_used = "warn"',
-  'expect_used = "warn"',
-  'panic = "warn"',
-  'todo = "warn"',
-  'unimplemented = "warn"',
-  'dbg_macro = "warn"',
-  'print_stdout = "warn"',
-  'print_stderr = "warn"',
-  'indexing_slicing = "warn"',
-  'string_slice = "warn"',
-  'unreachable = "warn"',
-  'undocumented_unsafe_blocks = "warn"',
-  'multiple_unsafe_ops_per_block = "warn"',
-  'allow_attributes = "warn"',
-  'allow_attributes_without_reason = "warn"',
+  'unwrap_used = "forbid"',
+  'expect_used = "forbid"',
+  'panic = "forbid"',
+  'todo = "forbid"',
+  'unimplemented = "forbid"',
+  'dbg_macro = "forbid"',
+  'print_stdout = "forbid"',
+  'print_stderr = "forbid"',
+  'indexing_slicing = "forbid"',
+  'string_slice = "forbid"',
+  'unreachable = "forbid"',
+  'undocumented_unsafe_blocks = "forbid"',
+  'multiple_unsafe_ops_per_block = "forbid"',
+  'allow_attributes = "forbid"',
+  'allow_attributes_without_reason = "forbid"',
 ];
 export const CLIPPY_CONFIG = [
   "allow-unwrap-in-tests = true",
@@ -507,6 +590,70 @@ export const CLIPPY_CONFIG = [
   "allow-panic-in-tests = true",
   "allow-indexing-slicing-in-tests = true",
 ];
+
+export const DENY_CONFIG = [
+  "[graph]",
+  "all-features = true",
+  "[advisories]",
+  'yanked = "deny"',
+  "[licenses]",
+  'allow = ["Apache-2.0", "MIT"]',
+  "include-dev = true",
+  "private = { ignore = true }",
+  "[bans]",
+  'multiple-versions = "deny"',
+  'wildcards = "deny"',
+  "allow-wildcard-paths = true",
+  "[sources]",
+  'unknown-registry = "deny"',
+  'unknown-git = "deny"',
+];
+
+// The package.json scripts that run the Rust gates, exactly, and `check` runs each of them. The
+// commands themselves are fixed in scripts/cargo-gate.ts.
+const GATE = "node --disable-warning=ExperimentalWarning scripts/cargo-gate.ts";
+export const RUST_GATE_SCRIPTS: Record<string, string> = {
+  "format:check": `${GATE} fmt && oxfmt --check`,
+  "lint:rust": `${GATE} lint`,
+  deny: `${GATE} deny`,
+  "test:rust": `${GATE} test`,
+};
+
+// Files that may name a flag or variable that can switch lints off, each with why. Anywhere else,
+// naming one is setting it where a gate would run.
+const RUST_FLAG_EXEMPT: Record<string, string> = {
+  "scripts/cargo-gate.ts": "removes them from every gate's environment",
+  "scripts/cargo-gate.test.ts": "sets them to check the gate removes them",
+  "scripts/cargo-gate.medium.test.ts": "sets them to check the tool never sees them",
+  "scripts/check-standards.ts": "names them to find them",
+  "scripts/check-standards.test.ts": "plants them to check they are found",
+};
+const LINT_FLAG =
+  /(?:\b|_)rust(?:doc)?flags\b|rustc[-_](?:workspace[-_])?wrapper|\bcargo_alias_|cap-lints/i;
+
+/** Why the package.json scripts don't run the Rust gates as RUST_GATE_SCRIPTS says. */
+export function gateScriptFailures(scripts: Record<string, string>): string[] {
+  const out: string[] = [];
+  for (const [name, command] of Object.entries(RUST_GATE_SCRIPTS)) {
+    if (scripts[name] !== command) {
+      out.push(
+        `package.json: the "${name}" script must be \`${command}\` (RUST_GATE_SCRIPTS in ` +
+          "scripts/check-standards.ts); a gate's command changes in scripts/cargo-gate.ts.",
+      );
+    }
+  }
+  const check = scripts.check ?? "";
+  const steps = /[|;\n\r]|(?<!&)&(?!&)/.test(check) ? [] : check.split("&&").map((c) => c.trim());
+  for (const name of Object.keys(RUST_GATE_SCRIPTS)) {
+    if (!steps.includes(`pnpm run ${name}`)) {
+      out.push(
+        `package.json: the "check" script must run \`pnpm run ${name}\` as one of its \`&&\` ` +
+          "steps, with no `|`, `;` or line break that could step round it.",
+      );
+    }
+  }
+  return out;
+}
 
 /** TOML's lines with comments and blank lines dropped, each trimmed. Strings hold no `#` here. */
 function tomlLines(text: string): string[] {
@@ -553,6 +700,40 @@ export function memberDependencyFailures(manifest: string, text: string): string
     }
   }
   return out;
+}
+
+/**
+ * Why a member manifest's targets could hold code the checks don't read: a target `path` can name
+ * any file, and a proc macro of ours could emit any attribute.
+ */
+export function memberTargetFailures(manifest: string, text: string): string[] {
+  return tomlLines(text).flatMap((line) => {
+    if (/\bproc[-_]macro\s*=\s*true\b/.test(line)) {
+      return [
+        `${manifest}: \`${line}\`: a proc macro of ours could emit attributes no check reads. ` +
+          "Write the code out, or use a macro_rules! macro.",
+      ];
+    }
+    if (
+      /(?:^|[{,.\s])(?:required-features|test|harness|auto(?:lib|bins|tests|benches|examples))\s*=/.test(
+        line,
+      )
+    ) {
+      return [
+        `${manifest}: \`${line}\` keeps a target, or its tests, out of the build the gates ` +
+          "lint and test. Every target builds and runs its tests; gate code by feature, which " +
+          "the gates turn on, if it must be optional.",
+      ];
+    }
+    if (/(?:^|[{,.\s])path\s*=/.test(line)) {
+      return [
+        `${manifest}: \`${line}\` points a target at a file of its choosing. Keep each target ` +
+          "where Cargo looks by default (src/lib.rs, src/main.rs, src/bin/, tests/), where " +
+          "the checks read it.",
+      ];
+    }
+    return [];
+  });
 }
 
 /** Why the root manifest's lints or pinned dependencies are not what the standard says. */
@@ -607,6 +788,7 @@ export function rustFailures(
         );
       }
       out.push(...memberDependencyFailures(manifest, read(manifest)));
+      out.push(...memberTargetFailures(manifest, read(manifest)));
     }
   }
   for (const file of paths.filter((p) => p.endsWith(".rs"))) {
@@ -614,17 +796,11 @@ export function rustFailures(
       out.push(`${file}: Rust source lives in a crate under crates/, where the checks read it.`);
       continue;
     }
-    const source = read(file);
-    out.push(...suppressionFailures(file, source, unsafeModules));
-    if (/\$\s*\w+\s*:\s*meta\b|#\s*!?\s*\[\s*\$/.test(rustCode(source))) {
-      out.push(
-        `${file}: a macro passes an attribute through (\`$x:meta\` or \`#[$x]\`), which could ` +
-          "carry a lint suppression no check sees. Write the attribute out.",
-      );
-    }
+    out.push(...attributeFailures(file, read(file), unsafeModules));
   }
-  for (const file of Object.keys(unsafeModules).filter((f) => !paths.includes(f))) {
-    out.push(`scripts/check-standards.ts: UNSAFE_MODULES lists missing ${file}.`);
+  for (const file of Object.keys(unsafeModules)) {
+    if (paths.includes(file)) out.push(...unsafeModuleFailures(file, read(file)));
+    else out.push(`scripts/check-standards.ts: UNSAFE_MODULES lists missing ${file}.`);
   }
   for (const file of paths) {
     const base = fileName(file);
@@ -636,14 +812,35 @@ export function rustFailures(
       out.push(`${file}: rustfmt runs with its defaults (docs/standards/rust.md § Formatting).`);
     } else if (/^rust-toolchain(\.toml)?$/.test(base) && file !== "rust-toolchain.toml") {
       out.push(`${file}: the root rust-toolchain.toml is the one toolchain pin.`);
+    } else if (/(^|\/)\.config\/nextest\.toml$/.test(file)) {
+      out.push(`${file}: nextest runs with its defaults, so no profile can filter tests out.`);
+    } else if (["deny.toml", ".deny.toml"].includes(base) && file !== "deny.toml") {
+      out.push(`${file}: cargo-deny reads only the root deny.toml here.`);
+    }
+    if (!file.endsWith(".md") && !(file in RUST_FLAG_EXEMPT)) {
+      const flag = LINT_FLAG.exec(read(file));
+      if (flag !== null) {
+        out.push(
+          `${file}: names \`${flag[0]}\`, which can switch the Rust lints off. The gates run ` +
+            "through scripts/cargo-gate.ts, which removes it; a file that must set it goes in " +
+            "RUST_FLAG_EXEMPT in scripts/check-standards.ts, with why.",
+        );
+      }
     }
   }
-  if (
-    paths.includes("clippy.toml") &&
-    tomlLines(read("clippy.toml")).join("\n") !== CLIPPY_CONFIG.join("\n")
-  ) {
-    out.push("clippy.toml: differs from CLIPPY_CONFIG in scripts/check-standards.ts.");
+  for (const file of Object.keys(RUST_FLAG_EXEMPT).filter((f) => !paths.includes(f))) {
+    out.push(`scripts/check-standards.ts: RUST_FLAG_EXEMPT lists missing ${file}.`);
   }
+  const pinned = (file: string, lines: string[], name: string) => {
+    if (!paths.includes(file)) out.push(`${file} is missing; the Rust gates need it.`);
+    else if (tomlLines(read(file)).join("\n") !== lines.join("\n")) {
+      out.push(`${file}: differs from ${name} in scripts/check-standards.ts.`);
+    }
+  };
+  pinned("deny.toml", DENY_CONFIG, "DENY_CONFIG");
+  if (paths.includes("package.json")) out.push(...gateScriptFailures(packageScripts(read)));
+  else out.push("package.json is missing; the Rust gates run from its scripts.");
+  pinned("clippy.toml", CLIPPY_CONFIG, "CLIPPY_CONFIG");
   return out;
 }
 
@@ -654,7 +851,7 @@ function repoFiles(): string[] {
     encoding: "utf8",
   })
     .split("\n")
-    .filter((p) => p !== "" && existsSync(join(root, p)));
+    .filter((p) => p !== "" && existsSync(join(root, p)) && statSync(join(root, p)).isFile());
 }
 
 function checkRust(): void {
