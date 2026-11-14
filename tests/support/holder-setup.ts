@@ -48,7 +48,8 @@ function isolateTmux(dir: string): void {
   const bin = join(dir, "bin");
   mkdirSync(bin);
   writeFileSync(join(bin, "tmux"), TMUX_REFUSAL, { mode: 0o755 });
-  process.env["PATH"] = `${bin}:${process.env["PATH"] ?? ""}`;
+  const path = process.env["PATH"];
+  process.env["PATH"] = path === undefined || path === "" ? bin : `${bin}:${path}`;
 }
 
 /** Drops from `env` the variables that point a Bazhen CLI or hook at a real daemon. */
@@ -110,10 +111,14 @@ async function closeIfLive(socket: string, waitMs: number): Promise<LeakedHolder
     () => true,
     () => false,
   );
-  // A holder hangs up once its child's group is gone, so `ok` alone doesn't say it has exited.
+  // A holder hangs up once its child's group is gone, so `ok` alone doesn't say it has exited;
+  // nor does a connection this side ended.
   const closed =
     answered &&
-    (await Promise.race([client.ended.then(() => true), timeout(waitMs).then(() => false)]));
+    (await Promise.race([
+      client.ended.then((end) => end.reason === "eof"),
+      timeout(waitMs).then(() => false),
+    ]));
   client.end();
   return { socket, terminalId, holderPid, closed, hello: null };
 }
@@ -150,7 +155,8 @@ export interface TeardownReport {
 export async function teardownReport(dir: string, waitMs?: number): Promise<TeardownReport> {
   const leaked = await closeLiveHolders(holdersDir(dir), waitMs);
   const ranTmux = existsSync(tmuxDir(dir)) ? readdirSync(tmuxDir(dir)) : [];
-  const keep = leaked.some((holder) => !holder.closed);
+  // A tmux server a test started still runs; its socket is how a person stops it.
+  const keep = leaked.some((holder) => !holder.closed) || ranTmux.length > 0;
   const problems: string[] = [];
   if (leaked.length > 0) {
     problems.push(
@@ -160,12 +166,16 @@ export async function teardownReport(dir: string, waitMs?: number): Promise<Tear
   }
   if (keep) {
     problems.push(
-      `Left ${dir} in place, as a holder in it may still be running; ` +
-        "remove it once each pid named has exited.",
+      `Left ${dir} in place, as a holder or tmux server in it may still be running; ` +
+        "remove it once each has exited.",
     );
   }
-  if (ranTmux.length > 0)
-    problems.push(`A holder test ran tmux, which made ${ranTmux.join(", ")}.`);
+  if (ranTmux.length > 0) {
+    problems.push(
+      `A holder test ran tmux, which made ${ranTmux.join(", ")} in ${tmuxDir(dir)}: ` +
+        "stop its server by its socket there.",
+    );
+  }
   return { problems, keep };
 }
 

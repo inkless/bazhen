@@ -62,6 +62,23 @@ describe("closeLiveHolders", () => {
     ]);
   });
 
+  it("doesn't count a holder as closed when its connection ends by breaking the protocol", async () => {
+    const dir = holdersDir(scratchHome());
+    const socket = join(dir, "bad.sock");
+    const fake = await fakeAt(socket, {
+      hello: { terminalId: "bad", holderPid: 780 },
+      close: "ignores",
+    });
+    const closing = closeLiveHolders(dir, 500);
+    const holder = await fake.connection();
+    const close = await holder.request();
+    holder.send({ type: "ok", id: close.id, body: { request: "close" } });
+    holder.sendRaw(Uint8Array.of(0, 0, 0, 0));
+    await expect(closing).resolves.toEqual([
+      { socket, terminalId: "bad", holderPid: 780, closed: false, hello: null },
+    ]);
+  });
+
   it("names a holder that answers hello but ignores close", async () => {
     const dir = holdersDir(scratchHome());
     const socket = join(dir, "t2.sock");
@@ -129,12 +146,15 @@ describe("teardownReport", () => {
     ]);
   });
 
-  it("fails the run when anything appears in tmux's socket directory", async () => {
+  it("fails the run, keeping the home, when anything appears in tmux's socket directory", async () => {
     const home = scratchHome();
     writeFileSync(join(home, "tmux", "tmux-1000"), "");
     await expect(teardownReport(home)).resolves.toEqual({
-      problems: ["A holder test ran tmux, which made tmux-1000."],
-      keep: false,
+      problems: [
+        expect.stringContaining(`Left ${home} in place`),
+        `A holder test ran tmux, which made tmux-1000 in ${home}/tmux: stop its server by its socket there.`,
+      ],
+      keep: true,
     });
   });
 });
