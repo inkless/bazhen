@@ -30,8 +30,7 @@ import { parseJson } from "./json.ts";
 /*
  * A frame is a u32 big-endian length, then a type byte, then the payload; the length counts the
  * type byte and the payload. A request's payload, and a reply's to a request, starts with the
- * request's u32 id. This layout, and `hello` in both directions, hold in every major: they are
- * how two peers find out which major they share.
+ * request's u32 id. The layout holds in every major (see `HOLDER_PROTOCOL_VERSION`).
  */
 
 type NoFields = object;
@@ -132,6 +131,7 @@ const HEADER = 4;
 const ID = 4;
 const OFFSET = 8;
 const U32_MAX = 0xffff_ffff;
+const FIRST_REPLY = 0x81;
 const FIRST_EVENT = 0xc0;
 const FIRST_ANSWER_TO_ANY = 0xf0;
 
@@ -416,6 +416,7 @@ export function holderReplyDecoder(
   return new HolderFrameDecoder(max, (code, payload) => {
     const type = REPLY_TYPES.get(code);
     if (isReplyName(type)) return decodeReply(type, payload);
+    if (code < FIRST_REPLY) return malformed(`0x${code.toString(16)} is no reply's type`);
     if (code >= FIRST_EVENT && code < FIRST_ANSWER_TO_ANY) return { type: "unknown", code };
     if (payload.length < ID) return malformed(`reply 0x${code.toString(16)} has no id`);
     return { type: "unknown", code, id: view(payload).getUint32(0) };

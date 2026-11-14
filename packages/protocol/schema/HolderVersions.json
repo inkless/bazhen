@@ -6,6 +6,6 @@
   "type": "array",
   "items": {
     "type": "string",
-    "pattern": "^\\d+\\.\\d+$"
+    "maxLength": 32
   }
 }

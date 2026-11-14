@@ -11,6 +11,15 @@
     },
     "message": {
       "type": "string"
+    },
+    "protocol": {
+      "minItems": 1,
+      "maxItems": 16,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 32
+      }
     }
   },
   "required": [

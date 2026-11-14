@@ -15,7 +15,7 @@
         },
         "protocolVersion": {
           "type": "string",
-          "pattern": "^\\d+\\.\\d+$"
+          "pattern": "^[0-9]+\\.[0-9]+$"
         },
         "resumeToken": {
           "type": "string"

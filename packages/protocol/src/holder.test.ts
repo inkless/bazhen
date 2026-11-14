@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 import {
+  HOLDER_ERROR_CODES,
   HolderError,
   HolderExited,
   HolderForeground,
+  HolderRespawned,
   HolderHelloReply,
+  HolderHelloRequest,
   HolderSetThemeRequest,
   HolderSignalRequest,
   HolderSpawnSpec,
@@ -48,6 +51,7 @@ const hello = {
   writer: true,
 };
 
+const respawned = { generation: 3, childPid: 50, childStart: 1_763_000_002 };
 const stats = { engineBytes: 1, rss: null, ringBytes: 2, historyLines: 3 };
 const foreground = { childPid: 42, childStart: 1, pgid: 43, pgidStart: 2 };
 
@@ -85,7 +89,7 @@ describe("negotiateHolder", () => {
   it("ignores a version too long to read exactly, rather than merging it with another", () => {
     expect([
       negotiateHolder(["9007199254740993.0"], ["9007199254740992.0"]),
-      negotiateHolder(["1000000000000000000000.0"], ["1000000000000000000000.3"]),
+      negotiateHolder(["1.9007199254740993"], ["1.9007199254740992"]),
     ]).toEqual([null, null]);
   });
 });
@@ -99,7 +103,7 @@ const broken: [string, z.ZodType, unknown, unknown][] = [
     spawnSpec,
     { ...spawnSpec, terminalId: "t" },
   ],
-  ["a spawn spec in no version", HolderSpawnSpec, spawnSpec, { ...spawnSpec, protocol: ["1"] }],
+  ["a spawn spec in no version", HolderSpawnSpec, spawnSpec, { ...spawnSpec, protocol: [] }],
   ["a spawn spec with no socket", HolderSpawnSpec, spawnSpec, { ...spawnSpec, socket: "" }],
   [
     "a size past u16",
@@ -163,6 +167,27 @@ const broken: [string, z.ZodType, unknown, unknown][] = [
     { generation: 1, status: { type: "unknown" } },
     { status: { type: "unknown" } },
   ],
+  [
+    "an exit of a fractional generation",
+    HolderExited,
+    { generation: 1, status: { type: "unknown" } },
+    { generation: 1.5, status: { type: "unknown" } },
+  ],
+  ["a child start before the epoch", HolderHelloReply, hello, { ...hello, childStart: -1 }],
+  ["a respawn to pid 0", HolderRespawned, respawned, { ...respawned, childPid: 0 }],
+  ["a respawn of no generation", HolderRespawned, respawned, { ...respawned, generation: -1 }],
+  [
+    "a respawned child's start before the epoch",
+    HolderRespawned,
+    respawned,
+    { ...respawned, childStart: -1 },
+  ],
+  [
+    "a subscribe in a generation before 0",
+    HolderSubscribeRequest,
+    { generation: 0 },
+    { generation: -1 },
+  ],
 ];
 
 describe("holder/1 schemas", () => {
@@ -173,8 +198,29 @@ describe("holder/1 schemas", () => {
     ]);
   });
 
+  it("read a peer's versions leniently, so one this build can't parse doesn't refuse its hello", () => {
+    expect(HolderHelloRequest.parse({ protocol: ["1.0", "2.0-beta"] })).toEqual({
+      protocol: ["1.0", "2.0-beta"],
+    });
+  });
+
   it("give a spawn spec without a history depth the default one", () => {
     const { historyLines: _, ...spec } = HolderSpawnSpec.parse(spawnSpec);
     expect(HolderSpawnSpec.parse(spec).historyLines).toBe(HISTORY_LINES);
+  });
+});
+
+describe("holder error codes", () => {
+  it("keep the strings every version of either peer reads them by", () => {
+    expect(HOLDER_ERROR_CODES).toEqual([
+      "unknown-request",
+      "stale-generation",
+      "invalid",
+      "no-shared-version",
+      "not-writer",
+      "input-full",
+      "exited",
+      "failed",
+    ]);
   });
 });

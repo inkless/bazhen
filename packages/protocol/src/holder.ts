@@ -10,21 +10,26 @@ import { ProtocolVersion } from "./version.ts";
  * apart from the daemon's protocol, under the same rule: within a major, changes are additive
  * only, and the minor is bumped in the same commit as any addition.
  *
- * Neither peer sends anything newer than the version they agreed on in `hello`: no new frame,
- * field or enum value. A peer ignores fields it doesn't know and skips replies and events it
- * doesn't know; the holder answers a request it doesn't know with `error`. Any other frame whose
- * body fails its schema closes the connection.
+ * A connection opens with `hello`: until it is answered the client sends nothing else, and the
+ * holder sends only its answer. Neither peer then sends anything newer than the version they
+ * agreed on: no new frame, field or enum value. A peer ignores fields it doesn't know and skips
+ * replies and events it doesn't know; the holder answers a request it doesn't know with `error`
+ * coded `unknown-request`. A request whose body fails its schema is answered `error` coded
+ * `invalid`, and its connection closed; any other frame that fails closes it at once.
  *
  * Frozen in every major, because it is how two peers find out what they share: the frame layout,
- * the request id, the `hello` request's `protocol`, and `error`.
+ * the request id, the type-byte ranges, the `hello` request, the hello reply's `version` and
+ * `protocol`, which a client reads before the rest to know which major's schema the rest is in,
+ * and `error`.
  */
 export const HOLDER_PROTOCOL_VERSION = "1.0";
 
 /**
  * The highest version a peer speaks in each major it supports. Within a major every minor speaks
- * everything older, so one version per major says it all.
+ * everything older, so one version per major says it all. Frozen, so read leniently: an entry
+ * this build can't parse is skipped by `negotiateHolder`, not refused with the frame.
  */
-export const HolderVersions = z.array(ProtocolVersion).min(1).max(16);
+export const HolderVersions = z.array(z.string().max(32)).min(1).max(16);
 export type HolderVersions = z.infer<typeof HolderVersions>;
 
 const topMinors = (versions: readonly string[]) => {
@@ -112,9 +117,14 @@ export type HolderHelloRequest = z.infer<typeof HolderHelloRequest>;
 
 /**
  * Output from `from` on. Without it, from the holder's offset as it reads the request, which is
- * the offset of a `snapshot` sent just before it in the same write.
+ * the offset of a `snapshot` sent just before it in the same write. An offset belongs to one
+ * generation: with `generation`, a subscribe that crossed a respawn is refused `stale-generation`
+ * instead of resuming at the same offset of the new child's output.
  */
-export const HolderSubscribeRequest = z.object({ from: Offset.optional() });
+export const HolderSubscribeRequest = z.object({
+  from: Offset.optional(),
+  generation: Count.optional(),
+});
 export type HolderSubscribeRequest = z.infer<typeof HolderSubscribeRequest>;
 
 export const HolderSignalRequest = z.object({ signal: Signal });
@@ -189,8 +199,10 @@ export const HolderExited = z.object({ generation: Count, status: ExitStatus });
 export type HolderExited = z.infer<typeof HolderExited>;
 
 /**
- * A new child runs on the same PTY. Sent to every connection before any of its output, which
- * starts again at offset 0; a subscription goes on from there.
+ * A new child runs on the same PTY. In order, on every connection past `hello`: the rest of the
+ * old child's output, its `exited` if it ran until replaced, then this, then the new child's
+ * output from offset 0, where a subscription goes on. A reply sent after this one, the
+ * respawn's `ok` included, is of the new generation.
  */
 export const HolderRespawned = z.object({
   generation: Count,
@@ -216,8 +228,9 @@ export const HolderRequestName = z.enum([
 export type HolderRequestName = z.infer<typeof HolderRequestName>;
 
 /**
- * Each request's type byte, from `0x01` to `0x7f`. Never renumber one or give it to another
- * request: a type byte means the same in every version.
+ * Each request's type byte. Never renumber one or give it to another request: a type byte means
+ * the same in every version. A request with a reply of its own is `0x01`–`0x3f`, so that reply's
+ * byte stays below the events; `0x40`–`0x7f` are for requests answered only by `ok` or `error`.
  */
 export const HOLDER_REQUEST_CODES = {
   hello: 0x01,
@@ -245,6 +258,8 @@ export type HolderOk = z.infer<typeof HolderOk>;
 export const HOLDER_ERROR_CODES = [
   /** The holder doesn't know the request's type. */
   "unknown-request",
+  /** `subscribe` named a generation a respawn has since replaced. */
+  "stale-generation",
   /** The request's body failed its schema. */
   "invalid",
   /** `hello` found no major both sides speak. */
@@ -263,6 +278,8 @@ export const HolderError = z.object({
   request: z.string(),
   code: z.string(),
   message: z.string(),
+  /** The holder's versions, with `no-shared-version`, for `bazhen doctor` to show. */
+  protocol: HolderVersions.optional(),
 });
 export type HolderError = z.infer<typeof HolderError>;
 

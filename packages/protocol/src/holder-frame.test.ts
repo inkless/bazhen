@@ -112,7 +112,15 @@ describe("encoding a holder frame", () => {
   });
 });
 
+const OWN_REPLIES = ["hello", "snapshot", "stats", "foreground"] as const;
+
 describe("holder type bytes", () => {
+  it("give a request's own reply the request's byte with the top bit set, below the events", () => {
+    expect(
+      OWN_REPLIES.map((name) => [HOLDER_REPLY_CODES[name], HOLDER_REQUEST_CODES[name] < 0x40]),
+    ).toEqual(OWN_REPLIES.map((name) => [HOLDER_REQUEST_CODES[name] | 0x80, true]));
+  });
+
   it("keep the numbers every version of either peer reads them by", () => {
     expect([HOLDER_REQUEST_CODES, HOLDER_REPLY_CODES]).toEqual([
       {
@@ -209,6 +217,7 @@ describe("decoding holder frames", () => {
     ["an offset past 2^53 - 1", raw(0xc0, u64(2n ** 53n)), /past 2\^53/],
     ["a reply with no id", raw(0x86, bytes(0)), /has no id/],
     ["a reply of an unknown type with no id", raw(0xbf, bytes(0)), /has no id/],
+    ["a request's type byte", raw(0x05, u32(1)), /no reply's type/],
   ])("calls a reply with %s malformed", (_, frame, reason) => {
     expect(holderReplyDecoder().push(frame)).toMatchObject({
       malformed: expect.stringMatching(reason),
@@ -229,6 +238,13 @@ describe("decoding holder frames", () => {
   it("skips past an event type it doesn't know to the frames after it", () => {
     const [decoded] = decodeReplies(concat(raw(0xe0, text("later")), encodeHolderReply(data)));
     expect(decoded?.frames).toEqual([{ type: "unknown", code: 0xe0 }, data]);
+  });
+
+  it("reads no id into an event type it doesn't know, at either end of the event range", () => {
+    expect(decodeReplies(raw(0xc7, u32(9)), raw(0xef, u32(9))).flatMap((d) => d.frames)).toEqual([
+      { type: "unknown", code: 0xc7 },
+      { type: "unknown", code: 0xef },
+    ]);
   });
 
   it("reads the id of a reply type it doesn't know, so the request it answers can end", () => {

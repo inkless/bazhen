@@ -24,6 +24,19 @@ describe("jsonSchemas", () => {
     expect(schema).not.toHaveProperty("additionalProperties");
   });
 
+  it("publishes a version pattern every regex engine reads as ASCII digits", () => {
+    const schema: unknown = JSON.parse(String(jsonSchemas()["ProtocolVersion.json"]));
+    expect(schema).toMatchObject({ pattern: "^[0-9]+\\.[0-9]+$" });
+  });
+
+  it("keeps the schema of a record's values while opening objects", () => {
+    const schema: unknown = JSON.parse(String(jsonSchemas()["HolderTags.json"]));
+    expect(schema).toMatchObject({
+      type: "object",
+      additionalProperties: { type: "string", maxLength: 1024 },
+    });
+  });
+
   it("leaves a field with a default out of required, since an older peer omits it", () => {
     const schema: unknown = JSON.parse(String(jsonSchemas()["Environment.json"]));
     const properties: unknown = Reflect.get(Object(schema), "properties");

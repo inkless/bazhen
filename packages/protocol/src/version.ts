@@ -7,7 +7,8 @@ import { z } from "zod";
  */
 export const PROTOCOL_VERSION = "1.35";
 
-export const ProtocolVersion = z.string().regex(/^\d+\.\d+$/);
+/** Digits are `[0-9]`: in some regex engines a peer may use, `\d` matches any script's digits. */
+export const ProtocolVersion = z.string().regex(/^[0-9]+\.[0-9]+$/);
 
 const major = (v: string) => v.split(".")[0];
 

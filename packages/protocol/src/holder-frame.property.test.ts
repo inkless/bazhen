@@ -48,7 +48,7 @@ const request: fc.Arbitrary<HolderRequest> = fc.oneof(
   fc.record({
     type: fc.constant("subscribe" as const),
     id,
-    body: fc.record({ from: offset }, { requiredKeys: [] }),
+    body: fc.record({ from: offset, generation: offset }, { requiredKeys: [] }),
   }),
   fc.record({ type: fc.constant("input" as const), id, bytes: payload }),
   fc.record({
@@ -148,11 +148,15 @@ const reply: fc.Arbitrary<HolderReply> = fc.oneof(
   fc.record({
     type: fc.constant("error" as const),
     id,
-    body: fc.record({
-      request: answered,
-      code: fc.constantFrom(...HOLDER_ERROR_CODES, "from-a-newer-holder"),
-      message: fc.string(),
-    }),
+    body: fc.record(
+      {
+        request: answered,
+        code: fc.constantFrom(...HOLDER_ERROR_CODES, "from-a-newer-holder"),
+        message: fc.string(),
+        protocol: fc.constant<string[]>(["1.0", "a newer peer's 3.x"]),
+      },
+      { requiredKeys: ["request", "code", "message"] },
+    ),
   }),
   fc.record({
     type: fc.constant("stats" as const),
