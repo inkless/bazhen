@@ -18,8 +18,9 @@ page serves that rule, or keeps tests from hurting the machine and each other.
 | Behaviour tests are black-box: they reach the daemon only through public surfaces  | review                                      |
 
 Rust tests follow this page too, with the differences in `rust.md` § Tests: nextest, proptest,
-insta for protocol frames, cargo-fuzz for binary protocol decoders, and a `Control:` trailer for
-every new test, because falsify can't judge them by reverting and marks them INVALID.
+insta for protocol frames, cargo-fuzz for every function that takes bytes from outside, and a
+`Control:` trailer naming every new test, because falsify can't judge them by reverting and
+marks them INVALID.
 
 ## Sizes
 

@@ -14,7 +14,7 @@ pub(crate) fn run(mut args: impl Iterator<Item = String>) -> Option<i32> {
 }
 
 /// The request's JSON, for a tmux pane id (`%12`) only, which needs no escaping.
-fn body(pane: &str) -> Option<Vec<u8>> {
+pub fn body(pane: &str) -> Option<Vec<u8>> {
     let digits = pane.strip_prefix('%')?;
     let is_pane = !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit());
     is_pane.then(|| format!("{{\"pane\":\"{pane}\"}}").into_bytes())

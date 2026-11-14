@@ -20,7 +20,9 @@ already checked (listed at the end).
    code can't?
 7. **Rust** (`rust.md`). Is every `unsafe` in the one listed module, each block's `SAFETY:`
    comment a real proof of the invariant it names? Does a decoder return an error, never panic,
-   on any input? Are a library's errors typed with thiserror, and wrapped with their source? Is a
+   on any input, and is a decoder the check can't see listed in `FUZZED_DECODERS` with a
+   target: one of text from outside, a closure, one a macro generates, or a function that opens
+   its own source (`io::stdin()` inside)? Are a library's errors typed with thiserror, and wrapped with their source? Is a
    new dependency pinned in `[workspace.dependencies]`, with a reason in the commit, and its
    default features trimmed? Does each new Rust test's `Control:` trailer break the code the
    test names, and does a behaviour the daemon can observe have its test in the black-box suite

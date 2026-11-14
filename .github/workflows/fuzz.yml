@@ -1,0 +1,75 @@
+name: Fuzz
+
+# Runs every cargo-fuzz target in crates/*/fuzz (docs/standards/rust.md § Tests): nightly for long,
+# building on the corpus earlier runs kept, and briefly on a pull request that changes the Rust, so
+# a broken target or a decoder it breaks is seen before it merges.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/fuzz.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # libFuzzer's instrumentation needs nightly; this job alone uses it, pinned to one date.
+  NIGHTLY: nightly-2026-11-01
+  SECONDS_PER_TARGET: ${{ github.event_name == 'pull_request' && '60' || '600' }}
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install nightly
+        run: rustup toolchain install "$NIGHTLY" --profile minimal
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-fuzz
+          key: cargo-fuzz-0.13.2-${{ runner.os }}
+      - name: Install cargo-fuzz
+        run: command -v cargo-fuzz || cargo "+$NIGHTLY" install --locked cargo-fuzz@0.13.2
+      # Each run starts from the corpus the last one left, so the nightly runs add up.
+      - uses: actions/cache@v4
+        with:
+          path: crates/*/fuzz/corpus
+          key: fuzz-corpus-${{ github.run_id }}
+          restore-keys: fuzz-corpus-
+      - name: Run every target
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for manifest in crates/*/fuzz/Cargo.toml; do
+            crate=$(dirname "$(dirname "$manifest")")
+            # Listed first, so a crate whose targets can't be listed fails the job.
+            targets=$(cd "$crate" && cargo "+$NIGHTLY" fuzz list)
+            if [ -z "$targets" ]; then
+              echo "$crate/fuzz has no targets" >&2
+              exit 1
+            fi
+            for target in $targets; do
+              echo "::group::$crate $target"
+              mkdir -p "$crate/fuzz/corpus/$target" "$crate/fuzz/seeds/$target"
+              (cd "$crate" && cargo "+$NIGHTLY" fuzz run "$target" \
+                "fuzz/corpus/$target" "fuzz/seeds/$target" \
+                -- -max_total_time="$SECONDS_PER_TARGET")
+              echo "::endgroup::"
+            done
+          done
+      - name: Keep what crashed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts
+          path: crates/*/fuzz/artifacts/
