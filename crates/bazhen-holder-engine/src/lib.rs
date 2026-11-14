@@ -183,6 +183,13 @@ impl Engine {
                 }
             }
             let (stretch, after) = rest.split_at_checked(read).unwrap_or((rest, &[]));
+            let room = KEPT_ROWS + self.budget.scrolled() + 1;
+            if room > self.scrollback && !self.alternate() {
+                // A REP can scroll more than a stretch is sized for: room for it, until the
+                // drain after it.
+                self.scrollback = room;
+                self.term.grid_mut().update_history(room);
+            }
             let stop = self.budget.stop();
             let switch = (stop == Some(Stop::AltScreen) && !self.alternate())
                 .then(|| stretch.iter().rposition(|&byte| byte == 0x1b))
@@ -433,5 +440,14 @@ mod tests {
         assert_eq!(history(&mut engine), lines(0..46));
         engine.advance(b"\x1b[3J");
         assert_eq!(history(&mut engine), "");
+    }
+
+    #[test]
+    fn a_char_repeated_thousands_of_times_overflows_nothing() {
+        let mut engine = Engine::new(Size { cols: 2, rows: 1 }, 100_000);
+        engine.advance(b"x\x1b[65535b");
+        let stats = engine.stats();
+        assert_eq!(stats.overflows, 0);
+        assert_eq!(stats.history_rows, 65_536 / 2 - 1);
     }
 }
