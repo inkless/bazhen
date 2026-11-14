@@ -5,7 +5,7 @@
 //! the wall-clock microsecond it arrived, for the driver to compare with when it sent it.
 
 use std::fs::OpenOptions;
-use std::io::{self, Read as _, Write as _};
+use std::io::{self, Write as _};
 use std::process::ExitCode;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -73,7 +73,9 @@ fn queries(kind: &str, out: &str, count: usize) -> io::Result<()> {
             if left <= 0 || !readable(left)? {
                 break false;
             }
-            if io::stdin().read(&mut byte)? == 0 {
+            // Straight from the fd: std's Stdin buffers, and poll can't see what it holds.
+            let n = rustix::io::read(io::stdin(), &mut byte)?;
+            if n == 0 {
                 break false;
             }
             reply.extend_from_slice(&byte);
@@ -98,7 +100,7 @@ fn escapes(out: &str, count: usize) -> io::Result<()> {
     let mut byte = [0u8; 1];
     let mut seen = 0;
     while seen < count {
-        if io::stdin().read(&mut byte)? == 0 {
+        if rustix::io::read(io::stdin(), &mut byte)? == 0 {
             break;
         }
         if byte == [0x1b] {
