@@ -548,6 +548,7 @@ async function runRustTests(dir: string, top: string, tests: RustTest[]): Promis
 }
 
 export type RustVerdict = RustTest & { outcome: Outcome; note: string };
+type RustJudgement = { verdicts: RustVerdict[]; unapplied: string[]; ran: number; total: number };
 
 const key = (t: RustTest) => `${t.file} ${t.title}`;
 
@@ -597,10 +598,11 @@ async function mutateRustTests(
   range: string[],
   report: unknown,
   added: RustTest[],
-): Promise<{ verdicts: RustVerdict[]; unapplied: string[] } | undefined> {
+): Promise<RustJudgement | undefined> {
   const diff = git(["diff", "-M", ...range, "--", "*.rs"], dir);
   if (diff === "") {
-    return { verdicts: added.map((t) => invalidRust(t, "no Rust source changed")), unapplied: [] };
+    const verdicts = added.map((t) => invalidRust(t, "no Rust source changed"));
+    return { verdicts, unapplied: [], ran: 0, total: 0 };
   }
   const diffFile = join(dir, "falsify-rust.diff");
   writeFileSync(diffFile, diff);
@@ -625,7 +627,9 @@ async function mutateRustTests(
     targets,
   );
   const passed = new Set(baseline.filter((e) => e.event === "ok").map((e) => e.test));
-  const broken = new Set(baseline.filter((e) => e.event !== "ok").map((e) => e.test));
+  const broken = new Set(
+    baseline.filter((e) => e.event !== "ok" && e.event !== "started").map((e) => e.test),
+  );
   let pending = runnable.filter((t) => passed.has(key(t)) && !broken.has(key(t)));
   const killedBy = new Map<string, string>();
   const unapplied: string[] = [];
@@ -658,7 +662,7 @@ async function mutateRustTests(
         : "no mutant of the change failed it on an assertion",
     );
   });
-  return { verdicts, unapplied };
+  return { verdicts, unapplied, ran, total: mutants.length };
 }
 
 /**
@@ -689,7 +693,7 @@ async function judgeRustTests(top: string, base: string, head: string) {
       return undefined;
     }
     const added = addedRustTests(rustTestIds(before), rustTestIds(after));
-    if (added.length === 0) return { verdicts: [], unapplied: [] };
+    if (added.length === 0) return { verdicts: [], unapplied: [], ran: 0, total: 0 };
     return await mutateRustTests(dir, top, [base, head], after, added);
   } finally {
     cleanup?.();
@@ -765,8 +769,7 @@ async function main(args: string[]): Promise<number> {
       title,
     }));
   });
-  let rustTests: RustVerdict[] = [];
-  let unapplied: string[] = [];
+  let rust: RustJudgement = { verdicts: [], unapplied: [], ran: 0, total: 0 };
   if (changes.some((c) => RUST_INPUT.test(c.path) || RUST_INPUT.test(c.oldPath ?? ""))) {
     process.once("SIGINT", handleSignal);
     process.once("SIGTERM", handleSignal);
@@ -774,13 +777,14 @@ async function main(args: string[]): Promise<number> {
     try {
       const judged = await judgeRustTests(top, base, head);
       if (judged === undefined) return 1;
-      ({ verdicts: rustTests, unapplied } = judged);
+      rust = judged;
     } finally {
       process.off("SIGINT", handleSignal);
       process.off("SIGTERM", handleSignal);
       process.off("SIGHUP", handleSignal);
     }
   }
+  const rustTests = rust.verdicts;
   if (targets.length === 0 && rustTests.length === 0) {
     console.log(`falsify: no new tests between ${base.slice(0, 12)} and HEAD`);
     return 0;
@@ -878,7 +882,12 @@ async function main(args: string[]): Promise<number> {
     const note = r.note ?? (r.unrelated ? " (passed; unrelated to the source change)" : "");
     console.log(`  ${r.outcome.padEnd(8)} ${r.file} › ${r.title}${note}`);
   }
-  for (const name of unapplied) {
+  if (rust.total > 0) {
+    console.log(
+      `falsify: ${rust.ran} of the change's ${rust.total} Rust mutants run (at most ${MAX_MUTANTS})`,
+    );
+  }
+  for (const name of rust.unapplied) {
     console.log(`  INVALID  mutant ${name} (its patch left the file unchanged; not run)`);
   }
 
