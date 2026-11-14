@@ -10,6 +10,7 @@ import type {
   RuntimeInventoryEntry,
   RuntimeRef,
   RuntimeStream,
+  StreamEnd,
   Size,
   TerminalId,
   TerminalSpec,
@@ -466,18 +467,18 @@ export class TmuxRuntime implements RuntimeAdapter {
       alternate: alternate === 1,
     });
     proc.onData(() => screen.poke());
-    const closeHandlers: Array<() => void> = [];
+    const closeHandlers: Array<(why: StreamEnd) => void> = [];
     let closed = false;
     proc.onExit(() => {
       closed = true;
       screen.dispose();
-      for (const h of closeHandlers) h();
+      for (const h of closeHandlers) h("ended");
     });
     const stream: RuntimeStream = {
       size: { cols, rows },
       onData: (cb) => proc.onData(cb),
       onClose: (cb) => {
-        if (closed) cb();
+        if (closed) cb("ended");
         else closeHandlers.push(cb);
       },
       write: (bytes) => proc.write(bytes),

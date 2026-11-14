@@ -135,7 +135,7 @@ export interface RuntimeStream {
    * snapshot client, it could no longer deliver every byte in order. A close the consumer didn't
    * ask for, of a terminal that still runs, is for it to attach again.
    */
-  onClose(cb: () => void): void;
+  onClose(cb: (why: StreamEnd) => void): void;
   write(bytes: Uint8Array): void;
   resize(size: Size): Promise<void>;
   /**
@@ -169,6 +169,12 @@ export const RESPAWN_RESET =
   "\x1b[?1049l\x1b[!p\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1004l\x1b[?2004l" +
   "\x1b]104\x07\x1b]110\x07\x1b]111\x07\x1b]112\x07\x1b[H\x1b[2J";
 
+/**
+ * Why a stream closed: `behind` only for a snapshot client that could no longer deliver every
+ * byte in order, which a fresh snapshot recovers from; `ended` for anything else.
+ */
+export type StreamEnd = "behind" | "ended";
+
 /** What failed, as a few words such as `screen check`, and the error it failed with. */
 export interface StreamFailure {
   readonly what: string;
@@ -199,22 +205,42 @@ export interface HistoryAttached extends AttachedClient {
   readonly history: string;
 }
 
-/** A client whose stream carries on exactly where its snapshot ends. */
-export interface SnapshotAttached extends AttachedClient {
-  readonly kind: "snapshot";
+/** A terminal's whole state as of one point in its output. */
+export interface Snapshot {
   /**
    * VT bytes that rebuild the screen, the history above it, the cursor and the modes exactly as
-   * they were after `offset` bytes of output. The stream's bytes are the ones after them, none
-   * missed or repeated; a stream that can't keep to that closes. They only set state and never
-   * ask the terminal anything, so a terminal that replays them has nothing to answer.
+   * they were after `offset` bytes of output. They only set state and never ask the terminal
+   * anything, so a terminal that replays them has nothing to answer.
    */
   readonly vt: Uint8Array;
   /**
-   * Bytes the process the ref names has printed, from 0 at its start. The stream outlives a
-   * respawn, and goes on with the same terminal, the next process's output counted from 0 again.
-   * At most `Number.MAX_SAFE_INTEGER`.
+   * Bytes the process of `generation` had printed, from 0 at its start. At most
+   * `Number.MAX_SAFE_INTEGER`.
    */
   readonly offset: number;
+  readonly generation: number;
+}
+
+/**
+ * A stream whose bytes carry on exactly where its snapshot ends, none missed or repeated; one that
+ * can't keep to that closes. It outlives a respawn, and goes on with the same terminal, the next
+ * process's output counted from 0 again.
+ */
+export interface SnapshotStream extends RuntimeStream {
+  /**
+   * The terminal as it is now: taken no earlier than the call, and resolved only once every byte
+   * before its offset, and any respawn before it, has reached the stream's callbacks. Rejects if
+   * the stream closes first.
+   */
+  snapshot(): Promise<Snapshot>;
+}
+
+/** A client that opened on a snapshot, which its stream carries on from. */
+export interface SnapshotAttached extends Snapshot {
+  readonly kind: "snapshot";
+  readonly stream: SnapshotStream;
+  /** Whether the program was on its alternate screen as the client attached. */
+  readonly alternate: boolean;
 }
 
 export interface RuntimeAdapter {

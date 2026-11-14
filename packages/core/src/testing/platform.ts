@@ -8,3 +8,13 @@ declare function setTimeout(callback: () => void, ms: number): unknown;
 export const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
 export const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
 export const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+export function concat(...parts: readonly Uint8Array[]): Uint8Array {
+  const out = new Uint8Array(parts.reduce((n, part) => n + part.length, 0));
+  let at = 0;
+  for (const part of parts) {
+    out.set(part, at);
+    at += part.length;
+  }
+  return out;
+}

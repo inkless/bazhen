@@ -16,7 +16,10 @@ import {
   RESPAWN_RESET,
   StaleIncarnation,
   type Attached,
+  type Snapshot,
   type SnapshotAttached,
+  type SnapshotStream,
+  type StreamEnd,
   type StreamFailure,
   type Foreground,
   type RuntimeAdapter,
@@ -29,7 +32,7 @@ import {
   type ProcessSpec,
   type TerminalSpec,
 } from "../runtime.ts";
-import { decode, encode } from "./platform.ts";
+import { concat, decode, encode } from "./platform.ts";
 import type { ContractHarness } from "./runtime-contract.ts";
 
 /** What reached one terminal from its clients, for a test to assert on. */
@@ -65,6 +68,22 @@ interface Terminal {
   alternate: boolean;
   readonly streams: Set<Client>;
   readonly clients: ClientRecord;
+  /** Snapshots a test is holding back, while it holds them. */
+  held?: HeldSnapshots;
+}
+
+/** Snapshots asked for and not yet taken, and those taken and not yet resolved. */
+interface HeldSnapshots {
+  asked: ((snapshot: Snapshot) => void)[];
+  taken: (() => void)[];
+}
+
+/** A test's hold on a terminal's stream snapshots, so it can put output on either side of each. */
+export interface SnapshotHold {
+  /** Takes every snapshot asked for so far, as of now; none of them resolves yet. */
+  take(): void;
+  /** Resolves every snapshot taken, and stops holding them. */
+  release(): void;
 }
 
 interface Client {
@@ -72,7 +91,7 @@ interface Client {
   switched(alternate: boolean): void;
   respawned(generation: number): void;
   fail(failure: StreamFailure): void;
-  end(): void;
+  end(why?: StreamEnd): void;
 }
 
 type ExitListener = (ref: RuntimeRef, status: ExitStatus) => void;
@@ -110,13 +129,6 @@ function screenAfter(text: string, alternate: boolean): boolean {
     }
   }
   return on;
-}
-
-function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
-  const out = new Uint8Array(a.length + b.length);
-  out.set(a);
-  out.set(b, a.length);
-  return out;
 }
 
 export class FakeRuntime implements RuntimeAdapter {
@@ -178,13 +190,16 @@ export class FakeRuntime implements RuntimeAdapter {
     const switches: ((alternate: boolean) => void)[] = [];
     const respawns: ((generation: number) => void)[] = [];
     const failures: ((failure: StreamFailure) => void)[] = [];
-    const closed: (() => void)[] = [];
-    let ended = false;
-    const end = () => {
-      if (ended) return;
-      ended = true;
+    const closed: ((why: StreamEnd) => void)[] = [];
+    const snapshots = new Set<(err: Error) => void>();
+    let ended: StreamEnd | null = null;
+    const end = (why: StreamEnd = "ended") => {
+      if (ended !== null) return;
+      ended = why;
       t.streams.delete(client);
-      for (const cb of closed) cb();
+      for (const reject of snapshots) reject(new Error("the stream closed"));
+      snapshots.clear();
+      for (const cb of closed) cb(why);
     };
     const client: Client = {
       emit: (bytes) => data.forEach((cb) => cb(bytes)),
@@ -197,7 +212,7 @@ export class FakeRuntime implements RuntimeAdapter {
     const stream: RuntimeStream = {
       size: t.size,
       onData: (cb) => void data.push(cb),
-      onClose: (cb) => (ended ? cb() : void closed.push(cb)),
+      onClose: (cb) => (ended !== null ? cb(ended) : void closed.push(cb)),
       write: (bytes) => {
         t.clients.written.push(decode(bytes));
         if (t.pane.echo && t.pane.exit === null) this.emit(t, bytes);
@@ -215,7 +230,23 @@ export class FakeRuntime implements RuntimeAdapter {
         end();
       },
     };
-    if (this.attachKind === "snapshot") return { ...this.snapshotOf(t), stream };
+    if (this.attachKind === "snapshot") {
+      const snapshot = () =>
+        new Promise<Snapshot>((resolve, reject) => {
+          if (ended !== null) throw new Error("the stream closed");
+          snapshots.add(reject);
+          const settle = (taken: Snapshot) => {
+            if (!snapshots.delete(reject)) return;
+            resolve(taken);
+          };
+          if (t.held === undefined) {
+            const taken = this.snapshotOf(t);
+            void Promise.resolve().then(() => settle(taken));
+          } else t.held.asked.push(settle);
+        });
+      const snapshotStream: SnapshotStream = { ...stream, snapshot };
+      return { ...this.snapshotOf(t), stream: snapshotStream, alternate: t.alternate };
+    }
     const lines =
       historyLines > 0 && !t.alternate ? t.history.split("\n").slice(-historyLines).join("\n") : "";
     return { kind: "history", stream, history: lines, alternate: t.alternate };
@@ -362,6 +393,32 @@ export class FakeRuntime implements RuntimeAdapter {
     this.remove(this.terminalOf(ref));
   }
 
+  /**
+   * Holds the terminal's stream snapshots: each is taken only at `take`, and resolves only at
+   * `release`, so a test can put output before and after the point it is taken at.
+   */
+  holdSnapshots(ref: RuntimeRef): SnapshotHold {
+    const t = this.terminalOf(ref);
+    const held: HeldSnapshots = { asked: [], taken: [] };
+    t.held = held;
+    return {
+      take: () => {
+        const snapshot = this.snapshotOf(t);
+        for (const settle of held.asked.splice(0)) held.taken.push(() => settle(snapshot));
+      },
+      release: () => {
+        if (t.held === held) delete t.held;
+        for (const resolve of held.taken.splice(0)) resolve();
+      },
+    };
+  }
+
+  /** The terminal's snapshot clients fall too far behind its output, and their streams close. */
+  fallBehind(ref: RuntimeRef): void {
+    if (this.attachKind !== "snapshot") throw new Error("only a snapshot client falls behind");
+    for (const client of this.terminalOf(ref).streams) client.end("behind");
+  }
+
   /** The server stays up but can no longer be read, as a socket Bazhen can't open. */
   disconnect(): void {
     this.reachable = false;
@@ -412,14 +469,14 @@ export class FakeRuntime implements RuntimeAdapter {
   }
 
   /** The history scrolled above a clear screen, then everything printed since from its top. */
-  private snapshotOf(t: Terminal): Omit<SnapshotAttached, "stream"> {
+  private snapshotOf(t: Terminal): Omit<SnapshotAttached, "stream" | "alternate"> {
     const above = `${"\r\n".repeat(t.size.rows)}\x1b[0m\x1b[H`;
     const history = t.history === "" ? "" : `${t.history.replaceAll("\n", "\r\n")}${above}`;
     return {
       kind: "snapshot",
       vt: encode(history + decode(t.printed).replaceAll(QUERY, "")),
       offset: t.offset,
-      alternate: t.alternate,
+      generation: t.pane.generation,
     };
   }
 
