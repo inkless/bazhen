@@ -34,6 +34,7 @@ const SUITES = {
   e2e: "test:e2e",
   falsify: "test:falsify",
   "control-mode": "test:control-mode",
+  "control-mode-persistent": "test:control-mode-persistent",
 } as const;
 type Suite = keyof typeof SUITES;
 const DEFAULT_SUITES: Suite[] = ["integration", "api", "e2e"];

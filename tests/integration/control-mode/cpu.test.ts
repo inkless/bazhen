@@ -79,6 +79,7 @@ async function measure(workload: "busy" | "flood", viewed: number, mode: Mode) {
     tmuxServerPct: pct(cpuSeconds(tmuxPid) - t0.tmux),
     tmuxClientsPct: pct(sum(pids) - t0.clients),
     consumerPct: pct((self.user + self.system) / 1e6),
+    consumerRssMb: Math.round(process.memoryUsage().rss / 1e6),
   };
   report("cpu", row);
   for (const c of closers.splice(0)) await c();
@@ -95,6 +96,8 @@ describe("CPU, client mode against control mode", () => {
     ["busy", 25, "control"],
     ["flood", 2, "attach"],
     ["flood", 2, "control"],
+    ["flood", 25, "attach"],
+    ["flood", 25, "control"],
   ] as const)("%s agents, %i viewed, %s", async (workload, viewed, mode) => {
     const row = await measure(workload, viewed, mode);
     expect(row.clients).toBe(viewed);
