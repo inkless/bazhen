@@ -361,7 +361,7 @@ const socketListener = getRequestListener(
       activity,
       recordUsage: (agentId, usage) => store.recordUsage(agentId, usage),
     }),
-    stop: shutdown,
+    stop: () => shutdown("requested"),
     pairing,
     devices,
     externalOrigins: config.externalOrigins,
@@ -419,7 +419,11 @@ socketServer.requestTimeout = 0;
 rmSync(paths.socket, { force: true });
 socketServer.listen(paths.socket, () => chmodSync(paths.socket, 0o600));
 
-function shutdown() {
+/**
+ * A stop someone asked for: a signal, or `bazhen stop`. It says it stopped only after every close
+ * has returned, so a close that throws ends in Node's non-zero exit with no such line.
+ */
+function shutdown(reason: NodeJS.Signals | "requested") {
   shuttingDown.abort();
   clearInterval(retention);
   clearInterval(deviceSweep);
@@ -428,6 +432,7 @@ function shutdown() {
   socketServer.close();
   codex.close();
   store.close();
+  console.log(`bazhen daemon stopped (${reason})`);
   process.exit(0);
 }
 process.on("SIGINT", shutdown);

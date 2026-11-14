@@ -68,6 +68,8 @@ export class DevRun {
   private readonly script: ChildProcess;
   private output = "";
   private exited = false;
+  /** What `script -e` reports: pnpm's exit status, or 128 + the signal that ended it. */
+  private status: number | null = null;
   /** Everything the run started, kept so `stop` can wait for processes reparented away. */
   private readonly seen = new Set<number>();
 
@@ -75,7 +77,10 @@ export class DevRun {
     this.home = home;
     this.script = script;
     script.stdout?.on("data", (d: Buffer) => (this.output += d.toString()));
-    script.on("exit", () => (this.exited = true));
+    script.on("exit", (code) => {
+      this.status = code;
+      this.exited = true;
+    });
   }
 
   /** Started, once the daemon listens and vite is ready. */
@@ -87,7 +92,8 @@ export class DevRun {
       BAZHEN_PORT: String(await freePort()),
       BAZHEN_WEB_PORT: String(await freePort()),
     };
-    const script = spawnGroup("script", ["-qefc", "pnpm dev", "/dev/null"], {
+    // `exec`, so the status is pnpm's: a non-interactive sh left in between dies of the Ctrl-C.
+    const script = spawnGroup("script", ["-qefc", "exec pnpm dev", "/dev/null"], {
       cwd: repo,
       env,
       stdio: "pipe",
@@ -132,8 +138,8 @@ export class DevRun {
    * or stderr from outside the foreground process group, which the shell doesn't wait for.
    */
   backgroundHolders(): string[] {
-    const [shell, ...rest] = this.record();
-    const terminal = shell === undefined ? undefined : link(`/proc/${shell}/fd/0`);
+    const [pnpm, ...rest] = this.record();
+    const terminal = pnpm === undefined ? undefined : link(`/proc/${pnpm}/fd/0`);
     return rest
       .filter((pid) => {
         const s = stat(pid);
@@ -143,12 +149,12 @@ export class DevRun {
       .map((pid) => commandLine(pid) ?? `${pid} (exited)`);
   }
 
-  /** Presses Ctrl-C and waits for `pnpm dev` to end; the status pnpm gave each app. */
-  async interrupt(): Promise<string[]> {
+  /** Presses Ctrl-C and waits for `pnpm dev` to end; its exit status and each app's. */
+  async interrupt(): Promise<{ exit: number | null; apps: string[] }> {
     this.record();
     this.script.stdin?.write("\x03");
     await waitUntil(() => this.exited, "pnpm dev to exit", 30_000);
-    return this.statuses();
+    return { exit: this.status, apps: this.statuses() };
   }
 
   /**
