@@ -61,9 +61,32 @@ describe("the terminal stream", () => {
     expect(late.frames.map((f) => f.type)).toEqual(
       expect.arrayContaining(["snapshot_start", "snapshot_end"]),
     );
-    expect(daemon.tmux("list-clients").trim().split("\n")).toHaveLength(1);
+    // An earlier view's client may still be on its way out.
+    await expect.poll(() => daemon.tmux("list-clients").trim().split("\n")).toHaveLength(1);
     first.close();
     late.close();
+  });
+
+  it("keeps its client a moment after the last view closes on an Enter, then lets it go", async () => {
+    const program = await daemon.program([
+      "sh",
+      "-c",
+      'echo ready; read line; echo "got $line"; exec sleep 600',
+    ]);
+    await waitUntil(() => daemon.screen(program.agentId).includes("ready"), "the program");
+    const session = String(daemon.paneFact(program.agentId, "session_name"));
+    const clients = () => daemon.tmux("list-clients", "-t", session).trim();
+    const view = await daemon.view(program.terminalId, "interactive");
+    await view.drive();
+    view.type("last words\r");
+    view.close();
+    await view.closed();
+    await expect.poll(() => daemon.screen(program.agentId)).toContain("got last words");
+    // Long enough for a client killed at the close to be gone, well inside the hub's grace.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const lingering = clients();
+    await expect.poll(clients, { timeout: 10_000 }).toBe("");
+    expect(lingering).not.toBe("");
   });
 
   it("refuses a stream opened from a page on another origin", async () => {
