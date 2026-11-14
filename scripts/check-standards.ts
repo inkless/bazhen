@@ -456,6 +456,32 @@ function closingBracket(code: string, open: number): number {
   return code.length;
 }
 
+// The cfg predicates code may be compiled under, each with why: the gates build every one of
+// them, so no lint or test misses code behind it. A predicate they don't build (release-only,
+// another OS, a feature turned off) hides the code from both, and `not` (as in `not(test)`) hides
+// it from the tests.
+const CFG_ALLOWED: Record<string, string> = {
+  test: "nextest and clippy's --all-targets build the test configuration",
+};
+
+/** The predicates of a cfg or cfg_attr attribute that aren't in CFG_ALLOWED. */
+export function cfgOutsideAllowList(body: string): string[] {
+  const cfg = /^cfg(_attr)?\s*\(/.exec(body);
+  if (cfg === null) return [];
+  let predicate = body.slice(cfg[0].length);
+  if (cfg[1] !== undefined) {
+    for (let i = 0, depth = 0; i < predicate.length; i++) {
+      depth += predicate[i] === "(" ? 1 : predicate[i] === ")" ? -1 : 0;
+      if (predicate[i] === "," && depth === 0) {
+        predicate = predicate.slice(0, i);
+        break;
+      }
+    }
+  }
+  const atoms = predicate.match(/\b[A-Za-z_]\w*\b/g) ?? [];
+  return [...new Set(atoms)].filter((a) => !["all", "any"].includes(a) && !(a in CFG_ALLOWED));
+}
+
 const UNSAFE_EXPECT = /^expect\s*\(\s*unsafe_code\s*,\s*reason\s*=\s*""\s*,?\s*\)$/;
 const SEE_RUST_MD = "(docs/standards/rust.md § Lints).";
 
@@ -508,7 +534,13 @@ export function attributeFailures(
             "docs/standards/rust.md).",
         );
       }
-    } else if (/\b(ignore|should_panic)\b/.test(body)) {
+    } else if (cfgOutsideAllowList(body).length > 0) {
+      out.push(
+        `${where}: ${attribute} compiles code only under ${cfgOutsideAllowList(body).join(", ")}, ` +
+          "which the gates never build, so no lint or test reads it. Use a cfg in CFG_ALLOWED in " +
+          `scripts/check-standards.ts, or add one there with why ${SEE_RUST_MD}`,
+      );
+    } else if (/(?:^|,)\s*(ignore|should_panic)\b/.test(body)) {
       out.push(
         `${where}: ${attribute} skips a test, or passes it when it fails. A test runs, and fails ` +
           "on what it asserts; check an error with a Result, not a panic.",
@@ -583,6 +615,19 @@ export const WORKSPACE_LINTS = [
   'multiple_unsafe_ops_per_block = "forbid"',
   'allow_attributes = "forbid"',
   'allow_attributes_without_reason = "forbid"',
+];
+// The root manifest's other tables, exactly: one workspace over crates/, nothing excluded, and the
+// one profile the hook's release build uses. Any other table (a patch, a test profile) is refused.
+export const ROOT_TABLES: Record<string, string[]> = {
+  "[workspace]": ['members = ["crates/*"]', 'resolver = "3"'],
+  "[workspace.package]": ['edition = "2024"', 'rust-version = "1.100"', "publish = false"],
+  "[profile.release]": ["lto = true", "codegen-units = 1", 'panic = "abort"', "strip = true"],
+};
+export const TOOLCHAIN_CONFIG = [
+  "[toolchain]",
+  'channel = "1.100.0"',
+  'profile = "minimal"',
+  'components = ["rustfmt", "clippy"]',
 ];
 export const CLIPPY_CONFIG = [
   "allow-unwrap-in-tests = true",
@@ -702,44 +747,72 @@ export function memberDependencyFailures(manifest: string, text: string): string
   return out;
 }
 
+// The tables that describe a crate's targets, and the keys there that keep one, or its tests, out
+// of the build.
+const TARGET_TABLE = /^\[\[?(?:package|lib|bin|test|bench|example)\]\]?$/;
+const TARGET_DROPPING_KEY =
+  /(?:^|[{,.\s])(?:required-features|test|harness|auto(?:lib|bins|tests|benches|examples))\s*=/;
+
 /**
  * Why a member manifest's targets could hold code the checks don't read: a target `path` can name
  * any file, and a proc macro of ours could emit any attribute.
  */
 export function memberTargetFailures(manifest: string, text: string): string[] {
-  return tomlLines(text).flatMap((line) => {
-    if (/\bproc[-_]macro\s*=\s*true\b/.test(line)) {
-      return [
-        `${manifest}: \`${line}\`: a proc macro of ours could emit attributes no check reads. ` +
-          "Write the code out, or use a macro_rules! macro.",
-      ];
+  const out: string[] = [];
+  for (const [header, lines] of tomlTables(text)) {
+    if (/^\[\[?(?:workspace|patch|replace|profile)\b/.test(header)) {
+      out.push(
+        `${manifest}: ${header}: a crate takes its workspace, patches and profiles from the root ` +
+          "Cargo.toml, where the checks pin them.",
+      );
     }
-    if (
-      /(?:^|[{,.\s])(?:required-features|test|harness|auto(?:lib|bins|tests|benches|examples))\s*=/.test(
-        line,
-      )
-    ) {
-      return [
-        `${manifest}: \`${line}\` keeps a target, or its tests, out of the build the gates ` +
-          "lint and test. Every target builds and runs its tests; gate code by feature, which " +
-          "the gates turn on, if it must be optional.",
-      ];
+    const target = header === "" || TARGET_TABLE.test(header);
+    for (const line of lines.map((l) => l.replaceAll(/"[^"]*"/g, '""'))) {
+      if (/\bproc[-_]macro\s*=\s*true\b/.test(line)) {
+        out.push(
+          `${manifest}: \`${line}\`: a proc macro of ours could emit attributes no check reads. ` +
+            "Write the code out, or use a macro_rules! macro.",
+        );
+      } else if (target && TARGET_DROPPING_KEY.test(line)) {
+        out.push(
+          `${manifest}: \`${line}\` keeps a target, or its tests, out of the build the gates ` +
+            "lint and test. Every target builds and runs its tests.",
+        );
+      } else if (target && /(?:^|[{,.\s])path\s*=/.test(line)) {
+        out.push(
+          `${manifest}: \`${line}\` points a target at a file of its choosing. Keep each target ` +
+            "where Cargo looks by default (src/lib.rs, src/main.rs, src/bin/, tests/), where " +
+            "the checks read it.",
+        );
+      }
     }
-    if (/(?:^|[{,.\s])path\s*=/.test(line)) {
-      return [
-        `${manifest}: \`${line}\` points a target at a file of its choosing. Keep each target ` +
-          "where Cargo looks by default (src/lib.rs, src/main.rs, src/bin/, tests/), where " +
-          "the checks read it.",
-      ];
-    }
-    return [];
-  });
+  }
+  return out;
 }
 
 /** Why the root manifest's lints or pinned dependencies are not what the standard says. */
 export function rootManifestFailures(text: string): string[] {
   const out: string[] = [];
   const tables = tomlTables(text);
+  for (const [header, lines] of tables) {
+    const pinned = ROOT_TABLES[header];
+    if (pinned !== undefined && lines.join("\n") !== pinned.join("\n")) {
+      out.push(`Cargo.toml: ${header} differs from ROOT_TABLES in scripts/check-standards.ts.`);
+    } else if (
+      pinned === undefined &&
+      header !== "[workspace.dependencies]" &&
+      !header.startsWith("[workspace.lints") &&
+      (header !== "" || lines.length > 0)
+    ) {
+      out.push(
+        `Cargo.toml: ${header || lines[0]} isn't one of the root manifest's tables. Patches, ` +
+          "excluded crates and other profiles change what the gates build; they aren't used here.",
+      );
+    }
+  }
+  for (const header of Object.keys(ROOT_TABLES).filter((h) => !tables.has(h))) {
+    out.push(`Cargo.toml: ${header} is missing (ROOT_TABLES in scripts/check-standards.ts).`);
+  }
   const lints = [...tables]
     .filter(([header]) => header.startsWith("[workspace.lints"))
     .flatMap(([header, lines]) => [header, ...lines]);
@@ -751,11 +824,11 @@ export function rootManifestFailures(text: string): string[] {
   }
   for (const line of tables.get("[workspace.dependencies]") ?? []) {
     const version = /^[\w-]+\s*=\s*(?:"([^"]*)"|\{.*\bversion\s*=\s*"([^"]*)".*\})$/.exec(line);
-    const path = /^[\w-]+\s*=\s*\{(?!.*\bversion\b).*\bpath\s*=\s*"[^"]*".*\}$/.test(line);
+    const path = /^([\w-]+)\s*=\s*\{(?!.*\bversion\b).*\bpath\s*=\s*"crates\/\1".*\}$/.test(line);
     if (!path && !(version?.[1] ?? version?.[2] ?? "").startsWith("=")) {
       out.push(
         `Cargo.toml: \`${line}\` must pin an exact version (\`"=x.y.z"\`) or be a path to a ` +
-          "crate of ours.",
+          'crate of ours (`path = "crates/<name>"`).',
       );
     }
   }
@@ -838,6 +911,7 @@ export function rustFailures(
     }
   };
   pinned("deny.toml", DENY_CONFIG, "DENY_CONFIG");
+  pinned("rust-toolchain.toml", TOOLCHAIN_CONFIG, "TOOLCHAIN_CONFIG");
   if (paths.includes("package.json")) out.push(...gateScriptFailures(packageScripts(read)));
   else out.push("package.json is missing; the Rust gates run from its scripts.");
   pinned("clippy.toml", CLIPPY_CONFIG, "CLIPPY_CONFIG");

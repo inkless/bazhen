@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   CLIPPY_CONFIG,
+  ROOT_TABLES,
+  TOOLCHAIN_CONFIG,
   DENY_CONFIG,
   RUST_GATE_SCRIPTS,
   WORKSPACE_LINTS,
@@ -242,6 +244,29 @@ describe("attributeFailures", () => {
     ]);
   });
 
+  it("refuses code compiled only under a cfg the gates never build", () => {
+    const source = [
+      "#[cfg(not(debug_assertions))]",
+      '#[cfg(feature = "slow")]',
+      '#[cfg_attr(target_os = "macos", derive(Debug))]',
+      "#[cfg(all(test, unix))]",
+      "#[cfg(not(test))]",
+      "#[cfg(test)]",
+      "#[cfg(all(test))]",
+      "#[cfg_attr(test, derive(Debug))]",
+      "#[educe(Debug(ignore))]",
+      "#[cfg_attr(test, ignore)]",
+    ].join("\n");
+    expect(scan(source).map((f) => f.split(": ")[0])).toEqual([
+      "crates/x/src/a.rs:1",
+      "crates/x/src/a.rs:2",
+      "crates/x/src/a.rs:3",
+      "crates/x/src/a.rs:4",
+      "crates/x/src/a.rs:5",
+      "crates/x/src/a.rs:10",
+    ]);
+  });
+
   it("reads a C raw string as a string, so it can't hide what follows", () => {
     const source = 'const A: &CStr = cr"\\";\n#[allow(dead_code)]\nfn f() {}\nconst B: &str = "x";';
     expect(scan(source)).toEqual([
@@ -288,8 +313,10 @@ describe("unsafeModuleFailures", () => {
 const targetFailures = (text: string) => memberTargetFailures("crates/a/Cargo.toml", text);
 
 describe("memberTargetFailures", () => {
-  it("accepts targets where Cargo looks by default", () => {
-    const manifest = '[package]\nname = "a"\n\n[[bin]]\nname = "a"\n\n[lib]\ndoctest = false\n';
+  it("accepts targets where Cargo looks by default, and the same words elsewhere", () => {
+    const manifest =
+      '[package]\nname = "a"\ndescription = "no path = here"\n\n[[bin]]\nname = "a"\n\n' +
+      "[lib]\ndoctest = false\n\n[features]\ntest = []\n";
     expect(memberTargetFailures("crates/a/Cargo.toml", manifest)).toEqual([]);
   });
 
@@ -305,6 +332,8 @@ describe("memberTargetFailures", () => {
       targetFailures("[[test]]\nharness = false\n"),
       targetFailures("[package]\nautotests = false\n"),
       targetFailures("lib = { test = false }\n"),
+      targetFailures('[workspace]\n\n[workspace.lints.rust]\nunsafe_code = "allow"\n'),
+      targetFailures('[patch.crates-io]\nproptest = { path = "x" }\n'),
     ]).toEqual([
       [expect.stringContaining("points a target")],
       [expect.stringContaining("points a target")],
@@ -312,6 +341,11 @@ describe("memberTargetFailures", () => {
       [expect.stringContaining("points a target")],
       [expect.stringContaining("proc macro")],
       ...Array.from({ length: 5 }, () => [expect.stringContaining("keeps a target")]),
+      [
+        expect.stringContaining("[workspace]: a crate takes its workspace"),
+        expect.stringContaining("[workspace.lints.rust]: a crate takes its workspace"),
+      ],
+      [expect.stringContaining("[patch.crates-io]: a crate takes its workspace")],
     ]);
   });
 });
@@ -431,19 +465,19 @@ describe("rustFailures", () => {
   });
 });
 
+const table = (header: string) => [header, ...(ROOT_TABLES[header] ?? []), ""];
+
 describe("rootManifestFailures", () => {
   const root = [
-    "[workspace]",
-    'members = ["crates/*"]',
-    "",
+    ...table("[workspace]"),
+    ...table("[workspace.package]"),
     "# Pinned here.",
     "[workspace.dependencies]",
     'proptest = { version = "=1.12.0", default-features = false }',
     "",
     ...WORKSPACE_LINTS.flatMap((l) => (l.startsWith("[") ? ["", l] : [l])),
     "",
-    "[profile.release]",
-    "lto = true",
+    ...table("[profile.release]"),
   ].join("\n");
 
   const deps = (lines: string) =>
@@ -467,17 +501,37 @@ describe("rootManifestFailures", () => {
     ]);
   });
 
+  it("refuses a workspace other than the standard's: excluded crates, patches, other profiles", () => {
+    expect([
+      rootManifestFailures(
+        root.replace('resolver = "3"', 'resolver = "3"\nexclude = ["crates/x"]'),
+      ),
+      rootManifestFailures(`${root}\n[patch.crates-io]\nproptest = { path = "crates/p" }\n`),
+      rootManifestFailures(`${root}\n[profile.test]\noverflow-checks = false\n`),
+      rootManifestFailures(root.replace("lto = true", "")),
+      rootManifestFailures(root.replace(/\[profile\.release\][^[]*/, "")),
+    ]).toEqual([
+      [expect.stringContaining("[workspace] differs from ROOT_TABLES")],
+      [expect.stringContaining("[patch.crates-io] isn't one of the root manifest's tables")],
+      [expect.stringContaining("[profile.test] isn't one of")],
+      [expect.stringContaining("[profile.release] differs")],
+      [expect.stringContaining("[profile.release] is missing")],
+    ]);
+  });
+
   it("refuses a workspace dependency not pinned exactly, but takes a path to a crate of ours", () => {
     expect([
       deps('serde = "1.0.200"'),
       deps('serde = { version = "^1", features = ["derive"] }'),
       deps('serde = { version = "=1.0.200", default-features = false }'),
       deps('holder-proto = { path = "crates/holder-proto" }'),
+      deps('evil = { path = "vendor/evil" }'),
     ]).toEqual([
       [expect.stringContaining('`serde = "1.0.200"` must pin an exact version')],
       [expect.stringContaining("must pin an exact version")],
       [],
       [],
+      [expect.stringContaining('(`path = "crates/<name>"`)')],
     ]);
   });
 });
@@ -612,6 +666,7 @@ describe("rustFailures on the gates' own configuration", () => {
   const standard: Record<string, string> = {
     "deny.toml": DENY_CONFIG.join("\n"),
     "clippy.toml": CLIPPY_CONFIG.join("\n"),
+    "rust-toolchain.toml": TOOLCHAIN_CONFIG.join("\n"),
     "package.json": JSON.stringify({ scripts: { ...RUST_GATE_SCRIPTS, check: CHECK } }),
     "scripts/cargo-gate.ts": "RUSTFLAGS",
     "scripts/cargo-gate.test.ts": "RUSTFLAGS",
@@ -639,6 +694,17 @@ describe("rustFailures on the gates' own configuration", () => {
       [expect.stringContaining("deny.toml: differs from DENY_CONFIG")],
       [expect.stringContaining("deny.toml is missing")],
       [expect.stringContaining("reads only the root deny.toml")],
+    ]);
+  });
+
+  it("refuses a toolchain other than the pinned one, such as one at a path", () => {
+    const fake = '[toolchain]\npath = "/repo/crates/x/tc"\n';
+    expect([
+      failures({ "rust-toolchain.toml": fake }),
+      failures({}, ["rust-toolchain.toml"]),
+    ]).toEqual([
+      [expect.stringContaining("rust-toolchain.toml: differs from TOOLCHAIN_CONFIG")],
+      [expect.stringContaining("rust-toolchain.toml is missing")],
     ]);
   });
 

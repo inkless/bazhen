@@ -106,27 +106,32 @@ source with comments and strings set aside, and fails on:
   `proc-macro` crate of ours: each brings in code, or attributes, from somewhere the scan doesn't
   read;
 - `#[ignore]` and `#[should_panic]`, which skip a test or pass it when it fails, and any
-  attribute naming `clippy` (`#[cfg(not(clippy))]`, `#[clippy::msrv]`), which hides code from
-  clippy or changes how it lints;
-- a member manifest's `required-features`, `test`, `harness` or `auto*` keys, which keep a target
-  or its tests out of the build. The gates lint and test with `--all-features`, so code gated by
-  a feature is read too.
+  attribute naming `clippy` (`#[clippy::msrv]`), which changes how it lints;
+- a `cfg` or `cfg_attr` predicate other than those in `CFG_ALLOWED` (`test` alone today), or
+  `not` around one: code compiled only in a release build, on another OS, under a feature or
+  outside tests is code the gates never build, so no lint or test reads it. A predicate joins
+  the list with why the gates build it;
+- a member manifest's `required-features`, `test`, `harness` or `auto*` keys in its target
+  tables, which keep a target or its tests out of the build, and any `[workspace]`, `[patch]`,
+  `[replace]` or `[profile]` table of its own.
 
 **When a dependency's macro trips a forbidden lint.** An attribute macro from another crate that
 emits an allow of a forbidden lint (`#[tokio::main]` allows `clippy::expect_used`) fails with
 E0453. Lower that one lint to `deny` in `Cargo.toml` and in `WORKSPACE_LINTS`, in a commit that
 names the macro; the scan still guards it.
 
-**The configuration is pinned too.** `scripts/check-standards.ts` holds `[workspace.lints]`,
-`clippy.toml` and `deny.toml` as `WORKSPACE_LINTS`, `CLIPPY_CONFIG` and `DENY_CONFIG`, and the
+**The configuration is pinned too.** `scripts/check-standards.ts` holds `[workspace.lints]`, the
+root manifest's other tables, `rust-toolchain.toml`, `clippy.toml` and `deny.toml` as
+`WORKSPACE_LINTS`, `ROOT_TABLES`, `TOOLCHAIN_CONFIG`, `CLIPPY_CONFIG` and `DENY_CONFIG`, and the
 gate scripts in `package.json` as `RUST_GATE_SCRIPTS`, and fails when the files differ, so a lint
-level or a gate changes only in a commit that changes the script and this page with it. It also
-fails on anything that would loosen them from beside: cargo config in a `.cargo` directory, whose
-`rustflags` can turn lints off; a second `clippy.toml` or `deny.toml`; a nextest config, whose
-profiles can filter tests out; a `rustfmt.toml`; a second toolchain file; a crate outside
-`crates/`; Rust source outside a crate there; and any file but those in `RUST_FLAG_EXEMPT` that
-names a flag or variable able to switch lints off (`RUSTFLAGS`, `--cap-lints`, a rustc wrapper,
-a cargo alias).
+level, the toolchain or a gate changes only in a commit that changes the script and this page with
+it. The root manifest holds no other table (a patch, an excluded crate, another profile), and a
+workspace dependency is an exact version or a path to `crates/<name>`. It also fails on anything
+that would loosen them from beside: cargo config in a `.cargo` directory, whose `rustflags` can turn
+lints off; a second `clippy.toml` or `deny.toml`; a nextest config, whose profiles can filter tests
+out; a `rustfmt.toml`; a second toolchain file; a crate outside `crates/`; Rust source outside a
+crate there; and any file but those in `RUST_FLAG_EXEMPT` that names a flag or variable able to
+switch lints off (`RUSTFLAGS`, `--cap-lints`, a rustc wrapper, a cargo alias).
 
 **The gates run in a clean environment.** `--cap-lints allow` switches every lint off, forbidden
 ones included, whether it arrives through `RUSTFLAGS`, a cargo config in any parent directory, or an
@@ -136,7 +141,8 @@ binary (`cargo-clippy`, not `cargo clippy`), refuses any option after the gate (
 <name>` may name tests), removes the variables that change flags, tools or the test runner, sets
 `CARGO_ENCODED_RUSTFLAGS` empty (which outranks every other source of rustflags), and overrides any
 configured compiler or wrapper. A cargo config outside the repository may still set what the gate
-can't override: a test runner, a `rustdoc`, or `[env]`, which can hand clippy its flags. The lint
+can't override: a test runner, a `rustdoc`, `[env]` (which can hand clippy its flags) or an
+`include` of another file. The lint
 and test gates refuse to run under one. A global `RUSTFLAGS` or a wrapper such as sccache is ignored
 by the gates, not an error.
 

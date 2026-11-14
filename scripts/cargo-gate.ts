@@ -124,13 +124,13 @@ export function parseGate(args: string[]): { gate: Gate; tests: string[] } {
 }
 
 // What a cargo config can set that the gate can't override from the command line: a runner that
-// stands in for the test binaries, a rustdoc, or environment variables for the tools (`[env]`,
-// which can hand clippy `--cap-lints`). Rustflags, rustc and the wrappers the gate overrides
-// itself, so a wrapper such as sccache is fine. Matched in any TOML spelling: under a table,
-// dotted, quoted or inline.
+// stands in for the test binaries, a rustdoc, environment variables for the tools (`[env]`, which
+// can hand clippy `--cap-lints`), or another config file to read (`include`), which this check
+// wouldn't. Rustflags, rustc and the wrappers the gate overrides itself, so a wrapper such as
+// sccache is fine. Matched in any TOML spelling: under a table, dotted, quoted or inline.
 const UNSAFE_CONFIG = [
-  /(?:^|[\s.{,"'])(?:runner|rustdoc)["']?\s*=/m,
-  /^\s*\[\s*["']?env["']?\s*\]|(?:^|[\s{,])["']?env["']?\s*[.=]/m,
+  /(?:^|[\s.{,"'])(?:runner|rustdoc|include)["']?\s*=/m,
+  /^\s*\[\s*["']?env["']?\s*[\].]|(?:^|[\s{,])["']?env["']?\s*[.=]/m,
 ];
 
 /**
@@ -151,10 +151,10 @@ export function outsideConfigs(dir: string, cargoHome: string): string[] {
 export function configFailures(paths: string[], read: (path: string) => string | undefined) {
   return paths.flatMap((path) => {
     const text = read(path);
-    const code = text?.replaceAll(/^\s*#.*$/gm, "");
+    const code = text?.replaceAll(/(?:^|\s)#.*$/gm, "");
     return code !== undefined && UNSAFE_CONFIG.some((key) => key.test(code))
       ? [
-          `${path} sets a test runner, a rustdoc or [env], which the Rust gates can't override ` +
+          `${path} sets a test runner, a rustdoc, [env] or include, which the Rust gates can't override ` +
             "and which could change what they run. Remove it, or move it out of this " +
             "repository's parent directories.",
         ]
