@@ -117,6 +117,13 @@ export class NotResumable extends Error {
   }
 }
 
+/**
+ * The harness's own server answered that it won't do this, and the message gives its reason in
+ * its own words. Unlike a server that can't be reached, asking again won't help until what the
+ * message names changes.
+ */
+export class HarnessRefused extends Error {}
+
 /** A terminal already carries the agent: an agent has one terminal at a time. */
 export class AgentTerminalExists extends Error {
   readonly agentId: AgentSessionId;
@@ -131,8 +138,9 @@ export class AgentTerminalExists extends Error {
 export class LaunchFailed extends Error {
   readonly agentId: AgentSessionId;
 
-  constructor(agentId: AgentSessionId, cause: unknown) {
-    super(`agent ${agentId} failed to launch`, { cause });
+  /** `why` is shown to whoever asked, so it carries no secret the cause's own text might hold. */
+  constructor(agentId: AgentSessionId, why: string, options?: ErrorOptions) {
+    super(`agent ${agentId} failed to launch: ${why}`, options);
     this.agentId = agentId;
   }
 }

@@ -2,6 +2,7 @@ import { tmpdir } from "node:os";
 import { FLEET_INSTRUCTIONS } from "../tasks/mail.ts";
 import { describe, expect, it } from "vitest";
 import {
+  HarnessRefused,
   LaunchFailed,
   newId,
   NoTerminal,
@@ -27,6 +28,17 @@ import {
   StaleGeneration,
   TerminalReplaced,
 } from "./lifecycle.ts";
+
+/** The payloads of every event of `type` about `agentId`, oldest first. */
+const payloads = (
+  store: Store,
+  agentId: string,
+  type: "agent.respawn_rejected" | "agent.relaunch_rejected",
+) =>
+  store
+    .events(0)
+    .filter((e) => e.entityId === agentId && e.type === type)
+    .map((e) => e.payload);
 
 /**
  * An agent left closing by an environment out of reach, then forced closed once it is back
@@ -392,6 +404,32 @@ describe("agent lifecycle", () => {
     expect([again.eventIds.length, agent()?.state]).toEqual([2, "running"]);
   });
 
+  it("records a respawn the harness refuses as refused, in its own words, and passes it on", async () => {
+    const { lifecycle, store, agentId, exit, agent, fail } = await running();
+    exit("0");
+    const refused = new HarnessRefused("Codex refused thread/resume: no such provider (-32600)");
+    fail(refused);
+    await expect(lifecycle.respawn(agentId, { idempotencyKey: "r", generation: 0 })).rejects.toBe(
+      refused,
+    );
+    expect([agent()?.state, payloads(store, agentId, "agent.respawn_rejected")]).toEqual([
+      "exited",
+      [{ reason: "harness_refused", detail: refused.message }],
+    ]);
+  });
+
+  it("records what kept a respawn from the environment, leaving out a secret it echoed", async () => {
+    const { lifecycle, store, agentId, exit, fail } = await running();
+    exit("0");
+    fail(new Error('tmux unreachable; api_key = "s3cret"'));
+    await expect(
+      lifecycle.respawn(agentId, { idempotencyKey: "r", generation: 0 }),
+    ).rejects.toThrow(`agent ${agentId}: tmux unreachable; api_key = [redacted]`);
+    expect(payloads(store, agentId, "agent.respawn_rejected")).toEqual([
+      { reason: "unavailable", detail: "tmux unreachable; api_key = [redacted]" },
+    ]);
+  });
+
   it("signals a running agent and records it, without changing its state", async () => {
     const { lifecycle, agentId, agent, signalled } = await running();
     const res = await lifecycle.signal(agentId, {
@@ -489,6 +527,19 @@ describe("relaunching a lost agent", () => {
     ]).toEqual([
       ["lost", true, ["close", "relaunch"]],
       ["running", 1],
+    ]);
+  });
+
+  it("records a relaunch the harness refuses as refused, in its own words, and passes it on", async () => {
+    const { lifecycle, store, agentId, agent, fail } = await lost();
+    const refused = new HarnessRefused("Codex refused thread/resume: no such provider (-32600)");
+    fail(refused);
+    await expect(lifecycle.relaunch(agentId, { idempotencyKey: "l", generation: 0 })).rejects.toBe(
+      refused,
+    );
+    expect([agent()?.state, payloads(store, agentId, "agent.relaunch_rejected")]).toEqual([
+      "lost",
+      [{ reason: "harness_refused", detail: refused.message }],
     ]);
   });
 

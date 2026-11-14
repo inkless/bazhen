@@ -583,6 +583,14 @@ export class Daemon {
     this.tmux("kill-session", "-t", session);
   }
 
+  /** Rewrites the Codex home's config.toml as its user would edit it; returns what it held. */
+  editCodexConfig(edit: (config: string) => string): string {
+    const file = join(this.home, "codex", "config.toml");
+    const before = readFileSync(file, "utf8");
+    writeFileSync(file, edit(before));
+    return before;
+  }
+
   /** Runs the Codex CLI on this daemon's Codex home, as its user would. */
   async codex(...args: string[]): Promise<void> {
     await run("codex", args, { env: this.env, timeout: 90_000 });
@@ -703,6 +711,13 @@ export class EventClient {
 
   types(): string[] {
     return this.frames.flatMap((f) => (f.type === "event" ? [f.event.type] : []));
+  }
+
+  /** The payloads of the events of `type` received, in the order they arrived. */
+  payloads(type: string): unknown[] {
+    return this.frames.flatMap((f) =>
+      f.type === "event" && f.event.type === type ? [f.event.payload] : [],
+    );
   }
 
   /** Whether the daemon has closed the stream. */

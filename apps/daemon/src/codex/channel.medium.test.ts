@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { WebSocket } from "ws";
+import { HarnessRefused } from "@bazhen/core";
+import { AppServerError } from "./app-server.ts";
 import { closeFakeServers, tempCodexHome as home, fakeServer } from "../testing/fake-app-server.ts";
 import { CodexChannel, type CodexChannelOptions } from "./channel.ts";
 
@@ -126,6 +128,33 @@ describe("Codex channel", () => {
     wss.once("connection", (ws) => setTimeout(() => ws.terminate(), 50));
     const channel = channelOn(codexHome);
     expect(await channel.request("thread/start", {})).toBe("launched");
+    channel.close();
+  });
+
+  it("rejects a request the server refuses as Codex's refusal, in Codex's own words", async () => {
+    const { codexHome, socket } = home();
+    await fakeServer(socket, codexHome, () => ({
+      error: { code: -32600, message: "This chat uses model provider “gone”" },
+    }));
+    const channel = channelOn(codexHome);
+    const refused = channel.request("thread/resume", {});
+    await expect(refused).rejects.toBeInstanceOf(HarnessRefused);
+    await expect(refused).rejects.toThrow(
+      "Codex refused thread/resume: This chat uses model provider “gone” (-32600)",
+    );
+    channel.close();
+  });
+
+  it("calls a server that is still draining on the last attempt unavailable, not a refusal", async () => {
+    const { codexHome, socket } = home();
+    const { wss } = await fakeServer(socket, codexHome, () => DRAINING);
+    wss.on("connection", (ws) => setTimeout(() => ws.terminate(), 20));
+    const channel = channelOn(codexHome);
+    const failed = await channel.request("thread/start", {}).catch((err: unknown) => err);
+    expect([failed instanceof HarnessRefused, failed instanceof AppServerError]).toEqual([
+      false,
+      true,
+    ]);
     channel.close();
   });
 

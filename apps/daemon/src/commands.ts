@@ -1,4 +1,5 @@
 import {
+  HarnessRefused,
   NoTerminal,
   NotResumable,
   ProcessState,
@@ -52,7 +53,9 @@ export class ServerUnconfirmed extends Error {
 /** The environment could not act just now; the command can be repeated. */
 export class EnvironmentUnavailable extends Error {
   constructor(subject: string, cause: unknown) {
-    super(`could not reach the environment running ${subject}`, { cause });
+    super(`could not reach the environment running ${subject}: ${failureDetail(cause)}`, {
+      cause,
+    });
   }
 }
 
@@ -65,7 +68,44 @@ export const forceable = (cause: unknown) =>
 export function fromEnvironment(subject: string, cause: unknown): never {
   if (cause instanceof StaleIncarnation) throw new TerminalReplaced(subject, cause);
   if (cause instanceof TerminalUnconfirmed) throw new ServerUnconfirmed(subject, cause);
-  if (cause instanceof NoTerminal || cause instanceof NotResumable || cause instanceof ProcessState)
-    throw cause;
+  const typed = [NoTerminal, NotResumable, ProcessState, HarnessRefused];
+  if (typed.some((e) => cause instanceof e)) throw cause;
   throw new EnvironmentUnavailable(subject, cause);
+}
+
+/** The most of a failure's text an event or an answer carries. */
+export const DETAIL_MAX = 500;
+
+/**
+ * Where a failure's text could hold a secret: a value assigned to a name that says it is one, as a
+ * config line or an environment variable echoed back (`api_key = "…"`, `OPENAI_API_KEY=…`, a JSON
+ * `"token": "…"`); an `Authorization` scheme's credentials; a URL's user and password; and the
+ * shapes well-known keys take wherever they appear. Prose such as `auth: failed` is left as is.
+ */
+const SECRETS: readonly [RegExp, string][] = [
+  [
+    /(["']?[\w.-]*(?:key|token|secret|passw(?:or)?d|credential|auth)[\w.-]*["']?\s*=\s*)("[^"]*"|'[^']*'|[^\s,;)}\]]+)/gi,
+    "$1[redacted]",
+  ],
+  [
+    /("[\w.-]*(?:key|token|secret|passw(?:or)?d|credential|auth)[\w.-]*"\s*:\s*)("[^"]*"|[^\s,;)}\]]+)/gi,
+    "$1[redacted]",
+  ],
+  [/\b(Bearer|Basic|Token)\s+[\w.~+/=-]+/gi, "$1 [redacted]"],
+  [/(\w+:\/\/)[^/\s:@]+:[^/\s@]+@/g, "$1[redacted]@"],
+  [
+    /\b(?:sk-[\w-]{16,}|gh[pousr]_\w{20,}|github_pat_\w{20,}|xox[abprs]-[\w-]{10,}|AKIA[0-9A-Z]{16}|AIza[\w-]{35})/g,
+    "[redacted]",
+  ],
+];
+
+/**
+ * A failure's own text, safe to store and to answer with: its secrets taken out, and cut to
+ * DETAIL_MAX characters, never through one.
+ */
+export function failureDetail(cause: unknown): string {
+  const text = cause instanceof Error ? cause.message : String(cause);
+  const safe = SECRETS.reduce((t, [pattern, replacement]) => t.replace(pattern, replacement), text);
+  const chars = [...new Intl.Segmenter().segment(safe)].map((s) => s.segment);
+  return chars.length <= DETAIL_MAX ? safe : `${chars.slice(0, DETAIL_MAX - 1).join("")}…`;
 }

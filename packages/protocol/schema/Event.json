@@ -450,6 +450,9 @@
                 "launch_rejected",
                 "daemon_restart"
               ]
+            },
+            "detail": {
+              "type": "string"
             }
           },
           "required": [
@@ -776,9 +779,13 @@
                 "not_resumable",
                 "no_terminal",
                 "terminal_changed",
+                "harness_refused",
                 "unavailable",
                 "daemon_restart"
               ]
+            },
+            "detail": {
+              "type": "string"
             }
           },
           "required": [
@@ -1060,9 +1067,13 @@
               "enum": [
                 "not_resumable",
                 "terminal_exists",
+                "harness_refused",
                 "unavailable",
                 "daemon_restart"
               ]
+            },
+            "detail": {
+              "type": "string"
             }
           },
           "required": [

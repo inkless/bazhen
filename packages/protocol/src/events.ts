@@ -78,8 +78,15 @@ export const EVENTS = {
   },
   "agent.failed": {
     entity: "agent",
-    /** `daemon_restart`: the daemon died mid-launch, and its terminal never appeared (§7.1). */
-    payload: z.object({ reason: z.enum(["launch_rejected", "daemon_restart"]) }),
+    payload: z.object({
+      /** `daemon_restart`: the daemon died mid-launch, and its terminal never appeared (§7.1). */
+      reason: z.enum(["launch_rejected", "daemon_restart"]),
+      /**
+       * Protocol 1.34. What went wrong, in the failure's own words with secrets taken out, at most
+       * 500 characters.
+       */
+      detail: z.string().optional(),
+    }),
   },
   /** A reachable environment no longer has the agent's terminal (§4.5, §7.1). */
   "agent.lost": { entity: "agent", payload: z.object({}) },
@@ -99,14 +106,23 @@ export const EVENTS = {
   "agent.respawn_rejected": {
     entity: "agent",
     payload: z.object({
-      /** `daemon_restart`: the daemon died mid-respawn, before the new process started (§7.1). */
+      /**
+       * `harness_refused`: the harness's server answered that it won't resume the session (protocol
+       * 1.34). `daemon_restart`: the daemon died mid-respawn, before the new process started (§7.1).
+       */
       reason: z.enum([
         "not_resumable",
         "no_terminal",
         "terminal_changed",
+        "harness_refused",
         "unavailable",
         "daemon_restart",
       ]),
+      /**
+       * Protocol 1.34. What went wrong, in the failure's own words with secrets taken out, at most
+       * 500 characters.
+       */
+      detail: z.string().optional(),
     }),
   },
   /**
@@ -136,8 +152,22 @@ export const EVENTS = {
   "agent.relaunch_rejected": {
     entity: "agent",
     payload: z.object({
-      /** `daemon_restart`: the daemon died mid-relaunch, and the new terminal never appeared. */
-      reason: z.enum(["not_resumable", "terminal_exists", "unavailable", "daemon_restart"]),
+      /**
+       * `harness_refused`: the harness's server answered that it won't start the session (protocol
+       * 1.34). `daemon_restart`: the daemon died mid-relaunch, and the new terminal never appeared.
+       */
+      reason: z.enum([
+        "not_resumable",
+        "terminal_exists",
+        "harness_refused",
+        "unavailable",
+        "daemon_restart",
+      ]),
+      /**
+       * Protocol 1.34. What went wrong, in the failure's own words with secrets taken out, at most
+       * 500 characters.
+       */
+      detail: z.string().optional(),
     }),
   },
   /**

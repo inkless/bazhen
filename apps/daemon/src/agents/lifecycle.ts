@@ -2,6 +2,7 @@ import {
   advanceTerminal,
   AgentTerminalExists,
   agentCommands,
+  HarnessRefused,
   newId,
   NoTerminal,
   NotResumable,
@@ -24,6 +25,7 @@ import {
   type SignalAgentRequest,
 } from "@bazhen/protocol";
 import {
+  failureDetail,
   forceable,
   fromEnvironment as failed,
   StaleGeneration,
@@ -186,7 +188,7 @@ export class Lifecycle {
           generation: next.generation,
         })
         .catch((cause: unknown) => {
-          this.record(agentId, "agent.respawn_rejected", { reason: rejection(cause) });
+          this.record(agentId, "agent.respawn_rejected", rejection(cause));
           return fromEnvironment(agentId, cause);
         });
       const runtimeRef = runtimePayload(refs.runtime);
@@ -242,7 +244,7 @@ export class Lifecycle {
           return { ...rest, runtime };
         })
         .catch((cause: unknown) => {
-          this.record(agentId, "agent.relaunch_rejected", { reason: relaunchRejection(cause) });
+          this.record(agentId, "agent.relaunch_rejected", relaunchRejection(cause));
           if (cause instanceof AgentTerminalExists) throw cause;
           return fromEnvironment(agentId, cause);
         });
@@ -320,19 +322,24 @@ const respawnable = (state: AgentState) => agentCommands(state).includes("respaw
 const relaunchable = (state: AgentState) => agentCommands(state).includes("relaunch");
 const running = (state: AgentState) => agentCommands(state).includes("signal");
 
-function rejection(cause: unknown): EventPayload<"agent.respawn_rejected">["reason"] {
-  if (cause instanceof NotResumable) return "not_resumable";
-  if (cause instanceof NoTerminal) return "no_terminal";
-  if (cause instanceof StaleIncarnation || cause instanceof ProcessState) return "terminal_changed";
-  return "unavailable";
+function rejection(cause: unknown): EventPayload<"agent.respawn_rejected"> {
+  const detail = failureDetail(cause);
+  if (cause instanceof NotResumable) return { reason: "not_resumable", detail };
+  if (cause instanceof NoTerminal) return { reason: "no_terminal", detail };
+  if (cause instanceof StaleIncarnation || cause instanceof ProcessState)
+    return { reason: "terminal_changed", detail };
+  if (cause instanceof HarnessRefused) return { reason: "harness_refused", detail };
+  return { reason: "unavailable", detail };
 }
 
 /** An environment's failure as a command on the agent's. */
 const fromEnvironment = (agentId: string, cause: unknown): never =>
   failed(`agent ${agentId}`, cause);
 
-function relaunchRejection(cause: unknown): EventPayload<"agent.relaunch_rejected">["reason"] {
-  if (cause instanceof NotResumable) return "not_resumable";
-  if (cause instanceof AgentTerminalExists) return "terminal_exists";
-  return "unavailable";
+function relaunchRejection(cause: unknown): EventPayload<"agent.relaunch_rejected"> {
+  const detail = failureDetail(cause);
+  if (cause instanceof NotResumable) return { reason: "not_resumable", detail };
+  if (cause instanceof AgentTerminalExists) return { reason: "terminal_exists", detail };
+  if (cause instanceof HarnessRefused) return { reason: "harness_refused", detail };
+  return { reason: "unavailable", detail };
 }

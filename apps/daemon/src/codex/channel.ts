@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import type { HarnessChannelPort } from "@bazhen/core";
+import { HarnessRefused, type HarnessChannelPort } from "@bazhen/core";
 import { AppServer, AppServerError, realPath, type Listener } from "./app-server.ts";
 import { cliVersion } from "./version.ts";
 
@@ -111,7 +111,8 @@ export class CodexChannel implements HarnessChannelPort {
 
   /**
    * One request's result. A server draining before it exits refuses new work, so the request
-   * waits for that server to go and is sent to the next one.
+   * waits for that server to go and is sent to the next one. Any other error the server answers
+   * with is Codex refusing, in its own words.
    */
   async request(method: string, params: unknown): Promise<unknown> {
     for (let attempt = 1; ; attempt++) {
@@ -119,9 +120,10 @@ export class CodexChannel implements HarnessChannelPort {
       try {
         return await server.request(method, params);
       } catch (err) {
-        if (!(err instanceof AppServerError && err.shuttingDown) || attempt >= DRAINING_ATTEMPTS) {
-          throw err;
-        }
+        if (!(err instanceof AppServerError)) throw err;
+        if (!err.shuttingDown)
+          throw new HarnessRefused(`Codex refused ${err.message}`, { cause: err });
+        if (attempt >= DRAINING_ATTEMPTS) throw err;
         await server.closed;
       }
     }

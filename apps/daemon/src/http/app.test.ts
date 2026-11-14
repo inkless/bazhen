@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AgentTerminalExists,
+  HarnessRefused,
   newId,
   NotResumable,
   TaskRefused,
@@ -71,7 +72,9 @@ const deps: AppDeps = {
     if (req.generation !== 2) throw new StaleGeneration(agentId, 2);
     throw new EnvironmentUnavailable(agentId, new Error("tmux unreachable"));
   },
-  respawn: async () => {
+  respawn: async (_agentId, req) => {
+    if (req.generation === 1)
+      throw new HarnessRefused('Codex refused thread/resume: api_key = "s3cret" is wrong (-32600)');
     throw new NotResumable(newId("agent"));
   },
   relaunch: async (agentId, req) => {
@@ -228,6 +231,21 @@ describe("HTTP app", () => {
       body: JSON.stringify({ idempotencyKey: "r", generation: 0 }),
     });
     expect([res.status, (await res.json()).error]).toEqual([409, "not_resumable"]);
+  });
+
+  it("answers a respawn the harness refuses with the harness's own reason, its secrets left out", async () => {
+    const res = await app.request("/v1/agents/agent_x/respawn", {
+      method: "POST",
+      headers: { host, "content-type": "application/json" },
+      body: JSON.stringify({ idempotencyKey: "r", generation: 1 }),
+    });
+    expect([res.status, await res.json()]).toEqual([
+      502,
+      {
+        error: "launch_failed",
+        message: "Codex refused thread/resume: api_key = [redacted] is wrong (-32600)",
+      },
+    ]);
   });
 
   it("opens a shell and answers with the events it produced", async () => {

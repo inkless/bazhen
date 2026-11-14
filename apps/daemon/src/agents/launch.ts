@@ -17,6 +17,7 @@ import {
   type TuiTheme,
 } from "@bazhen/protocol";
 import { z } from "zod";
+import { failureDetail } from "../commands.ts";
 import { IdempotencyConflict, runtimePayload, type Store } from "../store/store.ts";
 import { FLEET_INSTRUCTIONS } from "../tasks/mail.ts";
 import { resolveDirectory } from "./cwd.ts";
@@ -169,15 +170,19 @@ export async function launchAgent(
       size,
     });
     const refs = await launching.catch((cause) => {
-      // The client learns only that it failed; the daemon's log says why.
       console.error(`agent ${agentId} failed to launch:`, cause);
+      const detail = failureDetail(cause);
       record(
         () =>
-          store.append({ ...event, type: "agent.failed", payload: { reason: "launch_rejected" } }),
+          store.append({
+            ...event,
+            type: "agent.failed",
+            payload: { reason: "launch_rejected", detail },
+          }),
         launched.eventIds,
         true,
       );
-      throw new LaunchFailed(agentId, cause);
+      throw new LaunchFailed(agentId, detail, { cause });
     });
     return record(
       () =>
