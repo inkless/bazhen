@@ -1,12 +1,14 @@
 // Falsification harness (docs/standards/testing.md). It answers one question about the tests a
 // branch adds: would they fail if the branch's source change were not there?
 //
-// It runs the branch's new tests against the base's version of the source, in a throwaway
-// worktree, and classifies each new test:
+// It runs the branch's new tests against the base's version of the source (anything under an
+// app's or package's src/ and TypeScript under scripts/, tests aside), in a throwaway worktree,
+// and classifies each new test:
 //   KILLED    it failed: the test depends on the change. Good.
 //   SURVIVED  it passed without the change: it cannot detect the change. Not allowed. Only a test
-//             that directly imports a reverted file can survive; one that passes otherwise is
-//             unrelated to the source change and comes out INVALID.
+//             that directly imports a reverted file, or runs one it names with `new URL`, can
+//             survive; one that passes otherwise is unrelated to the source change and comes out
+//             INVALID.
 //   INVALID   no verdict: it couldn't load, timed out, was skipped, its title couldn't be read or
 //             isn't unique, or it passed but is unrelated to the source change; a branch that
 //             adds tests without a source change also lands here. Every test of a brand-new
@@ -44,6 +46,7 @@ import {
   openSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -70,7 +73,7 @@ export type Outcome = "KILLED" | "SURVIVED" | "INVALID";
 export type Change = { status: string; path: string; oldPath?: string };
 
 const TEST_FILE = /(^|\/)[^/]+\.test\.tsx?$/;
-const REVERTIBLE = /^(apps|packages)\/[^/]+\/src\//;
+const REVERTIBLE = /^(?:(?:apps|packages)\/[^/]+\/src\/|scripts\/.+\.tsx?$)/;
 const TITLE = /(?<![.\w])(?:it|test)(?:\.\w+(?:\([^()]*\))?)*\(\s*(["'`])((?:\\.|(?!\1).)+)\1/g;
 const TEST_CALL = /(?<![.\w])(?:it|test)(?:\.\w+)*\s*\(/;
 const CONTROL_TRAILER = /^Control: .+ -> .+$/m;
@@ -93,6 +96,7 @@ const TEST_BUILD = GATES.test.slice(
   GATES.test.indexOf("--status-level"),
 );
 const KILL_GRACE_MS = 2000;
+const JUDGING = "BZ_FALSIFY_JUDGING";
 
 // Inherited, these point every git command at another repository or index: git exports them to
 // hooks, and a caller may set them. Every git command here, and everything run in the temporary
@@ -120,6 +124,14 @@ const git = (args: string[], cwd = process.cwd()) =>
     maxBuffer: 64 * 1024 * 1024,
     stdio: ["ignore", "pipe", "pipe"],
   });
+
+/**
+ * Whether a changed path is source the revert check puts back as the base had it: anything under
+ * an app's or package's `src/`, and TypeScript under `scripts/`, but never a test. These are the
+ * folders the sibling-test rule in check-standards.ts reads source from.
+ */
+export const isRevertible = (path: string): boolean =>
+  REVERTIBLE.test(path) && !TEST_FILE.test(path);
 
 export function parseNameStatus(out: string): Change[] {
   return out
@@ -266,14 +278,17 @@ export function classify(report: VitestReport, file: string, title: string): Out
 // `import("…")`. A type-only import can't change what a test does at run time.
 const STATIC_IMPORT = /\b(?:import|export)\s+(type\s+)?[^;'"]*?\bfrom\s*["']([^"']+)["']/g;
 const BARE_IMPORT = /\bimport\s*\(?\s*["']([^"']+)["']/g;
+// A script a test runs as a child process rather than importing it.
+const FILE_URL = /\bnew\s+URL\(\s*["']([^"':]+)["']\s*,\s*import\.meta\.url\s*\)/g;
 const WORKSPACE = /^(@bazhen\/[^/]+)/;
 
 /**
  * The reverted paths a test file imports directly: a relative specifier resolved against the
  * test's folder (with `.ts`, `.tsx` or `/index.ts` tried when it has no extension), or a
  * workspace package (`@bazhen/x`, `@bazhen/x/sub`), which counts every reverted path under that
- * package's folder. `packages` maps package names to folders, e.g. `@bazhen/core` →
- * `packages/core`.
+ * package's folder. A `new URL("<path>", import.meta.url)` naming a reverted file counts too, so
+ * a test that runs a script instead of importing it is related to it. `packages` maps package
+ * names to folders, e.g. `@bazhen/core` → `packages/core`.
  */
 export function relatedReverts(
   testPath: string,
@@ -286,6 +301,10 @@ export function relatedReverts(
     ...[...testSource.matchAll(BARE_IMPORT)].map((m) => m[1]),
   ].filter((s): s is string => s !== undefined);
   const related = new Set<string>();
+  for (const [, url = ""] of testSource.matchAll(FILE_URL)) {
+    const path = posix.join(posix.dirname(testPath), url);
+    if (revertedPaths.includes(path)) related.add(path);
+  }
   for (const specifier of specifiers) {
     if (specifier.startsWith(".")) {
       const path = posix.join(posix.dirname(testPath), specifier);
@@ -827,6 +846,20 @@ async function main(args: string[]): Promise<number> {
     return 2;
   }
   const top = git(["rev-parse", "--show-toplevel"]).trim();
+  // A test of falsify run in falsify's own worktree may start falsify again. Against a throwaway
+  // repository that is the test; against the repository being judged it would judge it again,
+  // in a worktree of its own, without end.
+  const repository = realpathSync(
+    git(["rev-parse", "--path-format=absolute", "--git-common-dir"]).trim(),
+  );
+  if (process.env[JUDGING] === repository) {
+    console.error(
+      "falsify: a falsify run is already judging this repository, and something it ran started " +
+        "falsify on it again. A test must start falsify only on a repository of its own.",
+    );
+    return 2;
+  }
+  process.env[JUDGING] = repository;
   const head = git(["rev-parse", "--verify", "HEAD^{commit}"]).trim();
   let base: string;
   try {
@@ -876,9 +909,7 @@ async function main(args: string[]): Promise<number> {
   }
 
   const reverts = changes.filter(
-    (c) =>
-      (REVERTIBLE.test(c.path) && !TEST_FILE.test(c.path)) ||
-      (c.oldPath !== undefined && REVERTIBLE.test(c.oldPath) && !TEST_FILE.test(c.oldPath)),
+    (c) => isRevertible(c.path) || (c.oldPath !== undefined && isRevertible(c.oldPath)),
   );
   const results: {
     file: string;

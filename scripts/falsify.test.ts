@@ -3,6 +3,7 @@ import {
   classify,
   hasControl,
   addedRustTests,
+  isRevertible,
   newTitles,
   parseArgs,
   parseNameStatus,
@@ -291,6 +292,32 @@ describe("hasControl", () => {
   });
 });
 
+describe("isRevertible", () => {
+  it("reverts a script and a script folder's TypeScript, but not a script's test", () => {
+    expect(
+      [
+        "scripts/test-real.ts",
+        "scripts/lib/paths.tsx",
+        "scripts/test-real.test.ts",
+        "scripts/test-real.medium.test.ts",
+        "scripts/setup.sh",
+      ].map(isRevertible),
+    ).toEqual([true, true, false, false, false]);
+  });
+
+  it("reverts an app's or package's source of any kind, but not its tests", () => {
+    expect(
+      [
+        "packages/core/src/machine.ts",
+        "apps/web/src/ui/tokens.css",
+        "apps/web/src/App.test.tsx",
+        "packages/core/package.json",
+        "tests/support/disposable-host.ts",
+      ].map(isRevertible),
+    ).toEqual([true, true, false, false, false]);
+  });
+});
+
 describe("relatedReverts", () => {
   const TEST = "packages/core/src/terminal.test.ts";
   const PACKAGES = { "@bazhen/protocol": "packages/protocol", "@bazhen/core": "packages/core" };
@@ -334,6 +361,13 @@ describe("relatedReverts", () => {
       "packages/protocol/src/x.ts",
       "packages/core/src/setup.ts",
     ]);
+  });
+
+  it("counts a reverted script a test runs through new URL", () => {
+    const source = 'const SCRIPT = fileURLToPath(new URL("falsify.ts", import.meta.url));';
+    expect(
+      relatedReverts("scripts/falsify.medium.test.ts", source, ["scripts/falsify.ts"], PACKAGES),
+    ).toEqual(["scripts/falsify.ts"]);
   });
 
   it("ignores a type-only import", () => {
