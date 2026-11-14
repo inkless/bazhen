@@ -22,7 +22,8 @@ import { ProtocolVersion } from "./version.ts";
  * - the rule that nothing but `hello` and its answer passes before `hello` is answered;
  * - the `hello` request's `protocol`, the hello reply's `version` and `protocol`, and the spawn
  *   spec's `protocol`. Each side reads these first; the rest of a `hello` is read in the schema
- *   of the agreed version's major;
+ *   of the agreed version's major. A client can't know which of its majors the holder will
+ *   agree on, so the rest of its `hello` must satisfy the schema of every major it lists;
  * - `error`, and its codes `no-shared-version` and `invalid`.
  */
 export const HOLDER_PROTOCOL_VERSION = "1.0";
@@ -356,6 +357,8 @@ export const HOLDER_ERROR_CODES = [
   "input-full",
   /** The request needs a child, and it has exited. */
   "exited",
+  /** A snapshot over the reply cap even with all its history left out. */
+  "snapshot-too-large",
   /** The holder tried and the system refused, as a respawn that can't start its program. */
   "failed",
 ] as const;
@@ -398,6 +401,7 @@ export const HOLDER_MAX_REQUEST_BYTES = 1 << 20;
 
 /**
  * The most a frame from a holder may hold. A snapshot that would be larger drops its oldest
- * history lines until it fits, and says how many it dropped.
+ * history lines until it fits, and says how many it dropped; one too large with no history at
+ * all is answered `error` coded `snapshot-too-large`.
  */
 export const HOLDER_MAX_REPLY_BYTES = 64 << 20;

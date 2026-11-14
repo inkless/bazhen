@@ -221,6 +221,11 @@ describe("decoding holder frames", () => {
       raw(0x01, concat(u32(1), text('{"protocol":["1.0"],"writer":"yes"}'))),
       /^hello: /,
     ],
+    [
+      "a hello listing two majors whose rest fits only the newer one",
+      raw(0x01, concat(u32(1), text('{"protocol":["1.4","2.0"],"writer":"yes"}'))),
+      /^hello: .*writer/s,
+    ],
   ])("calls %s malformed", (_, frame, reason) => {
     expect(holderRequestDecoder().push(frame)).toMatchObject({
       malformed: expect.stringMatching(reason),

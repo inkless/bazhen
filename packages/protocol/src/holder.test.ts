@@ -268,6 +268,7 @@ describe("holder error codes", () => {
       "not-writer",
       "input-full",
       "exited",
+      "snapshot-too-large",
       "failed",
     ]);
   });
