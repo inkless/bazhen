@@ -1,6 +1,7 @@
 // Repository standards that no linter covers (docs/standards/code.md, testing.md). Runs first in
 // `pnpm check`; every failure names the file and the fix.
 
+import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
 import { join } from "node:path";
@@ -372,6 +373,295 @@ function checkAgentContext(): void {
   }
 }
 
+// The modules that may hold `unsafe` code, each with why it must (docs/standards/rust.md § Unsafe).
+// Each may set `#[expect(unsafe_code, reason = "...")]`, and nothing else in crates/ may.
+const UNSAFE_MODULES: Record<string, string> = {};
+
+const RAW_STRING = /r(#*)"/y;
+const isIdent = (c: string | undefined) => c !== undefined && /\w/.test(c);
+
+/**
+ * Rust source with its comments removed and every string and char literal emptied, so neither a
+ * `//` in a string nor an attribute quoted in one changes what the attributes are.
+ */
+export function rustCode(source: string): string {
+  let out = "";
+  let i = 0;
+  while (i < source.length) {
+    const c = source[i] ?? "";
+    const next = source[i + 1];
+    if (c === "/" && next === "/") {
+      while (i < source.length && source[i] !== "\n") i++;
+    } else if (c === "/" && next === "*") {
+      let depth = 1;
+      i += 2;
+      while (i < source.length && depth > 0) {
+        const pair = source.slice(i, i + 2);
+        const step = pair === "/*" ? 1 : pair === "*/" ? -1 : 0;
+        depth += step;
+        i += step === 0 ? 1 : 2;
+      }
+      out += " ";
+    } else if (c === "r" && !isIdent(source[i - 1] === "b" ? source[i - 2] : source[i - 1])) {
+      RAW_STRING.lastIndex = i;
+      const raw = RAW_STRING.exec(source);
+      if (raw === null) {
+        out += c;
+        i++;
+        continue;
+      }
+      const close = `"${raw[1] ?? ""}`;
+      const end = source.indexOf(close, i + raw[0].length);
+      i = end === -1 ? source.length : end + close.length;
+      out += '""';
+    } else if (c === '"') {
+      i++;
+      while (i < source.length && source[i] !== '"') i += source[i] === "\\" ? 2 : 1;
+      i++;
+      out += '""';
+    } else if (c === "'" && (next === "\\" || source[i + 2] === "'")) {
+      i += next === "\\" ? 3 : 1;
+      while (i < source.length && source[i] !== "'") i++;
+      i++;
+      out += "' '";
+    } else {
+      out += c;
+      i++;
+    }
+  }
+  return out;
+}
+
+const LINT_LEVEL = /#\s*!?\s*\[\s*(?:cfg_attr\s*\([^\]]*?,\s*)?(allow|expect)\s*\(([^)]*)\)/g;
+
+/** Each `allow(...)` or `expect(...)` lint attribute in Rust source, comments and strings aside. */
+export function lintSuppressions(source: string): { level: string; lints: string[] }[] {
+  return [...rustCode(source).matchAll(LINT_LEVEL)].map(([, level = "", list = ""]) => ({
+    level,
+    lints: list
+      .replace(/reason\s*=\s*""/g, "")
+      .split(",")
+      .map((l) => l.trim())
+      .filter((l) => l !== ""),
+  }));
+}
+
+/** Why each lint suppression in `file` is not allowed: none at all, but `unsafe_code` in an unsafe module. */
+export function suppressionFailures(
+  file: string,
+  source: string,
+  unsafeModules: Record<string, string>,
+): string[] {
+  return lintSuppressions(source)
+    .filter(
+      ({ level, lints }) =>
+        !(file in unsafeModules && level === "expect" && lints.join() === "unsafe_code"),
+    )
+    .map(
+      ({ level, lints }) =>
+        `${file}: #[${level}(${lints.join(", ")})] suppresses a lint. Fix the code instead; the ` +
+        "only exceptions are the workspace allow-list in Cargo.toml and UNSAFE_MODULES in " +
+        "scripts/check-standards.ts (docs/standards/rust.md).",
+    );
+}
+
+/** Whether a crate's manifest takes the workspace's lints. */
+export function inheritsWorkspaceLints(manifest: string): boolean {
+  const table = /^\[lints\][ \t]*(?:#.*)?\r?$([\s\S]*?)(?=^\[|(?![\s\S]))/m.exec(manifest)?.[1];
+  return table !== undefined && /^[ \t]*workspace[ \t]*=[ \t]*true\b/m.test(table);
+}
+
+// The lint levels every crate inherits, and the test allowances, as Cargo.toml and clippy.toml
+// must hold them. Changing a lint level is a change to docs/standards/rust.md: make it in both
+// places, and here, in one commit that says why.
+export const WORKSPACE_LINTS = [
+  "[workspace.lints.rust]",
+  'unsafe_code = "deny"',
+  'unsafe_op_in_unsafe_fn = "deny"',
+  'missing_debug_implementations = "deny"',
+  'unreachable_pub = "deny"',
+  'rust_2018_idioms = { level = "deny", priority = -1 }',
+  "[workspace.lints.clippy]",
+  'pedantic = { level = "warn", priority = -1 }',
+  'must_use_candidate = "allow"',
+  'unwrap_used = "warn"',
+  'expect_used = "warn"',
+  'panic = "warn"',
+  'todo = "warn"',
+  'unimplemented = "warn"',
+  'dbg_macro = "warn"',
+  'print_stdout = "warn"',
+  'print_stderr = "warn"',
+  'indexing_slicing = "warn"',
+  'string_slice = "warn"',
+  'unreachable = "warn"',
+  'undocumented_unsafe_blocks = "warn"',
+  'multiple_unsafe_ops_per_block = "warn"',
+  'allow_attributes = "warn"',
+  'allow_attributes_without_reason = "warn"',
+];
+export const CLIPPY_CONFIG = [
+  "allow-unwrap-in-tests = true",
+  "allow-expect-in-tests = true",
+  "allow-panic-in-tests = true",
+  "allow-indexing-slicing-in-tests = true",
+];
+
+/** TOML's lines with comments and blank lines dropped, each trimmed. Strings hold no `#` here. */
+function tomlLines(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((l) => l.replace(/\s#.*$|^#.*$/, "").trim())
+    .filter((l) => l !== "");
+}
+
+/** Each table's lines, by its header; the lines before any header are under "". */
+export function tomlTables(text: string): Map<string, string[]> {
+  const tables = new Map<string, string[]>([["", []]]);
+  let current: string[] = tables.get("") ?? [];
+  for (const line of tomlLines(text)) {
+    if (/^\[[^\]]*\]$/.test(line)) {
+      current = [];
+      tables.set(line, current);
+    } else current.push(line);
+  }
+  return tables;
+}
+
+const DEPENDENCY_TABLE = /^\[(?:target\..+\.)?(?:dev-|build-)?dependencies\]$/;
+
+/** Why a member manifest's dependencies don't all come from `[workspace.dependencies]`. */
+export function memberDependencyFailures(manifest: string, text: string): string[] {
+  const out: string[] = [];
+  for (const [header, lines] of tomlTables(text)) {
+    if (/^\[(?:target\..+\.)?(?:dev-|build-)?dependencies\./.test(header)) {
+      out.push(`${manifest}: ${header} must be an entry \`{ workspace = true }\` instead.`);
+    }
+    if (!DEPENDENCY_TABLE.test(header)) continue;
+    for (const line of lines) {
+      const inherited =
+        /^[\w-]+\s*=\s*\{\s*workspace\s*=\s*true\s*(?:,\s*features\s*=\s*\[[^\]]*\]\s*)?(?:,\s*optional\s*=\s*true\s*)?\}$/.test(
+          line,
+        ) || /^[\w-]+\.workspace\s*=\s*true$/.test(line);
+      if (!inherited) {
+        out.push(
+          `${manifest}: \`${line}\` must be \`{ workspace = true }\`, its version pinned in the ` +
+            "root Cargo.toml's [workspace.dependencies] (docs/standards/rust.md § Dependencies).",
+        );
+      }
+    }
+  }
+  return out;
+}
+
+/** Why the root manifest's lints or pinned dependencies are not what the standard says. */
+export function rootManifestFailures(text: string): string[] {
+  const out: string[] = [];
+  const tables = tomlTables(text);
+  const lints = [...tables]
+    .filter(([header]) => header.startsWith("[workspace.lints"))
+    .flatMap(([header, lines]) => [header, ...lines]);
+  if (lints.join("\n") !== WORKSPACE_LINTS.join("\n")) {
+    out.push(
+      "Cargo.toml: [workspace.lints] differs from WORKSPACE_LINTS in scripts/check-standards.ts. " +
+        "A lint level changes in both, with docs/standards/rust.md, in one commit that says why.",
+    );
+  }
+  for (const line of tables.get("[workspace.dependencies]") ?? []) {
+    const version = /^[\w-]+\s*=\s*(?:"([^"]*)"|\{.*\bversion\s*=\s*"([^"]*)".*\})$/.exec(line);
+    const path = /^[\w-]+\s*=\s*\{(?!.*\bversion\b).*\bpath\s*=\s*"[^"]*".*\}$/.test(line);
+    if (!path && !(version?.[1] ?? version?.[2] ?? "").startsWith("=")) {
+      out.push(
+        `Cargo.toml: \`${line}\` must pin an exact version (\`"=x.y.z"\`) or be a path to a ` +
+          "crate of ours.",
+      );
+    }
+  }
+  return out;
+}
+
+const fileName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
+
+/**
+ * The Rust rules' failures for a repository holding `paths`, read with `read`: crates only in
+ * crates/, each taking the workspace lints and its dependencies from the workspace; the lint
+ * configuration as the standard says, with nothing beside it to loosen it; and no source that
+ * suppresses a lint or builds an attribute a scan can't read.
+ */
+export function rustFailures(
+  paths: string[],
+  read: (path: string) => string,
+  unsafeModules: Record<string, string>,
+): string[] {
+  const out: string[] = [];
+  for (const manifest of paths.filter((p) => fileName(p) === "Cargo.toml")) {
+    if (manifest === "Cargo.toml") {
+      out.push(...rootManifestFailures(read(manifest)));
+    } else if (!/^crates\/[^/]+\/Cargo\.toml$/.test(manifest)) {
+      out.push(`${manifest}: a crate lives in crates/<name>/, as a member of the root workspace.`);
+    } else {
+      if (!inheritsWorkspaceLints(read(manifest))) {
+        out.push(
+          `${manifest}: needs \`[lints]\` with \`workspace = true\`, so the workspace lints apply.`,
+        );
+      }
+      out.push(...memberDependencyFailures(manifest, read(manifest)));
+    }
+  }
+  for (const file of paths.filter((p) => p.endsWith(".rs"))) {
+    if (!file.startsWith("crates/")) {
+      out.push(`${file}: Rust source lives in a crate under crates/, where the checks read it.`);
+      continue;
+    }
+    const source = read(file);
+    out.push(...suppressionFailures(file, source, unsafeModules));
+    if (/\$\s*\w+\s*:\s*meta\b|#\s*!?\s*\[\s*\$/.test(rustCode(source))) {
+      out.push(
+        `${file}: a macro passes an attribute through (\`$x:meta\` or \`#[$x]\`), which could ` +
+          "carry a lint suppression no check sees. Write the attribute out.",
+      );
+    }
+  }
+  for (const file of Object.keys(unsafeModules).filter((f) => !paths.includes(f))) {
+    out.push(`scripts/check-standards.ts: UNSAFE_MODULES lists missing ${file}.`);
+  }
+  for (const file of paths) {
+    const base = fileName(file);
+    if (/(^|\/)\.cargo\/config(\.toml)?$/.test(file)) {
+      out.push(`${file}: cargo config can pass flags that turn lints off; there is none here.`);
+    } else if (["clippy.toml", ".clippy.toml"].includes(base) && file !== "clippy.toml") {
+      out.push(`${file}: clippy reads only the root clippy.toml here.`);
+    } else if (["rustfmt.toml", ".rustfmt.toml"].includes(base)) {
+      out.push(`${file}: rustfmt runs with its defaults (docs/standards/rust.md § Formatting).`);
+    } else if (/^rust-toolchain(\.toml)?$/.test(base) && file !== "rust-toolchain.toml") {
+      out.push(`${file}: the root rust-toolchain.toml is the one toolchain pin.`);
+    }
+  }
+  if (
+    paths.includes("clippy.toml") &&
+    tomlLines(read("clippy.toml")).join("\n") !== CLIPPY_CONFIG.join("\n")
+  ) {
+    out.push("clippy.toml: differs from CLIPPY_CONFIG in scripts/check-standards.ts.");
+  }
+  return out;
+}
+
+/** The repository's files, tracked or not yet added, as git sees them. */
+function repoFiles(): string[] {
+  return execFileSync("git", ["ls-files", "-co", "--exclude-standard"], {
+    cwd: root,
+    encoding: "utf8",
+  })
+    .split("\n")
+    .filter((p) => p !== "" && existsSync(join(root, p)));
+}
+
+function checkRust(): void {
+  failures.push(
+    ...rustFailures(repoFiles(), (p) => readFileSync(join(root, p), "utf8"), UNSAFE_MODULES),
+  );
+}
+
 // Skills live once in .agents/skills (Codex, pi, opencode); .claude/skills links to it.
 const SKILLS_DIR = ".agents/skills";
 const DESCRIPTION_MAX = 1024;
@@ -426,6 +716,7 @@ if (isMain(import.meta)) {
   checkAgentContext();
   checkSkills(scriptNames());
   checkWebTokens();
+  checkRust();
 
   if (failures.length > 0) {
     console.error(`Standards check failed:\n${failures.map((f) => `  - ${f}`).join("\n")}`);

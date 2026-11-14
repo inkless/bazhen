@@ -1,0 +1,25 @@
+# The dependency policy: docs/standards/rust.md § Dependencies.
+
+[graph]
+all-features = true
+
+[advisories]
+yanked = "deny"
+
+[licenses]
+# Add a licence only when a crate needs it, saying which in the commit.
+allow = ["Apache-2.0", "MIT"]
+# Test-only crates too: the policy is one list, whatever ships.
+include-dev = true
+# Our own crates are never published, so they carry no licence.
+private = { ignore = true }
+
+[bans]
+multiple-versions = "deny"
+wildcards = "deny"
+# Our own crates depend on each other by path, which cargo-deny reads as a wildcard.
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

@@ -6,7 +6,7 @@
 
 use crate::{ACK_DEADLINE, post};
 
-pub fn run(mut args: impl Iterator<Item = String>) -> Option<i32> {
+pub(crate) fn run(mut args: impl Iterator<Item = String>) -> Option<i32> {
     let socket = args.next()?;
     let pane = args.next()?;
     post(&socket, "/v1/codex/pane-title", &body(&pane)?, ACK_DEADLINE).ok()?;

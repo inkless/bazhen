@@ -1,6 +1,6 @@
 #!/bin/sh
 # The hook client for a platform without a built bazhen-hook: the same contract as
-# apps/hook/src/main.rs, several times slower. Outside a Bazhen agent, or on any failure, it exits
+# crates/bazhen-hook/src/main.rs, several times slower. Outside a Bazhen agent, or on any failure, it exits
 # 0 with no output, so the harness carries on as it would without Bazhen.
 
 # The status line: run the user's own command (the rest of the arguments) on the same input,
