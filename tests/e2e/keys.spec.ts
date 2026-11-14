@@ -461,8 +461,9 @@ test("gives up a socket that went silent, drops what was typed on it, and drives
   streams.silenceNewest();
   const before = Date.now();
   await page.keyboard.type("z");
-  // Two heartbeats: a ping, then a beat that finds it unanswered, which the view warns of.
-  await page.clock.runFor(15_000);
+  // Two heartbeats: a ping, then a beat that finds it unanswered, which the view warns of. The
+  // beats are 10 s apart at a phase set when the view mounted, so only 20 s is sure to hold two.
+  await page.clock.runFor(20_000);
   await expect(status(page)).toHaveText("Checking the connection…");
   // The second miss gives the socket up.
   await page.clock.runFor(20_000);
