@@ -28,7 +28,10 @@ already checked (listed at the end).
    the behaviour the test names? Does each Rust test it reports INVALID have a `Control:`
    trailer that breaks the code the test names? Does a behaviour the daemon can observe have
    its test in the black-box suite too?
-8. **Docs.** If behaviour, a command or a rule changed, are `AGENTS.md`, the README or these
+8. **Web** (`ui.md`). Does a key's path to the daemon stay free of other work, and does any
+   task that can run over 50 ms yield? Does the page still avoid `eval`, HTML strings and
+   script from another origin?
+9. **Docs.** If behaviour, a command or a rule changed, are `AGENTS.md`, the README or these
    standards updated in the same commit?
 
 The commit body says why the change was made, and records any `Control:` trailers.

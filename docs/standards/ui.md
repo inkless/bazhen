@@ -10,6 +10,8 @@ consistent with the rest and cheap to re-theme.
 | A new pair of foreground and background is added to that test                                | review                                                  |
 | Screens take interactive widgets from `apps/web/src/ui/`, never from `react-aria-components` | `pnpm lint` (`onlyThrough` in `scripts/lint-config.ts`) |
 | Interactive targets are at least `--size-hit-min`                                            | review                                                  |
+| A keystroke's path does no work beyond sending it; work over 50 ms yields                    | review                                                  |
+| The page stays ready for a strict CSP: no `eval`, no HTML strings, no remote script          | review                                                  |
 
 ## Tokens
 
@@ -142,6 +144,35 @@ locale the UI is translated into goes in that list too.
 Not everything needs one. A list that navigates, like the fleet, stays a native list of
 buttons: React Aria's `GridList` is a selection widget, with `role="grid"`. Native inputs and
 `<details>` stay native too, since React Aria adds nothing to them.
+
+## Responsiveness
+
+A key pressed in a terminal is the interaction users feel most, and a phone the slowest device we
+serve. Interaction to Next Paint (INP) measures it: how long after a tap or key the next frame
+shows.
+
+- The path from a key to the daemon does nothing else: no state update that re-renders a screen,
+  no parsing. A busy main thread delays the key behind it.
+- A task over 50 ms is a long task and blocks input. Split a loop that can run that long, such as
+  replaying a backlog, and `await scheduler.yield()` once 50 ms are spent, falling back to
+  `setTimeout(resolve, 0)` where it is missing.
+- Before fixing a slow interaction, find which part it is: input delay (the thread was busy),
+  processing (our handler) or presentation (style and layout after it). A fix aimed at the wrong
+  part leaves the latency where it was.
+
+## Page security
+
+A terminal is a remote shell, so a script injected into the page is the whole machine. Keep the
+page ready for a policy that allows only its own scripts:
+
+- No `eval`, `new Function` or string timers, and no HTML built from strings (`innerHTML`,
+  `dangerouslySetInnerHTML`): terminal output and agent text are text nodes.
+- No script from another origin, and no new inline script; the one in `index.html` is allowed
+  because a policy can name its hash.
+- Widening `script-src` (`'unsafe-inline'`, a host or `https:` allowlist) needs its reason in the
+  commit: an allowlisted host's open redirect is a way past it.
+
+Why: these cost nothing now, and a strict policy can be turned on later without a rewrite.
 
 ## Browsers
 
