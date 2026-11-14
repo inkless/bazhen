@@ -130,18 +130,66 @@ export interface RuntimeStream {
   /** The size the client attached at; the runtime picks it when none was asked for. */
   readonly size: Size;
   onData(cb: (bytes: Uint8Array) => void): void;
+  /**
+   * The stream is over: the terminal ended, or the runtime lost its connection to it, or, for a
+   * snapshot client, it could no longer deliver every byte in order. A close the consumer didn't
+   * ask for, of a terminal that still runs, is for it to attach again.
+   */
   onClose(cb: () => void): void;
   write(bytes: Uint8Array): void;
   resize(size: Size): Promise<void>;
-  /** Whether the program is drawing on its alternate screen, read from the runtime. */
-  alternateScreen(): Promise<boolean>;
+  /**
+   * Each time the program moves to or from its alternate screen, from the state `Attached`
+   * reported, and never twice the same way in a row. A runtime that only learns of a switch by
+   * asking may report it before or after the output that made it reaches the stream, and a
+   * respawn's return to the main screen only once the new process prints.
+   */
+  onAlternate(cb: (alternate: boolean) => void): void;
+  /**
+   * Trouble its views should hear of, after which the stream carries on: a failure that ends it
+   * closes it instead. One that keeps failing is reported once, until it succeeds again.
+   */
+  onFailure(cb: (failure: StreamFailure) => void): void;
+  /**
+   * A snapshot client's terminal has a new process, the generation given: called before its first
+   * byte. The consumer applies `RESPAWN_RESET`, as the runtime did. A client that redraws, as
+   * tmux's does, is never told: its runtime redraws it instead.
+   */
+  onRespawn(cb: (generation: number) => void): void;
   /** Must release every OS handle the stream holds. */
   close(): void;
 }
 
-/** A runtime client just opened, and what it can't redraw: the history above its screen. */
-export interface Attached {
+/**
+ * What a respawn does to a snapshot runtime's terminal before the next process starts: back to
+ * its main screen, every mode and colour as a fresh terminal has it, and the screen cleared, its
+ * history kept.
+ */
+export const RESPAWN_RESET =
+  "\x1b[?1049l\x1b[!p\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1004l\x1b[?2004l" +
+  "\x1b]104\x07\x1b]110\x07\x1b]111\x07\x1b]112\x07\x1b[H\x1b[2J";
+
+/** What failed, as a few words such as `screen check`, and the error it failed with. */
+export interface StreamFailure {
+  readonly what: string;
+  readonly cause: unknown;
+}
+
+/**
+ * A runtime client just opened. Either it redraws the screen itself and the history above it is
+ * read beside it, or the runtime hands over the whole state at once.
+ */
+export type Attached = HistoryAttached | SnapshotAttached;
+
+interface AttachedClient {
   readonly stream: RuntimeStream;
+  /** Whether the program was on its alternate screen as the client attached. */
+  readonly alternate: boolean;
+}
+
+/** A client whose first output redraws the screen, but can't redraw the history above it. */
+export interface HistoryAttached extends AttachedClient {
+  readonly kind: "history";
   /**
    * The history above the screen as the client attached, oldest first: lines separated by `\n`,
    * with their SGR attributes, and empty for a program on its alternate screen. Read after the
@@ -149,8 +197,24 @@ export interface Attached {
    * draws the screen. Read on demand only, never polled (foundation-design §4.2, §5.9).
    */
   readonly history: string;
-  /** Whether the program was on its alternate screen as the client attached. */
-  readonly alternate: boolean;
+}
+
+/** A client whose stream carries on exactly where its snapshot ends. */
+export interface SnapshotAttached extends AttachedClient {
+  readonly kind: "snapshot";
+  /**
+   * VT bytes that rebuild the screen, the history above it, the cursor and the modes exactly as
+   * they were after `offset` bytes of output. The stream's bytes are the ones after them, none
+   * missed or repeated; a stream that can't keep to that closes. They only set state and never
+   * ask the terminal anything, so a terminal that replays them has nothing to answer.
+   */
+  readonly vt: Uint8Array;
+  /**
+   * Bytes the process the ref names has printed, from 0 at its start. The stream outlives a
+   * respawn, and goes on with the same terminal, the next process's output counted from 0 again.
+   * At most `Number.MAX_SAFE_INTEGER`.
+   */
+  readonly offset: number;
 }
 
 export interface RuntimeAdapter {
@@ -166,7 +230,8 @@ export interface RuntimeAdapter {
   create(spec: TerminalSpec): Promise<RuntimeRef>;
   /**
    * Opens a client at `size`, or, given null, at whatever size the terminal already has, with up
-   * to `historyLines` of the history above its screen.
+   * to `historyLines` of the history above its screen. A runtime that keeps a depth of its own per
+   * terminal may ignore `historyLines`.
    */
   attach(ref: RuntimeRef, size: Size | null, historyLines: number): Promise<Attached>;
   /**

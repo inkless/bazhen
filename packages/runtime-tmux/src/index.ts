@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import type {
-  Attached,
+  HistoryAttached,
   Foreground,
   TerminalForeground,
   ProcessSpec,
@@ -45,9 +45,13 @@ import { shellCommand } from "./shell.ts";
 
 export { shellCommand };
 import { ExitWatch, type DeadTerminal } from "./exit-watch.ts";
+import { ScreenWatch } from "./screen-watch.ts";
 
 const EXIT_POLL_MS = 1_000;
 const UNKNOWN_EXIT_AFTER_MS = 2_000;
+/** How long output must pause, or at most how long it may run, before the screen is re-read. */
+const SCREEN_QUIET_MS = 100;
+const SCREEN_MAX_WAIT_MS = 500;
 
 /** Every pane fact Bazhen reads from tmux, by name: its own @bazhen_* options, then tmux's. */
 const COLUMN = {
@@ -425,7 +429,7 @@ export class TmuxRuntime implements RuntimeAdapter {
       .map(({ ref, tags, exit }) => ({ ref, tags, exit }));
   }
 
-  async attach(ref: RuntimeRef, size: Size | null, historyLines: number): Promise<Attached> {
+  async attach(ref: RuntimeRef, size: Size | null, historyLines: number): Promise<HistoryAttached> {
     // Found by its tag on the server it was made on: a session name or number alone could, after a
     // restart, name another terminal.
     const [pane] = await this.panesOf(ref);
@@ -453,10 +457,20 @@ export class TmuxRuntime implements RuntimeAdapter {
       { cols, rows },
       this.env,
     );
+    const screen = new ScreenWatch({
+      quietMs: SCREEN_QUIET_MS,
+      maxWaitMs: SCREEN_MAX_WAIT_MS,
+      check: async () =>
+        (await this.tmux("display-message", "-p", "-t", windowOf(session), "#{alternate_on}")) ===
+        "1",
+      alternate: alternate === 1,
+    });
+    proc.onData(() => screen.poke());
     const closeHandlers: Array<() => void> = [];
     let closed = false;
     proc.onExit(() => {
       closed = true;
+      screen.dispose();
       for (const h of closeHandlers) h();
     });
     const stream: RuntimeStream = {
@@ -472,12 +486,15 @@ export class TmuxRuntime implements RuntimeAdapter {
         await resizeWindow(next);
         proc.resize(next);
       },
-      alternateScreen: async () =>
-        (await this.tmux("display-message", "-p", "-t", windowOf(session), "#{alternate_on}")) ===
-        "1",
-      close: () => proc.kill(),
+      onAlternate: (cb) => screen.onAlternate(cb),
+      onFailure: (cb) => screen.onFailure(cb),
+      onRespawn: () => {},
+      close: () => {
+        screen.dispose();
+        proc.kill();
+      },
     };
-    return { stream, history, alternate: alternate === 1 };
+    return { kind: "history", stream, history, alternate: alternate === 1 };
   }
 
   /**

@@ -220,10 +220,11 @@ describe("tmux runtime on a private server", () => {
     const ref = await runtime.create(
       spec(["sh", "-c", "printf main; sleep 0.5; printf '\\033[?1049halt'; sleep 30"]),
     );
-    const { stream } = await runtime.attach(ref, size, 0);
-    const before = await stream.alternateScreen();
-    await expect.poll(() => screen(ref.locator.session), { timeout: 3000 }).toContain("alt");
-    expect([before, await stream.alternateScreen()]).toEqual([false, true]);
+    const { stream, alternate } = await runtime.attach(ref, size, 0);
+    const pushed: boolean[] = [];
+    stream.onAlternate((on) => pushed.push(on));
+    await expect.poll(() => pushed, { timeout: 3000 }).toEqual([true]);
+    expect(alternate).toBe(false);
     stream.close();
   });
 

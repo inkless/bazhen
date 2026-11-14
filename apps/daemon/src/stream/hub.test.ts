@@ -1,13 +1,7 @@
 import headless from "@xterm/headless";
 import { describe, expect, it, vi } from "vitest";
-import {
-  newId,
-  type Attached,
-  type AttachmentId,
-  type RuntimeRef,
-  type TerminalId,
-} from "@bazhen/core";
-import { FakeRuntime } from "@bazhen/core/testing";
+import { newId, type AttachmentId, type RuntimeRef, type TerminalId } from "@bazhen/core";
+import { FakeRuntime, type FakeRuntimeOptions } from "@bazhen/core/testing";
 import {
   oscColour,
   TERMINAL_COLOURS,
@@ -15,6 +9,7 @@ import {
   type StreamServerFrame,
   type TuiTheme,
 } from "@bazhen/protocol";
+import { replay } from "../testing/browser-terminal.ts";
 import { TerminalClosed } from "./emulator.ts";
 import {
   HUB_DEFAULTS,
@@ -29,40 +24,24 @@ import {
 
 /** What a browser shows after writing everything a view was sent: each non-blank line. */
 async function screenOf(sent: readonly string[]): Promise<string[]> {
+  return (await rowsOf(sent)).all.filter((line) => line !== "");
+}
+
+/** Every row a browser holds after writing what a view was sent, and the first on its screen. */
+async function rowsOf(sent: readonly string[]): Promise<{ all: string[]; top: number }> {
   const term = new headless.Terminal({ ...size, allowProposedApi: true });
   await new Promise<void>((resolve) => term.write(sent.join(""), resolve));
   const buffer = term.buffer.active;
-  const lines = Array.from({ length: buffer.length }, (_, y) =>
+  const all = Array.from({ length: buffer.length }, (_, y) =>
     (buffer.getLine(y)?.translateToString(true) ?? "").trim(),
   );
   term.dispose();
-  return lines.filter((line) => line !== "");
-}
-
-/** A FakeRuntime whose screen checks a test can fail, stall, or answer one at a time. */
-class CheckedRuntime extends FakeRuntime {
-  checks = 0;
-  mode: "answer" | "fail" | "hang" | "hold" = "answer";
-  failure = "tmux gone";
-  readonly held: ((alternate: boolean) => void)[] = [];
-
-  override async attach(...args: Parameters<FakeRuntime["attach"]>): Promise<Attached> {
-    const attached = await super.attach(...args);
-    const check = () => attached.stream.alternateScreen();
-    const alternateScreen = async () => {
-      this.checks++;
-      if (this.mode === "fail") throw new Error(this.failure);
-      if (this.mode === "hang") return new Promise<boolean>(() => {});
-      if (this.mode === "hold") return new Promise<boolean>((resolve) => this.held.push(resolve));
-      return check();
-    };
-    return { ...attached, stream: { ...attached.stream, alternateScreen } };
-  }
+  return { all, top: buffer.baseY };
 }
 
 /** A runtime with one terminal, whose program echoes nothing, and what reaches it. */
-async function fakeRuntime(history = "earlier output") {
-  const runtime = new CheckedRuntime();
+async function fakeRuntime(history = "earlier output", opts: FakeRuntimeOptions = {}) {
+  const runtime = new FakeRuntime(opts);
   const terminal = async (text = history) => {
     const created = await runtime.create({
       terminalId: newId("term"),
@@ -86,15 +65,9 @@ async function fakeRuntime(history = "earlier output") {
     attachedAt: clients.attaches,
     emit: (s: string) => runtime.output(ref, s),
     end: () => runtime.vanish(ref),
-    failScreenChecks: (failure = "tmux gone") => {
-      runtime.failure = failure;
-      runtime.mode = "fail";
-    },
-    hangScreenChecks: () => (runtime.mode = "hang"),
-    /** From now on each screen check waits until answered, oldest first. */
-    holdScreenChecks: () => (runtime.mode = "hold"),
-    answerScreenCheck: (answer: boolean) => runtime.held.shift()?.(answer),
-    screenChecks: () => runtime.checks,
+    /** The runtime's screen check fails with `message`. */
+    failScreenCheck: (message: string) =>
+      runtime.fail(ref, { what: "screen check", cause: new Error(message) }),
     counts: () => ({ attaches: clients.attaches.length, closes: clients.closes }),
     /** Another terminal on the same runtime, with the same history unless given another. */
     another: terminal,
@@ -218,6 +191,51 @@ describe("terminal hub", () => {
       ["earlier output", "one two three"],
       ["earlier output", "one two three"],
     ]);
+  });
+
+  it("opens every view on a runtime's snapshot, then live output, with nothing missed or repeated", async () => {
+    const rt = await fakeRuntime("earlier output", { attach: "snapshot" });
+    rt.emit("before ");
+    const log = duringSecondSnapshot(memoryLog().log, () => rt.emit("two "));
+    const hub = new Hub(rt.runtime, log);
+    const first = viewer();
+    await hub.join(rt.ref, first.v, size);
+    rt.emit("one ");
+    const late = viewer();
+    await hub.join(rt.ref, late.v, size);
+    rt.emit("three");
+    expect([await screenOf(first.seen), await screenOf(late.seen)]).toEqual([
+      ["earlier output", "before one two three"],
+      ["earlier output", "before one two three"],
+    ]);
+    const { all, top } = await rowsOf(late.seen);
+    expect([all.slice(0, top).includes("earlier output"), all[top]]).toEqual([
+      true,
+      "before one two three",
+    ]);
+  });
+
+  it("starts every view of a respawned terminal on its main screen, as a fresh terminal", async () => {
+    const rt = await fakeRuntime("earlier output", { attach: "snapshot" });
+    const hub = new Hub(rt.runtime, memoryLog().log);
+    const first = viewer();
+    await hub.join(rt.ref, first.v, size);
+    rt.emit("\x1b]11;#ff0000\x07\x1b[?1049hALTDRAWN\x1b[?1000h");
+    rt.runtime.exitProcess(rt.ref);
+    await rt.runtime.respawn(rt.ref, { ...rt.runtime.specOf(rt.ref), generation: 1 });
+    rt.emit("respawned");
+    const late = viewer();
+    await hub.join(rt.ref, late.v, size);
+    const shown = async (seen: string[]) => {
+      const { buffer, modes, colours } = await replay(seen.join(""), size);
+      return { buffer, modes, colours };
+    };
+    const main = { ...(await shown([])), buffer: "normal" };
+    expect([
+      await shown(first.seen),
+      await shown(late.seen),
+      (await screenOf(late.seen)).includes("ALTDRAWN"),
+    ]).toEqual([main, main, false]);
   });
 
   it("never tells a view it is attached when the terminal closes while it opens", async () => {
@@ -645,12 +663,10 @@ describe("terminal hub", () => {
 });
 
 describe("terminal hub: screen state and slow views", () => {
-  const quick = { ...HUB_DEFAULTS, screenQuietMs: 10, screenMaxWaitMs: 50 };
-
   it("tells a view whether the program is on its alternate screen, right after its snapshot", async () => {
     const rt = await fakeRuntime();
     rt.emit("\x1b[?1049h");
-    const hub = new Hub(rt.runtime, memoryLog().log, quick);
+    const hub = new Hub(rt.runtime, memoryLog().log);
     const a = viewer();
     await hub.join(rt.ref, a.v, size);
     const types = a.frames.map((f) => f.type);
@@ -660,84 +676,65 @@ describe("terminal hub: screen state and slow views", () => {
     ]).toEqual([1, { type: "screen", alternate: true }]);
   });
 
-  it("tells every view when the program switches screens, once, after its output settles", async () => {
+  it("tells every view of a switch of screens as the runtime pushes it, once", async () => {
     const rt = await fakeRuntime();
-    const hub = new Hub(rt.runtime, memoryLog().log, quick);
+    const hub = new Hub(rt.runtime, memoryLog().log);
     const a = viewer();
     const b = viewer("observe");
     await hub.join(rt.ref, a.v, size);
     await hub.join(rt.ref, b.v, size);
     rt.emit("\x1b[?1049h");
     rt.emit("drawn");
-    await expect.poll(() => b.frames.at(-1)).toEqual({ type: "screen", alternate: true });
-    rt.emit("more");
-    await new Promise((resolve) => setTimeout(resolve, 40));
-    const screenFrames = (v: typeof a) => v.frames.filter((f) => f.type === "screen").length;
-    expect([screenFrames(a), screenFrames(b)]).toEqual([2, 2]);
+    const screens = (v: typeof a) => v.frames.filter((f) => f.type === "screen");
+    const switched = [
+      { type: "screen", alternate: false },
+      { type: "screen", alternate: true },
+    ];
+    expect([screens(a), screens(b)]).toEqual([switched, switched]);
   });
 
-  it("starts no screen check while one is still running", async () => {
+  it("tells a view that opens after a switch of screens where the program is now", async () => {
     const rt = await fakeRuntime();
-    const hub = new Hub(rt.runtime, memoryLog().log, quick);
+    const hub = new Hub(rt.runtime, memoryLog().log);
     await hub.join(rt.ref, viewer().v, size);
-    rt.hangScreenChecks();
-    for (let i = 0; i < 3; i++) {
-      rt.emit("output");
-      await new Promise((resolve) => setTimeout(resolve, 30));
-    }
-    expect(rt.screenChecks()).toBe(1);
-  });
-
-  it("checks the screen again when output arrived while a check was running", async () => {
-    const rt = await fakeRuntime();
-    const hub = new Hub(rt.runtime, memoryLog().log, quick);
-    const a = viewer();
-    await hub.join(rt.ref, a.v, size);
-    rt.holdScreenChecks();
-    rt.emit("still on the main screen");
-    await expect.poll(() => rt.screenChecks()).toBe(1);
     rt.emit("\x1b[?1049h");
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    rt.answerScreenCheck(false);
-    await expect.poll(() => rt.screenChecks()).toBe(2);
-    rt.answerScreenCheck(true);
-    await expect.poll(() => a.frames.at(-1)).toEqual({ type: "screen", alternate: true });
+    const late = viewer();
+    await hub.join(rt.ref, late.v, size);
+    expect(late.frames.filter((f) => f.type === "screen")).toEqual([
+      { type: "screen", alternate: true },
+    ]);
   });
 
-  it("reports a screen check that keeps failing once, not every time", async () => {
+  it("tells every view what failed in the runtime", async () => {
     const rt = await fakeRuntime();
-    const hub = new Hub(rt.runtime, memoryLog().log, quick);
+    const hub = new Hub(rt.runtime, memoryLog().log);
     const a = viewer();
+    const b = viewer("observe");
     await hub.join(rt.ref, a.v, size);
-    rt.failScreenChecks();
-    for (let i = 0; i < 3; i++) {
-      rt.emit("output");
-      await new Promise((resolve) => setTimeout(resolve, 30));
-    }
-    expect([rt.screenChecks() >= 3, a.frames.filter((f) => f.type === "notice")]).toEqual([
-      true,
+    await hub.join(rt.ref, b.v, size);
+    rt.failScreenCheck("tmux gone");
+    const notices = (v: typeof a) => v.frames.filter((f) => f.type === "notice");
+    expect([notices(a), notices(b)]).toEqual([
+      [{ type: "notice", message: "screen check failed: tmux gone" }],
       [{ type: "notice", message: "screen check failed: tmux gone" }],
     ]);
   });
 
   it("tells views why a screen check failed, leaving out a secret the failure echoed", async () => {
     const rt = await fakeRuntime();
-    const hub = new Hub(rt.runtime, memoryLog().log, quick);
+    const hub = new Hub(rt.runtime, memoryLog().log);
     const a = viewer();
     await hub.join(rt.ref, a.v, size);
-    rt.failScreenChecks('tmux gone; api_key = "s3cr3t"');
-    rt.emit("output");
-    await expect
-      .poll(() => a.frames.filter((f) => f.type === "notice"))
-      .toEqual([
-        { type: "notice", message: "screen check failed: tmux gone; api_key = [redacted]" },
-      ]);
+    rt.failScreenCheck('tmux gone; api_key = "s3cr3t"');
+    expect(a.frames.filter((f) => f.type === "notice")).toEqual([
+      { type: "notice", message: "screen check failed: tmux gone; api_key = [redacted]" },
+    ]);
   });
 
   it("ends a view that falls too far behind, and keeps serving the others", async () => {
     const rt = await fakeRuntime();
     const { log, events } = memoryLog();
-    const hub = new Hub(rt.runtime, log, { ...quick, maxUnsentBytes: 100 });
+    const hub = new Hub(rt.runtime, log, { ...HUB_DEFAULTS, maxUnsentBytes: 100 });
     let backlog = 0;
     const slow = viewer("observe", () => backlog);
     const fast = viewer();
@@ -760,7 +757,7 @@ describe("terminal hub: screen state and slow views", () => {
   it("counts output held during a view's snapshot as unsent", async () => {
     const rt = await fakeRuntime();
     const log = duringSecondSnapshot(memoryLog().log, () => rt.emit("x".repeat(101)));
-    const hub = new Hub(rt.runtime, log, { ...quick, maxUnsentBytes: 100 });
+    const hub = new Hub(rt.runtime, log, { ...HUB_DEFAULTS, maxUnsentBytes: 100 });
     await hub.join(rt.ref, viewer().v, size);
     const late = viewer();
     await expect(hub.join(rt.ref, late.v, size)).rejects.toThrow(ViewEnded);
@@ -769,7 +766,7 @@ describe("terminal hub: screen state and slow views", () => {
 
   it("holds a view to the plain limit once its snapshot is written", async () => {
     const rt = await fakeRuntime("h".repeat(500));
-    const hub = new Hub(rt.runtime, memoryLog().log, { ...quick, maxUnsentBytes: 100 });
+    const hub = new Hub(rt.runtime, memoryLog().log, { ...HUB_DEFAULTS, maxUnsentBytes: 100 });
     let backlog = 0;
     const slow = viewer("observe", () => backlog);
     await hub.join(rt.ref, slow.v, size);
@@ -788,7 +785,7 @@ describe("terminal hub: screen state and slow views", () => {
   it("ends views as disconnected when the runtime client is lost but the terminal lives on", async () => {
     const rt = await fakeRuntime();
     const { log, events } = memoryLog(false);
-    const hub = new Hub(rt.runtime, log, quick);
+    const hub = new Hub(rt.runtime, log);
     const a = viewer();
     const attached = await hub.join(rt.ref, a.v, size);
     rt.end();
@@ -853,8 +850,6 @@ describe("terminal hub: room for views", () => {
   let clock = 0;
   const room = {
     ...HUB_DEFAULTS,
-    screenQuietMs: 10,
-    screenMaxWaitMs: 50,
     snapshotChunkBytes: 100,
     snapshotStallMs: 1000,
     now: () => clock,

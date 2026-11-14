@@ -1,24 +1,33 @@
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import { newId } from "../ids.ts";
-import { FakeRuntime } from "./fake-runtime.ts";
+import { FakeRuntime, fakeContractHarness } from "./fake-runtime.ts";
 import { runtimeContract } from "./runtime-contract.ts";
 
-const fakeOf = (runtime: unknown) => {
-  if (!(runtime instanceof FakeRuntime)) throw new Error("not the fake runtime");
-  return runtime;
-};
-
-runtimeContract("FakeRuntime", {
-  make: () => ({ runtime: new FakeRuntime(), dispose: () => {} }),
-  unreadable: (runtime) => fakeOf(runtime).disconnect(),
-  replacePane: (runtime, ref) => fakeOf(runtime).replacePane(ref),
-  vanish: (runtime, ref) => fakeOf(runtime).vanish(ref),
-  killServer: (runtime) => fakeOf(runtime).killServer(),
-  cwd: "/w",
-  waitMs: 1_000,
-});
+runtimeContract("FakeRuntime", fakeContractHarness("history"));
+runtimeContract("FakeRuntime in snapshot mode", fakeContractHarness("snapshot"));
 
 describe("the fake runtime's controls", () => {
+  it("takes a respawned terminal's program back to its main screen, telling open streams", async () => {
+    const fake = new FakeRuntime();
+    const spec = {
+      terminalId: newId("term"),
+      tags: { kind: "shell" },
+      argv: ["cat"],
+      cwd: "/w",
+      env: {},
+      size: { cols: 80, rows: 24 },
+      generation: 0,
+    } as const;
+    const ref = await fake.create(spec);
+    const { stream } = await fake.attach(ref, null, 0);
+    const pushed: boolean[] = [];
+    stream.onAlternate((on) => pushed.push(on));
+    fake.output(ref, "\x1b[?1049h");
+    fake.exitProcess(ref);
+    await fake.respawn(ref, { ...spec, generation: 1 });
+    expect(pushed).toEqual([true, false]);
+  });
+
   it("records what reached a terminal, and ends every client when the terminal goes", async () => {
     const fake = new FakeRuntime();
     const ref = await fake.create({
@@ -31,7 +40,9 @@ describe("the fake runtime's controls", () => {
       generation: 0,
     });
     fake.scroll(ref, "one\ntwo\nthree");
-    const { stream, history } = await fake.attach(ref, null, 2);
+    const attached = await fake.attach(ref, null, 2);
+    assert(attached.kind === "history", "attached with a snapshot");
+    const { stream, history } = attached;
     let closed = false;
     stream.onClose(() => (closed = true));
     stream.write(new Uint8Array([97]));

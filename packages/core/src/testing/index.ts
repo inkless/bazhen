@@ -1,2 +1,13 @@
-export { FakeRuntime, type ClientRecord } from "./fake-runtime.ts";
-export { runtimeContract, type ContractHarness } from "./runtime-contract.ts";
+export {
+  FakeRuntime,
+  fakeContractHarness,
+  type ClientRecord,
+  type FakeRuntimeOptions,
+} from "./fake-runtime.ts";
+export {
+  runtimeContract,
+  snapshotContract,
+  type ContractHarness,
+  type Replayed,
+  type SnapshotHarness,
+} from "./runtime-contract.ts";

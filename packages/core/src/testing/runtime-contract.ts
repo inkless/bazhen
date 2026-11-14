@@ -1,7 +1,10 @@
 // What every RuntimeAdapter promises the daemon, as one suite. It runs against FakeRuntime in
-// `pnpm check` and against TmuxRuntime in the test container, so the fake can't drift from tmux.
+// `pnpm check`, in both its attach modes, and against TmuxRuntime in the test container, so the
+// fake can't drift from tmux. It reads a ref's locator only for the generation every runtime
+// records.
 
-import { describe, expect, it, onTestFinished } from "vitest";
+import type { ExitStatus } from "@bazhen/protocol";
+import { assert, describe, expect, it, onTestFinished } from "vitest";
 import { newId } from "../ids.ts";
 import { decode, delay, encode } from "./platform.ts";
 import {
@@ -9,6 +12,7 @@ import {
   StaleIncarnation,
   type RuntimeAdapter,
   type RuntimeRef,
+  type Size,
   type TerminalSpec,
   type TerminalTags,
 } from "../runtime.ts";
@@ -16,35 +20,57 @@ import {
 export interface ContractHarness {
   /** A runtime on a server of its own, which the suite ends after each test. */
   make(): { readonly runtime: RuntimeAdapter; dispose(): void };
-  /** Leaves `runtime`'s server running, but where it can no longer be read. */
+  /** Leaves what holds `runtime`'s terminals running, but where it can no longer be read. */
   unreadable(runtime: RuntimeAdapter): void;
-  /** Replaces the terminal's pane inside it, as a split and a kill by hand would. */
-  replacePane(runtime: RuntimeAdapter, ref: RuntimeRef): void;
+  /** Replaces the terminal's process outside Bazhen, under the generation it already has. */
+  replaceProcess(runtime: RuntimeAdapter, ref: RuntimeRef): void;
   /** Ends the terminal outside Bazhen, as a killed session would. */
   vanish(runtime: RuntimeAdapter, ref: RuntimeRef): void;
-  /** Ends `runtime`'s server and every terminal on it, as a reboot would. */
-  killServer(runtime: RuntimeAdapter): void;
+  /** Ends every terminal and whatever holds them, as a reboot would. */
+  reboot(runtime: RuntimeAdapter): void;
+  /** The same terminal's ref, as if it had been made on a server other than the one running it. */
+  forge(ref: RuntimeRef): RuntimeRef;
+  /** Where the runtime runs a terminal's process, for one that reuses it across a respawn. */
+  placeOf(ref: RuntimeRef): string | undefined;
+  /** Whether it may never learn how a process ended, and call the cause unknown, as tmux 3.4 may. */
+  readonly exitMayBeUnknown: boolean;
   /** Where the terminals' programs run. */
   readonly cwd: string;
   /** How long to wait for a process to exit; a loaded runner can take a second or more. */
   readonly waitMs: number;
 }
 
-/** tmux 3.4 sometimes never learns how a pane's process ended, so a cause may be unknown. */
-const UNKNOWN = { type: "unknown" } as const;
 const sleeping = ["sleep", "300"] as const;
 const exiting = (code: number) => ["sh", "-c", `exit ${code}`] as const;
 
 const entryOf = async (runtime: RuntimeAdapter, ref: RuntimeRef) =>
   (await runtime.inventory()).find(
-    (e) => e.ref.terminalId === ref.terminalId && e.ref.locator.paneId === ref.locator.paneId,
+    (e) =>
+      e.ref.terminalId === ref.terminalId && e.ref.locator.generation === ref.locator.generation,
   );
 const exitOf = async (runtime: RuntimeAdapter, ref: RuntimeRef) =>
   (await entryOf(runtime, ref))?.exit ?? null;
+/** The terminal's current incarnation, which a ref equals only while its process is the same. */
 const running = async (runtime: RuntimeAdapter, ref: RuntimeRef) => {
-  const entry = await entryOf(runtime, ref);
-  return { pid: entry?.ref.locator.panePid, dead: entry === undefined || entry.exit !== null };
+  const entry = (await runtime.inventory()).find((e) => e.ref.terminalId === ref.terminalId);
+  return { ref: entry?.ref, dead: entry === undefined || entry.exit !== null };
 };
+
+/** A client attached on a snapshot, with the output its stream has carried since. */
+async function snapshotClient(runtime: RuntimeAdapter, ref: RuntimeRef) {
+  const attached = await runtime.attach(ref, null, 0);
+  onTestFinished(() => attached.stream.close());
+  assert(attached.kind === "snapshot", `attached with ${attached.kind}`);
+  let live = "";
+  let bytes = 0;
+  const respawns: { generation: number; after: string }[] = [];
+  attached.stream.onData((chunk) => {
+    live += decode(chunk);
+    bytes += chunk.length;
+  });
+  attached.stream.onRespawn((generation) => respawns.push({ generation, after: live }));
+  return { ...attached, live: () => live, end: () => attached.offset + bytes, respawns };
+}
 
 /** Exits reported for `terminalId`, collected until the test ends. */
 function exitsOf(runtime: RuntimeAdapter, terminalId: string) {
@@ -71,6 +97,10 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
     generation: 0,
   });
 
+  /** The cause the runtime gives, or, where it may not learn it, unknown. */
+  const causes = (status: ExitStatus) =>
+    harness.exitMayBeUnknown ? [status, { type: "unknown" }] : [status];
+
   const deadOf = async (runtime: RuntimeAdapter, ref: RuntimeRef) => {
     await expect.poll(() => exitOf(runtime, ref), { timeout: harness.waitMs }).not.toBeNull();
   };
@@ -82,7 +112,7 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
   };
 
   describe(`${name}: the runtime contract`, () => {
-    it("has no server to read before its first terminal, and a healthy one after", async () => {
+    it("reports nothing running before its first terminal, and healthy after", async () => {
       const runtime = fresh();
       expect([(await runtime.health()).state, await runtime.inventory()]).toEqual([
         "not-running",
@@ -122,7 +152,7 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       const ref = await runtime.create(spec(exiting(3)));
       await expect
         .poll(() => exitOf(runtime, ref), { timeout: harness.waitMs })
-        .toBeOneOf([{ type: "exited", code: 3 }, UNKNOWN]);
+        .toBeOneOf(causes({ type: "exited", code: 3 }));
     });
 
     it("finds a terminal's own process in its foreground while it starts nothing", async () => {
@@ -174,15 +204,20 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       await expect.poll(() => seen, { timeout: harness.waitMs }).toContain("ping-你好");
     });
 
-    it("tells whether the program is on its alternate screen, as it switches", async () => {
+    it("pushes each switch to or from the alternate screen, once", async () => {
       const runtime = fresh();
       const ref = await runtime.create(spec(["cat"]));
       const { stream, alternate } = await runtime.attach(ref, null, 0);
       onTestFinished(() => stream.close());
+      const pushed: boolean[] = [];
+      stream.onAlternate((on) => pushed.push(on));
       stream.write(encode("\x1b[?1049h\r"));
-      await expect.poll(() => stream.alternateScreen(), { timeout: harness.waitMs }).toBe(true);
+      await expect.poll(() => pushed, { timeout: harness.waitMs }).toEqual([true]);
+      stream.write(encode("still there\r"));
+      await delay(300);
+      expect(pushed).toEqual([true]);
       stream.write(encode("\x1b[?1049l\r"));
-      await expect.poll(() => stream.alternateScreen(), { timeout: harness.waitMs }).toBe(false);
+      await expect.poll(() => pushed, { timeout: harness.waitMs }).toEqual([true, false]);
       expect(alternate).toBe(false);
     });
 
@@ -194,7 +229,7 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       await expect(runtime.attach(ref, null, 0)).rejects.toMatchObject({ reason: "gone" });
     });
 
-    it("reports how the pane's own process ended, or that it could not tell", async () => {
+    it("reports how the terminal's own process ended, or, where it can't, that it could not tell", async () => {
       const runtime = fresh();
       const coded = await runtime.create(spec(exiting(3)));
       const killed = await runtime.create(spec(sleeping));
@@ -205,24 +240,47 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       await runtime.signal(killed, "SIGTERM");
       await expect
         .poll(() => codes.at(-1)?.status, { timeout: harness.waitMs })
-        .toBeOneOf([{ type: "exited", code: 3 }, UNKNOWN]);
+        .toBeOneOf(causes({ type: "exited", code: 3 }));
       await expect
         .poll(() => signals.at(-1)?.status, { timeout: harness.waitMs })
-        .toBeOneOf([{ type: "signalled", signal: "SIGTERM" }, UNKNOWN]);
+        .toBeOneOf(causes({ type: "signalled", signal: "SIGTERM" }));
     });
 
-    it("respawns a dead pane in place, with a new process and the same pane", async () => {
+    it("respawns a dead terminal in place, as its next generation", async () => {
       const runtime = fresh();
       const s = spec(exiting(0));
       const ref = await runtime.create(s);
       await deadOf(runtime, ref);
       const next = await runtime.respawn(ref, { ...s, generation: 1, argv: sleeping });
-      expect(next.locator.paneId).toBe(ref.locator.paneId);
-      expect(next.locator.panePid).not.toBe(ref.locator.panePid);
-      expect(await running(runtime, next)).toEqual({ pid: next.locator.panePid, dead: false });
+      const entries = (await runtime.inventory()).filter(
+        (e) => e.ref.terminalId === ref.terminalId,
+      );
+      expect([next.locator.generation, entries.map((e) => [e.ref, e.exit])]).toEqual([
+        "1",
+        [[next, null]],
+      ]);
+      expect(harness.placeOf(next)).toBe(harness.placeOf(ref));
     });
 
-    it("reports a respawned pane's next exit under its new generation", async () => {
+    it("respawns a terminal left on its alternate screen onto its main screen", async () => {
+      const runtime = fresh();
+      const s = spec(["cat"]);
+      const ref = await runtime.create(s);
+      const { stream } = await runtime.attach(ref, null, 0);
+      onTestFinished(() => stream.close());
+      const pushed: boolean[] = [];
+      stream.onAlternate((on) => pushed.push(on));
+      stream.write(encode("\x1b[?1049h\r"));
+      await expect.poll(() => pushed, { timeout: harness.waitMs }).toEqual([true]);
+      await runtime.signal(ref, "SIGTERM");
+      await deadOf(runtime, ref);
+      const next = await runtime.respawn(ref, { ...s, generation: 1, argv: sleeping });
+      const after = await runtime.attach(next, null, 0);
+      onTestFinished(() => after.stream.close());
+      expect(after.alternate).toBe(false);
+    });
+
+    it("reports a respawned terminal's next exit under its new generation", async () => {
       const runtime = fresh();
       const s = spec(exiting(1));
       const ref = await runtime.create(s);
@@ -237,15 +295,15 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       await expect
         .poll(() => exits.at(-1), { timeout: harness.waitMs })
         .toMatchObject({ generation: "1" });
-      expect(exits.at(-1)?.status).toBeOneOf([{ type: "exited", code: 2 }, UNKNOWN]);
+      expect(exits.at(-1)?.status).toBeOneOf(causes({ type: "exited", code: 2 }));
     });
 
-    it("refuses to respawn a pane whose process is still running, and leaves it running", async () => {
+    it("refuses to respawn a terminal whose process is still running, and leaves it running", async () => {
       const runtime = fresh();
       const s = spec(sleeping);
       const ref = await runtime.create(s);
       await expect(runtime.respawn(ref, s)).rejects.toMatchObject({ expected: "exited" });
-      expect(await running(runtime, ref)).toEqual({ pid: ref.locator.panePid, dead: false });
+      expect(await running(runtime, ref)).toEqual({ ref, dead: false });
     });
 
     it("refuses to signal a process that has already exited", async () => {
@@ -258,7 +316,7 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
     it("touches nothing when the server is not the one the terminal was created on", async () => {
       const runtime = fresh();
       const ref = await runtime.create(spec(sleeping));
-      const forged = { ...ref, locator: { ...ref.locator, serverStart: "1" } };
+      const forged = harness.forge(ref);
       await expect(runtime.close(forged)).rejects.toThrow(StaleIncarnation);
       await expect(runtime.signal(forged, "SIGKILL")).rejects.toThrow(StaleIncarnation);
       expect((await running(runtime, ref)).dead).toBe(false);
@@ -267,23 +325,23 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
     it("refuses to attach from a ref whose server is not the one the terminal was created on", async () => {
       const runtime = fresh();
       const ref = await runtime.create(spec(sleeping));
-      const forged = { ...ref, locator: { ...ref.locator, serverStart: "1" } };
+      const forged = harness.forge(ref);
       await expect(runtime.attach(forged, null, 0)).rejects.toMatchObject({
         reason: "server-replaced",
       });
     });
 
-    it("closes a terminal whose server has ended, with no server running", async () => {
+    it("closes a terminal ended by a reboot, with nothing running", async () => {
       const runtime = fresh();
       const ref = await runtime.create(spec(sleeping));
-      harness.killServer(runtime);
+      harness.reboot(runtime);
       await expect(runtime.close(ref)).resolves.toBeUndefined();
     });
 
-    it("closes a terminal whose server has ended, once another server runs", async () => {
+    it("closes a terminal ended by a reboot, once another terminal runs", async () => {
       const runtime = fresh();
       const ref = await runtime.create(spec(sleeping));
-      harness.killServer(runtime);
+      harness.reboot(runtime);
       const next = await runtime.create(spec(sleeping));
       await runtime.close(ref);
       expect((await runtime.inventory()).map((e) => e.ref.terminalId)).toEqual([next.terminalId]);
@@ -294,17 +352,19 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       const s = spec(exiting(0));
       const ref = await runtime.create(s);
       await deadOf(runtime, ref);
-      const forged = { ...ref, locator: { ...ref.locator, serverPid: "0" } };
+      const forged = harness.forge(ref);
       await expect(runtime.respawn(forged, s)).rejects.toMatchObject({ reason: "server-replaced" });
-      expect(await exitOf(runtime, ref)).toBeOneOf([{ type: "exited", code: 0 }, UNKNOWN]);
+      expect(await exitOf(runtime, ref)).toBeOneOf(causes({ type: "exited", code: 0 }));
     });
 
-    it("refuses to act on a pane that has been replaced inside the terminal", async () => {
+    it("refuses to act on a process replaced outside Bazhen, on a server it was made on", async () => {
       const runtime = fresh();
       const ref = await runtime.create(spec(sleeping));
-      harness.replacePane(runtime, ref);
-      await expect(runtime.signal(ref, "SIGKILL")).rejects.toMatchObject({
-        reason: "pane-replaced",
+      harness.replaceProcess(runtime, ref);
+      const refused = runtime.signal(ref, "SIGKILL");
+      await expect(refused).rejects.toThrow(StaleIncarnation);
+      await expect(refused).rejects.toMatchObject({
+        reason: expect.stringMatching(/^(pane|process)-replaced$/),
       });
     });
 
@@ -376,6 +436,121 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       onTestFinished(runtime.onExit((dead) => seen.push(dead.terminalId)));
       await delay(300);
       expect(seen).toEqual([]);
+    });
+  });
+}
+
+/** What a runtime that attaches on a snapshot promises beyond the runtime contract. */
+/** What a terminal that replays VT bytes, as a view does, ends up showing and answering. */
+export interface Replayed {
+  readonly buffer: "normal" | "alternate";
+  /** Its modes, compared whole with a fresh terminal's. */
+  readonly modes: unknown;
+  /** Every row it holds, history first, trimmed. */
+  readonly lines: readonly string[];
+  /** What it sent back, as a terminal answers a query. */
+  readonly replies: string;
+  /** The colour slots it was told to change from its theme, and what to: none for a fresh one. */
+  readonly colours: Readonly<Record<string, string>>;
+}
+
+export interface SnapshotHarness extends ContractHarness {
+  /** Replays `vt` into a fresh terminal of `size`. */
+  replay(vt: Uint8Array, size: Size): Promise<Replayed>;
+}
+
+export function snapshotContract(name: string, harness: SnapshotHarness): void {
+  const fresh = () => {
+    const made = harness.make();
+    onTestFinished(() => made.dispose());
+    return made.runtime;
+  };
+
+  const spec: TerminalSpec = {
+    terminalId: newId("term"),
+    tags: { kind: "shell" },
+    argv: ["cat"],
+    cwd: harness.cwd,
+    env: {},
+    size: { cols: 80, rows: 24 },
+    generation: 0,
+  };
+
+  describe(`${name}: the snapshot attach contract`, () => {
+    it("attaches on a snapshot that its stream carries on from, nothing missed or repeated", async () => {
+      const runtime = fresh();
+      const ref = await runtime.create({ ...spec, terminalId: newId("term") });
+      const first = await snapshotClient(runtime, ref);
+      first.stream.write(encode("before\r"));
+      await expect.poll(() => first.live(), { timeout: harness.waitMs }).toContain("before");
+      const late = await snapshotClient(runtime, ref);
+      late.stream.write(encode("after\r"));
+      await expect.poll(() => late.live(), { timeout: harness.waitMs }).toContain("after");
+      await expect.poll(() => late.end() - first.end(), { timeout: harness.waitMs }).toBe(0);
+      await delay(300);
+      expect(late.offset).toSatisfy(Number.isSafeInteger);
+      expect(late.offset).toBeGreaterThan(0);
+      expect([late.end() - first.end(), decode(late.vt), late.live()]).toEqual([
+        0,
+        expect.stringContaining("before"),
+        expect.not.stringContaining("before"),
+      ]);
+    });
+
+    it("tells a stream of a respawn before the next process's output, which counts from 0", async () => {
+      const runtime = fresh();
+      const s = { ...spec, terminalId: newId("term") };
+      const ref = await runtime.create(s);
+      const first = await snapshotClient(runtime, ref);
+      first.stream.write(encode("before\r"));
+      await expect.poll(() => first.live(), { timeout: harness.waitMs }).toContain("before");
+      await runtime.signal(ref, "SIGTERM");
+      await expect.poll(() => exitOf(runtime, ref), { timeout: harness.waitMs }).not.toBeNull();
+      const next = await runtime.respawn(ref, { ...s, generation: 1 });
+      const late = await snapshotClient(runtime, next);
+      first.stream.write(encode("after\r"));
+      await expect.poll(() => first.live(), { timeout: harness.waitMs }).toContain("after");
+      expect([late.offset, first.respawns]).toEqual([
+        0,
+        [{ generation: 1, after: expect.not.stringContaining("after") }],
+      ]);
+    });
+
+    it("attaches a respawned terminal on its main screen, with a fresh terminal's modes", async () => {
+      const runtime = fresh();
+      const s = { ...spec, terminalId: newId("term") };
+      const ref = await runtime.create(s);
+      const first = await snapshotClient(runtime, ref);
+      first.stream.write(
+        encode(
+          "\x1b]11;#ff0000\x07\x1b]4;1;#00ff00\x07\x1b[?1049hALTDRAWN\x1b[?1000h\x1b[?2004h\r",
+        ),
+      );
+      await expect.poll(() => first.live(), { timeout: harness.waitMs }).toContain("ALTDRAWN");
+      await runtime.signal(ref, "SIGTERM");
+      await expect.poll(() => exitOf(runtime, ref), { timeout: harness.waitMs }).not.toBeNull();
+      const next = await runtime.respawn(ref, { ...s, generation: 1 });
+      const late = await snapshotClient(runtime, next);
+      const shown = await harness.replay(late.vt, s.size);
+      const blank = await harness.replay(new Uint8Array(), s.size);
+      expect([late.alternate, shown.buffer, shown.modes, shown.colours, shown.lines]).toEqual([
+        false,
+        "normal",
+        blank.modes,
+        blank.colours,
+        expect.not.arrayContaining(["ALTDRAWN"]),
+      ]);
+    });
+
+    it("attaches on a snapshot that asks the terminal nothing, whatever the program asked", async () => {
+      const runtime = fresh();
+      const ref = await runtime.create({ ...spec, terminalId: newId("term") });
+      const first = await snapshotClient(runtime, ref);
+      first.stream.write(encode("\x1b[6n\x1b[c\x1b]10;?\x07\x1b]11;?\x1b\\asked\r"));
+      await expect.poll(() => first.live(), { timeout: harness.waitMs }).toContain("asked");
+      const late = await snapshotClient(runtime, ref);
+      const shown = await harness.replay(late.vt, spec.size);
+      expect([shown.replies, shown.lines]).toEqual(["", expect.arrayContaining(["asked"])]);
     });
   });
 }

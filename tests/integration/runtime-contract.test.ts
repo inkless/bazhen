@@ -36,7 +36,7 @@ runtimeContract("TmuxRuntime", {
   },
   // A socket this user can't open: the server runs on, and no command reaches it.
   unreadable: (runtime) => chmodSync(serverOf(runtime).socket, 0o000),
-  replacePane: (runtime, ref) => {
+  replaceProcess: (runtime, ref) => {
     const server = serverOf(runtime);
     tmuxOut(server, "split-window", "-d", "-t", String(ref.locator.sessionId), "sleep", "300");
     tmuxOut(server, "kill-pane", "-t", String(ref.locator.paneId));
@@ -44,7 +44,10 @@ runtimeContract("TmuxRuntime", {
   vanish: (runtime, ref) => {
     tmuxOut(serverOf(runtime), "kill-session", "-t", String(ref.locator.sessionId));
   },
-  killServer: (runtime) => serverOf(runtime).kill(),
+  reboot: (runtime) => serverOf(runtime).kill(),
+  forge: (ref) => ({ ...ref, locator: { ...ref.locator, serverStart: "1" } }),
+  placeOf: (ref) => ref.locator.paneId,
+  exitMayBeUnknown: true,
   cwd: mkdtempSync(join(tmpdir(), "bz-contract-")),
   // A loaded CI runner can take a second or more to reap a pane's process.
   waitMs: 10_000,
