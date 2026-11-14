@@ -25,30 +25,40 @@ proxy set to rewrite Host, from this machine's own browser.
 With an external origin configured, every browser must pair (`bazhen pair`) before it reaches
 the API, but a paired phone can do anything you can, and the pairing form itself is open to
 whoever reaches Caddy. The page itself loads unpaired, since it shows the pairing form: it is the
-same built bundle for everyone and holds nothing secret. Two lines in the Caddyfile below keep
-strangers from reaching it at all:
+same built bundle for everyone and holds nothing secret. Two lines in the Caddyfile below decide
+who reaches it:
 
 ```caddyfile
 @outside not remote_ip 192.168.1.0/24
 abort @outside
 ```
 
-- **Your network only.** Caddy listens on ports 80 and 443 of every interface, a VPN's included,
-  so anyone on any of those networks can reach it. `remote_ip` aborts every request that doesn't
-  come from your home network's range, before it reaches Bazhen. Caddy's `bind` would instead
-  listen on the LAN address alone, but on macOS a process that isn't root can listen on a port
-  below 1024 only on all addresses at once. `bind 192.168.1.20` on port 443 needs `sudo`, which
-  breaks Caddy's later runs as you (see [Running it as yourself](#running-it-as-yourself)). For
-  `bind`, use a port above 1024 instead ([On a high port](#on-a-high-port)).
-- **Your devices only, if you want more.** Name the phones in `remote_ip` instead of the range
-  (`not remote_ip 192.168.1.30 192.168.1.31`), and only they are let in. An address names a device
-  only while that device holds it: when your phone is away, another device on the network can take
-  its address and be let in. So give each phone a fixed address:
+- **Your address range only.** Caddy listens on ports 80 and 443 of every interface, a VPN's
+  included. `remote_ip` aborts every request whose source address is outside the range, before it
+  reaches Bazhen. It checks the address, not the network the request came in on, so it admits
+  every device on your home network to the pairing form, guests' and appliances' included; pairing
+  still gates everything past it. It also admits any other network that uses the same range:
+  `192.168.1.0/24` is the commonest default, so a café's or hotel's Wi-Fi, or a VPN whose peers
+  fall in it, gets through while this machine is there with Caddy running. Stop Caddy when you take
+  the machine away from home, or narrow it with one of the next two.
+- **Your devices only.** Name the phones in `remote_ip` instead of the range
+  (`not remote_ip 192.168.1.30 192.168.1.31`), and only they reach the pairing form. An address
+  names a device only while that device holds it: when your phone is away, another device on the
+  network can take its address and be let in. So give each phone a fixed address:
   - Turn off its private Wi-Fi address for this network (iOS: Settings → Wi-Fi → ⓘ → Private
     Wi-Fi Address → Off; Android: Wi-Fi → the network → Privacy → Use device MAC), so it keeps
     one hardware address instead of rotating it.
   - Then reserve an address for that hardware address in your router's DHCP settings, and name
     the reserved address in the Caddyfile.
+- **Your LAN address only.** Caddy's `bind` listens on this machine's LAN address alone, so no
+  other interface, a VPN's included, reaches it. On macOS 10.14 and later, a process that isn't
+  root can listen on a port below 1024 only on all addresses at once, so `bind` on port 443 needs
+  `sudo`, which breaks Caddy's later runs as you (see
+  [Running it as yourself](#running-it-as-yourself)). Use `bind` on a port above 1024 instead
+  ([On a high port](#on-a-high-port)).
+
+`remote_ip` acts only after the TLS handshake, so whoever can reach the port still sees the
+certificate, and with it the hostname.
 
 Keep this to a network only you use. The examples use `192.168.1.0/24` for the network,
 `192.168.1.20` for this machine and `192.168.1.30` and `192.168.1.31` for the phones; replace them
@@ -61,6 +71,9 @@ route, everywhere this page names this machine's address:
 ipconfig getifaddr "$(route -n get default | awk '/interface:/ { print $2 }')"
 ```
 
+Run it with any VPN off: a full-tunnel VPN takes the default route, and the command then prints
+the VPN's address, or nothing. Check that the address it prints is in your home network's range.
+
 ## With your own domain
 
 The browser trusts the certificate, with nothing to install on the phone. Caddy gets it from
@@ -71,7 +84,9 @@ mind being seen, or get a wildcard certificate (`*.example.com`) so the logs sho
 domain.
 
 1. Point the name at this machine in your local DNS, for example a rewrite of
-   `bazhen.example.com` to `192.168.1.20` in AdGuard Home or Pi-hole.
+   `bazhen.example.com` to `192.168.1.20` in AdGuard Home or Pi-hole. Give it no IPv6 (AAAA)
+   record, or add that network's IPv6 prefix to `remote_ip`: Caddy listens on IPv6 too, and a
+   phone that connects over IPv6 is aborted by the IPv4 range.
 2. Get a Caddy build with your DNS provider's module. For Cloudflare, run
    `caddy add-package github.com/caddy-dns/cloudflare`, or download a build with it from
    caddyserver.com/download.
@@ -115,7 +130,9 @@ trusts that authority once.
 1. Write a `Caddyfile` for the machine's LAN address, and its `.local` name if you want one
    (`scutil --get LocalHostName` prints it on macOS). `skip_install_trust` keeps Caddy from adding
    its authority to this machine's trust store, which the phone doesn't need, and which would ask
-   for your password:
+   for your password. A phone may resolve the `.local` name to this machine's IPv6 address, connect
+   over IPv6 and be aborted by the IPv4 range, so open the IPv4 address, or add the LAN's IPv6
+   prefixes (`fe80::/10` and its own `/64`) to `remote_ip`:
 
    ```caddyfile
    {
@@ -151,7 +168,7 @@ The root certificate lets whoever holds its key sign a certificate that device t
 site. Caddy keeps the key on this machine; don't copy it anywhere else. When you no longer reach
 Bazhen this way, remove the root from each device: on iOS, delete the profile under Settings →
 General → VPN & Device Management; on Android, remove it under Settings → Security → Trusted
-credentials → User; on this machine, run `caddy untrust`.
+credentials → User; on this machine, if you ran `caddy trust`, run `caddy untrust`.
 
 ## On a high port
 
@@ -177,10 +194,11 @@ https://192.168.1.20:8443 {
 BAZHEN_EXTERNAL_ORIGINS=https://192.168.1.20:8443 pnpm bazhen start
 ```
 
-`disable_redirects` keeps Caddy off port 80, where it would otherwise listen to redirect plain
-HTTP. Keep the `remote_ip` lines: `bind` leaves out the other interfaces, not the other devices on
-this one. With your own domain, use `bazhen.example.com:8443` and its `tls` block instead, and
-leave out `skip_install_trust`.
+Caddy would otherwise also listen on port 80 to redirect plain HTTP, on the bound address, which
+needs root as port 443 does; `disable_redirects` keeps it off port 80. Keep the `remote_ip` lines:
+`bind` leaves out the other interfaces, not the other devices on this one. Trust the authority on
+each device as in steps 2 and 3 of [Without a domain](#without-a-domain). With your own domain,
+use `bazhen.example.com:8443` and its `tls` block instead, and leave out `skip_install_trust`.
 
 ## Running it as yourself
 
