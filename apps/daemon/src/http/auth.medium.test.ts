@@ -20,6 +20,11 @@ const refuse = () => {
 /** The `name=value` a response's Set-Cookie carries, or "" for none. */
 const cookieOf = (res: Response) => (res.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
 
+/** Requests from another page on the same site, or another site, with no Origin, as an image's. */
+const otherPages = [{ "sec-fetch-site": "same-site" }, { "sec-fetch-site": "cross-site" }];
+/** A request from the daemon's own page. */
+const ownPage = { origin, "sec-fetch-site": "same-origin" };
+
 function daemon(always = true) {
   const clock = { now: Date.parse("2026-11-12T00:00:00.000Z") };
   const store = Store.open(tempDb());
@@ -89,7 +94,16 @@ function daemon(always = true) {
     const res = await pair(codes.issue().code);
     return { cookie: cookieOf(res), deviceId: PairResponse.parse(await res.json()).deviceId };
   };
-  return { request, pair, paired, codes, devices, clock };
+  /** Reads the state with `cookie` once per set of headers, in turn: each status, and its cookie. */
+  const reads = async (cookie: string, pages: readonly Record<string, string>[]) => {
+    const answers: [number, string][] = [];
+    for (const headers of pages) {
+      const res = await request("/v1/state", { headers: { cookie, ...headers } });
+      answers.push([res.status, cookieOf(res)]);
+    }
+    return answers;
+  };
+  return { request, pair, paired, reads, codes, devices, clock };
 }
 
 describe("device auth when pairing is not always required", () => {
@@ -128,14 +142,17 @@ describe("device auth when pairing is not always required", () => {
     ]).toEqual([cookie, "Phone"]);
   });
 
-  it("records a loopback read's use from the daemon's own page, but not from another local origin's", async () => {
-    const { request, paired, clock } = daemon(false);
+  it("serves a loopback read from another local page, but records the use only from the daemon's own", async () => {
+    const { reads, paired, clock } = daemon(false);
     const { cookie } = await paired();
     clock.now += TOUCH_EVERY_MS;
-    const read = (from: string) => request("/v1/state", { headers: { cookie, origin: from } });
-    const elsewhere = await read("http://127.0.0.1:3000");
-    const own = await read(origin);
-    expect([elsewhere.status, cookieOf(elsewhere), cookieOf(own)]).toEqual([200, "", cookie]);
+    const elsewhere = { origin: "http://127.0.0.1:3000" };
+    expect(await reads(cookie, [elsewhere, ...otherPages, ownPage])).toEqual([
+      [200, ""],
+      [200, ""],
+      [200, ""],
+      [200, cookie],
+    ]);
   });
 });
 
@@ -253,6 +270,17 @@ describe("device auth on the TCP app", () => {
     expect(later.headers.get("set-cookie")).toMatch(/^__Host-bazhen_device=[\w-]{43}; Secure;/);
   });
 
+  it("serves a paired read from another page on the site, but records the use only from the daemon's own", async () => {
+    const { reads, paired, clock } = daemon();
+    const { cookie } = await paired();
+    clock.now += TOUCH_EVERY_MS;
+    expect(await reads(cookie, [...otherPages, ownPage])).toEqual([
+      [200, ""],
+      [200, ""],
+      [200, cookie],
+    ]);
+  });
+
   it("sets the cookie again once an hour has passed, so its lifetime restarts", async () => {
     const { request, paired, clock } = daemon();
     const { cookie } = await paired();
@@ -268,12 +296,15 @@ describe("device auth on the TCP app", () => {
 
 const servers: Server[] = [];
 afterEach(() => {
-  for (const server of servers.splice(0)) server.close();
+  for (const server of servers.splice(0)) {
+    server.closeAllConnections();
+    server.close();
+  }
 });
 
 async function serving(always = true) {
   const store = Store.open(tempDb());
-  const clock = { now: Date.now() };
+  const clock = { now: Date.parse("2026-11-12T00:00:00.000Z") };
   const devices = new DeviceAuth(store, { now: () => new Date(clock.now), log: () => {} });
   const wss = new WebSocketServer({ noServer: true });
   /** The device each upgrade the route took came from, by name. */
@@ -297,9 +328,9 @@ async function serving(always = true) {
     pageOrigin: `http://${served.host}`,
     cookie: `bazhen_device=${token}`,
     revoke: () => devices.revoke(deviceId),
-    /** The device goes unused long enough to lapse, and the sweep runs. */
+    /** The device goes unused past its lifetime, and the sweep runs. */
     lapse: () => {
-      clock.now += LOOPBACK_IDLE_MS;
+      clock.now += LOOPBACK_IDLE_MS + 1;
       devices.sweep();
     },
     from,

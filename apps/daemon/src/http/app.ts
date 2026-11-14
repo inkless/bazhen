@@ -180,13 +180,19 @@ export function createApp(deps: AppDeps): Hono {
       const required = mustPair(gate, header);
       const origin = header("origin");
       // A page elsewhere can't even read; a paired browser acts only from an allowed origin,
-      // which it always sends then. SameSite is the second layer, though it lets another local
-      // port's page send the loopback cookie, so that page mustn't keep the device alive either.
+      // which it always sends then. SameSite is the second layer.
       if (origin !== undefined && !allow?.origins.includes(origin)) {
         return required ? fail(c, 403, "origin_not_allowed", origin) : next();
       }
+      // SameSite ignores ports, so a page on another local port also sends the cookie, without
+      // Origin on a plain GET such as an image's. Only the daemon's own page, or a client that
+      // isn't a browser and so sends no Sec-Fetch-Site, keeps the device alive.
+      const fetchSite = header("sec-fetch-site");
       const presented = tokenFrom(header("cookie"));
-      const verified = gate.devices.verify(presented, { remote: arrivedRemotely(header) });
+      const verified = gate.devices.verify(presented, {
+        remote: arrivedRemotely(header),
+        touch: fetchSite === undefined || fetchSite === "same-origin",
+      });
       if (required) {
         if (verified === null)
           return fail(c, 401, "unpaired", "pair this browser: run `bazhen pair`");

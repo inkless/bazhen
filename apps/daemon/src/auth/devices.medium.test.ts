@@ -141,17 +141,20 @@ describe("DeviceAuth", () => {
     expect([before?.device.name, devices.verify(overHttp(token))]).toEqual(["Laptop", null]);
   });
 
-  it("closes a lapsed device's sockets that had to pair when swept, and leaves the rest open", () => {
-    const { devices, clock } = auth();
+  it("closes a revoked device's sockets and a lapsed one's that had to pair when swept, and leaves the rest open", () => {
+    const { devices, store, clock } = auth();
     const laptop = devices.pair("Laptop", false).deviceId;
     const phone = devices.pair("Phone", true).deviceId;
-    const [a, b, c] = [new FakeSocket(), new FakeSocket(), new FakeSocket()];
+    const tablet = devices.pair("Tablet", false).deviceId;
+    const [a, b, c, d] = [new FakeSocket(), new FakeSocket(), new FakeSocket(), new FakeSocket()];
     devices.hold(laptop, a, { required: true });
     devices.hold(laptop, b, { required: false });
     devices.hold(phone, c, { required: true });
+    devices.hold(tablet, d, { required: false });
+    store.revokeDevice(tablet, new Date(clock.now));
     clock.now += LOOPBACK_IDLE_MS;
     devices.sweep();
-    expect([a.destroyed, b.destroyed, c.destroyed]).toEqual([true, false, false]);
+    expect([a, b, c, d].map((s) => s.destroyed)).toEqual([true, false, false, true]);
   });
 
   it("restarts a device's lifetime when it is used, writing that at most hourly", () => {
