@@ -8,9 +8,15 @@ import { ProtocolVersion } from "./version.ts";
 /**
  * `holder/1`: what the daemon and a `bazhen-holder` say over the holder's Unix socket. Versioned
  * apart from the daemon's protocol, under the same rule: within a major, changes are additive
- * only, and the minor is bumped in the same commit as any addition. A peer ignores fields it
- * doesn't know, skips replies and events it doesn't know, and answers a request it doesn't know
- * with `error`; a client sends nothing newer than the version both sides agreed on.
+ * only, and the minor is bumped in the same commit as any addition.
+ *
+ * Neither peer sends anything newer than the version they agreed on in `hello`: no new frame,
+ * field or enum value. A peer ignores fields it doesn't know and skips replies and events it
+ * doesn't know; the holder answers a request it doesn't know with `error`. Any other frame whose
+ * body fails its schema closes the connection.
+ *
+ * Frozen in every major, because it is how two peers find out what they share: the frame layout,
+ * the request id, the `hello` request's `protocol`, and `error`.
  */
 export const HOLDER_PROTOCOL_VERSION = "1.0";
 
@@ -21,16 +27,13 @@ export const HOLDER_PROTOCOL_VERSION = "1.0";
 export const HolderVersions = z.array(ProtocolVersion).min(1).max(16);
 export type HolderVersions = z.infer<typeof HolderVersions>;
 
-const parse = (version: string) => {
-  const [major = 0, minor = 0] = version.split(".").map(Number);
-  return { major, minor };
-};
-
 const topMinors = (versions: readonly string[]) => {
   const tops = new Map<number, number>();
   for (const version of versions) {
     if (!ProtocolVersion.safeParse(version).success) continue;
-    const { major, minor } = parse(version);
+    const [major = -1, minor = -1] = version.split(".").map(Number);
+    // A part too long for a safe integer would read as another number, or print as an exponent.
+    if (!(Number.isSafeInteger(major) && Number.isSafeInteger(minor))) continue;
     tops.set(major, Math.max(minor, tops.get(major) ?? minor));
   }
   return tops;
@@ -82,9 +85,12 @@ export const HolderProcessSpec = z.object({
 });
 export type HolderProcessSpec = z.infer<typeof HolderProcessSpec>;
 
-/** What a holder reads from its stdin when the daemon starts it: never argv, which `ps` shows. */
+/**
+ * What a holder reads from its stdin when the daemon starts it: never argv, which `ps` shows. A
+ * holder that shares no major with `protocol`, the daemon's versions, exits without starting.
+ */
 export const HolderSpawnSpec = HolderProcessSpec.extend({
-  protocol: ProtocolVersion,
+  protocol: HolderVersions,
   terminalId: Id("term"),
   socket: z.string().min(1),
   tags: HolderTags,
@@ -94,8 +100,9 @@ export const HolderSpawnSpec = HolderProcessSpec.extend({
 export type HolderSpawnSpec = z.infer<typeof HolderSpawnSpec>;
 
 /**
- * Opens every connection. `writer` asks for the one slot whose `input` the holder takes; the
- * reply says whether this connection got it.
+ * Opens every connection, with the versions the client speaks. The holder answers with the
+ * version they agree on, or with `error` coded `no-shared-version` and then closes. `writer` asks
+ * for the one slot whose `input` the holder takes; the reply says whether this connection got it.
  */
 export const HolderHelloRequest = z.object({
   protocol: HolderVersions,
@@ -121,6 +128,9 @@ export const HolderSetThemeRequest = z.object({ theme: TuiTheme.nullable() });
 export type HolderSetThemeRequest = z.infer<typeof HolderSetThemeRequest>;
 
 export const HolderHelloReply = z.object({
+  /** The version agreed on, in which both sides speak from here on. */
+  version: ProtocolVersion,
+  /** Every version the holder speaks, as `bazhen doctor` shows it. */
   protocol: HolderVersions,
   terminalId: Id("term"),
   tags: HolderTags,
@@ -128,6 +138,7 @@ export const HolderHelloReply = z.object({
   holderPid: Pid,
   holderStart: StartTime,
   childPid: Pid,
+  childStart: StartTime,
   /** How the child ended; null while it runs. */
   exit: ExitStatus.nullable(),
   size: HolderSize,
@@ -173,8 +184,20 @@ export type HolderTitle = z.infer<typeof HolderTitle>;
 export const HolderAlternate = z.object({ offset: Offset, on: z.boolean() });
 export type HolderAlternate = z.infer<typeof HolderAlternate>;
 
-export const HolderExited = z.object({ status: ExitStatus });
+/** The child of `generation` ended. */
+export const HolderExited = z.object({ generation: Count, status: ExitStatus });
 export type HolderExited = z.infer<typeof HolderExited>;
+
+/**
+ * A new child runs on the same PTY. Sent to every connection before any of its output, which
+ * starts again at offset 0; a subscription goes on from there.
+ */
+export const HolderRespawned = z.object({
+  generation: Count,
+  childPid: Pid,
+  childStart: StartTime,
+});
+export type HolderRespawned = z.infer<typeof HolderRespawned>;
 
 export const HolderRequestName = z.enum([
   "hello",
@@ -193,8 +216,8 @@ export const HolderRequestName = z.enum([
 export type HolderRequestName = z.infer<typeof HolderRequestName>;
 
 /**
- * Each request's type byte. Never renumber one or give it to another request: a type byte means
- * the same in every version.
+ * Each request's type byte, from `0x01` to `0x7f`. Never renumber one or give it to another
+ * request: a type byte means the same in every version.
  */
 export const HOLDER_REQUEST_CODES = {
   hello: 0x01,
@@ -211,30 +234,56 @@ export const HOLDER_REQUEST_CODES = {
   "set-theme": 0x0c,
 } as const satisfies Record<HolderRequestName, number>;
 
-/** What `ok` and `error` answer: a request by name, or one the holder doesn't know. */
-const Answered = z.union([HolderRequestName, z.literal("unknown")]);
-
-export const HolderOk = z.object({ request: Answered });
+/** The `request` of `ok` and `error` names the request answered, for logs: its id says which. */
+export const HolderOk = z.object({ request: z.string() });
 export type HolderOk = z.infer<typeof HolderOk>;
 
-export const HolderError = z.object({ request: Answered, message: z.string() });
+/**
+ * The codes `error` carries in this version. A peer meets codes newer than it knows, so `code` is
+ * read as a string and an unknown one treated as `failed`.
+ */
+export const HOLDER_ERROR_CODES = [
+  /** The holder doesn't know the request's type. */
+  "unknown-request",
+  /** The request's body failed its schema. */
+  "invalid",
+  /** `hello` found no major both sides speak. */
+  "no-shared-version",
+  /** `input` from a connection without the writer slot. */
+  "not-writer",
+  /** `input` past what the holder queues for a program that isn't reading. */
+  "input-full",
+  /** The request needs a child, and it has exited. */
+  "exited",
+  /** The holder tried and the system refused, as a respawn that can't start its program. */
+  "failed",
+] as const;
+
+export const HolderError = z.object({
+  request: z.string(),
+  code: z.string(),
+  message: z.string(),
+});
 export type HolderError = z.infer<typeof HolderError>;
 
 /**
- * Each reply's and event's type byte, under the same rule. A request's own reply is its type
- * byte with the top bit set.
+ * Each reply's and event's type byte, under the same rule. The ranges say whether a frame carries
+ * a request's id, so a peer can tell even of a type it doesn't know: a request's own reply is its
+ * type byte with the top bit set (`0x81`–`0xbf`); events, which carry none, are `0xc0`–`0xef`;
+ * `ok` and `error`, which answer any request, are `0xf0`–`0xff`.
  */
 export const HOLDER_REPLY_CODES = {
   hello: 0x81,
   snapshot: 0x82,
-  data: 0x83,
-  gap: 0x84,
-  resized: 0x85,
   stats: 0x86,
   foreground: 0x89,
-  title: 0x8a,
-  alternate: 0x8b,
-  exited: 0x8c,
+  data: 0xc0,
+  gap: 0xc1,
+  resized: 0xc2,
+  title: 0xc3,
+  alternate: 0xc4,
+  exited: 0xc5,
+  respawned: 0xc6,
   ok: 0xf0,
   error: 0xf1,
 } as const;

@@ -16,6 +16,7 @@ import {
   type HolderReplyName,
   type HolderRequestName,
   HolderResized,
+  HolderRespawned,
   HolderSetTagsRequest,
   HolderSetThemeRequest,
   HolderSignalRequest,
@@ -74,6 +75,7 @@ interface ReplyFields {
   title: Body<HolderTitle>;
   alternate: Body<HolderAlternate>;
   exited: Body<HolderExited>;
+  respawned: Body<HolderRespawned>;
   ok: Answer & Body<HolderOk>;
   error: Answer & Body<HolderError>;
 }
@@ -95,10 +97,14 @@ export interface UnknownHolderRequest {
   readonly id: number;
 }
 
-/** A reply or event of a type this build doesn't know, from a newer peer: skip it. */
+/**
+ * A reply or event of a type this build doesn't know, from a newer peer: skip it. Its type byte
+ * says whether it answers a request, and so whether it has an id.
+ */
 export interface UnknownHolderReply {
   readonly type: "unknown";
   readonly code: number;
+  readonly id?: number;
 }
 
 /** A frame that can't be encoded as given: its fields fail their schema, or it is over the cap. */
@@ -126,6 +132,8 @@ const HEADER = 4;
 const ID = 4;
 const OFFSET = 8;
 const U32_MAX = 0xffff_ffff;
+const FIRST_EVENT = 0xc0;
+const FIRST_ANSWER_TO_ANY = 0xf0;
 
 /** How one type's fields become a payload and back. Encoding throws; decoding reports. */
 interface Codec<F> {
@@ -183,7 +191,7 @@ const json = <T>(schema: z.ZodType<T>): Codec<Body<T>> => ({
   decode: (type, payload) => {
     let text: string;
     try {
-      text = new TextDecoder("utf-8", { fatal: true }).decode(payload);
+      text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(payload);
     } catch {
       return malformed(`${type} is not UTF-8`);
     }
@@ -241,6 +249,7 @@ const REPLIES: { readonly [K in HolderReplyName]: Codec<ReplyFields[K]> } = {
   title: json(HolderTitle),
   alternate: json(HolderAlternate),
   exited: json(HolderExited),
+  respawned: json(HolderRespawned),
   ok: answering(json(HolderOk)),
   error: answering(json(HolderError)),
 };
@@ -316,6 +325,10 @@ export class HolderFrameDecoder<F> {
     this.decodeFrame = decodeFrame;
   }
 
+  /**
+   * The bytes of a decoded frame may be a view into `chunk` rather than a copy: a caller that
+   * reuses its read buffer copies them first.
+   */
   push(chunk: Uint8Array): HolderDecoded<F> {
     const frames: F[] = [];
     if (this.refused !== null) return { frames, malformed: this.refused };
@@ -402,7 +415,9 @@ export function holderReplyDecoder(
 ): HolderFrameDecoder<HolderReply | UnknownHolderReply> {
   return new HolderFrameDecoder(max, (code, payload) => {
     const type = REPLY_TYPES.get(code);
-    if (!isReplyName(type)) return { type: "unknown", code };
-    return decodeReply(type, payload);
+    if (isReplyName(type)) return decodeReply(type, payload);
+    if (code >= FIRST_EVENT && code < FIRST_ANSWER_TO_ANY) return { type: "unknown", code };
+    if (payload.length < ID) return malformed(`reply 0x${code.toString(16)} has no id`);
+    return { type: "unknown", code, id: view(payload).getUint32(0) };
   });
 }

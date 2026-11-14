@@ -36,8 +36,13 @@
       ]
     },
     "protocol": {
-      "type": "string",
-      "pattern": "^\\d+\\.\\d+$"
+      "minItems": 1,
+      "maxItems": 16,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^\\d+\\.\\d+$"
+      }
     },
     "terminalId": {
       "type": "string",

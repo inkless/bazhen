@@ -4,29 +4,10 @@
   "type": "object",
   "properties": {
     "request": {
-      "anyOf": [
-        {
-          "type": "string",
-          "enum": [
-            "hello",
-            "snapshot",
-            "subscribe",
-            "input",
-            "resize",
-            "stats",
-            "close",
-            "signal",
-            "foreground",
-            "respawn",
-            "set-tags",
-            "set-theme"
-          ]
-        },
-        {
-          "type": "string",
-          "const": "unknown"
-        }
-      ]
+      "type": "string"
+    },
+    "code": {
+      "type": "string"
     },
     "message": {
       "type": "string"
@@ -34,6 +15,7 @@
   },
   "required": [
     "request",
+    "code",
     "message"
   ]
 }

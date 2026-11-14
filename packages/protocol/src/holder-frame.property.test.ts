@@ -3,7 +3,7 @@
 
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { HolderRequestName } from "./holder.ts";
+import { HOLDER_ERROR_CODES, HolderRequestName } from "./holder.ts";
 import {
   encodeHolderReply,
   encodeHolderRequest,
@@ -31,7 +31,10 @@ const request: fc.Arbitrary<HolderRequest> = fc.oneof(
   fc.record({
     type: fc.constant("hello" as const),
     id,
-    body: fc.record({ protocol: fc.constant<string[]>(["1.0"]), writer: fc.boolean() }),
+    body: fc.record(
+      { protocol: fc.constant<string[]>(["1.0"]), writer: fc.boolean() },
+      { requiredKeys: ["protocol"] },
+    ),
   }),
   fc.record({
     type: fc.constantFrom(
@@ -42,7 +45,11 @@ const request: fc.Arbitrary<HolderRequest> = fc.oneof(
     ),
     id,
   }),
-  fc.record({ type: fc.constant("subscribe" as const), id, body: fc.record({ from: offset }) }),
+  fc.record({
+    type: fc.constant("subscribe" as const),
+    id,
+    body: fc.record({ from: offset }, { requiredKeys: [] }),
+  }),
   fc.record({ type: fc.constant("input" as const), id, bytes: payload }),
   fc.record({
     type: fc.constant("resize" as const),
@@ -72,17 +79,22 @@ const request: fc.Arbitrary<HolderRequest> = fc.oneof(
     body: fc.record({
       argv: fc.array(text, { minLength: 1, maxLength: 4 }),
       cwd: fc.constant("/"),
+      theme: fc.constantFrom("light" as const, "dark" as const),
       env: fc.dictionary(fc.string(), text),
       generation: offset,
     }),
   }),
 );
 
+/** What `ok` and `error` name: any request, one the holder didn't know included. */
+const answered = fc.constantFrom(...HolderRequestName.options, "unknown", "from-a-newer-daemon");
+
 const reply: fc.Arbitrary<HolderReply> = fc.oneof(
   fc.record({
     type: fc.constant("hello" as const),
     id,
     body: fc.record({
+      version: fc.constant("1.0"),
       protocol: fc.constant<string[]>(["1.0"]),
       terminalId: fc.constant("term_0190a1b2c3d47abc8def0123456789ab"),
       tags,
@@ -90,6 +102,7 @@ const reply: fc.Arbitrary<HolderReply> = fc.oneof(
       holderPid: pid,
       holderStart: offset,
       childPid: pid,
+      childStart: offset,
       exit: fc.option(exit, { nil: null }),
       size: fc.record({ cols: dimension, rows: dimension }),
       offset,
@@ -104,7 +117,14 @@ const reply: fc.Arbitrary<HolderReply> = fc.oneof(
     id,
     body: fc.record({ childPid: pid, childStart: offset, pgid: pid, pgidStart: offset }),
   }),
-  fc.record({ type: fc.constant("exited" as const), body: fc.record({ status: exit }) }),
+  fc.record({
+    type: fc.constant("exited" as const),
+    body: fc.record({ generation: offset, status: exit }),
+  }),
+  fc.record({
+    type: fc.constant("respawned" as const),
+    body: fc.record({ generation: offset, childPid: pid, childStart: offset }),
+  }),
   fc.record({ type: fc.constant("data" as const), offset, bytes: payload }),
   fc.record({ type: fc.constant("snapshot" as const), id, offset, bytes: payload }),
   fc.record({ type: fc.constant("gap" as const), body: fc.record({ from: offset, to: offset }) }),
@@ -123,13 +143,14 @@ const reply: fc.Arbitrary<HolderReply> = fc.oneof(
   fc.record({
     type: fc.constant("ok" as const),
     id,
-    body: fc.record({ request: fc.constantFrom(...HolderRequestName.options) }),
+    body: fc.record({ request: answered }),
   }),
   fc.record({
     type: fc.constant("error" as const),
     id,
     body: fc.record({
-      request: fc.constantFrom(...HolderRequestName.options),
+      request: answered,
+      code: fc.constantFrom(...HOLDER_ERROR_CODES, "from-a-newer-holder"),
       message: fc.string(),
     }),
   }),

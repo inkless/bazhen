@@ -3,6 +3,10 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+$"
+    },
     "protocol": {
       "minItems": 1,
       "maxItems": 16,
@@ -46,6 +50,11 @@
     "childPid": {
       "type": "integer",
       "exclusiveMinimum": 0,
+      "maximum": 9007199254740991
+    },
+    "childStart": {
+      "type": "integer",
+      "minimum": 0,
       "maximum": 9007199254740991
     },
     "exit": {
@@ -145,6 +154,7 @@
     }
   },
   "required": [
+    "version",
     "protocol",
     "terminalId",
     "tags",
@@ -152,6 +162,7 @@
     "holderPid",
     "holderStart",
     "childPid",
+    "childStart",
     "exit",
     "size",
     "offset",
