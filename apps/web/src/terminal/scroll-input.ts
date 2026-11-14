@@ -1,8 +1,13 @@
 import type { Terminal } from "@xterm/xterm";
 import type { WheelAction } from "./scroll.ts";
+import { Fling, type Glide } from "./fling.ts";
 import { ScrollSteps } from "./scroll-steps.ts";
 
 const encoder = new TextEncoder();
+/** The most rows a glide moves in one frame for a program fed arrow keys or mouse reports. */
+const GLIDE_STEPS_PER_FRAME = 3;
+/** The person asked their system for less motion: a swipe then stops where the finger lifts. */
+const reducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 /** Pixels per unit of a wheel event's delta, by its `deltaMode`: pixels, lines or pages. */
 function pixelsPerUnit(mode: number, row: number, rows: number): number {
   if (mode === WheelEvent.DOM_DELTA_PAGE) return row * rows;
@@ -47,40 +52,99 @@ export function attachScrollInput(
   // xterm.js 6 does nothing on a swipe: finger travel becomes the same steps a wheel makes.
   const screen = element.querySelector<HTMLElement>(".xterm-screen") ?? element;
   const touchSteps = new ScrollSteps();
+  const fling = new Fling();
   let lastY: number | null = null;
+  let lastX = 0;
+  let gliding: number | null = null;
+  const stopGlide = () => {
+    if (gliding !== null) cancelAnimationFrame(gliding);
+    gliding = null;
+  };
+
+  /** Moves `steps` rows, revealing earlier output when positive; false once there is no further. */
+  const scrollBy = (steps: number, clientY: number): boolean => {
+    const action = route();
+    const up = steps > 0;
+    const row = rowHeight();
+    for (let i = 0; i < Math.abs(steps); i++) {
+      if (action === "local") {
+        const buffer = term.buffer.active;
+        if (up ? buffer.viewportY === 0 : buffer.viewportY === buffer.baseY) return false;
+        term.scrollLines(up ? -1 : 1);
+      } else if (action === "arrows") input(arrow(up));
+      else if (action === "app") {
+        // xterm.js encodes a wheel event as the mouse report the program asked for.
+        const deltaY = up ? -row : row;
+        screen.dispatchEvent(
+          new WheelEvent("wheel", {
+            deltaY,
+            clientX: lastX,
+            clientY,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      }
+    }
+    return true;
+  };
+
+  /** Carries a released swipe on, a frame at a time, as the phone's own scrolling would. */
+  const glide = (motion: Glide, clientY: number) => {
+    const frame = (now: number) => {
+      const { pixels, done } = motion.advance(now);
+      const steps = touchSteps.add(pixels, rowHeight());
+      // A program fed keys or mouse reports gets a bounded number a frame, however fast the flick.
+      const capped =
+        route() === "local"
+          ? steps
+          : Math.sign(steps) * Math.min(Math.abs(steps), GLIDE_STEPS_PER_FRAME);
+      gliding = !done && scrollBy(capped, clientY) ? requestAnimationFrame(frame) : null;
+    };
+    gliding = requestAnimationFrame(frame);
+  };
+
   const touchStart = (e: TouchEvent) => {
-    lastY = e.touches[0]?.clientY ?? null;
+    stopGlide();
+    const touch = e.touches[0];
+    lastY = touch?.clientY ?? null;
+    lastX = touch?.clientX ?? 0;
     touchSteps.reset();
+    fling.reset();
+    if (touch !== undefined) fling.track(e.timeStamp, touch.clientY);
   };
   const touchMove = (e: TouchEvent) => {
     const touch = e.touches[0];
     if (lastY === null || touch === undefined) return;
-    const row = rowHeight();
-    const steps = touchSteps.add(touch.clientY - lastY, row);
+    const steps = touchSteps.add(touch.clientY - lastY, rowHeight());
     lastY = touch.clientY;
+    lastX = touch.clientX;
+    fling.track(e.timeStamp, touch.clientY);
     e.preventDefault();
-    const action = route();
-    const up = steps > 0;
-    for (let i = 0; i < Math.abs(steps); i++) {
-      if (action === "local") term.scrollLines(up ? -1 : 1);
-      else if (action === "arrows") input(arrow(up));
-      else if (action === "app") {
-        // xterm.js encodes a wheel event as the mouse report the program asked for.
-        const { clientX, clientY } = touch;
-        const deltaY = up ? -row : row;
-        screen.dispatchEvent(
-          new WheelEvent("wheel", { deltaY, clientX, clientY, bubbles: true, cancelable: true }),
-        );
-      }
-    }
+    scrollBy(steps, touch.clientY);
   };
-  const touchEnd = () => (lastY = null);
+  const touchEnd = (e: TouchEvent) => {
+    const releasedAt = lastY;
+    lastY = null;
+    const motion = fling.release(e.timeStamp);
+    if (motion === null || releasedAt === null || reducedMotion()) return;
+    glide(motion, releasedAt);
+  };
+  // Anything the person does next stops a glide; the glide's own mouse reports are not theirs.
+  const interrupt = (e: Event) => {
+    if (e.isTrusted) stopGlide();
+  };
 
   element.addEventListener("wheel", wheel, { capture: true, passive: false });
   screen.addEventListener("touchstart", touchStart, { passive: true });
   screen.addEventListener("touchmove", touchMove, { passive: false });
   screen.addEventListener("touchend", touchEnd, { passive: true });
+  element.addEventListener("wheel", interrupt, { capture: true, passive: true });
+  element.addEventListener("keydown", interrupt, { capture: true });
   return () => {
+    stopGlide();
+    element.removeEventListener("wheel", interrupt, { capture: true });
+    element.removeEventListener("keydown", interrupt, { capture: true });
     element.removeEventListener("wheel", wheel, { capture: true });
     screen.removeEventListener("touchstart", touchStart);
     screen.removeEventListener("touchmove", touchMove);

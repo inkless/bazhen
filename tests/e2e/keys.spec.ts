@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type CDPSession, type Page } from "@playwright/test";
 import { TmuxServer } from "@bazhen/host-guard";
 import { readKeyLog } from "../support/key-log.ts";
 import { onAlternateScreen, openSecondView, screen, viewportTop, status } from "./page.ts";
@@ -211,6 +211,72 @@ test("scrolls the scrollback with a swipe on a touch screen", async ({ browser }
   }
   await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   await expect.poll(() => viewportTop(page)).toBeLessThan(top);
+  await context.close();
+});
+
+/**
+ * Rows the view moved for a downward swipe of 300 px, once it settles: a flick lifts at speed, a
+ * drag pauses before it lifts.
+ */
+async function swiped(page: Page, cdp: CDPSession, how: "flick" | "drag"): Promise<number> {
+  const box = await terminalBox(page);
+  const x = box.x + box.width / 2;
+  const from = Math.max(box.y, 0) + 20;
+  const at = (y: number) => [{ x, y }];
+  const before = await viewportTop(page);
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: at(from) });
+  for (let step = 1; step <= 10; step++) {
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: at(from + step * 30),
+    });
+    if (how === "drag") await page.waitForTimeout(40);
+  }
+  if (how === "drag") await page.waitForTimeout(300);
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  // Settled: the view no longer moves between two looks.
+  let last = Number.NaN;
+  await expect
+    .poll(
+      async () => {
+        const now = await viewportTop(page);
+        const still = now === last;
+        last = now;
+        return still;
+      },
+      { intervals: [300] },
+    )
+    .toBe(true);
+  return before - last;
+}
+
+test("carries a quick swipe on after the finger lifts, and stops a slow one where it lifts", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({ hasTouch: true });
+  const page = await context.newPage();
+  await launchProbe(page, "--lines=400");
+  await reopen(page);
+  const cdp = await context.newCDPSession(page);
+  const dragged = await swiped(page, cdp, "drag");
+  const flicked = await swiped(page, cdp, "flick");
+  // A flick sent a frame at a time is far slower than a finger, so its glide adds less than a
+  // phone's would; any glide at all carries it well past the drag.
+  expect([dragged > 0, flicked >= dragged * 1.5]).toEqual([true, true]);
+  await context.close();
+});
+
+test("stops a quick swipe where the finger lifts when the system asks for less motion", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({ hasTouch: true, reducedMotion: "reduce" });
+  const page = await context.newPage();
+  await launchProbe(page, "--lines=400");
+  await reopen(page);
+  const cdp = await context.newCDPSession(page);
+  const dragged = await swiped(page, cdp, "drag");
+  const flicked = await swiped(page, cdp, "flick");
+  expect([dragged > 0, Math.abs(flicked - dragged) <= 1]).toEqual([true, true]);
   await context.close();
 });
 
