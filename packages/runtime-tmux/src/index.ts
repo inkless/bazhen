@@ -130,10 +130,18 @@ const overflowed = (err: unknown) =>
   Reflect.get(Object(err.cause), "code") === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
 
 /**
+ * The only keys tmux itself takes: they leave a mode, which no key enters. Without them a pane
+ * that a `run-shell` printed into stays in view mode with every key ignored.
+ */
+const MODE_EXIT_BINDINGS = ["copy-mode", "copy-mode-vi"].flatMap((table) =>
+  ["q", "Escape", "C-c"].map((key) => ["bind-key", "-T", table, key, "send-keys", "-X", "cancel"]),
+);
+
+/**
  * The private server's configuration. With tmux's defaults, Ctrl-B would be swallowed as a prefix
- * and `C-b d` would detach Bazhen's own client, so no key reaches tmux itself. `window-size
- * manual` is deliberately absent: set globally, tmux before 3.8 crashes on the next window
- * creation. An empty `update-environment` stops an attaching client from copying its own
+ * and `C-b d` would detach Bazhen's own client, so no key reaches tmux itself outside a mode.
+ * `window-size manual` is deliberately absent: set globally, tmux before 3.8 crashes on the next
+ * window creation. An empty `update-environment` stops an attaching client from copying its own
  * variables into a session. `history-limit` keeps as much history as the daemon and each view
  * do. Without the smcup override, the client switches the browser's terminal to its alternate
  * buffer, which keeps no scrollback and turns the wheel into arrow keys.
@@ -144,6 +152,7 @@ unbind-key -a -T prefix
 unbind-key -a -T root
 unbind-key -a -T copy-mode
 unbind-key -a -T copy-mode-vi
+${MODE_EXIT_BINDINGS.map((command) => command.join(" ")).join("\n")}
 set -g status off
 set -g history-limit ${HISTORY_LINES}
 set -g remain-on-exit on
@@ -161,20 +170,28 @@ export class TmuxError extends Error {
   /** The command as a log may show it: values the user's own text could be in are redacted. */
   readonly args: readonly string[];
   readonly stderr: string;
+  /**
+   * tmux exited with a status of its own. A client its timeout stopped exits with a status too,
+   * since tmux catches SIGTERM (0, on 3.5), so only the kill tells the two apart.
+   */
+  readonly answered: boolean;
 
   constructor(args: readonly string[], cause: unknown) {
-    const raw: unknown =
-      typeof cause === "object" && cause !== null ? Reflect.get(cause, "stderr") : "";
+    const of = (key: string): unknown =>
+      typeof cause === "object" && cause !== null ? Reflect.get(cause, key) : undefined;
+    const raw = of("stderr");
     const stderr = typeof raw === "string" ? raw.trim() : "";
     const shown = redacted(args);
-    const code: unknown =
-      typeof cause === "object" && cause !== null ? Reflect.get(cause, "code") : undefined;
+    const code = of("code");
+    const killed = of("killed") === true;
+    const signal = of("signal");
     // The child process's own error names the whole command line, so it is not kept as the cause.
     super(`tmux ${shown.join(" ")} failed${stderr ? `: ${stderr}` : ""}`, {
-      cause: Object.assign(new Error(`tmux exited ${String(code)}`), { code }),
+      cause: Object.assign(new Error(`tmux exited ${String(code)}`), { code, killed, signal }),
     });
     this.args = shown;
     this.stderr = stderr;
+    this.answered = typeof code === "number" && !killed && typeof signal !== "string";
   }
 }
 
@@ -193,8 +210,8 @@ export interface TmuxRuntimeOptions {
   readonly captureMaxBytes?: number;
   /**
    * A command the server runs, in the background, whenever a pane's title changes, with the
-   * pane's id appended. Set on the server with every terminal created, so a server started by an
-   * older daemon gets it too.
+   * pane's id appended. Without one, the hook is removed. A server started by an older daemon
+   * gets this runtime's hook from `applyServerSettings` and from every terminal created.
    */
   readonly onPaneTitle?: readonly [string, ...string[]];
   /** Where a failure inside exit polling goes, since no caller is waiting on it. */
@@ -208,6 +225,8 @@ export class TmuxRuntime implements RuntimeAdapter {
   private env: Readonly<Record<string, string>>;
   private readonly exits: ExitWatch;
   private readonly unknownCause = new UnknownCause(UNKNOWN_EXIT_AFTER_MS);
+  /** Until `applyServerSettings` reaches a running server; `health` applies them meanwhile. */
+  private settingsPending = true;
 
   constructor(opts: TmuxRuntimeOptions) {
     this.opts = opts;
@@ -282,6 +301,9 @@ export class TmuxRuntime implements RuntimeAdapter {
     }
     try {
       await this.tmux("list-sessions", "-F", "#{session_id}");
+      // Settings that found no server, as when one is still recreating a deleted socket, go on here.
+      if (this.settingsPending)
+        await this.applyServerSettings().catch(this.opts.onError ?? reportSettings);
       return { state: "healthy", version };
     } catch (err) {
       if (!(err instanceof TmuxError)) throw err;
@@ -324,9 +346,7 @@ export class TmuxRuntime implements RuntimeAdapter {
         ...tagCommands(session, spec.terminalId, spec.tags),
         generationCommand(windowOf(session), spec.generation),
         ["set-option", "-w", "-t", windowOf(session), "window-size", "manual"],
-        ...(this.opts.onPaneTitle === undefined
-          ? []
-          : [["set-hook", "-g", "pane-title-changed", paneHook(this.opts.onPaneTitle)]]),
+        this.paneTitleHook(),
         resizeArgs(session, spec.size),
         ["display-message", "-p", "-t", windowOf(session), LOCATION.format],
       ]),
@@ -336,6 +356,31 @@ export class TmuxRuntime implements RuntimeAdapter {
       runtime: this.kind,
       locator: this.locator(LOCATION.parse(location)),
     };
+  }
+
+  /**
+   * Puts this runtime's server-wide settings on a server that is already running, which read its
+   * configuration from whichever daemon started it: the pane-title hook, and the keys that leave
+   * a mode. With no server running it does nothing, and starts none; the next `health` that
+   * reaches one applies them, as it does after a server too slow to answer. A server that answers
+   * and refuses them is not asked again.
+   */
+  async applyServerSettings(): Promise<void> {
+    try {
+      await this.tmux(...sequence([this.paneTitleHook(), ...MODE_EXIT_BINDINGS]));
+    } catch (err) {
+      if (err instanceof TmuxError && noServer(err)) return;
+      if (err instanceof TmuxError && err.answered) this.settingsPending = false;
+      throw err;
+    }
+    this.settingsPending = false;
+  }
+
+  private paneTitleHook(): string[] {
+    const hook = this.opts.onPaneTitle;
+    return hook === undefined
+      ? ["set-hook", "-gu", "pane-title-changed"]
+      : ["set-hook", "-g", "pane-title-changed", paneHook(hook)];
   }
 
   /** The tmux server's socket, as each terminal's locator names it. */
@@ -767,6 +812,9 @@ function identities(refs: readonly RuntimeRef[]): ServerIdentity[] {
   return [...seen.values()];
 }
 
+const reportSettings = (err: unknown) =>
+  console.warn("tmux server settings were not applied:", err);
+
 /** The socket is missing or nobody listens on it; any other failure says nothing about the server. */
 const noServer = (err: TmuxError) =>
   /no server running|error connecting to .* \((No such file or directory|Connection refused)\)/.test(
@@ -786,14 +834,16 @@ const resizeArgs = (session: string, size: Size) => [
 ];
 
 /**
- * The hook that runs `argv` in the background with the pane's id appended. tmux parses a hook as
+ * The hook that runs `argv` in the background with the pane's id appended, its output and status
+ * discarded: tmux shows a `run-shell` that prints or fails in the pane, in view mode, so a missing
+ * client would otherwise take over the pane on every title change. tmux parses a hook as
  * a command line, so the shell command goes in double quotes, with `\\`, `"` and `$` escaped, and
  * run-shell expands it as a format: each word's `#` is doubled, so only the `#{pane_id}` added
  * here is one. Each word is single-quoted for the shell.
  */
 export function paneHook(argv: readonly string[]): string {
   const words = argv.map((w) => `'${w.replaceAll("'", "'\\''").replaceAll("#", "##")}'`);
-  const shell = [...words, "'#{pane_id}'"].join(" ");
+  const shell = `${[...words, "'#{pane_id}'"].join(" ")} >/dev/null 2>&1 || :`;
   return `run-shell -b "${shell.replace(/[\\"$]/g, (c) => `\\${c}`)}"`;
 }
 

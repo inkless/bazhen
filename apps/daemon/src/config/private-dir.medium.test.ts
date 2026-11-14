@@ -2,7 +2,7 @@ import { chmodSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } 
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ensurePrivateDir, UnsafeRuntimeDir } from "./private-dir.ts";
+import { ensurePrivateDir, UnsafePrivateDir } from "./private-dir.ts";
 
 const uid = userInfo().uid;
 let root = "";
@@ -33,7 +33,7 @@ describe("ensurePrivateDir", () => {
 
   it("refuses a directory owned by someone else", () => {
     const run = join(root, "run");
-    expect(() => ensurePrivateDir(run, uid + 1)).toThrow(UnsafeRuntimeDir);
+    expect(() => ensurePrivateDir(run, uid + 1)).toThrow(UnsafePrivateDir);
   });
 
   it("refuses a symlink, which could point the socket anywhere", () => {
@@ -45,6 +45,6 @@ describe("ensurePrivateDir", () => {
 
   it("refuses a file in the directory's place", () => {
     writeFileSync(join(root, "run"), "");
-    expect(() => ensurePrivateDir(join(root, "run"), uid)).toThrow(UnsafeRuntimeDir);
+    expect(() => ensurePrivateDir(join(root, "run"), uid)).toThrow(UnsafePrivateDir);
   });
 });

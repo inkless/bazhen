@@ -52,6 +52,16 @@ describe("launching an agent", () => {
     await expect.poll(() => daemon.screen(agentId), { timeout: 20_000 }).toMatch(/Claude Code/);
   });
 
+  it("gives Claude Code and the tmux server the hook link a restart re-points, not the client", async () => {
+    const { agentId } = LaunchAgentResponse.parse((await launch("hook link")).body);
+    await expect.poll(() => daemon.screen(agentId), { timeout: 20_000 }).toMatch(/Claude Code/);
+    const link = join(daemon.home, "state", "hook", "bazhen-hook");
+    expect([daemon.agentCommand(agentId).join(" "), daemon.tmux("show-hooks", "-gw")]).toEqual([
+      expect.stringContaining(`'${link}'`),
+      expect.stringContaining(`'${link}' 'pane-title'`),
+    ]);
+  });
+
   it("shows a launched agent as running in the state snapshot", async () => {
     const { agentId } = LaunchAgentResponse.parse((await launch("second")).body);
     const state = StateSnapshot.parse((await daemon.request("/v1/state")).body);
