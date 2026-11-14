@@ -1,4 +1,5 @@
 import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { newId } from "@bazhen/core";
 import { HOOK_REPLY_MAX_BYTES, offeredMessage, type HookReply } from "@bazhen/protocol";
 import { FOLD_MAX_CHARS } from "@bazhen/harness-claude-code";
 import { Store } from "../store/store.ts";
@@ -6,7 +7,7 @@ import { AgentQueue } from "../agents/queue.ts";
 import { Lifecycle } from "../agents/lifecycle.ts";
 import { quietStartAgain, withAgent, testView } from "../testing/fixtures.ts";
 import { UnknownAgent } from "../store/store.ts";
-import { MAX_FAILURES, Mailbox, QUIET } from "./mailbox.ts";
+import { AgentGone, MAX_FAILURES, Mailbox, QUIET } from "./mailbox.ts";
 
 const stateOf = (store: Store, id: string) =>
   store.snapshot(testView).messages.find((m) => m.id === id)?.state;
@@ -501,5 +502,37 @@ describe("a closed agent's mail", () => {
     let reply: HookReply | undefined;
     void mailbox.wait(agentId, live()).then((r) => (reply = r));
     await expect.poll(() => reply).toEqual(QUIET);
+  });
+
+  // A forced close records closed while the terminal may still run, so its tool calls go on.
+  it("folds nothing into a closed agent's turn, even mail queued for it", async () => {
+    const { store, agentId, close } = await closable();
+    const mailbox = new Mailbox(store);
+    await close();
+    const messageId = newId("msg");
+    store.append({
+      type: "mailbox.queued",
+      entityId: messageId,
+      actor: "system",
+      payload: { agentId, body: "late" },
+    });
+    expect([mailbox.fold(agentId, "p-1"), stateOf(store, messageId), vi.getTimerCount()]).toEqual([
+      QUIET,
+      "queued",
+      0,
+    ]);
+  });
+
+  it("refuses new mail for a closed agent, and answers a repeat of mail sent before", async () => {
+    const { store, agentId, close } = await closable();
+    const mailbox = new Mailbox(store);
+    const before = mailbox.send(agentId, { idempotencyKey: "before", body: "hi" });
+    await close();
+    const sent = store.snapshot(testView).messages.length;
+    expect(() => mailbox.send(agentId, { idempotencyKey: "after", body: "hi" })).toThrow(AgentGone);
+    expect([
+      mailbox.send(agentId, { idempotencyKey: "before", body: "hi" }),
+      store.snapshot(testView).messages.length,
+    ]).toEqual([before, sent]);
   });
 });

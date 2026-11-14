@@ -11,6 +11,7 @@ import { FakeRuntime } from "@bazhen/core/testing";
 import { PROTOCOL_VERSION, type LaunchAgentRequest } from "@bazhen/protocol";
 import { EnvironmentUnavailable, ServerUnconfirmed, StaleGeneration } from "../agents/lifecycle.ts";
 import { AttentionClosed } from "../mailbox/approvals.ts";
+import { AgentGone } from "../mailbox/mailbox.ts";
 import { ShellBusy, UnknownShell } from "../shells/lifecycle.ts";
 import { AttentionRefused } from "../attention/inbox.ts";
 import { createApp, type AppDeps, type TaskCommands } from "./app.ts";
@@ -49,7 +50,10 @@ const deps: AppDeps = {
     messages: [],
     shells: [],
   }),
-  send: () => ({ messageId: newId("msg"), eventIds: [4] }),
+  send: (agentId) => {
+    if (agentId === "agent_gone") throw new AgentGone(agentId, "closed");
+    return { messageId: newId("msg"), eventIds: [4] };
+  },
   answer: () => {
     throw new AttentionClosed("attn_x");
   },
@@ -263,6 +267,15 @@ describe("HTTP app", () => {
       [200, [9]],
       [409, "conflict"],
     ]);
+  });
+
+  it("answers mail for an agent that is gone as a conflict", async () => {
+    const res = await app.request("/v1/agents/agent_gone/messages", {
+      method: "POST",
+      headers: { host, "content-type": "application/json" },
+      body: JSON.stringify({ idempotencyKey: "m", body: "hi" }),
+    });
+    expect([res.status, (await res.json()).error]).toEqual([409, "conflict"]);
   });
 });
 

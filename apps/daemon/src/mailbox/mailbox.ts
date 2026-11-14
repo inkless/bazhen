@@ -5,12 +5,23 @@ import {
   SendMessageResponse,
   offerToken,
   type OfferToken,
+  type AgentState,
   type EventPayload,
   type HookReply,
   type SendMessageRequest,
 } from "@bazhen/protocol";
 import { FOLD_MAX_CHARS, carriesWake, foldReply, wakeText } from "@bazhen/harness-claude-code";
 import { UnknownAgent, type Store } from "../store/store.ts";
+
+/** Mail for an agent that is gone, or going, would never reach it. */
+export class AgentGone extends Error {
+  readonly agentId: string;
+
+  constructor(agentId: string, state: string) {
+    super(`agent ${agentId} is ${state} and takes no mail`);
+    this.agentId = agentId;
+  }
+}
 
 /** A reply that lets the hook go with no effect on the harness. */
 export const QUIET: HookReply = { exitCode: 0, stdout: "", stderr: "", offered: [] };
@@ -100,7 +111,8 @@ export class Mailbox {
   }
 
   send(agentId: string, req: SendMessageRequest): SendMessageResponse {
-    const harness = this.store.agent(agentId)?.harness;
+    const agent = this.store.agent(agentId);
+    const harness = agent?.harness;
     const routes: Record<string, ((id: string, agent: string) => void) | undefined> = {
       "claude-code": () => this.offer(agentId),
       codex: this.codex,
@@ -113,6 +125,7 @@ export class Mailbox {
       (r) => SendMessageResponse.parse(r),
       () => {
         if (deliver === undefined) throw new UnknownAgent(agentId, "that takes mail");
+        if (agent !== undefined && GONE.has(agent.state)) throw new AgentGone(agentId, agent.state);
         // A Codex agent with no thread has nowhere to take it; the sender hears so now.
         if (harness === "codex" && this.store.codexThread(agentId) === undefined) {
           throw new UnknownAgent(agentId, "bound to a Codex thread");
@@ -295,6 +308,7 @@ export class Mailbox {
    * With nothing queued, the call goes on at once.
    */
   fold(agentId: string, promptId: string | null): HookReply {
+    if (this.closed(agentId)) return QUIET;
     const queued = fitting(this.store.mail(agentId, ["queued"]), (m) => wakeText([m]).length, {
       max: FOLD_MAX_CHARS,
       firstAlways: false,
@@ -402,6 +416,12 @@ export class Mailbox {
 }
 
 const IN_FLIGHT = ["offered", "emitted", "seen"] as const;
+
+/**
+ * An agent that will never take another turn: closing or closed, its mail is given up; failed, it
+ * never started, and nothing would give its mail up.
+ */
+const GONE: ReadonlySet<AgentState> = new Set<AgentState>(["closing", "closed", "failed"]);
 
 /** A wake's offered IDs travel in a header, which clients cap; this keeps it to a few KB. */
 const MAX_WAKE_MESSAGES = 100;
