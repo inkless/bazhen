@@ -2,6 +2,7 @@ import optimizeLocales from "@react-aria/optimize-locales-plugin";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 import { answer, refuseUpgrade, servesHere } from "./src/dev/loopback.ts";
+import { isClosedSocketError } from "./src/dev/proxy-log.ts";
 
 const daemon = `http://127.0.0.1:${process.env.BAZHEN_PORT ?? 7900}`;
 const port = Number(process.env.BAZHEN_WEB_PORT ?? 7901);
@@ -45,10 +46,32 @@ const closeOnSigint = (): Plugin => ({
   },
 });
 
+/**
+ * Drops the two stack traces Vite's proxy prints when a terminal stream ends mid-write
+ * (`isClosedSocketError`). It filters Vite's own logger in place: a `customLogger` would replace
+ * it, and with it `logLevel` and `clearScreen`.
+ */
+const quietClosedSockets = (): Plugin => ({
+  name: "bazhen:quiet-closed-sockets",
+  apply: "serve",
+  configResolved({ logger }) {
+    const error = logger.error.bind(logger);
+    logger.error = (msg, options) => {
+      if (!isClosedSocketError(msg, options)) error(msg, options);
+    };
+  },
+});
+
 export default defineConfig({
   // The UI is written in English, so React Aria's strings for its other locales (the dialog's
   // hidden dismiss button, among others) would only add weight.
-  plugins: [react(), optimizeLocales.vite({ locales: ["en-US"] }), closeOnSigint(), loopbackOnly()],
+  plugins: [
+    react(),
+    optimizeLocales.vite({ locales: ["en-US"] }),
+    closeOnSigint(),
+    loopbackOnly(),
+    quietClosedSockets(),
+  ],
   server: {
     host: "127.0.0.1",
     port,

@@ -35,6 +35,7 @@ async function setup(opts: {
   const lists: unknown[] = [];
   const titles = [...opts.titles];
   const titled: RuntimeRef[] = [];
+  const logged: string[] = [];
   const threads = new CodexThreads({
     store,
     runtime: {
@@ -56,7 +57,7 @@ async function setup(opts: {
         if (unsaved-- > 0) throw new Error(`no rollout found for thread id ${threadId}`);
       },
     },
-    log: () => {},
+    log: (message) => logged.push(message),
     retryMs: 5,
     released: (id) => released.push(id),
     ...(opts.giveUpMs === undefined ? {} : { giveUpMs: opts.giveUpMs }),
@@ -76,6 +77,7 @@ async function setup(opts: {
     resumed,
     lists,
     titled,
+    logged,
     released,
     held,
     agentOn,
@@ -219,11 +221,41 @@ describe("Codex thread switches", () => {
     expect([s.boundTo(), s.untracked()]).toEqual([A, true]);
   });
 
-  it("leaves the agent on its thread when its title is no thread id", async () => {
+  it("leaves the agent on its thread when its title is no thread id, and names the title", async () => {
     const s = await setup({ titles: ["my project · codex"] });
     s.announce(B);
     await s.threads.paneTitleChanged("%0");
     expect([s.boundTo(), s.lists, s.untracked()]).toEqual([A, [], true]);
+    expect(s.logged.join("\n")).toContain('"my project · codex"');
+  });
+
+  it("ignores the empty title the TUI leaves as it exits, blank or not", async () => {
+    const s = await setup({ titles: ["", " "] });
+    await s.threads.paneTitleChanged("%0");
+    await s.threads.paneTitleChanged("%0");
+    expect([s.boundTo(), s.lists, s.untracked(), s.logged]).toEqual([A, [], false, []]);
+  });
+
+  it("lets held mail go when the TUI exits while the agent waits to move", async () => {
+    const s = await setup({ titles: [shown(B), ""], unsaved: 9 });
+    s.announce(B);
+    await s.threads.paneTitleChanged("%0");
+    expect(s.held()).toBe(true);
+    await s.threads.paneTitleChanged("%0");
+    expect([s.boundTo(), s.held(), s.released, s.untracked()]).toEqual([
+      A,
+      false,
+      [s.agentId],
+      false,
+    ]);
+  });
+
+  it("says switches are followed again once the title is back on the agent's thread", async () => {
+    const s = await setup({ titles: [shown(B), shown(A)], listed: [{ id: A }] });
+    await s.threads.paneTitleChanged("%0");
+    expect(s.untracked()).toBe(true);
+    await s.threads.paneTitleChanged("%0");
+    expect([s.boundTo(), s.untracked()]).toEqual([A, false]);
   });
 
   it("does nothing for a title still naming its thread, as after /compact", async () => {

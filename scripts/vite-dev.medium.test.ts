@@ -5,6 +5,7 @@ import { once } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { request, createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
+import type { Duplex } from "node:stream";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -113,6 +114,31 @@ function upgrade(port: number, path: string, host: string): Promise<string> {
   });
 }
 
+/** Opens a terminal stream as this machine's browser, which then reads none of its output. */
+function openStream(port: number): Promise<Duplex> {
+  return new Promise((resolve, reject) => {
+    const req = request({
+      host: "127.0.0.1",
+      port,
+      path: "/v1/terminals/term_1/stream",
+      headers: {
+        host: `127.0.0.1:${port}`,
+        connection: "Upgrade",
+        upgrade: "websocket",
+        "sec-websocket-version": "13",
+        "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+      },
+    });
+    req.on("upgrade", (_res, socket) => {
+      socket.pause();
+      resolve(socket);
+    });
+    req.on("response", () => reject(new Error("the stream was answered, not upgraded")));
+    req.on("error", reject);
+    req.end();
+  });
+}
+
 /**
  * Waits until this dev server, not some other process that took the port, answers this machine
  * with its page. Fails at once, with what it printed, if it exits first.
@@ -138,18 +164,43 @@ describe("the web dev server", () => {
     reached.push(`GET ${req.url ?? ""}`);
     res.end("{}");
   });
+  let streamsEnded = 0;
+  let streamsBackedUp = 0;
   daemon.on("upgrade", (req, socket) => {
     reached.push(`upgrade ${req.url ?? ""}`);
-    socket.destroy();
+    if (!req.url?.startsWith("/v1/terminals/")) {
+      socket.destroy();
+      return;
+    }
+    // A terminal stream: it accepts, then writes output non-stop, as a busy terminal does.
+    socket.on("error", () => {});
+    socket.write(
+      "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n",
+    );
+    const output = Buffer.alloc(16 * 1024, "x");
+    let backedUp = false;
+    const write = () => {
+      while (socket.writable && socket.write(output));
+      if (!socket.writable) return;
+      if (!backedUp) streamsBackedUp++;
+      backedUp = true;
+      socket.once("drain", write);
+    };
+    write();
+    // The proxy ends its side once the browser's has gone, and has handled any error by then.
+    socket.on("end", () => {
+      streamsEnded++;
+      socket.destroy();
+    });
   });
   const cache = mkdtempSync(join(tmpdir(), "bz-vite-cache-"));
   let port = 0;
   let child: ReturnType<typeof spawnGroup> | undefined;
+  let stderr = "";
 
   beforeAll(async () => {
     const daemonPort = await listen(daemon);
     port = await freePort();
-    let stderr = "";
     child = spawnGroup(process.execPath, ["--input-type=module", "-e", START], {
       cwd: web,
       stdio: ["ignore", "ignore", "pipe"],
@@ -219,5 +270,23 @@ describe("the web dev server", () => {
       script: ["200", ...forbidden],
       framed: ["403", ...forbidden],
     });
+  });
+
+  it("prints nothing when a terminal stream's browser goes while the daemon still writes", async () => {
+    const from = stderr.length;
+    const drops = 5;
+    for (let i = 1; i <= drops; i++) {
+      const stream = await openStream(port);
+      // Output unread when the tab goes makes the browser's close a reset, as closing a busy
+      // terminal's tab does.
+      await expect.poll(() => streamsBackedUp).toBe(i);
+      stream.destroy();
+    }
+    await expect.poll(() => streamsEnded).toBe(drops);
+    // A hang-up the daemon gives during the handshake still prints, and once it has, so has
+    // anything the dev server wrote before it.
+    await upgrade(port, "/v1/events?hang-up", `127.0.0.1:${port}`);
+    await expect.poll(() => stderr.slice(from)).toContain("socket hang up");
+    expect(stderr.slice(from)).not.toMatch(/(read|write) (EPIPE|ECONNRESET)/);
   });
 });
