@@ -155,9 +155,12 @@ export interface ServerEnd {
  * Starts `server` in the foreground (`tmux -D`), as this process's child, so a crash reports its
  * signal instead of a daemonised server vanishing.
  */
-export async function foreground(server: ConfiguredTmuxServer) {
-  const [bin, ...argv] = server.argv("-D");
-  const child = spawnGroup(bin, argv, { stdio: ["ignore", "ignore", "pipe"] });
+export async function foreground(server: ConfiguredTmuxServer, logDir?: string) {
+  const [bin, ...argv] = server.argv(...(logDir === undefined ? [] : ["-v"]), "-D");
+  const child = spawnGroup(bin, argv, {
+    stdio: ["ignore", "ignore", "pipe"],
+    ...(logDir === undefined ? {} : { cwd: logDir }),
+  });
   let stderr = "";
   child.stderr?.setEncoding("utf8").on("data", (d: string) => (stderr = (stderr + d).slice(-2000)));
   const started = Date.now();

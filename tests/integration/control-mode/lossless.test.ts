@@ -7,6 +7,7 @@ import { ControlClient } from "./control-client.ts";
 import {
   HISTORY,
   Screen,
+  cpuSeconds,
   fifo,
   missing,
   newTerminal,
@@ -106,6 +107,35 @@ async function burst(paused: boolean) {
   });
 }
 
+/**
+ * A control client, the only one on its session, that stops reading as soon as it attaches while
+ * `yes` runs: does tmux stop reading the pane (the program holds), or buffer for the client?
+ */
+async function stall(trial: number) {
+  const server = spikeServer(`stall-${trial}`);
+  servers.push(server);
+  const t = newTerminal(server, "stall", "yes");
+  const client = await ControlClient.attach(server, t.session);
+  clients.push(client);
+  client.pause();
+  const bytesAtPause = client.bytes;
+  const pid = Number(server.runSync(["display-message", "-p", "-t", t.pane, "#{pane_pid}"]));
+  const tmuxPid = Number(server.runSync(["display-message", "-p", "#{pid}"]));
+  const rss = () =>
+    Number(readFileSync(`/proc/${tmuxPid}/status`, "utf8").match(/VmRSS:\s+(\d+)/)?.[1]);
+  await sleep(10_000);
+  const row = {
+    trial,
+    bytesAtPause,
+    yesCpuS10: cpuSeconds(pid),
+    tmuxRssKb10: rss(),
+    serverAlive: server.alive(),
+    exitReason: client.exitReason,
+  };
+  report("stalled-reader-trial", row);
+  return row;
+}
+
 describe("control mode keeps every line tmux keeps", () => {
   it("a live view of seq 1 12000 holds what tmux holds", async () => {
     const dir = work();
@@ -169,43 +199,8 @@ describe("control mode keeps every line tmux keeps", () => {
     expect(r.missingFromView).toBe(0);
   });
 
-  it("a view that never reads: does tmux hold the program, or drop the view", async () => {
-    const server = spikeServer("stall");
-    servers.push(server);
-    const t = newTerminal(server, "stall", "yes");
-    const { client } = await ControlClient.attach(server, t.session).then((c) => {
-      clients.push(c);
-      return { client: c };
-    });
-    client.pause();
-    const sample = () => {
-      const [h, pid] = server
-        .runSync(["display-message", "-p", "-t", t.pane, "#{history_size} #{pane_pid}"])
-        .trim()
-        .split(" ");
-      return { history: Number(h), pid: Number(pid) };
-    };
-    const rows: Array<Record<string, unknown>> = [];
-    const start = Date.now();
-    for (let i = 0; i < 6; i++) {
-      await sleep(5000);
-      const s = sample();
-      const stat = readFileSync(`/proc/${s.pid}/stat`, "utf8");
-      const f = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
-      rows.push({
-        s: Math.round((Date.now() - start) / 1000),
-        history: s.history,
-        yesCpuS: (Number(f[11]) + Number(f[12])) / 100,
-        tmuxRssKb: Number(
-          readFileSync(
-            `/proc/${Number(server.runSync(["display-message", "-p", "#{pid}"]))}/status`,
-            "utf8",
-          ).match(/VmRSS:\s+(\d+)/)?.[1],
-        ),
-        clientAlive: client.child.exitCode === null,
-      });
-    }
-    report("stalled-reader", { rows, exitReason: client.exitReason });
-    expect(server.alive()).toBe(true);
+  it.each([1, 2, 3, 4])("a view that never reads, alone, under yes: trial %i", async (trial) => {
+    const row = await stall(trial);
+    expect(row.serverAlive).toBe(true);
   });
 });

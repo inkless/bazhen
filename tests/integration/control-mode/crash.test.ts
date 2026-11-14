@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -115,11 +115,27 @@ async function viewAll(viewers: Viewer, server: ConfiguredTmuxServer, terminals:
   return () => 0;
 }
 
-async function run(name: string, s: Scenario) {
+/** The end of tmux's verbose server log in `dir`, and lines naming a fatal error. */
+function serverLog(dir: string) {
+  const file = readdirSync(dir).find((f) => f.startsWith("tmux-server-"));
+  if (file === undefined) return { file: null };
+  const path = join(dir, file);
+  const text = readFileSync(path, "utf8");
+  const lines = text.split("\n");
+  return {
+    file,
+    mb: Math.round(statSync(path).size / 1e6),
+    fatal: lines.filter((l) => /fatal|not enough data|out of memory/.test(l)).slice(-5),
+    tail: lines.slice(-25),
+  };
+}
+
+async function run(name: string, s: Scenario, verbose = false) {
   const dir = mkdtempSync(join(tmpdir(), "bz-cc-"));
+  const logDir = mkdtempSync("/dev/shm/bz-cc-log-");
   const server = spikeServer(`crash-${name}`);
   servers.push(server);
-  const fg = await foreground(server);
+  const fg = await foreground(server, verbose ? logDir : undefined);
   const cat = bigFileLoop(dir);
   const terminals = Array.from({ length: 25 }, (_, i) =>
     newTerminal(server, `t${i}`, commandFor(s.load, i, cat)),
@@ -149,6 +165,7 @@ async function run(name: string, s: Scenario) {
     serverDiedAtMs: end?.atMs ?? null,
     serverStderr: end?.stderr.trim() || null,
     viewersRunning: running(),
+    ...(verbose ? { log: serverLog(logDir) } : {}),
   };
   report("crash", row);
   return row;
@@ -169,12 +186,11 @@ async function offTrial(i: number): Promise<boolean> {
 }
 
 const CONTROL_FULL: Scenario = { viewers: "control", load: "mixed", churn: "control-snapshot" };
+const CHURN_BARE: Scenario = { viewers: "none", load: "mixed", churn: "control-bare" };
 const ATTACH_FULL: Scenario = { viewers: "attach", load: "mixed", churn: "attach-snapshot" };
 
 describe("what kills the server under 25 viewers, floods and churn", () => {
   it.each([
-    ["control-viewers-only", { viewers: "control", load: "mixed", churn: "none" }],
-    ["attach-viewers-only", { viewers: "attach", load: "mixed", churn: "none" }],
     ["control-churn-snapshot", { viewers: "none", load: "mixed", churn: "control-snapshot" }],
     ["control-churn-bare", { viewers: "none", load: "mixed", churn: "control-bare" }],
     ["control-churn-busy-only", { viewers: "none", load: "busy", churn: "control-snapshot" }],
@@ -189,6 +205,14 @@ describe("what kills the server under 25 viewers, floods and churn", () => {
     const row = await run(name, scenario);
     expect(row.scenario).toBe(name);
   });
+
+  it.each(["1", "2"])(
+    "control churn, bare, under floods, with tmux's verbose log %s",
+    async (n) => {
+      const row = await run(`control-churn-bare-verbose-${n}`, CHURN_BARE, true);
+      expect(row.cycles).toBeGreaterThan(0);
+    },
+  );
 
   it("the harness can see a crash: refresh-client -A off on a busy pane, 8 trials", async () => {
     const TRIALS = 8;
