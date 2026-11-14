@@ -154,7 +154,7 @@ describe("stream endpoint", () => {
   });
 
   it("says when bytes sent to a view are written, and when they never will be", async () => {
-    const { url, viewer, joins } = await beating();
+    const { url, viewer, joins, left } = await beating();
     const ws = new WebSocket(url);
     await opened(ws);
     ws.send(JSON.stringify(hello));
@@ -162,11 +162,27 @@ describe("stream endpoint", () => {
     const written: string[] = [];
     viewer()?.send(Buffer.alloc(1 << 20), () => written.push("while open"));
     await expect.poll(() => written).toEqual(["while open"]);
-    const closed = new Promise((resolve) => ws.once("close", resolve));
     ws.terminate();
-    await closed;
+    await expect.poll(() => left).toEqual(["client_closed"]);
     viewer()?.send(Buffer.alloc(1 << 20), () => written.push("once closed"));
     await expect.poll(() => written).toEqual(["while open", "once closed"]);
+  });
+
+  it("says a write is over when its view's socket dies with the write still in flight", async () => {
+    const { url, viewer, joins, left } = await beating();
+    const ws = new WebSocket(url);
+    await opened(ws);
+    ws.send(JSON.stringify(hello));
+    await expect.poll(joins).toBe(1);
+    ws.pause();
+    const written: string[] = [];
+    viewer()?.send(Buffer.alloc(64 << 20), () => written.push("over"));
+    const stuck = [viewer()?.unsent(), [...written]];
+    ws.terminate();
+    await expect.poll(() => left).toEqual(["client_closed"]);
+    await expect.poll(() => written).toEqual(["over"]);
+    expect(stuck).toEqual([expect.any(Number), []]);
+    expect(stuck[0]).toBeGreaterThan(0);
   });
 
   it("tells the hub which paired device a view is on, and none for one that never paired", async () => {

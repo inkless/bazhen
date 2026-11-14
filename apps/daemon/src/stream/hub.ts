@@ -142,8 +142,8 @@ interface Entry {
   held: number;
   /**
    * What of the snapshot may still be in the socket's queue, which the view may lag by on top of
-   * `maxUnsentBytes`: a large history alone must not end the view. That is at most one piece of
-   * it, and shrinks as the socket drains.
+   * `maxUnsentBytes`: a large history alone must not end the view. That is the one piece in
+   * flight, if any.
    */
   snapshotBytes: number;
   /** Whether it has been told its input was dropped under the current lease. */
@@ -153,8 +153,8 @@ interface Entry {
 /** A view whose snapshot is still being written to its socket. */
 interface Loading {
   readonly watched: Watched;
-  /** Bytes of the snapshot not yet written. */
-  remaining: number;
+  /** The snapshot's size: all of it is held until the last of it is written. */
+  readonly bytes: number;
   /** When a piece of it was last written, or it began. */
   since: number;
   /** Stops waiting for the piece in flight, once the view has ended. */
@@ -204,7 +204,7 @@ export class TerminalHub {
   /**
    * `resumes` names the view's own earlier attachment, when it reattaches after losing its
    * socket; that one is ended before the view is told who drives, if the token is the one that
-   * attachment was given.
+   * attachment was given. A view turned away leaves it be.
    */
   async join(ref: RuntimeRef, viewer: Viewer, size: Size, resumes?: Resume): Promise<Attachment> {
     // An observer never sizes the terminal, not even by being the first to open it (§5.4).
@@ -233,20 +233,22 @@ export class TerminalHub {
       resumeDigest: digest(resumeToken),
     };
     watched.viewers.set(id, entry);
-    if (resumed) {
-      replaced.viewer.close();
-      this.end(watched, resumes.attachmentId, "replaced");
-    }
-    const snapshot = watched.emulator.snapshot();
+    // Not held in a local: the serialized text, which may be twice the size of its bytes, would
+    // then stay alive until the whole snapshot is written.
+    const serialized = bytesOf(watched.emulator.snapshot());
     this.log.started(id, watched.terminal, viewer.mode);
-    viewer.notify(leaseFrame(watched, id));
     viewer.notify({ type: "snapshot_start" });
-    const shown = Buffer.from(await snapshot);
+    const shown = await serialized;
     if (!watched.viewers.has(id)) throw new ViewEnded();
     if (!this.makeRoom(shown.length)) {
       this.end(watched, id, "attach_failed");
       throw new ViewRefused("too many views are still loading their screens; try again shortly");
     }
+    if (resumed && watched.viewers.get(resumes.attachmentId) === replaced) {
+      replaced.viewer.close();
+      this.end(watched, resumes.attachmentId, "replaced");
+    }
+    viewer.notify(leaseFrame(watched, id));
     await this.sendSnapshot(watched, id, entry, shown);
     // The view may have left, or the terminal closed, while its snapshot was sent.
     if (!watched.viewers.has(id)) throw new ViewEnded();
@@ -343,7 +345,8 @@ export class TerminalHub {
   /**
    * A piece at a time, each once the last is written. Pieces queued together would be written as
    * one batch, counted unwritten until all of it is, and a view reading slowly would look no
-   * different from one that has gone.
+   * different from one that has gone. Each piece is a copy, so a socket that holds on to the one
+   * in flight after its view has ended holds only that piece.
    */
   private async sendSnapshot(
     watched: Watched,
@@ -353,20 +356,20 @@ export class TerminalHub {
   ): Promise<void> {
     const loading: Loading = {
       watched,
-      remaining: shown.length,
+      bytes: shown.length,
       since: this.opts.now(),
       wake: () => {},
     };
     this.loading.set(id, loading);
     const step = this.opts.snapshotChunkBytes;
     for (let at = 0; at < shown.length && watched.viewers.has(id); at += step) {
-      const piece = shown.subarray(at, at + step);
+      const piece = Buffer.from(shown.subarray(at, at + step));
       entry.snapshotBytes = piece.length;
       await new Promise<void>((resolve) => {
         loading.wake = resolve;
         entry.viewer.send(piece, resolve);
       });
-      loading.remaining -= piece.length;
+      entry.snapshotBytes = 0;
       loading.since = this.opts.now();
     }
     this.loading.delete(id);
@@ -380,13 +383,13 @@ export class TerminalHub {
   private makeRoom(bytes: number): boolean {
     const now = this.opts.now();
     let pending = 0;
-    for (const loading of this.loading.values()) pending += loading.remaining;
+    for (const loading of this.loading.values()) pending += loading.bytes;
     const fits = () => pending === 0 || pending + bytes <= this.opts.maxSnapshotBytes;
     for (const [id, loading] of this.loading) {
       if (fits()) break;
       if (now - loading.since < this.opts.snapshotStallMs) continue;
       const entry = loading.watched.viewers.get(id);
-      pending -= loading.remaining;
+      pending -= loading.bytes;
       if (entry !== undefined) this.evict(loading.watched, id, entry);
     }
     return fits();
@@ -561,6 +564,8 @@ export class TerminalHub {
 }
 
 const digest = (token: string) => createHash("sha256").update(token).digest();
+
+const bytesOf = async (text: Promise<string>) => Buffer.from(await text);
 
 /** Tells a view why its stream is over, and closes it. */
 function dismiss(entry: Entry, frame: StreamServerFrame): void {
