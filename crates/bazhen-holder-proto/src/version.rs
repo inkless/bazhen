@@ -1,0 +1,87 @@
+use std::collections::BTreeMap;
+use std::fmt;
+
+use crate::body::MAX_SAFE_INTEGER;
+
+/// The version this build speaks. Within a major, changes are additive only, and the minor is
+/// bumped with any addition.
+pub const PROTOCOL_VERSION: &str = "1.0";
+
+/// A `major.minor` version.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Version {
+    major: u64,
+    minor: u64,
+}
+
+impl Version {
+    pub const fn major(self) -> u64 {
+        self.major
+    }
+
+    pub const fn minor(self) -> u64 {
+        self.minor
+    }
+
+    /// `major.minor` in ASCII digits, each part a safe integer as the TypeScript peer reads it; a
+    /// part too long for one is no version, rather than another number.
+    pub fn parse(text: &str) -> Option<Self> {
+        let (major, minor) = text.split_once('.')?;
+        Some(Self {
+            major: safe_part(major)?,
+            minor: safe_part(minor)?,
+        })
+    }
+}
+
+impl fmt::Display for Version {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{}", self.major, self.minor)
+    }
+}
+
+fn safe_part(part: &str) -> Option<u64> {
+    if part.is_empty() || !part.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    part.parse().ok().filter(|n| *n <= MAX_SAFE_INTEGER)
+}
+
+fn top_minors<S: AsRef<str>>(versions: &[S]) -> BTreeMap<u64, u64> {
+    let mut tops = BTreeMap::new();
+    for version in versions.iter().filter_map(|v| Version::parse(v.as_ref())) {
+        let top = tops.entry(version.major).or_insert(version.minor);
+        *top = (*top).max(version.minor);
+    }
+    tops
+}
+
+/// The version two peers both speak: the highest major they share, at the lower of their two
+/// minors in it. `None` when they share no major. An entry that isn't a version is skipped.
+pub fn negotiate<A: AsRef<str>, B: AsRef<str>>(ours: &[A], theirs: &[B]) -> Option<Version> {
+    let ours = top_minors(ours);
+    let theirs = top_minors(theirs);
+    ours.iter().rev().find_map(|(major, minor)| {
+        theirs.get(major).map(|their| Version {
+            major: *major,
+            minor: (*minor).min(*their),
+        })
+    })
+}
+
+/// True when this build shares a major with `theirs`.
+pub(crate) fn speaks<B: AsRef<str>>(theirs: &[B]) -> bool {
+    negotiate(&[PROTOCOL_VERSION], theirs).is_some()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn refuses_anything_but_digits_dot_digits() {
+        for text in ["1", "1.", ".1", "1.0.0", "-1.0", "1.0 ", "+1.0", "١.٠"] {
+            assert_eq!(Version::parse(text), None, "{text}");
+        }
+    }
+}

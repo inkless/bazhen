@@ -431,6 +431,21 @@ const REQUEST_SOURCES: readonly FrameSource[] = [
     rawRequest(req.hello, 68, '{"protocol":["2.0"],"writer":["\\ud800"]}'),
   ),
   inbound(
+    "signal as a one-key object, which zod refuses and serde would read",
+    "malformed",
+    rawRequest(req.signal, 71, '{"signal":{"SIGINT":null}}'),
+  ),
+  inbound(
+    "set-theme as a one-key object",
+    "malformed",
+    rawRequest(req["set-theme"], 72, '{"theme":{"dark":null}}'),
+  ),
+  inbound(
+    "respawn with its theme as a one-key object",
+    "malformed",
+    rawRequest(req.respawn, 73, JSON.stringify({ ...processSpec, theme: { light: null } })),
+  ),
+  inbound(
     "set-theme with no theme, as nullable is never missing",
     "malformed",
     rawRequest(req["set-theme"], 65, "{}"),
@@ -789,6 +804,7 @@ const SPAWN_SPEC_SOURCES = [
   ),
   spec("a reserved tag", { ...spawnSpec, tags: { prototype: "" } }, "invalid"),
   spec("theme null", { ...spawnSpec, theme: null }, "invalid"),
+  spec("theme as a one-key object", { ...spawnSpec, theme: { dark: null } }, "invalid"),
   spec("a lone surrogate in env", { ...spawnSpec, env: { A: "\udfff" } }, "invalid"),
   spec(
     "a lone surrogate in a field from a later minor",

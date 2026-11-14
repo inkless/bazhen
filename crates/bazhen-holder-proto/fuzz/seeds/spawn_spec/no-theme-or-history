@@ -1,0 +1,1 @@
+{"protocol":["1.0"],"terminalId":"term_0190a1b2c3d47abc8def0123456789ab","socket":"/run/user/1000/bazhen/holders/t.sock","tags":{"kind":"agent"},"size":{"cols":80,"rows":24},"argv":["claude","--resume","日本語"],"cwd":"/home/u/src","env":{"1":"integer-like keys sort first in JavaScript","TERM":"xterm-256color"},"generation":4}
