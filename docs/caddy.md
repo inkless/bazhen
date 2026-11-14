@@ -28,20 +28,40 @@ whoever reaches Caddy. The page itself loads unpaired, since it shows the pairin
 same built bundle for everyone and holds nothing secret. Two lines in the Caddyfile below keep
 strangers from reaching it at all:
 
-- **`bind`** makes Caddy listen on this machine's LAN address only. Without it, Caddy listens on
-  ports 80 and 443 of every interface, a VPN's included, and anyone on any of those networks can
-  reach it.
-- **`remote_ip`** admits only the devices you name, by address. An address names a device only
-  while that device holds it: when your phone is away, another device on the network can take its
-  address and be let in. So give each phone a fixed address:
+```caddyfile
+@outside not remote_ip 192.168.1.0/24
+abort @outside
+```
+
+- **Your network only.** Caddy listens on ports 80 and 443 of every interface, a VPN's included,
+  so anyone on any of those networks can reach it. `remote_ip` aborts every request that doesn't
+  come from your home network's range, before it reaches Bazhen.
+
+  Caddy's `bind` would instead listen on the LAN address alone, but on macOS a process that isn't
+  root can listen on a port below 1024 only on all addresses at once. `bind 192.168.1.20` on port
+  443 needs `sudo`, which breaks Caddy's later runs as you (see
+  [Running it as yourself](#running-it-as-yourself)). For `bind`, use a port above 1024 instead
+  ([On a high port](#on-a-high-port)).
+- **Your devices only, if you want more.** Name the phones in `remote_ip` instead of the range
+  (`not remote_ip 192.168.1.30 192.168.1.31`), and only they are let in. An address names a device
+  only while that device holds it: when your phone is away, another device on the network can take
+  its address and be let in. So give each phone a fixed address:
   - Turn off its private Wi-Fi address for this network (iOS: Settings → Wi-Fi → ⓘ → Private
     Wi-Fi Address → Off; Android: Wi-Fi → the network → Privacy → Use device MAC), so it keeps
     one hardware address instead of rotating it.
   - Then reserve an address for that hardware address in your router's DHCP settings, and name
     the reserved address in the Caddyfile.
 
-Keep this to a network only you use. The examples use `192.168.1.20` for this machine and
-`192.168.1.30` and `192.168.1.31` for the phones; replace them with yours.
+Keep this to a network only you use. The examples use `192.168.1.0/24` for the network,
+`192.168.1.20` for this machine and `192.168.1.30` and `192.168.1.31` for the phones; replace them
+with yours.
+
+A Mac on Wi-Fi and a dock's Ethernet at once has an address on each. Use the one on the default
+route, everywhere this page names this machine's address:
+
+```sh
+ipconfig getifaddr "$(route -n get default | awk '/interface:/ { print $2 }')"
+```
 
 ## With your own domain
 
@@ -72,12 +92,11 @@ domain.
 
    ```caddyfile
    bazhen.example.com {
-   	bind 192.168.1.20
    	tls {
    		dns cloudflare {env.CF_API_TOKEN}
    	}
-   	@others not remote_ip 192.168.1.30 192.168.1.31
-   	abort @others
+   	@outside not remote_ip 192.168.1.0/24
+   	abort @outside
    	reverse_proxy 127.0.0.1:7900
    }
    ```
@@ -96,14 +115,19 @@ Caddy signs a certificate for this machine's address with its own local authorit
 trusts that authority once.
 
 1. Write a `Caddyfile` for the machine's LAN address, and its `.local` name if you want one
-   (`scutil --get LocalHostName` prints it on macOS):
+   (`scutil --get LocalHostName` prints it on macOS). `skip_install_trust` keeps Caddy from adding
+   its authority to this machine's trust store, which the phone doesn't need, and which would ask
+   for your password:
 
    ```caddyfile
+   {
+   	skip_install_trust
+   }
+
    https://192.168.1.20, https://my-mac.local {
-   	bind 192.168.1.20
    	tls internal
-   	@others not remote_ip 192.168.1.30 192.168.1.31
-   	abort @others
+   	@outside not remote_ip 192.168.1.0/24
+   	abort @outside
    	reverse_proxy 127.0.0.1:7900
    }
    ```
@@ -116,7 +140,7 @@ trusts that authority once.
      turn on full trust under Settings → General → About → Certificate Trust Settings.
    - **Android:** Settings → Security → More security settings → Install a certificate → CA
      certificate. The menu names vary by maker.
-   - **This machine:** run `caddy trust`.
+   - **This machine:** run `caddy trust`, only if you also open Bazhen this way here.
 4. Start Caddy and Bazhen with every address you open it at:
 
    ```sh
@@ -130,6 +154,45 @@ site. Caddy keeps the key on this machine; don't copy it anywhere else. When you
 Bazhen this way, remove the root from each device: on iOS, delete the profile under Settings →
 General → VPN & Device Management; on Android, remove it under Settings → Security → Trusted
 credentials → User; on this machine, run `caddy untrust`.
+
+## On a high port
+
+`bind` works without root on a port above 1024. Give the port in each site address, and in
+`BAZHEN_EXTERNAL_ORIGINS`, since the browser shows it:
+
+```caddyfile
+{
+	skip_install_trust
+	auto_https disable_redirects
+}
+
+https://192.168.1.20:8443 {
+	bind 192.168.1.20
+	tls internal
+	@outside not remote_ip 192.168.1.0/24
+	abort @outside
+	reverse_proxy 127.0.0.1:7900
+}
+```
+
+```sh
+BAZHEN_EXTERNAL_ORIGINS=https://192.168.1.20:8443 pnpm bazhen start
+```
+
+`disable_redirects` keeps Caddy off port 80, where it would otherwise listen to redirect plain
+HTTP. Keep the `remote_ip` lines: `bind` leaves out the other interfaces, not the other devices on
+this one. With your own domain, use `bazhen.example.com:8443` and its `tls` block instead, and
+leave out `skip_install_trust`.
+
+## Running it as yourself
+
+Run Caddy as your user, never with `sudo`. `sudo` keeps your `HOME`, so Caddy writes its
+certificates and authority under `~/Library/Application Support/Caddy` as root, and the next run
+as yourself fails with "permission denied". If that happened, give the directory back:
+
+```sh
+sudo chown -R "$(whoami)" ~/Library/Application\ Support/Caddy
+```
 
 ## Checking it
 
