@@ -136,3 +136,9 @@ export async function until(check: () => boolean, ms: number, step = 50): Promis
   }
   return check();
 }
+
+/** The environment a PTY-attached `tmux attach` gets here. */
+export const attachEnv = (): Record<string, string> => ({
+  PATH: process.env["PATH"] ?? "",
+  LANG: "C.UTF-8",
+});
