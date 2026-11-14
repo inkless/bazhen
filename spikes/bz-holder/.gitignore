@@ -2,3 +2,5 @@ node_modules/
 target/
 runs/
 programs/recordings/htop.bin
+programs/recordings/claude.bin
+programs/recordings/codex.bin

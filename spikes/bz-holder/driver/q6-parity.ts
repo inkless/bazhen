@@ -55,7 +55,7 @@ const scenarios: Scenario[] = [
     argv: (home) => [
       "/bin/sh",
       "-c",
-      `node ${PROGRAMS}/gen.ts sgr160 ${home}/s.txt 3000 && timeout 2 ${REPLAY} ${home}/s.txt 400; exec sleep 600`,
+      `node ${PROGRAMS}/gen.ts sgr160 ${home}/s.txt 3000 && { ${REPLAY} ${home}/s.txt 400 & p=$!; sleep 2; kill $p; }; exec sleep 600`,
     ],
     settle: 3500,
   },
@@ -119,7 +119,10 @@ const home = makeHome("q6");
 let failures = 0;
 const holders = [];
 
-for (const s of scenarios.filter((x) => only.length === 0 || only.includes(x.name))) {
+// In --replay, any recording can be named, such as the owner's claude or codex.
+const known = new Set(scenarios.map((x) => x.name));
+const extra: Scenario[] = replayMode ? only.filter((n) => !known.has(n)).map((name) => ({ name, argv: () => [] })) : [];
+for (const s of [...scenarios, ...extra].filter((x) => only.length === 0 || only.includes(x.name))) {
   const recording = path.join(REC, `${s.name}.bin`);
   const argv = replayMode
     ? ["/bin/sh", "-c", `stty -opost -echo; cat '${recording}'; exec sleep 600`]
