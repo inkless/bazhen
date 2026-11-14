@@ -115,7 +115,10 @@ describe("decoding holder frames", () => {
 
   it("refuses a frame over the cap from its header alone", () => {
     const decoder = holderRequestDecoder();
-    expect(decoder.push(u32(HOLDER_MAX_REQUEST_BYTES + 1)).malformed).toMatch(/over the .* cap/);
+    expect(decoder.push(u32(HOLDER_MAX_REQUEST_BYTES + 1))).toEqual({
+      frames: [],
+      malformed: expect.stringMatching(/over the .* cap/),
+    });
   });
 
   it.each([
@@ -125,7 +128,9 @@ describe("decoding holder frames", () => {
     ["JSON its schema refuses", raw(0x05, concat(u32(1), text('{"cols":-1,"rows":1}'))), /resize/],
     ["a body that isn't UTF-8", raw(0x05, concat(u32(1), bytes(0xff))), /not UTF-8/],
   ])("calls %s malformed", (_, frame, reason) => {
-    expect(holderRequestDecoder().push(frame).malformed).toMatch(reason);
+    expect(holderRequestDecoder().push(frame)).toMatchObject({
+      malformed: expect.stringMatching(reason),
+    });
   });
 
   it.each([
@@ -133,7 +138,9 @@ describe("decoding holder frames", () => {
     ["an offset past 2^53 - 1", raw(0x83, u64(2n ** 53n)), /past 2\^53/],
     ["a reply with no id", raw(0x86, bytes(0)), /has no id/],
   ])("calls a reply with %s malformed", (_, frame, reason) => {
-    expect(holderReplyDecoder().push(frame).malformed).toMatch(reason);
+    expect(holderReplyDecoder().push(frame)).toMatchObject({
+      malformed: expect.stringMatching(reason),
+    });
   });
 
   it("returns the frames before a malformed one, and nothing after it", () => {
