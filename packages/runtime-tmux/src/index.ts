@@ -693,7 +693,7 @@ const DEFAULT_COLORTERM = "truecolor";
  * `tmux kill-server` would end Bazhen's private server and every terminal on it. A new terminal
  * tab has neither, so `env` drops them and then execs the argv, which stays the pane's process.
  */
-const processArgs = (spec: ProcessSpec) => [
+export const processArgs = (spec: ProcessSpec) => [
   "-c",
   spec.cwd,
   ...Object.entries(spec.env).flatMap(([k, v]) => ["-e", escapeTrailingSemicolon(`${k}=${v}`)]),
