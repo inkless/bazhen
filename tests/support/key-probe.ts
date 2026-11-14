@@ -3,6 +3,7 @@
 //   --lines=N     print N numbered lines first, so the terminal has scrollback
 //   --mouse       ask for mouse reports, SGR-encoded, as Claude Code does
 //   --alternate-on-key   switch to the alternate screen when a "!" arrives
+//   --app-cursor  ask for application cursor keys (DECCKM), as vim and less do
 import { appendFileSync } from "node:fs";
 
 const [log, ...options] = process.argv.slice(2);
@@ -11,6 +12,7 @@ const lines = Number(options.find((o) => o.startsWith("--lines="))?.slice("--lin
 process.stdin.setRawMode(true);
 for (let i = 1; i <= lines; i++) process.stdout.write(`line ${i}\r\n`);
 if (options.includes("--mouse")) process.stdout.write("\x1b[?1000h\x1b[?1006h");
+if (options.includes("--app-cursor")) process.stdout.write("\x1b[?1h");
 // Focus reports too, as a program that wants them asks; tmux forwards none otherwise.
 process.stdout.write("\x1b[?1004hkey-probe ready\r\n");
 process.stdin.on("data", (chunk: Buffer) => {

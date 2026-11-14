@@ -460,3 +460,31 @@ main {
 .pairing p {
   margin: 0;
 }
+
+/*
+ * The touch key bar, fixed to the bottom and raised above the soft keyboard from script; the room
+ * under the page keeps it off the terminal's last rows. It scrolls sideways on the narrowest
+ * phones rather than shrink a key below the hit size.
+ */
+.key-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  display: flex;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  padding-bottom: max(var(--space-1), env(safe-area-inset-bottom));
+  overflow-x: auto;
+  border-top: 1px solid var(--color-border-strong);
+  background: var(--color-bg);
+}
+
+.key-bar .button {
+  flex: 1 0 var(--size-hit-min);
+  padding: 0 var(--space-1);
+  font-family: var(--font-family-mono);
+}
+
+.key-bar-room {
+  height: calc(var(--size-hit-min) + 2 * var(--space-1) + 1px);
+}

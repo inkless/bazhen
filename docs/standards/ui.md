@@ -118,6 +118,13 @@ tap on a phone.
   trigger, and closes on Escape or a tap outside. Its confirm acts once per opening; the screen's
   own command should still refuse a second send while the first is in flight.
 - `ThemeSwitch`, the header's System / Light / Dark choice.
+- `ToggleButton` for a button that stays pressed until pressed again, such as the key bar's
+  sticky Ctrl.
+
+On a touch screen, a key bar under the terminal types what a phone's or iPad's keyboard lacks:
+Esc, Tab, Ctrl, the arrows, newline and Enter, through the same key map and lease as a typed key.
+Its keys take `preventFocusOnPress`, so a tap leaves focus, and the soft keyboard, on the
+terminal.
 
 A new widget (a menu, a combo box, a toast) is a new wrapper: import the React Aria component by
 name, style it from semantic tokens, and add the pairs it draws to the contrast test. Its

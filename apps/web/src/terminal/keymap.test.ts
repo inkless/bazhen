@@ -26,6 +26,10 @@ describe("terminal key map", () => {
     expect(matchKey(keydown("Enter", { shiftKey: true }), DEFAULT_KEY_MAP)).toBe("\x1b\r");
   });
 
+  it("sends Esc for Cmd+., for a keyboard with no Esc key", () => {
+    expect(matchKey(keydown(".", { metaKey: true }), DEFAULT_KEY_MAP)).toBe("\x1b");
+  });
+
   it("leaves plain Enter to xterm.js, so it still submits", () => {
     expect(matchKey(keydown("Enter"), DEFAULT_KEY_MAP)).toBeNull();
   });

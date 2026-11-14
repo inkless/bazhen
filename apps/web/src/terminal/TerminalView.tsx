@@ -17,6 +17,7 @@ import {
   type TuiTheme,
 } from "@bazhen/protocol";
 import { Heartbeat, PING_EVERY_MS } from "./heartbeat.ts";
+import { barBytes, keyBar, withCtrl, type BarTarget } from "./bar-keys.ts";
 import { matchKey } from "./keymap.ts";
 import { statusText, type Status } from "./status.ts";
 import { Backoff } from "./reconnect.ts";
@@ -113,6 +114,7 @@ function connect(
   term.loadAddon(new Unicode11Addon());
   term.unicode.activeVersion = "11";
   term.open(element);
+  notAFormField(term);
   loadRenderer(term);
   fit.fit();
   swallowReplies(term);
@@ -278,15 +280,32 @@ function connect(
   const route = () =>
     wheelAction({ mouseTracking: term.modes.mouseTrackingMode !== "none", alternate, kind });
   const detachScroll = attachScrollInput(element, term, route, (bytes) => input(bytes, false));
-  const typed = term.onData((data) =>
-    input(encoder.encode(data), withoutEventReports(data) !== ""),
-  );
+  const bar = keyBar();
+  const target: BarTarget = {
+    press: (key) => {
+      const ctrl = bar.takeCtrl();
+      const appCursor = term.modes.applicationCursorKeysMode;
+      input(encoder.encode(barBytes(key, { keyMap: settings.keyMap, ctrl, appCursor })), true);
+    },
+    focus: () => term.focus(),
+  };
+  const unregister = bar.register(target);
+  const typed = term.onData((data) => {
+    const keystroke = withoutEventReports(data) !== "";
+    // The bar's Ctrl, armed for the next key, applies to a letter typed on the soft keyboard.
+    const ctrl = keystroke && bar.target() === target && bar.takeCtrl();
+    input(encoder.encode(ctrl ? withCtrl(data) : data), keystroke);
+  });
   // Only X10 mouse reports come this way.
   const binary = term.onBinary((data) => input(latin1(data), false));
   const resize = term.onResize(({ cols, rows }) => send({ type: "resize", cols, rows }));
   const observer = new ResizeObserver(() => fit.fit());
   observer.observe(element);
   const detachTakeover = attachTakeover(element, engage);
+  // The bar types into the terminal the user last touched, not one the window's focus reached.
+  const aim = () => bar.engaged(target);
+  element.addEventListener("pointerdown", aim);
+  element.addEventListener("focusin", aim);
   // A contrast preference can change while it is open; it repaints in place.
   const unfollow = page.subscribe(() => {
     term.options.theme = colours();
@@ -298,6 +317,9 @@ function connect(
     clearInterval(beating);
     document.removeEventListener("visibilitychange", shown);
     detachTakeover();
+    element.removeEventListener("pointerdown", aim);
+    element.removeEventListener("focusin", aim);
+    unregister();
     detachScroll();
     observer.disconnect();
     typed.dispose();
@@ -323,6 +345,20 @@ function loadRenderer(term: Xterm): void {
   } catch {
     // No WebGL in this browser: the DOM renderer is already drawing.
   }
+}
+
+/**
+ * xterm.js types through a hidden textarea, which iOS takes for a form field and offers to fill
+ * with passwords, cards and addresses, and to correct and capitalise. xterm.js turns off
+ * correction and spell checking; this turns off the rest a page can.
+ */
+function notAFormField(term: Xterm): void {
+  const field = term.textarea;
+  if (field === undefined) return;
+  field.autocomplete = "off";
+  field.autocapitalize = "none";
+  field.setAttribute("autocorrect", "off");
+  field.spellcheck = false;
 }
 
 /**

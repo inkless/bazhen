@@ -17,8 +17,12 @@ export type KeyMap = ReadonlyMap<string, string>;
 /**
  * xterm.js sends a bare CR for Shift+Enter, the same as Enter, and tmux can't tell the TUIs it was
  * Shift+Enter; ESC CR is what Claude Code and Codex both take as a newline (foundation-design §5.9).
+ * Cmd+. is Esc, as on macOS, for an iPad keyboard, which has no Esc key.
  */
-export const DEFAULT_KEY_MAP: KeyMap = new Map([["shift+enter", "\x1b\r"]]);
+export const DEFAULT_KEY_MAP: KeyMap = new Map([
+  ["shift+enter", "\x1b\r"],
+  ["meta+.", "\x1b"],
+]);
 
 const MODIFIERS = ["ctrl", "alt", "shift", "meta"] as const;
 

@@ -201,9 +201,12 @@ test("scrolls the scrollback with a swipe on a touch screen", async ({ browser }
   const cdp = await context.newCDPSession(page);
   const x = box.x + box.width / 2;
   const at = (y: number) => [{ x, y }];
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: at(box.y + 20) });
+  // The page may be scrolled to the terminal's cursor, its top above the window: swipe from the
+  // top of what shows.
+  const start = Math.max(box.y, 0) + 20;
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: at(start) });
   for (let step = 1; step <= 10; step++) {
-    const touchPoints = at(box.y + 20 + step * 30);
+    const touchPoints = at(start + step * 30);
     await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints });
   }
   await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
@@ -356,4 +359,96 @@ test("answers none of tmux's terminal queries itself", async ({ page }) => {
   const program = await launchProbe(page);
   // The queries come first on the stream, so by the time the probe's text shows, they are parsed.
   expect(program.sent).toEqual([]);
+});
+
+/** A phone: a touch screen, which is what shows the key bar. */
+const PHONE = { hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } };
+
+const keyBar = (page: Page) => page.getByRole("toolbar", { name: "terminal keys" });
+
+/** Taps `key` on the key bar and waits for exactly `bytes` to reach the program. */
+async function tapKey(page: Page, program: Probe, key: string, bytes: string): Promise<void> {
+  const since = Date.now();
+  await keyBar(page).getByRole("button", { name: key, exact: true }).tap();
+  // Exactly: a key that moved focus off the terminal would add a focus report.
+  await expect.poll(() => program.received(since)).toBe(hex(bytes));
+}
+
+test("types the keys a phone's keyboard lacks from the key bar", async ({ browser }) => {
+  const phone = await (await browser.newContext(PHONE)).newPage();
+  const program = await launchProbe(phone);
+  // Nothing for iOS to offer to fill, correct or capitalise in what the terminal types through.
+  const field = phone.getByRole("textbox", { name: "Terminal input" });
+  for (const [name, value] of [
+    ["autocomplete", "off"],
+    ["autocapitalize", "none"],
+    ["autocorrect", "off"],
+    ["spellcheck", "false"],
+  ] as const) {
+    await expect(field).toHaveAttribute(name, value);
+  }
+  await phone.locator(".xterm-screen").tap();
+  await expect(status(phone)).toHaveText("Driving");
+  for (const [key, bytes] of [
+    ["Escape", "\x1b"],
+    ["Tab", "\t"],
+    ["Up arrow", "\x1b[A"],
+    ["Down arrow", "\x1b[B"],
+    ["Right arrow", "\x1b[C"],
+    ["Left arrow", "\x1b[D"],
+    ["Newline", "\x1b\r"],
+    ["Enter", "\r"],
+  ] as const) {
+    await tapKey(phone, program, key, bytes);
+  }
+  const ctrl = keyBar(phone).getByRole("button", { name: "Control" });
+  await ctrl.tap();
+  await expect(ctrl).toHaveAttribute("aria-pressed", "true");
+  const since = Date.now();
+  await phone.keyboard.type("c");
+  await expect.poll(() => program.received(since)).toBe(hex("\x03"));
+  // For one key only.
+  await expect(ctrl).toHaveAttribute("aria-pressed", "false");
+  await ctrl.tap();
+  await tapKey(phone, program, "Right arrow", "\x1b[1;5C");
+  await phone.context().close();
+});
+
+test("sends the key bar's arrows as a program in application cursor mode reads them", async ({
+  browser,
+}) => {
+  const phone = await (await browser.newContext(PHONE)).newPage();
+  const program = await launchProbe(phone, "--app-cursor");
+  await phone.locator(".xterm-screen").tap();
+  await expect(status(phone)).toHaveText("Driving");
+  await tapKey(phone, program, "Up arrow", "\x1bOA");
+  await tapKey(phone, program, "Left arrow", "\x1bOD");
+  await phone.context().close();
+});
+
+test("takes over with the first key bar key on a phone that is watching, and sends it with the next", async ({
+  page,
+  browser,
+}) => {
+  const program = await launchProbe(page);
+  await drive(page);
+  // A laptop has no key bar: its keyboard has the keys.
+  await expect(keyBar(page)).toHaveCount(0);
+  const phone = await openSecondView(browser, "key-probe ready", PHONE);
+  const since = Date.now();
+  const escape = keyBar(phone).getByRole("button", { name: "Escape" });
+  await escape.tap();
+  await expect(status(phone)).toHaveText("Driving");
+  await expect(status(page)).toContainText(TAKEN_OVER);
+  await escape.tap();
+  await expect.poll(() => program.received(since)).toBe(hex("\x1b"));
+  await phone.context().close();
+});
+
+test("sends Esc for Cmd+., for an iPad keyboard, which has no Esc key", async ({ page }) => {
+  const program = await launchProbe(page);
+  await drive(page);
+  const since = Date.now();
+  await page.keyboard.press("Meta+Period");
+  await expect.poll(() => program.received(since)).toBe(hex("\x1b"));
 });

@@ -233,3 +233,16 @@ pre {
     outline: 2px solid Highlight;
   }
 }
+
+/* Pressed and held, as a sticky modifier: the accent fill, outlined for forced colours. */
+.toggle-button[data-selected] {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+@media (forced-colors: active) {
+  .toggle-button[data-selected] {
+    outline: 2px solid Highlight;
+  }
+}
