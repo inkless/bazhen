@@ -150,9 +150,23 @@ export interface RuntimeStream {
    * closes it instead. One that keeps failing is reported once, until it succeeds again.
    */
   onFailure(cb: (failure: StreamFailure) => void): void;
+  /**
+   * A snapshot client's terminal has a new process, the generation given: called before its first
+   * byte. The consumer applies `RESPAWN_RESET`, as the runtime did. A client that redraws, as
+   * tmux's does, is never told: its runtime redraws it instead.
+   */
+  onRespawn(cb: (generation: number) => void): void;
   /** Must release every OS handle the stream holds. */
   close(): void;
 }
+
+/**
+ * What a respawn does to a snapshot runtime's terminal before the next process starts: back to
+ * its main screen, every mode as a fresh terminal has it, and the screen cleared, its history
+ * kept.
+ */
+export const RESPAWN_RESET =
+  "\x1b[?1049l\x1b[!p\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1004l\x1b[?2004l\x1b[H\x1b[2J";
 
 /** What failed, as a few words such as `screen check`, and the error it failed with. */
 export interface StreamFailure {

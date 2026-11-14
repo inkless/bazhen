@@ -6,13 +6,14 @@
 // no server runs until the first terminal is created or after the last one goes, and while none
 // runs nothing can be read. It attaches as tmux does, with the history beside a stream that
 // redraws, or, in snapshot mode, as a holder does, with one snapshot the stream carries on from:
-// everything the terminal printed, replayed, so a test that prints a query puts it in a snapshot.
+// everything the terminal printed, replayed, with the queries in it taken out.
 
 import type { ExitStatus, Signal } from "@bazhen/protocol";
 import type { TerminalId } from "../ids.ts";
 import {
   assertSameGeneration,
   ProcessState,
+  RESPAWN_RESET,
   StaleIncarnation,
   type Attached,
   type SnapshotAttached,
@@ -29,6 +30,7 @@ import {
   type TerminalSpec,
 } from "../runtime.ts";
 import { decode, encode } from "./platform.ts";
+import type { ContractHarness } from "./runtime-contract.ts";
 
 /** What reached one terminal from its clients, for a test to assert on. */
 export interface ClientRecord {
@@ -68,6 +70,7 @@ interface Terminal {
 interface Client {
   emit(bytes: Uint8Array): void;
   switched(alternate: boolean): void;
+  respawned(generation: number): void;
   fail(failure: StreamFailure): void;
   end(): void;
 }
@@ -80,6 +83,19 @@ export interface FakeRuntimeOptions {
 }
 
 const EXIT = /(?:^|;)\s*exit (\d+)\s*$/;
+const ESC = "\\x1b";
+/** Status and device reports, window-size and mode requests, and colour queries. */
+const QUERY = new RegExp(
+  [
+    `${ESC}\\[[?>=]?[0-9;]*[cn]`,
+    `${ESC}\\[>[0-9;]*q`,
+    `${ESC}\\[\\??[0-9;]*\\$p`,
+    `${ESC}\\[1[4-9]t`,
+    `${ESC}\\][0-9]+;\\?(?:\\x07|${ESC}\\\\)`,
+  ].join("|"),
+  "g",
+);
+
 /** Where the program is after `text`: on its alternate screen if its last switch went there. */
 function screenAfter(text: string, alternate: boolean): boolean {
   let last = -1;
@@ -160,6 +176,7 @@ export class FakeRuntime implements RuntimeAdapter {
     if (size !== null) t.size = size;
     const data: ((bytes: Uint8Array) => void)[] = [];
     const switches: ((alternate: boolean) => void)[] = [];
+    const respawns: ((generation: number) => void)[] = [];
     const failures: ((failure: StreamFailure) => void)[] = [];
     const closed: (() => void)[] = [];
     let ended = false;
@@ -172,6 +189,7 @@ export class FakeRuntime implements RuntimeAdapter {
     const client: Client = {
       emit: (bytes) => data.forEach((cb) => cb(bytes)),
       switched: (alternate) => switches.forEach((cb) => cb(alternate)),
+      respawned: (generation) => respawns.forEach((cb) => cb(generation)),
       fail: (failure) => failures.forEach((cb) => cb(failure)),
       end,
     };
@@ -191,6 +209,7 @@ export class FakeRuntime implements RuntimeAdapter {
       },
       onAlternate: (cb) => void switches.push(cb),
       onFailure: (cb) => void failures.push(cb),
+      onRespawn: (cb) => void respawns.push(cb),
       close: () => {
         t.clients.closes++;
         end();
@@ -229,7 +248,11 @@ export class FakeRuntime implements RuntimeAdapter {
     // A respawn replaces the process; the terminal, its id and tags, stays.
     t.spec = { ...t.spec, ...spec };
     t.pane = { ...this.pane(t.spec), id: t.pane.id };
+    t.printed = concat(t.printed, encode(RESPAWN_RESET));
     t.offset = 0;
+    if (this.attachKind === "snapshot") {
+      for (const client of t.streams) client.respawned(spec.generation);
+    }
     if (t.alternate) {
       t.alternate = false;
       for (const client of t.streams) client.switched(false);
@@ -394,7 +417,7 @@ export class FakeRuntime implements RuntimeAdapter {
     const history = t.history === "" ? "" : `${t.history.replaceAll("\n", "\r\n")}${above}`;
     return {
       kind: "snapshot",
-      vt: concat(encode(history), t.printed),
+      vt: encode(history + decode(t.printed).replaceAll(QUERY, "")),
       offset: t.offset,
       alternate: t.alternate,
     };
@@ -438,4 +461,25 @@ export class FakeRuntime implements RuntimeAdapter {
       throw new StaleIncarnation(ref.terminalId, "pane-replaced");
     return t;
   }
+}
+
+const fakeOf = (runtime: unknown) => {
+  if (!(runtime instanceof FakeRuntime)) throw new Error("not the fake runtime");
+  return runtime;
+};
+
+/** The contract's harness for a FakeRuntime attaching as `attach` says. */
+export function fakeContractHarness(attach: Attached["kind"]): ContractHarness {
+  return {
+    make: () => ({ runtime: new FakeRuntime({ attach }), dispose: () => {} }),
+    unreadable: (runtime) => fakeOf(runtime).disconnect(),
+    replaceProcess: (runtime, ref) => fakeOf(runtime).replaceProcess(ref),
+    vanish: (runtime, ref) => fakeOf(runtime).vanish(ref),
+    reboot: (runtime) => fakeOf(runtime).reboot(),
+    forge: (ref) => ({ ...ref, locator: { ...ref.locator, serverStart: "1" } }),
+    placeOf: (ref) => ref.locator.paneId,
+    exitMayBeUnknown: false,
+    cwd: "/w",
+    waitMs: 1_000,
+  };
 }

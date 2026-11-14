@@ -26,6 +26,15 @@ async function screenOf(sent: readonly string[]): Promise<string[]> {
   return (await rowsOf(sent)).all.filter((line) => line !== "");
 }
 
+/** Which buffer a browser shows after writing what a view was sent, and whether it reports mice. */
+async function modesOf(sent: readonly string[]) {
+  const term = new headless.Terminal({ ...size, allowProposedApi: true });
+  await new Promise<void>((resolve) => term.write(sent.join(""), resolve));
+  const shown = { buffer: term.buffer.active.type, mouse: term.modes.mouseTrackingMode };
+  term.dispose();
+  return shown;
+}
+
 /** Every row a browser holds after writing what a view was sent, and the first on its screen. */
 async function rowsOf(sent: readonly string[]): Promise<{ all: string[]; top: number }> {
   const term = new headless.Terminal({ ...size, allowProposedApi: true });
@@ -212,6 +221,25 @@ describe("terminal hub", () => {
       true,
       "before one two three",
     ]);
+  });
+
+  it("starts every view of a respawned terminal on its main screen, with no mouse reports", async () => {
+    const rt = await fakeRuntime("earlier output", { attach: "snapshot" });
+    const hub = new Hub(rt.runtime, memoryLog().log);
+    const first = viewer();
+    await hub.join(rt.ref, first.v, size);
+    rt.emit("\x1b[?1049hALTDRAWN\x1b[?1000h");
+    rt.runtime.exitProcess(rt.ref);
+    await rt.runtime.respawn(rt.ref, { ...rt.runtime.specOf(rt.ref), generation: 1 });
+    rt.emit("respawned");
+    const late = viewer();
+    await hub.join(rt.ref, late.v, size);
+    const main = { buffer: "normal", mouse: "none" };
+    expect([
+      await modesOf(first.seen),
+      await modesOf(late.seen),
+      (await screenOf(late.seen)).includes("ALTDRAWN"),
+    ]).toEqual([main, main, false]);
   });
 
   it("never tells a view it is attached when the terminal closes while it opens", async () => {

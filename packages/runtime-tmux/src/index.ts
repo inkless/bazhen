@@ -488,6 +488,7 @@ export class TmuxRuntime implements RuntimeAdapter {
       },
       onAlternate: (cb) => screen.onAlternate(cb),
       onFailure: (cb) => screen.onFailure(cb),
+      onRespawn: () => {},
       close: () => {
         screen.dispose();
         proc.kill();

@@ -4,6 +4,7 @@ import {
   engage,
   newId,
   release,
+  RESPAWN_RESET,
   type AttachmentId,
   type Lease,
   type RuntimeAdapter,
@@ -294,7 +295,7 @@ export class TerminalHub {
       // Before any of the client's output, whose first redraw paints the screen below it.
       if (attached.kind === "history") watched.emulator.seed(attached.history);
       else watched.emulator.write(attached.vt);
-      stream.onData((bytes) => {
+      const deliver = (bytes: Uint8Array) => {
         watched.emulator.write(bytes);
         for (const [id, entry] of watched.viewers) {
           if (entry.queue) {
@@ -306,7 +307,9 @@ export class TerminalHub {
             this.evict(watched, id, entry);
           }
         }
-      });
+      };
+      stream.onData(deliver);
+      stream.onRespawn(() => deliver(RESPAWN_BYTES));
       stream.onClose(() => {
         // The client also exits when its connection to tmux is lost while the terminal lives on.
         const closed = this.log.closing(watched.terminal);
@@ -528,6 +531,8 @@ export class TerminalHub {
     this.fitTo(watched);
   }
 }
+
+const RESPAWN_BYTES = Buffer.from(RESPAWN_RESET);
 
 const digest = (token: string) => createHash("sha256").update(token).digest();
 

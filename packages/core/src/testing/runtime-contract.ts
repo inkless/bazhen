@@ -12,6 +12,7 @@ import {
   StaleIncarnation,
   type RuntimeAdapter,
   type RuntimeRef,
+  type Size,
   type TerminalSpec,
   type TerminalTags,
 } from "../runtime.ts";
@@ -29,6 +30,8 @@ export interface ContractHarness {
   reboot(runtime: RuntimeAdapter): void;
   /** The same terminal's ref, as if it had been made on a server other than the one running it. */
   forge(ref: RuntimeRef): RuntimeRef;
+  /** Where the runtime runs a terminal's process, for one that reuses it across a respawn. */
+  placeOf(ref: RuntimeRef): string | undefined;
   /** Whether it may never learn how a process ended, and call the cause unknown, as tmux 3.4 may. */
   readonly exitMayBeUnknown: boolean;
   /** Where the terminals' programs run. */
@@ -60,11 +63,13 @@ async function snapshotClient(runtime: RuntimeAdapter, ref: RuntimeRef) {
   assert(attached.kind === "snapshot", `attached with ${attached.kind}`);
   let live = "";
   let bytes = 0;
+  const respawns: { generation: number; after: string }[] = [];
   attached.stream.onData((chunk) => {
     live += decode(chunk);
     bytes += chunk.length;
   });
-  return { ...attached, live: () => live, end: () => attached.offset + bytes };
+  attached.stream.onRespawn((generation) => respawns.push({ generation, after: live }));
+  return { ...attached, live: () => live, end: () => attached.offset + bytes, respawns };
 }
 
 /** Exits reported for `terminalId`, collected until the test ends. */
@@ -254,6 +259,7 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
         "1",
         [[next, null]],
       ]);
+      expect(harness.placeOf(next)).toBe(harness.placeOf(ref));
     });
 
     it("respawns a terminal left on its alternate screen onto its main screen", async () => {
@@ -435,7 +441,23 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
 }
 
 /** What a runtime that attaches on a snapshot promises beyond the runtime contract. */
-export function snapshotContract(name: string, harness: ContractHarness): void {
+/** What a terminal that replays VT bytes, as a view does, ends up showing and answering. */
+export interface Replayed {
+  readonly buffer: "normal" | "alternate";
+  /** Its modes, compared whole with a fresh terminal's. */
+  readonly modes: unknown;
+  /** Every row it holds, history first, trimmed. */
+  readonly lines: readonly string[];
+  /** What it sent back, as a terminal answers a query. */
+  readonly replies: string;
+}
+
+export interface SnapshotHarness extends ContractHarness {
+  /** Replays `vt` into a fresh terminal of `size`. */
+  replay(vt: Uint8Array, size: Size): Promise<Replayed>;
+}
+
+export function snapshotContract(name: string, harness: SnapshotHarness): void {
   const fresh = () => {
     const made = harness.make();
     onTestFinished(() => made.dispose());
@@ -473,7 +495,7 @@ export function snapshotContract(name: string, harness: ContractHarness): void {
       ]);
     });
 
-    it("counts a respawned process's output from 0, while a stream from before goes on", async () => {
+    it("tells a stream of a respawn before the next process's output, which counts from 0", async () => {
       const runtime = fresh();
       const s = { ...spec, terminalId: newId("term") };
       const ref = await runtime.create(s);
@@ -484,9 +506,44 @@ export function snapshotContract(name: string, harness: ContractHarness): void {
       await expect.poll(() => exitOf(runtime, ref), { timeout: harness.waitMs }).not.toBeNull();
       const next = await runtime.respawn(ref, { ...s, generation: 1 });
       const late = await snapshotClient(runtime, next);
-      expect(late.offset).toBe(0);
       first.stream.write(encode("after\r"));
       await expect.poll(() => first.live(), { timeout: harness.waitMs }).toContain("after");
+      expect([late.offset, first.respawns]).toEqual([
+        0,
+        [{ generation: 1, after: expect.not.stringContaining("after") }],
+      ]);
+    });
+
+    it("attaches a respawned terminal on its main screen, with a fresh terminal's modes", async () => {
+      const runtime = fresh();
+      const s = { ...spec, terminalId: newId("term") };
+      const ref = await runtime.create(s);
+      const first = await snapshotClient(runtime, ref);
+      first.stream.write(encode("\x1b[?1049hALTDRAWN\x1b[?1000h\x1b[?2004h\r"));
+      await expect.poll(() => first.live(), { timeout: harness.waitMs }).toContain("ALTDRAWN");
+      await runtime.signal(ref, "SIGTERM");
+      await expect.poll(() => exitOf(runtime, ref), { timeout: harness.waitMs }).not.toBeNull();
+      const next = await runtime.respawn(ref, { ...s, generation: 1 });
+      const late = await snapshotClient(runtime, next);
+      const shown = await harness.replay(late.vt, s.size);
+      const blank = await harness.replay(new Uint8Array(), s.size);
+      expect([late.alternate, shown.buffer, shown.modes, shown.lines]).toEqual([
+        false,
+        "normal",
+        blank.modes,
+        expect.not.arrayContaining(["ALTDRAWN"]),
+      ]);
+    });
+
+    it("attaches on a snapshot that asks the terminal nothing, whatever the program asked", async () => {
+      const runtime = fresh();
+      const ref = await runtime.create({ ...spec, terminalId: newId("term") });
+      const first = await snapshotClient(runtime, ref);
+      first.stream.write(encode("\x1b[6n\x1b[c\x1b]10;?\x07\x1b]11;?\x1b\\asked\r"));
+      await expect.poll(() => first.live(), { timeout: harness.waitMs }).toContain("asked");
+      const late = await snapshotClient(runtime, ref);
+      const shown = await harness.replay(late.vt, spec.size);
+      expect([shown.replies, shown.lines]).toEqual(["", expect.arrayContaining(["asked"])]);
     });
   });
 }

@@ -46,6 +46,7 @@ runtimeContract("TmuxRuntime", {
   },
   reboot: (runtime) => serverOf(runtime).kill(),
   forge: (ref) => ({ ...ref, locator: { ...ref.locator, serverStart: "1" } }),
+  placeOf: (ref) => ref.locator.paneId,
   exitMayBeUnknown: true,
   cwd: mkdtempSync(join(tmpdir(), "bz-contract-")),
   // A loaded CI runner can take a second or more to reap a pane's process.
