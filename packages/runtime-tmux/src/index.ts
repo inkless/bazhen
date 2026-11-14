@@ -15,7 +15,13 @@ import type {
   TerminalSpec,
   TerminalTags,
 } from "@bazhen/core";
-import { TERMINAL_COLOURS, type ExitStatus, type Signal, type TuiTheme } from "@bazhen/protocol";
+import {
+  HISTORY_LINES,
+  TERMINAL_COLOURS,
+  type ExitStatus,
+  type Signal,
+  type TuiTheme,
+} from "@bazhen/protocol";
 import {
   GENERATION_OPTION,
   PaneRefused,
@@ -117,7 +123,8 @@ const FOREGROUND = columns([
  * and `C-b d` would detach Bazhen's own client, so no key reaches tmux itself. `window-size
  * manual` is deliberately absent: set globally, tmux before 3.8 crashes on the next window
  * creation. An empty `update-environment` stops an attaching client from copying its own
- * variables into a session. Without the smcup override, the client switches the browser's
+ * variables into a session. `history-limit` keeps as much history as the daemon and each view do.
+ * Without the smcup override, the client switches the browser's
  * terminal to its alternate buffer, which keeps no scrollback and turns the wheel into arrow keys.
  */
 export const TMUX_CONFIG = `set -g prefix None
@@ -127,6 +134,7 @@ unbind-key -a -T root
 unbind-key -a -T copy-mode
 unbind-key -a -T copy-mode-vi
 set -g status off
+set -g history-limit ${HISTORY_LINES}
 set -g remain-on-exit on
 set -g escape-time 0
 set -g default-terminal tmux-256color

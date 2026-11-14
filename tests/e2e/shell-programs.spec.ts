@@ -128,6 +128,22 @@ async function redrawsAtNewSize(page: Page, shellId: string, rows: number, last:
     .toEqual([true, true, true]);
 }
 
+/** The numbers on lines that hold only a number, top to bottom: what `seq` printed. */
+const numbersIn = (text: string) =>
+  text.split("\n").flatMap((line) => (/^\d+$/.test(line.trim()) ? [Number(line.trim())] : []));
+
+/** What tmux holds of the shell's pane, its history and its screen, as text. */
+function held(shellId: string): string {
+  const home = String(process.env["BZ_E2E_HOME"]);
+  const server = TmuxServer.at(join(home, "run", "tmux.sock"), { root: home });
+  const pane = server
+    .runSync(["list-panes", "-a", "-F", "#{@bazhen_terminal_id} #{pane_id}"])
+    .split("\n")
+    .find((l) => l.startsWith(`${shellId} `))
+    ?.split(" ")[1];
+  return server.runSync(["capture-pane", "-p", "-J", "-t", String(pane), "-S", "-", "-E", "-"]);
+}
+
 /** The wheel, turned down over the terminal, as a person scrolls. */
 async function wheelDown(page: Page): Promise<void> {
   const box = await page.locator(".xterm-screen").boundingBox();
@@ -157,6 +173,18 @@ test.afterEach(async ({ page }) => {
       });
     }
   }, opened.splice(0));
+});
+
+test("shows a reopened shell every line of history tmux holds, after a burst of output", async ({
+  page,
+}) => {
+  const id = await shell(page);
+  await run(page, "seq 1 3000");
+  await idle(page, id);
+  const tmuxHolds = numbersIn(held(id));
+  await page.reload();
+  await expect.poll(() => screen(page, id), { timeout: 15_000 }).toMatch(PROMPT);
+  expect([tmuxHolds.at(-1), numbersIn(await screen(page, id))]).toEqual([3000, tmuxHolds]);
 });
 
 test("nvim with the mouse on gets the wheel, and takes Esc at once", async ({ page }) => {

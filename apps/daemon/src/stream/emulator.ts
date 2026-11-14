@@ -2,10 +2,7 @@ import { SerializeAddon } from "@xterm/addon-serialize";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import headless from "@xterm/headless";
 import type { Size } from "@bazhen/core";
-import { oscColour } from "@bazhen/protocol";
-
-/** How much history above the screen a view gets when it opens (foundation-design §12 item 2). */
-export const HISTORY_LINES = 2000;
+import { HISTORY_LINES, oscColour } from "@bazhen/protocol";
 
 const ESC = "\x1b";
 const ST = `${ESC}\\`;

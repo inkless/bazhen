@@ -5,6 +5,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as Xterm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import {
+  HISTORY_LINES,
   EPOCH_FRAMES_SINCE,
   isAtLeast,
   parseJson,
@@ -101,6 +102,8 @@ function connect(
     allowProposedApi: true,
     cursorBlink: true,
     macOptionIsMeta: settings.optionIsMeta,
+    // As much history as tmux and the daemon keep, so a reopened view shows all it is sent.
+    scrollback: HISTORY_LINES,
   });
   const fit = new FitAddon();
   term.loadAddon(fit);

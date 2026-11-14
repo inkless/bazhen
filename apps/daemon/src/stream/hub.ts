@@ -13,6 +13,7 @@ import {
   type TerminalId,
 } from "@bazhen/core";
 import {
+  HISTORY_LINES,
   PROTOCOL_VERSION,
   TERMINAL_COLOURS,
   type AttachmentMode,
@@ -20,7 +21,7 @@ import {
   type StreamServerFrame,
   type TuiTheme,
 } from "@bazhen/protocol";
-import { HISTORY_LINES, ScreenEmulator } from "./emulator.ts";
+import { ScreenEmulator } from "./emulator.ts";
 import { classifyInput } from "./input-filter.ts";
 import { Settle } from "./settle.ts";
 
