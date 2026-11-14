@@ -23,7 +23,7 @@ import {
   rmSync,
   symlinkSync,
 } from "node:fs";
-import { constants, hostname, tmpdir } from "node:os";
+import { availableParallelism, constants, hostname, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { isAlive, signalGroup, spawnGroup } from "@bazhen/host-guard";
 import { isMain } from "./is-main.ts";
@@ -89,6 +89,26 @@ export function tmuxBuildArgs(env: Readonly<Record<string, string | undefined>>)
     throw new Error("BZ_TMUX_VERSION and BZ_TMUX_SHA256 are set together, or not at all");
   }
   return { TMUX_VERSION: version, TMUX_SHA256: sha256 };
+}
+
+/**
+ * The CPUs a suite's container may use: half the machine, `BZ_TEST_CPUS` when set. A suite that
+ * starts one busy process per core would otherwise take every core from the agents working on the
+ * same machine, so the quota is what keeps a test run a guest rather than the owner.
+ */
+export function cpuBudget(
+  env: Readonly<Record<string, string | undefined>>,
+  cores: number,
+): string {
+  const override = env["BZ_TEST_CPUS"];
+  if (override !== undefined && override !== "") {
+    const value = Number(override);
+    if (!Number.isFinite(value) || value < 0.1) {
+      throw new Error(`BZ_TEST_CPUS must be a number of CPUs, at least 0.1, got "${override}"`);
+    }
+    return String(value);
+  }
+  return String(Math.max(2, Math.floor(cores / 2)));
 }
 
 const SECRET_NAME =
@@ -443,6 +463,10 @@ export async function run(args: readonly string[], host: Host): Promise<number> 
           // Chromium needs more shared memory than a container's default 64 MB.
           "--shm-size",
           "1g",
+          // A suite may start a busy process per core; the quota keeps the machine usable for the
+          // agents working on it while the run goes on.
+          "--cpus",
+          cpuBudget(process.env, availableParallelism()),
           image,
           "pnpm",
           SUITES[suite],

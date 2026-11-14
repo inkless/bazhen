@@ -5,6 +5,7 @@ import {
   parseArgs,
   pins,
   tmuxBuildArgs,
+  cpuBudget,
   run,
   stopper,
   sweep,
@@ -60,6 +61,19 @@ describe("pnpm test:real", () => {
 
   it("refuses to build when a pin is missing", () => {
     expect(() => pins(read({ ...repo, "package.json": "{}" }))).toThrow("not pinned");
+  });
+
+  it("gives a suite half the machine, so its own load cannot take the rest of it", () => {
+    expect(cpuBudget({}, 32)).toBe("16");
+    expect(cpuBudget({}, 4)).toBe("2");
+    // An odd core count floors: five cores is two for the suite, never three.
+    expect(cpuBudget({}, 5)).toBe("2");
+    // A one- or two-core machine still gets both: a fraction of itself is no quota at all.
+    expect(cpuBudget({}, 1)).toBe("2");
+    expect(cpuBudget({ BZ_TEST_CPUS: "3" }, 32)).toBe("3");
+    expect(cpuBudget({ BZ_TEST_CPUS: "0.5" }, 32)).toBe("0.5");
+    expect(() => cpuBudget({ BZ_TEST_CPUS: "many" }, 32)).toThrow("BZ_TEST_CPUS");
+    expect(() => cpuBudget({ BZ_TEST_CPUS: "0" }, 32)).toThrow("BZ_TEST_CPUS");
   });
 
   it("keeps a file that looks like a secret out of the image, and every other file in", () => {
@@ -138,6 +152,9 @@ function fakeHost(
 }
 
 const verb = (args: readonly string[]) => args.slice(0, 2).join(" ");
+/** The argument after `flag` in a command, or undefined when the command lacks it. */
+const valueAfter = (args: readonly string[] | undefined, flag: string) =>
+  args?.[args.indexOf(flag) + 1];
 const passing = (): Answer => result(0);
 const isIntegration = (args: readonly string[]) =>
   args[0] === "run" && args.includes("test:integration");
@@ -185,6 +202,14 @@ describe("pnpm test:real cleans up after itself", () => {
     expect(suite).toContain(`org.bazhen.test-real.owner-pid=${OWN_PID}`);
     expect(suite).toContain(`org.bazhen.test-real.host=${HOST}`);
     expect(ownerOf(RUN)).toBe(OWN_PID);
+  });
+
+  it("gives each suite's container a CPU budget, so the run cannot take the machine", async () => {
+    const fake = fakeHost(passing);
+    expect(await run(["api"], fake.host)).toBe(0);
+    const suite = fake.calls.find((c) => c[0] === "run");
+    expect(suite).toContain("--cpus");
+    expect(Number(valueAfter(suite, "--cpus"))).toBeGreaterThan(0);
   });
 
   it("removes its image and context when the build fails, and runs no suite", async () => {
