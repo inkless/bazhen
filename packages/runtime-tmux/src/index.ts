@@ -354,15 +354,17 @@ export class TmuxRuntime implements RuntimeAdapter {
    * Puts this runtime's server-wide settings on a server that is already running, which read its
    * configuration from whichever daemon started it: the pane-title hook, and the keys that leave
    * a mode. With no server running it does nothing, and starts none; the next `health` that
-   * reaches one applies them.
+   * reaches one applies them. A server that refuses them is not asked again.
    */
   async applyServerSettings(): Promise<void> {
     try {
       await this.tmux(...sequence([this.paneTitleHook(), ...MODE_EXIT_BINDINGS]));
-      this.settingsPending = false;
     } catch (err) {
-      if (!(err instanceof TmuxError && noServer(err))) throw err;
+      if (err instanceof TmuxError && noServer(err)) return;
+      this.settingsPending = false;
+      throw err;
     }
+    this.settingsPending = false;
   }
 
   private paneTitleHook(): string[] {

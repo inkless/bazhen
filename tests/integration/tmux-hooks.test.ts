@@ -103,13 +103,15 @@ describe("the pane-title hook on a server an older daemon started", () => {
     ]);
   });
 
-  it("is put on by the first health check that reaches the server, until settings are applied", async () => {
+  it("is put on by a health check that reaches the server, when settings at start found none", async () => {
     const server = newServer();
     const before = client("health-before");
     const after = client("health-after");
+    const daemon = runtimeOn(server, [after.path]);
+    await daemon.applyServerSettings();
     const ref = await runtimeOn(server, [before.path]).create(titler());
     const pane = String(ref.locator.paneId);
-    await runtimeOn(server, [after.path]).health();
+    await daemon.health();
     title(server, pane, "four");
     await expect.poll(() => logged(after.log), { timeout: 5_000 }).toBe(`${pane}\n`);
   });
