@@ -31,7 +31,11 @@ export function testHome(env: NodeJS.ProcessEnv = process.env): string {
   return home;
 }
 
+/** A terminal id as holder/1 has it: a plain file name, so its socket stays in the home. */
+const TERMINAL_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
 /** The socket of the holder for `terminalId`, in this run's home. */
 export function holderSocket(terminalId: string, env: NodeJS.ProcessEnv = process.env): string {
+  if (!TERMINAL_ID.test(terminalId)) throw new Error(`${terminalId} is no terminal id`);
   return join(holdersDir(testHome(env)), `${terminalId}.sock`);
 }
