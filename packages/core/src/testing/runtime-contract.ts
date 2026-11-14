@@ -450,6 +450,8 @@ export interface Replayed {
   readonly lines: readonly string[];
   /** What it sent back, as a terminal answers a query. */
   readonly replies: string;
+  /** The colour slots it was told to change from its theme, and what to: none for a fresh one. */
+  readonly colours: Readonly<Record<string, string>>;
 }
 
 export interface SnapshotHarness extends ContractHarness {
@@ -519,7 +521,11 @@ export function snapshotContract(name: string, harness: SnapshotHarness): void {
       const s = { ...spec, terminalId: newId("term") };
       const ref = await runtime.create(s);
       const first = await snapshotClient(runtime, ref);
-      first.stream.write(encode("\x1b[?1049hALTDRAWN\x1b[?1000h\x1b[?2004h\r"));
+      first.stream.write(
+        encode(
+          "\x1b]11;#ff0000\x07\x1b]4;1;#00ff00\x07\x1b[?1049hALTDRAWN\x1b[?1000h\x1b[?2004h\r",
+        ),
+      );
       await expect.poll(() => first.live(), { timeout: harness.waitMs }).toContain("ALTDRAWN");
       await runtime.signal(ref, "SIGTERM");
       await expect.poll(() => exitOf(runtime, ref), { timeout: harness.waitMs }).not.toBeNull();
@@ -527,10 +533,11 @@ export function snapshotContract(name: string, harness: SnapshotHarness): void {
       const late = await snapshotClient(runtime, next);
       const shown = await harness.replay(late.vt, s.size);
       const blank = await harness.replay(new Uint8Array(), s.size);
-      expect([late.alternate, shown.buffer, shown.modes, shown.lines]).toEqual([
+      expect([late.alternate, shown.buffer, shown.modes, shown.colours, shown.lines]).toEqual([
         false,
         "normal",
         blank.modes,
+        blank.colours,
         expect.not.arrayContaining(["ALTDRAWN"]),
       ]);
     });

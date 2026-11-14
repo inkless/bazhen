@@ -162,11 +162,12 @@ export interface RuntimeStream {
 
 /**
  * What a respawn does to a snapshot runtime's terminal before the next process starts: back to
- * its main screen, every mode as a fresh terminal has it, and the screen cleared, its history
- * kept.
+ * its main screen, every mode and colour as a fresh terminal has it, and the screen cleared, its
+ * history kept.
  */
 export const RESPAWN_RESET =
-  "\x1b[?1049l\x1b[!p\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1004l\x1b[?2004l\x1b[H\x1b[2J";
+  "\x1b[?1049l\x1b[!p\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1004l\x1b[?2004l" +
+  "\x1b]104\x07\x1b]110\x07\x1b]111\x07\x1b]112\x07\x1b[H\x1b[2J";
 
 /** What failed, as a few words such as `screen check`, and the error it failed with. */
 export interface StreamFailure {
