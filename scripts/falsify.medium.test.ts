@@ -1,6 +1,7 @@
 // Runs scripts/falsify.ts against a branch in a linked worktree of a throwaway repository, with a
 // bogus GIT_DIR and GIT_INDEX_FILE in its environment that must never reach git or the tests. A
-// stub `pnpm` stands in for install and vitest, and logs what it saw.
+// stub `pnpm` stands in for install and vitest, and logs what it saw; a stub `cargo-nextest` lists
+// the Rust tests named in the tree's rust-tests.txt.
 
 import { execFileSync, spawnSync } from "node:child_process";
 import {
@@ -48,6 +49,19 @@ case "$1" in
     ;;
 esac
 exit 1
+`;
+
+const STUB_NEXTEST = `#!/bin/sh
+echo "NEXTEST: $*" >> "$STUB_LOG"
+[ "\${STUB_NEXTEST_FAIL:-}" = 1 ] && exit 1
+[ -e nextest-fails ] && exit 1
+printf '{"rust-suites":{"hook":{"testcases":{'
+sep=""
+while read -r name; do
+  printf '%s"%s":{}' "$sep" "$name"
+  sep=","
+done < rust-tests.txt
+printf '}}}}'
 `;
 
 type Fixture = {
@@ -99,6 +113,8 @@ beforeEach(() => {
   mkdirSync(fx.tmp);
   write(root, "bin/pnpm", STUB_PNPM);
   chmodSync(join(root, "bin/pnpm"), 0o755);
+  write(root, "bin/cargo-nextest", STUB_NEXTEST);
+  chmodSync(join(root, "bin/cargo-nextest"), 0o755);
   writeFileSync(fx.log, "");
 
   mkdirSync(fx.repo);
@@ -227,5 +243,109 @@ describe("falsify on a branch in a linked worktree", () => {
       deadFolder: existsSync(dead),
       liveFolder: existsSync(live),
     }).toEqual({ listed: [`worktree ${live}`], deadFolder: false, liveFolder: true });
+  });
+});
+
+/** Commits a Cargo workspace whose tests are `names`, on the branch. */
+function addRustTests(...names: string[]): void {
+  write(fx.linked, "Cargo.toml", "[workspace]\n");
+  write(fx.linked, "rust-tests.txt", names.map((n) => `${n}\n`).join(""));
+  git(fx.linked, "add", "Cargo.toml", "rust-tests.txt");
+  git(fx.linked, "commit", "--quiet", "-m", "test: rust", "-m", CONTROL);
+}
+
+describe("falsify on a branch that adds Rust tests", () => {
+  it("lists no Rust tests on a branch that changes no Rust", () => {
+    expect(againstBase().status).toBe(0);
+    expect(stubLog()).not.toContain("NEXTEST:");
+  });
+
+  it("fails on a new Rust test until a trailer names it by its full path", () => {
+    addRustTests("tests::reads_a_frame");
+    const before = againstBase();
+    git(
+      fx.linked,
+      "commit",
+      "--quiet",
+      "--allow-empty",
+      "-m",
+      "test: x",
+      "-m",
+      "Control: reads_a_frame: x -> y",
+    );
+    const bareName = againstBase().status;
+    git(
+      fx.linked,
+      "commit",
+      "--quiet",
+      "--allow-empty",
+      "-m",
+      "test: y",
+      "-m",
+      "Control: tests::reads_a_frame: x -> y",
+    );
+    expect({ before, bareName, named: againstBase().status }).toEqual({
+      before: { status: 1, output: expect.stringContaining("Control: tests::reads_a_frame:") },
+      bareName: 1,
+      named: 0,
+    });
+  });
+
+  it("fails, and leaves nothing behind, when nextest can't list the tests", () => {
+    addRustTests("tests::reads_a_frame");
+    expect(againstBase({ STUB_NEXTEST_FAIL: "1" })).toEqual({
+      status: 1,
+      output: expect.stringContaining("nextest list` failed at HEAD"),
+    });
+    expect(leftovers()).toEqual([]);
+  });
+});
+
+/** Gives main a Cargo workspace whose tests are `names`, and rebases the branch onto it. */
+function rustOnMain(names: string[], extra: Record<string, string> = {}): void {
+  write(fx.repo, "Cargo.toml", "[workspace]\n");
+  write(fx.repo, "rust-tests.txt", names.map((n) => `${n}\n`).join(""));
+  for (const [file, text] of Object.entries(extra)) write(fx.repo, file, text);
+  git(fx.repo, "add", "Cargo.toml", "rust-tests.txt", ...Object.keys(extra));
+  git(fx.repo, "commit", "--quiet", "-m", "build: rust");
+  fx.base = git(fx.repo, "rev-parse", "HEAD").trim();
+  git(fx.linked, "rebase", "--quiet", "main");
+}
+
+describe("falsify on a branch of a tree that already has Rust", () => {
+  it("lists nothing for a branch that changes no Rust", () => {
+    rustOnMain(["tests::kept"]);
+    expect(againstBase().status).toBe(0);
+    expect(stubLog()).not.toContain("NEXTEST:");
+  });
+
+  it("lists the base and HEAD, and asks a control only for the test HEAD adds", () => {
+    rustOnMain(["tests::kept"]);
+    write(fx.linked, "rust-tests.txt", "tests::kept\ntests::added\n");
+    write(fx.linked, "crates/x/src/lib.rs", "// a test\n");
+    git(fx.linked, "add", "rust-tests.txt", "crates/x/src/lib.rs");
+    git(fx.linked, "commit", "--quiet", "-m", "test: rust", "-m", CONTROL);
+    const result = againstBase();
+    expect({
+      status: result.status,
+      asksAdded: result.output.includes("Control: tests::added:"),
+      asksKept: result.output.includes("Control: tests::kept:"),
+      listings: stubLog()
+        .split("\n")
+        .filter((l) => l.startsWith("NEXTEST:")).length,
+    }).toEqual({ status: 1, asksAdded: true, asksKept: false, listings: 2 });
+  });
+
+  it("fails, and leaves nothing behind, when the base's tests can't be listed", () => {
+    rustOnMain(["tests::kept"], { "nextest-fails": "" });
+    git(fx.linked, "rm", "--quiet", "nextest-fails");
+    write(fx.linked, "crates/x/src/lib.rs", "// a change\n");
+    git(fx.linked, "add", "crates/x/src/lib.rs");
+    git(fx.linked, "commit", "--quiet", "-m", "build: fix", "-m", CONTROL);
+    expect(againstBase()).toEqual({
+      status: 1,
+      output: expect.stringContaining("nextest list` failed at the base"),
+    });
+    expect(leftovers()).toEqual([]);
   });
 });

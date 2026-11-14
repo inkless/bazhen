@@ -168,7 +168,7 @@ export function rustTestIds(report: unknown): string[] {
   });
 }
 
-/** The tests listed at HEAD that weren't at the base, as `{ binary, name }`. */
+/** The tests listed at HEAD that weren't at the base, as `{ file: target, title: path }`. */
 export function addedRustTests(base: string[], head: string[]): { file: string; title: string }[] {
   const before = new Set(base);
   return head
@@ -184,7 +184,8 @@ const escapeRegExp = (text: string) => text.replaceAll(/[.*+?^${}()|[\]\\]/g, "\
 
 /**
  * The Rust tests no `Control:` trailer names. A trailer names a test when the part before its
- * `->` holds the test's full path (`module::name`) as a whole word.
+ * `->` holds the test's full path (`module::name`) as a whole word. The target isn't part of it,
+ * so one trailer covers the same path added in two crates on one branch.
  */
 export function uncontrolledRustTests(names: string[], messages: string): string[] {
   const subjects = [...messages.matchAll(CONTROL_SUBJECT)].map(([, subject = ""]) => subject);

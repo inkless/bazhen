@@ -6,7 +6,7 @@ page serves that rule, or keeps tests from hurting the machine and each other.
 | Rule                                                                               | Enforced by                                 |
 | ---------------------------------------------------------------------------------- | ------------------------------------------- |
 | A test that passes without the change it accompanies is rejected                   | CI on pull requests (`pnpm test:falsify`)   |
-| A new test that can't be judged by reverting needs at least one `Control:` trailer | CI on pull requests (`pnpm test:falsify`)   |
+| A test falsify can't judge needs a `Control:` trailer; a Rust test, one naming it. | CI on pull requests (`pnpm test:falsify`)   |
 | Small tests (`*.test.ts`) touch no files, sockets, processes or databases          | `pnpm lint`                                 |
 | No `.only`, `.skip`, assertion-free tests, or conditionals inside tests            | `pnpm lint` (vitest rules)                  |
 | Every source file with runtime code has a sibling test, or a named covering test   | `pnpm check` (`scripts/check-standards.ts`) |
@@ -103,9 +103,10 @@ Every new test must be shown to fail without the code it covers.
 - **Controls for INVALID tests.** Break the code by hand: swap a comparison, delete a branch, or
   return a constant. Confirm the test fails on its assertion, not on a crash or a timeout, then
   restore the code. Record it as a trailer in a commit message on the branch:
-  `Control: <what you broke> -> <how the test failed>`, one per INVALID test. The check accepts
-  any one trailer on the branch, so the reviewer is who holds you to the rest. Never bypass a
-  hook with `--no-verify`.
+  `Control: <what you broke> -> <how the test failed>`, one per INVALID test. For a TypeScript
+  test the check accepts any one trailer on the branch, so the reviewer is who holds you to the
+  rest; a Rust test needs a trailer naming it (`rust.md` § Tests). Never bypass a hook with
+  `--no-verify`.
 
 Two lessons from the scaffold's controls:
 

@@ -31,7 +31,7 @@ test by hand and record its trailer.
 6. **Record the control.** Break the code the test names (swap a comparison, drop a check,
    return a constant), run the test, see it fail on its assertion, and restore the code. Add a
    trailer to a commit on the branch for each new test, naming it by the path nextest lists
-   (`pnpm test:rust` prints it):
+   (`pnpm test:falsify` prints the trailer to fill in for each test that has none):
    `Control: <module::path::test_name>: <what you broke> -> <how the test failed>`.
 
 ## Checklist
