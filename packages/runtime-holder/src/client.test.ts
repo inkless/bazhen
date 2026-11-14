@@ -122,6 +122,7 @@ describe("HolderClient", () => {
       body: { request: "resize", code: "melted", message: "" },
     });
     await expect(answer).rejects.toMatchObject({ code: "failed", rawCode: "melted" });
+    expect(client.open).toBe(true);
   });
 
   it("drops the answer to an aborted request instead of giving it to the next one", async () => {
@@ -249,6 +250,24 @@ describe("HolderClient", () => {
     abort.abort(new Error("deadline"));
     await expect(attached).rejects.toThrow("deadline");
     await expect(client.ended).resolves.toMatchObject({ reason: "error" });
+  });
+
+  it("ends the connection when an attach's snapshot is refused but its subscription taken", async () => {
+    const { client, holder, events } = await connected();
+    const attached = client.attach();
+    const snapshot = await holder.request();
+    const subscribe = await holder.request();
+    holder.send(
+      {
+        type: "error",
+        id: snapshot.id,
+        body: { request: "snapshot", code: "snapshot-too-large", message: "" },
+      },
+      { type: "ok", id: subscribe.id, body: { request: "subscribe" } },
+      { type: "data", offset: 0, bytes: Uint8Array.of(0x78) },
+    );
+    await expect(attached).rejects.toMatchObject({ code: "snapshot-too-large" });
+    expect({ open: client.open, events }).toEqual({ open: false, events: [] });
   });
 
   it("ends the connection when a subscribe is aborted once sent", async () => {
