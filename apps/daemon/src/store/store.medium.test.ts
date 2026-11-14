@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { InvalidTransition, newId, type ResumeEvidence } from "@bazhen/core";
 import type { ExternalRef } from "@bazhen/protocol";
 import {
@@ -242,6 +242,64 @@ describe("Store", () => {
       }),
     ).toThrow("abandoned");
     expect(store.snapshot(testView)).toMatchObject({ eventId: before, environments: [] });
+    store.close();
+  });
+});
+
+/**
+ * The `synchronous` level each commit on any connection ran at, in order. With `lockedOnce`, the
+ * first write transaction can't begin, as when another writer holds the database past the timeout.
+ */
+function commitLevels({ lockedOnce = false } = {}): number[] {
+  const levels: number[] = [];
+  let locked = lockedOnce;
+  const { value: exec } = Object.getOwnPropertyDescriptor(DatabaseSync.prototype, "exec") ?? {};
+  vi.spyOn(DatabaseSync.prototype, "exec").mockImplementation(function (
+    this: DatabaseSync,
+    sql: string,
+  ) {
+    if (sql === "BEGIN IMMEDIATE" && locked) {
+      locked = false;
+      throw new Error("database is locked");
+    }
+    if (sql === "COMMIT")
+      levels.push(Number(this.prepare("PRAGMA synchronous").get()?.synchronous));
+    Reflect.apply(exec, this, [sql]);
+  });
+  return levels;
+}
+
+describe("Store durability", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("commits at NORMAL, and a device's revocation, which must not come back after a crash, at FULL", () => {
+    const store = Store.open(dbPath());
+    const now = new Date("2026-02-01T00:00:00.000Z");
+    const levels = commitLevels();
+    const device = store.pairDevice("phone", "hash", true, now);
+    store.revokeDevice(device, now);
+    withEnvironment(store);
+    expect(levels).toEqual([1, 2, 1]);
+    store.close();
+  });
+
+  it("goes back to NORMAL when a durable transaction can't even begin", () => {
+    const store = Store.open(dbPath());
+    const device = store.pairDevice("phone", "hash", true, new Date());
+    const levels = commitLevels({ lockedOnce: true });
+    expect(() => store.revokeDevice(device, new Date())).toThrow("database is locked");
+    withEnvironment(store);
+    expect(levels).toEqual([1]);
+    store.close();
+  });
+
+  it("refuses a durable transaction inside another, whose commit would decide its durability", () => {
+    const store = Store.open(dbPath());
+    const device = store.pairDevice("phone", "hash", true, new Date());
+    expect(() => store.transaction(() => store.revokeDevice(device, new Date()))).toThrow(
+      /durable/,
+    );
+    expect(store.devices().map((d) => d.id)).toEqual([device]);
     store.close();
   });
 });
