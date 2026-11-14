@@ -332,7 +332,11 @@ export class Store {
 
   static open(path: string, migrations: readonly Migration[] = MIGRATIONS): Store {
     const db = new DatabaseSync(path);
-    db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
+    // NORMAL loses nothing when the daemon dies, only the commits since the last checkpoint on an
+    // OS crash or power loss; FULL would flush on every commit, which blocks the event loop.
+    db.exec(
+      "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;",
+    );
     db.exec("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL) STRICT");
     const store = new Store(db);
     store.migrate(migrations);
@@ -553,7 +557,8 @@ export class Store {
 
   /** Revokes a device; one already revoked is left as it is, with no second event. */
   revokeDevice(id: string, now: Date): void {
-    this.transaction(() => {
+    // Lost to a crash, a revocation would let the device back in.
+    this.transaction("durable", () => {
       const row = this.prepare("SELECT revoked_at FROM devices WHERE id = ?").get(id);
       if (row === undefined) throw new UnknownDevice(id);
       if (row.revoked_at !== null) return;
@@ -1253,26 +1258,35 @@ export class Store {
 
   /**
    * Runs `fn` in one transaction; nested calls join the outer one. A read takes no write lock,
-   * but still sees one consistent state.
+   * but still sees one consistent state. A durable one is flushed to disk as it commits, so it
+   * survives an OS crash or power loss; it never joins another, whose commit would decide that.
    */
   transaction<T>(fn: () => T): T;
-  transaction<T>(mode: "read", fn: () => T): T;
-  transaction<T>(...args: [() => T] | ["read", () => T]): T {
-    const fn = args.length === 1 ? args[0] : args[1];
-    if (this.depth > 0) return fn();
-    this.db.exec(args.length === 1 ? "BEGIN IMMEDIATE" : "BEGIN DEFERRED");
-    this.depth++;
+  transaction<T>(mode: "read" | "durable", fn: () => T): T;
+  transaction<T>(...args: [() => T] | ["read" | "durable", () => T]): T {
+    const [mode, fn] = args.length === 1 ? ["write" as const, args[0]] : args;
+    if (this.depth > 0) {
+      if (mode === "durable") throw new Error("A durable transaction can't run inside another");
+      return fn();
+    }
+    if (mode === "durable") this.db.exec("PRAGMA synchronous = FULL");
     let out: T;
     try {
-      out = fn();
-      this.db.exec("COMMIT");
-    } catch (err) {
-      this.db.exec("ROLLBACK");
-      this.afterCommits = [];
-      this.appended = false;
-      throw err;
+      this.db.exec(mode === "read" ? "BEGIN DEFERRED" : "BEGIN IMMEDIATE");
+      this.depth++;
+      try {
+        out = fn();
+        this.db.exec("COMMIT");
+      } catch (err) {
+        this.db.exec("ROLLBACK");
+        this.afterCommits = [];
+        this.appended = false;
+        throw err;
+      } finally {
+        this.depth--;
+      }
     } finally {
-      this.depth--;
+      if (mode === "durable") this.db.exec("PRAGMA synchronous = NORMAL");
     }
     const appended = this.appended;
     this.appended = false;

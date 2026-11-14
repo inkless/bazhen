@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { HOOK_REPLY_MAX_BYTES, offeredMessage, type HookReply } from "@bazhen/protocol";
 import { FOLD_MAX_CHARS } from "@bazhen/harness-claude-code";
 import { Store } from "../store/store.ts";
@@ -99,6 +99,12 @@ describe("mailbox", () => {
 
   it("offers every message a hook held again after a restart, as a possible re-delivery", async () => {
     const { store, agentId } = await withAgent();
+    // The daemon before the restart is gone, its deadlines with it; real timers would let them
+    // fire on the mail the restarted one requeued.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const mailbox = new Mailbox(store);
     const seen = mailbox.send(agentId, { idempotencyKey: "m1", body: "first" }).messageId;
     mailbox.ack((await mailbox.wait(agentId, live())).offered);
