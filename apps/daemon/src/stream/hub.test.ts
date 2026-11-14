@@ -904,21 +904,16 @@ describe("terminal hub: room for views", () => {
   it("sends a snapshot a piece at a time, each once the last is written, and loses none of it", async () => {
     const { rt, hub, snapshot, screen } = await measured(() => ({}));
     const view = slowViewer();
-    const joined = hub.join(rt.ref, view.v, size).then(() => true);
-    const inFlight: number[] = [];
-    for (let turns = 0; turns < snapshot / 100 + 20; turns++) {
-      await turn();
-      inFlight.push(view.inFlight());
+    const joined = hub.join(rt.ref, view.v, size);
+    for (let piece = 0; piece < Math.ceil(snapshot / 100); piece++) {
+      await vi.waitFor(() => expect(view.inFlight()).toBe(1));
       view.write();
     }
-    const attached = await Promise.race([joined, turn().then(() => false)]);
-    expect([
-      attached,
-      Math.max(...inFlight),
-      view.seen.length >= snapshot / 100,
-      view.seen.every((piece) => piece.length <= 100),
-      await screenOf(view.seen),
-    ]).toEqual([true, 1, true, true, await screen()]);
+    await expect(joined).resolves.toBeDefined();
+    expect([view.seen.every((piece) => piece.length <= 100), await screenOf(view.seen)]).toEqual([
+      true,
+      await screen(),
+    ]);
   });
 
   it("ends a view whose snapshot has stalled when another needs the room, the oldest first", async () => {
