@@ -93,6 +93,8 @@ async function snapshotClient(runtime: RuntimeAdapter, ref: RuntimeRef) {
   };
 }
 
+type SnapshotClient = Awaited<ReturnType<typeof snapshotClient>> & { readonly ref: RuntimeRef };
+
 /** Exits reported for `terminalId`, collected until the test ends. */
 function exitsOf(runtime: RuntimeAdapter, terminalId: string) {
   const seen: { generation: string | undefined; status: unknown }[] = [];
@@ -623,21 +625,34 @@ export function snapshotContract(name: string, harness: SnapshotHarness): void {
       expect([taken.generation, taken.told, taken.offset]).toEqual([1, 1, 0]);
     });
 
-    it("refuses a snapshot its stream closes before it is taken, and any asked for after", async () => {
-      const runtime = fresh();
-      const ref = await runtime.create({ ...spec, terminalId: newId("term") });
-      const client = await snapshotClient(runtime, ref);
-      const order: string[] = [];
-      client.stream.onClose(() => order.push("closed"));
-      const pending = client.stream.snapshot().catch((err: unknown) => {
-        order.push("rejected");
-        throw err;
-      });
-      client.stream.close();
-      await expect(pending).rejects.toBeInstanceOf(Error);
-      expect(order).toEqual(["closed", "rejected"]);
-      await expect(client.stream.snapshot()).rejects.toBeInstanceOf(Error);
-    });
+    it.each([
+      [
+        "its consumer closes it",
+        (_: RuntimeAdapter, client: SnapshotClient) => client.stream.close(),
+      ],
+      [
+        "its terminal ends",
+        (runtime: RuntimeAdapter, client: SnapshotClient) => harness.vanish(runtime, client.ref),
+      ],
+    ])(
+      "refuses a snapshot pending when %s, once it has closed, and any asked for after",
+      async (_how, close) => {
+        const runtime = fresh();
+        await runtime.create({ ...spec, terminalId: newId("term"), argv: ["sleep", "300"] });
+        const ref = await runtime.create({ ...spec, terminalId: newId("term") });
+        const client = { ...(await snapshotClient(runtime, ref)), ref };
+        const order: string[] = [];
+        client.stream.onClose(() => order.push("closed"));
+        const pending = client.stream.snapshot().catch((err: unknown) => {
+          order.push("rejected");
+          throw err;
+        });
+        close(runtime, client);
+        await expect(pending).rejects.toBeInstanceOf(Error);
+        expect(order).toEqual(["closed", "rejected"]);
+        await expect(client.stream.snapshot()).rejects.toBeInstanceOf(Error);
+      },
+    );
 
     it("attaches on a snapshot that asks the terminal nothing, whatever the program asked", async () => {
       const runtime = fresh();

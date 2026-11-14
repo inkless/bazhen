@@ -152,8 +152,8 @@ export interface RuntimeStream {
   onFailure(cb: (failure: StreamFailure) => void): void;
   /**
    * A snapshot client's terminal has a new process, the generation given, always higher than the
-   * last: called before its first byte. The consumer applies `RESPAWN_RESET`, as the runtime did. A client that redraws, as
-   * tmux's does, is never told: its runtime redraws it instead.
+   * last: called before its first byte. The consumer applies `RESPAWN_RESET`, as the runtime did.
+   * A client that redraws, as tmux's does, is never told: its runtime redraws it instead.
    */
   onRespawn(cb: (generation: number) => void): void;
   /** Must release every OS handle the stream holds. */

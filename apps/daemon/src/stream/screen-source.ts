@@ -6,7 +6,7 @@ import type { Position } from "./seam.ts";
 export interface ScreenSource {
   /** Every byte the stream delivers, in order. */
   write(bytes: Uint8Array): void;
-  /** The history and screen as VT bytes, and the position they are exact at; `now` is the stream's. */
+  /** The history and screen as VT bytes, and the position they are exact at, given the stream's. */
   snapshot(now: Position): Promise<{ readonly vt: Uint8Array; readonly at: Position }>;
   /** Takes effect after the output already written. */
   resize(size: Size): void;
