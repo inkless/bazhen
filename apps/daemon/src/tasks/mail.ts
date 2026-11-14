@@ -50,6 +50,17 @@ export function finishedMail(task: Named, outcome: TaskOutcome, from: Caller, no
   return note === null ? head : `${head}\n\nNote: ${note}`;
 }
 
+/**
+ * An agent's own message to another, after a line naming the sender, so the reader knows which
+ * peer wrote it, and saying how to reply without asking for a reply.
+ */
+export function peerMail(
+  from: { readonly id: string; readonly harness: string; readonly cwd: string },
+  text: string,
+) {
+  return `From agent ${from.id} (${from.harness}, ${from.cwd}). If it needs an answer: bazhen send ${from.id} "<answer>"\n\n${text}`;
+}
+
 /** A message's limit in the mailbox, which every composed one is held to. */
 export const MAIL_LIMIT = 20_000;
 
@@ -86,4 +97,5 @@ Tasks reach you as messages from Bazhen, and you answer them with the bazhen com
 - bazhen task list: the tasks you are assigned; bazhen task show <task>: one in full.
 - bazhen task done <task> --note "<what you did>": report a task finished, to whoever gave it to you.
 - bazhen escalate "<question>" [--task <task>]: put a question or problem in the human's inbox.
-- As a task's coordinator or lead, bazhen agents lists the other agents, and bazhen delegate <agent-id> --task <task> --title "<title>" --brief "<instructions>" hands part of it to one of them; with --launch claude-code or --launch codex in place of the agent id, to a new agent started for it.`;
+- bazhen agents lists the other agents, and bazhen send <agent-id> "<text>" (or --file <path>, for text with quotes or several lines) sends one a message: a question it can answer, or something it needs to act on. A message from another agent names its sender. Answer it only when there is something to answer or act on, never just to acknowledge or thank.
+- As a task's coordinator or lead, bazhen delegate <agent-id> --task <task> --title "<title>" --brief "<instructions>" hands part of it to another agent; with --launch claude-code or --launch codex in place of the agent id, to a new agent started for it.`;

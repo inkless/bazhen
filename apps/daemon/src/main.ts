@@ -119,6 +119,7 @@ const tasks: TaskCommands = {
   finish: (caller, taskId, req) => taskService.finish(caller, taskId, req),
   delegate: async (caller, req) => taskService.launchAndDelegate(caller, req),
   escalate: (caller, req) => taskService.escalate(caller, req),
+  send: (caller, agentId, req) => taskService.send(caller, agentId, req),
 };
 const presence = new Presence();
 // Found once, at start: a notifier installed or built later is picked up by a restart.
@@ -287,7 +288,6 @@ const commands = {
   state: () => store.snapshot(snapshotView),
   launch: (req) =>
     launchAgent({ store, environment, size: DEFAULT_SIZE, home: inputs.home, queue }, req),
-  send: (agentId, req) => mailbox.send(agentId, req),
   answer: (attentionId, req) => approvals.answer(attentionId, req),
   reply: (attentionId, req) => inbox.reply(attentionId, req),
   dismiss: (attentionId, req) => inbox.dismiss(attentionId, req),

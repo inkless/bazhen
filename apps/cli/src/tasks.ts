@@ -8,7 +8,9 @@ import {
   CreateTaskResponse,
   HarnessId,
   EscalateResponse,
+  Id,
   Role,
+  SendMessageResponse,
   StateSnapshot,
   TaskCommandResponse,
   TaskDetail,
@@ -28,6 +30,7 @@ export const TASK_USAGE = `usage:
   bazhen task done [<task>] [--note <text>] [--cascade]
   bazhen task cancel <task> [--note <text>] [--cascade]
   bazhen escalate <question> [--task <task>]
+  bazhen send <agent> (<text> | --file <path>)
   bazhen delegate (<agent> | --launch claude-code|codex [--dir <dir>]) --title <title> (--brief <text> | --brief-file <path>) [--task <task>] [--role lead|worker]`;
 
 /** A command line that doesn't say what to do; the message says why. */
@@ -66,6 +69,7 @@ const OPTIONS = {
   title: { type: "string" },
   brief: { type: "string" },
   "brief-file": { type: "string" },
+  file: { type: "string" },
   parent: { type: "string" },
   assign: { type: "string" },
   role: { type: "string" },
@@ -88,6 +92,9 @@ function parse(argv: readonly string[]) {
     throw err;
   }
 }
+
+/** The options `send` takes; `--home` and `--port` are every verb's. */
+const SEND_OPTIONS: ReadonlySet<string> = new Set(["file", "home", "port"]);
 
 const state: Call<StateSnapshot> = { method: "GET", path: "/v1/state", reply: StateSnapshot };
 
@@ -115,6 +122,9 @@ export function taskVerb(argv: readonly string[], ctx: Context): Verb {
   const post = <T>(path: string, reply: Call<T>["reply"], body: object, print: (r: T) => string) =>
     verb({ method: "POST", path, reply, body: { idempotencyKey: ctx.key(), ...body } }, print);
 
+  if (name !== "send" && values.file !== undefined) {
+    throw new Usage("--file is for send; a brief takes --brief-file");
+  }
   if (name === "agents") return verb(state, listAgents);
   if (name === "escalate") {
     const summary = [sub, ...rest].filter((w) => w !== undefined).join(" ");
@@ -126,6 +136,27 @@ export function taskVerb(argv: readonly string[], ctx: Context): Verb {
         ...(values.task === undefined ? {} : { taskId: values.task }),
       },
       (r) => `escalated as ${r.attentionId}; the human answers in the inbox`,
+    );
+  }
+  if (name === "send") {
+    const agentId = need(sub, "the agent to send to");
+    if (!Id("agent").safeParse(agentId).success) throw new Usage(`not an agent id: ${agentId}`);
+    // An unquoted word that is another verb's option would be taken out of the text silently.
+    const taken = Object.keys(values).filter((o) => !SEND_OPTIONS.has(o));
+    if (taken.length > 0) {
+      throw new Usage(`put the text in quotes: it holds --${taken.join(", --")}`);
+    }
+    const words = rest.join(" ");
+    if (words !== "" && values.file !== undefined) {
+      throw new Usage("give the text or --file, not both");
+    }
+    const body =
+      values.file === undefined ? need(words, "the text to send") : ctx.readFile(values.file);
+    return post(
+      `/v1/agents/${agentId}/messages`,
+      SendMessageResponse,
+      { body },
+      (r) => `sent ${r.messageId} to ${agentId}`,
     );
   }
   if (name === "delegate") {

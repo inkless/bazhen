@@ -110,7 +110,8 @@ export class Mailbox {
     this.codex = opts.codex;
   }
 
-  send(agentId: string, req: SendMessageRequest): SendMessageResponse {
+  /** `from` is the agent whose own words the body is, for an agent's message to a peer. */
+  send(agentId: string, req: SendMessageRequest, from?: AgentSessionId): SendMessageResponse {
     const agent = this.store.agent(agentId);
     const harness = agent?.harness;
     const routes: Record<string, ((id: string, agent: string) => void) | undefined> = {
@@ -121,7 +122,7 @@ export class Mailbox {
     let created = false;
     const response = this.store.once(
       req.idempotencyKey,
-      { agentId, body: req.body },
+      { agentId, body: req.body, from },
       (r) => SendMessageResponse.parse(r),
       () => {
         if (deliver === undefined) throw new UnknownAgent(agentId, "that takes mail");
@@ -135,8 +136,8 @@ export class Mailbox {
         const eventId = this.store.append({
           type: "mailbox.queued",
           entityId: messageId,
-          actor: "system",
-          payload: { agentId, body: req.body },
+          actor: from ?? "system",
+          payload: { agentId, body: req.body, ...(from === undefined ? {} : { from }) },
         });
         return { messageId, eventIds: [eventId] };
       },

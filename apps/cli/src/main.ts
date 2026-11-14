@@ -262,6 +262,7 @@ async function run(verb: string): Promise<number> {
     case "task":
     case "delegate":
     case "escalate":
+    case "send":
       return taskCommand();
     case "start":
       return start();

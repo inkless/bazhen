@@ -14,6 +14,7 @@ import {
   AssignTaskResponse,
   CreateTaskResponse,
   EscalateResponse,
+  SendMessageResponse,
   TaskCommandResponse,
   type AgentState,
   type AssignTaskRequest,
@@ -24,6 +25,7 @@ import {
   type EscalateRequest,
   type FinishTaskRequest,
   type Role,
+  type SendMessageRequest,
   type TaskOutcome,
   type UnassignTaskRequest,
 } from "@bazhen/protocol";
@@ -40,6 +42,7 @@ import {
   lineEndedMail,
   ownedMail,
   MAIL_LIMIT,
+  peerMail,
   unassignedMail,
   type Named,
 } from "./mail.ts";
@@ -96,13 +99,13 @@ const CLOSED_CALLER: ReadonlySet<AgentState> = new Set<AgentState>([
   "lost",
 ]);
 
-/** A composed message longer than the mailbox takes: the brief, or the note, is too long. */
+/** A composed message longer than the mailbox takes: the text it carries is too long. */
 export class MailTooLong extends Error {
   readonly length: number;
 
   constructor(length: number) {
     super(
-      `the message to the agent would be ${length} characters, over the ${MAIL_LIMIT} a message may be: shorten the brief or note`,
+      `the message to the agent would be ${length} characters, over the ${MAIL_LIMIT} a message may be: shorten what you wrote`,
     );
     this.length = length;
   }
@@ -335,6 +338,32 @@ export class Tasks {
       ...this.tell([...givers], finishedMail(task, outcome, caller, note), caller, `${key}:givers`),
       ...this.tell(workers, told, caller, `${key}:workers`),
     ];
+  }
+
+  /**
+   * A message to an agent: the human's as written, or an agent's own to a peer, which says who
+   * sent it and how to reply. An agent can't mail itself; the mailbox refuses an agent that is gone.
+   */
+  send(caller: Caller, agentId: string, req: SendMessageRequest): SendMessageResponse {
+    if (caller === null) return this.mailbox.send(agentId, req);
+    const { idempotencyKey, body } = req;
+    return this.store.once(
+      idempotencyKey,
+      { caller, agentId, body },
+      (r) => SendMessageResponse.parse(r),
+      () => {
+        this.checkCaller(caller);
+        if (agentId === caller) throw new TaskRefused("forbidden", "you can't send to yourself");
+        const sender = this.store.agentLaunch(caller)?.launch;
+        if (sender === undefined) throw new UnknownAgent(caller);
+        const text = checkLength(peerMail({ id: caller, ...sender }, body));
+        return this.mailbox.send(
+          agentId,
+          { idempotencyKey: `${idempotencyKey}:sent`, body: text },
+          caller,
+        );
+      },
+    );
   }
 
   /**

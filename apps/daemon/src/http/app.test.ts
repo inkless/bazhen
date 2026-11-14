@@ -21,6 +21,7 @@ const runtime = new FakeRuntime();
 
 const launched = { agentId: newId("agent"), terminalId: newId("term"), eventIds: [2, 3] };
 const callers: Caller[] = [];
+const target = newId("agent");
 const tasks: TaskCommands = {
   create: (caller, req) => {
     callers.push(caller);
@@ -34,6 +35,11 @@ const tasks: TaskCommands = {
   finish: () => ({ eventIds: [8] }),
   delegate: async () => ({ taskId: newId("task"), assignmentId: newId("asgn"), eventIds: [9] }),
   escalate: () => ({ attentionId: newId("attn") }),
+  send: (caller, agentId) => {
+    callers.push(caller);
+    if (agentId === "agent_gone") throw new AgentGone(agentId, "closed");
+    return { messageId: newId("msg"), eventIds: [agentId === target ? 4 : 0] };
+  },
 };
 const deps: AppDeps = {
   appVersion: "0.1.0",
@@ -51,10 +57,6 @@ const deps: AppDeps = {
     messages: [],
     shells: [],
   }),
-  send: (agentId) => {
-    if (agentId === "agent_gone") throw new AgentGone(agentId, "closed");
-    return { messageId: newId("msg"), eventIds: [4] };
-  },
   answer: () => {
     throw new AttentionClosed("attn_x");
   },
@@ -314,6 +316,21 @@ describe("HTTP task routes", () => {
   it("treats a browser's request as the human's, whatever agent it names", async () => {
     const res = await createTask(app, "page", { "bazhen-agent-id": agentId });
     expect([res.status, callers.at(-1)]).toEqual([200, null]);
+  });
+
+  it("sends a socket caller's message as that agent's, and a browser's as the human's", async () => {
+    const send = (on: typeof app) =>
+      on.request(`/v1/agents/${target}/messages`, {
+        method: "POST",
+        headers: { host, "content-type": "application/json", "bazhen-agent-id": agentId },
+        body: JSON.stringify({ idempotencyKey: "m", body: "hi" }),
+      });
+    const replies = [await send(socket), await send(app)];
+    expect(await Promise.all(replies.map(async (r) => (await r.json()).eventIds))).toEqual([
+      [4],
+      [4],
+    ]);
+    expect(callers.slice(-2)).toEqual([agentId, null]);
   });
 
   it("refuses a socket caller whose agent id is malformed", async () => {
