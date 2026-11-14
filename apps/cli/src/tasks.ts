@@ -9,6 +9,7 @@ import {
   HarnessId,
   EscalateResponse,
   Role,
+  SendMessageResponse,
   StateSnapshot,
   TaskCommandResponse,
   TaskDetail,
@@ -28,6 +29,7 @@ export const TASK_USAGE = `usage:
   bazhen task done [<task>] [--note <text>] [--cascade]
   bazhen task cancel <task> [--note <text>] [--cascade]
   bazhen escalate <question> [--task <task>]
+  bazhen send <agent> (<text> | --file <path>)
   bazhen delegate (<agent> | --launch claude-code|codex [--dir <dir>]) --title <title> (--brief <text> | --brief-file <path>) [--task <task>] [--role lead|worker]`;
 
 /** A command line that doesn't say what to do; the message says why. */
@@ -66,6 +68,7 @@ const OPTIONS = {
   title: { type: "string" },
   brief: { type: "string" },
   "brief-file": { type: "string" },
+  file: { type: "string" },
   parent: { type: "string" },
   assign: { type: "string" },
   role: { type: "string" },
@@ -126,6 +129,21 @@ export function taskVerb(argv: readonly string[], ctx: Context): Verb {
         ...(values.task === undefined ? {} : { taskId: values.task }),
       },
       (r) => `escalated as ${r.attentionId}; the human answers in the inbox`,
+    );
+  }
+  if (name === "send") {
+    const agentId = need(sub, "the agent to send to");
+    const words = rest.join(" ");
+    if (words !== "" && values.file !== undefined) {
+      throw new Usage("give the text or --file, not both");
+    }
+    const body =
+      values.file === undefined ? need(words, "the text to send") : ctx.readFile(values.file);
+    return post(
+      `/v1/agents/${agentId}/messages`,
+      SendMessageResponse,
+      { body },
+      (r) => `sent ${r.messageId} to ${agentId}`,
     );
   }
   if (name === "delegate") {

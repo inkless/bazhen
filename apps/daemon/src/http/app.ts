@@ -97,7 +97,6 @@ export interface AppDeps {
   readonly web?: { readonly root: string };
   readonly state: () => StateSnapshot;
   readonly launch: (req: LaunchAgentRequest) => Promise<LaunchAgentResponse>;
-  readonly send: (agentId: string, req: SendMessageRequest) => SendMessageResponse;
   readonly answer: (attentionId: string, req: AnswerAttentionRequest) => AnswerAttentionResponse;
   readonly reply: (attentionId: string, req: ReplyAttentionRequest) => ReplyAttentionResponse;
   readonly dismiss: (attentionId: string, req: DismissAttentionRequest) => DismissAttentionResponse;
@@ -136,6 +135,8 @@ export interface TaskCommands {
   /** Launching the agent to delegate to, when the request asks, is the only async step. */
   delegate(caller: Caller, req: DelegateTaskRequest): Promise<CreateTaskResponse>;
   escalate(caller: Caller, req: EscalateRequest): EscalateResponse;
+  /** A message to the agent: the human's, or another agent's own words. */
+  send(caller: Caller, agentId: string, req: SendMessageRequest): SendMessageResponse;
 }
 
 /** Thrown for a caller that says it is an agent with something that is no agent's id. */
@@ -272,7 +273,6 @@ export function createApp(deps: AppDeps): Hono {
       if (!body.success) return invalid(c, body.error);
       return c.json(await run(c.req.param("id"), body.data));
     });
-  route("/v1/agents/:id/messages", SendMessageRequest, deps.send);
   route("/v1/agents/:id/close", CloseAgentRequest, deps.close);
   route("/v1/agents/:id/respawn", RespawnAgentRequest, deps.respawn);
   route("/v1/agents/:id/relaunch", RelaunchAgentRequest, deps.relaunch);
@@ -310,6 +310,7 @@ export function createApp(deps: AppDeps): Hono {
     tasks.delegate(caller, req),
   );
   taskRoute("/v1/escalations", EscalateRequest, (caller, _id, req) => tasks.escalate(caller, req));
+  taskRoute("/v1/agents/:id/messages", SendMessageRequest, (...a) => tasks.send(...a));
   taskRoute("/v1/tasks/:id/assign", AssignTaskRequest, (...a) => tasks.assign(...a));
   taskRoute("/v1/tasks/:id/unassign", UnassignTaskRequest, (...a) => tasks.unassign(...a));
   taskRoute("/v1/tasks/:id/finish", FinishTaskRequest, (...a) => tasks.finish(...a));

@@ -84,6 +84,30 @@ describe("bazhen task verbs", () => {
     ]);
   });
 
+  it("sends the words after the agent as one message, or a file's text, and says what it sent", () => {
+    const words = taskVerb(["send", OTHER, "Is", "the", "build", "green?"], ctx(AGENT));
+    expect([words.call.path, words.call.body]).toEqual([
+      `/v1/agents/${OTHER}/messages`,
+      { idempotencyKey: "key", body: "Is the build green?" },
+    ]);
+    const file = taskVerb(["send", OTHER, "--file", "notes.md"], ctx(AGENT));
+    expect(file.call.body).toMatchObject({ body: "brief from notes.md" });
+    const messageId = "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
+    expect(after(words, { messageId, eventIds: [1] })).toBe(`sent ${messageId} to ${OTHER}`);
+  });
+
+  it("wants an agent and one text to send, from the words or a file", () => {
+    expect([
+      usage(["send"]),
+      usage(["send", OTHER]),
+      usage(["send", OTHER, "hi", "--file", "f"]),
+    ]).toEqual([
+      expect.stringContaining("the agent"),
+      expect.stringContaining("the text"),
+      expect.stringContaining("not both"),
+    ]);
+  });
+
   it("delegates to a new agent it launches, in the directory named, rather than to one named", () => {
     const verb = taskVerb(
       ["delegate", "--launch", "codex", "--dir", "/work", "--title", "t", "--brief", "b"],
