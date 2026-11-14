@@ -8,7 +8,7 @@ import { Store } from "../store/store.ts";
 import { fakeEnvironment, tempDb, testView } from "../testing/fixtures.ts";
 import { IdempotencyConflict } from "../store/store.ts";
 import { InvalidDirectory } from "./cwd.ts";
-import { launchAgent, localEnvironmentId } from "./launch.ts";
+import { launchAgent, launchSettled, localEnvironmentId } from "./launch.ts";
 import { AgentQueue } from "./queue.ts";
 
 function setup(fail = false) {
@@ -103,6 +103,50 @@ describe("launchAgent", () => {
     const first = await launchAgent(deps, request);
     const again = await launchAgent(deps, request);
     expect([launches.length, again]).toEqual([1, first]);
+  });
+
+  it("launches once for a key repeated in the same tick, and answers the repeat so far", async () => {
+    const { store, deps, launches } = setup();
+    const [first, again] = await Promise.all([
+      launchAgent(deps, request),
+      launchAgent(deps, request),
+    ]);
+    expect([launches.length, store.snapshot(testView).agents.length]).toEqual([1, 1]);
+    expect(again).toEqual({ ...first, eventIds: first.eventIds.slice(0, 1) });
+  });
+
+  it("holds its agent's slot from the moment the agent is recorded", async () => {
+    const { store, deps } = setup();
+    const launching = launchAgent(deps, request);
+    const recorded = store.snapshot(testView).agents.map((a) => [a.state, deps.queue.busy(a.id)]);
+    await launching;
+    expect(recorded).toEqual([["starting", true]]);
+  });
+
+  it("refuses a key reused in the same tick for a different launch, launching once", async () => {
+    const { deps, launches } = setup();
+    const first = launchAgent(deps, request);
+    const other = launchAgent(deps, { ...request, cwd: "~" });
+    await expect(other).rejects.toThrow(IdempotencyConflict);
+    expect([(await first).agentId, launches.length]).toEqual([expect.any(String), 1]);
+  });
+
+  it("answers a repeat with the settled launch once settling is asked for", async () => {
+    const { deps, launches } = setup();
+    const [first, again] = await Promise.all([
+      launchSettled(deps, request),
+      launchSettled(deps, request),
+    ]);
+    expect([launches.length, first.eventIds.length, again]).toEqual([1, 2, first]);
+  });
+
+  it("fails a repeat with its launch's failure once settling is asked for", async () => {
+    const { deps, launches } = setup(true);
+    const both = await Promise.allSettled([
+      launchSettled(deps, request),
+      launchSettled(deps, request),
+    ]);
+    expect([both.map((r) => r.status), launches.length]).toEqual([["rejected", "rejected"], 1]);
   });
 
   it("refuses a harness the environment can't run before recording anything", async () => {

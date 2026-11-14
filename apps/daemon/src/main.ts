@@ -11,7 +11,7 @@ import { filterEnv } from "@bazhen/core";
 import { TmuxServer, findNotifySend } from "@bazhen/host-guard";
 import { PROTOCOL_VERSION } from "@bazhen/protocol";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
-import { launchAgent, localEnvironmentId } from "./agents/launch.ts";
+import { launchAgent, launchSettled, localEnvironmentId } from "./agents/launch.ts";
 import { Lifecycle } from "./agents/lifecycle.ts";
 import { AgentQueue } from "./agents/queue.ts";
 import { reconcile } from "./agents/reconcile.ts";
@@ -102,7 +102,7 @@ const inbox = new Inbox(store, approvals, (agentId, req) => mailbox.send(agentId
 inbox.follow();
 const taskService = new Tasks(store, mailbox, (raised) => inbox.raise(raised), {
   launch: (req, launchedBy) =>
-    launchAgent(
+    launchSettled(
       { store, environment, size: DEFAULT_SIZE, home: inputs.home, queue },
       req,
       launchedBy,

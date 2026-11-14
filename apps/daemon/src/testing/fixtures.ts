@@ -20,7 +20,7 @@ import {
   type EnvironmentAdapter,
   type Resumes,
 } from "@bazhen/core";
-import { launchAgent, localEnvironmentId } from "../agents/launch.ts";
+import { launchAgent, launchSettled, localEnvironmentId } from "../agents/launch.ts";
 import { AgentQueue } from "../agents/queue.ts";
 import { upgrades, type UpgradeRoute } from "../http/upgrades.ts";
 import { Mailbox } from "../mailbox/mailbox.ts";
@@ -249,9 +249,12 @@ export async function withCodexAgent(threadId = "thr-1") {
 
 /**
  * A store with three running Claude Code agents, to coordinate, lead and work on tasks, and the
- * task service on the store's real mailbox.
+ * task service on the store's real mailbox. `delegated` starts the agents a delegation launches.
  */
-export async function taskFleet(limits = { maxLaunched: 5, maxDepth: 3 }) {
+export async function taskFleet(
+  limits = { maxLaunched: 5, maxDepth: 3 },
+  delegated?: (l: AgentLaunch) => Promise<AgentRefs>,
+) {
   const { store, agentId: coordinator, environment } = await withAgent();
   const deps = {
     store,
@@ -272,8 +275,10 @@ export async function taskFleet(limits = { maxLaunched: 5, maxDepth: 3 }) {
   const [lead, worker] = [await launch("launch-lead"), await launch("launch-worker")];
   const mailbox = new Mailbox(store);
   const raised: Raised[] = [];
+  const delegating =
+    delegated === undefined ? deps : { ...deps, environment: fakeEnvironment(store, delegated) };
   const launcher = {
-    launch: (req: LaunchAgentRequest, by: AgentSessionId) => launchAgent(deps, req, by),
+    launch: (req: LaunchAgentRequest, by: AgentSessionId) => launchSettled(delegating, req, by),
     ...limits,
   };
   const tasks = new Tasks(

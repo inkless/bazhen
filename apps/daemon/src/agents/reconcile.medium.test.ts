@@ -49,7 +49,7 @@ const exited = (store: Store, agentId: string) =>
  * A launch the daemon died in the middle of: recorded and keyed as `launch-cut`, with the
  * environment never answering. Retrying the key replays it.
  */
-async function launchCut(store: Store) {
+function launchCut(store: Store) {
   const deps = (environment: EnvironmentAdapter) => ({
     store,
     environment,
@@ -60,10 +60,6 @@ async function launchCut(store: Store) {
   const req = { idempotencyKey: "launch-cut", harness: "claude-code", cwd: "~" } as const;
   const hung = { ...fakeEnvironment(store), launch: () => new Promise<never>(() => {}) };
   void launchAgent(deps(hung), req);
-  // The launch is recorded once it holds its agent's slot, a moment after it is asked for.
-  await expect
-    .poll(() => store.snapshot(testView).agents.some((a) => a.state === "starting"))
-    .toBe(true);
   const agent = store.snapshot(testView).agents.find((a) => a.state === "starting");
   if (agent?.terminalId == null || !isId("term", agent.terminalId) || !isId("agent", agent.id))
     throw new Error("no launch");
@@ -181,7 +177,7 @@ describe("reconcile", () => {
 
   it("settles an agent the daemon died launching as running, on the harness session its terminal carries", async () => {
     const { store } = await withAgent();
-    const { agentId, terminalId, retry } = await launchCut(store);
+    const { agentId, terminalId, retry } = launchCut(store);
     const externalRef = {
       environmentId: localEnvironmentId(store),
       kind: "claude-session",
@@ -204,7 +200,7 @@ describe("reconcile", () => {
 
   it("settles an agent the daemon died launching as failed when no session carries it, and its key says so", async () => {
     const { store } = await withAgent();
-    const { agentId, retry } = await launchCut(store);
+    const { agentId, retry } = launchCut(store);
     await reconcile(store, fakeEnvironment(store));
     const state = store.snapshot(testView).agents.find((a) => a.id === agentId)?.state;
     const replayed = await retry().catch((e: unknown) => e);
