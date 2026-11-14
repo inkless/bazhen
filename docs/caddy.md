@@ -35,13 +35,11 @@ abort @outside
 
 - **Your network only.** Caddy listens on ports 80 and 443 of every interface, a VPN's included,
   so anyone on any of those networks can reach it. `remote_ip` aborts every request that doesn't
-  come from your home network's range, before it reaches Bazhen.
-
-  Caddy's `bind` would instead listen on the LAN address alone, but on macOS a process that isn't
-  root can listen on a port below 1024 only on all addresses at once. `bind 192.168.1.20` on port
-  443 needs `sudo`, which breaks Caddy's later runs as you (see
-  [Running it as yourself](#running-it-as-yourself)). For `bind`, use a port above 1024 instead
-  ([On a high port](#on-a-high-port)).
+  come from your home network's range, before it reaches Bazhen. Caddy's `bind` would instead
+  listen on the LAN address alone, but on macOS a process that isn't root can listen on a port
+  below 1024 only on all addresses at once. `bind 192.168.1.20` on port 443 needs `sudo`, which
+  breaks Caddy's later runs as you (see [Running it as yourself](#running-it-as-yourself)). For
+  `bind`, use a port above 1024 instead ([On a high port](#on-a-high-port)).
 - **Your devices only, if you want more.** Name the phones in `remote_ip` instead of the range
   (`not remote_ip 192.168.1.30 192.168.1.31`), and only they are let in. An address names a device
   only while that device holds it: when your phone is away, another device on the network can take
