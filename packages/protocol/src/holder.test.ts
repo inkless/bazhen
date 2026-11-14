@@ -248,6 +248,12 @@ const broken: [string, z.ZodType, unknown, unknown][] = [
     { ...respawned, childStart: -1 },
   ],
   [
+    "an environment variable a JavaScript record would drop, though constructor is kept",
+    HolderSpawnSpec,
+    { ...spawnSpec, env: { constructor: "x" } },
+    { ...spawnSpec, env: JSON.parse('{"__proto__":"x"}') },
+  ],
+  [
     "a lone high surrogate in argv, though a pair is fine",
     HolderSpawnSpec,
     { ...spawnSpec, argv: ["😀"] },

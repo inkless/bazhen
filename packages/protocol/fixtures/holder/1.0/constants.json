@@ -8,6 +8,9 @@
     "constructor",
     "prototype"
   ],
+  "HOLDER_RESERVED_ENV_NAMES": [
+    "__proto__"
+  ],
   "HOLDER_MAX_COLS": 1000,
   "HOLDER_MAX_ROWS": 1000,
   "HOLDER_MAX_HISTORY_LINES": 100000,

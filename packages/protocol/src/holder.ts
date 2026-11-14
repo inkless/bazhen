@@ -141,24 +141,38 @@ export type HolderSize = z.infer<typeof HolderSize>;
 export const HOLDER_RESERVED_TAG_NAMES = ["__proto__", "constructor", "prototype"] as const;
 
 /**
+ * An environment variable a JavaScript record drops without a word, so the daemon could never
+ * send it: refused instead, the same by every peer. Other names that are an object's own, such
+ * as `constructor`, survive a record and are an environment's to use.
+ */
+export const HOLDER_RESERVED_ENV_NAMES = ["__proto__"] as const;
+
+/**
+ * A record that refuses `names` as keys rather than lose them, as a JavaScript record can, or
+ * hand them to a peer that reads the record into a plain object.
+ */
+function refusingKeys<T extends z.ZodType>(what: string, names: readonly string[], record: T) {
+  return z
+    .preprocess((value, ctx) => {
+      for (const name of names) {
+        if (typeof value === "object" && value !== null && Object.hasOwn(value, name)) {
+          ctx.addIssue({ code: "custom", message: `${what} ${name} is reserved` });
+        }
+      }
+      return value;
+    }, record)
+    .describe(`${what[0]?.toUpperCase()}${what.slice(1)}s ${names.join(", ")} are refused.`);
+}
+
+/**
  * Whatever the daemon writes beside a terminal so it can rebuild the terminal's links from the
  * holder alone. The holder stores and echoes them and reads none: their meaning is the daemon's.
  */
-export const HolderTags = z
-  .preprocess(
-    (tags, ctx) => {
-      // Dropped without a word by a JavaScript record, and a trap for any peer that reads tags
-      // into a plain object: refused instead, the same by every peer.
-      for (const name of HOLDER_RESERVED_TAG_NAMES) {
-        if (typeof tags === "object" && tags !== null && Object.hasOwn(tags, name)) {
-          ctx.addIssue({ code: "custom", message: `tag name ${name} is reserved` });
-        }
-      }
-      return tags;
-    },
-    z.record(utf8(HOLDER_TAG_NAME_MAX_BYTES, 1), utf8(HOLDER_TAG_VALUE_MAX_BYTES)),
-  )
-  .describe(`Tag names ${HOLDER_RESERVED_TAG_NAMES.join(", ")} are refused.`);
+export const HolderTags = refusingKeys(
+  "tag name",
+  HOLDER_RESERVED_TAG_NAMES,
+  z.record(utf8(HOLDER_TAG_NAME_MAX_BYTES, 1), utf8(HOLDER_TAG_VALUE_MAX_BYTES)),
+);
 export type HolderTags = z.infer<typeof HolderTags>;
 
 export const HolderSignal = z.enum(["SIGINT", "SIGTERM", "SIGHUP", "SIGKILL"]);
@@ -186,7 +200,11 @@ const TerminalId = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/);
 export const HolderProcessSpec = z.object({
   argv: z.array(wellFormed()).min(1),
   cwd: wellFormed().min(1),
-  env: z.record(wellFormed(), wellFormed()),
+  env: refusingKeys(
+    "environment name",
+    HOLDER_RESERVED_ENV_NAMES,
+    z.record(wellFormed(), wellFormed()),
+  ),
   generation: Count,
   theme: HolderTheme.optional(),
 });

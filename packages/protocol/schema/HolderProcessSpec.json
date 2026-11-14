@@ -15,6 +15,7 @@
       "minLength": 1
     },
     "env": {
+      "description": "Environment names __proto__ are refused.",
       "type": "object",
       "propertyNames": {
         "type": "string"

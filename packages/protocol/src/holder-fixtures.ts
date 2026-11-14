@@ -9,6 +9,7 @@ import {
   HOLDER_PROTOCOL_VERSION,
   HOLDER_REPLY_CODES,
   HOLDER_REQUEST_CODES,
+  HOLDER_RESERVED_ENV_NAMES,
   HOLDER_RESERVED_TAG_NAMES,
   HOLDER_TAG_NAME_MAX_BYTES,
   HOLDER_TAG_VALUE_MAX_BYTES,
@@ -352,6 +353,20 @@ const REQUEST_SOURCES: readonly FrameSource[] = [
     "respawn with an env value not a string",
     "malformed",
     rawRequest(req.respawn, 53, JSON.stringify({ ...processSpec, env: { A: 1 } })),
+  ),
+  inbound(
+    "respawn with an environment variable named __proto__",
+    "malformed",
+    rawRequest(req.respawn, 69, `{"argv":["sh"],"cwd":"/","env":{"__proto__":"x"},"generation":0}`),
+  ),
+  inbound(
+    "respawn with an environment variable named constructor",
+    "valid",
+    rawRequest(
+      req.respawn,
+      70,
+      `{"argv":["sh"],"cwd":"/","env":{"constructor":"x"},"generation":0}`,
+    ),
   ),
   inbound(
     "respawn with a negative generation",
@@ -831,6 +846,7 @@ export function holderConstants() {
     HOLDER_TAG_NAME_MAX_BYTES,
     HOLDER_TAG_VALUE_MAX_BYTES,
     HOLDER_RESERVED_TAG_NAMES,
+    HOLDER_RESERVED_ENV_NAMES,
     HOLDER_MAX_COLS,
     HOLDER_MAX_ROWS,
     HOLDER_MAX_HISTORY_LINES,

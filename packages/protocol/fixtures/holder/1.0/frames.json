@@ -666,6 +666,34 @@
     }
   },
   {
+    "name": "respawn with an environment variable named __proto__",
+    "direction": "request",
+    "hex": "0000004545000000457b2261726776223a5b227368225d2c22637764223a222f222c22656e76223a7b225f5f70726f746f5f5f223a2278227d2c2267656e65726174696f6e223a307d",
+    "outcome": {
+      "malformed": "respawn: env: environment name __proto__ is reserved"
+    }
+  },
+  {
+    "name": "respawn with an environment variable named constructor",
+    "direction": "request",
+    "hex": "0000004745000000467b2261726776223a5b227368225d2c22637764223a222f222c22656e76223a7b22636f6e7374727563746f72223a2278227d2c2267656e65726174696f6e223a307d",
+    "outcome": {
+      "canonical": {
+        "head": "4500000046",
+        "json": {
+          "argv": [
+            "sh"
+          ],
+          "cwd": "/",
+          "env": {
+            "constructor": "x"
+          },
+          "generation": 0
+        }
+      }
+    }
+  },
+  {
     "name": "respawn with a negative generation",
     "direction": "request",
     "hex": "000000a445000000367b2261726776223a5b22636c61756465222c222d2d726573756d65222c22e697a5e69cace8aa9e225d2c22637764223a222f686f6d652f752f737263222c22656e76223a7b2231223a22696e74656765722d6c696b65206b65797320736f727420666972737420696e204a617661536372697074222c225445524d223a22787465726d2d323536636f6c6f72227d2c2267656e65726174696f6e223a2d317d",
