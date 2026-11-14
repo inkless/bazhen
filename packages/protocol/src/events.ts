@@ -83,7 +83,7 @@ export const EVENTS = {
       reason: z.enum(["launch_rejected", "daemon_restart"]),
       /**
        * Protocol 1.34. What went wrong, in the failure's own words with secrets taken out, at most
-       * 500 characters.
+       * 500 characters counted as a person sees them (grapheme clusters, not UTF-16 units).
        */
       detail: z.string().optional(),
     }),
@@ -120,7 +120,7 @@ export const EVENTS = {
       ]),
       /**
        * Protocol 1.34. What went wrong, in the failure's own words with secrets taken out, at most
-       * 500 characters.
+       * 500 characters counted as a person sees them (grapheme clusters, not UTF-16 units).
        */
       detail: z.string().optional(),
     }),
@@ -165,7 +165,7 @@ export const EVENTS = {
       ]),
       /**
        * Protocol 1.34. What went wrong, in the failure's own words with secrets taken out, at most
-       * 500 characters.
+       * 500 characters counted as a person sees them (grapheme clusters, not UTF-16 units).
        */
       detail: z.string().optional(),
     }),

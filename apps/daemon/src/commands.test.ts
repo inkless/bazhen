@@ -62,33 +62,55 @@ describe("an environment's failure as a command's", () => {
 });
 
 describe("a failure's detail", () => {
-  const SECRET = "s3cr3t-Value_42";
-
-  it("keeps a harness's own words whole", () => {
-    const words =
+  it("keeps a harness's own words, ids and prose whole", () => {
+    const kept = [
       "Codex refused thread/resume: This chat uses model provider “deepseek”, which is no " +
-      "longer configured. Restore this provider’s configuration to continue. (-32600)";
-    expect([failureDetail(new Error(words)), failureDetail("auth: failed")]).toEqual([
-      words,
+        "longer configured. Restore this provider’s configuration to continue. (-32600)",
+      "Codex refused thread/resume: no rollout found for thread id " +
+        "01a1d8c8-9752-7d53-b6a1-2a4e9df16bdf (-32600)",
       "auth: failed",
-    ]);
+      "token: expired",
+      "authentication: required",
+      "TOML parse error: invalid basic string",
+      "requires_openai_auth = false",
+    ];
+    expect(kept.map((text) => failureDetail(new Error(text)))).toEqual(kept);
   });
 
-  it("takes out every secret a config line, an environment or a request could echo", () => {
-    const echoed = [
-      `experimental_bearer_token = "${SECRET}"`,
-      `OPENAI_API_KEY=${SECRET}`,
-      `{"api_key": "${SECRET}"}`,
-      `password='${SECRET}'`,
-      `Authorization: Bearer ${SECRET}`,
-      `https://user:${SECRET}@example.com/v1`,
-      `sk-proj-${SECRET}abcdef`,
-      `ghp_${SECRET.replaceAll("-", "")}abcdefghij`,
-    ];
-    const details = echoed.map((line) => failureDetail(new Error(`bad config: ${line}`)));
-    expect(details).toEqual(echoed.map(() => expect.stringContaining("[redacted]")));
-    expect(details.join("\n")).not.toContain(SECRET.replaceAll("-", ""));
-    expect(details.join("\n")).not.toContain(SECRET);
+  it.each([
+    ['experimental_bearer_token = "s3cr3t"', "experimental_bearer_token = [redacted]"],
+    ["OPENAI_API_KEY=s3cr3t", "OPENAI_API_KEY=[redacted]"],
+    ['{"api_key": "s3cr3t"}', '{"api_key": [redacted]}'],
+    ['{\\"api_key\\":\\"s3cr3t\\"}', '{\\"api_key\\":[redacted]}'],
+    ["password='s3cr3t'", "password=[redacted]"],
+    ['api_key = "s3\\"cr3t" and more', "api_key = [redacted] and more"],
+    ['api_key = "s3cr3t and the rest of the line', "api_key = [redacted]"],
+    [
+      'ModelProviderInfo { experimental_bearer_token: Some("s3cr3t"), name: "x" }',
+      'ModelProviderInfo { experimental_bearer_token: Some([redacted]), name: "x" }',
+    ],
+    ["api_key: s3cr3t", "api_key: [redacted]"],
+    ["x-api-key: s3cr3t", "x-api-key: [redacted]"],
+    ['token: "s3cr3t"', "token: [redacted]"],
+    ["Authorization: Basic czNjcjN0", "Authorization: [redacted]"],
+    ["Authorization: Bearer s3cr3t-token", "Authorization: [redacted]"],
+    ["sent Bearer s3cr3t-token", "sent Bearer [redacted]"],
+    ['http_headers = { "X-Corp" = "s3cr3t" }', "http_headers = {[redacted]}"],
+    ["https://user:s3cr3t@example.com/v1", "https://[redacted]@example.com/v1"],
+    ["key sk-proj-s3cr3tABCDEFGHIJKLMNOP leaked", "key [redacted] leaked"],
+    ["eyJhbGciOiJI.eyJzdWIiOiIx.s3cr3tSIGNATURE in a header", "[redacted] in a header"],
+  ])("takes the secret out of %j", (echoed, expected) => {
+    expect(failureDetail(new Error(`bad config: ${echoed}`))).toBe(`bad config: ${expected}`);
+  });
+
+  it("reads a long text in time linear in its length", () => {
+    // A long run of what could start a name, which a backtracking pattern takes cubic time over.
+    const started = performance.now();
+    const detail = failureDetail("key".repeat(1_200));
+    expect([
+      performance.now() - started < 1_000,
+      [...new Intl.Segmenter().segment(detail)].length,
+    ]).toEqual([true, DETAIL_MAX]);
   });
 
   it("cuts a long text to its limit between characters, never through one", () => {

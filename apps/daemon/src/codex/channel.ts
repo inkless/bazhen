@@ -61,6 +61,13 @@ export interface CodexChannelOptions {
   readonly reconnectMs?: number;
 }
 
+/**
+ * JSON-RPC's codes for a request the server won't carry out as asked: invalid request (Codex's
+ * answer to a thread whose model provider is gone), unknown method, invalid params. An internal
+ * error (-32603) or a server-defined code can be passing, so it isn't one.
+ */
+const REFUSALS: ReadonlySet<number> = new Set([-32600, -32601, -32602]);
+
 /** How many servers a request is tried on when each is draining as it arrives. */
 const DRAINING_ATTEMPTS = 3;
 
@@ -111,8 +118,8 @@ export class CodexChannel implements HarnessChannelPort {
 
   /**
    * One request's result. A server draining before it exits refuses new work, so the request
-   * waits for that server to go and is sent to the next one. Any other error the server answers
-   * with is Codex refusing, in its own words.
+   * waits for that server to go and is sent to the next one. An error about the request itself
+   * is Codex refusing it, in its own words; any other may pass, and is left as it is.
    */
   async request(method: string, params: unknown): Promise<unknown> {
     for (let attempt = 1; ; attempt++) {
@@ -121,10 +128,13 @@ export class CodexChannel implements HarnessChannelPort {
         return await server.request(method, params);
       } catch (err) {
         if (!(err instanceof AppServerError)) throw err;
-        if (!err.shuttingDown)
+        if (err.shuttingDown && attempt < DRAINING_ATTEMPTS) {
+          await server.closed;
+          continue;
+        }
+        if (!err.shuttingDown && REFUSALS.has(err.code))
           throw new HarnessRefused(`Codex refused ${err.message}`, { cause: err });
-        if (attempt >= DRAINING_ATTEMPTS) throw err;
-        await server.closed;
+        throw err;
       }
     }
   }

@@ -40,6 +40,21 @@ const answersResumeWithItsThread = (method: string, _connection: number, params:
     ? { result: idleThread(JSON.stringify(params).includes("thr-2") ? "thr-2" : "thr-1") }
     : { result: "ok" };
 
+/** A server that fails inside on `thread/read`, and drops the connection on anything else. */
+const failsReadsDropsTheRest = (method: string) =>
+  method === "thread/read"
+    ? { error: { code: -32603, message: "could not read the rollout" } }
+    : null;
+
+/** Ends a connection once the server has answered its first request after `initialize`. */
+const endsOnceAnswered = (ws: WebSocket) => {
+  let requests = 0;
+  ws.on("message", () => {
+    requests += 1;
+    if (requests === 2) setImmediate(() => ws.terminate());
+  });
+};
+
 const DRAINING = {
   error: { code: -32600, message: "Server is draining", data: { reason: "serverShuttingDown" } },
 };
@@ -148,12 +163,28 @@ describe("Codex channel", () => {
   it("calls a server that is still draining on the last attempt unavailable, not a refusal", async () => {
     const { codexHome, socket } = home();
     const { wss } = await fakeServer(socket, codexHome, () => DRAINING);
-    wss.on("connection", (ws) => setTimeout(() => ws.terminate(), 20));
+    wss.on("connection", endsOnceAnswered);
     const channel = channelOn(codexHome);
     const failed = await channel.request("thread/start", {}).catch((err: unknown) => err);
     expect([failed instanceof HarnessRefused, failed instanceof AppServerError]).toEqual([
       false,
       true,
+    ]);
+    channel.close();
+  });
+
+  it("leaves a request the server fails inside, or never answers, as not a refusal", async () => {
+    const { codexHome, socket } = home();
+    await fakeServer(socket, codexHome, failsReadsDropsTheRest);
+    const channel = channelOn(codexHome);
+    const failures = await Promise.all(
+      ["thread/read", "thread/resume"].map((method) =>
+        channel.request(method, {}).catch((err: unknown) => err),
+      ),
+    );
+    expect(failures.map((f) => [f instanceof HarnessRefused, String(f)])).toEqual([
+      [false, expect.stringContaining("(-32603)")],
+      [false, expect.stringContaining("ended")],
     ]);
     channel.close();
   });

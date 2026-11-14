@@ -512,12 +512,15 @@ describe("relaunching a lost agent", () => {
   });
 
   it("leaves a rejected relaunch lost on its old terminal, to be relaunched again or removed", async () => {
-    const { lifecycle, agentId, agent, fail } = await lost();
+    const { lifecycle, store, agentId, agent, fail } = await lost();
     const before = agent()?.terminalId;
     fail(new Error("tmux unreachable"));
     await expect(
       lifecycle.relaunch(agentId, { idempotencyKey: "l-1", generation: 0 }),
     ).rejects.toThrow(EnvironmentUnavailable);
+    expect(payloads(store, agentId, "agent.relaunch_rejected")).toEqual([
+      { reason: "unavailable", detail: "tmux unreachable" },
+    ]);
     const rejected = agent();
     fail(undefined);
     await lifecycle.relaunch(agentId, { idempotencyKey: "l-2", generation: 0 });

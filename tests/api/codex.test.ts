@@ -396,8 +396,6 @@ describe("a Codex agent", () => {
       });
     } finally {
       daemon.editCodexConfig(() => original);
-      await daemon.codex("app-server", "daemon", "stop");
-      await daemon.codex("app-server", "daemon", "start");
     }
-  });
+  }, 180_000);
 });
