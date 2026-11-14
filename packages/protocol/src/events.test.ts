@@ -25,6 +25,9 @@ describe("event registry", () => {
   });
 });
 
+const queued = (payload: object) =>
+  Event.safeParse({ ...recorded, type: "mailbox.queued", entityType: "message", payload });
+
 describe("streamed events", () => {
   it("carries a registered type with the payload that type declares", () => {
     const event = {
@@ -50,6 +53,13 @@ describe("streamed events", () => {
       payload: { agentId, body: "the secret plan" },
     });
     expect(event.payload).toEqual({ agentId });
+  });
+
+  it("streams who a queued message is from, and only an agent's id as that", () => {
+    const agentId = "agent_019a7b2c3d4e7f00a1b2c3d4e5f60718";
+    const from = "agent_019a7b2c3d4e7f00a1b2c3d4e5f60719";
+    expect(queued({ agentId, body: "hi", from }).data?.payload).toEqual({ agentId, from });
+    expect(queued({ agentId, body: "hi", from: "the human" }).success).toBe(false);
   });
 
   it("tells a client its cursor can't be resumed, and why", () => {

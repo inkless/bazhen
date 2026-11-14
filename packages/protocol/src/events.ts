@@ -6,7 +6,15 @@ import { ApprovalDecision, AttentionCloseReason, AttentionKind } from "./mail.ts
 import { Role, TaskBrief, TaskOutcome, TaskTitle } from "./tasks.ts";
 import { ProtocolVersion } from "./version.ts";
 
-const queued = z.object({ agentId: Id("agent"), body: z.string() });
+const queued = z.object({
+  agentId: Id("agent"),
+  body: z.string(),
+  /**
+   * The agent whose own words the body is; absent for the human's mail and for mail Bazhen
+   * composes, as a task's. Absent before protocol 1.35.
+   */
+  from: Id("agent").optional(),
+});
 const taskCreated = z.object({
   title: TaskTitle,
   brief: TaskBrief,

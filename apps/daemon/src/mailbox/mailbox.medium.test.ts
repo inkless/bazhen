@@ -6,7 +6,7 @@ import { Store } from "../store/store.ts";
 import { AgentQueue } from "../agents/queue.ts";
 import { Lifecycle } from "../agents/lifecycle.ts";
 import { quietStartAgain, withAgent, testView } from "../testing/fixtures.ts";
-import { UnknownAgent } from "../store/store.ts";
+import { IdempotencyConflict, UnknownAgent } from "../store/store.ts";
 import { AgentGone, MAX_FAILURES, Mailbox, QUIET } from "./mailbox.ts";
 
 const stateOf = (store: Store, id: string) =>
@@ -156,6 +156,22 @@ describe("mailbox", () => {
       mailbox.send(agentId, { idempotencyKey: "same", body: "hi" }),
       store.snapshot(testView).messages.length,
     ]).toEqual([first, 1]);
+  });
+
+  it("records whose words a message is, and refuses the same key from another sender", async () => {
+    const { store, agentId } = await withAgent();
+    const mailbox = new Mailbox(store);
+    const peer = newId("agent");
+    mailbox.send(agentId, { idempotencyKey: "human", body: "hi" });
+    mailbox.send(agentId, { idempotencyKey: "peer", body: "hi" }, peer);
+    const queued = store.events(0).filter((e) => e.type === "mailbox.queued");
+    expect(queued.map((e) => [e.actor, Reflect.get(Object(e.payload), "from")])).toEqual([
+      ["system", undefined],
+      [peer, peer],
+    ]);
+    expect(() => mailbox.send(agentId, { idempotencyKey: "peer", body: "hi" })).toThrow(
+      IdempotencyConflict,
+    );
   });
 
   it("requeues what a new session can't have seen, for the new session's waiter", async () => {
