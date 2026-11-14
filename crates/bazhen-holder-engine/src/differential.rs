@@ -39,6 +39,7 @@ enum Action {
     SyncOn,
     SyncOff,
     Query,
+    Repeat(u16),
     WriteHistory,
 }
 
@@ -68,6 +69,7 @@ impl Action {
             Self::SyncOn => "\x1b[?2026h".into(),
             Self::SyncOff => "\x1b[?2026l".into(),
             Self::Query => "\x1b[6n".into(),
+            Self::Repeat(n) => format!("\x1b[{n}b"),
             Self::WriteHistory => return None,
         })
     }
@@ -104,6 +106,7 @@ fn output() -> impl Strategy<Value = Action> {
         1 => Just(Action::SyncOn),
         1 => Just(Action::SyncOff),
         1 => Just(Action::Query),
+        1 => (0u16..200).prop_map(Action::Repeat),
         1 => Just(Action::WriteHistory),
     ]
 }

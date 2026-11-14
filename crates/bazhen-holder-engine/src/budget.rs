@@ -75,9 +75,15 @@ impl Budget {
     }
 
     /// The most rows a stretch can scroll: it stops once the count reaches `stretch`, and the
-    /// action that reaches it adds at most a screen, or `room` and the bytes that end a char.
+    /// action that reaches it adds at most a screen, or `room` and the bytes that end a char;
+    /// all but REP, whose count [`Budget::scrolled`] gives.
     pub(crate) fn most_rows_per_stretch(&self) -> usize {
         self.stretch + self.rows + MOST_CONTINUATIONS
+    }
+
+    /// The most rows the stretch so far could scroll.
+    pub(crate) fn scrolled(&self) -> usize {
+        self.scrolled
     }
 
     /// Starts a stretch. Its count must cover every row scrolled within it, so it can't lean
@@ -166,6 +172,13 @@ impl Perform for Budget {
             'J' if handled && first == 3 => self.stop = Some(Stop::ClearHistory),
             // CHT: tabs forward, which wraps as HT does.
             'I' if handled => self.may_wrap(),
+            // REP prints the char before it again, up to 65,535 times, in one action: as many
+            // rows as printing them would wrap, not bounded by the screen.
+            'b' if handled => {
+                let repeats = first.max(1);
+                self.may_wrap();
+                self.scrolled += repeats / self.chars_per_row + 1;
+            }
             'h' | 'l' if intermediates == b"?" && switches_screen(params) => {
                 self.stop = Some(Stop::AltScreen);
             }
@@ -268,6 +281,13 @@ mod tests {
         assert_eq!(stretch(b"ab\x1bcmore"), (4, 1, Some(Stop::Reset)));
         assert_eq!(stretch(b"\x1b[3Jmore"), (4, 0, Some(Stop::ClearHistory)));
         assert_eq!(stretch(b"\x1b[3;1Jmore"), (6, 0, Some(Stop::ClearHistory)));
+    }
+
+    #[test]
+    fn a_repeat_counts_the_rows_its_chars_could_wrap_however_many() {
+        // One for the "x", which may wrap, then one per five chars and one more.
+        assert_eq!(stretch(b"x\x1b[999b"), (7, 1 + 999 / 5 + 1, None));
+        assert_eq!(stretch(b"x\x1b[?999b").1, 1);
     }
 
     #[test]
