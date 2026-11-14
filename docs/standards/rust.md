@@ -21,7 +21,7 @@ a review asks for something no check covers.
 | Dependencies are pinned exactly in `[workspace.dependencies]`, and members take them from there                                         | `pnpm check` (`scripts/check-standards.ts`)           |
 | Dependencies have permitted licences, no advisory, one version each                                                                     | `pnpm deny`                                           |
 | Tests run under nextest                                                                                                                 | `pnpm test:rust`                                      |
-| Every new Rust test has a `Control:` trailer naming it                                                                                  | CI on pull requests (`pnpm test:falsify`)             |
+| Every new Rust test fails on a mutant of the change, or has a `Control:` trailer naming it                                              | CI on pull requests (`pnpm test:falsify`)             |
 | Library errors are typed with thiserror; long-running processes log with tracing                                                        | review                                                |
 | Every function that takes bytes from outside is fuzzed, or listed with why it is no decoder                                             | `pnpm check` (`scripts/check-standards.ts`)           |
 | Rust components are certified black-box, by the TypeScript suites                                                                       | review                                                |
@@ -289,15 +289,28 @@ What differs:
     instrumentation needs it; everything else builds on the pinned toolchain. To run one locally,
     install that nightly and `cargo install --locked cargo-fuzz@0.13.2` once, then run
     `cargo +nightly-2026-11-01 fuzz run <target>` from the crate's directory.
-- **Falsify can't judge Rust tests by reverting.** A Rust unit test lives in the file it tests, so
-  reverting the source would revert the test. When a branch touches `crates/` or the Cargo files,
+- **Falsify judges Rust tests by mutating the change, not by reverting it.** A Rust unit test
+  lives in the file it tests, so reverting the source would revert the test, and a test of a new
+  function wouldn't compile without it. When a branch touches `crates/` or the Cargo files,
   `pnpm test:falsify` has nextest list the tests at the base and at HEAD, so it finds every new
-  test however it is declared (`#[test]`, proptest, a macro of the crate's own), and lists each as
-  INVALID without running it. Each needs a `Control:` trailer of its own that names it by the
-  full path nextest lists (`testing.md` § Falsification), after you break the code by hand and
-  watch the test fail on its assertion:
+  test however it is declared (`#[test]`, proptest, a macro of the crate's own). It then has
+  cargo-mutants list the mutants of the code the branch changed, and runs the new tests against
+  them, one mutant at a time, in a throwaway worktree. A test that passes unmutated, fails
+  twice under one mutant by panicking in test code, and passes again once the mutant is undone,
+  is KILLED, and the mutant is printed beside it as its control. In test code means every place
+  the failure names is an item under a bare `#[cfg(test)]`, or a file in the crate's `tests/`,
+  and isn't a line that calls a product `#[track_caller]` function: the test's assertion, or an
+  `unwrap` in it, but not a crash, a timeout, a panic in product code, the standard library or a
+  dependency, or a failure on state an earlier run left. Keep test modules at the top level of
+  the file, as rustfmt lays them out: falsify ends a test item at the next line that starts at
+  column 0. The run stops once every new test is killed, and after at most 100 mutants. Any
+  other new test is INVALID: one that fails unmutated, one no mutant killed, or one a branch with
+  no Rust source change can't be mutated for. It needs a `Control:` trailer of its own naming it
+  by the full path nextest lists, after you break the code by hand and watch it fail on its
+  assertion:
   `Control: pane_title::tests::refuses_a_window_id: accept @ ids -> left: Some, right: None`.
-  One trailer may name several tests it covers.
+  One trailer may name several tests it covers. Install cargo-mutants once:
+  `cargo install --locked cargo-mutants@27.1.0`.
 
 **Black-box first.** A Rust component is certified by the TypeScript suites that drive it from
 outside, as `testing.md` § Black-box behaviour tests describes: `tests/api` delivers mail to

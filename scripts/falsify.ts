@@ -9,15 +9,18 @@
 //             unrelated to the source change and comes out INVALID.
 //   INVALID   no verdict: it couldn't load, timed out, was skipped, its title couldn't be read or
 //             isn't unique, or it passed but is unrelated to the source change; a branch that
-//             adds tests without a source change also lands here. Every test of a brand-new symbol is INVALID, so it needs a hand-run control
+//             adds tests without a source change also lands here. Every test of a brand-new
+//             symbol is INVALID, so it needs a hand-run control
 //             recorded as a trailer in a commit on the branch:
 //             `Control: <what you broke> -> <how the test failed>`.
 //
 // A Rust test under crates/ lives in the file it tests, so reverting the source would revert the
 // test with it. When the branch touches the Rust workspace, nextest lists the tests at the base and
 // at HEAD, so a test is found however it is declared (`#[test]`, proptest, a macro of the crate's
-// own). Each new one comes out INVALID without being run, and needs a Control trailer naming it by
-// its full path, `Control: tests::name: <what you broke> -> <how the test failed>`
+// own). Each new one is run instead against the mutants cargo-mutants lists in the code the branch
+// changed, one at a time in a throwaway worktree: KILLED by the first mutant it fails under twice
+// with a panic in test code, else INVALID, needing a Control trailer naming it by its full path,
+// `Control: tests::name: <what you broke> -> <how the test failed>`
 // (docs/standards/rust.md § Tests).
 //
 // Titles come from added lines that look like `it(...)`/`test(...)` calls, so a fixture string in
@@ -42,12 +45,26 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, join, posix } from "node:path";
 import { isAlive, signalGroup, spawnGroup } from "@bazhen/host-guard";
-import { GATES, gateEnv } from "./cargo-gate.ts";
+import { GATES, configFailures, gateEnv, outsideConfigs } from "./cargo-gate.ts";
 import { isMain } from "./is-main.ts";
+import {
+  failedOnAssertion,
+  inTestCode,
+  filterable,
+  unmutate,
+  libtestTargets,
+  nextestFilter,
+  parseMutants,
+  testEvents,
+  type Mutant,
+  type TestEvent,
+  type RustTest,
+} from "./rust-mutants.ts";
 
 export type Outcome = "KILLED" | "SURVIVED" | "INVALID";
 export type Change = { status: string; path: string; oldPath?: string };
@@ -62,6 +79,13 @@ const LOCK_REASON = /^bz-falsify pid=(\d+)$/;
 const INSTALL_TIMEOUT_MS = 120_000;
 const VITEST_TIMEOUT_MS = 300_000;
 const CARGO_TIMEOUT_MS = 900_000;
+// The most mutants run for one branch. A count, not a time budget, so a verdict is the same on
+// every machine; a hook-crate mutant builds and runs in under a second.
+const MAX_MUTANTS = 100;
+// Each Rust test run's limit, build included; a test of the limit itself sets a shorter one.
+const MUTANT_TIMEOUT_MS = Number(process.env["FALSIFY_RUST_TIMEOUT_MS"] ?? "") || 300_000;
+// nextest's libtest JSON is experimental; the version pins its shape.
+const LIBTEST_JSON_VERSION = "0.1";
 // The test gate's build options (workspace, features, lockfile, wrapper overrides), so the tests
 // listed are the ones the gate runs.
 const TEST_BUILD = GATES.test.slice(
@@ -369,9 +393,13 @@ async function stopGroup(child: ChildProcess): Promise<void> {
 
 async function onSignal(signal: NodeJS.Signals): Promise<void> {
   signalled = true;
-  if (running) await stopGroup(running);
-  cleanup?.();
-  process.exit(exitCodeFor(signal) ?? 1);
+  try {
+    if (running) await stopGroup(running);
+  } finally {
+    // A timeout may be stopping the same group, and signalGroup throws once it has gone.
+    cleanup?.();
+    process.exit(exitCodeFor(signal) ?? 1);
+  }
 }
 
 const handleSignal = (signal: NodeJS.Signals) => void onSignal(signal);
@@ -381,7 +409,7 @@ function run(
   args: string[],
   cwd: string,
   timeoutMs: number,
-  options: { env?: NodeJS.ProcessEnv; stdout?: number } = {},
+  options: { env?: NodeJS.ProcessEnv; stdout?: number; onTimeout?: () => void } = {},
 ): Promise<boolean> {
   return new Promise((done) => {
     const child = spawnGroup(cmd, args, {
@@ -393,7 +421,9 @@ function run(
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
-      void stopGroup(child);
+      options.onTimeout?.();
+      // A signal may be stopping the same group, and signalGroup throws once it has gone.
+      stopGroup(child).catch(() => undefined);
     }, timeoutMs);
     const finish = (ok: boolean) => {
       clearTimeout(timer);
@@ -428,47 +458,311 @@ function addWorktree(dir: string, commit: string, top: string): void {
 
 const LOCK = `bz-falsify pid=${process.pid}`;
 
+const rustEnv = (top: string): NodeJS.ProcessEnv => ({
+  ...gateEnv(isolatedEnv()),
+  CARGO_TARGET_DIR: join(top, "target", "falsify"),
+});
+
 /**
- * The Rust tests nextest lists in `dir`, through the Rust gates' clean environment, or undefined
- * when it couldn't list them. A tree with no Cargo workspace has none.
+ * Runs a command in `dir` with its stdout in `dir/<file>`, and returns whether it exited 0 and
+ * what it printed.
  */
-async function listRustTests(dir: string, top: string): Promise<string[] | undefined> {
-  if (!existsSync(join(dir, "Cargo.toml"))) return [];
-  const out = join(dir, "falsify-nextest.json");
-  const fd = openSync(out, "w");
-  const env = { ...gateEnv(isolatedEnv()), CARGO_TARGET_DIR: join(top, "target", "falsify") };
-  let listed: boolean;
+async function capture(
+  cmd: string,
+  args: string[],
+  dir: string,
+  file: string,
+  options: { env: NodeJS.ProcessEnv; timeoutMs: number },
+): Promise<{ ok: boolean; out: string; timedOut: boolean }> {
+  const path = join(dir, file);
+  const fd = openSync(path, "w");
+  let ok: boolean;
+  let timedOut = false;
   try {
-    listed = await run(
-      "cargo-nextest",
-      ["nextest", "list", ...TEST_BUILD, "--message-format", "json"],
-      dir,
-      CARGO_TIMEOUT_MS,
-      { env, stdout: fd },
-    );
+    ok = await run(cmd, args, dir, options.timeoutMs, {
+      env: options.env,
+      stdout: fd,
+      onTimeout: () => (timedOut = true),
+    });
   } finally {
     closeSync(fd);
   }
-  if (!listed) return undefined;
+  return { ok, out: readFileSync(path, "utf8"), timedOut };
+}
+
+/**
+ * The nextest list report for `dir`, through the Rust gates' clean environment, or undefined when
+ * it couldn't list the tests. A tree with no Cargo workspace has none.
+ */
+async function listRustTests(dir: string, top: string): Promise<unknown> {
+  if (!existsSync(join(dir, "Cargo.toml"))) return { "rust-suites": {} };
+  const args = ["nextest", "list", ...TEST_BUILD, "--message-format", "json"];
+  const { ok, out } = await capture("cargo-nextest", args, dir, "falsify-nextest.json", {
+    env: rustEnv(top),
+    timeoutMs: CARGO_TIMEOUT_MS,
+  });
+  if (!ok) return undefined;
   try {
-    return rustTestIds(JSON.parse(readFileSync(out, "utf8")));
+    const report: unknown = JSON.parse(out);
+    rustTestIds(report);
+    return report;
   } catch {
     return undefined;
   }
 }
 
+const MUTANTS_HINT =
+  "if cargo-mutants is missing, install it: cargo install --locked cargo-mutants@27.1.0";
+
+/** The mutants cargo-mutants lists in `dir` in the code the diff in the file `diff` touches. */
+async function listMutants(dir: string, top: string, diff: string): Promise<unknown> {
+  const { ok, out } = await capture(
+    "cargo-mutants",
+    ["mutants", "--list", "--json", "--no-config", "--workspace", "--diff", "--in-diff", diff],
+    dir,
+    "falsify-mutants.json",
+    { env: rustEnv(top), timeoutMs: CARGO_TIMEOUT_MS },
+  );
+  if (!ok) throw new Error("cargo-mutants failed");
+  return JSON.parse(out);
+}
+
+// Each test's own timeout, so a mutant that loops ends that test, not the whole run.
+const NEXTEST_PROFILE = `[profile.falsify]
+slow-timeout = { period = "5s", terminate-after = 2 }
+fail-fast = false
+`;
+
 /**
- * The Rust tests HEAD has and the base hasn't, listed by nextest in a temporary worktree, or
- * undefined when either side couldn't be listed. Listing sees every test however it is declared:
- * by `#[test]`, proptest, or a macro of the crate's own.
+ * Runs `tests` once in `dir` and returns nextest's libtest-json-plus output, however it exited,
+ * and whether it ran out of time.
  */
-async function newRustTests(top: string, base: string, head: string) {
+async function runRustTests(
+  dir: string,
+  top: string,
+  tests: RustTest[],
+): Promise<{ out: string; timedOut: boolean }> {
+  const env: NodeJS.ProcessEnv = { ...rustEnv(top), NEXTEST_EXPERIMENTAL_LIBTEST_JSON: "1" };
+  // A backtrace names product code, which would read as a crash rather than an assertion.
+  delete env["RUST_BACKTRACE"];
+  delete env["RUST_LIB_BACKTRACE"];
+  const args = [
+    "nextest",
+    "run",
+    ...TEST_BUILD,
+    "--tool-config-file",
+    `falsify:${join(dir, "falsify-nextest.toml")}`,
+    "--profile",
+    "falsify",
+    "--message-format",
+    "libtest-json-plus",
+    "--message-format-version",
+    LIBTEST_JSON_VERSION,
+    "-E",
+    nextestFilter(tests),
+  ];
+  const { out, timedOut } = await capture("cargo-nextest", args, dir, "falsify-results.json", {
+    env,
+    timeoutMs: MUTANT_TIMEOUT_MS,
+  });
+  return { out, timedOut };
+}
+
+export type RustVerdict = RustTest & { outcome: Outcome; note: string };
+type RustJudgement = {
+  verdicts: RustVerdict[];
+  unapplied: string[];
+  timedOut: string[];
+  ran: number;
+  total: number;
+};
+
+const key = (t: RustTest) => `${t.file} ${t.title}`;
+
+/** Which tests a run's results show passing: an `ok`, and nothing else for the same test. */
+function passing(events: TestEvent[]): (t: RustTest) => boolean {
+  const ok = new Set(events.filter((e) => e.event === "ok").map((e) => e.test));
+  const not = new Set(
+    events.filter((e) => e.event !== "ok" && e.event !== "started").map((e) => e.test),
+  );
+  return (t) => ok.has(key(t)) && !not.has(key(t));
+}
+
+const invalidRust = (t: RustTest, why: string): RustVerdict => ({
+  ...t,
+  outcome: "INVALID",
+  note: ` (Rust: ${why}; needs a control)`,
+});
+
+/**
+ * Applies `mutant` in the worktree `dir` and, only if its file really changed, runs `body`; then
+ * undoes it, whatever happened. False when the patch left the file as it was, so nothing ran.
+ */
+async function withMutant(dir: string, mutant: Mutant, body: () => Promise<void>) {
+  const path = join(dir, mutant.file);
+  if (!existsSync(path)) return false;
+  const original = readFileSync(path, "utf8");
+  const patch = join(dir, "falsify-mutant.patch");
+  writeFileSync(patch, mutant.patch);
+  let applied = false;
+  try {
+    try {
+      git(["apply", patch], dir);
+    } catch {
+      // Not applied: the file is unchanged, which is what decides.
+    }
+    applied = readFileSync(path, "utf8") !== original;
+    if (applied) await body();
+  } finally {
+    git(["checkout", "--quiet", "--", mutant.file], dir);
+  }
+  if (readFileSync(path, "utf8") !== original) {
+    throw new Error(`falsify: couldn't undo the mutant ${mutant.name}`);
+  }
+  return applied;
+}
+
+/**
+ * Judges each new test by the mutants of the code the branch changed, in the worktree `dir`, at
+ * HEAD: KILLED by the first mutant it fails on with a panic of its own, else INVALID. Each mutant
+ * is applied, proved to have changed its file, run against the tests not yet killed, and undone,
+ * and the run stops once every test is killed or MAX_MUTANTS have run.
+ */
+async function mutateRustTests(
+  dir: string,
+  top: string,
+  range: string[],
+  report: unknown,
+  added: RustTest[],
+  atBase: Set<string>,
+): Promise<RustJudgement | undefined> {
+  const diff = git(["diff", "-M", ...range, "--", "*.rs"], dir);
+  if (diff === "") {
+    const verdicts = added.map((t) => invalidRust(t, "no Rust source changed"));
+    return { verdicts, unapplied: [], timedOut: [], ran: 0, total: 0 };
+  }
+  const diffFile = join(dir, "falsify-rust.diff");
+  writeFileSync(diffFile, diff);
+  let mutants: Mutant[];
+  try {
+    mutants = parseMutants(await listMutants(dir, top, diffFile));
+  } catch (error) {
+    const why = error instanceof Error ? error.message : String(error);
+    console.error(
+      `falsify: \`cargo-mutants mutants --list\` failed (${why}), so the new Rust tests can't be ` +
+        `judged. Run it in the repository to see why; ${MUTANTS_HINT}`,
+    );
+    return undefined;
+  }
+  const targets = libtestTargets(report);
+  writeFileSync(join(dir, "falsify-nextest.toml"), NEXTEST_PROFILE);
+  // Read before any mutant is applied: where a failure points is judged against the source as
+  // the branch has it.
+  const sources = new Map(
+    git(["ls-files", "--", "crates/*.rs"], dir)
+      .split("\n")
+      .filter(Boolean)
+      .map((file) => [file, readFileSync(join(dir, file), "utf8")]),
+  );
+  const isTestCode = inTestCode(sources);
+
+  // A crate's library and binaries share a target, so a new test named as one the base already
+  // has there would be credited with the old test's failures.
+  const counts = new Map<string, number>();
+  for (const t of added) counts.set(key(t), (counts.get(key(t)) ?? 0) + 1);
+  const shared = (t: RustTest) => (counts.get(key(t)) ?? 0) > 1;
+  const runnable = added.filter((t) => filterable(t) && !atBase.has(key(t)) && !shared(t));
+  const unmutated =
+    runnable.length > 0 && mutants.length > 0
+      ? await runRustTests(dir, top, runnable)
+      : { out: "", timedOut: false };
+  const passedUnmutated = passing(testEvents(unmutated.out, targets));
+  let pending = runnable.filter(passedUnmutated);
+  const killedBy = new Map<string, string>();
+  const unapplied: string[] = [];
+  const timedOut: string[] = [];
+  let ran = 0;
+  for (const mutant of mutants) {
+    if (pending.length === 0 || ran === MAX_MUTANTS) break;
+    const isTest = isTestCode(unmutate(mutant.patch, mutant.file));
+    let ranOutOfTime = false;
+    const failedUnder = async (tests: RustTest[]) => {
+      const tried = await runRustTests(dir, top, tests);
+      ranOutOfTime ||= tried.timedOut;
+      const failed = new Set(
+        testEvents(tried.out, targets)
+          .filter((r) => failedOnAssertion(r, isTest))
+          .map((r) => r.test),
+      );
+      return tests.filter((t) => failed.has(key(t)));
+    };
+    let confirmed: RustTest[] = [];
+    const applied = await withMutant(dir, mutant, async () => {
+      ran += 1;
+      const candidates = await failedUnder(pending);
+      // Run once more, so a test that fails now and then isn't credited to whichever mutant it
+      // happened to fail under.
+      confirmed = candidates.length > 0 ? await failedUnder(candidates) : [];
+    });
+    if (!applied) unapplied.push(mutant.name);
+    if (ranOutOfTime) timedOut.push(mutant.name);
+    if (confirmed.length > 0) {
+      // And once with the mutant undone: a test that fails without it too, from state an earlier
+      // run left behind, failed for some other reason than the mutant.
+      const recheck = await runRustTests(dir, top, confirmed);
+      const passesAgain = passing(testEvents(recheck.out, targets));
+      for (const t of confirmed.filter(passesAgain)) killedBy.set(key(t), mutant.name);
+      pending = pending.filter((t) => !killedBy.has(key(t)));
+    }
+  }
+  const capped =
+    pending.length > 0 && ran === MAX_MUTANTS && ran + unapplied.length < mutants.length;
+  const verdicts = added.map((t): RustVerdict => {
+    const by = killedBy.get(key(t));
+    if (by !== undefined) return { ...t, outcome: "KILLED", note: ` (by ${by})` };
+    if (atBase.has(key(t))) return invalidRust(t, "the base has a test of that name in its crate");
+    if (shared(t)) return invalidRust(t, "another new test in its crate has that name");
+    if (!filterable(t)) return invalidRust(t, "its name can't be selected to run alone");
+    if (mutants.length === 0) return invalidRust(t, "the change has no code to mutate");
+    if (unmutated.timedOut && !passedUnmutated(t)) {
+      return invalidRust(t, `the unmutated run timed out after ${MUTANT_TIMEOUT_MS / 1000} s`);
+    }
+    if (!passedUnmutated(t)) return invalidRust(t, "fails or doesn't run unmutated");
+    return invalidRust(
+      t,
+      capped
+        ? `no mutant failed it on an assertion within the first ${MAX_MUTANTS}`
+        : "no mutant of the change failed it on an assertion",
+    );
+  });
+  return { verdicts, unapplied, timedOut, ran, total: mutants.length };
+}
+
+/**
+ * The Rust tests HEAD has and the base hasn't, listed by nextest in a temporary worktree, each
+ * judged by mutating the code the branch changed; or undefined, with the reason printed, when
+ * they couldn't be listed or judged. Listing sees every test however it is declared: by
+ * `#[test]`, proptest, or a macro of the crate's own. Mutants are applied only in that worktree,
+ * which is removed on every way out, a signal included.
+ */
+async function judgeRustTests(top: string, base: string, head: string) {
   const dir = mkdtempSync(join(tmpdir(), WORKTREE_PREFIX));
   cleanup = () => {
     cleanup = undefined;
     removeWorktree(dir, top);
   };
   try {
+    const cargoHome = process.env["CARGO_HOME"] ?? join(homedir(), ".cargo");
+    const unsafeConfig = configFailures(outsideConfigs(dir, cargoHome), (path) =>
+      existsSync(path) ? readFileSync(path, "utf8") : undefined,
+    );
+    if (unsafeConfig.length > 0) {
+      console.error(
+        "falsify: cargo would read this config while it runs the Rust tests in a temporary " +
+          `worktree under ${tmpdir()}:\n${unsafeConfig.join("\n")}`,
+      );
+      return undefined;
+    }
     addWorktree(dir, base, top);
     const before = await listRustTests(dir, top);
     git(["checkout", "--quiet", "--detach", head], dir);
@@ -482,7 +776,10 @@ async function newRustTests(top: string, base: string, head: string) {
       );
       return undefined;
     }
-    return addedRustTests(before, after);
+    const atBase = rustTestIds(before);
+    const added = addedRustTests(atBase, rustTestIds(after));
+    if (added.length === 0) return { verdicts: [], unapplied: [], timedOut: [], ran: 0, total: 0 };
+    return await mutateRustTests(dir, top, [base, head], after, added, new Set(atBase));
   } finally {
     cleanup?.();
   }
@@ -557,21 +854,22 @@ async function main(args: string[]): Promise<number> {
       title,
     }));
   });
-  let rustTests: { file: string; title: string }[] = [];
+  let rust: RustJudgement = { verdicts: [], unapplied: [], timedOut: [], ran: 0, total: 0 };
   if (changes.some((c) => RUST_INPUT.test(c.path) || RUST_INPUT.test(c.oldPath ?? ""))) {
-    process.once("SIGINT", handleSignal);
-    process.once("SIGTERM", handleSignal);
-    process.once("SIGHUP", handleSignal);
+    process.on("SIGINT", handleSignal);
+    process.on("SIGTERM", handleSignal);
+    process.on("SIGHUP", handleSignal);
     try {
-      const listed = await newRustTests(top, base, head);
-      if (listed === undefined) return 1;
-      rustTests = listed;
+      const judged = await judgeRustTests(top, base, head);
+      if (judged === undefined) return 1;
+      rust = judged;
     } finally {
       process.off("SIGINT", handleSignal);
       process.off("SIGTERM", handleSignal);
       process.off("SIGHUP", handleSignal);
     }
   }
+  const rustTests = rust.verdicts;
   if (targets.length === 0 && rustTests.length === 0) {
     console.log(`falsify: no new tests between ${base.slice(0, 12)} and HEAD`);
     return 0;
@@ -587,12 +885,12 @@ async function main(args: string[]): Promise<number> {
     title: string;
     outcome: Outcome;
     unrelated?: boolean;
-    rust?: boolean;
+    note?: string;
   }[] = [];
 
-  for (const t of rustTests) results.push({ ...t, outcome: "INVALID", rust: true });
+  results.push(...rustTests);
   if (targets.length === 0) {
-    // Only Rust tests, and none of them is run.
+    // Only Rust tests, judged already.
   } else if (reverts.length === 0) {
     for (const t of targets) results.push({ ...t, outcome: "INVALID" });
   } else {
@@ -602,9 +900,9 @@ async function main(args: string[]): Promise<number> {
       removeWorktree(dir, top);
     };
     // SIGHUP too: an agent's tmux pane closing mid-run must not orphan the detached children.
-    process.once("SIGINT", handleSignal);
-    process.once("SIGTERM", handleSignal);
-    process.once("SIGHUP", handleSignal);
+    process.on("SIGINT", handleSignal);
+    process.on("SIGTERM", handleSignal);
+    process.on("SIGHUP", handleSignal);
     try {
       addWorktree(dir, head, top);
       for (const c of reverts) {
@@ -666,12 +964,21 @@ async function main(args: string[]): Promise<number> {
 
   console.log(`falsify: new tests run against the source at ${base.slice(0, 12)}`);
   for (const r of results) {
-    const note = r.rust
-      ? " (Rust: not run; needs a control)"
-      : r.unrelated
-        ? " (passed; unrelated to the source change)"
-        : "";
+    const note = r.note ?? (r.unrelated ? " (passed; unrelated to the source change)" : "");
     console.log(`  ${r.outcome.padEnd(8)} ${r.file} › ${r.title}${note}`);
+  }
+  if (rust.total > 0) {
+    console.log(
+      `falsify: ${rust.ran} of the change's ${rust.total} Rust mutants run (at most ${MAX_MUTANTS})`,
+    );
+  }
+  for (const name of rust.timedOut) {
+    console.log(
+      `  INVALID  mutant ${name} (its run timed out after ${MUTANT_TIMEOUT_MS / 1000} s)`,
+    );
+  }
+  for (const name of rust.unapplied) {
+    console.log(`  INVALID  mutant ${name} (its patch left the file unchanged; not run)`);
   }
 
   const survived = results.filter((r) => r.outcome === "SURVIVED");
@@ -683,13 +990,13 @@ async function main(args: string[]): Promise<number> {
     return 1;
   }
   const uncontrolled = uncontrolledRustTests(
-    rustTests.map((t) => t.title),
+    rustTests.filter((t) => t.outcome !== "KILLED").map((t) => t.title),
     messages,
   );
   if (uncontrolled.length > 0) {
     console.error(
-      "\nRust tests can't be judged by reverting, so each new one needs a control of its own. " +
-        "Break the code by hand, confirm the test fails on its assertion, and record it in a " +
+      "\nNo mutant of the change showed these Rust tests can fail, so each needs a control of its " +
+        "own. Break the code by hand, confirm the test fails on its assertion, and record it in a " +
         "commit message on the branch, naming the test by its full path:\n" +
         uncontrolled
           .map((name) => `  Control: ${name}: <what you broke> -> <how it failed>`)
@@ -697,7 +1004,7 @@ async function main(args: string[]): Promise<number> {
     );
     return 1;
   }
-  const invalid = results.filter((r) => r.outcome === "INVALID" && r.rust !== true);
+  const invalid = results.filter((r) => r.outcome === "INVALID" && r.note === undefined);
   if (invalid.length > 0 && !hasControl(messages)) {
     console.error(
       reverts.length === 0
