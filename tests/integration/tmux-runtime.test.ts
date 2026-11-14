@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import type { TerminalTags } from "@bazhen/core";
 import { filterEnv, newId } from "@bazhen/core";
+import { HISTORY_LINES } from "@bazhen/protocol";
 import { sessionName, TmuxError, TmuxRuntime } from "@bazhen/runtime-tmux";
 import { nodePtySpawner } from "@bazhen/daemon/pty";
 import { TerminalHub } from "@bazhen/daemon/stream";
@@ -34,6 +35,22 @@ const screen = (session: string | undefined) =>
   tmuxOut(server, "capture-pane", "-p", "-t", `${String(session)}:0`);
 
 describe("tmux runtime on a private server", () => {
+  it("gives a new terminal its full history, on a server an older daemon started with less", async () => {
+    await runtime.create(spec(["sleep", "30"]));
+    tmuxOut(server, "set-option", "-g", "history-limit", "50");
+    const ref = await runtime.create(spec(["sleep", "30"]));
+    expect(
+      tmuxOut(
+        server,
+        "display-message",
+        "-p",
+        "-t",
+        String(ref.locator.paneId),
+        "#{history_limit}",
+      ).trim(),
+    ).toBe(String(HISTORY_LINES));
+  });
+
   it("reads its terminals back when started without a UTF-8 locale", async () => {
     const bare = testServer("runtime-no-locale");
     const { LANG: _l, LC_ALL: _a, LC_CTYPE: _c, ...noLocale } = filterEnv(process.env).env;

@@ -13,9 +13,15 @@ export const EPOCH_FRAMES_SINCE = "1.30";
  * daemon's copy, and each view's scrollback. A view gets this much when it opens, and keeps this
  * much as output scrolls (foundation-design §12 item 2).
  */
-export const HISTORY_LINES = 2000;
+export const HISTORY_LINES = 10_000;
 
-const Size = { cols: z.number().int().min(2).max(1000), rows: z.number().int().min(2).max(1000) };
+/** The most rows a view or a terminal can have. */
+export const MAX_ROWS = 1000;
+
+const Size = {
+  cols: z.number().int().min(2).max(1000),
+  rows: z.number().int().min(2).max(MAX_ROWS),
+};
 
 /**
  * Text frames a view sends on `/v1/terminals/:id/stream`; its keystrokes are binary frames

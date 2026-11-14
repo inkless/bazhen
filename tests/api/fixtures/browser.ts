@@ -1,5 +1,6 @@
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import headless from "@xterm/headless";
+import { HISTORY_LINES, MAX_ROWS } from "@bazhen/protocol";
 
 /** A browser's view of a terminal: what xterm.js, as the web client sets it up, shows. */
 export interface BrowserScreen {
@@ -16,7 +17,12 @@ export async function replay(
   bytes: Uint8Array,
   size: { cols: number; rows: number },
 ): Promise<BrowserScreen> {
-  const term = new headless.Terminal({ ...size, scrollback: 10_000, allowProposedApi: true });
+  // As the page makes its terminal.
+  const term = new headless.Terminal({
+    ...size,
+    scrollback: HISTORY_LINES + MAX_ROWS,
+    allowProposedApi: true,
+  });
   term.loadAddon(new Unicode11Addon());
   term.unicode.activeVersion = "11";
   await new Promise<void>((resolve) => term.write(bytes, resolve));

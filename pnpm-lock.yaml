@@ -394,6 +394,9 @@ importers:
       '@bazhen/host-guard':
         specifier: workspace:*
         version: link:../../packages/host-guard
+      '@bazhen/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
     devDependencies:
       '@anthropic-ai/claude-code':
         specifier: 2.1.322
