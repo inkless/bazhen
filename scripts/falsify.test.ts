@@ -141,6 +141,12 @@ describe("addedRustTests", () => {
       { file: "proto", title: "frame::cases::macro_made" },
     ]);
   });
+
+  it("counts a new test with the same path as one the base has elsewhere in the crate", () => {
+    const base = ["hook tests::reads"];
+    const head = ["hook tests::reads", "hook tests::reads"];
+    expect(addedRustTests(base, head)).toEqual([{ file: "hook", title: "tests::reads" }]);
+  });
 });
 
 describe("uncontrolledRustTests", () => {

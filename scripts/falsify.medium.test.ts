@@ -332,7 +332,7 @@ describe("falsify on a branch of a tree that already has Rust", () => {
       asksKept: result.output.includes("Control: tests::kept:"),
       listings: stubLog()
         .split("\n")
-        .filter((l) => l.startsWith("NEXTEST:")).length,
+        .filter((l) => /^NEXTEST: nextest list .*--all-features/.test(l)).length,
     }).toEqual({ status: 1, asksAdded: true, asksKept: false, listings: 2 });
   });
 

@@ -46,7 +46,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, join, posix } from "node:path";
 import { isAlive, signalGroup, spawnGroup } from "@bazhen/host-guard";
-import { NO_WRAPPER, gateEnv } from "./cargo-gate.ts";
+import { GATES, gateEnv } from "./cargo-gate.ts";
 import { isMain } from "./is-main.ts";
 
 export type Outcome = "KILLED" | "SURVIVED" | "INVALID";
@@ -62,6 +62,12 @@ const LOCK_REASON = /^bz-falsify pid=(\d+)$/;
 const INSTALL_TIMEOUT_MS = 120_000;
 const VITEST_TIMEOUT_MS = 300_000;
 const CARGO_TIMEOUT_MS = 900_000;
+// The test gate's build options (workspace, features, lockfile, wrapper overrides), so the tests
+// listed are the ones the gate runs.
+const TEST_BUILD = GATES.test.slice(
+  GATES.test.indexOf("run") + 1,
+  GATES.test.indexOf("--status-level"),
+);
 const KILL_GRACE_MS = 2000;
 
 // Inherited, these point every git command at another repository or index: git exports them to
@@ -168,11 +174,20 @@ export function rustTestIds(report: unknown): string[] {
   });
 }
 
-/** The tests listed at HEAD that weren't at the base, as `{ file: target, title: path }`. */
+/**
+ * The tests listed at HEAD that weren't at the base, as `{ file: target, title: path }`. Counted,
+ * not compared as sets: a crate's library and binaries share a target, so a new test with the
+ * same path as one the base has elsewhere in the crate is still new.
+ */
 export function addedRustTests(base: string[], head: string[]): { file: string; title: string }[] {
-  const before = new Set(base);
+  const before = new Map<string, number>();
+  for (const id of base) before.set(id, (before.get(id) ?? 0) + 1);
   return head
-    .filter((id) => !before.has(id))
+    .filter((id) => {
+      const left = before.get(id) ?? 0;
+      before.set(id, left - 1);
+      return left <= 0;
+    })
     .map((id) => {
       const space = id.indexOf(" ");
       return { file: id.slice(0, space), title: id.slice(space + 1) };
@@ -426,7 +441,7 @@ async function listRustTests(dir: string, top: string): Promise<string[] | undef
   try {
     listed = await run(
       "cargo-nextest",
-      ["nextest", "list", "--workspace", "--locked", ...NO_WRAPPER, "--message-format", "json"],
+      ["nextest", "list", ...TEST_BUILD, "--message-format", "json"],
       dir,
       CARGO_TIMEOUT_MS,
       { env, stdout: fd },
