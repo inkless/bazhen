@@ -28,11 +28,20 @@ const BIG = { cols: 1000, rows: 500 };
 
 /**
  * The daemon's PTYs once no tmux client is left: one whose last view an earlier test closed stays
- * attached a moment, and counted in a baseline it would hold a PTY that later goes.
+ * attached a moment, and counted in a baseline it would hold a PTY that later goes. tmux drops a
+ * client and the daemon its PTY in either order, so the count must also hold still.
  */
 async function ptyBaseline(): Promise<number> {
   await waitUntil(() => daemon.tmux("list-clients").trim() === "", "earlier views' clients to go");
-  return daemon.ptyHandles();
+  let last = daemon.ptyHandles();
+  await waitUntil(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const now = daemon.ptyHandles();
+    const settled = now === last;
+    last = now;
+    return settled;
+  }, "the daemon's PTYs to settle");
+  return last;
 }
 
 const screens = (view: View) =>

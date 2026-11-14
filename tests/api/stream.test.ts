@@ -62,7 +62,18 @@ describe("the terminal stream", () => {
       expect.arrayContaining(["snapshot_start", "snapshot_end"]),
     );
     // An earlier view's client may still be on its way out.
-    await expect.poll(() => daemon.tmux("list-clients").trim().split("\n")).toHaveLength(1);
+    await expect
+      .poll(
+        () =>
+          daemon
+            .tmux("list-clients")
+            .split("\n")
+            .filter((line) => line.trim() !== ""),
+        {
+          timeout: 10_000,
+        },
+      )
+      .toHaveLength(1);
     first.close();
     late.close();
   });
@@ -81,10 +92,10 @@ describe("the terminal stream", () => {
     view.type("last words\r");
     view.close();
     await view.closed();
-    await expect.poll(() => daemon.screen(program.agentId)).toContain("got last words");
     // Long enough for a client killed at the close to be gone, well inside the hub's grace.
     await new Promise((resolve) => setTimeout(resolve, 300));
     const lingering = clients();
+    await expect.poll(() => daemon.screen(program.agentId)).toContain("got last words");
     await expect.poll(clients, { timeout: 10_000 }).toBe("");
     expect(lingering).not.toBe("");
   });
