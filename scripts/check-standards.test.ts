@@ -12,6 +12,7 @@ import {
   pathCandidates,
   pnpmScripts,
   rustFailures,
+  skillFailures,
   suppressionFailures,
 } from "./check-standards.ts";
 
@@ -363,5 +364,39 @@ describe("memberDependencyFailures", () => {
       expect.stringContaining('`f = { path = "../f" }`'),
       expect.stringContaining("[build-dependencies.g] must be an entry"),
     ]);
+  });
+});
+
+function skill(description: string): string {
+  return `---\nname: bz-x\ndescription: ${description}\n---\n\n# X\n`;
+}
+
+describe("skillFailures", () => {
+  const doc = ".agents/skills/bz-x/SKILL.md";
+  const valid = "Does X. Use when changing Bazhen's source in this repository.";
+
+  it("passes a valid skill", () => {
+    expect(skillFailures(doc, "bz-x", skill(valid))).toEqual([]);
+  });
+
+  it('rejects an unquoted value containing ": "', () => {
+    expect(
+      skillFailures(doc, "bz-x", skill(`Does X ("Refusing to run: 2 PTYs"). ${valid}`)),
+    ).toEqual([expect.stringContaining('description is an unquoted YAML value containing ": "')]);
+  });
+
+  it("rejects an unquoted value ending in a colon", () => {
+    expect(skillFailures(doc, "bz-x", skill(`${valid} Covers:`))).toEqual([
+      expect.stringContaining("description is an unquoted YAML value"),
+    ]);
+  });
+
+  it('accepts ": " inside a quoted value', () => {
+    expect(skillFailures(doc, "bz-x", skill(`"Does X (run: 2). ${valid}"`))).toEqual([]);
+    expect(skillFailures(doc, "bz-x", skill(`'Does X (run: 2). ${valid}'`))).toEqual([]);
+  });
+
+  it("accepts a colon not followed by a space", () => {
+    expect(skillFailures(doc, "bz-x", skill(`Runs pnpm test:real. ${valid}`))).toEqual([]);
   });
 });

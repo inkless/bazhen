@@ -692,24 +692,39 @@ function checkSkills(scripts: Set<string>): void {
       failures.push(`${SKILLS_DIR}/${dir} has no SKILL.md.`);
       continue;
     }
-    const text = readFileSync(join(root, doc), "utf8");
-    const front = /^---\n([\s\S]*?)\n---\n/.exec(text)?.[1] ?? "";
-    const name = /^name: (.+)$/m.exec(front)?.[1]?.trim();
-    const description = /^description: (.+)$/m.exec(front)?.[1]?.trim() ?? "";
-    if (name !== dir || !dir.startsWith("bz-")) {
-      failures.push(`${doc}: name must equal its directory and start with "bz-" (got "${name}").`);
-    }
-    if (description.length === 0 || description.length > DESCRIPTION_MAX) {
-      failures.push(`${doc}: description must be 1-${DESCRIPTION_MAX} characters.`);
-    }
-    if (!description.includes("changing Bazhen's source in this repository")) {
-      failures.push(
-        `${doc}: description must say it applies "when changing Bazhen's source in this ` +
-          "repository\", so it doesn't compete with the product's bazhen-* skills.",
-      );
-    }
+    failures.push(...skillFailures(doc, dir, readFileSync(join(root, doc), "utf8")));
     checkContextFile(doc, scripts);
   }
+}
+
+// Strict YAML parsers reject a plain (unquoted) scalar holding ": " as a nested mapping, and the
+// harness that uses one then skips the skill; lenient ones read it fine, so nothing else notices.
+export function skillFailures(doc: string, dir: string, text: string): string[] {
+  const out: string[] = [];
+  const front = /^---\n([\s\S]*?)\n---\n/.exec(text)?.[1] ?? "";
+  for (const [, key = "", value = ""] of front.matchAll(/^([\w-]+): (.+)$/gm)) {
+    if (!/^["'|>]/.test(value) && /:(\s|$)/.test(value)) {
+      out.push(
+        `${doc}: ${key} is an unquoted YAML value containing ": ", which strict parsers ` +
+          "reject; quote the value or reword it.",
+      );
+    }
+  }
+  const name = /^name: (.+)$/m.exec(front)?.[1]?.trim();
+  const description = /^description: (.+)$/m.exec(front)?.[1]?.trim() ?? "";
+  if (name !== dir || !dir.startsWith("bz-")) {
+    out.push(`${doc}: name must equal its directory and start with "bz-" (got "${name}").`);
+  }
+  if (description.length === 0 || description.length > DESCRIPTION_MAX) {
+    out.push(`${doc}: description must be 1-${DESCRIPTION_MAX} characters.`);
+  }
+  if (!description.includes("changing Bazhen's source in this repository")) {
+    out.push(
+      `${doc}: description must say it applies "when changing Bazhen's source in this ` +
+        "repository\", so it doesn't compete with the product's bazhen-* skills.",
+    );
+  }
+  return out;
 }
 
 if (isMain(import.meta)) {
