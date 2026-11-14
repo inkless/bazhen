@@ -1,7 +1,7 @@
 # Bazhen
 
 A local daemon that owns durable terminals on a private tmux server, plus a web client.
-TypeScript throughout, in a pnpm workspace.
+TypeScript in a pnpm workspace, and Rust in a Cargo workspace (`crates/`).
 
 ## Rules
 
@@ -17,4 +17,5 @@ TypeScript throughout, in a pnpm workspace.
 ## Standards
 
 Why the rules and checks exist, and the checklist to review against: `docs/standards/code.md`,
-`docs/standards/testing.md`, `docs/standards/review.md`; for web UI, `docs/standards/ui.md`.
+`docs/standards/testing.md`, `docs/standards/review.md`; for web UI, `docs/standards/ui.md`; for
+Rust, `docs/standards/rust.md`.

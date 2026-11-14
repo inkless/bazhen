@@ -13,6 +13,10 @@
 //             recorded as a trailer in a commit on the branch:
 //             `Control: <what you broke> -> <how the test failed>`.
 //
+// A Rust test under crates/ lives in the file it tests, so reverting the source would revert the
+// test with it. Each new one (an added `fn` under `#[test]`, proptest's included) comes out
+// INVALID without being run, and so needs a control (docs/standards/rust.md § Tests).
+//
 // Titles come from added lines that look like `it(...)`/`test(...)` calls, so a fixture string in
 // a test file such as 'it("fixture", f)' counts as a test too. It then can't be found in the
 // report and comes out INVALID: the safe direction, since it asks for a control.
@@ -120,6 +124,31 @@ export function newTitles(diff: string, file: string): string[] {
 }
 
 const withoutAsync = (call: string) => call.replaceAll(/\basync\s+/g, "");
+
+const RUST_SOURCE = /^crates\/.+\.rs$/;
+const RUST_TEST_ATTR = /^#\[(?:\w+::)*test\b/;
+const RUST_FN = /^(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(\w+)/;
+
+/**
+ * The Rust tests a diff of one file adds: each `fn` right under a `#[test]`-style attribute, where
+ * the function line, the attribute or both are new. Lines the diff removes are skipped, so a test
+ * the diff only moves an attribute over still reads as new: the safe direction.
+ */
+export function newRustTests(diff: string): string[] {
+  const names: string[] = [];
+  let previous = { text: "", added: false };
+  for (const line of diff.split("\n")) {
+    if (/^(\+\+\+|---) |^@@|^-/.test(line) || line === "") continue;
+    const current = { text: line.slice(1).trim(), added: line.startsWith("+") };
+    if (current.text === "") continue;
+    const fn = RUST_FN.exec(current.text);
+    if (fn?.[1] !== undefined && RUST_TEST_ATTR.test(previous.text)) {
+      if (current.added || previous.added) names.push(fn[1]);
+    }
+    if (!current.text.startsWith("#[") || !RUST_TEST_ATTR.test(previous.text)) previous = current;
+  }
+  return names;
+}
 
 export type VitestReport = {
   testResults: {
@@ -388,7 +417,16 @@ async function main(args: string[]): Promise<number> {
       title,
     }));
   });
-  if (targets.length === 0) {
+  const rustTests = changes
+    .filter((c) => c.status !== "D" && RUST_SOURCE.test(c.path))
+    .flatMap((c) => {
+      const paths = c.status === "R" && c.oldPath ? [c.oldPath, c.path] : [c.path];
+      return newRustTests(git(["diff", "-M", ...range, "--", ...paths])).map((title) => ({
+        file: c.path,
+        title,
+      }));
+    });
+  if (targets.length === 0 && rustTests.length === 0) {
     console.log(`falsify: no new tests between ${base.slice(0, 12)} and HEAD`);
     return 0;
   }
@@ -398,9 +436,18 @@ async function main(args: string[]): Promise<number> {
       (REVERTIBLE.test(c.path) && !TEST_FILE.test(c.path)) ||
       (c.oldPath !== undefined && REVERTIBLE.test(c.oldPath) && !TEST_FILE.test(c.oldPath)),
   );
-  const results: { file: string; title: string; outcome: Outcome; unrelated?: boolean }[] = [];
+  const results: {
+    file: string;
+    title: string;
+    outcome: Outcome;
+    unrelated?: boolean;
+    rust?: boolean;
+  }[] = [];
 
-  if (reverts.length === 0) {
+  for (const t of rustTests) results.push({ ...t, outcome: "INVALID", rust: true });
+  if (targets.length === 0) {
+    // Only Rust tests, and none of them is run.
+  } else if (reverts.length === 0) {
     for (const t of targets) results.push({ ...t, outcome: "INVALID" });
   } else {
     const dir = mkdtempSync(join(tmpdir(), WORKTREE_PREFIX));
@@ -488,7 +535,11 @@ async function main(args: string[]): Promise<number> {
 
   console.log(`falsify: new tests run against the source at ${base.slice(0, 12)}`);
   for (const r of results) {
-    const note = r.unrelated ? " (passed; unrelated to the source change)" : "";
+    const note = r.rust
+      ? " (Rust: not run; needs a control)"
+      : r.unrelated
+        ? " (passed; unrelated to the source change)"
+        : "";
     console.log(`  ${r.outcome.padEnd(8)} ${r.file} › ${r.title}${note}`);
   }
 
@@ -503,9 +554,11 @@ async function main(args: string[]): Promise<number> {
   const invalid = results.filter((r) => r.outcome === "INVALID");
   if (invalid.length > 0 && !hasControl(messages)) {
     console.error(
-      reverts.length === 0
-        ? "\nThis branch adds tests but no source change to revert."
-        : "\nSome tests could not be judged by reverting (new symbols, tests unrelated to the " +
+      targets.length === 0
+        ? "\nThis branch adds Rust tests, which can't be judged by reverting."
+        : reverts.length === 0
+          ? "\nThis branch adds tests but no source change to revert."
+          : "\nSome tests could not be judged by reverting (new symbols, tests unrelated to the " +
             "source change, unparsed titles, load errors or timeouts).",
     );
     console.error(
