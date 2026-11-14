@@ -112,15 +112,16 @@ export interface FakeHolderServer {
 }
 
 /**
- * A fake holder on a Unix socket at `path`. Like a real one, it answers `close` with `ok`, then
- * ends every connection and removes its socket.
+ * What a fake holder does with `close`: what a real one does, answer `ok` then end every
+ * connection and remove its socket (`exits`); answer `ok` and stay (`stays`); or leave it to
+ * the test, like a holder that ignores it (`ignores`).
  */
+export type FakeClose = "exits" | "stays" | "ignores";
+
+/** A fake holder on a Unix socket at `path`. */
 export async function listenFakeHolder(
   path: string,
-  options: FakeHolderOptions & {
-    /** False leaves `close` to the test, like a holder that ignores it. */
-    readonly answersClose?: boolean;
-  } = {},
+  options: Omit<FakeHolderOptions, "onClose"> & { readonly close?: FakeClose } = {},
 ): Promise<FakeHolderServer> {
   const sockets = new Set<Socket>();
   const connected: FakeHolder[] = [];
@@ -128,8 +129,10 @@ export async function listenFakeHolder(
   const server = createServer((socket) => {
     sockets.add(socket);
     socket.on("close", () => sockets.delete(socket));
-    const onClose = options.answersClose === false ? undefined : answerClose;
-    const holder = new FakeHolder(socket, onClose ? { ...options, onClose } : options);
+    const holder = new FakeHolder(
+      socket,
+      options.close === "ignores" ? options : { ...options, onClose: answerClose },
+    );
     const waiter = waiting.shift();
     if (waiter === undefined) connected.push(holder);
     else waiter(holder);
@@ -141,7 +144,7 @@ export async function listenFakeHolder(
     });
   const answerClose = (holder: FakeHolder, request: HolderRequest) => {
     holder.send({ type: "ok", id: request.id, body: { request: "close" } });
-    void close();
+    if (options.close !== "stays") void close();
   };
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);

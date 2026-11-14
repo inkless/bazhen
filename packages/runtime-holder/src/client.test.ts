@@ -241,6 +241,36 @@ describe("HolderClient", () => {
     expect(near.destroyed).toBe(true);
   });
 
+  it("ends the connection when an attach is aborted once sent, so no output comes unsnapshotted", async () => {
+    const { client, holder } = await connected();
+    const abort = new AbortController();
+    const attached = client.attach({ signal: abort.signal });
+    await holder.request();
+    abort.abort(new Error("deadline"));
+    await expect(attached).rejects.toThrow("deadline");
+    await expect(client.ended).resolves.toMatchObject({ reason: "error" });
+  });
+
+  it("ends the connection when a subscribe is aborted once sent", async () => {
+    const { client, holder } = await connected();
+    const abort = new AbortController();
+    const subscribed = client.subscribe(undefined, { signal: abort.signal });
+    await holder.request();
+    abort.abort(new Error("deadline"));
+    await expect(subscribed).rejects.toThrow("deadline");
+    await expect(client.ended).resolves.toMatchObject({ reason: "error" });
+  });
+
+  it("keeps the connection when an aborted request has nothing running on the holder", async () => {
+    const { client, holder } = await connected();
+    const abort = new AbortController();
+    const answer = client.stats({ signal: abort.signal });
+    await holder.request();
+    abort.abort(new Error("deadline"));
+    await expect(answer).rejects.toThrow("deadline");
+    expect(client.open).toBe(true);
+  });
+
   it("ends the connection with the error when onEvent throws, rejecting what waits", async () => {
     const thrown = new Error("consumer broke");
     const { client, near, holder } = await connected({

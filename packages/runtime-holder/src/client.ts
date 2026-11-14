@@ -83,7 +83,7 @@ export class HolderDisconnected extends Error {
 export interface HolderClientOptions {
   /**
    * Called for every event, synchronously and in the order the holder sent them. One that throws
-   * ends the connection with that error.
+   * while the connection is open ends it with that error.
    */
   readonly onEvent: (event: HolderEvent) => void;
   /** Ask for the slot whose `input` the holder takes; `hello.writer` says whether it was given. */
@@ -93,7 +93,10 @@ export interface HolderClientOptions {
 }
 
 export interface RequestOptions {
-  /** Abandons the request; an answer that arrives later is dropped. */
+  /**
+   * Abandons the request; an answer that arrives later is dropped. Aborting an `attach` or a
+   * `subscribe` once sent ends the connection, as the holder may already be sending its output.
+   */
   readonly signal?: AbortSignal;
 }
 
@@ -116,7 +119,14 @@ interface Sending<K extends AnswerName> {
   readonly batch?: Uint8Array[];
   /** Called with the answer as it is read, in order with the events around it. */
   readonly onAnswer?: (reply: ReplyOf<K>) => void;
+  /**
+   * Ends the connection if the request is aborted once sent, for a request the holder acts on
+   * whatever the client does with its answer: a subscription then runs without its snapshot.
+   */
+  readonly endsOnAbort?: boolean;
 }
+
+const asError = (value: unknown) => (value instanceof Error ? value : new Error(String(value)));
 
 /** What one `input` frame carries: the cap less the type byte and the request id. */
 const INPUT_CHUNK = HOLDER_MAX_REQUEST_BYTES - 1 - 4;
@@ -173,6 +183,7 @@ class Connection {
       const forget = () => {
         this.pending.delete(request.id);
         reject(signal?.reason);
+        if (sending.endsOnAbort) this.fail({ reason: "error", error: asError(signal?.reason) });
       };
       signal?.addEventListener("abort", forget, { once: true });
       const stop = () => signal?.removeEventListener("abort", forget);
@@ -237,9 +248,7 @@ class Connection {
       }
     } catch (thrown) {
       // From `onEvent`: the frames after it are lost, so the connection can't go on in step.
-      const error = thrown instanceof Error ? thrown : new Error(String(thrown));
-      this.finish({ reason: "error", error });
-      this.stream.destroy();
+      this.fail({ reason: "error", error: asError(thrown) });
       return;
     }
     if (malformed !== null) this.breakProtocol(malformed);
@@ -277,7 +286,11 @@ class Connection {
   }
 
   private breakProtocol(message: string): void {
-    this.finish({ reason: "malformed", message });
+    this.fail({ reason: "malformed", message });
+  }
+
+  private fail(end: HolderEnd): void {
+    this.finish(end);
     this.stream.destroy();
   }
 
@@ -347,7 +360,10 @@ export class HolderClient {
         batch,
         onAnswer,
       }),
-      this.connection.ask((id) => ({ type: "subscribe", id, body: {} }), "ok", options, { batch }),
+      this.connection.ask((id) => ({ type: "subscribe", id, body: {} }), "ok", options, {
+        batch,
+        endsOnAbort: true,
+      }),
     ];
     this.connection.write(batch);
     await Promise.all(answers);
@@ -355,7 +371,9 @@ export class HolderClient {
 
   async subscribe(from?: HolderSubscribeRequest["from"], options?: RequestOptions): Promise<void> {
     const body = from === undefined ? {} : { from };
-    await this.connection.ask((id) => ({ type: "subscribe", id, body }), "ok", options);
+    await this.connection.ask((id) => ({ type: "subscribe", id, body }), "ok", options, {
+      endsOnAbort: true,
+    });
   }
 
   /**
