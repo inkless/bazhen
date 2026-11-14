@@ -33,6 +33,7 @@ const SUITES = {
   api: "test:api",
   e2e: "test:e2e",
   falsify: "test:falsify",
+  "control-mode": "test:control-mode",
 } as const;
 type Suite = keyof typeof SUITES;
 const DEFAULT_SUITES: Suite[] = ["integration", "api", "e2e"];
@@ -507,7 +508,14 @@ const host: Host = {
   docker,
   prepare(base, prefix) {
     const dir = buildContext(git(process.cwd(), "rev-parse", "--show-toplevel"), base, prefix);
-    return { dir, buildArgs: pins((p) => readFileSync(join(dir, p), "utf8")) };
+    const tmux = process.env["BZ_TMUX_SOURCE_VERSION"];
+    return {
+      dir,
+      buildArgs: {
+        ...pins((p) => readFileSync(join(dir, p), "utf8")),
+        ...(tmux === undefined || tmux === "" ? {} : { TMUX_SOURCE_VERSION: tmux }),
+      },
+    };
   },
   removeDir: (dir) => rmSync(dir, { recursive: true, force: true }),
   runDirs: () =>

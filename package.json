@@ -13,6 +13,7 @@
     "format:check": "oxfmt --check",
     "test": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
+    "test:control-mode": "vitest run --project control-mode",
     "test:api": "pnpm run build:hook && vitest run --project api",
     "check": "node --disable-warning=ExperimentalWarning scripts/check-standards.ts && node --disable-warning=ExperimentalWarning scripts/protocol-schema.ts --check && pnpm run lint && pnpm run format:check && pnpm run typecheck && pnpm run test:hook && pnpm run test && pnpm run test:medium && pnpm run test:bench",
     "test:e2e": "pnpm run build:hook && pnpm --filter @bazhen/e2e-tests run test",

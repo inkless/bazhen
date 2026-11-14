@@ -46,10 +46,22 @@ export default defineConfig({
         test: {
           name: "integration",
           include: ["tests/integration/**/*.test.ts"],
+          exclude: ["tests/integration/control-mode/**", "**/node_modules/**"],
           globalSetup: ["tests/support/global-setup.ts"],
           fileParallelism: false,
           maxWorkers: 1,
           testTimeout: 30_000,
+        },
+      },
+      {
+        // Measurements of tmux control mode, run on their own: they load the machine on purpose.
+        test: {
+          name: "control-mode",
+          include: ["tests/integration/control-mode/**/*.test.ts"],
+          globalSetup: ["tests/support/global-setup.ts"],
+          fileParallelism: false,
+          maxWorkers: 1,
+          testTimeout: 300_000,
         },
       },
       {

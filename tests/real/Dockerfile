@@ -4,6 +4,24 @@
 # the pins below from the repository.
 
 ARG NODE_VERSION
+
+# Set TMUX_SOURCE_VERSION (say 3.6b) to run the suites against that tmux release, compiled from
+# its tarball in this stage, so only the binary reaches the image. Empty builds nothing.
+FROM node:${NODE_VERSION}-trixie AS tmux-source
+ARG TMUX_SOURCE_VERSION=""
+RUN mkdir -p /out/bin \
+  && if [ -n "${TMUX_SOURCE_VERSION}" ]; then \
+    apt-get update \
+    && apt-get install -y --no-install-recommends libevent-dev libncurses-dev pkg-config bison \
+    && cd /tmp \
+    && wget -q "https://github.com/tmux/tmux/releases/download/${TMUX_SOURCE_VERSION}/tmux-${TMUX_SOURCE_VERSION}.tar.gz" \
+    && tar xzf "tmux-${TMUX_SOURCE_VERSION}.tar.gz" \
+    && cd "tmux-${TMUX_SOURCE_VERSION}" \
+    && ./configure --prefix=/usr/local --disable-utf8proc \
+    && make -j"$(nproc)" \
+    && install -m 0755 tmux /out/bin/tmux; \
+  fi
+
 FROM node:${NODE_VERSION}-trixie
 
 ARG PNPM_VERSION
@@ -32,6 +50,9 @@ RUN echo "man-db man-db/auto-update boolean false" | debconf-set-selections \
   && rm -rf /var/lib/apt/lists/* \
   && npm install -g "pnpm@${PNPM_VERSION}" \
   && touch /etc/bazhen-disposable-host
+
+# Ahead of Debian's /usr/bin/tmux on PATH; Debian's tmux stays installed for its runtime libraries.
+COPY --from=tmux-source /out/bin/ /usr/local/bin/
 
 USER node
 WORKDIR /home/node/bazhen
