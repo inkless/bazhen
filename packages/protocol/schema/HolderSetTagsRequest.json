@@ -1,0 +1,23 @@
+{
+  "$id": "HolderSetTagsRequest",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "tags": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
+      },
+      "additionalProperties": {
+        "type": "string",
+        "maxLength": 1024
+      }
+    }
+  },
+  "required": [
+    "tags"
+  ],
+  "additionalProperties": false
+}

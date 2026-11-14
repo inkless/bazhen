@@ -1,0 +1,40 @@
+{
+  "$id": "HolderError",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "request": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "hello",
+            "snapshot",
+            "subscribe",
+            "input",
+            "resize",
+            "stats",
+            "close",
+            "signal",
+            "foreground",
+            "respawn",
+            "set-tags",
+            "set-theme"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "unknown"
+        }
+      ]
+    },
+    "message": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "request",
+    "message"
+  ],
+  "additionalProperties": false
+}

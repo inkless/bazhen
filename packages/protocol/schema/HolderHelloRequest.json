@@ -1,0 +1,23 @@
+{
+  "$id": "HolderHelloRequest",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "protocol": {
+      "minItems": 1,
+      "maxItems": 16,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^\\d+\\.\\d+$"
+      }
+    },
+    "writer": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "protocol"
+  ],
+  "additionalProperties": false
+}
