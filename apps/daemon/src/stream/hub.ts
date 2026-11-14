@@ -242,7 +242,9 @@ export class TerminalHub {
     if (!watched.viewers.has(id)) throw new ViewEnded();
     if (!this.makeRoom(shown.length)) {
       this.end(watched, id, "attach_failed");
-      throw new ViewRefused("too many views are still loading their screens; try again shortly");
+      throw new ViewRefused(
+        "too many views are still loading their screens; reopen this terminal in a moment",
+      );
     }
     if (resumed && watched.viewers.get(resumes.attachmentId) === replaced) {
       replaced.viewer.close();
