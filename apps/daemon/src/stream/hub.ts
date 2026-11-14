@@ -35,7 +35,8 @@ export interface Viewer {
   readonly declaresEpoch: boolean;
   /** The name of the paired device the view is on, if it is on one. */
   readonly deviceName?: string | undefined;
-  send(bytes: Uint8Array): void;
+  /** `written` runs once the bytes are written to the view's socket, or the socket has failed. */
+  send(bytes: Uint8Array, written?: () => void): void;
   notify(frame: StreamServerFrame): void;
   /** Bytes sent to the view that have not reached it yet. */
   unsent(): number;
@@ -51,9 +52,29 @@ export class ViewEnded extends Error {
   }
 }
 
+/** A view was turned away before it opened, for want of room. */
+export class ViewRefused extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ViewRefused";
+  }
+}
+
 export interface HubOptions {
   /** A view this far behind its terminal's output is ended, never sent a stream with a hole. */
   readonly maxUnsentBytes: number;
+  /** The most views a terminal may have; one more is turned away. */
+  readonly maxViews: number;
+  /**
+   * The most snapshot bytes not yet written to their views, across every terminal. Over it, views
+   * whose snapshots have stalled are ended to make room, and failing that the view that opens is
+   * turned away.
+   */
+  readonly maxSnapshotBytes: number;
+  readonly snapshotChunkBytes: number;
+  /** A view whose snapshot has had nothing written for this long has stalled. */
+  readonly snapshotStallMs: number;
+  readonly now: () => number;
   /** How long output must pause, or at most how long it may run, before the screen is re-read. */
   readonly screenQuietMs: number;
   readonly screenMaxWaitMs: number;
@@ -61,6 +82,13 @@ export interface HubOptions {
 
 export const HUB_DEFAULTS: HubOptions = {
   maxUnsentBytes: 4 * 1024 * 1024,
+  maxViews: 16,
+  // Three of the largest snapshot a 200-column terminal can have.
+  maxSnapshotBytes: 200 * 1024 * 1024,
+  snapshotChunkBytes: 1024 * 1024,
+  // A link slower than about 100 KB/s.
+  snapshotStallMs: 10_000,
+  now: () => performance.now(),
   screenQuietMs: 100,
   screenMaxWaitMs: 500,
 };
@@ -113,13 +141,24 @@ interface Entry {
   queue?: Uint8Array[];
   held: number;
   /**
-   * What of the snapshot may still be unsent, which the view may lag by on top of
-   * `maxUnsentBytes`: a large history alone must not end the view. It shrinks as the socket
-   * drains, and never grows back.
+   * What of the snapshot may still be in the socket's queue, which the view may lag by on top of
+   * `maxUnsentBytes`: a large history alone must not end the view. That is at most one piece of
+   * it, and shrinks as the socket drains.
    */
   snapshotBytes: number;
   /** Whether it has been told its input was dropped under the current lease. */
   toldDropped?: boolean;
+}
+
+/** A view whose snapshot is still being written to its socket. */
+interface Loading {
+  readonly watched: Watched;
+  /** Bytes of the snapshot not yet written. */
+  remaining: number;
+  /** When a piece of it was last written, or it began. */
+  since: number;
+  /** Stops waiting for the piece in flight, once the view has ended. */
+  wake: () => void;
 }
 
 interface Watched {
@@ -153,6 +192,8 @@ export class TerminalHub {
   private readonly log: AttachmentLog;
   private readonly opts: HubOptions;
   private readonly watched = new Map<TerminalId, Promise<Watched>>();
+  /** Oldest first. */
+  private readonly loading = new Map<AttachmentId, Loading>();
 
   constructor(runtime: RuntimeAdapter, log: AttachmentLog, opts: HubOptions = HUB_DEFAULTS) {
     this.runtime = runtime;
@@ -170,6 +211,16 @@ export class TerminalHub {
     const opening = viewer.mode === "interactive" ? size : null;
     const { watched, opened } = await this.watch(ref, opening);
     const id = newId("att");
+    const replaced = resumes && watched.viewers.get(resumes.attachmentId);
+    const resumed =
+      resumes !== undefined &&
+      replaced !== undefined &&
+      timingSafeEqual(digest(resumes.token), replaced.resumeDigest);
+    if (watched.viewers.size - (resumed ? 1 : 0) >= this.opts.maxViews) {
+      this.log.started(id, watched.terminal, viewer.mode);
+      this.log.ended(id, "attach_failed");
+      throw new ViewRefused(`this terminal already has ${this.opts.maxViews} views open`);
+    }
     // From here the view's live bytes are held, and the snapshot covers every byte before them.
     const queue: Uint8Array[] = [];
     const resumeToken = randomBytes(16).toString("base64url");
@@ -182,8 +233,7 @@ export class TerminalHub {
       resumeDigest: digest(resumeToken),
     };
     watched.viewers.set(id, entry);
-    const replaced = resumes && watched.viewers.get(resumes.attachmentId);
-    if (resumes && replaced && timingSafeEqual(digest(resumes.token), replaced.resumeDigest)) {
+    if (resumed) {
       replaced.viewer.close();
       this.end(watched, resumes.attachmentId, "replaced");
     }
@@ -192,8 +242,12 @@ export class TerminalHub {
     viewer.notify(leaseFrame(watched, id));
     viewer.notify({ type: "snapshot_start" });
     const shown = Buffer.from(await snapshot);
-    entry.snapshotBytes = shown.length;
-    viewer.send(shown);
+    if (!watched.viewers.has(id)) throw new ViewEnded();
+    if (!this.makeRoom(shown.length)) {
+      this.end(watched, id, "attach_failed");
+      throw new ViewRefused("too many views are still loading their screens; try again shortly");
+    }
+    await this.sendSnapshot(watched, id, entry, shown);
     // The view may have left, or the terminal closed, while its snapshot was sent.
     if (!watched.viewers.has(id)) throw new ViewEnded();
     viewer.notify({ type: "snapshot_end" });
@@ -270,6 +324,7 @@ export class TerminalHub {
         // The client also exits when its connection to tmux is lost while the terminal lives on.
         const closed = this.log.closing(watched.terminal);
         for (const [id, entry] of watched.viewers) {
+          this.unload(id);
           dismiss(entry, closed ? { type: "exit" } : { type: "ended", reason: "disconnected" });
           this.log.ended(id, closed ? "terminal_closed" : "disconnected");
         }
@@ -283,6 +338,63 @@ export class TerminalHub {
     this.watched.set(ref.terminalId, opening);
     opening.catch(() => this.forget(ref.terminalId, opening));
     return { watched: await opening, opened: true };
+  }
+
+  /**
+   * A piece at a time, each once the last is written. Pieces queued together would be written as
+   * one batch, counted unwritten until all of it is, and a view reading slowly would look no
+   * different from one that has gone.
+   */
+  private async sendSnapshot(
+    watched: Watched,
+    id: AttachmentId,
+    entry: Entry,
+    shown: Buffer,
+  ): Promise<void> {
+    const loading: Loading = {
+      watched,
+      remaining: shown.length,
+      since: this.opts.now(),
+      wake: () => {},
+    };
+    this.loading.set(id, loading);
+    const step = this.opts.snapshotChunkBytes;
+    for (let at = 0; at < shown.length && watched.viewers.has(id); at += step) {
+      const piece = shown.subarray(at, at + step);
+      entry.snapshotBytes = piece.length;
+      await new Promise<void>((resolve) => {
+        loading.wake = resolve;
+        entry.viewer.send(piece, resolve);
+      });
+      loading.remaining -= piece.length;
+      loading.since = this.opts.now();
+    }
+    this.loading.delete(id);
+  }
+
+  /**
+   * Whether a snapshot of `bytes` may be sent now. Over the cap, views whose snapshots have
+   * stalled are ended, oldest first, until it fits; a view still reading its own is never ended
+   * for it. A snapshot is never refused while no other is being sent, however large it is.
+   */
+  private makeRoom(bytes: number): boolean {
+    const now = this.opts.now();
+    let pending = 0;
+    for (const loading of this.loading.values()) pending += loading.remaining;
+    const fits = () => pending === 0 || pending + bytes <= this.opts.maxSnapshotBytes;
+    for (const [id, loading] of this.loading) {
+      if (fits()) break;
+      if (now - loading.since < this.opts.snapshotStallMs) continue;
+      const entry = loading.watched.viewers.get(id);
+      pending -= loading.remaining;
+      if (entry !== undefined) this.evict(loading.watched, id, entry);
+    }
+    return fits();
+  }
+
+  private unload(id: AttachmentId): void {
+    this.loading.get(id)?.wake();
+    this.loading.delete(id);
   }
 
   /** Ends a view that has fallen behind, at a frame boundary; it reattaches for a fresh screen. */
@@ -433,6 +545,7 @@ export class TerminalHub {
 
   private end(watched: Watched, id: AttachmentId, reason: EndReason): void {
     if (!watched.viewers.delete(id)) return;
+    this.unload(id);
     this.log.ended(id, reason);
     const wasDriver = watched.lease.holder === id;
     watched.lease = release(watched.lease, id);

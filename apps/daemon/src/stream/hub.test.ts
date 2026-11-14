@@ -1,6 +1,12 @@
 import headless from "@xterm/headless";
-import { describe, expect, it } from "vitest";
-import { newId, type Attached, type AttachmentId, type TerminalId } from "@bazhen/core";
+import { describe, expect, it, vi } from "vitest";
+import {
+  newId,
+  type Attached,
+  type AttachmentId,
+  type RuntimeRef,
+  type TerminalId,
+} from "@bazhen/core";
 import { FakeRuntime } from "@bazhen/core/testing";
 import {
   oscColour,
@@ -14,8 +20,10 @@ import {
   HUB_DEFAULTS,
   TerminalHub,
   ViewEnded,
+  ViewRefused,
   type Attachment,
   type AttachmentLog,
+  type HubOptions,
   type Viewer,
 } from "./hub.ts";
 
@@ -54,16 +62,20 @@ class CheckedRuntime extends FakeRuntime {
 /** A runtime with one terminal, whose program echoes nothing, and what reaches it. */
 async function fakeRuntime(history = "earlier output") {
   const runtime = new CheckedRuntime();
-  const ref = await runtime.create({
-    terminalId: newId("term"),
-    tags: { kind: "shell" },
-    argv: ["sleep", "300"],
-    cwd: "/w",
-    env: {},
-    size,
-    generation: 0,
-  });
-  runtime.scroll(ref, history);
+  const terminal = async () => {
+    const created = await runtime.create({
+      terminalId: newId("term"),
+      tags: { kind: "shell" },
+      argv: ["sleep", "300"],
+      cwd: "/w",
+      env: {},
+      size,
+      generation: 0,
+    });
+    runtime.scroll(created, history);
+    return created;
+  };
+  const ref = await terminal();
   const clients = runtime.clients(ref);
   return {
     runtime,
@@ -80,6 +92,8 @@ async function fakeRuntime(history = "earlier output") {
     answerScreenCheck: (answer: boolean) => runtime.held.shift()?.(answer),
     screenChecks: () => runtime.checks,
     counts: () => ({ attaches: clients.attaches.length, closes: clients.closes }),
+    /** Another terminal on the same runtime, with the same history. */
+    another: terminal,
   };
 }
 
@@ -125,7 +139,10 @@ function viewer(
   const v: Viewer = {
     mode,
     declaresEpoch: declares !== "never",
-    send: (bytes) => seen.push(Buffer.from(bytes).toString()),
+    send: (bytes, written) => {
+      seen.push(Buffer.from(bytes).toString());
+      written?.();
+    },
     notify: (frame) => {
       frames.push(frame);
       if (frame.type !== "lease") return;
@@ -232,7 +249,10 @@ describe("terminal hub", () => {
     const order: string[] = [];
     const late: Viewer = {
       mode: "interactive",
-      send: () => order.push("bytes"),
+      send: (_bytes, written) => {
+        order.push("bytes");
+        written?.();
+      },
       notify: (frame) => order.push(frame.type),
       unsent: () => 0,
       close: () => {},
@@ -737,9 +757,9 @@ describe("terminal hub: screen state and slow views", () => {
     const stuck = viewer("observe", () => sent);
     const counting: Viewer = {
       ...stuck.v,
-      send: (bytes) => {
+      send: (bytes, written) => {
         sent += bytes.length;
-        stuck.v.send(bytes);
+        stuck.v.send(bytes, written);
       },
     };
     await hub.join(rt.ref, counting, size);
@@ -785,5 +805,211 @@ describe("terminal hub: screen state and slow views", () => {
       true,
       `ended ${attached.id} disconnected`,
     ]);
+  });
+});
+
+/**
+ * A view whose socket writes what it is sent only when the test says, as a slow reader's does,
+ * or never, as a gone one's. Its socket closing settles what is in flight, as `ws` does.
+ */
+function slowViewer() {
+  const view = viewer("observe");
+  const inFlight: (() => void)[] = [];
+  let gone = false;
+  const v: Viewer = {
+    ...view.v,
+    send: (bytes, written) => {
+      view.v.send(bytes);
+      if (gone) written?.();
+      else if (written) inFlight.push(written);
+    },
+  };
+  return {
+    ...view,
+    v,
+    inFlight: () => inFlight.length,
+    /** Writes the piece in flight, if there is one. */
+    write: () => inFlight.shift()?.(),
+    disconnect: () => {
+      gone = true;
+      for (const written of inFlight.splice(0)) written();
+    },
+  };
+}
+
+const turn = () => new Promise((resolve) => setImmediate(resolve));
+
+/** Starts a slow view opening, and waits until the first piece of its snapshot is in flight. */
+async function loading(hub: TerminalHub, ref: RuntimeRef) {
+  const view = slowViewer();
+  const joined = hub.join(ref, view.v, size);
+  joined.catch(() => {});
+  await vi.waitFor(() => expect(view.inFlight()).toBe(1));
+  return { ...view, joined };
+}
+
+describe("terminal hub: room for views", () => {
+  const history = "h".repeat(500);
+  let clock = 0;
+  const room = {
+    ...HUB_DEFAULTS,
+    screenQuietMs: 10,
+    screenMaxWaitMs: 50,
+    snapshotChunkBytes: 100,
+    snapshotStallMs: 1000,
+    now: () => clock,
+  };
+
+  /** A hub over a terminal with a long history, and the size of that terminal's snapshot. */
+  async function measured(opts: (snapshot: number) => Partial<HubOptions>) {
+    clock = 0;
+    const rt = await fakeRuntime(history);
+    const probe = viewer();
+    const { log, events } = memoryLog();
+    const sizing = new Hub(rt.runtime, log, room);
+    (await sizing.join(rt.ref, probe.v, size)).leave();
+    const snapshot = Buffer.byteLength(probe.seen.join(""));
+    const hub = new Hub(rt.runtime, log, { ...room, ...opts(snapshot) });
+    return { rt, hub, events, snapshot, screen: () => screenOf(probe.seen) };
+  }
+
+  it("turns a view away once its terminal has as many as it may, and leaves the others be", async () => {
+    const rt = await fakeRuntime();
+    const { log, events } = memoryLog();
+    const hub = new Hub(rt.runtime, log, { ...room, maxViews: 2 });
+    const [a, b, c] = [viewer(), viewer(), viewer()];
+    await hub.join(rt.ref, a.v, size);
+    await hub.join(rt.ref, b.v, size);
+    await expect(hub.join(rt.ref, c.v, size)).rejects.toThrow(ViewRefused);
+    const [started, ended] = events.slice(-2).map((e) => e.split(" "));
+    expect([a.closed(), b.closed(), c.frames, started, ended]).toEqual([
+      false,
+      false,
+      [],
+      ["started", ended?.[1]],
+      ["ended", started?.[1], "attach_failed"],
+    ]);
+  });
+
+  it("lets a view reattach to a terminal that has as many views as it may, but no new one", async () => {
+    const rt = await fakeRuntime();
+    const hub = new Hub(rt.runtime, memoryLog().log, { ...room, maxViews: 2 });
+    const gone = viewer();
+    const before = await hub.join(rt.ref, gone.v, size);
+    await hub.join(rt.ref, viewer().v, size);
+    const back = viewer();
+    await hub.join(rt.ref, back.v, size, { attachmentId: before.id, token: tokenOf(gone) });
+    const fresh = hub.join(rt.ref, viewer().v, size);
+    await expect(fresh).rejects.toThrow(ViewRefused);
+    expect(back.frames.at(-1)?.type).toBe("attached");
+  });
+
+  it("sends a snapshot a piece at a time, each once the last is written, and loses none of it", async () => {
+    const { rt, hub, snapshot, screen } = await measured(() => ({}));
+    const view = slowViewer();
+    const attached = hub.join(rt.ref, view.v, size).then(() => true);
+    const inFlight: number[] = [];
+    while (!(await Promise.race([attached, turn().then(() => false)]))) {
+      inFlight.push(view.inFlight());
+      view.write();
+    }
+    expect([
+      Math.max(...inFlight),
+      view.seen.length >= snapshot / 100,
+      view.seen.every((piece) => piece.length <= 100),
+      await screenOf(view.seen),
+    ]).toEqual([1, true, true, await screen()]);
+  });
+
+  it("ends a view whose snapshot has stalled when another needs the room, the oldest first", async () => {
+    const { rt, hub, events, snapshot } = await measured((snap) => ({
+      maxSnapshotBytes: snap * 2.5,
+    }));
+    const oldest = await loading(hub, rt.ref);
+    clock = 10;
+    const older = await loading(hub, rt.ref);
+    clock = 1010;
+    const late = viewer();
+    await hub.join(rt.ref, late.v, size);
+    expect([
+      oldest.frames.at(-1),
+      oldest.closed(),
+      older.closed(),
+      events.filter((e) => e.endsWith("evicted_slow")).length,
+      Buffer.byteLength(late.seen.join("")),
+    ]).toEqual([{ type: "ended", reason: "evicted_slow" }, true, false, 1, snapshot]);
+    await expect(oldest.joined).rejects.toThrow(ViewEnded);
+  });
+
+  it("turns a view away when every snapshot being sent is still being read", async () => {
+    const { rt, hub, events } = await measured((snap) => ({ maxSnapshotBytes: snap * 2.2 }));
+    const first = await loading(hub, rt.ref);
+    const second = await loading(hub, rt.ref);
+    clock = 900;
+    first.write();
+    second.write();
+    clock = 1500;
+    await expect(hub.join(rt.ref, viewer().v, size)).rejects.toThrow(ViewRefused);
+    expect([first.closed(), second.closed(), events.at(-1)]).toEqual([
+      false,
+      false,
+      expect.stringMatching(/ attach_failed$/),
+    ]);
+  });
+
+  it("counts only what of a snapshot is still to be written", async () => {
+    const { rt, hub, snapshot } = await measured((snap) => ({ maxSnapshotBytes: snap * 1.5 }));
+    const reading = await loading(hub, rt.ref);
+    for (let left = snapshot; left > snapshot / 2; left -= 100) {
+      reading.write();
+      await vi.waitFor(() => expect(reading.inFlight()).toBe(1));
+    }
+    const late = viewer();
+    await hub.join(rt.ref, late.v, size);
+    expect([reading.closed(), late.frames.at(-1)?.type]).toEqual([false, "attached"]);
+  });
+
+  it("never ends a view that has its whole snapshot to make room", async () => {
+    const { rt, hub } = await measured((snap) => ({ maxSnapshotBytes: snap * 1.5 }));
+    const opened = viewer();
+    await hub.join(rt.ref, opened.v, size);
+    clock = 5000;
+    await loading(hub, rt.ref);
+    await expect(hub.join(rt.ref, viewer().v, size)).rejects.toThrow(ViewRefused);
+    expect(opened.closed()).toBe(false);
+  });
+
+  it("never ends a view for a stalled snapshot while there is room", async () => {
+    const { rt, hub } = await measured((snap) => ({ maxSnapshotBytes: snap * 3 }));
+    const slow = await loading(hub, rt.ref);
+    clock = 1_000_000;
+    await hub.join(rt.ref, viewer().v, size);
+    expect(slow.closed()).toBe(false);
+  });
+
+  it("ends a stalled view of one terminal for a view of another", async () => {
+    const { rt, hub } = await measured((snap) => ({ maxSnapshotBytes: snap * 1.5 }));
+    const stalled = await loading(hub, rt.ref);
+    clock = 1000;
+    const other = await rt.another();
+    await hub.join(other, viewer().v, size);
+    expect(stalled.closed()).toBe(true);
+  });
+
+  it("sends a snapshot larger than the cap only while no other is being sent", async () => {
+    const { rt, hub } = await measured((snap) => ({ maxSnapshotBytes: snap / 2 }));
+    const alone = await loading(hub, rt.ref);
+    await expect(hub.join(rt.ref, viewer().v, size)).rejects.toThrow(ViewRefused);
+    expect(alone.closed()).toBe(false);
+  });
+
+  it("lets a view whose socket closes mid-snapshot finish opening, and frees its room", async () => {
+    const { rt, hub } = await measured((snap) => ({ maxSnapshotBytes: snap * 1.5 }));
+    const closing = await loading(hub, rt.ref);
+    closing.disconnect();
+    const late = viewer();
+    await expect(closing.joined).resolves.toBeDefined();
+    await hub.join(rt.ref, late.v, size);
+    expect(late.frames.at(-1)?.type).toBe("attached");
   });
 });

@@ -284,7 +284,7 @@ describe("tmux runtime on a private server", () => {
     });
     const viewer = {
       mode: "interactive" as const,
-      send: () => {},
+      send: (_bytes: Uint8Array, written?: () => void) => written?.(),
       notify: () => {},
       unsent: () => 0,
       close: () => {},
