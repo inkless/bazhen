@@ -639,7 +639,7 @@ describe("falsify judging new Rust tests by mutating the change", () => {
   ] as const)("refuses a cargo config %s, which could change what the tests run", (_where, dir) => {
     mutatedBranch(["tests::b_is_two"], [mutantOfB("replace b -> u8 with 0")]);
     const config = join(dir(), "config.toml");
-    write("/", config, '[env]\nRUSTFLAGS = "--cap-lints allow"\n');
+    write("/", config, '[env]\nFALSIFY_FIXTURE = "1"\n');
     const result = againstBase();
     expect({
       status: result.status,
