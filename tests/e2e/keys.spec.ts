@@ -228,17 +228,27 @@ async function touchAt(page: Page) {
   return { from: Math.max(box.y, 0) + 20, at: (y: number) => [{ x, y }] };
 }
 
-/** A swipe of 300 px down the terminal: a flick lifts at speed, a drag pauses before it lifts. */
+/**
+ * A swipe of 300 px down the terminal. A flick's events carry times 10 ms apart, so its speed
+ * doesn't depend on how fast the runner sends them; a drag moves in real time and pauses before
+ * it lifts.
+ */
 async function swipe(page: Page, cdp: CDPSession, how: "flick" | "drag"): Promise<void> {
   const { from, at } = await touchAt(page);
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: at(from) });
+  const start = Date.now() / 1000;
+  const when = (step: number) => (how === "flick" ? { timestamp: start + step * 0.01 } : {});
+  const send = (
+    type: "touchStart" | "touchMove" | "touchEnd",
+    touchPoints: { x: number; y: number }[],
+    step: number,
+  ) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints, ...when(step) });
+  await send("touchStart", at(from), 0);
   for (let step = 1; step <= 10; step++) {
-    const touchPoints = at(from + step * 30);
-    await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints });
+    await send("touchMove", at(from + step * 30), step);
     if (how === "drag") await page.waitForTimeout(40);
   }
   if (how === "drag") await page.waitForTimeout(300);
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await send("touchEnd", [], 11);
 }
 
 /** The view's top line once it has settled: the same at three looks in a row, 300 ms apart. */
@@ -264,11 +274,11 @@ async function swiped(page: Page, cdp: CDPSession, how: "flick" | "drag"): Promi
   return before - (await settled(page));
 }
 
-/** A page on a touch screen showing a program with long scrollback, at the bottom of it. */
-async function touchPage(browser: Browser, options: BrowserContextOptions = {}) {
+/** A page on a touch screen showing a program with `lines` of scrollback, at the bottom of it. */
+async function touchPage(browser: Browser, options: BrowserContextOptions = {}, lines = 400) {
   const context = await browser.newContext({ hasTouch: true, ...options });
   const page = await context.newPage();
-  const program = await launchProbe(page, "--lines=400");
+  const program = await launchProbe(page, `--lines=${lines}`);
   await reopen(page);
   return { context, page, program, cdp: await context.newCDPSession(page) };
 }
@@ -295,14 +305,27 @@ test("stops a quick swipe where the finger lifts when the system asks for less m
   await context.close();
 });
 
-/** Flicks up the scrollback until the view reaches its top, or twenty flicks have gone by. */
+/**
+ * Flicks up the scrollback until the view reaches its top, letting each glide run out or reach
+ * the top before the next: a new touch would stop it. Returns as soon as the top is in view.
+ */
 async function flickToTop(page: Page, cdp: CDPSession): Promise<void> {
-  for (let i = 0; i < 20 && (await viewportTop(page)) > 0; i++) await swipe(page, cdp, "flick");
+  for (let i = 0; i < 20 && (await viewportTop(page)) > 0; i++) {
+    await swipe(page, cdp, "flick");
+    await expect
+      .poll(async () => (await viewportTop(page)) === 0 || !(await gliding(page)), {
+        intervals: [20],
+        timeout: 5000,
+      })
+      .toBe(true);
+  }
 }
 
 test("stops a glide at once for a key", async ({ browser }) => {
   const { context, page, cdp } = await touchPage(browser);
+  // Driving sizes the terminal to this view, and tmux redraws it: a flick waits for that.
   await drive(page);
+  await settled(page);
   await swipe(page, cdp, "flick");
   await expect.poll(() => gliding(page)).toBe(true);
   await page.keyboard.press("x");
@@ -324,9 +347,10 @@ test("stops a glide at once for the next touch", async ({ browser }) => {
 });
 
 test("ends a glide at the top of the scrollback", async ({ browser }) => {
-  const { context, page, cdp } = await touchPage(browser);
+  // A few flicks' worth, so one reaches the top while it still has speed to spare.
+  const { context, page, cdp } = await touchPage(browser, {}, 80);
   await flickToTop(page, cdp);
-  await expect.poll(() => viewportTop(page), { intervals: [20], timeout: 15_000 }).toBe(0);
+  expect(await viewportTop(page)).toBe(0);
   // At once, not once it would have slowed to a stop on its own, a second or so later.
   await expect.poll(() => gliding(page), { intervals: [20], timeout: 200 }).toBe(false);
   await context.close();
