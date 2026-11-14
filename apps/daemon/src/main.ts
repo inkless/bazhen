@@ -43,6 +43,7 @@ import { Inbox } from "./attention/inbox.ts";
 import { MAC_APP, desktopNotifier, hostNotifier, notifyOnAttention } from "./notify/desktop.ts";
 import { Presence } from "./notify/presence.ts";
 import { HOOK_SCRIPT, hookClient, hookCommand } from "./mailbox/hook-command.ts";
+import { stableHookClient } from "./mailbox/hook-link.ts";
 import { ActivityTracker } from "./mailbox/activity.ts";
 import { SessionBinding, psTable } from "./mailbox/binding.ts";
 import { hookApp } from "./mailbox/ingress.ts";
@@ -136,6 +137,7 @@ mailbox.requeueInFlight();
 approvals.closeAbandoned();
 const hookRunner = hookClient();
 if (hookRunner === HOOK_SCRIPT) console.warn(`bazhen-hook is not built; hooks use ${HOOK_SCRIPT}`);
+const hookPath = stableHookClient(paths.state, hookRunner);
 const runtime = new TmuxRuntime({
   server: TmuxServer.at(paths.tmuxSocket, {
     root: paths.run,
@@ -144,9 +146,10 @@ const runtime = new TmuxRuntime({
   pty: nodePtySpawner,
   env: hostEnv,
   // Codex TUIs title their panes with their thread; the script client has no pane-title command.
-  ...(hookRunner === HOOK_SCRIPT
-    ? {}
-    : { onPaneTitle: paneTitleCommand(hookRunner, paths.socket) }),
+  ...(hookRunner === HOOK_SCRIPT ? {} : { onPaneTitle: paneTitleCommand(hookPath, paths.socket) }),
+});
+await runtime.applyServerSettings().catch((err: unknown) => {
+  console.warn("tmux server settings were not applied:", err);
 });
 // Follows Codex TUIs from thread to thread, by their panes' titles (§5.8).
 const codexThreads = new CodexThreads({
@@ -190,7 +193,7 @@ const environment = new LocalEnvironment({
   harnesses: [
     new ClaudeCodeHarness({
       newSessionId: randomUUID,
-      hookCommand: hookCommand(hookRunner),
+      hookCommand: hookCommand(hookPath),
       exists: existsSync,
       statusLine: (cwd) =>
         statusLineChoice(cwd, hostEnv["CLAUDE_CONFIG_DIR"] ?? join(inputs.home, ".claude")),
