@@ -295,11 +295,14 @@ What differs:
   `pnpm test:falsify` has nextest list the tests at the base and at HEAD, so it finds every new
   test however it is declared (`#[test]`, proptest, a macro of the crate's own). It then has
   cargo-mutants list the mutants of the code the branch changed, and runs the new tests against
-  them, one mutant at a time, in a throwaway worktree. A test that passes unmutated, then fails
-  twice under one mutant by panicking in test code, is KILLED, and the mutant is printed beside
-  it as its control. In test code means every place the failure names is in `crates/` and
-  outside the functions cargo-mutants mutates: its assertion, or an `unwrap` in the test, but not
-  a crash, a timeout, or a panic in product code, the standard library or a dependency. The run
+  them, one mutant at a time, in a throwaway worktree. A test that passes unmutated, fails
+  twice under one mutant by panicking in test code, and passes again once the mutant is undone,
+  is KILLED, and the mutant is printed beside it as its control. In test code means every place the failure names is an
+  item under a bare `#[cfg(test)]`, or a file in the crate's `tests/`, and isn't a line that
+  calls a product `#[track_caller]` function: the test's assertion, or an `unwrap` in it, but
+  not a crash, a timeout, a panic in product code, the standard library or a dependency, or a
+  failure on state an earlier run left. Keep test modules at the top level of the file, as
+  rustfmt lays them out: falsify finds a test item by its closing brace at column 0. The run
   stops once every new test is killed, and after at most 100 mutants. Any other new test is
   INVALID: one that fails unmutated, one no mutant killed, or one a branch with no Rust source
   change can't be mutated for. It needs a `Control:` trailer of its own naming it by the full
