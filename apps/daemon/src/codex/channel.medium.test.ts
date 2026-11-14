@@ -47,11 +47,16 @@ const failsReadsDropsTheRest = (method: string) =>
     : null;
 
 /** Ends a connection once the server has answered its first request after `initialize`. */
+/**
+ * Ends a connection once the server has answered its first request after `initialize`: the fake
+ * server's own listener, added first, has sent its answer by the time this one runs.
+ */
 const endsOnceAnswered = (ws: WebSocket) => {
-  let requests = 0;
-  ws.on("message", () => {
-    requests += 1;
-    if (requests === 2) setImmediate(() => ws.terminate());
+  ws.on("message", (data: Buffer) => {
+    const message = Object(JSON.parse(data.toString()));
+    const request = Reflect.get(message, "id") !== undefined;
+    if (request && Reflect.get(message, "method") !== "initialize")
+      setImmediate(() => ws.terminate());
   });
 };
 
@@ -146,27 +151,35 @@ describe("Codex channel", () => {
     channel.close();
   });
 
-  it("rejects a request the server refuses as Codex's refusal, in Codex's own words", async () => {
-    const { codexHome, socket } = home();
-    await fakeServer(socket, codexHome, () => ({
-      error: { code: -32600, message: "This chat uses model provider “gone”" },
-    }));
-    const channel = channelOn(codexHome);
-    const refused = channel.request("thread/resume", {});
-    await expect(refused).rejects.toBeInstanceOf(HarnessRefused);
-    await expect(refused).rejects.toThrow(
-      "Codex refused thread/resume: This chat uses model provider “gone” (-32600)",
-    );
-    channel.close();
-  });
+  it.each([-32600, -32601, -32602])(
+    "rejects a request the server refuses (%i) as Codex's refusal, in Codex's own words",
+    async (code) => {
+      const { codexHome, socket } = home();
+      await fakeServer(socket, codexHome, () => ({
+        error: { code, message: "This chat uses model provider “gone”" },
+      }));
+      const channel = channelOn(codexHome);
+      const refused = channel.request("thread/resume", {});
+      await expect(refused).rejects.toBeInstanceOf(HarnessRefused);
+      await expect(refused).rejects.toThrow(
+        `Codex refused thread/resume: This chat uses model provider “gone” (${code})`,
+      );
+      channel.close();
+    },
+  );
 
-  it("calls a server that is still draining on the last attempt unavailable, not a refusal", async () => {
+  it("tries each next server while one drains, then calls the last still draining unavailable", async () => {
     const { codexHome, socket } = home();
-    const { wss } = await fakeServer(socket, codexHome, () => DRAINING);
+    const asked: number[] = [];
+    const { wss } = await fakeServer(socket, codexHome, (_method, connection) => {
+      asked.push(connection);
+      return DRAINING;
+    });
     wss.on("connection", endsOnceAnswered);
     const channel = channelOn(codexHome);
     const failed = await channel.request("thread/start", {}).catch((err: unknown) => err);
-    expect([failed instanceof HarnessRefused, failed instanceof AppServerError]).toEqual([
+    expect([asked, failed instanceof HarnessRefused, failed instanceof AppServerError]).toEqual([
+      [0, 1, 2],
       false,
       true,
     ]);

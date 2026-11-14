@@ -61,6 +61,12 @@ describe("an environment's failure as a command's", () => {
   });
 });
 
+/**
+ * A key of `prefix`'s shape, `length` characters after it, made here so the source holds no
+ * literal a secret scanner would take for a real key.
+ */
+const fake = (prefix: string, length: number) => prefix + "S3cr3tKeyX".repeat(8).slice(0, length);
+
 describe("a failure's detail", () => {
   it("keeps a harness's own words, ids and prose whole", () => {
     const kept = [
@@ -73,6 +79,7 @@ describe("a failure's detail", () => {
       "authentication: required",
       "TOML parse error: invalid basic string",
       "requires_openai_auth = false",
+      "max_tokens: 4096",
     ];
     expect(kept.map((text) => failureDetail(new Error(text)))).toEqual(kept);
   });
@@ -97,20 +104,52 @@ describe("a failure's detail", () => {
     ["sent Bearer s3cr3t-token", "sent Bearer [redacted]"],
     ['http_headers = { "X-Corp" = "s3cr3t" }', "http_headers = {[redacted]}"],
     ["https://user:s3cr3t@example.com/v1", "https://[redacted]@example.com/v1"],
-    ["key sk-proj-s3cr3tABCDEFGHIJKLMNOP leaked", "key [redacted] leaked"],
-    ["eyJhbGciOiJI.eyJzdWIiOiIx.s3cr3tSIGNATURE in a header", "[redacted] in a header"],
+    [`key ${fake("sk-proj-", 20)} leaked`, "key [redacted] leaked"],
+    [`${fake("eyJ", 9)}.${fake("eyJ", 9)}.${fake("", 12)} in a header`, "[redacted] in a header"],
+    [`${fake("sk_live_", 16)} and ${fake("rk_test_", 16)}`, "[redacted] and [redacted]"],
+    [fake("ghp_", 24), "[redacted]"],
+    [fake("github_pat_", 24), "[redacted]"],
+    [fake("glpat-", 24), "[redacted]"],
+    [fake("hf_", 24), "[redacted]"],
+    [fake("xoxb-", 12), "[redacted]"],
+    [fake("AKIA", 16).toUpperCase(), "[redacted]"],
+    [fake("AIza", 35), "[redacted]"],
+    ["redis://:s3cr3t@host", "redis://[redacted]@host"],
+    ["token: 0123s3cr3t", "token: [redacted]"],
+    ['{\\"token\\": \\"s3cr3t\\"}', '{\\"token\\": [redacted]}'],
+    ['{\\"api_key\\": \\"s3cr3t with spaces\\"}', '{\\"api_key\\": [redacted]}'],
+    ['API_KEY            = "s3cr3t"', "API_KEY            = [redacted]"],
+    ["experimental_bearer_token: Some(s3cr3t)", "experimental_bearer_token: Some([redacted])"],
+    [
+      'experimental_bearer_token: Some(\n    "s3cr3t",\n)',
+      "experimental_bearer_token: Some(\n    [redacted],\n)",
+    ],
+    [
+      'http_headers: Some(\n    {\n        "X-Corp": "s3cr3t",\n    },\n)',
+      "http_headers: Some(\n    {[redacted]},\n)",
+    ],
+    ['env_http_headers = { "X-Corp" = "S3CR3T_VAR" }', "env_http_headers = {[redacted]}"],
+    ['http_headers = { "X-Corp" = "s3cr3t', "http_headers = {[redacted]}"],
+    ["api_key=xyz-sk-s3cr3tABCDEFGHIJKLMNOP rest", "api_key=[redacted] rest"],
   ])("takes the secret out of %j", (echoed, expected) => {
     expect(failureDetail(new Error(`bad config: ${echoed}`))).toBe(`bad config: ${expected}`);
   });
 
-  it("reads a long text in time linear in its length", () => {
-    // A long run of what could start a name, which a backtracking pattern takes cubic time over.
+  it.each([
+    // A run of what could start a name, which a backtracking pattern takes cubic time over.
+    ["key".repeat(2_600)],
+    // A megabyte that patterns searching again from each position take quadratic time over.
+    ["eyJ-".repeat(250_000)],
+    ["a:".repeat(500_000)],
+  ])("reads %# long text in bounded time", (text) => {
     const started = performance.now();
-    const detail = failureDetail("key".repeat(1_200));
-    expect([
-      performance.now() - started < 1_000,
-      [...new Intl.Segmenter().segment(detail)].length,
-    ]).toEqual([true, DETAIL_MAX]);
+    failureDetail(text);
+    expect(performance.now() - started).toBeLessThan(1_000);
+  });
+
+  it("keeps no part of a secret the search's limit would cut in two", () => {
+    const text = `token="${"x".repeat(7_950)}" proxy https://user:s3cr3ts3cr3ts3cr3t@host`;
+    expect(failureDetail(text)).toBe("token=[redacted] proxy…");
   });
 
   it("cuts a long text to its limit between characters, never through one", () => {

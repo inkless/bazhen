@@ -78,19 +78,19 @@ export const DETAIL_MAX = 500;
 
 /** A name a secret is kept under: `api_key`, `experimental_bearer_token`, `x-api-key`, `password`. */
 const SECRET_NAME =
-  /key|token|secret|passw(?:or)?d|credential|bearer|authori[sz]ation|cookie|^auth$/i;
+  /key|token(?!s)|secret|passw(?:or)?d|credential|bearer|authori[sz]ation|cookie|^auth$/i;
 
-/** Names that, before a colon and a bare word, are prose (`token: expired`), not a value. */
+/** Names that, before a colon and a plain word, are prose (`token: expired`), not a value. */
 const PROSE_NAMES = new Set(["key", "token", "auth"]);
 
 /**
  * `name = value` or `name: value`, as a TOML or env line, JSON, or Rust's Debug output
  * (`experimental_bearer_token: Some("…")`) shows it. A quoted value runs to its closing quote or
  * the end of the line, escaped quotes included, so a value cut short still goes whole. Every
- * repetition is bounded or can't overlap the next, so long input costs linear time.
+ * repetition is bounded or can't overlap the next, so no input backtracks without end.
  */
 const ASSIGNMENT =
-  /(\\?["']?)([\w.-]{1,64})\1(\s{0,8}([=:])\s{0,8}(?:Some\()?)((?:(?:Bearer|Basic|Digest|Token)\s{1,8})?(?:"(?:[^"\\\n]|\\.)*"?|'(?:[^'\\\n]|\\.)*'?|\[redacted\]|[^\s,;)}\]]+))/g;
+  /(\\?["']?)([\w.-]{1,64})\1([ \t]{0,64}([=:])\s{0,64}(?:Some\(\s{0,64})?)((?:(?:Bearer|Basic|Digest|Token)\s{1,8})?(?:\\"(?:[^"\\\n]|\\[^"]){0,4096}(?:\\")?|"(?:[^"\\\n]|\\.)*"?|'(?:[^'\\\n]|\\.)*'?|(?:\[redacted\]|[^\s,;)}\]]){1,512}))/g;
 
 /**
  * Credentials that need no secret-looking name beside them: a provider's extra headers, whose
@@ -99,19 +99,33 @@ const ASSIGNMENT =
  */
 const BARE_SECRETS: readonly [RegExp, string][] = [
   [
-    /((?:env_)?http_headers["']?\s{0,8}[=:]\s{0,8}(?:Some\()?)\{[^}\n]{0,4096}\}?/gi,
+    /((?:env_)?http_headers["']?[ \t]{0,64}[=:]\s{0,64}(?:Some\(\s{0,64})?)\{[^}]{0,4096}\}?/gi,
     "$1{[redacted]}",
   ],
-  [/\bBearer\s{1,8}[\w.~+/=-]{8,}/g, "Bearer [redacted]"],
-  [/(\w{1,32}:\/\/)[^/\s:@]{1,256}:[^/\s@]{1,256}@/g, "$1[redacted]@"],
+  [/\bBearer\s{1,8}[\w.~+/=-]{8,2048}/g, "Bearer [redacted]"],
+  [/(\w{1,32}:\/\/)[^/\s:@]{0,256}:[^/\s@]{1,256}@/g, "$1[redacted]@"],
   [
-    /\b(?:sk-[\w-]{16,}|[sr]k_live_\w{16,}|gh[pousr]_\w{20,}|github_pat_\w{20,}|glpat-[\w-]{20,}|hf_\w{20,}|xox[abprs]-[\w-]{10,}|AKIA[0-9A-Z]{16}|AIza[\w-]{35}|eyJ[\w-]{8,}\.eyJ[\w-]{8,}\.[\w-]{8,})/g,
+    /\b(?:sk-[\w-]{16,512}|[sr]k_(?:live|test)_\w{16,512}|gh[pousr]_\w{20,512}|github_pat_\w{20,512}|glpat-[\w-]{20,512}|hf_\w{20,512}|xox[abprs]-[\w-]{10,512}|AKIA[0-9A-Z]{16}|AIza[\w-]{35}|eyJ[\w-]{8,2048}\.eyJ[\w-]{8,2048}\.[\w-]{8,2048})/g,
     "[redacted]",
   ],
 ];
 
-/** More text than this is never shown, so none of it is searched for secrets either. */
+/**
+ * More text than this is never shown, so none of it is searched for secrets either. It also bounds
+ * the search's cost: a name that turns out not to be a secret's has its value searched again.
+ */
 const SEARCHED_MAX = 16 * DETAIL_MAX;
+
+/**
+ * The first SEARCHED_MAX characters, cut back to the last break between words: a secret cut in
+ * two could escape a pattern that needs its end, as a URL's password does its `@`.
+ */
+function searched(text: string): string {
+  if (text.length <= SEARCHED_MAX) return text;
+  const head = text.slice(0, SEARCHED_MAX);
+  const end = Math.max(...[" ", "\n", "\t", ",", ";"].map((d) => head.lastIndexOf(d)), 0);
+  return `${head.slice(0, end)}…`;
+}
 
 function redacted(text: string): string {
   const bare = BARE_SECRETS.reduce((t, [pattern, to]) => t.replace(pattern, to), text);
@@ -120,7 +134,7 @@ function redacted(text: string): string {
   ASSIGNMENT.lastIndex = 0;
   for (let m = ASSIGNMENT.exec(bare); m !== null; m = ASSIGNMENT.exec(bare)) {
     const [whole, quote = "", name = "", separator = "", op, value = ""] = m;
-    const prose = op === ":" && !/^["']/.test(value) && PROSE_NAMES.has(name.toLowerCase());
+    const prose = op === ":" && /^[a-z]+$/i.test(value) && PROSE_NAMES.has(name.toLowerCase());
     if (SECRET_NAME.test(name) && !prose) {
       out += `${bare.slice(copied, m.index)}${quote}${name}${quote}${separator}[redacted]`;
       copied = m.index + whole.length;
@@ -139,7 +153,7 @@ function redacted(text: string): string {
  */
 export function failureDetail(cause: unknown): string {
   const text = cause instanceof Error ? cause.message : String(cause);
-  const safe = redacted(text.slice(0, SEARCHED_MAX));
+  const safe = redacted(searched(text));
   const chars = [...new Intl.Segmenter().segment(safe)].map((s) => s.segment);
   return chars.length <= DETAIL_MAX ? safe : `${chars.slice(0, DETAIL_MAX - 1).join("")}…`;
 }
