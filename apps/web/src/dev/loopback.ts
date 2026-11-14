@@ -16,9 +16,10 @@ const FRAMED = ["iframe", "frame", "embed", "object"];
 
 /**
  * Whether the web dev server should answer a request: this machine's own browser, by a loopback
- * Host on its own port, from a page on that origin if any, not framed by another page, with no proxy header. The dev server
- * serves the repository's source (`/@fs/` included), and Vite's own host check admits any IP
- * address, so a proxy given this machine's LAN address would put that source on the network.
+ * Host on its own port, from a page on that origin if any, not framed by another page, with no
+ * proxy header. The dev server serves the repository's source (`/@fs/` included), and Vite's own
+ * host check admits any IP address, so a proxy given this machine's LAN address would put that
+ * source on the network.
  *
  * It can't see a forwarder that presents a loopback Host and adds no header: `socat`, `ssh -R`,
  * or a proxy set to rewrite Host and send no forwarding header reaches the source unrefused.
@@ -36,7 +37,7 @@ export function servesHere(headers: Headers, port: number): boolean {
   return PROXY_HEADERS.every((name) => headers[name] === undefined);
 }
 
-/** What the dev server's response is refused framing by: a page on another local port may not embed it. */
+/** The policy that stops any page, on another local port or not, from embedding a dev page. */
 export const NO_FRAMING = "frame-ancestors 'none'";
 
 /** The reply to a request `servesHere` refused. */
