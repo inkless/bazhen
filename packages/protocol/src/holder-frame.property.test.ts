@@ -80,7 +80,10 @@ const request: fc.Arbitrary<HolderRequest> = fc.oneof(
       argv: fc.array(text, { minLength: 1, maxLength: 4 }),
       cwd: fc.constant("/"),
       theme: fc.constantFrom("light" as const, "dark" as const),
-      env: fc.dictionary(fc.string(), text),
+      env: fc.dictionary(
+        fc.string().filter((name) => name !== "__proto__"),
+        text,
+      ),
       generation: offset,
     }),
   }),

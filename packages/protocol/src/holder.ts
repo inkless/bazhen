@@ -47,14 +47,50 @@ export const HolderVersions = z.array(utf8(HOLDER_VERSION_MAX_BYTES)).min(1).max
 export type HolderVersions = z.infer<typeof HolderVersions>;
 
 /**
+ * In a `u` regex a surrogate pair is one code point, so only a half on its own matches. Not
+ * `isWellFormed()`: the web bundle targets browsers that predate it.
+ */
+const LONE_SURROGATE = /\p{Cs}/u;
+
+/**
+ * True when any string in a peer's JSON, an object key included, holds a lone surrogate, which
+ * JSON can carry and UTF-8 can't. A Rust peer refuses such a body on parse, even in a field it
+ * would ignore, so a decoder here refuses it before any schema strips that field. Walked without
+ * recursion: the JSON is the peer's, and its depth is whatever it sent.
+ */
+export function hasLoneSurrogate(json: unknown): boolean {
+  const pending: unknown[] = [json];
+  while (pending.length > 0) {
+    const value = pending.pop();
+    if (typeof value === "string" && LONE_SURROGATE.test(value)) return true;
+    if (Array.isArray(value)) {
+      for (const item of value) pending.push(item);
+    } else if (typeof value === "object" && value !== null) {
+      for (const [key, field] of Object.entries(value)) {
+        if (LONE_SURROGATE.test(key)) return true;
+        pending.push(field);
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Any string a peer in another language can hold: one with a lone surrogate is refused, the same
+ * by every peer.
+ */
+function wellFormed() {
+  return z.string().refine((value) => !LONE_SURROGATE.test(value), "a lone surrogate");
+}
+
+/**
  * A string of at most `max` UTF-8 bytes, as a Rust peer measures it. JSON Schema can only count
  * characters, so the published schema states the limit in its description instead of a
  * `maxLength` a peer would read as characters.
  */
 function utf8(max: number, min = 0) {
   const encoder = new TextEncoder();
-  return z
-    .string()
+  return wellFormed()
     .min(min)
     .refine((text) => encoder.encode(text).length <= max, `at most ${max} UTF-8 bytes`)
     .describe(`At most ${max} UTF-8 bytes.`);
@@ -105,24 +141,38 @@ export type HolderSize = z.infer<typeof HolderSize>;
 export const HOLDER_RESERVED_TAG_NAMES = ["__proto__", "constructor", "prototype"] as const;
 
 /**
+ * An environment variable a JavaScript record drops without a word, so the daemon could never
+ * send it: refused instead, the same by every peer. Other names that are an object's own, such
+ * as `constructor`, survive a record and are an environment's to use.
+ */
+export const HOLDER_RESERVED_ENV_NAMES = ["__proto__"] as const;
+
+/**
+ * A record that refuses `names` as keys rather than lose them, as a JavaScript record can, or
+ * hand them to a peer that reads the record into a plain object.
+ */
+function refusingKeys<T extends z.ZodType>(what: string, names: readonly string[], record: T) {
+  return z
+    .preprocess((value, ctx) => {
+      for (const name of names) {
+        if (typeof value === "object" && value !== null && Object.hasOwn(value, name)) {
+          ctx.addIssue({ code: "custom", message: `${what} ${name} is reserved` });
+        }
+      }
+      return value;
+    }, record)
+    .describe(`${what[0]?.toUpperCase()}${what.slice(1)}s ${names.join(", ")} are refused.`);
+}
+
+/**
  * Whatever the daemon writes beside a terminal so it can rebuild the terminal's links from the
  * holder alone. The holder stores and echoes them and reads none: their meaning is the daemon's.
  */
-export const HolderTags = z
-  .preprocess(
-    (tags, ctx) => {
-      // Dropped without a word by a JavaScript record, and a trap for any peer that reads tags
-      // into a plain object: refused instead, the same by every peer.
-      for (const name of HOLDER_RESERVED_TAG_NAMES) {
-        if (typeof tags === "object" && tags !== null && Object.hasOwn(tags, name)) {
-          ctx.addIssue({ code: "custom", message: `tag name ${name} is reserved` });
-        }
-      }
-      return tags;
-    },
-    z.record(utf8(HOLDER_TAG_NAME_MAX_BYTES, 1), utf8(HOLDER_TAG_VALUE_MAX_BYTES)),
-  )
-  .describe(`Tag names ${HOLDER_RESERVED_TAG_NAMES.join(", ")} are refused.`);
+export const HolderTags = refusingKeys(
+  "tag name",
+  HOLDER_RESERVED_TAG_NAMES,
+  z.record(utf8(HOLDER_TAG_NAME_MAX_BYTES, 1), utf8(HOLDER_TAG_VALUE_MAX_BYTES)),
+);
 export type HolderTags = z.infer<typeof HolderTags>;
 
 export const HolderSignal = z.enum(["SIGINT", "SIGTERM", "SIGHUP", "SIGKILL"]);
@@ -135,7 +185,7 @@ export type HolderTheme = z.infer<typeof HolderTheme>;
 /** How a child ended: with a code, by a signal named as in `SIGTERM`, or in a way not known. */
 export const HolderExitStatus = z.discriminatedUnion("type", [
   z.object({ type: z.literal("exited"), code: z.int() }),
-  z.object({ type: z.literal("signalled"), signal: z.string() }),
+  z.object({ type: z.literal("signalled"), signal: wellFormed() }),
   z.object({ type: z.literal("unknown") }),
 ]);
 export type HolderExitStatus = z.infer<typeof HolderExitStatus>;
@@ -148,9 +198,13 @@ const TerminalId = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/);
  * `generation` must be above the current one, or the respawn is refused `stale-generation`.
  */
 export const HolderProcessSpec = z.object({
-  argv: z.array(z.string()).min(1),
-  cwd: z.string().min(1),
-  env: z.record(z.string(), z.string()),
+  argv: z.array(wellFormed()).min(1),
+  cwd: wellFormed().min(1),
+  env: refusingKeys(
+    "environment name",
+    HOLDER_RESERVED_ENV_NAMES,
+    z.record(wellFormed(), wellFormed()),
+  ),
   generation: Count,
   theme: HolderTheme.optional(),
 });
@@ -163,7 +217,7 @@ export type HolderProcessSpec = z.infer<typeof HolderProcessSpec>;
 export const HolderSpawnSpec = HolderProcessSpec.extend({
   protocol: HolderVersions,
   terminalId: TerminalId,
-  socket: z.string().min(1),
+  socket: wellFormed().min(1),
   tags: HolderTags,
   size: HolderSize,
   historyLines: Count.max(HOLDER_MAX_HISTORY_LINES).default(10_000),
@@ -225,7 +279,7 @@ export const HolderHelloReply = z.object({
   exit: HolderExitStatus.nullable(),
   size: HolderSize,
   offset: Offset,
-  title: z.string(),
+  title: wellFormed(),
   alternate: z.boolean(),
   historyLines: Count,
   writer: z.boolean(),
@@ -263,7 +317,7 @@ export type HolderGap = z.infer<typeof HolderGap>;
 export const HolderResized = z.object({ offset: Offset, cols: Cols, rows: Rows });
 export type HolderResized = z.infer<typeof HolderResized>;
 
-export const HolderTitle = z.object({ offset: Offset, text: z.string() });
+export const HolderTitle = z.object({ offset: Offset, text: wellFormed() });
 export type HolderTitle = z.infer<typeof HolderTitle>;
 
 export const HolderAlternate = z.object({ offset: Offset, on: z.boolean() });
@@ -330,7 +384,7 @@ export const HOLDER_REQUEST_CODES = {
 } as const satisfies Record<HolderRequestName, number>;
 
 /** The `request` of `ok` and `error` names the request answered, for logs: its id says which. */
-export const HolderOk = z.object({ request: z.string() });
+export const HolderOk = z.object({ request: wellFormed() });
 export type HolderOk = z.infer<typeof HolderOk>;
 
 /**
@@ -364,9 +418,9 @@ export const HOLDER_ERROR_CODES = [
 ] as const;
 
 export const HolderError = z.object({
-  request: z.string(),
-  code: z.string(),
-  message: z.string(),
+  request: wellFormed(),
+  code: wellFormed(),
+  message: wellFormed(),
   /** The holder's versions, with `no-shared-version`, for `bazhen doctor` to show. */
   protocol: HolderVersions.optional(),
 });

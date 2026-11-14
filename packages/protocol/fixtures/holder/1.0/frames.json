@@ -1,0 +1,1554 @@
+[
+  {
+    "name": "hello",
+    "direction": "request",
+    "hex": "0000001901000000007b2270726f746f636f6c223a5b22312e30225d7d",
+    "outcome": {
+      "canonical": {
+        "head": "0100000000",
+        "json": {
+          "protocol": [
+            "1.0"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "hello as writer, two majors",
+    "direction": "request",
+    "hex": "0000002d01000000017b2270726f746f636f6c223a5b22312e30222c22322e33225d2c22777269746572223a747275657d",
+    "outcome": {
+      "canonical": {
+        "head": "0100000001",
+        "json": {
+          "protocol": [
+            "1.0",
+            "2.3"
+          ],
+          "writer": true
+        }
+      }
+    }
+  },
+  {
+    "name": "hello, sixteen versions at the byte limit",
+    "direction": "request",
+    "hex": "0000022601000000027b2270726f746f636f6c223a5b22312e30222c22312e303030303030303030303030303030303030303030303030303030303030222c22312e303030303030303030303030303030303030303030303030303030303030222c22312e303030303030303030303030303030303030303030303030303030303030222c22312e303030303030303030303030303030303030303030303030303030303030222c22312e303030303030303030303030303030303030303030303030303030303030222c22312e303030303030303030303030303030303030303030303030303030303030222c22312e303030303030303030303030303030303030303030303030303030303030222c22312e303030303030303030303030303030303030303030303030303030303030222c22312e303030303030303030303030303030303030303030303030303030303030222c22312e303030303030303030303030303030303030303030303030303030303030222c22312e303030303030303030303030303030303030303030303030303030303030222c22312e303030303030303030303030303030303030303030303030303030303030222c22312e303030303030303030303030303030303030303030303030303030303030222c22312e303030303030303030303030303030303030303030303030303030303030222c22312e303030303030303030303030303030303030303030303030303030303030225d7d",
+    "outcome": {
+      "canonical": {
+        "head": "0100000002",
+        "json": {
+          "protocol": [
+            "1.0",
+            "1.000000000000000000000000000000",
+            "1.000000000000000000000000000000",
+            "1.000000000000000000000000000000",
+            "1.000000000000000000000000000000",
+            "1.000000000000000000000000000000",
+            "1.000000000000000000000000000000",
+            "1.000000000000000000000000000000",
+            "1.000000000000000000000000000000",
+            "1.000000000000000000000000000000",
+            "1.000000000000000000000000000000",
+            "1.000000000000000000000000000000",
+            "1.000000000000000000000000000000",
+            "1.000000000000000000000000000000",
+            "1.000000000000000000000000000000",
+            "1.000000000000000000000000000000"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "snapshot, the largest id",
+    "direction": "request",
+    "hex": "0000000502ffffffff",
+    "outcome": {
+      "canonical": {
+        "head": "02ffffffff",
+        "bytes": ""
+      }
+    }
+  },
+  {
+    "name": "stats",
+    "direction": "request",
+    "hex": "000000050300000003",
+    "outcome": {
+      "canonical": {
+        "head": "0300000003",
+        "bytes": ""
+      }
+    }
+  },
+  {
+    "name": "foreground",
+    "direction": "request",
+    "hex": "000000050400000004",
+    "outcome": {
+      "canonical": {
+        "head": "0400000004",
+        "bytes": ""
+      }
+    }
+  },
+  {
+    "name": "close",
+    "direction": "request",
+    "hex": "000000054300000005",
+    "outcome": {
+      "canonical": {
+        "head": "4300000005",
+        "bytes": ""
+      }
+    }
+  },
+  {
+    "name": "subscribe from now",
+    "direction": "request",
+    "hex": "0000000740000000067b7d",
+    "outcome": {
+      "canonical": {
+        "head": "4000000006",
+        "json": {}
+      }
+    }
+  },
+  {
+    "name": "subscribe from the largest safe offset",
+    "direction": "request",
+    "hex": "0000003840000000077b2266726f6d223a7b2267656e65726174696f6e223a312c226f6666736574223a393030373139393235343734303939317d7d",
+    "outcome": {
+      "canonical": {
+        "head": "4000000007",
+        "json": {
+          "from": {
+            "generation": 1,
+            "offset": 9007199254740991
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "input of any bytes",
+    "direction": "request",
+    "hex": "0000000941000000080300ff1b",
+    "outcome": {
+      "canonical": {
+        "head": "4100000008",
+        "bytes": "0300ff1b"
+      }
+    }
+  },
+  {
+    "name": "input of nothing",
+    "direction": "request",
+    "hex": "000000054100000009",
+    "outcome": {
+      "canonical": {
+        "head": "4100000009",
+        "bytes": ""
+      }
+    }
+  },
+  {
+    "name": "resize at the bound",
+    "direction": "request",
+    "hex": "0000001e420000000a7b22636f6c73223a313030302c22726f7773223a313030307d",
+    "outcome": {
+      "canonical": {
+        "head": "420000000a",
+        "json": {
+          "cols": 1000,
+          "rows": 1000
+        }
+      }
+    }
+  },
+  {
+    "name": "resize to zero",
+    "direction": "request",
+    "hex": "00000018420000000b7b22636f6c73223a302c22726f7773223a307d",
+    "outcome": {
+      "canonical": {
+        "head": "420000000b",
+        "json": {
+          "cols": 0,
+          "rows": 0
+        }
+      }
+    }
+  },
+  {
+    "name": "signal SIGINT",
+    "direction": "request",
+    "hex": "00000018440000000c7b227369676e616c223a22534947494e54227d",
+    "outcome": {
+      "canonical": {
+        "head": "440000000c",
+        "json": {
+          "signal": "SIGINT"
+        }
+      }
+    }
+  },
+  {
+    "name": "signal SIGTERM",
+    "direction": "request",
+    "hex": "00000019440000000d7b227369676e616c223a225349475445524d227d",
+    "outcome": {
+      "canonical": {
+        "head": "440000000d",
+        "json": {
+          "signal": "SIGTERM"
+        }
+      }
+    }
+  },
+  {
+    "name": "signal SIGHUP",
+    "direction": "request",
+    "hex": "00000018440000000e7b227369676e616c223a22534947485550227d",
+    "outcome": {
+      "canonical": {
+        "head": "440000000e",
+        "json": {
+          "signal": "SIGHUP"
+        }
+      }
+    }
+  },
+  {
+    "name": "signal SIGKILL",
+    "direction": "request",
+    "hex": "00000019440000000f7b227369676e616c223a225349474b494c4c227d",
+    "outcome": {
+      "canonical": {
+        "head": "440000000f",
+        "json": {
+          "signal": "SIGKILL"
+        }
+      }
+    }
+  },
+  {
+    "name": "respawn",
+    "direction": "request",
+    "hex": "000000b345000000107b2261726776223a5b22636c61756465222c222d2d726573756d65222c22e697a5e69cace8aa9e225d2c22637764223a222f686f6d652f752f737263222c22656e76223a7b2231223a22696e74656765722d6c696b65206b65797320736f727420666972737420696e204a617661536372697074222c225445524d223a22787465726d2d323536636f6c6f72227d2c2267656e65726174696f6e223a342c227468656d65223a226c69676874227d",
+    "outcome": {
+      "canonical": {
+        "head": "4500000010",
+        "json": {
+          "argv": [
+            "claude",
+            "--resume",
+            "日本語"
+          ],
+          "cwd": "/home/u/src",
+          "env": {
+            "1": "integer-like keys sort first in JavaScript",
+            "TERM": "xterm-256color"
+          },
+          "generation": 4,
+          "theme": "light"
+        }
+      }
+    }
+  },
+  {
+    "name": "respawn with no theme",
+    "direction": "request",
+    "hex": "000000a345000000117b2261726776223a5b22636c61756465222c222d2d726573756d65222c22e697a5e69cace8aa9e225d2c22637764223a222f686f6d652f752f737263222c22656e76223a7b2231223a22696e74656765722d6c696b65206b65797320736f727420666972737420696e204a617661536372697074222c225445524d223a22787465726d2d323536636f6c6f72227d2c2267656e65726174696f6e223a347d",
+    "outcome": {
+      "canonical": {
+        "head": "4500000011",
+        "json": {
+          "argv": [
+            "claude",
+            "--resume",
+            "日本語"
+          ],
+          "cwd": "/home/u/src",
+          "env": {
+            "1": "integer-like keys sort first in JavaScript",
+            "TERM": "xterm-256color"
+          },
+          "generation": 4
+        }
+      }
+    }
+  },
+  {
+    "name": "set-tags at the byte limits",
+    "direction": "request",
+    "hex": "0000046446000000127b2274616773223a7b2237223a2278222c22c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9223a22c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9222c2262223a22227d7d",
+    "outcome": {
+      "canonical": {
+        "head": "4600000012",
+        "json": {
+          "tags": {
+            "7": "x",
+            "éééééééééééééééééééééééééééééééé": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+            "b": ""
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "set-tags to none",
+    "direction": "request",
+    "hex": "0000001046000000137b2274616773223a7b7d7d",
+    "outcome": {
+      "canonical": {
+        "head": "4600000013",
+        "json": {
+          "tags": {}
+        }
+      }
+    }
+  },
+  {
+    "name": "set-theme dark",
+    "direction": "request",
+    "hex": "0000001547000000147b227468656d65223a226461726b227d",
+    "outcome": {
+      "canonical": {
+        "head": "4700000014",
+        "json": {
+          "theme": "dark"
+        }
+      }
+    }
+  },
+  {
+    "name": "set-theme none",
+    "direction": "request",
+    "hex": "0000001347000000157b227468656d65223a6e756c6c7d",
+    "outcome": {
+      "canonical": {
+        "head": "4700000015",
+        "json": {
+          "theme": null
+        }
+      }
+    }
+  },
+  {
+    "name": "unknown request with a reply of its own",
+    "direction": "request",
+    "hex": "0000000705000000167b7d",
+    "outcome": {
+      "unknown": {
+        "code": 5,
+        "id": 22
+      }
+    }
+  },
+  {
+    "name": "unknown request without one",
+    "direction": "request",
+    "hex": "000000057f00000017",
+    "outcome": {
+      "unknown": {
+        "code": 127,
+        "id": 23
+      }
+    }
+  },
+  {
+    "name": "hello with fields from a later minor",
+    "direction": "request",
+    "hex": "0000003801000000187b2270726f746f636f6c223a5b22312e30225d2c226c61746572223a7b2278223a317d2c22777269746572223a66616c73657d",
+    "outcome": {
+      "canonical": {
+        "head": "0100000018",
+        "json": {
+          "protocol": [
+            "1.0"
+          ],
+          "writer": false
+        }
+      }
+    }
+  },
+  {
+    "name": "subscribe with a nested field from a later minor",
+    "direction": "request",
+    "hex": "0000003640000000197b2266726f6d223a7b2267656e65726174696f6e223a302c226f6666736574223a352c226c61746572223a747275657d7d",
+    "outcome": {
+      "canonical": {
+        "head": "4000000019",
+        "json": {
+          "from": {
+            "generation": 0,
+            "offset": 5
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "snapshot with arguments from a later minor",
+    "direction": "request",
+    "hex": "00000007020000001a7879",
+    "outcome": {
+      "canonical": {
+        "head": "020000001a",
+        "bytes": ""
+      }
+    }
+  },
+  {
+    "name": "hello sharing no major, the rest unread",
+    "direction": "request",
+    "hex": "00000041010000001b7b2270726f746f636f6c223a5b22322e30225d2c22777269746572223a22696e206120736368656d612074686973206275696c64206c61636b73227d",
+    "outcome": {
+      "canonical": {
+        "head": "010000001b",
+        "json": {
+          "protocol": [
+            "2.0"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "hello whose only 1.x minor is past 2^53, so shares no major",
+    "direction": "request",
+    "hex": "0000003a010000001c7b2270726f746f636f6c223a5b22312e39303037313939323534373430393932225d2c22777269746572223a22756e72656164227d",
+    "outcome": {
+      "canonical": {
+        "head": "010000001c",
+        "json": {
+          "protocol": [
+            "1.9007199254740992"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "hello listing a version this build can't parse",
+    "direction": "request",
+    "hex": "0000002b010000001d7b2270726f746f636f6c223a5b2278222c22312e30225d2c22777269746572223a747275657d",
+    "outcome": {
+      "canonical": {
+        "head": "010000001d",
+        "json": {
+          "protocol": [
+            "x",
+            "1.0"
+          ],
+          "writer": true
+        }
+      }
+    }
+  },
+  {
+    "name": "a frame of length 0",
+    "direction": "request",
+    "hex": "0000000001",
+    "outcome": {
+      "malformed": "a frame of length 0"
+    }
+  },
+  {
+    "name": "a frame over the cap",
+    "direction": "request",
+    "hex": "0010000141",
+    "outcome": {
+      "malformed": "a frame of 1048577 bytes, over the 1048576 cap"
+    }
+  },
+  {
+    "name": "type 0x00",
+    "direction": "request",
+    "hex": "00000007000000001e7b7d",
+    "outcome": {
+      "malformed": "0x0 is no request's type"
+    }
+  },
+  {
+    "name": "type 0x80, a reply's range",
+    "direction": "request",
+    "hex": "00000007800000001f7b7d",
+    "outcome": {
+      "malformed": "0x80 is no request's type"
+    }
+  },
+  {
+    "name": "type 0xc0, an event's",
+    "direction": "request",
+    "hex": "00000007c0000000207b7d",
+    "outcome": {
+      "malformed": "0xc0 is no request's type"
+    }
+  },
+  {
+    "name": "a request with no id",
+    "direction": "request",
+    "hex": "0000000402000001",
+    "outcome": {
+      "malformed": "request 0x2 has no id"
+    }
+  },
+  {
+    "name": "hello not UTF-8",
+    "direction": "request",
+    "hex": "000000060100000021ff",
+    "outcome": {
+      "malformed": "hello is not UTF-8"
+    }
+  },
+  {
+    "name": "hello not JSON",
+    "direction": "request",
+    "hex": "0000000e01000000227b70726f746f636f6c",
+    "outcome": {
+      "malformed": "hello: Invalid input: expected object, received undefined"
+    }
+  },
+  {
+    "name": "hello with no protocol",
+    "direction": "request",
+    "hex": "0000000701000000237b7d",
+    "outcome": {
+      "malformed": "hello: protocol: Invalid input: expected array, received undefined"
+    }
+  },
+  {
+    "name": "hello with no versions",
+    "direction": "request",
+    "hex": "0000001401000000247b2270726f746f636f6c223a5b5d7d",
+    "outcome": {
+      "malformed": "hello: protocol: Too small: expected array to have >=1 items"
+    }
+  },
+  {
+    "name": "hello with seventeen versions",
+    "direction": "request",
+    "hex": "0000007901000000257b2270726f746f636f6c223a5b22312e30222c22312e30222c22312e30222c22312e30222c22312e30222c22312e30222c22312e30222c22312e30222c22312e30222c22312e30222c22312e30222c22312e30222c22312e30222c22312e30222c22312e30222c22312e30222c22312e30225d7d",
+    "outcome": {
+      "malformed": "hello: protocol: Too big: expected array to have <=16 items"
+    }
+  },
+  {
+    "name": "hello with a version over the byte limit",
+    "direction": "request",
+    "hex": "0000003701000000267b2270726f746f636f6c223a5b22312e30303030303030303030303030303030303030303030303030303030303030225d7d",
+    "outcome": {
+      "malformed": "hello: protocol.0: at most 32 UTF-8 bytes"
+    }
+  },
+  {
+    "name": "hello writer null, as optional is never null",
+    "direction": "request",
+    "hex": "0000002701000000277b2270726f746f636f6c223a5b22312e30225d2c22777269746572223a6e756c6c7d",
+    "outcome": {
+      "malformed": "hello: writer: Invalid input: expected boolean, received null"
+    }
+  },
+  {
+    "name": "hello writer not a boolean",
+    "direction": "request",
+    "hex": "0000002401000000287b2270726f746f636f6c223a5b22312e30225d2c22777269746572223a317d",
+    "outcome": {
+      "malformed": "hello: writer: Invalid input: expected boolean, received number"
+    }
+  },
+  {
+    "name": "subscribe from past 2^53 - 1",
+    "direction": "request",
+    "hex": "0000003840000000297b2266726f6d223a7b2267656e65726174696f6e223a302c226f6666736574223a393030373139393235343734303939327d7d",
+    "outcome": {
+      "malformed": "subscribe: from.offset: Too big: expected int to be <=9007199254740991"
+    }
+  },
+  {
+    "name": "subscribe from a negative offset",
+    "direction": "request",
+    "hex": "0000002a400000002a7b2266726f6d223a7b2267656e65726174696f6e223a302c226f6666736574223a2d317d7d",
+    "outcome": {
+      "malformed": "subscribe: from.offset: Too small: expected number to be >=0"
+    }
+  },
+  {
+    "name": "subscribe from a fractional offset",
+    "direction": "request",
+    "hex": "0000002b400000002b7b2266726f6d223a7b2267656e65726174696f6e223a302c226f6666736574223a312e357d7d",
+    "outcome": {
+      "malformed": "subscribe: from.offset: Invalid input: expected int, received number"
+    }
+  },
+  {
+    "name": "subscribe from null",
+    "direction": "request",
+    "hex": "00000012400000002c7b2266726f6d223a6e756c6c7d",
+    "outcome": {
+      "malformed": "subscribe: from: Invalid input: expected object, received null"
+    }
+  },
+  {
+    "name": "subscribe from no generation",
+    "direction": "request",
+    "hex": "0000001a400000002d7b2266726f6d223a7b226f6666736574223a307d7d",
+    "outcome": {
+      "malformed": "subscribe: from.generation: Invalid input: expected number, received undefined"
+    }
+  },
+  {
+    "name": "resize past the bound",
+    "direction": "request",
+    "hex": "0000001b420000002e7b22636f6c73223a313030312c22726f7773223a317d",
+    "outcome": {
+      "malformed": "resize: cols: Too big: expected number to be <=1000"
+    }
+  },
+  {
+    "name": "resize negative",
+    "direction": "request",
+    "hex": "00000019420000002f7b22636f6c73223a312c22726f7773223a2d317d",
+    "outcome": {
+      "malformed": "resize: rows: Too small: expected number to be >=0"
+    }
+  },
+  {
+    "name": "resize with no cols",
+    "direction": "request",
+    "hex": "0000000f42000000307b22726f7773223a317d",
+    "outcome": {
+      "malformed": "resize: cols: Invalid input: expected number, received undefined"
+    }
+  },
+  {
+    "name": "resize body an array",
+    "direction": "request",
+    "hex": "0000000c42000000315b38302c32345d",
+    "outcome": {
+      "malformed": "resize: Invalid input: expected object, received array"
+    }
+  },
+  {
+    "name": "signal not in holder/1",
+    "direction": "request",
+    "hex": "0000001944000000327b227369676e616c223a2253494755535231227d",
+    "outcome": {
+      "malformed": "signal: signal: Invalid option: expected one of \"SIGINT\"|\"SIGTERM\"|\"SIGHUP\"|\"SIGKILL\""
+    }
+  },
+  {
+    "name": "respawn with no argv",
+    "direction": "request",
+    "hex": "0000008445000000337b2261726776223a5b5d2c22637764223a222f686f6d652f752f737263222c22656e76223a7b2231223a22696e74656765722d6c696b65206b65797320736f727420666972737420696e204a617661536372697074222c225445524d223a22787465726d2d323536636f6c6f72227d2c2267656e65726174696f6e223a347d",
+    "outcome": {
+      "malformed": "respawn: argv: Too small: expected array to have >=1 items"
+    }
+  },
+  {
+    "name": "respawn with an empty cwd",
+    "direction": "request",
+    "hex": "0000009845000000347b2261726776223a5b22636c61756465222c222d2d726573756d65222c22e697a5e69cace8aa9e225d2c22637764223a22222c22656e76223a7b2231223a22696e74656765722d6c696b65206b65797320736f727420666972737420696e204a617661536372697074222c225445524d223a22787465726d2d323536636f6c6f72227d2c2267656e65726174696f6e223a347d",
+    "outcome": {
+      "malformed": "respawn: cwd: Too small: expected string to have >=1 characters"
+    }
+  },
+  {
+    "name": "respawn with an env value not a string",
+    "direction": "request",
+    "hex": "0000006045000000357b2261726776223a5b22636c61756465222c222d2d726573756d65222c22e697a5e69cace8aa9e225d2c22637764223a222f686f6d652f752f737263222c22656e76223a7b2241223a317d2c2267656e65726174696f6e223a347d",
+    "outcome": {
+      "malformed": "respawn: env.A: Invalid input: expected string, received number"
+    }
+  },
+  {
+    "name": "respawn with an environment variable named __proto__",
+    "direction": "request",
+    "hex": "0000004545000000457b2261726776223a5b227368225d2c22637764223a222f222c22656e76223a7b225f5f70726f746f5f5f223a2278227d2c2267656e65726174696f6e223a307d",
+    "outcome": {
+      "malformed": "respawn: env: environment name __proto__ is reserved"
+    }
+  },
+  {
+    "name": "respawn with an environment variable named constructor",
+    "direction": "request",
+    "hex": "0000004745000000467b2261726776223a5b227368225d2c22637764223a222f222c22656e76223a7b22636f6e7374727563746f72223a2278227d2c2267656e65726174696f6e223a307d",
+    "outcome": {
+      "canonical": {
+        "head": "4500000046",
+        "json": {
+          "argv": [
+            "sh"
+          ],
+          "cwd": "/",
+          "env": {
+            "constructor": "x"
+          },
+          "generation": 0
+        }
+      }
+    }
+  },
+  {
+    "name": "respawn with a negative generation",
+    "direction": "request",
+    "hex": "000000a445000000367b2261726776223a5b22636c61756465222c222d2d726573756d65222c22e697a5e69cace8aa9e225d2c22637764223a222f686f6d652f752f737263222c22656e76223a7b2231223a22696e74656765722d6c696b65206b65797320736f727420666972737420696e204a617661536372697074222c225445524d223a22787465726d2d323536636f6c6f72227d2c2267656e65726174696f6e223a2d317d",
+    "outcome": {
+      "malformed": "respawn: generation: Too small: expected number to be >=0"
+    }
+  },
+  {
+    "name": "respawn theme null, as optional is never null",
+    "direction": "request",
+    "hex": "000000b045000000377b2261726776223a5b22636c61756465222c222d2d726573756d65222c22e697a5e69cace8aa9e225d2c22637764223a222f686f6d652f752f737263222c22656e76223a7b2231223a22696e74656765722d6c696b65206b65797320736f727420666972737420696e204a617661536372697074222c225445524d223a22787465726d2d323536636f6c6f72227d2c2267656e65726174696f6e223a342c227468656d65223a6e756c6c7d",
+    "outcome": {
+      "malformed": "respawn: theme: Invalid option: expected one of \"light\"|\"dark\""
+    }
+  },
+  {
+    "name": "respawn with a lone surrogate in argv",
+    "direction": "request",
+    "hex": "0000008d45000000387b2261726776223a5b22615c7564383030225d2c22637764223a222f686f6d652f752f737263222c22656e76223a7b2231223a22696e74656765722d6c696b65206b65797320736f727420666972737420696e204a617661536372697074222c225445524d223a22787465726d2d323536636f6c6f72227d2c2267656e65726174696f6e223a347d",
+    "outcome": {
+      "malformed": "respawn has a lone surrogate"
+    }
+  },
+  {
+    "name": "set-tags with an empty name",
+    "direction": "request",
+    "hex": "0000001646000000397b2274616773223a7b22223a2278227d7d",
+    "outcome": {
+      "malformed": "set-tags: tags.: Invalid key in record"
+    }
+  },
+  {
+    "name": "set-tags with a name over the byte limit",
+    "direction": "request",
+    "hex": "00000056460000003a7b2274616773223a7b22c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a961223a22227d7d",
+    "outcome": {
+      "malformed": "set-tags: tags.ééééééééééééééééééééééééééééééééa: Invalid key in record"
+    }
+  },
+  {
+    "name": "set-tags with a value over the byte limit",
+    "direction": "request",
+    "hex": "00000417460000003b7b2274616773223a7b2261223a22c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a961227d7d",
+    "outcome": {
+      "malformed": "set-tags: tags.a: at most 1024 UTF-8 bytes"
+    }
+  },
+  {
+    "name": "set-tags naming __proto__",
+    "direction": "request",
+    "hex": "0000001f460000003c7b2274616773223a7b225f5f70726f746f5f5f223a2278227d7d",
+    "outcome": {
+      "malformed": "set-tags: tags: tag name __proto__ is reserved"
+    }
+  },
+  {
+    "name": "set-tags naming constructor",
+    "direction": "request",
+    "hex": "00000021460000003d7b2274616773223a7b22636f6e7374727563746f72223a2278227d7d",
+    "outcome": {
+      "malformed": "set-tags: tags: tag name constructor is reserved"
+    }
+  },
+  {
+    "name": "set-tags naming prototype",
+    "direction": "request",
+    "hex": "0000001f460000003e7b2274616773223a7b2270726f746f74797065223a2278227d7d",
+    "outcome": {
+      "malformed": "set-tags: tags: tag name prototype is reserved"
+    }
+  },
+  {
+    "name": "set-tags with a value not a string",
+    "direction": "request",
+    "hex": "00000015460000003f7b2274616773223a7b2261223a317d7d",
+    "outcome": {
+      "malformed": "set-tags: tags.a: Invalid input: expected string, received number"
+    }
+  },
+  {
+    "name": "set-tags with a lone surrogate",
+    "direction": "request",
+    "hex": "0000001c46000000407b2274616773223a7b2261223a225c7564633030227d7d",
+    "outcome": {
+      "malformed": "set-tags has a lone surrogate"
+    }
+  },
+  {
+    "name": "hello with a lone surrogate in a field from a later minor",
+    "direction": "request",
+    "hex": "0000002a01000000427b2270726f746f636f6c223a5b22312e30225d2c226c61746572223a225c7564383030227d",
+    "outcome": {
+      "malformed": "hello has a lone surrogate"
+    }
+  },
+  {
+    "name": "hello with a lone surrogate in a key from a later minor",
+    "direction": "request",
+    "hex": "0000002e01000000437b2270726f746f636f6c223a5b22312e30225d2c226c61746572223a7b225c7564626666223a317d7d",
+    "outcome": {
+      "malformed": "hello has a lone surrogate"
+    }
+  },
+  {
+    "name": "hello sharing no major, a lone surrogate in what goes unread",
+    "direction": "request",
+    "hex": "0000002d01000000447b2270726f746f636f6c223a5b22322e30225d2c22777269746572223a5b225c7564383030225d7d",
+    "outcome": {
+      "malformed": "hello has a lone surrogate"
+    }
+  },
+  {
+    "name": "set-theme with no theme, as nullable is never missing",
+    "direction": "request",
+    "hex": "0000000747000000417b7d",
+    "outcome": {
+      "malformed": "set-theme: theme: Invalid option: expected one of \"light\"|\"dark\""
+    }
+  },
+  {
+    "name": "hello",
+    "direction": "reply",
+    "hex": "0000015f81000000007b2276657273696f6e223a22312e30222c2270726f746f636f6c223a5b22312e30225d2c227465726d696e616c4964223a227465726d5f3031393061316232633364343761626338646566303132333435363738396162222c2274616773223a7b2230223a227a65726f222c226b696e64223a226167656e74227d2c2267656e65726174696f6e223a322c22686f6c646572506964223a34312c22686f6c6465725374617274223a313736333030303030302c226368696c64506964223a34322c226368696c645374617274223a313736333030303030312c2265786974223a6e756c6c2c2273697a65223a7b22636f6c73223a38302c22726f7773223a32347d2c226f6666736574223a313233342c227469746c65223a22e29cb320636c61756465222c22616c7465726e617465223a747275652c22686973746f72794c696e6573223a31303030302c22777269746572223a66616c73657d",
+    "outcome": {
+      "canonical": {
+        "head": "8100000000",
+        "json": {
+          "version": "1.0",
+          "protocol": [
+            "1.0"
+          ],
+          "terminalId": "term_0190a1b2c3d47abc8def0123456789ab",
+          "tags": {
+            "0": "zero",
+            "kind": "agent"
+          },
+          "generation": 2,
+          "holderPid": 41,
+          "holderStart": 1763000000,
+          "childPid": 42,
+          "childStart": 1763000001,
+          "exit": null,
+          "size": {
+            "cols": 80,
+            "rows": 24
+          },
+          "offset": 1234,
+          "title": "✳ claude",
+          "alternate": true,
+          "historyLines": 10000,
+          "writer": false
+        }
+      }
+    }
+  },
+  {
+    "name": "hello of an exited child",
+    "direction": "reply",
+    "hex": "0000017581000000017b2276657273696f6e223a22312e30222c2270726f746f636f6c223a5b22312e30225d2c227465726d696e616c4964223a227465726d5f3031393061316232633364343761626338646566303132333435363738396162222c2274616773223a7b2230223a227a65726f222c226b696e64223a226167656e74227d2c2267656e65726174696f6e223a322c22686f6c646572506964223a34312c22686f6c6465725374617274223a313736333030303030302c226368696c64506964223a34322c226368696c645374617274223a313736333030303030312c2265786974223a7b2274797065223a22657869746564222c22636f6465223a2d317d2c2273697a65223a7b22636f6c73223a38302c22726f7773223a32347d2c226f6666736574223a313233342c227469746c65223a22e29cb320636c61756465222c22616c7465726e617465223a747275652c22686973746f72794c696e6573223a31303030302c22777269746572223a747275657d",
+    "outcome": {
+      "canonical": {
+        "head": "8100000001",
+        "json": {
+          "version": "1.0",
+          "protocol": [
+            "1.0"
+          ],
+          "terminalId": "term_0190a1b2c3d47abc8def0123456789ab",
+          "tags": {
+            "0": "zero",
+            "kind": "agent"
+          },
+          "generation": 2,
+          "holderPid": 41,
+          "holderStart": 1763000000,
+          "childPid": 42,
+          "childStart": 1763000001,
+          "exit": {
+            "type": "exited",
+            "code": -1
+          },
+          "size": {
+            "cols": 80,
+            "rows": 24
+          },
+          "offset": 1234,
+          "title": "✳ claude",
+          "alternate": true,
+          "historyLines": 10000,
+          "writer": true
+        }
+      }
+    }
+  },
+  {
+    "name": "snapshot at the largest offset",
+    "direction": "reply",
+    "hex": "0000001a8200000002001fffffffffffffffffffff1b5b481b5b324a6869",
+    "outcome": {
+      "canonical": {
+        "head": "8200000002001fffffffffffff",
+        "bytes": "ffffffff1b5b481b5b324a6869"
+      }
+    }
+  },
+  {
+    "name": "data",
+    "direction": "reply",
+    "hex": "0000000cc0000000000000000700ff0a",
+    "outcome": {
+      "canonical": {
+        "head": "c00000000000000007",
+        "bytes": "00ff0a"
+      }
+    }
+  },
+  {
+    "name": "data of nothing",
+    "direction": "reply",
+    "hex": "00000009c00000000000000000",
+    "outcome": {
+      "canonical": {
+        "head": "c00000000000000000",
+        "bytes": ""
+      }
+    }
+  },
+  {
+    "name": "gap",
+    "direction": "reply",
+    "hex": "00000021c17b2266726f6d223a302c22746f223a393030373139393235343734303939317d",
+    "outcome": {
+      "canonical": {
+        "head": "c1",
+        "json": {
+          "from": 0,
+          "to": 9007199254740991
+        }
+      }
+    }
+  },
+  {
+    "name": "resized",
+    "direction": "reply",
+    "hex": "00000022c27b226f6666736574223a392c22636f6c73223a3132302c22726f7773223a34307d",
+    "outcome": {
+      "canonical": {
+        "head": "c2",
+        "json": {
+          "offset": 9,
+          "cols": 120,
+          "rows": 40
+        }
+      }
+    }
+  },
+  {
+    "name": "title",
+    "direction": "reply",
+    "hex": "00000028c37b226f6666736574223a31302c2274657874223a22e697a5e69cace8aa9e205c7530303037227d",
+    "outcome": {
+      "canonical": {
+        "head": "c3",
+        "json": {
+          "offset": 10,
+          "text": "日本語 \u0007"
+        }
+      }
+    }
+  },
+  {
+    "name": "alternate",
+    "direction": "reply",
+    "hex": "00000019c47b226f6666736574223a31312c226f6e223a66616c73657d",
+    "outcome": {
+      "canonical": {
+        "head": "c4",
+        "json": {
+          "offset": 11,
+          "on": false
+        }
+      }
+    }
+  },
+  {
+    "name": "exited with a code",
+    "direction": "reply",
+    "hex": "00000035c57b2267656e65726174696f6e223a302c22737461747573223a7b2274797065223a22657869746564222c22636f6465223a307d7d",
+    "outcome": {
+      "canonical": {
+        "head": "c5",
+        "json": {
+          "generation": 0,
+          "status": {
+            "type": "exited",
+            "code": 0
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "exited by a signal",
+    "direction": "reply",
+    "hex": "00000042c57b2267656e65726174696f6e223a312c22737461747573223a7b2274797065223a227369676e616c6c6564222c227369676e616c223a2253494753454756227d7d",
+    "outcome": {
+      "canonical": {
+        "head": "c5",
+        "json": {
+          "generation": 1,
+          "status": {
+            "type": "signalled",
+            "signal": "SIGSEGV"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "exited in a way not known",
+    "direction": "reply",
+    "hex": "0000002dc57b2267656e65726174696f6e223a322c22737461747573223a7b2274797065223a22756e6b6e6f776e227d7d",
+    "outcome": {
+      "canonical": {
+        "head": "c5",
+        "json": {
+          "generation": 2,
+          "status": {
+            "type": "unknown"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "respawned",
+    "direction": "reply",
+    "hex": "00000037c67b2267656e65726174696f6e223a332c226368696c64506964223a35302c226368696c645374617274223a313736333030303030327d",
+    "outcome": {
+      "canonical": {
+        "head": "c6",
+        "json": {
+          "generation": 3,
+          "childPid": 50,
+          "childStart": 1763000002
+        }
+      }
+    }
+  },
+  {
+    "name": "stats",
+    "direction": "reply",
+    "hex": "0000003d83000000037b22656e67696e654279746573223a312c22727373223a322c2272696e674279746573223a332c22686973746f72794c696e6573223a347d",
+    "outcome": {
+      "canonical": {
+        "head": "8300000003",
+        "json": {
+          "engineBytes": 1,
+          "rss": 2,
+          "ringBytes": 3,
+          "historyLines": 4
+        }
+      }
+    }
+  },
+  {
+    "name": "stats with no rss",
+    "direction": "reply",
+    "hex": "0000004083000000047b22656e67696e654279746573223a302c22727373223a6e756c6c2c2272696e674279746573223a302c22686973746f72794c696e6573223a307d",
+    "outcome": {
+      "canonical": {
+        "head": "8300000004",
+        "json": {
+          "engineBytes": 0,
+          "rss": null,
+          "ringBytes": 0,
+          "historyLines": 0
+        }
+      }
+    }
+  },
+  {
+    "name": "foreground",
+    "direction": "reply",
+    "hex": "0000003b84000000057b226368696c64506964223a34322c226368696c645374617274223a312c2270676964223a34332c22706769645374617274223a327d",
+    "outcome": {
+      "canonical": {
+        "head": "8400000005",
+        "json": {
+          "childPid": 42,
+          "childStart": 1,
+          "pgid": 43,
+          "pgidStart": 2
+        }
+      }
+    }
+  },
+  {
+    "name": "ok",
+    "direction": "reply",
+    "hex": "00000019f0000000067b2272657175657374223a22726573697a65227d",
+    "outcome": {
+      "canonical": {
+        "head": "f000000006",
+        "json": {
+          "request": "resize"
+        }
+      }
+    }
+  },
+  {
+    "name": "error unknown-request",
+    "direction": "reply",
+    "hex": "0000005af1000000077b2272657175657374223a22737562736372696265222c22636f6465223a22756e6b6e6f776e2d72657175657374222c226d657373616765223a22726566757365643a20756e6b6e6f776e2d72657175657374227d",
+    "outcome": {
+      "canonical": {
+        "head": "f100000007",
+        "json": {
+          "request": "subscribe",
+          "code": "unknown-request",
+          "message": "refused: unknown-request"
+        }
+      }
+    }
+  },
+  {
+    "name": "error stale-generation",
+    "direction": "reply",
+    "hex": "0000005cf1000000087b2272657175657374223a22737562736372696265222c22636f6465223a227374616c652d67656e65726174696f6e222c226d657373616765223a22726566757365643a207374616c652d67656e65726174696f6e227d",
+    "outcome": {
+      "canonical": {
+        "head": "f100000008",
+        "json": {
+          "request": "subscribe",
+          "code": "stale-generation",
+          "message": "refused: stale-generation"
+        }
+      }
+    }
+  },
+  {
+    "name": "error out-of-range",
+    "direction": "reply",
+    "hex": "00000054f1000000097b2272657175657374223a22737562736372696265222c22636f6465223a226f75742d6f662d72616e6765222c226d657373616765223a22726566757365643a206f75742d6f662d72616e6765227d",
+    "outcome": {
+      "canonical": {
+        "head": "f100000009",
+        "json": {
+          "request": "subscribe",
+          "code": "out-of-range",
+          "message": "refused: out-of-range"
+        }
+      }
+    }
+  },
+  {
+    "name": "error invalid",
+    "direction": "reply",
+    "hex": "0000004af10000000a7b2272657175657374223a22737562736372696265222c22636f6465223a22696e76616c6964222c226d657373616765223a22726566757365643a20696e76616c6964227d",
+    "outcome": {
+      "canonical": {
+        "head": "f10000000a",
+        "json": {
+          "request": "subscribe",
+          "code": "invalid",
+          "message": "refused: invalid"
+        }
+      }
+    }
+  },
+  {
+    "name": "error no-shared-version",
+    "direction": "reply",
+    "hex": "0000005ef10000000b7b2272657175657374223a22737562736372696265222c22636f6465223a226e6f2d7368617265642d76657273696f6e222c226d657373616765223a22726566757365643a206e6f2d7368617265642d76657273696f6e227d",
+    "outcome": {
+      "canonical": {
+        "head": "f10000000b",
+        "json": {
+          "request": "subscribe",
+          "code": "no-shared-version",
+          "message": "refused: no-shared-version"
+        }
+      }
+    }
+  },
+  {
+    "name": "error not-writer",
+    "direction": "reply",
+    "hex": "00000050f10000000c7b2272657175657374223a22737562736372696265222c22636f6465223a226e6f742d777269746572222c226d657373616765223a22726566757365643a206e6f742d777269746572227d",
+    "outcome": {
+      "canonical": {
+        "head": "f10000000c",
+        "json": {
+          "request": "subscribe",
+          "code": "not-writer",
+          "message": "refused: not-writer"
+        }
+      }
+    }
+  },
+  {
+    "name": "error input-full",
+    "direction": "reply",
+    "hex": "00000050f10000000d7b2272657175657374223a22737562736372696265222c22636f6465223a22696e7075742d66756c6c222c226d657373616765223a22726566757365643a20696e7075742d66756c6c227d",
+    "outcome": {
+      "canonical": {
+        "head": "f10000000d",
+        "json": {
+          "request": "subscribe",
+          "code": "input-full",
+          "message": "refused: input-full"
+        }
+      }
+    }
+  },
+  {
+    "name": "error exited",
+    "direction": "reply",
+    "hex": "00000048f10000000e7b2272657175657374223a22737562736372696265222c22636f6465223a22657869746564222c226d657373616765223a22726566757365643a20657869746564227d",
+    "outcome": {
+      "canonical": {
+        "head": "f10000000e",
+        "json": {
+          "request": "subscribe",
+          "code": "exited",
+          "message": "refused: exited"
+        }
+      }
+    }
+  },
+  {
+    "name": "error snapshot-too-large",
+    "direction": "reply",
+    "hex": "00000060f10000000f7b2272657175657374223a22737562736372696265222c22636f6465223a22736e617073686f742d746f6f2d6c61726765222c226d657373616765223a22726566757365643a20736e617073686f742d746f6f2d6c61726765227d",
+    "outcome": {
+      "canonical": {
+        "head": "f10000000f",
+        "json": {
+          "request": "subscribe",
+          "code": "snapshot-too-large",
+          "message": "refused: snapshot-too-large"
+        }
+      }
+    }
+  },
+  {
+    "name": "error failed",
+    "direction": "reply",
+    "hex": "00000048f1000000107b2272657175657374223a22737562736372696265222c22636f6465223a226661696c6564222c226d657373616765223a22726566757365643a206661696c6564227d",
+    "outcome": {
+      "canonical": {
+        "head": "f100000010",
+        "json": {
+          "request": "subscribe",
+          "code": "failed",
+          "message": "refused: failed"
+        }
+      }
+    }
+  },
+  {
+    "name": "error no-shared-version with the holder's versions",
+    "direction": "reply",
+    "hex": "00000053f1ffffffff7b2272657175657374223a2268656c6c6f222c22636f6465223a226e6f2d7368617265642d76657273696f6e222c226d657373616765223a22222c2270726f746f636f6c223a5b22322e30225d7d",
+    "outcome": {
+      "canonical": {
+        "head": "f1ffffffff",
+        "json": {
+          "request": "hello",
+          "code": "no-shared-version",
+          "message": "",
+          "protocol": [
+            "2.0"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "error of a code from a later minor",
+    "direction": "reply",
+    "hex": "00000035f1000000147b2272657175657374223a22696e707574222c22636f6465223a226c61746572222c226d657373616765223a226d227d",
+    "outcome": {
+      "canonical": {
+        "head": "f100000014",
+        "json": {
+          "request": "input",
+          "code": "later",
+          "message": "m"
+        }
+      }
+    }
+  },
+  {
+    "name": "unknown reply to a request",
+    "direction": "reply",
+    "hex": "0000000785000000157b7d",
+    "outcome": {
+      "unknown": {
+        "code": 133,
+        "id": 21
+      }
+    }
+  },
+  {
+    "name": "unknown event",
+    "direction": "reply",
+    "hex": "00000003c77b7d",
+    "outcome": {
+      "unknown": {
+        "code": 199
+      }
+    }
+  },
+  {
+    "name": "unknown event with no payload",
+    "direction": "reply",
+    "hex": "00000001ef",
+    "outcome": {
+      "unknown": {
+        "code": 239
+      }
+    }
+  },
+  {
+    "name": "unknown answer to any request",
+    "direction": "reply",
+    "hex": "00000005f200000016",
+    "outcome": {
+      "unknown": {
+        "code": 242,
+        "id": 22
+      }
+    }
+  },
+  {
+    "name": "hello with a field from a later minor",
+    "direction": "reply",
+    "hex": "0000016b81000000177b2276657273696f6e223a22312e30222c2270726f746f636f6c223a5b22312e30225d2c227465726d696e616c4964223a227465726d5f3031393061316232633364343761626338646566303132333435363738396162222c2274616773223a7b2230223a227a65726f222c226b696e64223a226167656e74227d2c2267656e65726174696f6e223a322c22686f6c646572506964223a34312c22686f6c6465725374617274223a313736333030303030302c226368696c64506964223a34322c226368696c645374617274223a313736333030303030312c2265786974223a6e756c6c2c2273697a65223a7b22636f6c73223a38302c22726f7773223a32347d2c226f6666736574223a313233342c227469746c65223a22e29cb320636c61756465222c22616c7465726e617465223a747275652c22686973746f72794c696e6573223a31303030302c22777269746572223a66616c73652c226c61746572223a5b315d7d",
+    "outcome": {
+      "canonical": {
+        "head": "8100000017",
+        "json": {
+          "version": "1.0",
+          "protocol": [
+            "1.0"
+          ],
+          "terminalId": "term_0190a1b2c3d47abc8def0123456789ab",
+          "tags": {
+            "0": "zero",
+            "kind": "agent"
+          },
+          "generation": 2,
+          "holderPid": 41,
+          "holderStart": 1763000000,
+          "childPid": 42,
+          "childStart": 1763000001,
+          "exit": null,
+          "size": {
+            "cols": 80,
+            "rows": 24
+          },
+          "offset": 1234,
+          "title": "✳ claude",
+          "alternate": true,
+          "historyLines": 10000,
+          "writer": false
+        }
+      }
+    }
+  },
+  {
+    "name": "a frame of length 0",
+    "direction": "reply",
+    "hex": "00000000c0",
+    "outcome": {
+      "malformed": "a frame of length 0"
+    }
+  },
+  {
+    "name": "a frame over the cap",
+    "direction": "reply",
+    "hex": "04000001c0",
+    "outcome": {
+      "malformed": "a frame of 67108865 bytes, over the 67108864 cap"
+    }
+  },
+  {
+    "name": "type 0x00",
+    "direction": "reply",
+    "hex": "00000003007b7d",
+    "outcome": {
+      "malformed": "0x0 is no reply's type"
+    }
+  },
+  {
+    "name": "type 0x80, below the replies",
+    "direction": "reply",
+    "hex": "0000000780000000187b7d",
+    "outcome": {
+      "malformed": "0x80 is no reply's type"
+    }
+  },
+  {
+    "name": "unknown reply with no id",
+    "direction": "reply",
+    "hex": "00000003850001",
+    "outcome": {
+      "malformed": "reply 0x85 has no id"
+    }
+  },
+  {
+    "name": "unknown answer to any with no id",
+    "direction": "reply",
+    "hex": "00000001f2",
+    "outcome": {
+      "malformed": "reply 0xf2 has no id"
+    }
+  },
+  {
+    "name": "ok with no id",
+    "direction": "reply",
+    "hex": "00000002f000",
+    "outcome": {
+      "malformed": "ok has no id"
+    }
+  },
+  {
+    "name": "data too short for its offset",
+    "direction": "reply",
+    "hex": "00000008c000000000000000",
+    "outcome": {
+      "malformed": "data is too short for its offset"
+    }
+  },
+  {
+    "name": "data past 2^53 - 1",
+    "direction": "reply",
+    "hex": "00000009c00020000000000000",
+    "outcome": {
+      "malformed": "data offset 9007199254740992 is past 2^53 - 1"
+    }
+  },
+  {
+    "name": "snapshot too short for its dropped lines",
+    "direction": "reply",
+    "hex": "0000001082000000190000000000000000000000",
+    "outcome": {
+      "malformed": "snapshot is too short for its dropped lines"
+    }
+  },
+  {
+    "name": "hello agreeing on a major this build doesn't speak",
+    "direction": "reply",
+    "hex": "0000015f810000001a7b2276657273696f6e223a22322e30222c2270726f746f636f6c223a5b22312e30225d2c227465726d696e616c4964223a227465726d5f3031393061316232633364343761626338646566303132333435363738396162222c2274616773223a7b2230223a227a65726f222c226b696e64223a226167656e74227d2c2267656e65726174696f6e223a322c22686f6c646572506964223a34312c22686f6c6465725374617274223a313736333030303030302c226368696c64506964223a34322c226368696c645374617274223a313736333030303030312c2265786974223a6e756c6c2c2273697a65223a7b22636f6c73223a38302c22726f7773223a32347d2c226f6666736574223a313233342c227469746c65223a22e29cb320636c61756465222c22616c7465726e617465223a747275652c22686973746f72794c696e6573223a31303030302c22777269746572223a66616c73657d",
+    "outcome": {
+      "malformed": "hello agrees on 2.0, a major this build doesn't speak"
+    }
+  },
+  {
+    "name": "hello agreeing on no version",
+    "direction": "reply",
+    "hex": "0000015d810000001b7b2276657273696f6e223a2231222c2270726f746f636f6c223a5b22312e30225d2c227465726d696e616c4964223a227465726d5f3031393061316232633364343761626338646566303132333435363738396162222c2274616773223a7b2230223a227a65726f222c226b696e64223a226167656e74227d2c2267656e65726174696f6e223a322c22686f6c646572506964223a34312c22686f6c6465725374617274223a313736333030303030302c226368696c64506964223a34322c226368696c645374617274223a313736333030303030312c2265786974223a6e756c6c2c2273697a65223a7b22636f6c73223a38302c22726f7773223a32347d2c226f6666736574223a313233342c227469746c65223a22e29cb320636c61756465222c22616c7465726e617465223a747275652c22686973746f72794c696e6573223a31303030302c22777269746572223a66616c73657d",
+    "outcome": {
+      "malformed": "hello: version: Invalid string: must match pattern /^[0-9]+\\.[0-9]+$/"
+    }
+  },
+  {
+    "name": "hello with no child pid",
+    "direction": "reply",
+    "hex": "00000151810000001c7b2276657273696f6e223a22312e30222c2270726f746f636f6c223a5b22312e30225d2c227465726d696e616c4964223a227465726d5f3031393061316232633364343761626338646566303132333435363738396162222c2274616773223a7b2230223a227a65726f222c226b696e64223a226167656e74227d2c2267656e65726174696f6e223a322c22686f6c646572506964223a34312c22686f6c6465725374617274223a313736333030303030302c226368696c645374617274223a313736333030303030312c2265786974223a6e756c6c2c2273697a65223a7b22636f6c73223a38302c22726f7773223a32347d2c226f6666736574223a313233342c227469746c65223a22e29cb320636c61756465222c22616c7465726e617465223a747275652c22686973746f72794c696e6573223a31303030302c22777269746572223a66616c73657d",
+    "outcome": {
+      "malformed": "hello: childPid: Invalid input: expected number, received undefined"
+    }
+  },
+  {
+    "name": "hello with pid 0",
+    "direction": "reply",
+    "hex": "0000015e810000001d7b2276657273696f6e223a22312e30222c2270726f746f636f6c223a5b22312e30225d2c227465726d696e616c4964223a227465726d5f3031393061316232633364343761626338646566303132333435363738396162222c2274616773223a7b2230223a227a65726f222c226b696e64223a226167656e74227d2c2267656e65726174696f6e223a322c22686f6c646572506964223a302c22686f6c6465725374617274223a313736333030303030302c226368696c64506964223a34322c226368696c645374617274223a313736333030303030312c2265786974223a6e756c6c2c2273697a65223a7b22636f6c73223a38302c22726f7773223a32347d2c226f6666736574223a313233342c227469746c65223a22e29cb320636c61756465222c22616c7465726e617465223a747275652c22686973746f72794c696e6573223a31303030302c22777269746572223a66616c73657d",
+    "outcome": {
+      "malformed": "hello: holderPid: Too small: expected number to be >0"
+    }
+  },
+  {
+    "name": "hello with no exit, as nullable is never missing",
+    "direction": "reply",
+    "hex": "00000153810000001e7b2276657273696f6e223a22312e30222c2270726f746f636f6c223a5b22312e30225d2c227465726d696e616c4964223a227465726d5f3031393061316232633364343761626338646566303132333435363738396162222c2274616773223a7b2230223a227a65726f222c226b696e64223a226167656e74227d2c2267656e65726174696f6e223a322c22686f6c646572506964223a34312c22686f6c6465725374617274223a313736333030303030302c226368696c64506964223a34322c226368696c645374617274223a313736333030303030312c2273697a65223a7b22636f6c73223a38302c22726f7773223a32347d2c226f6666736574223a313233342c227469746c65223a22e29cb320636c61756465222c22616c7465726e617465223a747275652c22686973746f72794c696e6573223a31303030302c22777269746572223a66616c73657d",
+    "outcome": {
+      "malformed": "hello: exit: Invalid input: expected object, received undefined"
+    }
+  },
+  {
+    "name": "hello with a terminal id that isn't a file name",
+    "direction": "reply",
+    "hex": "0000013e810000001f7b2276657273696f6e223a22312e30222c2270726f746f636f6c223a5b22312e30225d2c227465726d696e616c4964223a222e2e2f78222c2274616773223a7b2230223a227a65726f222c226b696e64223a226167656e74227d2c2267656e65726174696f6e223a322c22686f6c646572506964223a34312c22686f6c6465725374617274223a313736333030303030302c226368696c64506964223a34322c226368696c645374617274223a313736333030303030312c2265786974223a6e756c6c2c2273697a65223a7b22636f6c73223a38302c22726f7773223a32347d2c226f6666736574223a313233342c227469746c65223a22e29cb320636c61756465222c22616c7465726e617465223a747275652c22686973746f72794c696e6573223a31303030302c22777269746572223a66616c73657d",
+    "outcome": {
+      "malformed": "hello: terminalId: Invalid string: must match pattern /^[A-Za-z0-9_-]{1,64}$/"
+    }
+  },
+  {
+    "name": "stats missing rss, as nullable is never missing",
+    "direction": "reply",
+    "hex": "0000003583000000207b22656e67696e654279746573223a302c2272696e674279746573223a302c22686973746f72794c696e6573223a307d",
+    "outcome": {
+      "malformed": "stats: rss: Invalid input: expected number, received undefined"
+    }
+  },
+  {
+    "name": "exited of a status not in holder/1",
+    "direction": "reply",
+    "hex": "0000002dc57b2267656e65726174696f6e223a302c22737461747573223a7b2274797065223a2263726173686564227d7d",
+    "outcome": {
+      "malformed": "exited: status.type: Invalid discriminator value. Expected 'exited' | 'signalled' | 'unknown'"
+    }
+  },
+  {
+    "name": "gap from a negative offset",
+    "direction": "reply",
+    "hex": "00000013c17b2266726f6d223a2d312c22746f223a307d",
+    "outcome": {
+      "malformed": "gap: from: Too small: expected number to be >=0"
+    }
+  },
+  {
+    "name": "error with a code not a string",
+    "direction": "reply",
+    "hex": "0000002ff1000000217b2272657175657374223a22696e707574222c22636f6465223a312c226d657373616765223a226d227d",
+    "outcome": {
+      "malformed": "error: code: Invalid input: expected string, received number"
+    }
+  },
+  {
+    "name": "an unknown event, its payload unread though it has a lone surrogate",
+    "direction": "reply",
+    "hex": "0000000bc75b225c7564633030225d",
+    "outcome": {
+      "unknown": {
+        "code": 199
+      }
+    }
+  },
+  {
+    "name": "exited with a lone surrogate in a field from a later minor",
+    "direction": "reply",
+    "hex": "0000003ec57b2267656e65726174696f6e223a302c22737461747573223a7b2274797065223a22756e6b6e6f776e222c226c61746572223a225c7564383030227d7d",
+    "outcome": {
+      "malformed": "exited has a lone surrogate"
+    }
+  },
+  {
+    "name": "title with a lone surrogate",
+    "direction": "reply",
+    "hex": "0000001dc37b226f6666736574223a302c2274657874223a225c7564383030227d",
+    "outcome": {
+      "malformed": "title has a lone surrogate"
+    }
+  }
+]

@@ -6,6 +6,7 @@
     "spikes/**",
     "pnpm-lock.yaml",
     ".oxlintrc.json",
-    "packages/protocol/schema/**"
+    "packages/protocol/schema/**",
+    "packages/protocol/fixtures/**"
   ]
 }

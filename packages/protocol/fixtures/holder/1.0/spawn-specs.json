@@ -1,0 +1,239 @@
+[
+  {
+    "name": "every field",
+    "json": "{\"protocol\":[\"1.0\"],\"terminalId\":\"term_0190a1b2c3d47abc8def0123456789ab\",\"socket\":\"/run/user/1000/bazhen/holders/t.sock\",\"tags\":{\"kind\":\"agent\"},\"size\":{\"cols\":80,\"rows\":24},\"argv\":[\"claude\",\"--resume\",\"日本語\"],\"cwd\":\"/home/u/src\",\"env\":{\"1\":\"integer-like keys sort first in JavaScript\",\"TERM\":\"xterm-256color\"},\"generation\":4,\"theme\":\"dark\",\"historyLines\":5000}",
+    "outcome": {
+      "canonical": {
+        "argv": [
+          "claude",
+          "--resume",
+          "日本語"
+        ],
+        "cwd": "/home/u/src",
+        "env": {
+          "1": "integer-like keys sort first in JavaScript",
+          "TERM": "xterm-256color"
+        },
+        "generation": 4,
+        "theme": "dark",
+        "protocol": [
+          "1.0"
+        ],
+        "terminalId": "term_0190a1b2c3d47abc8def0123456789ab",
+        "socket": "/run/user/1000/bazhen/holders/t.sock",
+        "tags": {
+          "kind": "agent"
+        },
+        "size": {
+          "cols": 80,
+          "rows": 24
+        },
+        "historyLines": 5000
+      }
+    }
+  },
+  {
+    "name": "no theme or history, which defaults",
+    "json": "{\"protocol\":[\"1.0\"],\"terminalId\":\"term_0190a1b2c3d47abc8def0123456789ab\",\"socket\":\"/run/user/1000/bazhen/holders/t.sock\",\"tags\":{\"kind\":\"agent\"},\"size\":{\"cols\":80,\"rows\":24},\"argv\":[\"claude\",\"--resume\",\"日本語\"],\"cwd\":\"/home/u/src\",\"env\":{\"1\":\"integer-like keys sort first in JavaScript\",\"TERM\":\"xterm-256color\"},\"generation\":4}",
+    "outcome": {
+      "canonical": {
+        "argv": [
+          "claude",
+          "--resume",
+          "日本語"
+        ],
+        "cwd": "/home/u/src",
+        "env": {
+          "1": "integer-like keys sort first in JavaScript",
+          "TERM": "xterm-256color"
+        },
+        "generation": 4,
+        "protocol": [
+          "1.0"
+        ],
+        "terminalId": "term_0190a1b2c3d47abc8def0123456789ab",
+        "socket": "/run/user/1000/bazhen/holders/t.sock",
+        "tags": {
+          "kind": "agent"
+        },
+        "size": {
+          "cols": 80,
+          "rows": 24
+        },
+        "historyLines": 10000
+      }
+    }
+  },
+  {
+    "name": "history at the bound, two majors",
+    "json": "{\"protocol\":[\"0.3\",\"1.0\"],\"terminalId\":\"term_0190a1b2c3d47abc8def0123456789ab\",\"socket\":\"/run/user/1000/bazhen/holders/t.sock\",\"tags\":{\"kind\":\"agent\"},\"size\":{\"cols\":80,\"rows\":24},\"argv\":[\"claude\",\"--resume\",\"日本語\"],\"cwd\":\"/home/u/src\",\"env\":{\"1\":\"integer-like keys sort first in JavaScript\",\"TERM\":\"xterm-256color\"},\"generation\":4,\"theme\":\"dark\",\"historyLines\":100000}",
+    "outcome": {
+      "canonical": {
+        "argv": [
+          "claude",
+          "--resume",
+          "日本語"
+        ],
+        "cwd": "/home/u/src",
+        "env": {
+          "1": "integer-like keys sort first in JavaScript",
+          "TERM": "xterm-256color"
+        },
+        "generation": 4,
+        "theme": "dark",
+        "protocol": [
+          "0.3",
+          "1.0"
+        ],
+        "terminalId": "term_0190a1b2c3d47abc8def0123456789ab",
+        "socket": "/run/user/1000/bazhen/holders/t.sock",
+        "tags": {
+          "kind": "agent"
+        },
+        "size": {
+          "cols": 80,
+          "rows": 24
+        },
+        "historyLines": 100000
+      }
+    }
+  },
+  {
+    "name": "a field from a later minor",
+    "json": "{\"protocol\":[\"1.0\"],\"terminalId\":\"term_0190a1b2c3d47abc8def0123456789ab\",\"socket\":\"/run/user/1000/bazhen/holders/t.sock\",\"tags\":{\"kind\":\"agent\"},\"size\":{\"cols\":80,\"rows\":24},\"argv\":[\"claude\",\"--resume\",\"日本語\"],\"cwd\":\"/home/u/src\",\"env\":{\"1\":\"integer-like keys sort first in JavaScript\",\"TERM\":\"xterm-256color\"},\"generation\":4,\"theme\":\"dark\",\"historyLines\":5000,\"later\":1}",
+    "outcome": {
+      "canonical": {
+        "argv": [
+          "claude",
+          "--resume",
+          "日本語"
+        ],
+        "cwd": "/home/u/src",
+        "env": {
+          "1": "integer-like keys sort first in JavaScript",
+          "TERM": "xterm-256color"
+        },
+        "generation": 4,
+        "theme": "dark",
+        "protocol": [
+          "1.0"
+        ],
+        "terminalId": "term_0190a1b2c3d47abc8def0123456789ab",
+        "socket": "/run/user/1000/bazhen/holders/t.sock",
+        "tags": {
+          "kind": "agent"
+        },
+        "size": {
+          "cols": 80,
+          "rows": 24
+        },
+        "historyLines": 5000
+      }
+    }
+  },
+  {
+    "name": "sharing no major, the rest unread",
+    "json": "{\"protocol\":[\"2.0\"],\"terminalId\":\"term_0190a1b2c3d47abc8def0123456789ab\",\"socket\":\"/run/user/1000/bazhen/holders/t.sock\",\"tags\":{\"kind\":\"agent\"},\"size\":{\"cols\":80,\"rows\":24},\"argv\":[],\"cwd\":\"/home/u/src\",\"env\":{\"1\":\"integer-like keys sort first in JavaScript\",\"TERM\":\"xterm-256color\"},\"generation\":4,\"theme\":\"dark\",\"historyLines\":5000}",
+    "outcome": {
+      "noSharedVersion": true
+    }
+  },
+  {
+    "name": "no protocol",
+    "json": "{\"terminalId\":\"term_0190a1b2c3d47abc8def0123456789ab\",\"socket\":\"/run/user/1000/bazhen/holders/t.sock\",\"tags\":{\"kind\":\"agent\"},\"size\":{\"cols\":80,\"rows\":24},\"argv\":[\"claude\",\"--resume\",\"日本語\"],\"cwd\":\"/home/u/src\",\"env\":{\"1\":\"integer-like keys sort first in JavaScript\",\"TERM\":\"xterm-256color\"},\"generation\":4,\"theme\":\"dark\",\"historyLines\":5000}",
+    "outcome": {
+      "invalid": "protocol: Invalid input: expected array, received undefined"
+    }
+  },
+  {
+    "name": "not an object",
+    "json": "[{\"protocol\":[\"1.0\"],\"terminalId\":\"term_0190a1b2c3d47abc8def0123456789ab\",\"socket\":\"/run/user/1000/bazhen/holders/t.sock\",\"tags\":{\"kind\":\"agent\"},\"size\":{\"cols\":80,\"rows\":24},\"argv\":[\"claude\",\"--resume\",\"日本語\"],\"cwd\":\"/home/u/src\",\"env\":{\"1\":\"integer-like keys sort first in JavaScript\",\"TERM\":\"xterm-256color\"},\"generation\":4,\"theme\":\"dark\",\"historyLines\":5000}]",
+    "outcome": {
+      "invalid": "Invalid input: expected object, received array"
+    }
+  },
+  {
+    "name": "not JSON",
+    "json": "{",
+    "outcome": {
+      "invalid": "Invalid input: expected object, received undefined"
+    }
+  },
+  {
+    "name": "history past the bound",
+    "json": "{\"protocol\":[\"1.0\"],\"terminalId\":\"term_0190a1b2c3d47abc8def0123456789ab\",\"socket\":\"/run/user/1000/bazhen/holders/t.sock\",\"tags\":{\"kind\":\"agent\"},\"size\":{\"cols\":80,\"rows\":24},\"argv\":[\"claude\",\"--resume\",\"日本語\"],\"cwd\":\"/home/u/src\",\"env\":{\"1\":\"integer-like keys sort first in JavaScript\",\"TERM\":\"xterm-256color\"},\"generation\":4,\"theme\":\"dark\",\"historyLines\":100001}",
+    "outcome": {
+      "invalid": "historyLines: Too big: expected number to be <=100000"
+    }
+  },
+  {
+    "name": "a terminal id with a slash",
+    "json": "{\"protocol\":[\"1.0\"],\"terminalId\":\"a/b\",\"socket\":\"/run/user/1000/bazhen/holders/t.sock\",\"tags\":{\"kind\":\"agent\"},\"size\":{\"cols\":80,\"rows\":24},\"argv\":[\"claude\",\"--resume\",\"日本語\"],\"cwd\":\"/home/u/src\",\"env\":{\"1\":\"integer-like keys sort first in JavaScript\",\"TERM\":\"xterm-256color\"},\"generation\":4,\"theme\":\"dark\",\"historyLines\":5000}",
+    "outcome": {
+      "invalid": "terminalId: Invalid string: must match pattern /^[A-Za-z0-9_-]{1,64}$/"
+    }
+  },
+  {
+    "name": "a terminal id of 65 characters",
+    "json": "{\"protocol\":[\"1.0\"],\"terminalId\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"socket\":\"/run/user/1000/bazhen/holders/t.sock\",\"tags\":{\"kind\":\"agent\"},\"size\":{\"cols\":80,\"rows\":24},\"argv\":[\"claude\",\"--resume\",\"日本語\"],\"cwd\":\"/home/u/src\",\"env\":{\"1\":\"integer-like keys sort first in JavaScript\",\"TERM\":\"xterm-256color\"},\"generation\":4,\"theme\":\"dark\",\"historyLines\":5000}",
+    "outcome": {
+      "invalid": "terminalId: Invalid string: must match pattern /^[A-Za-z0-9_-]{1,64}$/"
+    }
+  },
+  {
+    "name": "an empty socket",
+    "json": "{\"protocol\":[\"1.0\"],\"terminalId\":\"term_0190a1b2c3d47abc8def0123456789ab\",\"socket\":\"\",\"tags\":{\"kind\":\"agent\"},\"size\":{\"cols\":80,\"rows\":24},\"argv\":[\"claude\",\"--resume\",\"日本語\"],\"cwd\":\"/home/u/src\",\"env\":{\"1\":\"integer-like keys sort first in JavaScript\",\"TERM\":\"xterm-256color\"},\"generation\":4,\"theme\":\"dark\",\"historyLines\":5000}",
+    "outcome": {
+      "invalid": "socket: Too small: expected string to have >=1 characters"
+    }
+  },
+  {
+    "name": "a size past the bound",
+    "json": "{\"protocol\":[\"1.0\"],\"terminalId\":\"term_0190a1b2c3d47abc8def0123456789ab\",\"socket\":\"/run/user/1000/bazhen/holders/t.sock\",\"tags\":{\"kind\":\"agent\"},\"size\":{\"cols\":80,\"rows\":1001},\"argv\":[\"claude\",\"--resume\",\"日本語\"],\"cwd\":\"/home/u/src\",\"env\":{\"1\":\"integer-like keys sort first in JavaScript\",\"TERM\":\"xterm-256color\"},\"generation\":4,\"theme\":\"dark\",\"historyLines\":5000}",
+    "outcome": {
+      "invalid": "size.rows: Too big: expected number to be <=1000"
+    }
+  },
+  {
+    "name": "a reserved tag",
+    "json": "{\"protocol\":[\"1.0\"],\"terminalId\":\"term_0190a1b2c3d47abc8def0123456789ab\",\"socket\":\"/run/user/1000/bazhen/holders/t.sock\",\"tags\":{\"prototype\":\"\"},\"size\":{\"cols\":80,\"rows\":24},\"argv\":[\"claude\",\"--resume\",\"日本語\"],\"cwd\":\"/home/u/src\",\"env\":{\"1\":\"integer-like keys sort first in JavaScript\",\"TERM\":\"xterm-256color\"},\"generation\":4,\"theme\":\"dark\",\"historyLines\":5000}",
+    "outcome": {
+      "invalid": "tags: tag name prototype is reserved"
+    }
+  },
+  {
+    "name": "theme null",
+    "json": "{\"protocol\":[\"1.0\"],\"terminalId\":\"term_0190a1b2c3d47abc8def0123456789ab\",\"socket\":\"/run/user/1000/bazhen/holders/t.sock\",\"tags\":{\"kind\":\"agent\"},\"size\":{\"cols\":80,\"rows\":24},\"argv\":[\"claude\",\"--resume\",\"日本語\"],\"cwd\":\"/home/u/src\",\"env\":{\"1\":\"integer-like keys sort first in JavaScript\",\"TERM\":\"xterm-256color\"},\"generation\":4,\"theme\":null,\"historyLines\":5000}",
+    "outcome": {
+      "invalid": "theme: Invalid option: expected one of \"light\"|\"dark\""
+    }
+  },
+  {
+    "name": "a lone surrogate in env",
+    "json": "{\"protocol\":[\"1.0\"],\"terminalId\":\"term_0190a1b2c3d47abc8def0123456789ab\",\"socket\":\"/run/user/1000/bazhen/holders/t.sock\",\"tags\":{\"kind\":\"agent\"},\"size\":{\"cols\":80,\"rows\":24},\"argv\":[\"claude\",\"--resume\",\"日本語\"],\"cwd\":\"/home/u/src\",\"env\":{\"A\":\"\\udfff\"},\"generation\":4,\"theme\":\"dark\",\"historyLines\":5000}",
+    "outcome": {
+      "invalid": "a lone surrogate"
+    }
+  },
+  {
+    "name": "a lone surrogate in a field from a later minor",
+    "json": "{\"protocol\":[\"1.0\"],\"terminalId\":\"term_0190a1b2c3d47abc8def0123456789ab\",\"socket\":\"/run/user/1000/bazhen/holders/t.sock\",\"tags\":{\"kind\":\"agent\"},\"size\":{\"cols\":80,\"rows\":24},\"argv\":[\"claude\",\"--resume\",\"日本語\"],\"cwd\":\"/home/u/src\",\"env\":{\"1\":\"integer-like keys sort first in JavaScript\",\"TERM\":\"xterm-256color\"},\"generation\":4,\"theme\":\"dark\",\"historyLines\":5000,\"later\":\"\\ud800\"}",
+    "outcome": {
+      "invalid": "a lone surrogate"
+    }
+  },
+  {
+    "name": "a lone surrogate in a key from a later minor",
+    "json": "{\"protocol\":[\"1.0\"],\"terminalId\":\"term_0190a1b2c3d47abc8def0123456789ab\",\"socket\":\"/run/user/1000/bazhen/holders/t.sock\",\"tags\":{\"kind\":\"agent\"},\"size\":{\"cols\":80,\"rows\":24},\"argv\":[\"claude\",\"--resume\",\"日本語\"],\"cwd\":\"/home/u/src\",\"env\":{\"1\":\"integer-like keys sort first in JavaScript\",\"TERM\":\"xterm-256color\"},\"generation\":4,\"theme\":\"dark\",\"historyLines\":5000,\"later\":{\"\\udbff\":1}}",
+    "outcome": {
+      "invalid": "a lone surrogate"
+    }
+  },
+  {
+    "name": "sharing no major, a lone surrogate in what goes unread",
+    "json": "{\"protocol\":[\"2.0\"],\"terminalId\":\"term_0190a1b2c3d47abc8def0123456789ab\",\"socket\":\"/run/user/1000/bazhen/holders/t.sock\",\"tags\":{\"kind\":\"agent\"},\"size\":{\"cols\":80,\"rows\":24},\"argv\":[\"claude\",\"--resume\",\"日本語\"],\"cwd\":\"/home/u/src\",\"env\":{\"1\":\"integer-like keys sort first in JavaScript\",\"TERM\":\"xterm-256color\"},\"generation\":4,\"theme\":\"dark\",\"historyLines\":5000,\"later\":\"\\ud800\"}",
+    "outcome": {
+      "invalid": "a lone surrogate"
+    }
+  }
+]

@@ -13,6 +13,7 @@ import {
   HolderSpawnSpec,
   HolderStats,
   HolderSubscribeRequest,
+  hasLoneSurrogate,
   negotiateHolder,
 } from "./holder.ts";
 import { HISTORY_LINES } from "./stream.ts";
@@ -54,6 +55,23 @@ const hello = {
 const respawned = { generation: 3, childPid: 50, childStart: 1_763_000_002 };
 const stats = { engineBytes: 1, rss: null, ringBytes: 2, historyLines: 3 };
 const foreground = { childPid: 42, childStart: 1, pgid: 43, pgidStart: 2 };
+
+describe("hasLoneSurrogate", () => {
+  it("finds a lone half in a key, a nested value or an array, and none in a pair", () => {
+    expect([
+      hasLoneSurrogate({ a: { "\ud800": 1 } }),
+      hasLoneSurrogate({ a: [1, null, { b: "x\udc00" }] }),
+      hasLoneSurrogate(["\ude00\ud83d"]),
+      hasLoneSurrogate({ "😀": ["😀", 1, true, null] }),
+    ]).toEqual([true, true, true, false]);
+  });
+
+  it("walks JSON nested deeper than the call stack", () => {
+    const depth = 200_000;
+    const deep: unknown = JSON.parse(`${"[".repeat(depth)}"\ud800"${"]".repeat(depth)}`);
+    expect(hasLoneSurrogate(deep)).toBe(true);
+  });
+});
 
 describe("negotiateHolder", () => {
   it("agrees on the lower minor of a shared major, whichever side has it", () => {
@@ -228,6 +246,30 @@ const broken: [string, z.ZodType, unknown, unknown][] = [
     HolderRespawned,
     respawned,
     { ...respawned, childStart: -1 },
+  ],
+  [
+    "an environment variable a JavaScript record would drop, though constructor is kept",
+    HolderSpawnSpec,
+    { ...spawnSpec, env: { constructor: "x" } },
+    { ...spawnSpec, env: JSON.parse('{"__proto__":"x"}') },
+  ],
+  [
+    "a lone high surrogate in argv, though a pair is fine",
+    HolderSpawnSpec,
+    { ...spawnSpec, argv: ["😀"] },
+    { ...spawnSpec, argv: ["\ud83d"] },
+  ],
+  [
+    "a lone low surrogate in a tag value, which UTF-8 can't hold",
+    HolderSpawnSpec,
+    { ...spawnSpec, tags: { k: "a😀b" } },
+    { ...spawnSpec, tags: { k: "a\ude00b" } },
+  ],
+  [
+    "a title with a pair's halves swapped",
+    HolderHelloReply,
+    { ...hello, title: "😀" },
+    { ...hello, title: "\ude00\ud83d" },
   ],
   [
     "a subscribe in a generation before 0",
