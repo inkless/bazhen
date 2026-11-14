@@ -26,6 +26,15 @@ async function opened(
 const FLOOD = ["sh", "-c", "while :; do seq -f '%0990g' 1 100000; done"];
 const BIG = { cols: 1000, rows: 500 };
 
+/**
+ * The daemon's PTYs once no tmux client is left: one whose last view an earlier test closed stays
+ * attached a moment, and counted in a baseline it would hold a PTY that later goes.
+ */
+async function ptyBaseline(): Promise<number> {
+  await waitUntil(() => daemon.tmux("list-clients").trim() === "", "earlier views' clients to go");
+  return daemon.ptyHandles();
+}
+
 const screens = (view: View) =>
   view.frames.flatMap((f) => (f.type === "screen" ? [f.alternate] : []));
 
@@ -43,7 +52,7 @@ describe("a view's stream over time", () => {
 
   it("ends a view whose socket stops reading, and keeps serving the others", async () => {
     const { terminalId } = await daemon.program(FLOOD);
-    const baseline = daemon.ptyHandles();
+    const baseline = await ptyBaseline();
     const stalled = await opened(terminalId, "observe", BIG);
     const live = await opened(terminalId, "interactive", BIG);
     stalled.stall();
@@ -78,7 +87,7 @@ describe("a view's stream over time", () => {
 
   it("returns to its PTY baseline after views come, go and fall behind", async () => {
     const { terminalId } = await daemon.program(FLOOD);
-    const baseline = daemon.ptyHandles();
+    const baseline = await ptyBaseline();
     for (let i = 0; i < 20; i++) {
       const view = await opened(terminalId, "observe");
       view.close();

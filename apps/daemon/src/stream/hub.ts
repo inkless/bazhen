@@ -77,6 +77,8 @@ export interface HubOptions {
   /** A view whose snapshot has had nothing written for this long has stalled. */
   readonly snapshotStallMs: number;
   readonly now: () => number;
+  /** How long a terminal's runtime client outlives its last view, unless a new view opens first. */
+  readonly lingerMs: number;
 }
 
 export const HUB_DEFAULTS: HubOptions = {
@@ -89,6 +91,10 @@ export const HUB_DEFAULTS: HubOptions = {
   // A link slower than about 100 KB/s.
   snapshotStallMs: 10_000,
   now: () => performance.now(),
+  // Codex 0.166 can drop a prompt it has just taken if its tmux client detaches within
+  // milliseconds of the Enter, as it does when the person closes the last view straight after
+  // pressing it. It sends a prompt on within a few hundred ms even under load.
+  lingerMs: 2000,
 };
 
 export type EndReason = EventPayload<"attachment.ended">["reason"];
@@ -178,13 +184,20 @@ interface Watched {
 /**
  * At most one runtime client per viewed terminal, however many views are open, with its bytes
  * fanned out to every view (foundation-design §5.4). The lease decides whose size the terminal
- * takes and whose keystrokes reach it (§4.3).
+ * takes and whose keystrokes reach it (§4.3). A client whose last view has left stays attached
+ * for `lingerMs`, or until the terminal's next client has attached, so the program is never left
+ * without one the moment a view closes; a view that opens meanwhile gets a client of its own.
  */
 export class TerminalHub {
   private readonly runtime: RuntimeAdapter;
   private readonly log: AttachmentLog;
   private readonly opts: HubOptions;
   private readonly watched = new Map<TerminalId, Promise<Watched>>();
+  /** Clients whose last view has left, each with the timer that closes it. */
+  private readonly lingering = new Map<
+    TerminalId,
+    { stream: RuntimeStream; timer: ReturnType<typeof setTimeout> }
+  >();
   /** Oldest first. */
   private readonly loading = new Map<AttachmentId, Loading>();
 
@@ -322,7 +335,14 @@ export class TerminalHub {
           }
         }
       };
+      let drawn = false;
       stream.onData((bytes) => {
+        // The client draws as soon as it attaches: only then may the one before it go. It may
+        // already be parked itself, if its only view left before it drew.
+        if (!drawn) {
+          drawn = true;
+          if (this.lingering.get(ref.terminalId)?.stream !== stream) this.letGo(ref.terminalId);
+        }
         const at = watched.at;
         watched.at = { ...at, offset: at.offset + bytes.length };
         deliver({ kind: "data", at, bytes });
@@ -332,6 +352,11 @@ export class TerminalHub {
         deliver({ kind: "reset", generation, bytes: RESPAWN_BYTES });
       });
       stream.onClose((why) => {
+        const left = this.lingering.get(ref.terminalId);
+        if (left?.stream === stream) {
+          clearTimeout(left.timer);
+          this.lingering.delete(ref.terminalId);
+        }
         // The client also exits when its connection to tmux is lost while the terminal lives on.
         const closed = this.log.closing(watched.terminal);
         const reason = closed
@@ -439,6 +464,15 @@ export class TerminalHub {
   private evict(watched: Watched, id: AttachmentId, entry: Entry): void {
     dismiss(entry, { type: "ended", reason: "evicted_slow" });
     this.end(watched, id, "evicted_slow");
+  }
+
+  /** Closes the client still attached for `terminal` after its last view left, if there is one. */
+  private letGo(terminal: TerminalId): void {
+    const left = this.lingering.get(terminal);
+    if (left === undefined) return;
+    this.lingering.delete(terminal);
+    clearTimeout(left.timer);
+    left.stream.close();
   }
 
   private forget(terminal: TerminalId, opening: Promise<Watched>): void {
@@ -553,7 +587,9 @@ export class TerminalHub {
     watched.lease = release(watched.lease, id);
     if (watched.viewers.size === 0) {
       this.watched.delete(watched.terminal);
-      watched.stream.close();
+      this.letGo(watched.terminal);
+      const timer = setTimeout(() => this.letGo(watched.terminal), this.opts.lingerMs).unref();
+      this.lingering.set(watched.terminal, { stream: watched.stream, timer });
       return;
     }
     if (wasDriver) this.announceLease(watched);
