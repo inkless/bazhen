@@ -44,9 +44,7 @@ const HANG_MS = 30_000;
 const PRIME_MS = 60_000;
 /** Pairs run and thrown away first: the first runs pay for cold caches, not for the client. */
 const WARM_UP = 5;
-export const BINARY = fileURLToPath(
-  new URL("../apps/hook/target/release/bazhen-hook", import.meta.url),
-);
+export const BINARY = fileURLToPath(new URL("../target/release/bazhen-hook", import.meta.url));
 const PAYLOAD = JSON.stringify({
   session_id: "3f0c1a4e-5b6d-4c7e-8f90-a1b2c3d4e5f6",
   prompt_id: "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",

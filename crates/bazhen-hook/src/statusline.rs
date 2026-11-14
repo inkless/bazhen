@@ -15,7 +15,7 @@ use std::time::Duration;
 /// The daemon is told in passing; a status line redraws often, and never waits on it for long.
 const REPORT_DEADLINE: Duration = Duration::from_millis(200);
 
-pub fn run(command: impl Iterator<Item = String>) -> Option<i32> {
+pub(crate) fn run(command: impl Iterator<Item = String>) -> Option<i32> {
     let mut input = Vec::new();
     io::stdin().read_to_end(&mut input).ok()?;
     let user = command.collect::<Vec<_>>();
@@ -28,6 +28,7 @@ pub fn run(command: impl Iterator<Item = String>) -> Option<i32> {
             .ok()
             .map(|mut child| {
                 if let Some(mut stdin) = child.stdin.take() {
+                    // A command that exits without reading its input still draws its line.
                     let _ = stdin.write_all(&input);
                 }
                 child

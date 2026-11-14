@@ -45,10 +45,13 @@ jobs:
       # The real-tmux suites refuse to run on any host that is not thrown away after use.
       - name: Mark the runner disposable
         run: sudo touch /etc/bazhen-disposable-host
-      # The hook client (apps/hook) is Rust; tests build and run it.
-      - uses: dtolnay/rust-toolchain@stable
+      # The Rust crates (crates/) build on the toolchain rust-toolchain.toml pins; `pnpm check` runs
+      # rustfmt, clippy, cargo-deny and nextest on them.
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
-          components: clippy, rustfmt
+          tool: cargo-nextest@0.9.152,cargo-deny@0.20.2
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm test:integration
@@ -81,7 +84,8 @@ jobs:
         run: command -v tmux || brew install tmux
       - name: Mark the runner disposable
         run: sudo touch /etc/bazhen-disposable-host
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:api
 
@@ -103,7 +107,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends neovim less man-db htop
       - name: Mark the runner disposable
         run: sudo touch /etc/bazhen-disposable-host
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @bazhen/e2e-tests exec playwright install --with-deps chromium
       - run: pnpm test:e2e
@@ -126,7 +131,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y tmux fish zsh
       - name: Mark the runner disposable
         run: sudo touch /etc/bazhen-disposable-host
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
       - run: pnpm install --frozen-lockfile
       - name: pnpm test:falsify
         env:

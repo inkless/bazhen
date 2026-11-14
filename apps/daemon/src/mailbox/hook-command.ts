@@ -4,9 +4,11 @@ import { fileURLToPath } from "node:url";
 /** One shell word, whatever the string holds. */
 const word = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
 
-const BINARY = fileURLToPath(new URL("../../../hook/target/release/bazhen-hook", import.meta.url));
+const BINARY = fileURLToPath(new URL("../../../../target/release/bazhen-hook", import.meta.url));
 /** The `sh` + `curl` client with the same contract, for when no binary is built; much slower. */
-export const HOOK_SCRIPT = fileURLToPath(new URL("../../../hook/bazhen-hook.sh", import.meta.url));
+export const HOOK_SCRIPT = fileURLToPath(
+  new URL("../../../../crates/bazhen-hook/bazhen-hook.sh", import.meta.url),
+);
 
 /** The hook client a harness runs: the built binary, else the script. */
 export function hookClient(): string {

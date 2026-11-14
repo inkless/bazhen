@@ -11,6 +11,9 @@ client. Agents, tasks, and orchestration come later.
 - Node.js 24 or newer (development uses 26.13.0; see `.nvmrc` / `.tool-versions`)
 - pnpm 12 (pinned through `packageManager`)
 - tmux 3.x
+- Rust through rustup, which installs the toolchain `rust-toolchain.toml` pins on first use, and
+  once per machine the two cargo tools `pnpm check` runs:
+  `cargo install --locked cargo-nextest@0.9.152 cargo-deny@0.20.2`
 - macOS or Linux
 - For the tests that run real tmux, Docker (`pnpm test:real`)
 
@@ -21,12 +24,12 @@ client. Agents, tasks, and orchestration come later.
 | `pnpm install --frozen-lockfile` | Install exactly what the lockfile records, and the git hooks (husky)                                                    |
 | `pnpm dev`                       | Start the daemon (`http://127.0.0.1:7900`) and the web dev server (`http://127.0.0.1:7901`); no vite keyboard shortcuts |
 | `pnpm bazhen <verb>`             | The CLI: `start`, `stop`, `status`, `doctor`, `env refresh`, `pair`, `devices [revoke <id>]`                            |
-| `pnpm check`                     | Standards check, lint, format check, type-check, small and medium tests                                                 |
+| `pnpm check`                     | Standards check, lint, format check, type-check, small and medium tests, clippy, cargo-deny, nextest                    |
 | `pnpm test`                      | Small tests                                                                                                             |
 | `pnpm test:real [suite…]`        | The tests that run real tmux, in a throwaway Linux container: integration, api, e2e                                     |
 | `pnpm test:falsify`              | Run the branch's new tests against the base's source; CI runs it on pull requests                                       |
 | `pnpm build`                     | Compile packages to `dist/` and build the web bundle, which the daemon serves at `http://127.0.0.1:7900`                |
-| `pnpm format`                    | Rewrite files with oxfmt                                                                                                |
+| `pnpm format`                    | Rewrite files with oxfmt and rustfmt                                                                                    |
 
 Contributing, for people and agents: [AGENTS.md](AGENTS.md) and [docs/standards/](docs/standards/).
 
@@ -34,7 +37,7 @@ Contributing, for people and agents: [AGENTS.md](AGENTS.md) and [docs/standards/
 
 - `apps/daemon` — the service: configuration and paths, HTTP API, SQLite store, PTY seam
 - `apps/cli` — the `bazhen` command, a client of the daemon's Unix socket
-- `apps/hook` — `bazhen-hook`, the hook client harnesses run (Rust, standard library only)
+- `crates/bazhen-hook` — `bazhen-hook`, the hook client harnesses run (Rust, standard library only)
 - `apps/web` — React + Vite client, with React Aria Components for its widgets (`docs/standards/ui.md`)
 - `packages/protocol` — shared types, schemas, and the protocol version
 - `packages/core` — domain model and state machines; no platform imports

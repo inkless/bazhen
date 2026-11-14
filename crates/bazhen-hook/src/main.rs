@@ -21,11 +21,11 @@ const REPLY_TYPE: &str = "application/vnd.bazhen.hook-reply";
 const MAX_BODY: usize = 1 << 20;
 const MAX_HEAD: usize = 16 << 10;
 /// Only a backstop: the harness's own timeout for each hook ends it first.
-const HOOK_DEADLINE: Duration = Duration::from_secs(10 * 60);
+const HOOK_DEADLINE: Duration = Duration::from_mins(10);
 /// The waiter outlives a daemon restart by reconnecting, and gives up before its hook's timeout.
-const WAIT_DEADLINE: Duration = Duration::from_secs(23 * 3600);
+const WAIT_DEADLINE: Duration = Duration::from_hours(23);
 const ACK_DEADLINE: Duration = Duration::from_secs(5);
-/// PostToolUse runs on every tool call, and a fold it misses waits for a wake, so a slow daemon
+/// `PostToolUse` runs on every tool call, and a fold it misses waits for a wake, so a slow daemon
 /// costs a tool call at most this; with the ack after it, well inside the hook's 10 s timeout.
 const FOLD_DEADLINE: Duration = Duration::from_secs(2);
 /// How long the rest of a reply may take once its first byte is in: the waiter may wait hours
@@ -69,6 +69,8 @@ fn run() -> Option<i32> {
     io::stdout().flush().ok()?;
     io::stderr().write_all(&reply.stderr).ok()?;
     if !reply.offered.is_empty() {
+        // The reply is already out; an ack that fails leaves the mail offered, and the daemon
+        // offers it again.
         let _ = post(
             &socket,
             "/v1/hooks/ack",
@@ -88,7 +90,7 @@ fn is_token(s: &str) -> bool {
 
 /// The `HookRequest` JSON. The payload comes first, so the fixed keys after it win if the payload
 /// tries to smuggle in its own; a payload that isn't JSON makes the daemon answer quietly.
-fn hook_request(payload: &[u8], agent: &str, event: &str, pid: u32, ppid: u32) -> Vec<u8> {
+fn hook_request(payload: &[u8], agent: &str, event: &str, pid: u32, parent_pid: u32) -> Vec<u8> {
     let payload: &[u8] = if payload.trim_ascii().is_empty() {
         b"null"
     } else {
@@ -99,7 +101,7 @@ fn hook_request(payload: &[u8], agent: &str, event: &str, pid: u32, ppid: u32) -
     out.extend_from_slice(
         format!(
             ",\"protocolVersion\":\"{PROTOCOL_VERSION}\",\"agentId\":\"{agent}\",\
-             \"event\":\"{event}\",\"pid\":{pid},\"ppid\":{ppid}}}"
+             \"event\":\"{event}\",\"pid\":{pid},\"ppid\":{parent_pid}}}"
         )
         .as_bytes(),
     );
@@ -154,20 +156,21 @@ fn post(socket: &str, path: &str, body: &[u8], timeout: Duration) -> io::Result<
 fn read_response(stream: &mut UnixStream, stall: Duration) -> io::Result<Vec<u8>> {
     const LIMIT: usize = MAX_HEAD + 4 + MAX_BODY + 1;
     let mut response = Vec::new();
-    let mut chunk = [0; 64 << 10];
+    let mut chunk = vec![0; 64 << 10];
     while response.len() < LIMIT {
         if let Some(end) = promised_end(&response) {
             response.truncate(end);
             break;
         }
-        let want = chunk.len().min(LIMIT - response.len());
-        match stream.read(&mut chunk[..want]) {
+        // What is left to read only shrinks, so the buffer can shrink with it.
+        chunk.truncate(LIMIT - response.len());
+        match stream.read(&mut chunk) {
             Ok(0) => break,
             Ok(n) => {
                 if response.is_empty() {
                     bound_reads(stream, stall)?;
                 }
-                response.extend_from_slice(&chunk[..n]);
+                response.extend_from_slice(chunk.get(..n).unwrap_or(&chunk));
             }
             Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
             Err(e) => return Err(e),
@@ -212,8 +215,8 @@ fn is_truncated(response: &[u8]) -> bool {
 
 fn split_head(response: &[u8]) -> Option<(&str, &[u8])> {
     let end = response.windows(4).position(|w| w == b"\r\n\r\n")?;
-    let head = std::str::from_utf8(&response[..end]).ok()?;
-    Some((head, &response[end + 4..]))
+    let (head, rest) = response.split_at_checked(end)?;
+    Some((std::str::from_utf8(head).ok()?, rest.get(4..)?))
 }
 
 fn headers<'a>(head: &'a str, name: &str) -> impl Iterator<Item = &'a str> {
@@ -251,16 +254,16 @@ fn parse_reply(response: &[u8]) -> Option<Reply> {
         && headers(head, "Transfer-Encoding").next().is_none()
         && length <= MAX_BODY
         && body.len() == length
-        && stdout_bytes <= length
         && offered.iter().all(|id| is_token(id));
     if !well_formed {
         return None;
     }
+    let (stdout, stderr) = body.split_at_checked(stdout_bytes)?;
     Some(Reply {
         exit_code: header(head, "Bazhen-Exit-Code")?.parse::<u8>().ok()?.into(),
         offered,
-        stdout: body[..stdout_bytes].to_vec(),
-        stderr: body[stdout_bytes..].to_vec(),
+        stdout: stdout.to_vec(),
+        stderr: stderr.to_vec(),
     })
 }
 
@@ -442,7 +445,7 @@ mod tests {
     fn reads_without_waiting_once_the_closed_connection_refuses_a_timeout() {
         let unframed = edit(&framed("2", "", "2", b"hi"), "Content-Length: 2\r\n", "");
         // Held open, so a read that still blocked would wait out the 2 s timeout.
-        let (mut client, _open) = daemon_wrote(&unframed, false);
+        let (client, _open) = daemon_wrote(&unframed, false);
         let einval = Err(io::Error::from_raw_os_error(22));
         bound_or_unblock(&client, einval).unwrap();
         let start = Instant::now();
@@ -482,5 +485,53 @@ mod tests {
         assert_eq!(parse_reply(&twice), None);
         let padding = format!("X-Pad: {}\r\nContent-Type", "x".repeat(MAX_HEAD));
         assert_eq!(parse_reply(&edit(&ok, "Content-Type", &padding)), None);
+    }
+
+    mod properties {
+        use super::*;
+        use proptest::prelude::*;
+
+        fn token() -> impl Strategy<Value = String> {
+            "[A-Za-z0-9_-]{1,12}"
+        }
+
+        fn reply() -> impl Strategy<Value = Reply> {
+            (
+                any::<u8>(),
+                prop::collection::vec(token(), 0..4),
+                prop::collection::vec(any::<u8>(), 0..64),
+                prop::collection::vec(any::<u8>(), 0..64),
+            )
+                .prop_map(|(exit, offered, stdout, stderr)| Reply {
+                    exit_code: exit.into(),
+                    offered,
+                    stdout,
+                    stderr,
+                })
+        }
+
+        fn frame(reply: &Reply) -> Vec<u8> {
+            let body = [reply.stdout.as_slice(), reply.stderr.as_slice()].concat();
+            framed(
+                &reply.exit_code.to_string(),
+                &reply.offered.join(","),
+                &reply.stdout.len().to_string(),
+                &body,
+            )
+        }
+
+        proptest! {
+            #[test]
+            fn reads_back_any_reply_framed_as_the_protocol_documents(reply in reply()) {
+                prop_assert_eq!(parse_reply(&frame(&reply)), Some(reply));
+            }
+
+            #[test]
+            fn refuses_every_reply_cut_short(reply in reply(), cut in any::<prop::sample::Index>()) {
+                let whole = frame(&reply);
+                let prefix = &whole[..cut.index(whole.len())];
+                prop_assert_eq!(parse_reply(prefix), None);
+            }
+        }
     }
 }
