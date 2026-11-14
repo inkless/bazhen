@@ -85,56 +85,73 @@ const PROSE_NAMES = new Set(["key", "token", "auth"]);
 
 /**
  * `name = value` or `name: value`, as a TOML or env line, JSON, or Rust's Debug output
- * (`experimental_bearer_token: Some("…")`) shows it. A quoted value runs to its closing quote or
- * the end of the line, escaped quotes included, so a value cut short still goes whole. Every
+ * (`experimental_bearer_token: Some("…")`) shows it. A quoted value runs to its closing quote, or
+ * the end of the line when it has none, escaped quotes included; a TOML `"""` string to its
+ * closing `"""`; an unquoted value to the end of its line, since a secret can hold spaces. Every
  * repetition is bounded or can't overlap the next, so no input backtracks without end.
  */
 const ASSIGNMENT =
-  /(\\?["']?)([\w.-]{1,64})\1([ \t]{0,64}([=:])\s{0,64}(?:Some\(\s{0,64})?)((?:(?:Bearer|Basic|Digest|Token)\s{1,8})?(?:\\"(?:[^"\\\n]|\\[^"]){0,4096}(?:\\")?|"(?:[^"\\\n]|\\.)*"?|'(?:[^'\\\n]|\\.)*'?|(?:\[redacted\]|[^\s,;)}\]]){1,512}))/g;
+  /(\\?["']?)([\w.-]{1,64})\1([ \t]{0,64}([=:])\s{0,64}(?:Some\(\s{0,64})?)((?:(?:bearer|basic|digest|token)\s{1,8})?(?:"""[\s\S]{0,4096}?(?:"""|$)|\\"(?:[^"\\\n]|\\[^"]){0,4096}(?:\\")?|"(?:[^"\\\n]|\\.)*"?|'(?:[^'\\\n]|\\.)*'?|[^\n]{1,512}))/gi;
 
 /**
- * Credentials that need no secret-looking name beside them: a provider's extra headers, whose
- * names are anyone's (`http_headers = { "X-Corp" = "…" }`), a bearer token, a URL's password, and
- * the shapes well-known keys take.
+ * Credentials that need no secret-looking name beside them: a private key's PEM block, cut short
+ * or whole; a provider's extra headers, whose names are anyone's (`http_headers = { "X-Corp" =
+ * "…" }`); a URL's user and password; and the shapes well-known keys take.
  */
 const BARE_SECRETS: readonly [RegExp, string][] = [
+  [
+    /-----BEGIN [A-Z0-9 ]{1,64}-----(?:[\s\S]{0,16384}?-----END [A-Z0-9 ]{1,64}-----|[\s\S]{0,16384})/g,
+    "[redacted]",
+  ],
   [
     /((?:env_)?http_headers["']?[ \t]{0,64}[=:]\s{0,64}(?:Some\(\s{0,64})?)\{[^}]{0,4096}\}?/gi,
     "$1{[redacted]}",
   ],
-  [/\bBearer\s{1,8}[\w.~+/=-]{8,2048}/g, "Bearer [redacted]"],
-  [/(\w{1,32}:\/\/)[^/\s:@]{0,256}:[^/\s@]{1,256}@/g, "$1[redacted]@"],
+  [/(\w{1,32}:\/\/)[^/\s@]{1,256}@/g, "$1[redacted]@"],
   [
     /\b(?:sk-[\w-]{16,512}|[sr]k_(?:live|test)_\w{16,512}|gh[pousr]_\w{20,512}|github_pat_\w{20,512}|glpat-[\w-]{20,512}|hf_\w{20,512}|xox[abprs]-[\w-]{10,512}|AKIA[0-9A-Z]{16}|AIza[\w-]{35}|eyJ[\w-]{8,2048}\.eyJ[\w-]{8,2048}\.[\w-]{8,2048})/g,
     "[redacted]",
   ],
 ];
 
+/** An HTTP authorization scheme and its credentials, in any case, with or without a header name. */
+const SCHEME = /\b(bearer|basic)(\s{1,8})([\w.~+/=-]{8,2048})/gi;
+
+/** Credentials look encoded; prose after `basic` or `bearer` is lowercase letters. */
+const encoded = (value: string) => /[0-9A-Z+/=]/.test(value);
+
 /**
- * More text than this is never shown, so none of it is searched for secrets either. It also bounds
- * the search's cost: a name that turns out not to be a secret's has its value searched again.
+ * How much of a failure's text is kept: the rest is dropped before it is searched, which also
+ * bounds the search's cost, since a name that turns out not to be a secret's has its value
+ * searched again.
  */
 const SEARCHED_MAX = 16 * DETAIL_MAX;
 
 /**
- * The first SEARCHED_MAX characters, cut back to the last break between words: a secret cut in
- * two could escape a pattern that needs its end, as a URL's password does its `@`.
+ * The first SEARCHED_MAX characters, cut back to the last whitespace: a secret cut in two could
+ * escape a pattern that needs its end, as a URL's password does its `@`, and a secret can hold
+ * any other character.
  */
 function searched(text: string): string {
   if (text.length <= SEARCHED_MAX) return text;
   const head = text.slice(0, SEARCHED_MAX);
-  const end = Math.max(...[" ", "\n", "\t", ",", ";"].map((d) => head.lastIndexOf(d)), 0);
+  const end = Math.max(...[" ", "\n", "\t"].map((d) => head.lastIndexOf(d)), 0);
   return `${head.slice(0, end)}…`;
 }
 
 function redacted(text: string): string {
-  const bare = BARE_SECRETS.reduce((t, [pattern, to]) => t.replace(pattern, to), text);
+  const bare = BARE_SECRETS.reduce((t, [pattern, to]) => t.replace(pattern, to), text).replace(
+    SCHEME,
+    (whole, scheme: string, gap: string, value: string) =>
+      encoded(value) ? `${scheme}${gap}[redacted]` : whole,
+  );
   let out = "";
   let copied = 0;
   ASSIGNMENT.lastIndex = 0;
   for (let m = ASSIGNMENT.exec(bare); m !== null; m = ASSIGNMENT.exec(bare)) {
     const [whole, quote = "", name = "", separator = "", op, value = ""] = m;
-    const prose = op === ":" && /^[a-z]+$/i.test(value) && PROSE_NAMES.has(name.toLowerCase());
+    const prose =
+      op === ":" && /^[a-z]+(?:\s|$)/i.test(value) && PROSE_NAMES.has(name.toLowerCase());
     if (SECRET_NAME.test(name) && !prose) {
       out += `${bare.slice(copied, m.index)}${quote}${name}${quote}${separator}[redacted]`;
       copied = m.index + whole.length;

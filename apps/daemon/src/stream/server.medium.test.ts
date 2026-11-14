@@ -153,6 +153,25 @@ describe("stream endpoint", () => {
     await closed;
   });
 
+  it("tells a view its attach failed and why, leaving out a secret the failure echoed", async () => {
+    const hub: StreamDeps["hub"] = {
+      join: () => Promise.reject(new Error('tmux gone; api_key = "s3cr3t"')),
+    };
+    const served = await serveUpgrades([
+      streamRoute({ hub, runtimeRef: (id) => ({ terminalId, runtime: "fake", locator: { id } }) }),
+    ]);
+    server = served.server;
+    const ws = new WebSocket(`ws://${served.host}/v1/terminals/${terminalId}/stream`);
+    await opened(ws);
+    const refusal = new Promise((resolve) =>
+      ws.once("message", (data: Buffer) => resolve(data.toString())),
+    );
+    ws.send(JSON.stringify(hello));
+    expect(await refusal).toBe(
+      '{"type":"error","message":"attach failed: tmux gone; api_key = [redacted]"}',
+    );
+  });
+
   it("says when bytes sent to a view are written, and when they never will be", async () => {
     const { url, viewer, joins, left } = await beating();
     const ws = new WebSocket(url);
