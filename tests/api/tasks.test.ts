@@ -98,6 +98,15 @@ describe("tasks and delegation, through the CLI", () => {
     );
   });
 
+  it("hands one agent's message to another, saying who sent it", async () => {
+    const out = await asAgent(worker.agentId, ["send", coordinator.agentId, "Is", "it", "green?"]);
+    expect(out).toMatchObject({ code: 0, out: expect.stringContaining("sent msg_") });
+    const header = `From agent ${worker.agentId} (claude-code, `;
+    const delivered = () =>
+      claudeModel.requests.filter((r) => r.includes(header)).some((r) => r.includes("green?"));
+    await expect.poll(delivered, { timeout: 30_000 }).toBe(true);
+  });
+
   it("launches a new agent for a delegated subtask, which knows who launched it and gets the brief", async () => {
     const created = await daemon.request("/v1/tasks", {
       method: "POST",
