@@ -18,7 +18,13 @@ already checked (listed at the end).
    wrapped at the seam?
 6. **Names and comments.** Do names say what things are? Does every comment explain a _why_ the
    code can't?
-7. **Docs.** If behaviour, a command or a rule changed, are `AGENTS.md`, the README or these
+7. **Rust** (`rust.md`). Is every `unsafe` in the one listed module, each block's `SAFETY:`
+   comment a real proof of the invariant it names? Does a decoder return an error, never panic,
+   on any input? Are a library's errors typed with thiserror, and wrapped with their source? Is a
+   new dependency pinned in `[workspace.dependencies]`, with a reason in the commit, and its
+   default features trimmed? Does each new Rust test have a `Control:` trailer, and does a
+   behaviour the daemon can observe have its test in the black-box suite too?
+8. **Docs.** If behaviour, a command or a rule changed, are `AGENTS.md`, the README or these
    standards updated in the same commit?
 
 The commit body says why the change was made, and records any `Control:` trailers.
@@ -34,6 +40,11 @@ The commit body says why the change was made, and records any `Control:` trailer
   runs them in a container). It runs on Linux, on Node 24 and 26; macOS is off while the repo is
   private. On a pull request it also runs `pnpm test:falsify` against the target
   branch; run it yourself before pushing.
+- **`pnpm check`'s Rust gates** run rustfmt's check, clippy with pedantic and the restriction
+  lints, cargo-deny and nextest on the whole workspace, and the standards check rejects lint
+  suppressions in `crates/`, a lint configuration other than the standard's, and a dependency
+  not pinned in the workspace. Falsify lists each new Rust test as INVALID, so a branch that adds
+  one needs a `Control:` trailer; item 7 checks there is one per test.
 
 The pre-commit hook is installed by `pnpm install` (husky); never skip it with `--no-verify`.
 Run `pnpm check` yourself before opening a pull request. Don't

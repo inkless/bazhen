@@ -276,6 +276,7 @@ const CONTEXT_DOCS = [
   "docs/standards/testing.md",
   "docs/standards/review.md",
   "docs/standards/ui.md",
+  "docs/standards/rust.md",
 ];
 const PNPM_BUILTINS = new Set(["install", "exec", "add", "remove", "update"]);
 // pnpm options that take a value as the next word; every other option is a bare flag.

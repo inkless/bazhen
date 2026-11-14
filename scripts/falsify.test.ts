@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   classify,
   hasControl,
+  newRustTests,
   newTitles,
   parseArgs,
   parseNameStatus,
@@ -93,6 +94,53 @@ describe("newTitles", () => {
 
   it("ignores a regex .test( call", () => {
     expect(newTitles(diff('const ok = /x/.test("abc");'), FILE)).toEqual([]);
+  });
+});
+
+describe("newRustTests", () => {
+  it("finds each fn the diff adds under #[test], proptest's included", () => {
+    const rust = [
+      "--- a/crates/x/src/main.rs",
+      "+++ b/crates/x/src/main.rs",
+      "@@ -1,3 +1,20 @@",
+      " fn helper() {}",
+      "+#[test]",
+      "+fn reads_a_frame() {}",
+      "+",
+      "+#[tokio::test]",
+      "+async fn answers_hello() {}",
+      "+#[test]",
+      '+#[should_panic(expected = "x")]',
+      "+fn panics_on_x() {}",
+      "+proptest! {",
+      "+    #[test]",
+      "+    fn round_trips(x in any::<u8>()) {}",
+      "+}",
+      "+fn not_a_test() {}",
+    ].join("\n");
+    expect(newRustTests(rust)).toEqual([
+      "reads_a_frame",
+      "answers_hello",
+      "panics_on_x",
+      "round_trips",
+    ]);
+  });
+
+  it("counts a test whose attribute or fn line alone is new, and not one only its body changed", () => {
+    const rust = [
+      "@@ -1,9 +1,9 @@",
+      "+#[test]",
+      " fn became_a_test() {}",
+      " #[test]",
+      "-fn old_name() {}",
+      "+fn new_name() {}",
+      " #[test]",
+      " fn untouched() {",
+      "-    assert!(false);",
+      "+    assert!(true);",
+      " }",
+    ].join("\n");
+    expect(newRustTests(rust)).toEqual(["became_a_test", "new_name"]);
   });
 });
 

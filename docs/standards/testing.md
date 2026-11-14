@@ -17,6 +17,10 @@ page serves that rule, or keeps tests from hurting the machine and each other.
 | Fakes over mocks; behaviour-named tests; no snapshots of terminal output           | review                                      |
 | Behaviour tests are black-box: they reach the daemon only through public surfaces  | review                                      |
 
+Rust tests follow this page too, with the differences in `rust.md` § Tests: nextest, proptest,
+insta for protocol frames, cargo-fuzz for binary protocol decoders, and a `Control:` trailer for
+every new test, because falsify can't judge them by reverting and marks them INVALID.
+
 ## Sizes
 
 Size is about what a test touches, and the file name declares it. The sizes follow _Software
