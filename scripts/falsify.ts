@@ -14,8 +14,11 @@
 //             `Control: <what you broke> -> <how the test failed>`.
 //
 // A Rust test under crates/ lives in the file it tests, so reverting the source would revert the
-// test with it. Each new one (an added `fn` under `#[test]`, proptest's included) comes out
-// INVALID without being run, and so needs a control (docs/standards/rust.md § Tests).
+// test with it. When the branch touches the Rust workspace, nextest lists the tests at the base and
+// at HEAD, so a test is found however it is declared (`#[test]`, proptest, a macro of the crate's
+// own). Each new one comes out INVALID without being run, and needs a Control trailer naming it by
+// its full path, `Control: tests::name: <what you broke> -> <how the test failed>`
+// (docs/standards/rust.md § Tests).
 //
 // Titles come from added lines that look like `it(...)`/`test(...)` calls, so a fixture string in
 // a test file such as 'it("fixture", f)' counts as a test too. It then can't be found in the
@@ -31,10 +34,19 @@
 // when there is no origin.
 
 import { execFileSync, type ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  mkdtempSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, posix } from "node:path";
 import { isAlive, signalGroup, spawnGroup } from "@bazhen/host-guard";
+import { NO_WRAPPER, gateEnv } from "./cargo-gate.ts";
 import { isMain } from "./is-main.ts";
 
 export type Outcome = "KILLED" | "SURVIVED" | "INVALID";
@@ -49,6 +61,7 @@ const WORKTREE_PREFIX = "bz-falsify-";
 const LOCK_REASON = /^bz-falsify pid=(\d+)$/;
 const INSTALL_TIMEOUT_MS = 120_000;
 const VITEST_TIMEOUT_MS = 300_000;
+const CARGO_TIMEOUT_MS = 900_000;
 const KILL_GRACE_MS = 2000;
 
 // Inherited, these point every git command at another repository or index: git exports them to
@@ -125,29 +138,60 @@ export function newTitles(diff: string, file: string): string[] {
 
 const withoutAsync = (call: string) => call.replaceAll(/\basync\s+/g, "");
 
-const RUST_SOURCE = /^crates\/.+\.rs$/;
-const RUST_TEST_ATTR = /^#\[(?:\w+::)*test\b/;
-const RUST_FN = /^(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(\w+)/;
+// What can change the set of Rust tests: a crate's files, or the workspace's manifest and lockfile.
+const RUST_INPUT = /^(?:crates\/|Cargo\.(?:toml|lock)$)/;
 
 /**
- * The Rust tests a diff of one file adds: each `fn` right under a `#[test]`-style attribute, where
- * the function line, the attribute or both are new. Lines the diff removes are skipped, so a test
- * the diff only moves an attribute over still reads as new: the safe direction.
+ * Each test in a `cargo nextest list --message-format json` report, as `<target> <test name>`.
+ * A crate's library and binaries share one target, its name, so a unit test moved between them
+ * is the same test; an integration test's target is its own binary (`crate::file`). Throws on
+ * anything that isn't such a report, so a list that went wrong is never read as empty.
  */
-export function newRustTests(diff: string): string[] {
-  const names: string[] = [];
-  let previous = { text: "", added: false };
-  for (const line of diff.split("\n")) {
-    if (/^(\+\+\+|---) |^@@|^-/.test(line) || line === "") continue;
-    const current = { text: line.slice(1).trim(), added: line.startsWith("+") };
-    if (current.text === "") continue;
-    const fn = RUST_FN.exec(current.text);
-    if (fn?.[1] !== undefined && RUST_TEST_ATTR.test(previous.text)) {
-      if (current.added || previous.added) names.push(fn[1]);
-    }
-    if (!current.text.startsWith("#[") || !RUST_TEST_ATTR.test(previous.text)) previous = current;
+export function rustTestIds(report: unknown): string[] {
+  const suites =
+    typeof report === "object" && report !== null && "rust-suites" in report
+      ? report["rust-suites"]
+      : undefined;
+  if (typeof suites !== "object" || suites === null) {
+    throw new Error("not a nextest list report: no rust-suites");
   }
-  return names;
+  return Object.entries(suites).flatMap(([binary, suite]: [string, unknown]) => {
+    const cases =
+      typeof suite === "object" && suite !== null && "testcases" in suite
+        ? suite.testcases
+        : undefined;
+    if (typeof cases !== "object" || cases === null) {
+      throw new Error(`not a nextest list report: ${binary} has no testcases`);
+    }
+    const target = binary.replace(/::bin\/.*$/, "");
+    return Object.keys(cases).map((name) => `${target} ${name}`);
+  });
+}
+
+/** The tests listed at HEAD that weren't at the base, as `{ binary, name }`. */
+export function addedRustTests(base: string[], head: string[]): { file: string; title: string }[] {
+  const before = new Set(base);
+  return head
+    .filter((id) => !before.has(id))
+    .map((id) => {
+      const space = id.indexOf(" ");
+      return { file: id.slice(0, space), title: id.slice(space + 1) };
+    });
+}
+
+const CONTROL_SUBJECT = /^Control: (.+) -> .+$/gm;
+const escapeRegExp = (text: string) => text.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * The Rust tests no `Control:` trailer names. A trailer names a test when the part before its
+ * `->` holds the test's full path (`module::name`) as a whole word.
+ */
+export function uncontrolledRustTests(names: string[], messages: string): string[] {
+  const subjects = [...messages.matchAll(CONTROL_SUBJECT)].map(([, subject = ""]) => subject);
+  return names.filter((name) => {
+    const named = new RegExp(`(?<!\\w|::)${escapeRegExp(name)}(?!\\w|::)`);
+    return !subjects.some((subject) => named.test(subject));
+  });
 }
 
 export type VitestReport = {
@@ -316,9 +360,19 @@ async function onSignal(signal: NodeJS.Signals): Promise<void> {
 
 const handleSignal = (signal: NodeJS.Signals) => void onSignal(signal);
 
-function run(cmd: string, args: string[], cwd: string, timeoutMs: number): Promise<boolean> {
+function run(
+  cmd: string,
+  args: string[],
+  cwd: string,
+  timeoutMs: number,
+  options: { env?: NodeJS.ProcessEnv; stdout?: number } = {},
+): Promise<boolean> {
   return new Promise((done) => {
-    const child = spawnGroup(cmd, args, { cwd, env: isolatedEnv(), stdio: "ignore" });
+    const child = spawnGroup(cmd, args, {
+      cwd,
+      env: options.env ?? isolatedEnv(),
+      stdio: ["ignore", options.stdout ?? "ignore", "ignore"],
+    });
     running = child;
     let timedOut = false;
     const timer = setTimeout(() => {
@@ -346,6 +400,76 @@ async function install(dir: string): Promise<boolean> {
     (await run("pnpm", ["install", ...flags, "--offline"], dir, INSTALL_TIMEOUT_MS)) ||
     run("pnpm", ["install", ...flags, "--prefer-offline"], dir, INSTALL_TIMEOUT_MS)
   );
+}
+
+/**
+ * A detached worktree of `commit` in `dir`, locked in the same step as it is created, so a crash
+ * can never leave an unlocked (and so never-swept) worktree behind.
+ */
+function addWorktree(dir: string, commit: string, top: string): void {
+  git(["worktree", "add", "--quiet", "--detach", "--lock", "--reason", LOCK, dir, commit], top);
+}
+
+const LOCK = `bz-falsify pid=${process.pid}`;
+
+/**
+ * The Rust tests nextest lists in `dir`, through the Rust gates' clean environment, or undefined
+ * when it couldn't list them. A tree with no Cargo workspace has none.
+ */
+async function listRustTests(dir: string, top: string): Promise<string[] | undefined> {
+  if (!existsSync(join(dir, "Cargo.toml"))) return [];
+  const out = join(dir, "falsify-nextest.json");
+  const fd = openSync(out, "w");
+  const env = { ...gateEnv(isolatedEnv()), CARGO_TARGET_DIR: join(top, "target", "falsify") };
+  let listed: boolean;
+  try {
+    listed = await run(
+      "cargo-nextest",
+      ["nextest", "list", "--workspace", "--locked", ...NO_WRAPPER, "--message-format", "json"],
+      dir,
+      CARGO_TIMEOUT_MS,
+      { env, stdout: fd },
+    );
+  } finally {
+    closeSync(fd);
+  }
+  if (!listed) return undefined;
+  try {
+    return rustTestIds(JSON.parse(readFileSync(out, "utf8")));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The Rust tests HEAD has and the base hasn't, listed by nextest in a temporary worktree, or
+ * undefined when either side couldn't be listed. Listing sees every test however it is declared:
+ * by `#[test]`, proptest, or a macro of the crate's own.
+ */
+async function newRustTests(top: string, base: string, head: string) {
+  const dir = mkdtempSync(join(tmpdir(), WORKTREE_PREFIX));
+  cleanup = () => {
+    cleanup = undefined;
+    removeWorktree(dir, top);
+  };
+  try {
+    addWorktree(dir, base, top);
+    const before = await listRustTests(dir, top);
+    git(["checkout", "--quiet", "--detach", head], dir);
+    const after = await listRustTests(dir, top);
+    if (before === undefined || after === undefined) {
+      const where = before === undefined ? `the base, ${base.slice(0, 12)}` : "HEAD";
+      console.error(
+        `falsify: \`cargo-nextest nextest list\` failed at ${where}, so the Rust tests the ` +
+          "branch adds are unknown. Run `pnpm test:rust` there to see why; if cargo-nextest is " +
+          "missing, install it: cargo install --locked cargo-nextest@0.9.152",
+      );
+      return undefined;
+    }
+    return addedRustTests(before, after);
+  } finally {
+    cleanup?.();
+  }
 }
 
 const USAGE = "usage: node scripts/falsify.ts [--base <ref>]";
@@ -417,15 +541,21 @@ async function main(args: string[]): Promise<number> {
       title,
     }));
   });
-  const rustTests = changes
-    .filter((c) => c.status !== "D" && RUST_SOURCE.test(c.path))
-    .flatMap((c) => {
-      const paths = c.status === "R" && c.oldPath ? [c.oldPath, c.path] : [c.path];
-      return newRustTests(git(["diff", "-M", ...range, "--", ...paths])).map((title) => ({
-        file: c.path,
-        title,
-      }));
-    });
+  let rustTests: { file: string; title: string }[] = [];
+  if (changes.some((c) => RUST_INPUT.test(c.path) || RUST_INPUT.test(c.oldPath ?? ""))) {
+    process.once("SIGINT", handleSignal);
+    process.once("SIGTERM", handleSignal);
+    process.once("SIGHUP", handleSignal);
+    try {
+      const listed = await newRustTests(top, base, head);
+      if (listed === undefined) return 1;
+      rustTests = listed;
+    } finally {
+      process.off("SIGINT", handleSignal);
+      process.off("SIGTERM", handleSignal);
+      process.off("SIGHUP", handleSignal);
+    }
+  }
   if (targets.length === 0 && rustTests.length === 0) {
     console.log(`falsify: no new tests between ${base.slice(0, 12)} and HEAD`);
     return 0;
@@ -460,22 +590,7 @@ async function main(args: string[]): Promise<number> {
     process.once("SIGTERM", handleSignal);
     process.once("SIGHUP", handleSignal);
     try {
-      // Locked in the same step as it is created, so a crash can never leave an unlocked (and so
-      // never-swept) worktree behind.
-      git(
-        [
-          "worktree",
-          "add",
-          "--quiet",
-          "--detach",
-          "--lock",
-          "--reason",
-          `bz-falsify pid=${process.pid}`,
-          dir,
-          head,
-        ],
-        top,
-      );
+      addWorktree(dir, head, top);
       for (const c of reverts) {
         if (c.status === "A" || c.status === "C") rmSync(join(dir, c.path), { force: true });
         else if (c.status === "R" && c.oldPath) {
@@ -551,14 +666,27 @@ async function main(args: string[]): Promise<number> {
     );
     return 1;
   }
-  const invalid = results.filter((r) => r.outcome === "INVALID");
+  const uncontrolled = uncontrolledRustTests(
+    rustTests.map((t) => t.title),
+    messages,
+  );
+  if (uncontrolled.length > 0) {
+    console.error(
+      "\nRust tests can't be judged by reverting, so each new one needs a control of its own. " +
+        "Break the code by hand, confirm the test fails on its assertion, and record it in a " +
+        "commit message on the branch, naming the test by its full path:\n" +
+        uncontrolled
+          .map((name) => `  Control: ${name}: <what you broke> -> <how it failed>`)
+          .join("\n"),
+    );
+    return 1;
+  }
+  const invalid = results.filter((r) => r.outcome === "INVALID" && r.rust !== true);
   if (invalid.length > 0 && !hasControl(messages)) {
     console.error(
-      targets.length === 0
-        ? "\nThis branch adds Rust tests, which can't be judged by reverting."
-        : reverts.length === 0
-          ? "\nThis branch adds tests but no source change to revert."
-          : "\nSome tests could not be judged by reverting (new symbols, tests unrelated to the " +
+      reverts.length === 0
+        ? "\nThis branch adds tests but no source change to revert."
+        : "\nSome tests could not be judged by reverting (new symbols, tests unrelated to the " +
             "source change, unparsed titles, load errors or timeouts).",
     );
     console.error(

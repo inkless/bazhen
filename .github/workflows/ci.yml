@@ -131,8 +131,12 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y tmux fish zsh
       - name: Mark the runner disposable
         run: sudo touch /etc/bazhen-disposable-host
+      # Falsify lists the Rust tests with nextest, at the base and at HEAD, to find the new ones.
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-nextest@0.9.152
       - run: pnpm install --frozen-lockfile
       - name: pnpm test:falsify
         env:

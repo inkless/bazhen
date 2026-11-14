@@ -7,8 +7,8 @@ description: Writes a test for Bazhen's Rust crates in this repository (crates/*
 
 **Gate: no new behaviour without a test that fails first, for the right reason.** Falsify can't
 revert a Rust test's source without reverting the test, so it marks every new one INVALID and
-CI fails the pull request until the branch has a `Control:` trailer. You prove each test by hand
-and record one trailer per test.
+CI fails the pull request until each new test has a `Control:` trailer naming it. You prove each
+test by hand and record its trailer.
 
 ## Steps
 
@@ -30,8 +30,9 @@ and record one trailer per test.
 5. Implement until it passes, then run `pnpm check`.
 6. **Record the control.** Break the code the test names (swap a comparison, drop a check,
    return a constant), run the test, see it fail on its assertion, and restore the code. Add a
-   trailer to a commit on the branch, one per new test:
-   `Control: <what you broke> -> <how the test failed>`.
+   trailer to a commit on the branch for each new test, naming it by the path nextest lists
+   (`pnpm test:rust` prints it):
+   `Control: <module::path::test_name>: <what you broke> -> <how the test failed>`.
 
 ## Checklist
 
@@ -63,4 +64,4 @@ and record one trailer per test.
 | "Falsify can't check Rust, so skip it"      | That's why the control is by hand. It's the only proof there is          |
 | "A property test is overkill for a parser"  | Parsers are where the panics are. One strategy finds what ten cases miss |
 | "I'll `#[ignore]` it for now"               | Fix it or delete it                                                      |
-| "The `Control:` trailer for one covers all" | One per new test; the reviewer holds you to it                           |
+| "The `Control:` trailer for one covers all" | Each new test needs a trailer naming it; falsify fails on any it misses  |

@@ -2,13 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   classify,
   hasControl,
-  newRustTests,
+  addedRustTests,
   newTitles,
   parseArgs,
   parseNameStatus,
   relatedReverts,
+  rustTestIds,
   signalExitCode,
   staleWorktrees,
+  uncontrolledRustTests,
   type VitestReport,
 } from "./falsify.ts";
 
@@ -97,50 +99,77 @@ describe("newTitles", () => {
   });
 });
 
-describe("newRustTests", () => {
-  it("finds each fn the diff adds under #[test], proptest's included", () => {
-    const rust = [
-      "--- a/crates/x/src/main.rs",
-      "+++ b/crates/x/src/main.rs",
-      "@@ -1,3 +1,20 @@",
-      " fn helper() {}",
-      "+#[test]",
-      "+fn reads_a_frame() {}",
-      "+",
-      "+#[tokio::test]",
-      "+async fn answers_hello() {}",
-      "+#[test]",
-      '+#[should_panic(expected = "x")]',
-      "+fn panics_on_x() {}",
-      "+proptest! {",
-      "+    #[test]",
-      "+    fn round_trips(x in any::<u8>()) {}",
-      "+}",
-      "+fn not_a_test() {}",
-    ].join("\n");
-    expect(newRustTests(rust)).toEqual([
-      "reads_a_frame",
-      "answers_hello",
-      "panics_on_x",
-      "round_trips",
+const nextestList = (suites: Record<string, string[]>) => ({
+  "rust-suites": Object.fromEntries(
+    Object.entries(suites).map(([binary, names]) => [
+      binary,
+      { testcases: Object.fromEntries(names.map((n) => [n, { "filter-match": {} }])) },
+    ]),
+  ),
+});
+
+describe("rustTestIds", () => {
+  it("names each test by its target and full path, a crate's lib and bins sharing one", () => {
+    expect(
+      rustTestIds(
+        nextestList({
+          "bazhen-hook::bin/bazhen-hook": ["tests::reads_a_frame"],
+          "bazhen-hook": ["properties::round_trips"],
+          "holder-proto::contract": ["decodes"],
+        }),
+      ),
+    ).toEqual([
+      "bazhen-hook tests::reads_a_frame",
+      "bazhen-hook properties::round_trips",
+      "holder-proto::contract decodes",
     ]);
   });
 
-  it("counts a test whose attribute or fn line alone is new, and not one only its body changed", () => {
-    const rust = [
-      "@@ -1,9 +1,9 @@",
-      "+#[test]",
-      " fn became_a_test() {}",
-      " #[test]",
-      "-fn old_name() {}",
-      "+fn new_name() {}",
-      " #[test]",
-      " fn untouched() {",
-      "-    assert!(false);",
-      "+    assert!(true);",
-      " }",
+  it("refuses anything that isn't a list report, rather than read it as no tests", () => {
+    for (const listed of [null, {}, { "rust-suites": { x: {} } }, "[]"]) {
+      expect(() => rustTestIds(listed)).toThrow(/not a nextest list report/);
+    }
+  });
+});
+
+describe("addedRustTests", () => {
+  it("is the tests HEAD lists that the base didn't, however they were declared", () => {
+    const base = ["hook tests::kept", "hook tests::old_name"];
+    const head = ["hook tests::kept", "hook tests::new_name", "proto frame::cases::macro_made"];
+    expect(addedRustTests(base, head)).toEqual([
+      { file: "hook", title: "tests::new_name" },
+      { file: "proto", title: "frame::cases::macro_made" },
+    ]);
+  });
+});
+
+describe("uncontrolledRustTests", () => {
+  const names = ["tests::reads_a_frame", "properties::round_trips", "tests::reads"];
+
+  it("is every test no Control trailer names by its full path, as a whole path", () => {
+    const messages = [
+      "feat: a",
+      "",
+      "Control: tests::reads_a_frame: drop the length check -> expected Err, got Ok",
+      "",
+      "feat: b",
+      "",
+      "Control: made round_trips fail -> it failed",
+      "The Control: properties::round_trips -> mid-line is no trailer",
+      "Control: properties::round_trips, with no arrow",
+      "Control: tests::reads::deeper: a longer path -> y",
+      "Control: other::tests::reads: a module of the same name -> y",
     ].join("\n");
-    expect(newRustTests(rust)).toEqual(["became_a_test", "new_name"]);
+    expect(uncontrolledRustTests(names, messages)).toEqual([
+      "properties::round_trips",
+      "tests::reads",
+    ]);
+  });
+
+  it("takes one trailer naming several tests, and none when every test has one", () => {
+    const messages =
+      "Control: tests::reads_a_frame, tests::reads and properties::round_trips: x -> y\n";
+    expect(uncontrolledRustTests(names, messages)).toEqual([]);
   });
 });
 
