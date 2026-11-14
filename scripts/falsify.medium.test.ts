@@ -368,6 +368,26 @@ const scriptTest = () => ({
   text: branchTest('import { s } from "./x.ts";\n'),
 });
 
+/**
+ * Commits a generator's `source` and its committed `output` on the branch, then a change to both
+ * with `test`, and runs falsify against the first commit with the stub showing the output.
+ */
+function changeGenerated(source: string, output: string, test: { path: string; text: string }) {
+  write(fx.linked, source, "export const g = 1;\n");
+  write(fx.linked, output, '{"generated":1}\n');
+  git(fx.linked, "add", source, output);
+  git(fx.linked, "commit", "--quiet", "-m", "feat: g1");
+  const base = git(fx.linked, "rev-parse", "HEAD").trim();
+  write(fx.linked, source, "export const g = 2;\n");
+  write(fx.linked, output, '{"generated":2}\n');
+  write(fx.linked, test.path, test.text);
+  git(fx.linked, "add", source, output, test.path);
+  git(fx.linked, "commit", "--quiet", "-m", "feat: g2");
+  return falsify(["--base", base], { STUB_SOURCE: output, STUB_TEST: test.path });
+}
+
+const sawBaseOutput = () => stubLog().includes('SOURCE: {"generated":1}');
+
 describe("falsify on a branch that changes a script", () => {
   it("runs the script's new test against the base's script", () => {
     const result = changeScript(SCRIPT, scriptTest());
@@ -404,22 +424,29 @@ describe("falsify on a branch that changes a script", () => {
   });
 
   it("reverts a generator's committed output with it, so a test reading the output sees the base's", () => {
-    write(fx.linked, "scripts/lint-config.ts", "export const MATRIX = 1;\n");
-    write(fx.linked, ".oxlintrc.json", '{"bans":1}\n');
-    git(fx.linked, "add", "scripts/lint-config.ts", ".oxlintrc.json");
-    git(fx.linked, "commit", "--quiet", "-m", "feat: matrix 1");
-    const base = git(fx.linked, "rev-parse", "HEAD").trim();
-    write(fx.linked, "scripts/lint-config.ts", "export const MATRIX = 2;\n");
-    write(fx.linked, ".oxlintrc.json", '{"bans":2}\n');
     const test = "scripts/lint-config.medium.test.ts";
-    write(fx.linked, test, branchTest('import { MATRIX } from "./lint-config.ts";\n'));
-    git(fx.linked, "add", "scripts/lint-config.ts", ".oxlintrc.json", test);
-    git(fx.linked, "commit", "--quiet", "-m", "feat: matrix 2");
-    const result = falsify(["--base", base], { STUB_SOURCE: ".oxlintrc.json", STUB_TEST: test });
+    const result = changeGenerated("scripts/lint-config.ts", ".oxlintrc.json", {
+      path: test,
+      text: branchTest('import { g } from "./lint-config.ts";\n'),
+    });
     expect({
       status: result.status,
       killed: result.output.includes(`KILLED   ${test} › caps`),
-      sawBaseOutput: stubLog().includes('SOURCE: {"bans":1}'),
+      sawBaseOutput: sawBaseOutput(),
+    }).toEqual({ status: 0, killed: true, sawBaseOutput: true });
+  });
+
+  it("reverts the holder fixtures with the protocol source they are generated from", () => {
+    const test = "packages/protocol/src/holder.test.ts";
+    const result = changeGenerated(
+      "packages/protocol/src/holder.ts",
+      "packages/protocol/fixtures/holder/1.0/frames.json",
+      { path: test, text: branchTest('import { g } from "./holder.ts";\n') },
+    );
+    expect({
+      status: result.status,
+      killed: result.output.includes(`KILLED   ${test} › caps`),
+      sawBaseOutput: sawBaseOutput(),
     }).toEqual({ status: 0, killed: true, sawBaseOutput: true });
   });
 
