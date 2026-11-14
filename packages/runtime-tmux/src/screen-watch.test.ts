@@ -9,7 +9,7 @@ function watched() {
   let checks = 0;
   let screen = false;
   let mode: "answer" | "fail" | "hang" | "hold" = "answer";
-  const held: ((alternate: boolean) => void)[] = [];
+  const held: { answer: (alternate: boolean) => void; fail: (err: Error) => void }[] = [];
   const watch = new ScreenWatch({
     quietMs: 10,
     maxWaitMs: 50,
@@ -18,7 +18,9 @@ function watched() {
       checks++;
       if (mode === "fail") throw new Error("tmux gone");
       if (mode === "hang") return new Promise<boolean>(() => {});
-      if (mode === "hold") return new Promise<boolean>((resolve) => held.push(resolve));
+      if (mode === "hold") {
+        return new Promise<boolean>((answer, fail) => held.push({ answer, fail }));
+      }
       return screen;
     },
   });
@@ -37,7 +39,8 @@ function watched() {
     hangChecks: () => (mode = "hang"),
     /** From now on each check waits until answered, oldest first. */
     holdChecks: () => (mode = "hold"),
-    answerCheck: (answer: boolean) => held.shift()?.(answer),
+    answerCheck: (answer: boolean) => held.shift()?.answer(answer),
+    failCheck: (message: string) => held.shift()?.fail(new Error(message)),
   };
 }
 
@@ -87,6 +90,17 @@ describe("watching tmux's alternate screen", () => {
     w.answerCheck(true);
     await sleep(30);
     expect([w.pushes, w.checks()]).toEqual([[], 1]);
+  });
+
+  it("reports no failure of a check that fails after it is disposed", async () => {
+    const w = watched();
+    w.holdChecks();
+    w.watch.poke();
+    await expect.poll(() => w.checks()).toBe(1);
+    w.watch.dispose();
+    w.failCheck("tmux gone");
+    await sleep(30);
+    expect(w.failures).toEqual([]);
   });
 
   it("reports a check that keeps failing once, not every time", async () => {

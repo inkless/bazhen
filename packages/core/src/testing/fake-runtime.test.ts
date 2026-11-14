@@ -25,6 +25,27 @@ runtimeContract("FakeRuntime in snapshot mode", harness("snapshot"));
 snapshotContract("FakeRuntime in snapshot mode", harness("snapshot"));
 
 describe("the fake runtime's controls", () => {
+  it("takes a respawned terminal's program back to its main screen, telling open streams", async () => {
+    const fake = new FakeRuntime();
+    const spec = {
+      terminalId: newId("term"),
+      tags: { kind: "shell" },
+      argv: ["cat"],
+      cwd: "/w",
+      env: {},
+      size: { cols: 80, rows: 24 },
+      generation: 0,
+    } as const;
+    const ref = await fake.create(spec);
+    const { stream } = await fake.attach(ref, null, 0);
+    const pushed: boolean[] = [];
+    stream.onAlternate((on) => pushed.push(on));
+    fake.output(ref, "\x1b[?1049h");
+    fake.exitProcess(ref);
+    await fake.respawn(ref, { ...spec, generation: 1 });
+    expect(pushed).toEqual([true, false]);
+  });
+
   it("records what reached a terminal, and ends every client when the terminal goes", async () => {
     const fake = new FakeRuntime();
     const ref = await fake.create({

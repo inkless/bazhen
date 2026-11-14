@@ -357,7 +357,9 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       harness.replaceProcess(runtime, ref);
       const refused = runtime.signal(ref, "SIGKILL");
       await expect(refused).rejects.toThrow(StaleIncarnation);
-      await expect(refused).rejects.not.toMatchObject({ reason: "server-replaced" });
+      await expect(refused).rejects.toMatchObject({
+        reason: expect.stringMatching(/^(pane|process)-replaced$/),
+      });
     });
 
     it("refuses to respawn from a ref to an earlier generation", async () => {
@@ -440,18 +442,20 @@ export function snapshotContract(name: string, harness: ContractHarness): void {
     return made.runtime;
   };
 
+  const spec: TerminalSpec = {
+    terminalId: newId("term"),
+    tags: { kind: "shell" },
+    argv: ["cat"],
+    cwd: harness.cwd,
+    env: {},
+    size: { cols: 80, rows: 24 },
+    generation: 0,
+  };
+
   describe(`${name}: the snapshot attach contract`, () => {
     it("attaches on a snapshot that its stream carries on from, nothing missed or repeated", async () => {
       const runtime = fresh();
-      const ref = await runtime.create({
-        terminalId: newId("term"),
-        tags: { kind: "shell" },
-        argv: ["cat"],
-        cwd: harness.cwd,
-        env: {},
-        size: { cols: 80, rows: 24 },
-        generation: 0,
-      });
+      const ref = await runtime.create({ ...spec, terminalId: newId("term") });
       const first = await snapshotClient(runtime, ref);
       first.stream.write(encode("before\r"));
       await expect.poll(() => first.live(), { timeout: harness.waitMs }).toContain("before");
@@ -467,6 +471,22 @@ export function snapshotContract(name: string, harness: ContractHarness): void {
         expect.stringContaining("before"),
         expect.not.stringContaining("before"),
       ]);
+    });
+
+    it("counts a respawned process's output from 0, while a stream from before goes on", async () => {
+      const runtime = fresh();
+      const s = { ...spec, terminalId: newId("term") };
+      const ref = await runtime.create(s);
+      const first = await snapshotClient(runtime, ref);
+      first.stream.write(encode("before\r"));
+      await expect.poll(() => first.live(), { timeout: harness.waitMs }).toContain("before");
+      await runtime.signal(ref, "SIGTERM");
+      await expect.poll(() => exitOf(runtime, ref), { timeout: harness.waitMs }).not.toBeNull();
+      const next = await runtime.respawn(ref, { ...s, generation: 1 });
+      const late = await snapshotClient(runtime, next);
+      expect(late.offset).toBe(0);
+      first.stream.write(encode("after\r"));
+      await expect.poll(() => first.live(), { timeout: harness.waitMs }).toContain("after");
     });
   });
 }

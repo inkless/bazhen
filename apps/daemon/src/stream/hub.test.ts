@@ -23,14 +23,19 @@ import {
 
 /** What a browser shows after writing everything a view was sent: each non-blank line. */
 async function screenOf(sent: readonly string[]): Promise<string[]> {
+  return (await rowsOf(sent)).all.filter((line) => line !== "");
+}
+
+/** Every row a browser holds after writing what a view was sent, and the first on its screen. */
+async function rowsOf(sent: readonly string[]): Promise<{ all: string[]; top: number }> {
   const term = new headless.Terminal({ ...size, allowProposedApi: true });
   await new Promise<void>((resolve) => term.write(sent.join(""), resolve));
   const buffer = term.buffer.active;
-  const lines = Array.from({ length: buffer.length }, (_, y) =>
+  const all = Array.from({ length: buffer.length }, (_, y) =>
     (buffer.getLine(y)?.translateToString(true) ?? "").trim(),
   );
   term.dispose();
-  return lines.filter((line) => line !== "");
+  return { all, top: buffer.baseY };
 }
 
 /** A runtime with one terminal, whose program echoes nothing, and what reaches it. */
@@ -201,6 +206,11 @@ describe("terminal hub", () => {
     expect([await screenOf(first.seen), await screenOf(late.seen)]).toEqual([
       ["earlier output", "before one two three"],
       ["earlier output", "before one two three"],
+    ]);
+    const { all, top } = await rowsOf(late.seen);
+    expect([all.slice(0, top).includes("earlier output"), all[top]]).toEqual([
+      true,
+      "before one two three",
     ]);
   });
 

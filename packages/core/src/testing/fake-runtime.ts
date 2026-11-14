@@ -5,7 +5,8 @@
 // switches screens puts the program on its alternate screen or takes it off. As with tmux,
 // no server runs until the first terminal is created or after the last one goes, and while none
 // runs nothing can be read. It attaches as tmux does, with the history beside a stream that
-// redraws, or, in snapshot mode, as a holder does, with one snapshot the stream carries on from.
+// redraws, or, in snapshot mode, as a holder does, with one snapshot the stream carries on from:
+// everything the terminal printed, replayed, so a test that prints a query puts it in a snapshot.
 
 import type { ExitStatus, Signal } from "@bazhen/protocol";
 import type { TerminalId } from "../ids.ts";
@@ -54,8 +55,10 @@ interface Terminal {
   pane: Pane;
   size: Size;
   history: string;
-  /** Everything the process has printed, which a snapshot replays; its length is the offset. */
+  /** Everything the terminal has printed, which a snapshot replays. */
   printed: Uint8Array;
+  /** How much of it the current process printed: a snapshot's offset. */
+  offset: number;
   /** Whether the program is on its alternate screen, as its last switch in its output says. */
   alternate: boolean;
   readonly streams: Set<Client>;
@@ -140,6 +143,7 @@ export class FakeRuntime implements RuntimeAdapter {
       size: spec.size,
       history: "",
       printed: new Uint8Array(),
+      offset: 0,
       alternate: false,
       streams: new Set(),
       clients: { attaches: [], written: [], resizes: [], closes: 0 },
@@ -225,7 +229,7 @@ export class FakeRuntime implements RuntimeAdapter {
     // A respawn replaces the process; the terminal, its id and tags, stays.
     t.spec = { ...t.spec, ...spec };
     t.pane = { ...this.pane(t.spec), id: t.pane.id };
-    t.printed = new Uint8Array();
+    t.offset = 0;
     if (t.alternate) {
       t.alternate = false;
       for (const client of t.streams) client.switched(false);
@@ -377,20 +381,21 @@ export class FakeRuntime implements RuntimeAdapter {
 
   private emit(t: Terminal, bytes: Uint8Array): void {
     t.printed = concat(t.printed, bytes);
+    t.offset += bytes.length;
     const was = t.alternate;
     t.alternate = screenAfter(decode(bytes), was);
     for (const client of t.streams) client.emit(bytes);
     if (t.alternate !== was) for (const client of t.streams) client.switched(t.alternate);
   }
 
-  /** The history scrolled above the screen, then everything printed since, as the hub seeds it. */
+  /** The history scrolled above a clear screen, then everything printed since from its top. */
   private snapshotOf(t: Terminal): Omit<SnapshotAttached, "stream"> {
-    const above = "\r\n".repeat(t.size.rows);
+    const above = `${"\r\n".repeat(t.size.rows)}\x1b[0m\x1b[H`;
     const history = t.history === "" ? "" : `${t.history.replaceAll("\n", "\r\n")}${above}`;
     return {
       kind: "snapshot",
       vt: concat(encode(history), t.printed),
-      offset: t.printed.length,
+      offset: t.offset,
       alternate: t.alternate,
     };
   }

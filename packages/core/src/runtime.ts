@@ -131,8 +131,9 @@ export interface RuntimeStream {
   readonly size: Size;
   onData(cb: (bytes: Uint8Array) => void): void;
   /**
-   * The stream is over: the terminal ended, or the runtime lost its connection to it, or it could
-   * no longer deliver every byte in order. The consumer tells these apart, and attaches again.
+   * The stream is over: the terminal ended, or the runtime lost its connection to it, or, for a
+   * snapshot client, it could no longer deliver every byte in order. A close the consumer didn't
+   * ask for, of a terminal that still runs, is for it to attach again.
    */
   onClose(cb: () => void): void;
   write(bytes: Uint8Array): void;
@@ -140,7 +141,8 @@ export interface RuntimeStream {
   /**
    * Each time the program moves to or from its alternate screen, from the state `Attached`
    * reported, and never twice the same way in a row. A runtime that only learns of a switch by
-   * asking may report it before or after the output that made it reaches the stream.
+   * asking may report it before or after the output that made it reaches the stream, and a
+   * respawn's return to the main screen only once the new process prints.
    */
   onAlternate(cb: (alternate: boolean) => void): void;
   /**
@@ -193,8 +195,9 @@ export interface SnapshotAttached extends AttachedClient {
    */
   readonly vt: Uint8Array;
   /**
-   * Bytes the process the ref names has printed, from 0 at its start: a respawn starts the count
-   * again. At most `Number.MAX_SAFE_INTEGER`.
+   * Bytes the process the ref names has printed, from 0 at its start. The stream outlives a
+   * respawn, and goes on with the same terminal, the next process's output counted from 0 again.
+   * At most `Number.MAX_SAFE_INTEGER`.
    */
   readonly offset: number;
 }
