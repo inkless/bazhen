@@ -2,6 +2,14 @@
 
 [graph]
 all-features = true
+# The triples Bazhen is built for: alacritty_terminal's windows-sys is never built, and would
+# otherwise count as a second version of the one rustix takes.
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-apple-darwin",
+  "aarch64-apple-darwin",
+]
 
 [advisories]
 yanked = "deny"

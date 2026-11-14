@@ -38,6 +38,7 @@ Contributing, for people and agents: [AGENTS.md](AGENTS.md) and [docs/standards/
 - `apps/daemon` — the service: configuration and paths, HTTP API, SQLite store, PTY seam
 - `apps/cli` — the `bazhen` command, a client of the daemon's Unix socket
 - `crates/bazhen-hook` — `bazhen-hook`, the hook client harnesses run (Rust, standard library only)
+- `crates/bazhen-holder-engine` — a terminal's screen and compact history, for the PTY holder (Rust)
 - `apps/web` — React + Vite client, with React Aria Components for its widgets (`docs/standards/ui.md`)
 - `packages/protocol` — shared types, schemas, and the protocol version
 - `packages/core` — domain model and state machines; no platform imports

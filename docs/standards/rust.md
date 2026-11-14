@@ -220,7 +220,10 @@ whose output the harness reads, logs nothing.
   behaviour everywhere at once.
 - **`pnpm deny`** runs cargo-deny with `deny.toml`. It fails on a licence outside the allow-list
   (dev-dependencies included), an advisory or a yanked crate, two versions of one crate, a
-  wildcard version, or a source other than crates.io. A new licence joins the allow-list in the
+  wildcard version, or a source other than crates.io. It reads the dependency tree for the
+  triples Bazhen is built for, Linux and macOS on x86_64 and aarch64 (`[graph] targets`): a
+  crate only Windows builds, such as alacritty_terminal's `windows-sys`, is neither checked nor a
+  second version. A new licence joins the allow-list in the
   commit that needs it, naming the crate. The first crate to take `thiserror` or `tracing` meets
   both limits: they bring `unicode-ident`, under Unicode-3.0, and may bring a second version of a
   crate already in the tree (`syn`, say). Add the licence with that reason, and align the versions

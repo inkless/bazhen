@@ -10,6 +10,7 @@ publish = false
 # Every third-party crate is pinned here, exactly, and members take it with `{ workspace = true }`
 # (docs/standards/rust.md § Dependencies).
 [workspace.dependencies]
+alacritty_terminal = { version = "=0.26.0", default-features = false }
 proptest = { version = "=1.12.0", default-features = false, features = ["std"] }
 
 [workspace.lints.rust]
