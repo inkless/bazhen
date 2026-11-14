@@ -1,5 +1,5 @@
 import headless from "@xterm/headless";
-import { assert, describe, expect, it, onTestFinished, vi } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import {
   newId,
   type AttachmentId,
@@ -170,22 +170,27 @@ function memoryLog(closing = false) {
 
 const size = { cols: 80, rows: 24 };
 
-/** Fakes timeouts for the rest of the test, so how long a client lingers is the test's to say. */
-function fakeTimeouts() {
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-  onTestFinished(() => {
-    vi.useRealTimers();
-  });
-}
-
-/** Settles `work` under fake timeouts, running only those due now, as the emulator's writes are. */
-async function settle<T>(work: Promise<T>): Promise<T> {
-  const pending = Symbol("pending");
-  for (;;) {
-    const first = await Promise.race([work, Promise.resolve(pending)]);
-    if (first !== pending) return first;
-    await vi.advanceTimersByTimeAsync(0);
-  }
+/** Timers a test runs by hand: `advance` moves the clock on and runs what is due, in order. */
+function handTimers() {
+  let now = 0;
+  const pending: { at: number; run: () => void }[] = [];
+  const later = (ms: number, run: () => void) => {
+    const timer = { at: now + ms, run };
+    pending.push(timer);
+    return () => {
+      if (pending.includes(timer)) pending.splice(pending.indexOf(timer), 1);
+    };
+  };
+  const advance = (ms: number) => {
+    now += ms;
+    for (;;) {
+      const due = pending.filter((t) => t.at <= now).toSorted((a, b) => a.at - b.at)[0];
+      if (due === undefined) return;
+      pending.splice(pending.indexOf(due), 1);
+      due.run();
+    }
+  };
+  return { opts: { ...HUB_DEFAULTS, later }, advance, pending: () => pending.length };
 }
 
 describe("terminal hub", () => {
@@ -659,33 +664,33 @@ describe("terminal hub", () => {
   });
 
   it("closes the runtime client once the last view has been gone a moment, and only then", async () => {
-    fakeTimeouts();
+    const clock = handTimers();
     const rt = await fakeRuntime();
     const { log, events } = memoryLog();
-    const hub = new Hub(rt.runtime, log);
-    const a = await settle(hub.join(rt.ref, viewer().v, size));
-    const b = await settle(hub.join(rt.ref, viewer().v, size));
+    const hub = new Hub(rt.runtime, log, clock.opts);
+    const a = await hub.join(rt.ref, viewer().v, size);
+    const b = await hub.join(rt.ref, viewer().v, size);
     a.leave();
     b.leave();
     const ended = events.at(-1);
-    vi.advanceTimersByTime(HUB_DEFAULTS.lingerMs - 1);
+    clock.advance(HUB_DEFAULTS.lingerMs - 1);
     const meanwhile = rt.counts().closes;
-    vi.advanceTimersByTime(1);
+    clock.advance(1);
     expect([ended, meanwhile, rt.counts().closes]).toEqual([`ended ${b.id} client_closed`, 0, 1]);
   });
 
-  it("gives a view that comes back meanwhile a client of its own, and lets the old one go once it draws", async () => {
-    fakeTimeouts();
+  it("gives a view that comes back meanwhile a client of its own, and lets the old one go once it sends output", async () => {
+    const clock = handTimers();
     const rt = await fakeRuntime();
-    const hub = new Hub(rt.runtime, memoryLog().log);
-    (await settle(hub.join(rt.ref, viewer().v, size))).leave();
+    const hub = new Hub(rt.runtime, memoryLog().log, clock.opts);
+    (await hub.join(rt.ref, viewer().v, size)).leave();
     const back = viewer();
-    await settle(hub.join(rt.ref, back.v, size));
-    const beforeItDrew = rt.counts();
+    await hub.join(rt.ref, back.v, size);
+    const beforeItSent = rt.counts();
     rt.emit("out");
     const once = rt.counts();
-    vi.advanceTimersByTime(HUB_DEFAULTS.lingerMs);
-    expect([beforeItDrew, once, rt.counts(), back.seen.at(-1)]).toEqual([
+    clock.advance(HUB_DEFAULTS.lingerMs);
+    expect([beforeItSent, once, rt.counts(), back.seen.at(-1)]).toEqual([
       { attaches: 2, closes: 0 },
       { attaches: 2, closes: 1 },
       { attaches: 2, closes: 1 },
@@ -693,31 +698,34 @@ describe("terminal hub", () => {
     ]);
   });
 
-  it("closes the client before when a view that never drew leaves, and keeps its own a moment though it draws then", async () => {
-    fakeTimeouts();
+  it("keeps a client that sent output while a view whose client sent none comes and goes", async () => {
+    const clock = handTimers();
     const rt = await fakeRuntime();
-    const hub = new Hub(rt.runtime, memoryLog().log);
-    (await settle(hub.join(rt.ref, viewer().v, size))).leave();
-    (await settle(hub.join(rt.ref, viewer().v, size))).leave();
-    const once = rt.counts();
-    rt.emit("its first output");
-    const drawn = rt.counts();
-    vi.advanceTimersByTime(HUB_DEFAULTS.lingerMs);
-    expect([once, drawn, rt.counts()]).toEqual([
-      { attaches: 2, closes: 1 },
+    const hub = new Hub(rt.runtime, memoryLog().log, clock.opts);
+    const first = await hub.join(rt.ref, viewer().v, size);
+    rt.emit("drawn");
+    first.leave();
+    (await hub.join(rt.ref, viewer().v, size)).leave();
+    const bothParked = rt.counts();
+    rt.emit("the second one's first output");
+    const secondSent = rt.counts();
+    clock.advance(HUB_DEFAULTS.lingerMs);
+    expect([bothParked, secondSent, rt.counts()]).toEqual([
+      { attaches: 2, closes: 0 },
       { attaches: 2, closes: 1 },
       { attaches: 2, closes: 2 },
     ]);
   });
 
   it("leaves nothing to close when its terminal goes while the client lingers", async () => {
-    fakeTimeouts();
+    const clock = handTimers();
     const rt = await fakeRuntime();
-    const hub = new Hub(rt.runtime, memoryLog().log);
-    (await settle(hub.join(rt.ref, viewer().v, size))).leave();
+    const hub = new Hub(rt.runtime, memoryLog().log, clock.opts);
+    (await hub.join(rt.ref, viewer().v, size)).leave();
     rt.end();
-    vi.advanceTimersByTime(HUB_DEFAULTS.lingerMs);
-    expect(rt.counts().closes).toBe(0);
+    const timers = clock.pending();
+    clock.advance(HUB_DEFAULTS.lingerMs);
+    expect([timers, rt.counts().closes]).toEqual([0, 0]);
   });
 
   it("tells every view when the terminal itself goes away", async () => {

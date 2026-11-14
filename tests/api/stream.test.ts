@@ -78,7 +78,7 @@ describe("the terminal stream", () => {
     late.close();
   });
 
-  it("keeps its client a moment after the last view closes on an Enter, then lets it go", async () => {
+  it("keeps the client of a view closed on an Enter until the next view's client is in", async () => {
     const program = await daemon.program([
       "sh",
       "-c",
@@ -86,18 +86,29 @@ describe("the terminal stream", () => {
     ]);
     await waitUntil(() => daemon.screen(program.agentId).includes("ready"), "the program");
     const session = String(daemon.paneFact(program.agentId, "session_name"));
-    const clients = () => daemon.tmux("list-clients", "-t", session).trim();
-    const view = await daemon.view(program.terminalId, "interactive");
-    await view.drive();
-    view.type("last words\r");
-    view.close();
-    await view.closed();
-    // Long enough for a client killed at the close to be gone, well inside the hub's grace.
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    const lingering = clients();
+    // tmux runs the hook as each client attaches, so this lists how many clients the session had
+    // at each attach, in tmux's own order.
+    daemon.tmux(
+      "set-hook",
+      "-t",
+      session,
+      "client-attached",
+      `set-option -aF -t '${session}' @attached '#{session_attached} '`,
+    );
+    const attachedCounts = () =>
+      daemon.tmux("show-options", "-v", "-t", session, "@attached").trim();
+    const typed = await daemon.view(program.terminalId, "interactive");
+    await typed.drive();
+    typed.type("last words\r");
+    typed.close();
+    await typed.closed();
+    const next = await daemon.view(program.terminalId, "observe");
+    await expect.poll(attachedCounts, { timeout: 10_000 }).toBe("1 2");
     await expect.poll(() => daemon.screen(program.agentId)).toContain("got last words");
-    await expect.poll(clients, { timeout: 10_000 }).toBe("");
-    expect(lingering).not.toBe("");
+    next.close();
+    await expect
+      .poll(() => daemon.tmux("list-clients", "-t", session).trim(), { timeout: 10_000 })
+      .toBe("");
   });
 
   it("refuses a stream opened from a page on another origin", async () => {
