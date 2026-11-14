@@ -1,7 +1,7 @@
 // What every RuntimeAdapter promises the daemon, as one suite. It runs against FakeRuntime in
 // `pnpm check`, in both its attach modes, and against TmuxRuntime in the test container, so the
-// fake can't drift from tmux. It names no runtime's own parts: a ref's locator is read only for
-// the generation every runtime records.
+// fake can't drift from tmux. It reads a ref's locator only for the generation every runtime
+// records.
 
 import type { ExitStatus } from "@bazhen/protocol";
 import { assert, describe, expect, it, onTestFinished } from "vitest";
@@ -210,6 +210,7 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       await expect.poll(() => pushed, { timeout: harness.waitMs }).toEqual([true]);
       stream.write(encode("still there\r"));
       await delay(300);
+      expect(pushed).toEqual([true]);
       stream.write(encode("\x1b[?1049l\r"));
       await expect.poll(() => pushed, { timeout: harness.waitMs }).toEqual([true, false]);
       expect(alternate).toBe(false);
@@ -246,8 +247,31 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       const ref = await runtime.create(s);
       await deadOf(runtime, ref);
       const next = await runtime.respawn(ref, { ...s, generation: 1, argv: sleeping });
-      expect([next.terminalId, next.locator.generation]).toEqual([ref.terminalId, "1"]);
-      expect(await running(runtime, next)).toEqual({ ref: next, dead: false });
+      const entries = (await runtime.inventory()).filter(
+        (e) => e.ref.terminalId === ref.terminalId,
+      );
+      expect([next.locator.generation, entries.map((e) => [e.ref, e.exit])]).toEqual([
+        "1",
+        [[next, null]],
+      ]);
+    });
+
+    it("respawns a terminal left on its alternate screen onto its main screen", async () => {
+      const runtime = fresh();
+      const s = spec(["cat"]);
+      const ref = await runtime.create(s);
+      const { stream } = await runtime.attach(ref, null, 0);
+      onTestFinished(() => stream.close());
+      const pushed: boolean[] = [];
+      stream.onAlternate((on) => pushed.push(on));
+      stream.write(encode("\x1b[?1049h\r"));
+      await expect.poll(() => pushed, { timeout: harness.waitMs }).toEqual([true]);
+      await runtime.signal(ref, "SIGTERM");
+      await deadOf(runtime, ref);
+      const next = await runtime.respawn(ref, { ...s, generation: 1, argv: sleeping });
+      const after = await runtime.attach(next, null, 0);
+      onTestFinished(() => after.stream.close());
+      expect(after.alternate).toBe(false);
     });
 
     it("reports a respawned terminal's next exit under its new generation", async () => {
@@ -327,11 +351,13 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       expect(await exitOf(runtime, ref)).toBeOneOf(causes({ type: "exited", code: 0 }));
     });
 
-    it("refuses to act on a process replaced outside Bazhen", async () => {
+    it("refuses to act on a process replaced outside Bazhen, on a server it was made on", async () => {
       const runtime = fresh();
       const ref = await runtime.create(spec(sleeping));
       harness.replaceProcess(runtime, ref);
-      await expect(runtime.signal(ref, "SIGKILL")).rejects.toThrow(StaleIncarnation);
+      const refused = runtime.signal(ref, "SIGKILL");
+      await expect(refused).rejects.toThrow(StaleIncarnation);
+      await expect(refused).rejects.not.toMatchObject({ reason: "server-replaced" });
     });
 
     it("refuses to respawn from a ref to an earlier generation", async () => {

@@ -50,7 +50,7 @@ describe("watching tmux's alternate screen", () => {
     await expect.poll(() => w.pushes).toEqual([true]);
     w.watch.poke();
     await sleep(40);
-    expect(w.pushes).toEqual([true]);
+    expect([w.pushes, w.checks()]).toEqual([[true], 2]);
   });
 
   it("starts no check while one is still running", async () => {
@@ -74,6 +74,19 @@ describe("watching tmux's alternate screen", () => {
     await expect.poll(() => w.checks()).toBe(2);
     w.answerCheck(true);
     await expect.poll(() => w.pushes).toEqual([true]);
+  });
+
+  it("reports nothing, and checks no more, once it is disposed while a check runs", async () => {
+    const w = watched();
+    w.holdChecks();
+    w.watch.poke();
+    await expect.poll(() => w.checks()).toBe(1);
+    w.watch.poke();
+    await sleep(30);
+    w.watch.dispose();
+    w.answerCheck(true);
+    await sleep(30);
+    expect([w.pushes, w.checks()]).toEqual([[], 1]);
   });
 
   it("reports a check that keeps failing once, not every time", async () => {

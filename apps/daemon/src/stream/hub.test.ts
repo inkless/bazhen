@@ -659,6 +659,18 @@ describe("terminal hub: screen state and slow views", () => {
     expect([screens(a), screens(b)]).toEqual([switched, switched]);
   });
 
+  it("tells a view that opens after a switch of screens where the program is now", async () => {
+    const rt = await fakeRuntime();
+    const hub = new Hub(rt.runtime, memoryLog().log);
+    await hub.join(rt.ref, viewer().v, size);
+    rt.emit("\x1b[?1049h");
+    const late = viewer();
+    await hub.join(rt.ref, late.v, size);
+    expect(late.frames.filter((f) => f.type === "screen")).toEqual([
+      { type: "screen", alternate: true },
+    ]);
+  });
+
   it("tells every view what failed in the runtime", async () => {
     const rt = await fakeRuntime();
     const hub = new Hub(rt.runtime, memoryLog().log);
@@ -804,8 +816,6 @@ describe("terminal hub: room for views", () => {
   let clock = 0;
   const room = {
     ...HUB_DEFAULTS,
-    screenQuietMs: 10,
-    screenMaxWaitMs: 50,
     snapshotChunkBytes: 100,
     snapshotStallMs: 1000,
     now: () => clock,

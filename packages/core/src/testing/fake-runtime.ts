@@ -226,6 +226,10 @@ export class FakeRuntime implements RuntimeAdapter {
     t.spec = { ...t.spec, ...spec };
     t.pane = { ...this.pane(t.spec), id: t.pane.id };
     t.printed = new Uint8Array();
+    if (t.alternate) {
+      t.alternate = false;
+      for (const client of t.streams) client.switched(false);
+    }
     this.reportIfExited(t);
     return this.refOf(t);
   }
@@ -379,9 +383,10 @@ export class FakeRuntime implements RuntimeAdapter {
     if (t.alternate !== was) for (const client of t.streams) client.switched(t.alternate);
   }
 
-  /** The history as lines above everything printed since, which replays to the same screen. */
+  /** The history scrolled above the screen, then everything printed since, as the hub seeds it. */
   private snapshotOf(t: Terminal): Omit<SnapshotAttached, "stream"> {
-    const history = t.history === "" ? "" : `${t.history.replaceAll("\n", "\r\n")}\r\n`;
+    const above = "\r\n".repeat(t.size.rows);
+    const history = t.history === "" ? "" : `${t.history.replaceAll("\n", "\r\n")}${above}`;
     return {
       kind: "snapshot",
       vt: concat(encode(history), t.printed),

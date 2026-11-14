@@ -130,15 +130,23 @@ export interface RuntimeStream {
   /** The size the client attached at; the runtime picks it when none was asked for. */
   readonly size: Size;
   onData(cb: (bytes: Uint8Array) => void): void;
+  /**
+   * The stream is over: the terminal ended, or the runtime lost its connection to it, or it could
+   * no longer deliver every byte in order. The consumer tells these apart, and attaches again.
+   */
   onClose(cb: () => void): void;
   write(bytes: Uint8Array): void;
   resize(size: Size): Promise<void>;
   /**
    * Each time the program moves to or from its alternate screen, from the state `Attached`
-   * reported, and never twice the same way in a row.
+   * reported, and never twice the same way in a row. A runtime that only learns of a switch by
+   * asking may report it before or after the output that made it reaches the stream.
    */
   onAlternate(cb: (alternate: boolean) => void): void;
-  /** Trouble the stream ran into that its views should hear of, once per run of the same failure. */
+  /**
+   * Trouble its views should hear of, after which the stream carries on: a failure that ends it
+   * closes it instead. One that keeps failing is reported once, until it succeeds again.
+   */
   onFailure(cb: (failure: StreamFailure) => void): void;
   /** Must release every OS handle the stream holds. */
   close(): void;
@@ -156,10 +164,15 @@ export interface StreamFailure {
  */
 export type Attached = HistoryAttached | SnapshotAttached;
 
-/** A client whose first output redraws the screen, but can't redraw the history above it. */
-export interface HistoryAttached {
-  readonly kind: "history";
+interface AttachedClient {
   readonly stream: RuntimeStream;
+  /** Whether the program was on its alternate screen as the client attached. */
+  readonly alternate: boolean;
+}
+
+/** A client whose first output redraws the screen, but can't redraw the history above it. */
+export interface HistoryAttached extends AttachedClient {
+  readonly kind: "history";
   /**
    * The history above the screen as the client attached, oldest first: lines separated by `\n`,
    * with their SGR attributes, and empty for a program on its alternate screen. Read after the
@@ -167,23 +180,23 @@ export interface HistoryAttached {
    * draws the screen. Read on demand only, never polled (foundation-design §4.2, §5.9).
    */
   readonly history: string;
-  /** Whether the program was on its alternate screen as the client attached. */
-  readonly alternate: boolean;
 }
 
 /** A client whose stream carries on exactly where its snapshot ends. */
-export interface SnapshotAttached {
+export interface SnapshotAttached extends AttachedClient {
   readonly kind: "snapshot";
-  readonly stream: RuntimeStream;
   /**
    * VT bytes that rebuild the screen, the history above it, the cursor and the modes exactly as
-   * they were after the program's first `offset` bytes of output. The stream's bytes are the ones
-   * after them, none missed or repeated.
+   * they were after `offset` bytes of output. The stream's bytes are the ones after them, none
+   * missed or repeated; a stream that can't keep to that closes. They only set state and never
+   * ask the terminal anything, so a terminal that replays them has nothing to answer.
    */
   readonly vt: Uint8Array;
-  /** A count of output bytes, so at most `Number.MAX_SAFE_INTEGER`. */
+  /**
+   * Bytes the process the ref names has printed, from 0 at its start: a respawn starts the count
+   * again. At most `Number.MAX_SAFE_INTEGER`.
+   */
   readonly offset: number;
-  readonly alternate: boolean;
 }
 
 export interface RuntimeAdapter {
