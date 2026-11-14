@@ -30,9 +30,9 @@ function pair(fake: FakeHolderOptions = {}, options: Partial<HolderClientOptions
   return { near, holder, events, opening };
 }
 
-async function connected() {
-  const { holder, events, opening } = pair();
-  return { client: await opening, holder, events };
+async function connected(options: Partial<HolderClientOptions> = {}) {
+  const { near, holder, events, opening } = pair({}, options);
+  return { client: await opening, near, holder, events };
 }
 
 const inputBytes = (frame: FakeRequest) => ("bytes" in frame ? frame.bytes : new Uint8Array());
@@ -72,7 +72,12 @@ describe("HolderClient", () => {
     },
   );
 
-  it("says hello with its version and the writer flag, and sends nothing more until answered", async () => {
+  it("asks to be a reader unless told to ask for the writer slot", async () => {
+    const { holder } = pair({ hello: false });
+    await expect(holder.request()).resolves.toMatchObject({ body: { writer: false } });
+  });
+
+  it("says hello first, with its version and the writer flag it was given", async () => {
     const { holder, opening } = pair({ hello: false }, { writer: true });
     const hello = await holder.request();
     expect(hello).toMatchObject({ type: "hello", body: { protocol: ["1.0"], writer: true } });
@@ -136,12 +141,35 @@ describe("HolderClient", () => {
     expect({ open: client.open, events }).toEqual({ open: true, events: [] });
   });
 
+  it("drops an error answering an aborted request rather than reporting refused input", async () => {
+    const { client, holder, events } = await connected();
+    const abort = new AbortController();
+    const abandoned = client.resize({ cols: 90, rows: 20 }, { signal: abort.signal });
+    const late = await holder.request();
+    abort.abort(new Error("deadline"));
+    await expect(abandoned).rejects.toThrow("deadline");
+    const next = client.stats();
+    const request = await holder.request();
+    holder.send(
+      { type: "error", id: late.id, body: { request: "resize", code: "invalid", message: "" } },
+      { type: "stats", id: request.id, body: stats },
+    );
+    await next;
+    expect(events).toEqual([]);
+  });
+
   it("cuts input over the request cap into frames that rejoin to the same bytes", async () => {
     const { client, holder } = await connected();
     const bytes = Uint8Array.from({ length: 2 * HOLDER_MAX_REQUEST_BYTES + 1 }, (_, i) => i % 251);
     const ids = client.input(bytes);
     const frames = [await holder.request(), await holder.request(), await holder.request()];
+    const full = HOLDER_MAX_REQUEST_BYTES - 1 - 4;
     expect(frames.map((frame) => frame.id)).toEqual(ids);
+    expect(frames.map((frame) => inputBytes(frame).length)).toEqual([
+      full,
+      full,
+      bytes.length - 2 * full,
+    ]);
     expect(Buffer.concat(frames.map(inputBytes)).equals(bytes)).toBe(true);
   });
 
@@ -192,7 +220,7 @@ describe("HolderClient", () => {
   });
 
   it("ends the connection when a request is answered by another request's kind of reply", async () => {
-    const { client, holder } = await connected();
+    const { client, near, holder } = await connected();
     const statsAnswer = client.stats();
     const other = client.snapshot();
     const request = await holder.request();
@@ -200,15 +228,48 @@ describe("HolderClient", () => {
     await expect(statsAnswer).rejects.toBeInstanceOf(HolderDisconnected);
     await expect(other).rejects.toMatchObject({ end: { reason: "malformed" } });
     await expect(client.ended).resolves.toMatchObject({ reason: "malformed" });
+    expect(near.destroyed).toBe(true);
   });
 
   it("ends the connection on a malformed frame, rejecting every request waiting", async () => {
-    const { client, holder } = await connected();
+    const { client, near, holder } = await connected();
     const waiting = [client.stats(), client.foreground()];
     holder.sendRaw(Uint8Array.of(0, 0, 0, 0));
     const results = await Promise.allSettled(waiting);
     expect(results.map((result) => result.status)).toEqual(["rejected", "rejected"]);
     await expect(client.ended).resolves.toMatchObject({ reason: "malformed" });
+    expect(near.destroyed).toBe(true);
+  });
+
+  it("ends the connection with the error when onEvent throws, rejecting what waits", async () => {
+    const thrown = new Error("consumer broke");
+    const { client, near, holder } = await connected({
+      onEvent: () => {
+        throw thrown;
+      },
+    });
+    const answer = client.stats();
+    await holder.request();
+    holder.send({ type: "title", body: { offset: 0, text: "vim" } });
+    await expect(answer).rejects.toMatchObject({ end: { reason: "error", error: thrown } });
+    expect(near.destroyed).toBe(true);
+  });
+
+  it("hangs up when asked, ending its side so the holder sees end of file", async () => {
+    const { client, near } = await connected();
+    client.end();
+    expect(client.open).toBe(false);
+    await expect(client.ended).resolves.toEqual({ reason: "eof" });
+    await expect.poll(() => near.writableFinished).toBe(true);
+  });
+
+  it("ends with the socket's error when the stream fails", async () => {
+    const { client, near } = await connected();
+    near.destroy(new Error("EPIPE"));
+    await expect(client.ended).resolves.toMatchObject({
+      reason: "error",
+      error: { message: "EPIPE" },
+    });
   });
 
   it("rejects an attach on a connection already ended", async () => {
