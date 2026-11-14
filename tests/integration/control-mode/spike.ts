@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import headless from "@xterm/headless";
-import type { ConfiguredTmuxServer } from "@bazhen/host-guard";
+import { spawnGroup, type ConfiguredTmuxServer } from "@bazhen/host-guard";
 import { TMUX_CONFIG } from "@bazhen/runtime-tmux";
 import { testServer } from "../helpers.ts";
 
@@ -142,3 +142,32 @@ export const attachEnv = (): Record<string, string> => ({
   PATH: process.env["PATH"] ?? "",
   LANG: "C.UTF-8",
 });
+
+/** How a foreground server ended: its exit code or signal, and the end of its stderr. */
+export interface ServerEnd {
+  readonly code: number | null;
+  readonly signal: NodeJS.Signals | null;
+  readonly stderr: string;
+  readonly atMs: number;
+}
+
+/**
+ * Starts `server` in the foreground (`tmux -D`), as this process's child, so a crash reports its
+ * signal instead of a daemonised server vanishing.
+ */
+export async function foreground(server: ConfiguredTmuxServer) {
+  const [bin, ...argv] = server.argv("-D");
+  const child = spawnGroup(bin, argv, { stdio: ["ignore", "ignore", "pipe"] });
+  let stderr = "";
+  child.stderr?.setEncoding("utf8").on("data", (d: string) => (stderr = (stderr + d).slice(-2000)));
+  const started = Date.now();
+  let end: ServerEnd | null = null;
+  const ended = new Promise<ServerEnd>((resolve) =>
+    child.once("exit", (code, signal) => {
+      end = { code, signal, stderr, atMs: Date.now() - started };
+      resolve(end);
+    }),
+  );
+  await until(() => server.alive(), 5000);
+  return { ended, end: () => end, started };
+}

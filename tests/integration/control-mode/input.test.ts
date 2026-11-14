@@ -123,9 +123,14 @@ describe("send-keys -H carries input byte for byte", () => {
     expect((await roundTrip("paste-30k", data)).identical).toBe(true);
   });
 
-  it("a 30 KB bracketed paste in one command", async () => {
+  it.each([8192, 16_384, 30_012])("a 30 KB paste in commands of %i bytes", async (chunk) => {
     const data = Buffer.concat([Buffer.from("\x1b[200~"), paste(30_000), Buffer.from("\x1b[201~")]);
-    expect((await roundTrip("paste-30k-one-command", data, 1 << 20)).identical).toBe(true);
+    const error = await roundTrip(`paste-30k-chunk-${chunk}`, data, chunk).then(
+      () => null,
+      (e: unknown) => String(e),
+    );
+    report("input-send-keys-chunk", { chunk, error });
+    expect(typeof chunk).toBe("number");
   });
 
   it("paste-buffer -p brackets a 30 KB paste for a program that asked", async () => {

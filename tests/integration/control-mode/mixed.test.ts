@@ -49,6 +49,47 @@ const windowSize = (server: ConfiguredTmuxServer, t: Terminal) =>
     .runSync(["display-message", "-p", "-t", t.pane, "#{window_width}x#{window_height}"])
     .trim();
 
+/**
+ * `yes` in a pane both a person's tty client and a control client view, for 30 s, with the control
+ * client reading as the daemon would, or not at all; then 10 s for it to catch up.
+ */
+async function floodBeside(paused: boolean) {
+  const server = spikeServer(`mixed-flood-${paused}`);
+  servers.push(server);
+  const t = newTerminal(server, "flood", "yes");
+  const client = await ControlClient.attach(server, t.session);
+  closers.push(() => client.close());
+  const screen = new Screen();
+  client.onOutput((_p, d) => screen.write(d));
+  const human = humanAttach(server, t);
+  if (paused) client.pause();
+  const pid = serverPid(server);
+  const rows: Array<Record<string, unknown>> = [];
+  const sample = (s: number) =>
+    rows.push({
+      s,
+      tmuxRssKb: rssKb(pid),
+      humanMb: Math.round(human.bytes() / 1e6),
+      controlMb: Math.round(client.bytes / 1e6),
+      controlAlive: client.child.exitCode === null,
+    });
+  for (let s = 5; s <= 30; s += 5) {
+    await sleep(5000);
+    sample(s);
+  }
+  client.resume();
+  await sleep(10_000);
+  sample(40);
+  const row = {
+    paused,
+    rows,
+    exitReason: client.exitReason,
+    serverAlive: server.alive(),
+  };
+  report("mixed-flood", row);
+  return row;
+}
+
 describe("a control client beside a person's tmux attach", () => {
   it("a paused control view loses nothing while a tty client keeps reading", async () => {
     const dir = mkdtempSync(join(tmpdir(), "bz-cc-"));
@@ -101,33 +142,11 @@ describe("a control client beside a person's tmux attach", () => {
     expect(row.serverAlive).toBe(true);
   });
 
-  it("a control view that never reads, beside a tty client, under a flood for 30 s", async () => {
-    const server = spikeServer("mixed-flood");
-    servers.push(server);
-    const t = newTerminal(server, "flood", "yes");
-    const client = await ControlClient.attach(server, t.session);
-    closers.push(() => client.close());
-    const human = humanAttach(server, t);
-    client.pause();
-    const pid = serverPid(server);
-    const rows: Array<Record<string, unknown>> = [];
-    for (let s = 5; s <= 30; s += 5) {
-      await sleep(5000);
-      rows.push({
-        s,
-        tmuxRssKb: rssKb(pid),
-        humanBytes: human.bytes(),
-        controlAlive: client.child.exitCode === null,
-      });
-    }
-    client.resume();
-    await sleep(3000);
-    report("mixed-stalled-flood", {
-      rows,
-      controlBytesAfterResume: client.bytes,
-      exitReason: client.exitReason,
-      serverAlive: server.alive(),
-    });
-    expect(server.alive()).toBe(true);
-  });
+  it.each([true, false])(
+    "a flood beside a tty client for 30 s, the control view paused: %s",
+    async (paused) => {
+      const row = await floodBeside(paused);
+      expect(row.serverAlive).toBe(true);
+    },
+  );
 });

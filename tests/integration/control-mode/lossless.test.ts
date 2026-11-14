@@ -44,7 +44,7 @@ async function view(server: ConfiguredTmuxServer, t: Terminal) {
   client.onOutput((pane, data) => {
     if (pane === t.pane) screen.write(data);
   });
-  return { client, screen };
+  return { client, screen, captureMax: Math.max(0, ...numbers(capture.split("\n"))) };
 }
 
 function compare(
@@ -67,6 +67,7 @@ function compare(
     viewMax: Math.max(...mine),
     missingFromView: missing(tmux, mine).length,
     extraInView: missing(mine, tmux).length,
+    extraNotOlder: missing(mine, tmux).filter((n) => n >= Math.min(...tmux)).length,
     duplicateLines: numbered - mine.size,
     ...extra,
   };
@@ -148,12 +149,14 @@ describe("control mode keeps every line tmux keeps", () => {
     );
     writeFileSync(go, "go\n");
     await sleep(150);
-    const { screen } = await view(server, t);
+    const { screen, captureMax } = await view(server, t);
     await until(() => numbers(tmuxLines(server, t.pane)).has(40000), 30_000);
     await sleep(500);
     await screen.settled();
-    const r = compare("seam-mid-burst", server, t, screen);
-    expect(r.missingFromView + r.extraInView + r.duplicateLines).toBe(0);
+    const r = compare("seam-mid-burst", server, t, screen, { captureMax });
+    expect(captureMax).toBeGreaterThan(0);
+    expect(captureMax).toBeLessThan(40000);
+    expect(r).toMatchObject({ missingFromView: 0, extraNotOlder: 0, duplicateLines: 0 });
   });
 
   it("a view that reads throughout gets all of seq 1 200000", async () => {

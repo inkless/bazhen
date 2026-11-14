@@ -58,6 +58,8 @@ export class ControlClient {
     this.child = spawnGroup(bin, argv, { stdio: ["pipe", "pipe", "pipe"] });
     this.ready = new Promise((r) => (this.readyResolve = r));
     this.child.stdout?.on("data", (chunk: Buffer) => this.feed(chunk));
+    // A write racing the client's exit fails with EPIPE; `exited` already reports the exit.
+    this.child.stdin?.on("error", () => {});
     this.exited = new Promise((resolve) => this.child.once("exit", (code) => resolve(code)));
     void this.exited.then(() => {
       for (const p of this.pending.splice(0)) p.resolve({ ok: false, lines: ["client exited"] });
