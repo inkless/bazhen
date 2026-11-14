@@ -174,6 +174,14 @@ describe("launchAgent", () => {
     expect(failed).toEqual({ reason: "launch_rejected", detail: "tmux refused" });
   });
 
+  it("answers a repeat of a failed launch with why it failed", async () => {
+    const { deps } = setup(true);
+    await launchAgent(deps, request).catch(() => {});
+    await expect(launchAgent(deps, request)).rejects.toThrow(
+      "failed to launch: an earlier attempt failed: tmux refused",
+    );
+  });
+
   it("refuses a key reused for a different launch, rather than answering for the first", async () => {
     const { deps, launches } = setup();
     await launchAgent(deps, request);

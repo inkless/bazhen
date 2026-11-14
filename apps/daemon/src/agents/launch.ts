@@ -11,6 +11,7 @@ import {
   type LaunchOptions,
 } from "@bazhen/core";
 import {
+  EVENTS,
   HarnessId,
   LaunchAgentResponse,
   type LaunchAgentRequest,
@@ -77,10 +78,20 @@ function replay(
     const agentId = prior.response.agentId;
     throw new LaunchFailed(
       isId("agent", agentId) ? agentId : newId("agent"),
-      "an earlier attempt failed",
+      earlierFailure(store, agentId),
     );
   }
   return prior.response;
+}
+
+/** Why an agent's launch failed, as its failure recorded it, when it recorded why. */
+function earlierFailure(store: Store, agentId: string): string {
+  const id = store.lastEventId(agentId, "agent.failed");
+  const recorded = id === undefined ? undefined : store.events(id - 1, 1)[0]?.payload;
+  const detail = EVENTS["agent.failed"].payload.safeParse(recorded).data?.detail;
+  return detail === undefined
+    ? "an earlier attempt failed"
+    : `an earlier attempt failed: ${detail}`;
 }
 
 /**

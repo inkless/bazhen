@@ -28,6 +28,7 @@ import {
   type UnassignTaskRequest,
 } from "@bazhen/protocol";
 import type { Raised } from "../attention/inbox.ts";
+import { failureDetail } from "../commands.ts";
 import type { Mailbox } from "../mailbox/mailbox.ts";
 import { UnknownAgent, type Store } from "../store/store.ts";
 import {
@@ -424,7 +425,7 @@ export class Tasks {
           agentId,
           kind: "escalation",
           summary: printable(
-            `${by} launched this agent to delegate "${req.title}" to it, but the delegation was then refused (${err.message}). Close it if it isn't needed.`,
+            `${by} launched this agent to delegate "${req.title}" to it, but the delegation was then refused (${failureDetail(err)}). Close it if it isn't needed.`,
           ),
         });
       }

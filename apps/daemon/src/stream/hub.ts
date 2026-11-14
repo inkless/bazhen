@@ -21,6 +21,7 @@ import {
   type StreamServerFrame,
   type TuiTheme,
 } from "@bazhen/protocol";
+import { failureDetail } from "../commands.ts";
 import { ScreenEmulator } from "./emulator.ts";
 import { classifyInput } from "./input-filter.ts";
 import { Settle } from "./settle.ts";
@@ -442,7 +443,10 @@ export class TerminalHub {
           if (watched.screenFailed) return;
           watched.screenFailed = true;
           for (const entry of watched.viewers.values()) {
-            entry.viewer.notify({ type: "notice", message: `screen check failed: ${String(err)}` });
+            entry.viewer.notify({
+              type: "notice",
+              message: `screen check failed: ${failureDetail(err)}`,
+            });
           }
         },
       )
@@ -547,7 +551,7 @@ export class TerminalHub {
       })
       .catch((err: unknown) => {
         for (const entry of watched.viewers.values()) {
-          entry.viewer.notify({ type: "notice", message: `resize failed: ${String(err)}` });
+          entry.viewer.notify({ type: "notice", message: `resize failed: ${failureDetail(err)}` });
         }
       })
       .finally(() => {

@@ -43,6 +43,7 @@ async function screenOf(sent: readonly string[]): Promise<string[]> {
 class CheckedRuntime extends FakeRuntime {
   checks = 0;
   mode: "answer" | "fail" | "hang" | "hold" = "answer";
+  failure = "tmux gone";
   readonly held: ((alternate: boolean) => void)[] = [];
 
   override async attach(...args: Parameters<FakeRuntime["attach"]>): Promise<Attached> {
@@ -50,7 +51,7 @@ class CheckedRuntime extends FakeRuntime {
     const check = () => attached.stream.alternateScreen();
     const alternateScreen = async () => {
       this.checks++;
-      if (this.mode === "fail") throw new Error("tmux gone");
+      if (this.mode === "fail") throw new Error(this.failure);
       if (this.mode === "hang") return new Promise<boolean>(() => {});
       if (this.mode === "hold") return new Promise<boolean>((resolve) => this.held.push(resolve));
       return check();
@@ -85,7 +86,10 @@ async function fakeRuntime(history = "earlier output") {
     attachedAt: clients.attaches,
     emit: (s: string) => runtime.output(ref, s),
     end: () => runtime.vanish(ref),
-    failScreenChecks: () => (runtime.mode = "fail"),
+    failScreenChecks: (failure = "tmux gone") => {
+      runtime.failure = failure;
+      runtime.mode = "fail";
+    },
     hangScreenChecks: () => (runtime.mode = "hang"),
     /** From now on each screen check waits until answered, oldest first. */
     holdScreenChecks: () => (runtime.mode = "hold"),
@@ -712,8 +716,22 @@ describe("terminal hub: screen state and slow views", () => {
     }
     expect([rt.screenChecks() >= 3, a.frames.filter((f) => f.type === "notice")]).toEqual([
       true,
-      [{ type: "notice", message: "screen check failed: Error: tmux gone" }],
+      [{ type: "notice", message: "screen check failed: tmux gone" }],
     ]);
+  });
+
+  it("tells views why a screen check failed, leaving out a secret the failure echoed", async () => {
+    const rt = await fakeRuntime();
+    const hub = new Hub(rt.runtime, memoryLog().log, quick);
+    const a = viewer();
+    await hub.join(rt.ref, a.v, size);
+    rt.failScreenChecks('tmux gone; api_key = "s3cr3t"');
+    rt.emit("output");
+    await expect
+      .poll(() => a.frames.filter((f) => f.type === "notice"))
+      .toEqual([
+        { type: "notice", message: "screen check failed: tmux gone; api_key = [redacted]" },
+      ]);
   });
 
   it("ends a view that falls too far behind, and keeps serving the others", async () => {
