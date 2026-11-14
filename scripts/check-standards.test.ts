@@ -12,7 +12,10 @@ import {
   inheritsWorkspaceLints,
   attributeFailures,
   memberDependencyFailures,
-  memberTargetFailures,
+  harnessFailures,
+  macroFailures,
+  metadataFailures,
+  type CargoMetadata,
   rootManifestFailures,
   offTokenLines,
   pathCandidates,
@@ -310,43 +313,106 @@ describe("unsafeModuleFailures", () => {
   });
 });
 
-const targetFailures = (text: string) => memberTargetFailures("crates/a/Cargo.toml", text);
+const ROOT = "/repo/";
+type Pkg = CargoMetadata["packages"][number];
+const target = (kind: string, name: string, src: string, extra: object = {}) => ({
+  kind: [kind],
+  name,
+  src_path: `${ROOT}${src}`,
+  test: true,
+  ...extra,
+});
+const pkg = (name: string, targets: Pkg["targets"], dependencies: Pkg["dependencies"] = []) => ({
+  name,
+  manifest_path: `${ROOT}crates/${name}/Cargo.toml`,
+  targets,
+  dependencies,
+});
+const meta = (...packages: Pkg[]): CargoMetadata => ({ workspace_root: ROOT, packages });
+const files = ["crates/a/Cargo.toml", "crates/a/src/lib.rs", "crates/a/src/main.rs"];
+const usual = () =>
+  pkg(
+    "a",
+    [target("lib", "a", "crates/a/src/lib.rs"), target("bin", "a", "crates/a/src/main.rs")],
+    [
+      { name: "proptest", req: "=1.12.0", kind: "dev" },
+      { name: "b", req: "*", kind: null, path: `${ROOT}crates/b` },
+    ],
+  );
 
-describe("memberTargetFailures", () => {
-  it("accepts targets where Cargo looks by default, and the same words elsewhere", () => {
-    const manifest =
-      '[package]\nname = "a"\ndescription = "no path = here"\n\n[[bin]]\nname = "a"\n\n' +
-      "[lib]\ndoctest = false\n\n[features]\ntest = []\n";
-    expect(memberTargetFailures("crates/a/Cargo.toml", manifest)).toEqual([]);
+describe("metadataFailures", () => {
+  it("accepts targets where Cargo looks by default, and exact or local dependencies", () => {
+    expect(metadataFailures(meta(usual()), files)).toEqual([]);
   });
 
-  it("refuses a target path and a proc macro, however the table is written", () => {
-    expect([
-      targetFailures('[lib]\npath = "src/lib.txt"\n'),
-      targetFailures('[[bin]]\nname = "a"\npath="../x.rs"\n'),
-      targetFailures('lib.path = "src/lib.txt"\n'),
-      targetFailures('lib = { name = "a", path = "x.rs" }\n'),
-      targetFailures("[lib]\nproc-macro = true\n"),
-      targetFailures('[[test]]\nname = "slow"\nrequired-features = ["slow"]\n'),
-      targetFailures("[lib]\ntest = false\n"),
-      targetFailures("[[test]]\nharness = false\n"),
-      targetFailures("[package]\nautotests = false\n"),
-      targetFailures("lib = { test = false }\n"),
-      targetFailures('[workspace]\n\n[workspace.lints.rust]\nunsafe_code = "allow"\n'),
-      targetFailures('[patch.crates-io]\nproptest = { path = "x" }\n'),
-    ]).toEqual([
-      [expect.stringContaining("points a target")],
-      [expect.stringContaining("points a target")],
-      [expect.stringContaining("points a target")],
-      [expect.stringContaining("points a target")],
-      [expect.stringContaining("proc macro")],
-      ...Array.from({ length: 5 }, () => [expect.stringContaining("keeps a target")]),
-      [
-        expect.stringContaining("[workspace]: a crate takes its workspace"),
-        expect.stringContaining("[workspace.lints.rust]: a crate takes its workspace"),
-      ],
-      [expect.stringContaining("[patch.crates-io]: a crate takes its workspace")],
+  it("refuses a target elsewhere, however the manifest put it there", () => {
+    const moved = usual();
+    moved.targets = [target("lib", "a", "crates/a/src/lib.txt"), target("bin", "x", "x.rs")];
+    expect(metadataFailures(meta(moved), [...files, "crates/a/src/lib.txt"])).toEqual([
+      expect.stringContaining("target a is built from crates/a/src/lib.txt"),
+      expect.stringContaining("target x is built from x.rs"),
+      expect.stringContaining("crates/a/src/lib.rs: is where Cargo looks for a target"),
+      expect.stringContaining("crates/a/src/main.rs: is where Cargo looks for a target"),
     ]);
+  });
+
+  it("refuses a build script, a proc macro, a build dependency and a loose version", () => {
+    const odd = usual();
+    odd.targets.push(target("custom-build", "build-script-build", "crates/a/build.rs"));
+    odd.targets.push(target("proc-macro", "m", "crates/a/src/lib.rs"));
+    odd.dependencies.push({ name: "cc", req: "=1.0.0", kind: "build" });
+    odd.dependencies.push({ name: "serde", req: "^1", kind: null });
+    expect(metadataFailures(meta(odd), files)).toEqual([
+      expect.stringContaining("target build-script-build is a custom-build"),
+      expect.stringContaining("target m is a proc-macro"),
+      expect.stringContaining("cc is a build dependency"),
+      expect.stringContaining("serde is `^1`"),
+    ]);
+  });
+
+  it("refuses a target left out of the tests, or needing a feature", () => {
+    const left = usual();
+    left.targets = [
+      target("lib", "a", "crates/a/src/lib.rs", { test: false }),
+      target("bin", "a", "crates/a/src/main.rs", { "required-features": ["slow"] }),
+    ];
+    expect(metadataFailures(meta(left), files)).toEqual([
+      expect.stringContaining("target a is left out of the tests"),
+      expect.stringContaining("target a is left out of the tests"),
+    ]);
+  });
+
+  it("refuses a crate in crates/ the workspace doesn't build, and a file no target builds", () => {
+    expect(
+      metadataFailures(meta(usual()), [...files, "crates/x/Cargo.toml", "crates/a/tests/t.rs"]),
+    ).toEqual([
+      expect.stringContaining("crates/x/Cargo.toml: isn't a member of the root workspace"),
+      expect.stringContaining("crates/a/tests/t.rs: is where Cargo looks for a target"),
+    ]);
+  });
+});
+
+describe("harnessFailures", () => {
+  it("refuses a harness of a test's own, however the key is spelled", () => {
+    expect(
+      [
+        "[[test]]\nharness = false\n",
+        '[[test]]\n"harness" = false\n',
+        "[lib]\ndoctest = false\n",
+      ].map((t) => harnessFailures("crates/a/Cargo.toml", t).length),
+    ).toEqual([1, 1, 0]);
+  });
+});
+
+describe("macroFailures", () => {
+  const source =
+    '// macro_rules! in a comment\nlet s = "macro_rules!";\nmacro_rules! hide { () => {} }\n';
+
+  it("refuses a macro defined outside MACRO_MODULES, and takes one in it", () => {
+    expect([
+      macroFailures("crates/a/src/lib.rs", source, {}),
+      macroFailures("crates/a/src/lib.rs", source, { "crates/a/src/lib.rs": "read" }),
+    ]).toEqual([[expect.stringContaining("crates/a/src/lib.rs:3: defines a macro")], []]);
   });
 });
 
@@ -384,7 +450,7 @@ describe("rustFailures", () => {
     "crates/b/src/lib.rs": "#[expect(dead_code)]\nfn f() {}\n",
     "crates/b/src/meta.rs": "macro_rules! m { ($a:meta) => { #[$a] fn g() {} } }\n",
     "crates/b/src/pty.rs": "mod ffi;\n",
-    "crates/c/Cargo.toml": `${member}\n[lib]\npath = "src/lib.txt"\n`,
+    "crates/c/Cargo.toml": `${member}\n[[test]]\nname = "t"\nharness = false\n`,
     "apps/x/Cargo.toml": member,
     "crates/a/b/Cargo.toml": member,
     "apps/x/src/sneaky.rs": "#![expect(unsafe_code)]\n",
@@ -424,7 +490,7 @@ describe("rustFailures", () => {
       [],
       [expect.stringContaining("needs `[lints]`")],
       [expect.stringContaining("#[expect(dead_code)] suppresses a lint")],
-      [expect.stringContaining("is built by a macro")],
+      [expect.stringContaining("is built by a macro"), expect.stringContaining("defines a macro")],
       [],
     ]);
   });
@@ -443,10 +509,27 @@ describe("rustFailures", () => {
     ]);
   });
 
-  it("reads each listed unsafe module, and each member's targets", () => {
+  it("reads each listed unsafe module, and each member's harness", () => {
     expect([about("crates/b/src/pty.rs"), about("crates/c/Cargo.toml")]).toEqual([
       [expect.stringContaining("declares a child module")],
-      [expect.stringContaining("points a target")],
+      [expect.stringContaining("sets a test harness")],
+    ]);
+  });
+
+  it("reads the workspace Cargo reports, and names a listed macro module that's gone", () => {
+    const withMeta = rustFailures(
+      ["crates/a/src/lib.rs"],
+      () => "",
+      {},
+      {
+        metadata: meta(pkg("a", [target("lib", "a", "crates/a/src/lib.txt")])),
+        macroModules: { "crates/a/src/gone.rs": "read" },
+      },
+    );
+    expect(withMeta.filter((f) => /crates\/a\/|MACRO_MODULES/.test(f))).toEqual([
+      expect.stringContaining("target a is built from crates/a/src/lib.txt"),
+      expect.stringContaining("crates/a/src/lib.rs: is where Cargo looks for a target"),
+      "scripts/check-standards.ts: MACRO_MODULES lists missing crates/a/src/gone.rs.",
     ]);
   });
 

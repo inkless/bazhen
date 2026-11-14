@@ -1,12 +1,13 @@
 // Repository standards that no linter covers (docs/standards/code.md, testing.md). Runs first in
 // `pnpm check`; every failure names the file and the fix.
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cssDeclarations } from "../apps/web/src/ui/token-sheet.ts";
+import { gateEnv } from "./cargo-gate.ts";
 import { isMain } from "./is-main.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -561,6 +562,29 @@ export function attributeFailures(
   return out;
 }
 
+// The modules that may define a macro_rules! macro, each with why. Clippy doesn't lint inside a
+// macro's expansion, so a macro of ours wrapping `.unwrap()` hides it from `unwrap_used`; a macro
+// here is one a review has read.
+const MACRO_MODULES: Record<string, string> = {};
+
+/** Why a file outside MACRO_MODULES may not define a macro. */
+export function macroFailures(
+  file: string,
+  source: string,
+  macroModules: Record<string, string>,
+): string[] {
+  const code = rustCode(source);
+  const at = (i: number) => `${file}:${code.slice(0, i).split("\n").length}`;
+  return file in macroModules
+    ? []
+    : [...code.matchAll(/\bmacro_rules\s*!/g)].map(
+        (m) =>
+          `${at(m.index)}: defines a macro, inside which clippy doesn't lint, so a macro can ` +
+          "hide what it would flag. Write the code out, or list the module in MACRO_MODULES in " +
+          "scripts/check-standards.ts with why (docs/standards/rust.md § Lints).",
+      );
+}
+
 const CRATE_ROOT = /^crates\/[^/]+\/(?:src\/(?:lib|main)\.rs|src\/bin\/.+|build\.rs)$/;
 
 /** Why an unsafe module could let `unsafe` reach beyond its own file. */
@@ -747,47 +771,109 @@ export function memberDependencyFailures(manifest: string, text: string): string
   return out;
 }
 
-// The tables that describe a crate's targets, and the keys there that keep one, or its tests, out
-// of the build.
-const TARGET_TABLE = /^\[\[?(?:package|lib|bin|test|bench|example)\]\]?$/;
-const TARGET_DROPPING_KEY =
-  /(?:^|[{,.\s])(?:required-features|test|harness|auto(?:lib|bins|tests|benches|examples))\s*=/;
+/** A target in `cargo metadata`'s report, as far as the checks read it. */
+export type CargoTarget = {
+  kind: string[];
+  name: string;
+  src_path: string;
+  test: boolean;
+  "required-features"?: string[];
+};
+/** A dependency in `cargo metadata`'s report. */
+export type CargoDependency = { name: string; req: string; kind: string | null; path?: string };
+/** The parts of `cargo metadata --no-deps --format-version 1` the checks read. */
+export type CargoMetadata = {
+  workspace_root: string;
+  packages: {
+    name: string;
+    manifest_path: string;
+    targets: CargoTarget[];
+    dependencies: CargoDependency[];
+  }[];
+};
+
+// Where Cargo looks for each kind of target by default, relative to the crate: the only places
+// a target may be, so the scan reads every one.
+const TARGET_PLACES: Record<string, RegExp> = {
+  lib: /^src\/lib\.rs$/,
+  bin: /^src\/(?:main\.rs|bin\/[\w-]+\.rs|bin\/[\w-]+\/main\.rs)$/,
+  test: /^tests\/(?:[\w-]+\.rs|[\w-]+\/main\.rs)$/,
+  bench: /^benches\/(?:[\w-]+\.rs|[\w-]+\/main\.rs)$/,
+  example: /^examples\/(?:[\w-]+\.rs|[\w-]+\/main\.rs)$/,
+};
+const TARGET_FILE =
+  /^crates\/[^/]+\/(src\/(?:lib|main)\.rs|src\/bin\/[^/]+\.rs|src\/bin\/[^/]+\/main\.rs|(?:tests|benches|examples)\/[^/]+\.rs|(?:tests|benches|examples)\/[^/]+\/main\.rs)$/;
 
 /**
- * Why a member manifest's targets could hold code the checks don't read: a target `path` can name
- * any file, and a proc macro of ours could emit any attribute.
+ * Why the workspace Cargo reports doesn't build what the checks read: every crate in crates/ a
+ * member; every target of a kind the gates build, at Cargo's default place, run by the tests and
+ * needing no feature; no build script or proc macro; every file at a default place a target; and
+ * every dependency an exact version, or a path to a crate of ours. Read from Cargo itself, so no
+ * spelling of a manifest can say one thing to the scan and another to Cargo.
  */
-export function memberTargetFailures(manifest: string, text: string): string[] {
+export function metadataFailures(meta: CargoMetadata, paths: string[]): string[] {
   const out: string[] = [];
-  for (const [header, lines] of tomlTables(text)) {
-    if (/^\[\[?(?:workspace|patch|replace|profile)\b/.test(header)) {
-      out.push(
-        `${manifest}: ${header}: a crate takes its workspace, patches and profiles from the root ` +
-          "Cargo.toml, where the checks pin them.",
-      );
+  const top = meta.workspace_root.replace(/\/?$/, "/");
+  const rel = (path: string) => (path.startsWith(top) ? path.slice(top.length) : path);
+  const sources = new Set<string>();
+  const members = new Set(meta.packages.map((p) => rel(p.manifest_path)));
+  for (const manifest of paths.filter((p) => /^crates\/[^/]+\/Cargo\.toml$/.test(p))) {
+    if (!members.has(manifest)) {
+      out.push(`${manifest}: isn't a member of the root workspace, so no gate builds it.`);
     }
-    const target = header === "" || TARGET_TABLE.test(header);
-    for (const line of lines.map((l) => l.replaceAll(/"[^"]*"/g, '""'))) {
-      if (/\bproc[-_]macro\s*=\s*true\b/.test(line)) {
+  }
+  for (const pkg of meta.packages) {
+    const dir = rel(pkg.manifest_path).replace(/Cargo\.toml$/, "");
+    for (const t of pkg.targets) {
+      const src = rel(t.src_path);
+      sources.add(src);
+      const [kind = ""] = t.kind;
+      const place = TARGET_PLACES[kind];
+      if (place === undefined || t.kind.length !== 1) {
         out.push(
-          `${manifest}: \`${line}\`: a proc macro of ours could emit attributes no check reads. ` +
-            "Write the code out, or use a macro_rules! macro.",
+          `${dir}: target ${t.name} is a ${t.kind.join("/")}. A build script or proc macro of ` +
+            "ours could change what is compiled, or emit code no check reads.",
         );
-      } else if (target && TARGET_DROPPING_KEY.test(line)) {
+      } else if (!src.startsWith(dir) || !place.test(src.slice(dir.length))) {
         out.push(
-          `${manifest}: \`${line}\` keeps a target, or its tests, out of the build the gates ` +
-            "lint and test. Every target builds and runs its tests.",
+          `${dir}: target ${t.name} is built from ${src}. Keep each target where Cargo looks by ` +
+            "default (src/lib.rs, src/main.rs, src/bin/, tests/), where the checks read it.",
         );
-      } else if (target && /(?:^|[{,.\s])path\s*=/.test(line)) {
+      } else if (
+        (["lib", "bin", "test"].includes(kind) && !t.test) ||
+        (t["required-features"] ?? []).length > 0
+      ) {
         out.push(
-          `${manifest}: \`${line}\` points a target at a file of its choosing. Keep each target ` +
-            "where Cargo looks by default (src/lib.rs, src/main.rs, src/bin/, tests/), where " +
-            "the checks read it.",
+          `${dir}: target ${t.name} is left out of the tests or needs a feature. Every target ` +
+            "builds and runs its tests.",
+        );
+      }
+    }
+    for (const dep of pkg.dependencies) {
+      const ours = dep.path !== undefined && /^crates\/[^/]+\/?$/.test(rel(dep.path) + "/");
+      if (dep.kind === "build") {
+        out.push(
+          `${dir}: ${dep.name} is a build dependency, and a crate here has no build script.`,
+        );
+      } else if (!ours && !dep.req.startsWith("=")) {
+        out.push(
+          `${dir}: ${dep.name} is \`${dep.req}\`. A dependency is pinned exactly in ` +
+            "[workspace.dependencies], or is a crate of ours in crates/.",
         );
       }
     }
   }
+  for (const file of paths.filter((p) => TARGET_FILE.test(p) && !sources.has(p))) {
+    out.push(`${file}: is where Cargo looks for a target, but no target builds it.`);
+  }
   return out;
+}
+
+/** Why a member manifest gives a test target a harness of its own, which could run nothing. */
+export function harnessFailures(manifest: string, text: string): string[] {
+  return /["']?\bharness["']?\s*=/.test(text)
+    ? [`${manifest}: sets a test harness. Tests run under libtest, which nextest drives.`]
+    : [];
 }
 
 /** Why the root manifest's lints or pinned dependencies are not what the standard says. */
@@ -847,6 +933,7 @@ export function rustFailures(
   paths: string[],
   read: (path: string) => string,
   unsafeModules: Record<string, string>,
+  options: { metadata?: CargoMetadata; macroModules?: Record<string, string> } = {},
 ): string[] {
   const out: string[] = [];
   for (const manifest of paths.filter((p) => fileName(p) === "Cargo.toml")) {
@@ -861,7 +948,7 @@ export function rustFailures(
         );
       }
       out.push(...memberDependencyFailures(manifest, read(manifest)));
-      out.push(...memberTargetFailures(manifest, read(manifest)));
+      out.push(...harnessFailures(manifest, read(manifest)));
     }
   }
   for (const file of paths.filter((p) => p.endsWith(".rs"))) {
@@ -870,6 +957,11 @@ export function rustFailures(
       continue;
     }
     out.push(...attributeFailures(file, read(file), unsafeModules));
+    out.push(...macroFailures(file, read(file), options.macroModules ?? {}));
+  }
+  if (options.metadata !== undefined) out.push(...metadataFailures(options.metadata, paths));
+  for (const file of Object.keys(options.macroModules ?? {}).filter((f) => !paths.includes(f))) {
+    out.push(`scripts/check-standards.ts: MACRO_MODULES lists missing ${file}.`);
   }
   for (const file of Object.keys(unsafeModules)) {
     if (paths.includes(file)) out.push(...unsafeModuleFailures(file, read(file)));
@@ -928,9 +1020,62 @@ function repoFiles(): string[] {
     .filter((p) => p !== "" && existsSync(join(root, p)) && statSync(join(root, p)).isFile());
 }
 
+/** The workspace as Cargo reads it, through the Rust gates' clean environment. */
+function cargoMetadata(): CargoMetadata | string {
+  const run = spawnSync("cargo", ["metadata", "--no-deps", "--format-version", "1", "--locked"], {
+    cwd: root,
+    env: gateEnv(process.env),
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (run.status !== 0) return run.stderr || "cargo metadata failed to run";
+  const parsed: unknown = JSON.parse(run.stdout);
+  return isCargoMetadata(parsed) ? parsed : "cargo metadata printed a report the checks can't read";
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
+const str = (v: unknown) => typeof v === "string";
+
+/** Whether `cargo metadata`'s output has every field the checks read. */
+export function isCargoMetadata(value: unknown): value is CargoMetadata {
+  return (
+    isRecord(value) &&
+    str(value.workspace_root) &&
+    Array.isArray(value.packages) &&
+    value.packages.every(
+      (p) =>
+        isRecord(p) &&
+        str(p.name) &&
+        str(p.manifest_path) &&
+        Array.isArray(p.targets) &&
+        p.targets.every(
+          (t) =>
+            isRecord(t) &&
+            Array.isArray(t.kind) &&
+            t.kind.every(str) &&
+            str(t.name) &&
+            str(t.src_path) &&
+            typeof t.test === "boolean",
+        ) &&
+        Array.isArray(p.dependencies) &&
+        p.dependencies.every((d) => isRecord(d) && str(d.name) && str(d.req)),
+    )
+  );
+}
+
 function checkRust(): void {
+  const metadata = cargoMetadata();
+  if (typeof metadata === "string") {
+    failures.push(
+      `Cargo.toml: \`cargo metadata\` failed, so the workspace can't be read:\n${metadata}`,
+    );
+    return;
+  }
   failures.push(
-    ...rustFailures(repoFiles(), (p) => readFileSync(join(root, p), "utf8"), UNSAFE_MODULES),
+    ...rustFailures(repoFiles(), (p) => readFileSync(join(root, p), "utf8"), UNSAFE_MODULES, {
+      metadata,
+      macroModules: MACRO_MODULES,
+    }),
   );
 }
 

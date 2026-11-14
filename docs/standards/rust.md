@@ -8,6 +8,7 @@ a review asks for something no check covers.
 | Rule                                                                                                                                    | Enforced by                                           |
 | --------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
 | Crates live only in `crates/<name>`, each taking the workspace lints                                                                    | `pnpm check` (`scripts/check-standards.ts`)           |
+| Every target is built and tested from where Cargo looks by default; no build script or proc macro of ours                               | `pnpm check` (`scripts/check-standards.ts`)           |
 | The lint levels, test allowances, `deny.toml` and the gate scripts are the ones below, with nothing beside them to loosen them          | `pnpm check` (`scripts/check-standards.ts`)           |
 | Clippy's pedantic group and the restriction lints below fail the build                                                                  | `pnpm lint:rust` (`-D warnings`)                      |
 | No named lint can be lowered by any attribute, however it is written                                                                    | the compiler (`forbid`)                               |
@@ -102,18 +103,29 @@ source with comments and strings set aside, and fails on:
   module's own `#![expect(unsafe_code, reason = "...")]`;
 - any `#` that doesn't begin an attribute written out in full, and any attribute holding a macro
   variable: a macro could otherwise build a suppression from tokens no scan reads;
-- `include!`, however it is reached, `#[path]`, a target `path` in a member's manifest, and a
-  `proc-macro` crate of ours: each brings in code, or attributes, from somewhere the scan doesn't
-  read;
+- `include!`, however it is reached, and `#[path]`: each brings in code from somewhere the scan
+  doesn't read;
+- `macro_rules!` outside a module listed in `MACRO_MODULES`: clippy doesn't lint inside a
+  macro's expansion, so a macro of ours wrapping `.unwrap()` hides it from `unwrap_used`. A module
+  joins the list once a review has read its macros;
 - `#[ignore]` and `#[should_panic]`, which skip a test or pass it when it fails, and any
   attribute naming `clippy` (`#[clippy::msrv]`), which changes how it lints;
 - a `cfg` or `cfg_attr` predicate other than those in `CFG_ALLOWED` (`test` alone today), or
   `not` around one: code compiled only in a release build, on another OS, under a feature or
   outside tests is code the gates never build, so no lint or test reads it. A predicate joins
-  the list with why the gates build it;
-- a member manifest's `required-features`, `test`, `harness` or `auto*` keys in its target
-  tables, which keep a target or its tests out of the build, and any `[workspace]`, `[patch]`,
-  `[replace]` or `[profile]` table of its own.
+  the list with why the gates build it: a `target_os` joins only with a CI job in the same pull
+  request that runs `pnpm lint:rust` and `pnpm test:rust` on that OS, as the PTY holder's
+  `linux` and `macos` code will need;
+- a test harness of a member's own (`harness = false`), which could run nothing.
+
+The targets themselves are read from Cargo, not from the manifests' text, so no spelling of a
+manifest can say one thing to the check and another to Cargo. `cargo metadata` must report every
+crate in `crates/` as a member of the workspace, and every target of each a library, binary,
+test, bench or example, at the place Cargo looks for it by default, run by the tests and needing
+no feature, with a target for every file at such a place. A build script (`build.rs`, or a
+`build` key) or a proc macro of ours fails, as does a build dependency: a build script can hand
+the compiler flags and environment no gate sees. Every dependency is an exact version or a crate
+of ours in `crates/`.
 
 **When a dependency's macro trips a forbidden lint.** An attribute macro from another crate that
 emits an allow of a forbidden lint (`#[tokio::main]` allows `clippy::expect_used`) fails with
@@ -141,10 +153,10 @@ binary (`cargo-clippy`, not `cargo clippy`), refuses any option after the gate (
 <name>` may name tests), removes the variables that change flags, tools or the test runner, sets
 `CARGO_ENCODED_RUSTFLAGS` empty (which outranks every other source of rustflags), and overrides any
 configured compiler or wrapper. A cargo config outside the repository may still set what the gate
-can't override: a test runner, a `rustdoc`, `[env]` (which can hand clippy its flags) or an
-`include` of another file. The lint
-and test gates refuse to run under one. A global `RUSTFLAGS` or a wrapper such as sccache is ignored
-by the gates, not an error.
+can't override: a test runner, a `rustdoc` or a linker, `[env]` (which can hand clippy its flags), a
+profile (which can turn off overflow checks and debug assertions in the tests) or an `include` of
+another file. The lint and test gates refuse to run under one. A global `RUSTFLAGS` or a wrapper
+such as sccache is ignored by the gates, not an error.
 
 **The allow-list** is in `[workspace.lints.clippy]` only, one line each, with its reason beside
 it. It holds `must_use_candidate`, which fires on nearly every pure function; `#[must_use]` goes

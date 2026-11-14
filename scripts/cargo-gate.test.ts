@@ -123,6 +123,9 @@ describe("configFailures", () => {
     "/g/.cargo/config.toml": 'env.CLIPPY_ARGS = "--cap-lints=allow"\n',
     "/i/.cargo/config.toml": '[env.CLIPPY_ARGS]\nvalue = "--cap-lints=allow"\nforce = true\n',
     "/j/.cargo/config.toml": 'include = ["/elsewhere/more.toml"]\n',
+    "/k/.cargo/config.toml": '[target.x86_64-unknown-linux-gnu]\nlinker = "/fake/cc"\n',
+    "/l/.cargo/config.toml": "[profile.test]\noverflow-checks = false\n",
+    "/m/.cargo/config.toml": "profile.dev.debug-assertions = false\n",
   };
   const accepted: Record<string, string> = {
     "/h/.cargo/config.toml": '[build]\nrustc-wrapper = "/usr/bin/sccache"\n',
@@ -135,7 +138,7 @@ describe("configFailures", () => {
     (p) => configs[p],
   );
 
-  it("names a config with a runner, a rustdoc, [env] or include, in any TOML spelling", () => {
+  it("names a config with a runner, rustdoc, linker, [env], profile or include, in any spelling", () => {
     expect(failures.map((f) => f.split(" ")[0])).toEqual(Object.keys(refused));
   });
 });
