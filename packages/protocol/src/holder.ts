@@ -1,21 +1,19 @@
 import { z } from "zod";
-import { ExitStatus, Signal } from "./agents.ts";
-import { Id } from "./ids.ts";
-import { HISTORY_LINES } from "./stream.ts";
-import { TuiTheme } from "./theme.ts";
 import { ProtocolVersion } from "./version.ts";
 
 /**
  * `holder/1`: what the daemon and a `bazhen-holder` say over the holder's Unix socket. Versioned
  * apart from the daemon's protocol, under the same rule: within a major, changes are additive
- * only, and the minor is bumped in the same commit as any addition.
+ * only, and the minor is bumped in the same commit as any addition. It defines its own enums
+ * rather than the daemon protocol's, so that one's minor can't change this one's.
  *
  * A connection opens with `hello`: until it is answered the client sends nothing else, and the
  * holder sends only its answer. Neither peer then sends anything newer than the version they
  * agreed on: no new frame, field or enum value. A peer ignores fields it doesn't know and skips
  * replies and events it doesn't know; the holder answers a request it doesn't know with `error`
- * coded `unknown-request`. A request whose body fails its schema is answered `error` coded
- * `invalid`, and its connection closed; any other frame that fails closes it at once.
+ * coded `unknown-request`, whose `request` is the type byte, as `0x2a`. A request whose body
+ * isn't UTF-8 JSON that passes its schema is answered `error` coded `invalid`, and its connection
+ * closed; any other frame that fails closes it at once. String limits count UTF-8 bytes.
  *
  * Frozen in every major, because it is how two peers find out what they share: the frame layout,
  * the request id, the type-byte ranges, the `hello` request, the hello reply's `version` and
@@ -29,8 +27,18 @@ export const HOLDER_PROTOCOL_VERSION = "1.0";
  * everything older, so one version per major says it all. Frozen, so read leniently: an entry
  * this build can't parse is skipped by `negotiateHolder`, not refused with the frame.
  */
-export const HolderVersions = z.array(z.string().max(32)).min(1).max(16);
+export const HolderVersions = z.array(utf8(32)).min(1).max(16);
 export type HolderVersions = z.infer<typeof HolderVersions>;
+
+/** Rust measures a string in UTF-8 bytes; `max` alone counts UTF-16 units, which can be fewer. */
+function utf8(max: number, min = 0) {
+  const encoder = new TextEncoder();
+  return z
+    .string()
+    .min(min)
+    .max(max)
+    .refine((text) => encoder.encode(text).length <= max, `at most ${max} UTF-8 bytes`);
+}
 
 const topMinors = (versions: readonly string[]) => {
   const tops = new Map<number, number>();
@@ -77,16 +85,37 @@ export type HolderSize = z.infer<typeof HolderSize>;
  * Whatever the daemon writes beside a terminal so it can rebuild the terminal's links from the
  * holder alone. The holder stores and echoes them and reads none: their meaning is the daemon's.
  */
-export const HolderTags = z.record(z.string().min(1).max(64), z.string().max(1024));
+export const HolderTags = z.record(utf8(64, 1), utf8(1024));
 export type HolderTags = z.infer<typeof HolderTags>;
 
-/** What a terminal runs. `respawn` replaces it, keeping the terminal, its tags and its size. */
+export const HolderSignal = z.enum(["SIGINT", "SIGTERM", "SIGHUP", "SIGKILL"]);
+export type HolderSignal = z.infer<typeof HolderSignal>;
+
+/** The background a program is told it is drawn on, when it asks. */
+export const HolderTheme = z.enum(["light", "dark"]);
+export type HolderTheme = z.infer<typeof HolderTheme>;
+
+/** How a child ended: with a code, by a signal named as in `SIGTERM`, or in a way not known. */
+export const HolderExitStatus = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("exited"), code: z.int() }),
+  z.object({ type: z.literal("signalled"), signal: z.string() }),
+  z.object({ type: z.literal("unknown") }),
+]);
+export type HolderExitStatus = z.infer<typeof HolderExitStatus>;
+
+/** Names the holder's socket file, so it stays a plain file name. */
+const TerminalId = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/);
+
+/**
+ * What a terminal runs. `respawn` replaces it, keeping the terminal, its tags and its size; its
+ * `generation` must be above the current one, or the respawn is refused `invalid`.
+ */
 export const HolderProcessSpec = z.object({
   argv: z.array(z.string()).min(1),
   cwd: z.string().min(1),
   env: z.record(z.string(), z.string()),
   generation: Count,
-  theme: TuiTheme.optional(),
+  theme: HolderTheme.optional(),
 });
 export type HolderProcessSpec = z.infer<typeof HolderProcessSpec>;
 
@@ -96,11 +125,11 @@ export type HolderProcessSpec = z.infer<typeof HolderProcessSpec>;
  */
 export const HolderSpawnSpec = HolderProcessSpec.extend({
   protocol: HolderVersions,
-  terminalId: Id("term"),
+  terminalId: TerminalId,
   socket: z.string().min(1),
   tags: HolderTags,
   size: HolderSize,
-  historyLines: Count.default(HISTORY_LINES),
+  historyLines: Count.default(10_000),
 });
 export type HolderSpawnSpec = z.infer<typeof HolderSpawnSpec>;
 
@@ -119,7 +148,8 @@ export type HolderHelloRequest = z.infer<typeof HolderHelloRequest>;
  * Output from `from` on. Without it, from the holder's offset as it reads the request, which is
  * the offset of a `snapshot` sent just before it in the same write. An offset belongs to one
  * generation: with `generation`, a subscribe that crossed a respawn is refused `stale-generation`
- * instead of resuming at the same offset of the new child's output.
+ * instead of resuming at the same offset of the new child's output. A connection has one
+ * subscription: subscribing again moves it.
  */
 export const HolderSubscribeRequest = z.object({
   from: Offset.optional(),
@@ -127,14 +157,14 @@ export const HolderSubscribeRequest = z.object({
 });
 export type HolderSubscribeRequest = z.infer<typeof HolderSubscribeRequest>;
 
-export const HolderSignalRequest = z.object({ signal: Signal });
+export const HolderSignalRequest = z.object({ signal: HolderSignal });
 export type HolderSignalRequest = z.infer<typeof HolderSignalRequest>;
 
 export const HolderSetTagsRequest = z.object({ tags: HolderTags });
 export type HolderSetTagsRequest = z.infer<typeof HolderSetTagsRequest>;
 
 /** Null tells a program that asks nothing of the holder's own. */
-export const HolderSetThemeRequest = z.object({ theme: TuiTheme.nullable() });
+export const HolderSetThemeRequest = z.object({ theme: HolderTheme.nullable() });
 export type HolderSetThemeRequest = z.infer<typeof HolderSetThemeRequest>;
 
 export const HolderHelloReply = z.object({
@@ -142,7 +172,7 @@ export const HolderHelloReply = z.object({
   version: ProtocolVersion,
   /** Every version the holder speaks, as `bazhen doctor` shows it. */
   protocol: HolderVersions,
-  terminalId: Id("term"),
+  terminalId: TerminalId,
   tags: HolderTags,
   generation: Count,
   holderPid: Pid,
@@ -150,7 +180,7 @@ export const HolderHelloReply = z.object({
   childPid: Pid,
   childStart: StartTime,
   /** How the child ended; null while it runs. */
-  exit: ExitStatus.nullable(),
+  exit: HolderExitStatus.nullable(),
   size: HolderSize,
   offset: Offset,
   title: z.string(),
@@ -195,7 +225,7 @@ export const HolderAlternate = z.object({ offset: Offset, on: z.boolean() });
 export type HolderAlternate = z.infer<typeof HolderAlternate>;
 
 /** The child of `generation` ended. */
-export const HolderExited = z.object({ generation: Count, status: ExitStatus });
+export const HolderExited = z.object({ generation: Count, status: HolderExitStatus });
 export type HolderExited = z.infer<typeof HolderExited>;
 
 /**
@@ -230,7 +260,14 @@ export type HolderRequestName = z.infer<typeof HolderRequestName>;
 /**
  * Each request's type byte. Never renumber one or give it to another request: a type byte means
  * the same in every version. A request with a reply of its own is `0x01`–`0x3f`, so that reply's
- * byte stays below the events; `0x40`–`0x7f` are for requests answered only by `ok` or `error`.
+ * byte stays below the events; `0x40`–`0x7f` are for requests whose success is `ok`.
+ *
+ * Every request gets one answer under its id, except `input`, which gets one only when refused:
+ * - `hello`, `snapshot`, `stats`, `foreground`: their own reply, or `error`;
+ * - `subscribe`, `resize`, `signal`, `respawn`, `set-tags`, `set-theme`: `ok`, or `error`;
+ * - `input`: nothing, or `error` (`not-writer`, `input-full`);
+ * - `close`: `ok`; then the holder hangs up the child's process group, kills it if it outlives a
+ *   grace period, removes its socket and exits, ending every connection.
  */
 export const HOLDER_REQUEST_CODES = {
   hello: 0x01,
@@ -284,7 +321,8 @@ export const HolderError = z.object({
 export type HolderError = z.infer<typeof HolderError>;
 
 /**
- * Each reply's and event's type byte, under the same rule. The ranges say whether a frame carries
+ * Each reply's and event's type byte, under the same rule. `data` and `gap` go to the connection
+ * subscribed; the other events to every connection past `hello`. The ranges say whether a frame carries
  * a request's id, so a peer can tell even of a type it doesn't know: a request's own reply is its
  * type byte with the top bit set (`0x81`–`0xbf`); events, which carry none, are `0xc0`–`0xef`;
  * `ok` and `error`, which answer any request, are `0xf0`–`0xff`.

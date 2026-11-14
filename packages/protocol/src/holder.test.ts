@@ -98,10 +98,10 @@ const broken: [string, z.ZodType, unknown, unknown][] = [
   ["a spawn spec with an empty argv", HolderSpawnSpec, spawnSpec, { ...spawnSpec, argv: [] }],
   ["a spawn spec with an empty cwd", HolderSpawnSpec, spawnSpec, { ...spawnSpec, cwd: "" }],
   [
-    "a spawn spec for no terminal id",
+    "a terminal id that isn't a plain file name",
     HolderSpawnSpec,
     spawnSpec,
-    { ...spawnSpec, terminalId: "t" },
+    { ...spawnSpec, terminalId: "../t" },
   ],
   ["a spawn spec in no version", HolderSpawnSpec, spawnSpec, { ...spawnSpec, protocol: [] }],
   ["a spawn spec with no socket", HolderSpawnSpec, spawnSpec, { ...spawnSpec, socket: "" }],
@@ -119,6 +119,12 @@ const broken: [string, z.ZodType, unknown, unknown][] = [
     HolderSpawnSpec,
     spawnSpec,
     { ...spawnSpec, tags: { ["k".repeat(65)]: "x" } },
+  ],
+  [
+    "a tag value of more UTF-8 bytes than allowed, though fewer characters",
+    HolderSpawnSpec,
+    spawnSpec,
+    { ...spawnSpec, tags: { k: "界".repeat(342) } },
   ],
   [
     "a tag value too long",

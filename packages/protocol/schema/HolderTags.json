@@ -9,6 +9,7 @@
   },
   "additionalProperties": {
     "type": "string",
+    "minLength": 0,
     "maxLength": 1024
   }
 }
