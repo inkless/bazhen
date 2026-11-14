@@ -59,7 +59,9 @@ describe("what a view shows when it opens", () => {
       captured(daemon.capture(agentId, HISTORY_LINES)),
       daemon.cursor(agentId),
     ]);
-    expect(shown.lines.length - shown.screen.length).toBe(HISTORY_LINES);
+    // tmux's whole history, not a part: it holds HISTORY_LINES, less any lines it moved back onto
+    // the screen as the view made the pane taller.
+    expect(shown.lines.length - shown.screen.length).toBeGreaterThan(HISTORY_LINES - size.rows);
     first.close();
     late.close();
   });

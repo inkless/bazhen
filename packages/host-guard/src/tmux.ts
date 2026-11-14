@@ -93,7 +93,11 @@ export interface TmuxOptions {
   readonly env?: Readonly<Record<string, string | undefined>>;
   readonly timeout?: number;
   readonly stdio?: StdioOptions;
+  /** The most output the command may print; more fails it. Node's own limit, 1 MiB, by default. */
+  readonly maxBytes?: number;
 }
+
+const DEFAULT_MAX_BYTES = 1024 * 1024;
 
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -345,7 +349,11 @@ export class TmuxServer {
   /** What the command printed; rejects as `execFile` does, with its stderr. */
   async run(args: readonly string[], opts: TmuxOptions = {}): Promise<string> {
     const [bin, ...argv] = this.argv(...args);
-    const { stdout } = await run(bin, argv, { env: opts.env, timeout: opts.timeout ?? TIMEOUT_MS });
+    const { stdout } = await run(bin, argv, {
+      env: opts.env,
+      timeout: opts.timeout ?? TIMEOUT_MS,
+      maxBuffer: opts.maxBytes ?? DEFAULT_MAX_BYTES,
+    });
     return stdout;
   }
 
@@ -355,6 +363,7 @@ export class TmuxServer {
       env: opts.env,
       timeout: opts.timeout ?? TIMEOUT_MS,
       stdio: opts.stdio,
+      maxBuffer: opts.maxBytes ?? DEFAULT_MAX_BYTES,
       encoding: "utf8",
     });
   }

@@ -51,6 +51,23 @@ describe("tmux runtime on a private server", () => {
     ).toBe(String(HISTORY_LINES));
   });
 
+  it("attaches with the whole of a history longer than a megabyte", async () => {
+    const wide = {
+      ...spec(["sh", "-c", "seq -f '%0999g' 1 2000; echo done; sleep 30"]),
+      size: { cols: 200, rows: 30 },
+    };
+    const ref = await runtime.create(wide);
+    await expect.poll(() => screen(ref.locator.session), { timeout: 10_000 }).toContain("done");
+    const { stream, history } = await runtime.attach(ref, null, HISTORY_LINES);
+    stream.close();
+    // Whole lines up to the screen, so the capture wasn't cut short. The very last row above the
+    // screen can be the start of a line the screen goes on with.
+    expect([history.length > 1024 * 1024, history.split("\n").at(-2)]).toEqual([
+      true,
+      expect.stringMatching(/^\d{999}$/),
+    ]);
+  });
+
   it("reads its terminals back when started without a UTF-8 locale", async () => {
     const bare = testServer("runtime-no-locale");
     const { LANG: _l, LC_ALL: _a, LC_CTYPE: _c, ...noLocale } = filterEnv(process.env).env;

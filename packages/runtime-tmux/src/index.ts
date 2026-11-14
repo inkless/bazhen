@@ -127,6 +127,12 @@ const FOREGROUND = columns([
  * do. Without the smcup override, the client switches the browser's terminal to its alternate
  * buffer, which keeps no scrollback and turns the wheel into arrow keys.
  */
+/**
+ * The most a captured cell can take with its escapes: a character and an SGR that sets 24-bit
+ * foreground and background. A full history of long lines passes 1 MiB, Node's default limit.
+ */
+const CAPTURED_BYTES_PER_CELL = 32;
+
 export const TMUX_CONFIG = `set -g prefix None
 set -g prefix2 None
 unbind-key -a -T prefix
@@ -244,9 +250,12 @@ export class TmuxRuntime implements RuntimeAdapter {
   }
 
   /** What tmux printed, untrimmed: blank lines at its end can be content. */
-  private async tmuxOutput(args: readonly string[]): Promise<string> {
+  private async tmuxOutput(args: readonly string[], maxBytes?: number): Promise<string> {
     try {
-      return await this.opts.server.run(args, { env: this.env });
+      return await this.opts.server.run(args, {
+        env: this.env,
+        ...(maxBytes === undefined ? {} : { maxBytes }),
+      });
     } catch (cause) {
       throw new TmuxError(args, cause);
     }
@@ -389,18 +398,21 @@ export class TmuxRuntime implements RuntimeAdapter {
     const history =
       lines > 0
         ? (
-            await this.tmuxOutput([
-              "capture-pane",
-              "-p",
-              "-e",
-              "-J",
-              "-t",
-              windowOf(session),
-              "-S",
-              `-${lines}`,
-              "-E",
-              "-1",
-            ])
+            await this.tmuxOutput(
+              [
+                "capture-pane",
+                "-p",
+                "-e",
+                "-J",
+                "-t",
+                windowOf(session),
+                "-S",
+                `-${lines}`,
+                "-E",
+                "-1",
+              ],
+              lines * cols * CAPTURED_BYTES_PER_CELL,
+            )
           ).replace(/\n$/, "")
         : "";
     const proc = this.opts.pty.spawn(
