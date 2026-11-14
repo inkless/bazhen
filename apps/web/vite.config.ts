@@ -1,7 +1,7 @@
 import optimizeLocales from "@react-aria/optimize-locales-plugin";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
-import { refuseUpgrade, servesHere } from "./src/dev/loopback.ts";
+import { answer, refuseUpgrade, servesHere } from "./src/dev/loopback.ts";
 
 const daemon = `http://127.0.0.1:${process.env.BAZHEN_PORT ?? 7900}`;
 const port = Number(process.env.BAZHEN_WEB_PORT ?? 7901);
@@ -19,11 +19,7 @@ const loopbackOnly = (): Plugin => ({
     server.httpServer?.prependListener("upgrade", (req, socket) => {
       if (!servesHere(req.headers, port)) refuseUpgrade(req, socket);
     });
-    server.middlewares.use((req, res, next) => {
-      if (servesHere(req.headers, port)) return next();
-      res.statusCode = 403;
-      res.end("The web dev server serves this machine only; reach Bazhen through the daemon.\n");
-    });
+    server.middlewares.use((req, res, next) => answer(req.headers, res, port, next));
   },
 });
 
