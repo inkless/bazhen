@@ -11,34 +11,40 @@ export interface KeyChord {
   readonly keyCode: number;
 }
 
-/** Chords, written like kitty's `map` (`shift+enter`), to the text the terminal is sent for them. */
+/**
+ * Chords, written like kitty's `map` (`shift+enter`), to the text the terminal is sent for them.
+ * A user's map binds a chord to `null` to unbind it, which leaves the key to xterm.js.
+ */
 export type KeyMap = ReadonlyMap<string, string>;
 
 /**
  * xterm.js sends a bare CR for Shift+Enter, the same as Enter, and tmux can't tell the TUIs it was
  * Shift+Enter; ESC CR is what Claude Code and Codex both take as a newline (foundation-design §5.9).
- * Cmd+. is Esc, as on macOS, for an iPad keyboard, which has no Esc key.
  */
-export const DEFAULT_KEY_MAP: KeyMap = new Map([
-  ["shift+enter", "\x1b\r"],
-  ["meta+.", "\x1b"],
-]);
+export const DEFAULT_KEY_MAP: KeyMap = new Map([["shift+enter", "\x1b\r"]]);
+
+/** On Apple's platforms Cmd+. is also Esc, as in macOS, for an iPad keyboard, which has no Esc. */
+export const APPLE_KEY_MAP: KeyMap = new Map([...DEFAULT_KEY_MAP, ["meta+.", "\x1b"]]);
+
+/** Whether `userAgent` is an Apple platform's; iPadOS's Safari names itself a Mac. */
+export const isApple = (userAgent: string) => /Macintosh|iPhone|iPad|iPod/.test(userAgent);
 
 const MODIFIERS = ["ctrl", "alt", "shift", "meta"] as const;
 
 export type ParsedKeyMap = { ok: true; map: KeyMap } | { ok: false; error: string };
 
-/** A user's bindings over the defaults; a map with any invalid entry is rejected whole. */
-export function parseKeyMap(raw: unknown): ParsedKeyMap {
+/** A user's bindings over `defaults`; a map with any invalid entry is rejected whole. */
+export function parseKeyMap(raw: unknown, defaults: KeyMap = DEFAULT_KEY_MAP): ParsedKeyMap {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     return { ok: false, error: "a key map is an object of chord to text" };
   }
-  const map = new Map(DEFAULT_KEY_MAP);
+  const map = new Map(defaults);
   for (const [chord, text] of Object.entries(raw)) {
     const name = canonical(chord);
     if (name === null) return { ok: false, error: `unknown chord "${chord}"` };
-    if (typeof text !== "string") return { ok: false, error: `"${chord}" must map to a string` };
-    map.set(name, text);
+    if (text === null) map.delete(name);
+    else if (typeof text === "string") map.set(name, text);
+    else return { ok: false, error: `"${chord}" must map to a string, or null to unbind it` };
   }
   return { ok: true, map };
 }

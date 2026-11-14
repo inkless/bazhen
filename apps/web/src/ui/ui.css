@@ -135,7 +135,7 @@ pre {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  z-index: 10;
+  z-index: var(--z-modal);
   display: grid;
   place-items: center;
   padding: var(--space-4);
@@ -245,4 +245,9 @@ pre {
   .toggle-button[data-selected] {
     outline: 2px solid Highlight;
   }
+}
+
+.toolbar {
+  display: flex;
+  gap: var(--space-1);
 }

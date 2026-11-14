@@ -361,6 +361,10 @@ test("answers none of tmux's terminal queries itself", async ({ page }) => {
   expect(program.sent).toEqual([]);
 });
 
+/** A Mac's browser, as an iPad's Safari names itself too. */
+const MAC =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
+
 /** A phone: a touch screen, which is what shows the key bar. */
 const PHONE = { hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } };
 
@@ -401,7 +405,7 @@ test("types the keys a phone's keyboard lacks from the key bar", async ({ browse
   ] as const) {
     await tapKey(phone, program, key, bytes);
   }
-  const ctrl = keyBar(phone).getByRole("button", { name: "Control" });
+  const ctrl = keyBar(phone).getByRole("button", { name: "Ctrl" });
   await ctrl.tap();
   await expect(ctrl).toHaveAttribute("aria-pressed", "true");
   const since = Date.now();
@@ -417,6 +421,14 @@ test("types the keys a phone's keyboard lacks from the key bar", async ({ browse
   await phone.keyboard.press("Shift+Enter");
   await expect.poll(() => program.received(before)).toBe(hex("\x1b\r"));
   await expect(ctrl).toHaveAttribute("aria-pressed", "false");
+  // Hidden, it stays hidden on this device, until shown again.
+  await keyBar(phone).getByRole("button", { name: "Hide" }).tap();
+  await expect(keyBar(phone)).toHaveCount(0);
+  await phone.reload();
+  await expect(phone.getByRole("button", { name: "Show keys" })).toBeVisible();
+  await expect(keyBar(phone)).toHaveCount(0);
+  await phone.getByRole("button", { name: "Show keys" }).tap();
+  await expect(keyBar(phone)).toBeVisible();
   await phone.context().close();
 });
 
@@ -451,10 +463,36 @@ test("takes over with the first key bar key on a phone that is watching, and sen
   await phone.context().close();
 });
 
-test("sends Esc for Cmd+., for an iPad keyboard, which has no Esc key", async ({ page }) => {
+test("sends Esc for Cmd+. on an Apple device, for an iPad keyboard, which has no Esc key", async ({
+  browser,
+}) => {
+  const page = await (await browser.newContext({ userAgent: MAC })).newPage();
   const program = await launchProbe(page);
   await drive(page);
   const since = Date.now();
   await page.keyboard.press("Meta+Period");
   await expect.poll(() => program.received(since)).toBe(hex("\x1b"));
+  await page.context().close();
+});
+
+test("keeps Ctrl armed when its key only takes over, and sends it with the next", async ({
+  page,
+  browser,
+}) => {
+  const program = await launchProbe(page);
+  const phone = await openSecondView(browser, "key-probe ready", PHONE);
+  await phone.locator(".xterm-screen").tap();
+  await expect(status(phone)).toHaveText("Driving");
+  await drive(page);
+  await expect(status(phone)).toContainText(TAKEN_OVER);
+  // The phone's terminal still has focus, so arming Ctrl doesn't engage it: its `c` does.
+  const ctrl = keyBar(phone).getByRole("button", { name: "Ctrl" });
+  await ctrl.tap();
+  const since = Date.now();
+  await phone.keyboard.type("c");
+  await expect(status(phone)).toHaveText("Driving");
+  await expect(ctrl).toHaveAttribute("aria-pressed", "true");
+  await phone.keyboard.type("c");
+  await expect.poll(() => program.received(since)).toBe(hex("\x03"));
+  await phone.context().close();
 });

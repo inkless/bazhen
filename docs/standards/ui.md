@@ -121,10 +121,13 @@ tap on a phone.
 - `ToggleButton` for a button that stays pressed until pressed again, such as the key bar's
   sticky Ctrl.
 
-On a touch screen, a key bar under the terminal types what a phone's or iPad's keyboard lacks:
-Esc, Tab, Ctrl, the arrows, newline and Enter, through the same key map and lease as a typed key.
-Its keys take `preventFocusOnPress`, so a tap leaves focus, and the soft keyboard, on the
-terminal.
+- `Toolbar` for a row of controls that is one tab stop, such as the key bar.
+
+On a phone or an iPad, a key bar under the terminal types what their keyboards lack: Esc, Tab,
+Ctrl, the arrows, newline and Enter, through the same key map and lease as a typed key. Its keys
+take `preventFocusOnPress`, so a tap leaves focus, and the soft keyboard, on the terminal. While
+it shows, a terminal is no taller than what shows above it, and the user can hide it per device.
+Stacking goes by `--z-key-bar` and `--z-modal`; a terminal's host isolates xterm.js's own layers.
 
 A new widget (a menu, a combo box, a toast) is a new wrapper: import the React Aria component by
 name, style it from semantic tokens, and add the pairs it draws to the contrast test. Its

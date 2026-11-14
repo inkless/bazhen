@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { barBytes, keyBarStore, lift, withCtrl, type BarKey } from "./bar-keys.ts";
+import { barBytes, keyBarStore, lift, wantsKeyBar, withCtrl, type BarKey } from "./bar-keys.ts";
 import { DEFAULT_KEY_MAP, parseKeyMap, type KeyMap } from "./keymap.ts";
 
 const plain = { keyMap: DEFAULT_KEY_MAP, ctrl: false, appCursor: false };
@@ -65,6 +65,7 @@ describe("Ctrl on a typed character", () => {
     ["3", "\x1b"],
     ["7", "\x1f"],
     ["/", "\x1f"],
+    ["-", "\x1f"],
     ["8", "\x7f"],
   ])("turns %j into its control code", (typed, code) => {
     expect(withCtrl(typed)).toBe(code);
@@ -79,23 +80,46 @@ describe("Ctrl on a typed character", () => {
   });
 });
 
-const view = () => ({ press: vi.fn<(key: BarKey) => void>(), focus: vi.fn<() => void>() });
+function view(kind: "agent" | "shell" = "shell", focused = false) {
+  return {
+    kind,
+    press: vi.fn<(key: BarKey) => void>(),
+    focus: vi.fn<() => void>(),
+    holdsFocus: () => focused,
+  };
+}
 
 describe("key bar store", () => {
-  it("types into the last view mounted until another is engaged", () => {
+  it("types into the agent's terminal until another is engaged", () => {
     const store = keyBarStore();
-    const agent = view();
+    const agent = view("agent");
     const shell = view();
     store.register(agent);
     store.register(shell);
-    expect(store.target()).toBe(shell);
-    store.engaged(agent);
     expect(store.target()).toBe(agent);
+    store.engaged(shell);
+    expect(store.target()).toBe(shell);
   });
 
-  it("falls back to the view mounted last when its target goes", () => {
+  it("prefers the terminal focus is in over the agent's, before any is engaged", () => {
     const store = keyBarStore();
-    const agent = view();
+    store.register(view("agent"));
+    const shell = view("shell", true);
+    store.register(shell);
+    expect(store.target()).toBe(shell);
+  });
+
+  it("types into the newest view when none is an agent's or has focus", () => {
+    const store = keyBarStore();
+    store.register(view());
+    const newest = view();
+    store.register(newest);
+    expect(store.target()).toBe(newest);
+  });
+
+  it("falls back when the engaged view goes", () => {
+    const store = keyBarStore();
+    const agent = view("agent");
     const shell = view();
     store.register(agent);
     const unregister = store.register(shell);
@@ -119,22 +143,26 @@ describe("key bar store", () => {
 
   it("releases Ctrl when the target changes, so it never lands on another terminal", () => {
     const store = keyBarStore();
-    const agent = view();
-    store.register(agent);
-    store.register(view());
+    store.register(view("agent"));
+    const shell = view();
+    store.register(shell);
     store.setCtrl(true);
-    store.engaged(agent);
+    store.engaged(shell);
     expect(store.ctrl()).toBe(false);
   });
 
-  it("tells subscribers when Ctrl or the views change", () => {
+  it("tells subscribers when Ctrl, the views or the layout change, and only then", () => {
     const store = keyBarStore();
     const changed = vi.fn<() => void>();
     store.subscribe(changed);
     store.register(view());
     store.setCtrl(true);
+    store.setCtrl(true);
     store.takeCtrl();
-    expect(changed).toHaveBeenCalledTimes(3);
+    store.setLayout({ room: 400, bar: 53 });
+    store.setLayout({ room: 400, bar: 53 });
+    store.setLayout(null);
+    expect(changed).toHaveBeenCalledTimes(5);
   });
 });
 
@@ -148,5 +176,21 @@ describe("lift above the soft keyboard", () => {
     expect(lift(800, { height: 800, offsetTop: 0 })).toBe(0);
     expect(lift(800, { height: 820, offsetTop: 0 })).toBe(0);
     expect(lift(800, null)).toBe(0);
+  });
+});
+
+describe("which devices get the key bar", () => {
+  const iPad =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Safari/605.1.15";
+  const windows = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0";
+
+  it("gives it to a phone, and to an iPad with a trackpad and keyboard", () => {
+    expect(wantsKeyBar({ coarse: true, maxTouchPoints: 5, userAgent: "iPhone" })).toBe(true);
+    expect(wantsKeyBar({ coarse: false, maxTouchPoints: 5, userAgent: iPad })).toBe(true);
+  });
+
+  it("leaves it off a touch-screen laptop and a Mac, whose keyboards have every key", () => {
+    expect(wantsKeyBar({ coarse: false, maxTouchPoints: 10, userAgent: windows })).toBe(false);
+    expect(wantsKeyBar({ coarse: false, maxTouchPoints: 0, userAgent: iPad })).toBe(false);
   });
 });

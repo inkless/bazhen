@@ -25,6 +25,12 @@ describe("a device's terminal settings", () => {
     expect([settings.keyMap.get("ctrl+enter"), settings.optionIsMeta]).toEqual(["\n", true]);
   });
 
+  it("adds Apple's defaults on an Apple device, under the user's own map", () => {
+    expect(loadSettings(storage({}), true).keyMap.get("meta+.")).toBe("\x1b");
+    const unbound = loadSettings(storage({ [SETTINGS_KEYS.keyMap]: '{"meta+.":null}' }), true);
+    expect(unbound.keyMap.has("meta+.")).toBe(false);
+  });
+
   it("keeps the defaults and says why when the stored key map isn't usable", () => {
     const settings = loadSettings(storage({ [SETTINGS_KEYS.keyMap]: "not a map" }));
     expect([settings.keyMap, settings.problem]).toEqual([

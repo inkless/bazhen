@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebglAddon } from "@xterm/addon-webgl";
@@ -18,7 +18,7 @@ import {
 } from "@bazhen/protocol";
 import { Heartbeat, PING_EVERY_MS } from "./heartbeat.ts";
 import { barBytes, keyBar, withCtrl, type BarTarget } from "./bar-keys.ts";
-import { matchKey } from "./keymap.ts";
+import { isApple, matchKey } from "./keymap.ts";
 import { statusText, type Status } from "./status.ts";
 import { Backoff } from "./reconnect.ts";
 import { wheelAction, type TerminalKind } from "./scroll.ts";
@@ -50,6 +50,8 @@ export function TerminalView({
   height?: string;
 }) {
   const host = useRef<HTMLDivElement>(null);
+  const bar = keyBar();
+  const layout = useSyncExternalStore(bar.subscribe, bar.layout);
   const [report, setReport] = useState<Report>({ status: { kind: "connecting" }, notice: null });
 
   useEffect(() => {
@@ -73,7 +75,12 @@ export function TerminalView({
         ref={host}
         // xterm.js paints whole rows; the strip below the last one is the host's.
         style={{
-          height,
+          // No taller than what shows above the key bar, so its last row, where a TUI's input
+          // sits, stays in view.
+          height: layout === null ? height : `min(${height}, ${layout.room}px)`,
+          scrollMarginBottom: layout === null ? undefined : `${layout.bar}px`,
+          // xterm.js stacks its layers up to z-index 11; kept in here, they stay under the bar.
+          isolation: "isolate",
           background: "var(--color-terminal-bg)",
           colorScheme: scheme,
         }}
@@ -93,7 +100,7 @@ function connect(
   scheme: TuiTheme,
   onReport: (report: Report) => void,
 ) {
-  const settings = loadSettings(localStorage);
+  const settings = loadSettings(localStorage, isApple(navigator.userAgent));
   const page = pageTheme();
   const colours = () => terminalTheme(scheme, page.moreContrast());
   const term = new Xterm({
@@ -166,9 +173,13 @@ function connect(
    * Input goes only from the driver. Anything else is dropped; a keystroke also asks for the
    * lease, a focus or mouse report or a scroll never does (§4.3).
    */
-  const input = (bytes: Uint8Array<ArrayBuffer>, keystroke: boolean) => {
-    if (driving && ws?.readyState === WebSocket.OPEN) ws.send(bytes);
-    else if (keystroke) engage();
+  const input = (bytes: Uint8Array<ArrayBuffer>, keystroke: boolean): boolean => {
+    if (driving && ws?.readyState === WebSocket.OPEN) {
+      ws.send(bytes);
+      return true;
+    }
+    if (keystroke) engage();
+    return false;
   };
   const leaseStatus = (): Status => {
     if (driving) return { kind: "driving" };
@@ -271,12 +282,19 @@ function connect(
   document.addEventListener("visibilitychange", shown);
 
   const bar = keyBar();
+  /**
+   * Sends a keystroke, with the bar's Ctrl if it is armed for this view, and releases Ctrl once the
+   * key is sent. A key that only takes the lease leaves it armed for the key the user sends next.
+   */
+  const keystroke = (text: (ctrl: boolean) => string) => {
+    const ctrl = bar.target() === target && bar.ctrl();
+    if (input(encoder.encode(text(ctrl)), true) && ctrl) bar.takeCtrl();
+  };
   term.attachCustomKeyEventHandler((event) => {
     const text = matchKey(event, settings.keyMap);
     if (text === null) return true;
-    // A bound key is the key the bar's armed Ctrl was for; left armed, it would land on the next.
-    if (bar.target() === target) bar.takeCtrl();
-    input(encoder.encode(text), true);
+    // Bound, it is the key an armed Ctrl was for, though it has no Ctrl form of its own.
+    keystroke(() => text);
     event.preventDefault();
     return false;
   });
@@ -284,19 +302,23 @@ function connect(
     wheelAction({ mouseTracking: term.modes.mouseTrackingMode !== "none", alternate, kind });
   const detachScroll = attachScrollInput(element, term, route, (bytes) => input(bytes, false));
   const target: BarTarget = {
-    press: (key) => {
-      const ctrl = bar.takeCtrl();
-      const appCursor = term.modes.applicationCursorKeysMode;
-      input(encoder.encode(barBytes(key, { keyMap: settings.keyMap, ctrl, appCursor })), true);
-    },
+    kind,
+    press: (key) =>
+      keystroke((ctrl) =>
+        barBytes(key, {
+          keyMap: settings.keyMap,
+          ctrl,
+          appCursor: term.modes.applicationCursorKeysMode,
+        }),
+      ),
     focus: () => term.focus(),
+    holdsFocus: () => element.contains(document.activeElement),
   };
   const unregister = bar.register(target);
   const typed = term.onData((data) => {
-    const keystroke = withoutEventReports(data) !== "";
     // The bar's Ctrl, armed for the next key, applies to a letter typed on the soft keyboard.
-    const ctrl = keystroke && bar.target() === target && bar.takeCtrl();
-    input(encoder.encode(ctrl ? withCtrl(data) : data), keystroke);
+    if (withoutEventReports(data) !== "") keystroke((ctrl) => (ctrl ? withCtrl(data) : data));
+    else input(encoder.encode(data), false);
   });
   // Only X10 mouse reports come this way.
   const binary = term.onBinary((data) => input(latin1(data), false));
@@ -308,6 +330,24 @@ function connect(
   const aim = () => bar.engaged(target);
   element.addEventListener("pointerdown", aim);
   element.addEventListener("focusin", aim);
+  // Focus leaving for anything but the bar, the soft keyboard closing say, ends what Ctrl was for.
+  const left = (event: FocusEvent) => {
+    const to = event.relatedTarget;
+    const toBar = to instanceof Element && to.closest(".key-bar") !== null;
+    if (!toBar && bar.target() === target) bar.setCtrl(false);
+  };
+  element.addEventListener("focusout", left);
+  // When the bar shows or the soft keyboard opens, the terminal is sized to what shows above the
+  // bar; bring the whole of a focused one into view, its last row above the bar.
+  let layout = bar.layout();
+  const unwatch = bar.subscribe(() => {
+    const next = bar.layout();
+    if (next === layout) return;
+    layout = next;
+    if (next !== null && target.holdsFocus()) {
+      requestAnimationFrame(() => element.scrollIntoView({ block: "end" }));
+    }
+  });
   // A contrast preference can change while it is open; it repaints in place.
   const unfollow = page.subscribe(() => {
     term.options.theme = colours();
@@ -321,6 +361,8 @@ function connect(
     detachTakeover();
     element.removeEventListener("pointerdown", aim);
     element.removeEventListener("focusin", aim);
+    element.removeEventListener("focusout", left);
+    unwatch();
     unregister();
     detachScroll();
     observer.disconnect();

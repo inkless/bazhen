@@ -463,15 +463,14 @@ main {
 
 /*
  * The touch key bar, fixed to the bottom and raised above the soft keyboard from script; the room
- * under the page keeps it off the terminal's last rows. It scrolls sideways on the narrowest
- * phones rather than shrink a key below the hit size.
+ * under the page keeps it off the page's end. It scrolls sideways on the narrowest phones rather
+ * than shrink a key below the hit size.
  */
 .key-bar {
   position: fixed;
   left: 0;
   right: 0;
-  display: flex;
-  gap: var(--space-1);
+  z-index: var(--z-key-bar);
   padding: var(--space-1);
   padding-bottom: max(var(--space-1), env(safe-area-inset-bottom));
   overflow-x: auto;
@@ -487,4 +486,12 @@ main {
 
 .key-bar-room {
   height: calc(var(--size-hit-min) + 2 * var(--space-1) + 1px);
+}
+
+/* Where the hidden bar comes back from. */
+.key-bar-show {
+  position: fixed;
+  right: var(--space-2);
+  bottom: max(var(--space-2), env(safe-area-inset-bottom));
+  z-index: var(--z-key-bar);
 }

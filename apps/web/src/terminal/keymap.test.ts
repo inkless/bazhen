@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_KEY_MAP, matchKey, parseKeyMap, type KeyChord, type KeyMap } from "./keymap.ts";
+import {
+  APPLE_KEY_MAP,
+  DEFAULT_KEY_MAP,
+  isApple,
+  matchKey,
+  parseKeyMap,
+  type KeyChord,
+  type KeyMap,
+} from "./keymap.ts";
 
 function keydown(key: string, mods: Partial<KeyChord> = {}): KeyChord {
   return {
@@ -26,8 +34,21 @@ describe("terminal key map", () => {
     expect(matchKey(keydown("Enter", { shiftKey: true }), DEFAULT_KEY_MAP)).toBe("\x1b\r");
   });
 
-  it("sends Esc for Cmd+., for a keyboard with no Esc key", () => {
-    expect(matchKey(keydown(".", { metaKey: true }), DEFAULT_KEY_MAP)).toBe("\x1b");
+  it("sends Esc for Cmd+. on Apple's platforms, for an iPad keyboard with no Esc key", () => {
+    expect(matchKey(keydown(".", { metaKey: true }), APPLE_KEY_MAP)).toBe("\x1b");
+    expect(matchKey(keydown(".", { metaKey: true }), DEFAULT_KEY_MAP)).toBeNull();
+  });
+
+  it("knows an iPad by its Mac user agent, and Windows as not Apple's", () => {
+    const iPad =
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Safari/605.1.15";
+    const windows = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0";
+    expect([isApple(iPad), isApple(windows)]).toEqual([true, false]);
+  });
+
+  it("unbinds a default chord bound to null, leaving the key to xterm.js", () => {
+    const map = parsedMap({ "shift+enter": null });
+    expect(matchKey(keydown("Enter", { shiftKey: true }), map)).toBeNull();
   });
 
   it("leaves plain Enter to xterm.js, so it still submits", () => {

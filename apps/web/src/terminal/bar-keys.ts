@@ -72,6 +72,7 @@ const CTRL_EXTRAS: Record<string, string> = {
   "6": "\x1e",
   "7": "\x1f",
   "/": "\x1f",
+  "-": "\x1f",
   "8": "\x7f",
   "?": "\x7f",
 };
@@ -88,9 +89,19 @@ export function withCtrl(typed: string): string {
 
 /** A terminal view the bar can type into. */
 export interface BarTarget {
+  /** An agent's terminal, which the bar falls back to over a shell's. */
+  readonly kind: "agent" | "shell";
   press(key: BarKey): void;
   /** Focuses its terminal, which on a phone opens the soft keyboard. */
   focus(): void;
+  /** Whether focus is in its terminal. */
+  holdsFocus(): boolean;
+}
+
+/** Where terminals fit while the bar shows: how tall the page shows, less the bar, and the bar. */
+export interface BarLayout {
+  readonly room: number;
+  readonly bar: number;
 }
 
 /** The terminal views on the page, which one the bar types into, and the bar's sticky Ctrl. */
@@ -98,9 +109,15 @@ export function keyBarStore() {
   const views: BarTarget[] = [];
   let engaged: BarTarget | undefined;
   let ctrl = false;
+  let layout: BarLayout | null = null;
   const listeners = new Set<() => void>();
   const changed = () => listeners.forEach((listener) => listener());
-  const target = () => engaged ?? views.at(-1);
+  /** The view last engaged, else the one focus is in, else the agent's, else the newest. */
+  const target = () =>
+    engaged ??
+    views.find((v) => v.holdsFocus()) ??
+    views.find((v) => v.kind === "agent") ??
+    views.at(-1);
   /** Runs `change`, releasing Ctrl if it moves the bar to another terminal. */
   const moving = (change: () => void) => {
     const before = target();
@@ -128,15 +145,23 @@ export function keyBarStore() {
     target,
     ctrl: () => ctrl,
     setCtrl: (on: boolean): void => {
+      if (on === ctrl) return;
       ctrl = on;
       changed();
     },
-    /** Whether Ctrl applies to the key being sent; it applies to one key only. */
+    /** Releases Ctrl once the key it was armed for has been sent; whether it was armed. */
     takeCtrl: (): boolean => {
       if (!ctrl) return false;
       ctrl = false;
       changed();
       return true;
+    },
+    layout: () => layout,
+    /** The bar's layout while it shows, `null` while it doesn't. */
+    setLayout: (next: BarLayout | null): void => {
+      if (next?.room === layout?.room && next?.bar === layout?.bar) return;
+      layout = next;
+      changed();
     },
     subscribe: (listener: () => void): (() => void) => {
       listeners.add(listener);
@@ -163,3 +188,18 @@ export function lift(
   if (viewport === null) return 0;
   return Math.max(0, innerHeight - (viewport.height + viewport.offsetTop));
 }
+
+export interface Device {
+  /** Whether the primary pointer is a finger: a phone, or an iPad with no trackpad. */
+  readonly coarse: boolean;
+  readonly maxTouchPoints: number;
+  readonly userAgent: string;
+}
+
+/**
+ * Whether `device` gets the key bar: a phone, or an iPad, which names itself a Mac but has a touch
+ * screen, even with a trackpad and keyboard, which has no Esc either. A laptop with a touch screen
+ * has a keyboard with every key, and doesn't.
+ */
+export const wantsKeyBar = ({ coarse, maxTouchPoints, userAgent }: Device): boolean =>
+  coarse || (maxTouchPoints > 1 && /Macintosh/.test(userAgent));
