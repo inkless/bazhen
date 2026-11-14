@@ -122,15 +122,60 @@ export function testEvents(output: string, targets: Map<string, string>): TestEv
   return events;
 }
 
+/** Where a line of a mutated file was before the mutant, or undefined for a line the mutant wrote. */
+export type Unmutate = (file: string, line: number) => number | undefined;
+
+const HUNK = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/gm;
+
 /**
- * Whether a result is a failure on the test's own assertion: it failed, it panicked, and its
- * output names no line of product code. That rules out a crash, a timeout, and a panic product
- * code raised (an overflow the mutant caused), which proptest also reports from inside the test.
+ * Maps a line of the file `patch` mutates back to the line it was before: a mutant that replaces
+ * a function's body moves every later line, and product spans are read from the unmutated file.
+ * A line inside a hunk is the mutant's own.
  */
-export function failedOnAssertion(result: TestEvent, product: LineSpan[]): boolean {
+export function unmutate(patch: string, file: string): Unmutate {
+  const hunks = [...patch.matchAll(HUNK)].map(([, oldCount, newStart, newCount]) => ({
+    oldCount: Number(oldCount ?? 1),
+    newStart: Number(newStart),
+    newCount: Number(newCount ?? 1),
+  }));
+  return (at, line) => {
+    if (at !== file) return line;
+    let shift = 0;
+    for (const h of hunks) {
+      if (line < h.newStart) break;
+      if (line < h.newStart + h.newCount) return undefined;
+      shift += h.oldCount - h.newCount;
+    }
+    return line + shift;
+  };
+}
+
+const WORKSPACE_SOURCE = /^crates\//;
+
+/**
+ * Whether a result is a failure on the test's own assertion: it failed, it panicked, and every
+ * place its output names is workspace source outside product code. That rules out a crash, a
+ * timeout, a panic product code raised (an overflow the mutant caused), and one raised inside the
+ * standard library or a dependency, whose location is an absolute path; proptest reports each of
+ * these from inside the test, with the place it came from.
+ */
+export function failedOnAssertion(
+  result: TestEvent,
+  product: LineSpan[],
+  original: Unmutate = (_file, line) => line,
+): boolean {
   if (result.event !== "failed" || !PANIC.test(result.stdout)) return false;
-  return ![...result.stdout.matchAll(LOCATION)].some(([, file, line]) =>
-    product.some((s) => s.file === file && Number(line) >= s.start && Number(line) <= s.end),
+  const places = [...result.stdout.matchAll(LOCATION)];
+  return (
+    places.length > 0 &&
+    places.every(([, file = "", at]) => {
+      const line = original(file, Number(at));
+      return (
+        WORKSPACE_SOURCE.test(file) &&
+        line !== undefined &&
+        !product.some((s) => s.file === file && line >= s.start && line <= s.end)
+      );
+    })
   );
 }
 

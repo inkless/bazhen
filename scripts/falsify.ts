@@ -46,14 +46,15 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, join, posix } from "node:path";
 import { isAlive, signalGroup, spawnGroup } from "@bazhen/host-guard";
-import { GATES, gateEnv } from "./cargo-gate.ts";
+import { GATES, configFailures, gateEnv, outsideConfigs } from "./cargo-gate.ts";
 import { isMain } from "./is-main.ts";
 import {
   failedOnAssertion,
   filterable,
+  unmutate,
   libtestTargets,
   nextestFilter,
   parseMutants,
@@ -389,6 +390,9 @@ async function stopGroup(child: ChildProcess): Promise<void> {
 }
 
 async function onSignal(signal: NodeJS.Signals): Promise<void> {
+  // A second Ctrl-C while the first is still stopping the children must not end the process
+  // before it removes the worktree.
+  if (signalled) return;
   signalled = true;
   if (running) await stopGroup(running);
   cleanup?.();
@@ -517,7 +521,7 @@ async function listMutants(dir: string, top: string, diff?: string): Promise<unk
 
 // Each test's own timeout, so a mutant that loops ends that test, not the whole run.
 const NEXTEST_PROFILE = `[profile.falsify]
-slow-timeout = { period = "10s", terminate-after = 3 }
+slow-timeout = { period = "5s", terminate-after = 2 }
 fail-fast = false
 `;
 
@@ -600,6 +604,7 @@ async function mutateRustTests(
   range: string[],
   report: unknown,
   added: RustTest[],
+  atBase: Set<string>,
 ): Promise<RustJudgement | undefined> {
   const diff = git(["diff", "-M", ...range, "--", "*.rs"], dir);
   if (diff === "") {
@@ -613,17 +618,20 @@ async function mutateRustTests(
   try {
     mutants = parseMutants(await listMutants(dir, top, diffFile));
     product = productSpans(await listMutants(dir, top));
-  } catch {
+  } catch (error) {
+    const why = error instanceof Error ? error.message : String(error);
     console.error(
-      "falsify: `cargo-mutants mutants --list` failed, so the new Rust tests can't be judged. " +
-        `Run it in the repository to see why; ${MUTANTS_HINT}`,
+      `falsify: \`cargo-mutants mutants --list\` failed (${why}), so the new Rust tests can't be ` +
+        `judged. Run it in the repository to see why; ${MUTANTS_HINT}`,
     );
     return undefined;
   }
   const targets = libtestTargets(report);
   writeFileSync(join(dir, "falsify-nextest.toml"), NEXTEST_PROFILE);
 
-  const runnable = added.filter(filterable);
+  // A crate's library and binaries share a target, so a new test named as one the base already
+  // has there would be credited with the old test's failures.
+  const runnable = added.filter((t) => filterable(t) && !atBase.has(key(t)));
   const baseline = testEvents(
     runnable.length > 0 && mutants.length > 0 ? await runRustTests(dir, top, runnable) : "",
     targets,
@@ -638,21 +646,31 @@ async function mutateRustTests(
   let ran = 0;
   for (const mutant of mutants) {
     if (pending.length === 0 || ran === MAX_MUTANTS) break;
+    const original = unmutate(mutant.patch, mutant.file);
+    const failedUnder = async (tests: RustTest[]) => {
+      const results = testEvents(await runRustTests(dir, top, tests), targets);
+      const failed = new Set(
+        results.filter((r) => failedOnAssertion(r, product, original)).map((r) => r.test),
+      );
+      return tests.filter((t) => failed.has(key(t)));
+    };
     const applied = await withMutant(dir, mutant, async () => {
       ran += 1;
-      for (const result of testEvents(await runRustTests(dir, top, pending), targets)) {
-        if (failedOnAssertion(result, product) && !killedBy.has(result.test)) {
-          killedBy.set(result.test, mutant.name);
-        }
-      }
+      const candidates = await failedUnder(pending);
+      // Run once more, so a test that fails now and then isn't credited to whichever mutant it
+      // happened to fail under.
+      const confirmed = candidates.length > 0 ? await failedUnder(candidates) : [];
+      for (const t of confirmed) killedBy.set(key(t), mutant.name);
       pending = pending.filter((t) => !killedBy.has(key(t)));
     });
     if (!applied) unapplied.push(mutant.name);
   }
-  const capped = pending.length > 0 && ran === MAX_MUTANTS;
+  const capped =
+    pending.length > 0 && ran === MAX_MUTANTS && ran + unapplied.length < mutants.length;
   const verdicts = added.map((t): RustVerdict => {
     const by = killedBy.get(key(t));
     if (by !== undefined) return { ...t, outcome: "KILLED", note: ` (by ${by})` };
+    if (atBase.has(key(t))) return invalidRust(t, "the base has a test of that name in its crate");
     if (!filterable(t)) return invalidRust(t, "its name can't be selected to run alone");
     if (mutants.length === 0) return invalidRust(t, "the change has no code to mutate");
     if (!passed.has(key(t)) || broken.has(key(t)))
@@ -681,6 +699,14 @@ async function judgeRustTests(top: string, base: string, head: string) {
     removeWorktree(dir, top);
   };
   try {
+    const cargoHome = process.env["CARGO_HOME"] ?? join(homedir(), ".cargo");
+    const unsafeConfig = configFailures(outsideConfigs(dir, cargoHome), (path) =>
+      existsSync(path) ? readFileSync(path, "utf8") : undefined,
+    );
+    if (unsafeConfig.length > 0) {
+      console.error(`falsify: ${unsafeConfig.join("\n")}`);
+      return undefined;
+    }
     addWorktree(dir, base, top);
     const before = await listRustTests(dir, top);
     git(["checkout", "--quiet", "--detach", head], dir);
@@ -694,9 +720,10 @@ async function judgeRustTests(top: string, base: string, head: string) {
       );
       return undefined;
     }
-    const added = addedRustTests(rustTestIds(before), rustTestIds(after));
+    const atBase = rustTestIds(before);
+    const added = addedRustTests(atBase, rustTestIds(after));
     if (added.length === 0) return { verdicts: [], unapplied: [], ran: 0, total: 0 };
-    return await mutateRustTests(dir, top, [base, head], after, added);
+    return await mutateRustTests(dir, top, [base, head], after, added, new Set(atBase));
   } finally {
     cleanup?.();
   }
@@ -773,9 +800,9 @@ async function main(args: string[]): Promise<number> {
   });
   let rust: RustJudgement = { verdicts: [], unapplied: [], ran: 0, total: 0 };
   if (changes.some((c) => RUST_INPUT.test(c.path) || RUST_INPUT.test(c.oldPath ?? ""))) {
-    process.once("SIGINT", handleSignal);
-    process.once("SIGTERM", handleSignal);
-    process.once("SIGHUP", handleSignal);
+    process.on("SIGINT", handleSignal);
+    process.on("SIGTERM", handleSignal);
+    process.on("SIGHUP", handleSignal);
     try {
       const judged = await judgeRustTests(top, base, head);
       if (judged === undefined) return 1;
@@ -817,9 +844,9 @@ async function main(args: string[]): Promise<number> {
       removeWorktree(dir, top);
     };
     // SIGHUP too: an agent's tmux pane closing mid-run must not orphan the detached children.
-    process.once("SIGINT", handleSignal);
-    process.once("SIGTERM", handleSignal);
-    process.once("SIGHUP", handleSignal);
+    process.on("SIGINT", handleSignal);
+    process.on("SIGTERM", handleSignal);
+    process.on("SIGHUP", handleSignal);
     try {
       addWorktree(dir, head, top);
       for (const c of reverts) {

@@ -20,6 +20,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isAlive } from "@bazhen/host-guard";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const FALSIFY = fileURLToPath(new URL("falsify.ts", import.meta.url));
@@ -63,7 +64,7 @@ if [ "$2" = run ]; then
   [ "\${NEXTEST_EXPERIMENTAL_LIBTEST_JSON:-}" = 1 ] || exit 101
   echo "RUN: $(tr '\\n' ' ' < ${LIB})" >> "$STUB_LOG"
   if [ "\${STUB_HANG:-}" = 1 ] && grep -q MUTATED ${LIB}; then
-    echo HANGING >> "$STUB_LOG"
+    echo "HANGING $$" >> "$STUB_LOG"
     sleep 60
   fi
   while read -r name; do
@@ -77,6 +78,10 @@ if [ "$2" = run ]; then
     printf '{"type":"test","event":"started","name":"hook::hook$%s"}\\n' "$name"
     # A backtrace lists the product frames a panic passed through.
     if [ -n "$at" ] && [ -n "\${RUST_BACKTRACE:-}" ]; then at="$at, at ${LIB}:5:5"; fi
+    # A flaky test fails once, then passes.
+    if [ -n "$at" ] && [ "\${STUB_FLAKY:-}" = 1 ]; then
+      if [ -e "$STUB_LOG.flaked" ]; then at=""; else : > "$STUB_LOG.flaked"; fi
+    fi
     if [ -n "$at" ]; then
       printf '{"type":"test","event":"failed","name":"hook::hook$%s","stdout":"panicked at %s: assertion failed"}\\n' "$name" "$at"
     else
@@ -85,19 +90,35 @@ if [ "$2" = run ]; then
   done < rust-tests.txt
   exit 0
 fi
-printf '{"rust-suites":{"hook":{"package-name":"hook","binary-name":"hook","testcases":{'
-sep=""
-while read -r name; do
-  printf '%s"%s":{}' "$sep" "$name"
-  sep=","
-done < rust-tests.txt
-printf '}}}}'
+suite() {
+  printf '"%s":{"package-name":"hook","binary-name":"hook","testcases":{' "$1"
+  sep=""
+  while read -r name; do
+    printf '%s"%s":{}' "$sep" "$name"
+    sep=","
+  done < "$2"
+  printf '}}'
+}
+printf '{"rust-suites":{'
+suite hook rust-tests.txt
+# The crate's binary, whose tests share the library's target.
+if [ -e bin-tests.txt ]; then printf ','; suite hook::bin/hook bin-tests.txt; fi
+printf '}}'
 `;
 
 const STUB_MUTANTS = `#!/bin/sh
 echo "MUTANTS: $*" >> "$STUB_LOG"
 [ "\${STUB_MUTANTS_FAIL:-}" = 1 ] && exit 1
-if [ -e mutants.json ]; then cat mutants.json; else echo "[]"; fi
+case "$*" in
+  *--in-diff*)
+    # Only the mutants of the change, and only when given the branch's diff of its Rust source.
+    for diff in "$@"; do :; done
+    if [ -e mutants.json ] && grep -q '^+fn b' "$diff"; then cat mutants.json; else echo "[]"; fi
+    ;;
+  *)
+    if [ -e all-mutants.json ]; then cat all-mutants.json; else echo "[]"; fi
+    ;;
+esac
 `;
 
 type Fixture = {
@@ -124,6 +145,7 @@ function env(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
     TMPDIR: fx.tmp,
     STUB_LOG: fx.log,
     STUB_STATUS: "failed",
+    CARGO_HOME: join(fx.root, "cargo-home"),
     ...extra,
   };
 }
@@ -403,20 +425,41 @@ function mutantOfB(name: string, from = "    2", to = "    0 /* MUTATED */") {
   };
 }
 
+/** A mutant of `a`, which the branch doesn't change: only the whole workspace's listing has it. */
+const MUTANT_OF_A = {
+  name: `${LIB}:2:5: replace a -> u8 with 0`,
+  file: LIB,
+  span: { start: { line: 2, column: 5 }, end: { line: 2, column: 6 } },
+  function: {
+    function_name: "a",
+    return_type: "-> u8",
+    span: { start: { line: 1, column: 1 }, end: { line: 3, column: 2 } },
+  },
+};
+
 const ASSERTION = `${LIB}:20:9`;
 const IN_PRODUCT = `${LIB}:5:5`;
+const IN_UNCHANGED_PRODUCT = `${LIB}:2:5`;
 
 /**
  * Main has a crate whose test is tests::kept; the branch adds `b` and `tests`, with these mutants
  * listed and these `marker|test|panic location` kills, under a trailer that names no Rust test.
  */
-function mutatedBranch(tests: string[], mutants: unknown[], kills: string[] = []): void {
+function mutatedBranch(
+  tests: string[],
+  mutants: unknown[],
+  kills: string[] = [],
+  extra: Record<string, string> = {},
+): void {
   rustOnMain(["tests::kept"], { [LIB]: LIB_BEFORE });
   write(fx.linked, LIB, LIB_AFTER);
   write(fx.linked, "rust-tests.txt", ["tests::kept", ...tests].map((n) => `${n}\n`).join(""));
   write(fx.linked, "mutants.json", JSON.stringify(mutants));
+  write(fx.linked, "all-mutants.json", JSON.stringify([MUTANT_OF_A, ...mutants]));
   write(fx.linked, "kills.txt", kills.map((k) => `${k}\n`).join(""));
-  git(fx.linked, "add", LIB, "rust-tests.txt", "mutants.json", "kills.txt");
+  for (const [file, text] of Object.entries(extra)) write(fx.linked, file, text);
+  const files = ["rust-tests.txt", "mutants.json", "all-mutants.json", "kills.txt"];
+  git(fx.linked, "add", LIB, ...files, ...Object.keys(extra));
   git(fx.linked, "commit", "--quiet", "-m", "feat: b", "-m", CONTROL);
 }
 
@@ -483,10 +526,90 @@ describe("falsify judging new Rust tests by mutating the change", () => {
       [mutantOfB("replace b -> u8 with 0")],
       [`MUTATED|tests::b_is_two|${IN_PRODUCT}`],
     );
+    const result = againstBase();
+    expect({
+      status: result.status,
+      unkilled: result.output.includes(
+        "tests::b_is_two (Rust: no mutant of the change failed it on an assertion",
+      ),
+      runs: runs(),
+    }).toEqual({ status: 1, unkilled: true, runs: 2 });
+  });
+
+  it("doesn't count a panic in product code the branch didn't change", () => {
+    mutatedBranch(
+      ["tests::b_is_two"],
+      [mutantOfB("replace b -> u8 with 0")],
+      [`MUTATED|tests::b_is_two|${IN_UNCHANGED_PRODUCT}`],
+    );
+    const result = againstBase();
+    expect({ status: result.status, runs: runs() }).toEqual({ status: 1, runs: 2 });
+  });
+
+  it("doesn't credit a test that fails under a mutant only once", () => {
+    mutatedBranch(
+      ["tests::b_is_two"],
+      [mutantOfB("replace b -> u8 with 0")],
+      [`MUTATED|tests::b_is_two|${ASSERTION}`],
+    );
+    const result = againstBase({ STUB_FLAKY: "1" });
+    expect({
+      status: result.status,
+      asks: result.output.includes("Control: tests::b_is_two:"),
+      runs: runs(),
+    }).toEqual({ status: 1, asks: true, runs: 3 });
+  });
+
+  it("credits each test to the first mutant that fails it, and stops running it", () => {
+    mutatedBranch(
+      ["tests::t1", "tests::t2"],
+      [
+        mutantOfB("replace b -> u8 with 0", "    2", "    0 /* ZERO */"),
+        mutantOfB("replace b -> u8 with 1", "    2", "    1 /* ONE */"),
+      ],
+      [`ZERO|tests::t1|${ASSERTION}`, `ONE|tests::t1|${ASSERTION}`, `ONE|tests::t2|${ASSERTION}`],
+    );
+    const result = againstBase();
+    expect({
+      status: result.status,
+      t1: result.output.includes("tests::t1 (by crates/x/src/lib.rs:5:5: replace b -> u8 with 0)"),
+      t2: result.output.includes("tests::t2 (by crates/x/src/lib.rs:5:5: replace b -> u8 with 1)"),
+      runsOfT1: stubLog().match(/^NEXTEST: nextest run .*test\(=tests::t1\)/gm)?.length,
+    }).toEqual({ status: 0, t1: true, t2: true, runsOfT1: 3 });
+  });
+
+  it("doesn't judge a test whose name can't be selected alone", () => {
+    mutatedBranch(["tests::case(1)"], [mutantOfB("replace b -> u8 with 0")]);
     expect(againstBase()).toEqual({
       status: 1,
-      output: expect.stringContaining("Control: tests::b_is_two:"),
+      output: expect.stringContaining(
+        "tests::case(1) (Rust: its name can't be selected to run alone",
+      ),
     });
+  });
+
+  it("doesn't judge a new test named as one the base has elsewhere in its crate", () => {
+    mutatedBranch([], [mutantOfB("replace b -> u8 with 0")], [`MUTATED|tests::kept|${ASSERTION}`], {
+      "bin-tests.txt": "tests::kept\n",
+    });
+    expect(againstBase()).toEqual({
+      status: 1,
+      output: expect.stringContaining(
+        "tests::kept (Rust: the base has a test of that name in its crate",
+      ),
+    });
+  });
+
+  it("refuses a cargo config above its worktree, which could change what the tests run", () => {
+    mutatedBranch(["tests::b_is_two"], [mutantOfB("replace b -> u8 with 0")]);
+    write(fx.tmp, ".cargo/config.toml", '[env]\nRUSTFLAGS = "--cap-lints allow"\n');
+    const result = againstBase();
+    expect({
+      status: result.status,
+      refused: result.output.includes(`${join(fx.tmp, ".cargo", "config.toml")} sets`),
+      ran: stubLog().includes("NEXTEST:"),
+      worktrees: falsifyWorktrees(fx.repo),
+    }).toEqual({ status: 1, refused: true, ran: false, worktrees: [] });
   });
 
   it("doesn't judge a test that fails without a mutant", () => {
@@ -518,7 +641,8 @@ describe("falsify judging new Rust tests by mutating the change", () => {
       noOp: result.output.includes(`INVALID  mutant ${LIB}:5:5: no-op (its patch left`),
       killedBy: result.output.includes("(by crates/x/src/lib.rs:5:5: replace b -> u8 with 0)"),
       runs: runs(),
-    }).toEqual({ status: 0, stale: true, noOp: true, killedBy: true, runs: 2 });
+      summary: result.output.includes("1 of the change's 3 Rust mutants run"),
+    }).toEqual({ status: 0, stale: true, noOp: true, killedBy: true, runs: 3, summary: true });
   });
 
   it("stops once every new test is killed", () => {
@@ -530,7 +654,7 @@ describe("falsify judging new Rust tests by mutating the change", () => {
       ],
       [`MUTATED|tests::b_is_two|${ASSERTION}`],
     );
-    expect({ status: againstBase().status, runs: runs() }).toEqual({ status: 0, runs: 2 });
+    expect({ status: againstBase().status, runs: runs() }).toEqual({ status: 0, runs: 3 });
   });
 
   it("runs at most 100 mutants, and says so of a test none of them failed", () => {
@@ -543,6 +667,16 @@ describe("falsify judging new Rust tests by mutating the change", () => {
       summary: result.output.includes("100 of the change's 101 Rust mutants run"),
       runs: runs(),
     }).toEqual({ status: 1, capped: true, summary: true, runs: 101 });
+  }, 60_000);
+
+  it("doesn't say it stopped early when it ran every mutant", () => {
+    const mutants = Array.from({ length: 100 }, (_, i) => mutantOfB(`mutant ${i}`));
+    mutatedBranch(["tests::b_is_two"], mutants);
+    const result = againstBase();
+    expect({
+      capped: result.output.includes("within the first 100"),
+      unkilled: result.output.includes("no mutant of the change failed it on an assertion"),
+    }).toEqual({ capped: false, unkilled: true });
   }, 60_000);
 
   it("fails with the install command, and leaves nothing behind, when cargo-mutants can't list", () => {
@@ -570,8 +704,10 @@ describe("falsify judging new Rust tests by mutating the change", () => {
       });
       const exited = once(child, "exit");
       await expect.poll(() => stubLog().includes("HANGING"), { timeout: 20_000 }).toBe(true);
+      const nextest = Number(/^HANGING (\d+)$/m.exec(stubLog())?.[1]);
       child.kill(signal);
       const [status] = await exited;
+      await expect.poll(() => isAlive(nextest), { timeout: 5000 }).toBe(false);
       expect({
         status,
         checkout: git(fx.linked, "status", "--porcelain"),
@@ -581,4 +717,23 @@ describe("falsify judging new Rust tests by mutating the change", () => {
     },
     30_000,
   );
+
+  it("on a second Ctrl-C while it stops, still removes its worktree", async () => {
+    mutatedBranch(["tests::b_is_two"], [mutantOfB("replace b -> u8 with 0")]);
+    const child = spawn("node", [FALSIFY, "--base", fx.base], {
+      cwd: fx.linked,
+      env: env({ STUB_HANG: "1" }),
+      stdio: "ignore",
+    });
+    const exited = once(child, "exit");
+    await expect.poll(() => stubLog().includes("HANGING"), { timeout: 20_000 }).toBe(true);
+    child.kill("SIGINT");
+    child.kill("SIGINT");
+    const [status, signal] = await exited;
+    expect({ status, signal, leftovers: leftovers() }).toEqual({
+      status: 130,
+      signal: null,
+      leftovers: [],
+    });
+  }, 30_000);
 });

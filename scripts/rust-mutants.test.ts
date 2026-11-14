@@ -7,6 +7,7 @@ import {
   parseMutants,
   productSpans,
   testEvents,
+  unmutate,
 } from "./rust-mutants.ts";
 
 const LIB = "crates/bazhen-hook/src/lib.rs";
@@ -126,6 +127,7 @@ describe("testEvents", () => {
   it("names each result by target and path, skipping other lines and unknown binaries", () => {
     const output = [
       "    Starting 2 tests across 2 binaries",
+      '{"type":"test","event":"failed","name":"bazhen-hook::bazhen_hook$tests::cut',
       event("bazhen-hook::bazhen_hook$tests::a", "ok"),
       event("bazhen-hook::bazhen_hook$tests::b", "failed", "x"),
       event("other::other$tests::c", "failed"),
@@ -163,6 +165,27 @@ describe("failedOnAssertion", () => {
         product,
       ),
     }).toEqual({ passed: false, noPanic: false, inProduct: false, proptestReport: false });
+  });
+
+  it("doesn't count a panic raised in the standard library or a dependency", () => {
+    const std =
+      "/rustc/4d91de4e48198da2e33413efdcd9cd2cc0c46688/library/std/src/collections/hash/map.rs:1456:23";
+    const dependency = "/home/u/.cargo/registry/src/index.crates.io-1/serde-1.0.0/src/de.rs:10:5";
+    expect({
+      std: failedOnAssertion(result("failed", panic(std, "no entry found for key")), product),
+      dependency: failedOnAssertion(result("failed", panic(dependency)), product),
+    }).toEqual({ std: false, dependency: false });
+  });
+
+  it("reads a place in the mutated file as the line it was before the mutant", () => {
+    // The mutant made lines 84-91 into 84-86, so the old 120 is now 115.
+    const shrunk = unmutate("@@ -84,8 +84,3 @@\n", LIB);
+    const at = (line: number) => result("failed", panic(`${LIB}:${line}:9`));
+    expect({
+      movedIntoProduct: failedOnAssertion(at(87), [{ file: LIB, start: 92, end: 95 }], shrunk),
+      inTheMutant: failedOnAssertion(at(85), [], shrunk),
+      after: failedOnAssertion(at(115), [{ file: LIB, start: 115, end: 115 }], shrunk),
+    }).toEqual({ movedIntoProduct: false, inTheMutant: false, after: true });
   });
 });
 
