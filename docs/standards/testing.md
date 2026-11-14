@@ -88,7 +88,11 @@ Every new test must be shown to fail without the code it covers.
   worktree (`scripts/falsify.ts`). The source is every file the branch changed under `apps/*/src`
   or `packages/*/src`, and its TypeScript under `scripts/`, tests aside. `scripts/falsify.ts`
   is reverted like any other script: the copy that runs is your checkout's, so only the tests
-  see the base's. Only committed work counts. Each test comes out as one of:
+  see the base's. A script's committed output is reverted with it (`.oxlintrc.json` with
+  `scripts/lint-config.ts`; the protocol's schema and fixtures with their sources), listed in
+  `GENERATED` in `scripts/falsify.ts`. A branch that changes falsify or anything it imports is
+  judged by the base's falsify too, in CI, so its new tests also need what that falsify asks for,
+  usually a `Control:` line. Only committed work counts. Each test comes out as one of:
   - **KILLED** — it failed. Good.
   - **SURVIVED** — it passed without the change, so it can't detect the change. The check
     fails. Only a test that directly imports a reverted file, or runs one it names with

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   classify,
+  harnessFiles,
   hasControl,
   addedRustTests,
   isRevertible,
@@ -8,6 +9,7 @@ import {
   parseArgs,
   parseNameStatus,
   relatedReverts,
+  revertsOf,
   rustTestIds,
   signalExitCode,
   staleWorktrees,
@@ -272,6 +274,11 @@ describe("parseArgs", () => {
     ]);
   });
 
+  it("reads --harness alone", () => {
+    expect([["--harness"], ["--harness", "--base", "main"]].map(rejects)).toEqual([false, true]);
+    expect(parseArgs(["--harness"])).toEqual({ harness: true });
+  });
+
   it("rejects a missing ref, a flag as the ref, extra arguments and a bare revision", () => {
     expect([["--base"], ["--base", "--x"], ["--base", "a", "b"], ["HEAD"]].map(rejects)).toEqual([
       true,
@@ -315,6 +322,46 @@ describe("isRevertible", () => {
         "tests/support/disposable-host.ts",
       ].map(isRevertible),
     ).toEqual([true, true, false, false, false]);
+  });
+});
+
+describe("harnessFiles", () => {
+  it("follows falsify's runtime imports, and lists a workspace package it imports as a folder", () => {
+    const tree: Record<string, string> = {
+      "scripts/falsify.ts":
+        'import { a } from "./a.ts";\nimport { g } from "@bazhen/host-guard";\nimport "node:fs";',
+      "scripts/a.ts": 'export { b } from "./lib/b";',
+      "scripts/lib/b.ts": "export const b = 1;",
+      "scripts/unrelated.ts": "export const u = 1;",
+    };
+    expect(
+      harnessFiles((path) => tree[path], { "@bazhen/host-guard": "packages/host-guard" }),
+    ).toEqual(["packages/host-guard/", "scripts/a.ts", "scripts/falsify.ts", "scripts/lib/b.ts"]);
+  });
+});
+
+const modified = (...paths: string[]) => paths.map((path) => ({ status: "M", path }));
+
+describe("revertsOf", () => {
+  it("reverts a generator's changed output with the generator", () => {
+    const changes = modified("scripts/lint-config.ts", ".oxlintrc.json", "README.md");
+    expect(revertsOf(changes).map((c) => c.path)).toEqual([
+      "scripts/lint-config.ts",
+      ".oxlintrc.json",
+    ]);
+  });
+
+  it("reverts the protocol's schema and fixtures with the protocol source they come from", () => {
+    const changes = modified(
+      "packages/protocol/src/holder.ts",
+      "packages/protocol/schema/HolderOk.json",
+      "packages/protocol/fixtures/holder/1.0/frames.json",
+    );
+    expect(revertsOf(changes)).toEqual(changes);
+  });
+
+  it("keeps a generator's output when the branch changes the output alone", () => {
+    expect(revertsOf(modified(".oxlintrc.json", "scripts/lint-config.medium.test.ts"))).toEqual([]);
   });
 });
 

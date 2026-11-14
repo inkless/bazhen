@@ -403,6 +403,26 @@ describe("falsify on a branch that changes a script", () => {
     });
   });
 
+  it("reverts a generator's committed output with it, so a test reading the output sees the base's", () => {
+    write(fx.linked, "scripts/lint-config.ts", "export const MATRIX = 1;\n");
+    write(fx.linked, ".oxlintrc.json", '{"bans":1}\n');
+    git(fx.linked, "add", "scripts/lint-config.ts", ".oxlintrc.json");
+    git(fx.linked, "commit", "--quiet", "-m", "feat: matrix 1");
+    const base = git(fx.linked, "rev-parse", "HEAD").trim();
+    write(fx.linked, "scripts/lint-config.ts", "export const MATRIX = 2;\n");
+    write(fx.linked, ".oxlintrc.json", '{"bans":2}\n');
+    const test = "scripts/lint-config.medium.test.ts";
+    write(fx.linked, test, branchTest('import { MATRIX } from "./lint-config.ts";\n'));
+    git(fx.linked, "add", "scripts/lint-config.ts", ".oxlintrc.json", test);
+    git(fx.linked, "commit", "--quiet", "-m", "feat: matrix 2");
+    const result = falsify(["--base", base], { STUB_SOURCE: ".oxlintrc.json", STUB_TEST: test });
+    expect({
+      status: result.status,
+      killed: result.output.includes(`KILLED   ${test} › caps`),
+      sawBaseOutput: stubLog().includes('SOURCE: {"bans":1}'),
+    }).toEqual({ status: 0, killed: true, sawBaseOutput: true });
+  });
+
   it("judges a change to falsify.ts by reverting it, so a test that only runs it can survive", () => {
     const runsIt = {
       path: "scripts/falsify.medium.test.ts",

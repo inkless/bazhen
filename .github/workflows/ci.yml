@@ -166,3 +166,19 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: pnpm test:falsify --base "origin/$BASE_REF"
+      # The falsify that judges a branch is the branch's own, so a branch that weakens it could
+      # pass on the weakened check. When the branch changes falsify or anything it imports, the
+      # base's falsify judges the branch as well.
+      - name: pnpm test:falsify with the base's falsify, when the branch changes falsify
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          base=$(git merge-base "origin/$BASE_REF" HEAD)
+          mapfile -t harness < <(node scripts/falsify.ts --harness)
+          if git diff --quiet "$base" HEAD -- "${harness[@]}"; then
+            echo "falsify and its imports are unchanged."
+            exit 0
+          fi
+          git worktree add --detach "$RUNNER_TEMP/base-falsify" "$base"
+          pnpm --dir "$RUNNER_TEMP/base-falsify" install --frozen-lockfile --prefer-offline --ignore-scripts
+          node "$RUNNER_TEMP/base-falsify/scripts/falsify.ts" --base "origin/$BASE_REF"
