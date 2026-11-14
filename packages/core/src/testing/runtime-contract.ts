@@ -6,7 +6,7 @@
 import type { ExitStatus } from "@bazhen/protocol";
 import { assert, describe, expect, it, onTestFinished } from "vitest";
 import { newId } from "../ids.ts";
-import { decode, delay, encode } from "./platform.ts";
+import { concat, decode, delay, encode } from "./platform.ts";
 import {
   ProcessState,
   StaleIncarnation,
@@ -63,14 +63,37 @@ async function snapshotClient(runtime: RuntimeAdapter, ref: RuntimeRef) {
   assert(attached.kind === "snapshot", `attached with ${attached.kind}`);
   let live = "";
   let bytes = 0;
+  let at = { generation: attached.generation, offset: attached.offset };
+  /** The current process's output the stream carried, by the offset it starts at. */
+  let since = new Map<number, Uint8Array>();
   const respawns: { generation: number; after: string }[] = [];
   attached.stream.onData((chunk) => {
+    since.set(at.offset, chunk);
     live += decode(chunk);
     bytes += chunk.length;
+    at = { ...at, offset: at.offset + chunk.length };
   });
-  attached.stream.onRespawn((generation) => respawns.push({ generation, after: live }));
-  return { ...attached, live: () => live, end: () => attached.offset + bytes, respawns };
+  attached.stream.onRespawn((generation) => {
+    respawns.push({ generation, after: live });
+    at = { generation, offset: 0 };
+    since = new Map();
+  });
+  return {
+    ...attached,
+    live: () => live,
+    end: () => attached.offset + bytes,
+    respawns,
+    /** Where the stream is: the generation and offset of the next byte it will carry. */
+    at: () => at,
+    /** The current process's output the stream carried from `offset` on. */
+    from(offset: number): Uint8Array {
+      const chunks = [...since].filter(([start, c]) => start + c.length > offset);
+      return concat(...chunks.map(([start, c]) => c.subarray(Math.max(0, offset - start))));
+    },
+  };
 }
+
+type SnapshotClient = Awaited<ReturnType<typeof snapshotClient>> & { readonly ref: RuntimeRef };
 
 /** Exits reported for `terminalId`, collected until the test ends. */
 function exitsOf(runtime: RuntimeAdapter, terminalId: string) {
@@ -219,6 +242,25 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       stream.write(encode("\x1b[?1049l\r"));
       await expect.poll(() => pushed, { timeout: harness.waitMs }).toEqual([true, false]);
       expect(alternate).toBe(false);
+    });
+
+    it("says a stream ended when its terminal ends or its consumer closes it", async () => {
+      const runtime = fresh();
+      await runtime.create(spec(sleeping)); // keeps the server up once the other is gone
+      const ref = await runtime.create(spec(["cat"]));
+      const [kept, dropped] = [
+        await runtime.attach(ref, null, 0),
+        await runtime.attach(ref, null, 0),
+      ];
+      const whys: string[] = [];
+      kept.stream.onClose((why) => whys.push(`terminal ${why}`));
+      dropped.stream.onClose((why) => whys.push(`consumer ${why}`));
+      dropped.stream.close();
+      await expect.poll(() => whys, { timeout: harness.waitMs }).toEqual(["consumer ended"]);
+      harness.vanish(runtime, ref);
+      await expect
+        .poll(() => whys, { timeout: harness.waitMs })
+        .toEqual(["consumer ended", "terminal ended"]);
     });
 
     it("refuses to attach to a terminal that is no longer there", async () => {
@@ -510,7 +552,8 @@ export function snapshotContract(name: string, harness: SnapshotHarness): void {
       const late = await snapshotClient(runtime, next);
       first.stream.write(encode("after\r"));
       await expect.poll(() => first.live(), { timeout: harness.waitMs }).toContain("after");
-      expect([late.offset, first.respawns]).toEqual([
+      expect([late.generation, late.offset, first.respawns]).toEqual([
+        1,
         0,
         [{ generation: 1, after: expect.not.stringContaining("after") }],
       ]);
@@ -541,6 +584,75 @@ export function snapshotContract(name: string, harness: SnapshotHarness): void {
         expect.not.arrayContaining(["ALTDRAWN"]),
       ]);
     });
+
+    it("takes a snapshot on a live stream, no older than the call and no newer than its bytes", async () => {
+      const runtime = fresh();
+      const ref = await runtime.create({ ...spec, terminalId: newId("term") });
+      const client = await snapshotClient(runtime, ref);
+      client.stream.write(encode("one\r\n"));
+      await expect.poll(() => client.live(), { timeout: harness.waitMs }).toContain("one");
+      client.stream.write(encode("two\r\n"));
+      const asked = client.at();
+      const taken = await client.stream.snapshot().then((s) => ({ ...s, reached: client.at() }));
+      client.stream.write(encode("three\r\n"));
+      await expect.poll(() => client.live(), { timeout: harness.waitMs }).toContain("three");
+      await delay(300);
+      const late = await snapshotClient(runtime, ref);
+      const shown = await harness.replay(concat(taken.vt, client.from(taken.offset)), spec.size);
+      expect(taken.offset).toSatisfy(Number.isSafeInteger);
+      expect([
+        taken.generation,
+        taken.offset >= asked.offset,
+        taken.offset <= taken.reached.offset,
+        shown.lines,
+      ]).toEqual([asked.generation, true, true, (await harness.replay(late.vt, spec.size)).lines]);
+      expect(shown.lines).toEqual(expect.arrayContaining(["one", "two", "three"]));
+    });
+
+    it("takes a stream's snapshot in the generation a respawn started, after telling it", async () => {
+      const runtime = fresh();
+      const s = { ...spec, terminalId: newId("term") };
+      const ref = await runtime.create(s);
+      const client = await snapshotClient(runtime, ref);
+      client.stream.write(encode("before\r"));
+      await expect.poll(() => client.live(), { timeout: harness.waitMs }).toContain("before");
+      await runtime.signal(ref, "SIGTERM");
+      await expect.poll(() => exitOf(runtime, ref), { timeout: harness.waitMs }).not.toBeNull();
+      await runtime.respawn(ref, { ...s, generation: 1 });
+      const taken = await client.stream
+        .snapshot()
+        .then((snap) => ({ ...snap, told: client.respawns.length }));
+      expect([taken.generation, taken.told, taken.offset]).toEqual([1, 1, 0]);
+    });
+
+    it.each([
+      [
+        "its consumer closes it",
+        (_: RuntimeAdapter, client: SnapshotClient) => client.stream.close(),
+      ],
+      [
+        "its terminal ends",
+        (runtime: RuntimeAdapter, client: SnapshotClient) => harness.vanish(runtime, client.ref),
+      ],
+    ])(
+      "refuses a snapshot pending when %s, once it has closed, and any asked for after",
+      async (_how, close) => {
+        const runtime = fresh();
+        await runtime.create({ ...spec, terminalId: newId("term"), argv: ["sleep", "300"] });
+        const ref = await runtime.create({ ...spec, terminalId: newId("term") });
+        const client = { ...(await snapshotClient(runtime, ref)), ref };
+        const order: string[] = [];
+        client.stream.onClose(() => order.push("closed"));
+        const pending = client.stream.snapshot().catch((err: unknown) => {
+          order.push("rejected");
+          throw err;
+        });
+        close(runtime, client);
+        await expect(pending).rejects.toBeInstanceOf(Error);
+        expect(order).toEqual(["closed", "rejected"]);
+        await expect(client.stream.snapshot()).rejects.toBeInstanceOf(Error);
+      },
+    );
 
     it("attaches on a snapshot that asks the terminal nothing, whatever the program asked", async () => {
       const runtime = fresh();

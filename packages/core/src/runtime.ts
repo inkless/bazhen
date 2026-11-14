@@ -131,11 +131,11 @@ export interface RuntimeStream {
   readonly size: Size;
   onData(cb: (bytes: Uint8Array) => void): void;
   /**
-   * The stream is over: the terminal ended, or the runtime lost its connection to it, or, for a
-   * snapshot client, it could no longer deliver every byte in order. A close the consumer didn't
-   * ask for, of a terminal that still runs, is for it to attach again.
+   * The stream is over: its consumer closed it, the terminal ended, or the runtime lost its
+   * connection to it, or, for a snapshot client, it could no longer deliver every byte in order. A
+   * close the consumer didn't ask for, of a terminal that still runs, is for it to attach again.
    */
-  onClose(cb: () => void): void;
+  onClose(cb: (why: StreamEnd) => void): void;
   write(bytes: Uint8Array): void;
   resize(size: Size): Promise<void>;
   /**
@@ -151,9 +151,9 @@ export interface RuntimeStream {
    */
   onFailure(cb: (failure: StreamFailure) => void): void;
   /**
-   * A snapshot client's terminal has a new process, the generation given: called before its first
-   * byte. The consumer applies `RESPAWN_RESET`, as the runtime did. A client that redraws, as
-   * tmux's does, is never told: its runtime redraws it instead.
+   * A snapshot client's terminal has a new process, the generation given, always higher than the
+   * last: called before its first byte. The consumer applies `RESPAWN_RESET`, as the runtime did.
+   * A client that redraws, as tmux's does, is never told: its runtime redraws it instead.
    */
   onRespawn(cb: (generation: number) => void): void;
   /** Must release every OS handle the stream holds. */
@@ -168,6 +168,12 @@ export interface RuntimeStream {
 export const RESPAWN_RESET =
   "\x1b[?1049l\x1b[!p\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1004l\x1b[?2004l" +
   "\x1b]104\x07\x1b]110\x07\x1b]111\x07\x1b]112\x07\x1b[H\x1b[2J";
+
+/**
+ * Why a stream closed: `behind` only for a snapshot client that could no longer deliver every
+ * byte in order, which attaching again recovers from; `ended` for anything else.
+ */
+export type StreamEnd = "behind" | "ended";
 
 /** What failed, as a few words such as `screen check`, and the error it failed with. */
 export interface StreamFailure {
@@ -199,22 +205,50 @@ export interface HistoryAttached extends AttachedClient {
   readonly history: string;
 }
 
-/** A client whose stream carries on exactly where its snapshot ends. */
-export interface SnapshotAttached extends AttachedClient {
-  readonly kind: "snapshot";
+/** A terminal's whole state as of one point in its output. */
+export interface Snapshot {
   /**
-   * VT bytes that rebuild the screen, the history above it, the cursor and the modes exactly as
-   * they were after `offset` bytes of output. The stream's bytes are the ones after them, none
-   * missed or repeated; a stream that can't keep to that closes. They only set state and never
-   * ask the terminal anything, so a terminal that replays them has nothing to answer.
+   * VT bytes that rebuild the screen, at the terminal's size then, the history above it, the cursor
+   * and the modes exactly as they were after `offset` bytes of output. They only set state and
+   * never ask the terminal anything, so a terminal that replays them has nothing to answer.
    */
   readonly vt: Uint8Array;
   /**
-   * Bytes the process the ref names has printed, from 0 at its start. The stream outlives a
-   * respawn, and goes on with the same terminal, the next process's output counted from 0 again.
-   * At most `Number.MAX_SAFE_INTEGER`.
+   * Bytes the process of `generation` had printed, from 0 at its start. At most
+   * `Number.MAX_SAFE_INTEGER`.
    */
   readonly offset: number;
+  /**
+   * The process's generation, as its `ProcessSpec` and `onRespawn` give it. Each respawn's is
+   * higher than the last, so positions order by generation, then offset.
+   */
+  readonly generation: number;
+}
+
+/**
+ * A stream whose bytes carry on exactly where its snapshot ends, none missed or repeated; one that
+ * can't keep to that closes. It outlives a respawn, and goes on with the same terminal, the next
+ * process's output counted from 0 again.
+ */
+export interface SnapshotStream extends RuntimeStream {
+  /**
+   * The terminal as it is now, its process running or exited. Its (generation, offset) is no
+   * earlier than the stream's position at the call, the generation and offset of the next byte
+   * it would deliver, and no later than that position as it resolves: every byte before its
+   * offset, and any respawn before it, has reached the stream's callbacks by then. Several may be
+   * outstanding at once. Rejects if the stream closes first, and only once its `onClose`
+   * callbacks have run, so a consumer can tell the two apart; any other failure rejects and leaves
+   * the stream open.
+   */
+  snapshot(): Promise<Snapshot>;
+}
+
+/** A client that opened on a snapshot, which its stream carries on from. */
+export interface SnapshotAttached extends Snapshot {
+  readonly kind: "snapshot";
+  readonly stream: SnapshotStream;
+  /** Whether the program was on its alternate screen as the client attached. */
+  readonly alternate: boolean;
 }
 
 export interface RuntimeAdapter {
