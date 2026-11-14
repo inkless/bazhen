@@ -46,7 +46,7 @@ describe("reconciling shells after a restart", () => {
   it("marks a shell lost once its server is gone, and lets it be dismissed with nothing to end", async () => {
     const { runtime, shells, restart, open, stateOf } = setup();
     const terminalId = await open();
-    runtime.killServer();
+    runtime.reboot();
     await restart();
     expect(stateOf(terminalId)).toBe("lost");
     await shells.close(terminalId, { idempotencyKey: "dismiss", generation: 0 });
@@ -93,7 +93,7 @@ describe("reconciling shells after a restart", () => {
     const { store, runtime, restart, open, stateOf } = setup();
     const terminalId = await open();
     store.append({ type: "terminal.closing", entityId: terminalId, actor: "user", payload: {} });
-    runtime.killServer();
+    runtime.reboot();
     await restart();
     expect(stateOf(terminalId)).toBe("closed");
   });

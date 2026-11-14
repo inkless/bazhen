@@ -274,7 +274,7 @@ describe("a shell beside an agent", () => {
   it("lets an agent's close wait for a restart beside it, then takes the new shell too", async () => {
     const { shells, agentId, closeAgent, store, runtime, holdOpens } = await setup();
     const { terminalId } = await shells.open({ idempotencyKey: "o", linkedAgentId: agentId });
-    runtime.killServer();
+    runtime.reboot();
     store.append({ type: "terminal.lost", entityId: terminalId, actor: "system", payload: {} });
     const release = holdOpens();
     const restarting = shells.restart(terminalId, { idempotencyKey: "r", generation: 0 });
@@ -381,7 +381,7 @@ async function lost(theme: "light" | "dark" = "light") {
     linkedAgentId: ctx.agentId,
     theme,
   });
-  ctx.runtime.killServer();
+  ctx.runtime.reboot();
   ctx.store.append({ type: "terminal.lost", entityId: terminalId, actor: "system", payload: {} });
   return { ...ctx, terminalId };
 }

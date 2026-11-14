@@ -101,7 +101,7 @@ describe("ServerWatch", () => {
     const watch = new ServerWatch({ store, environment, queue, log: () => {} });
     await watch.tick();
     const before = [agentId, exited, closing].map((id) => stateOf(store, id));
-    runtime.killServer();
+    runtime.reboot();
     await watch.tick();
     expect([before, [agentId, exited, closing].map((id) => stateOf(store, id))]).toEqual([
       ["running", "exited", "closing"],

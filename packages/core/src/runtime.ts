@@ -133,14 +133,32 @@ export interface RuntimeStream {
   onClose(cb: () => void): void;
   write(bytes: Uint8Array): void;
   resize(size: Size): Promise<void>;
-  /** Whether the program is drawing on its alternate screen, read from the runtime. */
-  alternateScreen(): Promise<boolean>;
+  /**
+   * Each time the program moves to or from its alternate screen, from the state `Attached`
+   * reported, and never twice the same way in a row.
+   */
+  onAlternate(cb: (alternate: boolean) => void): void;
+  /** Trouble the stream ran into that its views should hear of, once per run of the same failure. */
+  onFailure(cb: (failure: StreamFailure) => void): void;
   /** Must release every OS handle the stream holds. */
   close(): void;
 }
 
-/** A runtime client just opened, and what it can't redraw: the history above its screen. */
-export interface Attached {
+/** What failed, as a few words such as `screen check`, and the error it failed with. */
+export interface StreamFailure {
+  readonly what: string;
+  readonly cause: unknown;
+}
+
+/**
+ * A runtime client just opened. Either it redraws the screen itself and the history above it is
+ * read beside it, or the runtime hands over the whole state at once.
+ */
+export type Attached = HistoryAttached | SnapshotAttached;
+
+/** A client whose first output redraws the screen, but can't redraw the history above it. */
+export interface HistoryAttached {
+  readonly kind: "history";
   readonly stream: RuntimeStream;
   /**
    * The history above the screen as the client attached, oldest first: lines separated by `\n`,
@@ -150,6 +168,21 @@ export interface Attached {
    */
   readonly history: string;
   /** Whether the program was on its alternate screen as the client attached. */
+  readonly alternate: boolean;
+}
+
+/** A client whose stream carries on exactly where its snapshot ends. */
+export interface SnapshotAttached {
+  readonly kind: "snapshot";
+  readonly stream: RuntimeStream;
+  /**
+   * VT bytes that rebuild the screen, the history above it, the cursor and the modes exactly as
+   * they were after the program's first `offset` bytes of output. The stream's bytes are the ones
+   * after them, none missed or repeated.
+   */
+  readonly vt: Uint8Array;
+  /** A count of output bytes, so at most `Number.MAX_SAFE_INTEGER`. */
+  readonly offset: number;
   readonly alternate: boolean;
 }
 
@@ -166,7 +199,8 @@ export interface RuntimeAdapter {
   create(spec: TerminalSpec): Promise<RuntimeRef>;
   /**
    * Opens a client at `size`, or, given null, at whatever size the terminal already has, with up
-   * to `historyLines` of the history above its screen.
+   * to `historyLines` of the history above its screen. A runtime that keeps a depth of its own per
+   * terminal may ignore `historyLines`.
    */
   attach(ref: RuntimeRef, size: Size | null, historyLines: number): Promise<Attached>;
   /**
