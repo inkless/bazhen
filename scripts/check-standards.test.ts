@@ -317,7 +317,7 @@ describe("rootManifestFailures", () => {
   });
 
   it("refuses a lint level that differs from the standard's", () => {
-    const relaxed = root.replace('unwrap_used = "warn"', 'unwrap_used = "allow"');
+    const relaxed = root.replace('unwrap_used = "forbid"', 'unwrap_used = "deny"');
     const added = root.replace(
       "[workspace.lints.clippy]\n",
       '[workspace.lints.clippy]\ncast_lossless = "allow"\n',
