@@ -547,10 +547,12 @@ describe("falsify judging new Rust tests by mutating the change", () => {
 
   it("fails with the install command, and leaves nothing behind, when cargo-mutants can't list", () => {
     mutatedBranch(["tests::b_is_two"], [mutantOfB("replace b -> u8 with 0")]);
-    expect(againstBase({ STUB_MUTANTS_FAIL: "1" })).toEqual({
-      status: 1,
-      output: expect.stringContaining("cargo install --locked cargo-mutants@27.1.0"),
-    });
+    const result = againstBase({ STUB_MUTANTS_FAIL: "1" });
+    expect({
+      status: result.status,
+      hint: result.output.includes("cargo install --locked cargo-mutants@27.1.0"),
+      judged: result.output.includes("falsify: new tests run"),
+    }).toEqual({ status: 1, hint: true, judged: false });
     expect(leftovers()).toEqual([]);
   });
 
