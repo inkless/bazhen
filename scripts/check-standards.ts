@@ -869,8 +869,18 @@ export function metadataFailures(meta: CargoMetadata, paths: string[]): string[]
   return out;
 }
 
-/** Why a member manifest gives a test target a harness of its own, which could run nothing. */
+/**
+ * Why a member manifest gives a test target a harness of its own, which could run nothing, or
+ * holds an escape: a quoted key can spell `harness` with escapes (`"\u0068arness"`) that no text
+ * check reads as the word, so a member manifest has none.
+ */
 export function harnessFailures(manifest: string, text: string): string[] {
+  if (text.includes("\\")) {
+    return [
+      `${manifest}: holds a \\ escape, which can spell a key the checks don't read as itself. ` +
+        "Write every key and value out plainly.",
+    ];
+  }
   return /["']?\bharness["']?\s*=/.test(text)
     ? [`${manifest}: sets a test harness. Tests run under libtest, which nextest drives.`]
     : [];

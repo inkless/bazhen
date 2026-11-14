@@ -398,9 +398,17 @@ describe("harnessFailures", () => {
       [
         "[[test]]\nharness = false\n",
         '[[test]]\n"harness" = false\n',
+        '[[test]]\nname = "t"\n"\\u0068arness" = false\n',
+        '[package]\ndescription = "a \\"quoted\\" word"\n',
         "[lib]\ndoctest = false\n",
-      ].map((t) => harnessFailures("crates/a/Cargo.toml", t).length),
-    ).toEqual([1, 1, 0]);
+      ].map((t) => harnessFailures("crates/a/Cargo.toml", t)),
+    ).toEqual([
+      [expect.stringContaining("sets a test harness")],
+      [expect.stringContaining("sets a test harness")],
+      [expect.stringContaining("holds a \\ escape")],
+      [expect.stringContaining("holds a \\ escape")],
+      [],
+    ]);
   });
 });
 
