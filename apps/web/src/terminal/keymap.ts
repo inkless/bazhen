@@ -11,10 +11,7 @@ export interface KeyChord {
   readonly keyCode: number;
 }
 
-/**
- * Chords, written like kitty's `map` (`shift+enter`), to the text the terminal is sent for them.
- * A user's map binds a chord to `null` to unbind it, which leaves the key to xterm.js.
- */
+/** Chords, written like kitty's `map` (`shift+enter`), to the text the terminal is sent for them. */
 export type KeyMap = ReadonlyMap<string, string>;
 
 /**
@@ -33,7 +30,10 @@ const MODIFIERS = ["ctrl", "alt", "shift", "meta"] as const;
 
 export type ParsedKeyMap = { ok: true; map: KeyMap } | { ok: false; error: string };
 
-/** A user's bindings over `defaults`; a map with any invalid entry is rejected whole. */
+/**
+ * A user's bindings over `defaults`; a map with any invalid entry is rejected whole. A chord bound
+ * to `null` is unbound, which leaves the key to xterm.js.
+ */
 export function parseKeyMap(raw: unknown, defaults: KeyMap = DEFAULT_KEY_MAP): ParsedKeyMap {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     return { ok: false, error: "a key map is an object of chord to text" };

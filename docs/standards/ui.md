@@ -126,7 +126,8 @@ tap on a phone.
 On a phone or an iPad, a key bar under the terminal types what their keyboards lack: Esc, Tab,
 Ctrl, the arrows, newline and Enter, through the same key map and lease as a typed key. Its keys
 take `preventFocusOnPress`, so a tap leaves focus, and the soft keyboard, on the terminal. While
-it shows, a terminal is no taller than what shows above it, and the user can hide it per device.
+it shows, a terminal leaves room for it underneath, the same with the soft keyboard open or
+closed so the keyboard never reflows the TUI, and the user can hide it per device.
 Stacking goes by `--z-key-bar` and `--z-modal`; a terminal's host isolates xterm.js's own layers.
 
 A new widget (a menu, a combo box, a toast) is a new wrapper: import the React Aria component by

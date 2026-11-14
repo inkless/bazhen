@@ -488,10 +488,10 @@ main {
   height: calc(var(--size-hit-min) + 2 * var(--space-1) + 1px);
 }
 
-/* Where the hidden bar comes back from. */
+/* Where the hidden bar comes back from, raised with it above the soft keyboard. */
 .key-bar-show {
   position: fixed;
   right: var(--space-2);
-  bottom: max(var(--space-2), env(safe-area-inset-bottom));
+  margin-bottom: max(var(--space-2), env(safe-area-inset-bottom));
   z-index: var(--z-key-bar);
 }

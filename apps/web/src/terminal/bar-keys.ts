@@ -16,8 +16,8 @@ const KEYS: Record<BarKey, BarKeyInfo> = {
   down: { key: "ArrowDown", arrow: "B" },
   right: { key: "ArrowRight", arrow: "C" },
   left: { key: "ArrowLeft", arrow: "D" },
-  // Shift+Enter, which the default key map sends as ESC CR, the TUIs' newline.
-  newline: { key: "Enter", shift: true, bytes: "\r" },
+  // Shift+Enter, the TUIs' newline: ESC CR, as the default key map sends it, even unbound.
+  newline: { key: "Enter", shift: true, bytes: "\x1b\r" },
   enter: { key: "Enter", bytes: "\r" },
 };
 
@@ -98,9 +98,8 @@ export interface BarTarget {
   holdsFocus(): boolean;
 }
 
-/** Where terminals fit while the bar shows: how tall the page shows, less the bar, and the bar. */
+/** While the bar shows: its height, which a terminal leaves room for under it. */
 export interface BarLayout {
-  readonly room: number;
   readonly bar: number;
 }
 
@@ -159,7 +158,7 @@ export function keyBarStore() {
     layout: () => layout,
     /** The bar's layout while it shows, `null` while it doesn't. */
     setLayout: (next: BarLayout | null): void => {
-      if (next?.room === layout?.room && next?.bar === layout?.bar) return;
+      if (next?.bar === layout?.bar) return;
       layout = next;
       changed();
     },

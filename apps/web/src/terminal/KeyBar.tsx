@@ -46,11 +46,12 @@ export function KeyBar() {
     setHidden(next);
   };
   const bar = useRef<HTMLDivElement>(null);
-  const raised = useBarLayout(wanted && present && !hidden, bar);
+  const raised = useLift(wanted && present);
+  useShownBar(wanted && present && !hidden, bar);
   if (!wanted || !present) return null;
   if (hidden) {
     return (
-      <div className="key-bar-show">
+      <div className="key-bar-show" style={{ bottom: `${raised}px` }}>
         <Button preventFocusOnPress aria-label="Show keys" onPress={() => hide(false)}>
           Keys
         </Button>
@@ -97,31 +98,36 @@ export function KeyBar() {
   );
 }
 
-/**
- * While `shown`, keeps the bar above the soft keyboard and tells the terminals how much room they
- * have above it. Returns how far to raise the bar.
- */
-function useBarLayout(shown: boolean, bar: { readonly current: HTMLElement | null }): number {
+/** How far to raise what sits at the bottom to keep it above the soft keyboard, while `active`. */
+function useLift(active: boolean): number {
   const [raised, setRaised] = useState(0);
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!active || viewport === null) return undefined;
+    const update = () => setRaised(lift(window.innerHeight, viewport));
+    update();
+    viewport.addEventListener("resize", update);
+    viewport.addEventListener("scroll", update);
+    return () => {
+      viewport.removeEventListener("resize", update);
+      viewport.removeEventListener("scroll", update);
+    };
+  }, [active]);
+  return raised;
+}
+
+/**
+ * While `shown`, tells the terminals the bar's height, which they leave room for. Once it isn't,
+ * hidden or gone, releases Ctrl, which would otherwise land unseen on the next key typed.
+ */
+function useShownBar(shown: boolean, bar: { readonly current: HTMLElement | null }): void {
   useEffect(() => {
     if (!shown) return undefined;
     const store = keyBar();
-    const viewport = window.visualViewport;
-    const update = () => {
-      const height = bar.current?.offsetHeight ?? 0;
-      setRaised(lift(window.innerHeight, viewport));
-      store.setLayout({ room: (viewport?.height ?? window.innerHeight) - height, bar: height });
-    };
-    update();
-    viewport?.addEventListener("resize", update);
-    viewport?.addEventListener("scroll", update);
-    window.addEventListener("resize", update);
+    store.setLayout({ bar: bar.current?.offsetHeight ?? 0 });
     return () => {
-      viewport?.removeEventListener("resize", update);
-      viewport?.removeEventListener("scroll", update);
-      window.removeEventListener("resize", update);
       store.setLayout(null);
+      store.setCtrl(false);
     };
   }, [shown, bar]);
-  return raised;
 }

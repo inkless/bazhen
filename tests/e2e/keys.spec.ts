@@ -421,8 +421,12 @@ test("types the keys a phone's keyboard lacks from the key bar", async ({ browse
   await phone.keyboard.press("Shift+Enter");
   await expect.poll(() => program.received(before)).toBe(hex("\x1b\r"));
   await expect(ctrl).toHaveAttribute("aria-pressed", "false");
-  // Hidden, it stays hidden on this device, until shown again.
+  // Hidden, it stays hidden on this device, until shown again, and takes an armed Ctrl with it.
+  await ctrl.tap();
   await keyBar(phone).getByRole("button", { name: "Hide" }).tap();
+  const hidden = Date.now();
+  await phone.keyboard.type("c");
+  await expect.poll(() => program.received(hidden)).toBe(hex("c"));
   await expect(keyBar(phone)).toHaveCount(0);
   await phone.reload();
   await expect(phone.getByRole("button", { name: "Show keys" })).toBeVisible();

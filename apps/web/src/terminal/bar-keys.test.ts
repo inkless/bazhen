@@ -42,6 +42,11 @@ describe("key bar bytes", () => {
     expect(barBytes("tab", { ...plain, ctrl: true })).toBe("\t");
   });
 
+  it("sends newline as ESC CR even where Shift+Enter is unbound, never the CR that submits", () => {
+    const keyMap = parsedMap({ "shift+enter": null });
+    expect(barBytes("newline", { ...plain, keyMap })).toBe("\x1b\r");
+  });
+
   it("takes a user's binding for a bar key over the default", () => {
     const keyMap = parsedMap({ escape: "E", "shift+enter": "\n", "ctrl+arrowup": "U" });
     expect(barBytes("escape", { ...plain, keyMap })).toBe("E");
@@ -159,8 +164,8 @@ describe("key bar store", () => {
     store.setCtrl(true);
     store.setCtrl(true);
     store.takeCtrl();
-    store.setLayout({ room: 400, bar: 53 });
-    store.setLayout({ room: 400, bar: 53 });
+    store.setLayout({ bar: 53 });
+    store.setLayout({ bar: 53 });
     store.setLayout(null);
     expect(changed).toHaveBeenCalledTimes(5);
   });
