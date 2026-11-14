@@ -63,6 +63,10 @@ To see every semantic colour in both themes, open `/swatches.html` on the dev se
    `apps/web/src/ui/token-sheet.test.ts`, and run `pnpm test`.
 4. A new hue is a new 12-step scale in `palette.css`, light and dark.
 
+One file holds palette colours of its own: the app icon, `apps/web/public/icon.svg`, which the
+browser and the OS draw as an image, where no token resolves. It is `--color-neutral-12`,
+`--color-neutral-1` and `--color-blue-dark-9` in sRGB; a change to those steps changes it too.
+
 ## The terminal
 
 xterm.js draws from its own theme object, not CSS, so `terminalTheme()`
@@ -143,3 +147,14 @@ buttons: React Aria's `GridList` is a selection widget, with `role="grid"`. Nati
 
 `light-dark()` sets the floor: Safari 17.5, Chrome 123, Firefox 120. That covers a phone on the
 LAN on a current OS.
+
+On a Linux, Windows or ChromeOS desktop a browser tab keeps Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+Shift+W
+and Ctrl+Tab: the page never sees them, so nothing it does can pass them to a terminal. An
+installed app's window offers the page every key first, and xterm.js sends Ctrl+W, Ctrl+T, Ctrl+N,
+Ctrl+Tab and Ctrl+Shift+Tab on; it sends no Ctrl+Shift letter, so Ctrl+Shift+W still closes the
+window. So there, and only there, the page links its manifest and app icon
+(`apps/web/src/install.ts`), and `apps/web/src/terminal/close-guard.ts` asks before a close, in a
+tab or the app's window, while Ctrl is down in a focused terminal. A Mac doesn't lose these keys,
+and a phone or a tablet is touch-first, so they get neither. Playwright's keys skip the browser's
+own shortcuts, so no e2e test presses the real Ctrl+W: check a change here by hand, in a tab and in
+the installed app.

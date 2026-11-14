@@ -18,6 +18,8 @@ import {
 } from "@bazhen/protocol";
 import { Heartbeat, PING_EVERY_MS } from "./heartbeat.ts";
 import { barBytes, keyBar, settled, withCtrl, type BarTarget } from "./bar-keys.ts";
+import { guardClose } from "./close-guard.ts";
+import { closeNotice, offersInstall, pageNow, thisPlatform } from "../install.ts";
 import { isApple, matchKey } from "./keymap.ts";
 import { statusText, type Status } from "./status.ts";
 import { Backoff } from "./reconnect.ts";
@@ -326,6 +328,14 @@ function connect(
     holdsFocus: () => element.contains(document.activeElement),
   };
   const unregister = bar.register(target);
+  const unguard = offersInstall(thisPlatform())
+    ? guardClose(
+        { window, document },
+        () => target.holdsFocus(),
+        // Read on use: a tab Chrome moves into the app's window as it installs keeps this view.
+        () => report({ notice: closeNotice(pageNow()) }),
+      )
+    : () => {};
   const typed = term.onData((data) => {
     // The bar's Ctrl, armed for the next key, applies to a letter typed on the soft keyboard.
     if (withoutEventReports(data) !== "") keystroke((ctrl) => (ctrl ? withCtrl(data) : data));
@@ -396,6 +406,7 @@ function connect(
     window.visualViewport?.removeEventListener("resize", resized);
     clearTimeout(revealing);
     unregister();
+    unguard();
     scroll.detach();
     observer.disconnect();
     typed.dispose();

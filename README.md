@@ -131,6 +131,22 @@ A forwarder that adds no such header, such as `ssh -R` or `socat` onto the daemo
 server's port, isn't noticed: with one, set `web.pairing = "always"`. On a machine other people log in to, set
 `web.pairing = "always"` (or `BAZHEN_PAIRING=always`) to require pairing on loopback too.
 
+## Installing Bazhen as an app on Linux and Windows
+
+In a browser tab on a Linux, Windows or ChromeOS desktop, Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+Shift+W and
+Ctrl+Tab belong to the browser: they never reach the terminal, and Ctrl+W closes the tab. An
+installed app's window passes Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+Tab and Ctrl+Shift+Tab on to the
+terminal. Ctrl+Shift+W still closes the window, and Ctrl+Shift+N still opens a browser window. Open
+Bazhen in Chrome or Chromium, at `http://127.0.0.1:7900` or your HTTPS route, click the install
+icon in the address bar, and open Bazhen from your app launcher from then on. The app runs in the
+same browser profile, so at the same address it keeps the browser's pairing and needs no second
+`bazhen pair`.
+
+While Ctrl is down in a terminal, closing a tab, or the app's window, asks first: Ctrl+W in a tab,
+and Ctrl+Shift+W in the app. Firefox can't install Bazhen as an app, so there the question is all
+there is. A Mac doesn't lose Ctrl+W, and a phone or a tablet is touch-first, so Bazhen offers them
+no app and doesn't ask.
+
 ## The inbox
 
 Everything an agent needs you for collects in the inbox, and each item offers only what can be
