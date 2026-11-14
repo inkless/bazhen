@@ -217,6 +217,8 @@ export class TmuxRuntime implements RuntimeAdapter {
   private env: Readonly<Record<string, string>>;
   private readonly exits: ExitWatch;
   private readonly unknownCause = new UnknownCause(UNKNOWN_EXIT_AFTER_MS);
+  /** Until `applyServerSettings` reaches a running server; `health` applies them meanwhile. */
+  private settingsPending = true;
 
   constructor(opts: TmuxRuntimeOptions) {
     this.opts = opts;
@@ -291,6 +293,9 @@ export class TmuxRuntime implements RuntimeAdapter {
     }
     try {
       await this.tmux("list-sessions", "-F", "#{session_id}");
+      // Settings that found no server, as when one is still recreating a deleted socket, go on here.
+      if (this.settingsPending)
+        await this.applyServerSettings().catch(this.opts.onError ?? reportSettings);
       return { state: "healthy", version };
     } catch (err) {
       if (!(err instanceof TmuxError)) throw err;
@@ -348,11 +353,13 @@ export class TmuxRuntime implements RuntimeAdapter {
   /**
    * Puts this runtime's server-wide settings on a server that is already running, which read its
    * configuration from whichever daemon started it: the pane-title hook, and the keys that leave
-   * a mode. With no server running it does nothing, and starts none.
+   * a mode. With no server running it does nothing, and starts none; the next `health` that
+   * reaches one applies them.
    */
   async applyServerSettings(): Promise<void> {
     try {
       await this.tmux(...sequence([this.paneTitleHook(), ...MODE_EXIT_BINDINGS]));
+      this.settingsPending = false;
     } catch (err) {
       if (!(err instanceof TmuxError && noServer(err))) throw err;
     }
@@ -793,6 +800,9 @@ function identities(refs: readonly RuntimeRef[]): ServerIdentity[] {
   }
   return [...seen.values()];
 }
+
+const reportSettings = (err: unknown) =>
+  console.warn("tmux server settings were not applied:", err);
 
 /** The socket is missing or nobody listens on it; any other failure says nothing about the server. */
 const noServer = (err: TmuxError) =>

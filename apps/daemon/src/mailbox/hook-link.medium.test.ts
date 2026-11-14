@@ -1,5 +1,13 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -83,9 +91,20 @@ describe("stable hook link", () => {
 
   it("links nothing in a directory another user owns, since its owner would choose what runs", () => {
     const warnings: string[] = [];
-    expect([stableHookClient(dir, second, uid + 1, (m) => warnings.push(m)), warnings]).toEqual([
+    const path = stableHookClient(dir, second, uid + 1, (m) => warnings.push(m));
+    expect([path, warnings, existsSync(join(dir, "bazhen-hook"))]).toEqual([
       second,
       [expect.stringContaining("owned by uid")],
+      false,
+    ]);
+  });
+
+  it("gives back the client itself where something else already holds the link's name", () => {
+    mkdirSync(join(dir, "bazhen-hook", "kept"), { recursive: true });
+    const warnings: string[] = [];
+    expect([stableHookClient(dir, second, uid, (m) => warnings.push(m)), warnings]).toEqual([
+      second,
+      [expect.stringContaining(second)],
     ]);
   });
 });

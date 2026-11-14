@@ -93,9 +93,25 @@ describe("the pane-title hook on a server an older daemon started", () => {
   it("is removed by a terminal a daemon with no pane-title client creates", async () => {
     const server = newServer();
     const before = client("removed-by-create");
+    const hooks = () => tmuxOut(server, "show-hooks", "-gw");
     await runtimeOn(server, [before.path]).create(titler());
+    const set = hooks();
     await runtimeOn(server).create(titler());
-    expect(tmuxOut(server, "show-hooks", "-gw")).not.toContain(before.path);
+    expect([set, hooks()]).toEqual([
+      expect.stringContaining(before.path),
+      expect.not.stringContaining(before.path),
+    ]);
+  });
+
+  it("is put on by the first health check that reaches the server, until settings are applied", async () => {
+    const server = newServer();
+    const before = client("health-before");
+    const after = client("health-after");
+    const ref = await runtimeOn(server, [before.path]).create(titler());
+    const pane = String(ref.locator.paneId);
+    await runtimeOn(server, [after.path]).health();
+    title(server, pane, "four");
+    await expect.poll(() => logged(after.log), { timeout: 5_000 }).toBe(`${pane}\n`);
   });
 
   it("is not applied, and no server started, when none runs", async () => {
@@ -147,6 +163,7 @@ describe("a pane in view mode", () => {
     tmuxOut(server, "unbind-key", "-a", "-T", "copy-mode-vi");
     await runtime.applyServerSettings();
     tmuxOut(server, "run-shell", "-t", pane, "echo shown");
+    expect(inMode(server, pane)).toBe("1");
     tmuxOut(server, "send-keys", "-t", pane, "q");
     await expect.poll(() => inMode(server, pane)).toBe("0");
   });

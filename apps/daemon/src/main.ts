@@ -207,10 +207,6 @@ const environment = new LocalEnvironment({
   ...(hostEnv.SHELL?.startsWith("/") === true && { shell: hostEnv.SHELL }),
 });
 await reconcile(store, environment);
-// After reconcile, whose health check brings back a server whose socket was deleted.
-await runtime.applyServerSettings().catch((err: unknown) => {
-  console.warn("tmux server settings were not applied:", err);
-});
 // What a Claude Code agent was doing went with the last daemon's memory (foundation-design §4.6).
 const activity = new ActivityTracker((agentId, a) => store.recordActivity(agentId, a));
 const queue = new AgentQueue();
@@ -222,6 +218,10 @@ const shells = new ShellLifecycle({
   home: inputs.home,
 });
 await reconcileShells(store, environment, shells);
+// After both reconciles, whose health checks have a server whose socket was deleted recreate it.
+await runtime.applyServerSettings().catch((err: unknown) => {
+  console.warn("tmux server settings were not applied:", err);
+});
 await shells.settleOrphans();
 const foreground = new ForegroundWatch({ store, environment });
 // A title that changed while the daemon was down, or a move it was waiting on, is read again;
