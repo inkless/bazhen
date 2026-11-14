@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Fling, FLING_TIME_CONSTANT_MS, VELOCITY_WINDOW_MS } from "./fling.ts";
+import { Fling, FLING_TIME_CONSTANT_MS, Glide, VELOCITY_WINDOW_MS } from "./fling.ts";
 
 /** A finger moving `perMs` px each ms from `y`, sampled every 10 ms from time 0 to `until`. */
 function moved(perMs: number, until: number): Fling {
@@ -36,6 +36,7 @@ describe("a swipe's momentum", () => {
 
   it("slows as it goes, and stops", () => {
     const g = moved(2, 200).release(200);
+    g?.advance(200);
     const early = g?.advance(216).pixels;
     g?.advance(1200);
     const late = g?.advance(1216).pixels;
@@ -51,6 +52,27 @@ describe("a swipe's momentum", () => {
 
   it("doesn't glide when the finger paused before it lifted", () => {
     expect(moved(2, 200).release(200 + VELOCITY_WINDOW_MS + 1)).toBeNull();
+  });
+
+  it("doesn't glide when the finger paused briefly before it lifted", () => {
+    expect(moved(2, 200).release(260)).toBeNull();
+  });
+
+  it("doesn't glide from a lift timed before the finger's last move", () => {
+    expect(moved(2, 200).release(150)).toBeNull();
+  });
+
+  it("starts its clock at its first frame, whatever clock the touch was timed on", () => {
+    const g = moved(2, 200).release(200);
+    const first = g?.advance(5_000_000);
+    const next = g?.advance(5_000_016);
+    expect([first?.pixels, Number(next?.pixels) > 0, next?.done]).toEqual([0, true, false]);
+  });
+
+  it("ends after ten time constants, however fast it started", () => {
+    const g = new Glide(1e6);
+    g.advance(0);
+    expect(g.advance(10 * FLING_TIME_CONSTANT_MS + 1).done).toBe(true);
   });
 
   it("doesn't glide from a touch that never moved", () => {

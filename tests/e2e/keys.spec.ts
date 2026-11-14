@@ -1,9 +1,16 @@
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, test, type CDPSession, type Page } from "@playwright/test";
+import {
+  expect,
+  test,
+  type Browser,
+  type BrowserContextOptions,
+  type CDPSession,
+  type Page,
+} from "@playwright/test";
 import { TmuxServer } from "@bazhen/host-guard";
 import { readKeyLog } from "../support/key-log.ts";
-import { onAlternateScreen, openSecondView, screen, viewportTop, status } from "./page.ts";
+import { gliding, onAlternateScreen, openSecondView, screen, viewportTop, status } from "./page.ts";
 
 // The page's terminal against the real daemon and tmux. Each test launches an agent from the page,
 // then runs a key probe in its terminal in place of the agent: the probe logs exactly the bytes
@@ -214,50 +221,62 @@ test("scrolls the scrollback with a swipe on a touch screen", async ({ browser }
   await context.close();
 });
 
-/**
- * Rows the view moved for a downward swipe of 300 px, once it settles: a flick lifts at speed, a
- * drag pauses before it lifts.
- */
-async function swiped(page: Page, cdp: CDPSession, how: "flick" | "drag"): Promise<number> {
+/** A finger at `y` on the terminal, half way across. */
+async function touchAt(page: Page) {
   const box = await terminalBox(page);
   const x = box.x + box.width / 2;
-  const from = Math.max(box.y, 0) + 20;
-  const at = (y: number) => [{ x, y }];
-  const before = await viewportTop(page);
+  return { from: Math.max(box.y, 0) + 20, at: (y: number) => [{ x, y }] };
+}
+
+/** A swipe of 300 px down the terminal: a flick lifts at speed, a drag pauses before it lifts. */
+async function swipe(page: Page, cdp: CDPSession, how: "flick" | "drag"): Promise<void> {
+  const { from, at } = await touchAt(page);
   await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: at(from) });
   for (let step = 1; step <= 10; step++) {
-    await cdp.send("Input.dispatchTouchEvent", {
-      type: "touchMove",
-      touchPoints: at(from + step * 30),
-    });
+    const touchPoints = at(from + step * 30);
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints });
     if (how === "drag") await page.waitForTimeout(40);
   }
   if (how === "drag") await page.waitForTimeout(300);
   await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-  // Settled: the view no longer moves between two looks.
-  let last = Number.NaN;
+}
+
+/** The view's top line once it has settled: the same at three looks in a row, 300 ms apart. */
+async function settled(page: Page): Promise<number> {
+  const looks: number[] = [];
   await expect
     .poll(
       async () => {
-        const now = await viewportTop(page);
-        const still = now === last;
-        last = now;
-        return still;
+        looks.push(await viewportTop(page));
+        const [a, b, c] = looks.slice(-3);
+        return looks.length >= 3 && a === b && b === c;
       },
       { intervals: [300] },
     )
     .toBe(true);
-  return before - last;
+  return looks.at(-1) ?? Number.NaN;
+}
+
+/** Rows the view moved for a swipe, once it settles. */
+async function swiped(page: Page, cdp: CDPSession, how: "flick" | "drag"): Promise<number> {
+  const before = await viewportTop(page);
+  await swipe(page, cdp, how);
+  return before - (await settled(page));
+}
+
+/** A page on a touch screen showing a program with long scrollback, at the bottom of it. */
+async function touchPage(browser: Browser, options: BrowserContextOptions = {}) {
+  const context = await browser.newContext({ hasTouch: true, ...options });
+  const page = await context.newPage();
+  const program = await launchProbe(page, "--lines=400");
+  await reopen(page);
+  return { context, page, program, cdp: await context.newCDPSession(page) };
 }
 
 test("carries a quick swipe on after the finger lifts, and stops a slow one where it lifts", async ({
   browser,
 }) => {
-  const context = await browser.newContext({ hasTouch: true });
-  const page = await context.newPage();
-  await launchProbe(page, "--lines=400");
-  await reopen(page);
-  const cdp = await context.newCDPSession(page);
+  const { context, page, cdp } = await touchPage(browser);
   const dragged = await swiped(page, cdp, "drag");
   const flicked = await swiped(page, cdp, "flick");
   // A flick sent a frame at a time is far slower than a finger, so its glide adds less than a
@@ -269,14 +288,47 @@ test("carries a quick swipe on after the finger lifts, and stops a slow one wher
 test("stops a quick swipe where the finger lifts when the system asks for less motion", async ({
   browser,
 }) => {
-  const context = await browser.newContext({ hasTouch: true, reducedMotion: "reduce" });
-  const page = await context.newPage();
-  await launchProbe(page, "--lines=400");
-  await reopen(page);
-  const cdp = await context.newCDPSession(page);
+  const { context, page, cdp } = await touchPage(browser, { reducedMotion: "reduce" });
   const dragged = await swiped(page, cdp, "drag");
   const flicked = await swiped(page, cdp, "flick");
   expect([dragged > 0, Math.abs(flicked - dragged) <= 1]).toEqual([true, true]);
+  await context.close();
+});
+
+/** Flicks up the scrollback until the view reaches its top, or twenty flicks have gone by. */
+async function flickToTop(page: Page, cdp: CDPSession): Promise<void> {
+  for (let i = 0; i < 20 && (await viewportTop(page)) > 0; i++) await swipe(page, cdp, "flick");
+}
+
+test("stops a glide at once for a key", async ({ browser }) => {
+  const { context, page, cdp } = await touchPage(browser);
+  await drive(page);
+  await swipe(page, cdp, "flick");
+  await expect.poll(() => gliding(page)).toBe(true);
+  await page.keyboard.press("x");
+  const stoppedAt = await viewportTop(page);
+  expect([await gliding(page), await settled(page)]).toEqual([false, stoppedAt]);
+  await context.close();
+});
+
+test("stops a glide at once for the next touch", async ({ browser }) => {
+  const { context, page, cdp } = await touchPage(browser);
+  await swipe(page, cdp, "flick");
+  await expect.poll(() => gliding(page)).toBe(true);
+  const { from, at } = await touchAt(page);
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: at(from) });
+  const stoppedAt = await viewportTop(page);
+  expect([await gliding(page), await settled(page)]).toEqual([false, stoppedAt]);
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await context.close();
+});
+
+test("ends a glide at the top of the scrollback", async ({ browser }) => {
+  const { context, page, cdp } = await touchPage(browser);
+  await flickToTop(page, cdp);
+  await expect.poll(() => viewportTop(page), { intervals: [20], timeout: 15_000 }).toBe(0);
+  // At once, not once it would have slowed to a stop on its own, a second or so later.
+  await expect.poll(() => gliding(page), { intervals: [20], timeout: 200 }).toBe(false);
   await context.close();
 });
 
@@ -444,6 +496,22 @@ async function tapKey(page: Page, program: Probe, key: string, bytes: string): P
   // Exactly: a key that moved focus off the terminal would add a focus report.
   await expect.poll(() => program.received(0).slice(before)).toBe(hex(bytes));
 }
+
+test("stops a glide when a key on the key bar is pressed", async ({ browser }) => {
+  const context = await browser.newContext(PHONE);
+  const phone = await context.newPage();
+  await launchProbe(phone, "--lines=400");
+  await reopen(phone);
+  await phone.locator(".xterm-screen").tap();
+  await expect(status(phone)).toHaveText("Driving");
+  const cdp = await context.newCDPSession(phone);
+  await swipe(phone, cdp, "flick");
+  await expect.poll(() => gliding(phone)).toBe(true);
+  await keyBar(phone).getByRole("button", { name: "Up arrow", exact: true }).tap();
+  const stoppedAt = await viewportTop(phone);
+  expect([await gliding(phone), await settled(phone)]).toEqual([false, stoppedAt]);
+  await context.close();
+});
 
 test("types the keys a phone's keyboard lacks from the key bar", async ({ browser }) => {
   const phone = await (await browser.newContext(PHONE)).newPage();

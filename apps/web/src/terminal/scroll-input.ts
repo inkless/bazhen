@@ -5,7 +5,7 @@ import { ScrollSteps } from "./scroll-steps.ts";
 
 const encoder = new TextEncoder();
 /** The most rows a glide moves in one frame for a program fed arrow keys or mouse reports. */
-const GLIDE_STEPS_PER_FRAME = 3;
+export const GLIDE_STEPS_PER_FRAME = 3;
 /** The person asked their system for less motion: a swipe then stops where the finger lifts. */
 const reducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 /** Pixels per unit of a wheel event's delta, by its `deltaMode`: pixels, lines or pages. */
@@ -18,16 +18,34 @@ const ARROWS = {
   application: { up: encoder.encode("\x1bOA"), down: encoder.encode("\x1bOB") },
 };
 
+/** A view's scroll input, as attached. */
+export interface ScrollInput {
+  /** Stops a swipe's glide, for anything that isn't a scroll: a key, a reattach. */
+  stopGlide(): void;
+  /** Whether a released swipe is still gliding. */
+  gliding(): boolean;
+  detach(): void;
+}
+
+/**
+ * The rows a glide moves this frame. A program fed arrow keys or mouse reports gets at most
+ * GLIDE_STEPS_PER_FRAME, however fast the flick; the page's own scrollback takes them all.
+ */
+export function glideSteps(steps: number, action: WheelAction): number {
+  if (action === "local") return steps;
+  return Math.sign(steps) * Math.min(Math.abs(steps), GLIDE_STEPS_PER_FRAME);
+}
+
 /**
  * Routes the wheel, a trackpad and phone swipes on `element` by `route()` (foundation-design
- * §5.9), sending arrow keys through `input`. Returns the teardown.
+ * §5.9), sending arrow keys through `input`.
  */
 export function attachScrollInput(
   element: HTMLElement,
   term: Terminal,
   route: () => WheelAction,
   input: (bytes: Uint8Array<ArrayBuffer>) => void,
-): () => void {
+): ScrollInput {
   const arrow = (up: boolean) => {
     const keys = term.modes.applicationCursorKeysMode ? ARROWS.application : ARROWS.normal;
     return up ? keys.up : keys.down;
@@ -61,9 +79,11 @@ export function attachScrollInput(
     gliding = null;
   };
 
-  /** Moves `steps` rows, revealing earlier output when positive; false once there is no further. */
-  const scrollBy = (steps: number, clientY: number): boolean => {
-    const action = route();
+  /**
+   * Moves `steps` rows by `action`, revealing earlier output when positive; false once the page's
+   * scrollback has no further to go.
+   */
+  const scrollBy = (steps: number, action: WheelAction, clientY: number): boolean => {
     const up = steps > 0;
     const row = rowHeight();
     for (let i = 0; i < Math.abs(steps); i++) {
@@ -89,46 +109,59 @@ export function attachScrollInput(
     return true;
   };
 
-  /** Carries a released swipe on, a frame at a time, as the phone's own scrolling would. */
-  const glide = (motion: Glide, clientY: number) => {
+  /**
+   * Carries a released swipe on, a frame at a time, as the phone's own scrolling would, by the
+   * route it was released on: a program that switches screens mid-glide ends it, rather than
+   * getting keys or reports meant for the page's scrollback.
+   */
+  const glide = (motion: Glide, action: WheelAction, clientY: number) => {
     const frame = (now: number) => {
       const { pixels, done } = motion.advance(now);
-      const steps = touchSteps.add(pixels, rowHeight());
-      // A program fed keys or mouse reports gets a bounded number a frame, however fast the flick.
-      const capped =
-        route() === "local"
-          ? steps
-          : Math.sign(steps) * Math.min(Math.abs(steps), GLIDE_STEPS_PER_FRAME);
-      gliding = !done && scrollBy(capped, clientY) ? requestAnimationFrame(frame) : null;
+      const steps = glideSteps(touchSteps.add(pixels, rowHeight()), action);
+      const going = !done && route() === action && scrollBy(steps, action, clientY);
+      gliding = going ? requestAnimationFrame(frame) : null;
     };
     gliding = requestAnimationFrame(frame);
   };
 
+  /** A finger, or the touch, ends: forget the swipe, without a glide. */
+  const forget = () => {
+    lastY = null;
+    fling.reset();
+  };
   const touchStart = (e: TouchEvent) => {
     stopGlide();
     const touch = e.touches[0];
-    lastY = touch?.clientY ?? null;
-    lastX = touch?.clientX ?? 0;
+    // A second finger makes it a pinch or the like, not a swipe.
+    if (e.touches.length !== 1 || touch === undefined) return forget();
+    lastY = touch.clientY;
+    lastX = touch.clientX;
     touchSteps.reset();
     fling.reset();
-    if (touch !== undefined) fling.track(e.timeStamp, touch.clientY);
+    fling.track(e.timeStamp, touch.clientY);
   };
   const touchMove = (e: TouchEvent) => {
     const touch = e.touches[0];
-    if (lastY === null || touch === undefined) return;
+    if (lastY === null || touch === undefined || e.touches.length !== 1) return;
     const steps = touchSteps.add(touch.clientY - lastY, rowHeight());
     lastY = touch.clientY;
     lastX = touch.clientX;
     fling.track(e.timeStamp, touch.clientY);
     e.preventDefault();
-    scrollBy(steps, touch.clientY);
+    scrollBy(steps, route(), touch.clientY);
   };
   const touchEnd = (e: TouchEvent) => {
     const releasedAt = lastY;
-    lastY = null;
+    // Only the last finger off releases a swipe.
+    if (e.touches.length !== 0) return forget();
     const motion = fling.release(e.timeStamp);
+    forget();
     if (motion === null || releasedAt === null || reducedMotion()) return;
-    glide(motion, releasedAt);
+    glide(motion, route(), releasedAt);
+  };
+  const touchCancel = () => {
+    stopGlide();
+    forget();
   };
   // Anything the person does next stops a glide; the glide's own mouse reports are not theirs.
   const interrupt = (e: Event) => {
@@ -139,15 +172,21 @@ export function attachScrollInput(
   screen.addEventListener("touchstart", touchStart, { passive: true });
   screen.addEventListener("touchmove", touchMove, { passive: false });
   screen.addEventListener("touchend", touchEnd, { passive: true });
+  screen.addEventListener("touchcancel", touchCancel, { passive: true });
   element.addEventListener("wheel", interrupt, { capture: true, passive: true });
   element.addEventListener("keydown", interrupt, { capture: true });
-  return () => {
-    stopGlide();
-    element.removeEventListener("wheel", interrupt, { capture: true });
-    element.removeEventListener("keydown", interrupt, { capture: true });
-    element.removeEventListener("wheel", wheel, { capture: true });
-    screen.removeEventListener("touchstart", touchStart);
-    screen.removeEventListener("touchmove", touchMove);
-    screen.removeEventListener("touchend", touchEnd);
+  return {
+    stopGlide,
+    gliding: () => gliding !== null,
+    detach: () => {
+      stopGlide();
+      element.removeEventListener("wheel", interrupt, { capture: true });
+      element.removeEventListener("keydown", interrupt, { capture: true });
+      element.removeEventListener("wheel", wheel, { capture: true });
+      screen.removeEventListener("touchstart", touchStart);
+      screen.removeEventListener("touchmove", touchMove);
+      screen.removeEventListener("touchend", touchEnd);
+      screen.removeEventListener("touchcancel", touchCancel);
+    },
   };
 }
