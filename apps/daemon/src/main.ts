@@ -100,6 +100,7 @@ const mailbox = new Mailbox(store, { codex: (id, agentId) => void codexMail.deli
 const approvals = new Approvals(store);
 const inbox = new Inbox(store, approvals, (agentId, req) => mailbox.send(agentId, req));
 inbox.follow();
+mailbox.follow();
 const taskService = new Tasks(store, mailbox, (raised) => inbox.raise(raised), {
   launch: (req, launchedBy) =>
     launchSettled(

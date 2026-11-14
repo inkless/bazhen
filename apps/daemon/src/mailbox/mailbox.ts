@@ -78,14 +78,15 @@ export class Mailbox {
   private readonly ended = new Map<string, string>();
   /** Per agent, messages already handed over and unseen when its last turn ended. */
   private readonly unseenAtTurnEnd = new Map<string, Set<MessageId>>();
-  /** Each written wake not yet seen, with the timer that offers it again if it stays unseen. */
-  private readonly unseen = new Map<MessageId, ReturnType<typeof setTimeout>>();
-  /** The agent each handed-over message is for. */
-  private readonly owners = new Map<MessageId, string>();
-  /** Each message handed to a hook and not yet written: its offer's token, and the timer. */
+  /** Each written wake not yet seen, its agent, and the timer that offers it again if unseen. */
+  private readonly unseen = new Map<
+    MessageId,
+    { agentId: string; timer: ReturnType<typeof setTimeout> }
+  >();
+  /** Each message handed to a hook and not yet written: its agent, its offer's token, the timer. */
   private readonly unacked = new Map<
     MessageId,
-    { token: OfferToken; timer: ReturnType<typeof setTimeout>; fold: boolean }
+    { agentId: string; token: OfferToken; timer: ReturnType<typeof setTimeout>; fold: boolean }
   >();
   /** Offer ids: this daemon's own prefix, then a count, so no two offers share one. */
   private readonly offerPrefix = randomBytes(4).toString("hex");
@@ -139,6 +140,7 @@ export class Mailbox {
    * may hand out mail.
    */
   wait(agentId: AgentSessionId, signal: AbortSignal): Promise<HookReply> {
+    if (this.closed(agentId)) return Promise.resolve(QUIET);
     this.waiters.get(agentId)?.(QUIET);
     return new Promise((resolve) => {
       const release = (reply: HookReply) => {
@@ -156,14 +158,13 @@ export class Mailbox {
    * client whose offer was since taken back and made again confirms nothing.
    */
   ack(offered: readonly OfferToken[]): void {
-    for (const [id, { token, timer, fold }] of this.unacked) {
+    for (const [id, { agentId, token, timer, fold }] of this.unacked) {
       if (!offered.includes(token)) continue;
       clearTimeout(timer);
       this.unacked.delete(id);
       this.record("mailbox.emitted", id, {});
       // A fold is never seen in a prompt: its turn's Stop delivers it, however long that takes.
-      const agentId = this.owners.get(id);
-      if (agentId !== undefined && !fold) this.watchUnseen(agentId, id);
+      if (!fold) this.watchUnseen(agentId, id);
     }
   }
 
@@ -173,14 +174,14 @@ export class Mailbox {
    * under way the turn boundaries decide, so the deadline waits for the turn to end.
    */
   private watchUnseen(agentId: string, id: MessageId, checks = UNSEEN_TURN_CHECKS): void {
-    clearTimeout(this.unseen.get(id));
+    clearTimeout(this.unseen.get(id)?.timer);
     const timer = setTimeout(() => {
       this.unseen.delete(id);
       if (!this.store.mail(agentId, ["emitted"]).some((m) => m.id === id)) return;
       if (this.turns.has(agentId) && checks > 0) this.watchUnseen(agentId, id, checks - 1);
       else this.requeue(agentId, id, "not_seen");
     }, this.unseenDeadlineMs);
-    this.unseen.set(id, timer);
+    this.unseen.set(id, { agentId, timer });
   }
 
   /**
@@ -189,7 +190,7 @@ export class Mailbox {
    * StopFailure, as Esc ends one (or the TUI died): what it saw is requeued (§5.6, step 4).
    */
   promptStarted(agentId: string, prompt: string, promptId: string | null): void {
-    if (promptId === null) return;
+    if (promptId === null || this.closed(agentId)) return;
     const current = this.turns.get(agentId);
     if (current !== undefined && current !== promptId) {
       // Seen in that turn's prompt, or folded into it.
@@ -202,16 +203,17 @@ export class Mailbox {
     // prompt carrying its label means the agent has it, and the re-offer is called off.
     for (const m of this.store.mail(agentId, ["emitted", "queued", "offered"])) {
       if (!carriesWake(prompt, m.id) || m.firstOffered === null) continue;
-      clearTimeout(this.unacked.get(m.id)?.timer);
-      this.unacked.delete(m.id);
-      clearTimeout(this.unseen.get(m.id));
-      this.unseen.delete(m.id);
+      this.callOff(m.id);
       this.record("mailbox.seen", m.id, { promptId });
     }
   }
 
-  /** Whether this is the second report of a turn's end, and if not, notes the first. */
+  /**
+   * Whether this report of a turn's end changes nothing: a closed agent's, or the second report of
+   * the end; if not, notes the first.
+   */
   private heardEnd(agentId: string, promptId: string | null): boolean {
+    if (this.closed(agentId)) return true;
     if (promptId === null) return false;
     if (this.ended.get(agentId) === promptId) return true;
     this.ended.set(agentId, promptId);
@@ -332,28 +334,58 @@ export class Mailbox {
         () => this.requeue(agentId, m.id, "not_written"),
         this.ackDeadlineMs,
       );
-      this.unacked.set(m.id, { token, timer, fold: promptId !== undefined });
-      this.owners.set(m.id, agentId);
+      this.unacked.set(m.id, { agentId, token, timer, fold: promptId !== undefined });
       return token;
     });
   }
 
   /**
+   * Forgets each agent as it closes: closing gives up its mail, so nothing held for that mail, or
+   * for the agent's turns, is wanted again.
+   */
+  follow(): () => void {
+    return this.store.react((e) => {
+      if (e.type === "agent.closed") this.store.afterCommit(() => this.forget(e.entityId));
+    });
+  }
+
+  private forget(agentId: string): void {
+    this.waiters.get(agentId)?.(QUIET);
+    for (const [id, held] of [...this.unacked, ...this.unseen]) {
+      if (held.agentId === agentId) this.callOff(id);
+    }
+    this.turns.delete(agentId);
+    this.ended.delete(agentId);
+    this.unseenAtTurnEnd.delete(agentId);
+  }
+
+  private closed(agentId: string): boolean {
+    return this.store.agent(agentId)?.state === "closed";
+  }
+
+  /** Calls off a message's deadlines: the one for its ack, and the one for its being seen. */
+  private callOff(id: MessageId): void {
+    clearTimeout(this.unacked.get(id)?.timer);
+    this.unacked.delete(id);
+    clearTimeout(this.unseen.get(id)?.timer);
+    this.unseen.delete(id);
+  }
+
+  /**
    * Back to the queue, and straight to a waiter if one is already waiting. A message the agent's
-   * side has now failed `MAX_FAILURES` times is given up instead (§5.6, step 5).
+   * side has now failed `MAX_FAILURES` times is given up instead (§5.6, step 5). One no longer in
+   * flight, as a closed agent's mail is not, is left where it is.
    */
   private requeue(
     agentId: string,
     id: MessageId,
     reason: EventPayload<"mailbox.requeued">["reason"],
   ): void {
-    clearTimeout(this.unacked.get(id)?.timer);
-    this.unacked.delete(id);
-    clearTimeout(this.unseen.get(id));
-    this.unseen.delete(id);
+    this.callOff(id);
     this.unseenAtTurnEnd.get(agentId)?.delete(id);
-    const failed = this.store.mail(agentId, IN_FLIGHT).find((m) => m.id === id)?.failures ?? 0;
-    const givesUp = AGENT_FAILURES.has(reason) && failed + 1 >= MAX_FAILURES;
+    const message = this.store.mail(agentId, IN_FLIGHT).find((m) => m.id === id);
+    if (message === undefined) return;
+    const givesUp = AGENT_FAILURES.has(reason) && message.failures + 1 >= MAX_FAILURES;
     this.store.transaction(() => {
       this.record("mailbox.requeued", id, { reason });
       if (givesUp) this.record("mailbox.undeliverable", id, { reason: "gave_up" });
