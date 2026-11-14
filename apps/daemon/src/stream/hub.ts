@@ -13,6 +13,7 @@ import {
   type TerminalId,
 } from "@bazhen/core";
 import {
+  HISTORY_LINES,
   PROTOCOL_VERSION,
   TERMINAL_COLOURS,
   type AttachmentMode,
@@ -20,7 +21,7 @@ import {
   type StreamServerFrame,
   type TuiTheme,
 } from "@bazhen/protocol";
-import { HISTORY_LINES, ScreenEmulator } from "./emulator.ts";
+import { ScreenEmulator } from "./emulator.ts";
 import { classifyInput } from "./input-filter.ts";
 import { Settle } from "./settle.ts";
 
@@ -111,6 +112,12 @@ interface Entry {
   /** Live bytes held while the view's snapshot is on its way, and how many there are. */
   queue?: Uint8Array[];
   held: number;
+  /**
+   * What of the snapshot may still be unsent, which the view may lag by on top of
+   * `maxUnsentBytes`: a large history alone must not end the view. It shrinks as the socket
+   * drains, and never grows back.
+   */
+  snapshotBytes: number;
   /** Whether it has been told its input was dropped under the current lease. */
   toldDropped?: boolean;
 }
@@ -166,7 +173,14 @@ export class TerminalHub {
     // From here the view's live bytes are held, and the snapshot covers every byte before them.
     const queue: Uint8Array[] = [];
     const resumeToken = randomBytes(16).toString("base64url");
-    const entry: Entry = { viewer, size, queue, held: 0, resumeDigest: digest(resumeToken) };
+    const entry: Entry = {
+      viewer,
+      size,
+      queue,
+      held: 0,
+      snapshotBytes: 0,
+      resumeDigest: digest(resumeToken),
+    };
     watched.viewers.set(id, entry);
     const replaced = resumes && watched.viewers.get(resumes.attachmentId);
     if (resumes && replaced && timingSafeEqual(digest(resumes.token), replaced.resumeDigest)) {
@@ -177,7 +191,9 @@ export class TerminalHub {
     this.log.started(id, watched.terminal, viewer.mode);
     viewer.notify(leaseFrame(watched, id));
     viewer.notify({ type: "snapshot_start" });
-    viewer.send(Buffer.from(await snapshot));
+    const shown = Buffer.from(await snapshot);
+    entry.snapshotBytes = shown.length;
+    viewer.send(shown);
     // The view may have left, or the terminal closed, while its snapshot was sent.
     if (!watched.viewers.has(id)) throw new ViewEnded();
     viewer.notify({ type: "snapshot_end" });
@@ -242,7 +258,10 @@ export class TerminalHub {
             entry.queue.push(bytes);
             entry.held += bytes.length;
           } else entry.viewer.send(bytes);
-          if (entry.viewer.unsent() + entry.held > this.opts.maxUnsentBytes) {
+          const unsent = entry.viewer.unsent();
+          entry.snapshotBytes = Math.min(entry.snapshotBytes, unsent);
+          const behind = unsent - entry.snapshotBytes + entry.held;
+          if (behind > this.opts.maxUnsentBytes) {
             this.evict(watched, id, entry);
           }
         }

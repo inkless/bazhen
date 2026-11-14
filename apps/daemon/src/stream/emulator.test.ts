@@ -1,6 +1,12 @@
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import headless from "@xterm/headless";
-import { oscColour, TERMINAL_COLOURS, type TuiTheme } from "@bazhen/protocol";
+import {
+  HISTORY_LINES,
+  MAX_ROWS,
+  oscColour,
+  TERMINAL_COLOURS,
+  type TuiTheme,
+} from "@bazhen/protocol";
 import { describe, expect, it } from "vitest";
 import { ScreenEmulator, TerminalClosed } from "./emulator.ts";
 
@@ -75,7 +81,12 @@ const size = { cols: 20, rows: 5 };
 
 /** A terminal like the browser's: xterm.js with Unicode 11 widths. */
 function browserTerminal(dimensions = size): headless.Terminal {
-  const term = new headless.Terminal({ ...dimensions, scrollback: 5000, allowProposedApi: true });
+  // As the page makes its terminal.
+  const term = new headless.Terminal({
+    ...dimensions,
+    scrollback: HISTORY_LINES + MAX_ROWS,
+    allowProposedApi: true,
+  });
   term.loadAddon(new Unicode11Addon());
   term.unicode.activeVersion = "11";
   return term;
@@ -119,8 +130,8 @@ describe("the daemon's attach snapshot", () => {
     ]);
   });
 
-  it("keeps at most 2,000 lines of history", async () => {
-    const history = Array.from({ length: 2500 }, (_, i) => `old ${i}`).join("\n");
+  it("keeps at most HISTORY_LINES of history", async () => {
+    const history = Array.from({ length: HISTORY_LINES + 500 }, (_, i) => `old ${i}`).join("\n");
     const browser = await replayed("now", history);
     expect(lines(browser)[0]).toBe("old 500");
   });

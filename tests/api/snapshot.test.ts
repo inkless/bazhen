@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { HISTORY_LINES } from "@bazhen/protocol";
 import { Daemon, waitUntil, type View } from "./daemon.ts";
 import { captured, replay } from "./fixtures/browser.ts";
 
@@ -7,10 +8,6 @@ const size = { cols: 100, rows: 30 };
 let daemon: Daemon;
 beforeAll(async () => {
   daemon = await Daemon.start();
-  // tmux keeps 2,000 lines by default, which would hide the daemon's own limit. The setting
-  // applies to terminals created after it, and needs the server a first terminal starts.
-  await daemon.program(["sleep", "600"]);
-  daemon.tmux("set-option", "-g", "history-limit", "5000");
 });
 afterAll(async () => {
   await daemon?.stop();
@@ -47,11 +44,11 @@ async function numbers(view: View): Promise<number[]> {
 }
 
 describe("what a view shows when it opens", () => {
-  it("shows 2,000 lines of history above the screen, as tmux holds them, with the cursor where tmux has it", async () => {
+  it("shows all the history tmux holds above the screen, with the cursor where tmux has it", async () => {
     const { agentId, terminalId } = await daemon.program([
       "sh",
       "-c",
-      'for i in $(seq 1 3000); do echo "line $i"; done; printf "prompt> "; sleep 600',
+      `seq -f "line %.0f" 1 ${HISTORY_LINES + 1000}; printf "prompt> "; sleep 600`,
     ]);
     await waitUntil(() => daemon.screen(agentId).includes("prompt>"), "the program's output");
     const first = await opened(terminalId, "interactive");
@@ -59,10 +56,12 @@ describe("what a view shows when it opens", () => {
     const late = await opened(terminalId, "observe");
     const shown = await replay(late.snapshot(), size);
     expect([shown.lines, shown.cursor]).toEqual([
-      captured(daemon.capture(agentId, 2000)),
+      captured(daemon.capture(agentId, HISTORY_LINES)),
       daemon.cursor(agentId),
     ]);
-    expect(shown.lines.length - shown.screen.length).toBe(2000);
+    // tmux's whole history, not a part: it holds HISTORY_LINES, less any lines it moved back onto
+    // the screen as the view made the pane taller.
+    expect(shown.lines.length - shown.screen.length).toBeGreaterThan(HISTORY_LINES - size.rows);
     first.close();
     late.close();
   });

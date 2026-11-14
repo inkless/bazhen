@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import type { TerminalTags } from "@bazhen/core";
 import { filterEnv, newId } from "@bazhen/core";
+import { HISTORY_LINES } from "@bazhen/protocol";
 import { sessionName, TmuxError, TmuxRuntime } from "@bazhen/runtime-tmux";
 import { nodePtySpawner } from "@bazhen/daemon/pty";
 import { TerminalHub } from "@bazhen/daemon/stream";
@@ -34,6 +35,65 @@ const screen = (session: string | undefined) =>
   tmuxOut(server, "capture-pane", "-p", "-t", `${String(session)}:0`);
 
 describe("tmux runtime on a private server", () => {
+  it("gives a new terminal its full history, on a server an older daemon started with less", async () => {
+    await runtime.create(spec(["sleep", "30"]));
+    tmuxOut(server, "set-option", "-g", "history-limit", "50");
+    const ref = await runtime.create(spec(["sleep", "30"]));
+    expect(
+      tmuxOut(
+        server,
+        "display-message",
+        "-p",
+        "-t",
+        String(ref.locator.paneId),
+        "#{history_limit}",
+      ).trim(),
+    ).toBe(String(HISTORY_LINES));
+  });
+
+  it("attaches with the whole of a history longer than a megabyte", async () => {
+    const wide = {
+      ...spec(["sh", "-c", "seq -f '%0999g' 1 2000; echo done; sleep 30"]),
+      size: { cols: 200, rows: 30 },
+    };
+    const ref = await runtime.create(wide);
+    await expect.poll(() => screen(ref.locator.session), { timeout: 10_000 }).toContain("done");
+    const { stream, history } = await runtime.attach(ref, null, HISTORY_LINES);
+    stream.close();
+    // Whole lines up to the screen, so the capture wasn't cut short. The very last row above the
+    // screen can be the start of a line the screen goes on with.
+    expect([history.length > 1024 * 1024, history.split("\n").at(-2)]).toEqual([
+      true,
+      expect.stringMatching(/^\d{999}$/),
+    ]);
+  });
+
+  it("opens on the most recent history that fits, when a whole history is too large", async () => {
+    const small = new TmuxRuntime({
+      server,
+      pty: nodePtySpawner,
+      env: filterEnv(launchedFrom).env,
+      captureMaxBytes: 256 * 1024,
+    });
+    // 2,000 lines of 50 cells, each in its own 24-bit foreground and background: about 4 MB.
+    const art =
+      'awk \'BEGIN { for (i = 1; i <= 2000; i++) { s = ""; for (j = 0; j < 50; j++) ' +
+      's = s sprintf("\\033[38;2;%d;%d;100;48;2;%d;%d;50m\\342\\226\\200", i % 256, j * 5, j * 5, i % 256); ' +
+      'print s "\\033[0m " i } print "done" }\'; sleep 30';
+    const ref = await small.create(spec(["sh", "-c", art]));
+    await expect.poll(() => screen(ref.locator.session), { timeout: 10_000 }).toContain("done");
+    const { stream, history } = await small.attach(ref, null, HISTORY_LINES);
+    stream.close();
+    const numbers = history.split("\n").map((line) => Number(/ (\d+)$/.exec(line)?.[1]));
+    const onScreen = Number(/ (\d+)$/m.exec(screen(ref.locator.session))?.[1]);
+    expect([
+      history.includes("\x1b[38;2;"),
+      numbers.length > 0,
+      numbers.length < 2000,
+      numbers.every((n, i) => n === onScreen - numbers.length + i),
+    ]).toEqual([true, true, true, true]);
+  });
+
   it("reads its terminals back when started without a UTF-8 locale", async () => {
     const bare = testServer("runtime-no-locale");
     const { LANG: _l, LC_ALL: _a, LC_CTYPE: _c, ...noLocale } = filterEnv(process.env).env;

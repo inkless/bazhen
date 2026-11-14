@@ -5,6 +5,8 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as Xterm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import {
+  HISTORY_LINES,
+  MAX_ROWS,
   EPOCH_FRAMES_SINCE,
   isAtLeast,
   parseJson,
@@ -101,6 +103,10 @@ function connect(
     allowProposedApi: true,
     cursorBlink: true,
     macOptionIsMeta: settings.optionIsMeta,
+    // As much history as tmux and the daemon keep, so a reopened view shows all it is sent, and
+    // room for a screen more: a snapshot taken at more rows than this page has pushes its extra
+    // screen lines into the scrollback, which would otherwise evict the oldest history.
+    scrollback: HISTORY_LINES + MAX_ROWS,
   });
   const fit = new FitAddon();
   term.loadAddon(fit);

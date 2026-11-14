@@ -705,7 +705,8 @@ describe("terminal hub: screen state and slow views", () => {
     const fast = viewer();
     const s = await hub.join(rt.ref, slow.v, size);
     await hub.join(rt.ref, fast.v, size);
-    backlog = 101;
+    // As a socket counts it: the snapshot it was sent, still unsent, and 101 bytes more.
+    backlog = Buffer.byteLength(slow.seen.join("")) + 101;
     rt.emit("one");
     rt.emit("two");
     expect([
@@ -726,6 +727,50 @@ describe("terminal hub: screen state and slow views", () => {
     const flooding = emittingOnSnapshot(late.v, () => rt.emit("x".repeat(101)));
     await expect(hub.join(rt.ref, flooding, size)).rejects.toThrow(ViewEnded);
     expect(late.frames.at(-1)).toEqual({ type: "ended", reason: "evicted_slow" });
+  });
+
+  it("lets a view lag by its own snapshot, however large, and no further", async () => {
+    const rt = await fakeRuntime("h".repeat(500));
+    const hub = new Hub(rt.runtime, memoryLog().log, { ...quick, maxUnsentBytes: 100 });
+    // A socket that never drains: everything sent to it stays unsent.
+    let sent = 0;
+    const stuck = viewer("observe", () => sent);
+    const counting: Viewer = {
+      ...stuck.v,
+      send: (bytes) => {
+        sent += bytes.length;
+        stuck.v.send(bytes);
+      },
+    };
+    await hub.join(rt.ref, counting, size);
+    rt.emit("x".repeat(100));
+    const afterSnapshot = stuck.closed();
+    rt.emit("y");
+    expect([afterSnapshot, stuck.closed(), stuck.frames.at(-1)]).toEqual([
+      false,
+      true,
+      { type: "ended", reason: "evicted_slow" },
+    ]);
+  });
+
+  it("takes the snapshot's allowance back as the view's socket drains", async () => {
+    const rt = await fakeRuntime("h".repeat(500));
+    const hub = new Hub(rt.runtime, memoryLog().log, { ...quick, maxUnsentBytes: 100 });
+    let backlog = 0;
+    const slow = viewer("observe", () => backlog);
+    await hub.join(rt.ref, slow.v, size);
+    backlog = Buffer.byteLength(slow.seen.join(""));
+    rt.emit("x");
+    const whileSnapshotUnsent = slow.closed();
+    backlog = 0;
+    rt.emit("y");
+    backlog = 101;
+    rt.emit("z");
+    expect([whileSnapshotUnsent, slow.closed(), slow.frames.at(-1)]).toEqual([
+      false,
+      true,
+      { type: "ended", reason: "evicted_slow" },
+    ]);
   });
 
   it("ends views as disconnected when the runtime client is lost but the terminal lives on", async () => {
