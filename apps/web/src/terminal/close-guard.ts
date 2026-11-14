@@ -9,14 +9,20 @@
  * its back-forward cache.
  */
 export function guardClose(
-  page: { readonly window: EventTarget; readonly document: EventTarget },
+  page: {
+    readonly window: EventTarget;
+    readonly document: EventTarget & { hasFocus(): boolean };
+  },
   holdsFocus: () => boolean,
   onStayed: () => void,
 ): () => void {
   let armed = false;
   let stayed: ReturnType<typeof setTimeout> | undefined;
+  // On X11 a window in the background still gets pointer moves, with the global Ctrl state, and
+  // keeps its active element, so a Ctrl+drag in another app crosses it.
+  const typedInto = () => page.document.hasFocus() && holdsFocus();
   const ask = (event: Event) => {
-    if (!holdsFocus()) return;
+    if (!typedInto()) return;
     event.preventDefault();
     // Runs only if the page outlives the prompt.
     stayed = setTimeout(onStayed, 0);
@@ -27,10 +33,12 @@ export function guardClose(
     if (on) page.window.addEventListener("beforeunload", ask);
     else page.window.removeEventListener("beforeunload", ask);
   };
-  const key = (event: Event) => arm(ctrl(event) && holdsFocus());
+  const key = (event: Event) => arm(ctrl(event) && typedInto());
   // A Ctrl released over the prompt, or after Alt+Tab or a tab switch, sends this page no keyup,
   // and one still held after the prompt sends no keydown; the pointer says which, or the blur.
-  const pointer = (event: Event) => arm(ctrl(event) && holdsFocus());
+  // Chrome delivers the move onto the prompt's button only once it closes, without Ctrl, so a W
+  // pressed after staying, with Ctrl held and the mouse not moved since, closes the tab unasked.
+  const pointer = (event: Event) => arm(ctrl(event) && typedInto());
   const disarm = () => arm(false);
   // Input in capture, so the terminal can't stop it on the way; the window's own blur only.
   const listeners = [

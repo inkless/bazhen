@@ -16,7 +16,8 @@ class Window extends EventTarget {
 
 function page() {
   const window = new Window();
-  const document = new EventTarget();
+  let windowFocused = true;
+  const document = Object.assign(new EventTarget(), { hasFocus: () => windowFocused });
   let focused = true;
   let stays = 0;
   const stop = guardClose(
@@ -32,6 +33,7 @@ function page() {
     stays: () => stays,
     stop,
     focus: (now: boolean) => (focused = now),
+    focusWindow: (now: boolean) => (windowFocused = now),
     key: (type: "keydown" | "keyup", ctrlKey: boolean) => send(type, ctrlKey),
     pointer: (ctrlKey: boolean, type = "pointermove") => send(type, ctrlKey),
     /** Whether a close now asks first. */
@@ -114,6 +116,13 @@ describe("the close guard", () => {
     p.focus(false);
     p.pointer(true);
     expect(p.window.unloadListeners).toBe(0);
+  });
+
+  it("never arms from a Ctrl+drag in another app crossing the window, its terminal still active", () => {
+    const p = page();
+    p.focusWindow(false);
+    p.pointer(true);
+    expect([p.window.unloadListeners, p.asks()]).toEqual([0, false]);
   });
 
   it("stops asking at a click without Ctrl", () => {
