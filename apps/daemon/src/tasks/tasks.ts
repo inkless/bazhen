@@ -342,7 +342,7 @@ export class Tasks {
 
   /**
    * A message to an agent: the human's as written, or an agent's own to a peer, which says who
-   * sent it and how to reply. An agent can't mail itself, nor an agent that is gone.
+   * sent it and how to reply. An agent can't mail itself; the mailbox refuses an agent that is gone.
    */
   send(caller: Caller, agentId: string, req: SendMessageRequest): SendMessageResponse {
     if (caller === null) return this.mailbox.send(agentId, req);
@@ -354,7 +354,6 @@ export class Tasks {
       () => {
         this.checkCaller(caller);
         if (agentId === caller) throw new TaskRefused("forbidden", "you can't send to yourself");
-        if (!this.reachable(agentId)) throw new UnknownAgent(agentId, "that is open");
         const sender = this.store.agentLaunch(caller)?.launch;
         if (sender === undefined) throw new UnknownAgent(caller);
         const text = checkLength(peerMail({ id: caller, ...sender }, body));

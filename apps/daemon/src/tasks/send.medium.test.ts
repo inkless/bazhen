@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { TaskRefused } from "@bazhen/core";
+import { newId, TaskRefused } from "@bazhen/core";
 import { recordClosed } from "../agents/lifecycle.ts";
+import { AgentGone } from "../mailbox/mailbox.ts";
 import { UnknownAgent, type Store } from "../store/store.ts";
 import { inbox, taskFleet } from "../testing/fixtures.ts";
-import { MAIL_LIMIT } from "./mail.ts";
+import { MAIL_LIMIT, peerMail } from "./mail.ts";
 import { MailTooLong } from "./tasks.ts";
 
 const close = (store: Store, agentId: string) => {
@@ -35,7 +36,7 @@ describe("Tasks send", () => {
     expect([inbox(store, worker), senders(store)]).toEqual([["Is the build green?"], [undefined]]);
   });
 
-  it("refuses an agent mailing itself, a closed sender, a closed peer and an over-long text", async () => {
+  it("refuses an agent mailing itself, a closed sender, a closed or unknown peer and an over-long text", async () => {
     const { store, tasks, coordinator, lead, worker } = await taskFleet();
     close(store, worker);
     const send =
@@ -44,9 +45,22 @@ describe("Tasks send", () => {
         tasks.send(from, to, { idempotencyKey: `${from}-${to}-${body.length}`, body });
     expect(send(lead, lead)).toThrow(TaskRefused);
     expect(send(worker, lead)).toThrow(UnknownAgent);
-    expect(send(lead, worker)).toThrow(UnknownAgent);
+    expect(send(lead, worker)).toThrow(AgentGone);
+    expect(send(lead, newId("agent"))).toThrow(UnknownAgent);
     expect(send(lead, coordinator, "x".repeat(MAIL_LIMIT))).toThrow(MailTooLong);
     expect(senders(store)).toEqual([]);
+  });
+
+  it("takes a text that just fits the limit with its sender line", async () => {
+    const { store, tasks, coordinator, lead } = await taskFleet();
+    const sender = {
+      id: lead,
+      harness: "claude-code",
+      cwd: String(store.agentLaunch(lead)?.launch.cwd),
+    };
+    const body = "x".repeat(MAIL_LIMIT - peerMail(sender, "").length);
+    tasks.send(lead, coordinator, { idempotencyKey: "k", body });
+    expect(senders(store)).toEqual([lead]);
   });
 
   it("answers a repeat with the first answer, even once the peer has closed", async () => {

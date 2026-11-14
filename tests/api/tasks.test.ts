@@ -101,6 +101,9 @@ describe("tasks and delegation, through the CLI", () => {
   it("hands one agent's message to another, saying who sent it", async () => {
     const out = await asAgent(worker.agentId, ["send", coordinator.agentId, "Is", "it", "green?"]);
     expect(out).toMatchObject({ code: 0, out: expect.stringContaining("sent msg_") });
+    const messageId = /sent (msg_\S+)/.exec(out.out)?.[1];
+    const queued = (await state()).messages.find((m) => m.id === messageId);
+    expect(queued?.agentId).toBe(coordinator.agentId);
     const header = `From agent ${worker.agentId} (claude-code, `;
     const delivered = () =>
       claudeModel.requests.filter((r) => r.includes(header)).some((r) => r.includes("green?"));

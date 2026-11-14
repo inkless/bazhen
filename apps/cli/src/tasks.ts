@@ -8,6 +8,7 @@ import {
   CreateTaskResponse,
   HarnessId,
   EscalateResponse,
+  Id,
   Role,
   SendMessageResponse,
   StateSnapshot,
@@ -92,6 +93,9 @@ function parse(argv: readonly string[]) {
   }
 }
 
+/** The options `send` takes; `--home` and `--port` are every verb's. */
+const SEND_OPTIONS: ReadonlySet<string> = new Set(["file", "home", "port"]);
+
 const state: Call<StateSnapshot> = { method: "GET", path: "/v1/state", reply: StateSnapshot };
 
 /** Builds the verb `argv` names (the words after `bazhen`), or throws Usage. */
@@ -118,6 +122,9 @@ export function taskVerb(argv: readonly string[], ctx: Context): Verb {
   const post = <T>(path: string, reply: Call<T>["reply"], body: object, print: (r: T) => string) =>
     verb({ method: "POST", path, reply, body: { idempotencyKey: ctx.key(), ...body } }, print);
 
+  if (name !== "send" && values.file !== undefined) {
+    throw new Usage("--file is for send; a brief takes --brief-file");
+  }
   if (name === "agents") return verb(state, listAgents);
   if (name === "escalate") {
     const summary = [sub, ...rest].filter((w) => w !== undefined).join(" ");
@@ -133,6 +140,12 @@ export function taskVerb(argv: readonly string[], ctx: Context): Verb {
   }
   if (name === "send") {
     const agentId = need(sub, "the agent to send to");
+    if (!Id("agent").safeParse(agentId).success) throw new Usage(`not an agent id: ${agentId}`);
+    // An unquoted word that is another verb's option would be taken out of the text silently.
+    const taken = Object.keys(values).filter((o) => !SEND_OPTIONS.has(o));
+    if (taken.length > 0) {
+      throw new Usage(`put the text in quotes: it holds --${taken.join(", --")}`);
+    }
     const words = rest.join(" ");
     if (words !== "" && values.file !== undefined) {
       throw new Usage("give the text or --file, not both");

@@ -10,8 +10,9 @@ const queued = z.object({
   agentId: Id("agent"),
   body: z.string(),
   /**
-   * The agent whose own words the body is; absent for the human's mail and for mail Bazhen
-   * composes, as a task's. Absent before protocol 1.35.
+   * The agent whose own words the body is, after a line naming it that the body starts with;
+   * absent for the human's mail and for mail Bazhen composes, as a task's. Absent before protocol
+   * 1.35.
    */
   from: Id("agent").optional(),
 });

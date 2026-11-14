@@ -108,6 +108,26 @@ describe("bazhen task verbs", () => {
     ]);
   });
 
+  it("refuses text that holds another verb's option, rather than send it with the option taken out", () => {
+    expect([
+      usage(["send", OTHER, "run", "it", "with", "--all"]),
+      usage(["send", OTHER, "use", "--task", TASK]),
+    ]).toEqual([
+      expect.stringContaining("quotes: it holds --all"),
+      expect.stringContaining("quotes: it holds --task"),
+    ]);
+  });
+
+  it("refuses a send to something that is no agent's id, and --file on any other verb", () => {
+    expect([
+      usage(["send", "../tasks", "hi"]),
+      usage(["escalate", "Pin", "it?", "--file", "q.md"]),
+    ]).toEqual([
+      expect.stringContaining("not an agent id"),
+      expect.stringContaining("--file is for send"),
+    ]);
+  });
+
   it("delegates to a new agent it launches, in the directory named, rather than to one named", () => {
     const verb = taskVerb(
       ["delegate", "--launch", "codex", "--dir", "/work", "--title", "t", "--brief", "b"],
