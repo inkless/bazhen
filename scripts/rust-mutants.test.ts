@@ -219,6 +219,11 @@ describe("testCode", () => {
     });
   });
 
+  it("ends a module at its closing brace, whatever follows the brace on its line", () => {
+    const source = "#[cfg(test)]\nmod tests {\n    fn t() {}\n} // tests\n\npub fn after() {}\n";
+    expect(testCode(LIB, source)).toEqual([{ file: LIB, start: 1, end: 4 }]);
+  });
+
   it("keeps a wrapped signature's column-0 lines inside its item", () => {
     const source = [
       "#[cfg(test)]",
