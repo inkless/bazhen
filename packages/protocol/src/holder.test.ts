@@ -230,6 +230,24 @@ const broken: [string, z.ZodType, unknown, unknown][] = [
     { ...respawned, childStart: -1 },
   ],
   [
+    "a lone high surrogate in argv, though a pair is fine",
+    HolderSpawnSpec,
+    { ...spawnSpec, argv: ["😀"] },
+    { ...spawnSpec, argv: ["\ud83d"] },
+  ],
+  [
+    "a lone low surrogate in a tag value, which UTF-8 can't hold",
+    HolderSpawnSpec,
+    { ...spawnSpec, tags: { k: "a😀b" } },
+    { ...spawnSpec, tags: { k: "a\ude00b" } },
+  ],
+  [
+    "a title with a pair's halves swapped",
+    HolderHelloReply,
+    { ...hello, title: "😀" },
+    { ...hello, title: "\ude00\ud83d" },
+  ],
+  [
     "a subscribe in a generation before 0",
     HolderSubscribeRequest,
     { from: { generation: 0, offset: 0 } },

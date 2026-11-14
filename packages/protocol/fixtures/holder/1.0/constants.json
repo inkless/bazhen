@@ -1,0 +1,58 @@
+{
+  "HOLDER_PROTOCOL_VERSION": "1.0",
+  "HOLDER_VERSION_MAX_BYTES": 32,
+  "HOLDER_TAG_NAME_MAX_BYTES": 64,
+  "HOLDER_TAG_VALUE_MAX_BYTES": 1024,
+  "HOLDER_RESERVED_TAG_NAMES": [
+    "__proto__",
+    "constructor",
+    "prototype"
+  ],
+  "HOLDER_MAX_COLS": 1000,
+  "HOLDER_MAX_ROWS": 1000,
+  "HOLDER_MAX_HISTORY_LINES": 100000,
+  "HOLDER_DEFAULT_HISTORY_LINES": 10000,
+  "HOLDER_MAX_REQUEST_BYTES": 1048576,
+  "HOLDER_MAX_REPLY_BYTES": 67108864,
+  "HOLDER_REQUEST_CODES": {
+    "hello": 1,
+    "snapshot": 2,
+    "stats": 3,
+    "foreground": 4,
+    "subscribe": 64,
+    "input": 65,
+    "resize": 66,
+    "close": 67,
+    "signal": 68,
+    "respawn": 69,
+    "set-tags": 70,
+    "set-theme": 71
+  },
+  "HOLDER_REPLY_CODES": {
+    "hello": 129,
+    "snapshot": 130,
+    "stats": 131,
+    "foreground": 132,
+    "data": 192,
+    "gap": 193,
+    "resized": 194,
+    "title": 195,
+    "alternate": 196,
+    "exited": 197,
+    "respawned": 198,
+    "ok": 240,
+    "error": 241
+  },
+  "HOLDER_ERROR_CODES": [
+    "unknown-request",
+    "stale-generation",
+    "out-of-range",
+    "invalid",
+    "no-shared-version",
+    "not-writer",
+    "input-full",
+    "exited",
+    "snapshot-too-large",
+    "failed"
+  ]
+}
