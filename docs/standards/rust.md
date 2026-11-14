@@ -21,7 +21,7 @@ a review asks for something no check covers.
 | Dependencies are pinned exactly in `[workspace.dependencies]`, and members take them from there                                         | `pnpm check` (`scripts/check-standards.ts`)           |
 | Dependencies have permitted licences, no advisory, one version each                                                                     | `pnpm deny`                                           |
 | Tests run under nextest                                                                                                                 | `pnpm test:rust`                                      |
-| Every new Rust test has a `Control:` trailer                                                                                            | CI on pull requests (`pnpm test:falsify`)             |
+| Every new Rust test has a `Control:` trailer naming it                                                                                  | CI on pull requests (`pnpm test:falsify`)             |
 | Library errors are typed with thiserror; long-running processes log with tracing                                                        | review                                                |
 | Every decoder of a framed binary protocol has a cargo-fuzz target                                                                       | review                                                |
 | Rust components are certified black-box, by the TypeScript suites                                                                       | review                                                |
@@ -256,11 +256,14 @@ What differs:
   else builds on the pinned toolchain. The hook's reply parser reads HTTP from the daemon's own
   socket, and its property tests cover it.
 - **Falsify can't judge Rust tests by reverting.** A Rust unit test lives in the file it tests, so
-  reverting the source would revert the test. `pnpm test:falsify` lists each new `#[test]` fn
-  under `crates/`, proptest's included, as INVALID without running it, so the branch needs a
-  `Control:` trailer (`testing.md` § Falsification). Record one per new test, after breaking the
-  code by hand and watching the test fail on its assertion; the check accepts any one, and the
-  reviewer holds you to the rest.
+  reverting the source would revert the test. When a branch touches `crates/` or the Cargo files,
+  `pnpm test:falsify` has nextest list the tests at the base and at HEAD, so it finds every new
+  test however it is declared (`#[test]`, proptest, a macro of the crate's own), and lists each as
+  INVALID without running it. Each needs a `Control:` trailer of its own that names it by the
+  full path nextest lists (`testing.md` § Falsification), after you break the code by hand and
+  watch the test fail on its assertion:
+  `Control: pane_title::tests::refuses_a_window_id: accept @ ids -> left: Some, right: None`.
+  One trailer may name several tests it covers.
 
 **Black-box first.** A Rust component is certified by the TypeScript suites that drive it from
 outside, as `testing.md` § Black-box behaviour tests describes: `tests/api` delivers mail to
