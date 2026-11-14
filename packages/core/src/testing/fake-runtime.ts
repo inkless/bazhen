@@ -80,6 +80,8 @@ interface HeldSnapshots {
 
 /** A test's hold on a terminal's stream snapshots, so it can put output on either side of each. */
 export interface SnapshotHold {
+  /** How many snapshots have been asked for and not yet taken. */
+  asked(): number;
   /** Takes every snapshot asked for so far, as of now; none of them resolves yet. */
   take(): void;
   /** Resolves every snapshot taken, and stops holding them. */
@@ -402,6 +404,7 @@ export class FakeRuntime implements RuntimeAdapter {
     const held: HeldSnapshots = { asked: [], taken: [] };
     t.held = held;
     return {
+      asked: () => held.asked.length,
       take: () => {
         const snapshot = this.snapshotOf(t);
         for (const settle of held.asked.splice(0)) held.taken.push(() => settle(snapshot));

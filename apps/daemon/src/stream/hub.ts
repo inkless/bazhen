@@ -23,8 +23,9 @@ import {
   type TuiTheme,
 } from "@bazhen/protocol";
 import { failureDetail } from "../commands.ts";
-import { ScreenEmulator } from "./emulator.ts";
 import { classifyInput } from "./input-filter.ts";
+import { emulatorScreen, runtimeScreen, type ScreenSource } from "./screen-source.ts";
+import { seam, seamable, type Held, type Position } from "./seam.ts";
 
 /** One browser view of a terminal, as the hub sees it. */
 export interface Viewer {
@@ -134,8 +135,8 @@ interface Entry {
   grantedEpoch?: number;
   /** The epoch the view says its input is typed under; a grant never changes it. */
   declaredEpoch?: number;
-  /** Live bytes held while the view's snapshot is on its way, and how many there are. */
-  queue?: Uint8Array[];
+  /** Live output held while the view's snapshot is on its way, and how many bytes of it. */
+  queue?: Held[];
   held: number;
   /**
    * What of the snapshot may still be in the socket's queue, which the view may lag by on top of
@@ -161,7 +162,9 @@ interface Loading {
 interface Watched {
   readonly terminal: TerminalId;
   readonly stream: RuntimeStream;
-  readonly emulator: ScreenEmulator;
+  readonly screen: ScreenSource;
+  /** Where the stream is: the position of the next byte it delivers. */
+  at: Position;
   readonly viewers: Map<AttachmentId, Entry>;
   alternate: boolean;
   lease: Lease;
@@ -211,8 +214,9 @@ export class TerminalHub {
       this.log.ended(id, "attach_failed");
       throw new ViewRefused(`this terminal already has ${this.opts.maxViews} views open`);
     }
-    // From here the view's live bytes are held, and the snapshot covers every byte before them.
-    const queue: Uint8Array[] = [];
+    // From here the view's live output is held, and its snapshot is no older than this.
+    const queue: Held[] = [];
+    const from = watched.at;
     const resumeToken = randomBytes(16).toString("base64url");
     const entry: Entry = {
       viewer,
@@ -223,13 +227,18 @@ export class TerminalHub {
       resumeDigest: digest(resumeToken),
     };
     watched.viewers.set(id, entry);
-    // Not held in a local: the serialized text, which may be twice the size of its bytes, would
-    // then stay alive until the whole snapshot is written.
-    const serialized = bytesOf(watched.emulator.snapshot());
+    const taking = watched.screen.snapshot(from);
     this.log.started(id, watched.terminal, viewer.mode);
-    const shown = await serialized;
+    const shown = await taking.catch((err: unknown) => {
+      if (watched.viewers.has(id)) this.end(watched, id, "attach_failed");
+      throw err;
+    });
     if (!watched.viewers.has(id)) throw new ViewEnded();
-    if (!this.makeRoom(shown.length)) {
+    if (!seamable(from, watched.at, shown.at)) {
+      this.end(watched, id, "attach_failed");
+      throw new ViewRefused("this terminal's screen could not be read; reopen it");
+    }
+    if (!this.makeRoom(shown.vt.length)) {
       this.end(watched, id, "attach_failed");
       throw new ViewRefused(
         "too many views are still loading their screens; reopen this terminal in a moment",
@@ -242,12 +251,12 @@ export class TerminalHub {
     // Not before: a view clears its screen for a snapshot, and one turned away would lose it.
     viewer.notify({ type: "snapshot_start" });
     viewer.notify(leaseFrame(watched, id));
-    await this.sendSnapshot(watched, id, entry, shown);
+    await this.sendSnapshot(watched, id, entry, shown.vt);
     // The view may have left, or the terminal closed, while its snapshot was sent.
     if (!watched.viewers.has(id)) throw new ViewEnded();
     viewer.notify({ type: "snapshot_end" });
     viewer.notify({ type: "screen", alternate: watched.alternate });
-    for (const bytes of queue) viewer.send(bytes);
+    for (const bytes of seam(queue, from, watched.at, shown.at) ?? []) viewer.send(bytes);
     delete entry.queue;
     entry.held = 0;
     // The most recent interactive view sizes the terminal while nobody drives it.
@@ -282,24 +291,25 @@ export class TerminalHub {
       const watched: Watched = {
         terminal: ref.terminalId,
         stream,
-        emulator: new ScreenEmulator(
-          stream.size,
-          (reply) => stream.write(reply),
-          () => TERMINAL_COLOURS[this.log.theme(ref.terminalId)],
-        ),
+        screen:
+          attached.kind === "history"
+            ? emulatorScreen(attached, () => TERMINAL_COLOURS[this.log.theme(ref.terminalId)])
+            : runtimeScreen(attached),
+        at:
+          attached.kind === "history"
+            ? { generation: 0, offset: 0 }
+            : { generation: attached.generation, offset: attached.offset },
         size: stream.size,
         viewers: new Map(),
         alternate: attached.alternate,
         lease: { holder: null, epoch: this.log.epoch(ref.terminalId) },
       };
-      // Before any of the client's output, whose first redraw paints the screen below it.
-      if (attached.kind === "history") watched.emulator.seed(attached.history);
-      else watched.emulator.write(attached.vt);
-      const deliver = (bytes: Uint8Array) => {
-        watched.emulator.write(bytes);
+      const deliver = (item: Held) => {
+        const { bytes } = item;
+        watched.screen.write(bytes);
         for (const [id, entry] of watched.viewers) {
           if (entry.queue) {
-            entry.queue.push(bytes);
+            entry.queue.push(item);
             entry.held += bytes.length;
           } else entry.viewer.send(bytes);
           const behind = entry.viewer.unsent() - entry.snapshotBytes + entry.held;
@@ -308,18 +318,33 @@ export class TerminalHub {
           }
         }
       };
-      stream.onData(deliver);
-      stream.onRespawn(() => deliver(RESPAWN_BYTES));
-      stream.onClose(() => {
+      stream.onData((bytes) => {
+        const at = watched.at;
+        watched.at = { ...at, offset: at.offset + bytes.length };
+        deliver({ kind: "data", at, bytes });
+      });
+      stream.onRespawn((generation) => {
+        watched.at = { generation, offset: 0 };
+        deliver({ kind: "reset", generation, bytes: RESPAWN_BYTES });
+      });
+      stream.onClose((why) => {
         // The client also exits when its connection to tmux is lost while the terminal lives on.
         const closed = this.log.closing(watched.terminal);
+        const reason = closed
+          ? "terminal_closed"
+          : why === "behind"
+            ? "evicted_slow"
+            : "disconnected";
         for (const [id, entry] of watched.viewers) {
           this.unload(id);
-          dismiss(entry, closed ? { type: "exit" } : { type: "ended", reason: "disconnected" });
-          this.log.ended(id, closed ? "terminal_closed" : "disconnected");
+          dismiss(
+            entry,
+            reason === "terminal_closed" ? { type: "exit" } : { type: "ended", reason },
+          );
+          this.log.ended(id, reason);
         }
         watched.viewers.clear();
-        watched.emulator.dispose();
+        watched.screen.dispose();
         this.forget(ref.terminalId, opening);
       });
       stream.onAlternate((alternate) => {
@@ -350,7 +375,7 @@ export class TerminalHub {
     watched: Watched,
     id: AttachmentId,
     entry: Entry,
-    shown: Buffer,
+    shown: Uint8Array,
   ): Promise<void> {
     const loading: Loading = {
       watched,
@@ -503,7 +528,7 @@ export class TerminalHub {
       // step of the stream's resize, and no output is delivered before this continuation runs.
       .then(() => {
         watched.size = next;
-        watched.emulator.resize(next);
+        watched.screen.resize(next);
       })
       .catch((err: unknown) => {
         for (const entry of watched.viewers.values()) {
@@ -535,8 +560,6 @@ export class TerminalHub {
 const RESPAWN_BYTES = Buffer.from(RESPAWN_RESET);
 
 const digest = (token: string) => createHash("sha256").update(token).digest();
-
-const bytesOf = async (text: Promise<string>) => Buffer.from(await text);
 
 /** Tells a view why its stream is over, and closes it. */
 function dismiss(entry: Entry, frame: StreamServerFrame): void {

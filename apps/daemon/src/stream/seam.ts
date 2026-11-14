@@ -14,6 +14,10 @@ export type Held =
 
 const compare = (a: Position, b: Position) => a.generation - b.generation || a.offset - b.offset;
 
+/** Whether output held from `from` up to `now` can carry on from a snapshot taken at `taken`. */
+export const seamable = (from: Position, now: Position, taken: Position) =>
+  compare(taken, from) >= 0 && compare(taken, now) <= 0;
+
 /**
  * What of `held`, which the stream delivered from `from` up to `now`, follows a snapshot taken at
  * `taken`: the bytes a view that replays the snapshot still needs, none missed or repeated. Null
@@ -26,7 +30,7 @@ export function seam(
   now: Position,
   taken: Position,
 ): Uint8Array[] | null {
-  if (compare(taken, from) < 0 || compare(taken, now) > 0) return null;
+  if (!seamable(from, now, taken)) return null;
   return held.flatMap((item) => {
     if (item.kind === "reset") return item.generation > taken.generation ? [item.bytes] : [];
     const { at, bytes } = item;

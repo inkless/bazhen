@@ -1,6 +1,13 @@
 import headless from "@xterm/headless";
-import { describe, expect, it, vi } from "vitest";
-import { newId, type AttachmentId, type RuntimeRef, type TerminalId } from "@bazhen/core";
+import { setTimeout as delay } from "node:timers/promises";
+import { assert, describe, expect, it, vi } from "vitest";
+import {
+  newId,
+  type AttachmentId,
+  type RuntimeRef,
+  type Snapshot,
+  type TerminalId,
+} from "@bazhen/core";
 import { FakeRuntime, type FakeRuntimeOptions } from "@bazhen/core/testing";
 import {
   oscColour,
@@ -1065,5 +1072,195 @@ describe("terminal hub: room for views", () => {
     await expect(closing.joined).resolves.toBeDefined();
     await hub.join(rt.ref, late.v, size);
     expect(late.frames.at(-1)?.type).toBe("attached");
+  });
+});
+
+/** A snapshot runtime whose streams' snapshots `alter` changes. */
+class AlteredRuntime extends FakeRuntime {
+  private readonly alter: (taken: Snapshot) => Snapshot;
+
+  constructor(alter: (taken: Snapshot) => Snapshot) {
+    super({ attach: "snapshot" });
+    this.alter = alter;
+  }
+
+  override async attach(...args: Parameters<FakeRuntime["attach"]>) {
+    const attached = await super.attach(...args);
+    assert(attached.kind === "snapshot");
+    const { stream } = attached;
+    const snapshot = async () => this.alter(await stream.snapshot());
+    return { ...attached, stream: { ...stream, snapshot } };
+  }
+}
+
+/** A terminal on a snapshot runtime with one view open. */
+async function snapshotTerminal(runtime = new FakeRuntime({ attach: "snapshot" })) {
+  const ref = await runtime.create({
+    terminalId: newId("term"),
+    tags: { kind: "shell" },
+    argv: ["sleep", "300"],
+    cwd: "/w",
+    env: {},
+    size,
+    generation: 0,
+  });
+  runtime.scroll(ref, "earlier output");
+  const { log, events } = memoryLog();
+  const hub = new Hub(runtime, log);
+  const first = viewer();
+  await hub.join(ref, first.v, size);
+  return { r: runtime, ref, hub, first, events, emit: (s: string) => runtime.output(ref, s) };
+}
+
+/** Starts the next view opening, and waits until its snapshot has been asked for. */
+async function openHeld(o: Awaited<ReturnType<typeof snapshotTerminal>>) {
+  const hold = o.r.holdSnapshots(o.ref);
+  const late = viewer();
+  const joined = o.hub.join(o.ref, late.v, size);
+  await vi.waitFor(() => expect(hold.asked()).toBe(1));
+  return { hold, late, joined };
+}
+
+describe("terminal hub: snapshot streams", () => {
+  it("opens a view on output from both sides of the point its snapshot was taken at", async () => {
+    const o = await snapshotTerminal();
+    o.emit("one ");
+    const { hold, late, joined } = await openHeld(o);
+    o.emit("two ");
+    hold.take();
+    o.emit("three ");
+    hold.release();
+    await joined;
+    o.emit("four");
+    expect([await screenOf(o.first.seen), await screenOf(late.seen)]).toEqual([
+      ["earlier output", "one two three four"],
+      ["earlier output", "one two three four"],
+    ]);
+  });
+
+  it.each([
+    ["before", ["respawn", "take"]],
+    ["after", ["take", "respawn"]],
+  ] as const)(
+    "opens a view of a terminal respawned %s its snapshot was taken as the views already open",
+    async (_when, order) => {
+      const o = await snapshotTerminal();
+      o.emit("\x1b[?1049hALTDRAWN\x1b[?2004h");
+      const { hold, late, joined } = await openHeld(o);
+      const steps = {
+        take: async () => hold.take(),
+        respawn: async () => {
+          o.r.exitProcess(o.ref);
+          await o.r.respawn(o.ref, { ...o.r.specOf(o.ref), generation: 1 });
+          o.emit("respawned ");
+        },
+      };
+      for (const step of order) await steps[step]();
+      o.emit("more");
+      hold.release();
+      await joined;
+      const first = await replay(o.first.seen.join(""), size);
+      const shown = await replay(late.seen.join(""), size);
+      expect([shown.buffer, shown.modes, (await screenOf(late.seen)).at(-1)]).toEqual([
+        first.buffer,
+        first.modes,
+        "respawned more",
+      ]);
+    },
+  );
+
+  it("leaves a program's queries to its runtime to answer", async () => {
+    const history = await fakeRuntime();
+    const snapshot = await fakeRuntime("earlier output", { attach: "snapshot" });
+    for (const rt of [history, snapshot]) {
+      const hub = new Hub(rt.runtime, memoryLog().log);
+      await hub.join(rt.ref, viewer().v, size);
+      rt.emit("\x1b[>q\x1b[6n");
+    }
+    await expect.poll(() => history.written.length).toBeGreaterThan(0);
+    await delay(50);
+    expect(snapshot.written).toEqual([]);
+  });
+
+  it.each([
+    ["older", -1],
+    ["newer", 1],
+  ])(
+    "refuses a view whose snapshot is %s than the output it can carry on from",
+    async (_, skew) => {
+      const o = await snapshotTerminal(
+        new AlteredRuntime((taken) => ({ ...taken, offset: taken.offset + skew })),
+      );
+      o.emit("one ");
+      const late = viewer();
+      await expect(o.hub.join(o.ref, late.v, size)).rejects.toThrow(ViewRefused);
+      expect([
+        late.frames.some((f) => f.type === "snapshot_start"),
+        late.seen,
+        o.events.filter((e) => e.endsWith("attach_failed")).length,
+      ]).toEqual([false, [], 1]);
+    },
+  );
+
+  it("ends a view whose snapshot fails, and serves the others on", async () => {
+    const o = await snapshotTerminal(
+      new AlteredRuntime(() => {
+        throw new Error("no snapshot");
+      }),
+    );
+    const late = viewer();
+    await expect(o.hub.join(o.ref, late.v, size)).rejects.toThrow("no snapshot");
+    o.emit("still here");
+    expect([
+      late.frames.some((f) => f.type === "attached"),
+      o.events.filter((e) => e.endsWith("attach_failed")).length,
+      o.first.seen.at(-1),
+    ]).toEqual([false, 1, "still here"]);
+  });
+
+  it("never tells a view it is attached when the stream closes while its snapshot is taken", async () => {
+    const o = await snapshotTerminal();
+    const { late, joined } = await openHeld(o);
+    o.r.fallBehind(o.ref);
+    await expect(joined).rejects.toThrow("the stream closed");
+    expect([late.frames.some((f) => f.type === "attached"), late.closed()]).toEqual([false, true]);
+  });
+});
+
+const fallBehind = (r: FakeRuntime, ref: RuntimeRef) => r.fallBehind(ref);
+const vanish = (r: FakeRuntime, ref: RuntimeRef) => r.vanish(ref);
+
+describe("terminal hub: a snapshot stream that closes", () => {
+  it.each([
+    ["falls behind", false, fallBehind, { type: "ended", reason: "evicted_slow" }, "evicted_slow"],
+    ["is lost", false, vanish, { type: "ended", reason: "disconnected" }, "disconnected"],
+    ["ends with its terminal", true, vanish, { type: "exit" }, "terminal_closed"],
+  ] as const)("ends every view as its stream %s", async (_how, closing, close, frame, reason) => {
+    const rt = await fakeRuntime("earlier output", { attach: "snapshot" });
+    const { log, events } = memoryLog(closing);
+    const hub = new Hub(rt.runtime, log);
+    const a = viewer();
+    const attached = await hub.join(rt.ref, a.v, size);
+    close(rt.runtime, rt.ref);
+    expect([a.frames.at(-1), a.closed(), events.at(-1)]).toEqual([
+      frame,
+      true,
+      `ended ${attached.id} ${reason}`,
+    ]);
+  });
+
+  it("opens a view that comes back after falling behind on a fresh snapshot", async () => {
+    const rt = await fakeRuntime("earlier output", { attach: "snapshot" });
+    const hub = new Hub(rt.runtime, memoryLog().log);
+    await hub.join(rt.ref, viewer().v, size);
+    rt.emit("missed ");
+    rt.runtime.fallBehind(rt.ref);
+    rt.emit("while away");
+    const back = viewer();
+    await hub.join(rt.ref, back.v, size);
+    expect([rt.counts().attaches, await screenOf(back.seen)]).toEqual([
+      2,
+      ["earlier output", "missed while away"],
+    ]);
   });
 });
