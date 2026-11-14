@@ -35,6 +35,5 @@
     "idempotencyKey",
     "harness",
     "cwd"
-  ],
-  "additionalProperties": false
+  ]
 }

@@ -28,6 +28,5 @@
     "id",
     "agentId",
     "state"
-  ],
-  "additionalProperties": false
+  ]
 }

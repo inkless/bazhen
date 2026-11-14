@@ -1,0 +1,27 @@
+{
+  "$id": "HolderResized",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "offset": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "cols": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000
+    },
+    "rows": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000
+    }
+  },
+  "required": [
+    "offset",
+    "cols",
+    "rows"
+  ]
+}

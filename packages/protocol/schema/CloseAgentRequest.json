@@ -43,14 +43,12 @@
         "required": [
           "terminalId",
           "program"
-        ],
-        "additionalProperties": false
+        ]
       }
     }
   },
   "required": [
     "idempotencyKey",
     "generation"
-  ],
-  "additionalProperties": false
+  ]
 }

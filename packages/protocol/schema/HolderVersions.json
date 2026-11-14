@@ -1,0 +1,12 @@
+{
+  "$id": "HolderVersions",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "minItems": 1,
+  "maxItems": 16,
+  "type": "array",
+  "items": {
+    "type": "string",
+    "minLength": 0,
+    "description": "At most 32 UTF-8 bytes."
+  }
+}

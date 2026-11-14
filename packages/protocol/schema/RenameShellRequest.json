@@ -24,6 +24,5 @@
   "required": [
     "idempotencyKey",
     "name"
-  ],
-  "additionalProperties": false
+  ]
 }

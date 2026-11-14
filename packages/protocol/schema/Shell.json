@@ -68,8 +68,7 @@
           "required": [
             "command",
             "since"
-          ],
-          "additionalProperties": false
+          ]
         },
         {
           "type": "null"
@@ -112,6 +111,5 @@
     "theme",
     "attachCommand",
     "commands"
-  ],
-  "additionalProperties": false
+  ]
 }

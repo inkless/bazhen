@@ -1,0 +1,21 @@
+{
+  "$id": "HolderSize",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "cols": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000
+    },
+    "rows": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000
+    }
+  },
+  "required": [
+    "cols",
+    "rows"
+  ]
+}

@@ -1,0 +1,177 @@
+{
+  "$id": "HolderHelloReply",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+$"
+    },
+    "protocol": {
+      "minItems": 1,
+      "maxItems": 16,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 0,
+        "description": "At most 32 UTF-8 bytes."
+      }
+    },
+    "terminalId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$"
+    },
+    "tags": {
+      "description": "Tag names __proto__, constructor, prototype are refused.",
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "description": "At most 64 UTF-8 bytes."
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 0,
+        "description": "At most 1024 UTF-8 bytes."
+      }
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "holderPid": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991
+    },
+    "holderStart": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "childPid": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991
+    },
+    "childStart": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "exit": {
+      "anyOf": [
+        {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "exited"
+                },
+                "code": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "type",
+                "code"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "signalled"
+                },
+                "signal": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "signal"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "unknown"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            }
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "size": {
+      "type": "object",
+      "properties": {
+        "cols": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000
+        },
+        "rows": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000
+        }
+      },
+      "required": [
+        "cols",
+        "rows"
+      ]
+    },
+    "offset": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "title": {
+      "type": "string"
+    },
+    "alternate": {
+      "type": "boolean"
+    },
+    "historyLines": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "writer": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "version",
+    "protocol",
+    "terminalId",
+    "tags",
+    "generation",
+    "holderPid",
+    "holderStart",
+    "childPid",
+    "childStart",
+    "exit",
+    "size",
+    "offset",
+    "title",
+    "alternate",
+    "historyLines",
+    "writer"
+  ]
+}

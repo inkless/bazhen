@@ -27,6 +27,5 @@
     "stdout",
     "stderr",
     "offered"
-  ],
-  "additionalProperties": false
+  ]
 }

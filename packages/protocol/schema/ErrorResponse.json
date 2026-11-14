@@ -44,14 +44,12 @@
         "required": [
           "terminalId",
           "program"
-        ],
-        "additionalProperties": false
+        ]
       }
     }
   },
   "required": [
     "error",
     "message"
-  ],
-  "additionalProperties": false
+  ]
 }

@@ -22,6 +22,5 @@
   "required": [
     "id",
     "kind"
-  ],
-  "additionalProperties": false
+  ]
 }

@@ -24,6 +24,5 @@
     "code",
     "expiresAt",
     "origins"
-  ],
-  "additionalProperties": false
+  ]
 }

@@ -11,6 +11,5 @@
   },
   "required": [
     "idempotencyKey"
-  ],
-  "additionalProperties": false
+  ]
 }

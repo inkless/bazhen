@@ -5,6 +5,8 @@ import { ProtocolVersion } from "./version.ts";
 export * from "./agents.ts";
 export * from "./devices.ts";
 export * from "./events.ts";
+export * from "./holder.ts";
+export * from "./holder-frame.ts";
 export * from "./ids.ts";
 export * from "./input.ts";
 export * from "./json.ts";

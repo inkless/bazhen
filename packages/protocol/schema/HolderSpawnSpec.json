@@ -1,0 +1,107 @@
+{
+  "$id": "HolderSpawnSpec",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "argv": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "cwd": {
+      "type": "string",
+      "minLength": 1
+    },
+    "env": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "theme": {
+      "type": "string",
+      "enum": [
+        "light",
+        "dark"
+      ]
+    },
+    "protocol": {
+      "minItems": 1,
+      "maxItems": 16,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 0,
+        "description": "At most 32 UTF-8 bytes."
+      }
+    },
+    "terminalId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$"
+    },
+    "socket": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tags": {
+      "description": "Tag names __proto__, constructor, prototype are refused.",
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "description": "At most 64 UTF-8 bytes."
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 0,
+        "description": "At most 1024 UTF-8 bytes."
+      }
+    },
+    "size": {
+      "type": "object",
+      "properties": {
+        "cols": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000
+        },
+        "rows": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000
+        }
+      },
+      "required": [
+        "cols",
+        "rows"
+      ]
+    },
+    "historyLines": {
+      "default": 10000,
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000
+    }
+  },
+  "required": [
+    "argv",
+    "cwd",
+    "env",
+    "generation",
+    "protocol",
+    "terminalId",
+    "socket",
+    "tags",
+    "size"
+  ]
+}

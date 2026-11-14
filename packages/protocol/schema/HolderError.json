@@ -1,0 +1,31 @@
+{
+  "$id": "HolderError",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "request": {
+      "type": "string"
+    },
+    "code": {
+      "type": "string"
+    },
+    "message": {
+      "type": "string"
+    },
+    "protocol": {
+      "minItems": 1,
+      "maxItems": 16,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 0,
+        "description": "At most 32 UTF-8 bytes."
+      }
+    }
+  },
+  "required": [
+    "request",
+    "code",
+    "message"
+  ]
+}

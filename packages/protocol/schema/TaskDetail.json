@@ -118,8 +118,7 @@
           "parentAssignmentId",
           "state",
           "endReason"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     "subtasks": {
@@ -171,8 +170,7 @@
           "state",
           "ownerAgentId",
           "parentTaskId"
-        ],
-        "additionalProperties": false
+        ]
       }
     }
   },
@@ -186,6 +184,5 @@
     "note",
     "assignments",
     "subtasks"
-  ],
-  "additionalProperties": false
+  ]
 }

@@ -1,0 +1,19 @@
+{
+  "$id": "HolderSignalRequest",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "signal": {
+      "type": "string",
+      "enum": [
+        "SIGINT",
+        "SIGTERM",
+        "SIGHUP",
+        "SIGKILL"
+      ]
+    }
+  },
+  "required": [
+    "signal"
+  ]
+}

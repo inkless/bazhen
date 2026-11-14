@@ -58,8 +58,7 @@
           },
           "required": [
             "kind"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -72,8 +71,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -143,8 +141,7 @@
             "harness",
             "version",
             "previous"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -157,8 +154,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -245,8 +241,7 @@
             "project",
             "cwd",
             "terminalId"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -259,8 +254,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -333,8 +327,7 @@
                     "environmentId",
                     "kind",
                     "id"
-                  ],
-                  "additionalProperties": false
+                  ]
                 },
                 {
                   "type": "null"
@@ -362,8 +355,7 @@
                   "required": [
                     "runtime",
                     "locator"
-                  ],
-                  "additionalProperties": false
+                  ]
                 },
                 {
                   "type": "null"
@@ -381,8 +373,7 @@
           "required": [
             "externalRef",
             "runtimeRef"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -395,8 +386,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -457,8 +447,7 @@
           },
           "required": [
             "reason"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -471,8 +460,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -519,8 +507,7 @@
         },
         "payload": {
           "type": "object",
-          "properties": {},
-          "additionalProperties": false
+          "properties": {}
         }
       },
       "required": [
@@ -533,8 +520,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -581,8 +567,7 @@
         },
         "payload": {
           "type": "object",
-          "properties": {},
-          "additionalProperties": false
+          "properties": {}
         }
       },
       "required": [
@@ -595,8 +580,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -669,8 +653,7 @@
                     "environmentId",
                     "kind",
                     "id"
-                  ],
-                  "additionalProperties": false
+                  ]
                 },
                 {
                   "type": "null"
@@ -696,8 +679,7 @@
               "required": [
                 "runtime",
                 "locator"
-              ],
-              "additionalProperties": false
+              ]
             },
             "theme": {
               "type": "string",
@@ -710,8 +692,7 @@
           "required": [
             "externalRef",
             "runtimeRef"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -724,8 +705,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -790,8 +770,7 @@
           },
           "required": [
             "reason"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -804,8 +783,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -870,8 +848,7 @@
             "terminalId",
             "generation",
             "fresh"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -884,8 +861,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -958,8 +934,7 @@
                     "environmentId",
                     "kind",
                     "id"
-                  ],
-                  "additionalProperties": false
+                  ]
                 },
                 {
                   "type": "null"
@@ -985,8 +960,7 @@
               "required": [
                 "runtime",
                 "locator"
-              ],
-              "additionalProperties": false
+              ]
             },
             "theme": {
               "type": "string",
@@ -999,8 +973,7 @@
           "required": [
             "externalRef",
             "runtimeRef"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -1013,8 +986,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -1078,8 +1050,7 @@
           },
           "required": [
             "reason"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -1092,8 +1063,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -1164,14 +1134,12 @@
                 "environmentId",
                 "kind",
                 "id"
-              ],
-              "additionalProperties": false
+              ]
             }
           },
           "required": [
             "externalRef"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -1184,8 +1152,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -1240,8 +1207,7 @@
           },
           "required": [
             "sessionId"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -1254,8 +1220,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -1315,8 +1280,7 @@
           },
           "required": [
             "signal"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -1329,8 +1293,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -1417,8 +1380,7 @@
             "source",
             "confidence",
             "observedAt"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -1431,8 +1393,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -1494,8 +1455,7 @@
               "exclusiveMinimum": 0,
               "maximum": 9007199254740991
             }
-          },
-          "additionalProperties": false
+          }
         }
       },
       "required": [
@@ -1508,8 +1468,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -1575,8 +1534,7 @@
                   "required": [
                     "type",
                     "code"
-                  ],
-                  "additionalProperties": false
+                  ]
                 },
                 {
                   "type": "object",
@@ -1592,8 +1550,7 @@
                   "required": [
                     "type",
                     "signal"
-                  ],
-                  "additionalProperties": false
+                  ]
                 },
                 {
                   "type": "object",
@@ -1605,16 +1562,14 @@
                   },
                   "required": [
                     "type"
-                  ],
-                  "additionalProperties": false
+                  ]
                 }
               ]
             }
           },
           "required": [
             "exit"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -1627,8 +1582,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -1675,8 +1629,7 @@
         },
         "payload": {
           "type": "object",
-          "properties": {},
-          "additionalProperties": false
+          "properties": {}
         }
       },
       "required": [
@@ -1689,8 +1642,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -1737,8 +1689,7 @@
         },
         "payload": {
           "type": "object",
-          "properties": {},
-          "additionalProperties": false
+          "properties": {}
         }
       },
       "required": [
@@ -1751,8 +1702,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -1834,8 +1784,7 @@
             "environmentId",
             "cwd",
             "linkedAgentId"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -1848,8 +1797,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -1916,14 +1864,12 @@
               "required": [
                 "runtime",
                 "locator"
-              ],
-              "additionalProperties": false
+              ]
             }
           },
           "required": [
             "runtimeRef"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -1936,8 +1882,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -1995,8 +1940,7 @@
           },
           "required": [
             "reason"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -2009,8 +1953,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -2057,8 +2000,7 @@
         },
         "payload": {
           "type": "object",
-          "properties": {},
-          "additionalProperties": false
+          "properties": {}
         }
       },
       "required": [
@@ -2071,8 +2013,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -2119,8 +2060,7 @@
         },
         "payload": {
           "type": "object",
-          "properties": {},
-          "additionalProperties": false
+          "properties": {}
         }
       },
       "required": [
@@ -2133,8 +2073,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -2194,8 +2133,7 @@
           },
           "required": [
             "reason"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -2208,8 +2146,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -2271,8 +2208,7 @@
           },
           "required": [
             "command"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -2285,8 +2221,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -2333,8 +2268,7 @@
         },
         "payload": {
           "type": "object",
-          "properties": {},
-          "additionalProperties": false
+          "properties": {}
         }
       },
       "required": [
@@ -2347,8 +2281,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -2405,8 +2338,7 @@
           },
           "required": [
             "name"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -2419,8 +2351,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -2483,8 +2414,7 @@
           "required": [
             "terminalId",
             "mode"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -2497,8 +2427,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -2562,8 +2491,7 @@
           },
           "required": [
             "reason"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -2576,8 +2504,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -2636,8 +2563,7 @@
           },
           "required": [
             "agentId"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -2650,8 +2576,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -2702,8 +2627,7 @@
             "promptId": {
               "type": "string"
             }
-          },
-          "additionalProperties": false
+          }
         }
       },
       "required": [
@@ -2716,8 +2640,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -2764,8 +2687,7 @@
         },
         "payload": {
           "type": "object",
-          "properties": {},
-          "additionalProperties": false
+          "properties": {}
         }
       },
       "required": [
@@ -2778,8 +2700,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -2833,8 +2754,7 @@
           },
           "required": [
             "promptId"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -2847,8 +2767,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -2895,8 +2814,7 @@
         },
         "payload": {
           "type": "object",
-          "properties": {},
-          "additionalProperties": false
+          "properties": {}
         }
       },
       "required": [
@@ -2909,8 +2827,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -2964,8 +2881,7 @@
           },
           "required": [
             "offline"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -2978,8 +2894,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -3037,8 +2952,7 @@
           },
           "required": [
             "reason"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -3051,8 +2965,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -3114,8 +3027,7 @@
           },
           "required": [
             "reason"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -3128,8 +3040,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -3217,8 +3128,7 @@
             "summary",
             "toolUseId",
             "mainAgent"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -3231,8 +3141,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -3290,8 +3199,7 @@
           },
           "required": [
             "decision"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -3304,8 +3212,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -3369,8 +3276,7 @@
           },
           "required": [
             "reason"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -3383,8 +3289,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -3438,8 +3343,7 @@
           },
           "required": [
             "name"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -3452,8 +3356,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -3500,8 +3403,7 @@
         },
         "payload": {
           "type": "object",
-          "properties": {},
-          "additionalProperties": false
+          "properties": {}
         }
       },
       "required": [
@@ -3514,8 +3416,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -3576,8 +3477,7 @@
           "required": [
             "attachmentId",
             "epoch"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -3590,8 +3490,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -3682,8 +3581,7 @@
             "title",
             "ownerAgentId",
             "parentTaskId"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -3696,8 +3594,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -3755,8 +3652,7 @@
           },
           "required": [
             "outcome"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -3769,8 +3665,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -3844,8 +3739,7 @@
           "required": [
             "ownerAgentId",
             "delegatedFrom"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -3858,8 +3752,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -3940,8 +3833,7 @@
             "agentId",
             "role",
             "parentAssignmentId"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -3954,8 +3846,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -4013,8 +3904,7 @@
           },
           "required": [
             "reason"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -4027,8 +3917,7 @@
         "causationId",
         "correlationId",
         "payload"
-      ],
-      "additionalProperties": false
+      ]
     }
   ]
 }

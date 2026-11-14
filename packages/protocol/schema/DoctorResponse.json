@@ -8,7 +8,7 @@
     },
     "protocolVersion": {
       "type": "string",
-      "pattern": "^\\d+\\.\\d+$"
+      "pattern": "^[0-9]+\\.[0-9]+$"
     },
     "runtime": {
       "type": "object",
@@ -31,8 +31,7 @@
       "required": [
         "state",
         "version"
-      ],
-      "additionalProperties": false
+      ]
     },
     "hookClient": {
       "type": "object",
@@ -47,8 +46,7 @@
       "required": [
         "path",
         "fallback"
-      ],
-      "additionalProperties": false
+      ]
     },
     "config": {
       "type": "object",
@@ -63,8 +61,7 @@
       "required": [
         "path",
         "found"
-      ],
-      "additionalProperties": false
+      ]
     },
     "agents": {
       "type": "object",
@@ -86,8 +83,7 @@
       "required": [
         "shell",
         "loginShell"
-      ],
-      "additionalProperties": false
+      ]
     },
     "codex": {
       "type": "object",
@@ -108,8 +104,7 @@
       "required": [
         "daemon",
         "cli"
-      ],
-      "additionalProperties": false
+      ]
     },
     "web": {
       "type": "object",
@@ -154,8 +149,7 @@
           "required": [
             "mode",
             "required"
-          ],
-          "additionalProperties": false
+          ]
         },
         "app": {
           "type": [
@@ -168,8 +162,7 @@
         "externalOrigins",
         "from",
         "allowInsecureOrigins"
-      ],
-      "additionalProperties": false
+      ]
     },
     "notifications": {
       "type": "object",
@@ -187,8 +180,7 @@
       "required": [
         "desktop",
         "notifier"
-      ],
-      "additionalProperties": false
+      ]
     },
     "env": {
       "type": "object",
@@ -225,8 +217,7 @@
         "source",
         "kept",
         "removed"
-      ],
-      "additionalProperties": false
+      ]
     }
   },
   "required": [
@@ -237,6 +228,5 @@
     "config",
     "agents",
     "env"
-  ],
-  "additionalProperties": false
+  ]
 }

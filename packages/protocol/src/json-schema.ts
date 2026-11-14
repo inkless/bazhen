@@ -14,9 +14,28 @@ export function jsonSchemas(): Record<string, string> {
       .toSorted(([a], [b]) => a.localeCompare(b))
       .map(([name, schema]) => [
         `${name}.json`,
-        `${JSON.stringify({ $id: name, ...z.toJSONSchema(schema, { override: optionalDefaults }) }, null, 2)}\n`,
+        `${JSON.stringify({ $id: name, ...z.toJSONSchema(schema, { override: forPeers }) }, null, 2)}\n`,
       ]),
   );
+}
+
+function forPeers(ctx: {
+  zodSchema: unknown;
+  jsonSchema: { required?: string[]; additionalProperties?: unknown };
+}): void {
+  optionalDefaults(ctx);
+  openObjects(ctx);
+}
+
+/**
+ * An object that strips fields it doesn't know accepts them, as a newer peer within the same major
+ * sends them, so its schema doesn't refuse them either. Only a strict object is closed.
+ */
+function openObjects(ctx: { zodSchema: unknown; jsonSchema: { additionalProperties?: unknown } }) {
+  const { zodSchema, jsonSchema } = ctx;
+  if (zodSchema instanceof z.ZodObject && zodSchema.def.catchall === undefined) {
+    delete jsonSchema.additionalProperties;
+  }
 }
 
 /**

@@ -32,6 +32,5 @@
     "pairedAt",
     "lastSeenAt",
     "expiresAt"
-  ],
-  "additionalProperties": false
+  ]
 }

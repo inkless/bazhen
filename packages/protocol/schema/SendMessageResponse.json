@@ -19,6 +19,5 @@
   "required": [
     "messageId",
     "eventIds"
-  ],
-  "additionalProperties": false
+  ]
 }

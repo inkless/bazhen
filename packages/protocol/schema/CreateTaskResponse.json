@@ -31,6 +31,5 @@
     "taskId",
     "assignmentId",
     "eventIds"
-  ],
-  "additionalProperties": false
+  ]
 }
