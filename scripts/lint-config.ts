@@ -25,6 +25,7 @@ const PACKAGE_DIR: Record<string, string> = {
   "@bazhen/core": "packages/core",
   "@bazhen/host-guard": "packages/host-guard",
   "@bazhen/runtime-tmux": "packages/runtime-tmux",
+  "@bazhen/runtime-holder": "packages/runtime-holder",
   "@bazhen/env-local": "packages/env-local",
   "@bazhen/harness-claude-code": "packages/harness-claude-code",
   "@bazhen/harness-codex": "packages/harness-codex",
@@ -41,13 +42,19 @@ const WIDGET_LIBS = ["react-aria-components", "react-aria-components/*"];
 export const MATRIX: Area[] = [
   {
     dir: "packages/protocol",
-    banned: ["@bazhen/core", "@bazhen/runtime-tmux", "@bazhen/daemon", "@bazhen/web"],
+    banned: [
+      "@bazhen/core",
+      "@bazhen/runtime-tmux",
+      "@bazhen/runtime-holder",
+      "@bazhen/daemon",
+      "@bazhen/web",
+    ],
     platformFree: true,
     thirdParty: RUNTIME_LIBS,
   },
   {
     dir: "packages/core",
-    banned: ["@bazhen/runtime-tmux", "@bazhen/daemon", "@bazhen/web"],
+    banned: ["@bazhen/runtime-tmux", "@bazhen/runtime-holder", "@bazhen/daemon", "@bazhen/web"],
     typeOnly: ["@bazhen/protocol"],
     platformFree: true,
     thirdParty: RUNTIME_LIBS,
@@ -59,6 +66,7 @@ export const MATRIX: Area[] = [
       "@bazhen/protocol",
       "@bazhen/core",
       "@bazhen/runtime-tmux",
+      "@bazhen/runtime-holder",
       "@bazhen/env-local",
       "@bazhen/harness-claude-code",
       "@bazhen/harness-codex",
@@ -69,13 +77,19 @@ export const MATRIX: Area[] = [
   },
   {
     dir: "packages/runtime-tmux",
-    banned: ["@bazhen/daemon", "@bazhen/web"],
+    banned: ["@bazhen/runtime-holder", "@bazhen/daemon", "@bazhen/web"],
     thirdParty: ["node-pty", "hono", "@hono/*", "ws", "@xterm/*"],
+  },
+  {
+    dir: "packages/runtime-holder",
+    banned: ["@bazhen/runtime-tmux", "@bazhen/daemon", "@bazhen/web"],
+    thirdParty: RUNTIME_LIBS,
   },
   {
     dir: "packages/env-local",
     banned: [
       "@bazhen/runtime-tmux",
+      "@bazhen/runtime-holder",
       "@bazhen/harness-claude-code",
       "@bazhen/harness-codex",
       "@bazhen/daemon",
@@ -89,6 +103,7 @@ export const MATRIX: Area[] = [
     dir: "packages/harness-claude-code",
     banned: [
       "@bazhen/runtime-tmux",
+      "@bazhen/runtime-holder",
       "@bazhen/env-local",
       "@bazhen/harness-codex",
       "@bazhen/daemon",
@@ -102,6 +117,7 @@ export const MATRIX: Area[] = [
     dir: "packages/harness-codex",
     banned: [
       "@bazhen/runtime-tmux",
+      "@bazhen/runtime-holder",
       "@bazhen/env-local",
       "@bazhen/harness-claude-code",
       "@bazhen/daemon",
@@ -119,6 +135,7 @@ export const MATRIX: Area[] = [
     banned: [
       "@bazhen/core",
       "@bazhen/runtime-tmux",
+      "@bazhen/runtime-holder",
       "@bazhen/env-local",
       "@bazhen/harness-claude-code",
       "@bazhen/harness-codex",
@@ -134,6 +151,7 @@ export const MATRIX: Area[] = [
     banned: [
       "@bazhen/core",
       "@bazhen/runtime-tmux",
+      "@bazhen/runtime-holder",
       "@bazhen/env-local",
       "@bazhen/harness-claude-code",
       "@bazhen/harness-codex",
@@ -143,7 +161,7 @@ export const MATRIX: Area[] = [
   },
   {
     dir: "apps/web",
-    banned: ["@bazhen/core", "@bazhen/runtime-tmux", "@bazhen/daemon"],
+    banned: ["@bazhen/core", "@bazhen/runtime-tmux", "@bazhen/runtime-holder", "@bazhen/daemon"],
     platformFree: true,
     thirdParty: ["node-pty", "hono", "@hono/*", "ws"],
     onlyThrough: { packages: WIDGET_LIBS, via: "apps/web/src/ui" },
@@ -151,7 +169,7 @@ export const MATRIX: Area[] = [
   // After apps/web, whose rule it replaces for these files: the one place widgets are wrapped.
   {
     dir: "apps/web/src/ui",
-    banned: ["@bazhen/core", "@bazhen/runtime-tmux", "@bazhen/daemon"],
+    banned: ["@bazhen/core", "@bazhen/runtime-tmux", "@bazhen/runtime-holder", "@bazhen/daemon"],
     platformFree: true,
     thirdParty: ["node-pty", "hono", "@hono/*", "ws"],
   },

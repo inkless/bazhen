@@ -28,6 +28,8 @@ const COVERED_ELSEWHERE: Record<string, string> = {
   "apps/daemon/src/testing/fixtures.ts": "apps/daemon/src/mailbox/mailbox.medium.test.ts",
   "apps/daemon/src/testing/browser-terminal.ts": "apps/daemon/src/stream/snapshot-contract.test.ts",
   "apps/daemon/src/testing/fake-app-server.ts": "apps/daemon/src/codex/app-server.medium.test.ts",
+  "packages/runtime-holder/src/testing/fake-holder.ts":
+    "packages/runtime-holder/src/client.test.ts",
   "packages/core/src/environment.ts": "packages/env-local/src/index.test.ts",
   "packages/protocol/src/holder-fixtures.ts": "scripts/protocol-schema.medium.test.ts",
   "packages/core/src/runtime.ts": "packages/core/src/testing/fake-runtime.test.ts",

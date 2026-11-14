@@ -353,6 +353,12 @@ importers:
         specifier: 4.10.2
         version: 4.10.2
 
+  packages/runtime-holder:
+    dependencies:
+      '@bazhen/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+
   packages/runtime-tmux:
     dependencies:
       '@bazhen/core':
