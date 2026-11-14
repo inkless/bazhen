@@ -135,7 +135,7 @@ pre {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  z-index: 10;
+  z-index: var(--z-modal);
   display: grid;
   place-items: center;
   padding: var(--space-4);
@@ -232,4 +232,22 @@ pre {
   .tab[data-selected] {
     outline: 2px solid Highlight;
   }
+}
+
+/* Pressed and held, as a sticky modifier: the accent fill, outlined for forced colours. */
+.toggle-button[data-selected] {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+@media (forced-colors: active) {
+  .toggle-button[data-selected] {
+    outline: 2px solid Highlight;
+  }
+}
+
+.toolbar {
+  display: flex;
+  gap: var(--space-1);
 }

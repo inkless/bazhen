@@ -12,6 +12,7 @@ import { pageTheme } from "./ui/theme.ts";
 import { Button } from "./ui/Button.tsx";
 import { ShellPane } from "./shells/ShellPane.tsx";
 import { ShellsRail } from "./shells/ShellsRail.tsx";
+import { KeyBar } from "./terminal/KeyBar.tsx";
 
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -215,6 +216,7 @@ export function Dashboard() {
           )}
         </section>
       </div>
+      <KeyBar />
     </>
   );
 }

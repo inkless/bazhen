@@ -82,6 +82,9 @@
 
   /* $type: number */
   --line-height-body: 1.4;
+  /* Stacking: the key bar over the page and its terminals, a modal over everything. */
+  --z-key-bar: 5;
+  --z-modal: 10;
 
   /* $type: duration, cubicBezier */
   --duration-fast: 100ms;

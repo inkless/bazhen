@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebglAddon } from "@xterm/addon-webgl";
@@ -17,7 +17,8 @@ import {
   type TuiTheme,
 } from "@bazhen/protocol";
 import { Heartbeat, PING_EVERY_MS } from "./heartbeat.ts";
-import { matchKey } from "./keymap.ts";
+import { barBytes, keyBar, settled, withCtrl, type BarTarget } from "./bar-keys.ts";
+import { isApple, matchKey } from "./keymap.ts";
 import { statusText, type Status } from "./status.ts";
 import { Backoff } from "./reconnect.ts";
 import { wheelAction, type TerminalKind } from "./scroll.ts";
@@ -49,6 +50,8 @@ export function TerminalView({
   height?: string;
 }) {
   const host = useRef<HTMLDivElement>(null);
+  const bar = keyBar();
+  const layout = useSyncExternalStore(bar.subscribe, bar.layout);
   const [report, setReport] = useState<Report>({ status: { kind: "connecting" }, notice: null });
 
   useEffect(() => {
@@ -72,7 +75,12 @@ export function TerminalView({
         ref={host}
         // xterm.js paints whole rows; the strip below the last one is the host's.
         style={{
-          height,
+          // Room for the key bar under it, the same whether the soft keyboard is open or not, so
+          // the keyboard never reflows the TUI.
+          height: layout === null ? height : `calc(${height} - ${layout.bar}px)`,
+          scrollMarginBottom: layout === null ? undefined : `${layout.bar}px`,
+          // xterm.js stacks its layers up to z-index 11; kept in here, they stay under the bar.
+          isolation: "isolate",
           background: "var(--color-terminal-bg)",
           colorScheme: scheme,
         }}
@@ -92,7 +100,7 @@ function connect(
   scheme: TuiTheme,
   onReport: (report: Report) => void,
 ) {
-  const settings = loadSettings(localStorage);
+  const settings = loadSettings(localStorage, isApple(navigator.userAgent));
   const page = pageTheme();
   const colours = () => terminalTheme(scheme, page.moreContrast());
   const term = new Xterm({
@@ -113,6 +121,7 @@ function connect(
   term.loadAddon(new Unicode11Addon());
   term.unicode.activeVersion = "11";
   term.open(element);
+  notAFormField(term);
   loadRenderer(term);
   fit.fit();
   swallowReplies(term);
@@ -164,9 +173,13 @@ function connect(
    * Input goes only from the driver. Anything else is dropped; a keystroke also asks for the
    * lease, a focus or mouse report or a scroll never does (§4.3).
    */
-  const input = (bytes: Uint8Array<ArrayBuffer>, keystroke: boolean) => {
-    if (driving && ws?.readyState === WebSocket.OPEN) ws.send(bytes);
-    else if (keystroke) engage();
+  const input = (bytes: Uint8Array<ArrayBuffer>, keystroke: boolean): boolean => {
+    if (driving && ws?.readyState === WebSocket.OPEN) {
+      ws.send(bytes);
+      return true;
+    }
+    if (keystroke) engage();
+    return false;
   };
   const leaseStatus = (): Status => {
     if (driving) return { kind: "driving" };
@@ -268,25 +281,92 @@ function connect(
   };
   document.addEventListener("visibilitychange", shown);
 
+  const bar = keyBar();
+  /**
+   * Sends a keystroke, with the bar's Ctrl if it is armed for this view, and releases Ctrl once the
+   * key is sent. A key that only takes the lease leaves it armed for the key the user sends next.
+   */
+  const keystroke = (text: (ctrl: boolean) => string) => {
+    const ctrl = bar.target() === target && bar.ctrl();
+    if (input(encoder.encode(text(ctrl)), true) && ctrl) bar.takeCtrl();
+  };
   term.attachCustomKeyEventHandler((event) => {
     const text = matchKey(event, settings.keyMap);
     if (text === null) return true;
-    input(encoder.encode(text), true);
+    // Bound, it is the key an armed Ctrl was for, though it has no Ctrl form of its own.
+    keystroke(() => text);
     event.preventDefault();
     return false;
   });
   const route = () =>
     wheelAction({ mouseTracking: term.modes.mouseTrackingMode !== "none", alternate, kind });
   const detachScroll = attachScrollInput(element, term, route, (bytes) => input(bytes, false));
-  const typed = term.onData((data) =>
-    input(encoder.encode(data), withoutEventReports(data) !== ""),
-  );
+  const target: BarTarget = {
+    kind,
+    press: (key) =>
+      keystroke((ctrl) =>
+        barBytes(key, {
+          keyMap: settings.keyMap,
+          ctrl,
+          appCursor: term.modes.applicationCursorKeysMode,
+        }),
+      ),
+    focus: () => term.focus(),
+    holdsFocus: () => element.contains(document.activeElement),
+  };
+  const unregister = bar.register(target);
+  const typed = term.onData((data) => {
+    // The bar's Ctrl, armed for the next key, applies to a letter typed on the soft keyboard.
+    if (withoutEventReports(data) !== "") keystroke((ctrl) => (ctrl ? withCtrl(data) : data));
+    else input(encoder.encode(data), false);
+  });
   // Only X10 mouse reports come this way.
   const binary = term.onBinary((data) => input(latin1(data), false));
   const resize = term.onResize(({ cols, rows }) => send({ type: "resize", cols, rows }));
   const observer = new ResizeObserver(() => fit.fit());
   observer.observe(element);
   const detachTakeover = attachTakeover(element, engage);
+  // The bar types into the terminal the user last touched, not one the window's focus reached.
+  const aim = () => bar.engaged(target);
+  element.addEventListener("pointerdown", aim);
+  element.addEventListener("focusin", aim);
+  // Focus leaving for anything but the bar, the soft keyboard closing say, ends what Ctrl was for.
+  const left = (event: FocusEvent) => {
+    const to = event.relatedTarget;
+    const toBar = to instanceof Element && to.closest(".key-bar") !== null;
+    if (!toBar && bar.target() === target) bar.setCtrl(false);
+  };
+  element.addEventListener("focusout", left);
+  // When the bar shows or the soft keyboard opens or closes, bring a focused terminal into view
+  // with its last row, where a TUI's input sits, above the bar. Once the viewport settles, as
+  // Android resizes it all through its animation; not for a toolbar collapsing or a pinch, which
+  // would pull the page back from where the user panned or zoomed it.
+  let revealing: ReturnType<typeof setTimeout> | undefined;
+  let covered = Math.max(
+    0,
+    window.innerHeight - (window.visualViewport?.height ?? window.innerHeight),
+  );
+  const reveal = () => {
+    if (bar.layout() !== null && target.holdsFocus()) element.scrollIntoView({ block: "end" });
+  };
+  const resized = () => {
+    clearTimeout(revealing);
+    revealing = setTimeout(() => {
+      const viewport = window.visualViewport;
+      const now = viewport === null ? null : settled(covered, window.innerHeight, viewport);
+      if (now === null) return;
+      covered = now.covered;
+      if (now.keyboard) reveal();
+    }, REVEAL_SETTLE_MS);
+  };
+  let layout = bar.layout();
+  const unwatch = bar.subscribe(() => {
+    if (bar.layout() === layout) return;
+    layout = bar.layout();
+    clearTimeout(revealing);
+    revealing = setTimeout(reveal, REVEAL_SETTLE_MS);
+  });
+  window.visualViewport?.addEventListener("resize", resized);
   // A contrast preference can change while it is open; it repaints in place.
   const unfollow = page.subscribe(() => {
     term.options.theme = colours();
@@ -298,6 +378,13 @@ function connect(
     clearInterval(beating);
     document.removeEventListener("visibilitychange", shown);
     detachTakeover();
+    element.removeEventListener("pointerdown", aim);
+    element.removeEventListener("focusin", aim);
+    element.removeEventListener("focusout", left);
+    unwatch();
+    window.visualViewport?.removeEventListener("resize", resized);
+    clearTimeout(revealing);
+    unregister();
     detachScroll();
     observer.disconnect();
     typed.dispose();
@@ -308,6 +395,9 @@ function connect(
     unhook();
   };
 }
+
+/** How long the viewport stays still before a focused terminal is brought into view. */
+const REVEAL_SETTLE_MS = 150;
 
 /**
  * WebGL where it draws correctly, xterm.js's DOM renderer otherwise. Under phone emulation WebGL
@@ -323,6 +413,20 @@ function loadRenderer(term: Xterm): void {
   } catch {
     // No WebGL in this browser: the DOM renderer is already drawing.
   }
+}
+
+/**
+ * xterm.js types through a hidden textarea, which iOS takes for a form field and offers to fill
+ * with passwords, cards and addresses, and to correct and capitalise. xterm.js turns off
+ * correction and spell checking; this turns off the rest a page can.
+ */
+function notAFormField(term: Xterm): void {
+  const field = term.textarea;
+  if (field === undefined) return;
+  field.autocomplete = "off";
+  field.autocapitalize = "none";
+  field.setAttribute("autocorrect", "off");
+  field.spellcheck = false;
 }
 
 /**
