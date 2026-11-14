@@ -1,9 +1,12 @@
-import type {
-  AgentLaunchRequest,
-  HarnessAdapter,
-  HarnessChannelPort,
-  HarnessLaunch,
-  LaunchOptions,
+import {
+  leadingMailId,
+  mailLabel,
+  quoteLabels,
+  type AgentLaunchRequest,
+  type HarnessAdapter,
+  type HarnessChannelPort,
+  type HarnessLaunch,
+  type LaunchOptions,
 } from "@bazhen/core";
 import type { Activity, ApprovalDecision, ExternalRef } from "@bazhen/protocol";
 import { z } from "zod";
@@ -262,8 +265,7 @@ export function readResolved(method: string, params: unknown): RequestId | null 
  * A message's text as the agent reads it. It always carries the message's id, so the turn that
  * takes it can be matched to it, whenever and however Codex delivers it (foundation-design §5.8).
  */
-export const messageText = (id: string, body: string) =>
-  `Message for you from Bazhen (${id}):\n${body}`;
+export const messageText = (id: string, body: string) => `${mailLabel(id)}\n${quoteLabels(body)}`;
 
 /**
  * `codex queue`'s arguments for one message: to the app-server at `remote`, which wakes an idle
@@ -294,12 +296,6 @@ const UserMessage = z.object({
 });
 
 /**
- * The label `messageText` starts each message with, and the id it carries. Only where Bazhen
- * puts it counts: a body that quotes another message's label confirms nothing.
- */
-const LABEL = /^Message for you from Bazhen \((msg_[0-9a-zA-Z]+)\):\n/;
-
-/**
  * The Bazhen message a turn takes as the user's input, by id, and its thread; a null id for
  * input that isn't one, and null for any other notification.
  */
@@ -311,7 +307,7 @@ export function readUserMessage(
   const p = UserMessage.safeParse(params);
   if (!p.success) return null;
   const first = p.data.item.content[0]?.text ?? "";
-  return { threadId: p.data.threadId, messageId: LABEL.exec(first)?.[1] ?? null };
+  return { threadId: p.data.threadId, messageId: leadingMailId(first) };
 }
 
 /** What a Codex thread is doing, as an activity signal's value (foundation-design §5.8). */
