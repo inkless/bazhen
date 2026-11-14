@@ -1,6 +1,6 @@
 ---
 name: bz-debug-integration-test
-description: Diagnoses Bazhen integration test runs that hang, report leaked tmux servers ("Tests left N tmux server(s) running"), refuse to start ("Refusing to run: N PTYs are in use"), or fail intermittently. Use when pnpm test:real or pnpm check misbehaves while changing Bazhen's source in this repository. Not for operating a running Bazhen.
+description: Diagnoses Bazhen integration test runs that hang, report leaked tmux servers ("Tests left N tmux server(s) running"), refuse to start ("Refusing to run" — N PTYs are in use), or fail intermittently. Use when pnpm test:real or pnpm check misbehaves while changing Bazhen's source in this repository. Not for operating a running Bazhen.
 ---
 
 # Debug an integration test run

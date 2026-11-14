@@ -12,6 +12,7 @@ import {
   pathCandidates,
   pnpmScripts,
   rustFailures,
+  skillFailures,
   suppressionFailures,
 } from "./check-standards.ts";
 
@@ -363,5 +364,76 @@ describe("memberDependencyFailures", () => {
       expect.stringContaining('`f = { path = "../f" }`'),
       expect.stringContaining("[build-dependencies.g] must be an entry"),
     ]);
+  });
+});
+
+function skill(frontmatter: string): string {
+  return `---\nname: bz-x\n${frontmatter}\n---\n\n# X\n`;
+}
+
+describe("skillFailures", () => {
+  const doc = ".agents/skills/bz-x/SKILL.md";
+  const valid = "Does X. Use when changing Bazhen's source in this repository.";
+  const failures = (frontmatter: string): string[] =>
+    skillFailures(doc, "bz-x", skill(frontmatter));
+
+  it("passes a valid skill", () => {
+    expect(failures(`description: ${valid}`)).toEqual([]);
+  });
+
+  it.each([
+    ["a quoted value", `description: "Does X (run: 2). ${valid}"`],
+    [
+      "an apostrophe doubled in single quotes",
+      `description: 'Does X (run: 2). ${valid.replace("'", "''")}'`,
+    ],
+    ["an escape in double quotes", `description: "Does \\"X\\". ${valid}"`],
+    ["a colon not followed by a space", `description: Runs pnpm test:real. ${valid}`],
+    ["a hash not after a space", `description: Issue#3. ${valid}`],
+    ["two spaces after the key", `description:  "a: b. ${valid}"`],
+  ])("accepts %s, reading the value YAML reads", (_, frontmatter) => {
+    expect(failures(frontmatter)).toEqual([]);
+  });
+
+  it.each([
+    [
+      '": " in a plain value',
+      `description: Does X ("Refusing to run: 2 PTYs"). ${valid}`,
+      'holds ": "',
+    ],
+    ["a plain value ending in a colon", `description: ${valid} Covers:`, 'ends in ":"'],
+    ['" #" in a plain value', `description: ${valid} #2`, 'holds " #"'],
+    ["a plain value starting with a backtick", `description: \`pnpm\` ${valid}`, 'starts with "`"'],
+    ["a plain value starting with a dash", `description: - ${valid}`, 'starts with "-"'],
+    ["a plain value starting with a star", `description: *X ${valid}`, 'starts with "*"'],
+    [
+      "text after a closing double quote",
+      `description: "Refusing" to run: 2. ${valid}`,
+      "after its closing quote",
+    ],
+    ["an unpaired apostrophe in single quotes", `description: '${valid}'`, "unpaired '"],
+    [
+      "a continuation line",
+      `description: ${valid}\n  more: text`,
+      '"  more: text" is not a one-line',
+    ],
+    ["a block scalar", `description: |\n  ${valid}`, 'starts with "|"'],
+    ["a key repeated", `description: ${valid}\ndescription: ${valid}`, "description appears twice"],
+  ])("rejects %s", (_, frontmatter, problem) => {
+    expect(failures(frontmatter)).toContainEqual(expect.stringContaining(problem));
+  });
+
+  it.each([
+    ["name", "name: *bz-x\ndescription: " + valid],
+    ["description", "name: bz-x\ndescription: *X"],
+  ])("reports only the parse problem when %s fails to parse", (key, frontmatter) => {
+    expect(skillFailures(doc, "bz-x", `---\n${frontmatter}\n---\n`)).toEqual([
+      expect.stringContaining(`frontmatter ${key} starts with "*"`),
+    ]);
+  });
+
+  it("checks the description as YAML reads it, not as written", () => {
+    expect(failures(`description: '${valid.replace("'", "''")}'`)).toEqual([]);
+    expect(failures(`description: "${valid.replace("'", "\\u0027")}"`)).toEqual([]);
   });
 });
