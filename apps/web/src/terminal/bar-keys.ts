@@ -202,3 +202,21 @@ export interface Device {
  */
 export const wantsKeyBar = ({ coarse, maxTouchPoints, userAgent }: Device): boolean =>
   coarse || (maxTouchPoints > 1 && /Macintosh/.test(userAgent));
+
+/** How much the page's covered height must change to be the soft keyboard, not a toolbar. */
+const KEYBOARD_PX = 100;
+
+/**
+ * Once the viewport settles: how much of the page the soft keyboard and toolbars cover now, and
+ * whether that changed by a keyboard since `covered`, last time. `null` while zoomed, when a
+ * resize is the user's pinch and their view stays where they put it.
+ */
+export function settled(
+  covered: number,
+  innerHeight: number,
+  viewport: { readonly height: number; readonly scale: number },
+): { readonly covered: number; readonly keyboard: boolean } | null {
+  if (viewport.scale !== 1) return null;
+  const now = Math.max(0, innerHeight - viewport.height);
+  return { covered: now, keyboard: Math.abs(now - covered) >= KEYBOARD_PX };
+}

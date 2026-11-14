@@ -17,7 +17,7 @@ import {
   type TuiTheme,
 } from "@bazhen/protocol";
 import { Heartbeat, PING_EVERY_MS } from "./heartbeat.ts";
-import { barBytes, keyBar, withCtrl, type BarTarget } from "./bar-keys.ts";
+import { barBytes, keyBar, settled, withCtrl, type BarTarget } from "./bar-keys.ts";
 import { isApple, matchKey } from "./keymap.ts";
 import { statusText, type Status } from "./status.ts";
 import { Backoff } from "./reconnect.ts";
@@ -337,23 +337,36 @@ function connect(
     if (!toBar && bar.target() === target) bar.setCtrl(false);
   };
   element.addEventListener("focusout", left);
-  // When the bar shows or the soft keyboard opens, bring a focused terminal into view with its
-  // last row, where a TUI's input sits, above the bar. Once the keyboard settles: Android resizes
-  // the viewport all through its animation.
+  // When the bar shows or the soft keyboard opens or closes, bring a focused terminal into view
+  // with its last row, where a TUI's input sits, above the bar. Once the viewport settles, as
+  // Android resizes it all through its animation; not for a toolbar collapsing or a pinch, which
+  // would pull the page back from where the user panned or zoomed it.
   let revealing: ReturnType<typeof setTimeout> | undefined;
+  let covered = Math.max(
+    0,
+    window.innerHeight - (window.visualViewport?.height ?? window.innerHeight),
+  );
   const reveal = () => {
+    if (bar.layout() !== null && target.holdsFocus()) element.scrollIntoView({ block: "end" });
+  };
+  const resized = () => {
     clearTimeout(revealing);
     revealing = setTimeout(() => {
-      if (bar.layout() !== null && target.holdsFocus()) element.scrollIntoView({ block: "end" });
+      const viewport = window.visualViewport;
+      const now = viewport === null ? null : settled(covered, window.innerHeight, viewport);
+      if (now === null) return;
+      covered = now.covered;
+      if (now.keyboard) reveal();
     }, REVEAL_SETTLE_MS);
   };
   let layout = bar.layout();
   const unwatch = bar.subscribe(() => {
     if (bar.layout() === layout) return;
     layout = bar.layout();
-    reveal();
+    clearTimeout(revealing);
+    revealing = setTimeout(reveal, REVEAL_SETTLE_MS);
   });
-  window.visualViewport?.addEventListener("resize", reveal);
+  window.visualViewport?.addEventListener("resize", resized);
   // A contrast preference can change while it is open; it repaints in place.
   const unfollow = page.subscribe(() => {
     term.options.theme = colours();
@@ -369,7 +382,7 @@ function connect(
     element.removeEventListener("focusin", aim);
     element.removeEventListener("focusout", left);
     unwatch();
-    window.visualViewport?.removeEventListener("resize", reveal);
+    window.visualViewport?.removeEventListener("resize", resized);
     clearTimeout(revealing);
     unregister();
     detachScroll();

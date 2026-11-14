@@ -372,10 +372,11 @@ const keyBar = (page: Page) => page.getByRole("toolbar", { name: "terminal keys"
 
 /** Taps `key` on the key bar and waits for exactly `bytes` to reach the program. */
 async function tapKey(page: Page, program: Probe, key: string, bytes: string): Promise<void> {
-  const since = Date.now();
+  // What arrived before, not a time: a key logged in the same millisecond would count twice.
+  const before = program.received(0).length;
   await keyBar(page).getByRole("button", { name: key, exact: true }).tap();
   // Exactly: a key that moved focus off the terminal would add a focus report.
-  await expect.poll(() => program.received(since)).toBe(hex(bytes));
+  await expect.poll(() => program.received(0).slice(before)).toBe(hex(bytes));
 }
 
 test("types the keys a phone's keyboard lacks from the key bar", async ({ browser }) => {

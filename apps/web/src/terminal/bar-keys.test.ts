@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import { barBytes, keyBarStore, lift, wantsKeyBar, withCtrl, type BarKey } from "./bar-keys.ts";
+import {
+  barBytes,
+  keyBarStore,
+  lift,
+  settled,
+  wantsKeyBar,
+  withCtrl,
+  type BarKey,
+} from "./bar-keys.ts";
 import { DEFAULT_KEY_MAP, parseKeyMap, type KeyMap } from "./keymap.ts";
 
 const plain = { keyMap: DEFAULT_KEY_MAP, ctrl: false, appCursor: false };
@@ -197,5 +205,20 @@ describe("which devices get the key bar", () => {
   it("leaves it off a touch-screen laptop and a Mac, whose keyboards have every key", () => {
     expect(wantsKeyBar({ coarse: false, maxTouchPoints: 10, userAgent: windows })).toBe(false);
     expect(wantsKeyBar({ coarse: false, maxTouchPoints: 0, userAgent: iPad })).toBe(false);
+  });
+});
+
+describe("the soft keyboard, once the viewport settles", () => {
+  it("is a change of a keyboard's height in how much of the page is covered", () => {
+    expect(settled(0, 800, { height: 450, scale: 1 })).toEqual({ covered: 350, keyboard: true });
+    expect(settled(350, 800, { height: 800, scale: 1 })).toEqual({ covered: 0, keyboard: true });
+  });
+
+  it("is not a toolbar collapsing as the page scrolls", () => {
+    expect(settled(0, 800, { height: 750, scale: 1 })).toEqual({ covered: 50, keyboard: false });
+  });
+
+  it("is never read while the user has zoomed in", () => {
+    expect(settled(0, 800, { height: 300, scale: 2 })).toBeNull();
   });
 });
