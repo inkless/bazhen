@@ -20,6 +20,8 @@ const launch = async (key: string) =>
       })
     ).body,
   );
+/** The newest event a stream has delivered, or 0 before any. */
+const lastOf = (ids: readonly number[]) => ids.at(-1) ?? 0;
 const consecutive = (from: number, to: number) =>
   Array.from({ length: to - from }, (_, i) => from + 1 + i);
 
@@ -77,22 +79,26 @@ describe("the event stream", () => {
   });
 
   it("loses nothing a client saw across a kill -9, and resumes it where it stopped", async () => {
+    // The agents launched so far go on recording events, after a restart too, as the daemon
+    // reconciles them: a stream is caught up when it reaches the newest event, not a snapshot's.
+    const newest = async () => (await state()).eventId;
     const before = await state();
     const client = await daemon.events({ ...before, eventId: 0 });
-    await expect.poll(() => client.ids().at(-1)).toBe(before.eventId);
+    await expect.poll(async () => client.ids().at(-1) === (await newest())).toBe(true);
     const seen = client.ids();
+    const stopped = lastOf(seen);
     await daemon.kill();
     await waitUntil(() => client.ended(), "the stream to drop");
     await daemon.restart();
     await launch("after the restart");
     const after = await state();
-    const resumed = await daemon.events({ epoch: before.epoch, eventId: before.eventId });
+    const resumed = await daemon.events({ epoch: before.epoch, eventId: stopped });
     const full = await daemon.events({ ...after, eventId: 0 });
-    await expect.poll(() => full.ids().at(-1)).toBe(after.eventId);
-    await expect.poll(() => resumed.ids().at(-1)).toBe(after.eventId);
+    await expect.poll(async () => full.ids().at(-1) === (await newest())).toBe(true);
+    await expect.poll(async () => resumed.ids().at(-1) === (await newest())).toBe(true);
     expect(after.epoch).toBe(before.epoch);
     expect(full.ids().slice(0, seen.length)).toEqual(seen);
-    expect(resumed.ids()).toEqual(consecutive(before.eventId, after.eventId));
+    expect(resumed.ids()).toEqual(consecutive(stopped, lastOf(resumed.ids())));
     resumed.close();
     full.close();
   });
