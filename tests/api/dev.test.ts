@@ -16,8 +16,13 @@ describe("pnpm dev", () => {
     expect(dev.backgroundHolders()).toEqual([]);
   });
 
-  it("stops both processes cleanly on Ctrl-C", async () => {
+  it("stops both processes cleanly on Ctrl-C, says so, and exits 0", async () => {
     expect(dev.statuses()).toEqual([]);
-    expect(await dev.interrupt()).toEqual(["apps/daemon dev: Done", "apps/web dev: Done"]);
+    expect(await dev.interrupt()).toEqual({
+      exit: 0,
+      apps: ["apps/daemon dev: Done", "apps/web dev: Done"],
+    });
+    expect(dev.text).toContain("apps/daemon dev: bazhen daemon stopped (SIGINT)");
+    expect(dev.text).toContain("apps/web dev: bazhen web dev server stopped");
   });
 });

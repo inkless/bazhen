@@ -38,7 +38,10 @@ const closeOnSigint = (): Plugin => ({
   configureServer(server) {
     const close = () =>
       void server.close().then(
-        () => process.exit(process.exitCode ?? 0),
+        () => {
+          console.log("bazhen web dev server stopped");
+          process.exit(process.exitCode ?? 0);
+        },
         () => process.exit(1),
       );
     process.once("SIGINT", close);
