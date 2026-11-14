@@ -65,6 +65,7 @@ import {
   TerminalReplaced,
 } from "../commands.ts";
 import { AttentionClosed, AttentionUnavailable } from "../mailbox/approvals.ts";
+import { AgentGone } from "../mailbox/mailbox.ts";
 import { ShellBusy, ShellOpenFailed, ShellsUnsettled, UnknownShell } from "../shells/lifecycle.ts";
 import { AttentionRefused } from "../attention/inbox.ts";
 import { MailTooLong, UnknownTask } from "../tasks/tasks.ts";
@@ -348,6 +349,7 @@ export function createApp(deps: AppDeps): Hono {
     if (err instanceof NotResumable) return fail(c, 409, "not_resumable", err.message);
     if (err instanceof ServerUnconfirmed) return fail(c, 409, "server_unconfirmed", err.message);
     const conflict = [
+      AgentGone,
       StateConflict,
       TerminalReplaced,
       NoTerminal,

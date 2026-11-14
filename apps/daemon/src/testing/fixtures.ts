@@ -274,6 +274,7 @@ export async function taskFleet(
   };
   const [lead, worker] = [await launch("launch-lead"), await launch("launch-worker")];
   const mailbox = new Mailbox(store);
+  mailbox.follow();
   const raised: Raised[] = [];
   const delegating =
     delegated === undefined ? deps : { ...deps, environment: fakeEnvironment(store, delegated) };

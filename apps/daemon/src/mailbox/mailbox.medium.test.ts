@@ -1,10 +1,13 @@
 import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { newId } from "@bazhen/core";
 import { HOOK_REPLY_MAX_BYTES, offeredMessage, type HookReply } from "@bazhen/protocol";
 import { FOLD_MAX_CHARS } from "@bazhen/harness-claude-code";
 import { Store } from "../store/store.ts";
-import { withAgent, testView } from "../testing/fixtures.ts";
+import { AgentQueue } from "../agents/queue.ts";
+import { Lifecycle } from "../agents/lifecycle.ts";
+import { quietStartAgain, withAgent, testView } from "../testing/fixtures.ts";
 import { UnknownAgent } from "../store/store.ts";
-import { MAX_FAILURES, Mailbox, QUIET } from "./mailbox.ts";
+import { AgentGone, MAX_FAILURES, Mailbox, QUIET } from "./mailbox.ts";
 
 const stateOf = (store: Store, id: string) =>
   store.snapshot(testView).messages.find((m) => m.id === id)?.state;
@@ -25,6 +28,25 @@ async function seenInP1() {
       .filter((e) => e.type === "mailbox.requeued" && e.entityId === messageId)
       .map((e) => Reflect.get(Object(e.payload), "reason"));
   return { store, agentId, mailbox, messageId, state: () => stateOf(store, messageId), requeues };
+}
+
+/**
+ * An agent, closed when `close` is called as the user's close command closes it; the mailbox's
+ * deadlines run on fake timers, so one firing on a closed agent's mail throws in the test.
+ */
+async function closable() {
+  const { store, agentId, environment } = await withAgent();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+  const close = () =>
+    new Lifecycle(store, environment, new AgentQueue(), quietStartAgain).close(agentId, {
+      idempotencyKey: "close",
+      generation: 0,
+    });
+  const requeued = () => store.events(0).filter((e) => e.type === "mailbox.requeued").length;
+  return { store, agentId, close, requeued };
 }
 
 describe("mailbox", () => {
@@ -443,5 +465,74 @@ describe("mailbox", () => {
     await expect.poll(() => stateOf(store, messageId)).toBe("queued");
     mailbox.promptStarted(agentId, `did you get ${messageId}?`, "p-1");
     expect(stateOf(store, messageId)).toBe("queued");
+  });
+});
+
+describe("a closed agent's mail", () => {
+  it("lets an unwritten offer's deadline pass with nothing recorded once its agent closed", async () => {
+    const { store, agentId, close, requeued } = await closable();
+    const mailbox = new Mailbox(store);
+    const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
+    await mailbox.wait(agentId, live());
+    await close();
+    expect(() => vi.advanceTimersByTime(10_000)).not.toThrow();
+    expect([stateOf(store, messageId), requeued()]).toEqual(["undeliverable", 0]);
+  });
+
+  it("lets go of a closing agent's waiter and calls off every deadline of its mail", async () => {
+    const { store, agentId, close } = await closable();
+    const mailbox = new Mailbox(store);
+    mailbox.follow();
+    mailbox.send(agentId, { idempotencyKey: "written", body: "hello" });
+    mailbox.ack((await mailbox.wait(agentId, live())).offered);
+    mailbox.send(agentId, { idempotencyKey: "unwritten", body: "again" });
+    await mailbox.wait(agentId, live());
+    let released: number | undefined;
+    void mailbox.wait(agentId, live()).then((reply) => (released = reply.exitCode));
+    expect(vi.getTimerCount()).toBe(2);
+    await close();
+    await expect.poll(() => released).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("answers a waiter that arrives after its agent closed at once, with nothing", async () => {
+    const { store, agentId, close } = await closable();
+    const mailbox = new Mailbox(store);
+    await close();
+    let reply: HookReply | undefined;
+    void mailbox.wait(agentId, live()).then((r) => (reply = r));
+    await expect.poll(() => reply).toEqual(QUIET);
+  });
+
+  // A forced close records closed while the terminal may still run, so its tool calls go on.
+  it("folds nothing into a closed agent's turn, even mail queued for it", async () => {
+    const { store, agentId, close } = await closable();
+    const mailbox = new Mailbox(store);
+    await close();
+    const messageId = newId("msg");
+    store.append({
+      type: "mailbox.queued",
+      entityId: messageId,
+      actor: "system",
+      payload: { agentId, body: "late" },
+    });
+    expect([mailbox.fold(agentId, "p-1"), stateOf(store, messageId), vi.getTimerCount()]).toEqual([
+      QUIET,
+      "queued",
+      0,
+    ]);
+  });
+
+  it("refuses new mail for a closed agent, and answers a repeat of mail sent before", async () => {
+    const { store, agentId, close } = await closable();
+    const mailbox = new Mailbox(store);
+    const before = mailbox.send(agentId, { idempotencyKey: "before", body: "hi" });
+    await close();
+    const sent = store.snapshot(testView).messages.length;
+    expect(() => mailbox.send(agentId, { idempotencyKey: "after", body: "hi" })).toThrow(AgentGone);
+    expect([
+      mailbox.send(agentId, { idempotencyKey: "before", body: "hi" }),
+      store.snapshot(testView).messages.length,
+    ]).toEqual([before, sent]);
   });
 });
