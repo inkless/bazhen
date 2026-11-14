@@ -152,7 +152,7 @@ describe("DeviceAuth", () => {
     devices.hold(phone, c, { required: true });
     devices.hold(tablet, d, { required: false });
     store.revokeDevice(tablet, new Date(clock.now));
-    clock.now += LOOPBACK_IDLE_MS;
+    clock.now += LOOPBACK_IDLE_MS + 1;
     devices.sweep();
     expect([a, b, c, d].map((s) => s.destroyed)).toEqual([true, false, false, true]);
   });

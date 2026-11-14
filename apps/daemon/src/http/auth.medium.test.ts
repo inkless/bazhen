@@ -20,10 +20,17 @@ const refuse = () => {
 /** The `name=value` a response's Set-Cookie carries, or "" for none. */
 const cookieOf = (res: Response) => (res.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
 
-/** Requests from another page on the same site, or another site, with no Origin, as an image's. */
-const otherPages = [{ "sec-fetch-site": "same-site" }, { "sec-fetch-site": "cross-site" }];
-/** A request from the daemon's own page. */
-const ownPage = { origin, "sec-fetch-site": "same-origin" };
+/**
+ * A browser's plain GETs, which carry no Origin, from anywhere but the daemon's own page: another
+ * page on the site, another site, and a URL typed into the address bar.
+ */
+const notOwnPage = [
+  { "sec-fetch-site": "same-site" },
+  { "sec-fetch-site": "cross-site" },
+  { "sec-fetch-site": "none" },
+];
+/** A browser's plain GET from the daemon's own page, which carries no Origin either. */
+const ownPage = { "sec-fetch-site": "same-origin" };
 
 function daemon(always = true) {
   const clock = { now: Date.parse("2026-11-12T00:00:00.000Z") };
@@ -142,12 +149,13 @@ describe("device auth when pairing is not always required", () => {
     ]).toEqual([cookie, "Phone"]);
   });
 
-  it("serves a loopback read from another local page, but records the use only from the daemon's own", async () => {
+  it("records a loopback browser's use only for a read from the daemon's own page, serving the rest", async () => {
     const { reads, paired, clock } = daemon(false);
     const { cookie } = await paired();
-    clock.now += TOUCH_EVERY_MS;
+    clock.now += TOUCH_EVERY_MS + 1;
     const elsewhere = { origin: "http://127.0.0.1:3000" };
-    expect(await reads(cookie, [elsewhere, ...otherPages, ownPage])).toEqual([
+    expect(await reads(cookie, [elsewhere, ...notOwnPage, ownPage])).toEqual([
+      [200, ""],
       [200, ""],
       [200, ""],
       [200, ""],
@@ -270,11 +278,12 @@ describe("device auth on the TCP app", () => {
     expect(later.headers.get("set-cookie")).toMatch(/^__Host-bazhen_device=[\w-]{43}; Secure;/);
   });
 
-  it("serves a paired read from another page on the site, but records the use only from the daemon's own", async () => {
+  it("records a paired browser's use only for a read from the daemon's own page, serving the rest", async () => {
     const { reads, paired, clock } = daemon();
     const { cookie } = await paired();
-    clock.now += TOUCH_EVERY_MS;
-    expect(await reads(cookie, [...otherPages, ownPage])).toEqual([
+    clock.now += TOUCH_EVERY_MS + 1;
+    expect(await reads(cookie, [...notOwnPage, ownPage])).toEqual([
+      [200, ""],
       [200, ""],
       [200, ""],
       [200, cookie],
