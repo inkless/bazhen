@@ -176,24 +176,32 @@ export function createApp(deps: AppDeps): Hono {
     // The API only: the page holds no secret, and must load unpaired to show the pairing form.
     app.use("/v1/*", async (c, next) => {
       if (c.req.method === "POST" && c.req.path === PAIRING_PATH) return next();
-      if (!mustPair(gate, (name) => c.req.header(name))) return next();
-      const origin = c.req.header("origin");
+      const header = (name: string) => c.req.header(name);
+      const required = mustPair(gate, header);
+      const origin = header("origin");
       // A page elsewhere can't even read; a paired browser acts only from an allowed origin,
       // which it always sends then. SameSite is the second layer.
       if (origin !== undefined && !allow?.origins.includes(origin)) {
-        return fail(c, 403, "origin_not_allowed", origin);
+        return required ? fail(c, 403, "origin_not_allowed", origin) : next();
       }
-      const presented = tokenFrom(c.req.header("cookie"));
+      // SameSite ignores ports, so a page on another local port also sends the cookie, without
+      // Origin on a plain GET such as an image's. Only the daemon's own page, or a client that
+      // isn't a browser and so sends no Sec-Fetch-Site, keeps the device alive.
+      const fetchSite = header("sec-fetch-site");
+      const presented = tokenFrom(header("cookie"));
       const verified = gate.devices.verify(presented, {
-        remote: arrivedRemotely((name) => c.req.header(name)),
+        remote: arrivedRemotely(header),
+        touch: fetchSite === undefined || fetchSite === "same-origin",
       });
-      if (verified === null || presented === undefined)
-        return fail(c, 401, "unpaired", "pair this browser: run `bazhen pair`");
-      if (!SAFE_METHODS.has(c.req.method) && origin === undefined) {
-        return fail(c, 403, "origin_not_allowed", "");
+      if (required) {
+        if (verified === null)
+          return fail(c, 401, "unpaired", "pair this browser: run `bazhen pair`");
+        if (!SAFE_METHODS.has(c.req.method) && origin === undefined) {
+          return fail(c, 403, "origin_not_allowed", "");
+        }
       }
       await next();
-      if (verified.refresh)
+      if (verified?.refresh === true && presented !== undefined)
         c.header("set-cookie", deviceCookie(presented.token, verified.device.secure), {
           append: true,
         });

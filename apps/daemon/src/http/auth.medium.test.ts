@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket, WebSocketServer } from "ws";
 import { FakeRuntime } from "@bazhen/core/testing";
 import { PairResponse } from "@bazhen/protocol";
-import { DeviceAuth, TOUCH_EVERY_MS } from "../auth/devices.ts";
+import { DeviceAuth, LOOPBACK_IDLE_MS, TOUCH_EVERY_MS, tokenFrom } from "../auth/devices.ts";
 import { PairingCodes } from "../auth/pairing.ts";
 import { Store } from "../store/store.ts";
 import { serveUpgrades, tempDb, upgradeOutcome } from "../testing/fixtures.ts";
@@ -19,6 +19,18 @@ const refuse = () => {
 
 /** The `name=value` a response's Set-Cookie carries, or "" for none. */
 const cookieOf = (res: Response) => (res.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+
+/**
+ * A browser's plain GETs, which carry no Origin, from anywhere but the daemon's own page: another
+ * page on the site, another site, and a URL typed into the address bar.
+ */
+const notOwnPage = [
+  { "sec-fetch-site": "same-site" },
+  { "sec-fetch-site": "cross-site" },
+  { "sec-fetch-site": "none" },
+];
+/** A browser's plain GET from the daemon's own page, which carries no Origin either. */
+const ownPage = { "sec-fetch-site": "same-origin" };
 
 function daemon(always = true) {
   const clock = { now: Date.parse("2026-11-12T00:00:00.000Z") };
@@ -89,20 +101,32 @@ function daemon(always = true) {
     const res = await pair(codes.issue().code);
     return { cookie: cookieOf(res), deviceId: PairResponse.parse(await res.json()).deviceId };
   };
-  return { request, pair, paired, codes, devices, clock };
+  /** Reads the state with `cookie` once per set of headers, in turn: each status, and its cookie. */
+  const reads = async (cookie: string, pages: readonly Record<string, string>[]) => {
+    const answers: [number, string][] = [];
+    for (const headers of pages) {
+      const res = await request("/v1/state", { headers: { cookie, ...headers } });
+      answers.push([res.status, cookieOf(res)]);
+    }
+    return answers;
+  };
+  return { request, pair, paired, reads, codes, devices, clock };
 }
 
 describe("device auth when pairing is not always required", () => {
   it("serves loopback's own requests unpaired, and asks one a proxy forwarded from elsewhere", async () => {
-    const { request } = daemon(false);
+    const { request, paired, devices } = daemon(false);
+    const revoked = await paired();
+    devices.revoke(revoked.deviceId);
     const statuses = await Promise.all(
       [
         {},
+        { cookie: revoked.cookie },
         { "x-forwarded-for": "127.0.0.1" },
         { "x-forwarded-for": "192.168.1.30, 127.0.0.1" },
       ].map(async (headers) => (await request("/v1/state", { headers })).status),
     );
-    expect(statuses).toEqual([200, 200, 401]);
+    expect(statuses).toEqual([200, 200, 200, 401]);
   });
 
   it("asks for pairing on a request whose Forwarded header names another machine", async () => {
@@ -111,6 +135,32 @@ describe("device auth when pairing is not always required", () => {
       headers: { forwarded: "for=192.168.1.30;proto=https" },
     });
     expect(res.status).toBe(401);
+  });
+
+  it("restarts a loopback-paired browser's lifetime when it reads, and sets its cookie again", async () => {
+    const { request, paired, devices, clock } = daemon(false);
+    const { cookie } = await paired();
+    clock.now += LOOPBACK_IDLE_MS - TOUCH_EVERY_MS;
+    const res = await request("/v1/state", { headers: { cookie } });
+    clock.now += 2 * TOUCH_EVERY_MS;
+    expect([
+      cookieOf(res),
+      devices.verify(tokenFrom(cookie), { touch: false })?.device.name,
+    ]).toEqual([cookie, "Phone"]);
+  });
+
+  it("records a loopback browser's use only for a read from the daemon's own page, serving the rest", async () => {
+    const { reads, paired, clock } = daemon(false);
+    const { cookie } = await paired();
+    clock.now += TOUCH_EVERY_MS + 1;
+    const elsewhere = { origin: "http://127.0.0.1:3000" };
+    expect(await reads(cookie, [elsewhere, ...notOwnPage, ownPage])).toEqual([
+      [200, ""],
+      [200, ""],
+      [200, ""],
+      [200, ""],
+      [200, cookie],
+    ]);
   });
 });
 
@@ -228,6 +278,18 @@ describe("device auth on the TCP app", () => {
     expect(later.headers.get("set-cookie")).toMatch(/^__Host-bazhen_device=[\w-]{43}; Secure;/);
   });
 
+  it("records a paired browser's use only for a read from the daemon's own page, serving the rest", async () => {
+    const { reads, paired, clock } = daemon();
+    const { cookie } = await paired();
+    clock.now += TOUCH_EVERY_MS + 1;
+    expect(await reads(cookie, [...notOwnPage, ownPage])).toEqual([
+      [200, ""],
+      [200, ""],
+      [200, ""],
+      [200, cookie],
+    ]);
+  });
+
   it("sets the cookie again once an hour has passed, so its lifetime restarts", async () => {
     const { request, paired, clock } = daemon();
     const { cookie } = await paired();
@@ -241,14 +303,18 @@ describe("device auth on the TCP app", () => {
   });
 });
 
-let server: Server | undefined;
+const servers: Server[] = [];
 afterEach(() => {
-  server?.close();
+  for (const server of servers.splice(0)) {
+    server.closeAllConnections();
+    server.close();
+  }
 });
 
 async function serving(always = true) {
   const store = Store.open(tempDb());
-  const devices = new DeviceAuth(store, { log: () => {} });
+  const clock = { now: Date.parse("2026-11-12T00:00:00.000Z") };
+  const devices = new DeviceAuth(store, { now: () => new Date(clock.now), log: () => {} });
   const wss = new WebSocketServer({ noServer: true });
   /** The device each upgrade the route took came from, by name. */
   const from: (string | null)[] = [];
@@ -264,15 +330,35 @@ async function serving(always = true) {
     ],
     { devices, always },
   );
-  server = served.server;
+  servers.push(served.server);
   const { token, deviceId } = devices.pair("Phone", false);
   return {
     url: `ws://${served.host}/echo`,
     pageOrigin: `http://${served.host}`,
     cookie: `bazhen_device=${token}`,
     revoke: () => devices.revoke(deviceId),
+    /** The device goes unused past its lifetime, and the sweep runs. */
+    lapse: () => {
+      clock.now += LOOPBACK_IDLE_MS + 1;
+      devices.sweep();
+    },
     from,
   };
+}
+
+/** Whether `ws` still answers a ping, or has been closed. */
+const stillOpen = (ws: WebSocket) =>
+  new Promise((resolve) => {
+    ws.once("pong", () => resolve("open"));
+    ws.once("close", () => resolve("closed"));
+    ws.ping();
+  });
+
+/** A socket from a page on `pageOrigin` with `cookie`, once the route has greeted it. */
+async function watching(url: string, pageOrigin: string, cookie: string) {
+  const ws = new WebSocket(url, { origin: pageOrigin, headers: { cookie } });
+  await new Promise((resolve) => ws.once("message", resolve));
+  return ws;
 }
 
 describe("device auth on WebSocket upgrades", () => {
@@ -328,6 +414,17 @@ describe("device auth on WebSocket upgrades", () => {
     await new Promise((resolve) => ws.once("message", resolve));
     revoke();
     await expect.poll(() => ws.readyState, { timeout: 1_000 }).toBe(WebSocket.CLOSED);
+  });
+
+  it("closes a lapsed device's socket that had to pair, but keeps a loopback one that needn't have", async () => {
+    const [loopback, required] = [await serving(false), await serving()];
+    const sockets = await Promise.all(
+      [loopback, required].map((s) => watching(s.url, s.pageOrigin, s.cookie)),
+    );
+    loopback.lapse();
+    required.lapse();
+    expect(await Promise.all(sockets.map(stillOpen))).toEqual(["open", "closed"]);
+    for (const ws of sockets) ws.close();
   });
 
   it("closes a revoked device's open sockets", async () => {
