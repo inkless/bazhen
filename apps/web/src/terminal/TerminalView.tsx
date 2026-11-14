@@ -18,6 +18,7 @@ import {
 } from "@bazhen/protocol";
 import { Heartbeat, PING_EVERY_MS } from "./heartbeat.ts";
 import { barBytes, keyBar, settled, withCtrl, type BarTarget } from "./bar-keys.ts";
+import { guardClose } from "./close-guard.ts";
 import { isApple, matchKey } from "./keymap.ts";
 import { statusText, type Status } from "./status.ts";
 import { Backoff } from "./reconnect.ts";
@@ -326,6 +327,11 @@ function connect(
     holdsFocus: () => element.contains(document.activeElement),
   };
   const unregister = bar.register(target);
+  const unguard = guardClose(
+    { window, document },
+    () => target.holdsFocus(),
+    () => report({ notice: "onbeforeinstallprompt" in window ? CLOSE_KEY_INSTALL : CLOSE_KEY }),
+  );
   const typed = term.onData((data) => {
     // The bar's Ctrl, armed for the next key, applies to a letter typed on the soft keyboard.
     if (withoutEventReports(data) !== "") keystroke((ctrl) => (ctrl ? withCtrl(data) : data));
@@ -396,6 +402,7 @@ function connect(
     window.visualViewport?.removeEventListener("resize", resized);
     clearTimeout(revealing);
     unregister();
+    unguard();
     scroll.detach();
     observer.disconnect();
     typed.dispose();
@@ -409,6 +416,12 @@ function connect(
 
 /** How long the viewport stays still before a focused terminal is brought into view. */
 const REVEAL_SETTLE_MS = 150;
+
+/** After the user stays through a close Ctrl+W asked for, in a browser that can install apps. */
+const CLOSE_KEY_INSTALL =
+  "Ctrl+W closes the tab, so the terminal can't get it. Install Bazhen as an app and it will.";
+/** The same, in a browser that can't. */
+const CLOSE_KEY = "Ctrl+W closes the tab, so the terminal can't get it.";
 
 /**
  * WebGL where it draws correctly, xterm.js's DOM renderer otherwise. Under phone emulation WebGL

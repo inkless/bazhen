@@ -660,3 +660,72 @@ test("keeps Ctrl armed when its key only takes over, and sends it with the next"
   await expect.poll(() => program.received(since)).toBe(hex("\x03"));
   await phone.context().close();
 });
+
+/** The web app manifest Chrome read for the page, or null for none. */
+async function appManifest(page: Page) {
+  const cdp = await page.context().newCDPSession(page);
+  const manifest = await cdp.send("Page.getAppManifest");
+  const { installabilityErrors } = await cdp.send("Page.getInstallabilityErrors");
+  if (manifest.url === "") return null;
+  const data: unknown = JSON.parse(manifest.data ?? "null");
+  return {
+    path: new URL(manifest.url).pathname,
+    errors: [
+      ...manifest.errors.map((e) => e.message),
+      ...installabilityErrors.map((e) => e.errorId),
+    ],
+    display: Reflect.get(Object(data), "display"),
+  };
+}
+
+// Chrome offers to install any page, manifest or not, so installability alone proves nothing.
+test("offers itself as an app on a desktop that isn't a Mac, standalone in its own window", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect
+    .poll(() => appManifest(page))
+    .toEqual({ path: "/manifest.webmanifest", errors: [], display: "standalone" });
+});
+
+test("leaves an iPad or a Mac with no manifest, so Add to Home Screen is as it was", async ({
+  browser,
+}) => {
+  const page = await (await browser.newContext({ userAgent: MAC })).newPage();
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "Launch Claude Code" })).toBeVisible();
+  expect(await appManifest(page)).toBeNull();
+  await page.context().close();
+});
+
+test("asks before a close while Ctrl is down in a terminal, and says why once the user stays", async ({
+  page,
+}) => {
+  await launchProbe(page);
+  await drive(page);
+  const dialogs: string[] = [];
+  page.on("dialog", (dialog) => {
+    dialogs.push(dialog.type());
+    void dialog.dismiss();
+  });
+  await page.keyboard.down("Control");
+  await page.close({ runBeforeUnload: true });
+  await expect.poll(() => dialogs).toEqual(["beforeunload"]);
+  await page.keyboard.up("Control");
+  await expect(page.getByRole("status").filter({ hasText: "Ctrl+W closes the tab" })).toBeVisible();
+});
+
+test("closes without asking once Ctrl is up", async ({ page }) => {
+  await launchProbe(page);
+  await drive(page);
+  const dialogs: string[] = [];
+  page.on("dialog", (dialog) => {
+    dialogs.push(dialog.type());
+    void dialog.dismiss();
+  });
+  await page.keyboard.down("Control");
+  await page.keyboard.up("Control");
+  await page.close({ runBeforeUnload: true });
+  await expect.poll(() => page.isClosed()).toBe(true);
+  expect(dialogs).toEqual([]);
+});

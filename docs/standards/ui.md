@@ -143,3 +143,12 @@ buttons: React Aria's `GridList` is a selection widget, with `role="grid"`. Nati
 
 `light-dark()` sets the floor: Safari 17.5, Chrome 123, Firefox 120. That covers a phone on the
 LAN on a current OS.
+
+On Linux and Windows a browser tab keeps Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+Shift+W and Ctrl+Tab: the
+page never sees them, so nothing it does can pass them to a terminal. An installed app's window
+offers the page every key first, and xterm.js sends them on. So the page links its manifest
+(`apps/web/public/manifest.webmanifest`, from `apps/web/src/install.ts`) on those platforms only. A
+Mac, an iPad and a phone never lose these keys, and keep the Home Screen behaviour they were tested
+with. In a tab, `apps/web/src/terminal/close-guard.ts` asks before a close while Ctrl is down in a
+focused terminal. Playwright's keys skip the browser's own shortcuts, so no e2e test presses the
+real Ctrl+W: check a change here by hand, in a tab and in the installed app.

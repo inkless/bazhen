@@ -184,6 +184,11 @@ const TOKEN_FILES = new Set([
   "apps/web/src/ui/token-sheet.ts",
   "apps/web/src/ui/swatches.tsx",
 ]);
+/**
+ * The app icon, which the browser and the OS draw as an image outside any page, where no token
+ * resolves. Its colours are palette.css's neutral 12, neutral 1 and dark blue 9 in sRGB.
+ */
+const ICON_FILES = new Set(["apps/web/public/icon.svg"]);
 
 /** The custom properties a stylesheet declares, wherever it declares them. */
 export function declaredTokens(css: string): Set<string> {
@@ -256,7 +261,7 @@ function checkWebTokens(): void {
     .filter((f) => !/\/(node_modules|dist|dist-types)\//.test(f))
     .filter((f) => /\.(css|tsx?|html|svg)$/.test(f) && !/\.test\.tsx?$/.test(f));
   for (const file of files) {
-    if (TOKEN_FILES.has(file)) continue;
+    if (TOKEN_FILES.has(file) || ICON_FILES.has(file)) continue;
     const source = readFileSync(join(root, file), "utf8");
     const kind = file.endsWith(".css") ? "css" : "script";
     for (const { line, text } of offTokenLines(source, kind, tokens)) {
