@@ -339,8 +339,8 @@ const retireOld = () =>
   );
 void retireOld();
 const retention = setInterval(() => void retireOld(), RETIRE_EVERY_MS);
-// A device that lapses while it watches loses its views within a minute, as a revoked one does
-// at once.
+// A device that lapses while it watches loses, within a minute, the views it had to pair for; a
+// revoked one loses all its views at once.
 const SWEEP_DEVICES_EVERY_MS = 60 * 1000;
 const deviceSweep = setInterval(() => devices.sweep(), SWEEP_DEVICES_EVERY_MS);
 

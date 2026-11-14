@@ -48,7 +48,8 @@ export interface Verified {
  * with every socket they hold open. Tokens are 32 random bytes; the store keeps their hash only.
  */
 export class DeviceAuth {
-  private readonly sockets = new Map<string, Set<Closable>>();
+  /** Each device's open sockets, and for each whether it had to pair to open. */
+  private readonly sockets = new Map<string, Map<Closable, boolean>>();
   private readonly store: Store;
   private readonly now: () => Date;
   private readonly log: (line: string) => void;
@@ -112,19 +113,26 @@ export class DeviceAuth {
     this.log(`bazhen: revoked device ${id}`);
   }
 
-  /** Closes the sockets of every device that has lapsed since it opened them. */
+  /**
+   * Closes the sockets of every device revoked or lapsed since it opened them. A lapsed device
+   * keeps the sockets that needn't have paired: closing one does no good, since its browser would
+   * open it again unpaired.
+   */
   sweep(): void {
     const live = new Map<string, StoredDevice>(this.store.devices().map((d) => [d.id, d]));
-    for (const id of this.sockets.keys()) {
+    for (const [id, open] of this.sockets) {
       const device = live.get(id);
-      if (device === undefined || this.lapsed(device)) this.close(id);
+      if (device === undefined) this.close(id);
+      else if (this.lapsed(device)) {
+        for (const [socket, required] of open) if (required) socket.destroy();
+      }
     }
   }
 
-  /** Tracks a socket a device opened, until it closes. */
-  hold(deviceId: DeviceId, socket: Closable): void {
-    const open = this.sockets.get(deviceId) ?? new Set();
-    open.add(socket);
+  /** Tracks a socket a device opened, until it closes; `required` is whether it had to pair. */
+  hold(deviceId: DeviceId, socket: Closable, opts: { required: boolean }): void {
+    const open = this.sockets.get(deviceId) ?? new Map<Closable, boolean>();
+    open.set(socket, opts.required);
     this.sockets.set(deviceId, open);
     socket.once("close", () => {
       open.delete(socket);
@@ -137,7 +145,7 @@ export class DeviceAuth {
   }
 
   private close(id: string): void {
-    for (const socket of this.sockets.get(id) ?? []) socket.destroy();
+    for (const socket of this.sockets.get(id)?.keys() ?? []) socket.destroy();
     this.sockets.delete(id);
   }
 }

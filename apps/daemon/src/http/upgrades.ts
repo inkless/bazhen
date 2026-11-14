@@ -54,12 +54,14 @@ export function upgrades(
         touch: false,
         remote: arrivedRemotely(header),
       }) ?? null;
-    if (gate !== null && mustPair(gate, header)) {
+    const required = gate !== null && mustPair(gate, header);
+    if (required) {
       if (verified === null) return refuseUpgrade(socket, "401 Unauthorized");
       if (origin === undefined) return refuseUpgrade(socket, REFUSAL_STATUS.origin_not_allowed);
     }
-    // Held wherever it is named, so a revoked or lapsed device can't go on being named.
-    if (verified !== null) gate?.devices.hold(verified.device.id, socket);
+    // Held wherever it is named, so a revoked device can't go on being named, nor a lapsed one
+    // where it had to pair.
+    if (verified !== null) gate?.devices.hold(verified.device.id, socket, { required });
     const device = verified?.device ?? null;
     const url = new URL(req.url ?? "/", "http://daemon");
     for (const route of routes) {
