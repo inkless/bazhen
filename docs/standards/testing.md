@@ -18,9 +18,9 @@ page serves that rule, or keeps tests from hurting the machine and each other.
 | Behaviour tests are black-box: they reach the daemon only through public surfaces  | review                                      |
 
 Rust tests follow this page too, with the differences in `rust.md` § Tests: nextest, proptest,
-insta for protocol frames, cargo-fuzz for every function that takes bytes from outside, and a
-`Control:` trailer naming every new test, because falsify can't judge them by reverting and
-marks them INVALID.
+insta for protocol frames, cargo-fuzz for every function that takes bytes from outside, and
+falsify judging new tests by mutating the change instead of reverting it, with a `Control:`
+trailer naming each test it can't judge.
 
 ## Sizes
 
@@ -106,8 +106,8 @@ Every new test must be shown to fail without the code it covers.
   restore the code. Record it as a trailer in a commit message on the branch:
   `Control: <what you broke> -> <how the test failed>`, one per INVALID test. For a TypeScript
   test the check accepts any one trailer on the branch, so the reviewer is who holds you to the
-  rest; a Rust test needs a trailer naming it (`rust.md` § Tests). Never bypass a hook with
-  `--no-verify`.
+  rest; a Rust test needs a trailer naming it, unless falsify killed it with a mutant of the
+  change (`rust.md` § Tests). Never bypass a hook with `--no-verify`.
 
 Two lessons from the scaffold's controls:
 

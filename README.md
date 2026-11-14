@@ -12,8 +12,8 @@ client. Agents, tasks, and orchestration come later.
 - pnpm 12 (pinned through `packageManager`)
 - tmux 3.x
 - Rust through rustup, which installs the toolchain `rust-toolchain.toml` pins on first use, and
-  once per machine the two cargo tools `pnpm check` runs:
-  `cargo install --locked cargo-nextest@0.9.152 cargo-deny@0.20.2`
+  once per machine the cargo tools `pnpm check` and `pnpm test:falsify` run:
+  `cargo install --locked cargo-nextest@0.9.152 cargo-deny@0.20.2 cargo-mutants@27.1.0`
 - macOS or Linux
 - For the tests that run real tmux, Docker, or Podman with its `docker` shim (`pnpm test:real`)
 

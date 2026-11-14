@@ -6,9 +6,9 @@ description: Writes a test for Bazhen's Rust crates in this repository (crates/*
 # Write a Rust test for Bazhen's source
 
 **Gate: no new behaviour without a test that fails first, for the right reason.** Falsify can't
-revert a Rust test's source without reverting the test, so it marks every new one INVALID and
-CI fails the pull request until each new test has a `Control:` trailer naming it. You prove each
-test by hand and record its trailer.
+revert a Rust test's source without reverting the test, so it runs each new test against mutants
+of the code the branch changed instead. CI fails the pull request until each new test is either
+KILLED by one of those mutants or named by a `Control:` trailer you recorded by hand.
 
 ## Steps
 
@@ -28,16 +28,18 @@ test by hand and record its trailer.
 4. **Run it and watch it fail:** `pnpm test:rust <name>`. It must fail on an
    assertion. A compile error proves nothing.
 5. Implement until it passes, then run `pnpm check`.
-6. **Record the control.** Break the code the test names (swap a comparison, drop a check,
-   return a constant), run the test, see it fail on its assertion, and restore the code. Add a
-   trailer to a commit on the branch for each new test, naming it by the path nextest lists
-   (`pnpm test:falsify` prints the trailer to fill in for each test that has none):
+6. **Commit, then run `pnpm test:falsify`.** Each new test it reports KILLED has its control: the
+   mutant printed beside it. For each one it reports INVALID, break the code the test names
+   (swap a comparison, drop a check, return a constant), run the test, see it fail on its
+   assertion, and restore the code. Add a trailer to a commit on the branch naming the test by
+   the path nextest lists (falsify prints the trailer to fill in):
    `Control: <module::path::test_name>: <what you broke> -> <how the test failed>`.
 
 ## Checklist
 
 - [ ] Each test name states one behaviour.
-- [ ] I watched each new test fail on an assertion, and recorded a `Control:` trailer for it.
+- [ ] I watched each new test fail on an assertion, and each one falsify didn't kill with a
+      mutant has a `Control:` trailer naming it.
 - [ ] A behaviour the daemon or a user can observe also has its test in the black-box suite
       (`tests/api`), which drives the binary from outside.
 - [ ] `pnpm check` passes.
@@ -61,7 +63,7 @@ test by hand and record its trailer.
 | Thought                                     | Answer                                                                   |
 | ------------------------------------------- | ------------------------------------------------------------------------ |
 | "The types make it obviously correct"       | The types don't check the framing. Then the test is cheap                |
-| "Falsify can't check Rust, so skip it"      | That's why the control is by hand. It's the only proof there is          |
+| "No mutant killed it, but it's fine"        | Then nothing yet shows it can fail. Break the code by hand and see       |
 | "A property test is overkill for a parser"  | Parsers are where the panics are. One strategy finds what ten cases miss |
 | "I'll `#[ignore]` it for now"               | Fix it or delete it                                                      |
-| "The `Control:` trailer for one covers all" | Each new test needs a trailer naming it; falsify fails on any it misses  |
+| "The `Control:` trailer for one covers all" | Each unkilled test needs a trailer naming it; falsify fails on any else  |

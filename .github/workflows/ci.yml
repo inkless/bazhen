@@ -154,12 +154,13 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y tmux fish zsh
       - name: Mark the runner disposable
         run: sudo touch /etc/bazhen-disposable-host
-      # Falsify lists the Rust tests with nextest, at the base and at HEAD, to find the new ones.
+      # Falsify lists the Rust tests with nextest, at the base and at HEAD, to find the new ones,
+      # and runs them against the mutants cargo-mutants lists in the code the branch changed.
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
-          tool: cargo-nextest@0.9.152
+          tool: cargo-nextest@0.9.152,cargo-mutants@27.1.0
       - run: pnpm install --frozen-lockfile
       - name: pnpm test:falsify
         env:

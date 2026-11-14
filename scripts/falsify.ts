@@ -9,16 +9,18 @@
 //             unrelated to the source change and comes out INVALID.
 //   INVALID   no verdict: it couldn't load, timed out, was skipped, its title couldn't be read or
 //             isn't unique, or it passed but is unrelated to the source change; a branch that
-//             adds tests without a source change also lands here. Every test of a brand-new symbol is INVALID, so it needs a hand-run control
+//             adds tests without a source change also lands here. Every test of a brand-new
+//             symbol is INVALID, so it needs a hand-run control
 //             recorded as a trailer in a commit on the branch:
 //             `Control: <what you broke> -> <how the test failed>`.
 //
 // A Rust test under crates/ lives in the file it tests, so reverting the source would revert the
 // test with it. When the branch touches the Rust workspace, nextest lists the tests at the base and
 // at HEAD, so a test is found however it is declared (`#[test]`, proptest, a macro of the crate's
-// own). Each new one comes out INVALID without being run, and needs a Control trailer naming it by
-// its full path, `Control: tests::name: <what you broke> -> <how the test failed>`
-// (docs/standards/rust.md § Tests).
+// own). Each new one is run instead against the mutants cargo-mutants lists in the code the branch
+// changed, one at a time in a throwaway worktree: KILLED by the first it fails on with a panic of
+// its own, else INVALID, needing a Control trailer naming it by its full path,
+// `Control: tests::name: <what you broke> -> <how the test failed>` (docs/standards/rust.md § Tests).
 //
 // Titles come from added lines that look like `it(...)`/`test(...)` calls, so a fixture string in
 // a test file such as 'it("fixture", f)' counts as a test too. It then can't be found in the
