@@ -692,20 +692,23 @@ mod tests {
         VersionText, Versions,
     };
 
-    /// Every frame `chunks` hold. A frame is at least 5 bytes, so a decoder that returns more
-    /// frames than bytes were sent isn't consuming what it decodes, and would otherwise be read
+    /// Every frame `chunks` hold. Each frame the decoder returns must move its cursor on: one that
+    /// returned a frame without consuming it would hand it back forever, copying it each time,
     /// until memory runs out.
     fn decode_all<F>(mut decoder: FrameDecoder<F>, chunks: &[&[u8]]) -> Result<Vec<F>, Malformed> {
-        let sent: usize = chunks.iter().map(|chunk| chunk.len()).sum();
         let mut frames = Vec::new();
         for chunk in chunks {
             decoder.push(chunk);
-            while let Some(frame) = decoder.next_frame()? {
-                frames.push(frame);
+            loop {
+                let before = decoder.start;
+                let Some(frame) = decoder.next_frame()? else {
+                    break;
+                };
                 assert!(
-                    frames.len() <= sent,
-                    "decoded more frames than the {sent} bytes sent hold"
+                    decoder.start > before,
+                    "returned a frame without consuming it"
                 );
+                frames.push(frame);
             }
         }
         Ok(frames)
@@ -782,11 +785,16 @@ mod tests {
 
     #[test]
     fn escapes_and_cuts_short_the_peer_bytes_a_reason_quotes() {
-        let signal = format!("\u{1b}[2J{}", "x".repeat(10_000));
-        let json = serde_json::to_vec(&serde_json::json!({ "signal": signal })).unwrap();
-        let length = u32::try_from(json.len() + 5).unwrap().to_be_bytes();
-        let mut decoder = request_decoder();
-        decoder.push(&[&length[..], &[request_code::SIGNAL, 0, 0, 0, 1], &json].concat());
+        // serde names an unknown variant as the peer wrote it, control bytes and all.
+        let status = format!("\u{1b}[2J{}", "x".repeat(10_000));
+        let json = serde_json::to_vec(&serde_json::json!({
+            "generation": 0,
+            "status": { "type": status },
+        }))
+        .unwrap();
+        let length = u32::try_from(json.len() + 1).unwrap().to_be_bytes();
+        let mut decoder = reply_decoder();
+        decoder.push(&[&length[..], &[reply_code::EXITED], &json].concat());
         let reason = decoder.next_frame().unwrap_err().reason().to_owned();
         assert!(!reason.contains('\u{1b}'), "{reason}");
         assert!(reason.chars().count() <= 200, "{}", reason.len());
