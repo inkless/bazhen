@@ -17,7 +17,6 @@ import {
   type TuiTheme,
 } from "@bazhen/protocol";
 import { replay } from "../testing/browser-terminal.ts";
-import { TerminalClosed } from "./emulator.ts";
 import {
   HUB_DEFAULTS,
   TerminalHub,
@@ -253,7 +252,7 @@ describe("terminal hub", () => {
     );
     await hub.join(rt.ref, viewer().v, size);
     const late = viewer();
-    await expect(hub.join(rt.ref, late.v, size)).rejects.toThrow(TerminalClosed);
+    await expect(hub.join(rt.ref, late.v, size)).rejects.toThrow(ViewEnded);
     expect([late.frames.some((f) => f.type === "attached"), late.closed()]).toEqual([false, true]);
   });
 
@@ -1094,7 +1093,10 @@ class AlteredRuntime extends FakeRuntime {
 }
 
 /** A terminal on a snapshot runtime with one view open. */
-async function snapshotTerminal(runtime = new FakeRuntime({ attach: "snapshot" })) {
+async function snapshotTerminal(
+  runtime = new FakeRuntime({ attach: "snapshot" }),
+  opts: HubOptions = HUB_DEFAULTS,
+) {
   const ref = await runtime.create({
     terminalId: newId("term"),
     tags: { kind: "shell" },
@@ -1106,17 +1108,20 @@ async function snapshotTerminal(runtime = new FakeRuntime({ attach: "snapshot" }
   });
   runtime.scroll(ref, "earlier output");
   const { log, events } = memoryLog();
-  const hub = new Hub(runtime, log);
+  const hub = new Hub(runtime, log, opts);
   const first = viewer();
   await hub.join(ref, first.v, size);
   return { r: runtime, ref, hub, first, events, emit: (s: string) => runtime.output(ref, s) };
 }
 
 /** Starts the next view opening, and waits until its snapshot has been asked for. */
-async function openHeld(o: Awaited<ReturnType<typeof snapshotTerminal>>) {
+async function openHeld(
+  o: Awaited<ReturnType<typeof snapshotTerminal>>,
+  as: (v: Viewer) => Viewer = (v) => v,
+) {
   const hold = o.r.holdSnapshots(o.ref);
   const late = viewer();
-  const joined = o.hub.join(o.ref, late.v, size);
+  const joined = o.hub.join(o.ref, as(late.v), size);
   await vi.waitFor(() => expect(hold.asked()).toBe(1));
   return { hold, late, joined };
 }
@@ -1202,6 +1207,37 @@ describe("terminal hub: snapshot streams", () => {
     },
   );
 
+  it("never holds a view to output its snapshot already shows", async () => {
+    const runtime = new FakeRuntime({ attach: "snapshot" });
+    const o = await snapshotTerminal(runtime, { ...HUB_DEFAULTS, maxUnsentBytes: 100 });
+    let reading: (() => void) | undefined;
+    let unwritten = 0;
+    const { hold, late, joined } = await openHeld(o, (v) => ({
+      ...v,
+      // The snapshot's one piece stays unwritten until the test lets it go, as a socket's would.
+      send: (bytes, written) =>
+        v.send(bytes, () => {
+          unwritten += bytes.length;
+          reading = () => {
+            unwritten -= bytes.length;
+            written?.();
+          };
+        }),
+      unsent: () => unwritten,
+    }));
+    o.emit("x".repeat(60));
+    hold.take();
+    hold.release();
+    await vi.waitFor(() => expect(reading).toBeDefined());
+    o.emit("y".repeat(60));
+    reading?.();
+    await joined;
+    expect([late.closed(), await screenOf(late.seen)]).toEqual([
+      false,
+      ["earlier output", `${"x".repeat(60)}${"y".repeat(20)}`, "y".repeat(40)],
+    ]);
+  });
+
   it("ends a view whose snapshot fails, and serves the others on", async () => {
     const o = await snapshotTerminal(
       new AlteredRuntime(() => {
@@ -1222,7 +1258,7 @@ describe("terminal hub: snapshot streams", () => {
     const o = await snapshotTerminal();
     const { late, joined } = await openHeld(o);
     o.r.fallBehind(o.ref);
-    await expect(joined).rejects.toThrow("the stream closed");
+    await expect(joined).rejects.toThrow(ViewEnded);
     expect([late.frames.some((f) => f.type === "attached"), late.closed()]).toEqual([false, true]);
   });
 });

@@ -20,23 +20,25 @@ export const seamable = (from: Position, now: Position, taken: Position) =>
 
 /**
  * What of `held`, which the stream delivered from `from` up to `now`, follows a snapshot taken at
- * `taken`: the bytes a view that replays the snapshot still needs, none missed or repeated. Null
- * when no such bytes exist: a snapshot older than `from` lacks the output between them, and one
- * newer than `now` covers output that hasn't arrived.
+ * `taken`: the output a view that replays the snapshot still needs, none missed or repeated, with
+ * a chunk the snapshot covers part of cut where it ends. Null when no such output exists: a
+ * snapshot older than `from` lacks the output between them, and one newer than `now` covers
+ * output that hasn't arrived.
  */
 export function seam(
   held: readonly Held[],
   from: Position,
   now: Position,
   taken: Position,
-): Uint8Array[] | null {
+): Held[] | null {
   if (!seamable(from, now, taken)) return null;
-  return held.flatMap((item) => {
-    if (item.kind === "reset") return item.generation > taken.generation ? [item.bytes] : [];
+  return held.flatMap((item): Held[] => {
+    if (item.kind === "reset") return item.generation > taken.generation ? [item] : [];
     const { at, bytes } = item;
-    if (at.generation !== taken.generation) return at.generation > taken.generation ? [bytes] : [];
+    if (at.generation !== taken.generation) return at.generation > taken.generation ? [item] : [];
     const skip = taken.offset - at.offset;
-    if (skip <= 0) return [bytes];
-    return skip < bytes.length ? [bytes.subarray(skip)] : [];
+    if (skip <= 0) return [item];
+    if (skip >= bytes.length) return [];
+    return [{ kind: "data", at: taken, bytes: bytes.subarray(skip) }];
   });
 }

@@ -25,7 +25,7 @@ import {
 import { failureDetail } from "../commands.ts";
 import { classifyInput } from "./input-filter.ts";
 import { emulatorScreen, runtimeScreen, type ScreenSource } from "./screen-source.ts";
-import { seam, seamable, type Held, type Position } from "./seam.ts";
+import { seam, type Held, type Position } from "./seam.ts";
 
 /** One browser view of a terminal, as the hub sees it. */
 export interface Viewer {
@@ -215,13 +215,12 @@ export class TerminalHub {
       throw new ViewRefused(`this terminal already has ${this.opts.maxViews} views open`);
     }
     // From here the view's live output is held, and its snapshot is no older than this.
-    const queue: Held[] = [];
     const from = watched.at;
     const resumeToken = randomBytes(16).toString("base64url");
     const entry: Entry = {
       viewer,
       size,
-      queue,
+      queue: [],
       held: 0,
       snapshotBytes: 0,
       resumeDigest: digest(resumeToken),
@@ -230,14 +229,19 @@ export class TerminalHub {
     const taking = watched.screen.snapshot(from);
     this.log.started(id, watched.terminal, viewer.mode);
     const shown = await taking.catch((err: unknown) => {
-      if (watched.viewers.has(id)) this.end(watched, id, "attach_failed");
+      if (!watched.viewers.has(id)) throw new ViewEnded();
+      this.end(watched, id, "attach_failed");
       throw err;
     });
     if (!watched.viewers.has(id)) throw new ViewEnded();
-    if (!seamable(from, watched.at, shown.at)) {
+    const rest = seam(entry.queue ?? [], from, watched.at, shown.at);
+    if (rest === null) {
       this.end(watched, id, "attach_failed");
       throw new ViewRefused("this terminal's screen could not be read; reopen it");
     }
+    // What the snapshot covers is never sent, so it neither stays held nor counts against the view.
+    entry.queue = rest;
+    entry.held = rest.reduce((n, item) => n + item.bytes.length, 0);
     if (!this.makeRoom(shown.vt.length)) {
       this.end(watched, id, "attach_failed");
       throw new ViewRefused(
@@ -256,7 +260,7 @@ export class TerminalHub {
     if (!watched.viewers.has(id)) throw new ViewEnded();
     viewer.notify({ type: "snapshot_end" });
     viewer.notify({ type: "screen", alternate: watched.alternate });
-    for (const bytes of seam(queue, from, watched.at, shown.at) ?? []) viewer.send(bytes);
+    for (const { bytes } of entry.queue ?? []) viewer.send(bytes);
     delete entry.queue;
     entry.held = 0;
     // The most recent interactive view sizes the terminal while nobody drives it.

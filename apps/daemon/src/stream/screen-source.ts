@@ -39,6 +39,9 @@ export function emulatorScreen(
  * delivered after it.
  */
 export function runtimeScreen(attached: SnapshotAttached): ScreenSource {
+  // Only `opened` may hold the attach snapshot: its vt is the whole history, kept no longer than
+  // the first view needs it.
+  const { stream } = attached;
   let opened: Snapshot | undefined = attached;
   return {
     write: () => {},
@@ -47,7 +50,7 @@ export function runtimeScreen(attached: SnapshotAttached): ScreenSource {
       opened = undefined;
       const usable =
         first !== undefined && first.generation === now.generation && first.offset === now.offset;
-      const taken = usable ? first : await attached.stream.snapshot();
+      const taken = usable ? first : await stream.snapshot();
       return { vt: taken.vt, at: { generation: taken.generation, offset: taken.offset } };
     },
     resize: () => {},

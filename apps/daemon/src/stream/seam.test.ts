@@ -75,7 +75,7 @@ function scenario(
   return {
     delivered: units.map((u) => u.byte),
     snapshot: units.filter((u) => precedes(u, taken)).map((u) => u.byte),
-    rest: (rest ?? []).flatMap((c) => [...c]),
+    rest: (rest ?? []).flatMap((item) => [...item.bytes]),
   };
 }
 
@@ -119,9 +119,9 @@ describe("the seam between a snapshot and the output held while it was taken", (
     ];
     const now = { generation: 1, offset: 2 };
     expect([
-      seam(held, from, now, from)?.map((c) => [...c]),
-      seam(held, from, now, { generation: 1, offset: 0 })?.map((c) => [...c]),
-      seam(held, from, now, { generation: 1, offset: 1 })?.map((c) => [...c]),
+      seam(held, from, now, from)?.map((item) => [...item.bytes]),
+      seam(held, from, now, { generation: 1, offset: 0 })?.map((item) => [...item.bytes]),
+      seam(held, from, now, { generation: 1, offset: 1 })?.map((item) => [...item.bytes]),
     ]).toEqual([[[RESET], [1, 2]], [[1, 2]], [[2]]]);
   });
 });

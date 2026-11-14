@@ -85,7 +85,7 @@ async function snapshotClient(runtime: RuntimeAdapter, ref: RuntimeRef) {
     respawns,
     /** Where the stream is: the generation and offset of the next byte it will carry. */
     at: () => at,
-    /** The current process's output the stream carried from `offset` on, which it must hold. */
+    /** The current process's output the stream carried from `offset` on. */
     from(offset: number): Uint8Array {
       const chunks = [...since].filter(([start, c]) => start + c.length > offset);
       return concat(...chunks.map(([start, c]) => c.subarray(Math.max(0, offset - start))));
@@ -622,11 +622,13 @@ export function snapshotContract(name: string, harness: SnapshotHarness): void {
       expect([taken.generation, taken.told, taken.offset]).toEqual([1, 1, 0]);
     });
 
-    it("refuses a snapshot once the stream has closed", async () => {
+    it("refuses a snapshot its stream closes before it is taken, and any asked for after", async () => {
       const runtime = fresh();
       const ref = await runtime.create({ ...spec, terminalId: newId("term") });
       const client = await snapshotClient(runtime, ref);
+      const pending = client.stream.snapshot();
       client.stream.close();
+      await expect(pending).rejects.toBeInstanceOf(Error);
       await expect(client.stream.snapshot()).rejects.toBeInstanceOf(Error);
     });
 
