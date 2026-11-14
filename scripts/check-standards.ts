@@ -697,24 +697,92 @@ function checkSkills(scripts: Set<string>): void {
   }
 }
 
-// Strict YAML parsers reject a plain (unquoted) scalar holding ": " as a nested mapping, and the
-// harness that uses one then skips the skill; lenient ones read it fine, so nothing else notices.
-export function skillFailures(doc: string, dir: string, text: string): string[] {
-  const out: string[] = [];
-  const front = /^---\n([\s\S]*?)\n---\n/.exec(text)?.[1] ?? "";
-  for (const [, key = "", value = ""] of front.matchAll(/^([\w-]+): (.+)$/gm)) {
-    if (!/^["'|>]/.test(value) && /:(\s|$)/.test(value)) {
-      out.push(
-        `${doc}: ${key} is an unquoted YAML value containing ": ", which strict parsers ` +
-          "reject; quote the value or reword it.",
+const PLAIN_SCALAR_START = /^[-?:,[\]{}#&*!|>'"%@`]/;
+
+/**
+ * Reads skill frontmatter as one-line `key: value` entries, each value plain, "double-quoted" or
+ * 'single-quoted', and reports anything outside that subset. Strict YAML parsers reject some text
+ * that lenient ones accept (a plain value holding ": "), and a harness that uses a strict one
+ * silently skips the skill, so the check allows only YAML that every parser reads the same way.
+ */
+function frontmatter(front: string): {
+  values: Map<string, string>;
+  invalid: Set<string>;
+  problems: string[];
+} {
+  const values = new Map<string, string>();
+  const invalid = new Set<string>();
+  const problems: string[] = [];
+  for (const line of front.split("\n")) {
+    if (line.trim() === "" || line.startsWith("#")) continue;
+    const entry = /^([\w-]+):(?: +(.*))?$/.exec(line);
+    if (!entry) {
+      problems.push(
+        `"${line}" is not a one-line key: value entry; put each value on its key's line`,
       );
+      continue;
+    }
+    const [, key = "", raw = ""] = entry;
+    const value = scalar(raw.trimEnd());
+    if (typeof value === "string") {
+      if (values.has(key)) problems.push(`${key} appears twice`);
+      values.set(key, value);
+    } else {
+      invalid.add(key);
+      problems.push(`${key} ${value.problem}`);
     }
   }
-  const name = /^name: (.+)$/m.exec(front)?.[1]?.trim();
-  const description = /^description: (.+)$/m.exec(front)?.[1]?.trim() ?? "";
-  if (name !== dir || !dir.startsWith("bz-")) {
+  return { values, invalid, problems };
+}
+
+function scalar(raw: string): string | { problem: string } {
+  if (raw === "") return { problem: "has no value on its line" };
+  if (raw.startsWith('"')) {
+    if (!/^"(?:[^"\\]|\\.)*"$/.test(raw)) {
+      return { problem: "has a double-quoted value with text after its closing quote" };
+    }
+    const unparsed = {
+      problem: 'has an escape or control character in its "..." value that JSON lacks',
+    };
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      return typeof parsed === "string" ? parsed : unparsed;
+    } catch {
+      return unparsed;
+    }
+  }
+  if (raw.startsWith("'")) {
+    if (!/^'(?:[^']|'')*'$/.test(raw)) {
+      return { problem: "has a single-quoted value with an unpaired ' inside; write it as ''" };
+    }
+    return raw.slice(1, -1).replaceAll("''", "'");
+  }
+  const quote = 'wrap the value in "double quotes"';
+  if (PLAIN_SCALAR_START.test(raw)) {
+    return { problem: `starts with "${raw[0]}", which YAML reads as syntax; ${quote}` };
+  }
+  if (/:\s/.test(raw)) {
+    return { problem: `holds ": ", which strict YAML parsers reject; ${quote} or reword it` };
+  }
+  if (raw.endsWith(":")) {
+    return { problem: `ends in ":", which strict YAML parsers reject; ${quote} or reword it` };
+  }
+  if (/\s#/.test(raw)) {
+    return { problem: `holds " #", which YAML reads as a comment; ${quote} or reword it` };
+  }
+  return raw;
+}
+
+export function skillFailures(doc: string, dir: string, text: string): string[] {
+  const front = /^---\n([\s\S]*?)\n---\n/.exec(text)?.[1] ?? "";
+  const { values, invalid, problems } = frontmatter(front);
+  const out = problems.map((problem) => `${doc}: frontmatter ${problem}.`);
+  const name = values.get("name");
+  const description = values.get("description") ?? "";
+  if (!invalid.has("name") && (name !== dir || !dir.startsWith("bz-"))) {
     out.push(`${doc}: name must equal its directory and start with "bz-" (got "${name}").`);
   }
+  if (invalid.has("description")) return out;
   if (description.length === 0 || description.length > DESCRIPTION_MAX) {
     out.push(`${doc}: description must be 1-${DESCRIPTION_MAX} characters.`);
   }
