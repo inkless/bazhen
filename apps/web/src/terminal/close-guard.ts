@@ -44,13 +44,13 @@ export function guardClose(
     [page.document, "visibilitychange", disarm, false],
   ] as const;
   for (const [target, type, listener, capture] of listeners) {
-    target.addEventListener(type, listener, capture);
+    target.addEventListener(type, listener, { capture });
   }
   return () => {
     disarm();
     clearTimeout(stayed);
     for (const [target, type, listener, capture] of listeners) {
-      target.removeEventListener(type, listener, capture);
+      target.removeEventListener(type, listener, { capture });
     }
   };
 }
