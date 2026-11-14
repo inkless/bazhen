@@ -602,6 +602,7 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-hook/src/lib.rs::header": "parse_reply",
   "crates/bazhen-hook/src/lib.rs::content_length": "parse_reply",
   "crates/bazhen-hook/src/pane_title.rs::body": "pane_title",
+  "crates/bazhen-holder-engine/src/lib.rs::Engine::advance": "advance",
 };
 const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-hook/src/lib.rs::hook_request": "an encoder: it writes the request",
@@ -615,6 +616,20 @@ const NOT_DECODERS: Record<string, string> = {
     "reached only through parse_reply, promised_end and is_truncated, all fuzzed",
   "crates/bazhen-hook/src/statusline.rs::report":
     "forwards the status line's input to the daemon in a hook request, without parsing it",
+  "crates/bazhen-holder-engine/src/lib.rs::Engine::parse":
+    "reached only through Engine::advance, which is fuzzed",
+  "crates/bazhen-holder-engine/src/lib.rs::whole_chars":
+    "reached only through Engine::advance, which is fuzzed",
+  "crates/bazhen-holder-engine/src/seam.rs::Utf8Seam::finish":
+    "reached only through Engine::advance, which is fuzzed",
+  "crates/bazhen-holder-engine/src/seam.rs::Utf8Seam::note":
+    "reached only through Engine::advance, which is fuzzed",
+  "crates/bazhen-holder-engine/src/budget.rs::Budget::csi_dispatch":
+    "vte's callback with what it parsed; reached only through Engine::advance, which is fuzzed",
+  "crates/bazhen-holder-engine/src/budget.rs::Budget::esc_dispatch":
+    "vte's callback with what it parsed; reached only through Engine::advance, which is fuzzed",
+  "crates/bazhen-holder-engine/src/differential.rs::PlanA::advance":
+    "test code: the differential test's reference terminal, compiled only under cfg(test)",
 };
 
 // An impl block, whose associated types its trait requires, so they aren't aliases. (A trait's
@@ -973,6 +988,12 @@ export const CLIPPY_CONFIG = [
 export const DENY_CONFIG = [
   "[graph]",
   "all-features = true",
+  "targets = [",
+  '"x86_64-unknown-linux-gnu",',
+  '"aarch64-unknown-linux-gnu",',
+  '"x86_64-apple-darwin",',
+  '"aarch64-apple-darwin",',
+  "]",
   "[advisories]",
   'yanked = "deny"',
   "[licenses]",
