@@ -10,7 +10,7 @@ import {
 } from "@bazhen/protocol";
 import type { UpgradeRoute } from "../http/upgrades.ts";
 import { ViewHeartbeat } from "./heartbeat.ts";
-import type { Attachment, LeaveReason, TerminalHub } from "./hub.ts";
+import { ViewRefused, type Attachment, type LeaveReason, type TerminalHub } from "./hub.ts";
 
 /** A frame is a keystroke burst or a paste; nothing a person types comes near this. */
 const MAX_FRAME_BYTES = 1 << 20;
@@ -94,7 +94,7 @@ function serve(
         mode: f.mode,
         deviceName,
         declaresEpoch: isAtLeast(f.protocolVersion, EPOCH_FRAMES_SINCE),
-        send: (out: Uint8Array) => ws.send(out, { binary: true }),
+        send: (out: Uint8Array, written?: () => void) => ws.send(out, { binary: true }, written),
         notify,
         unsent: () => ws.bufferedAmount,
         close: () => ws.close(),
@@ -109,7 +109,8 @@ function serve(
           attachment = joined;
           if (leaving !== undefined) joined.leave(leaving);
         },
-        (err: unknown) => refuse(`attach failed: ${String(err)}`),
+        (err: unknown) =>
+          refuse(err instanceof ViewRefused ? err.message : `attach failed: ${String(err)}`),
       );
       return;
     }
