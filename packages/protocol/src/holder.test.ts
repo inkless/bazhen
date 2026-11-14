@@ -221,6 +221,7 @@ describe("holder error codes", () => {
     expect(HOLDER_ERROR_CODES).toEqual([
       "unknown-request",
       "stale-generation",
+      "out-of-range",
       "invalid",
       "no-shared-version",
       "not-writer",

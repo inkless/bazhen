@@ -8,7 +8,8 @@ import { ProtocolVersion } from "./version.ts";
  * rather than the daemon protocol's, so that one's minor can't change this one's.
  *
  * A connection opens with `hello`: until it is answered the client sends nothing else, and the
- * holder sends only its answer. Neither peer then sends anything newer than the version they
+ * holder sends only its answer. A first frame that isn't `hello`, or a second `hello`, is answered
+ * `invalid`. Neither peer then sends anything newer than the version they
  * agreed on: no new frame, field or enum value. A peer ignores fields it doesn't know and skips
  * replies and events it doesn't know; the holder answers a request it doesn't know with `error`
  * coded `unknown-request`, whose `request` is the type byte, as `0x2a`. A request whose body
@@ -108,7 +109,7 @@ const TerminalId = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/);
 
 /**
  * What a terminal runs. `respawn` replaces it, keeping the terminal, its tags and its size; its
- * `generation` must be above the current one, or the respawn is refused `invalid`.
+ * `generation` must be above the current one, or the respawn is refused `stale-generation`.
  */
 export const HolderProcessSpec = z.object({
   argv: z.array(z.string()).min(1),
@@ -148,8 +149,10 @@ export type HolderHelloRequest = z.infer<typeof HolderHelloRequest>;
  * Output from `from` on. Without it, from the holder's offset as it reads the request, which is
  * the offset of a `snapshot` sent just before it in the same write. An offset belongs to one
  * generation: with `generation`, a subscribe that crossed a respawn is refused `stale-generation`
- * instead of resuming at the same offset of the new child's output. A connection has one
- * subscription: subscribing again moves it.
+ * instead of resuming at the same offset of the new child's output. A `from` the ring no longer
+ * holds is answered `ok`, then `gap` up to what it holds, then output; one past the holder's
+ * offset is refused `out-of-range`. A connection has one subscription: subscribing again moves
+ * it.
  */
 export const HolderSubscribeRequest = z.object({
   from: Offset.optional(),
@@ -157,6 +160,7 @@ export const HolderSubscribeRequest = z.object({
 });
 export type HolderSubscribeRequest = z.infer<typeof HolderSubscribeRequest>;
 
+/** Sent to the child's process group, which the child leads, not to the PTY's foreground group. */
 export const HolderSignalRequest = z.object({ signal: HolderSignal });
 export type HolderSignalRequest = z.infer<typeof HolderSignalRequest>;
 
@@ -295,8 +299,13 @@ export type HolderOk = z.infer<typeof HolderOk>;
 export const HOLDER_ERROR_CODES = [
   /** The holder doesn't know the request's type. */
   "unknown-request",
-  /** `subscribe` named a generation a respawn has since replaced. */
+  /**
+   * A generation that isn't current: a `subscribe` that crossed a respawn, or a `respawn` not
+   * above the current one.
+   */
   "stale-generation",
+  /** `subscribe` from past the holder's offset. */
+  "out-of-range",
   /** The request's body failed its schema. */
   "invalid",
   /** `hello` found no major both sides speak. */
