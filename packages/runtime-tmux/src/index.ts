@@ -119,6 +119,17 @@ const FOREGROUND = columns([
 ]);
 
 /**
+ * The most a history capture may print, whatever its size: well past Node's own 1 MiB limit,
+ * which a full history of long lines passes, and short of copying hundreds of megabytes.
+ */
+const CAPTURE_MAX_BYTES = 64 * 1024 * 1024;
+
+/** The command printed more than it was allowed to. */
+const overflowed = (err: unknown) =>
+  err instanceof TmuxError &&
+  Reflect.get(Object(err.cause), "code") === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
+
+/**
  * The private server's configuration. With tmux's defaults, Ctrl-B would be swallowed as a prefix
  * and `C-b d` would detach Bazhen's own client, so no key reaches tmux itself. `window-size
  * manual` is deliberately absent: set globally, tmux before 3.8 crashes on the next window
@@ -127,12 +138,6 @@ const FOREGROUND = columns([
  * do. Without the smcup override, the client switches the browser's terminal to its alternate
  * buffer, which keeps no scrollback and turns the wheel into arrow keys.
  */
-/**
- * The most a captured cell can take with its escapes: a character and an SGR that sets 24-bit
- * foreground and background. A full history of long lines passes 1 MiB, Node's default limit.
- */
-const CAPTURED_BYTES_PER_CELL = 32;
-
 export const TMUX_CONFIG = `set -g prefix None
 set -g prefix2 None
 unbind-key -a -T prefix
@@ -184,6 +189,8 @@ export interface TmuxRuntimeOptions {
   readonly env: Readonly<Record<string, string>>;
   /** How often dead terminals are looked for while anyone listens. */
   readonly exitPollMs?: number;
+  /** The most a history capture may print; tests lower it. */
+  readonly captureMaxBytes?: number;
   /**
    * A command the server runs, in the background, whenever a pane's title changes, with the
    * pane's id appended. Set on the server with every terminal created, so a server started by an
@@ -395,26 +402,7 @@ export class TmuxRuntime implements RuntimeAdapter {
     // A program on its alternate screen has no history of its own: tmux's is the main screen's,
     // behind it. With no history, `-E -1` would capture the screen's first line instead.
     const lines = alternate === 1 ? 0 : Math.min(historyLines, held);
-    const history =
-      lines > 0
-        ? (
-            await this.tmuxOutput(
-              [
-                "capture-pane",
-                "-p",
-                "-e",
-                "-J",
-                "-t",
-                windowOf(session),
-                "-S",
-                `-${lines}`,
-                "-E",
-                "-1",
-              ],
-              lines * cols * CAPTURED_BYTES_PER_CELL,
-            )
-          ).replace(/\n$/, "")
-        : "";
+    const history = lines > 0 ? await this.historyOf(session, lines) : "";
     const proc = this.opts.pty.spawn(
       this.opts.server.argv("attach-session", "-t", session),
       { cols, rows },
@@ -452,6 +440,35 @@ export class TmuxRuntime implements RuntimeAdapter {
    * One whose server may still run, its socket deleted or taken by another, is unconfirmed, and
    * only a forced close records it closed (foundation-design §7.1).
    */
+  /**
+   * Up to `lines` of the history above the screen, oldest first, with their escapes. A history
+   * too large to capture whole, as truecolor art takes 40 bytes a cell or more, gives its most
+   * recent half, and so on: a view always opens, with as much as fits.
+   */
+  private async historyOf(session: string, lines: number): Promise<string> {
+    const most = this.opts.captureMaxBytes ?? CAPTURE_MAX_BYTES;
+    for (let n = lines; n > 0; n = Math.floor(n / 2)) {
+      const args = [
+        "capture-pane",
+        "-p",
+        "-e",
+        "-J",
+        "-t",
+        windowOf(session),
+        "-S",
+        `-${n}`,
+        "-E",
+        "-1",
+      ];
+      try {
+        return (await this.tmuxOutput(args, most)).replace(/\n$/, "");
+      } catch (err) {
+        if (!overflowed(err)) throw err;
+      }
+    }
+    return "";
+  }
+
   async close(ref: RuntimeRef): Promise<void> {
     const [pane] = await this.panesOf(ref).catch(async (err: unknown) => {
       const serverAway =

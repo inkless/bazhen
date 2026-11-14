@@ -68,6 +68,32 @@ describe("tmux runtime on a private server", () => {
     ]);
   });
 
+  it("opens on the most recent history that fits, when a whole history is too large", async () => {
+    const small = new TmuxRuntime({
+      server,
+      pty: nodePtySpawner,
+      env: filterEnv(launchedFrom).env,
+      captureMaxBytes: 256 * 1024,
+    });
+    // 2,000 lines of 50 cells, each in its own 24-bit foreground and background: about 4 MB.
+    const art =
+      'awk \'BEGIN { for (i = 1; i <= 2000; i++) { s = ""; for (j = 0; j < 50; j++) ' +
+      's = s sprintf("\\033[38;2;%d;%d;100;48;2;%d;%d;50m\\342\\226\\200", i % 256, j * 5, j * 5, i % 256); ' +
+      'print s "\\033[0m " i } print "done" }\'; sleep 30';
+    const ref = await small.create(spec(["sh", "-c", art]));
+    await expect.poll(() => screen(ref.locator.session), { timeout: 10_000 }).toContain("done");
+    const { stream, history } = await small.attach(ref, null, HISTORY_LINES);
+    stream.close();
+    const numbers = history.split("\n").map((line) => Number(/ (\d+)$/.exec(line)?.[1]));
+    const onScreen = Number(/ (\d+)$/m.exec(screen(ref.locator.session))?.[1]);
+    expect([
+      history.includes("\x1b[38;2;"),
+      numbers.length > 0,
+      numbers.length < 2000,
+      numbers.every((n, i) => n === onScreen - numbers.length + i),
+    ]).toEqual([true, true, true, true]);
+  });
+
   it("reads its terminals back when started without a UTF-8 locale", async () => {
     const bare = testServer("runtime-no-locale");
     const { LANG: _l, LC_ALL: _a, LC_CTYPE: _c, ...noLocale } = filterEnv(process.env).env;

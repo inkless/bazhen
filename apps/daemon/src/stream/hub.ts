@@ -113,8 +113,9 @@ interface Entry {
   queue?: Uint8Array[];
   held: number;
   /**
-   * The snapshot's size, which the view may lag by on top of `maxUnsentBytes`: it counts as
-   * unsent while it drains, and a large history alone must not end the view.
+   * What of the snapshot may still be unsent, which the view may lag by on top of
+   * `maxUnsentBytes`: a large history alone must not end the view. It shrinks as the socket
+   * drains, and never grows back.
    */
   snapshotBytes: number;
   /** Whether it has been told its input was dropped under the current lease. */
@@ -257,7 +258,9 @@ export class TerminalHub {
             entry.queue.push(bytes);
             entry.held += bytes.length;
           } else entry.viewer.send(bytes);
-          const behind = Math.max(0, entry.viewer.unsent() - entry.snapshotBytes) + entry.held;
+          const unsent = entry.viewer.unsent();
+          entry.snapshotBytes = Math.min(entry.snapshotBytes, unsent);
+          const behind = unsent - entry.snapshotBytes + entry.held;
           if (behind > this.opts.maxUnsentBytes) {
             this.evict(watched, id, entry);
           }

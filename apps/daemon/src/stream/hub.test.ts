@@ -753,6 +753,26 @@ describe("terminal hub: screen state and slow views", () => {
     ]);
   });
 
+  it("takes the snapshot's allowance back as the view's socket drains", async () => {
+    const rt = await fakeRuntime("h".repeat(500));
+    const hub = new Hub(rt.runtime, memoryLog().log, { ...quick, maxUnsentBytes: 100 });
+    let backlog = 0;
+    const slow = viewer("observe", () => backlog);
+    await hub.join(rt.ref, slow.v, size);
+    backlog = Buffer.byteLength(slow.seen.join(""));
+    rt.emit("x");
+    const whileSnapshotUnsent = slow.closed();
+    backlog = 0;
+    rt.emit("y");
+    backlog = 101;
+    rt.emit("z");
+    expect([whileSnapshotUnsent, slow.closed(), slow.frames.at(-1)]).toEqual([
+      false,
+      true,
+      { type: "ended", reason: "evicted_slow" },
+    ]);
+  });
+
   it("ends views as disconnected when the runtime client is lost but the terminal lives on", async () => {
     const rt = await fakeRuntime();
     const { log, events } = memoryLog(false);
