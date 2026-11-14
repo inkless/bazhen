@@ -45,6 +45,11 @@ import {
 
 /** What starts an agent for a delegation, and how far an agent may launch others. */
 export interface Launcher {
+  /**
+   * Records the agent before it first yields, so the cap counts a launch on its way, and answers
+   * once the launch has settled, a repeat's included, so a delegation never goes to an agent
+   * whose launch then fails.
+   */
   launch(req: LaunchAgentRequest, launchedBy: AgentSessionId): Promise<LaunchAgentResponse>;
   /** How many agents one agent may have launched and still open at once. */
   readonly maxLaunched: number;
@@ -121,8 +126,6 @@ export class Tasks {
   private readonly raise: (raised: Raised) => string;
 
   private readonly launcher: Launcher;
-  /** The keys of each agent's launches on their way, by agent. */
-  private readonly launching = new Map<string, Set<string>>();
 
   /**
    * `raise` puts an item in the human's inbox, and answers with its id; `launcher` starts the
@@ -410,15 +413,7 @@ export class Tasks {
     const cwd = req.launch.cwd ?? this.store.agentLaunch(by)?.launch.cwd;
     if (cwd === undefined) throw new UnknownAgent(by);
     const launch = { idempotencyKey: key, harness: req.launch.harness, cwd };
-    const keys = this.launching.get(by) ?? new Set<string>();
-    this.launching.set(by, keys.add(key));
-    let agentId: string;
-    try {
-      ({ agentId } = await this.launcher.launch(launch, by));
-    } finally {
-      keys.delete(key);
-      if (keys.size === 0) this.launching.delete(by);
-    }
+    const { agentId } = await this.launcher.launch(launch, by);
     try {
       return this.delegateTo(caller, req, agentId, asked);
     } catch (err) {
@@ -498,17 +493,13 @@ export class Tasks {
   }
 
   /**
-   * Checks the agent may launch another now: under its cap of open agents it launched, counting
-   * the launches still on their way, and not itself so far down a chain of launches that another
-   * would run away.
+   * Checks the agent may launch another now: under its cap of open agents it launched, those
+   * still starting included, and not itself so far down a chain of launches that another would
+   * run away.
    */
   private checkLaunchLimits(by: AgentSessionId): void {
     const { maxLaunched, maxDepth } = this.launcher;
-    // A launch on its way counts until its agent is recorded, and from then as that agent.
-    const unrecorded = [...(this.launching.get(by) ?? [])].filter(
-      (key) => this.store.recall(key) === undefined,
-    );
-    const open = this.store.liveLaunchedBy(by) + unrecorded.length;
+    const open = this.store.liveLaunchedBy(by);
     if (open >= maxLaunched) {
       throw new TaskRefused(
         "conflict",

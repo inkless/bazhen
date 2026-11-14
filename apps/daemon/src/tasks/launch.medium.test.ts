@@ -10,9 +10,15 @@ const launch = { harness: "claude-code" as const };
 const work = { role: "worker" as const, ...sub };
 const launchRequest = (key: string) => ({ idempotencyKey: key, launch, ...work });
 
-/** A task the human gave `coordinator` to coordinate, on a fleet with these launch limits. */
-async function coordinated(limits = { maxLaunched: 5, maxDepth: 3 }) {
-  const f = await taskFleet(limits);
+/**
+ * A task the human gave `coordinator` to coordinate, on a fleet with these launch limits, whose
+ * delegations launch their agents with `delegated`.
+ */
+async function coordinated(
+  limits = { maxLaunched: 5, maxDepth: 3 },
+  delegated?: Parameters<typeof taskFleet>[1],
+) {
+  const f = await taskFleet(limits, delegated);
   const { taskId } = f.tasks.create(null, {
     idempotencyKey: "c",
     ...brief,
@@ -38,6 +44,10 @@ async function refusal(fn: () => Promise<unknown>) {
   }
   return "allowed";
 }
+
+/** An environment that refuses a launch once the work already under way has run. */
+const tmuxRefuses = () =>
+  new Promise<never>((_, reject) => setImmediate(() => reject(new Error("no tmux"))));
 
 /** What a settled promise was rejected with, as text; nothing for one that was fulfilled. */
 const reasons = (r: PromiseSettledResult<unknown>): string[] =>
@@ -113,6 +123,32 @@ describe("delegating to a new agent", () => {
     expect(store.snapshot(testView).tasks.map((t) => t.title)).toEqual(["Fix the build"]);
   });
 
+  it("launches and delegates once for a request repeated in the same tick", async () => {
+    const { store, tasks, coordinator, agents } = await coordinated();
+    const count = agents().length;
+    const [first, again] = await Promise.all([
+      tasks.launchAndDelegate(coordinator, launchRequest("d")),
+      tasks.launchAndDelegate(coordinator, launchRequest("d")),
+    ]);
+    const subtasks = store.snapshot(testView).tasks.filter((t) => t.title === sub.title);
+    expect([again, agents().length, subtasks.length]).toEqual([first, count + 1, 1]);
+  });
+
+  it("delegates nothing for a request repeated while its launch fails", async () => {
+    const { store, tasks, coordinator, agents } = await coordinated(undefined, tmuxRefuses);
+    const count = agents().length;
+    const both = await Promise.allSettled([
+      tasks.launchAndDelegate(coordinator, launchRequest("d")),
+      tasks.launchAndDelegate(coordinator, launchRequest("d")),
+    ]);
+    const failed = expect.stringMatching(/^Error: agent \S+ failed to launch$/);
+    expect([
+      both.flatMap(reasons),
+      store.snapshot(testView).tasks.map((t) => t.title),
+      agents().length,
+    ]).toEqual([[failed, failed], [brief.title], count + 1]);
+  });
+
   it("launches nothing for a brief whose message to the new agent would be too long", async () => {
     const { tasks, coordinator, agents } = await coordinated();
     const count = agents().length;
@@ -135,26 +171,24 @@ describe("delegating to a new agent", () => {
     ]);
   });
 
-  it("counts a launch on its way once its agent is recorded, as that agent and not twice", async () => {
-    const f = await coordinated({ maxLaunched: 2, maxDepth: 3 });
-    const { store, mailbox, coordinator } = f;
+  it("counts a launch on its way as the one agent it records, not twice", async () => {
     const held = Promise.withResolvers<void>();
-    const recorded = Promise.withResolvers<void>();
-    const tasks = new Tasks(store, mailbox, () => newId("attn"), {
-      ...f.launcher,
-      launch: async (req, by) => {
-        const launched = await f.launcher.launch(req, by);
-        recorded.resolve();
+    const { tasks, coordinator, agents } = await coordinated(
+      { maxLaunched: 2, maxDepth: 3 },
+      async (l) => {
         await held.promise;
-        return launched;
+        return {
+          runtime: { terminalId: l.terminalId, runtime: "tmux", locator: {} },
+          externalRef: null,
+        };
       },
-    });
+    );
     const first = tasks.launchAndDelegate(coordinator, launchRequest("d1"));
-    await recorded.promise;
+    const starting = agents().filter((a) => a.state === "starting").length;
     const second = tasks.launchAndDelegate(coordinator, launchRequest("d2"));
     held.resolve();
     const both = await Promise.allSettled([first, second]);
-    expect(both.map((r) => r.status)).toEqual(["fulfilled", "fulfilled"]);
+    expect([starting, both.map((r) => r.status)]).toEqual([1, ["fulfilled", "fulfilled"]]);
   });
 
   it("replays a launch a crash left undelegated, rather than counting it against the cap", async () => {

@@ -56,11 +56,6 @@ export interface LaunchDeps {
 }
 
 /**
- * Launches one agent. The daemon mints every id and records the launch before the environment
- * starts anything (foundation-design §8.1), and the request's key makes a retry return the first
- * answer instead of launching twice (§5.1).
- */
-/**
  * The first answer a key got: the same response, or the same failure. A launch the daemon died
  * in the middle of is settled after the key was answered, by reconciliation, so whether it failed
  * is read from the agent as well.
@@ -87,13 +82,37 @@ function replay(
   return prior.response;
 }
 
+/**
+ * `launchAgent`, answered only once the launch has settled: a repeat of a launch still in flight
+ * waits for it, then gets its outcome, its failure included, rather than the answer so far.
+ */
+export async function launchSettled(
+  deps: LaunchDeps,
+  req: LaunchAgentRequest,
+  launchedBy?: AgentSessionId,
+): Promise<LaunchAgentResponse> {
+  const answer = await launchAgent(deps, req, launchedBy);
+  const { agentId } = answer;
+  if (deps.store.agentTerminal({ agentId })?.state !== "starting") return answer;
+  // Only a repeat is answered while its launch is in flight, and that launch holds its agent's
+  // slot until its last event.
+  await deps.queue.run(agentId, async () => {});
+  return launchAgent(deps, req, launchedBy);
+}
+
 /** The options a request names; one without a theme leaves it to the harness. Never stored. */
 export const launchOptions = (theme: TuiTheme | undefined): LaunchOptions => ({
   instructions: FLEET_INSTRUCTIONS,
   ...(theme === undefined ? {} : { theme }),
 });
 
-/** `launchedBy` is the agent launching this one to delegate to it; none when the human does. */
+/**
+ * Launches one agent. The daemon mints every id and records the launch before the environment
+ * starts anything (foundation-design §8.1), and the request's key makes a retry return the first
+ * answer instead of launching twice (§5.1). A repeat while the launch is in flight gets the
+ * answer so far. `launchedBy` is the agent launching this one to delegate to it; none when the
+ * human does.
+ */
 export async function launchAgent(
   { store, environment, size, home, queue }: LaunchDeps,
   req: LaunchAgentRequest,
@@ -110,34 +129,35 @@ export async function launchAgent(
 
   const agentId = newId("agent");
   const terminalId = newId("term");
-  // Nothing else may settle the agent while its launch is in flight, so the launch holds its slot
-  // from before it is recorded.
-  return queue.run(agentId, async () => {
-    const event = { entityId: agentId, actor: "system" };
-    // Each step's event and the key's answer are written together, so a repeat sees exactly
-    // what the first request has done so far.
-    const record = (append: () => number, earlier: number[], failed = false) =>
-      store.transaction(() => {
-        const response = { agentId, terminalId, eventIds: [...earlier, append()] };
-        const remembered: LaunchRecord = { request: asked, response, failed };
-        store.remember(req.idempotencyKey, remembered);
-        return response;
-      });
+  const event = { entityId: agentId, actor: "system" };
+  // Each step's event and the key's answer are written together, so a repeat sees exactly what
+  // the first request has done so far.
+  const record = (append: () => number, earlier: number[], failed = false) =>
+    store.transaction(() => {
+      const response = { agentId, terminalId, eventIds: [...earlier, append()] };
+      const remembered: LaunchRecord = { request: asked, response, failed };
+      store.remember(req.idempotencyKey, remembered);
+      return response;
+    });
 
-    const launched = record(
-      () =>
-        store.append({
-          ...event,
-          type: "agent.launched",
-          payload: {
-            environmentId: environment.id,
-            ...request,
-            terminalId,
-            ...(launchedBy === undefined ? {} : { launchedBy }),
-          },
-        }),
-      [],
-    );
+  // Recorded before this call first yields, so a repeat in the same tick finds the key answered.
+  const launched = record(
+    () =>
+      store.append({
+        ...event,
+        type: "agent.launched",
+        payload: {
+          environmentId: environment.id,
+          ...request,
+          terminalId,
+          ...(launchedBy === undefined ? {} : { launchedBy }),
+        },
+      }),
+    [],
+  );
+  // Nothing else may settle the agent while its launch is in flight, so it takes its slot in the
+  // same synchronous step as it is recorded: no await may come between the two.
+  return queue.run(agentId, async () => {
     const options = launchOptions(req.theme);
     const launching = environment.launch({
       agentId,
