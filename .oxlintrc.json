@@ -72,6 +72,15 @@
               },
               {
                 "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
+              },
+              {
+                "group": [
                   "@bazhen/daemon",
                   "@bazhen/daemon/**",
                   "**/apps/daemon/**",
@@ -131,6 +140,15 @@
                   "**/runtime-tmux/src/**"
                 ],
                 "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
               },
               {
                 "group": [
@@ -225,6 +243,15 @@
               },
               {
                 "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
+              },
+              {
+                "group": [
                   "@bazhen/daemon",
                   "@bazhen/daemon/**",
                   "**/apps/daemon/**",
@@ -275,6 +302,15 @@
                   "**/runtime-tmux/src/**"
                 ],
                 "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
               },
               {
                 "group": [
@@ -338,6 +374,15 @@
                   "**/runtime-tmux/src/**"
                 ],
                 "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
               },
               {
                 "group": [
@@ -433,6 +478,15 @@
               },
               {
                 "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
+              },
+              {
+                "group": [
                   "@bazhen/daemon",
                   "@bazhen/daemon/**",
                   "**/apps/daemon/**",
@@ -510,6 +564,15 @@
                   "**/runtime-tmux/src/**"
                 ],
                 "message": "packages/host-guard (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "packages/host-guard (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
               },
               {
                 "group": [
@@ -607,6 +670,15 @@
                   "**/runtime-tmux/src/**"
                 ],
                 "message": "packages/host-guard (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "packages/host-guard (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
               },
               {
                 "group": [
@@ -736,6 +808,15 @@
               },
               {
                 "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "packages/host-guard (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
+              },
+              {
+                "group": [
                   "@bazhen/env-local",
                   "@bazhen/env-local/**",
                   "**/packages/env-local/**",
@@ -806,6 +887,15 @@
             "patterns": [
               {
                 "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "packages/runtime-tmux (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
+              },
+              {
+                "group": [
                   "@bazhen/daemon",
                   "@bazhen/daemon/**",
                   "**/apps/daemon/**",
@@ -847,6 +937,15 @@
           "error",
           {
             "patterns": [
+              {
+                "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "packages/runtime-tmux (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
+              },
               {
                 "group": [
                   "@bazhen/daemon",
@@ -921,6 +1020,15 @@
             "patterns": [
               {
                 "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "packages/runtime-tmux (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
+              },
+              {
+                "group": [
                   "@bazhen/daemon",
                   "@bazhen/daemon/**",
                   "**/apps/daemon/**",
@@ -954,6 +1062,191 @@
     },
     {
       "files": [
+        "packages/runtime-holder/**/*.ts",
+        "packages/runtime-holder/**/*.tsx"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/runtime-tmux",
+                  "@bazhen/runtime-tmux/**",
+                  "**/packages/runtime-tmux/**",
+                  "**/runtime-tmux/src/**"
+                ],
+                "message": "packages/runtime-holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**"
+                ],
+                "message": "packages/runtime-holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "@bazhen/web",
+                  "@bazhen/web/**",
+                  "**/apps/web/**",
+                  "**/web/src/**"
+                ],
+                "message": "packages/runtime-holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "hono",
+                  "@hono/*",
+                  "ws",
+                  "@xterm/*"
+                ],
+                "message": "packages/runtime-holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import runtime libraries."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "packages/runtime-holder/**/*.test.ts",
+        "packages/runtime-holder/**/*.test.tsx"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/runtime-tmux",
+                  "@bazhen/runtime-tmux/**",
+                  "**/packages/runtime-tmux/**",
+                  "**/runtime-tmux/src/**"
+                ],
+                "message": "packages/runtime-holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**"
+                ],
+                "message": "packages/runtime-holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "@bazhen/web",
+                  "@bazhen/web/**",
+                  "**/apps/web/**",
+                  "**/web/src/**"
+                ],
+                "message": "packages/runtime-holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "hono",
+                  "@hono/*",
+                  "ws",
+                  "@xterm/*"
+                ],
+                "message": "packages/runtime-holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import runtime libraries."
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "fs",
+                  "node:fs",
+                  "fs/promises",
+                  "node:fs/promises",
+                  "os",
+                  "node:os",
+                  "net",
+                  "node:net",
+                  "http",
+                  "node:http",
+                  "https",
+                  "node:https",
+                  "http2",
+                  "node:http2",
+                  "dgram",
+                  "node:dgram",
+                  "tls",
+                  "node:tls",
+                  "child_process",
+                  "node:child_process",
+                  "worker_threads",
+                  "node:worker_threads",
+                  "sqlite",
+                  "node:sqlite"
+                ],
+                "message": "A *.test.ts is a small test: no files, sockets, processes or databases. Rename it *.medium.test.ts (docs/standards/testing.md)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "packages/runtime-holder/**/*.medium.test.ts"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/runtime-tmux",
+                  "@bazhen/runtime-tmux/**",
+                  "**/packages/runtime-tmux/**",
+                  "**/runtime-tmux/src/**"
+                ],
+                "message": "packages/runtime-holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**"
+                ],
+                "message": "packages/runtime-holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "@bazhen/web",
+                  "@bazhen/web/**",
+                  "**/apps/web/**",
+                  "**/web/src/**"
+                ],
+                "message": "packages/runtime-holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "hono",
+                  "@hono/*",
+                  "ws",
+                  "@xterm/*"
+                ],
+                "message": "packages/runtime-holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import runtime libraries."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
         "packages/env-local/**/*.ts",
         "packages/env-local/**/*.tsx"
       ],
@@ -971,6 +1264,15 @@
                   "**/runtime-tmux/src/**"
                 ],
                 "message": "packages/env-local (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "packages/env-local (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
               },
               {
                 "group": [
@@ -1052,6 +1354,15 @@
                   "**/runtime-tmux/src/**"
                 ],
                 "message": "packages/env-local (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "packages/env-local (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
               },
               {
                 "group": [
@@ -1165,6 +1476,15 @@
               },
               {
                 "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "packages/env-local (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
+              },
+              {
+                "group": [
                   "@bazhen/harness-claude-code",
                   "@bazhen/harness-claude-code/**",
                   "**/packages/harness-claude-code/**",
@@ -1246,6 +1566,15 @@
               },
               {
                 "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "packages/harness-claude-code (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
+              },
+              {
+                "group": [
                   "@bazhen/env-local",
                   "@bazhen/env-local/**",
                   "**/packages/env-local/**",
@@ -1324,6 +1653,15 @@
                   "**/runtime-tmux/src/**"
                 ],
                 "message": "packages/harness-claude-code (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "packages/harness-claude-code (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
               },
               {
                 "group": [
@@ -1437,6 +1775,15 @@
               },
               {
                 "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "packages/harness-claude-code (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
+              },
+              {
+                "group": [
                   "@bazhen/env-local",
                   "@bazhen/env-local/**",
                   "**/packages/env-local/**",
@@ -1518,6 +1865,15 @@
               },
               {
                 "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "packages/harness-codex (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
+              },
+              {
+                "group": [
                   "@bazhen/env-local",
                   "@bazhen/env-local/**",
                   "**/packages/env-local/**",
@@ -1596,6 +1952,15 @@
                   "**/runtime-tmux/src/**"
                 ],
                 "message": "packages/harness-codex (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "packages/harness-codex (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
               },
               {
                 "group": [
@@ -1706,6 +2071,15 @@
                   "**/runtime-tmux/src/**"
                 ],
                 "message": "packages/harness-codex (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "packages/harness-codex (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
               },
               {
                 "group": [
@@ -1926,6 +2300,15 @@
               },
               {
                 "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
+              },
+              {
+                "group": [
                   "@bazhen/env-local",
                   "@bazhen/env-local/**",
                   "**/packages/env-local/**",
@@ -2013,6 +2396,15 @@
                   "**/runtime-tmux/src/**"
                 ],
                 "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
               },
               {
                 "group": [
@@ -2135,6 +2527,15 @@
               },
               {
                 "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
+              },
+              {
+                "group": [
                   "@bazhen/env-local",
                   "@bazhen/env-local/**",
                   "**/packages/env-local/**",
@@ -2225,6 +2626,15 @@
               },
               {
                 "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "tests/api (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
+              },
+              {
+                "group": [
                   "@bazhen/env-local",
                   "@bazhen/env-local/**",
                   "**/packages/env-local/**",
@@ -2300,6 +2710,15 @@
                   "**/runtime-tmux/src/**"
                 ],
                 "message": "tests/api (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "tests/api (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
               },
               {
                 "group": [
@@ -2410,6 +2829,15 @@
               },
               {
                 "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "tests/api (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
+              },
+              {
+                "group": [
                   "@bazhen/env-local",
                   "@bazhen/env-local/**",
                   "**/packages/env-local/**",
@@ -2489,6 +2917,15 @@
               },
               {
                 "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
+              },
+              {
+                "group": [
                   "@bazhen/daemon",
                   "@bazhen/daemon/**",
                   "**/apps/daemon/**",
@@ -2545,6 +2982,15 @@
                   "**/runtime-tmux/src/**"
                 ],
                 "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
               },
               {
                 "group": [
@@ -2636,6 +3082,15 @@
               },
               {
                 "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
+              },
+              {
+                "group": [
                   "@bazhen/daemon",
                   "@bazhen/daemon/**",
                   "**/apps/daemon/**",
@@ -2695,6 +3150,15 @@
               },
               {
                 "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "apps/web/src/ui (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
+              },
+              {
+                "group": [
                   "@bazhen/daemon",
                   "@bazhen/daemon/**",
                   "**/apps/daemon/**",
@@ -2744,6 +3208,15 @@
                   "**/runtime-tmux/src/**"
                 ],
                 "message": "apps/web/src/ui (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "apps/web/src/ui (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
               },
               {
                 "group": [
@@ -2825,6 +3298,15 @@
                   "**/runtime-tmux/src/**"
                 ],
                 "message": "apps/web/src/ui (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "apps/web/src/ui (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
               },
               {
                 "group": [
