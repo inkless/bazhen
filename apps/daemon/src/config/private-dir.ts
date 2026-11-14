@@ -11,8 +11,9 @@ export class UnsafePrivateDir extends Error {
 
 /**
  * Creates a directory, or tightens an existing one, so that only this user can reach what is in
- * it: the daemon's socket (foundation-design §6.1, §9.1), or the link every hook runs. Anything this user doesn't own, or a
- * symlink that could redirect the socket, is refused rather than repaired.
+ * it: the daemon's socket (foundation-design §6.1, §9.1), or the link every hook runs. Anything
+ * this user doesn't own, or a symlink that could redirect what is in it, is refused rather than
+ * repaired.
  */
 export function ensurePrivateDir(path: string, uid: number): void {
   try {

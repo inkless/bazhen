@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { filterEnv, newId, type TerminalSpec } from "@bazhen/core";
-import type { ConfiguredTmuxServer } from "@bazhen/host-guard";
+import { isAlive, type ConfiguredTmuxServer } from "@bazhen/host-guard";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
 import { nodePtySpawner } from "@bazhen/daemon/pty";
 import { testServer, tmuxOut } from "./helpers.ts";
@@ -126,13 +126,19 @@ describe("the pane-title hook on a server an older daemon started", () => {
 describe("a pane-title hook that fails", () => {
   it("leaves the pane out of view mode, whatever it printed or returned", async () => {
     const server = newServer();
-    const failing = client("failing", "echo printed\necho complained >&2\n", "exit 127\n");
+    const pidFile = join(dir, "failing.pid");
+    const failing = client(
+      "failing",
+      `echo $$ > '${pidFile}'\necho printed\necho complained >&2\n`,
+      "exit 127\n",
+    );
     const ref = await runtimeOn(server, [failing.path]).create(titler());
     const pane = String(ref.locator.paneId);
     title(server, pane, "three");
     await expect.poll(() => logged(failing.log), { timeout: 5_000 }).toBe(`${pane}\n`);
-    // The hook has printed by now and only exits after; a job of its own gives tmux time to
-    // finish the hook's.
+    const pid = Number(readFileSync(pidFile, "utf8"));
+    await expect.poll(() => isAlive(pid), { timeout: 5_000 }).toBe(false);
+    // tmux takes a finished job's output from its own loop, ahead of a command sent after it.
     tmuxOut(server, "run-shell", "true");
     expect(inMode(server, pane)).toBe("0");
   });

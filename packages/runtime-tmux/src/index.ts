@@ -354,14 +354,15 @@ export class TmuxRuntime implements RuntimeAdapter {
    * Puts this runtime's server-wide settings on a server that is already running, which read its
    * configuration from whichever daemon started it: the pane-title hook, and the keys that leave
    * a mode. With no server running it does nothing, and starts none; the next `health` that
-   * reaches one applies them. A server that refuses them is not asked again.
+   * reaches one applies them, as it does after a server too slow to answer. A server that answers
+   * and refuses them is not asked again.
    */
   async applyServerSettings(): Promise<void> {
     try {
       await this.tmux(...sequence([this.paneTitleHook(), ...MODE_EXIT_BINDINGS]));
     } catch (err) {
       if (err instanceof TmuxError && noServer(err)) return;
-      this.settingsPending = false;
+      if (err instanceof TmuxError && answered(err)) this.settingsPending = false;
       throw err;
     }
     this.settingsPending = false;
@@ -802,6 +803,9 @@ function identities(refs: readonly RuntimeRef[]): ServerIdentity[] {
   }
   return [...seen.values()];
 }
+
+/** tmux exited with a status of its own, rather than being stopped, as a timeout stops it. */
+const answered = (err: TmuxError) => typeof Reflect.get(Object(err.cause), "code") === "number";
 
 const reportSettings = (err: unknown) =>
   console.warn("tmux server settings were not applied:", err);
