@@ -38,3 +38,25 @@ export const mailbox = machine<MailboxState, MailboxEvent>("mailbox message", {
   delivered: {},
   undeliverable: {},
 });
+
+const LABEL_PREFIX = "Message for you from Bazhen (";
+
+/**
+ * How Bazhen introduces a message to an agent. A harness confirms a message by finding its label
+ * in the turn that took it, so a label must only ever be one Bazhen wrote: see `quoteLabels`.
+ */
+export const mailLabel = (id: string) => `${LABEL_PREFIX}${id}):`;
+
+/**
+ * A body as an agent reads it, with every label it quotes marked as a quote. Marking the prefix
+ * rather than whole labels catches every label whatever id it names, so a quoted one can neither
+ * confirm another message nor pass for one to the agent. The stored body keeps what was written.
+ */
+export const quoteLabels = (body: string) =>
+  body.replaceAll(LABEL_PREFIX, "Message for you from Bazhen [quoted] (");
+
+/** The id of the message `text` starts with, labelled as Bazhen labels it, or null. */
+export function leadingMailId(text: string): string | null {
+  if (!text.startsWith(LABEL_PREFIX)) return null;
+  return /^(msg_[0-9a-zA-Z]+)\):\n/.exec(text.slice(LABEL_PREFIX.length))?.[1] ?? null;
+}

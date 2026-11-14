@@ -1,8 +1,10 @@
-import type {
-  AgentLaunchRequest,
-  HarnessAdapter,
-  HarnessLaunch,
-  LaunchOptions,
+import {
+  mailLabel,
+  quoteLabels,
+  type AgentLaunchRequest,
+  type HarnessAdapter,
+  type HarnessLaunch,
+  type LaunchOptions,
 } from "@bazhen/core";
 import type { Activity, ApprovalDecision, ExternalRef, Usage } from "@bazhen/protocol";
 
@@ -459,14 +461,13 @@ export function foldReply(text: string): string {
   });
 }
 
-/** How a woken message is introduced to the model; only a prompt carrying it saw the message. */
-const wakeLabel = (id: string) => `Message for you from Bazhen (${id}):`;
-
 /**
  * Whether a prompt carries this message as a wake handed it over, rather than naming its id in
- * passing, as a human or a background subagent quoting it might.
+ * passing, as a human or a background subagent quoting it might. Claude Code wraps the wake in
+ * text of its own and rewrites tags in it, so the label is looked for anywhere; that is sound
+ * because `wakeText` marks every label a body quotes.
  */
-export const carriesWake = (prompt: string, id: string) => prompt.includes(wakeLabel(id));
+export const carriesWake = (prompt: string, id: string) => prompt.includes(mailLabel(id));
 
 /**
  * What a wake hands the model: Claude Code shows it as a system notification, not user input,
@@ -482,7 +483,7 @@ export function wakeText(
         m.firstOffered === null
           ? ""
           : `(possible re-delivery of ${m.id}, first offered ${m.firstOffered})\n`;
-      return `${wakeLabel(m.id)}\n${again}${m.body}`;
+      return `${mailLabel(m.id)}\n${again}${quoteLabels(m.body)}`;
     })
     .join("\n\n");
 }
