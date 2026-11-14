@@ -23,6 +23,5 @@
     "offset",
     "cols",
     "rows"
-  ],
-  "additionalProperties": false
+  ]
 }

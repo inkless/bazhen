@@ -18,6 +18,5 @@
   "required": [
     "agentId",
     "offered"
-  ],
-  "additionalProperties": false
+  ]
 }

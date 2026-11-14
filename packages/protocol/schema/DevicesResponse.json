@@ -37,13 +37,11 @@
           "pairedAt",
           "lastSeenAt",
           "expiresAt"
-        ],
-        "additionalProperties": false
+        ]
       }
     }
   },
   "required": [
     "devices"
-  ],
-  "additionalProperties": false
+  ]
 }

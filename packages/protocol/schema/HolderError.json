@@ -35,6 +35,5 @@
   "required": [
     "request",
     "message"
-  ],
-  "additionalProperties": false
+  ]
 }

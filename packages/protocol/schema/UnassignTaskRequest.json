@@ -16,6 +16,5 @@
   "required": [
     "idempotencyKey",
     "assignmentId"
-  ],
-  "additionalProperties": false
+  ]
 }

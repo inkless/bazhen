@@ -27,6 +27,5 @@
     "idempotencyKey",
     "generation",
     "signal"
-  ],
-  "additionalProperties": false
+  ]
 }

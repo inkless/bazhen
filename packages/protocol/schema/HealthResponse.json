@@ -45,8 +45,7 @@
         "kind",
         "state",
         "version"
-      ],
-      "additionalProperties": false
+      ]
     }
   },
   "required": [
@@ -55,6 +54,5 @@
     "protocolVersion",
     "schemaVersion",
     "runtime"
-  ],
-  "additionalProperties": false
+  ]
 }

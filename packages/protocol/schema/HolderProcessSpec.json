@@ -41,6 +41,5 @@
     "cwd",
     "env",
     "generation"
-  ],
-  "additionalProperties": false
+  ]
 }

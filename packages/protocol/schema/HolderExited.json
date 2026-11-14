@@ -21,8 +21,7 @@
           "required": [
             "type",
             "code"
-          ],
-          "additionalProperties": false
+          ]
         },
         {
           "type": "object",
@@ -38,8 +37,7 @@
           "required": [
             "type",
             "signal"
-          ],
-          "additionalProperties": false
+          ]
         },
         {
           "type": "object",
@@ -51,14 +49,12 @@
           },
           "required": [
             "type"
-          ],
-          "additionalProperties": false
+          ]
         }
       ]
     }
   },
   "required": [
     "status"
-  ],
-  "additionalProperties": false
+  ]
 }

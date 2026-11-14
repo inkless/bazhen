@@ -36,6 +36,5 @@
     "rss",
     "ringBytes",
     "historyLines"
-  ],
-  "additionalProperties": false
+  ]
 }

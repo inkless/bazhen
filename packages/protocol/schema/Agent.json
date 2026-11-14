@@ -85,8 +85,7 @@
             "environmentId",
             "kind",
             "id"
-          ],
-          "additionalProperties": false
+          ]
         },
         {
           "type": "null"
@@ -113,8 +112,7 @@
               "required": [
                 "type",
                 "code"
-              ],
-              "additionalProperties": false
+              ]
             },
             {
               "type": "object",
@@ -130,8 +128,7 @@
               "required": [
                 "type",
                 "signal"
-              ],
-              "additionalProperties": false
+              ]
             },
             {
               "type": "object",
@@ -143,8 +140,7 @@
               },
               "required": [
                 "type"
-              ],
-              "additionalProperties": false
+              ]
             }
           ]
         },
@@ -216,8 +212,7 @@
         "source",
         "confidence",
         "observedAt"
-      ],
-      "additionalProperties": false
+      ]
     },
     "usage": {
       "type": "object",
@@ -236,8 +231,7 @@
           "exclusiveMinimum": 0,
           "maximum": 9007199254740991
         }
-      },
-      "additionalProperties": false
+      }
     },
     "attachCommand": {
       "default": null,
@@ -291,6 +285,5 @@
     "generation",
     "externalRef",
     "exit"
-  ],
-  "additionalProperties": false
+  ]
 }

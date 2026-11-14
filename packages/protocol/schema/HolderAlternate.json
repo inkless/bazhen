@@ -15,6 +15,5 @@
   "required": [
     "offset",
     "on"
-  ],
-  "additionalProperties": false
+  ]
 }

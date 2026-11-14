@@ -41,14 +41,12 @@
       "required": [
         "agentId",
         "role"
-      ],
-      "additionalProperties": false
+      ]
     }
   },
   "required": [
     "idempotencyKey",
     "title",
     "brief"
-  ],
-  "additionalProperties": false
+  ]
 }

@@ -76,8 +76,7 @@
       "required": [
         "cols",
         "rows"
-      ],
-      "additionalProperties": false
+      ]
     },
     "historyLines": {
       "default": 10000,
@@ -96,6 +95,5 @@
     "socket",
     "tags",
     "size"
-  ],
-  "additionalProperties": false
+  ]
 }

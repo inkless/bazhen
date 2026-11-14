@@ -24,8 +24,7 @@
       "required": [
         "type",
         "attachmentId"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -53,8 +52,7 @@
         "type",
         "driver",
         "epoch"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -66,8 +64,7 @@
       },
       "required": [
         "type"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -79,8 +76,7 @@
       },
       "required": [
         "type"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -92,8 +88,7 @@
       },
       "required": [
         "type"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -105,8 +100,7 @@
       },
       "required": [
         "type"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -122,8 +116,7 @@
       "required": [
         "type",
         "alternate"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -135,8 +128,7 @@
       },
       "required": [
         "type"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -156,8 +148,7 @@
       "required": [
         "type",
         "reason"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -173,8 +164,7 @@
       "required": [
         "type",
         "message"
-      ],
-      "additionalProperties": false
+      ]
     },
     {
       "type": "object",
@@ -190,8 +180,7 @@
       "required": [
         "type",
         "message"
-      ],
-      "additionalProperties": false
+      ]
     }
   ]
 }

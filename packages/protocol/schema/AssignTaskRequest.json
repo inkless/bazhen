@@ -25,6 +25,5 @@
     "agentId",
     "role",
     "idempotencyKey"
-  ],
-  "additionalProperties": false
+  ]
 }

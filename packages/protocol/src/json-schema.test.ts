@@ -15,6 +15,15 @@ describe("jsonSchemas", () => {
     expect(schema).toMatchObject({ $id: "TerminalState", enum: protocol.TerminalState.options });
   });
 
+  it("leaves an object open to fields it doesn't know, since a newer peer adds them", () => {
+    const schema: unknown = JSON.parse(String(jsonSchemas()["HolderStats.json"]));
+    expect(schema).toMatchObject({
+      type: "object",
+      required: ["engineBytes", "rss", "ringBytes", "historyLines"],
+    });
+    expect(schema).not.toHaveProperty("additionalProperties");
+  });
+
   it("leaves a field with a default out of required, since an older peer omits it", () => {
     const schema: unknown = JSON.parse(String(jsonSchemas()["Environment.json"]));
     const properties: unknown = Reflect.get(Object(schema), "properties");

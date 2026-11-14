@@ -68,8 +68,7 @@
               "required": [
                 "type",
                 "code"
-              ],
-              "additionalProperties": false
+              ]
             },
             {
               "type": "object",
@@ -85,8 +84,7 @@
               "required": [
                 "type",
                 "signal"
-              ],
-              "additionalProperties": false
+              ]
             },
             {
               "type": "object",
@@ -98,8 +96,7 @@
               },
               "required": [
                 "type"
-              ],
-              "additionalProperties": false
+              ]
             }
           ]
         },
@@ -125,8 +122,7 @@
       "required": [
         "cols",
         "rows"
-      ],
-      "additionalProperties": false
+      ]
     },
     "offset": {
       "type": "integer",
@@ -163,6 +159,5 @@
     "alternate",
     "historyLines",
     "writer"
-  ],
-  "additionalProperties": false
+  ]
 }

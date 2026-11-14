@@ -10,6 +10,5 @@
   },
   "required": [
     "pane"
-  ],
-  "additionalProperties": false
+  ]
 }

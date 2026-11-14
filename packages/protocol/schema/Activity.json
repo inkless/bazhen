@@ -42,6 +42,5 @@
     "source",
     "confidence",
     "observedAt"
-  ],
-  "additionalProperties": false
+  ]
 }

@@ -17,6 +17,5 @@
   "required": [
     "cols",
     "rows"
-  ],
-  "additionalProperties": false
+  ]
 }

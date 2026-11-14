@@ -67,6 +67,5 @@
     "parentAssignmentId",
     "state",
     "endReason"
-  ],
-  "additionalProperties": false
+  ]
 }

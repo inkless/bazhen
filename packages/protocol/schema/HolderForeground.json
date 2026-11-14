@@ -29,6 +29,5 @@
     "childStart",
     "pgid",
     "pgidStart"
-  ],
-  "additionalProperties": false
+  ]
 }

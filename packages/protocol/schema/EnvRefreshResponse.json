@@ -42,6 +42,5 @@
     "removed",
     "refused",
     "unchanged"
-  ],
-  "additionalProperties": false
+  ]
 }

@@ -19,6 +19,5 @@
   "required": [
     "idempotencyKey",
     "decision"
-  ],
-  "additionalProperties": false
+  ]
 }

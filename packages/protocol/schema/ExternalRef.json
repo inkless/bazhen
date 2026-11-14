@@ -23,6 +23,5 @@
     "environmentId",
     "kind",
     "id"
-  ],
-  "additionalProperties": false
+  ]
 }

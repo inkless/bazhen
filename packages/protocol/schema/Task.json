@@ -47,6 +47,5 @@
     "state",
     "ownerAgentId",
     "parentTaskId"
-  ],
-  "additionalProperties": false
+  ]
 }

@@ -17,6 +17,5 @@
   "required": [
     "from",
     "to"
-  ],
-  "additionalProperties": false
+  ]
 }

@@ -20,6 +20,5 @@
     "v",
     "epoch",
     "after"
-  ],
-  "additionalProperties": false
+  ]
 }
