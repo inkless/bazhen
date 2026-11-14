@@ -5,15 +5,16 @@ import {
   declaredTokens,
   hasRuntimeCode,
   inheritsWorkspaceLints,
-  lintSuppressions,
+  attributeFailures,
   memberDependencyFailures,
+  memberTargetFailures,
   rootManifestFailures,
   offTokenLines,
   pathCandidates,
   pnpmScripts,
   rustFailures,
   skillFailures,
-  suppressionFailures,
+  unsafeModuleFailures,
 } from "./check-standards.ts";
 
 describe("hasRuntimeCode", () => {
@@ -129,22 +130,33 @@ describe("offTokenLines in scripts and markup", () => {
   });
 });
 
-describe("lintSuppressions", () => {
-  it("reads allow and expect, inner, outer, spaced, over several lines or under cfg_attr", () => {
+const unsafeModules = { "crates/x/src/pty.rs": "the PTY's FFI" };
+const scan = (source: string, file = "crates/x/src/a.rs") =>
+  attributeFailures(file, source, unsafeModules);
+
+describe("attributeFailures", () => {
+  it("names allow and expect, inner, outer, spaced, over several lines or under cfg_attr", () => {
     const source = [
       "#![allow(clippy::pedantic)]",
       '#[expect(clippy::unwrap_used, reason = "x")]',
       "#[cfg_attr(all(test, unix), allow(dead_code))]",
       "# [allow(unused)]",
       '#![expect(\n    unsafe_code,\n    reason = "the PTY (openpty, ioctl)"\n)]',
+      "#[cfg_attr(unix, cfg_attr(test, expect(dead_code)))]",
+      "#[r#allow(dead_code)]",
+      "/* a comment\n   over two lines */ #[allow (dead_code)]",
       "#[warn(missing_docs)]",
+      "#[derive(Debug)] #[cfg(test)] #[must_use]",
     ].join("\n");
-    expect(lintSuppressions(source)).toEqual([
-      { level: "allow", lints: ["clippy::pedantic"] },
-      { level: "expect", lints: ["clippy::unwrap_used"] },
-      { level: "allow", lints: ["dead_code"] },
-      { level: "allow", lints: ["unused"] },
-      { level: "expect", lints: ["unsafe_code"] },
+    expect(scan(source).map((f) => f.split(": ")[0])).toEqual([
+      "crates/x/src/a.rs:1",
+      "crates/x/src/a.rs:2",
+      "crates/x/src/a.rs:3",
+      "crates/x/src/a.rs:4",
+      "crates/x/src/a.rs:5",
+      "crates/x/src/a.rs:9",
+      "crates/x/src/a.rs:10",
+      "crates/x/src/a.rs:12",
     ]);
   });
 
@@ -155,36 +167,112 @@ describe("lintSuppressions", () => {
       'let u = "http://x"; #[allow(unused)]',
       '#[cfg_attr(feature = "a[b]", allow(missing_docs))]',
     ].join("\n");
-    expect(lintSuppressions(source).map((s) => s.lints[0])).toEqual([
-      "clippy::unwrap_used",
-      "dead_code",
-      "unused",
-      "missing_docs",
+    expect(scan(source)).toHaveLength(4);
+  });
+
+  it("leaves an attribute written in a comment, a string, a char or a raw string alone", () => {
+    const source = [
+      "// never #[allow(clippy::pedantic)]",
+      "/// see `#[expect(dead_code)]` and # alone",
+      "/* #[allow(x)] /* nested */ still a comment */",
+      'let s = "#[allow(y)] #";',
+      'let r = r##"a "#[allow(z)]" b"##; let b = br##"#"##;',
+      "let c = '#'; let q = '\"'; fn f<'a>(x: &'a str) {}",
+      'let r#type = 1; let allow_list = include_str!("x");',
+    ].join("\n");
+    expect(scan(source)).toEqual([]);
+  });
+
+  it("refuses a # a macro emits apart from its bracket, and an attribute it builds", () => {
+    const split = "macro_rules! pound { ($($t:tt)*) => { # $($t)* }; }";
+    const call = "pound! { [expect(clippy::cast_possible_truncation)] fn f() {} }";
+    const built = "macro_rules! m { ($a:meta) => { #[$a] fn g() {} } }";
+    const inner = "macro_rules! m { ($($t:tt)*) => { #[ $($t)* ] fn g() {} } }";
+    const token = "m!(#);";
+    expect([scan(`${split}\n${call}`), scan(built), scan(inner), scan(token)]).toEqual([
+      [expect.stringContaining("crates/x/src/a.rs:1: a `#` that doesn't begin an attribute")],
+      [expect.stringContaining("is built by a macro")],
+      [expect.stringContaining("is built by a macro")],
+      [expect.stringContaining("doesn't begin an attribute")],
     ]);
   });
 
-  it("leaves an attribute written in a comment, a string or a raw string alone", () => {
-    const source = [
-      "// never #[allow(clippy::pedantic)]",
-      "/// see `#[expect(dead_code)]`",
-      "/* #[allow(x)] /* nested */ still a comment */",
-      'let s = "#[allow(y)]";',
-      'let r = r#"a "#[allow(z)]" b"#;',
-      "let c = '\\''; let q = '\"'; fn f<'a>(x: &'a str) {}",
+  it("refuses code from a file the scan doesn't read, however include! is reached", () => {
+    expect([
+      scan('include!("../extra.txt");'),
+      scan('std::include!("x.rs");'),
+      scan("use core::include as inc;"),
+      scan('macro_rules! call { ($m:ident) => { $m!("x.txt") } }'),
+      scan('#[path = "../outside.txt"] mod outside;'),
+      scan('#[cfg_attr(unix, path = "unix.rs")] mod sys;'),
+    ]).toEqual([
+      [expect.stringContaining("`include`")],
+      [expect.stringContaining("`include`")],
+      [expect.stringContaining("`include`")],
+      [expect.stringContaining("`$m!`")],
+      [expect.stringContaining("from a path the checks don't read")],
+      [expect.stringContaining("from a path the checks don't read")],
+    ]);
+  });
+
+  it("lets only an unsafe module expect unsafe_code, inner and with a reason, and nothing else", () => {
+    const unsafeCode = '#![expect(unsafe_code, reason = "the PTY\'s FFI (openpty, ioctl)")]\n';
+    expect(scan(unsafeCode, "crates/x/src/pty.rs")).toEqual([]);
+    expect(scan(unsafeCode)).toHaveLength(1);
+    const more = [
+      "#![allow(unsafe_code)]",
+      '#![expect(unsafe_code, dead_code, reason = "x")]',
+      "#![expect(unsafe_code)]",
+      '#[expect(unsafe_code, reason = "x")] fn f() {}',
     ].join("\n");
-    expect(lintSuppressions(source)).toEqual([]);
+    expect(scan(more, "crates/x/src/pty.rs")).toHaveLength(4);
   });
 });
 
-describe("suppressionFailures", () => {
-  const unsafeModules = { "crates/x/src/pty.rs": "the PTY's FFI" };
+describe("unsafeModuleFailures", () => {
+  it("accepts a module with no children", () => {
+    expect(unsafeModuleFailures("crates/x/src/pty.rs", "fn open() {}\n// mod later;\n")).toEqual(
+      [],
+    );
+  });
 
-  it("lets only an unsafe module expect unsafe_code, and nothing else", () => {
-    const unsafeCode = '#![expect(unsafe_code, reason = "the PTY\'s FFI (openpty, ioctl)")]\n';
-    expect(suppressionFailures("crates/x/src/pty.rs", unsafeCode, unsafeModules)).toEqual([]);
-    expect(suppressionFailures("crates/x/src/a.rs", unsafeCode, unsafeModules)).toHaveLength(1);
-    const more = "#![allow(unsafe_code)]\n#![expect(unsafe_code, dead_code)]\n";
-    expect(suppressionFailures("crates/x/src/pty.rs", more, unsafeModules)).toHaveLength(2);
+  it("refuses a crate root, and a module declaring a child, inline or in a file", () => {
+    expect([
+      unsafeModuleFailures("crates/x/src/lib.rs", ""),
+      unsafeModuleFailures("crates/x/src/main.rs", ""),
+      unsafeModuleFailures("crates/x/src/bin/tool.rs", ""),
+      unsafeModuleFailures("crates/x/src/pty.rs", "mod ffi;\n#[cfg(test)]\nmod tests {}\n"),
+    ]).toEqual([
+      [expect.stringContaining("is a crate root")],
+      [expect.stringContaining("is a crate root")],
+      [expect.stringContaining("is a crate root")],
+      [expect.stringContaining("`mod ffi;`"), expect.stringContaining("`mod tests {`")],
+    ]);
+  });
+});
+
+const targetFailures = (text: string) => memberTargetFailures("crates/a/Cargo.toml", text);
+
+describe("memberTargetFailures", () => {
+  it("accepts targets where Cargo looks by default", () => {
+    const manifest = '[package]\nname = "a"\n\n[[bin]]\nname = "a"\n\n[lib]\ndoctest = false\n';
+    expect(memberTargetFailures("crates/a/Cargo.toml", manifest)).toEqual([]);
+  });
+
+  it("refuses a target path and a proc macro, however the table is written", () => {
+    expect([
+      targetFailures('[lib]\npath = "src/lib.txt"\n'),
+      targetFailures('[[bin]]\nname = "a"\npath="../x.rs"\n'),
+      targetFailures('lib.path = "src/lib.txt"\n'),
+      targetFailures('lib = { name = "a", path = "x.rs" }\n'),
+      targetFailures("[lib]\nproc-macro = true\n"),
+    ]).toEqual([
+      [expect.stringContaining("points a target")],
+      [expect.stringContaining("points a target")],
+      [expect.stringContaining("points a target")],
+      [expect.stringContaining("points a target")],
+      [expect.stringContaining("proc macro")],
+    ]);
   });
 });
 
@@ -221,6 +309,8 @@ describe("rustFailures", () => {
     "crates/b/Cargo.toml": "[package]\n",
     "crates/b/src/lib.rs": "#[expect(dead_code)]\nfn f() {}\n",
     "crates/b/src/meta.rs": "macro_rules! m { ($a:meta) => { #[$a] fn g() {} } }\n",
+    "crates/b/src/pty.rs": "mod ffi;\n",
+    "crates/c/Cargo.toml": `${member}\n[lib]\npath = "src/lib.txt"\n`,
     "apps/x/Cargo.toml": member,
     "crates/a/b/Cargo.toml": member,
     "apps/x/src/sneaky.rs": "#![expect(unsafe_code)]\n",
@@ -232,8 +322,10 @@ describe("rustFailures", () => {
   };
   const failures = rustFailures(Object.keys(repo), (p) => repo[p] ?? "", {
     "crates/a/src/gone.rs": "a module since removed",
+    "crates/b/src/pty.rs": "the PTY's FFI",
   });
-  const about = (path: string) => failures.filter((f) => f.startsWith(`${path}: `));
+  const about = (path: string) =>
+    failures.filter((f) => f.replace(/^([^:]+):\d+: /, "$1: ").startsWith(`${path}: `));
 
   it("refuses a crate or Rust source anywhere but crates/<name>", () => {
     expect([
@@ -257,8 +349,8 @@ describe("rustFailures", () => {
     ]).toEqual([
       [],
       [expect.stringContaining("needs `[lints]`")],
-      [expect.stringContaining("#[expect(dead_code)]")],
-      [expect.stringContaining("passes an attribute through")],
+      [expect.stringContaining("#[expect(dead_code)] suppresses a lint")],
+      [expect.stringContaining("is built by a macro")],
       [],
     ]);
   });
@@ -274,6 +366,13 @@ describe("rustFailures", () => {
       [expect.stringContaining("only the root clippy.toml")],
       [expect.stringContaining("its defaults")],
       [expect.stringContaining("one toolchain pin")],
+    ]);
+  });
+
+  it("reads each listed unsafe module, and each member's targets", () => {
+    expect([about("crates/b/src/pty.rs"), about("crates/c/Cargo.toml")]).toEqual([
+      [expect.stringContaining("declares a child module")],
+      [expect.stringContaining("points a target")],
     ]);
   });
 

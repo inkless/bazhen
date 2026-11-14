@@ -375,15 +375,17 @@ function checkAgentContext(): void {
 }
 
 // The modules that may hold `unsafe` code, each with why it must (docs/standards/rust.md § Unsafe).
-// Each may set `#[expect(unsafe_code, reason = "...")]`, and nothing else in crates/ may.
+// Each may set `#![expect(unsafe_code, reason = "...")]`, and nothing else in crates/ may.
 const UNSAFE_MODULES: Record<string, string> = {};
 
 const RAW_STRING = /r(#*)"/y;
 const isIdent = (c: string | undefined) => c !== undefined && /\w/.test(c);
+const newlinesIn = (text: string) => text.replaceAll(/[^\n]/g, "");
 
 /**
  * Rust source with its comments removed and every string and char literal emptied, so neither a
- * `//` in a string nor an attribute quoted in one changes what the attributes are.
+ * `//` in a string nor an attribute quoted in one changes what the attributes are. Newlines are
+ * kept, so a line in the result is the same line in the source.
  */
 export function rustCode(source: string): string {
   let out = "";
@@ -391,6 +393,7 @@ export function rustCode(source: string): string {
   while (i < source.length) {
     const c = source[i] ?? "";
     const next = source[i + 1];
+    const start = i;
     if (c === "/" && next === "/") {
       while (i < source.length && source[i] !== "\n") i++;
     } else if (c === "/" && next === "*") {
@@ -402,7 +405,7 @@ export function rustCode(source: string): string {
         depth += step;
         i += step === 0 ? 1 : 2;
       }
-      out += " ";
+      out += ` ${newlinesIn(source.slice(start, i))}`;
     } else if (c === "r" && !isIdent(source[i - 1] === "b" ? source[i - 2] : source[i - 1])) {
       RAW_STRING.lastIndex = i;
       const raw = RAW_STRING.exec(source);
@@ -414,12 +417,12 @@ export function rustCode(source: string): string {
       const close = `"${raw[1] ?? ""}`;
       const end = source.indexOf(close, i + raw[0].length);
       i = end === -1 ? source.length : end + close.length;
-      out += '""';
+      out += `""${newlinesIn(source.slice(start, i))}`;
     } else if (c === '"') {
       i++;
       while (i < source.length && source[i] !== '"') i += source[i] === "\\" ? 2 : 1;
       i++;
-      out += '""';
+      out += `""${newlinesIn(source.slice(start, i))}`;
     } else if (c === "'" && (next === "\\" || source[i + 2] === "'")) {
       i += next === "\\" ? 3 : 1;
       while (i < source.length && source[i] !== "'") i++;
@@ -433,37 +436,97 @@ export function rustCode(source: string): string {
   return out;
 }
 
-const LINT_LEVEL = /#\s*!?\s*\[\s*(?:cfg_attr\s*\([^\]]*?,\s*)?(allow|expect)\s*\(([^)]*)\)/g;
-
-/** Each `allow(...)` or `expect(...)` lint attribute in Rust source, comments and strings aside. */
-export function lintSuppressions(source: string): { level: string; lints: string[] }[] {
-  return [...rustCode(source).matchAll(LINT_LEVEL)].map(([, level = "", list = ""]) => ({
-    level,
-    lints: list
-      .replace(/reason\s*=\s*""/g, "")
-      .split(",")
-      .map((l) => l.trim())
-      .filter((l) => l !== ""),
-  }));
+/** The index just past the `]` that closes the `[` at `open`, or the end of `code`. */
+function closingBracket(code: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < code.length; i++) {
+    if (code[i] === "[") depth++;
+    else if (code[i] === "]" && --depth === 0) return i + 1;
+  }
+  return code.length;
 }
 
-/** Why each lint suppression in `file` is not allowed: none at all, but `unsafe_code` in an unsafe module. */
-export function suppressionFailures(
+const UNSAFE_EXPECT = /^expect\s*\(\s*unsafe_code\s*,\s*reason\s*=\s*""\s*,?\s*\)$/;
+const SEE_RUST_MD = "(docs/standards/rust.md § Lints).";
+
+/**
+ * Why the attributes in a Rust file don't hold to the standard. Every `#` must begin an attribute
+ * written out in full, so a macro can't assemble one from tokens no scan reads; no attribute may
+ * allow or expect a lint, but an unsafe module's `#![expect(unsafe_code)]`; and no code may come
+ * from a file the scan doesn't read (`include!`, `#[path]`).
+ */
+export function attributeFailures(
   file: string,
   source: string,
   unsafeModules: Record<string, string>,
 ): string[] {
-  return lintSuppressions(source)
-    .filter(
-      ({ level, lints }) =>
-        !(file in unsafeModules && level === "expect" && lints.join() === "unsafe_code"),
-    )
-    .map(
-      ({ level, lints }) =>
-        `${file}: #[${level}(${lints.join(", ")})] suppresses a lint. Fix the code instead; the ` +
-        "only exceptions are the workspace allow-list in Cargo.toml and UNSAFE_MODULES in " +
-        "scripts/check-standards.ts (docs/standards/rust.md).",
+  const code = rustCode(source);
+  const out: string[] = [];
+  const at = (i: number) => `${file}:${code.slice(0, i).split("\n").length}`;
+  for (let i = code.indexOf("#"); i !== -1; i = code.indexOf("#", i + 1)) {
+    if (code[i - 1] === "r" && !isIdent(code[i - 2]) && isIdent(code[i + 1])) continue;
+    const head = /^#\s*(!?)\s*\[/.exec(code.slice(i));
+    if (head === null) {
+      out.push(
+        `${at(i)}: a \`#\` that doesn't begin an attribute, as a macro building one from tokens ` +
+          `writes it. Write the attribute out in full ${SEE_RUST_MD}`,
+      );
+      continue;
+    }
+    const end = closingBracket(code, i + head[0].length - 1);
+    const body = code.slice(i + head[0].length, end - 1).trim();
+    const where = at(i);
+    const attribute = `#${head[1]}[${body.replaceAll(/\s+/g, " ")}]`;
+    i = end - 1;
+    if (body.includes("$")) {
+      out.push(
+        `${where}: ${attribute} is built by a macro, so it could carry a lint suppression no check ` +
+          `sees. Write the attribute out ${SEE_RUST_MD}`,
+      );
+    } else if (/\bpath\s*=/.test(body)) {
+      out.push(
+        `${where}: ${attribute} loads a module from a path the checks don't read. Put the module ` +
+          "where Rust looks for it by default.",
+      );
+    } else if (/\b(allow|expect)\b/.test(body)) {
+      const allowed = file in unsafeModules && head[1] === "!" && UNSAFE_EXPECT.test(body);
+      if (!allowed) {
+        out.push(
+          `${where}: ${attribute} suppresses a lint. Fix the code instead; the only exceptions are ` +
+            "the workspace allow-list in Cargo.toml and an unsafe module's " +
+            "#![expect(unsafe_code)] (UNSAFE_MODULES in scripts/check-standards.ts, " +
+            "docs/standards/rust.md).",
+        );
+      }
+    }
+  }
+  for (const m of code.matchAll(/\binclude\b|\$\s*\w+\s*!/g)) {
+    out.push(
+      `${at(m.index)}: \`${m[0]}\` brings in code the checks don't read, or a macro the scan ` +
+        "can't name. Write the code in a module of the crate.",
     );
+  }
+  return out;
+}
+
+const CRATE_ROOT = /^crates\/[^/]+\/(?:src\/(?:lib|main)\.rs|src\/bin\/.+|build\.rs)$/;
+
+/** Why an unsafe module could let `unsafe` reach beyond its own file. */
+export function unsafeModuleFailures(file: string, source: string): string[] {
+  const out: string[] = [];
+  if (CRATE_ROOT.test(file)) {
+    out.push(
+      `${file}: is a crate root, so its #![expect(unsafe_code)] would cover the whole crate. Keep ` +
+        "the unsafe code in a module of its own (docs/standards/rust.md § Unsafe).",
+    );
+  }
+  for (const m of rustCode(source).matchAll(/\bmod\s+\w+\s*[;{]/g)) {
+    out.push(
+      `${file}: \`${m[0]}\` declares a child module, which its #![expect(unsafe_code)] would ` +
+        "cover too. An unsafe module has no child modules (docs/standards/rust.md § Unsafe).",
+    );
+  }
+  return out;
 }
 
 /** Whether a crate's manifest takes the workspace's lints. */
@@ -555,6 +618,29 @@ export function memberDependencyFailures(manifest: string, text: string): string
   return out;
 }
 
+/**
+ * Why a member manifest's targets could hold code the checks don't read: a target `path` can name
+ * any file, and a proc macro of ours could emit any attribute.
+ */
+export function memberTargetFailures(manifest: string, text: string): string[] {
+  return tomlLines(text).flatMap((line) => {
+    if (/\bproc[-_]macro\s*=\s*true\b/.test(line)) {
+      return [
+        `${manifest}: \`${line}\`: a proc macro of ours could emit attributes no check reads. ` +
+          "Write the code out, or use a macro_rules! macro.",
+      ];
+    }
+    if (/(?:^|[{,.\s])path\s*=/.test(line)) {
+      return [
+        `${manifest}: \`${line}\` points a target at a file of its choosing. Keep each target ` +
+          "where Cargo looks by default (src/lib.rs, src/main.rs, src/bin/, tests/), where " +
+          "the checks read it.",
+      ];
+    }
+    return [];
+  });
+}
+
 /** Why the root manifest's lints or pinned dependencies are not what the standard says. */
 export function rootManifestFailures(text: string): string[] {
   const out: string[] = [];
@@ -607,6 +693,7 @@ export function rustFailures(
         );
       }
       out.push(...memberDependencyFailures(manifest, read(manifest)));
+      out.push(...memberTargetFailures(manifest, read(manifest)));
     }
   }
   for (const file of paths.filter((p) => p.endsWith(".rs"))) {
@@ -614,17 +701,11 @@ export function rustFailures(
       out.push(`${file}: Rust source lives in a crate under crates/, where the checks read it.`);
       continue;
     }
-    const source = read(file);
-    out.push(...suppressionFailures(file, source, unsafeModules));
-    if (/\$\s*\w+\s*:\s*meta\b|#\s*!?\s*\[\s*\$/.test(rustCode(source))) {
-      out.push(
-        `${file}: a macro passes an attribute through (\`$x:meta\` or \`#[$x]\`), which could ` +
-          "carry a lint suppression no check sees. Write the attribute out.",
-      );
-    }
+    out.push(...attributeFailures(file, read(file), unsafeModules));
   }
-  for (const file of Object.keys(unsafeModules).filter((f) => !paths.includes(f))) {
-    out.push(`scripts/check-standards.ts: UNSAFE_MODULES lists missing ${file}.`);
+  for (const file of Object.keys(unsafeModules)) {
+    if (paths.includes(file)) out.push(...unsafeModuleFailures(file, read(file)));
+    else out.push(`scripts/check-standards.ts: UNSAFE_MODULES lists missing ${file}.`);
   }
   for (const file of paths) {
     const base = fileName(file);
