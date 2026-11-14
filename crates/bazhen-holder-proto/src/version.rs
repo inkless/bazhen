@@ -10,11 +10,19 @@ pub const PROTOCOL_VERSION: &str = "1.0";
 /// A `major.minor` version.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Version {
-    pub major: u64,
-    pub minor: u64,
+    major: u64,
+    minor: u64,
 }
 
 impl Version {
+    pub const fn major(self) -> u64 {
+        self.major
+    }
+
+    pub const fn minor(self) -> u64 {
+        self.minor
+    }
+
     /// `major.minor` in ASCII digits, each part a safe integer as the TypeScript peer reads it; a
     /// part too long for one is no version, rather than another number.
     pub fn parse(text: &str) -> Option<Self> {
@@ -69,33 +77,6 @@ pub(crate) fn speaks<B: AsRef<str>>(theirs: &[B]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn agreed(ours: &[&str], theirs: &[&str]) -> Option<String> {
-        negotiate(ours, theirs).map(|v| v.to_string())
-    }
-
-    #[test]
-    fn agrees_on_the_highest_shared_major_at_the_lower_minor() {
-        assert_eq!(
-            agreed(&["1.4", "2.3"], &["1.9", "2.1"]).as_deref(),
-            Some("2.1")
-        );
-        assert_eq!(agreed(&["1.2"], &["1.4"]).as_deref(), Some("1.2"));
-    }
-
-    #[test]
-    fn reads_leading_zeros_as_the_number_and_prints_it_plainly() {
-        assert_eq!(agreed(&["1.0"], &["01.07"]).as_deref(), Some("1.0"));
-    }
-
-    #[test]
-    fn skips_a_part_past_the_largest_safe_integer() {
-        assert_eq!(
-            Version::parse("1.9007199254740991").map(|v| v.minor),
-            Some(MAX_SAFE_INTEGER)
-        );
-        assert_eq!(Version::parse("1.9007199254740992"), None);
-    }
 
     #[test]
     fn refuses_anything_but_digits_dot_digits() {

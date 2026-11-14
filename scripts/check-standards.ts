@@ -633,7 +633,6 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-holder-proto/src/frame.rs::Request::id":
     "returns the variant's id; reads no bytes",
   "crates/bazhen-holder-proto/src/frame.rs::Request::encode": "an encoder: it writes the request",
-  "crates/bazhen-holder-proto/src/frame.rs::Reply::name": "names the variant; reads no bytes",
   "crates/bazhen-holder-proto/src/frame.rs::Reply::code":
     "names the variant's type byte; reads no bytes",
   "crates/bazhen-holder-proto/src/frame.rs::Reply::encode": "an encoder: it writes the reply",
@@ -651,6 +650,8 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-holder-proto/src/frame.rs::hello_request":
     "reached only through FrameDecoder::next_frame, fuzzed",
   "crates/bazhen-holder-proto/src/frame.rs::hello_reply":
+    "reached only through FrameDecoder::next_frame, fuzzed",
+  "crates/bazhen-holder-proto/src/frame.rs::request_body":
     "reached only through FrameDecoder::next_frame, fuzzed",
   "crates/bazhen-holder-proto/src/frame.rs::decode_request":
     "reached only through FrameDecoder::next_frame, fuzzed",

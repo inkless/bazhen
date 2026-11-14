@@ -11,13 +11,25 @@ use serde_json::Value;
 
 /// A body's JSON, as an object, read into `T`.
 pub(crate) fn from_value<T: DeserializeOwned>(value: Value) -> Result<T, serde_json::Error> {
-    if !value.is_object() {
-        return Err(serde_json::Error::custom(format!(
-            "expected an object, not {}",
-            kind(&value)
-        )));
-    }
+    an_object(&value)?;
     T::deserialize(value)
+}
+
+/// `from_value`, from a borrow.
+pub(crate) fn from_ref<T: DeserializeOwned>(value: &Value) -> Result<T, serde_json::Error> {
+    an_object(value)?;
+    T::deserialize(value)
+}
+
+fn an_object(value: &Value) -> Result<(), serde_json::Error> {
+    if value.is_object() {
+        Ok(())
+    } else {
+        Err(serde_json::Error::custom(format!(
+            "expected an object, not {}",
+            kind(value)
+        )))
+    }
 }
 
 fn kind(value: &Value) -> &'static str {

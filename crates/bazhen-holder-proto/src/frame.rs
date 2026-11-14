@@ -3,6 +3,8 @@
 //! request's u32 id. This is `packages/protocol/src/holder-frame.ts`, which each rule here
 //! follows: the layout holds in every major.
 
+use std::borrow::Cow;
+
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
@@ -57,9 +59,32 @@ pub mod reply_code {
 }
 
 const HEADER: usize = 4;
+/// What a decoder's buffer keeps allocated between reads.
+const KEPT_CAPACITY: usize = 64 << 10;
 const LAST_REQUEST: u8 = 0x7f;
 const FIRST_REPLY: u8 = 0x81;
 const EVENTS: std::ops::RangeInclusive<u8> = 0xc0..=0xef;
+
+/// A request's name as `ok` and `error` give it in their `request`, from its type byte: one this
+/// build doesn't know is named by the byte, as `0x2a`.
+pub fn request_name(code: u8) -> Cow<'static, str> {
+    let name = match code {
+        request_code::HELLO => "hello",
+        request_code::SNAPSHOT => "snapshot",
+        request_code::STATS => "stats",
+        request_code::FOREGROUND => "foreground",
+        request_code::SUBSCRIBE => "subscribe",
+        request_code::INPUT => "input",
+        request_code::RESIZE => "resize",
+        request_code::CLOSE => "close",
+        request_code::SIGNAL => "signal",
+        request_code::RESPAWN => "respawn",
+        request_code::SET_TAGS => "set-tags",
+        request_code::SET_THEME => "set-theme",
+        _ => return Cow::Owned(format!("{code:#04x}")),
+    };
+    Cow::Borrowed(name)
+}
 
 /// The id a client gives a request, which the reply to it carries back.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -166,23 +191,48 @@ pub enum Reply {
     },
 }
 
+/// The most of a refusal's reason kept, in characters: a reason can quote the peer's bytes, and a
+/// holder may log it.
+const REASON_MAX_CHARS: usize = 200;
+
 /// Why a frame was refused. A decoder that met one decodes nothing more: its connection can't be
 /// trusted to be in step, so the caller closes it.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[error("{reason}")]
 pub struct Malformed {
     reason: String,
+    invalid_request: Option<(u8, RequestId)>,
 }
 
 impl Malformed {
-    pub(crate) fn new(reason: impl Into<String>) -> Self {
+    /// The reason escaped and cut short, so a peer's control bytes never reach a log raw.
+    pub(crate) fn new(reason: impl AsRef<str>) -> Self {
         Self {
-            reason: reason.into(),
+            reason: reason
+                .as_ref()
+                .escape_debug()
+                .take(REASON_MAX_CHARS)
+                .collect(),
+            invalid_request: None,
+        }
+    }
+
+    fn of_request(self, code: u8, id: RequestId) -> Self {
+        Self {
+            invalid_request: Some((code, id)),
+            ..self
         }
     }
 
     pub fn reason(&self) -> &str {
         &self.reason
+    }
+
+    /// The request whose body failed, by type byte and id, when its id could be read. `holder/1`
+    /// answers that request `error` coded `invalid` and then closes the connection; any other
+    /// refusal closes it at once.
+    pub fn invalid_request(&self) -> Option<(u8, RequestId)> {
+        self.invalid_request
     }
 }
 
@@ -224,22 +274,9 @@ fn with_offset(head: &[u8], offset: Offset) -> Vec<u8> {
 }
 
 impl Request {
-    pub fn name(&self) -> &'static str {
-        match self {
-            Self::Hello { .. } => "hello",
-            Self::Snapshot { .. } => "snapshot",
-            Self::Stats { .. } => "stats",
-            Self::Foreground { .. } => "foreground",
-            Self::Subscribe { .. } => "subscribe",
-            Self::Input { .. } => "input",
-            Self::Resize { .. } => "resize",
-            Self::Close { .. } => "close",
-            Self::Signal { .. } => "signal",
-            Self::Respawn { .. } => "respawn",
-            Self::SetTags { .. } => "set-tags",
-            Self::SetTheme { .. } => "set-theme",
-            Self::Unknown { .. } => "unknown",
-        }
+    /// The request as `ok` and `error` name it in their `request`.
+    pub fn name(&self) -> Cow<'static, str> {
+        request_name(self.code())
     }
 
     pub fn code(&self) -> u8 {
@@ -303,25 +340,6 @@ impl Request {
 }
 
 impl Reply {
-    pub fn name(&self) -> &'static str {
-        match self {
-            Self::Hello { .. } => "hello",
-            Self::Snapshot { .. } => "snapshot",
-            Self::Stats { .. } => "stats",
-            Self::Foreground { .. } => "foreground",
-            Self::Data { .. } => "data",
-            Self::Gap(_) => "gap",
-            Self::Resized(_) => "resized",
-            Self::Title(_) => "title",
-            Self::Alternate(_) => "alternate",
-            Self::Exited(_) => "exited",
-            Self::Respawned(_) => "respawned",
-            Self::Ok { .. } => "ok",
-            Self::Error { .. } => "error",
-            Self::Unknown { .. } => "unknown",
-        }
-    }
-
     pub fn code(&self) -> u8 {
         match self {
             Self::Hello { .. } => reply_code::HELLO,
@@ -405,6 +423,11 @@ fn read<T: DeserializeOwned>(what: &str, value: serde_json::Value) -> Result<T, 
     json::from_value(value).map_err(|e| Malformed::new(format!("{what}: {e}")))
 }
 
+/// The frozen part of a body, read from a borrow so the rest isn't copied to read it.
+fn read_frozen<T: DeserializeOwned>(what: &str, value: &serde_json::Value) -> Result<T, Malformed> {
+    json::from_ref(value).map_err(|e| Malformed::new(format!("{what}: {e}")))
+}
+
 fn body<T: DeserializeOwned>(what: &str, payload: &[u8]) -> Result<T, Malformed> {
     read(what, parse(what, payload)?)
 }
@@ -414,7 +437,7 @@ fn body<T: DeserializeOwned>(what: &str, payload: &[u8]) -> Result<T, Malformed>
 /// doesn't know, is left unread rather than refused.
 fn hello_request(payload: &[u8]) -> Result<HelloRequest, Malformed> {
     let value = parse("hello", payload)?;
-    let frozen: FrozenProtocol = read("hello", value.clone())?;
+    let frozen: FrozenProtocol = read_frozen("hello", &value)?;
     if !speaks(&frozen.protocol.texts()) {
         return Ok(HelloRequest {
             protocol: frozen.protocol,
@@ -427,7 +450,7 @@ fn hello_request(payload: &[u8]) -> Result<HelloRequest, Malformed> {
 /// A hello reply: its frozen `version` first, which says which major's schema the rest is in.
 fn hello_reply(payload: &[u8]) -> Result<HelloReply, Malformed> {
     let value = parse("hello", payload)?;
-    let frozen: FrozenHelloReply = read("hello", value.clone())?;
+    let frozen: FrozenHelloReply = read_frozen("hello", &value)?;
     if !speaks(&[frozen.version.as_str()]) {
         return Err(Malformed::new(format!(
             "hello agrees on {}, a major this build doesn't speak",
@@ -442,6 +465,10 @@ fn decode_request(code: u8, payload: &[u8]) -> Result<Request, Malformed> {
         return Err(Malformed::new(format!("{code:#x} is no request's type")));
     }
     let (id, rest) = split_id(&format!("request {code:#x}"), payload)?;
+    request_body(code, id, rest).map_err(|e| e.of_request(code, id))
+}
+
+fn request_body(code: u8, id: RequestId, rest: &[u8]) -> Result<Request, Malformed> {
     Ok(match code {
         request_code::HELLO => Request::Hello {
             id,
@@ -560,6 +587,9 @@ fn decode_reply(code: u8, payload: &[u8]) -> Result<Reply, Malformed> {
 #[derive(Debug)]
 pub struct FrameDecoder<F> {
     buffer: Vec<u8>,
+    /// Where the next frame starts in `buffer`: frames are read from here, and the bytes before it
+    /// dropped once per `push`, so many small frames in one read cost one copy, not one each.
+    start: usize,
     max: usize,
     refused: Option<Malformed>,
     decode: fn(u8, &[u8]) -> Result<F, Malformed>,
@@ -579,17 +609,28 @@ impl<F> FrameDecoder<F> {
     fn new(max: usize, decode: fn(u8, &[u8]) -> Result<F, Malformed>) -> Self {
         Self {
             buffer: Vec::new(),
+            start: 0,
             max,
             refused: None,
             decode,
         }
     }
 
-    /// Takes the next bytes the connection read. Ignored once a frame has been refused.
+    /// Takes the next bytes the connection read, to be drained with `next_frame` before the next
+    /// read. Ignored once a frame has been refused.
     pub fn push(&mut self, chunk: &[u8]) {
-        if self.refused.is_none() {
-            self.buffer.extend_from_slice(chunk);
+        if self.refused.is_some() {
+            return;
         }
+        if self.start > 0 {
+            self.buffer.drain(..self.start);
+            self.start = 0;
+        }
+        // A near-cap frame leaves its capacity behind, held for the connection's life otherwise.
+        if self.buffer.len() <= KEPT_CAPACITY {
+            self.buffer.shrink_to(KEPT_CAPACITY);
+        }
+        self.buffer.extend_from_slice(chunk);
     }
 
     /// The next whole frame, or `None` until more bytes come.
@@ -605,12 +646,14 @@ impl<F> FrameDecoder<F> {
         if let Err(refused) = &next {
             self.refused = Some(refused.clone());
             self.buffer = Vec::new();
+            self.start = 0;
         }
         next
     }
 
     fn take(&mut self) -> Result<Option<F>, Malformed> {
-        let Some((header, rest)) = self.buffer.split_first_chunk::<HEADER>() else {
+        let pending = self.buffer.get(self.start..).unwrap_or_default();
+        let Some((header, rest)) = pending.split_first_chunk::<HEADER>() else {
             return Ok(None);
         };
         let length = u32::from_be_bytes(*header);
@@ -632,7 +675,7 @@ impl<F> FrameDecoder<F> {
             };
         };
         let frame = (self.decode)(*code, payload);
-        self.buffer.drain(..HEADER + length);
+        self.start += HEADER + length;
         frame.map(Some)
     }
 }
@@ -706,6 +749,50 @@ mod tests {
     }
 
     #[test]
+    fn takes_a_reply_over_the_request_cap_up_to_its_own() {
+        let frame = Reply::Data {
+            offset: Bounded::new(0).unwrap(),
+            bytes: vec![7; MAX_REQUEST_BYTES],
+        };
+        let encoded = frame.encode().unwrap();
+        assert_eq!(
+            decode_all(reply_decoder(), &[&encoded]).unwrap(),
+            vec![frame]
+        );
+    }
+
+    #[test]
+    fn names_the_request_to_answer_invalid_when_only_its_body_failed() {
+        let body = [
+            &[0, 0, 0, 12, request_code::SET_THEME, 0, 0, 0, 9][..],
+            b"{\"x\":1}",
+        ]
+        .concat();
+        let mut decoder = request_decoder();
+        decoder.push(&body);
+        let refused = decoder.next_frame().unwrap_err();
+        assert_eq!(
+            refused.invalid_request(),
+            Some((request_code::SET_THEME, RequestId(9)))
+        );
+        let mut decoder = request_decoder();
+        decoder.push(&[0, 0, 0, 3, request_code::SET_THEME, 0, 0]);
+        assert_eq!(decoder.next_frame().unwrap_err().invalid_request(), None);
+    }
+
+    #[test]
+    fn escapes_and_cuts_short_the_peer_bytes_a_reason_quotes() {
+        let signal = format!("\u{1b}[2J{}", "x".repeat(10_000));
+        let json = serde_json::to_vec(&serde_json::json!({ "signal": signal })).unwrap();
+        let length = u32::try_from(json.len() + 5).unwrap().to_be_bytes();
+        let mut decoder = request_decoder();
+        decoder.push(&[&length[..], &[request_code::SIGNAL, 0, 0, 0, 1], &json].concat());
+        let reason = decoder.next_frame().unwrap_err().reason().to_owned();
+        assert!(!reason.contains('\u{1b}'), "{reason}");
+        assert!(reason.chars().count() <= 200, "{}", reason.len());
+    }
+
+    #[test]
     fn decodes_nothing_more_once_a_frame_is_refused() {
         let good = Request::Close { id: RequestId(2) }.encode().unwrap();
         let mut decoder = request_decoder();
@@ -751,7 +838,8 @@ mod tests {
         any::<u32>().prop_map(RequestId)
     }
 
-    fn count() -> impl Strategy<Value = Offset> {
+    fn count<K: Copy + std::fmt::Debug + 'static>()
+    -> impl Strategy<Value = Bounded<0, MAX_SAFE_INTEGER, K>> {
         (0..=MAX_SAFE_INTEGER).prop_map(|n| Bounded::new(n).unwrap())
     }
 

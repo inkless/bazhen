@@ -3,11 +3,13 @@
 //! read, so a value that exists is valid and encoding it can't fail on a field.
 
 use std::collections::BTreeMap;
+use std::marker::PhantomData;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::json;
+use crate::version::{PROTOCOL_VERSION, Version};
 
 /// The largest integer a JSON number holds exactly for a JavaScript peer, `2^53 - 1`. Every
 /// integer in `holder/1` is at most this, a binary frame's u64 offset included.
@@ -28,18 +30,19 @@ pub const RESERVED_TAG_NAMES: [&str; 3] = ["__proto__", "constructor", "prototyp
 #[error("{0}")]
 pub struct Invalid(String);
 
-/// An integer in `MIN..=MAX`.
+/// An integer in `MIN..=MAX`. `K` tells apart integers with the same bounds and other meanings,
+/// so an offset can't be passed where a generation is wanted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(try_from = "u64", into = "u64")]
-pub struct Bounded<const MIN: u64, const MAX: u64>(u64);
+#[serde(try_from = "u64", into = "u64", bound = "K: Copy")]
+pub struct Bounded<const MIN: u64, const MAX: u64, K = ()>(u64, PhantomData<K>);
 
-impl<const MIN: u64, const MAX: u64> Bounded<MIN, MAX> {
+impl<const MIN: u64, const MAX: u64, K> Bounded<MIN, MAX, K> {
     /// # Errors
     ///
     /// When `n` is outside `MIN..=MAX`.
     pub fn new(n: u64) -> Result<Self, Invalid> {
         if (MIN..=MAX).contains(&n) {
-            Ok(Self(n))
+            Ok(Self(n, PhantomData))
         } else {
             Err(Invalid(format!("{n} is outside {MIN}..={MAX}")))
         }
@@ -50,7 +53,7 @@ impl<const MIN: u64, const MAX: u64> Bounded<MIN, MAX> {
     }
 }
 
-impl<const MIN: u64, const MAX: u64> TryFrom<u64> for Bounded<MIN, MAX> {
+impl<const MIN: u64, const MAX: u64, K> TryFrom<u64> for Bounded<MIN, MAX, K> {
     type Error = Invalid;
 
     fn try_from(n: u64) -> Result<Self, Invalid> {
@@ -58,22 +61,38 @@ impl<const MIN: u64, const MAX: u64> TryFrom<u64> for Bounded<MIN, MAX> {
     }
 }
 
-impl<const MIN: u64, const MAX: u64> From<Bounded<MIN, MAX>> for u64 {
-    fn from(n: Bounded<MIN, MAX>) -> Self {
+impl<const MIN: u64, const MAX: u64, K> From<Bounded<MIN, MAX, K>> for u64 {
+    fn from(n: Bounded<MIN, MAX, K>) -> Self {
         n.0
     }
 }
 
+/// Tells an `Offset` apart from other integers with its bounds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct OffsetKind;
+/// Tells a `Generation` apart from other integers with its bounds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct GenerationKind;
+/// Tells a `StartTime` apart from other integers with its bounds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct StartTimeKind;
+/// Tells `Cols` apart from `Rows`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ColsKind;
+/// Tells `Rows` apart from `Cols`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RowsKind;
+
 pub type Count = Bounded<0, MAX_SAFE_INTEGER>;
 /// A byte offset in the terminal's output since its generation began.
-pub type Offset = Count;
-pub type Generation = Count;
+pub type Offset = Bounded<0, MAX_SAFE_INTEGER, OffsetKind>;
+pub type Generation = Bounded<0, MAX_SAFE_INTEGER, GenerationKind>;
 /// Epoch seconds, as `ps -o lstart` gives a process's start, so a pid can be checked for reuse.
-pub type StartTime = Count;
+pub type StartTime = Bounded<0, MAX_SAFE_INTEGER, StartTimeKind>;
 pub type Pid = Bounded<1, MAX_SAFE_INTEGER>;
 /// Up to the maximum; the holder clamps a size too small to use, a zero included.
-pub type Cols = Bounded<0, MAX_COLS>;
-pub type Rows = Bounded<0, MAX_ROWS>;
+pub type Cols = Bounded<0, MAX_COLS, ColsKind>;
+pub type Rows = Bounded<0, MAX_ROWS, RowsKind>;
 pub type HistoryLines = Bounded<0, MAX_HISTORY_LINES>;
 
 /// An exit code: any integer a JavaScript peer holds exactly, negative ones included.
@@ -184,6 +203,11 @@ impl Versions {
         &self.0
     }
 
+    /// The versions this build speaks, as a holder lists them in its hello reply.
+    pub fn spoken() -> Self {
+        Self(vec![Utf8(PROTOCOL_VERSION.to_owned())])
+    }
+
     pub(crate) fn texts(&self) -> Vec<&str> {
         self.0.iter().map(Utf8::as_str).collect()
     }
@@ -203,7 +227,7 @@ impl From<Versions> for Vec<VersionText> {
     }
 }
 
-impl AsRef<str> for Utf8<VERSION_MAX_BYTES> {
+impl<const MAX: usize, const MIN: usize> AsRef<str> for Utf8<MAX, MIN> {
     fn as_ref(&self) -> &str {
         &self.0
     }
@@ -237,6 +261,12 @@ impl TryFrom<String> for ProtocolVersion {
 
     fn try_from(text: String) -> Result<Self, Invalid> {
         Self::new(text)
+    }
+}
+
+impl From<Version> for ProtocolVersion {
+    fn from(version: Version) -> Self {
+        Self(version.to_string())
     }
 }
 
@@ -414,8 +444,10 @@ pub struct Size {
     pub rows: Rows,
 }
 
+/// Read from a JSON string only: serde would also read an enum from a one-key object
+/// (`{"SIGINT": null}`), which zod refuses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "UPPERCASE")]
+#[serde(try_from = "String", into = "&'static str")]
 pub enum Signal {
     Sigint,
     Sigterm,
@@ -423,12 +455,71 @@ pub enum Signal {
     Sigkill,
 }
 
-/// The background a program is told it is drawn on, when it asks.
+impl Signal {
+    pub const ALL: [Self; 4] = [Self::Sigint, Self::Sigterm, Self::Sighup, Self::Sigkill];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Sigint => "SIGINT",
+            Self::Sigterm => "SIGTERM",
+            Self::Sighup => "SIGHUP",
+            Self::Sigkill => "SIGKILL",
+        }
+    }
+}
+
+impl TryFrom<String> for Signal {
+    type Error = Invalid;
+
+    fn try_from(text: String) -> Result<Self, Invalid> {
+        Self::ALL
+            .into_iter()
+            .find(|signal| signal.as_str() == text)
+            .ok_or_else(|| Invalid(format!("{text:?} is not a holder/1 signal")))
+    }
+}
+
+impl From<Signal> for &'static str {
+    fn from(signal: Signal) -> Self {
+        signal.as_str()
+    }
+}
+
+/// The background a program is told it is drawn on, when it asks. Read from a JSON string only,
+/// as `Signal` is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(try_from = "String", into = "&'static str")]
 pub enum Theme {
     Light,
     Dark,
+}
+
+impl Theme {
+    pub const ALL: [Self; 2] = [Self::Light, Self::Dark];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Light => "light",
+            Self::Dark => "dark",
+        }
+    }
+}
+
+impl TryFrom<String> for Theme {
+    type Error = Invalid;
+
+    fn try_from(text: String) -> Result<Self, Invalid> {
+        Self::ALL
+            .into_iter()
+            .find(|theme| theme.as_str() == text)
+            .ok_or_else(|| Invalid(format!("{text:?} is not a holder/1 theme")))
+    }
+}
+
+impl From<Theme> for &'static str {
+    fn from(theme: Theme) -> Self {
+        theme.as_str()
+    }
 }
 
 /// How a child ended: with a code, by a signal named as in `SIGTERM`, or in a way not known.
@@ -456,7 +547,7 @@ pub struct ProcessSpec {
 }
 
 fn default_history_lines() -> HistoryLines {
-    Bounded(DEFAULT_HISTORY_LINES)
+    Bounded(DEFAULT_HISTORY_LINES, PhantomData)
 }
 
 /// What a holder reads from its stdin when the daemon starts it; `decode_spawn_spec` reads it.
@@ -482,6 +573,19 @@ pub struct SpawnSpec {
     pub size: Size,
     #[serde(default = "default_history_lines")]
     pub history_lines: HistoryLines,
+}
+
+impl SpawnSpec {
+    /// What the terminal runs, as a `respawn` would give it.
+    pub fn process(&self) -> ProcessSpec {
+        ProcessSpec {
+            argv: self.argv.clone(),
+            cwd: self.cwd.clone(),
+            env: self.env.clone(),
+            generation: self.generation,
+            theme: self.theme,
+        }
+    }
 }
 
 /// What every major reads of a spawn spec or a `hello` request first: the frozen `protocol`.
@@ -639,20 +743,61 @@ pub struct OkBody {
     pub request: String,
 }
 
-/// The codes `error` carries in this version. A peer meets newer ones, so `code` is a string and
-/// an unknown one is read as `failed`.
-pub const ERROR_CODES: [&str; 10] = [
-    "unknown-request",
-    "stale-generation",
-    "out-of-range",
-    "invalid",
-    "no-shared-version",
-    "not-writer",
-    "input-full",
-    "exited",
-    "snapshot-too-large",
-    "failed",
-];
+/// The codes `error` carries in this version. A peer meets newer ones, so `ErrorBody::code` is a
+/// string, and `ErrorBody::known_code` reads one this build doesn't know as `Failed`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ErrorCode {
+    /// The holder doesn't know the request's type.
+    UnknownRequest,
+    /// A `subscribe` that crossed a respawn, or a `respawn` not above the current generation.
+    StaleGeneration,
+    /// `subscribe` from past the holder's offset.
+    OutOfRange,
+    /// The request's body failed its schema.
+    Invalid,
+    /// `hello` found no major both sides speak.
+    NoSharedVersion,
+    /// `input` from a connection without the writer slot.
+    NotWriter,
+    /// `input` past what the holder queues for a program that isn't reading.
+    InputFull,
+    /// The request needs a child, and it has exited.
+    Exited,
+    /// A snapshot over the reply cap even with all its history left out.
+    SnapshotTooLarge,
+    /// The holder tried and the system refused.
+    Failed,
+}
+
+impl ErrorCode {
+    pub const ALL: [Self; 10] = [
+        Self::UnknownRequest,
+        Self::StaleGeneration,
+        Self::OutOfRange,
+        Self::Invalid,
+        Self::NoSharedVersion,
+        Self::NotWriter,
+        Self::InputFull,
+        Self::Exited,
+        Self::SnapshotTooLarge,
+        Self::Failed,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::UnknownRequest => "unknown-request",
+            Self::StaleGeneration => "stale-generation",
+            Self::OutOfRange => "out-of-range",
+            Self::Invalid => "invalid",
+            Self::NoSharedVersion => "no-shared-version",
+            Self::NotWriter => "not-writer",
+            Self::InputFull => "input-full",
+            Self::Exited => "exited",
+            Self::SnapshotTooLarge => "snapshot-too-large",
+            Self::Failed => "failed",
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ErrorBody {
@@ -666,6 +811,26 @@ pub struct ErrorBody {
         skip_serializing_if = "Option::is_none"
     )]
     pub protocol: Option<Versions>,
+}
+
+impl ErrorBody {
+    /// An `error` answering the request `request` names, as `crate::request_name` gives it.
+    pub fn new(request: impl Into<String>, code: ErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            request: request.into(),
+            code: code.as_str().to_owned(),
+            message: message.into(),
+            protocol: None,
+        }
+    }
+
+    /// `code` as this build knows it: a code from a newer peer is read as `Failed`.
+    pub fn known_code(&self) -> ErrorCode {
+        ErrorCode::ALL
+            .into_iter()
+            .find(|code| code.as_str() == self.code)
+            .unwrap_or(ErrorCode::Failed)
+    }
 }
 
 #[cfg(test)]
@@ -725,6 +890,32 @@ mod tests {
         );
         assert!(hello(Some(json!(["unknown"]))).is_err());
         assert!(hello(None).is_err());
+    }
+
+    #[test]
+    fn an_enum_is_read_from_its_string_and_never_from_a_one_key_object() {
+        assert_eq!(
+            read::<SignalRequest>(json!({ "signal": "SIGHUP" }))
+                .unwrap()
+                .signal,
+            Signal::Sighup
+        );
+        assert!(read::<SignalRequest>(json!({ "signal": { "SIGHUP": null } })).is_err());
+        assert!(read::<SetThemeRequest>(json!({ "theme": { "dark": null } })).is_err());
+    }
+
+    #[test]
+    fn an_error_names_its_code_and_reads_a_newer_one_as_failed() {
+        let error = ErrorBody::new("input", ErrorCode::NotWriter, "no slot");
+        assert_eq!(
+            (error.code.as_str(), error.known_code()),
+            ("not-writer", ErrorCode::NotWriter)
+        );
+        let newer = ErrorBody {
+            code: "from-a-later-minor".to_owned(),
+            ..error
+        };
+        assert_eq!(newer.known_code(), ErrorCode::Failed);
     }
 
     #[test]

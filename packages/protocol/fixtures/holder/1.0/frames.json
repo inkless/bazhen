@@ -806,6 +806,30 @@
     }
   },
   {
+    "name": "signal as a one-key object, which zod refuses and serde would read",
+    "direction": "request",
+    "hex": "0000001f44000000477b227369676e616c223a7b22534947494e54223a6e756c6c7d7d",
+    "outcome": {
+      "malformed": "signal: signal: Invalid option: expected one of \"SIGINT\"|\"SIGTERM\"|\"SIGHUP\"|\"SIGKILL\""
+    }
+  },
+  {
+    "name": "set-theme as a one-key object",
+    "direction": "request",
+    "hex": "0000001c47000000487b227468656d65223a7b226461726b223a6e756c6c7d7d",
+    "outcome": {
+      "malformed": "set-theme: theme: Invalid option: expected one of \"light\"|\"dark\""
+    }
+  },
+  {
+    "name": "respawn with its theme as a one-key object",
+    "direction": "request",
+    "hex": "000000ba45000000497b2261726776223a5b22636c61756465222c222d2d726573756d65222c22e697a5e69cace8aa9e225d2c22637764223a222f686f6d652f752f737263222c22656e76223a7b2231223a22696e74656765722d6c696b65206b65797320736f727420666972737420696e204a617661536372697074222c225445524d223a22787465726d2d323536636f6c6f72227d2c2267656e65726174696f6e223a342c227468656d65223a7b226c69676874223a6e756c6c7d7d",
+    "outcome": {
+      "malformed": "respawn: theme: Invalid option: expected one of \"light\"|\"dark\""
+    }
+  },
+  {
     "name": "set-theme with no theme, as nullable is never missing",
     "direction": "request",
     "hex": "0000000747000000417b7d",

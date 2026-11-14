@@ -1,18 +1,19 @@
 //! Holds this crate to the fixtures the TypeScript codec writes, for every version kept in
 //! `packages/protocol/fixtures/holder/`. The current version's outcomes must match exactly. For
-//! an older one, what was valid must still decode to the same type and binary fields: a newer
-//! build may add fields to what it re-encodes, and accept what an older one refused.
+//! an older one, what was valid must still decode to the same type and binary fields, and keep
+//! every field it had: a newer build may add fields to what it re-encodes, and accept what an
+//! older one refused.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use bazhen_holder_proto::body::{
-    DEFAULT_HISTORY_LINES, ERROR_CODES, MAX_COLS, MAX_HISTORY_LINES, MAX_ROWS, RESERVED_ENV_NAMES,
+    DEFAULT_HISTORY_LINES, ErrorCode, MAX_COLS, MAX_HISTORY_LINES, MAX_ROWS, RESERVED_ENV_NAMES,
     RESERVED_TAG_NAMES, TAG_NAME_MAX_BYTES, TAG_VALUE_MAX_BYTES, VERSION_MAX_BYTES,
 };
 use bazhen_holder_proto::{
     MAX_REPLY_BYTES, MAX_REQUEST_BYTES, PROTOCOL_VERSION, SpawnSpecError, decode_spawn_spec,
-    negotiate, reply_code, reply_decoder, request_code, request_decoder,
+    negotiate, reply_code, reply_decoder, request_code, request_decoder, request_name,
 };
 use serde_json::{Value, json};
 
@@ -137,9 +138,36 @@ fn matches_canonical(encoded: &[u8], canonical: &Value) -> Result<bool> {
     }
 }
 
+/// True when every field of `old` is in `new` with the same value, at any depth: what a newer build
+/// may add to a body without changing what an older one meant.
+fn keeps(old: &Value, new: &Value) -> bool {
+    match (old, new) {
+        (Value::Object(old), Value::Object(new)) => old
+            .iter()
+            .all(|(key, value)| new.get(key).is_some_and(|kept| keeps(value, kept))),
+        (Value::Array(old), Value::Array(new)) => {
+            old.len() == new.len() && old.iter().zip(new).all(|(old, new)| keeps(old, new))
+        }
+        _ => old == new,
+    }
+}
+
+/// Whether `encoded` keeps a canonical form an older version recorded: the same head, and every
+/// field of its JSON body.
+fn keeps_canonical(encoded: &[u8], canonical: &Value) -> Result<bool> {
+    let head = unhex(text(canonical, "head")?)?;
+    let Some((ours, body)) = encoded.split_at_checked(head.len()) else {
+        return Ok(false);
+    };
+    Ok(ours == head.as_slice()
+        && canonical.get("json").is_none_or(|json| {
+            serde_json::from_slice::<Value>(body).is_ok_and(|body| keeps(json, &body))
+        }))
+}
+
 /// Whether this crate's outcome is the fixture's. `exact` for the current version; otherwise only
-/// what was valid is held to, by its type and binary fields, and what was skipped must still not
-/// be refused, as a newer build may add fields, know new types and accept what was refused.
+/// what was valid is held to, by `keeps_canonical`, and what was skipped must still not be
+/// refused, as a newer build may add fields, know new types and accept what was refused.
 fn agrees(ours: &Outcome, outcome: &Value, exact: bool) -> Result<bool> {
     if let Some(canonical) = outcome.get("canonical") {
         let Outcome::Canonical(encoded) = ours else {
@@ -148,7 +176,7 @@ fn agrees(ours: &Outcome, outcome: &Value, exact: bool) -> Result<bool> {
         return if exact {
             matches_canonical(encoded, canonical)
         } else {
-            Ok(encoded.starts_with(&unhex(text(canonical, "head")?)?))
+            keeps_canonical(encoded, canonical)
         };
     }
     if let Some(unknown) = outcome.get("unknown") {
@@ -245,7 +273,12 @@ fn spawn_spec_mismatches(version: &str, exact: bool) -> Result<Vec<String>> {
             .ok_or(format!("{name}: no outcome"))?;
         let agrees = match (&ours, outcome.get("canonical")) {
             (Ok(spec), Some(canonical)) => {
-                !exact || serde_json::to_value(spec).map_err(|e| e.to_string())? == *canonical
+                let ours = serde_json::to_value(spec).map_err(|e| e.to_string())?;
+                if exact {
+                    ours == *canonical
+                } else {
+                    keeps(canonical, &ours)
+                }
             }
             (Err(_), Some(_)) => false,
             (Err(SpawnSpecError::NoSharedVersion { .. }), None) => {
@@ -354,7 +387,68 @@ fn every_constant_is_the_typescript_one() {
             "HOLDER_MAX_REPLY_BYTES": MAX_REPLY_BYTES,
             "HOLDER_REQUEST_CODES": codes(&request_codes),
             "HOLDER_REPLY_CODES": codes(&reply_codes),
-            "HOLDER_ERROR_CODES": ERROR_CODES,
+            "HOLDER_ERROR_CODES": ErrorCode::ALL.map(ErrorCode::as_str),
         })
+    );
+}
+
+#[test]
+fn every_request_is_named_as_the_typescript_codes_name_it() {
+    let constants = read(PROTOCOL_VERSION, "constants.json").unwrap();
+    let codes = constants["HOLDER_REQUEST_CODES"].as_object().unwrap();
+    for (name, code) in codes {
+        let code = u8::try_from(code.as_u64().unwrap()).unwrap();
+        assert_eq!(request_name(code), name.as_str());
+    }
+    assert_eq!(request_name(0x2a), "0x2a");
+}
+
+/// What a holder reads of a spawn spec to start its child, checked against the JSON it came from.
+#[test]
+fn a_spawn_spec_gives_back_every_field_it_was_read_with() {
+    let fixtures = entries(PROTOCOL_VERSION, "spawn-specs.json").unwrap();
+    let fixture = fixtures
+        .iter()
+        .find(|f| f["name"] == "every field")
+        .unwrap();
+    let json: Value = serde_json::from_str(fixture["json"].as_str().unwrap()).unwrap();
+    let spec = decode_spawn_spec(fixture["json"].as_str().unwrap().as_bytes()).unwrap();
+    let process = spec.process();
+    let strings = |value: &Value| -> Vec<String> {
+        value
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_owned())
+            .collect()
+    };
+    assert_eq!(process.argv.as_slice(), strings(&json["argv"]).as_slice());
+    assert_eq!(
+        serde_json::to_value(process.env.as_map()).unwrap(),
+        json["env"]
+    );
+    assert_eq!(process.cwd.as_ref(), json["cwd"]);
+    assert_eq!(process.generation.get(), json["generation"]);
+    assert_eq!(
+        process.theme.map(bazhen_holder_proto::body::Theme::as_str),
+        json["theme"].as_str()
+    );
+    assert_eq!(spec.terminal_id.as_str(), json["terminalId"]);
+    assert_eq!(spec.socket.as_ref(), json["socket"]);
+    assert_eq!(
+        serde_json::to_value(spec.tags.as_map()).unwrap(),
+        json["tags"]
+    );
+    assert_eq!(
+        spec.protocol
+            .as_slice()
+            .iter()
+            .map(|v| v.as_ref().to_owned())
+            .collect::<Vec<_>>(),
+        strings(&json["protocol"])
+    );
+    assert_eq!(
+        negotiate(spec.protocol.as_slice(), &[PROTOCOL_VERSION]).map(|v| v.to_string()),
+        Some(PROTOCOL_VERSION.to_owned())
     );
 }
