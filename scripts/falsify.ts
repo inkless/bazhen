@@ -392,9 +392,13 @@ async function stopGroup(child: ChildProcess): Promise<void> {
 
 async function onSignal(signal: NodeJS.Signals): Promise<void> {
   signalled = true;
-  if (running) await stopGroup(running);
-  cleanup?.();
-  process.exit(exitCodeFor(signal) ?? 1);
+  try {
+    if (running) await stopGroup(running);
+  } finally {
+    // A timeout may be stopping the same group, and signalGroup throws once it has gone.
+    cleanup?.();
+    process.exit(exitCodeFor(signal) ?? 1);
+  }
 }
 
 const handleSignal = (signal: NodeJS.Signals) => void onSignal(signal);
@@ -629,7 +633,10 @@ async function mutateRustTests(
 
   // A crate's library and binaries share a target, so a new test named as one the base already
   // has there would be credited with the old test's failures.
-  const runnable = added.filter((t) => filterable(t) && !atBase.has(key(t)));
+  const counts = new Map<string, number>();
+  for (const t of added) counts.set(key(t), (counts.get(key(t)) ?? 0) + 1);
+  const shared = (t: RustTest) => (counts.get(key(t)) ?? 0) > 1;
+  const runnable = added.filter((t) => filterable(t) && !atBase.has(key(t)) && !shared(t));
   const baseline = testEvents(
     runnable.length > 0 && mutants.length > 0 ? await runRustTests(dir, top, runnable) : "",
     targets,
@@ -669,6 +676,7 @@ async function mutateRustTests(
     const by = killedBy.get(key(t));
     if (by !== undefined) return { ...t, outcome: "KILLED", note: ` (by ${by})` };
     if (atBase.has(key(t))) return invalidRust(t, "the base has a test of that name in its crate");
+    if (shared(t)) return invalidRust(t, "another new test in its crate has that name");
     if (!filterable(t)) return invalidRust(t, "its name can't be selected to run alone");
     if (mutants.length === 0) return invalidRust(t, "the change has no code to mutate");
     if (!passed.has(key(t)) || broken.has(key(t)))
@@ -702,7 +710,10 @@ async function judgeRustTests(top: string, base: string, head: string) {
       existsSync(path) ? readFileSync(path, "utf8") : undefined,
     );
     if (unsafeConfig.length > 0) {
-      console.error(`falsify: ${unsafeConfig.join("\n")}`);
+      console.error(
+        "falsify: cargo would read this config while it runs the Rust tests in a temporary " +
+          `worktree under ${tmpdir()}:\n${unsafeConfig.join("\n")}`,
+      );
       return undefined;
     }
     addWorktree(dir, base, top);

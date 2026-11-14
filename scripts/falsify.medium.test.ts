@@ -44,6 +44,12 @@ case "$1" in
     exit 0
     ;;
   exec)
+    if [ "\${STUB_HANG:-}" = 1 ]; then
+      echo "HANGING $$" >> "$STUB_LOG"
+      trap 'echo TERMED >> "$STUB_LOG"' TERM
+      i=0
+      while [ $i -lt 20 ]; do sleep 1; i=$((i + 1)); done
+    fi
     for arg in "$@"; do
       case "$arg" in --outputFile=*) out="\${arg#--outputFile=}" ;; esac
     done
@@ -68,7 +74,8 @@ if [ "$2" = run ]; then
     if [ "\${STUB_STUBBORN:-}" = 1 ]; then
       # Outlasts SIGTERM, so falsify waits out its grace before SIGKILL.
       trap 'echo TERMED >> "$STUB_LOG"' TERM
-      while :; do sleep 1; done
+      i=0
+      while [ $i -lt 20 ]; do sleep 1; i=$((i + 1)); done
     fi
     sleep 60
   fi
@@ -548,7 +555,13 @@ describe("falsify judging new Rust tests by mutating the change", () => {
       [`MUTATED|tests::b_is_two|${IN_UNCHANGED_PRODUCT}`],
     );
     const result = againstBase();
-    expect({ status: result.status, runs: runs() }).toEqual({ status: 1, runs: 2 });
+    expect({
+      status: result.status,
+      unkilled: result.output.includes(
+        "tests::b_is_two (Rust: no mutant of the change failed it on an assertion",
+      ),
+      runs: runs(),
+    }).toEqual({ status: 1, unkilled: true, runs: 2 });
   });
 
   it("doesn't credit a test that fails under a mutant only once", () => {
@@ -593,6 +606,21 @@ describe("falsify judging new Rust tests by mutating the change", () => {
     });
   });
 
+  it("doesn't judge two new tests that share a name in their crate", () => {
+    mutatedBranch(
+      ["tests::dup"],
+      [mutantOfB("replace b -> u8 with 0")],
+      [`MUTATED|tests::dup|${ASSERTION}`],
+      { "bin-tests.txt": "tests::dup\n" },
+    );
+    const result = againstBase();
+    expect({
+      status: result.status,
+      shared: result.output.match(/tests::dup \(Rust: another new test in its crate has that name/g)
+        ?.length,
+    }).toEqual({ status: 1, shared: 2 });
+  });
+
   it("doesn't judge a new test named as one the base has elsewhere in its crate", () => {
     mutatedBranch([], [mutantOfB("replace b -> u8 with 0")], [`MUTATED|tests::kept|${ASSERTION}`], {
       "bin-tests.txt": "tests::kept\n",
@@ -605,16 +633,21 @@ describe("falsify judging new Rust tests by mutating the change", () => {
     });
   });
 
-  it("refuses a cargo config above its worktree, which could change what the tests run", () => {
+  it.each([
+    ["above its worktree", () => join(fx.tmp, ".cargo")],
+    ["in CARGO_HOME", () => join(fx.root, "cargo-home")],
+  ] as const)("refuses a cargo config %s, which could change what the tests run", (_where, dir) => {
     mutatedBranch(["tests::b_is_two"], [mutantOfB("replace b -> u8 with 0")]);
-    write(fx.tmp, ".cargo/config.toml", '[env]\nRUSTFLAGS = "--cap-lints allow"\n');
+    const config = join(dir(), "config.toml");
+    write("/", config, '[env]\nRUSTFLAGS = "--cap-lints allow"\n');
     const result = againstBase();
     expect({
       status: result.status,
-      refused: result.output.includes(`${join(fx.tmp, ".cargo", "config.toml")} sets`),
+      refused: result.output.includes(`${config} sets`),
       ran: stubLog().includes("NEXTEST:"),
       worktrees: falsifyWorktrees(fx.repo),
-    }).toEqual({ status: 1, refused: true, ran: false, worktrees: [] });
+      tmp: readdirSync(fx.tmp).filter((name) => name !== ".cargo"),
+    }).toEqual({ status: 1, refused: true, ran: false, worktrees: [], tmp: [] });
   });
 
   it("doesn't judge a test that fails without a mutant", () => {
@@ -675,7 +708,11 @@ describe("falsify judging new Rust tests by mutating the change", () => {
   }, 60_000);
 
   it("doesn't say it stopped early when it ran every mutant", () => {
-    const mutants = Array.from({ length: 100 }, (_, i) => mutantOfB(`mutant ${i}`));
+    // One that doesn't apply, so 101 are listed and every one that applies runs.
+    const mutants = [
+      mutantOfB("stale context", "    3", "    0 /* MUTATED */"),
+      ...Array.from({ length: 100 }, (_, i) => mutantOfB(`mutant ${i}`)),
+    ];
     mutatedBranch(["tests::b_is_two"], mutants);
     const result = againstBase();
     expect({
@@ -723,23 +760,37 @@ describe("falsify judging new Rust tests by mutating the change", () => {
     30_000,
   );
 
-  it("on a second Ctrl-C while it stops, still removes its worktree", async () => {
-    mutatedBranch(["tests::b_is_two"], [mutantOfB("replace b -> u8 with 0")]);
-    const child = spawn("node", [FALSIFY, "--base", fx.base], {
-      cwd: fx.linked,
-      env: env({ STUB_HANG: "1", STUB_STUBBORN: "1" }),
-      stdio: "ignore",
-    });
-    const exited = once(child, "exit");
-    await expect.poll(() => stubLog().includes("HANGING"), { timeout: 20_000 }).toBe(true);
-    child.kill("SIGINT");
-    await expect.poll(() => stubLog().includes("TERMED"), { timeout: 5000 }).toBe(true);
-    child.kill("SIGINT");
-    const [status, signal] = await exited;
-    expect({ status, signal, leftovers: leftovers() }).toEqual({
-      status: 130,
-      signal: null,
-      leftovers: [],
-    });
-  }, 30_000);
+  it.each([
+    ["Rust", (): void => mutatedBranch(["tests::b_is_two"], [mutantOfB("replace b -> u8 with 0")])],
+    ["TypeScript", (): void => undefined],
+  ] as const)(
+    "on a second Ctrl-C while it stops the %s run, still stops it and removes its worktree",
+    async (_path, branch) => {
+      branch();
+      const child = spawn("node", [FALSIFY, "--base", fx.base], {
+        cwd: fx.linked,
+        env: env({ STUB_HANG: "1", STUB_STUBBORN: "1" }),
+        stdio: "ignore",
+      });
+      const exited = once(child, "exit");
+      await expect.poll(() => stubLog().includes("HANGING"), { timeout: 20_000 }).toBe(true);
+      const stub = Number(/^HANGING (\d+)$/m.exec(stubLog())?.[1]);
+      child.kill("SIGINT");
+      await expect.poll(() => stubLog().includes("TERMED"), { timeout: 5000 }).toBe(true);
+      // Still waiting out the grace, so the second Ctrl-C lands while it stops.
+      expect({ exitCode: child.exitCode, signalCode: child.signalCode }).toEqual({
+        exitCode: null,
+        signalCode: null,
+      });
+      child.kill("SIGINT");
+      const [status, signal] = await exited;
+      await expect.poll(() => isAlive(stub), { timeout: 5000 }).toBe(false);
+      expect({ status, signal, leftovers: leftovers() }).toEqual({
+        status: 130,
+        signal: null,
+        leftovers: [],
+      });
+    },
+    30_000,
+  );
 });
