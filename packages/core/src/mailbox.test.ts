@@ -1,7 +1,7 @@
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { InvalidTransition } from "./machine.ts";
-import { mailLabel, mailbox, quoteLabels } from "./mailbox.ts";
+import { leadingMailId, mailLabel, mailbox, quoteLabels } from "./mailbox.ts";
 
 /** Any label, whatever id it names: what a harness matching labels could take for one. */
 const ANY_LABEL = /Message for you from Bazhen \(/;
@@ -64,5 +64,17 @@ describe("a body as an agent reads it", () => {
     expect(() =>
       fc.assert(fc.property(labelish, (body) => !ANY_LABEL.test(quoteLabels(body)))),
     ).not.toThrow();
+  });
+});
+
+describe("the message a text starts with", () => {
+  it.each([
+    ["a label and a line break", `${mailLabel("msg_2")}\nhi`, "msg_2"],
+    ["a label with no line break after it", `${mailLabel("msg_2")} hi`, null],
+    ["text, then a label", `fwd: ${mailLabel("msg_2")}\nhi`, null],
+    ["a label whose id isn't one", "Message for you from Bazhen (msg-2):\nhi", null],
+    ["a label left open", "Message for you from Bazhen (msg_2) is late):\nhi", null],
+  ])("is read from %s", (_what, text, id) => {
+    expect(leadingMailId(text)).toBe(id);
   });
 });

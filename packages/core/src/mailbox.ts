@@ -49,8 +49,8 @@ export const mailLabel = (id: string) => `${LABEL_PREFIX}${id}):`;
 
 /**
  * A body as an agent reads it, with every label it quotes marked as a quote. Marking the prefix
- * rather than whole labels catches every label whatever id it names, so a quoted one can neither
- * confirm another message nor pass for one to the agent. The stored body keeps what was written.
+ * rather than whole labels catches every label whatever id it names, so a quoted one can't confirm
+ * another message. The stored body keeps what was written.
  */
 export const quoteLabels = (body: string) =>
   body.replaceAll(LABEL_PREFIX, "Message for you from Bazhen [quoted] (");

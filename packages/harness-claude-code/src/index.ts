@@ -464,8 +464,9 @@ export function foldReply(text: string): string {
 /**
  * Whether a prompt carries this message as a wake handed it over, rather than naming its id in
  * passing, as a human or a background subagent quoting it might. Claude Code wraps the wake in
- * text of its own and rewrites tags in it, so the label is looked for anywhere; that is sound
- * because `wakeText` marks every label a body quotes.
+ * text of its own and rewrites tags in it, so the label is looked for anywhere. Mail can't fake
+ * one, since `wakeText` marks every label a body quotes; a label a person types, or a subagent
+ * repeats, into a prompt still counts.
  */
 export const carriesWake = (prompt: string, id: string) => prompt.includes(mailLabel(id));
 
