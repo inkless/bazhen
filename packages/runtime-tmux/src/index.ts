@@ -171,8 +171,8 @@ export class TmuxError extends Error {
   readonly args: readonly string[];
   readonly stderr: string;
   /**
-   * tmux exited with a status of its own. A client its timeout stopped exits 1 too, since tmux
-   * catches SIGTERM, so only the kill tells the two apart.
+   * tmux exited with a status of its own. A client its timeout stopped exits with a status too,
+   * since tmux catches SIGTERM (0, on 3.5), so only the kill tells the two apart.
    */
   readonly answered: boolean;
 
