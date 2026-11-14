@@ -1,4 +1,4 @@
-// Q5, CPU by BZ-1's method (CPU-time deltas over 15 s; /proc on Linux, ps -o time= on macOS):
+// CPU by the method of the earlier tmux measurement (CPU-time deltas over 15 s; /proc on Linux, ps -o time= on macOS):
 //  (a) 25 busy-agent replays at 50 lines/s, 2 of them subscribed;
 //  (b) 5 `yes` floods, 2 subscribed, plus an echo terminal (cat) to time keystroke echo.
 // Reports the holders' summed CPU as a % of one core, the driver's own, and echo p50/p99.
@@ -23,7 +23,7 @@ import {
 
 const WINDOW_S = 15;
 ptyGuard(31);
-const home = makeHome("q5");
+const home = makeHome("cpu");
 const agent = path.join(PROGRAMS, "recordings", "agent-synthetic.bin");
 const all: HolderRef[] = [];
 

@@ -1,4 +1,4 @@
-// Q1, survival: 25 holders flood (5 seq, 5 yes, 5 cat over 50 MB, 10 busy-agent replays) while
+// Survival: 25 holders flood (5 seq, 5 yes, 5 cat over 50 MB, 10 busy-agent replays) while
 // the stand-in daemon that spawned them is kill -9'd and restarted 50 times. Pass: every holder
 // alive, every child still running, no child ever received SIGHUP, and each holder still serves.
 import { spawn } from "node:child_process";
@@ -8,7 +8,7 @@ import { Conn, PROGRAMS, type HolderRef, alive, makeHome, ptyGuard, reap, sleep 
 
 const ROUNDS = Number(process.argv[2] ?? 50);
 ptyGuard(25);
-const home = makeHome("q1");
+const home = makeHome("survival");
 const gen = spawn("node", [path.join(PROGRAMS, "gen.ts"), "big", path.join(home, "big.txt"), "50"], {
   stdio: "inherit",
 });

@@ -1,4 +1,4 @@
-// Records a program for Q6: `node driver/record.ts <command> [args...]`. Runs it in a 120x40
+// Records a program for the parity check: `node driver/record.ts <command> [args...]`. Runs it in a 120x40
 // holder mirrored in this terminal (make the window at least that big); Ctrl-] stops, saves
 // programs/recordings/<command>.bin and closes the holder.
 import fs from "node:fs";

@@ -1,4 +1,4 @@
-// Q2, snapshot at offset: while `seq 1 200000` loops at full speed, attach (snapshot +
+// Snapshot at offset: while `seq 1 200000` loops at full speed, attach (snapshot +
 // subscribe in one write), take live bytes for a few ms, then ask for a second snapshot at Z and
 // detach. Per cycle:
 //  - seam: xterm(snapshot S + live bytes [S, Z)) equals xterm(snapshot Z), cell for cell;
@@ -26,7 +26,7 @@ const CYCLES = Number(process.argv[2] ?? 1000);
 const COLS = 120;
 const ROWS = 40;
 ptyGuard(1);
-const home = makeHome("q2");
+const home = makeHome("seam");
 const h = await spawnHolder(home, "seq", ["/bin/sh", "-c", "while :; do seq 1 200000; done"], {
   cols: COLS,
   rows: ROWS,

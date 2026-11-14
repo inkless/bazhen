@@ -1,4 +1,4 @@
-// Q6, parity: each scenario runs live in a holder. Once its output is quiet, the holder's
+// Parity: each scenario runs live in a holder. Once its output is quiet, the holder's
 // snapshot (at offset Z) replayed into @xterm/headless must equal the program's own bytes
 // [0, Z) fed straight into @xterm/headless: every cell, wrap flag, cursor and mode.
 // Recordings are saved to programs/recordings/ and can be replayed with --replay.
@@ -115,7 +115,7 @@ const scenarios: Scenario[] = [
 const only = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 const replayMode = process.argv.includes("--replay");
 ptyGuard(2);
-const home = makeHome("q6");
+const home = makeHome("parity");
 let failures = 0;
 const holders = [];
 

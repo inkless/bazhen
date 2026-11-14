@@ -1,4 +1,4 @@
-// Q8, fd limits: run under `ulimit -n 256` (see notes). Spawns 100 holders, subscribes to all
+// Fd limits: run under `ulimit -n 256` (see notes). Spawns 100 holders, subscribes to all
 // of them, and checks each streams. Also lists one child's fd table: a child must hold only its
 // stdio, never the holder's socket or PTY master.
 import fs from "node:fs";
@@ -11,7 +11,7 @@ const limit = (pid: number | "self") =>
     ? /Max open files\s+(\d+)\s+(\d+)/.exec(fs.readFileSync(`/proc/${pid}/limits`, "utf8"))?.slice(1, 3)
     : execFileSync("sh", ["-c", "ulimit -n"], { encoding: "utf8" }).trim();
 ptyGuard(N + 1);
-const home = makeHome("q8");
+const home = makeHome("fds");
 const holders: HolderRef[] = [];
 let spawnFailures = 0;
 for (let i = 0; i < N; i++) {

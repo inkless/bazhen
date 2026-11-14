@@ -1,4 +1,4 @@
-// Q4, memory: one holder at 0, 2,000 and 10,000 lines of 160-column SGR-heavy output, then 25
+// Memory: one holder at 0, 2,000 and 10,000 lines of 160-column SGR-heavy output, then 25
 // holders at 10,000 lines each. Reports the holder's own stats and ps RSS per terminal.
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -8,7 +8,7 @@ import { Conn, PROGRAMS, type HolderRef, makeHome, ptyGuard, reap, rssKb, sleep,
 const COLS = 160;
 const ROWS = 50;
 ptyGuard(26);
-const home = makeHome("q4");
+const home = makeHome("memory");
 const files: Record<number, string> = {};
 for (const n of [2000, 10_000]) {
   files[n] = path.join(home, `sgr${n}.txt`);

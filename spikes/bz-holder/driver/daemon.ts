@@ -1,4 +1,4 @@
-// A stand-in daemon for Q1: with --spawn <home> it first spawns the 25 load holders and writes
+// A stand-in daemon for the survival run: with --spawn <home> it first spawns the 25 load holders and writes
 // their refs to <home>/holders.json. Either way it then attaches to every holder (snapshot +
 // subscribe), drains their streams, prints "attached N", and runs until it is killed.
 import fs from "node:fs";

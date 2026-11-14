@@ -1,4 +1,4 @@
-// Q3, queries with the daemon down: bz-probe runs in a holder nobody is subscribed to, writes
+// Queries with the daemon down: bz-probe runs in a holder nobody is subscribed to, writes
 // each query 20 times and times the reply. Pass: every reply within 50 ms. Then a lone Esc,
 // sent as input with nobody subscribed, must reach the child within 10 ms.
 import fs from "node:fs";
@@ -8,7 +8,7 @@ import { Conn, K, PROBE, frame, makeHome, percentile, ptyGuard, reap, sleep, spa
 const COUNT = 20;
 const KINDS = ["cpr", "da1", "da2", "xtversion", "osc10", "osc11"];
 ptyGuard(KINDS.length + 1);
-const home = makeHome("q3");
+const home = makeHome("queries");
 const holders = [];
 let failures = 0;
 

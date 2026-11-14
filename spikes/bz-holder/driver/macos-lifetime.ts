@@ -1,10 +1,10 @@
-// Q7, macOS lifetime. See RUNBOOK-macos.md.
-//   node driver/q7.ts start          from inside the terminal app under test: launches a stand-in
+// MacOS lifetime. See RUNBOOK-macos.md.
+//   node driver/macos-lifetime.ts start          from inside the terminal app under test: launches a stand-in
 //                                    daemon detached (setsid, stdio to files), which spawns three
 //                                    holders; prints the home to pass to `check`.
-//   node driver/q7.ts check <home>   from any terminal, after quitting/closing/force-quitting:
+//   node driver/macos-lifetime.ts check <home>   from any terminal, after quitting/closing/force-quitting:
 //                                    daemon, holders and children alive, no SIGHUP, TCC access.
-//   node driver/q7.ts stop <home>    closes everything it started.
+//   node driver/macos-lifetime.ts stop <home>    closes everything it started.
 //   (serve <home> is internal: the detached daemon.)
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -14,7 +14,7 @@ import { Conn, K, type HolderRef, alive, frame, hupTrapped, makeHome, reap, slee
 const [mode, homeArg] = process.argv.slice(2);
 
 if (mode === "start") {
-  const home = makeHome("q7");
+  const home = makeHome("lifetime");
   const out = fs.openSync(path.join(home, "daemon.out"), "a");
   // macOS has no setsid(1); perl's POSIX::setsid is in the base system.
   const child = spawn(
