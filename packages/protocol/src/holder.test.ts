@@ -106,10 +106,40 @@ const broken: [string, z.ZodType, unknown, unknown][] = [
   ["a spawn spec in no version", HolderSpawnSpec, spawnSpec, { ...spawnSpec, protocol: [] }],
   ["a spawn spec with no socket", HolderSpawnSpec, spawnSpec, { ...spawnSpec, socket: "" }],
   [
-    "a size past u16",
+    "more columns than the maximum",
     HolderSpawnSpec,
     spawnSpec,
-    { ...spawnSpec, size: { cols: 65_536, rows: 24 } },
+    { ...spawnSpec, size: { cols: 1001, rows: 24 } },
+  ],
+  [
+    "more rows than the maximum",
+    HolderSpawnSpec,
+    spawnSpec,
+    { ...spawnSpec, size: { cols: 80, rows: 1001 } },
+  ],
+  [
+    "more history than the maximum",
+    HolderSpawnSpec,
+    { ...spawnSpec, historyLines: 100_000 },
+    { ...spawnSpec, historyLines: 100_001 },
+  ],
+  [
+    "a tag named __proto__",
+    HolderSpawnSpec,
+    spawnSpec,
+    { ...spawnSpec, tags: JSON.parse('{"__proto__":"x"}') },
+  ],
+  [
+    "a tag named constructor",
+    HolderSpawnSpec,
+    spawnSpec,
+    { ...spawnSpec, tags: { constructor: "x" } },
+  ],
+  [
+    "a tag value one UTF-8 byte over the limit",
+    HolderSpawnSpec,
+    { ...spawnSpec, tags: { k: `${"界".repeat(341)}a` } },
+    { ...spawnSpec, tags: { k: `${"界".repeat(341)}ab` } },
   ],
   ["a negative size", HolderSpawnSpec, spawnSpec, { ...spawnSpec, size: { cols: 80, rows: -1 } }],
   ["a fractional generation", HolderSpawnSpec, spawnSpec, { ...spawnSpec, generation: 1.5 }],
@@ -153,7 +183,18 @@ const broken: [string, z.ZodType, unknown, unknown][] = [
   ["an exit status of no kind", HolderHelloReply, hello, { ...hello, exit: { type: "gone" } }],
   ["a negative rss", HolderStats, stats, { ...stats, rss: -1 }],
   ["a foreground group 0", HolderForeground, foreground, { ...foreground, pgid: 0 }],
-  ["a subscribe from before 0", HolderSubscribeRequest, { from: 0 }, { from: -1 }],
+  [
+    "a subscribe from before 0",
+    HolderSubscribeRequest,
+    { from: { generation: 0, offset: 0 } },
+    { from: { generation: 0, offset: -1 } },
+  ],
+  [
+    "a subscribe from an offset of no generation",
+    HolderSubscribeRequest,
+    { from: { generation: 0, offset: 5 } },
+    { from: { offset: 5 } },
+  ],
   [
     "a signal Bazhen doesn't send",
     HolderSignalRequest,
@@ -191,8 +232,8 @@ const broken: [string, z.ZodType, unknown, unknown][] = [
   [
     "a subscribe in a generation before 0",
     HolderSubscribeRequest,
-    { generation: 0 },
-    { generation: -1 },
+    { from: { generation: 0, offset: 0 } },
+    { from: { generation: -1, offset: 0 } },
   ],
 ];
 

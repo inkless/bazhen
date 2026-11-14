@@ -1,6 +1,7 @@
 import type { z } from "zod";
 import {
   HOLDER_MAX_REPLY_BYTES,
+  HOLDER_PROTOCOL_VERSION,
   HOLDER_MAX_REQUEST_BYTES,
   HOLDER_REPLY_CODES,
   HOLDER_REQUEST_CODES,
@@ -9,7 +10,9 @@ import {
   HolderExited,
   HolderForeground,
   HolderGap,
+  HolderHelloFrozen,
   HolderHelloReply,
+  HolderHelloReplyFrozen,
   HolderHelloRequest,
   HolderOk,
   HolderProcessSpec,
@@ -24,6 +27,7 @@ import {
   HolderStats,
   HolderSubscribeRequest,
   HolderTitle,
+  negotiateHolder,
 } from "./holder.ts";
 import { parseJson } from "./json.ts";
 
@@ -65,7 +69,7 @@ interface RequestFields {
 
 interface ReplyFields {
   hello: Answer & Body<HolderHelloReply>;
-  snapshot: Answer & AtOffset;
+  snapshot: Answer & Snapshot;
   data: AtOffset;
   gap: Body<HolderGap>;
   resized: Body<HolderResized>;
@@ -117,20 +121,27 @@ export class InvalidHolderFrame extends Error {
 }
 
 /** Why a frame was refused. The decoder that met it decodes nothing more. */
-interface Malformed {
+class Malformed {
   readonly malformed: string;
+
+  constructor(reason: string) {
+    this.malformed = reason;
+  }
 }
 
-const malformed = (reason: string): Malformed => ({ malformed: reason });
+const malformed = (reason: string) => new Malformed(reason);
 
+/** By class, not shape: a peer's JSON may well carry a field named `malformed`. */
 function isMalformed(value: unknown): value is Malformed {
-  return typeof value === "object" && value !== null && "malformed" in value;
+  return value instanceof Malformed;
 }
 
 const HEADER = 4;
 const ID = 4;
 const OFFSET = 8;
+const DROPPED = 4;
 const U32_MAX = 0xffff_ffff;
+const LAST_REQUEST = 0x7f;
 const FIRST_REPLY = 0x81;
 const FIRST_EVENT = 0xc0;
 const FIRST_ANSWER_TO_ANY = 0xf0;
@@ -180,6 +191,38 @@ const atOffset: Codec<AtOffset> = {
   },
 };
 
+/** A snapshot: its offset, how many of the oldest history lines it left out to fit the cap. */
+interface Snapshot extends AtOffset {
+  readonly droppedLines: number;
+}
+
+const snapshot: Codec<Snapshot> = {
+  encode: (type, { offset, droppedLines, bytes }) => {
+    const dropped = checkU32(type, "droppedLines", droppedLines);
+    return concat(atOffset.encode(type, { offset, bytes: dropped }), bytes);
+  },
+  decode: (type, payload) => {
+    const at = atOffset.decode(type, payload);
+    if (isMalformed(at)) return at;
+    if (at.bytes.length < DROPPED) return malformed(`${type} is too short for its dropped lines`);
+    const droppedLines = view(at.bytes).getUint32(0);
+    return { offset: at.offset, droppedLines, bytes: at.bytes.subarray(DROPPED) };
+  },
+};
+
+function readJson(type: string, payload: Uint8Array): unknown {
+  try {
+    return parseJson(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(payload));
+  } catch {
+    return malformed(`${type} is not UTF-8`);
+  }
+}
+
+function parseBody<T>(type: string, schema: z.ZodType<T>, value: unknown): Body<T> | Malformed {
+  const parsed = schema.safeParse(value);
+  return parsed.success ? { body: parsed.data } : malformed(`${type}: ${parsed.error.message}`);
+}
+
 const json = <T>(schema: z.ZodType<T>): Codec<Body<T>> => ({
   encode: (type, { body }) => {
     const parsed = schema.safeParse(body);
@@ -189,16 +232,47 @@ const json = <T>(schema: z.ZodType<T>): Codec<Body<T>> => ({
     return new TextEncoder().encode(JSON.stringify(parsed.data));
   },
   decode: (type, payload) => {
-    let text: string;
-    try {
-      text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(payload);
-    } catch {
-      return malformed(`${type} is not UTF-8`);
-    }
-    const parsed = schema.safeParse(parseJson(text));
-    return parsed.success ? { body: parsed.data } : malformed(`${type}: ${parsed.error.message}`);
+    const value = readJson(type, payload);
+    return isMalformed(value) ? value : parseBody(type, schema, value);
   },
 });
+
+/** The versions this build speaks. */
+const SPOKEN = [HOLDER_PROTOCOL_VERSION];
+
+/**
+ * A `hello` request read as every major reads it: the frozen `protocol` first. A client this
+ * build shares no major with gets `no-shared-version`, so the rest of its hello, in a schema
+ * this build doesn't know, is left unread rather than refused.
+ */
+const helloRequest: Codec<Body<HolderHelloRequest>> = {
+  encode: json(HolderHelloRequest).encode,
+  decode: (type, payload) => {
+    const value = readJson(type, payload);
+    if (isMalformed(value)) return value;
+    const frozen = parseBody(type, HolderHelloFrozen, value);
+    if (isMalformed(frozen) || negotiateHolder(SPOKEN, frozen.body.protocol) === null)
+      return frozen;
+    return parseBody(type, HolderHelloRequest, value);
+  },
+};
+
+/** A hello reply: its frozen `version` first, which says which major's schema the rest is in. */
+const helloReply: Codec<Body<HolderHelloReply>> = {
+  encode: json(HolderHelloReply).encode,
+  decode: (type, payload) => {
+    const value = readJson(type, payload);
+    if (isMalformed(value)) return value;
+    const frozen = parseBody(type, HolderHelloReplyFrozen, value);
+    if (isMalformed(frozen)) return frozen;
+    if (negotiateHolder(SPOKEN, [frozen.body.version]) === null) {
+      return malformed(
+        `${type} agrees on ${frozen.body.version}, a major this build doesn't speak`,
+      );
+    }
+    return parseBody(type, HolderHelloReply, value);
+  },
+};
 
 const u32 = (n: number) => {
   const out = new Uint8Array(ID);
@@ -206,12 +280,14 @@ const u32 = (n: number) => {
   return out;
 };
 
-const checkId = (type: string, id: number) => {
-  if (!(Number.isInteger(id) && id >= 0 && id <= U32_MAX)) {
-    throw new InvalidHolderFrame(type, `id ${id} is not a u32`);
+function checkU32(type: string, name: string, n: number) {
+  if (!(Number.isInteger(n) && n >= 0 && n <= U32_MAX)) {
+    throw new InvalidHolderFrame(type, `${name} ${n} is not a u32`);
   }
-  return u32(id);
-};
+  return u32(n);
+}
+
+const checkId = (type: string, id: number) => checkU32(type, "id", id);
 
 /** A reply to a request: the request's id, then the reply's own fields. */
 const answering = <F>(codec: Codec<F>): Codec<Answer & F> => ({
@@ -224,7 +300,7 @@ const answering = <F>(codec: Codec<F>): Codec<Answer & F> => ({
 });
 
 const REQUESTS: { readonly [K in HolderRequestName]: Codec<RequestFields[K]> } = {
-  hello: json(HolderHelloRequest),
+  hello: helloRequest,
   snapshot: empty,
   subscribe: json(HolderSubscribeRequest),
   input: raw,
@@ -239,8 +315,8 @@ const REQUESTS: { readonly [K in HolderRequestName]: Codec<RequestFields[K]> } =
 };
 
 const REPLIES: { readonly [K in HolderReplyName]: Codec<ReplyFields[K]> } = {
-  hello: answering(json(HolderHelloReply)),
-  snapshot: answering(atOffset),
+  hello: answering(helloReply),
+  snapshot: answering(snapshot),
   data: atOffset,
   gap: json(HolderGap),
   resized: json(HolderResized),
@@ -401,6 +477,9 @@ export function holderRequestDecoder(
   max: number = HOLDER_MAX_REQUEST_BYTES,
 ): HolderFrameDecoder<HolderRequest | UnknownHolderRequest> {
   return new HolderFrameDecoder(max, (code, payload) => {
+    if (code === 0 || code > LAST_REQUEST) {
+      return malformed(`0x${code.toString(16)} is no request's type`);
+    }
     if (payload.length < ID) return malformed(`request 0x${code.toString(16)} has no id`);
     const id = view(payload).getUint32(0);
     const type = REQUEST_TYPES.get(code);

@@ -14,7 +14,7 @@
       "items": {
         "type": "string",
         "minLength": 0,
-        "maxLength": 32
+        "description": "At most 32 UTF-8 bytes."
       }
     },
     "terminalId": {
@@ -22,16 +22,17 @@
       "pattern": "^[A-Za-z0-9_-]{1,64}$"
     },
     "tags": {
+      "description": "Tag names __proto__, constructor, prototype are refused.",
       "type": "object",
       "propertyNames": {
         "type": "string",
         "minLength": 1,
-        "maxLength": 64
+        "description": "At most 64 UTF-8 bytes."
       },
       "additionalProperties": {
         "type": "string",
         "minLength": 0,
-        "maxLength": 1024
+        "description": "At most 1024 UTF-8 bytes."
       }
     },
     "generation": {
@@ -122,12 +123,12 @@
         "cols": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 65535
+          "maximum": 1000
         },
         "rows": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 65535
+          "maximum": 1000
         }
       },
       "required": [

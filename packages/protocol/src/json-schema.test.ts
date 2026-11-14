@@ -33,7 +33,7 @@ describe("jsonSchemas", () => {
     const schema: unknown = JSON.parse(String(jsonSchemas()["HolderTags.json"]));
     expect(schema).toMatchObject({
       type: "object",
-      additionalProperties: { type: "string", maxLength: 1024 },
+      additionalProperties: { type: "string", description: "At most 1024 UTF-8 bytes." },
     });
   });
 

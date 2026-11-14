@@ -49,13 +49,13 @@ describe("encoding a holder frame", () => {
   it("writes a JSON request after its id", () => {
     const json = '{"cols":80,"rows":24}';
     expect(encodeHolderRequest({ type: "resize", id: 1, body: { cols: 80, rows: 24 } })).toEqual(
-      concat(bytes(0, 0, 0, 1 + 4 + json.length, 0x05, 0, 0, 0, 1), text(json)),
+      concat(bytes(0, 0, 0, 1 + 4 + json.length, 0x42, 0, 0, 0, 1), text(json)),
     );
   });
 
   it("writes input as raw bytes after its id", () => {
     expect(encodeHolderRequest({ type: "input", id: 2, bytes: bytes(3) })).toEqual(
-      bytes(0, 0, 0, 6, 0x04, 0, 0, 0, 2, 3),
+      bytes(0, 0, 0, 6, 0x41, 0, 0, 0, 2, 3),
     );
   });
 
@@ -65,10 +65,10 @@ describe("encoding a holder frame", () => {
     );
   });
 
-  it("writes a snapshot's id, then its offset, then its bytes", () => {
-    expect(encodeHolderReply({ type: "snapshot", id: 3, offset: 9, bytes: text("x") })).toEqual(
-      bytes(0, 0, 0, 14, 0x82, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 9, 0x78),
-    );
+  it("writes a snapshot's id, its offset, the history lines it left out, then its bytes", () => {
+    expect(
+      encodeHolderReply({ type: "snapshot", id: 3, offset: 9, droppedLines: 2, bytes: text("x") }),
+    ).toEqual(bytes(0, 0, 0, 18, 0x82, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 2, 0x78));
   });
 
   it.each([
@@ -106,13 +106,15 @@ describe("encoding a holder frame", () => {
 
   it("writes a snapshot past the request cap, which only requests are held to", () => {
     const vt = new Uint8Array(2 * HOLDER_MAX_REQUEST_BYTES);
-    expect(encodeHolderReply({ type: "snapshot", id: 1, offset: 0, bytes: vt }).length).toBe(
-      4 + 1 + 4 + 8 + vt.length,
-    );
+    expect(
+      encodeHolderReply({ type: "snapshot", id: 1, offset: 0, droppedLines: 0, bytes: vt }).length,
+    ).toBe(4 + 1 + 4 + 8 + 4 + vt.length);
   });
 });
 
 const OWN_REPLIES = ["hello", "snapshot", "stats", "foreground"] as const;
+const isOwnReply = (name: string) => OWN_REPLIES.some((own) => own === name);
+const withoutOwnReply = (code: number) => code >= 0x40 && code <= 0x7f;
 
 describe("holder type bytes", () => {
   it("give a request's own reply the request's byte with the top bit set, below the events", () => {
@@ -121,27 +123,32 @@ describe("holder type bytes", () => {
     ).toEqual(OWN_REPLIES.map((name) => [HOLDER_REQUEST_CODES[name] | 0x80, true]));
   });
 
+  it("put every request without a reply of its own at 0x40 and above", () => {
+    const others = Object.entries(HOLDER_REQUEST_CODES).filter(([name]) => !isOwnReply(name));
+    expect(others.map(([, code]) => withoutOwnReply(code))).toEqual(others.map(() => true));
+  });
+
   it("keep the numbers every version of either peer reads them by", () => {
     expect([HOLDER_REQUEST_CODES, HOLDER_REPLY_CODES]).toEqual([
       {
         hello: 0x01,
         snapshot: 0x02,
-        subscribe: 0x03,
-        input: 0x04,
-        resize: 0x05,
-        stats: 0x06,
-        close: 0x07,
-        signal: 0x08,
-        foreground: 0x09,
-        respawn: 0x0a,
-        "set-tags": 0x0b,
-        "set-theme": 0x0c,
+        stats: 0x03,
+        foreground: 0x04,
+        subscribe: 0x40,
+        input: 0x41,
+        resize: 0x42,
+        close: 0x43,
+        signal: 0x44,
+        respawn: 0x45,
+        "set-tags": 0x46,
+        "set-theme": 0x47,
       },
       {
         hello: 0x81,
         snapshot: 0x82,
-        stats: 0x86,
-        foreground: 0x89,
+        stats: 0x83,
+        foreground: 0x84,
         data: 0xc0,
         gap: 0xc1,
         resized: 0xc2,
@@ -194,18 +201,26 @@ describe("decoding holder frames", () => {
   it.each([
     ["a frame of length 0", u32(0), /length 0/],
     ["a request with no id", raw(0x02, bytes(0, 0)), /has no id/],
-    ["JSON that doesn't parse", raw(0x05, concat(u32(1), text("{"))), /^resize: /],
+    ["JSON that doesn't parse", raw(0x42, concat(u32(1), text("{"))), /^resize: /],
     [
       "JSON its schema refuses",
-      raw(0x05, concat(u32(1), text('{"cols":-1,"rows":1}'))),
+      raw(0x42, concat(u32(1), text('{"cols":-1,"rows":1}'))),
       /^resize: .*cols/s,
     ],
     [
       "JSON after a byte-order mark",
-      raw(0x05, concat(u32(1), text('\ufeff{"cols":1,"rows":1}'))),
+      raw(0x42, concat(u32(1), text('\ufeff{"cols":1,"rows":1}'))),
       /^resize: /,
     ],
-    ["a body that isn't UTF-8", raw(0x05, concat(u32(1), bytes(0xff))), /not UTF-8/],
+    ["a body that isn't UTF-8", raw(0x42, concat(u32(1), bytes(0xff))), /not UTF-8/],
+    ["a type byte 0", raw(0x00, u32(1)), /no request's type/],
+    ["a reply's type byte", raw(0x80, u32(1)), /no request's type/],
+    ["an event's type byte", raw(0xff, u32(1)), /no request's type/],
+    [
+      "a hello this build could answer, with a field it can't read",
+      raw(0x01, concat(u32(1), text('{"protocol":["1.0"],"writer":"yes"}'))),
+      /^hello: /,
+    ],
   ])("calls %s malformed", (_, frame, reason) => {
     expect(holderRequestDecoder().push(frame)).toMatchObject({
       malformed: expect.stringMatching(reason),
@@ -215,7 +230,17 @@ describe("decoding holder frames", () => {
   it.each([
     ["an offset too short", raw(0xc0, bytes(0, 0, 0)), /too short/],
     ["an offset past 2^53 - 1", raw(0xc0, u64(2n ** 53n)), /past 2\^53/],
-    ["a reply with no id", raw(0x86, bytes(0)), /has no id/],
+    ["a reply with no id", raw(0x83, bytes(0)), /has no id/],
+    [
+      "a snapshot too short for its dropped lines",
+      raw(0x82, concat(u32(1), u64(0n), bytes(0))),
+      /dropped lines/,
+    ],
+    [
+      "a hello agreeing on a major this build doesn't speak",
+      raw(0x81, concat(u32(1), text('{"version":"2.0","protocol":["2.0"]}'))),
+      /doesn't speak/,
+    ],
     ["a reply of an unknown type with no id", raw(0xbf, bytes(0)), /has no id/],
     ["a request's type byte", raw(0x05, u32(1)), /no reply's type/],
   ])("calls a reply with %s malformed", (_, frame, reason) => {
@@ -266,7 +291,23 @@ describe("decoding holder frames", () => {
 
   it("reads a frame carrying a field it doesn't know", () => {
     const json = '{"engineBytes":1,"rss":2,"ringBytes":3,"historyLines":4,"compressed":true}';
-    expect(decodeReplies(raw(0x86, concat(u32(4), text(json))))[0]?.frames).toEqual([stats]);
+    expect(decodeReplies(raw(0x83, concat(u32(4), text(json))))[0]?.frames).toEqual([stats]);
+  });
+
+  it("reads only the frozen part of a hello from a client it shares no major with", () => {
+    const hello = raw(0x01, concat(u32(1), text('{"protocol":["2.0"],"writer":"yes"}')));
+    expect(holderRequestDecoder().push(hello)).toEqual({
+      frames: [{ type: "hello", id: 1, body: { protocol: ["2.0"] } }],
+      malformed: null,
+    });
+  });
+
+  it("reads a body whose fields happen to include one named malformed", () => {
+    const json = '{"engineBytes":1,"rss":2,"ringBytes":3,"historyLines":4,"malformed":"no"}';
+    expect(decodeReplies(raw(0x83, concat(u32(4), text(json))))[0]).toEqual({
+      frames: [stats],
+      malformed: null,
+    });
   });
 
   it("reads a bodiless request that carries a body, as a later minor may send", () => {

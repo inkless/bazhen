@@ -9,36 +9,54 @@ import { ProtocolVersion } from "./version.ts";
  *
  * A connection opens with `hello`: until it is answered the client sends nothing else, and the
  * holder sends only its answer. A first frame that isn't `hello`, or a second `hello`, is answered
- * `invalid`. Neither peer then sends anything newer than the version they
- * agreed on: no new frame, field or enum value. A peer ignores fields it doesn't know and skips
- * replies and events it doesn't know; the holder answers a request it doesn't know with `error`
- * coded `unknown-request`, whose `request` is the type byte, as `0x2a`. A request whose body
- * isn't UTF-8 JSON that passes its schema is answered `error` coded `invalid`, and its connection
- * closed; any other frame that fails closes it at once. String limits count UTF-8 bytes.
+ * `invalid`. Neither peer then sends anything newer than the version they agreed on: no new
+ * frame, field or enum value. A peer ignores fields it doesn't know and skips replies and events
+ * it doesn't know; the holder answers a request type in its range that it doesn't know with
+ * `error` coded `unknown-request`, whose `request` is the type byte, as `0x2a`. A request whose
+ * body isn't UTF-8 JSON that passes its schema is answered `error` coded `invalid`, and its
+ * connection closed; any other frame that fails, a type byte outside the requests' range
+ * included, closes it at once. String limits count UTF-8 bytes.
  *
- * Frozen in every major, because it is how two peers find out what they share: the frame layout,
- * the request id, the type-byte ranges, the `hello` request, the hello reply's `version` and
- * `protocol`, which a client reads before the rest to know which major's schema the rest is in,
- * and `error`.
+ * Frozen in every major, because it is how two peers find out what they share:
+ * - the frame layout, the u32 request id and the type-byte ranges;
+ * - the rule that nothing but `hello` and its answer passes before `hello` is answered;
+ * - the `hello` request's `protocol`, the hello reply's `version` and `protocol`, and the spawn
+ *   spec's `protocol`. Each side reads these first; the rest of a `hello` is read in the schema
+ *   of the agreed version's major;
+ * - `error`, and its codes `no-shared-version` and `invalid`.
  */
 export const HOLDER_PROTOCOL_VERSION = "1.0";
+
+/** Byte limits, in UTF-8 bytes, that both peers enforce on strings. */
+export const HOLDER_VERSION_MAX_BYTES = 32;
+export const HOLDER_TAG_NAME_MAX_BYTES = 64;
+export const HOLDER_TAG_VALUE_MAX_BYTES = 1024;
+
+/** Bounds that keep a terminal's snapshot within the reply cap in all but the worst cases. */
+export const HOLDER_MAX_COLS = 1000;
+export const HOLDER_MAX_ROWS = 1000;
+export const HOLDER_MAX_HISTORY_LINES = 100_000;
 
 /**
  * The highest version a peer speaks in each major it supports. Within a major every minor speaks
  * everything older, so one version per major says it all. Frozen, so read leniently: an entry
  * this build can't parse is skipped by `negotiateHolder`, not refused with the frame.
  */
-export const HolderVersions = z.array(utf8(32)).min(1).max(16);
+export const HolderVersions = z.array(utf8(HOLDER_VERSION_MAX_BYTES)).min(1).max(16);
 export type HolderVersions = z.infer<typeof HolderVersions>;
 
-/** Rust measures a string in UTF-8 bytes; `max` alone counts UTF-16 units, which can be fewer. */
+/**
+ * A string of at most `max` UTF-8 bytes, as a Rust peer measures it. JSON Schema can only count
+ * characters, so the published schema states the limit in its description instead of a
+ * `maxLength` a peer would read as characters.
+ */
 function utf8(max: number, min = 0) {
   const encoder = new TextEncoder();
   return z
     .string()
     .min(min)
-    .max(max)
-    .refine((text) => encoder.encode(text).length <= max, `at most ${max} UTF-8 bytes`);
+    .refine((text) => encoder.encode(text).length <= max, `at most ${max} UTF-8 bytes`)
+    .describe(`At most ${max} UTF-8 bytes.`);
 }
 
 const topMinors = (versions: readonly string[]) => {
@@ -76,17 +94,34 @@ const Count = z.int().nonnegative();
 const Pid = z.int().positive();
 /** Epoch seconds, as `ps -o lstart` gives a process's start, so a pid can be checked for reuse. */
 const StartTime = z.int().nonnegative();
-/** The holder clamps a size it can't use, a zero included, rather than refusing it. */
-const Dimension = z.int().min(0).max(0xffff);
+/** Up to the maximum; the holder clamps a size too small to use, a zero included. */
+const Cols = z.int().min(0).max(HOLDER_MAX_COLS);
+const Rows = z.int().min(0).max(HOLDER_MAX_ROWS);
 
-export const HolderSize = z.object({ cols: Dimension, rows: Dimension });
+export const HolderSize = z.object({ cols: Cols, rows: Rows });
 export type HolderSize = z.infer<typeof HolderSize>;
+
+export const HOLDER_RESERVED_TAG_NAMES = ["__proto__", "constructor", "prototype"] as const;
 
 /**
  * Whatever the daemon writes beside a terminal so it can rebuild the terminal's links from the
  * holder alone. The holder stores and echoes them and reads none: their meaning is the daemon's.
  */
-export const HolderTags = z.record(utf8(64, 1), utf8(1024));
+export const HolderTags = z
+  .preprocess(
+    (tags, ctx) => {
+      // Dropped without a word by a JavaScript record, and a trap for any peer that reads tags
+      // into a plain object: refused instead, the same by every peer.
+      for (const name of HOLDER_RESERVED_TAG_NAMES) {
+        if (typeof tags === "object" && tags !== null && Object.hasOwn(tags, name)) {
+          ctx.addIssue({ code: "custom", message: `tag name ${name} is reserved` });
+        }
+      }
+      return tags;
+    },
+    z.record(utf8(HOLDER_TAG_NAME_MAX_BYTES, 1), utf8(HOLDER_TAG_VALUE_MAX_BYTES)),
+  )
+  .describe(`Tag names ${HOLDER_RESERVED_TAG_NAMES.join(", ")} are refused.`);
 export type HolderTags = z.infer<typeof HolderTags>;
 
 export const HolderSignal = z.enum(["SIGINT", "SIGTERM", "SIGHUP", "SIGKILL"]);
@@ -130,7 +165,7 @@ export const HolderSpawnSpec = HolderProcessSpec.extend({
   socket: z.string().min(1),
   tags: HolderTags,
   size: HolderSize,
-  historyLines: Count.default(10_000),
+  historyLines: Count.max(HOLDER_MAX_HISTORY_LINES).default(10_000),
 });
 export type HolderSpawnSpec = z.infer<typeof HolderSpawnSpec>;
 
@@ -143,20 +178,22 @@ export const HolderHelloRequest = z.object({
   protocol: HolderVersions,
   writer: z.boolean().optional(),
 });
+
+/** What every major reads of a `hello` request, before it knows which major the rest is in. */
+export const HolderHelloFrozen = HolderHelloRequest.pick({ protocol: true });
 export type HolderHelloRequest = z.infer<typeof HolderHelloRequest>;
 
 /**
  * Output from `from` on. Without it, from the holder's offset as it reads the request, which is
- * the offset of a `snapshot` sent just before it in the same write. An offset belongs to one
- * generation: with `generation`, a subscribe that crossed a respawn is refused `stale-generation`
- * instead of resuming at the same offset of the new child's output. A `from` the ring no longer
- * holds is answered `ok`, then `gap` up to what it holds, then output; one past the holder's
- * offset is refused `out-of-range`. A connection has one subscription: subscribing again moves
- * it.
+ * the offset of a `snapshot` sent just before it in the same write. An offset means something
+ * only in its generation, so `from` names both: one that crossed a respawn is refused
+ * `stale-generation` rather than resuming at that offset of the new child's output. A `from` the
+ * ring no longer holds is answered `ok`, then `gap` up to what it holds, then output; one past
+ * the holder's offset is refused `out-of-range`. A connection has one subscription: subscribing
+ * again moves it.
  */
 export const HolderSubscribeRequest = z.object({
-  from: Offset.optional(),
-  generation: Count.optional(),
+  from: z.object({ generation: Count, offset: Offset }).optional(),
 });
 export type HolderSubscribeRequest = z.infer<typeof HolderSubscribeRequest>;
 
@@ -194,6 +231,9 @@ export const HolderHelloReply = z.object({
 });
 export type HolderHelloReply = z.infer<typeof HolderHelloReply>;
 
+/** What every major reads of a hello reply first, to know which major's schema the rest is in. */
+export const HolderHelloReplyFrozen = HolderHelloReply.pick({ version: true, protocol: true });
+
 /** Memory per terminal, as `bazhen doctor` shows it. `rss` is null where the OS won't say. */
 export const HolderStats = z.object({
   engineBytes: Count,
@@ -219,7 +259,7 @@ export type HolderForeground = z.infer<typeof HolderForeground>;
 export const HolderGap = z.object({ from: Offset, to: Offset });
 export type HolderGap = z.infer<typeof HolderGap>;
 
-export const HolderResized = z.object({ offset: Offset, cols: Dimension, rows: Dimension });
+export const HolderResized = z.object({ offset: Offset, cols: Cols, rows: Rows });
 export type HolderResized = z.infer<typeof HolderResized>;
 
 export const HolderTitle = z.object({ offset: Offset, text: z.string() });
@@ -264,7 +304,7 @@ export type HolderRequestName = z.infer<typeof HolderRequestName>;
 /**
  * Each request's type byte. Never renumber one or give it to another request: a type byte means
  * the same in every version. A request with a reply of its own is `0x01`–`0x3f`, so that reply's
- * byte stays below the events; `0x40`–`0x7f` are for requests whose success is `ok`.
+ * byte stays below the events; a request without one is `0x40`–`0x7f`.
  *
  * Every request gets one answer under its id, except `input`, which gets one only when refused:
  * - `hello`, `snapshot`, `stats`, `foreground`: their own reply, or `error`;
@@ -276,16 +316,16 @@ export type HolderRequestName = z.infer<typeof HolderRequestName>;
 export const HOLDER_REQUEST_CODES = {
   hello: 0x01,
   snapshot: 0x02,
-  subscribe: 0x03,
-  input: 0x04,
-  resize: 0x05,
-  stats: 0x06,
-  close: 0x07,
-  signal: 0x08,
-  foreground: 0x09,
-  respawn: 0x0a,
-  "set-tags": 0x0b,
-  "set-theme": 0x0c,
+  stats: 0x03,
+  foreground: 0x04,
+  subscribe: 0x40,
+  input: 0x41,
+  resize: 0x42,
+  close: 0x43,
+  signal: 0x44,
+  respawn: 0x45,
+  "set-tags": 0x46,
+  "set-theme": 0x47,
 } as const satisfies Record<HolderRequestName, number>;
 
 /** The `request` of `ok` and `error` names the request answered, for logs: its id says which. */
@@ -339,8 +379,8 @@ export type HolderError = z.infer<typeof HolderError>;
 export const HOLDER_REPLY_CODES = {
   hello: 0x81,
   snapshot: 0x82,
-  stats: 0x86,
-  foreground: 0x89,
+  stats: 0x83,
+  foreground: 0x84,
   data: 0xc0,
   gap: 0xc1,
   resized: 0xc2,
@@ -356,5 +396,8 @@ export type HolderReplyName = keyof typeof HOLDER_REPLY_CODES;
 /** The most a frame to a holder may hold, its type byte included. */
 export const HOLDER_MAX_REQUEST_BYTES = 1 << 20;
 
-/** The most a frame from a holder may hold: room for a full snapshot of colourful history. */
+/**
+ * The most a frame from a holder may hold. A snapshot that would be larger drops its oldest
+ * history lines until it fits, and says how many it dropped.
+ */
 export const HOLDER_MAX_REPLY_BYTES = 64 << 20;

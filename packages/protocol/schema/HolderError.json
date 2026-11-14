@@ -19,7 +19,7 @@
       "items": {
         "type": "string",
         "minLength": 0,
-        "maxLength": 32
+        "description": "At most 32 UTF-8 bytes."
       }
     }
   },

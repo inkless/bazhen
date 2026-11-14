@@ -17,7 +17,7 @@ import {
 const id = fc.nat({ max: 0xffff_ffff });
 const offset = fc.maxSafeNat();
 const payload = fc.uint8Array({ maxLength: 64 });
-const dimension = fc.nat({ max: 0xffff });
+const dimension = fc.nat({ max: 1000 });
 const pid = fc.integer({ min: 1, max: 2 ** 31 - 1 });
 const text = fc.string({ unit: "binary", maxLength: 32 });
 const tags = fc.dictionary(fc.string({ minLength: 1, maxLength: 8 }), text);
@@ -48,7 +48,7 @@ const request: fc.Arbitrary<HolderRequest> = fc.oneof(
   fc.record({
     type: fc.constant("subscribe" as const),
     id,
-    body: fc.record({ from: offset, generation: offset }, { requiredKeys: [] }),
+    body: fc.record({ from: fc.record({ generation: offset, offset }) }, { requiredKeys: [] }),
   }),
   fc.record({ type: fc.constant("input" as const), id, bytes: payload }),
   fc.record({
@@ -126,7 +126,13 @@ const reply: fc.Arbitrary<HolderReply> = fc.oneof(
     body: fc.record({ generation: offset, childPid: pid, childStart: offset }),
   }),
   fc.record({ type: fc.constant("data" as const), offset, bytes: payload }),
-  fc.record({ type: fc.constant("snapshot" as const), id, offset, bytes: payload }),
+  fc.record({
+    type: fc.constant("snapshot" as const),
+    id,
+    offset,
+    droppedLines: fc.nat({ max: 0xffff_ffff }),
+    bytes: payload,
+  }),
   fc.record({ type: fc.constant("gap" as const), body: fc.record({ from: offset, to: offset }) }),
   fc.record({
     type: fc.constant("resized" as const),

@@ -11,12 +11,12 @@
     "cols": {
       "type": "integer",
       "minimum": 0,
-      "maximum": 65535
+      "maximum": 1000
     },
     "rows": {
       "type": "integer",
       "minimum": 0,
-      "maximum": 65535
+      "maximum": 1000
     }
   },
   "required": [
