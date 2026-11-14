@@ -11,7 +11,9 @@
 // - Setup drops every inherited BAZHEN_ variable, so nothing a test runs can reach a real daemon.
 // - Teardown closes every holder still answering in the home, through the protocol, and fails
 //   the run naming them. It signals nothing: host-guard is the one place that does. A holder that
-//   may still run keeps the home in place, its tmux refusal included.
+//   may still run keeps the home in place, its tmux refusal included. One that closes in time
+//   has ended its child's process group, as holder/1's `close` requires, so nothing it ran is
+//   left using the home.
 
 import { randomUUID } from "node:crypto";
 import {
@@ -74,7 +76,7 @@ export interface LeakedHolder {
   /** Null for a holder that took the connection but gave no usable answer to `hello`. */
   readonly terminalId: string | null;
   readonly holderPid: number | null;
-  /** Whether it answered `close`; one that didn't may still be running. */
+  /** Whether it answered `close` and hung up in time; one that didn't may still be running. */
   readonly closed: boolean;
   /** Why `hello` failed, for one that took the connection. */
   readonly hello: string | null;
@@ -104,11 +106,14 @@ async function closeIfLive(socket: string, waitMs: number): Promise<LeakedHolder
     return { socket, terminalId: null, holderPid: null, closed: false, hello };
   }
   const { terminalId, holderPid } = client.hello;
-  const closed = await client.close({ signal: AbortSignal.timeout(waitMs) }).then(
+  const answered = await client.close({ signal: AbortSignal.timeout(waitMs) }).then(
     () => true,
     () => false,
   );
-  if (closed) await Promise.race([client.ended, timeout(waitMs)]);
+  // A holder hangs up once its child's group is gone, so `ok` alone doesn't say it has exited.
+  const closed =
+    answered &&
+    (await Promise.race([client.ended.then(() => true), timeout(waitMs).then(() => false)]));
   client.end();
   return { socket, terminalId, holderPid, closed, hello: null };
 }
@@ -131,7 +136,7 @@ export async function closeLiveHolders(
 
 function describeLeak(holder: LeakedHolder): string {
   if (holder.terminalId === null) return `${holder.socket} (no answer to hello: ${holder.hello})`;
-  const state = holder.closed ? "closed" : "ignored close; may still run";
+  const state = holder.closed ? "closed" : "didn't close in time; may still run";
   return `${holder.terminalId} (pid ${holder.holderPid}, ${state})`;
 }
 
@@ -153,7 +158,12 @@ export async function teardownReport(dir: string, waitMs?: number): Promise<Tear
         "Close every holder a test starts in afterAll (docs/standards/testing.md).",
     );
   }
-  if (keep) problems.push(`Left ${dir} in place, as a holder in it may still be running.`);
+  if (keep) {
+    problems.push(
+      `Left ${dir} in place, as a holder in it may still be running; ` +
+        "remove it once each pid named has exited.",
+    );
+  }
   if (ranTmux.length > 0)
     problems.push(`A holder test ran tmux, which made ${ranTmux.join(", ")}.`);
   return { problems, keep };
