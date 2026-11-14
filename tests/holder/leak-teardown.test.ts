@@ -29,6 +29,14 @@ async function fakeAt(...args: Parameters<typeof listenFakeHolder>) {
   return fake;
 }
 
+/** Sets up a run of its own, whose home `afterEach` removes whatever its test leaves. */
+function ownRun(): string {
+  setup();
+  const home = String(process.env["BAZHEN_HOME"]);
+  dirs.push(home);
+  return home;
+}
+
 afterEach(async () => {
   await Promise.all(fakes.splice(0).map((fake) => fake.close()));
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -45,10 +53,19 @@ describe("closeLiveHolders", () => {
     expect(existsSync(socket)).toBe(false);
   });
 
+  it("names a holder that answers close but doesn't hang up, as one that may still run", async () => {
+    const dir = holdersDir(scratchHome());
+    const socket = join(dir, "t3.sock");
+    await fakeAt(socket, { hello: { terminalId: "t3", holderPid: 779 }, close: "stays" });
+    await expect(closeLiveHolders(dir, 200)).resolves.toEqual([
+      { socket, terminalId: "t3", holderPid: 779, closed: false, hello: null },
+    ]);
+  });
+
   it("names a holder that answers hello but ignores close", async () => {
     const dir = holdersDir(scratchHome());
     const socket = join(dir, "t2.sock");
-    await fakeAt(socket, { hello: { terminalId: "t2", holderPid: 778 }, answersClose: false });
+    await fakeAt(socket, { hello: { terminalId: "t2", holderPid: 778 }, close: "ignores" });
     await expect(closeLiveHolders(dir, 200)).resolves.toEqual([
       { socket, terminalId: "t2", holderPid: 778, closed: false, hello: null },
     ]);
@@ -81,8 +98,9 @@ describe("closeLiveHolders", () => {
     ]);
   });
 
-  it("refuses a directory outside the holder tests' own", async () => {
+  it("refuses a directory outside the holder tests' own, however it is spelled", async () => {
     await expect(closeLiveHolders("/run/user/1000/bazhen/holders")).rejects.toThrow(/Refusing/);
+    await expect(closeLiveHolders(`${RUN_PREFIX}x/../../run/user`)).rejects.toThrow(/Refusing/);
   });
 });
 
@@ -102,12 +120,12 @@ describe("teardownReport", () => {
   it("keeps the home in place while a holder in it may still be running", async () => {
     const home = scratchHome();
     const socket = join(holdersDir(home), "t2.sock");
-    await fakeAt(socket, { hello: { terminalId: "t2", holderPid: 8 }, answersClose: false });
+    await fakeAt(socket, { hello: { terminalId: "t2", holderPid: 8 }, close: "ignores" });
     const report = await teardownReport(home, 200);
     expect(report.keep).toBe(true);
     expect(report.problems).toEqual([
-      expect.stringContaining("t2 (pid 8, ignored close; may still run)"),
-      `Left ${home} in place, as a holder in it may still be running.`,
+      expect.stringContaining("t2 (pid 8, didn't close in time; may still run)"),
+      expect.stringContaining(`Left ${home} in place`),
     ]);
   });
 
@@ -129,19 +147,34 @@ describe("setup and teardown", () => {
     Object.assign(process.env, runEnv);
   });
 
+  it("drops inherited Bazhen variables, which would reach a real daemon", () => {
+    process.env["BAZHEN_SOCKET"] = "/run/user/1000/bazhen/bazhen.sock";
+    ownRun();
+    expect(process.env["BAZHEN_SOCKET"]).toBeUndefined();
+  });
+
   it("removes a home left clean without failing the run", async () => {
-    setup();
-    const home = String(process.env["BAZHEN_HOME"]);
+    const home = ownRun();
     await expect(teardown()).resolves.toBeUndefined();
     expect(existsSync(home)).toBe(false);
   });
 
   it("fails the run naming a holder left in its home, once it has closed it", async () => {
-    setup();
-    const home = String(process.env["BAZHEN_HOME"]);
-    const socket = join(holdersDir(home), "left.sock");
-    await fakeAt(socket, { hello: { terminalId: "left", holderPid: 9 } });
+    const home = ownRun();
+    await fakeAt(join(holdersDir(home), "left.sock"), {
+      hello: { terminalId: "left", holderPid: 9 },
+    });
     await expect(teardown()).rejects.toThrow("left (pid 9, closed)");
     expect(existsSync(home)).toBe(false);
+  });
+
+  it("keeps the home, tmux refusal included, while a holder in it may still run", async () => {
+    const home = ownRun();
+    await fakeAt(join(holdersDir(home), "stuck.sock"), {
+      hello: { terminalId: "stuck", holderPid: 10 },
+      close: "stays",
+    });
+    await expect(teardown()).rejects.toThrow("may still run");
+    expect(existsSync(join(home, "bin", "tmux"))).toBe(true);
   });
 });
