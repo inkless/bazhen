@@ -53,8 +53,31 @@ export type HolderVersions = z.infer<typeof HolderVersions>;
 const LONE_SURROGATE = /\p{Cs}/u;
 
 /**
- * Any string a peer in another language can hold: one with a lone surrogate, which JSON can carry
- * and UTF-8 can't, is refused, the same by every peer.
+ * True when any string in a peer's JSON, an object key included, holds a lone surrogate, which
+ * JSON can carry and UTF-8 can't. A Rust peer refuses such a body on parse, even in a field it
+ * would ignore, so a decoder here refuses it before any schema strips that field. Walked without
+ * recursion: the JSON is the peer's, and its depth is whatever it sent.
+ */
+export function hasLoneSurrogate(json: unknown): boolean {
+  const pending: unknown[] = [json];
+  while (pending.length > 0) {
+    const value = pending.pop();
+    if (typeof value === "string" && LONE_SURROGATE.test(value)) return true;
+    if (Array.isArray(value)) {
+      for (const item of value) pending.push(item);
+    } else if (typeof value === "object" && value !== null) {
+      for (const [key, field] of Object.entries(value)) {
+        if (LONE_SURROGATE.test(key)) return true;
+        pending.push(field);
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Any string a peer in another language can hold: one with a lone surrogate is refused, the same
+ * by every peer.
  */
 function wellFormed() {
   return z.string().refine((value) => !LONE_SURROGATE.test(value), "a lone surrogate");

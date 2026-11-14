@@ -27,6 +27,7 @@ import {
   HolderStats,
   HolderSubscribeRequest,
   HolderTitle,
+  hasLoneSurrogate,
   negotiateHolder,
 } from "./holder.ts";
 import { parseJson } from "./json.ts";
@@ -211,11 +212,13 @@ const snapshot: Codec<Snapshot> = {
 };
 
 function readJson(type: string, payload: Uint8Array): unknown {
+  let value: unknown;
   try {
-    return parseJson(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(payload));
+    value = parseJson(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(payload));
   } catch {
     return malformed(`${type} is not UTF-8`);
   }
+  return hasLoneSurrogate(value) ? malformed(`${type} has a lone surrogate`) : value;
 }
 
 function parseBody<T>(type: string, schema: z.ZodType<T>, value: unknown): Body<T> | Malformed {

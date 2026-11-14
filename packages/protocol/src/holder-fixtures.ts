@@ -15,6 +15,7 @@ import {
   HOLDER_VERSION_MAX_BYTES,
   HolderSpawnSpec,
   HolderVersions,
+  hasLoneSurrogate,
   negotiateHolder,
 } from "./holder.ts";
 import {
@@ -400,6 +401,21 @@ const REQUEST_SOURCES: readonly FrameSource[] = [
     rawRequest(req["set-tags"], 64, '{"tags":{"a":"\\udc00"}}'),
   ),
   inbound(
+    "hello with a lone surrogate in a field from a later minor",
+    "malformed",
+    rawRequest(req.hello, 66, '{"protocol":["1.0"],"later":"\\ud800"}'),
+  ),
+  inbound(
+    "hello with a lone surrogate in a key from a later minor",
+    "malformed",
+    rawRequest(req.hello, 67, '{"protocol":["1.0"],"later":{"\\udbff":1}}'),
+  ),
+  inbound(
+    "hello sharing no major, a lone surrogate in what goes unread",
+    "malformed",
+    rawRequest(req.hello, 68, '{"protocol":["2.0"],"writer":["\\ud800"]}'),
+  ),
+  inbound(
     "set-theme with no theme, as nullable is never missing",
     "malformed",
     rawRequest(req["set-theme"], 65, "{}"),
@@ -543,6 +559,16 @@ const REPLY_SOURCES: readonly FrameSource[] = [
   outbound("gap from a negative offset", "malformed", rawEvent(rep.gap, '{"from":-1,"to":0}')),
   outbound("error with a code not a string", "malformed", rawAnswer(rep.error, 33, errorBody(1))),
   outbound(
+    "an unknown event, its payload unread though it has a lone surrogate",
+    "unknown",
+    rawEvent(0xc7, '["\\udc00"]'),
+  ),
+  outbound(
+    "exited with a lone surrogate in a field from a later minor",
+    "malformed",
+    rawEvent(rep.exited, '{"generation":0,"status":{"type":"unknown","later":"\\ud800"}}'),
+  ),
+  outbound(
     "title with a lone surrogate",
     "malformed",
     rawEvent(rep.title, '{"offset":0,"text":"\\ud800"}'),
@@ -683,6 +709,7 @@ export function frameFixtures(): FrameFixture[] {
  */
 export function readSpawnSpec(json: string): SpawnSpecOutcome {
   const value = parseJson(json);
+  if (hasLoneSurrogate(value)) return { invalid: "a lone surrogate" };
   const frozen = HolderSpawnSpec.pick({ protocol: true }).safeParse(value);
   if (!frozen.success) return { invalid: listIssues(frozen.error.issues) };
   if (negotiateHolder([HOLDER_PROTOCOL_VERSION], frozen.data.protocol) === null) {
@@ -748,6 +775,21 @@ const SPAWN_SPEC_SOURCES = [
   spec("a reserved tag", { ...spawnSpec, tags: { prototype: "" } }, "invalid"),
   spec("theme null", { ...spawnSpec, theme: null }, "invalid"),
   spec("a lone surrogate in env", { ...spawnSpec, env: { A: "\udfff" } }, "invalid"),
+  spec(
+    "a lone surrogate in a field from a later minor",
+    { ...spawnSpec, later: "\ud800" },
+    "invalid",
+  ),
+  spec(
+    "a lone surrogate in a key from a later minor",
+    { ...spawnSpec, later: { "\udbff": 1 } },
+    "invalid",
+  ),
+  spec(
+    "sharing no major, a lone surrogate in what goes unread",
+    { ...spawnSpec, protocol: ["2.0"], later: "\ud800" },
+    "invalid",
+  ),
 ];
 
 export function spawnSpecFixtures(): SpawnSpecFixture[] {

@@ -212,7 +212,28 @@
     "name": "a lone surrogate in env",
     "json": "{\"protocol\":[\"1.0\"],\"terminalId\":\"term_0190a1b2c3d47abc8def0123456789ab\",\"socket\":\"/run/user/1000/bazhen/holders/t.sock\",\"tags\":{\"kind\":\"agent\"},\"size\":{\"cols\":80,\"rows\":24},\"argv\":[\"claude\",\"--resume\",\"日本語\"],\"cwd\":\"/home/u/src\",\"env\":{\"A\":\"\\udfff\"},\"generation\":4,\"theme\":\"dark\",\"historyLines\":5000}",
     "outcome": {
-      "invalid": "env.A: a lone surrogate"
+      "invalid": "a lone surrogate"
+    }
+  },
+  {
+    "name": "a lone surrogate in a field from a later minor",
+    "json": "{\"protocol\":[\"1.0\"],\"terminalId\":\"term_0190a1b2c3d47abc8def0123456789ab\",\"socket\":\"/run/user/1000/bazhen/holders/t.sock\",\"tags\":{\"kind\":\"agent\"},\"size\":{\"cols\":80,\"rows\":24},\"argv\":[\"claude\",\"--resume\",\"日本語\"],\"cwd\":\"/home/u/src\",\"env\":{\"1\":\"integer-like keys sort first in JavaScript\",\"TERM\":\"xterm-256color\"},\"generation\":4,\"theme\":\"dark\",\"historyLines\":5000,\"later\":\"\\ud800\"}",
+    "outcome": {
+      "invalid": "a lone surrogate"
+    }
+  },
+  {
+    "name": "a lone surrogate in a key from a later minor",
+    "json": "{\"protocol\":[\"1.0\"],\"terminalId\":\"term_0190a1b2c3d47abc8def0123456789ab\",\"socket\":\"/run/user/1000/bazhen/holders/t.sock\",\"tags\":{\"kind\":\"agent\"},\"size\":{\"cols\":80,\"rows\":24},\"argv\":[\"claude\",\"--resume\",\"日本語\"],\"cwd\":\"/home/u/src\",\"env\":{\"1\":\"integer-like keys sort first in JavaScript\",\"TERM\":\"xterm-256color\"},\"generation\":4,\"theme\":\"dark\",\"historyLines\":5000,\"later\":{\"\\udbff\":1}}",
+    "outcome": {
+      "invalid": "a lone surrogate"
+    }
+  },
+  {
+    "name": "sharing no major, a lone surrogate in what goes unread",
+    "json": "{\"protocol\":[\"2.0\"],\"terminalId\":\"term_0190a1b2c3d47abc8def0123456789ab\",\"socket\":\"/run/user/1000/bazhen/holders/t.sock\",\"tags\":{\"kind\":\"agent\"},\"size\":{\"cols\":80,\"rows\":24},\"argv\":[\"claude\",\"--resume\",\"日本語\"],\"cwd\":\"/home/u/src\",\"env\":{\"1\":\"integer-like keys sort first in JavaScript\",\"TERM\":\"xterm-256color\"},\"generation\":4,\"theme\":\"dark\",\"historyLines\":5000,\"later\":\"\\ud800\"}",
+    "outcome": {
+      "invalid": "a lone surrogate"
     }
   }
 ]

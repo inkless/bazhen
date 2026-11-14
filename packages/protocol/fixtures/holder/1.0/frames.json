@@ -686,7 +686,7 @@
     "direction": "request",
     "hex": "0000008d45000000387b2261726776223a5b22615c7564383030225d2c22637764223a222f686f6d652f752f737263222c22656e76223a7b2231223a22696e74656765722d6c696b65206b65797320736f727420666972737420696e204a617661536372697074222c225445524d223a22787465726d2d323536636f6c6f72227d2c2267656e65726174696f6e223a347d",
     "outcome": {
-      "malformed": "respawn: argv.0: a lone surrogate"
+      "malformed": "respawn has a lone surrogate"
     }
   },
   {
@@ -750,7 +750,31 @@
     "direction": "request",
     "hex": "0000001c46000000407b2274616773223a7b2261223a225c7564633030227d7d",
     "outcome": {
-      "malformed": "set-tags: tags.a: a lone surrogate"
+      "malformed": "set-tags has a lone surrogate"
+    }
+  },
+  {
+    "name": "hello with a lone surrogate in a field from a later minor",
+    "direction": "request",
+    "hex": "0000002a01000000427b2270726f746f636f6c223a5b22312e30225d2c226c61746572223a225c7564383030227d",
+    "outcome": {
+      "malformed": "hello has a lone surrogate"
+    }
+  },
+  {
+    "name": "hello with a lone surrogate in a key from a later minor",
+    "direction": "request",
+    "hex": "0000002e01000000437b2270726f746f636f6c223a5b22312e30225d2c226c61746572223a7b225c7564626666223a317d7d",
+    "outcome": {
+      "malformed": "hello has a lone surrogate"
+    }
+  },
+  {
+    "name": "hello sharing no major, a lone surrogate in what goes unread",
+    "direction": "request",
+    "hex": "0000002d01000000447b2270726f746f636f6c223a5b22322e30225d2c22777269746572223a5b225c7564383030225d7d",
+    "outcome": {
+      "malformed": "hello has a lone surrogate"
     }
   },
   {
@@ -1474,11 +1498,29 @@
     }
   },
   {
+    "name": "an unknown event, its payload unread though it has a lone surrogate",
+    "direction": "reply",
+    "hex": "0000000bc75b225c7564633030225d",
+    "outcome": {
+      "unknown": {
+        "code": 199
+      }
+    }
+  },
+  {
+    "name": "exited with a lone surrogate in a field from a later minor",
+    "direction": "reply",
+    "hex": "0000003ec57b2267656e65726174696f6e223a302c22737461747573223a7b2274797065223a22756e6b6e6f776e222c226c61746572223a225c7564383030227d7d",
+    "outcome": {
+      "malformed": "exited has a lone surrogate"
+    }
+  },
+  {
     "name": "title with a lone surrogate",
     "direction": "reply",
     "hex": "0000001dc37b226f6666736574223a302c2274657874223a225c7564383030227d",
     "outcome": {
-      "malformed": "title: text: a lone surrogate"
+      "malformed": "title has a lone surrogate"
     }
   }
 ]
