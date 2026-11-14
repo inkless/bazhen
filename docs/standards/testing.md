@@ -148,10 +148,11 @@ A test owns everything it touches and leaves nothing behind.
 - **Ports.** Use free ports, never fixed ones, because parallel worktrees run the same suites.
 - **CPU.** A test or probe never synthesises CPU load (busy loops, stress tools) on a shared
   machine, because every agent on it slows down with you. A comparison that needs load runs on a
-  CI runner: rerun the job. The per-suite `--cpus` quota (`BZ_TEST_CPUS`) is a backstop, not
-  permission.
-- **Untracked files run.** `pnpm test:real` copies untracked files from the worktree into the
-  image, so an uncommitted test file runs as part of the suite. Remove probes before you run it.
+  CI runner: rerun the pull request's CI job that runs the suite, for example `api`. The per-suite
+  `--cpus` quota (`BZ_TEST_CPUS`) is a backstop, not permission.
+- **Untracked files run.** `pnpm test:real` copies untracked, non-ignored files from the worktree
+  into the image, so an uncommitted test file runs as part of the suite. Remove probes before you
+  run it.
 
 ## Writing the test
 
