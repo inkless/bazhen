@@ -38,6 +38,9 @@
       "path": "tests/integration"
     },
     {
+      "path": "tests/holder"
+    },
+    {
       "path": "tests/api"
     },
     {

@@ -13,7 +13,8 @@ page serves that rule, or keeps tests from hurting the machine and each other.
 | Test files type-check                                                              | `pnpm typecheck` (`tsconfig.dev.json`)      |
 | Tests that run real tmux start only on a disposable host (container or CI)         | integration, api and e2e setup              |
 | Tests can't reach a real tmux server, and leave none running                       | integration setup and teardown              |
-| Test runs refuse to start when the machine is short of PTYs                        | integration and api setup                   |
+| Test runs refuse to start when the machine is short of PTYs                        | integration, api and holder setup           |
+| Holder tests use only their run's home, reach no tmux, and leave no holder running | holder setup and teardown                   |
 | Fakes over mocks; behaviour-named tests; no snapshots of terminal output           | review                                      |
 | Behaviour tests are black-box: they reach the daemon only through public surfaces  | review                                      |
 
@@ -34,11 +35,12 @@ Engineering at Google_.
 | medium | `src/**/x.medium.test.ts`     | temporary files, SQLite              | `pnpm test:medium`                     |
 | medium | `scripts/*.medium.test.ts`    | temporary files, git, subprocesses   | `pnpm test:medium`                     |
 | medium | `tests/integration/*.test.ts` | a private tmux server, real PTYs     | `pnpm test:real integration`           |
+| medium | `tests/holder/*.test.ts`      | holders and real PTYs, no tmux       | `pnpm test:holder`                     |
 | large  | `tests/api/*.test.ts`         | the daemon as a process, tmux, CLIs  | `pnpm test:real api`                   |
 | large  | `tests/e2e/*.spec.ts`         | daemon, web client and browser       | `pnpm test:real e2e`                   |
 
-`pnpm check` runs the small and medium tests on the host; none of them runs tmux or an agent.
-The other three sizes run real tmux, so they run only on a disposable host: the test container
+`pnpm check` runs the small and medium tests on the host, the holder tests included; none of
+them runs tmux or an agent. The integration, api and e2e tests run real tmux, so they run only on a disposable host: the test container
 (`pnpm test:real`, which builds it from the worktree without mounting it) or a CI runner. A
 disposable host is Linux with `/etc/bazhen-disposable-host`; their setup refuses to start
 anywhere else. Never create that file on a machine you work on. Inside a container or CI they
@@ -139,13 +141,19 @@ A test owns everything it touches and leaves nothing behind.
 
 - **The host.** Real tmux runs only in the container or CI (above). A global setup runs no build
   or compile step: a step that fails there makes vitest run teardown on a half-made setup.
-- **Paths.** Medium and integration runs get a temporary `BAZHEN_HOME`. Unit runs point it at a
+- **Paths.** Medium, integration and holder runs get a temporary `BAZHEN_HOME`. Unit runs point it at a
   path that doesn't exist. Never read or write the real Bazhen directories.
 - **tmux.** A test runs tmux only through `@bazhen/host-guard`, which names every server by a
   socket path inside a directory the run owns, and refuses `default` and the directory the
   user's own servers share. Get a server with `testServer(label)`, so a leak says which test
   caused it, and kill it in `afterAll`. Each run also gets its own `TMUX_TMPDIR` and runs outside
   any tmux client (`TMUX` unset). Teardown fails the run on any server still alive.
+- **Holders.** Holder tests run on the host, under a temporary `BAZHEN_HOME` in `/tmp`, so the
+  longest holder socket path fits the 103 bytes a Unix socket allows on macOS. Take paths from
+  `tests/support/holder-home.ts`, whose `testHome()` and `holderSocket()` refuse any home but
+  the run's. Close every holder a test starts in `afterAll`: teardown closes any still answering,
+  through the protocol, and fails the run naming each. `tmux` on their `PATH` refuses to run,
+  and teardown fails the run if anything appears in their `TMUX_TMPDIR`.
 - **PTYs are a machine-wide resource.** macOS has 511, and a leak starves every terminal on the
   machine. The setup refuses to run above 420 in use. A runtime change that opens PTYs needs a
   lifecycle test that repeats the operation and asserts the handle count returns to its baseline

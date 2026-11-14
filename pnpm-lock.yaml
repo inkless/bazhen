@@ -169,6 +169,9 @@ importers:
       '@bazhen/host-guard':
         specifier: workspace:*
         version: link:packages/host-guard
+      '@bazhen/runtime-holder':
+        specifier: workspace:*
+        version: link:packages/runtime-holder
       '@types/node':
         specifier: 26.6.6
         version: 26.6.6
@@ -414,6 +417,15 @@ importers:
       '@playwright/test':
         specifier: 1.64.1
         version: 1.64.1
+
+  tests/holder:
+    dependencies:
+      '@bazhen/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+      '@bazhen/runtime-holder':
+        specifier: workspace:*
+        version: link:../../packages/runtime-holder
 
   tests/integration:
     dependencies:
