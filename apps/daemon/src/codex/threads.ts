@@ -144,13 +144,18 @@ export class CodexThreads {
     const agent = store.codexAgentInPane(runtime.socket, pane);
     if (agent === undefined) return this.settle(pane);
     const title = await runtime.paneTitle(agent.runtime);
+    // The TUI empties its title as it exits, which names no thread to follow.
+    if (title.trim() === "") return this.settle(pane);
     const prefix = titlePrefix(title);
     if (prefix === null) {
       this.settle(pane);
-      return this.untracked(agent.agentId, "its title is not a thread id");
+      return this.untracked(agent.agentId, `its title ${JSON.stringify(title)} names no thread`);
     }
     // Still the same thread, as after `/compact`, or back on it.
-    if (agent.threadId.startsWith(prefix)) return this.settle(pane);
+    if (agent.threadId.startsWith(prefix)) {
+      this.tracked(agent.agentId);
+      return this.settle(pane);
+    }
     let found = matching(prefix, this.seen);
     if (found.length === 0) found = matching(prefix, await this.listed());
     const [threadId] = found;
@@ -236,7 +241,7 @@ export class CodexThreads {
     }
   }
 
-  /** A move took: switches are followed again, if the agent said they weren't. */
+  /** The title names the agent's thread: switches are followed again, if it said they weren't. */
   private tracked(agentId: string): void {
     const latest = this.opts.store.latestActivity(agentId);
     if (latest?.detail !== UNTRACKED) return;
