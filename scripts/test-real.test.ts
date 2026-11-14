@@ -146,6 +146,13 @@ const rmFindsNothing = (args: readonly string[]): Answer =>
   args[0] === "rm"
     ? result(1, "", `Error response from daemon: No such container: ${RUN}-api`)
     : passing();
+/** What Podman's `docker` shim prints on stderr before every command. */
+const SHIM_NOTICE =
+  "Emulate Docker CLI using podman. Create /etc/containers/nodocker to quiet msg.";
+const imageNotKnown = (args: readonly string[]): Answer =>
+  verb(args) === "image rm"
+    ? result(2, "", `${SHIM_NOTICE}\nError: ${IMAGE}: image not known\n`)
+    : passing();
 const failing = () => {
   throw new Error("no such ref");
 };
@@ -261,6 +268,7 @@ describe("pnpm test:real cleans up after itself", () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining(`left ${RUN}-api;`));
     warn.mockClear();
     expect(await run(["api"], fakeHost(rmFindsNothing).host)).toBe(0);
+    expect(await run(["api"], fakeHost(imageNotKnown).host)).toBe(0);
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -324,23 +332,55 @@ const labels: Record<string, string> = {
   [unlabelled]: "\t",
   [foreign]: `555\t${HOST}`,
   [elsewhere]: "666\tdevcontainer",
+  "bz-real-111-aaaaaa-api": `111\t${HOST}`,
+  "bz-real-111-aaaaaa-e2e": `111\t${HOST}`,
+  "bz-real-222-bbbbbb-api": `222\t${HOST}`,
+  "bz-real-777-gggggg-e2e": "777\tdevcontainer",
+  "postgres-db": `111\t${HOST}`,
 };
-const stoppedContainers = [
-  `bz-real-111-aaaaaa-api\t111\t${HOST}`,
-  `bz-real-222-bbbbbb-api\t222\t${HOST}`,
-  "bz-real-777-gggggg-e2e\t777\tdevcontainer",
-  `postgres-db\t111\t${HOST}`,
+/** Every container the labels match, and its state. */
+const containers = [
+  "bz-real-111-aaaaaa-api\texited",
+  "bz-real-111-aaaaaa-e2e\trunning",
+  "bz-real-222-bbbbbb-api\texited",
+  "bz-real-777-gggggg-e2e\texited",
+  "postgres-db\texited",
 ];
-const host = (args: readonly string[]): Answer => {
-  const last = args.at(-1) ?? "";
-  if (verb(args) === "image ls") return result(0, `${Object.keys(labels).join("\n")}\n`);
-  if (verb(args) === "image inspect") return result(0, `${labels[last] ?? ""}\n`);
-  if (args.includes("status=exited")) return result(0, `${stoppedContainers.join("\n")}\n`);
-  if (args[0] === "ps") return result(0, last.endsWith(`=${inUse}`) ? "f00d\n" : "");
-  return result(0);
-};
 
-const isList = (c: string[]) => verb(c) === "image ls" || c.includes("status=exited");
+/**
+ * A container CLI as Docker or Podman answers the sweep. Podman refuses `status=dead` and the
+ * `.Label` template function, lists an image under `localhost/`, and calls a missing image "not
+ * known"; it answers a ref with or without that prefix.
+ */
+const cli =
+  (dialect: "docker" | "podman") =>
+  (args: readonly string[]): Answer => {
+    const last = (args.at(-1) ?? "").replace("localhost/", "");
+    if (dialect === "podman" && args.includes("status=dead")) {
+      return result(125, "", "Error: unknown container state: dead: invalid argument");
+    }
+    if (dialect === "podman" && args.some((a) => a.includes(".Label "))) {
+      return result(125, "", "Error: template: ps:1:24: can't evaluate field Label");
+    }
+    const prefix = dialect === "podman" ? "localhost/" : "";
+    const listed = Object.keys(labels).filter((ref) => ref.includes(":"));
+    if (verb(args) === "image ls")
+      return result(
+        0,
+        listed
+          .map((r) => `${r.startsWith("postgres") ? "docker.io/library/" : prefix}${r}\n`)
+          .join(""),
+      );
+    if (args[1] === "inspect") return result(0, `${labels[last] ?? ""}\n`);
+    if (args[0] === "ps" && args.includes("--quiet")) {
+      return result(0, last.endsWith(`=${inUse}`) ? "f00d\n" : "");
+    }
+    if (args[0] === "ps") return result(0, `${containers.join("\n")}\n`);
+    return result(0);
+  };
+const host = cli("docker");
+
+const isList = (c: string[]) => verb(c) === "image ls" || (c[0] === "ps" && !c.includes("--quiet"));
 
 describe("pnpm test:real's sweep of runs that died", () => {
   it("asks docker only for what this script labelled on this host", async () => {
@@ -384,6 +424,24 @@ describe("pnpm test:real's sweep of runs that died", () => {
     const fake = fakeHost(host, { alive: [222], dirs });
     await sweep(fake.host);
     expect(fake.removed).toEqual(["/tmp/bz-real-111-xxxxxx"]);
+  });
+
+  it("leaves a gone run's container that is still running, which only its own --rm removes", async () => {
+    const fake = fakeHost(host, { alive: [222] });
+    await sweep(fake.host);
+    expect(fake.calls.filter((c) => c[0] === "rm").map((c) => c[1])).toEqual([
+      "bz-real-111-aaaaaa-api",
+    ]);
+  });
+
+  it("removes the same leftovers under Podman, which words its lists and errors its own way", async () => {
+    quietly();
+    const fake = fakeHost(cli("podman"), { alive: [222] });
+    await sweep(fake.host);
+    expect(fake.calls.filter(isRemoval)).toEqual([
+      ["rm", "bz-real-111-aaaaaa-api"],
+      ["image", "rm", `localhost/${dead}`],
+    ]);
   });
 
   it("reads no owner from a name this script didn't make", () => {

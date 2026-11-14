@@ -257,10 +257,37 @@ async function lines(quiet: Quiet, args: readonly string[]): Promise<string[]> {
   return code === 0 ? out.split("\n").filter(Boolean) : [];
 }
 
+/** What podman-docker's `docker` prints on every call, unless the host opted out. */
+const SHIM_NOTICE = /^Emulate Docker CLI using podman\./;
+
+/** What a command said went wrong. */
+const errors = (err: string) =>
+  err.split("\n").filter((line) => line !== "" && !SHIM_NOTICE.test(line));
+
 /** Whether a removal failed only because there was nothing left to remove. */
 const gone = ({ code, err }: DockerResult) =>
   code === 0 ||
-  (code !== null && err.split("\n").every((line) => line === "" || /no such/i.test(line)));
+  // Docker says "No such image"; Podman, "image not known".
+  (code !== null && errors(err).every((line) => /no such|not known/i.test(line)));
+
+/** A ref to an image of this repository, as Docker lists it or as Podman does, under localhost/. */
+const OUR_IMAGE = new RegExp(`^(localhost/)?${REPOSITORY}:`);
+
+/** Container states in which a container has stopped, in Docker's words and in Podman's. */
+const STOPPED = new Set(["created", "configured", "exited", "stopped", "dead"]);
+
+/** The owner pid and host a container or image is labelled with, as the labels read. */
+async function ownerLabels(quiet: Quiet, kind: "container" | "image", ref: string) {
+  const [labels = ""] = await lines(quiet, [
+    kind,
+    "inspect",
+    "--format",
+    `{{index .Config.Labels "${OWNER_LABEL}"}}\t{{index .Config.Labels "${HOST_LABEL}"}}`,
+    ref,
+  ]);
+  const [owner, id] = labels.split("\t");
+  return { owner: Number(owner), id };
+}
 
 /**
  * Removes what runs on this host that died without cleaning up left behind: their stopped
@@ -272,24 +299,20 @@ export async function sweep(host: Host, quiet: Quiet = bounded(host)): Promise<v
   const dead = (pid: number | undefined) =>
     pid !== undefined && pid > 1 && pid !== host.pid && !host.isAlive(pid);
   const ours = ["--filter", `label=${OWNER_LABEL}`, "--filter", `label=${HOST_LABEL}=${host.id}`];
-  const stopped = await lines(quiet, [
+  // Labels and states are read with templates and filters both Docker and Podman know: Podman
+  // refuses `status=dead` and the `.Label` function, and an error here would read as no output.
+  const containers = await lines(quiet, [
     "ps",
     "--all",
     ...ours,
-    "--filter",
-    "status=created",
-    "--filter",
-    "status=exited",
-    "--filter",
-    "status=dead",
     "--format",
-    `{{.Names}}\t{{.Label "${OWNER_LABEL}"}}\t{{.Label "${HOST_LABEL}"}}`,
+    "{{.Names}}\t{{.State}}",
   ]);
-  for (const line of stopped) {
-    const [name = "", owner, id] = line.split("\t");
-    if (RUN_NAME.test(name) && id === host.id && dead(Number(owner))) {
-      await quiet(["rm", name]);
-    }
+  for (const line of containers) {
+    const [name = "", state = ""] = line.split("\t");
+    if (!RUN_NAME.test(name) || !STOPPED.has(state)) continue;
+    const { owner, id } = await ownerLabels(quiet, "container", name);
+    if (id === host.id && dead(owner)) await quiet(["rm", name]);
   }
   const refs = await lines(quiet, [
     "image",
@@ -300,23 +323,16 @@ export async function sweep(host: Host, quiet: Quiet = bounded(host)): Promise<v
     "--format",
     "{{.Repository}}:{{.Tag}}",
   ]);
-  for (const ref of refs.filter((r) => r.startsWith(`${REPOSITORY}:`))) {
-    const [labels = ""] = await lines(quiet, [
-      "image",
-      "inspect",
-      "--format",
-      `{{index .Config.Labels "${OWNER_LABEL}"}}\t{{index .Config.Labels "${HOST_LABEL}"}}`,
-      ref,
-    ]);
-    const [owner, id] = labels.split("\t");
-    if (id !== host.id || !dead(Number(owner))) continue;
+  for (const ref of refs.filter((r) => OUR_IMAGE.test(r))) {
+    const { owner, id } = await ownerLabels(quiet, "image", ref);
+    if (id !== host.id || !dead(owner)) continue;
     const users = await lines(quiet, ["ps", "--all", "--quiet", "--filter", `ancestor=${ref}`]);
     if (users.length > 0) continue;
     const removed = await quiet(["image", "rm", ref]);
     console.warn(
       removed.code === 0
         ? `test:real: removed ${ref}, left by a run that is gone`
-        : `test:real: kept ${ref}: ${removed.err.trim()}`,
+        : `test:real: kept ${ref}: ${errors(removed.err).join("; ")}`,
     );
   }
   for (const dir of host.runDirs()) {

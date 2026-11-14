@@ -15,7 +15,7 @@ client. Agents, tasks, and orchestration come later.
   once per machine the two cargo tools `pnpm check` runs:
   `cargo install --locked cargo-nextest@0.9.152 cargo-deny@0.20.2`
 - macOS or Linux
-- For the tests that run real tmux, Docker (`pnpm test:real`)
+- For the tests that run real tmux, Docker, or Podman with its `docker` shim (`pnpm test:real`)
 
 ## Commands
 

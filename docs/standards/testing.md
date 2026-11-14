@@ -48,7 +48,9 @@ signal abandons the cleanup. What a run killed outright or abandoned left, the n
 same machine removes: it sweeps the stopped containers, images and contexts whose owning process
 is gone, and an image only once no container uses it.
 Docker's build cache keeps the layers, so repeat runs are fast; BuildKit's garbage collection
-bounds it, and `docker builder prune` reclaims it on a machine of your own.
+bounds it, and `docker builder prune` reclaims it on a machine of your own. Under Podman, where
+`docker` is the podman-docker shim, nothing bounds the cache; `podman image prune` reclaims it on
+a machine of your own.
 
 **Remove every scratch Docker image and container you build,** by its own tag or name, when you
 are done with it. Several agents share one Docker host, so never prune, and never remove an image
