@@ -1,4 +1,4 @@
-//! The engine against plan A: a bare alacritty terminal that keeps all of its history itself.
+//! The engine against a bare alacritty terminal that keeps all of its history itself.
 //! Fed the same output in the same pieces, the two hold the same screen, cursor and history, row
 //! for row. alacritty keeps the primary grid private while the alternate screen is up, so history
 //! is compared only while the primary screen is up.
@@ -40,6 +40,10 @@ enum Action {
     SyncOff,
     Query,
     Repeat(u16),
+    SaveCursor,
+    RestoreCursor,
+    TabForward(u8),
+    Substitute,
     WriteHistory,
 }
 
@@ -70,6 +74,10 @@ impl Action {
             Self::SyncOff => "\x1b[?2026l".into(),
             Self::Query => "\x1b[6n".into(),
             Self::Repeat(n) => format!("\x1b[{n}b"),
+            Self::SaveCursor => "\x1b7".into(),
+            Self::RestoreCursor => "\x1b8".into(),
+            Self::TabForward(n) => format!("\x1b[{n}I"),
+            Self::Substitute => "\x1a".into(),
             Self::WriteHistory => return None,
         })
     }
@@ -107,20 +115,24 @@ fn output() -> impl Strategy<Value = Action> {
         1 => Just(Action::SyncOff),
         1 => Just(Action::Query),
         1 => (0u16..200).prop_map(Action::Repeat),
+        1 => Just(Action::SaveCursor),
+        1 => Just(Action::RestoreCursor),
+        1 => (0u8..4).prop_map(Action::TabForward),
+        1 => Just(Action::Substitute),
         1 => Just(Action::WriteHistory),
     ]
 }
 
-/// Plan A: alacritty alone, with room for all the history a case makes, and the engine's
+/// The reference: alacritty alone, with room for all the history a case makes, and the engine's
 /// workarounds for alacritty's and vte's bugs, which aren't what the test compares.
-struct PlanA {
+struct FullHistory {
     term: Term<Sink>,
     parser: Processor,
     utf8: Utf8Seam,
     replies: Sink,
 }
 
-impl PlanA {
+impl FullHistory {
     fn new(size: Size) -> Self {
         let replies = Sink::default();
         Self {
@@ -189,7 +201,7 @@ fn screen(term: &Term<Sink>) -> Vec<Cells> {
 /// background colour of the moment, which the row it stands for may not have been.
 fn drawn(text: &str, cols: u16) -> Vec<Cells> {
     let rows = u16::try_from(text.len() + 1).unwrap();
-    let mut term = PlanA::new(Size { cols, rows });
+    let mut term = FullHistory::new(Size { cols, rows });
     term.advance(text.as_bytes());
     let grid = term.term.grid();
     (0..=grid.cursor.point.line.0)
@@ -228,32 +240,32 @@ fn wraps(row: &Cells) -> bool {
 
 /// What differs between the two, if anything: screen, cursor, or, with the primary screen up,
 /// history.
-fn difference(engine: &Engine, plan_a: &PlanA) -> Option<String> {
-    let (ours, theirs) = (screen(&engine.term), screen(&plan_a.term));
+fn difference(engine: &Engine, full: &FullHistory) -> Option<String> {
+    let (ours, theirs) = (screen(&engine.term), screen(&full.term));
     if ours != theirs {
         return Some(format!(
-            "screen\nengine:\n{}plan A:\n{}",
+            "screen\nengine:\n{}reference:\n{}",
             shown(&ours),
             shown(&theirs)
         ));
     }
-    let (cursor, other) = (&engine.term.grid().cursor, &plan_a.term.grid().cursor);
+    let (cursor, other) = (&engine.term.grid().cursor, &full.term.grid().cursor);
     if (cursor.point, cursor.input_needs_wrap) != (other.point, other.input_needs_wrap) {
         return Some(format!(
             "cursor: {:?} against {:?}",
             cursor.point, other.point
         ));
     }
-    if plan_a.alternate() {
+    if full.alternate() {
         return None;
     }
     let mut history = String::new();
     engine.write_history(&mut history);
     let cols = engine.size.cols;
-    let (ours, theirs) = (drawn(&history, cols), drawn(&plan_a.history(), cols));
+    let (ours, theirs) = (drawn(&history, cols), drawn(&full.history(), cols));
     (ours != theirs).then(|| {
         format!(
-            "history\nengine:\n{}plan A:\n{}",
+            "history\nengine:\n{}reference:\n{}",
             shown(&ours),
             shown(&theirs)
         )
@@ -261,7 +273,7 @@ fn difference(engine: &Engine, plan_a: &PlanA) -> Option<String> {
 }
 
 /// Feeds both terminals `stream`, in pieces of the sizes `cuts` gives in turn.
-fn feed(engine: &mut Engine, plan_a: &mut PlanA, stream: &str, cuts: &[usize]) {
+fn feed(engine: &mut Engine, full: &mut FullHistory, stream: &str, cuts: &[usize]) {
     let mut rest = stream.as_bytes();
     for &cut in cuts.iter().cycle() {
         if rest.is_empty() {
@@ -269,39 +281,39 @@ fn feed(engine: &mut Engine, plan_a: &mut PlanA, stream: &str, cuts: &[usize]) {
         }
         let (piece, after) = rest.split_at(cut.min(rest.len()));
         engine.advance(piece);
-        plan_a.advance(piece);
+        full.advance(piece);
         rest = after;
     }
 }
 
 /// Plays `actions` to both, checking they hold the same after each that isn't output, and
 /// returns them.
-fn run(size: Size, actions: &[Action], cuts: &[usize]) -> (Engine, PlanA) {
-    let mut engine = Engine::new(size, ALL_OF_IT);
-    let mut plan_a = PlanA::new(size);
+fn run(size: Size, actions: &[Action], cuts: &[usize]) -> (Engine, FullHistory) {
+    let mut engine = Engine::new(size, HistoryRows(ALL_OF_IT));
+    let mut full = FullHistory::new(size);
     let mut pending = String::new();
     for action in actions {
         if let Some(bytes) = action.bytes() {
             pending.push_str(&bytes);
             continue;
         }
-        feed(&mut engine, &mut plan_a, &pending, cuts);
+        feed(&mut engine, &mut full, &pending, cuts);
         pending.clear();
-        assert_same(&engine, &plan_a);
+        assert_same(&engine, &full);
         if let Action::WriteHistory = action {
             engine.write_history(&mut String::new());
         }
     }
-    feed(&mut engine, &mut plan_a, &pending, cuts);
-    assert_same(&engine, &plan_a);
-    assert_eq!(engine.take_replies(), plan_a.replies.0.take().into_bytes());
-    (engine, plan_a)
+    feed(&mut engine, &mut full, &pending, cuts);
+    assert_same(&engine, &full);
+    assert_eq!(engine.take_replies(), full.replies.0.take().into_bytes());
+    (engine, full)
 }
 
-fn assert_same(engine: &Engine, plan_a: &PlanA) {
+fn assert_same(engine: &Engine, full: &FullHistory) {
     assert_eq!(engine.stats().overflows, 0, "{engine:?}");
-    if let Some(difference) = difference(engine, plan_a) {
-        panic!("the engine and plan A differ in their {difference}");
+    if let Some(difference) = difference(engine, full) {
+        panic!("the engine and the reference differ in their {difference}");
     }
 }
 
@@ -332,11 +344,11 @@ proptest! {
         cuts in cuts(),
         limit in 0usize..60,
     ) {
-        let (_, plan_a) = run(size, &actions, &cuts);
-        if plan_a.alternate() {
+        let (_, full) = run(size, &actions, &cuts);
+        if full.alternate() {
             return Ok(());
         }
-        let mut engine = Engine::new(size, limit);
+        let mut engine = Engine::new(size, HistoryRows(limit));
         let stream: String = actions.iter().filter_map(Action::bytes).collect();
         let mut rest = stream.as_bytes();
         for &cut in cuts.iter().cycle() {
@@ -347,13 +359,21 @@ proptest! {
             engine.advance(piece);
             rest = after;
         }
-        let mut history = String::new();
-        engine.write_history(&mut history);
-        let (ours, theirs) = (drawn(&history, size.cols), drawn(&plan_a.history(), size.cols));
+        let encoded = |grid: &alacritty_terminal::Grid<Cell>| -> Vec<(String, Ending)> {
+            let scrolled = grid.history_size();
+            (0..scrolled)
+                .map(|n| {
+                    let mut text = String::new();
+                    let ending = encode_row(&grid[scrollback_line(scrolled, n)], &mut text);
+                    (text, ending)
+                })
+                .collect()
+        };
+        let mut ours = engine.history.rows_for_test();
+        ours.extend(encoded(engine.term.grid()));
+        let theirs = encoded(full.term.grid());
         prop_assert!(engine.history.rows() <= limit);
-        prop_assert!(theirs.ends_with(&ours), "engine:\n{}plan A:\n{}", shown(&ours), shown(&theirs));
-        let in_alacritty = engine.term.grid().history_size();
-        let all = plan_a.term.grid().history_size();
-        prop_assert_eq!(engine.history.rows() + in_alacritty, all.min(limit + in_alacritty));
+        prop_assert_eq!(ours.len(), theirs.len().min(limit + engine.term.grid().history_size()));
+        prop_assert_eq!(&ours[..], &theirs[theirs.len() - ours.len()..]);
     }
 }

@@ -28,11 +28,12 @@ use alacritty_terminal::vte::ansi::Processor;
 use alacritty_terminal::vte::{Parser, Perform as _};
 
 use crate::budget::{Budget, Stop};
-use crate::encode::{Lines, encode_row};
+use crate::encode::{Ending, Lines, encode_row};
 use crate::history::History;
 use crate::seam::Utf8Seam;
 
-/// A terminal's size in cells.
+/// A terminal's size in cells. The engine works at no fewer than 2 columns and 1 row, and no more
+/// than 1,000 of either.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Size {
     pub cols: u16,
@@ -41,11 +42,12 @@ pub struct Size {
 
 impl Size {
     /// alacritty indexes past the row when a wide char arrives in a one-column terminal, so the
-    /// engine never has fewer than two.
+    /// engine never has fewer than two; and it allocates every cell, 24 bytes each, so a size
+    /// someone mistyped can't take gigabytes.
     fn usable(self) -> Self {
         Self {
-            cols: self.cols.max(2),
-            rows: self.rows.max(1),
+            cols: self.cols.clamp(2, MOST_CELLS_A_SIDE),
+            rows: self.rows.clamp(1, MOST_CELLS_A_SIDE),
         }
     }
 
@@ -57,6 +59,17 @@ impl Size {
         self.rows.into()
     }
 }
+
+const MOST_CELLS_A_SIDE: u16 = 1000;
+
+/// How many rows of history an engine keeps, as tmux's `history-limit` counts them: wrapped rows
+/// each count, so one long line can't take more than its share.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HistoryRows(pub usize);
+
+/// The most bytes of history text an engine keeps, whatever the rows hold: 10,000 rows of text
+/// drawn in a new colour every cell would otherwise take over 100 MB.
+const MOST_HISTORY_BYTES: usize = 32 << 20;
 
 impl Dimensions for Size {
     fn total_lines(&self) -> usize {
@@ -72,7 +85,7 @@ impl Dimensions for Size {
     }
 }
 
-/// What an engine holds, for `bazhen doctor`.
+/// What an engine holds in memory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Stats {
     /// alacritty's grids: their rows at full width.
@@ -98,6 +111,8 @@ impl EventListener for Sink {
     }
 }
 
+/// A terminal's screen and history: the program's output goes in through [`Engine::advance`],
+/// and what the terminal answers comes back through [`Engine::take_replies`].
 pub struct Engine {
     term: Term<Sink>,
     parser: Processor,
@@ -109,9 +124,9 @@ pub struct Engine {
     size: Size,
     /// alacritty's scrollback limit for the primary grid.
     scrollback: usize,
-    /// The row a drain leaves in alacritty's scrollback, encoded, and whether it wraps: alacritty
-    /// keeps the primary grid private while the alternate screen is up.
-    kept: Option<(String, bool)>,
+    /// The row a drain leaves in alacritty's scrollback, encoded: alacritty keeps the primary grid
+    /// private while the alternate screen is up.
+    kept: Option<(String, Ending)>,
     encoded: String,
     overflows: u64,
 }
@@ -128,8 +143,8 @@ impl fmt::Debug for Engine {
 }
 
 impl Engine {
-    /// An engine for a terminal of `size` that keeps up to `history_rows` rows of history.
-    pub fn new(size: Size, history_rows: usize) -> Self {
+    /// An engine for a terminal of `size` that keeps up to `history` rows of history.
+    pub fn new(size: Size, history: HistoryRows) -> Self {
         let size = size.usable();
         let budget = Budget::new(size.cols(), size.rows());
         let scrollback = scrollback_limit(&budget);
@@ -142,7 +157,7 @@ impl Engine {
             lookahead: Parser::new(),
             budget,
             utf8: Utf8Seam::default(),
-            history: History::new(history_rows),
+            history: History::new(history.0, MOST_HISTORY_BYTES),
             replies,
             size,
             scrollback,
@@ -174,8 +189,8 @@ impl Engine {
                     .lookahead
                     .advance_until_terminated(&mut self.budget, window);
                 if more == 0 {
-                    // vte reads a byte whenever it isn't told to stop; were it not to, both
-                    // parsers must still see the same bytes.
+                    // vte reads at least a byte unless told to stop. If it ever doesn't, the
+                    // read-ahead takes the window whole, so both parsers still see the same bytes.
                     self.lookahead.advance(&mut self.budget, window);
                     read += window.len();
                 } else {
@@ -205,8 +220,8 @@ impl Engine {
             }
             self.utf8.note(stretch);
             match stop {
-                Some(Stop::Reset) => self.history.clear(),
-                Some(Stop::ClearHistory) if !self.alternate() => self.history.clear(),
+                Some(Stop::Reset) => self.clear_history(),
+                Some(Stop::ClearHistory) if !self.alternate() => self.clear_history(),
                 _ => {}
             }
             self.drain();
@@ -223,7 +238,8 @@ impl Engine {
         }
     }
 
-    /// What the terminal wrote back to the program since the last call.
+    /// What the terminal wrote back to the program since the last call. They pile up until
+    /// taken, so take them after every [`Engine::advance`].
     pub fn take_replies(&mut self) -> Vec<u8> {
         std::mem::take(&mut *self.replies.0.borrow_mut()).into_bytes()
     }
@@ -231,24 +247,27 @@ impl Engine {
     /// Appends the history, oldest row first, as VT text: one line after another, each ended by
     /// CRLF, so a viewer of any width rewraps each line as it reads it.
     pub fn write_history(&self, out: &mut String) {
-        self.write_lines(&mut Lines::new(out));
+        let mut lines = Lines::new(out);
+        self.write_lines(&mut lines);
+        lines.finish();
     }
 
     fn write_lines(&self, lines: &mut Lines<'_>) {
         self.history.write(lines);
         if !self.alternate() {
             write_scrollback(self.term.grid(), lines);
-        } else if let Some((text, wrapped)) = &self.kept {
-            lines.row(text, *wrapped);
+        } else if let Some((text, ending)) = &self.kept {
+            lines.row(text, *ending);
         }
     }
 
+    /// What the engine holds in memory, and how many rows of history.
     pub fn stats(&self) -> Stats {
         // The primary grid's screen and the scrollback its storage is sized for, and the
         // alternate screen: alacritty allocates every row at full width.
         let grids = self.scrollback + 2 * self.size.rows();
         let scrolled = if self.alternate() {
-            0
+            usize::from(self.kept.is_some())
         } else {
             self.term.grid().history_size()
         };
@@ -258,6 +277,11 @@ impl Engine {
             history_rows: self.history.rows() + scrolled,
             overflows: self.overflows,
         }
+    }
+
+    fn clear_history(&mut self) {
+        self.history.clear();
+        self.kept = None;
     }
 
     fn alternate(&self) -> bool {
@@ -282,11 +306,14 @@ impl Engine {
             self.overflows += 1;
         }
         let grid = self.term.grid();
-        self.kept = (grid.history_size() > 0).then(|| {
-            let mut text = String::new();
-            let wrapped = encode_row(&grid[Line(-1)], &mut text);
-            (text, wrapped)
-        });
+        // The kept row changes only when a row scrolled after it, or history was cleared.
+        if grid.history_size() != KEPT_ROWS || self.kept.is_none() {
+            self.kept = (grid.history_size() > 0).then(|| {
+                let mut text = String::new();
+                let ending = encode_row(&grid[Line(-1)], &mut text);
+                (text, ending)
+            });
+        }
     }
 }
 
@@ -331,10 +358,11 @@ fn whole_chars(bytes: &[u8], len: usize) -> usize {
 /// The rows of scrollback a drain leaves in alacritty.
 const KEPT_ROWS: usize = 1;
 
-/// Room for the rows a drain leaves, the most one stretch can scroll, and one more, so a full
-/// scrollback means a lost row.
+/// Room for the rows a drain leaves, the most one stretch can scroll, a row the bytes finishing
+/// a split char may wrap before the next stretch counts, and one more, so a full scrollback means
+/// a lost row.
 fn scrollback_limit(budget: &Budget) -> usize {
-    KEPT_ROWS + budget.most_rows_per_stretch() + 1
+    KEPT_ROWS + budget.most_rows_per_stretch() + 2
 }
 
 fn config(scrollback: usize) -> Config {
@@ -344,7 +372,9 @@ fn config(scrollback: usize) -> Config {
     }
 }
 
-/// The `n`th oldest row of a scrollback `scrolled` rows deep.
+/// The `n`th oldest row of a scrollback `scrolled` rows deep; `n` from `scrolled` up is the
+/// screen. alacritty's grid indexing panics past its rows, so callers keep `n` below
+/// `scrolled` plus the screen's rows, from the grid they index.
 fn scrollback_line(scrolled: usize, n: usize) -> Line {
     let to_i32 = |v: usize| i32::try_from(v).unwrap_or(i32::MAX);
     Line(to_i32(n) - to_i32(scrolled))
@@ -387,14 +417,14 @@ mod tests {
 
     #[test]
     fn a_query_inside_a_synchronized_update_is_answered_at_once() {
-        let mut engine = Engine::new(SIZE, 100);
+        let mut engine = Engine::new(SIZE, HistoryRows(100));
         engine.advance(b"\x1b[?2026hxy\x1b[6n");
         assert_eq!(engine.take_replies(), b"\x1b[1;3R");
     }
 
     #[test]
     fn rows_that_leave_the_screen_move_to_the_store_in_order() {
-        let mut engine = Engine::new(SIZE, 1000);
+        let mut engine = Engine::new(SIZE, HistoryRows(1000));
         engine.advance(lines(0..100).as_bytes());
         assert_eq!(history(&mut engine), lines(0..96));
         assert_eq!(engine.history.rows(), 95);
@@ -403,7 +433,7 @@ mod tests {
 
     #[test]
     fn a_flood_in_one_read_overflows_nothing() {
-        let mut engine = Engine::new(SIZE, 100_000);
+        let mut engine = Engine::new(SIZE, HistoryRows(100_000));
         let flood = "\n".repeat(10_000) + &"\x1b[99S".repeat(1000) + &"x".repeat(50_000);
         engine.advance(flood.as_bytes());
         let stats = engine.stats();
@@ -418,7 +448,7 @@ mod tests {
 
     #[test]
     fn the_history_limit_counts_rows_and_drops_the_oldest() {
-        let mut engine = Engine::new(SIZE, 30);
+        let mut engine = Engine::new(SIZE, HistoryRows(30));
         engine.advance(lines(0..200).as_bytes());
         assert_eq!(engine.history.rows(), 30);
         assert_eq!(history(&mut engine), lines(196 - 30 - KEPT_ROWS..196));
@@ -426,7 +456,7 @@ mod tests {
 
     #[test]
     fn a_reset_clears_the_history_even_from_the_alternate_screen() {
-        let mut engine = Engine::new(SIZE, 1000);
+        let mut engine = Engine::new(SIZE, HistoryRows(1000));
         engine.advance(lines(0..50).as_bytes());
         engine.advance(b"\x1b[?1049h\x1bcafter");
         assert_eq!(history(&mut engine), "");
@@ -434,7 +464,7 @@ mod tests {
 
     #[test]
     fn clearing_history_clears_the_store_but_not_from_the_alternate_screen() {
-        let mut engine = Engine::new(SIZE, 1000);
+        let mut engine = Engine::new(SIZE, HistoryRows(1000));
         engine.advance(lines(0..50).as_bytes());
         engine.advance(b"\x1b[?1049h\x1b[3J\x1b[?1049l");
         assert_eq!(history(&mut engine), lines(0..46));
@@ -444,10 +474,26 @@ mod tests {
 
     #[test]
     fn a_char_repeated_thousands_of_times_overflows_nothing() {
-        let mut engine = Engine::new(Size { cols: 2, rows: 1 }, 100_000);
+        let mut engine = Engine::new(Size { cols: 2, rows: 1 }, HistoryRows(100_000));
         engine.advance(b"x\x1b[65535b");
         let stats = engine.stats();
         assert_eq!(stats.overflows, 0);
         assert_eq!(stats.history_rows, 65_536 / 2 - 1);
+    }
+
+    #[test]
+    fn under_the_alternate_screen_history_holds_what_scrolled_before_the_switch() {
+        let mut engine = Engine::new(SIZE, HistoryRows(1000));
+        // One read: the rows scroll and the switch follows in the same stretch.
+        engine.advance((lines(0..50) + "\x1b[?1049hvim").as_bytes());
+        assert_eq!(history(&mut engine), lines(0..46));
+        assert_eq!(engine.stats().history_rows, 46);
+    }
+
+    #[test]
+    fn a_thousand_lines_in_one_read_cross_stretches_in_order() {
+        let mut engine = Engine::new(SIZE, HistoryRows(10_000));
+        engine.advance(lines(0..1000).as_bytes());
+        assert_eq!(history(&mut engine), lines(0..996));
     }
 }

@@ -11,13 +11,29 @@ const LAYOUT_FLAGS: Flags = Flags::WRAPLINE
     .union(Flags::WIDE_CHAR_SPACER)
     .union(Flags::LEADING_WIDE_CHAR_SPACER);
 
-/// Appends `row`'s cells to `out`, with the pen back at the default, and returns whether it
-/// wraps into the next row. A row that wraps is written in full, so that writing the next one
-/// wraps there too; one that doesn't stops at its last cell that isn't blank.
-pub(crate) fn encode_row(row: &Row<Cell>, out: &mut String) -> bool {
+/// How a row starts and ends, which is what [`Lines`] needs to join it to its neighbours.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Ending {
+    /// It wraps into the next row.
+    pub(crate) wrapped: bool,
+    /// It ends in the cell a wide char didn't fit in, which isn't written: see [`Lines`].
+    pub(crate) spacer: bool,
+    /// Its first cell is a wide char.
+    pub(crate) wide_start: bool,
+}
+
+/// Appends `row`'s cells to `out`, with the pen back at the default, and says how it ends. A row
+/// that wraps is written in full, so that writing the next one wraps there too; one that doesn't
+/// stops at its last cell that isn't blank.
+pub(crate) fn encode_row(row: &Row<Cell>, out: &mut String) -> Ending {
     let wrapped = row
         .last()
         .is_some_and(|cell| cell.flags.contains(Flags::WRAPLINE));
+    let wide_start = row
+        .into_iter()
+        .next()
+        .is_some_and(|cell| cell.flags.contains(Flags::WIDE_CHAR));
+    let mut spacer = false;
     let end = if wrapped {
         row.len()
     } else {
@@ -34,11 +50,7 @@ pub(crate) fn encode_row(row: &Row<Cell>, out: &mut String) -> bool {
             continue;
         }
         if cell.flags.contains(Flags::LEADING_WIDE_CHAR_SPACER) {
-            // The cell a wide char didn't fit in. The next row usually starts with that char,
-            // which would wrap there anyway, but not always (a line inserted between them): a
-            // space keeps the next row's cells where they were.
-            pen = write_pen(out, pen, Pen::default());
-            out.push(' ');
+            spacer = true;
             continue;
         }
         pen = write_pen(out, pen, Pen::of(cell));
@@ -52,42 +64,70 @@ pub(crate) fn encode_row(row: &Row<Cell>, out: &mut String) -> bool {
     if pen != Pen::default() {
         out.push_str("\x1b[0m");
     }
-    wrapped
+    Ending {
+        wrapped,
+        spacer,
+        wide_start,
+    }
 }
 
 /// Writes encoded rows in order: a wrapped row runs into the next, and CRLF ends each line.
+///
+/// A row that ends in the cell a wide char didn't fit in is followed, nearly always, by a row
+/// that starts with that char, which wraps there by itself, so the cell isn't written: a viewer of
+/// another width would show it as a stray space. When the next row starts otherwise (a line
+/// inserted between them), the cell is written as a space, which keeps that row's cells in place.
 #[derive(Debug)]
 pub(crate) struct Lines<'a> {
     out: &'a mut String,
     /// The last row wrapped: the line goes on in whatever is written next.
     open: bool,
+    /// The last row ended in the cell a wide char didn't fit in.
+    spacer: bool,
 }
 
 impl<'a> Lines<'a> {
     pub(crate) fn new(out: &'a mut String) -> Self {
-        Self { out, open: false }
+        Self {
+            out,
+            open: false,
+            spacer: false,
+        }
     }
 
-    pub(crate) fn row(&mut self, text: &str, wrapped: bool) {
+    pub(crate) fn row(&mut self, text: &str, ending: Ending) {
         let start = self.out.len();
         self.out.push_str(text);
-        self.end_row(start, wrapped);
+        self.end_row(start, ending);
     }
 
     /// Encodes `row` and writes it.
     pub(crate) fn grid_row(&mut self, row: &Row<Cell>) {
         let start = self.out.len();
-        let wrapped = encode_row(row, self.out);
-        self.end_row(start, wrapped);
+        let ending = encode_row(row, self.out);
+        self.end_row(start, ending);
     }
 
-    fn end_row(&mut self, start: usize, wrapped: bool) {
-        if self.open && self.out.len() == start {
+    /// Writes what the last row still owes: a spacer, which whatever comes next may need.
+    pub(crate) fn finish(self) {
+        if self.spacer {
+            self.out.push(' ');
+        }
+    }
+
+    fn end_row(&mut self, start: usize, ending: Ending) {
+        let mut wrote = self.out.len() > start;
+        if std::mem::take(&mut self.spacer) && !ending.wide_start {
+            self.out.insert(start, ' ');
+            wrote = true;
+        }
+        if self.open && !wrote {
             // A blank row a line wrapped into: one cell makes the wrap happen.
             self.out.push(' ');
         }
-        self.open = wrapped;
-        if !wrapped {
+        self.open = ending.wrapped;
+        self.spacer = ending.spacer;
+        if !ending.wrapped {
             self.out.push_str("\r\n");
         }
     }
@@ -268,6 +308,7 @@ mod tests {
         for line in 0..4 {
             lines.grid_row(&original.grid()[Line(line)]);
         }
+        lines.finish();
         // A row past the last, for the last line's CRLF to move to.
         let mut replayed = term(cols, 5);
         feed(&mut replayed, encoded.as_bytes());
@@ -300,12 +341,26 @@ mod tests {
     }
 
     #[test]
-    fn a_wide_char_that_did_not_fit_moves_to_the_next_row_and_leaves_a_space() {
-        let (mut original, replayed) = round_trip("abcde中".as_bytes(), 6);
-        let spacer = &mut original[0][5];
-        assert!(spacer.flags.contains(Flags::LEADING_WIDE_CHAR_SPACER));
-        spacer.flags.remove(Flags::LEADING_WIDE_CHAR_SPACER);
+    fn a_wide_char_that_did_not_fit_moves_to_the_next_row_and_its_cell_is_left_unwritten() {
+        let (original, replayed) = round_trip("abcde中".as_bytes(), 6);
+        assert!(
+            original[0][5]
+                .flags
+                .contains(Flags::LEADING_WIDE_CHAR_SPACER)
+        );
         assert_eq!(original, replayed);
+    }
+
+    #[test]
+    fn rewrapped_wider_a_wide_char_that_wrapped_leaves_no_space_before_it() {
+        let mut narrow = term(6, 2);
+        feed(&mut narrow, "abcde中".as_bytes());
+        let mut encoded = String::new();
+        let mut lines = Lines::new(&mut encoded);
+        lines.grid_row(&narrow.grid()[Line(0)]);
+        lines.grid_row(&narrow.grid()[Line(1)]);
+        lines.finish();
+        assert_eq!(encoded, "abcde中\r\n");
     }
 
     #[test]
