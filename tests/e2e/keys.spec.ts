@@ -666,6 +666,7 @@ async function appManifest(page: Page) {
   const cdp = await page.context().newCDPSession(page);
   const manifest = await cdp.send("Page.getAppManifest");
   const { installabilityErrors } = await cdp.send("Page.getInstallabilityErrors");
+  await cdp.detach();
   if (manifest.url === "") return null;
   const data: unknown = JSON.parse(manifest.data ?? "null");
   return {
@@ -712,7 +713,9 @@ test("asks before a close while Ctrl is down in a terminal, and says why once th
   await page.close({ runBeforeUnload: true });
   await expect.poll(() => dialogs).toEqual(["beforeunload"]);
   await page.keyboard.up("Control");
-  await expect(page.getByRole("status").filter({ hasText: "Ctrl+W closes the tab" })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "Ctrl+W" })).toHaveText(
+    "Ctrl+W closes the tab, so the terminal can't get it. In Bazhen installed as an app, it can.",
+  );
 });
 
 test("closes without asking once Ctrl is up", async ({ page }) => {
@@ -721,7 +724,8 @@ test("closes without asking once Ctrl is up", async ({ page }) => {
   const dialogs: string[] = [];
   page.on("dialog", (dialog) => {
     dialogs.push(dialog.type());
-    void dialog.dismiss();
+    // Accepted, so the page closes either way and the assertion below says what it saw.
+    void dialog.accept();
   });
   await page.keyboard.down("Control");
   await page.keyboard.up("Control");

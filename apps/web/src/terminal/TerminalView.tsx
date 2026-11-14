@@ -19,6 +19,7 @@ import {
 import { Heartbeat, PING_EVERY_MS } from "./heartbeat.ts";
 import { barBytes, keyBar, settled, withCtrl, type BarTarget } from "./bar-keys.ts";
 import { guardClose } from "./close-guard.ts";
+import { canInstall, offersInstall, thisDevice } from "../install.ts";
 import { isApple, matchKey } from "./keymap.ts";
 import { statusText, type Status } from "./status.ts";
 import { Backoff } from "./reconnect.ts";
@@ -327,11 +328,15 @@ function connect(
     holdsFocus: () => element.contains(document.activeElement),
   };
   const unregister = bar.register(target);
-  const unguard = guardClose(
-    { window, document },
-    () => target.holdsFocus(),
-    () => report({ notice: "onbeforeinstallprompt" in window ? CLOSE_KEY_INSTALL : CLOSE_KEY }),
-  );
+  // An installed app's window, and a Mac, a phone or a tablet, already pass Ctrl+W on.
+  const unguard =
+    offersInstall(thisDevice()) && !matchMedia("(display-mode: standalone)").matches
+      ? guardClose(
+          { window, document },
+          () => target.holdsFocus(),
+          () => report({ notice: canInstall() ? CLOSE_KEY_APP : CLOSE_KEY }),
+        )
+      : () => {};
   const typed = term.onData((data) => {
     // The bar's Ctrl, armed for the next key, applies to a letter typed on the soft keyboard.
     if (withoutEventReports(data) !== "") keystroke((ctrl) => (ctrl ? withCtrl(data) : data));
@@ -417,10 +422,10 @@ function connect(
 /** How long the viewport stays still before a focused terminal is brought into view. */
 const REVEAL_SETTLE_MS = 150;
 
-/** After the user stays through a close Ctrl+W asked for, in a browser that can install apps. */
-const CLOSE_KEY_INSTALL =
-  "Ctrl+W closes the tab, so the terminal can't get it. Install Bazhen as an app and it will.";
-/** The same, in a browser that can't. */
+/** After the user stays through a close Ctrl+W asked for, where the browser can install Bazhen. */
+const CLOSE_KEY_APP =
+  "Ctrl+W closes the tab, so the terminal can't get it. In Bazhen installed as an app, it can.";
+/** The same, where it can't. */
 const CLOSE_KEY = "Ctrl+W closes the tab, so the terminal can't get it.";
 
 /**

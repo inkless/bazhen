@@ -1,24 +1,39 @@
 import { describe, expect, it } from "vitest";
 import { guardClose } from "./close-guard.ts";
 
+/** An EventTarget that counts its `beforeunload` listeners. */
+class Window extends EventTarget {
+  unloadListeners = 0;
+  override addEventListener(...args: Parameters<EventTarget["addEventListener"]>) {
+    if (args[0] === "beforeunload") this.unloadListeners++;
+    super.addEventListener(...args);
+  }
+  override removeEventListener(...args: Parameters<EventTarget["removeEventListener"]>) {
+    if (args[0] === "beforeunload") this.unloadListeners--;
+    super.removeEventListener(...args);
+  }
+}
+
 function page() {
-  const window = new EventTarget();
+  const window = new Window();
   const document = new EventTarget();
   let focused = true;
-  const stays: number[] = [];
+  let stays = 0;
   const stop = guardClose(
     { window, document },
     () => focused,
-    () => stays.push(Date.now()),
+    () => stays++,
   );
+  const send = (type: string, ctrlKey: boolean) =>
+    window.dispatchEvent(Object.assign(new Event(type), { ctrlKey }));
   return {
     window,
     document,
-    stays,
+    stays: () => stays,
     stop,
-    blur: () => (focused = false),
-    key: (type: "keydown" | "keyup", ctrlKey: boolean) =>
-      window.dispatchEvent(Object.assign(new Event(type), { ctrlKey })),
+    focus: (now: boolean) => (focused = now),
+    key: (type: "keydown" | "keyup", ctrlKey: boolean) => send(type, ctrlKey),
+    pointer: (ctrlKey: boolean) => send("pointermove", ctrlKey),
     /** Whether a close now asks first. */
     asks: () => {
       const close = new Event("beforeunload", { cancelable: true });
@@ -37,7 +52,15 @@ describe("the close guard", () => {
     expect(p.asks()).toBe(true);
   });
 
-  it("never asks without Ctrl, so a reload or a close from the mouse goes through", () => {
+  it("keeps asking while Ctrl is held across other keys, as for Ctrl+A then Ctrl+W", () => {
+    const p = page();
+    p.key("keydown", true);
+    p.key("keyup", true);
+    p.pointer(true);
+    expect(p.asks()).toBe(true);
+  });
+
+  it("never asks after a key pressed without Ctrl", () => {
     const p = page();
     p.key("keydown", false);
     expect(p.asks()).toBe(false);
@@ -45,8 +68,15 @@ describe("the close guard", () => {
 
   it("never asks while focus is outside the terminal", () => {
     const p = page();
-    p.blur();
+    p.focus(false);
     p.key("keydown", true);
+    expect(p.asks()).toBe(false);
+  });
+
+  it("doesn't ask once focus has left the terminal with Ctrl still down", () => {
+    const p = page();
+    p.key("keydown", true);
+    p.focus(false);
     expect(p.asks()).toBe(false);
   });
 
@@ -54,6 +84,13 @@ describe("the close guard", () => {
     const p = page();
     p.key("keydown", true);
     p.key("keyup", false);
+    expect(p.asks()).toBe(false);
+  });
+
+  it("stops asking once the pointer moves without Ctrl, as after staying with the mouse", () => {
+    const p = page();
+    p.key("keydown", true);
+    p.pointer(false);
     expect(p.asks()).toBe(false);
   });
 
@@ -71,13 +108,35 @@ describe("the close guard", () => {
     expect(p.asks()).toBe(false);
   });
 
+  it("holds a beforeunload listener only while armed, so Firefox can cache the page", () => {
+    const p = page();
+    const held = [p.window.unloadListeners];
+    p.key("keydown", true);
+    held.push(p.window.unloadListeners);
+    p.key("keyup", false);
+    held.push(p.window.unloadListeners);
+    p.key("keydown", true);
+    p.stop();
+    held.push(p.window.unloadListeners);
+    expect(held).toEqual([0, 1, 0, 0]);
+  });
+
   it("reports that the user stayed only once the prompt is over", async () => {
     const p = page();
     p.key("keydown", true);
     p.asks();
-    expect(p.stays).toHaveLength(0);
+    expect(p.stays()).toBe(0);
     await turn();
-    expect(p.stays).toHaveLength(1);
+    expect(p.stays()).toBe(1);
+  });
+
+  it("reports no stay for a view stopped before the prompt is over", async () => {
+    const p = page();
+    p.key("keydown", true);
+    p.asks();
+    p.stop();
+    await turn();
+    expect(p.stays()).toBe(0);
   });
 
   it("asks nothing once stopped, even if it was armed", () => {

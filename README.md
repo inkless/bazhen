@@ -131,18 +131,18 @@ A forwarder that adds no such header, such as `ssh -R` or `socat` onto the daemo
 server's port, isn't noticed: with one, set `web.pairing = "always"`. On a machine other people log in to, set
 `web.pairing = "always"` (or `BAZHEN_PAIRING=always`) to require pairing on loopback too.
 
-### Installing Bazhen as an app on Linux and Windows
+## Installing Bazhen as an app on Linux and Windows
 
-In a browser tab on Linux and Windows, Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+Shift+W and Ctrl+Tab belong
-to the browser: they never reach the terminal, and Ctrl+W closes the tab. An installed app's
-window passes them on. Open Bazhen in Chrome or Edge, at `http://127.0.0.1:7900` or your HTTPS
-route, click the install icon in the address bar, and open Bazhen from your app launcher from
-then on. The app runs in the same browser profile, so at the same address it keeps the browser's
-pairing and needs no second `bazhen pair`.
+In a browser tab on a Linux or Windows desktop, Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+Shift+W and
+Ctrl+Tab belong to the browser: they never reach the terminal, and Ctrl+W closes the tab. An
+installed app's window passes them on. Open Bazhen in Chrome or Chromium, at
+`http://127.0.0.1:7900` or your HTTPS route, click the install icon in the address bar, and open
+Bazhen from your app launcher from then on. The app runs in the same browser profile, so at the
+same address it keeps the browser's pairing and needs no second `bazhen pair`.
 
 In a tab, Ctrl+W pressed in a terminal asks before it closes the page. Firefox can't install
-apps on Linux, so there the question is all there is. On a Mac, an iPad or a phone nothing
-changes: Ctrl+W already reaches the terminal, and Bazhen offers no app.
+apps on Linux, so there the question is all there is. A Mac, a phone and a tablet don't lose
+Ctrl+W, and Bazhen offers them no app.
 
 ## The inbox
 
