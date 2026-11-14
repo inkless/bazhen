@@ -14,6 +14,9 @@
       "path": "packages/runtime-tmux"
     },
     {
+      "path": "packages/runtime-holder"
+    },
+    {
       "path": "packages/env-local"
     },
     {

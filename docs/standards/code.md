@@ -33,6 +33,8 @@ Each layer has one job:
 - `packages/core` is the domain: entities, state machines and the seam interfaces.
 - `packages/protocol` is the shared types and schemas that cross the network.
 - `packages/runtime-tmux` is an adapter: it implements a core seam on tmux.
+- `packages/runtime-holder` is the second runtime: a client of the holders' protocol
+  (`packages/protocol/src/holder.ts`).
 - `packages/host-guard` is the only code that runs tmux or sends a signal, product and tests
   alike. `TmuxServer` names every server by a socket path inside a directory its caller owns,
   never by `-L`, and refuses `default` and the directory the user's own servers share. A signal
