@@ -62,20 +62,33 @@ async function newTerminalEnv(): Promise<Record<string, string>> {
   );
 }
 
+/** `$COLORTERM` as a terminal started with `env` sees it. */
+async function colorterm(env: Record<string, string>): Promise<string> {
+  const out = join(dir, `colorterm-${newId("term")}`);
+  await runtime.create({
+    terminalId: newId("term"),
+    tags: { kind: "agent", agentId: newId("agent") },
+    argv: [
+      "sh",
+      "-c",
+      `printf %s "$COLORTERM" > '${out}.tmp' && mv '${out}.tmp' '${out}'; sleep 60`,
+    ],
+    cwd: dir,
+    env,
+    size: { cols: 80, rows: 24 },
+    generation: 0,
+  });
+  await expect.poll(() => existsSync(out), { timeout: 10_000 }).toBe(true);
+  return readFileSync(out, "utf8");
+}
+
 describe("a terminal's colour depth", () => {
-  it("is 24-bit in every terminal, whatever tmux version runs and whatever the spec carries", async () => {
-    const out = join(dir, "colorterm");
-    await runtime.create({
-      terminalId: newId("term"),
-      tags: { kind: "agent", agentId: newId("agent") },
-      argv: ["sh", "-c", `printf %s "$COLORTERM" > '${out}'; sleep 60`],
-      cwd: dir,
-      env: { COLORTERM: "16color" },
-      size: { cols: 80, rows: 24 },
-      generation: 0,
-    });
-    await expect.poll(() => existsSync(out), { timeout: 10_000 }).toBe(true);
-    expect(readFileSync(out, "utf8")).toBe("truecolor");
+  it("is 24-bit in a terminal whose spec names none, whatever tmux version runs", async () => {
+    expect(await colorterm({})).toBe("truecolor");
+  });
+
+  it("is the value a spec carries, as a user who passes COLORTERM through chose it", async () => {
+    expect(await colorterm({ COLORTERM: "16color" })).toBe("16color");
   });
 });
 

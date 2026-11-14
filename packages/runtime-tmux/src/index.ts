@@ -679,10 +679,13 @@ function located(ref: RuntimeRef, key: "sessionId" | "paneId"): string {
 }
 
 /**
- * What a terminal's programs read to choose 24-bit colour. tmux 3.6 sets it in every pane and
- * earlier versions don't, so it is set here: a terminal draws the same on whichever tmux runs.
+ * What a terminal's programs read to choose 24-bit colour. tmux 3.6 sets it in every pane, over
+ * whatever `-e` or the server's environment says, and earlier versions don't set it. So it is
+ * given to the pane's process by `env`, which runs after tmux: a terminal draws the same on
+ * whichever tmux runs, and a value the spec carries wins, as a user's `agents.env.passthrough` of
+ * it is deliberate.
  */
-const PANE_COLOUR_ENV = { COLORTERM: "truecolor" } as const;
+const DEFAULT_COLORTERM = "truecolor";
 
 /**
  * The process half of a terminal: its directory, Bazhen's variables and its argv. tmux sets TMUX
@@ -693,10 +696,7 @@ const PANE_COLOUR_ENV = { COLORTERM: "truecolor" } as const;
 const processArgs = (spec: ProcessSpec) => [
   "-c",
   spec.cwd,
-  ...Object.entries({ ...spec.env, ...PANE_COLOUR_ENV }).flatMap(([k, v]) => [
-    "-e",
-    escapeTrailingSemicolon(`${k}=${v}`),
-  ]),
+  ...Object.entries(spec.env).flatMap(([k, v]) => ["-e", escapeTrailingSemicolon(`${k}=${v}`)]),
   "--",
   "env",
   "-u",
@@ -704,6 +704,7 @@ const processArgs = (spec: ProcessSpec) => [
   "-u",
   "TMUX_PANE",
   "--",
+  escapeTrailingSemicolon(`COLORTERM=${spec.env["COLORTERM"] ?? DEFAULT_COLORTERM}`),
   ...spec.argv.map(escapeTrailingSemicolon),
 ];
 
