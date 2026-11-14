@@ -94,8 +94,9 @@ export interface HolderClientOptions {
 
 export interface RequestOptions {
   /**
-   * Abandons the request; an answer that arrives later is dropped. Aborting an `attach` or a
-   * `subscribe` once sent ends the connection, as the holder may already be sending its output.
+   * Abandons the request; an answer that arrives later is dropped. Aborting a `subscribe` once
+   * sent ends the connection, as the holder may already be sending its output; so does any
+   * failure of an `attach`.
    */
   readonly signal?: AbortSignal;
 }
@@ -112,6 +113,8 @@ interface Pending {
   /** Settles the request with its answer; false, settling nothing, for an answer of another kind. */
   readonly accept: (reply: ReplyOf<AnswerName>) => boolean;
   readonly reject: (error: unknown) => void;
+  /** Whether the holder refusing it ends the connection. */
+  readonly endsOnRefusal: boolean;
 }
 
 interface Sending<K extends AnswerName> {
@@ -120,10 +123,11 @@ interface Sending<K extends AnswerName> {
   /** Called with the answer as it is read, in order with the events around it. */
   readonly onAnswer?: (reply: ReplyOf<K>) => void;
   /**
-   * Ends the connection if the request is aborted once sent, for a request the holder acts on
-   * whatever the client does with its answer: a subscription then runs without its snapshot.
+   * What, once the request is sent, ends the connection: its abort (`abort`), or its abort or
+   * refusal (`failure`). For requests the holder acts on whatever becomes of their answer, after
+   * which output could run without its snapshot.
    */
-  readonly endsOnAbort?: boolean;
+  readonly endsOn?: "abort" | "failure";
 }
 
 const asError = (value: unknown) => (value instanceof Error ? value : new Error(String(value)));
@@ -183,7 +187,7 @@ class Connection {
       const forget = () => {
         this.pending.delete(request.id);
         reject(signal?.reason);
-        if (sending.endsOnAbort) this.fail({ reason: "error", error: asError(signal?.reason) });
+        if (sending.endsOn) this.fail({ reason: "error", error: asError(signal?.reason) });
       };
       signal?.addEventListener("abort", forget, { once: true });
       const stop = () => signal?.removeEventListener("abort", forget);
@@ -200,6 +204,7 @@ class Connection {
           stop();
           reject(error);
         },
+        endsOnRefusal: sending.endsOn === "failure",
       });
     });
     if (sending.batch) sending.batch.push(frame);
@@ -283,6 +288,8 @@ class Connection {
     }
     this.pending.delete(frame.id);
     pending.reject(error);
+    // At once, so that no frame after this one in the chunk reaches `onEvent`.
+    if (pending.endsOnRefusal) this.fail({ reason: "error", error });
   }
 
   private breakProtocol(message: string): void {
@@ -350,7 +357,8 @@ export class HolderClient {
   /**
    * A snapshot and a subscription in one write, which the holder serves from one point, so the
    * output that follows starts exactly where the snapshot ends. The snapshot goes to `onEvent`
-   * ahead of that output; this resolves once the subscription is taken.
+   * ahead of that output; this resolves once the subscription is taken. If either half fails,
+   * the connection ends, rather than going on with output that may have no snapshot.
    */
   async attach(options?: RequestOptions): Promise<void> {
     const batch: Uint8Array[] = [];
@@ -359,10 +367,11 @@ export class HolderClient {
       this.connection.ask((id) => ({ type: "snapshot", id }), "snapshot", options, {
         batch,
         onAnswer,
+        endsOn: "failure",
       }),
       this.connection.ask((id) => ({ type: "subscribe", id, body: {} }), "ok", options, {
         batch,
-        endsOnAbort: true,
+        endsOn: "failure",
       }),
     ];
     this.connection.write(batch);
@@ -372,7 +381,7 @@ export class HolderClient {
   async subscribe(from?: HolderSubscribeRequest["from"], options?: RequestOptions): Promise<void> {
     const body = from === undefined ? {} : { from };
     await this.connection.ask((id) => ({ type: "subscribe", id, body }), "ok", options, {
-      endsOnAbort: true,
+      endsOn: "abort",
     });
   }
 
