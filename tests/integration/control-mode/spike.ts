@@ -1,5 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  fstatSync,
+  ftruncateSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  readSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import headless from "@xterm/headless";
@@ -155,6 +164,60 @@ export interface ServerEnd {
  * Starts `server` in the foreground (`tmux -D`), as this process's child, so a crash reports its
  * signal instead of a daemonised server vanishing.
  */
+const FATAL = /fatal|not enough data|out of memory/;
+
+/**
+ * Follows tmux's verbose server log in `dir`, keeping its fatal lines and last lines, and empties
+ * the file as it goes: under a flood the log grows by hundreds of MB a second. tmux appends, so
+ * emptying it only loses what lands between a read and the truncate.
+ */
+export class LogTail {
+  bytes = 0;
+  readonly fatal: string[] = [];
+  private tail: string[] = [];
+  private partial = "";
+  private readonly timer: NodeJS.Timeout;
+  private readonly dir: string;
+
+  constructor(dir: string) {
+    this.dir = dir;
+    this.timer = setInterval(() => this.drain(), 50);
+  }
+
+  drain(): void {
+    const name = readdirSync(this.dir).find((f) => f.startsWith("tmux-server-"));
+    if (name === undefined) return;
+    const fd = openSync(join(this.dir, name), "r+");
+    try {
+      const size = fstatSync(fd).size;
+      const chunk = Buffer.allocUnsafe(1 << 22);
+      for (let at = 0; at < size;) {
+        const n = readSync(fd, chunk, 0, Math.min(chunk.length, size - at), at);
+        if (n === 0) break;
+        this.take(chunk.toString("utf8", 0, n));
+        at += n;
+      }
+      this.bytes += size;
+      ftruncateSync(fd, 0);
+    } finally {
+      closeSync(fd);
+    }
+  }
+
+  stop(): { mb: number; fatal: string[]; tail: string[] } {
+    clearInterval(this.timer);
+    this.drain();
+    return { mb: Math.round(this.bytes / 1e6), fatal: this.fatal.slice(-5), tail: this.tail };
+  }
+
+  private take(text: string): void {
+    const lines = (this.partial + text).split("\n");
+    this.partial = lines.pop() ?? "";
+    for (const l of lines) if (FATAL.test(l)) this.fatal.push(l);
+    this.tail = [...this.tail, ...lines.slice(-25)].slice(-25);
+  }
+}
+
 export async function foreground(server: ConfiguredTmuxServer, logDir?: string) {
   const [bin, ...argv] = server.argv(...(logDir === undefined ? [] : ["-v"]), "-D");
   const child = spawnGroup(bin, argv, {
@@ -171,6 +234,7 @@ export async function foreground(server: ConfiguredTmuxServer, logDir?: string) 
       resolve(end);
     }),
   );
+  const log = logDir === undefined ? undefined : new LogTail(logDir);
   await until(() => server.alive(), 5000);
-  return { ended, end: () => end, started };
+  return { ended, end: () => end, started, log };
 }
