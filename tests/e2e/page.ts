@@ -7,7 +7,14 @@ import {
 } from "@playwright/test";
 import { giveTranscript } from "../support/transcript.ts";
 
-type Hook = "screen" | "viewportTop" | "atBottom" | "alternate" | "background" | "foregrounds";
+type Hook =
+  | "screen"
+  | "viewportTop"
+  | "atBottom"
+  | "alternate"
+  | "gliding"
+  | "background"
+  | "foregrounds";
 
 /**
  * Reads one of a terminal view's test hooks: `terminalId`'s, or with none the page's first, as
@@ -49,6 +56,10 @@ export async function viewportTop(page: Page, terminalId?: string): Promise<numb
 /** Whether the view shows the terminal's live screen, not the page's scrollback above it. */
 export const atBottom = async (page: Page, terminalId?: string) =>
   (await read(page, "atBottom", terminalId)) === true;
+
+/** Whether a released swipe is still carrying the terminal on. */
+export const gliding = async (page: Page, terminalId?: string) =>
+  (await read(page, "gliding", terminalId)) === true;
 
 /** Whether the daemon has told the page the program is on its alternate screen. */
 export const onAlternateScreen = async (page: Page, terminalId?: string) =>

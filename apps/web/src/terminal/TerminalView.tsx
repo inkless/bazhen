@@ -156,7 +156,12 @@ function connect(
   let alternate = false;
   let over = false;
   let retry: ReturnType<typeof setTimeout> | undefined;
-  const unhook = exposeForTests(terminalId, term, () => alternate);
+  const unhook = exposeForTests(
+    terminalId,
+    term,
+    () => alternate,
+    () => scroll.gliding(),
+  );
 
   const send = (frame: StreamClientFrame) => {
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(frame));
@@ -194,6 +199,7 @@ function connect(
   /** The socket is gone, or as good as: reattach without waiting for it to say so. */
   const lost = (socket: WebSocket) => {
     if (ws !== socket || over) return;
+    scroll.stopGlide();
     ws = undefined;
     attached = driving = driven = false;
     returning = true;
@@ -231,8 +237,11 @@ function connect(
       const frame = StreamServerFrame.safeParse(parseJson(e.data));
       if (!frame.success) return end("The daemon sent a frame this page can't read.");
       const f = frame.data;
-      if (f.type === "snapshot_start") term.reset();
-      else if (f.type === "snapshot_end") backoff.reset();
+      if (f.type === "snapshot_start") {
+        // The view is redrawn from the top: a glide would carry on through the new screen.
+        scroll.stopGlide();
+        term.reset();
+      } else if (f.type === "snapshot_end") backoff.reset();
       else if (f.type === "screen") alternate = f.alternate;
       else if (f.type === "attached") {
         attached = true;
@@ -287,6 +296,8 @@ function connect(
    * key is sent. A key that only takes the lease leaves it armed for the key the user sends next.
    */
   const keystroke = (text: (ctrl: boolean) => string) => {
+    // A key, typed or from the bar, ends a glide, as on a phone, before it reaches the program.
+    scroll.stopGlide();
     const ctrl = bar.target() === target && bar.ctrl();
     if (input(encoder.encode(text(ctrl)), true) && ctrl) bar.takeCtrl();
   };
@@ -300,7 +311,7 @@ function connect(
   });
   const route = () =>
     wheelAction({ mouseTracking: term.modes.mouseTrackingMode !== "none", alternate, kind });
-  const detachScroll = attachScrollInput(element, term, route, (bytes) => input(bytes, false));
+  const scroll = attachScrollInput(element, term, route, (bytes) => input(bytes, false));
   const target: BarTarget = {
     kind,
     press: (key) =>
@@ -385,7 +396,7 @@ function connect(
     window.visualViewport?.removeEventListener("resize", resized);
     clearTimeout(revealing);
     unregister();
-    detachScroll();
+    scroll.detach();
     observer.disconnect();
     typed.dispose();
     binary.dispose();
@@ -456,7 +467,12 @@ const swallow = () => true;
  * reported the alternate screen, the background it paints, and the colours a program wrote text
  * in, whichever renderer draws.
  */
-function exposeForTests(terminalId: string, term: Xterm, alternate: () => boolean): () => void {
+function exposeForTests(
+  terminalId: string,
+  term: Xterm,
+  alternate: () => boolean,
+  gliding: () => boolean,
+): () => void {
   const views: Record<string, unknown> = Reflect.get(globalThis, "bazhenViews") ?? {};
   Reflect.set(globalThis, "bazhenViews", views);
   views[terminalId] = {
@@ -464,6 +480,7 @@ function exposeForTests(terminalId: string, term: Xterm, alternate: () => boolea
     viewportTop: () => term.buffer.active.viewportY,
     atBottom: () => term.buffer.active.viewportY === term.buffer.active.baseY,
     alternate,
+    gliding,
     background: () => term.options.theme?.background,
     foregrounds: () => foregrounds(term),
   };
