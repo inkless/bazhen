@@ -115,7 +115,18 @@ export function attachScrollInput(
    * getting keys or reports meant for the page's scrollback.
    */
   const glide = (motion: Glide, action: WheelAction, clientY: number) => {
+    stopGlide();
+    /** The page's scrollback has no further to go the way the glide is going. */
+    const atEdge = () => {
+      const buffer = term.buffer.active;
+      return motion.revealsEarlier ? buffer.viewportY === 0 : buffer.viewportY === buffer.baseY;
+    };
     const frame = (now: number) => {
+      // Every frame, not only one that moves a row: a glide at the edge with speed to spare ends.
+      if (action === "local" && atEdge()) {
+        gliding = null;
+        return;
+      }
       const { pixels, done } = motion.advance(now);
       const steps = glideSteps(touchSteps.add(pixels, rowHeight()), action);
       const going = !done && route() === action && scrollBy(steps, action, clientY);

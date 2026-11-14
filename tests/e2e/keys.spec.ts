@@ -289,8 +289,8 @@ test("carries a quick swipe on after the finger lifts, and stops a slow one wher
   const { context, page, cdp } = await touchPage(browser);
   const dragged = await swiped(page, cdp, "drag");
   const flicked = await swiped(page, cdp, "flick");
-  // A flick sent a frame at a time is far slower than a finger, so its glide adds less than a
-  // phone's would; any glide at all carries it well past the drag.
+  // A glide at the flick's 3 px/ms adds several times the drag's 300 px; 1.5 times leaves room
+  // for a runner too loaded to draw every frame.
   expect([dragged > 0, flicked >= dragged * 1.5]).toEqual([true, true]);
   await context.close();
 });

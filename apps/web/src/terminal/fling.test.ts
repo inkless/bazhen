@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { Fling, FLING_TIME_CONSTANT_MS, Glide, VELOCITY_WINDOW_MS } from "./fling.ts";
+import {
+  Fling,
+  FLING_TIME_CONSTANT_MS,
+  Glide,
+  RELEASE_PAUSE_MS,
+  VELOCITY_WINDOW_MS,
+} from "./fling.ts";
 
 /** A finger moving `perMs` px each ms from `y`, sampled every 10 ms from time 0 to `until`. */
 function moved(perMs: number, until: number): Fling {
@@ -54,8 +60,37 @@ describe("a swipe's momentum", () => {
     expect(moved(2, 200).release(200 + VELOCITY_WINDOW_MS + 1)).toBeNull();
   });
 
-  it("doesn't glide when the finger paused briefly before it lifted", () => {
-    expect(moved(2, 200).release(260)).toBeNull();
+  it("doesn't glide when the finger stopped before it lifted", () => {
+    expect(moved(2, 200).release(200 + RELEASE_PAUSE_MS + 10)).toBeNull();
+  });
+
+  // Touches as a phone reports them: a sample a frame, the lift a little after the last.
+  it.each([
+    ["a 60 Hz cadence", 16, 0],
+    ["a 120 Hz cadence", 8, 0],
+    ["a lift 25 ms after the last move", 16, 25],
+    ["a lift 50 ms after the last move", 16, 50],
+  ])("glides at the finger's speed for %s", (_what, every, gap) => {
+    const fling = new Fling();
+    for (let t = 0; t <= 160; t += every) fling.track(t, 1.5 * t);
+    const last = 160 - (160 % every);
+    const g = fling.release(last + gap);
+    g?.advance(0);
+    // The first 16 ms of travel, at about the finger's 1.5 px/ms.
+    expect(Number(g?.advance(16).pixels) / 16).toBeCloseTo(1.5, 0);
+  });
+
+  it("glides at the speed the finger had slowed to, not its fastest", () => {
+    const fling = new Fling();
+    let y = 0;
+    for (let t = 0; t <= 300; t += 16) {
+      y += Math.max(0.6, 3 - t / 100) * 16;
+      fling.track(t, y);
+    }
+    const g = fling.release(304);
+    g?.advance(0);
+    // It ended at 0.6 px/ms; the first 16 ms of the glide go about that fast.
+    expect(Number(g?.advance(16).pixels) / 16).toBeCloseTo(0.6, 1);
   });
 
   it("doesn't glide from a lift timed before the finger's last move", () => {
