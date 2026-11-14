@@ -11,6 +11,28 @@ import { signalServer, vouch, vouchServer, type PaneGroup } from "./signal.ts";
 const run = promisify(execFile);
 const TIMEOUT_MS = 5_000;
 
+/**
+ * `execFile`'s outcome as its promise form gives it, with what the command printed on the error,
+ * and with a command its timeout stopped as a failure: tmux's client exits 0 on the SIGTERM a
+ * timeout sends it, which `execFile` alone reports as success, with no output.
+ */
+function settled(
+  err: Error | null,
+  child: { readonly killed: boolean; readonly exitCode: number | null },
+  stdout: string,
+  stderr: string,
+): Error | null {
+  if (err !== null) return Object.assign(err, { stdout, stderr });
+  if (!child.killed) return null;
+  return Object.assign(new Error("tmux was stopped by its timeout"), {
+    code: child.exitCode,
+    killed: true,
+    signal: null,
+    stdout,
+    stderr,
+  });
+}
+
 const real = (path: string) => (existsSync(path) ? realpathSync(path) : path);
 
 /**
@@ -346,15 +368,26 @@ export class TmuxServer {
     return ["tmux", "-u", "-S", this.socket, ...config, ...args];
   }
 
-  /** What the command printed; rejects as `execFile` does, with its stderr. */
+  /** What the command printed; rejects as `execFile` does, with its stderr, or on its timeout. */
   async run(args: readonly string[], opts: TmuxOptions = {}): Promise<string> {
     const [bin, ...argv] = this.argv(...args);
-    const { stdout } = await run(bin, argv, {
-      env: opts.env,
-      timeout: opts.timeout ?? TIMEOUT_MS,
-      maxBuffer: opts.maxBytes ?? DEFAULT_MAX_BYTES,
+    return new Promise((done, fail) => {
+      const child = execFile(
+        bin,
+        argv,
+        {
+          env: opts.env,
+          timeout: opts.timeout ?? TIMEOUT_MS,
+          maxBuffer: opts.maxBytes ?? DEFAULT_MAX_BYTES,
+          encoding: "utf8",
+        },
+        (err, stdout, stderr) => {
+          const failed = settled(err, child, stdout, stderr);
+          if (failed === null) done(stdout);
+          else fail(failed);
+        },
+      );
     });
-    return stdout;
   }
 
   runSync(args: readonly string[], opts: TmuxOptions = {}): string {
@@ -395,8 +428,12 @@ export class TmuxServer {
       const child = execFile(
         bin,
         argv,
-        { env: opts.env, timeout: opts.timeout ?? TIMEOUT_MS },
-        (err) => (err === null ? done() : fail(err)),
+        { env: opts.env, timeout: opts.timeout ?? TIMEOUT_MS, encoding: "utf8" },
+        (err, stdout, stderr) => {
+          const failed = settled(err, child, stdout, stderr);
+          if (failed === null) done();
+          else fail(failed);
+        },
       );
       child.stdin?.end(script);
     });

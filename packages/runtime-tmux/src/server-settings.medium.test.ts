@@ -10,8 +10,9 @@ afterEach(() => {
 });
 
 /**
- * A `tmux` that answers `-V` and `list-sessions` and logs each attempt at the settings, which it
- * refuses with a status of its own, or is stopped by a signal on, as a timeout stops tmux.
+ * A `tmux` that answers `-V` and `list-sessions` and logs each attempt at the settings. It refuses
+ * them with a status of its own, or, the first time, hangs until the runtime's timeout stops it
+ * and exits 0, as a real client does on SIGTERM, and takes them after that.
  */
 const FAKE_TMUX = `#!/bin/sh
 case "$*" in
@@ -20,13 +21,16 @@ case "$*" in
 *" set-hook "*)
   echo attempt >> "$FAKE_LOG"
   [ "$FAKE_SETTINGS" = refuse ] && { echo "unknown command" >&2; exit 1; }
-  kill -TERM $$ ;;
+  [ -e "$FAKE_LOG.hung" ] && exit 0
+  : > "$FAKE_LOG.hung"
+  trap 'kill $! 2>/dev/null; exit 0' TERM
+  /bin/sleep 30 & wait $! ;;
 *) exit 1 ;;
 esac
 `;
 
 /** A runtime whose every tmux command runs the fake; what it warned of; its settings attempts. */
-function onFake(settings: "refuse" | "stopped") {
+function onFake(settings: "refuse" | "slow") {
   const root = mkdtempSync("/tmp/bz-settings-");
   made.push(root);
   writeFileSync(join(root, "tmux"), FAKE_TMUX, { mode: 0o755 });
@@ -54,10 +58,10 @@ describe("tmux server settings at health checks", () => {
     expect([warnings.length, attempts()]).toEqual([1, 1]);
   });
 
-  it("asks again at the next health check when tmux was stopped before it answered, as a timeout stops it", async () => {
-    const { runtime, warnings, attempts } = onFake("stopped");
+  it("asks again at the next health check when tmux timed out, though its client exited 0", async () => {
+    const { runtime, warnings, attempts } = onFake("slow");
     await runtime.health();
     await runtime.health();
-    expect([warnings.length, attempts()]).toEqual([2, 2]);
-  });
+    expect([warnings.length, attempts()]).toEqual([1, 2]);
+  }, 15_000);
 });

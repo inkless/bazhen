@@ -3,11 +3,12 @@
 
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { createServer } from "node:net";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { filterEnv, newId, type TerminalSpec } from "@bazhen/core";
 import { isAlive, type ConfiguredTmuxServer } from "@bazhen/host-guard";
-import { TmuxRuntime } from "@bazhen/runtime-tmux";
+import { TmuxError, TmuxRuntime } from "@bazhen/runtime-tmux";
 import { nodePtySpawner } from "@bazhen/daemon/pty";
 import { testServer, tmuxOut } from "./helpers.ts";
 
@@ -120,6 +121,34 @@ describe("the pane-title hook on a server an older daemon started", () => {
     const server = newServer();
     await runtimeOn(server).applyServerSettings();
     expect(server.alive()).toBe(false);
+  });
+});
+
+/** What Node said of a command that failed, as far as telling a timeout from tmux's answer goes. */
+const failure = (err: unknown) => ({
+  code: Reflect.get(Object(err), "code"),
+  killed: Reflect.get(Object(err), "killed"),
+  signal: Reflect.get(Object(err), "signal"),
+});
+
+describe("a tmux command its timeout stopped", () => {
+  it("fails, and is not taken for tmux's answer, though the client exits with a status", async () => {
+    const server = testServer("hooks-silent");
+    // A socket that takes the client's connection and never replies, as a stopped server does.
+    const silent = createServer(() => undefined);
+    await new Promise<void>((listening) => silent.listen(server.socket, listening));
+    const err = await server
+      .run(["list-sessions"], { timeout: 500 })
+      .then(
+        () => undefined,
+        (e: unknown) => e,
+      )
+      .finally(() => silent.close());
+    expect([failure(err), new TmuxError(["list-sessions"], err).answered]).toEqual([
+      // tmux 3.5 exits 0 on the SIGTERM; only the kill says it didn't answer, whatever the status.
+      { code: expect.any(Number), killed: true, signal: null },
+      false,
+    ]);
   });
 });
 

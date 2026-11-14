@@ -170,20 +170,28 @@ export class TmuxError extends Error {
   /** The command as a log may show it: values the user's own text could be in are redacted. */
   readonly args: readonly string[];
   readonly stderr: string;
+  /**
+   * tmux exited with a status of its own. A client its timeout stopped exits 1 too, since tmux
+   * catches SIGTERM, so only the kill tells the two apart.
+   */
+  readonly answered: boolean;
 
   constructor(args: readonly string[], cause: unknown) {
-    const raw: unknown =
-      typeof cause === "object" && cause !== null ? Reflect.get(cause, "stderr") : "";
+    const of = (key: string): unknown =>
+      typeof cause === "object" && cause !== null ? Reflect.get(cause, key) : undefined;
+    const raw = of("stderr");
     const stderr = typeof raw === "string" ? raw.trim() : "";
     const shown = redacted(args);
-    const code: unknown =
-      typeof cause === "object" && cause !== null ? Reflect.get(cause, "code") : undefined;
+    const code = of("code");
+    const killed = of("killed") === true;
+    const signal = of("signal");
     // The child process's own error names the whole command line, so it is not kept as the cause.
     super(`tmux ${shown.join(" ")} failed${stderr ? `: ${stderr}` : ""}`, {
-      cause: Object.assign(new Error(`tmux exited ${String(code)}`), { code }),
+      cause: Object.assign(new Error(`tmux exited ${String(code)}`), { code, killed, signal }),
     });
     this.args = shown;
     this.stderr = stderr;
+    this.answered = typeof code === "number" && !killed && typeof signal !== "string";
   }
 }
 
@@ -362,7 +370,7 @@ export class TmuxRuntime implements RuntimeAdapter {
       await this.tmux(...sequence([this.paneTitleHook(), ...MODE_EXIT_BINDINGS]));
     } catch (err) {
       if (err instanceof TmuxError && noServer(err)) return;
-      if (err instanceof TmuxError && answered(err)) this.settingsPending = false;
+      if (err instanceof TmuxError && err.answered) this.settingsPending = false;
       throw err;
     }
     this.settingsPending = false;
@@ -803,9 +811,6 @@ function identities(refs: readonly RuntimeRef[]): ServerIdentity[] {
   }
   return [...seen.values()];
 }
-
-/** tmux exited with a status of its own, rather than being stopped, as a timeout stops it. */
-const answered = (err: TmuxError) => typeof Reflect.get(Object(err.cause), "code") === "number";
 
 const reportSettings = (err: unknown) =>
   console.warn("tmux server settings were not applied:", err);
