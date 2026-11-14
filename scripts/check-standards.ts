@@ -284,12 +284,19 @@ const PNPM_VALUE_FLAGS = new Set(["--filter", "-F", "--dir", "-C", "--reporter",
 const LINT_RULE = /^(import|vitest|typescript|unicorn|react|react-hooks|eslint|bazhen)\//;
 const PATH_LIKE = /^(\.?[\w@-]+\/)+[\w.@-]*$|^\.?[\w-]+\.(ts|tsx|md|json)$/;
 
-function scriptNames(): Set<string> {
-  const pkg: unknown = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+/** package.json's scripts, by name, read with `read`. */
+function packageScripts(read: (path: string) => string): Record<string, string> {
+  const pkg: unknown = JSON.parse(read("package.json"));
   const scripts =
     typeof pkg === "object" && pkg !== null && "scripts" in pkg ? pkg.scripts : undefined;
-  return new Set(typeof scripts === "object" && scripts !== null ? Object.keys(scripts) : []);
+  if (typeof scripts !== "object" || scripts === null) return {};
+  return Object.fromEntries(
+    Object.entries(scripts).flatMap(([k, v]) => (typeof v === "string" ? [[k, v]] : [])),
+  );
 }
+
+const scriptNames = () =>
+  new Set(Object.keys(packageScripts((p) => readFileSync(join(root, p), "utf8"))));
 
 /** The text of every inline code span, and every whitespace-separated word in fenced blocks. */
 function codeSpans(text: string): string[] {
@@ -571,6 +578,69 @@ export const CLIPPY_CONFIG = [
   "allow-indexing-slicing-in-tests = true",
 ];
 
+export const DENY_CONFIG = [
+  "[graph]",
+  "all-features = true",
+  "[advisories]",
+  'yanked = "deny"',
+  "[licenses]",
+  'allow = ["Apache-2.0", "MIT"]',
+  "include-dev = true",
+  "private = { ignore = true }",
+  "[bans]",
+  'multiple-versions = "deny"',
+  'wildcards = "deny"',
+  "allow-wildcard-paths = true",
+  "[sources]",
+  'unknown-registry = "deny"',
+  'unknown-git = "deny"',
+];
+
+// The package.json scripts that run the Rust gates, exactly, and `check` runs each of them. The
+// commands themselves are fixed in scripts/cargo-gate.ts.
+const GATE = "node --disable-warning=ExperimentalWarning scripts/cargo-gate.ts";
+export const RUST_GATE_SCRIPTS: Record<string, string> = {
+  "format:check": `${GATE} fmt && oxfmt --check`,
+  "lint:rust": `${GATE} lint`,
+  deny: `${GATE} deny`,
+  "test:rust": `${GATE} test`,
+};
+
+// Files that may name a flag or variable that can switch lints off, each with why. Anywhere else,
+// naming one is setting it where a gate would run.
+const RUST_FLAG_EXEMPT: Record<string, string> = {
+  "scripts/cargo-gate.ts": "removes them from every gate's environment",
+  "scripts/cargo-gate.test.ts": "sets them to check the gate removes them",
+  "scripts/check-standards.ts": "names them to find them",
+  "scripts/check-standards.test.ts": "plants them to check they are found",
+};
+const LINT_FLAG =
+  /(?:\b|_)rust(?:doc)?flags\b|rustc[-_](?:workspace[-_])?wrapper|\bcargo_alias_|cap-lints/i;
+
+/** Why the package.json scripts don't run the Rust gates as RUST_GATE_SCRIPTS says. */
+export function gateScriptFailures(scripts: Record<string, string>): string[] {
+  const out: string[] = [];
+  for (const [name, command] of Object.entries(RUST_GATE_SCRIPTS)) {
+    if (scripts[name] !== command) {
+      out.push(
+        `package.json: the "${name}" script must be \`${command}\` (RUST_GATE_SCRIPTS in ` +
+          "scripts/check-standards.ts); a gate's command changes in scripts/cargo-gate.ts.",
+      );
+    }
+  }
+  const check = scripts.check ?? "";
+  const steps = /\|\||;|(?<!&)&(?!&)/.test(check) ? [] : check.split("&&").map((c) => c.trim());
+  for (const name of Object.keys(RUST_GATE_SCRIPTS)) {
+    if (!steps.includes(`pnpm run ${name}`)) {
+      out.push(
+        `package.json: the "check" script must run \`pnpm run ${name}\` as one of its \`&&\` ` +
+          "steps, with no `||` or `;` that could step round it.",
+      );
+    }
+  }
+  return out;
+}
+
 /** TOML's lines with comments and blank lines dropped, each trimmed. Strings hold no `#` here. */
 function tomlLines(text: string): string[] {
   return text
@@ -717,14 +787,35 @@ export function rustFailures(
       out.push(`${file}: rustfmt runs with its defaults (docs/standards/rust.md § Formatting).`);
     } else if (/^rust-toolchain(\.toml)?$/.test(base) && file !== "rust-toolchain.toml") {
       out.push(`${file}: the root rust-toolchain.toml is the one toolchain pin.`);
+    } else if (/(^|\/)\.config\/nextest\.toml$/.test(file)) {
+      out.push(`${file}: nextest runs with its defaults, so no profile can filter tests out.`);
+    } else if (["deny.toml", ".deny.toml"].includes(base) && file !== "deny.toml") {
+      out.push(`${file}: cargo-deny reads only the root deny.toml here.`);
+    }
+    if (!file.endsWith(".md") && !(file in RUST_FLAG_EXEMPT)) {
+      const flag = LINT_FLAG.exec(read(file));
+      if (flag !== null) {
+        out.push(
+          `${file}: names \`${flag[0]}\`, which can switch the Rust lints off. The gates run ` +
+            "through scripts/cargo-gate.ts, which removes it; a file that must set it goes in " +
+            "RUST_FLAG_EXEMPT in scripts/check-standards.ts, with why.",
+        );
+      }
     }
   }
-  if (
-    paths.includes("clippy.toml") &&
-    tomlLines(read("clippy.toml")).join("\n") !== CLIPPY_CONFIG.join("\n")
-  ) {
-    out.push("clippy.toml: differs from CLIPPY_CONFIG in scripts/check-standards.ts.");
+  for (const file of Object.keys(RUST_FLAG_EXEMPT).filter((f) => !paths.includes(f))) {
+    out.push(`scripts/check-standards.ts: RUST_FLAG_EXEMPT lists missing ${file}.`);
   }
+  const pinned = (file: string, lines: string[], name: string) => {
+    if (!paths.includes(file)) out.push(`${file} is missing; the Rust gates need it.`);
+    else if (tomlLines(read(file)).join("\n") !== lines.join("\n")) {
+      out.push(`${file}: differs from ${name} in scripts/check-standards.ts.`);
+    }
+  };
+  pinned("deny.toml", DENY_CONFIG, "DENY_CONFIG");
+  if (paths.includes("package.json")) out.push(...gateScriptFailures(packageScripts(read)));
+  else out.push("package.json is missing; the Rust gates run from its scripts.");
+  pinned("clippy.toml", CLIPPY_CONFIG, "CLIPPY_CONFIG");
   return out;
 }
 
@@ -735,7 +826,7 @@ function repoFiles(): string[] {
     encoding: "utf8",
   })
     .split("\n")
-    .filter((p) => p !== "" && existsSync(join(root, p)));
+    .filter((p) => p !== "" && existsSync(join(root, p)) && statSync(join(root, p)).isFile());
 }
 
 function checkRust(): void {

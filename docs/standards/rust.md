@@ -5,23 +5,25 @@ TypeScript wherever this page doesn't say otherwise. Where a check enforces a ru
 says enough to fix the problem without this page. Read this page when a rule seems wrong, or when
 a review asks for something no check covers.
 
-| Rule                                                                                                                                    | Enforced by                                 |
-| --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
-| Crates live only in `crates/<name>`, each taking the workspace lints                                                                    | `pnpm check` (`scripts/check-standards.ts`) |
-| The lint levels and test allowances are the ones below, with nothing beside them to loosen them                                         | `pnpm check` (`scripts/check-standards.ts`) |
-| Clippy's pedantic group and the restriction lints below fail the build                                                                  | `pnpm lint:rust` (`-D warnings`)            |
-| No lint is suppressed in source, except `unsafe_code` in an unsafe module                                                               | `pnpm check` (`scripts/check-standards.ts`) |
-| Code is formatted by rustfmt's defaults                                                                                                 | `pnpm format:check`                         |
-| No `unwrap`, `expect`, `panic!` or indexing that can panic outside tests; no `todo!`, `unimplemented!`, `unreachable!` or `dbg!` at all | `pnpm lint:rust`                            |
-| No `print!` or `eprint!`: stdout and stderr may be the protocol                                                                         | `pnpm lint:rust`                            |
-| Every `unsafe` block has a `SAFETY:` comment, one unsafe operation each                                                                 | `pnpm lint:rust`                            |
-| Dependencies are pinned exactly in `[workspace.dependencies]`, and members take them from there                                         | `pnpm check` (`scripts/check-standards.ts`) |
-| Dependencies have permitted licences, no advisory, one version each                                                                     | `pnpm deny`                                 |
-| Tests run under nextest                                                                                                                 | `pnpm test:rust`                            |
-| Every new Rust test has a `Control:` trailer                                                                                            | CI on pull requests (`pnpm test:falsify`)   |
-| Library errors are typed with thiserror; long-running processes log with tracing                                                        | review                                      |
-| Every decoder of a framed binary protocol has a cargo-fuzz target                                                                       | review                                      |
-| Rust components are certified black-box, by the TypeScript suites                                                                       | review                                      |
+| Rule                                                                                                                                    | Enforced by                                           |
+| --------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| Crates live only in `crates/<name>`, each taking the workspace lints                                                                    | `pnpm check` (`scripts/check-standards.ts`)           |
+| The lint levels, test allowances, `deny.toml` and the gate scripts are the ones below, with nothing beside them to loosen them          | `pnpm check` (`scripts/check-standards.ts`)           |
+| Clippy's pedantic group and the restriction lints below fail the build                                                                  | `pnpm lint:rust` (`-D warnings`)                      |
+| No named lint can be lowered by any attribute, however it is written                                                                    | the compiler (`forbid`)                               |
+| No lint is suppressed in source, except `unsafe_code` in an unsafe module; no code comes from a file the scan doesn't read              | `pnpm check` (`scripts/check-standards.ts`)           |
+| The gates run with no flag, alias, wrapper or runner from the caller                                                                    | `scripts/cargo-gate.ts`, which every gate script runs |
+| Code is formatted by rustfmt's defaults                                                                                                 | `pnpm format:check`                                   |
+| No `unwrap`, `expect`, `panic!` or indexing that can panic outside tests; no `todo!`, `unimplemented!`, `unreachable!` or `dbg!` at all | `pnpm lint:rust`                                      |
+| No `print!` or `eprint!`: stdout and stderr may be the protocol                                                                         | `pnpm lint:rust`                                      |
+| Every `unsafe` block has a `SAFETY:` comment, one unsafe operation each                                                                 | `pnpm lint:rust`                                      |
+| Dependencies are pinned exactly in `[workspace.dependencies]`, and members take them from there                                         | `pnpm check` (`scripts/check-standards.ts`)           |
+| Dependencies have permitted licences, no advisory, one version each                                                                     | `pnpm deny`                                           |
+| Tests run under nextest                                                                                                                 | `pnpm test:rust`                                      |
+| Every new Rust test has a `Control:` trailer                                                                                            | CI on pull requests (`pnpm test:falsify`)             |
+| Library errors are typed with thiserror; long-running processes log with tracing                                                        | review                                                |
+| Every decoder of a framed binary protocol has a cargo-fuzz target                                                                       | review                                                |
+| Rust components are certified black-box, by the TypeScript suites                                                                       | review                                                |
 
 ## Layout
 
@@ -59,9 +61,11 @@ follows them is cheap to split out later. The items reviews check most:
 ## Lints
 
 `[workspace.lints]` in `Cargo.toml` holds every lint level, and every crate inherits it with
-`[lints] workspace = true`. Clippy's `pedantic` group is on, and `pnpm lint:rust` runs clippy
-with `-D warnings`, so any finding fails. Of rustc's own lints, `unsafe_code` is denied (§ Unsafe),
-and so are:
+`[lints] workspace = true`. Clippy's `pedantic` group is denied, and `pnpm lint:rust` runs clippy
+with `-D warnings`, so any finding fails. Every lint named on its own below is `forbid`, not
+`deny`: no `#[allow]` or `#[expect]` can lower a forbidden lint, whether it is written out, built
+by a macro or brought in by `include!`, so the compiler itself refuses the suppression (E0453).
+Of rustc's own lints, `unsafe_code` is denied (§ Unsafe), and these are forbidden:
 
 - `unsafe_op_in_unsafe_fn`: an `unsafe fn`'s body is not one big unsafe block, so each unsafe
   call in it still gets its own block and proof;
@@ -85,16 +89,48 @@ On top of pedantic:
   `unreachable!()` is a panic the types didn't rule out.
 - `allow_attributes` and `allow_attributes_without_reason`: when the workspace's allow-list
   doesn't cover a case, the fix is in the code. AGENTS.md's rule holds: a failing check is fixed
-  in the code, never by a suppression. `scripts/check-standards.ts` fails on any `#[allow]` or
-  `#[expect]` of a lint in `crates/`, and on a macro that passes an attribute through
-  (`$x:meta`), which could carry one no scan sees.
+  in the code, never by a suppression.
 
-**The configuration is pinned too.** `scripts/check-standards.ts` holds `[workspace.lints]` and
-`clippy.toml` as `WORKSPACE_LINTS` and `CLIPPY_CONFIG`, and fails when the files differ, so a
-lint level changes only in a commit that changes the script and this page with it. It also fails
-on anything that would loosen them from beside: cargo config in a `.cargo` directory, whose
-`rustflags` can turn lints off; a second `clippy.toml`; a `rustfmt.toml`; a second toolchain
-file; a crate outside `crates/`; or Rust source outside a crate there.
+**The groups are guarded by the scan, not by forbid.** A forbidden group (`pedantic`,
+`rust_2018_idioms`) only warns when an attribute lowers one of its lints, which `-D warnings`
+doesn't catch, and the derives of crates such as serde and thiserror emit allows that rustc means
+to make errors under one. So the groups stay `deny`, and `scripts/check-standards.ts` is what
+keeps their lints, `unsafe_code` and rustc's default lints from being suppressed. It reads Rust
+source with comments and strings set aside, and fails on:
+
+- any attribute that allows or expects a lint, at any depth (`cfg_attr` included), but an unsafe
+  module's own `#![expect(unsafe_code, reason = "...")]`;
+- any `#` that doesn't begin an attribute written out in full, and any attribute holding a macro
+  variable: a macro could otherwise build a suppression from tokens no scan reads;
+- `include!`, however it is reached, `#[path]`, a target `path` in a member's manifest, and a
+  `proc-macro` crate of ours: each brings in code, or attributes, from somewhere the scan doesn't
+  read.
+
+**When a dependency's macro trips a forbidden lint.** An attribute macro from another crate that
+emits an allow of a forbidden lint (`#[tokio::main]` allows `clippy::expect_used`) fails with
+E0453. Lower that one lint to `deny` in `Cargo.toml` and in `WORKSPACE_LINTS`, in a commit that
+names the macro; the scan still guards it.
+
+**The configuration is pinned too.** `scripts/check-standards.ts` holds `[workspace.lints]`,
+`clippy.toml` and `deny.toml` as `WORKSPACE_LINTS`, `CLIPPY_CONFIG` and `DENY_CONFIG`, and the
+gate scripts in `package.json` as `RUST_GATE_SCRIPTS`, and fails when the files differ, so a lint
+level or a gate changes only in a commit that changes the script and this page with it. It also
+fails on anything that would loosen them from beside: cargo config in a `.cargo` directory, whose
+`rustflags` can turn lints off; a second `clippy.toml` or `deny.toml`; a nextest config, whose
+profiles can filter tests out; a `rustfmt.toml`; a second toolchain file; a crate outside
+`crates/`; Rust source outside a crate there; and any file but those in `RUST_FLAG_EXEMPT` that
+names a flag or variable able to switch lints off (`RUSTFLAGS`, `--cap-lints`, a rustc wrapper,
+a cargo alias).
+
+**The gates run in a clean environment.** `--cap-lints allow` switches every lint off, forbidden
+ones included, whether it arrives through `RUSTFLAGS`, a cargo config in any parent directory, or an
+argument, and a cargo alias can replace `cargo clippy` with a command that passes. So each gate
+script runs `scripts/cargo-gate.ts`, which holds the gate's command, calls the subcommand's own
+binary (`cargo-clippy`, not `cargo clippy`), refuses any option after the gate (`pnpm test:rust
+<name>` may name tests), removes the variables that change flags, tools or the test runner, sets
+`CARGO_ENCODED_RUSTFLAGS` empty (which outranks every other source of rustflags), and refuses to run
+under a cargo config outside the repository that names a compiler, a wrapper or a test runner. A
+global `RUSTFLAGS` of your own is ignored by the gates, not an error.
 
 **The allow-list** is in `[workspace.lints.clippy]` only, one line each, with its reason beside
 it. It holds `must_use_candidate`, which fires on nearly every pure function; `#[must_use]` goes
@@ -115,6 +151,8 @@ process groups does, keeps all of its `unsafe` in **one named module**, and that
 - is listed in `UNSAFE_MODULES` in `scripts/check-standards.ts`, with why it needs `unsafe`;
 - sets `#![expect(unsafe_code, reason = "...")]`, the only suppression the check accepts, and
   only in a listed file; put it first in the module, where a reader looks for it;
+- is not a crate root and declares no child module, inline or in a file, so the `expect` covers
+  that one file; tests of its safe API go in its parent module;
 - exposes a safe API, so no caller writes `unsafe`;
 - has a `// SAFETY:` comment on every `unsafe` block, saying which invariant makes it sound
   (`undocumented_unsafe_blocks`), and one unsafe operation per block

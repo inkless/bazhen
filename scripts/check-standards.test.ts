@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   CLIPPY_CONFIG,
+  DENY_CONFIG,
+  RUST_GATE_SCRIPTS,
   WORKSPACE_LINTS,
   declaredTokens,
+  gateScriptFailures,
   hasRuntimeCode,
   inheritsWorkspaceLints,
   attributeFailures,
@@ -377,7 +380,7 @@ describe("rustFailures", () => {
   });
 
   it("names an unsafe module that no longer exists", () => {
-    expect(about("scripts/check-standards.ts")).toEqual([
+    expect(about("scripts/check-standards.ts").filter((f) => f.includes("UNSAFE"))).toEqual([
       "scripts/check-standards.ts: UNSAFE_MODULES lists missing crates/a/src/gone.rs.",
     ]);
   });
@@ -534,5 +537,103 @@ describe("skillFailures", () => {
   it("checks the description as YAML reads it, not as written", () => {
     expect(failures(`description: '${valid.replace("'", "''")}'`)).toEqual([]);
     expect(failures(`description: "${valid.replace("'", "\\u0027")}"`)).toEqual([]);
+  });
+});
+
+const CHECK = Object.keys(RUST_GATE_SCRIPTS)
+  .map((name) => `pnpm run ${name}`)
+  .join(" && ");
+
+describe("gateScriptFailures", () => {
+  it("accepts the standard's gate scripts, run by check", () => {
+    expect(
+      gateScriptFailures({ ...RUST_GATE_SCRIPTS, check: `pnpm run lint && ${CHECK}` }),
+    ).toEqual([]);
+  });
+
+  it("refuses a gate that runs anything else, and a check that skips or steps round one", () => {
+    const loosened = { ...RUST_GATE_SCRIPTS, "lint:rust": "cargo clippy --workspace" };
+    expect([
+      gateScriptFailures({ ...loosened, check: CHECK }),
+      gateScriptFailures({ ...RUST_GATE_SCRIPTS, check: CHECK.replace(" && pnpm run deny", "") }),
+      gateScriptFailures({ ...RUST_GATE_SCRIPTS, check: `${CHECK} || true` }),
+      gateScriptFailures({ ...RUST_GATE_SCRIPTS, check: CHECK.replace(" && ", " ; ") }),
+    ]).toEqual([
+      [expect.stringContaining('the "lint:rust" script must be')],
+      [expect.stringContaining("must run `pnpm run deny`")],
+      Object.keys(RUST_GATE_SCRIPTS).map(() => expect.stringContaining("must run")),
+      Object.keys(RUST_GATE_SCRIPTS).map(() => expect.stringContaining("must run")),
+    ]);
+  });
+});
+
+describe("rustFailures on the gates' own configuration", () => {
+  const standard: Record<string, string> = {
+    "deny.toml": DENY_CONFIG.join("\n"),
+    "clippy.toml": CLIPPY_CONFIG.join("\n"),
+    "package.json": JSON.stringify({ scripts: { ...RUST_GATE_SCRIPTS, check: CHECK } }),
+    "scripts/cargo-gate.ts": "RUSTFLAGS",
+    "scripts/cargo-gate.test.ts": "RUSTFLAGS",
+    "scripts/check-standards.ts": "RUSTFLAGS",
+    "scripts/check-standards.test.ts": "RUSTFLAGS",
+    "docs/standards/rust.md": "`RUSTFLAGS` and `--cap-lints` are removed by the gate.",
+  };
+  const failures = (extra: Record<string, string>, drop: string[] = []) => {
+    const repo = { ...standard, ...extra };
+    const paths = Object.keys(repo).filter((p) => !drop.includes(p));
+    return rustFailures(paths, (p) => repo[p] ?? "", {});
+  };
+
+  it("accepts the standard's configuration, and flags named only where they are removed", () => {
+    expect(failures({})).toEqual([]);
+  });
+
+  it("refuses a deny.toml other than the standard's, or none", () => {
+    expect([
+      failures({ "deny.toml": DENY_CONFIG.join("\n").replace('"deny"', '"warn"') }),
+      failures({}, ["deny.toml"]),
+      failures({ "crates/a/deny.toml": "" }),
+    ]).toEqual([
+      [expect.stringContaining("deny.toml: differs from DENY_CONFIG")],
+      [expect.stringContaining("deny.toml is missing")],
+      [expect.stringContaining("reads only the root deny.toml")],
+    ]);
+  });
+
+  it("refuses a nextest config, which could filter tests out", () => {
+    expect(failures({ ".config/nextest.toml": "[profile.default]\n" })).toEqual([
+      expect.stringContaining("nextest runs with its defaults"),
+    ]);
+  });
+
+  it("refuses package.json gate scripts other than the standard's", () => {
+    const loose = JSON.stringify({ scripts: { ...RUST_GATE_SCRIPTS, deny: "true", check: CHECK } });
+    expect(failures({ "package.json": loose })).toEqual([
+      expect.stringContaining('the "deny" script must be'),
+    ]);
+  });
+
+  it("refuses a lint-loosening flag set anywhere a gate could run, however it is spelled", () => {
+    expect(
+      failures({
+        ".github/workflows/ci.yml": "env:\n  RUSTFLAGS: -A warnings\n",
+        "tests/real/Dockerfile": "ENV CARGO_ENCODED_RUSTFLAGS=--cap-lints=allow\n",
+        "scripts/build.ts": 'env: { CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "" }',
+        "crates/a/run.sh": "cargo --config 'build.rustc-wrapper=\"x\"' build\n",
+        "Cargo.toml.bak": "[alias]\n# CARGO_ALIAS_CLIPPY\n",
+      }).map((f) => f.split(":")[0]),
+    ).toEqual([
+      ".github/workflows/ci.yml",
+      "tests/real/Dockerfile",
+      "scripts/build.ts",
+      "crates/a/run.sh",
+      "Cargo.toml.bak",
+    ]);
+  });
+
+  it("names an exempt file that no longer exists", () => {
+    expect(failures({}, ["scripts/cargo-gate.test.ts"])).toEqual([
+      "scripts/check-standards.ts: RUST_FLAG_EXEMPT lists missing scripts/cargo-gate.test.ts.",
+    ]);
   });
 });
