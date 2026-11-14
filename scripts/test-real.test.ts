@@ -4,6 +4,7 @@ import {
   ownerOf,
   parseArgs,
   pins,
+  tmuxBuildArgs,
   run,
   stopper,
   sweep,
@@ -45,6 +46,16 @@ describe("pnpm test:real", () => {
       PNPM_VERSION: "12.16.1",
       PLAYWRIGHT_VERSION: "1.64.1",
     });
+  });
+
+  it("builds the Dockerfile's tmux unless a version and its checksum are both named", () => {
+    expect(tmuxBuildArgs({})).toEqual({});
+    expect(tmuxBuildArgs({ BZ_TMUX_VERSION: "3.4", BZ_TMUX_SHA256: "ab" })).toEqual({
+      TMUX_VERSION: "3.4",
+      TMUX_SHA256: "ab",
+    });
+    expect(() => tmuxBuildArgs({ BZ_TMUX_VERSION: "3.4" })).toThrow("together");
+    expect(() => tmuxBuildArgs({ BZ_TMUX_SHA256: "ab" })).toThrow("together");
   });
 
   it("refuses to build when a pin is missing", () => {

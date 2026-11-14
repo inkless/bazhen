@@ -89,6 +89,26 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:api
 
+  # Linux distributions ship tmux 3.4 as well as 3.6, and the suites are written against both. The
+  # image's own tmux is 3.6b, so this builds it at 3.4. Only the suite that drives tmux hardest
+  # runs, so the job costs one build and one suite, not three.
+  integration-tmux-3-4:
+    name: integration (tmux 3.4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BZ_TMUX_VERSION: "3.4"
+      BZ_TMUX_SHA256: 551ab8dea0bf505c0ad6b7bb35ef567cdde0ccb84357df142c254f35a23e19aa
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26.13.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:real integration
+
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 20

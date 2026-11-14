@@ -4,12 +4,34 @@
 # the pins below from the repository.
 
 ARG NODE_VERSION
+# Exact, so a tmux upgrade is a change someone makes and the defect pins are re-run against.
+ARG TMUX_VERSION=3.6b
+ARG TMUX_SHA256=390759d25fdba016887ec982b808927e637070fd7d03a8021f8ef3102b9ae3c7
+
+# Debian ships tmux 3.5a, not the 3.6b that developers' machines run, so the suites would test a
+# version nobody uses. tmux is built here from the release tarball, and only the installed tree
+# reaches the image: no compiler comes with it.
+FROM node:${NODE_VERSION}-trixie AS tmux-build
+ARG TMUX_VERSION
+ARG TMUX_SHA256
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends build-essential bison pkg-config libevent-dev \
+    libncurses-dev \
+  && rm -rf /var/lib/apt/lists/*
+ADD https://github.com/tmux/tmux/releases/download/${TMUX_VERSION}/tmux-${TMUX_VERSION}.tar.gz /tmp/tmux.tar.gz
+RUN echo "${TMUX_SHA256}  /tmp/tmux.tar.gz" | sha256sum -c - \
+  && mkdir /tmp/tmux-src \
+  && tar -xzf /tmp/tmux.tar.gz -C /tmp/tmux-src --strip-components=1 \
+  && cd /tmp/tmux-src \
+  && ./configure --prefix=/usr/local \
+  && make -j"$(nproc)" \
+  && make install DESTDIR=/tmux-root
+
 FROM node:${NODE_VERSION}-trixie
 
 ARG PNPM_VERSION
 ARG PLAYWRIGHT_VERSION
-# Exact, so a tmux upgrade is a change someone makes and the defect pins are re-run against.
-ARG TMUX_VERSION=3.5a-3
+ARG TMUX_VERSION
 # What the shell-terminal suite runs in a shell, pinned as tmux is.
 ARG NEOVIM_VERSION=0.10.4-8
 ARG LESS_VERSION=668-1
@@ -27,13 +49,17 @@ ENV HUSKY=0 CI=1 LANG=C.UTF-8
 # man-db would rebuild its index on install, which nothing here reads.
 RUN echo "man-db man-db/auto-update boolean false" | debconf-set-selections \
   && apt-get update \
-  && apt-get install -y --no-install-recommends "tmux=${TMUX_VERSION}" fish zsh \
+  && apt-get install -y --no-install-recommends libevent-core-2.1-7t64 fish zsh \
     "neovim=${NEOVIM_VERSION}" "less=${LESS_VERSION}" "man-db=${MAN_DB_VERSION}" \
     "htop=${HTOP_VERSION}" "rustup=${RUSTUP_VERSION}" \
   && npx -y "playwright@${PLAYWRIGHT_VERSION}" install-deps chromium \
   && rm -rf /var/lib/apt/lists/* \
   && npm install -g "pnpm@${PNPM_VERSION}" \
   && touch /etc/bazhen-disposable-host
+
+COPY --from=tmux-build /tmux-root/usr/local /usr/local
+# The build proves it carries the pinned tmux, not another that something else pulled in.
+RUN test "$(tmux -V)" = "tmux ${TMUX_VERSION}"
 
 USER node
 WORKDIR /home/node/bazhen

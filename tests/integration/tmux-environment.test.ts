@@ -62,6 +62,23 @@ async function newTerminalEnv(): Promise<Record<string, string>> {
   );
 }
 
+describe("a terminal's colour depth", () => {
+  it("is 24-bit in every terminal, whatever tmux version runs and whatever the spec carries", async () => {
+    const out = join(dir, "colorterm");
+    await runtime.create({
+      terminalId: newId("term"),
+      tags: { kind: "agent", agentId: newId("agent") },
+      argv: ["sh", "-c", `printf %s "$COLORTERM" > '${out}'; sleep 60`],
+      cwd: dir,
+      env: { COLORTERM: "16color" },
+      size: { cols: 80, rows: 24 },
+      generation: 0,
+    });
+    await expect.poll(() => existsSync(out), { timeout: 10_000 }).toBe(true);
+    expect(readFileSync(out, "utf8")).toBe("truecolor");
+  });
+});
+
 describe("replacing a running tmux server's environment", () => {
   it("gives new terminals hostile values exactly, drops removed names, and runs nothing", async () => {
     expect((await newTerminalEnv())["BZ_OLD"]).toBe("old");

@@ -679,6 +679,12 @@ function located(ref: RuntimeRef, key: "sessionId" | "paneId"): string {
 }
 
 /**
+ * What a terminal's programs read to choose 24-bit colour. tmux 3.6 sets it in every pane and
+ * earlier versions don't, so it is set here: a terminal draws the same on whichever tmux runs.
+ */
+const PANE_COLOUR_ENV = { COLORTERM: "truecolor" } as const;
+
+/**
  * The process half of a terminal: its directory, Bazhen's variables and its argv. tmux sets TMUX
  * and TMUX_PANE in every pane, whatever the server's environment, and with them a terminal's
  * `tmux kill-server` would end Bazhen's private server and every terminal on it. A new terminal
@@ -687,7 +693,10 @@ function located(ref: RuntimeRef, key: "sessionId" | "paneId"): string {
 const processArgs = (spec: ProcessSpec) => [
   "-c",
   spec.cwd,
-  ...Object.entries(spec.env).flatMap(([k, v]) => ["-e", escapeTrailingSemicolon(`${k}=${v}`)]),
+  ...Object.entries({ ...spec.env, ...PANE_COLOUR_ENV }).flatMap(([k, v]) => [
+    "-e",
+    escapeTrailingSemicolon(`${k}=${v}`),
+  ]),
   "--",
   "env",
   "-u",

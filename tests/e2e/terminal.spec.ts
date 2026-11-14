@@ -35,10 +35,10 @@ const isLaunch = (r: Request) =>
   r.method() === "POST" && new URL(r.url()).pathname === "/v1/agents";
 
 /**
- * The greys the pinned Claude Code draws its secondary text in, at the 256 colours tmux gives it:
- * one per theme, so which one is on screen says which theme it started in.
+ * The greys the pinned Claude Code draws its secondary text in, in 24-bit colour: one per theme,
+ * so which one is on screen says which theme it started in.
  */
-const CLAUDE_GREY = { dark: "246", light: "241" } as const;
+const CLAUDE_GREY = { dark: "#999999", light: "#666666" } as const;
 
 /** The agent's lifecycle state, as the daemon's state snapshot gives it. */
 async function agentState(page: Page, agentId: string): Promise<unknown> {
