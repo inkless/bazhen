@@ -961,7 +961,7 @@ export const TOOLCHAIN_CONFIG = [
   "[toolchain]",
   'channel = "1.100.0"',
   'profile = "minimal"',
-  'components = ["rustfmt", "clippy"]',
+  'components = ["rustfmt", "clippy", "rust-analyzer", "rust-src"]',
 ];
 export const CLIPPY_CONFIG = [
   "allow-unwrap-in-tests = true",
