@@ -1,6 +1,7 @@
 // Runs scripts/cargo-gate.ts as `pnpm` does, with stub cargo-* binaries on PATH that log the
 // arguments and flag variables they were started with, so what a gate really hands its tool is
-// checked, not only the functions that build it.
+// checked, not only the functions that build it. The gate also reads the cargo configs in the
+// repository's real parent directories; one there with a runner or [env] fails these tests too.
 
 import { spawnSync } from "node:child_process";
 import {
@@ -23,7 +24,8 @@ const GATE_SCRIPT = fileURLToPath(new URL("cargo-gate.ts", import.meta.url));
 const STUB = `#!/bin/sh
 case "$*" in *--version*) exit "\${STUB_VERSION_EXIT:-0}" ;; esac
 echo "ARGV: $*" >> "$STUB_LOG"
-/usr/bin/env | /bin/grep -E '^(RUSTFLAGS|CARGO_ENCODED_RUSTFLAGS)=' >> "$STUB_LOG"
+[ -n "\${RUSTFLAGS+set}" ] && echo "RUSTFLAGS=$RUSTFLAGS" >> "$STUB_LOG"
+[ -n "\${CARGO_ENCODED_RUSTFLAGS+set}" ] && echo "CARGO_ENCODED_RUSTFLAGS=$CARGO_ENCODED_RUSTFLAGS" >> "$STUB_LOG"
 exit "\${STUB_EXIT:-0}"
 `;
 
@@ -75,17 +77,24 @@ describe("cargo-gate.ts", () => {
     expect(gate(["lint"], { STUB_EXIT: "3" }).status).toBe(3);
   });
 
-  it("refuses to compile under a config it can't override, and runs nothing", () => {
-    writeFileSync(join(home, "config.toml"), 'target.x86_64-unknown-linux-gnu.runner = "true"\n');
-    const { status, stderr, logged } = gate(["test"]);
-    expect({ status, refused: stderr.includes("sets a test runner"), logged }).toEqual({
-      status: 1,
-      refused: true,
-      logged: [],
+  it("refuses to lint or test under a config it can't override, and runs nothing", () => {
+    writeFileSync(join(home, "config.toml"), '[env]\nCLIPPY_ARGS = "--cap-lints=allow"\n');
+    const refused = ["lint", "test"].map((g) => {
+      const { status, stderr, logged } = gate([g]);
+      return { status, refused: stderr.includes("sets a test runner"), logged };
     });
+    expect(refused).toEqual([
+      { status: 1, refused: true, logged: [] },
+      { status: 1, refused: true, logged: [] },
+    ]);
   });
 
-  it("names the install command when a tool is missing, and runs nothing", () => {
+  it("formats and checks dependencies under such a config, since neither compiles", () => {
+    writeFileSync(join(home, "config.toml"), '[env]\nCLIPPY_ARGS = "--cap-lints=allow"\n');
+    expect(["fmt", "deny"].map((g) => gate([g]).status)).toEqual([0, 0]);
+  });
+
+  it("names the install command when a tool is missing", () => {
     rmSync(join(bin, "cargo-deny"));
     const { status, stderr } = gate(["deny"]);
     expect({ status, hint: stderr.includes("cargo install --locked") }).toEqual({

@@ -8,6 +8,7 @@ a review asks for something no check covers.
 | Rule                                                                                                                                    | Enforced by                                           |
 | --------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
 | Crates live only in `crates/<name>`, each taking the workspace lints                                                                    | `pnpm check` (`scripts/check-standards.ts`)           |
+| Every target is built and tested from where Cargo looks by default; no build script or proc macro of ours                               | `pnpm check` (`scripts/check-standards.ts`)           |
 | The lint levels, test allowances, `deny.toml` and the gate scripts are the ones below, with nothing beside them to loosen them          | `pnpm check` (`scripts/check-standards.ts`)           |
 | Clippy's pedantic group and the restriction lints below fail the build                                                                  | `pnpm lint:rust` (`-D warnings`)                      |
 | No named lint can be lowered by any attribute, however it is written                                                                    | the compiler (`forbid`)                               |
@@ -102,31 +103,47 @@ source with comments and strings set aside, and fails on:
   module's own `#![expect(unsafe_code, reason = "...")]`;
 - any `#` that doesn't begin an attribute written out in full, and any attribute holding a macro
   variable: a macro could otherwise build a suppression from tokens no scan reads;
-- `include!`, however it is reached, `#[path]`, a target `path` in a member's manifest, and a
-  `proc-macro` crate of ours: each brings in code, or attributes, from somewhere the scan doesn't
-  read;
+- `include!`, however it is reached, and `#[path]`: each brings in code from somewhere the scan
+  doesn't read;
+- `macro_rules!` outside a module listed in `MACRO_MODULES`: clippy doesn't lint inside a
+  macro's expansion, so a macro of ours wrapping `.unwrap()` hides it from `unwrap_used`. A module
+  joins the list once a review has read its macros;
 - `#[ignore]` and `#[should_panic]`, which skip a test or pass it when it fails, and any
-  attribute naming `clippy` (`#[cfg(not(clippy))]`, `#[clippy::msrv]`), which hides code from
-  clippy or changes how it lints;
-- a member manifest's `required-features`, `test`, `harness` or `auto*` keys, which keep a target
-  or its tests out of the build. The gates lint and test with `--all-features`, so code gated by
-  a feature is read too.
+  attribute naming `clippy` (`#[clippy::msrv]`), which changes how it lints;
+- a `cfg` or `cfg_attr` predicate other than those in `CFG_ALLOWED` (`test` alone today), or
+  `not` around one: code compiled only in a release build, on another OS, under a feature or
+  outside tests is code the gates never build, so no lint or test reads it. A predicate joins
+  the list with why the gates build it: a `target_os` joins only with a CI job in the same pull
+  request that runs `pnpm lint:rust` and `pnpm test:rust` on that OS, as the PTY holder's
+  `linux` and `macos` code will need;
+- a test harness of a member's own (`harness = false`), which could run nothing.
+
+The targets themselves are read from Cargo, not from the manifests' text, so no spelling of a
+manifest can say one thing to the check and another to Cargo. `cargo metadata` must report every
+crate in `crates/` as a member of the workspace, and every target of each a library, binary,
+test, bench or example, at the place Cargo looks for it by default, run by the tests and needing
+no feature, with a target for every file at such a place. A build script (`build.rs`, or a
+`build` key) or a proc macro of ours fails, as does a build dependency: a build script can hand
+the compiler flags and environment no gate sees. Every dependency is an exact version or a crate
+of ours in `crates/`.
 
 **When a dependency's macro trips a forbidden lint.** An attribute macro from another crate that
 emits an allow of a forbidden lint (`#[tokio::main]` allows `clippy::expect_used`) fails with
 E0453. Lower that one lint to `deny` in `Cargo.toml` and in `WORKSPACE_LINTS`, in a commit that
 names the macro; the scan still guards it.
 
-**The configuration is pinned too.** `scripts/check-standards.ts` holds `[workspace.lints]`,
-`clippy.toml` and `deny.toml` as `WORKSPACE_LINTS`, `CLIPPY_CONFIG` and `DENY_CONFIG`, and the
+**The configuration is pinned too.** `scripts/check-standards.ts` holds `[workspace.lints]`, the
+root manifest's other tables, `rust-toolchain.toml`, `clippy.toml` and `deny.toml` as
+`WORKSPACE_LINTS`, `ROOT_TABLES`, `TOOLCHAIN_CONFIG`, `CLIPPY_CONFIG` and `DENY_CONFIG`, and the
 gate scripts in `package.json` as `RUST_GATE_SCRIPTS`, and fails when the files differ, so a lint
-level or a gate changes only in a commit that changes the script and this page with it. It also
-fails on anything that would loosen them from beside: cargo config in a `.cargo` directory, whose
-`rustflags` can turn lints off; a second `clippy.toml` or `deny.toml`; a nextest config, whose
-profiles can filter tests out; a `rustfmt.toml`; a second toolchain file; a crate outside
-`crates/`; Rust source outside a crate there; and any file but those in `RUST_FLAG_EXEMPT` that
-names a flag or variable able to switch lints off (`RUSTFLAGS`, `--cap-lints`, a rustc wrapper,
-a cargo alias).
+level, the toolchain or a gate changes only in a commit that changes the script and this page with
+it. The root manifest holds no other table (a patch, an excluded crate, another profile), and a
+workspace dependency is an exact version or a path to `crates/<name>`. It also fails on anything
+that would loosen them from beside: cargo config in a `.cargo` directory, whose `rustflags` can turn
+lints off; a second `clippy.toml` or `deny.toml`; a nextest config, whose profiles can filter tests
+out; a `rustfmt.toml`; a second toolchain file; a crate outside `crates/`; Rust source outside a
+crate there; and any file but those in `RUST_FLAG_EXEMPT` that names a flag or variable able to
+switch lints off (`RUSTFLAGS`, `--cap-lints`, a rustc wrapper, a cargo alias).
 
 **The gates run in a clean environment.** `--cap-lints allow` switches every lint off, forbidden
 ones included, whether it arrives through `RUSTFLAGS`, a cargo config in any parent directory, or an
@@ -136,9 +153,10 @@ binary (`cargo-clippy`, not `cargo clippy`), refuses any option after the gate (
 <name>` may name tests), removes the variables that change flags, tools or the test runner, sets
 `CARGO_ENCODED_RUSTFLAGS` empty (which outranks every other source of rustflags), and overrides any
 configured compiler or wrapper. A cargo config outside the repository may still set what the gate
-can't override: a test runner, a `rustdoc`, or `[env]`, which can hand clippy its flags. The lint
-and test gates refuse to run under one. A global `RUSTFLAGS` or a wrapper such as sccache is ignored
-by the gates, not an error.
+can't override: a test runner, a `rustdoc` or a linker, `[env]` (which can hand clippy its flags), a
+profile (which can turn off overflow checks and debug assertions in the tests) or an `include` of
+another file. The lint and test gates refuse to run under one. A global `RUSTFLAGS` or a wrapper
+such as sccache is ignored by the gates, not an error.
 
 **The allow-list** is in `[workspace.lints.clippy]` only, one line each, with its reason beside
 it. It holds `must_use_candidate`, which fires on nearly every pure function; `#[must_use]` goes
