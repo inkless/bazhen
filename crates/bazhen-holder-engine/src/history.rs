@@ -130,6 +130,62 @@ impl History {
         }
     }
 
+    /// Takes the newest line off the store, its rows oldest first, but no more than `most` of
+    /// them: the rest of a longer line stays, ending in a row that wraps.
+    pub(crate) fn pop_line(&mut self, most: usize) -> Vec<(String, Ending)> {
+        let mut line = Vec::new();
+        while line.len() < most {
+            let Some(row) = self.pop_row() else {
+                break;
+            };
+            line.push(row);
+            if !self.newest_wraps() {
+                break;
+            }
+        }
+        line.reverse();
+        line
+    }
+
+    /// Whether the newest row wraps, so its line goes on past the store.
+    pub(crate) fn newest_wraps(&self) -> bool {
+        self.rows > 0
+            && self
+                .blocks
+                .back()
+                .and_then(|block| block.rows.last())
+                .is_some_and(|row| row.ending().wrapped)
+    }
+
+    fn pop_row(&mut self) -> Option<(String, Ending)> {
+        if self.rows == 0 {
+            return None;
+        }
+        let evicted = if self.blocks.len() == 1 {
+            self.evicted
+        } else {
+            0
+        };
+        let block = self.blocks.back_mut()?;
+        let row = block.rows.pop()?;
+        let start = block.rows.last().map_or(0, |r| r.end());
+        let text = block
+            .text
+            .get(start..row.end())
+            .unwrap_or_default()
+            .to_owned();
+        block.text.truncate(start);
+        self.rows -= 1;
+        self.text_bytes -= text.len().min(self.text_bytes);
+        if block.rows.len() <= evicted {
+            self.blocks.pop_back();
+            if self.blocks.is_empty() {
+                self.evicted = 0;
+            }
+        }
+        Some((text, row.ending()))
+    }
+
     /// Every row held, oldest first, as stored.
     #[cfg(test)]
     pub(crate) fn rows_for_test(&self) -> Vec<(String, Ending)> {
@@ -251,6 +307,48 @@ mod tests {
         }
         assert_eq!(written(&history), "cd\r\nef\r\n");
         assert_eq!(history.rows(), 2);
+    }
+
+    #[test]
+    fn the_newest_line_comes_off_whole_and_in_order() {
+        let mut history = History::new(3, ANY_SIZE);
+        for (row, ending) in [
+            ("gone", LINE_END),
+            ("a", WRAPS),
+            ("b", WRAPS),
+            ("c", LINE_END),
+        ] {
+            history.push(row, ending);
+        }
+        history.push("d", WRAPS);
+        assert_eq!(history.pop_line(10), vec![("d".to_owned(), WRAPS)]);
+        let rows: Vec<_> = history
+            .pop_line(10)
+            .into_iter()
+            .map(|(text, _)| text)
+            .collect();
+        assert_eq!(rows, ["b", "c"]);
+        assert_eq!((history.rows(), written(&history)), (0, String::new()));
+        assert_eq!(history.pop_line(10), []);
+        history.push("e", LINE_END);
+        assert_eq!(written(&history), "e\r\n");
+    }
+
+    #[test]
+    fn a_line_longer_than_asked_for_comes_off_from_its_end() {
+        let mut history = History::new(10, ANY_SIZE);
+        for row in ["a", "b", "c"] {
+            history.push(row, WRAPS);
+        }
+        history.push("d", LINE_END);
+        let rows: Vec<_> = history
+            .pop_line(2)
+            .into_iter()
+            .map(|(text, _)| text)
+            .collect();
+        assert_eq!(rows, ["c", "d"]);
+        assert!(history.newest_wraps());
+        assert_eq!(written(&history), "ab");
     }
 
     #[test]

@@ -1,7 +1,19 @@
-//! The engine against a bare alacritty terminal that keeps all of its history itself.
-//! Fed the same output in the same pieces, the two hold the same screen, cursor and history, row
-//! for row. alacritty keeps the primary grid private while the alternate screen is up, so history
-//! is compared only while the primary screen is up.
+//! The engine against a bare alacritty terminal that keeps all of its history itself, the
+//! reference. Fed the same output in the same pieces, the two hold the same screen, cursor and
+//! history, row for row, until a resize (see [`Engine::resize`]):
+//! - With the primary screen up, the engine reflows history it gave back to alacritty rewrapped,
+//!   where the reference reflows its rows as they were. From then on the two hold the same cells
+//!   that draw something, in the same order, with blank cells and line breaks free. Where
+//!   alacritty's own reflow may lose cells, in either, only what it can't touch is compared: a
+//!   widening drops rows below the cursor when history runs short, so the cells down to the
+//!   cursor's row must agree as far as both go; a wide char whose spacer was erased can be lost
+//!   anywhere, and nothing is compared.
+//! - With the alternate screen up, the engine reflows the primary screen without its history,
+//!   so the primary may differ on return: the alternate screen and cursor are compared until it
+//!   ends, and nothing after.
+//!
+//! alacritty keeps the primary grid private while the alternate screen is up, so history is
+//! compared only while the primary screen is up.
 
 use alacritty_terminal::grid::{Dimensions, Row};
 use alacritty_terminal::index::Line;
@@ -44,6 +56,7 @@ enum Action {
     RestoreCursor,
     TabForward(u8),
     Substitute,
+    Resize(u16, u16),
     WriteHistory,
 }
 
@@ -78,7 +91,7 @@ impl Action {
             Self::RestoreCursor => "\x1b8".into(),
             Self::TabForward(n) => format!("\x1b[{n}I"),
             Self::Substitute => "\x1a".into(),
-            Self::WriteHistory => return None,
+            Self::Resize(..) | Self::WriteHistory => return None,
         })
     }
 }
@@ -123,6 +136,13 @@ fn output() -> impl Strategy<Value = Action> {
     ]
 }
 
+fn output_and_resizes() -> impl Strategy<Value = Action> {
+    prop_oneof![
+        12 => output(),
+        1 => (1u16..30, 1u16..12).prop_map(|(c, r)| Action::Resize(c, r)),
+    ]
+}
+
 /// The reference: alacritty alone, with room for all the history a case makes, and the engine's
 /// workarounds for alacritty's and vte's bugs, which aren't what the test compares.
 struct FullHistory {
@@ -151,6 +171,11 @@ impl FullHistory {
             self.utf8.note(rest);
         }
         self.parser.stop_sync(&mut self.term);
+    }
+
+    fn resize(&mut self, size: Size) {
+        self.term.resize(size.usable());
+        mark_widened_rows(&mut self.term);
     }
 
     fn history(&self) -> String {
@@ -238,6 +263,18 @@ fn wraps(row: &Cells) -> bool {
         .is_some_and(|c| c.flags.contains(Flags::WRAPLINE))
 }
 
+/// History and then the screen down to row `last`, as one text.
+fn history_and_screen(history: String, term: &Term<Sink>, last: usize) -> String {
+    let mut out = history;
+    let grid = term.grid();
+    let mut lines = Lines::new(&mut out);
+    for n in 0..grid.screen_lines().min(last + 1) {
+        lines.grid_row(&grid[scrollback_line(0, n)]);
+    }
+    lines.finish();
+    out
+}
+
 /// What differs between the two, if anything: screen, cursor, or, with the primary screen up,
 /// history.
 fn difference(engine: &Engine, full: &FullHistory) -> Option<String> {
@@ -272,6 +309,19 @@ fn difference(engine: &Engine, full: &FullHistory) -> Option<String> {
     })
 }
 
+/// The cells that draw something, in order: what a resize must not lose or reorder.
+fn visible(rows: &[Cells]) -> Vec<Cell> {
+    rows.iter()
+        .flatten()
+        .filter(|cell| cell.c != ' ' && !cell.flags.intersects(SPACERS))
+        .map(|cell| {
+            let mut cell = cell.clone();
+            cell.flags.remove(Flags::WRAPLINE);
+            cell
+        })
+        .collect()
+}
+
 /// Feeds both terminals `stream`, in pieces of the sizes `cuts` gives in turn.
 fn feed(engine: &mut Engine, full: &mut FullHistory, stream: &str, cuts: &[usize]) {
     let mut rest = stream.as_bytes();
@@ -292,7 +342,13 @@ fn run(size: Size, actions: &[Action], cuts: &[usize]) -> (Engine, FullHistory) 
     let mut engine = Engine::new(size, HistoryRows(ALL_OF_IT));
     let mut full = FullHistory::new(size);
     let mut pending = String::new();
+    // A resize under the alternate screen leaves the primary screen free to differ, and with it
+    // everything after the alternate screen ends: the case ends there.
+    let mut primary_may_differ = false;
     for action in actions {
+        if primary_may_differ && matches!(action, Action::AltOff | Action::Reset) {
+            return (engine, full);
+        }
         if let Some(bytes) = action.bytes() {
             pending.push_str(&bytes);
             continue;
@@ -300,8 +356,35 @@ fn run(size: Size, actions: &[Action], cuts: &[usize]) -> (Engine, FullHistory) 
         feed(&mut engine, &mut full, &pending, cuts);
         pending.clear();
         assert_same(&engine, &full);
-        if let Action::WriteHistory = action {
-            engine.write_history(&mut String::new());
+        match *action {
+            Action::Resize(cols, rows) => {
+                let size = Size { cols, rows };
+                if full.alternate() {
+                    engine.resize(size);
+                    full.resize(size);
+                    primary_may_differ = true;
+                    continue;
+                }
+                let drop_below = may_drop_rows_below_the_cursor(&full.term, size);
+                let lose_wide = has_a_wide_char_without_its_spacer(&full.term);
+                engine.resize(size);
+                full.resize(size);
+                if difference(&engine, &full).is_some() {
+                    if !lose_wide {
+                        let cursors = (&engine.term, &full.term);
+                        let last = if drop_below {
+                            let line = |term: &Term<Sink>| term.grid().cursor.point.line.0;
+                            line(cursors.0).min(line(cursors.1))
+                        } else {
+                            i32::MAX
+                        };
+                        assert_same_visible_cells(&engine, &full, last, drop_below);
+                    }
+                    return (engine, full);
+                }
+            }
+            Action::WriteHistory => engine.write_history(&mut String::new()),
+            _ => {}
         }
     }
     feed(&mut engine, &mut full, &pending, cuts);
@@ -315,6 +398,71 @@ fn assert_same(engine: &Engine, full: &FullHistory) {
     if let Some(difference) = difference(engine, full) {
         panic!("the engine and the reference differ in their {difference}");
     }
+}
+
+/// The bound on how far a resize may part the two: every cell that draws something, in history
+/// and on the screen down to row `last`, the same and in the same order. When rows below the
+/// cursor may have been dropped, `last` is the cursor's row and one side may hold more above it
+/// than the other, so one side's cells need only start the other's. What follows would differ,
+/// so a case ends there.
+fn assert_same_visible_cells(engine: &Engine, full: &FullHistory, last: i32, cut: bool) {
+    let mut history = String::new();
+    engine.write_history(&mut history);
+    let cols = engine.size.cols;
+    let last = usize::try_from(last).unwrap_or(0);
+    let ours = visible(&drawn(
+        &history_and_screen(history, &engine.term, last),
+        cols,
+    ));
+    let theirs = visible(&drawn(
+        &history_and_screen(full.history(), &full.term, last),
+        cols,
+    ));
+    let same = if cut {
+        ours.starts_with(&theirs) || theirs.starts_with(&ours)
+    } else {
+        ours == theirs
+    };
+    assert!(
+        same,
+        "visible cells differ after a resize\nengine: {}\nreference: {}",
+        text_of(&ours),
+        text_of(&theirs)
+    );
+}
+
+fn text_of(cells: &[Cell]) -> String {
+    cells.iter().map(|cell| cell.c).collect()
+}
+
+/// Whether `term` holds a wide char whose spacer was erased. alacritty's reflow moves such a
+/// char as if it were narrow, and can lose it; the engine gave the rows back rewrapped from
+/// text, where the spacer is whole again.
+fn has_a_wide_char_without_its_spacer(term: &Term<Sink>) -> bool {
+    let grid = term.grid();
+    let scrolled = grid.history_size();
+    (0..scrolled + grid.screen_lines()).any(|n| {
+        let row = &grid[scrollback_line(scrolled, n)];
+        let cells: Vec<&Cell> = row.into_iter().collect();
+        cells.windows(2).any(|pair| {
+            pair[0].flags.contains(Flags::WIDE_CHAR)
+                && !pair[1].flags.contains(Flags::WIDE_CHAR_SPACER)
+        })
+    })
+}
+
+/// Whether a resize to `size` widens the screen while something below the cursor draws.
+/// alacritty's reflow then keeps the cursor's row where it was by pulling rows down from history
+/// and, short of history, drops rows below the cursor as if they were blank. The reference and
+/// the engine hold that history in rows split differently, so either may drop rows the other
+/// keeps.
+fn may_drop_rows_below_the_cursor(term: &Term<Sink>, size: Size) -> bool {
+    let grid = term.grid();
+    let below = (grid.cursor.point.line.0 + 1)..i32::try_from(grid.screen_lines()).unwrap();
+    usize::from(size.usable().cols) > grid.columns()
+        && below
+            .into_iter()
+            .any(|line| grid[Line(line)].into_iter().any(|c| c.c != ' '))
 }
 
 fn size() -> impl Strategy<Value = Size> {
@@ -332,6 +480,15 @@ proptest! {
     fn without_a_resize_the_engine_holds_exactly_what_alacritty_with_all_its_history_does(
         size in size(),
         actions in prop::collection::vec(output(), 0..80),
+        cuts in cuts(),
+    ) {
+        run(size, &actions, &cuts);
+    }
+
+    #[test]
+    fn a_resize_keeps_every_cell_that_draws_something_in_order(
+        size in size(),
+        actions in prop::collection::vec(output_and_resizes(), 0..80),
         cuts in cuts(),
     ) {
         run(size, &actions, &cuts);

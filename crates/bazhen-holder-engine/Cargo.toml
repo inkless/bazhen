@@ -14,3 +14,6 @@ proptest = { workspace = true }
 [lints]
 workspace = true
 
+[[bin]]
+name = "bazhen-holder-replay"
+path = "src/bin/replay.rs"

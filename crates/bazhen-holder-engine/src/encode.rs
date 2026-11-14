@@ -108,6 +108,11 @@ impl<'a> Lines<'a> {
         self.end_row(start, ending);
     }
 
+    /// Whether the last row wrapped, so the line goes on in whatever is written next.
+    pub(crate) fn is_open(&self) -> bool {
+        self.open
+    }
+
     /// Writes what the last row still owes: a spacer, which whatever comes next may need.
     pub(crate) fn finish(self) {
         if self.spacer {

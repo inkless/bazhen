@@ -20,11 +20,11 @@ use std::fmt;
 use std::rc::Rc;
 
 use alacritty_terminal::event::{Event, EventListener};
-use alacritty_terminal::grid::{Dimensions, Grid};
-use alacritty_terminal::index::Line;
-use alacritty_terminal::term::cell::Cell;
+use alacritty_terminal::grid::{Dimensions, Grid, Row};
+use alacritty_terminal::index::{Column, Line};
+use alacritty_terminal::term::cell::{Cell, Flags};
 use alacritty_terminal::term::{Config, Term, TermMode};
-use alacritty_terminal::vte::ansi::Processor;
+use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
 use alacritty_terminal::vte::{Parser, Perform as _};
 
 use crate::budget::{Budget, Stop};
@@ -238,6 +238,50 @@ impl Engine {
         }
     }
 
+    /// Resizes the terminal, reflowing it as alacritty does.
+    ///
+    /// Two ways the result can differ from a terminal that held all its history itself:
+    /// - Blank cells and line breaks: the engine gives alacritty back the history a reflow pulls
+    ///   from rewrapped from its text, where that terminal reflows its rows as they were. Every
+    ///   cell that draws something is the same, and in the same order.
+    /// - Under the alternate screen alacritty keeps the primary grid private, so the primary
+    ///   screen reflows with only the row of history a drain leaves: on return it can differ,
+    ///   and alacritty may drop rows below the primary's cursor.
+    pub fn resize(&mut self, size: Size) {
+        let size = size.usable();
+        // A resize pulls rows back from history: a row-grow fills the new rows from it, and a
+        // reflow that rejoins wrapped rows pulls rows down to keep the cursor's line, or drops
+        // rows below the cursor if history runs out. A column-grow can join every `widen` rows
+        // into one, so alacritty gets back enough of the store for the old screen and the new.
+        if !self.alternate() {
+            let widen = size.cols().div_ceil(self.size.cols()).max(1);
+            let wanted = widen * (self.size.rows() + size.rows());
+            let refilled = refill(self.term.grid_mut(), &mut self.history, wanted);
+            self.scrollback = self.scrollback.max(refilled);
+            self.kept = None;
+        }
+        // Reflow can split a row into one per cell it holds, and a row-shrink pushes up to a
+        // screen into history: no row may fall off alacritty's scrollback before it's drained.
+        // Under the alternate screen the limit stays raised until a drain, so each resize builds
+        // on the last; past the cap, the overflow count says rows may have gone.
+        let split = self
+            .size
+            .cols()
+            .div_ceil(size.cols().saturating_sub(1).max(1));
+        let room = self
+            .scrollback
+            .saturating_add(self.size.rows())
+            .saturating_mul(split)
+            .saturating_add(size.rows())
+            .min(MOST_RESIZE_ROOM);
+        self.set_scrollback(room);
+        self.term.resize(size);
+        mark_widened_rows(&mut self.term);
+        self.size = size;
+        self.budget.resize(size.cols(), size.rows());
+        self.drain();
+    }
+
     /// What the terminal wrote back to the program since the last call. They pile up until
     /// taken, so take them after every [`Engine::advance`].
     pub fn take_replies(&mut self) -> Vec<u8> {
@@ -276,6 +320,15 @@ impl Engine {
             history_bytes: self.history.bytes(),
             history_rows: self.history.rows() + scrolled,
             overflows: self.overflows,
+        }
+    }
+
+    fn set_scrollback(&mut self, rows: usize) {
+        self.scrollback = rows;
+        if self.alternate() {
+            self.term.set_options(config(rows));
+        } else {
+            self.term.grid_mut().update_history(rows);
         }
     }
 
@@ -336,8 +389,16 @@ fn move_to_store(
         let wrapped = encode_row(&grid[scrollback_line(scrolled, n)], encoded);
         history.push(encoded, wrapped);
     }
-    grid.update_history(kept);
-    grid.update_history(limit);
+    if *scrollback == limit {
+        grid.update_history(kept);
+        grid.update_history(limit);
+    } else {
+        // A REP or a resize raised the limit: storage sized to the usual one gives back the rest.
+        let rows = (moved..scrolled)
+            .map(|n| std::mem::take(&mut grid[scrollback_line(scrolled, n)]))
+            .collect();
+        replace_scrollback(grid, rows, limit);
+    }
     let overflowed = scrolled >= *scrollback;
     *scrollback = limit;
     overflowed
@@ -354,6 +415,12 @@ fn whole_chars(bytes: &[u8], len: usize) -> usize {
         .count();
     len + continuations
 }
+
+/// How many times the rows a resize needs a refill may take off the store to finish a line.
+const REFILL_BOUND: usize = 8;
+
+/// The most rows of scrollback a resize makes room for.
+const MOST_RESIZE_ROOM: usize = 1 << 20;
 
 /// The rows of scrollback a drain leaves in alacritty.
 const KEPT_ROWS: usize = 1;
@@ -380,6 +447,129 @@ fn scrollback_line(scrolled: usize, n: usize) -> Line {
     Line(to_i32(n) - to_i32(scrolled))
 }
 
+/// alacritty's `Row::grow` widens a row with default cells but leaves its count of cells to
+/// clear as it was, so a row that was filled with a background colour keeps those cells when it
+/// is next cleared, and shows them when it is reused. Writing to a row's last cell makes the
+/// next clear take the whole row. Only the active grid's rows can be reached.
+fn mark_widened_rows(term: &mut Term<Sink>) {
+    let grid = term.grid_mut();
+    let scrolled = grid.history_size();
+    for n in 0..scrolled + grid.screen_lines() {
+        let row = &mut grid[scrollback_line(scrolled, n)];
+        if let Some(last) = row.len().checked_sub(1) {
+            let _: &mut Cell = &mut row[Column(last)];
+        }
+    }
+}
+
+/// Puts the newest lines of the store back into `grid`'s scrollback, rewrapped to its width,
+/// until it holds `wanted` rows or the store is empty. A line that runs on from the store into
+/// the scrollback comes back whole first, so that a reflow sees all of it. No more than
+/// `REFILL_BOUND` times `wanted` stored rows come back, however long their lines: the rest of a
+/// longer line stays in the store. Returns how many rows the scrollback holds.
+fn refill(grid: &mut Grid<Cell>, history: &mut History, wanted: usize) -> usize {
+    let cols = grid.columns();
+    let mut got = grid.history_size();
+    let mut left = REFILL_BOUND * wanted.max(1);
+    let mut taken = Vec::new();
+    let mut counter = RowCounter::new(cols);
+    while left > 0 && (got < wanted || (taken.is_empty() && history.newest_wraps())) {
+        let line = history.pop_line(left);
+        if line.is_empty() {
+            break;
+        }
+        left = left.saturating_sub(line.len());
+        let mut text = String::new();
+        write_rows(&mut Lines::new(&mut text), &line);
+        got += counter.rows(&text);
+        taken.push(line);
+    }
+    if taken.is_empty() {
+        return got;
+    }
+    let mut text = String::new();
+    let mut lines = Lines::new(&mut text);
+    for line in taken.iter().rev() {
+        write_rows(&mut lines, line);
+    }
+    write_scrollback(grid, &mut lines);
+    let open = lines.is_open();
+    let rows = rows_of(&text, cols, open);
+    let refilled = rows.len();
+    replace_scrollback(grid, rows, 0);
+    refilled
+}
+
+fn write_rows(lines: &mut Lines<'_>, rows: &[(String, Ending)]) {
+    for (text, ending) in rows {
+        lines.row(text, *ending);
+    }
+}
+
+/// Counts the rows alacritty draws lines in, with one terminal for every line counted: its
+/// storage grows a thousand rows at a time, which a terminal per line would pay each time.
+struct RowCounter {
+    term: Term<Sink>,
+    parser: Processor,
+}
+
+impl fmt::Debug for RowCounter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RowCounter").finish_non_exhaustive()
+    }
+}
+
+impl RowCounter {
+    fn new(cols: usize) -> Self {
+        let size = Size {
+            cols: u16::try_from(cols).unwrap_or(u16::MAX),
+            rows: 1,
+        };
+        Self {
+            term: Term::new(config(usize::MAX), &size, Sink::default()),
+            parser: Processor::new(),
+        }
+    }
+
+    /// The rows `text`, whole lines each ended by CRLF, takes.
+    fn rows(&mut self, text: &str) -> usize {
+        self.parser.advance(&mut self.term, text.as_bytes());
+        let rows = self.term.grid().history_size();
+        self.term.grid_mut().clear_history();
+        rows
+    }
+}
+
+/// The rows alacritty draws `text` in at `cols` wide. The last row of an open text, whose line
+/// goes on, is kept and marked as wrapping, as alacritty marks it once the line goes on.
+fn rows_of(text: &str, cols: usize, open: bool) -> Vec<Row<Cell>> {
+    let size = Size {
+        cols: u16::try_from(cols).unwrap_or(u16::MAX),
+        rows: 1,
+    };
+    let mut term = Term::new(config(text.len() + 1), &size, Sink::default());
+    Processor::<StdSyncHandler>::new().advance(&mut term, text.as_bytes());
+    let grid = term.grid();
+    let scrolled = grid.history_size();
+    let mut rows: Vec<_> = (0..scrolled)
+        .map(|n| grid[scrollback_line(scrolled, n)].clone())
+        .collect();
+    if open {
+        let mut last = grid[Line(0)].clone();
+        // A row that wraps with a cell to spare wrapped for a wide char that didn't fit: the
+        // cell holds the spacer, which the text leaves unwritten.
+        let spare = !grid.cursor.input_needs_wrap && grid.cursor.point.column.0 + 1 == cols;
+        if let Some(cell) = last.last_mut() {
+            cell.flags.insert(Flags::WRAPLINE);
+            if spare {
+                cell.flags.insert(Flags::LEADING_WIDE_CHAR_SPACER);
+            }
+        }
+        rows.push(last);
+    }
+    rows
+}
+
 /// An empty grid whose storage already has `room` rows for scrollback.
 ///
 /// alacritty grows a grid's storage by at least a thousand rows at a time, and keeps them while
@@ -390,6 +580,25 @@ fn presized(lines: usize, cols: usize, room: usize) -> Grid<Cell> {
     let mut grid = Grid::new(lines + room, cols, room);
     grid.resize(false, lines, cols);
     grid
+}
+
+/// Gives `grid` `rows` as its scrollback, with storage for `room` rows of it, keeping its screen
+/// and cursors.
+fn replace_scrollback(grid: &mut Grid<Cell>, rows: Vec<Row<Cell>>, room: usize) {
+    let lines = grid.screen_lines();
+    let screen = Line(0)..scrollback_line(0, lines);
+    let mut rebuilt = presized(lines, grid.columns(), room.max(rows.len()));
+    for row in rows {
+        rebuilt[Line(0)] = row;
+        rebuilt.scroll_up(&screen, 1);
+    }
+    for n in 0..lines {
+        let line = scrollback_line(0, n);
+        std::mem::swap(&mut rebuilt[line], &mut grid[line]);
+    }
+    rebuilt.cursor = grid.cursor.clone();
+    rebuilt.saved_cursor = grid.saved_cursor.clone();
+    *grid = rebuilt;
 }
 
 fn write_scrollback(grid: &Grid<Cell>, lines: &mut Lines<'_>) {
@@ -413,6 +622,17 @@ mod tests {
 
     fn lines(range: std::ops::Range<usize>) -> String {
         range.map(|i| i.to_string() + "\r\n").collect()
+    }
+
+    fn screen(engine: &Engine) -> Vec<String> {
+        let grid = engine.term.grid();
+        (0..grid.screen_lines())
+            .map(|n| {
+                let mut text = String::new();
+                encode_row(&grid[scrollback_line(0, n)], &mut text);
+                text
+            })
+            .collect()
     }
 
     #[test]
@@ -495,5 +715,60 @@ mod tests {
         let mut engine = Engine::new(SIZE, HistoryRows(10_000));
         engine.advance(lines(0..1000).as_bytes());
         assert_eq!(history(&mut engine), lines(0..996));
+    }
+
+    #[test]
+    fn widening_brings_back_enough_history_to_fill_the_screen() {
+        let mut engine = Engine::new(Size { cols: 2, rows: 5 }, HistoryRows(1000));
+        engine.advance("abcdefgh\r\n".repeat(30).as_bytes());
+        engine.resize(SIZE);
+        let screen = screen(&engine);
+        assert_eq!(screen[..4], ["abcdefgh"; 4], "{screen:?}");
+        let mut all = history(&mut engine);
+        all.extend(
+            screen
+                .iter()
+                .filter(|row| !row.is_empty())
+                .map(|row| format!("{row}\r\n")),
+        );
+        assert_eq!(all, "abcdefgh\r\n".repeat(30));
+    }
+
+    #[test]
+    fn a_row_coloured_before_a_widening_is_cleared_in_full_when_reused() {
+        let mut term = Term::new(config(100), &Size { cols: 4, rows: 1 }, Sink::default());
+        let mut parser = Processor::<StdSyncHandler>::new();
+        parser.advance(&mut term, b"\x1b[41m\n\n\n\n");
+        term.resize(Size { cols: 8, rows: 1 });
+        mark_widened_rows(&mut term);
+        // Clearing history leaves the widened rows for the next line feeds to reuse.
+        parser.advance(&mut term, b"\x1b[0m\x1b[3J\n\n");
+        let row = &term.grid()[Line(0)];
+        assert!(row.into_iter().all(|cell| cell.bg == Cell::default().bg));
+    }
+
+    #[test]
+    fn a_line_running_from_the_store_onto_the_screen_rejoins_when_widened() {
+        let mut engine = Engine::new(Size { cols: 2, rows: 3 }, HistoryRows(1000));
+        let line: String = ('a'..='z').cycle().take(60).collect();
+        engine.advance(line.as_bytes());
+        engine.resize(Size { cols: 20, rows: 3 });
+        let rows: Vec<String> = line
+            .as_bytes()
+            .chunks(20)
+            .map(|row| String::from_utf8_lossy(row).into_owned())
+            .collect();
+        assert_eq!(screen(&engine), rows);
+        assert_eq!(history(&mut engine), "");
+    }
+
+    #[test]
+    fn after_narrowing_a_flood_of_text_in_one_read_overflows_nothing() {
+        let mut engine = Engine::new(SIZE, HistoryRows(100_000));
+        engine.resize(Size { cols: 2, rows: 5 });
+        engine.advance("x".repeat(2000).as_bytes());
+        let stats = engine.stats();
+        assert_eq!(stats.overflows, 0);
+        assert_eq!(stats.history_rows, 2000 / 2 - 5);
     }
 }
