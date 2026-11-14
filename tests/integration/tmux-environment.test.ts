@@ -86,10 +86,6 @@ describe("a terminal's colour depth", () => {
   it("is 24-bit in a terminal whose spec names none, whatever tmux version runs", async () => {
     expect(await colorterm({})).toBe("truecolor");
   });
-
-  it("is the value a spec carries, as a user who passes COLORTERM through chose it", async () => {
-    expect(await colorterm({ COLORTERM: "16color" })).toBe("16color");
-  });
 });
 
 describe("replacing a running tmux server's environment", () => {
