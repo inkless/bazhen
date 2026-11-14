@@ -230,10 +230,13 @@ export const filterable = (test: RustTest): boolean =>
 
 /**
  * The nextest filter expression that selects exactly `tests`, each by its target (a crate's
- * library and binaries share one) and its full path.
+ * library and binaries share one) and its full path. The target is one pattern for the library
+ * and its binaries together, not one for each: nextest refuses a whole filter when any
+ * `binary_id` in it matches no binary, as a separate `bin/*` does for a crate without one, and
+ * for every integration test. A target `filterable` accepts holds nothing a regex reads as syntax.
  */
 export function nextestFilter(tests: RustTest[]): string {
   return tests
-    .map((t) => `((binary_id(=${t.file}) | binary_id(${t.file}::bin/*)) & test(=${t.title}))`)
+    .map((t) => `(binary_id(/^${t.file}(::bin\\/.*)?$/) & test(=${t.title}))`)
     .join(" | ");
 }

@@ -311,10 +311,25 @@ describe("nextestFilter", () => {
         { file: "holder-proto::contract", title: "decodes" },
       ]),
     ).toBe(
-      "((binary_id(=bazhen-hook) | binary_id(bazhen-hook::bin/*)) & test(=tests::a)) | " +
-        "((binary_id(=holder-proto::contract) | binary_id(holder-proto::contract::bin/*)) & " +
-        "test(=decodes))",
+      String.raw`(binary_id(/^bazhen-hook(::bin\/.*)?$/) & test(=tests::a)) | ` +
+        String.raw`(binary_id(/^holder-proto::contract(::bin\/.*)?$/) & test(=decodes))`,
     );
+  });
+
+  it("names a target in one binary_id, its binaries included, as nextest refuses one matching nothing", () => {
+    const filter = nextestFilter([{ file: "holder-proto", title: "tests::a" }]);
+    const ids = [...filter.matchAll(/binary_id\(\/(.*?)\/\)/g)].map(
+      ([, id = ""]) => new RegExp(id),
+    );
+    const binaries = [
+      "holder-proto",
+      "holder-proto::bin/holder",
+      "holder-proto::fixtures",
+      "holder-protox",
+    ];
+    expect(ids.map((id) => binaries.map((binary) => id.test(binary)))).toEqual([
+      [true, true, false, false],
+    ]);
   });
 
   it("refuses a name that would be read as filter syntax", () => {
