@@ -23,7 +23,7 @@ a review asks for something no check covers.
 | Tests run under nextest                                                                                                                 | `pnpm test:rust`                                      |
 | Every new Rust test has a `Control:` trailer naming it                                                                                  | CI on pull requests (`pnpm test:falsify`)             |
 | Library errors are typed with thiserror; long-running processes log with tracing                                                        | review                                                |
-| Every decoder of a framed binary protocol has a cargo-fuzz target                                                                       | review                                                |
+| Every function that takes bytes from outside is fuzzed, or listed with why it is no decoder                                             | `pnpm check` (`scripts/check-standards.ts`)           |
 | Rust components are certified black-box, by the TypeScript suites                                                                       | review                                                |
 
 ## Layout
@@ -32,7 +32,9 @@ One Cargo workspace at the repository root: `Cargo.toml`, one `Cargo.lock` and o
 directory.
 Every crate is a directory in `crates/`, named as its package is (`crates/bazhen-hook`). Each
 member takes `edition`, `rust-version` and `publish` from `[workspace.package]`, so the edition
-is 2024 everywhere and nothing is published by accident.
+is 2024 everywhere and nothing is published by accident. The one other crate a crate may hold is
+its fuzz crate, `crates/<name>/fuzz`, a workspace of its own because it builds on nightly
+(§ Tests).
 
 `rust-toolchain.toml` pins the compiler. rustup honours it on the host, in CI and in the test
 container (`tests/real/Dockerfile`), so a lint that fires in CI fires locally too. Upgrading the
@@ -249,12 +251,44 @@ What differs:
   `[workspace.dependencies]` with the first crate that needs it. This is the one exception
   to `testing.md`'s "no snapshots of terminal output": screen contents are still asserted byte by
   byte.
-- **A cargo-fuzz target for every decoder of a framed binary protocol.** No crate here has one
-  yet, so the rule starts with the first that does, the holder protocol's crate, which adds the
-  target and the CI job that runs it on a schedule (`cargo +nightly fuzz run <target>` for a fixed
-  time). That job alone uses nightly, because libFuzzer's instrumentation needs it; everything
-  else builds on the pinned toolchain. The hook's reply parser reads HTTP from the daemon's own
-  socket, and its property tests cover it.
+- **A cargo-fuzz target for every decoder.** Bytes a peer sends are whatever it sends, so every
+  function in a crate's `src` directory that takes bytes from outside (a byte slice or buffer, a
+  reader of any kind, a socket, a file, stdin or a child process), whatever its name or visibility,
+  is taken for a decoder. So is a struct or enum of the same crate that carries bytes (a byte field,
+  a parameter bounded by a byte trait, or a field of such a type): a function taking one is a
+  decoder, and so is each of its methods taking `self`, as a stateful frame reader reads through
+  `self`, and each method taking `self` in an impl bounded by a byte trait (`impl<R: Read>
+  Reader<R>`). `scripts/check-standards.ts` fails until each is listed in `FUZZED_DECODERS` with the
+  fuzz target that calls it, or in `NOT_DECODERS` with why it isn't one: an encoder, a function that
+  only sets a socket up, one reached only through a fuzzed decoder. A method is listed with its type
+  (`lib.rs::Reader::next_frame`). A stale entry, an entry with no reason, a type alias of a byte
+  type and a `use … as` renaming one fail too (`as _`, which brings a trait's methods into scope, is
+  fine).
+  - **Text is not taken for bytes**, because most functions taking `&str` parse text the program
+    made itself. A decoder of a text protocol whose input doesn't pass through a fuzzed byte
+    decoder first is listed in `FUZZED_DECODERS` by hand, with its own target, and review checks
+    for it: `pane_title::body` takes the pane id tmux passes as an argument, so
+    `crates/bazhen-hook/fuzz/fuzz_targets/pane_title.rs` drives it.
+  - **The rule is a reviewer's net, not a proof.** It reads signatures, so it can't see a function
+    a macro generates, a closure, or a function that opens its own source (`io::stdin()` inside
+    its body). Review checks those by hand. Two looser edges are known, and review covers them
+    too: a target that names a type and calls `.decode(` on a value counts as driving that type's
+    `decode`, so the reviewer checks the value is of the listed type; and every method taking
+    `self` on a type that carries bytes counts as a decoder, so a getter or a `Display` impl on
+    one needs a `NOT_DECODERS` entry with its reason. That is expected, not noise.
+  - The targets live in `crates/<name>/fuzz/fuzz_targets/<target>.rs` (cargo-fuzz's layout),
+    with seed inputs in `fuzz/seeds/<target>/`. The fuzz crate is a workspace of its own, its
+    dependencies pinned exactly. A target asserts what must hold of every input, not only
+    that nothing panics: `crates/bazhen-hook/fuzz/fuzz_targets/parse_reply.rs` checks that a
+    reply `parse_reply` accepts is one the reader saw end where it does.
+  - A crate with a decoder needs a library target, because a fuzz crate can call only a
+    library. The decoder is `pub` there; the binary, if any, is a `main` that calls the
+    library, as `crates/bazhen-hook/src/main.rs` is.
+  - `.github/workflows/fuzz.yml` runs every target nightly, and for a minute on a pull request that
+    changes the Rust. It alone uses nightly, pinned there as `NIGHTLY`, because libFuzzer's
+    instrumentation needs it; everything else builds on the pinned toolchain. To run one locally,
+    install that nightly and `cargo install --locked cargo-fuzz@0.13.2` once, then run
+    `cargo +nightly-2026-11-01 fuzz run <target>` from the crate's directory.
 - **Falsify can't judge Rust tests by reverting.** A Rust unit test lives in the file it tests, so
   reverting the source would revert the test. When a branch touches `crates/` or the Cargo files,
   `pnpm test:falsify` has nextest list the tests at the base and at HEAD, so it finds every new

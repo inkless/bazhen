@@ -6,7 +6,11 @@ import {
   DENY_CONFIG,
   RUST_GATE_SCRIPTS,
   WORKSPACE_LINTS,
+  byteTakers,
+  decoderFailures,
   declaredTokens,
+  fuzzManifestFailures,
+  tomlTables,
   gateScriptFailures,
   hasRuntimeCode,
   inheritsWorkspaceLints,
@@ -841,6 +845,370 @@ describe("rustFailures on the gates' own configuration", () => {
   it("names an exempt file that no longer exists", () => {
     expect(failures({}, ["scripts/cargo-gate.test.ts"])).toEqual([
       "scripts/check-standards.ts: RUST_FLAG_EXEMPT lists missing scripts/cargo-gate.test.ts.",
+    ]);
+  });
+});
+
+describe("byteTakers", () => {
+  it("names each function that takes bytes from outside, by parameter or bound", () => {
+    const source = [
+      "#[cfg(test)]",
+      "use std::io::Cursor;",
+      "pub fn parse(frame: &[u8]) -> Option<Frame> { None }",
+      "fn fill(buf: &mut [u8]) {}",
+      "fn header(bytes: [u8; 4]) {}",
+      "fn own(bytes: Vec<u8>) {}",
+      "fn from(r: impl Read) {}",
+      "fn feed<R: BufRead>(r: R) {}",
+      "fn pump<R>(r: R) where R: std::io::Read {}",
+      "fn serve(s: &mut UnixStream) {}",
+      "fn load(f: File) {}",
+      "fn drain<R>(r: R) -> usize where R: Read { 0 }",
+      "fn twice(a: fn() -> u8, c: fn() -> u8, b: [u8; 4]) {}",
+      "fn any(b: impl AsRef<[u8]>) {}",
+      "fn boxed(b: Box<[u8]>, c: Cow<'_, [u8]>) {}",
+      "#[cfg(test)]",
+      "const _: bool = 1 < 2;",
+      "fn spelled(b: &[core::primitive::u8]) {}",
+      "fn piped(i: Stdin, l: StdinLock<'_>) {}",
+      "fn child(o: ChildStdout) {}",
+      "fn reads(r: impl AsyncRead) {}",
+      "fn chunk<B: Buf>(b: B) {}",
+      "fn queued(q: VecDeque<u8>) {}",
+      "fn each(i: impl Iterator<Item = u8>) {}",
+      "unsafe fn raw(p: *const u8, q: *mut u8) {}",
+      "fn listen(l: UnixListener) {}",
+      "fn owned(fd: OwnedFd) {}",
+      "fn spawned(c: Child) {}",
+    ].join("\n");
+    expect(byteTakers(source)).toEqual([
+      "parse",
+      "fill",
+      "header",
+      "own",
+      "from",
+      "feed",
+      "pump",
+      "serve",
+      "load",
+      "drain",
+      "twice",
+      "any",
+      "boxed",
+      "spelled",
+      "piped",
+      "child",
+      "reads",
+      "chunk",
+      "queued",
+      "each",
+      "raw",
+      "listen",
+      "owned",
+      "spawned",
+    ]);
+  });
+
+  it("leaves a function that only returns bytes, takes text, or is test code", () => {
+    const source = [
+      "fn encode(x: u8) -> Vec<u8> { vec![x] }",
+      "fn name(pane: &str) -> Option<Vec<u8>> { None }",
+      "// fn commented(b: &[u8]) {}",
+      "#[cfg(test)]",
+      "mod tests {",
+      "    fn framed(body: &[u8]) -> Vec<u8> { body.to_vec() }",
+      "}",
+      "#[cfg(test)]",
+      "fn helper(b: &[u8]) {}",
+      "#[cfg(test)]",
+      "fn sized(b: [u8; 4]) -> Vec<u8> {",
+      "    fn inner(c: &[u8]) {}",
+      "    b.to_vec()",
+      "}",
+    ].join("\n");
+    expect(byteTakers(source)).toEqual([]);
+  });
+});
+
+describe("decoderFailures", () => {
+  const lib = "pub fn decode(b: &[u8]) {}\nfn send(b: &[u8]) {}\nfn other(x: u8) {}\n";
+  const repo: Record<string, string> = {
+    "crates/p/src/lib.rs": lib,
+    "crates/p/fuzz/fuzz_targets/decode.rs": "fuzz_target!(|b: &[u8]| { p::decode(b); });",
+    "crates/p/tests/api.rs": "fn helper(b: &[u8]) {}",
+  };
+  const failures = (
+    fuzzed: Record<string, string>,
+    notDecoders: Record<string, string>,
+    tree = repo,
+  ) => decoderFailures(Object.keys(tree), (p) => tree[p] ?? "", fuzzed, notDecoders);
+  const fuzzed = { "crates/p/src/lib.rs::decode": "decode" };
+  const exempt = { "crates/p/src/lib.rs::send": "an encoder" };
+
+  it("accepts each byte-taking function, fuzzed or exempt with a reason", () => {
+    expect(failures(fuzzed, exempt)).toEqual([]);
+  });
+
+  it("names one in neither list, whatever its name or visibility", () => {
+    expect([failures(fuzzed, {}), failures({}, exempt)]).toEqual([
+      [expect.stringContaining("crates/p/src/lib.rs::send: takes bytes from outside")],
+      [expect.stringContaining("crates/p/src/lib.rs::decode: takes bytes from outside")],
+    ]);
+  });
+
+  it("names a type alias of a byte type, which would hide a decoder's input", () => {
+    const aliased = {
+      ...repo,
+      "crates/p/src/frame.rs":
+        "pub type Frame<'a> = &'a [u8];\n#[cfg(test)]\nmod tests {\n    type Raw = Vec<u8>;\n}\n" +
+        "impl Deref for Buf {\n    type Target = [u8];\n}\n" +
+        "pub(crate) unsafe impl<T: Fn() -> u8> Tr for It<T> where T: Copy {\n    type Item = Vec<u8>;\n}\n" +
+        "trait Pr {\n    type Out<'a>: AsRef<[u8]>;\n    fn take(&self) {}\n}\n" +
+        "type Raw = Vec<u8>;\n",
+    };
+    expect(failures(fuzzed, exempt, aliased)).toEqual([
+      expect.stringContaining("crates/p/src/frame.rs::Frame: names a byte type"),
+      expect.stringContaining("crates/p/src/frame.rs::Raw: names a byte type"),
+    ]);
+  });
+
+  it("names methods with their type, so one type's target doesn't cover another's", () => {
+    const methods = {
+      ...repo,
+      "crates/p/src/two.rs":
+        "impl A {\n    pub fn decode(b: &[u8]) {}\n}\nimpl<T> Tr for B<T> {\n    fn decode(b: &[u8]) {}\n}\n",
+      "crates/p/fuzz/fuzz_targets/a.rs": "fuzz_target!(|b: &[u8]| { p::A::decode(b); });",
+    };
+    expect(failures({ ...fuzzed, "crates/p/src/two.rs::A::decode": "a" }, exempt, methods)).toEqual(
+      [expect.stringContaining("crates/p/src/two.rs::B::decode: takes bytes from outside")],
+    );
+  });
+
+  it("takes a type of ours holding bytes for a byte type, and its methods for decoders", () => {
+    const reader = {
+      ...repo,
+      "crates/p/src/reader.rs": [
+        "pub struct Reader {",
+        "    buf: Vec<u8>,",
+        "}",
+        "pub struct Frame<'a>(&'a [u8]);",
+        "pub struct Plain {",
+        "    n: u32,",
+        "}",
+        "impl Reader {",
+        "    pub fn new() -> Self { todo() }",
+        "    pub fn next_frame(&mut self) -> Option<u8> { None }",
+        "}",
+        "impl Plain {",
+        "    pub fn get(&self) -> u32 { 0 }",
+        "}",
+        "pub fn decode(f: Frame<'_>) {}",
+        "type Alias = Reader;",
+      ].join("\n"),
+    };
+    expect(failures(fuzzed, exempt, reader).map((f) => f.split(": ")[0])).toEqual([
+      "crates/p/src/reader.rs::Alias",
+      "crates/p/src/reader.rs::Reader::next_frame",
+      "crates/p/src/reader.rs::decode",
+    ]);
+  });
+
+  it("takes a generic reader bounded by a byte trait, and a type holding a carrier, for carriers", () => {
+    const generic = {
+      ...repo,
+      "crates/p/src/gen.rs": [
+        "pub struct Reader<R> { inner: R }",
+        "impl<R: Read> Reader<R> {",
+        "    pub fn next_frame(&mut self) {}",
+        "}",
+        "pub struct Feed<S> { s: S }",
+        "impl<S> Feed<S> where S: BufRead {",
+        "    pub fn feed(&mut self) {}",
+        "}",
+        "pub struct Bounded<R: Read> { r: R }",
+        "impl<R> Bounded<R> {",
+        "    pub fn pull(&mut self) {}",
+        "}",
+        "struct Inner { buf: Vec<u8> }",
+        "struct Middle { inner: Inner }",
+        "pub struct Outer { m: Middle }",
+        "impl Outer {",
+        "    pub fn go(&self) {}",
+        "}",
+        "pub struct Plain<T> { t: T }",
+        "impl<T: Clone> Plain<T> {",
+        "    pub fn get(&self) {}",
+        "}",
+      ].join("\n"),
+    };
+    expect(failures(fuzzed, exempt, generic).map((f) => f.split(": ")[0])).toEqual([
+      "crates/p/src/gen.rs::Reader::next_frame",
+      "crates/p/src/gen.rs::Feed::feed",
+      "crates/p/src/gen.rs::Bounded::pull",
+      "crates/p/src/gen.rs::Outer::go",
+    ]);
+  });
+
+  it("reads carriers per crate, and lets a trait in by `as _` but no carrier renamed", () => {
+    const crates = {
+      ...repo,
+      "crates/q/src/lib.rs": "pub struct Frame { b: Vec<u8> }\nuse crate::Frame as F;\n",
+      "crates/p/src/other.rs":
+        "use std::io::Read as _;\npub struct Frame;\npub fn take(f: Frame) {}\n",
+    };
+    expect(failures(fuzzed, exempt, crates)).toEqual([
+      expect.stringContaining("crates/q/src/lib.rs: `Frame as F` renames a byte type"),
+    ]);
+  });
+
+  it("checks a method's target calls that type's method, by path or on a value of the type", () => {
+    const tree = {
+      ...repo,
+      "crates/p/src/two.rs":
+        "pub struct R { b: Vec<u8> }\nimpl R {\n    pub fn next(&mut self) {}\n}\n",
+      "crates/p/fuzz/fuzz_targets/r.rs":
+        "fuzz_target!(|b: &[u8]| { let mut r = p::R::new(b); r.next(); });",
+      "crates/p/fuzz/fuzz_targets/s.rs": "fuzz_target!(|b: &[u8]| { p::S::next(b); });",
+    };
+    expect([
+      failures({ ...fuzzed, "crates/p/src/two.rs::R::next": "r" }, exempt, tree),
+      failures({ ...fuzzed, "crates/p/src/two.rs::R::next": "s" }, exempt, tree),
+    ]).toEqual([[], [expect.stringContaining("s.rs: doesn't call R::next")]]);
+  });
+
+  it("refuses a rename of a byte type, and a NOT_DECODERS entry with no reason", () => {
+    const renamed = {
+      ...repo,
+      "crates/p/src/use.rs":
+        "use std::io::{Read as R, Write as W};\nuse core::primitive::u8 as Byte;\n",
+    };
+    expect([
+      failures(fuzzed, exempt, renamed),
+      failures(fuzzed, { "crates/p/src/lib.rs::send": "  " }),
+    ]).toEqual([
+      [
+        expect.stringContaining("`Read as R` renames a byte type"),
+        expect.stringContaining("`u8 as Byte` renames a byte type"),
+      ],
+      [expect.stringContaining("lib.rs::send is in NOT_DECODERS with no reason")],
+    ]);
+  });
+
+  it("takes a decoder of text listed by hand, and names one listed that doesn't exist", () => {
+    const text = {
+      ...repo,
+      "crates/p/src/pane.rs": "pub fn id(pane: &str) -> bool { true }\n",
+      "crates/p/fuzz/fuzz_targets/id.rs": "fuzz_target!(|s: &str| { p::pane::id(s); });",
+    };
+    const listed = { ...fuzzed, "crates/p/src/pane.rs::id": "id" };
+    expect([
+      failures(listed, exempt, text),
+      failures({ ...listed, "crates/p/src/pane.rs::gone": "id" }, exempt, text),
+    ]).toEqual([
+      [],
+      [
+        expect.stringContaining("pane.rs::gone is listed, but no such function exists"),
+        expect.stringContaining("doesn't call gone"),
+      ],
+    ]);
+  });
+
+  it("names a stale entry, a missing target, and a target that doesn't call its decoder", () => {
+    expect([
+      failures(fuzzed, { ...exempt, "crates/p/src/lib.rs::other": "x" }),
+      failures({ "crates/p/src/lib.rs::decode": "gone" }, exempt),
+      failures(fuzzed, exempt, {
+        ...repo,
+        "crates/p/fuzz/fuzz_targets/decode.rs": "fuzz_target!(|b: &[u8]| { p::parse(b); });",
+      }),
+    ]).toEqual([
+      [expect.stringContaining("lib.rs::other is listed, but no such function takes bytes")],
+      [expect.stringContaining("its fuzz target crates/p/fuzz/fuzz_targets/gone.rs doesn't exist")],
+      [expect.stringContaining("doesn't call decode")],
+    ]);
+  });
+});
+
+const fuzzFailures = (text: string) => fuzzManifestFailures("crates/p/fuzz/Cargo.toml", text);
+
+describe("fuzzManifestFailures", () => {
+  const manifest = [
+    "[package]",
+    'name = "p-fuzz"',
+    "[package.metadata]",
+    "cargo-fuzz = true",
+    "[dependencies]",
+    'p = { path = ".." }',
+    'libfuzzer-sys = "=0.4.13"',
+    "[[bin]]",
+    'name = "decode"',
+    'path = "fuzz_targets/decode.rs"',
+    "[workspace]",
+  ].join("\n");
+
+  it("accepts a cargo-fuzz crate of its own with exact pins", () => {
+    expect(fuzzFailures(manifest)).toEqual([]);
+  });
+
+  it("refuses one that isn't marked, isn't its own workspace, or takes a loose dependency", () => {
+    expect([
+      fuzzFailures(manifest.replace("cargo-fuzz = true", "")),
+      fuzzFailures(manifest.replace("[workspace]", "")),
+      fuzzFailures(manifest.replace('"=0.4.13"', '"0.4"')),
+      fuzzFailures(manifest.replace('{ path = ".." }', '{ path = "../../q" }')),
+      fuzzFailures(`${manifest}\n[dev-dependencies]\nx = "1"\n`),
+    ]).toEqual([
+      [expect.stringContaining("cargo-fuzz = true")],
+      [expect.stringContaining("a workspace of its own")],
+      [expect.stringContaining("libfuzzer-sys")],
+      [expect.stringContaining("the crate it fuzzes")],
+      [expect.stringContaining("[dev-dependencies]: a fuzz crate takes its dependencies")],
+    ]);
+  });
+});
+
+describe("tomlTables", () => {
+  it("keeps every entry of a repeated array table", () => {
+    expect(tomlTables('[[bin]]\nname = "a"\n[[bin]]\nname = "b"\n').get("[[bin]]")).toEqual([
+      'name = "a"',
+      'name = "b"',
+    ]);
+  });
+
+  it("reads an array table's header as a table of its own", () => {
+    const tables = tomlTables('[dependencies]\na = "=1.0.0"\n[[bin]]\nname = "x"\n');
+    expect([tables.get("[dependencies]"), tables.get("[[bin]]")]).toEqual([
+      ['a = "=1.0.0"'],
+      ['name = "x"'],
+    ]);
+  });
+});
+
+describe("rustFailures on decoders and fuzz crates", () => {
+  const repo: Record<string, string> = {
+    "crates/p/src/lib.rs": "pub fn decode(b: &[u8]) {}\n",
+    "crates/p/fuzz/Cargo.toml": '[package]\nname = "p-fuzz"\n',
+  };
+  const failures = rustFailures(
+    Object.keys(repo),
+    (p) => repo[p] ?? "",
+    {},
+    {
+      fuzzed: {},
+      notDecoders: {},
+    },
+  );
+
+  it("reads each crate's decoders, and a fuzz crate's manifest as one", () => {
+    expect([
+      failures.filter((f) => f.startsWith("crates/p/src/lib.rs::decode:")),
+      failures.filter((f) => f.startsWith("crates/p/fuzz/Cargo.toml:")),
+    ]).toEqual([
+      [expect.stringContaining("takes bytes from outside")],
+      [
+        expect.stringContaining("cargo-fuzz = true"),
+        expect.stringContaining("a workspace of its own"),
+      ],
     ]);
   });
 });

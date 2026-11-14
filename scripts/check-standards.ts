@@ -585,6 +585,311 @@ export function macroFailures(
       );
 }
 
+// Every function in crates/ that takes bytes from outside (a slice, a buffer, a reader or a socket)
+// is a decoder until it is shown not to be: listed here with the fuzz target that drives it, or in
+// NOT_DECODERS with why it isn't one (docs/standards/rust.md § Tests). A decoder of text from
+// outside is listed here by hand, as pane_title's body is: the rule can't tell such text apart. A
+// target is crates/<crate>/fuzz/fuzz_targets/<target>.rs, and must call the function.
+const FUZZED_DECODERS: Record<string, string> = {
+  "crates/bazhen-hook/src/lib.rs::parse_reply": "parse_reply",
+  "crates/bazhen-hook/src/lib.rs::promised_end": "parse_reply",
+  "crates/bazhen-hook/src/lib.rs::is_truncated": "parse_reply",
+  "crates/bazhen-hook/src/lib.rs::header": "parse_reply",
+  "crates/bazhen-hook/src/lib.rs::content_length": "parse_reply",
+  "crates/bazhen-hook/src/pane_title.rs::body": "pane_title",
+};
+const NOT_DECODERS: Record<string, string> = {
+  "crates/bazhen-hook/src/lib.rs::hook_request": "an encoder: it writes the request",
+  "crates/bazhen-hook/src/lib.rs::ask": "sends a request; the reply goes to parse_reply",
+  "crates/bazhen-hook/src/lib.rs::post": "writes a request; the reply goes to read_response",
+  "crates/bazhen-hook/src/lib.rs::read_response":
+    "reads the socket until promised_end or is_truncated, both fuzzed, says the frame is whole",
+  "crates/bazhen-hook/src/lib.rs::bound_reads": "sets a socket's read timeout; reads nothing",
+  "crates/bazhen-hook/src/lib.rs::bound_or_unblock": "sets a socket's blocking mode; reads nothing",
+  "crates/bazhen-hook/src/lib.rs::split_head":
+    "reached only through parse_reply, promised_end and is_truncated, all fuzzed",
+  "crates/bazhen-hook/src/statusline.rs::report":
+    "forwards the status line's input to the daemon in a hook request, without parsing it",
+};
+
+// An impl block, whose associated types its trait requires, so they aren't aliases. (A trait's
+// own associated types take no `= …` on stable, so the alias pattern never matches them.)
+const IMPL_BLOCK = /(?<=^|[;{}])\s*(?:(?:pub(?:\([^)]*\))?|unsafe)\s+)*impl\b[^{;]*(?=\{)/gm;
+
+// Types a function takes that carry bytes from outside the process: anything holding u8s, a
+// reader of any kind, a socket, a file, stdin or a child process.
+const BYTES_IN =
+  /\[(?:(?:core|std)::primitive::)?u8\b|\b(?:Vec|VecDeque)<(?:(?:core|std)::primitive::)?u8>|\*\s*(?:const|mut)\s+u8\b|\bItem\s*=\s*u8\b|\b(?:(?:Async)?(?:Buf)?Read|Buf|Bytes|BytesMut|UnixStream|UnixListener|TcpStream|UdpSocket|File|OwnedFd|Stdin\w*|Child(?:Stdout|Stderr)?)\b/;
+
+// The names a `use … as` may not rename: each byte type above, and the containers that hold u8s.
+const BYTE_TYPE_NAMES = new Set(
+  (
+    "u8 Read BufRead AsyncRead AsyncBufRead Buf Bytes BytesMut UnixStream UnixListener " +
+    "TcpStream UdpSocket File OwnedFd Stdin StdinLock Child ChildStdout ChildStderr Vec VecDeque"
+  ).split(" "),
+);
+
+/**
+ * The structs and enums in `code` with a field that carries bytes. Such a type is a byte type
+ * too: its methods read the bytes through `self`, as a stateful frame reader does.
+ */
+function byteCarriers(code: string): Set<string> {
+  const items = [...code.matchAll(/\b(?:struct|enum)\s+(\w+)/g)].map((m) => ({
+    name: m[1] ?? "",
+    body: code.slice(m.index, itemEnd(code, m.index)),
+  }));
+  const carriers = new Set(items.filter((i) => BYTES_IN.test(i.body)).map((i) => i.name));
+  // A type holding a carrier carries bytes too, however deep: repeat until nothing is added.
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const { name, body } of items) {
+      if (!carriers.has(name) && mentionsAny(body.slice(name.length), carriers)) {
+        carriers.add(name);
+        grew = true;
+      }
+    }
+  }
+  return carriers;
+}
+
+const mentionsAny = (text: string, names: Set<string>) =>
+  [...names].some((n) => new RegExp(`\\b${n}\\b`).test(text));
+
+/**
+ * Each impl block in `code`: where it spans, the type it is for, and whether its generics or
+ * `where` clause bound a parameter by a byte trait (`impl<R: Read> Reader<R>`).
+ */
+function implBlocks(
+  code: string,
+): { start: number; end: number; type: string; byteBound: boolean }[] {
+  return [...code.matchAll(IMPL_BLOCK)].map((m) => {
+    const head = m[0].replace(/^[\s\S]*?\bimpl\b\s*/, "").replace(/^<(?:[^<>]|<[^<>]*>)*>\s*/, "");
+    const type = /(?:\bfor\s+)?(?:[\w:]+::)?(\w+)\s*(?:<|where\b|$)/.exec(
+      head.split(/\bfor\b/).pop() ?? "",
+    );
+    return {
+      start: m.index,
+      end: itemEnd(code, m.index + m[0].length),
+      type: type?.[1] ?? "",
+      byteBound: BYTES_IN.test(m[0]),
+    };
+  });
+}
+
+/**
+ * The index just past the item starting at `start`: past its `{ … }` body, or its `;`. Only `(`
+ * and `[` are counted on the way, since a `<` in an item may be a comparison, not a generic.
+ */
+function itemEnd(code: string, start: number): number {
+  let depth = 0;
+  for (let i = start; i < code.length; i++) {
+    const c = code[i];
+    if (c === "(" || c === "[") depth++;
+    else if (c === ")" || c === "]") depth--;
+    else if (c === ";" && depth <= 0) return i + 1;
+    else if (c === "{" && depth <= 0) {
+      for (let braces = 0; i < code.length; i++) {
+        if (code[i] === "{") braces++;
+        else if (code[i] === "}" && --braces === 0) return i + 1;
+      }
+    }
+  }
+  return code.length;
+}
+
+/** `code` with each item matched by `head` blanked to its end, newlines kept. */
+function blankItems(code: string, head: RegExp): string {
+  let out = code;
+  for (const m of code.matchAll(head)) {
+    const end = itemEnd(code, m.index + m[0].length);
+    out =
+      out.slice(0, m.index) +
+      newlinesIn(code.slice(m.index, end)).padStart(end - m.index) +
+      out.slice(end);
+  }
+  return out;
+}
+
+/** The code of a Rust file with every `#[cfg(test)]` item blanked out, newlines kept. */
+const withoutTests = (code: string) => blankItems(code, /#\s*\[\s*cfg\s*\(\s*test\s*\)\s*\]/g);
+
+/**
+ * Where an item's signature ends (its first `{` or `;` outside brackets), and what a function
+ * takes: the signature less its return type, so its generics, parameters and `where` clause.
+ * Brackets are counted, so a `;` in `[u8; 4]` or a `->` in a parameter's `fn() -> u8` isn't
+ * taken for the signature's own.
+ */
+function signature(rest: string): { end: number; takes: string } {
+  let depth = 0;
+  let arrow = -1;
+  let end = rest.length;
+  for (let i = 0; i < rest.length; i++) {
+    const c = rest[i];
+    const isArrow = c === "-" && rest[i + 1] === ">";
+    if (c === "(" || c === "[" || c === "<") depth++;
+    else if (c === ")" || c === "]" || (c === ">" && rest[i - 1] !== "-")) depth--;
+    else if (isArrow && depth <= 0 && arrow === -1) arrow = i;
+    else if ((c === "{" || c === ";") && depth <= 0) {
+      end = i;
+      break;
+    }
+  }
+  const whole = rest.slice(0, end);
+  if (arrow === -1) return { end, takes: whole };
+  const where = whole.slice(arrow).search(/\bwhere\b/);
+  return { end, takes: whole.slice(0, arrow) + (where === -1 ? "" : whole.slice(arrow + where)) };
+}
+
+/**
+ * The functions in a Rust file's non-test code that take bytes: by a parameter or bound of a
+ * byte type or of one of `carriers`, or as a method of a carrier, through `self`. A method is
+ * named with its type (`Reader::next_frame`), so two types' methods of one name stay apart.
+ */
+export function byteTakers(source: string, carriers: Set<string> = new Set()): string[] {
+  const code = withoutTests(rustCode(source));
+  const blocks = implBlocks(code);
+  return [...code.matchAll(/\bfn\s+(\w+)/g)].flatMap((m) => {
+    const takes = signature(code.slice(m.index)).takes;
+    const block = blocks.find((b) => b.start < m.index && m.index < b.end);
+    const fn = m[1] ?? "";
+    const name = block === undefined ? fn : `${block.type}::${fn}`;
+    const viaSelf =
+      block !== undefined &&
+      (carriers.has(block.type) || block.byteBound) &&
+      /\bself\b/.test(takes);
+    return BYTES_IN.test(takes) || mentionsAny(takes, carriers) || viaSelf ? [name] : [];
+  });
+}
+
+/** Every function in a Rust file's non-test code, a method named with its type. */
+function definedFunctions(source: string): string[] {
+  const code = withoutTests(rustCode(source));
+  const blocks = implBlocks(code);
+  return [...code.matchAll(/\bfn\s+(\w+)/g)].map((m) => {
+    const owner = blocks.find((b) => b.start < m.index && m.index < b.end)?.type;
+    return owner === undefined ? (m[1] ?? "") : `${owner}::${m[1] ?? ""}`;
+  });
+}
+
+/**
+ * Why a function that takes bytes has no fuzz target and no reason it needs none, or why an
+ * entry in either list is stale or its target missing.
+ */
+export function decoderFailures(
+  paths: string[],
+  read: (path: string) => string,
+  fuzzed: Record<string, string>,
+  notDecoders: Record<string, string>,
+): string[] {
+  const out: string[] = [];
+  const found = new Set<string>();
+  const defined = new Set<string>();
+  const product = paths.filter((p) => /^crates\/[^/]+\/src\/.+\.rs$/.test(p));
+  const crateCode = new Map<string, string>();
+  for (const file of product) {
+    const crate = crateOf(file);
+    crateCode.set(crate, `${crateCode.get(crate) ?? ""}\n${withoutTests(rustCode(read(file)))}`);
+  }
+  const crateCarriers = new Map([...crateCode].map(([crate, code]) => [crate, byteCarriers(code)]));
+  for (const file of product) {
+    const carriers = crateCarriers.get(crateOf(file)) ?? new Set<string>();
+    const code = blankItems(withoutTests(rustCode(read(file))), IMPL_BLOCK);
+    for (const fn of definedFunctions(read(file))) defined.add(`${file}::${fn}`);
+    for (const use of code.matchAll(/\buse\b[^;]*;/g)) {
+      for (const [, from = "", to = ""] of use[0].matchAll(/\b(\w+)\s+as\s+(\w+)/g)) {
+        if (to !== "_" && (BYTE_TYPE_NAMES.has(from) || carriers.has(from))) {
+          out.push(
+            `${file}: \`${from} as ${to}\` renames a byte type, which hides it from the decoder ` +
+              "rule. Use the type's own name.",
+          );
+        }
+      }
+    }
+    for (const alias of code.matchAll(/\btype\s+(\w+)[^=;]*=([^;]*);/g)) {
+      if (BYTES_IN.test(alias[2] ?? "") || mentionsAny(alias[2] ?? "", carriers)) {
+        out.push(
+          `${file}::${alias[1]}: names a byte type, which hides it from the decoder rule. ` +
+            "Write the byte type in each signature instead.",
+        );
+      }
+    }
+    for (const fn of byteTakers(read(file), carriers)) {
+      const key = `${file}::${fn}`;
+      found.add(key);
+      if (!(key in fuzzed) && !(key in notDecoders)) {
+        out.push(
+          `${key}: takes bytes from outside, so it is a decoder: add a cargo-fuzz target that ` +
+            "calls it and list it in FUZZED_DECODERS, or list it in NOT_DECODERS with why it " +
+            "isn't one (scripts/check-standards.ts, docs/standards/rust.md § Tests).",
+        );
+      }
+    }
+  }
+  for (const key of Object.keys(fuzzed).filter((k) => !defined.has(k))) {
+    out.push(`scripts/check-standards.ts: ${key} is listed, but no such function exists.`);
+  }
+  for (const [key, reason] of Object.entries(notDecoders)) {
+    if (!found.has(key)) {
+      out.push(`scripts/check-standards.ts: ${key} is listed, but no such function takes bytes.`);
+    } else if (reason.trim() === "") {
+      out.push(
+        `scripts/check-standards.ts: ${key} is in NOT_DECODERS with no reason it isn't one.`,
+      );
+    }
+  }
+  for (const [key, target] of Object.entries(fuzzed)) {
+    const crate = /^crates\/[^/]+/.exec(key)?.[0] ?? "";
+    const file = `${crate}/fuzz/fuzz_targets/${target}.rs`;
+    const path = key.slice(key.indexOf(".rs::") + 5);
+    const [owner, fn] = path.includes("::") ? path.split("::") : [undefined, path];
+    const code = paths.includes(file) ? rustCode(read(file)) : "";
+    const calls =
+      owner === undefined
+        ? new RegExp(`\\b${fn}\\s*\\(`).test(code)
+        : new RegExp(`\\b${owner}::${fn}\\s*\\(`).test(code) ||
+          (new RegExp(`\\b${owner}\\b`).test(code) && new RegExp(`\\.${fn}\\s*\\(`).test(code));
+    if (!paths.includes(file)) {
+      out.push(`${key}: its fuzz target ${file} doesn't exist.`);
+    } else if (!calls) {
+      out.push(`${file}: doesn't call ${path}, the decoder FUZZED_DECODERS says it drives.`);
+    }
+  }
+  return out;
+}
+
+const crateOf = (file: string) => /^crates\/[^/]+/.exec(file)?.[0] ?? "";
+
+/** Why a crate's fuzz manifest isn't a cargo-fuzz crate of its own with exact pins. */
+export function fuzzManifestFailures(manifest: string, text: string): string[] {
+  const tables = tomlTables(text);
+  const out: string[] = [];
+  if (!(tables.get("[package.metadata]") ?? []).includes("cargo-fuzz = true")) {
+    out.push(`${manifest}: a fuzz crate sets \`cargo-fuzz = true\` in [package.metadata].`);
+  }
+  if (!tables.has("[workspace]")) {
+    out.push(
+      `${manifest}: a fuzz crate is a workspace of its own (\`[workspace]\`): it builds on nightly.`,
+    );
+  }
+  for (const header of tables.keys()) {
+    if (header !== "[dependencies]" && /dependencies/.test(header)) {
+      out.push(
+        `${manifest}: ${header}: a fuzz crate takes its dependencies in [dependencies] only.`,
+      );
+    }
+  }
+  for (const line of tables.get("[dependencies]") ?? []) {
+    const pinned = /^[\w-]+\s*=\s*"=[^"]+"$/.test(line);
+    const parent = /^[\w-]+\s*=\s*\{\s*path\s*=\s*"\.\."\s*\}$/.test(line);
+    if (!pinned && !parent) {
+      out.push(
+        `${manifest}: \`${line}\` must pin an exact version (\`"=x.y.z"\`) or be the crate it fuzzes (\`path = ".."\`).`,
+      );
+    }
+  }
+  return out;
+}
+
 const CRATE_ROOT = /^crates\/[^/]+\/(?:src\/(?:lib|main)\.rs|src\/bin\/.+|build\.rs)$/;
 
 /** Why an unsafe module could let `unsafe` reach beyond its own file. */
@@ -737,8 +1042,8 @@ export function tomlTables(text: string): Map<string, string[]> {
   const tables = new Map<string, string[]>([["", []]]);
   let current: string[] = tables.get("") ?? [];
   for (const line of tomlLines(text)) {
-    if (/^\[[^\]]*\]$/.test(line)) {
-      current = [];
+    if (/^\[\[?[^\]]*\]\]?$/.test(line)) {
+      current = tables.get(line) ?? [];
       tables.set(line, current);
     } else current.push(line);
   }
@@ -943,12 +1248,19 @@ export function rustFailures(
   paths: string[],
   read: (path: string) => string,
   unsafeModules: Record<string, string>,
-  options: { metadata?: CargoMetadata; macroModules?: Record<string, string> } = {},
+  options: {
+    metadata?: CargoMetadata;
+    macroModules?: Record<string, string>;
+    fuzzed?: Record<string, string>;
+    notDecoders?: Record<string, string>;
+  } = {},
 ): string[] {
   const out: string[] = [];
   for (const manifest of paths.filter((p) => fileName(p) === "Cargo.toml")) {
     if (manifest === "Cargo.toml") {
       out.push(...rootManifestFailures(read(manifest)));
+    } else if (/^crates\/[^/]+\/fuzz\/Cargo\.toml$/.test(manifest)) {
+      out.push(...fuzzManifestFailures(manifest, read(manifest)));
     } else if (!/^crates\/[^/]+\/Cargo\.toml$/.test(manifest)) {
       out.push(`${manifest}: a crate lives in crates/<name>/, as a member of the root workspace.`);
     } else {
@@ -1017,6 +1329,7 @@ export function rustFailures(
   if (paths.includes("package.json")) out.push(...gateScriptFailures(packageScripts(read)));
   else out.push("package.json is missing; the Rust gates run from its scripts.");
   pinned("clippy.toml", CLIPPY_CONFIG, "CLIPPY_CONFIG");
+  out.push(...decoderFailures(paths, read, options.fuzzed ?? {}, options.notDecoders ?? {}));
   return out;
 }
 
@@ -1085,6 +1398,8 @@ function checkRust(): void {
     ...rustFailures(repoFiles(), (p) => readFileSync(join(root, p), "utf8"), UNSAFE_MODULES, {
       metadata,
       macroModules: MACRO_MODULES,
+      fuzzed: FUZZED_DECODERS,
+      notDecoders: NOT_DECODERS,
     }),
   );
 }

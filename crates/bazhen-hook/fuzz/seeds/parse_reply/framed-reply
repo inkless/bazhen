@@ -1,0 +1,8 @@
+HTTP/1.1 200 OK
+Content-Type: application/vnd.bazhen.hook-reply
+Content-Length: 5
+Bazhen-Exit-Code: 2
+Bazhen-Offered: m1,m2
+Bazhen-Stdout-Bytes: 2
+
+hiErr

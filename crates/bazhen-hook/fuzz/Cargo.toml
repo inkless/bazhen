@@ -1,0 +1,30 @@
+# The hook's fuzz targets. libFuzzer needs nightly, so this crate is a workspace of its own, built
+# only by `cargo +nightly fuzz` (.github/workflows/fuzz.yml).
+[package]
+name = "bazhen-hook-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+bazhen-hook = { path = ".." }
+libfuzzer-sys = "=0.4.13"
+
+[[bin]]
+name = "parse_reply"
+path = "fuzz_targets/parse_reply.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pane_title"
+path = "fuzz_targets/pane_title.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

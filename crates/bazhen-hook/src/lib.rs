@@ -6,7 +6,7 @@
 //! The reply's framing is documented beside `HookReply` in packages/protocol/src/mail.ts. Its
 //! decoders are public so the fuzz targets in `fuzz/` can reach them.
 
-mod pane_title;
+pub mod pane_title;
 mod statusline;
 
 use std::env;
@@ -229,13 +229,13 @@ fn headers<'a>(head: &'a str, name: &str) -> impl Iterator<Item = &'a str> {
 }
 
 /// The header's value when it appears exactly once; a repeated header is as bad as a missing one.
-fn header<'a>(head: &'a str, name: &str) -> Option<&'a str> {
+pub fn header<'a>(head: &'a str, name: &str) -> Option<&'a str> {
     let mut values = headers(head, name);
     let value = values.next()?;
     values.next().is_none().then_some(value)
 }
 
-fn content_length(head: &str) -> Option<usize> {
+pub fn content_length(head: &str) -> Option<usize> {
     header(head, "Content-Length")?.parse().ok()
 }
 
