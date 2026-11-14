@@ -2,8 +2,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Daemon, waitUntil, type View } from "./daemon.ts";
 
 let daemon: Daemon;
+/** The daemon's PTYs before any view has opened, so with no tmux client of its own. */
+let baseline = 0;
 beforeAll(async () => {
   daemon = await Daemon.start();
+  baseline = daemon.ptyHandles();
 });
 afterAll(async () => {
   await daemon?.stop();
@@ -43,7 +46,6 @@ describe("a view's stream over time", () => {
 
   it("ends a view whose socket stops reading, and keeps serving the others", async () => {
     const { terminalId } = await daemon.program(FLOOD);
-    const baseline = daemon.ptyHandles();
     const stalled = await opened(terminalId, "observe", BIG);
     const live = await opened(terminalId, "interactive", BIG);
     stalled.stall();
@@ -78,7 +80,6 @@ describe("a view's stream over time", () => {
 
   it("returns to its PTY baseline after views come, go and fall behind", async () => {
     const { terminalId } = await daemon.program(FLOOD);
-    const baseline = daemon.ptyHandles();
     for (let i = 0; i < 20; i++) {
       const view = await opened(terminalId, "observe");
       view.close();

@@ -256,11 +256,10 @@ describe("a Codex agent", () => {
   });
 
   it("answers the agent's question from the inbox, the human's text going back as the answer", async () => {
-    const before = model.requests.length;
     await daemon.prompt(asker, "[[fake:ask]]");
+    await untilAsked(asker, "[[fake:ask]]");
     // Codex answers the call itself where the tool isn't allowed: say what it made of the call
     // rather than time out on an item that never opens.
-    await expect.poll(() => model.requests.length, { timeout: 30_000 }).toBeGreaterThan(before);
     expect(offered()).toContain("request_user_input");
     const id = await openItemFor(FAKE_CODEX_QUESTION).catch((err: unknown) => {
       throw new Error(`${String(err)}; tool outputs: ${toolOutputs().join(" | ").slice(-600)}`);
