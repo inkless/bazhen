@@ -7,6 +7,7 @@ describe("gateEnv", () => {
       PATH: "/usr/bin",
       HOME: "/home/u",
       CARGO_TARGET_DIR: "/tmp/target",
+      CARGO_BUILD_TARGET_DIR: "/tmp/build-target",
       CARGO_HOME: "/home/u/.cargo",
       RUSTFLAGS: "--cap-lints allow",
       CARGO_ENCODED_RUSTFLAGS: "--cap-lints=allow",
@@ -31,6 +32,7 @@ describe("gateEnv", () => {
       PATH: "/usr/bin",
       HOME: "/home/u",
       CARGO_TARGET_DIR: "/tmp/target",
+      CARGO_BUILD_TARGET_DIR: "/tmp/build-target",
       CARGO_HOME: "/home/u/.cargo",
       CARGO_ENCODED_RUSTFLAGS: "",
       CARGO_ENCODED_RUSTDOCFLAGS: "",
@@ -81,9 +83,17 @@ describe("GATES", () => {
     expect(GATES.lint.slice(-3)).toEqual(["--", "-D", "warnings"]);
     for (const gate of [GATES.lint, GATES.test]) {
       expect(gate.join(" ")).toContain(
-        '--config build.rustc-wrapper="" --config build.rustc="rustc"',
+        '--config build.rustc-wrapper="" --config build.rustc-workspace-wrapper="" ' +
+          '--config build.rustc="rustc"',
       );
     }
+  });
+
+  it("lints and tests every feature, so no code hides behind one", () => {
+    expect([GATES.lint, GATES.test].map((gate) => gate.includes("--all-features"))).toEqual([
+      true,
+      true,
+    ]);
   });
 });
 
@@ -103,22 +113,27 @@ describe("outsideConfigs", () => {
 });
 
 describe("configFailures", () => {
-  const configs: Record<string, string> = {
-    "/a/.cargo/config.toml": '[build]\nrustc-wrapper = "/usr/bin/sccache"\n',
-    "/b/.cargo/config": '[target.x86_64-unknown-linux-gnu]\nrunner = "true"\n',
-    "/c/.cargo/config.toml": '[build]\nrustc = "/fake/rustc"\n',
-    "/home/u/.cargo/config.toml": "[net]\ngit-fetch-with-cli = true\n[build]\njobs = 4\n",
+  const refused: Record<string, string> = {
+    "/a/.cargo/config.toml": '[target.x86_64-unknown-linux-gnu]\nrunner = "true"\n',
+    "/b/.cargo/config": 'target.x86_64-unknown-linux-gnu.runner = "true"\n',
+    "/c/.cargo/config.toml": '[target.\'cfg(unix)\']\n"runner" = ["true"]\n',
+    "/d/.cargo/config.toml": 'target = { x86_64-unknown-linux-gnu = { runner = "true" } }\n',
+    "/e/.cargo/config.toml": '[build]\nrustdoc = "/fake/rustdoc"\n',
+    "/f/.cargo/config.toml": '[env]\nCLIPPY_ARGS = { value = "--cap-lints=allow", force = true }\n',
+    "/g/.cargo/config.toml": 'env.CLIPPY_ARGS = "--cap-lints=allow"\n',
   };
+  const accepted: Record<string, string> = {
+    "/h/.cargo/config.toml": '[build]\nrustc-wrapper = "/usr/bin/sccache"\n',
+    "/home/u/.cargo/config.toml":
+      '# runner = "true" is off\n[net]\ngit-fetch-with-cli = true\n[build]\njobs = 4\nrustc = "x"\n',
+  };
+  const configs = { ...refused, ...accepted };
   const failures = configFailures(
     [...Object.keys(configs), "/missing/.cargo/config.toml"],
     (p) => configs[p],
   );
 
-  it("names a config that swaps the compiler, wraps it or runs the tests through something else", () => {
-    expect(failures.map((f) => f.split(" ")[0])).toEqual([
-      "/a/.cargo/config.toml",
-      "/b/.cargo/config",
-      "/c/.cargo/config.toml",
-    ]);
+  it("names a config with a runner, a rustdoc or [env], in any TOML spelling", () => {
+    expect(failures.map((f) => f.split(" ")[0])).toEqual(Object.keys(refused));
   });
 });

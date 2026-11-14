@@ -104,7 +104,13 @@ source with comments and strings set aside, and fails on:
   variable: a macro could otherwise build a suppression from tokens no scan reads;
 - `include!`, however it is reached, `#[path]`, a target `path` in a member's manifest, and a
   `proc-macro` crate of ours: each brings in code, or attributes, from somewhere the scan doesn't
-  read.
+  read;
+- `#[ignore]` and `#[should_panic]`, which skip a test or pass it when it fails, and any
+  attribute naming `clippy` (`#[cfg(not(clippy))]`, `#[clippy::msrv]`), which hides code from
+  clippy or changes how it lints;
+- a member manifest's `required-features`, `test`, `harness` or `auto*` keys, which keep a target
+  or its tests out of the build. The gates lint and test with `--all-features`, so code gated by
+  a feature is read too.
 
 **When a dependency's macro trips a forbidden lint.** An attribute macro from another crate that
 emits an allow of a forbidden lint (`#[tokio::main]` allows `clippy::expect_used`) fails with
@@ -128,9 +134,11 @@ argument, and a cargo alias can replace `cargo clippy` with a command that passe
 script runs `scripts/cargo-gate.ts`, which holds the gate's command, calls the subcommand's own
 binary (`cargo-clippy`, not `cargo clippy`), refuses any option after the gate (`pnpm test:rust
 <name>` may name tests), removes the variables that change flags, tools or the test runner, sets
-`CARGO_ENCODED_RUSTFLAGS` empty (which outranks every other source of rustflags), and refuses to run
-under a cargo config outside the repository that names a compiler, a wrapper or a test runner. A
-global `RUSTFLAGS` of your own is ignored by the gates, not an error.
+`CARGO_ENCODED_RUSTFLAGS` empty (which outranks every other source of rustflags), and overrides any
+configured compiler or wrapper. A cargo config outside the repository may still set what the gate
+can't override: a test runner, a `rustdoc`, or `[env]`, which can hand clippy its flags. The lint
+and test gates refuse to run under one. A global `RUSTFLAGS` or a wrapper such as sccache is ignored
+by the gates, not an error.
 
 **The allow-list** is in `[workspace.lints.clippy]` only, one line each, with its reason beside
 it. It holds `must_use_candidate`, which fires on nearly every pure function; `#[must_use]` goes

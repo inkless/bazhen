@@ -413,7 +413,10 @@ export function rustCode(source: string): string {
         i += step === 0 ? 1 : 2;
       }
       out += ` ${newlinesIn(source.slice(start, i))}`;
-    } else if (c === "r" && !isIdent(source[i - 1] === "b" ? source[i - 2] : source[i - 1])) {
+    } else if (
+      c === "r" &&
+      !isIdent(/[bc]/.test(source[i - 1] ?? "") ? source[i - 2] : source[i - 1])
+    ) {
       RAW_STRING.lastIndex = i;
       const raw = RAW_STRING.exec(source);
       if (raw === null) {
@@ -505,6 +508,16 @@ export function attributeFailures(
             "docs/standards/rust.md).",
         );
       }
+    } else if (/\b(ignore|should_panic)\b/.test(body)) {
+      out.push(
+        `${where}: ${attribute} skips a test, or passes it when it fails. A test runs, and fails ` +
+          "on what it asserts; check an error with a Result, not a panic.",
+      );
+    } else if (/\bclippy\b/.test(body)) {
+      out.push(
+        `${where}: ${attribute} hides code from clippy or changes how it lints. Clippy reads ` +
+          `all of the code, under the workspace's lints ${SEE_RUST_MD}`,
+      );
     }
   }
   for (const m of code.matchAll(/\binclude\b|\$\s*\w+\s*!/g)) {
@@ -611,6 +624,7 @@ export const RUST_GATE_SCRIPTS: Record<string, string> = {
 const RUST_FLAG_EXEMPT: Record<string, string> = {
   "scripts/cargo-gate.ts": "removes them from every gate's environment",
   "scripts/cargo-gate.test.ts": "sets them to check the gate removes them",
+  "scripts/cargo-gate.medium.test.ts": "sets them to check the tool never sees them",
   "scripts/check-standards.ts": "names them to find them",
   "scripts/check-standards.test.ts": "plants them to check they are found",
 };
@@ -629,12 +643,12 @@ export function gateScriptFailures(scripts: Record<string, string>): string[] {
     }
   }
   const check = scripts.check ?? "";
-  const steps = /\|\||;|(?<!&)&(?!&)/.test(check) ? [] : check.split("&&").map((c) => c.trim());
+  const steps = /[|;\n\r]|(?<!&)&(?!&)/.test(check) ? [] : check.split("&&").map((c) => c.trim());
   for (const name of Object.keys(RUST_GATE_SCRIPTS)) {
     if (!steps.includes(`pnpm run ${name}`)) {
       out.push(
         `package.json: the "check" script must run \`pnpm run ${name}\` as one of its \`&&\` ` +
-          "steps, with no `||` or `;` that could step round it.",
+          "steps, with no `|`, `;` or line break that could step round it.",
       );
     }
   }
@@ -698,6 +712,17 @@ export function memberTargetFailures(manifest: string, text: string): string[] {
       return [
         `${manifest}: \`${line}\`: a proc macro of ours could emit attributes no check reads. ` +
           "Write the code out, or use a macro_rules! macro.",
+      ];
+    }
+    if (
+      /(?:^|[{,.\s])(?:required-features|test|harness|auto(?:lib|bins|tests|benches|examples))\s*=/.test(
+        line,
+      )
+    ) {
+      return [
+        `${manifest}: \`${line}\` keeps a target, or its tests, out of the build the gates ` +
+          "lint and test. Every target builds and runs its tests; gate code by feature, which " +
+          "the gates turn on, if it must be optional.",
       ];
     }
     if (/(?:^|[{,.\s])path\s*=/.test(line)) {

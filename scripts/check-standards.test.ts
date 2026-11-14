@@ -218,6 +218,37 @@ describe("attributeFailures", () => {
     ]);
   });
 
+  it("refuses an attribute that skips a test, inverts it, or hides code from clippy", () => {
+    const source = [
+      "#[test]",
+      '#[ignore = "slow"]',
+      "fn a() {}",
+      "#[test]",
+      '#[should_panic(expected = "x")]',
+      "fn b() {}",
+      "#[cfg_attr(unix, ignore)]",
+      "#[cfg(not(clippy))]",
+      "fn c() {}",
+      '#[clippy::msrv = "1.0"]',
+      "fn d() {}",
+      "#[cfg(test)] #[test] fn ignores_nothing() {}",
+    ].join("\n");
+    expect(scan(source).map((f) => f.split(": ")[0])).toEqual([
+      "crates/x/src/a.rs:2",
+      "crates/x/src/a.rs:5",
+      "crates/x/src/a.rs:7",
+      "crates/x/src/a.rs:8",
+      "crates/x/src/a.rs:10",
+    ]);
+  });
+
+  it("reads a C raw string as a string, so it can't hide what follows", () => {
+    const source = 'const A: &CStr = cr"\\";\n#[allow(dead_code)]\nfn f() {}\nconst B: &str = "x";';
+    expect(scan(source)).toEqual([
+      expect.stringContaining("crates/x/src/a.rs:2: #[allow(dead_code)]"),
+    ]);
+  });
+
   it("lets only an unsafe module expect unsafe_code, inner and with a reason, and nothing else", () => {
     const unsafeCode = '#![expect(unsafe_code, reason = "the PTY\'s FFI (openpty, ioctl)")]\n';
     expect(scan(unsafeCode, "crates/x/src/pty.rs")).toEqual([]);
@@ -269,12 +300,18 @@ describe("memberTargetFailures", () => {
       targetFailures('lib.path = "src/lib.txt"\n'),
       targetFailures('lib = { name = "a", path = "x.rs" }\n'),
       targetFailures("[lib]\nproc-macro = true\n"),
+      targetFailures('[[test]]\nname = "slow"\nrequired-features = ["slow"]\n'),
+      targetFailures("[lib]\ntest = false\n"),
+      targetFailures("[[test]]\nharness = false\n"),
+      targetFailures("[package]\nautotests = false\n"),
+      targetFailures("lib = { test = false }\n"),
     ]).toEqual([
       [expect.stringContaining("points a target")],
       [expect.stringContaining("points a target")],
       [expect.stringContaining("points a target")],
       [expect.stringContaining("points a target")],
       [expect.stringContaining("proc macro")],
+      ...Array.from({ length: 5 }, () => [expect.stringContaining("keeps a target")]),
     ]);
   });
 });
@@ -558,10 +595,14 @@ describe("gateScriptFailures", () => {
       gateScriptFailures({ ...RUST_GATE_SCRIPTS, check: CHECK.replace(" && pnpm run deny", "") }),
       gateScriptFailures({ ...RUST_GATE_SCRIPTS, check: `${CHECK} || true` }),
       gateScriptFailures({ ...RUST_GATE_SCRIPTS, check: CHECK.replace(" && ", " ; ") }),
+      gateScriptFailures({ ...RUST_GATE_SCRIPTS, check: `${CHECK} && true\nexit 0` }),
+      gateScriptFailures({ ...RUST_GATE_SCRIPTS, check: `${CHECK} | cat` }),
     ]).toEqual([
       [expect.stringContaining('the "lint:rust" script must be')],
       [expect.stringContaining("must run `pnpm run deny`")],
       Object.keys(RUST_GATE_SCRIPTS).map(() => expect.stringContaining("must run")),
+      Object.keys(RUST_GATE_SCRIPTS).map(() => expect.stringContaining("must run")),
+      Object.keys(RUST_GATE_SCRIPTS).map(() => expect.stringContaining("line break")),
       Object.keys(RUST_GATE_SCRIPTS).map(() => expect.stringContaining("must run")),
     ]);
   });
@@ -574,6 +615,7 @@ describe("rustFailures on the gates' own configuration", () => {
     "package.json": JSON.stringify({ scripts: { ...RUST_GATE_SCRIPTS, check: CHECK } }),
     "scripts/cargo-gate.ts": "RUSTFLAGS",
     "scripts/cargo-gate.test.ts": "RUSTFLAGS",
+    "scripts/cargo-gate.medium.test.ts": "RUSTFLAGS",
     "scripts/check-standards.ts": "RUSTFLAGS",
     "scripts/check-standards.test.ts": "RUSTFLAGS",
     "docs/standards/rust.md": "`RUSTFLAGS` and `--cap-lints` are removed by the gate.",
@@ -621,6 +663,10 @@ describe("rustFailures on the gates' own configuration", () => {
         "scripts/build.ts": 'env: { CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "" }',
         "crates/a/run.sh": "cargo --config 'build.rustc-wrapper=\"x\"' build\n",
         "Cargo.toml.bak": "[alias]\n# CARGO_ALIAS_CLIPPY\n",
+        "scripts/a.sh": "cargo clippy -- --cap-lints allow\n",
+        "scripts/b.sh": "RUSTDOCFLAGS=-Awarnings cargo doc\n",
+        "crates/a/x.toml": '[build]\nrustflags = ["-A", "warnings"]\n',
+        "scripts/c.sh": "RUSTC_WORKSPACE_WRAPPER=x cargo check\n",
       }).map((f) => f.split(":")[0]),
     ).toEqual([
       ".github/workflows/ci.yml",
@@ -628,6 +674,10 @@ describe("rustFailures on the gates' own configuration", () => {
       "scripts/build.ts",
       "crates/a/run.sh",
       "Cargo.toml.bak",
+      "scripts/a.sh",
+      "scripts/b.sh",
+      "crates/a/x.toml",
+      "scripts/c.sh",
     ]);
   });
 

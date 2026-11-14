@@ -15,7 +15,14 @@ import { isMain } from "./is-main.ts";
 const root = fileURLToPath(new URL("..", import.meta.url));
 
 // Every gate that compiles also overrides any rustc wrapper or compiler a cargo config names.
-const NO_WRAPPER = ["--config", 'build.rustc-wrapper=""', "--config", 'build.rustc="rustc"'];
+export const NO_WRAPPER = [
+  "--config",
+  'build.rustc-wrapper=""',
+  "--config",
+  'build.rustc-workspace-wrapper=""',
+  "--config",
+  'build.rustc="rustc"',
+];
 
 // Each subcommand's own binary, called directly: cargo would resolve `cargo clippy` through any
 // alias first, and an alias can name a command that passes.
@@ -27,6 +34,7 @@ export const GATES = {
     "--quiet",
     "--workspace",
     "--all-targets",
+    "--all-features",
     "--locked",
     ...NO_WRAPPER,
     "--",
@@ -39,6 +47,7 @@ export const GATES = {
     "nextest",
     "run",
     "--workspace",
+    "--all-features",
     "--locked",
     ...NO_WRAPPER,
     "--status-level",
@@ -77,7 +86,8 @@ const REMOVED = new Set([
   "CLIPPY_CONF_DIR",
   "CLIPPY_ARGS",
 ]);
-const REMOVED_PREFIX = /^(CARGO_BUILD_|CARGO_TARGET_(?!DIR$)|CARGO_ALIAS_|CARGO_PROFILE_|NEXTEST_)/;
+const REMOVED_PREFIX =
+  /^(CARGO_BUILD_(?!TARGET_DIR$)|CARGO_TARGET_(?!DIR$)|CARGO_ALIAS_|CARGO_PROFILE_|NEXTEST_)/;
 
 /**
  * The environment a gate runs in: the caller's, less everything that changes the build's flags or
@@ -113,9 +123,15 @@ export function parseGate(args: string[]): { gate: Gate; tests: string[] } {
   return { gate: name, tests: tests ?? [] };
 }
 
-// Keys of a cargo config that swap the compiler, wrap it, or run the tests through something
-// else. The gate overrides rustflags and the wrapper itself; these it can only refuse.
-const UNSAFE_CONFIG_KEY = /^\s*(rustc|rustc-wrapper|rustc-workspace-wrapper|rustdoc|runner)\s*=/m;
+// What a cargo config can set that the gate can't override from the command line: a runner that
+// stands in for the test binaries, a rustdoc, or environment variables for the tools (`[env]`,
+// which can hand clippy `--cap-lints`). Rustflags, rustc and the wrappers the gate overrides
+// itself, so a wrapper such as sccache is fine. Matched in any TOML spelling: under a table,
+// dotted, quoted or inline.
+const UNSAFE_CONFIG = [
+  /(?:^|[\s.{,"'])(?:runner|rustdoc)["']?\s*=/m,
+  /^\s*\[\s*["']?env["']?\s*\]|(?:^|[\s{,])["']?env["']?\s*[.=]/m,
+];
 
 /**
  * The cargo configs outside the repository that cargo would read for a run in `dir`: one in each
@@ -135,10 +151,12 @@ export function outsideConfigs(dir: string, cargoHome: string): string[] {
 export function configFailures(paths: string[], read: (path: string) => string | undefined) {
   return paths.flatMap((path) => {
     const text = read(path);
-    return text !== undefined && UNSAFE_CONFIG_KEY.test(text)
+    const code = text?.replaceAll(/^\s*#.*$/gm, "");
+    return code !== undefined && UNSAFE_CONFIG.some((key) => key.test(code))
       ? [
-          `${path} sets a compiler, a wrapper or a test runner, which would change what the Rust ` +
-            "gates run. Remove it, or move it out of this repository's parent directories.",
+          `${path} sets a test runner, a rustdoc or [env], which the Rust gates can't override ` +
+            "and which could change what they run. Remove it, or move it out of this " +
+            "repository's parent directories.",
         ]
       : [];
   });
@@ -157,7 +175,8 @@ function main(args: string[]): number {
   }
   const env = gateEnv(process.env);
   const cargoHome = process.env.CARGO_HOME ?? join(homedir(), ".cargo");
-  const failures = configFailures(outsideConfigs(root, cargoHome), readIfPresent);
+  const compiles = gate === "lint" || gate === "test";
+  const failures = compiles ? configFailures(outsideConfigs(root, cargoHome), readIfPresent) : [];
   if (failures.length > 0) {
     console.error(failures.join("\n"));
     return 1;
