@@ -1,0 +1,61 @@
+# Throwaway: the P0 holder spike. A workspace of its own, outside the root one's crates/*, so
+# nothing here reaches main. The lint tables are copied verbatim from the root Cargo.toml, so
+# code that survives into the real holder already meets them.
+[workspace]
+
+[package]
+name = "bz-holder"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.100"
+publish = false
+
+[[bin]]
+name = "bz-holder"
+path = "src/main.rs"
+
+[[bin]]
+name = "bz-probe"
+path = "src/bin/probe.rs"
+
+[[bin]]
+name = "bz-replay"
+path = "src/bin/replay.rs"
+
+[dependencies]
+alacritty_terminal = { version = "=0.26.0", default-features = false }
+rustix = { version = "1.1", features = ["std", "pty", "termios", "process", "fs", "event", "stdio"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+signal-hook = "0.4.3"
+
+[lints.rust]
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "forbid"
+missing_debug_implementations = "forbid"
+unreachable_pub = "forbid"
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[lints.clippy]
+pedantic = { level = "deny", priority = -1 }
+must_use_candidate = "allow"
+unwrap_used = "forbid"
+expect_used = "forbid"
+panic = "forbid"
+todo = "forbid"
+unimplemented = "forbid"
+dbg_macro = "forbid"
+print_stdout = "forbid"
+print_stderr = "forbid"
+indexing_slicing = "forbid"
+string_slice = "forbid"
+unreachable = "forbid"
+undocumented_unsafe_blocks = "forbid"
+multiple_unsafe_ops_per_block = "forbid"
+allow_attributes = "forbid"
+allow_attributes_without_reason = "forbid"
+
+# The engine runs behind catch_unwind, so a parser panic resets it instead of ending the holder.
+[profile.release]
+panic = "unwind"
+debug = "line-tables-only"
