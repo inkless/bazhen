@@ -43,7 +43,9 @@ The other three sizes run real tmux, so they run only on a disposable host: the 
 disposable host is Linux with `/etc/bazhen-disposable-host`; their setup refuses to start
 anywhere else. Never create that file on a machine you work on. Inside a container or CI they
 are the `pnpm test:integration`, `test:api` and `test:e2e` scripts, one worker each. Each run's
-containers have no network. A run removes its containers, image and build context on every exit
+containers have no network and get a CPU quota of half the machine (`BZ_TEST_CPUS` overrides it),
+because a suite that starts a busy process per core would otherwise take every core from the
+agents working on the same machine. A run removes its containers, image and build context on every exit
 it sees, Ctrl-C, SIGTERM and SIGHUP included, and gives each cleanup command 30 seconds; a second
 signal abandons the cleanup. What a run killed outright or abandoned left, the next run on the
 same machine removes: it sweeps the stopped containers, images and contexts whose owning process
