@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import type { HarnessChannelPort } from "@bazhen/core";
+import { HarnessRefused, type HarnessChannelPort } from "@bazhen/core";
 import { AppServer, AppServerError, realPath, type Listener } from "./app-server.ts";
 import { cliVersion } from "./version.ts";
 
@@ -61,6 +61,13 @@ export interface CodexChannelOptions {
   readonly reconnectMs?: number;
 }
 
+/**
+ * JSON-RPC's codes for a request the server won't carry out as asked: invalid request (Codex's
+ * answer to a thread whose model provider is gone), unknown method, invalid params. An internal
+ * error (-32603) or a server-defined code can be passing, so it isn't one.
+ */
+const REFUSALS: ReadonlySet<number> = new Set([-32600, -32601, -32602]);
+
 /** How many servers a request is tried on when each is draining as it arrives. */
 const DRAINING_ATTEMPTS = 3;
 
@@ -111,7 +118,8 @@ export class CodexChannel implements HarnessChannelPort {
 
   /**
    * One request's result. A server draining before it exits refuses new work, so the request
-   * waits for that server to go and is sent to the next one.
+   * waits for that server to go and is sent to the next one. An error about the request itself
+   * is Codex refusing it, in its own words; any other may pass, and is left as it is.
    */
   async request(method: string, params: unknown): Promise<unknown> {
     for (let attempt = 1; ; attempt++) {
@@ -119,10 +127,14 @@ export class CodexChannel implements HarnessChannelPort {
       try {
         return await server.request(method, params);
       } catch (err) {
-        if (!(err instanceof AppServerError && err.shuttingDown) || attempt >= DRAINING_ATTEMPTS) {
-          throw err;
+        if (!(err instanceof AppServerError)) throw err;
+        if (err.shuttingDown && attempt < DRAINING_ATTEMPTS) {
+          await server.closed;
+          continue;
         }
-        await server.closed;
+        if (!err.shuttingDown && REFUSALS.has(err.code))
+          throw new HarnessRefused(`Codex refused ${err.message}`, { cause: err });
+        throw err;
       }
     }
   }

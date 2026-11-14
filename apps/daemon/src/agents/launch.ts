@@ -11,12 +11,14 @@ import {
   type LaunchOptions,
 } from "@bazhen/core";
 import {
+  EVENTS,
   HarnessId,
   LaunchAgentResponse,
   type LaunchAgentRequest,
   type TuiTheme,
 } from "@bazhen/protocol";
 import { z } from "zod";
+import { failureDetail } from "../commands.ts";
 import { IdempotencyConflict, runtimePayload, type Store } from "../store/store.ts";
 import { FLEET_INSTRUCTIONS } from "../tasks/mail.ts";
 import { resolveDirectory } from "./cwd.ts";
@@ -76,10 +78,20 @@ function replay(
     const agentId = prior.response.agentId;
     throw new LaunchFailed(
       isId("agent", agentId) ? agentId : newId("agent"),
-      "an earlier attempt failed",
+      earlierFailure(store, agentId),
     );
   }
   return prior.response;
+}
+
+/** Why an agent's launch failed, as its failure recorded it, when it recorded why. */
+function earlierFailure(store: Store, agentId: string): string {
+  const id = store.lastEventId(agentId, "agent.failed");
+  const recorded = id === undefined ? undefined : store.events(id - 1, 1)[0]?.payload;
+  const detail = EVENTS["agent.failed"].payload.safeParse(recorded).data?.detail;
+  return detail === undefined
+    ? "an earlier attempt failed"
+    : `an earlier attempt failed: ${detail}`;
 }
 
 /**
@@ -169,15 +181,19 @@ export async function launchAgent(
       size,
     });
     const refs = await launching.catch((cause) => {
-      // The client learns only that it failed; the daemon's log says why.
       console.error(`agent ${agentId} failed to launch:`, cause);
+      const detail = failureDetail(cause);
       record(
         () =>
-          store.append({ ...event, type: "agent.failed", payload: { reason: "launch_rejected" } }),
+          store.append({
+            ...event,
+            type: "agent.failed",
+            payload: { reason: "launch_rejected", detail },
+          }),
         launched.eventIds,
         true,
       );
-      throw new LaunchFailed(agentId, cause);
+      throw new LaunchFailed(agentId, detail, { cause });
     });
     return record(
       () =>

@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { WebSocket } from "ws";
+import { HarnessRefused } from "@bazhen/core";
+import { AppServerError } from "./app-server.ts";
 import { closeFakeServers, tempCodexHome as home, fakeServer } from "../testing/fake-app-server.ts";
 import { CodexChannel, type CodexChannelOptions } from "./channel.ts";
 
@@ -37,6 +39,26 @@ const answersResumeWithItsThread = (method: string, _connection: number, params:
   method === "thread/resume"
     ? { result: idleThread(JSON.stringify(params).includes("thr-2") ? "thr-2" : "thr-1") }
     : { result: "ok" };
+
+/** A server that fails inside on `thread/read`, and drops the connection on anything else. */
+const failsReadsDropsTheRest = (method: string) =>
+  method === "thread/read"
+    ? { error: { code: -32603, message: "could not read the rollout" } }
+    : null;
+
+/** Ends a connection once the server has answered its first request after `initialize`. */
+/**
+ * Ends a connection once the server has answered its first request after `initialize`: the fake
+ * server's own listener, added first, has sent its answer by the time this one runs.
+ */
+const endsOnceAnswered = (ws: WebSocket) => {
+  ws.on("message", (data: Buffer) => {
+    const message = Object(JSON.parse(data.toString()));
+    const request = Reflect.get(message, "id") !== undefined;
+    if (request && Reflect.get(message, "method") !== "initialize")
+      setImmediate(() => ws.terminate());
+  });
+};
 
 const DRAINING = {
   error: { code: -32600, message: "Server is draining", data: { reason: "serverShuttingDown" } },
@@ -126,6 +148,57 @@ describe("Codex channel", () => {
     wss.once("connection", (ws) => setTimeout(() => ws.terminate(), 50));
     const channel = channelOn(codexHome);
     expect(await channel.request("thread/start", {})).toBe("launched");
+    channel.close();
+  });
+
+  it.each([-32600, -32601, -32602])(
+    "rejects a request the server refuses (%i) as Codex's refusal, in Codex's own words",
+    async (code) => {
+      const { codexHome, socket } = home();
+      await fakeServer(socket, codexHome, () => ({
+        error: { code, message: "This chat uses model provider “gone”" },
+      }));
+      const channel = channelOn(codexHome);
+      const refused = channel.request("thread/resume", {});
+      await expect(refused).rejects.toBeInstanceOf(HarnessRefused);
+      await expect(refused).rejects.toThrow(
+        `Codex refused thread/resume: This chat uses model provider “gone” (${code})`,
+      );
+      channel.close();
+    },
+  );
+
+  it("tries each next server while one drains, then calls the last still draining unavailable", async () => {
+    const { codexHome, socket } = home();
+    const asked: number[] = [];
+    const { wss } = await fakeServer(socket, codexHome, (_method, connection) => {
+      asked.push(connection);
+      return DRAINING;
+    });
+    wss.on("connection", endsOnceAnswered);
+    const channel = channelOn(codexHome);
+    const failed = await channel.request("thread/start", {}).catch((err: unknown) => err);
+    expect([asked, failed instanceof HarnessRefused, failed instanceof AppServerError]).toEqual([
+      [0, 1, 2],
+      false,
+      true,
+    ]);
+    channel.close();
+  });
+
+  it("leaves a request the server fails inside, or never answers, as not a refusal", async () => {
+    const { codexHome, socket } = home();
+    await fakeServer(socket, codexHome, failsReadsDropsTheRest);
+    const channel = channelOn(codexHome);
+    const failures = await Promise.all(
+      ["thread/read", "thread/resume"].map((method) =>
+        channel.request(method, {}).catch((err: unknown) => err),
+      ),
+    );
+    expect(failures.map((f) => [f instanceof HarnessRefused, String(f)])).toEqual([
+      [false, expect.stringContaining("(-32603)")],
+      [false, expect.stringContaining("ended")],
+    ]);
     channel.close();
   });
 

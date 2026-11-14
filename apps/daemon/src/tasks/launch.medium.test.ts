@@ -113,7 +113,7 @@ describe("delegating to a new agent", () => {
   it("delegates nothing when the launch fails", async () => {
     const { store, mailbox, coordinator } = await coordinated();
     const failing = {
-      launch: () => Promise.reject(new LaunchFailed(newId("agent"), new Error("no tmux"))),
+      launch: () => Promise.reject(new LaunchFailed(newId("agent"), "no tmux")),
       maxLaunched: 5,
       maxDepth: 3,
     };
@@ -141,7 +141,7 @@ describe("delegating to a new agent", () => {
       tasks.launchAndDelegate(coordinator, launchRequest("d")),
       tasks.launchAndDelegate(coordinator, launchRequest("d")),
     ]);
-    const failed = expect.stringMatching(/^Error: agent \S+ failed to launch$/);
+    const failed = expect.stringMatching(/^Error: agent \S+ failed to launch: /);
     expect([
       both.flatMap(reasons),
       store.snapshot(testView).tasks.map((t) => t.title),

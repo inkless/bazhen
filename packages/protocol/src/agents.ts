@@ -248,6 +248,10 @@ export const ErrorResponse = z.object({
   error: z.enum([
     "invalid_request",
     "unsupported",
+    /**
+     * The agent's process could not be started: by a launch, or by a respawn or relaunch the
+     * harness refused. The message says why; repeating won't help until that changes.
+     */
     "launch_failed",
     "conflict",
     "stale_generation",

@@ -44,6 +44,7 @@ import {
 } from "@bazhen/protocol";
 import {
   AgentTerminalExists,
+  HarnessRefused,
   isId,
   LaunchFailed,
   TaskRefused,
@@ -59,6 +60,7 @@ import { InvalidDirectory } from "../agents/cwd.ts";
 import { IdempotencyConflict, UnknownAgent } from "../store/store.ts";
 import {
   EnvironmentUnavailable,
+  failureDetail,
   ServerUnconfirmed,
   StaleGeneration,
   StateConflict,
@@ -325,6 +327,7 @@ export function createApp(deps: AppDeps): Hono {
     if (err instanceof UnsupportedHarness) return fail(c, 422, "unsupported", err.message);
     if (err instanceof InvalidDirectory) return fail(c, 400, "invalid_request", err.message);
     if (err instanceof LaunchFailed) return fail(c, 502, "launch_failed", err.message);
+    if (err instanceof HarnessRefused) return fail(c, 502, "launch_failed", failureDetail(err));
     if (err instanceof IdempotencyConflict) return fail(c, 409, "conflict", err.message);
     if (err instanceof AttentionClosed) return fail(c, 409, "conflict", err.message);
     if (err instanceof AttentionRefused) return fail(c, 409, "conflict", err.message);

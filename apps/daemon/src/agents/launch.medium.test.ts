@@ -167,6 +167,21 @@ describe("launchAgent", () => {
     ]);
   });
 
+  it("says why a launch failed, to the caller and in the record", async () => {
+    const { store, deps } = setup(true);
+    await expect(launchAgent(deps, request)).rejects.toThrow("failed to launch: tmux refused");
+    const failed = store.events(0).find((e) => e.type === "agent.failed")?.payload;
+    expect(failed).toEqual({ reason: "launch_rejected", detail: "tmux refused" });
+  });
+
+  it("answers a repeat of a failed launch with why it failed", async () => {
+    const { deps } = setup(true);
+    await launchAgent(deps, request).catch(() => {});
+    await expect(launchAgent(deps, request)).rejects.toThrow(
+      "failed to launch: an earlier attempt failed: tmux refused",
+    );
+  });
+
   it("refuses a key reused for a different launch, rather than answering for the first", async () => {
     const { deps, launches } = setup();
     await launchAgent(deps, request);

@@ -8,6 +8,7 @@ import {
   StreamClientFrame,
   type StreamServerFrame,
 } from "@bazhen/protocol";
+import { failureDetail } from "../commands.ts";
 import type { UpgradeRoute } from "../http/upgrades.ts";
 import { ViewHeartbeat } from "./heartbeat.ts";
 import { ViewRefused, type Attachment, type LeaveReason, type TerminalHub } from "./hub.ts";
@@ -110,7 +111,7 @@ function serve(
           if (leaving !== undefined) joined.leave(leaving);
         },
         (err: unknown) =>
-          refuse(err instanceof ViewRefused ? err.message : `attach failed: ${String(err)}`),
+          refuse(err instanceof ViewRefused ? err.message : `attach failed: ${failureDetail(err)}`),
       );
       return;
     }

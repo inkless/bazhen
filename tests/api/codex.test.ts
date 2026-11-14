@@ -361,4 +361,41 @@ describe("a Codex agent", () => {
       })
       .toBe("delivered");
   });
+
+  it("answers a respawn Codex refuses with Codex's own reason, and records it", async () => {
+    const quitter = await daemon.launch("codex-refused", "codex");
+    const agent = async () => (await state()).agents.find((a) => a.id === quitter.agentId);
+    await waitUntil(() => daemon.screen(quitter.agentId).includes(BANNER.codex), "Codex's TUI");
+    await daemon.prompt(quitter, "/quit");
+    await expect.poll(async () => (await agent())?.state, { timeout: 15_000 }).toBe("exited");
+    // The provider the thread started on is taken out of the user's config, and a server started
+    // after that must load the thread from disk to resume it.
+    const original = daemon.editCodexConfig((config) =>
+      config
+        .replace('model_provider = "fake"', 'model_provider = "other"')
+        .replace("[model_providers.fake]", "[model_providers.other]"),
+    );
+    try {
+      await daemon.codex("app-server", "daemon", "stop");
+      await daemon.codex("app-server", "daemon", "start");
+      const events = await daemon.events(await state());
+      const respawned = await daemon.request(`/v1/agents/${quitter.agentId}/respawn`, {
+        method: "POST",
+        body: { idempotencyKey: "respawn-refused", generation: 0 },
+      });
+      await expect.poll(() => events.payloads("agent.respawn_rejected")).toHaveLength(1);
+      events.close();
+      expect({
+        status: respawned.status,
+        body: respawned.body,
+        rejected: events.payloads("agent.respawn_rejected"),
+      }).toEqual({
+        status: 502,
+        body: { error: "launch_failed", message: expect.stringMatching(/provider .fake./) },
+        rejected: [{ reason: "harness_refused", detail: expect.stringMatching(/provider .fake./) }],
+      });
+    } finally {
+      daemon.editCodexConfig(() => original);
+    }
+  }, 180_000);
 });
