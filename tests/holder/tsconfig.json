@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    "outDir": "dist",
+    "noEmit": false,
+    "emitDeclarationOnly": true
+  },
+  "include": [
+    "*.ts",
+    "../support/holder-setup.ts",
+    "../support/holder-home.ts",
+    "../support/ptys.ts"
+  ],
+  "references": [{ "path": "../../packages/protocol" }, { "path": "../../packages/runtime-holder" }]
+}
