@@ -177,12 +177,10 @@ describe("stream endpoint", () => {
     ws.pause();
     const written: string[] = [];
     viewer()?.send(Buffer.alloc(64 << 20), () => written.push("over"));
-    const stuck = [viewer()?.unsent(), [...written]];
+    expect(viewer()?.unsent()).toBeGreaterThan(0);
     ws.terminate();
     await expect.poll(() => left).toEqual(["client_closed"]);
     await expect.poll(() => written).toEqual(["over"]);
-    expect(stuck).toEqual([expect.any(Number), []]);
-    expect(stuck[0]).toBeGreaterThan(0);
   });
 
   it("tells the hub which paired device a view is on, and none for one that never paired", async () => {

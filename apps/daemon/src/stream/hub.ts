@@ -83,7 +83,8 @@ export interface HubOptions {
 export const HUB_DEFAULTS: HubOptions = {
   maxUnsentBytes: 4 * 1024 * 1024,
   maxViews: 16,
-  // Three of the largest snapshot a 200-column terminal can have.
+  // Three of the largest snapshot a 200-column terminal can have. Taking a snapshot briefly needs
+  // several times its size again, uncounted here; only one is taken at a time.
   maxSnapshotBytes: 200 * 1024 * 1024,
   snapshotChunkBytes: 1024 * 1024,
   // A link slower than about 100 KB/s.
@@ -237,7 +238,6 @@ export class TerminalHub {
     // then stay alive until the whole snapshot is written.
     const serialized = bytesOf(watched.emulator.snapshot());
     this.log.started(id, watched.terminal, viewer.mode);
-    viewer.notify({ type: "snapshot_start" });
     const shown = await serialized;
     if (!watched.viewers.has(id)) throw new ViewEnded();
     if (!this.makeRoom(shown.length)) {
@@ -248,6 +248,8 @@ export class TerminalHub {
       replaced.viewer.close();
       this.end(watched, resumes.attachmentId, "replaced");
     }
+    // Not before: a view clears its screen for a snapshot, and one turned away would lose it.
+    viewer.notify({ type: "snapshot_start" });
     viewer.notify(leaseFrame(watched, id));
     await this.sendSnapshot(watched, id, entry, shown);
     // The view may have left, or the terminal closed, while its snapshot was sent.
@@ -314,9 +316,7 @@ export class TerminalHub {
             entry.queue.push(bytes);
             entry.held += bytes.length;
           } else entry.viewer.send(bytes);
-          const unsent = entry.viewer.unsent();
-          entry.snapshotBytes = Math.min(entry.snapshotBytes, unsent);
-          const behind = unsent - entry.snapshotBytes + entry.held;
+          const behind = entry.viewer.unsent() - entry.snapshotBytes + entry.held;
           if (behind > this.opts.maxUnsentBytes) {
             this.evict(watched, id, entry);
           }
@@ -377,22 +377,30 @@ export class TerminalHub {
 
   /**
    * Whether a snapshot of `bytes` may be sent now. Over the cap, views whose snapshots have
-   * stalled are ended, oldest first, until it fits; a view still reading its own is never ended
-   * for it. A snapshot is never refused while no other is being sent, however large it is.
+   * stalled are ended, oldest first, until it fits, and none are ended if that would not make
+   * room; a view still reading its own is never ended for it. A snapshot is never refused while
+   * no other is being sent, however large it is.
    */
   private makeRoom(bytes: number): boolean {
     const now = this.opts.now();
+    const fits = (held: number) => held === 0 || held + bytes <= this.opts.maxSnapshotBytes;
     let pending = 0;
-    for (const loading of this.loading.values()) pending += loading.bytes;
-    const fits = () => pending === 0 || pending + bytes <= this.opts.maxSnapshotBytes;
+    let freeable = 0;
+    const stalled: [AttachmentId, Loading][] = [];
     for (const [id, loading] of this.loading) {
-      if (fits()) break;
+      pending += loading.bytes;
       if (now - loading.since < this.opts.snapshotStallMs) continue;
+      freeable += loading.bytes;
+      stalled.push([id, loading]);
+    }
+    if (!fits(pending - freeable)) return false;
+    for (const [id, loading] of stalled) {
+      if (fits(pending)) break;
       const entry = loading.watched.viewers.get(id);
       pending -= loading.bytes;
       if (entry !== undefined) this.evict(loading.watched, id, entry);
     }
-    return fits();
+    return true;
   }
 
   private unload(id: AttachmentId): void {

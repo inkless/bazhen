@@ -62,7 +62,7 @@ class CheckedRuntime extends FakeRuntime {
 /** A runtime with one terminal, whose program echoes nothing, and what reaches it. */
 async function fakeRuntime(history = "earlier output") {
   const runtime = new CheckedRuntime();
-  const terminal = async () => {
+  const terminal = async (text = history) => {
     const created = await runtime.create({
       terminalId: newId("term"),
       tags: { kind: "shell" },
@@ -72,7 +72,7 @@ async function fakeRuntime(history = "earlier output") {
       size,
       generation: 0,
     });
-    runtime.scroll(created, history);
+    runtime.scroll(created, text);
     return created;
   };
   const ref = await terminal();
@@ -92,7 +92,7 @@ async function fakeRuntime(history = "earlier output") {
     answerScreenCheck: (answer: boolean) => runtime.held.shift()?.(answer),
     screenChecks: () => runtime.checks,
     counts: () => ({ attaches: clients.attaches.length, closes: clients.closes }),
-    /** Another terminal on the same runtime, with the same history. */
+    /** Another terminal on the same runtime, with the same history unless given another. */
     another: terminal,
   };
 }
@@ -159,13 +159,15 @@ function viewer(
   return { v, seen, frames, closed: () => closed };
 }
 
-/** The same view, but `during` runs while its snapshot is being sent. */
-function emittingOnSnapshot(view: Viewer, during: () => void): Viewer {
+/** The log, but `during` runs as the second view opens, once its snapshot has been asked for. */
+function duringSecondSnapshot(log: AttachmentLog, during: () => void): AttachmentLog {
+  let starts = 0;
   return {
-    ...view,
-    notify: (frame) => {
-      view.notify(frame);
-      if (frame.type === "snapshot_start") during();
+    ...log,
+    started: (...args) => {
+      log.started(...args);
+      starts++;
+      if (starts === 2) during();
     },
   };
 }
@@ -200,16 +202,13 @@ describe("terminal hub", () => {
 
   it("opens every view on the history and screen, then live output, with nothing missed or repeated", async () => {
     const rt = await fakeRuntime();
-    const hub = new Hub(rt.runtime, memoryLog().log);
+    const log = duringSecondSnapshot(memoryLog().log, () => rt.emit("two "));
+    const hub = new Hub(rt.runtime, log);
     const first = viewer();
     await hub.join(rt.ref, first.v, size);
     rt.emit("one ");
     const late = viewer();
-    await hub.join(
-      rt.ref,
-      emittingOnSnapshot(late.v, () => rt.emit("two ")),
-      size,
-    );
+    await hub.join(rt.ref, late.v, size);
     rt.emit("three");
     expect([await screenOf(first.seen), await screenOf(late.seen)]).toEqual([
       ["earlier output", "one two three"],
@@ -219,16 +218,13 @@ describe("terminal hub", () => {
 
   it("never tells a view it is attached when the terminal closes while it opens", async () => {
     const rt = await fakeRuntime();
-    const hub = new Hub(rt.runtime, memoryLog().log);
+    const hub = new Hub(
+      rt.runtime,
+      duringSecondSnapshot(memoryLog().log, () => rt.end()),
+    );
     await hub.join(rt.ref, viewer().v, size);
     const late = viewer();
-    await expect(
-      hub.join(
-        rt.ref,
-        emittingOnSnapshot(late.v, () => rt.end()),
-        size,
-      ),
-    ).rejects.toThrow(TerminalClosed);
+    await expect(hub.join(rt.ref, late.v, size)).rejects.toThrow(TerminalClosed);
     expect([late.frames.some((f) => f.type === "attached"), late.closed()]).toEqual([false, true]);
   });
 
@@ -745,11 +741,11 @@ describe("terminal hub: screen state and slow views", () => {
 
   it("counts output held during a view's snapshot as unsent", async () => {
     const rt = await fakeRuntime();
-    const hub = new Hub(rt.runtime, memoryLog().log, { ...quick, maxUnsentBytes: 100 });
+    const log = duringSecondSnapshot(memoryLog().log, () => rt.emit("x".repeat(101)));
+    const hub = new Hub(rt.runtime, log, { ...quick, maxUnsentBytes: 100 });
     await hub.join(rt.ref, viewer().v, size);
     const late = viewer();
-    const flooding = emittingOnSnapshot(late.v, () => rt.emit("x".repeat(101)));
-    await expect(hub.join(rt.ref, flooding, size)).rejects.toThrow(ViewEnded);
+    await expect(hub.join(rt.ref, late.v, size)).rejects.toThrow(ViewEnded);
     expect(late.frames.at(-1)).toEqual({ type: "ended", reason: "evicted_slow" });
   });
 
@@ -909,11 +905,12 @@ describe("terminal hub: room for views", () => {
       await vi.waitFor(() => expect(view.inFlight()).toBe(1));
       view.write();
     }
-    await expect(joined).resolves.toBeDefined();
-    expect([view.seen.every((piece) => piece.length <= 100), await screenOf(view.seen)]).toEqual([
+    expect([view.seen.length, view.seen.every((piece) => piece.length <= 100)]).toEqual([
+      Math.ceil(snapshot / 100),
       true,
-      await screen(),
     ]);
+    await expect(joined).resolves.toBeDefined();
+    expect(await screenOf(view.seen)).toEqual(await screen());
   });
 
   it("ends a view whose snapshot has stalled when another needs the room, the oldest first", async () => {
@@ -945,7 +942,7 @@ describe("terminal hub: room for views", () => {
     second.write();
     await turn();
     clock = 1500;
-    await expect(hub.join(rt.ref, viewer().v, size)).rejects.toThrow(ViewRefused);
+    await expect(hub.join(rt.ref, viewer().v, size)).rejects.toThrow(/still loading/);
     expect([first.closed(), second.closed(), events.at(-1)]).toEqual([
       false,
       false,
@@ -960,7 +957,7 @@ describe("terminal hub: room for views", () => {
       reading.write();
       await vi.waitFor(() => expect(reading.inFlight()).toBe(1));
     }
-    await expect(hub.join(rt.ref, viewer().v, size)).rejects.toThrow(ViewRefused);
+    await expect(hub.join(rt.ref, viewer().v, size)).rejects.toThrow(/still loading/);
     expect(reading.closed()).toBe(false);
   });
 
@@ -971,11 +968,15 @@ describe("terminal hub: room for views", () => {
     before.engage();
     await loading(hub, rt.ref);
     const claim = { attachmentId: before.id, token: tokenOf(gone) };
-    await expect(hub.join(rt.ref, viewer().v, size, claim)).rejects.toThrow(ViewRefused);
-    expect([gone.closed(), events.filter((e) => e.startsWith(`ended ${before.id}`))]).toEqual([
-      false,
-      [],
-    ]);
+    const back = viewer();
+    await expect(hub.join(rt.ref, back.v, size, claim)).rejects.toThrow(/still loading/);
+    before.input(Buffer.from("still driving"));
+    expect([
+      gone.closed(),
+      events.filter((e) => e.startsWith(`ended ${before.id}`)),
+      rt.written.at(-1),
+      back.frames.some((f) => f.type === "snapshot_start"),
+    ]).toEqual([false, [], "still driving", false]);
   });
 
   it("lets a view lag by the piece of its snapshot in flight and no further, and frees its room when it ends", async () => {
@@ -1007,6 +1008,18 @@ describe("terminal hub: room for views", () => {
     expect(opened.closed()).toBe(false);
   });
 
+  it("ends no stalled view when ending them all would still leave no room", async () => {
+    const { rt, hub } = await measured((snap) => ({ maxSnapshotBytes: snap * 2.5 }));
+    const stalled = await loading(hub, rt.ref);
+    const reading = await loading(hub, rt.ref);
+    clock = 1000;
+    reading.write();
+    await turn();
+    const larger = await rt.another("h".repeat(2000));
+    await expect(hub.join(larger, viewer().v, size)).rejects.toThrow(/still loading/);
+    expect([stalled.closed(), reading.closed()]).toEqual([false, false]);
+  });
+
   it("never ends a view for a stalled snapshot while there is room", async () => {
     const { rt, hub } = await measured((snap) => ({ maxSnapshotBytes: snap * 3 }));
     const slow = await loading(hub, rt.ref);
@@ -1027,7 +1040,7 @@ describe("terminal hub: room for views", () => {
   it("sends a snapshot larger than the cap only while no other is being sent", async () => {
     const { rt, hub } = await measured((snap) => ({ maxSnapshotBytes: snap / 2 }));
     const alone = await loading(hub, rt.ref);
-    await expect(hub.join(rt.ref, viewer().v, size)).rejects.toThrow(ViewRefused);
+    await expect(hub.join(rt.ref, viewer().v, size)).rejects.toThrow(/still loading/);
     expect(alone.closed()).toBe(false);
   });
 
