@@ -125,11 +125,18 @@ export function unmutate(patch: string, file: string): Unmutate {
 const INTEGRATION_TEST = /^crates\/[^/]+\/tests\//;
 
 /**
+ * Whether a line starts at column 0 and isn't part of the item above it: rustfmt indents an
+ * item's body, and puts at column 0 only its closing brace and a wrapped signature's `)`, `where`
+ * and opening `{`.
+ */
+const startsAnItem = (line: string) => /^[^\s)]/.test(line) && !/^(?:where\b|\{)/.test(line);
+
+/**
  * The test code in a Rust file: all of a file in a crate's `tests/`, and elsewhere each top-level
- * item under a bare `#[cfg(test)]`, to its closing brace. rustfmt, which the gates enforce, puts
- * a top-level item's closing brace alone at column 0 and indents everything inside it, so the
- * first such line ends the item. A test module nested in another item isn't found, which only
- * ever costs a kill.
+ * item under a bare `#[cfg(test)]`. rustfmt, which the gates enforce, indents everything inside a
+ * top-level item, so the item ends at the next line that starts at column 0: its own closing
+ * brace, or the next item when it fits on one line. A test module nested in another item isn't
+ * found, which only ever costs a kill.
  */
 export function testCode(file: string, source: string): LineSpan[] {
   const lines = source.split("\n");
@@ -139,13 +146,12 @@ export function testCode(file: string, source: string): LineSpan[] {
     if (lines[i] !== "#[cfg(test)]") continue;
     let item = i + 1;
     while (lines[item]?.startsWith("#[") === true) item += 1;
-    const header = lines[item];
-    if (header === undefined) break;
-    let end = item;
-    if (!/[;}]\s*$/.test(header)) {
-      end = lines.indexOf("}", item + 1);
-      if (end < 0) break;
-    }
+    if (lines[item] === undefined) break;
+    let next = item + 1;
+    while (next < lines.length && !startsAnItem(lines[next] ?? "")) next += 1;
+    if (next === lines.length) break;
+    // Its own closing brace, whatever follows it on the line, or else the next item.
+    const end = lines[next]?.startsWith("}") === true ? next : next - 1;
     spans.push({ file, start: i + 1, end: end + 1 });
     i = end;
   }

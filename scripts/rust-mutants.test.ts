@@ -166,6 +166,8 @@ const SOURCE = [
 const TESTS = { file: LIB, start: 14, end: 23 };
 const unchanged = (_file: string, line: number) => line;
 
+const result = (outcome: string, stdout: string) => ({ test: "t", event: outcome, stdout });
+
 describe("testCode", () => {
   it("is each item under #[cfg(test)], to its closing brace at column 0", () => {
     expect(testCode(LIB, SOURCE)).toEqual([TESTS]);
@@ -177,6 +179,61 @@ describe("testCode", () => {
       open: testCode(LIB, "#[cfg(test)]\nmod tests {\n    fn t() {}\n"),
       notBare: testCode(LIB, "#[cfg(all(test, unix))]\nmod tests {\n}\n"),
     }).toEqual({ oneLine: [{ file: LIB, start: 1, end: 3 }], open: [], notBare: [] });
+  });
+
+  it("ends a one-line item whose brace a comment follows, before the product code after it", () => {
+    const source = [
+      "pub fn triple(x: u32) -> u32 {",
+      "    check(x < 100);",
+      "    x * 3",
+      "}",
+      "",
+      "#[cfg(test)]",
+      "fn fixture() -> u32 { 2 } // fixture",
+      "",
+      "fn check(ok: bool) {",
+      '    assert!(ok, "broken");',
+      "}",
+      "",
+      "#[cfg(test)]",
+      "mod tests {",
+      "    use super::*;",
+      "",
+      "    #[test]",
+      "    fn triple_runs() {",
+      "        let _ = triple(2);",
+      "    }",
+      "}",
+      "",
+    ].join("\n");
+    const isTest = inTestCode(new Map([[LIB, source]]))(unchanged);
+    expect({
+      spans: testCode(LIB, source),
+      checkFails: failedOnAssertion(result("failed", panic(`${LIB}:10:5`, "broken")), isTest),
+    }).toEqual({
+      spans: [
+        { file: LIB, start: 6, end: 8 },
+        { file: LIB, start: 13, end: 21 },
+      ],
+      checkFails: false,
+    });
+  });
+
+  it("keeps a wrapped signature's column-0 lines inside its item", () => {
+    const source = [
+      "#[cfg(test)]",
+      "fn long(",
+      "    a: u32,",
+      ") -> u32",
+      "where",
+      "    u32: Copy,",
+      "{",
+      "    a",
+      "}",
+      "",
+      "pub fn after() {}",
+    ].join("\n");
+    expect(testCode(LIB, source)).toEqual([{ file: LIB, start: 1, end: 9 }]);
   });
 
   it("is the whole of a file in a crate's tests/", () => {
@@ -192,8 +249,6 @@ describe("trackCallers", () => {
     expect(trackCallers(inTests, testCode(LIB, inTests))).toEqual(["checked"]);
   });
 });
-
-const result = (outcome: string, stdout: string) => ({ test: "t", event: outcome, stdout });
 
 describe("failedOnAssertion", () => {
   const isTest = inTestCode(new Map([[LIB, SOURCE]]))(unchanged);
