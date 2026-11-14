@@ -66,4 +66,4 @@ KILLED by one of those mutants or named by a `Control:` trailer you recorded by 
 | "No mutant killed it, but it's fine"        | Then nothing yet shows it can fail. Break the code by hand and see       |
 | "A property test is overkill for a parser"  | Parsers are where the panics are. One strategy finds what ten cases miss |
 | "I'll `#[ignore]` it for now"               | Fix it or delete it                                                      |
-| "The `Control:` trailer for one covers all" | Each unkilled test needs a trailer naming it; falsify fails on any else  |
+| "The `Control:` trailer for one covers all" | Each unkilled test needs a trailer naming it; falsify fails on any other |

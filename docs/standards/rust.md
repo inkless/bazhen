@@ -295,12 +295,15 @@ What differs:
   `pnpm test:falsify` has nextest list the tests at the base and at HEAD, so it finds every new
   test however it is declared (`#[test]`, proptest, a macro of the crate's own). It then has
   cargo-mutants list the mutants of the code the branch changed, and runs the new tests against
-  them, one mutant at a time, in a throwaway worktree. A test that fails under one by panicking
-  outside product code (its assertion, not a crash, a timeout or an overflow the mutant caused)
-  is KILLED, and the mutant is printed beside it as its control. The run stops once every new
-  test is killed, and after at most 100 mutants. A test no mutant killed is INVALID and needs a
-  `Control:` trailer of its own naming it by the full path nextest lists (`testing.md`
-  § Falsification), after you break the code by hand and watch it fail on its assertion:
+  them, one mutant at a time, in a throwaway worktree. A test that passes unmutated, then fails
+  twice under one mutant by panicking in test code, is KILLED, and the mutant is printed beside
+  it as its control. In test code means every place the failure names is in `crates/` and
+  outside the functions cargo-mutants mutates: its assertion, or an `unwrap` in the test, but not
+  a crash, a timeout, or a panic in product code, the standard library or a dependency. The run
+  stops once every new test is killed, and after at most 100 mutants. Any other new test is
+  INVALID: one that fails unmutated, one no mutant killed, or one a branch with no Rust source
+  change can't be mutated for. It needs a `Control:` trailer of its own naming it by the full
+  path nextest lists, after you break the code by hand and watch it fail on its assertion:
   `Control: pane_title::tests::refuses_a_window_id: accept @ ids -> left: Some, right: None`.
   One trailer may name several tests it covers. Install cargo-mutants once:
   `cargo install --locked cargo-mutants@27.1.0`.

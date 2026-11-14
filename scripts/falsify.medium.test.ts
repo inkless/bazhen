@@ -65,6 +65,11 @@ if [ "$2" = run ]; then
   echo "RUN: $(tr '\\n' ' ' < ${LIB})" >> "$STUB_LOG"
   if [ "\${STUB_HANG:-}" = 1 ] && grep -q MUTATED ${LIB}; then
     echo "HANGING $$" >> "$STUB_LOG"
+    if [ "\${STUB_STUBBORN:-}" = 1 ]; then
+      # Outlasts SIGTERM, so falsify waits out its grace before SIGKILL.
+      trap 'echo TERMED >> "$STUB_LOG"' TERM
+      while :; do sleep 1; done
+    fi
     sleep 60
   fi
   while read -r name; do
@@ -722,12 +727,13 @@ describe("falsify judging new Rust tests by mutating the change", () => {
     mutatedBranch(["tests::b_is_two"], [mutantOfB("replace b -> u8 with 0")]);
     const child = spawn("node", [FALSIFY, "--base", fx.base], {
       cwd: fx.linked,
-      env: env({ STUB_HANG: "1" }),
+      env: env({ STUB_HANG: "1", STUB_STUBBORN: "1" }),
       stdio: "ignore",
     });
     const exited = once(child, "exit");
     await expect.poll(() => stubLog().includes("HANGING"), { timeout: 20_000 }).toBe(true);
     child.kill("SIGINT");
+    await expect.poll(() => stubLog().includes("TERMED"), { timeout: 5000 }).toBe(true);
     child.kill("SIGINT");
     const [status, signal] = await exited;
     expect({ status, signal, leftovers: leftovers() }).toEqual({

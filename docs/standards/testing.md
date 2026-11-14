@@ -106,8 +106,10 @@ Every new test must be shown to fail without the code it covers.
   restore the code. Record it as a trailer in a commit message on the branch:
   `Control: <what you broke> -> <how the test failed>`, one per INVALID test. For a TypeScript
   test the check accepts any one trailer on the branch, so the reviewer is who holds you to the
-  rest; a Rust test needs a trailer naming it, unless falsify killed it with a mutant of the
-  change (`rust.md` § Tests). Never bypass a hook with `--no-verify`.
+  rest. A Rust test falsify didn't kill with a mutant of the change needs a trailer of its own,
+  whose subject starts with the test's full path as nextest lists it:
+  `Control: <module::path::test_name>: <what you broke> -> <how the test failed>` (`rust.md`
+  § Tests). Never bypass a hook with `--no-verify`.
 
 Two lessons from the scaffold's controls:
 

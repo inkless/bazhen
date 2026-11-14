@@ -18,9 +18,10 @@
 // test with it. When the branch touches the Rust workspace, nextest lists the tests at the base and
 // at HEAD, so a test is found however it is declared (`#[test]`, proptest, a macro of the crate's
 // own). Each new one is run instead against the mutants cargo-mutants lists in the code the branch
-// changed, one at a time in a throwaway worktree: KILLED by the first it fails on with a panic of
-// its own, else INVALID, needing a Control trailer naming it by its full path,
-// `Control: tests::name: <what you broke> -> <how the test failed>` (docs/standards/rust.md § Tests).
+// changed, one at a time in a throwaway worktree: KILLED by the first mutant it fails under twice
+// with a panic in test code, else INVALID, needing a Control trailer naming it by its full path,
+// `Control: tests::name: <what you broke> -> <how the test failed>`
+// (docs/standards/rust.md § Tests).
 //
 // Titles come from added lines that look like `it(...)`/`test(...)` calls, so a fixture string in
 // a test file such as 'it("fixture", f)' counts as a test too. It then can't be found in the
@@ -390,9 +391,6 @@ async function stopGroup(child: ChildProcess): Promise<void> {
 }
 
 async function onSignal(signal: NodeJS.Signals): Promise<void> {
-  // A second Ctrl-C while the first is still stopping the children must not end the process
-  // before it removes the worktree.
-  if (signalled) return;
   signalled = true;
   if (running) await stopGroup(running);
   cleanup?.();
