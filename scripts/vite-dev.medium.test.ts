@@ -67,6 +67,23 @@ function fetchAs(port: number, path: string, host: string): Promise<[number, str
 const get = async (port: number, path: string, host: string) =>
   (await fetchAs(port, path, host))[0];
 
+/** A GET from this machine's own browser: the status, and the headers that forbid framing. */
+function pageAs(port: number, path: string, dest: string): Promise<string[]> {
+  return new Promise((resolve) => {
+    const headers = { host: `127.0.0.1:${port}`, "sec-fetch-dest": dest };
+    const req = request({ host: "127.0.0.1", port, path, headers }, (res) => {
+      res.resume();
+      resolve([
+        String(res.statusCode),
+        String(res.headers["content-security-policy"]),
+        String(res.headers["x-frame-options"]),
+      ]);
+    });
+    req.on("error", () => resolve([]));
+    req.end();
+  });
+}
+
 /** A WebSocket upgrade: "upgraded", "answered <status>", or "closed" with no answer. */
 function upgrade(port: number, path: string, host: string): Promise<string> {
   return new Promise((resolve) => {
@@ -188,6 +205,19 @@ describe("the web dev server", () => {
     expect({ refused, reached }).toEqual({
       refused: ["closed", "closed"],
       reached: ["upgrade /v1/events?own"],
+    });
+  });
+
+  it("forbids framing, and refuses a page another page embeds", async () => {
+    const forbidden = ["frame-ancestors 'none'", "DENY"];
+    expect({
+      topLevel: await pageAs(port, "/", "document"),
+      script: await pageAs(port, "/src/main.tsx", "script"),
+      framed: await pageAs(port, "/", "iframe"),
+    }).toEqual({
+      topLevel: ["200", ...forbidden],
+      script: ["200", ...forbidden],
+      framed: ["403", ...forbidden],
     });
   });
 });
