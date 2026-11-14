@@ -149,7 +149,7 @@ A test owns everything it touches and leaves nothing behind.
   caused it, and kill it in `afterAll`. Each run also gets its own `TMUX_TMPDIR` and runs outside
   any tmux client (`TMUX` unset). Teardown fails the run on any server still alive.
 - **Holders.** Holder tests run on the host, under a temporary `BAZHEN_HOME` in `/tmp`, so the
-  longest holder socket path fits the 103 bytes a Unix socket allows. Take paths from
+  longest holder socket path fits the 103 bytes a Unix socket allows on macOS. Take paths from
   `tests/support/holder-home.ts`, whose `testHome()` and `holderSocket()` refuse any home but
   the run's. Close every holder a test starts in `afterAll`: teardown closes any still answering,
   through the protocol, and fails the run naming each. `tmux` on their `PATH` refuses to run,
