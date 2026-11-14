@@ -14,6 +14,7 @@ page serves that rule, or keeps tests from hurting the machine and each other.
 | Tests that run real tmux start only on a disposable host (container or CI)         | integration, api and e2e setup              |
 | Tests can't reach a real tmux server, and leave none running                       | integration setup and teardown              |
 | Test runs refuse to start when the machine is short of PTYs                        | integration and api setup                   |
+| Suites never synthesise CPU load on a shared machine                               | review; `--cpus` quota on each container    |
 | Fakes over mocks; behaviour-named tests; no snapshots of terminal output           | review                                      |
 | Behaviour tests are black-box: they reach the daemon only through public surfaces  | review                                      |
 
@@ -145,6 +146,12 @@ A test owns everything it touches and leaves nothing behind.
   `BZ_PTY_CUTOFF` exists only for machines with a different PTY limit, never to get a leaky run
   through.
 - **Ports.** Use free ports, never fixed ones, because parallel worktrees run the same suites.
+- **CPU.** A test or probe never synthesises CPU load (busy loops, stress tools) on a shared
+  machine, because every agent on it slows down with you. A comparison that needs load runs on a
+  CI runner: rerun the job. The per-suite `--cpus` quota (`BZ_TEST_CPUS`) is a backstop, not
+  permission.
+- **Untracked files run.** `pnpm test:real` copies untracked files from the worktree into the
+  image, so an uncommitted test file runs as part of the suite. Remove probes before you run it.
 
 ## Writing the test
 
