@@ -37,6 +37,11 @@ describe("key bar bytes", () => {
     expect(barBytes("right", { ...plain, ctrl: true, appCursor: true })).toBe("\x1b[1;5C");
   });
 
+  it("keeps newline a newline with Ctrl armed, never the CR that submits", () => {
+    expect(barBytes("newline", { ...plain, ctrl: true })).toBe("\x1b\r");
+    expect(barBytes("tab", { ...plain, ctrl: true })).toBe("\t");
+  });
+
   it("takes a user's binding for a bar key over the default", () => {
     const keyMap = parsedMap({ escape: "E", "shift+enter": "\n", "ctrl+arrowup": "U" });
     expect(barBytes("escape", { ...plain, keyMap })).toBe("E");
@@ -56,6 +61,11 @@ describe("Ctrl on a typed character", () => {
     ["[", "\x1b"],
     ["_", "\x1f"],
     ["?", "\x7f"],
+    ["2", "\x00"],
+    ["3", "\x1b"],
+    ["7", "\x1f"],
+    ["/", "\x1f"],
+    ["8", "\x7f"],
   ])("turns %j into its control code", (typed, code) => {
     expect(withCtrl(typed)).toBe(code);
   });
@@ -63,6 +73,8 @@ describe("Ctrl on a typed character", () => {
   it("leaves what has no control code, or is more than one character, as typed", () => {
     expect(withCtrl("1")).toBe("1");
     expect(withCtrl("é")).toBe("é");
+    expect(withCtrl("ß")).toBe("ß");
+    expect(withCtrl("ı")).toBe("ı");
     expect(withCtrl("ab")).toBe("ab");
   });
 });

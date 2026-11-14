@@ -3,23 +3,19 @@ import { matchKey, type KeyMap } from "./keymap.ts";
 /** The keys a touch keyboard lacks, which the key bar types. */
 export type BarKey = "escape" | "tab" | "up" | "down" | "left" | "right" | "newline" | "enter";
 
-interface BarKeyInfo {
-  /** The key as a keyboard event names it, which a key map binds. */
-  readonly key: string;
-  readonly shift?: boolean;
-  /** What xterm.js sends for it with no binding. */
-  readonly bytes: string;
-  /** The final byte of an arrow's cursor sequence. */
-  readonly arrow?: string;
-}
+/** The key as a keyboard event names it, which a key map binds, and what xterm.js sends for it. */
+type BarKeyInfo =
+  | { readonly key: string; readonly shift?: boolean; readonly bytes: string }
+  /** `arrow` is the final byte of its cursor sequence. */
+  | { readonly key: string; readonly arrow: string };
 
 const KEYS: Record<BarKey, BarKeyInfo> = {
   escape: { key: "Escape", bytes: "\x1b" },
   tab: { key: "Tab", bytes: "\t" },
-  up: { key: "ArrowUp", bytes: "", arrow: "A" },
-  down: { key: "ArrowDown", bytes: "", arrow: "B" },
-  right: { key: "ArrowRight", bytes: "", arrow: "C" },
-  left: { key: "ArrowLeft", bytes: "", arrow: "D" },
+  up: { key: "ArrowUp", arrow: "A" },
+  down: { key: "ArrowDown", arrow: "B" },
+  right: { key: "ArrowRight", arrow: "C" },
+  left: { key: "ArrowLeft", arrow: "D" },
   // Shift+Enter, which the default key map sends as ESC CR, the TUIs' newline.
   newline: { key: "Enter", shift: true, bytes: "\r" },
   enter: { key: "Enter", bytes: "\r" },
@@ -33,34 +29,60 @@ export interface BarContext {
   readonly appCursor: boolean;
 }
 
-/** What the terminal is sent for `key`: the user's key map first, then what xterm.js sends. */
+/**
+ * What the terminal is sent for `key`: the user's key map first, then what xterm.js sends. Ctrl
+ * changes an arrow; on another key it counts only where the key map binds it, so Ctrl and newline
+ * is still a newline, never the CR that would submit.
+ */
 export function barBytes(key: BarKey, { keyMap, ctrl, appCursor }: BarContext): string {
   const info = KEYS[key];
-  const bound = matchKey(
-    {
-      type: "keydown",
-      key: info.key,
-      shiftKey: info.shift === true,
-      ctrlKey: ctrl,
-      altKey: false,
-      metaKey: false,
-      isComposing: false,
-      keyCode: 0,
-    },
-    keyMap,
-  );
-  if (bound !== null) return bound;
-  if (info.arrow === undefined) return info.bytes;
-  if (ctrl) return `\x1b[1;5${info.arrow}`;
+  const bound = (withCtrlKey: boolean) =>
+    matchKey(
+      {
+        type: "keydown",
+        key: info.key,
+        shiftKey: "shift" in info && info.shift,
+        ctrlKey: withCtrlKey,
+        altKey: false,
+        metaKey: false,
+        isComposing: false,
+        keyCode: 0,
+      },
+      keyMap,
+    );
+  if (ctrl) {
+    const text = bound(true);
+    if (text !== null) return text;
+    if ("arrow" in info) return `\x1b[1;5${info.arrow}`;
+  }
+  const text = bound(false);
+  if (text !== null) return text;
+  if ("bytes" in info) return info.bytes;
   return `${appCursor ? "\x1bO" : "\x1b["}${info.arrow}`;
 }
 
-/** `typed` with Ctrl held, as a terminal sends it: `c` is ETX, `?` is DEL; other text as typed. */
+/** What xterm sends for Ctrl with a digit or punctuation that has no control code of its own. */
+const CTRL_EXTRAS: Record<string, string> = {
+  " ": "\x00",
+  "2": "\x00",
+  "`": "\x00",
+  "3": "\x1b",
+  "4": "\x1c",
+  "5": "\x1d",
+  "6": "\x1e",
+  "7": "\x1f",
+  "/": "\x1f",
+  "8": "\x7f",
+  "?": "\x7f",
+};
+
+/** `typed` with Ctrl held, as xterm sends it: `c` is ETX, `?` is DEL; other text as typed. */
 export function withCtrl(typed: string): string {
   if (typed.length !== 1) return typed;
-  if (typed === "?") return "\x7f";
-  if (typed === " ") return "\x00";
-  const code = typed.toUpperCase().charCodeAt(0);
+  const extra = CTRL_EXTRAS[typed];
+  if (extra !== undefined) return extra;
+  // ASCII only: "ß" upper-cases to "SS", which must not become XOFF.
+  const code = (/[a-z]/.test(typed) ? typed.toUpperCase() : typed).charCodeAt(0);
   return code >= 0x40 && code <= 0x5f ? String.fromCharCode(code - 0x40) : typed;
 }
 

@@ -270,9 +270,12 @@ function connect(
   };
   document.addEventListener("visibilitychange", shown);
 
+  const bar = keyBar();
   term.attachCustomKeyEventHandler((event) => {
     const text = matchKey(event, settings.keyMap);
     if (text === null) return true;
+    // A bound key is the key the bar's armed Ctrl was for; left armed, it would land on the next.
+    if (bar.target() === target) bar.takeCtrl();
     input(encoder.encode(text), true);
     event.preventDefault();
     return false;
@@ -280,7 +283,6 @@ function connect(
   const route = () =>
     wheelAction({ mouseTracking: term.modes.mouseTrackingMode !== "none", alternate, kind });
   const detachScroll = attachScrollInput(element, term, route, (bytes) => input(bytes, false));
-  const bar = keyBar();
   const target: BarTarget = {
     press: (key) => {
       const ctrl = bar.takeCtrl();

@@ -411,6 +411,12 @@ test("types the keys a phone's keyboard lacks from the key bar", async ({ browse
   await expect(ctrl).toHaveAttribute("aria-pressed", "false");
   await ctrl.tap();
   await tapKey(phone, program, "Right arrow", "\x1b[1;5C");
+  // A key the key map sends, from an iPad's keyboard, is the key Ctrl was armed for.
+  await ctrl.tap();
+  const before = Date.now();
+  await phone.keyboard.press("Shift+Enter");
+  await expect.poll(() => program.received(before)).toBe(hex("\x1b\r"));
+  await expect(ctrl).toHaveAttribute("aria-pressed", "false");
   await phone.context().close();
 });
 
