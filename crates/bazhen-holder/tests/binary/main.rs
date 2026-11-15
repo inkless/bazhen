@@ -233,6 +233,21 @@ impl Started {
         }
     }
 
+    /// `state()` once the holder has ended, or after `within` if it hasn't: a holder that closed
+    /// its stdout may still be on its way out.
+    fn end(&mut self, within: Duration) -> String {
+        let deadline = Instant::now() + within;
+        while Instant::now() < deadline
+            && self
+                .child
+                .as_mut()
+                .is_some_and(|child| matches!(child.try_wait(), Ok(None)))
+        {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        self.state()
+    }
+
     fn pid(&self) -> Result<Pid> {
         Pid::from_raw(i32::try_from(self.pid)?).ok_or_else(|| "not a pid".into())
     }
@@ -429,9 +444,9 @@ fn wait_for_file(path: &Path, done: impl Fn(&str) -> bool) -> Result<String> {
     }
 }
 
-/// Fails when `needed` more PTYs would take the machine near its limit, as the TypeScript
-/// suites' setup does (`ptysInUse` in tests/support/global-setup.ts).
-fn require_ptys(needed: u64) -> Result<()> {
+/// The PTYs in use, and how many the tests may take the machine to, as the TypeScript suites'
+/// setup counts them (`ptysInUse` in tests/support/global-setup.ts).
+fn ptys() -> Result<(u64, u64)> {
     let read = |name: &str| -> Option<u64> {
         std::fs::read_to_string(format!("/proc/sys/kernel/pty/{name}"))
             .ok()?
@@ -452,10 +467,64 @@ fn require_ptys(needed: u64) -> Result<()> {
         Ok(raw) if !raw.is_empty() => raw.parse()?,
         _ => cutoff,
     };
+    Ok((used, cutoff))
+}
+
+/// Fails when `needed` more PTYs would take the machine past the cutoff `ptys` gives.
+fn require_ptys(needed: u64) -> Result<()> {
+    let (used, cutoff) = ptys()?;
     if used + needed > cutoff {
         return Err(format!("{used} PTYs in use, and {needed} more would pass {cutoff}").into());
     }
     Ok(())
+}
+
+/// This user's processes, the PTYs in use and this process's fds, with the limits each meets,
+/// for a test that starts many holders to say which one it ran into.
+fn machine() -> String {
+    let uid = rustix::process::getuid().as_raw().to_string();
+    let processes = Command::new("ps")
+        .args(["-U", &uid, "-o", "pid="])
+        .output()
+        .map_or_else(
+            |e| format!("unknown ({e})"),
+            |out| {
+                String::from_utf8_lossy(&out.stdout)
+                    .lines()
+                    .count()
+                    .to_string()
+            },
+        );
+    let ptys = ptys().map_or_else(
+        |e| format!("unknown ({e})"),
+        |(used, cutoff)| format!("{used} (the tests' cutoff {cutoff})"),
+    );
+    let fds = std::fs::read_dir("/dev/fd").map_or_else(
+        |e| format!("unknown ({e})"),
+        |listing| listing.count().to_string(),
+    );
+    let names: &[&str] = if cfg!(target_os = "macos") {
+        &["kern.maxproc", "kern.maxprocperuid", "kern.tty.ptmx_max"]
+    } else {
+        &["kernel.pid_max", "kernel.threads-max", "kernel.pty.max"]
+    };
+    let sysctl = Command::new("sysctl").args(names).output().map_or_else(
+        |e| format!("unknown ({e})"),
+        |out| {
+            let text = String::from_utf8_lossy(&out.stdout) + String::from_utf8_lossy(&out.stderr);
+            text.trim().replace('\n', ", ")
+        },
+    );
+    let limit = |resource| {
+        let Rlimit { current, maximum } = getrlimit(resource);
+        format!("{current:?} of {maximum:?}")
+    };
+    format!(
+        "this user's processes: {processes}, nproc {}; PTYs in use: {ptys}; this process's fds: \
+         {fds}, nofile {}; {sysctl}",
+        limit(Resource::Nproc),
+        limit(Resource::Nofile),
+    )
 }
 
 #[test]
@@ -627,8 +696,23 @@ fn a_hundred_holders_start_from_a_spawner_whose_soft_nofile_is_256() {
             s["terminalId"] = format!("t{n}").into();
             s["socket"] = home.join(format!("t{n}.sock")).to_string_lossy().into();
         });
-        let mut holder = spawn(&bytes, &Start::default()).unwrap();
-        assert_eq!(holder.first_line().unwrap(), "ready\n", "holder {n}");
+        // A file rather than a pipe, so the spawner holds no fd for each holder it keeps.
+        let stderr = home.join(format!("t{n}.err"));
+        let prelude = format!("exec 2>'{}';", stderr.display());
+        let how = Start {
+            prelude: &prelude,
+            ..Start::default()
+        };
+        let mut holder = spawn(&bytes, &how).unwrap();
+        let line = holder.first_line();
+        assert!(
+            line.as_ref().is_ok_and(|line| line == "ready\n"),
+            "holder {n} said {line:?}, not ready, and {}; its stderr: {:?}; its log: {:?}; {}",
+            holder.end(DEADLINE),
+            std::fs::read_to_string(&stderr).unwrap_or_default(),
+            std::fs::read_to_string(home.join(format!("t{n}.log"))).unwrap_or_default(),
+            machine(),
+        );
         holders.push(holder);
     }
 }
