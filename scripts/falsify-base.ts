@@ -19,6 +19,7 @@ import {
   WORKTREE_PREFIX,
   addWorktree,
   installArgs,
+  isolatedEnv,
   removeWorktree,
 } from "./falsify.ts";
 import { isMain } from "./is-main.ts";
@@ -37,7 +38,11 @@ function parseArgs(args: readonly string[]): string {
 }
 
 const git = (...args: string[]) =>
-  execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }).trim();
+  execFileSync("git", args, {
+    env: isolatedEnv(),
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "inherit"],
+  }).trim();
 
 /** The files a `--harness` run printed, one per line, or none when it failed. */
 function harness(falsify: string, cwd: string): string[] {
@@ -73,8 +78,10 @@ function main(args: readonly string[]): number {
       ]),
     ];
     const unchanged =
-      spawnSync("git", ["diff", "--quiet", base, "HEAD", "--", ...files], { cwd: top }).status ===
-      0;
+      spawnSync("git", ["diff", "--quiet", base, "HEAD", "--", ...files], {
+        cwd: top,
+        env: isolatedEnv(),
+      }).status === 0;
     if (unchanged) {
       console.log("falsify-base: falsify, its imports and how it is run are unchanged.");
       return 0;

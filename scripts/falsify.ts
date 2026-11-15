@@ -115,7 +115,7 @@ const GIT_LOCATION_VARS = [
   "GIT_COMMON_DIR",
 ];
 
-function isolatedEnv(): NodeJS.ProcessEnv {
+export function isolatedEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
   for (const name of GIT_LOCATION_VARS) delete env[name];
   return env;
