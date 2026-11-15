@@ -1144,10 +1144,11 @@ export const CARGO_CONFIG = [
 ];
 export const MUTANTS_CONFIG = ['test_tool = "nextest"'];
 
-// What starts tests: vitest, playwright, nextest, cargo-mutants, cargo test, and the scripts that
-// run one of those. A script step that does runs under scripts/capped.ts, at most at these caps.
+// What starts tests: vitest, playwright, nextest, cargo-mutants, cargo-fuzz, cargo test and bench,
+// and the scripts that run one of those. A script step that does runs under scripts/capped.ts, at
+// most at these caps.
 const TEST_RUNNER =
-  /\b(?:vitest|playwright|cargo-nextest|cargo[- ]mutants|cargo\s+(?:\+\S+\s+)?test|cargo-gate\.ts test|falsify\.ts|hook-bench\.ts|engine-replay\.ts|test-real\.ts)\b/;
+  /\b(?:vitest|playwright|cargo-(?:nextest|mutants|fuzz)|cargo\s+(?:\+\S+\s+)?(?:test|bench|nextest|mutants|fuzz)|cargo-gate\.ts test|falsify\.ts|hook-bench\.ts|engine-replay\.ts|test-real\.ts)\b/;
 const CAPPED_STEP = /^node (?:\.\.\/)*scripts\/capped\.ts --memory (\d+)G --time (\d+)m -- \S/;
 export const MAX_CAP = { gib: 24, minutes: 120 };
 
@@ -1156,10 +1157,10 @@ export function cappedScriptFailures(file: string, scripts: Record<string, strin
   const out: string[] = [];
   for (const [name, script] of Object.entries(scripts)) {
     if (!TEST_RUNNER.test(script)) continue;
-    if (/[|;\n\r]|(?<!&)&(?!&)/.test(script)) {
+    if (/[|;\n\r`]|\$\(|(?<!&)&(?!&)/.test(script)) {
       out.push(
         `${file}: the "${name}" script starts tests, so it joins its steps with \`&&\` alone: ` +
-          "a `|`, `;`, `&` or line break could run one round its cap.",
+          "a `|`, `;`, `&`, line break or command substitution could run one round its cap.",
       );
       continue;
     }

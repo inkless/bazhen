@@ -32,6 +32,10 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v7
+      # scripts/capped.ts caps each target's memory and time, and needs only Node's built-ins.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26.13.0
       - name: Install nightly
         run: rustup toolchain install "$NIGHTLY" --profile minimal
       - uses: actions/cache@v4
@@ -61,9 +65,12 @@ jobs:
             for target in $targets; do
               echo "::group::$crate $target"
               mkdir -p "$crate/fuzz/corpus/$target" "$crate/fuzz/seeds/$target"
-              (cd "$crate" && cargo "+$NIGHTLY" fuzz run "$target" \
+              # libFuzzer's own limits are given, not left to its defaults, inside a cap of the run's.
+              (cd "$crate" && node ../../scripts/capped.ts --memory 4G \
+                --time "$((SECONDS_PER_TARGET / 60 + 5))m" -- \
+                cargo "+$NIGHTLY" fuzz run "$target" \
                 "fuzz/corpus/$target" "fuzz/seeds/$target" \
-                -- -max_total_time="$SECONDS_PER_TARGET")
+                -- -max_total_time="$SECONDS_PER_TARGET" -rss_limit_mb=2048)
               echo "::endgroup::"
             done
           done

@@ -915,21 +915,24 @@ describe("cappedScriptFailures", () => {
         "cargo-nextest nextest run",
         "cargo mutants --in-diff x",
         "cargo +nightly test",
+        "cargo nextest run",
+        "cargo bench",
+        "cargo +nightly-2026-11-01 fuzz run parse_reply",
         "node scripts/cargo-gate.ts test",
         "node scripts/falsify.ts",
         "node scripts/hook-bench.ts",
         "node scripts/test-real.ts",
         `vitest run && ${cap} vitest run`,
       ].map((t) => cappedScriptFailures("package.json", { t }).length),
-    ).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
+    ).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
   });
 
   it("refuses a capped step joined by anything but && to one that could run round it", () => {
     expect(
-      ["; vitest", " | tee x", " & vitest", "\nvitest"].map(
+      ["; vitest", " | tee x", " & vitest", "\nvitest", " $(vitest)", " `vitest`"].map(
         (tail) => cappedScriptFailures("package.json", { t: `${cap} vitest run${tail}` })[0],
       ),
-    ).toEqual(Array.from({ length: 4 }, () => expect.stringContaining("`&&` alone")));
+    ).toEqual(Array.from({ length: 6 }, () => expect.stringContaining("`&&` alone")));
   });
 
   it("refuses a cap too big to bite", () => {

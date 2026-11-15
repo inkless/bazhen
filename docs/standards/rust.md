@@ -138,7 +138,7 @@ names the macro; the scan still guards it.
 root manifest's other tables, `rust-toolchain.toml`, `clippy.toml` and `deny.toml` as
 `WORKSPACE_LINTS`, `ROOT_TABLES`, `TOOLCHAIN_CONFIG`, `CLIPPY_CONFIG` and `DENY_CONFIG`, and the
 gate scripts in `package.json` as `RUST_GATE_SCRIPTS`, and the root `.cargo/config.toml` (the
-capping test runner) and `.cargo/mutants.toml` as `CARGO_CONFIG` and `MUTANTS_CONFIG`, and fails
+capping test runner, which caps what `cargo run` and `cargo bench` start too) and `.cargo/mutants.toml` as `CARGO_CONFIG` and `MUTANTS_CONFIG`, and fails
 when the files differ, so a lint level, the toolchain or a gate changes only in a commit that
 changes the script and this page with it. The root manifest holds no other table (a patch, an
 excluded crate, another profile), and a workspace dependency is an exact version or a path to
@@ -301,7 +301,9 @@ What differs:
     changes the Rust. It alone uses nightly, pinned there as `NIGHTLY`, because libFuzzer's
     instrumentation needs it; everything else builds on the pinned toolchain. To run one locally,
     install that nightly and `cargo install --locked cargo-fuzz@0.13.2` once, then run
-    `cargo +nightly-2026-11-01 fuzz run <target>` from the crate's directory.
+    `pnpm capped -- cargo +nightly-2026-11-01 fuzz run <target> -- -rss_limit_mb=2048
+    -max_total_time=600` from the crate's directory. cargo-fuzz starts its target without cargo's
+    test runner, so the cap and libFuzzer's own limits are given by hand.
 - **Falsify judges Rust tests by mutating the change, not by reverting it.** A Rust unit test
   lives in the file it tests, so reverting the source would revert the test, and a test of a new
   function wouldn't compile without it. When a branch touches `crates/` or the Cargo files,
