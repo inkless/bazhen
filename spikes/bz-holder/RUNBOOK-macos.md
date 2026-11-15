@@ -70,3 +70,11 @@ launchd or other macOS-specific fix before any migration PR".
    minute), and saves `programs/recordings/<name>.bin` when you press Ctrl-] . Then run
    `node driver/parity.ts --replay claude codex`. **Pass:** both `PASS`. Don't commit the
    recordings: they hold your prompts and paths.
+
+   **If Ctrl-] doesn't stop it**, find out what the key sends: run
+   `node driver/record.ts --keylog /tmp/bzh-keys.log codex`, press Ctrl-] a few times, then stop it
+   from another shell (`kill <pid of node driver/record.ts>`, then `node driver/cleanup.ts
+   /tmp/bzh-rec-XXXX`, and `reset` in the stuck window). Do it once directly in the terminal app
+   and once inside tmux. Each `in` line is one key chunk as hex; each `out` line is a keyboard
+   protocol the agent turned on. Paste only the `out` lines and the `in` lines from your Ctrl-]
+   presses: the rest is what you typed.
