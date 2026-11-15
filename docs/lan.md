@@ -7,20 +7,35 @@ own domain or Caddy's local authority.
 
 ## Setting it up
 
-1. List the address ranges that may connect. `bazhen doctor` prints this machine's subnets; pick
-   your home network's, and add `fe80::/10` if devices reach this machine over IPv6:
+1. List the address ranges that may connect. Bazhen refuses to start under `listen = "lan"`
+   without them, and its message lists this machine's subnets, as `bazhen doctor` does. Pick your
+   home network's, and its IPv6 network too if it has one, since phones often reach `.local` over
+   IPv6:
 
    ```toml
    [web]
    listen = "lan" # or BAZHEN_WEB_LISTEN=lan
-   lan_allow = ["192.168.1.0/24", "fe80::/10"]
+   lan_allow = ["192.168.1.0/24", "fdeb:9f4b:2183:4c5b::/64"]
    # lan_port = 7942 (or BAZHEN_LAN_PORT)
    ```
 
    A device outside these ranges is dropped before it sees anything. Nothing is admitted by
-   default: this machine's own subnets include a café's Wi-Fi, a VPN's and Docker's.
+   default: this machine's own subnets include a café's Wi-Fi, a VPN's and Docker's. A range that
+   admits every address (`0.0.0.0/0`, `::/0`) is refused. Link-local addresses (`fe80::`) are
+   the same on every network, so a link-local range names its interface, such as
+   `fe80::/10%en0`, and admits only devices on that one.
 
-2. Build the web app and start Bazhen:
+2. Let the port through this machine's firewall, if it has one, for the same ranges. On Linux
+   with `ufw`:
+
+   ```sh
+   sudo ufw allow from 192.168.1.0/24 to any port 7942 proto tcp
+   ```
+
+   On macOS, allow incoming connections for `node` when the firewall asks. A device whose page
+   times out without a warning is usually stopped here.
+
+3. Build the web app and start Bazhen:
 
    ```sh
    pnpm build
@@ -31,15 +46,16 @@ own domain or Caddy's local authority.
    directory. It names this machine's `.local` name only, such as `my-mac.local`, and lasts 820
    days; `bazhen doctor` shows when it expires.
 
-3. Run `bazhen pair`. Besides the code, it prints the address to open, such as
-   `https://my-mac.local:7942`, and the certificate's SHA-256 fingerprint.
+4. Run `bazhen pair`. Besides the code, it prints the address to open, such as
+   `https://my-mac.local:7942`, the certificate's SHA-256 fingerprint and when the certificate
+   expires.
 
-4. On the device, open that address. The browser warns that the certificate isn't trusted. Open
+5. On the device, open that address. The browser warns that the certificate isn't trusted. Open
    its details (Safari: Show Details, then view the certificate) and compare the SHA-256 with the
-   one `bazhen pair` printed, every pair of characters. Only if they match, choose to visit the
-   site.
+   one `bazhen pair` printed, every pair of characters; both are lowercase. Only if they match,
+   choose to visit the site.
 
-5. Enter the pairing code.
+6. Enter the pairing code.
 
 **If the fingerprints don't match, stop.** Don't trust the certificate and don't pair: something
 on the network is standing in for Bazhen, and it would see the code and everything after it.
@@ -53,7 +69,10 @@ If the certificate or its key is damaged, readable by other users, or expired, B
 serving loopback and logs why it isn't serving the LAN; `bazhen doctor` says so too. It never
 replaces the certificate by itself, since the fingerprint you checked would change without telling
 you. To make a new one, stop Bazhen, delete the `tls` directory the message names, and start it
-again. Then trust the new fingerprint on each device as in step 4. Paired devices stay paired.
+again. Then trust the new fingerprint on each device as in step 5. Paired devices stay paired.
+
+If the listener itself fails, for example because its port is taken, it stops alone in the same
+way: loopback keeps serving, and the log and `bazhen doctor` say why.
 
 ## What protects it
 

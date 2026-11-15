@@ -1,5 +1,6 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { request as httpsRequest, type Server } from "node:https";
+import { connect as tcpConnect } from "node:net";
 import { connect } from "node:tls";
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
@@ -13,9 +14,8 @@ import { parseCidr, type Cidr } from "../config/cidr.ts";
 import { Store } from "../store/store.ts";
 import { tempDb, upgradeOutcome } from "../testing/fixtures.ts";
 import { lanCertificate, type LanCertificate } from "../tls/material.ts";
-import { createApp, type AppDeps } from "./app.ts";
-import { upgrades, type UpgradeRoute } from "./upgrades.ts";
-import { lanAllowlists, lanPeer, serveLan } from "./lan.ts";
+import { lanListener, lanPeer, type LanParts } from "./lan.ts";
+import type { UpgradeRoute } from "./upgrades.ts";
 
 const name = "my-mac.local";
 const unused = () => Promise.reject(new Error("not used by these tests"));
@@ -37,88 +37,85 @@ let certificate: LanCertificate | undefined;
 function cert(): LanCertificate {
   if (certificate === undefined) {
     const dir = mkdtempSync(join(tmpdir(), "bz-lan-"));
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
     certificate = lanCertificate(join(dir, "tls"), { name, uid: userInfo().uid });
   }
   return certificate;
 }
+afterEach(() => {
+  certificate = undefined;
+});
 
-/** The LAN listener on 127.0.0.1, admitting `allow`, with a device store and one echo stream. */
-async function lan(
-  allow: readonly Cidr[] = [range("127.0.0.0/8")],
-  peer: AppDeps["lan"] = { peer: lanPeer },
-) {
+const commands: LanParts["commands"] = {
+  appVersion: "0.1.0",
+  schemaVersion: () => 1,
+  runtime: new FakeRuntime(),
+  state: () => ({
+    epoch: "e1",
+    eventId: 0,
+    environments: [],
+    agents: [],
+    attention: [],
+    messages: [],
+    shells: [],
+    tasks: [],
+    assignments: [],
+  }),
+  launch: unused,
+  answer: refuse,
+  close: unused,
+  respawn: unused,
+  relaunch: unused,
+  signal: unused,
+  reply: refuse,
+  dismiss: refuse,
+  resend: refuse,
+  openShell: unused,
+  closeShell: unused,
+  restartShell: unused,
+  renameShell: unused,
+  unlinkShell: unused,
+  tasks: {
+    create: refuse,
+    show: refuse,
+    assign: refuse,
+    unassign: refuse,
+    finish: refuse,
+    delegate: refuse,
+    escalate: refuse,
+    send: refuse,
+  },
+};
+
+/** The LAN listener as the daemon builds it, on 127.0.0.1, with one echo stream. */
+async function lan(over: Partial<LanParts> = {}) {
   const store = Store.open(tempDb());
   const devices = new DeviceAuth(store, { log: () => {} });
   const codes = new PairingCodes({ log: () => {} });
-  const allowlists = { hosts: [] as string[], origins: [] as string[] };
-  const gate = { devices, always: true, remote: true };
-  const deps: AppDeps = {
-    appVersion: "0.1.0",
-    schemaVersion: () => 1,
-    runtime: new FakeRuntime(),
-    allow: allowlists,
-    state: () => ({
-      epoch: "e1",
-      eventId: 0,
-      environments: [],
-      agents: [],
-      attention: [],
-      messages: [],
-      shells: [],
-      tasks: [],
-      assignments: [],
-    }),
-    launch: unused,
-    answer: refuse,
-    close: unused,
-    respawn: unused,
-    relaunch: unused,
-    signal: unused,
-    reply: refuse,
-    dismiss: refuse,
-    resend: refuse,
-    openShell: unused,
-    closeShell: unused,
-    restartShell: unused,
-    renameShell: unused,
-    unlinkShell: unused,
-    tasks: {
-      create: refuse,
-      show: refuse,
-      assign: refuse,
-      unassign: refuse,
-      finish: refuse,
-      delegate: refuse,
-      escalate: refuse,
-      send: refuse,
-    },
-    pairing: { codes, devices },
-    gate,
-    lan: peer,
-  };
   const wss = new WebSocketServer({ noServer: true });
-  const route: UpgradeRoute = {
+  const echo: UpgradeRoute = {
     path: /^\/echo$/,
     upgrade: (req, socket, head) => wss.handleUpgrade(req, socket, head, (ws) => ws.send("hello")),
   };
-  const port = await new Promise<number>((resolve) => {
-    const server: Server = serveLan({
-      app: createApp(deps),
+  const port = await new Promise<number>((resolve, reject) => {
+    const server: Server = lanListener({
+      commands,
+      devices,
+      codes,
       certificate: cert(),
       port: 0,
       hostname: "127.0.0.1",
-      allow,
-      upgrade: upgrades(allowlists, [route], gate),
+      allow: [range("127.0.0.0/8")],
+      streams: [echo],
       listening: resolve,
+      failed: reject,
+      ...over,
     });
     cleanups.push(() => {
       server.closeAllConnections();
       server.close();
     });
   });
-  const { hosts, origins } = lanAllowlists(name, port);
-  allowlists.hosts.push(...hosts);
-  allowlists.origins.push(...origins);
   const origin = `https://${name}:${port}`;
   /** A request over TLS that trusts the certificate and names the host, as Safari would. */
   const call = (
@@ -163,7 +160,23 @@ async function lan(
     };
     return new WebSocket(`wss://127.0.0.1:${port}/echo`, options);
   };
-  return { call, pair, stream, codes, devices, origin, port };
+  /** What a TLS client trusting the certificate gets: a handshake, or the code that ended it. */
+  const handshake = (extra: { maxVersion?: "TLSv1.2" } = {}) =>
+    new Promise((resolve) => {
+      const socket = connect({
+        host: "127.0.0.1",
+        port,
+        servername: name,
+        ca: cert().cert,
+        ...extra,
+      });
+      socket.once("secureConnect", () => {
+        resolve("handshake");
+        socket.destroy();
+      });
+      socket.once("error", (err: NodeJS.ErrnoException) => resolve(err.code));
+    });
+  return { call, pair, stream, handshake, codes, devices, origin, port };
 }
 
 describe("the LAN listener", () => {
@@ -188,8 +201,9 @@ describe("the LAN listener", () => {
       (await call("/v1/state", { headers: { cookie } })).status,
       (await call("/v1/state", { headers: { cookie, origin } })).status,
       await upgradeOutcome(stream({ cookie, origin })),
+      await upgradeOutcome(stream({ cookie })),
     ];
-    expect(statuses).toEqual([401, 401, 401]);
+    expect(statuses).toEqual([401, 401, 401, 401]);
   });
 
   it("opens a stream for a device paired on the LAN, and closes it when the device is revoked", async () => {
@@ -202,6 +216,12 @@ describe("the LAN listener", () => {
     const closed = new Promise((resolve) => ws.once("close", () => resolve("closed")));
     devices.revoke(PairResponse.parse(JSON.parse(paired.body)).deviceId);
     expect([first, await closed]).toEqual(["hello", "closed"]);
+  });
+
+  it("refuses an upgrade without Origin, even from a device paired on the LAN", async () => {
+    const { pair, stream, codes } = await lan();
+    const paired = await pair(codes.issue().code);
+    expect(await upgradeOutcome(stream({ cookie: paired.cookie }))).toBe(403);
   });
 
   it("refuses another host name, and an action from another origin", async () => {
@@ -222,19 +242,25 @@ describe("the LAN listener", () => {
 
   it("limits pairing attempts by the peer's address, apart from loopback's", async () => {
     const at = { peer: "192.168.1.30" };
-    const { pair, codes, origin } = await lan(undefined, { peer: () => at.peer });
+    const { pair, codes, origin } = await lan({ peer: () => at.peer });
     const { code } = codes.issue();
     const statuses: number[] = [];
-    for (let i = 0; i < 6; i++) statuses.push((await pair("WRONGONE")).status);
-    at.peer = "192.168.1.31";
-    statuses.push((await pair("WRONGONE")).status);
-    expect(statuses).toEqual([401, 401, 401, 401, 401, 429, 401]);
+    for (const [peer, count] of [
+      ["192.168.1.30", 6],
+      ["192.168.1.31", 5],
+      ["192.168.1.32", 1],
+    ] as const) {
+      at.peer = peer;
+      for (let i = 0; i < count; i++) statuses.push((await pair("WRONGONE")).status);
+    }
+    expect(statuses).toEqual([401, 401, 401, 401, 401, 429, 401, 401, 401, 401, 401, 429]);
+    // The LAN's window is full; loopback's is its own.
     expect(codes.attempt(code, origin).kind).toBe("paired");
   });
 
   it("knows the peer by its socket", async () => {
     const seen: (string | undefined)[] = [];
-    const { pair, codes } = await lan(undefined, {
+    const { pair, codes } = await lan({
       peer: (c) => {
         seen.push(lanPeer(c));
         return lanPeer(c);
@@ -245,40 +271,53 @@ describe("the LAN listener", () => {
   });
 
   it("refuses TLS 1.2", async () => {
-    const { port } = await lan();
-    const outcome = await new Promise((resolve) => {
-      const socket = connect({
-        host: "127.0.0.1",
-        port,
-        servername: name,
-        ca: cert().cert,
-        maxVersion: "TLSv1.2",
-      });
-      socket.once("secureConnect", () => {
-        socket.destroy();
-        resolve("connected");
-      });
-      socket.once("error", () => resolve("refused"));
-    });
-    expect(outcome).toBe("refused");
+    const { handshake } = await lan();
+    expect(await handshake({ maxVersion: "TLSv1.2" })).not.toBe("handshake");
   });
 
   it("drops a peer outside the allowed ranges before the handshake", async () => {
-    const { port } = await lan([range("10.0.0.0/8")]);
-    const outcome = await new Promise((resolve) => {
-      const socket = connect({ host: "127.0.0.1", port, servername: name, ca: cert().cert });
-      socket.once("secureConnect", () => {
-        resolve("handshake");
-        socket.destroy();
-      });
-      socket.once("error", (err: NodeJS.ErrnoException) => resolve(err.code));
-    });
-    expect(outcome).toBe("ECONNRESET");
+    const { handshake } = await lan({ allow: [range("10.0.0.0/8")] });
+    expect(await handshake()).toBe("ECONNRESET");
   });
-});
 
-afterEach(() => {
-  if (certificate !== undefined)
-    rmSync(join(certificate.path, "..", ".."), { recursive: true, force: true });
-  certificate = undefined;
+  it("drops a connection past its cap", async () => {
+    const { handshake, port } = await lan({ limits: { maxConnections: 1 } });
+    const held = tcpConnect({ host: "127.0.0.1", port });
+    cleanups.push(() => held.destroy());
+    await new Promise((resolve) => held.once("connect", resolve));
+    expect(await handshake()).toBe("ECONNRESET");
+  });
+
+  it("closes a connection whose handshake doesn't finish in time", async () => {
+    const { port } = await lan({ limits: { handshakeMs: 200 } });
+    const idle = tcpConnect({ host: "127.0.0.1", port });
+    cleanups.push(() => idle.destroy());
+    const outcome = await new Promise((resolve) => {
+      const timer = setTimeout(() => resolve("still open"), 2_000);
+      idle.once("close", () => {
+        clearTimeout(timer);
+        resolve("closed");
+      });
+    });
+    expect(outcome).toBe("closed");
+  });
+
+  it("reports an error and closes only itself, as when its port is taken", async () => {
+    const first = await lan();
+    const failure = await new Promise<NodeJS.ErrnoException>((resolve) => {
+      lanListener({
+        commands,
+        devices: first.devices,
+        codes: first.codes,
+        certificate: cert(),
+        port: first.port,
+        hostname: "127.0.0.1",
+        allow: [range("127.0.0.0/8")],
+        streams: [],
+        failed: resolve,
+      });
+    });
+    const stillServing = await first.call("/v1/state");
+    expect([failure.code, stillServing.status]).toEqual(["EADDRINUSE", 401]);
+  });
 });

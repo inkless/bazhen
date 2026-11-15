@@ -61,7 +61,7 @@ import { DeviceAuth } from "./auth/devices.ts";
 import { PairingCodes } from "./auth/pairing.ts";
 import { socketApp } from "./socket/routes.ts";
 import { localSubnets } from "./config/cidr.ts";
-import { lanAllowlists, lanPeer, serveLan } from "./http/lan.ts";
+import { lanListener, lanUrl } from "./http/lan.ts";
 import {
   LanCertificateInvalid,
   NoLocalName,
@@ -346,7 +346,7 @@ server.on("upgrade", upgrades(allow, streams, gate));
 // and the error says how to make a new one.
 let lanCert: LanCertificate | null = null;
 let lanError: string | null = null;
-let lanServer: ReturnType<typeof serveLan> | null = null;
+let lanServer: ReturnType<typeof lanListener> | null = null;
 if (config.lan !== null) {
   const { lan } = config;
   try {
@@ -358,30 +358,28 @@ if (config.lan !== null) {
   }
   if (lanCert !== null) {
     const served = lanCert;
-    const lanAllow = lanAllowlists(served.name, lan.port);
-    const lanGate = { devices, always: true, remote: true };
-    lanServer = serveLan({
-      app: createApp({
-        ...commands,
-        allow: lanAllow,
-        pairing: { codes: pairing, devices },
-        gate: lanGate,
-        lan: { peer: lanPeer },
-        web: { root: BUNDLE },
-      }),
+    lanServer = lanListener({
+      commands,
+      web: { root: BUNDLE },
+      devices,
+      codes: pairing,
       certificate: served,
       port: lan.port,
       allow: lan.allow,
-      upgrade: upgrades(lanAllow, streams, lanGate),
+      streams,
       listening: (p) =>
         console.log(
-          `bazhen: serving the LAN at https://${served.name}:${p} to ${lan.ranges.join(", ")}; ` +
+          `bazhen: serving the LAN at ${lanUrl(served, p)} to ${lan.ranges.join(", ")}; ` +
             `certificate SHA-256 ${served.fingerprint}`,
         ),
+      failed: (err) => {
+        lanError = `the LAN listener stopped: ${err.message}`;
+        lanServer = null;
+        console.error(`bazhen: ${lanError}; loopback keeps serving`);
+      },
     });
   }
 }
-const lanUrl = (cert: LanCertificate, lanPort: number) => `https://${cert.name}:${lanPort}`;
 
 const RETIRE_EVERY_MS = 60 * 60 * 1000;
 const shuttingDown = new AbortController();
@@ -418,9 +416,13 @@ const socketListener = getRequestListener(
     devices,
     externalOrigins: config.externalOrigins,
     lan: () =>
-      lanCert === null || config.lan === null
+      lanCert === null || config.lan === null || lanServer === null
         ? undefined
-        : { url: lanUrl(lanCert, config.lan.port), fingerprint: lanCert.fingerprint },
+        : {
+            url: lanUrl(lanCert, config.lan.port),
+            fingerprint: lanCert.fingerprint,
+            expiresAt: lanCert.notAfter.toISOString(),
+          },
     paneTitleChanged: (pane) => void codexThreads.paneTitleChanged(pane),
     refreshEnv: async (env) => {
       const next = filterEnv(env, config.envRules);

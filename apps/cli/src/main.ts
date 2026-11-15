@@ -222,6 +222,9 @@ async function pair(): Promise<number> {
     console.log(`  on the LAN, open ${r.lan.url}`);
     console.log(`  before trusting its certificate, check that its SHA-256 is`);
     console.log(`    ${r.lan.fingerprint}`);
+    console.log(
+      `  (the certificate lasts until ${new Date(r.lan.expiresAt).toLocaleDateString()})`,
+    );
     console.log("  and if it isn't, don't trust it or pair");
   }
   return 0;

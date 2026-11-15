@@ -138,7 +138,11 @@ describe("socketApp", () => {
   });
 
   it("shows the LAN listener's address and fingerprint with the code while it serves", async () => {
-    const lan = { url: "https://my-mac.local:7942", fingerprint: "AB CD" };
+    const lan = {
+      url: "https://my-mac.local:7942",
+      fingerprint: "ab cd",
+      expiresAt: "2029-02-11T00:00:00.000Z",
+    };
     const res = await app(undefined, undefined, () => lan).request("/v1/pairing/codes", {
       method: "POST",
     });

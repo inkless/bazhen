@@ -157,6 +157,12 @@ describe("resolveConfig", () => {
     expect(config.lan?.port).toBe(9443);
   });
 
+  it("refuses a range that admits everyone, saying why", () => {
+    expect(() => resolveConfig({ web: { listen: "lan", lan_allow: ["::/0"] } }, {})).toThrow(
+      "web.lan_allow: ::/0 admits every address; list your own network's range",
+    );
+  });
+
   it("refuses a range that isn't one, and a LAN port that is the daemon's own", () => {
     expect(() => resolveConfig({ web: { listen: "lan", lan_allow: ["192.168.1.0"] } }, {})).toThrow(
       InvalidConfig,

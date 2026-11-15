@@ -5,7 +5,7 @@ import { z } from "zod";
 import { ENV_RULE, type EnvRules } from "@bazhen/core";
 import { isOrigin, originList, originsProblem } from "@bazhen/protocol";
 import { networkInterfaces } from "node:os";
-import { localSubnets, parseCidr, type Cidr } from "./cidr.ts";
+import { localSubnets, parseRange, type Cidr } from "./cidr.ts";
 import { resolvePaths, type PathInputs } from "./paths.ts";
 
 const Port = z.int().min(1).max(65_535);
@@ -14,9 +14,10 @@ const EnvRule = z.string().regex(ENV_RULE, "must be a variable name, or a prefix
 const Origin = z.string().refine(isOrigin, "must be an origin, such as https://bazhen.example.com");
 const Flag = z.enum(["true", "false"]).transform((value) => value === "true");
 const Listen = z.enum(["loopback", "lan"]);
-const Range = z
-  .string()
-  .refine((t) => parseCidr(t) !== undefined, "must be a range, such as 192.168.1.0/24");
+const Range = z.string().superRefine((text, ctx) => {
+  const parsed = parseRange(text);
+  if ("problem" in parsed) ctx.addIssue({ code: "custom", message: `${text} ${parsed.problem}` });
+});
 
 /** The keys `config.toml` may hold. Unknown keys are refused, so a typo never means "default". */
 const ConfigFile = z.strictObject({
@@ -195,10 +196,10 @@ function lanListener(
       `web.lan_allow: web.listen is "lan", so list the address ranges that may connect${suggested}`,
     );
   }
-  const allow = ranges.map((range) => {
-    const parsed = parseCidr(range);
-    if (parsed === undefined) throw new InvalidConfig(`web.lan_allow: ${range} is not a range`);
-    return parsed;
+  const allow = ranges.map((text) => {
+    const parsed = parseRange(text);
+    if ("problem" in parsed) throw new InvalidConfig(`web.lan_allow: ${text} ${parsed.problem}`);
+    return parsed.range;
   });
   return { port: lanPort, ranges, allow };
 }
