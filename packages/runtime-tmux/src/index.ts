@@ -499,11 +499,6 @@ export class TmuxRuntime implements RuntimeAdapter {
   }
 
   /**
-   * A terminal the socket no longer carries counts as closed once it is provably gone (`gone`).
-   * One whose server may still run, its socket deleted or taken by another, is unconfirmed, and
-   * only a forced close records it closed (foundation-design §7.1).
-   */
-  /**
    * Up to `lines` of the history above the screen, oldest first, with their escapes. A history
    * too large to capture whole, as truecolor art takes 40 bytes a cell or more, gives its most
    * recent half, and so on: a view always opens, with as much as fits.
@@ -532,17 +527,34 @@ export class TmuxRuntime implements RuntimeAdapter {
     return "";
   }
 
+  /**
+   * A terminal the socket no longer carries counts as closed once it is provably gone (`gone`).
+   * One whose server may still run, its socket deleted or taken by another, is unconfirmed, and
+   * only a forced close records it closed (foundation-design §7.1).
+   */
   async close(ref: RuntimeRef): Promise<void> {
     const [pane] = await this.panesOf(ref).catch(async (err: unknown) => {
-      const serverAway =
-        (err instanceof TmuxError && noServer(err)) ||
-        (err instanceof StaleIncarnation && err.reason === "server-replaced");
-      // Another server carrying the terminal's tag is not its end.
-      if (!serverAway || (await this.carries(ref))) throw err;
-      if (await this.gone(ref)) return [];
-      throw new TerminalUnconfirmed(ref.terminalId, err);
+      await this.endedWithServer(ref, err);
+      return [];
     });
-    if (pane !== undefined) await this.tmux("kill-session", "-t", located(pane.ref, "sessionId"));
+    if (pane === undefined) return;
+    await this.tmux("kill-session", "-t", located(pane.ref, "sessionId")).catch((err: unknown) =>
+      this.endedWithServer(ref, err),
+    );
+  }
+
+  /**
+   * Returns when `err`, a command for `ref` that failed, shows the terminal ended with its server.
+   * Throws `TerminalUnconfirmed` while that server may still run it, and rethrows any other
+   * failure.
+   */
+  private async endedWithServer(ref: RuntimeRef, err: unknown): Promise<void> {
+    const serverAway =
+      (err instanceof TmuxError && noServer(err)) ||
+      (err instanceof StaleIncarnation && err.reason === "server-replaced");
+    // Another server carrying the terminal's tag is not its end.
+    if (!serverAway || (await this.carries(ref))) throw err;
+    if (!(await this.gone(ref))) throw new TerminalUnconfirmed(ref.terminalId, err);
   }
 
   /**
@@ -833,9 +845,13 @@ function identities(refs: readonly RuntimeRef[]): ServerIdentity[] {
 const reportSettings = (err: unknown) =>
   console.warn("tmux server settings were not applied:", err);
 
-/** The socket is missing or nobody listens on it; any other failure says nothing about the server. */
+/**
+ * The socket is missing, nobody listens on it, or the server closed the connection without an
+ * answer, as one that is shutting down does to every client. Any other failure says nothing
+ * about the server.
+ */
 const noServer = (err: TmuxError) =>
-  /no server running|error connecting to .* \((No such file or directory|Connection refused)\)/.test(
+  /no server running|error connecting to .* \((No such file or directory|Connection refused)\)|^server exited unexpectedly$/m.test(
     err.stderr,
   );
 
