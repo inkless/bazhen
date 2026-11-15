@@ -42,8 +42,9 @@ export function chokepointFor(file: string, inTest = false): string {
 
 // Named, not only called, so an import or an alias counts too. `test_kill_process`, which sends
 // no signal, doesn't match: `\b` doesn't fall inside an identifier.
+// A `use` of nix's or libc's `kill` inside braces counts as one, and so do the raw syscalls.
 const RUST_RAW =
-  /\b(?:kill_process|kill_process_group|kill_current_process_group|pidfd_send_signal|killpg)\b|\b(?:libc|signal)\s*::\s*kill\b/g;
+  /\b(?:kill_process|kill_process_group|kill_current_process_group|pidfd_send_signal|killpg|sigqueue|SYS_kill|SYS_tkill|SYS_tgkill|SYS_pidfd_send_signal|SYS_rt_sigqueueinfo)\b|\b(?:libc|signal)\s*::\s*kill\b|\buse\s+(?:nix\s*::\s*sys\s*::\s*signal|libc)\s*::\s*\{[^}]*\bkill\b[^}]*\}/g;
 const TS_KILL = /\bprocess\s*\??\.\s*kill\b/g;
 const TS_KILL_COMPUTED = /\bprocess\s*\??\.?\s*\[\s*["'`]kill["'`]\s*\]/g;
 const TS_KILL_BOUND = /\{[^}]*\bkill\b[^}]*\}\s*=\s*(?:globalThis\s*\.\s*)?process\b/g;
@@ -103,23 +104,38 @@ const STARTS_PROGRAM =
   /(?:Command\s*::\s*new|\b(?:spawn\w*|exec\w*|fork|runBounded|runIn\w*|output|run))\s*\(\s*\[?\s*$/;
 const SHELL_KILL = /(?:^|[\s;&|(`])(?:\S*\/)?(kill|pkill|killall)\s+(\S+(?:\s+\S+)*)/g;
 // Whether a shell `kill`'s first operand is a target: a pid, a group, a variable or a job.
-const KILL_TARGET = /^(?:-?\d+|-?\\?\$\S*|%\S*)$/;
+// Quotes are stripped first, so "$pid" counts, and so do a Rust format's `{}` and `-{pid}`.
+const KILL_TARGET = /^(?:-?\d+|-?\\?\$\S*|%\S*|-?\{[^}]*\})$/;
 // Its own process ($$) or last background job ($!): a test fixture's script ending itself.
 const SHELL_ITSELF = /^(?:\\?\$\\?\$|\$!)$/;
 const SYSTEMCTL = /^(?:\S*\/)?systemctl$/;
 const SHELL_SYSTEMCTL_KILL = /\bsystemctl\s+(?:-\S+\s+)*kill\b/;
 
-/** The operands of a shell `kill`, past its options: `-TERM`, `-s TERM`, `-9`. */
+/**
+ * The operands of a shell `kill`, unquoted, past its options (`-TERM`, `-s TERM`, `-9`) and the
+ * `--` that ends them, and less any redirection.
+ */
 function killOperands(args: string): string[] {
-  const words =
-    args
-      .split(/[;&|)\n]/)[0]
-      ?.trim()
-      .split(/\s+/) ?? [];
+  const words = (args.split(/[;&|)\n]/)[0] ?? "")
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w !== "")
+    .map((w) => w.replaceAll(/["']/g, ""));
   let i = 0;
-  while (i < words.length && /^-[A-Za-z]/.test(words[i] ?? "")) i += words[i] === "-s" ? 2 : 1;
+  while (i < words.length && /^-[A-Za-z0-9]/.test(words[i] ?? "")) {
+    i += words[i] === "-s" || words[i] === "-n" ? 2 : 1;
+  }
+  if (words[i] === "--") i++;
   return words.slice(i).filter((w) => !/^\d?>/.test(w));
 }
+
+// `kill` with nothing to kill but options, or fed its targets by xargs: either way, whatever
+// reaches it is unchecked.
+const SHELL_BARE_KILL =
+  /(?:^|[\s;&|(`])(?:xargs(?:\s+-\S+)*\s+kill\b|kill(?:\s+-\S+)+\s*(?:$|[;&|)\n]))/;
+// Programs that run the program their arguments name, so `["env", "kill", ...]` is a kill.
+const LAUNCHER =
+  /^(?:\S*\/)?(?:env|sudo|doas|timeout|setsid|nohup|nice|ionice|xargs|stdbuf|chrt|taskset|flock|unshare|chroot|runuser|su)$/;
 
 /**
  * Whether a string literal starts a kill: a shell command that runs `kill` on anything but the
@@ -127,7 +143,7 @@ function killOperands(args: string): string[] {
  * signal checks nothing the chokepoints would.
  */
 export function startsKill(literal: string): boolean {
-  if (SHELL_SYSTEMCTL_KILL.test(literal)) return true;
+  if (SHELL_SYSTEMCTL_KILL.test(literal) || SHELL_BARE_KILL.test(literal)) return true;
   for (const m of literal.matchAll(SHELL_KILL)) {
     if (m[1] !== "kill") return true;
     const [target, ...more] = killOperands(m[2] ?? "");
@@ -137,13 +153,25 @@ export function startsKill(literal: string): boolean {
   return false;
 }
 
-/** The files allowed to start a kill, each with the target it stops and why it may. */
-export const CLI_KILLS: Readonly<Record<string, string>> = {
-  "scripts/signal-paths.ts": "the patterns that find kills, which start nothing",
-  "scripts/signal-paths.test.ts": "the fixtures those patterns are tested on, which start nothing",
-  "packages/host-guard/src/cap.ts":
-    "`systemctl --user kill` of the scope unit this process named and started, which reaches " +
-    "only that scope's processes",
+/**
+ * The kills by a started process that are allowed, each by file, the code that may start it,
+ * and why it may: a kill found anywhere else in the file still counts.
+ */
+export const CLI_KILLS: Readonly<Record<string, { code: RegExp; why: string }>> = {
+  "scripts/signal-paths.ts": {
+    code: /[\s\S]*/,
+    why: "the patterns that find kills, which start nothing",
+  },
+  "scripts/signal-paths.test.ts": {
+    code: /[\s\S]*/,
+    why: "the fixtures those patterns are tested on, which start nothing",
+  },
+  "packages/host-guard/src/cap.ts": {
+    code: /output\(\s*"systemctl",\s*\["--user",\s*"kill",\s*`--signal=\$\{signal\}`,\s*unit\]\)/,
+    why:
+      "`systemctl --user kill` of the scope unit this process named and started, which reaches " +
+      "only that scope's processes",
+  },
 };
 
 /** The literals that start a kill: a program sending one, or a shell or systemctl doing so. */
@@ -156,17 +184,31 @@ function kills(literals: { index: number; body: string }[], code: string) {
           STARTS_PROGRAM.test(code.slice(Math.max(0, l.index - 40), l.index))),
     )
     .map((l) => ({ index: l.index, line: lineAt(code, l.index), call: `a kill by "${l.body}"` }));
-  // `systemctl kill` as a program and its arguments: "systemctl", options, then "kill".
   literals.forEach((l, n) => {
-    if (SYSTEMCTL.test(l.body) && literals.slice(n + 1, n + 5).some((a) => a.body === "kill"))
+    const next = literals.slice(n + 1, n + 5);
+    // `systemctl kill` as a program and its arguments: "systemctl", options, then "kill".
+    if (SYSTEMCTL.test(l.body) && next.some((a) => a.body === "kill"))
       out.push({ index: l.index, line: lineAt(code, l.index), call: "systemctl kill" });
+    // A launcher handed a kill program: `env`, `sudo`, `timeout` and the like, then "kill".
+    if (LAUNCHER.test(l.body) && next.some((a) => KILL_PROGRAM.test(a.body)))
+      out.push({ index: l.index, line: lineAt(code, l.index), call: `a kill by "${l.body}"` });
   });
   return out;
 }
 
+/** The spans of `text` where a kill by a started process is allowed (CLI_KILLS). */
+function allowedKills(file: string, text: string): [number, number][] {
+  const allowed = CLI_KILLS[file];
+  if (allowed === undefined) return [];
+  const pattern = new RegExp(allowed.code.source, "g");
+  return [...text.matchAll(pattern)].map((m) => [m.index, m.index + m[0].length]);
+}
+
+const outside = (spans: [number, number][]) => (m: { index: number }) =>
+  !spans.some(([from, to]) => m.index >= from && m.index < to);
+
 /** Each raw signal call in a file, by line, whatever else the file is. */
 export function rawSignalCalls(file: string, text: string): { line: number; call: string }[] {
-  const startable = !Object.hasOwn(CLI_KILLS, file);
   if (file.endsWith(".rs")) {
     const strings: string[] = [];
     const code = rustCode(text, strings);
@@ -174,7 +216,8 @@ export function rawSignalCalls(file: string, text: string): { line: number; call
       index: m.index,
       body: strings[n] ?? "",
     }));
-    return [...found(code, RUST_RAW), ...(startable ? kills(literals, code) : [])]
+    const spans = allowedKills(file, code);
+    return [...found(code, RUST_RAW), ...kills(literals, code).filter(outside(spans))]
       .toSorted((a, b) => a.index - b.index)
       .map(({ line, call }) => ({ line, call }));
   }
@@ -190,12 +233,27 @@ export function rawSignalCalls(file: string, text: string): { line: number; call
     (m) => code.slice(m.index, m.index + 6) === "import",
   );
   const computed = found(kept, TS_KILL_COMPUTED).filter(inCode);
+  // What else names `process`: a default or namespace import of it, or a constant bound to it.
+  const aliases = [
+    ...kept.matchAll(/\bimport\s+(?:\*\s+as\s+)?(\w+)\s+from\s*["'](?:node:)?process["']/g),
+    ...code.matchAll(
+      /\b(?:const|let|var)\s+(\w+)\s*=\s*(?:globalThis\s*\.\s*)?process\b(?!\s*\.)/g,
+    ),
+  ].flatMap((m) => (m[1] === undefined || !inCode(m) ? [] : [m[1]]));
+  const viaAlias = aliases.flatMap((alias) => [
+    ...found(code, new RegExp(`\\b${alias}\\s*\\??\\.\\s*kill\\b`, "g")),
+    ...found(
+      kept,
+      new RegExp(`\\b${alias}\\s*\\??\\.?\\s*\\[\\s*["'\`]kill["'\`]\\s*\\]`, "g"),
+    ).filter(inCode),
+  ]);
   return [
     ...found(code, TS_KILL),
     ...found(code, TS_KILL_BOUND),
     ...imports,
     ...computed,
-    ...(startable ? kills(literals, code) : []),
+    ...viaAlias,
+    ...kills(literals, code).filter(outside(allowedKills(file, kept))),
   ]
     .toSorted((a, b) => a.index - b.index)
     .map(({ line, call }) => ({ line, call }));

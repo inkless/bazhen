@@ -1494,10 +1494,14 @@ describe("the signal chokepoints", () => {
       "bazhen-test-signal = { workspace = true }",
       "[dev-dependencies]",
       "bazhen-test-signal = { workspace = true }",
+      "[dependencies.bazhen-test-signal]",
+      "workspace = true",
+      "[target.'cfg(unix)'.dev-dependencies.bazhen-test-signal]",
+      "workspace = true",
     ].join("\n");
     expect(
       testSignalDependencyFailures("crates/x/Cargo.toml", manifest).map((f) => f.split(": ")[0]),
-    ).toEqual(["crates/x/Cargo.toml:2", "crates/x/Cargo.toml:4"]);
+    ).toEqual(["crates/x/Cargo.toml:2", "crates/x/Cargo.toml:4", "crates/x/Cargo.toml:7"]);
   });
 
   it("names a chokepoint that no longer exists", () => {

@@ -7,6 +7,7 @@
 //! `require_sandbox`, which each such test calls first.
 
 use std::os::unix::fs::MetadataExt as _;
+use std::path::Path;
 
 pub use rustix::process::Signal;
 use rustix::process::{Pid, getpgid, getpgrp, getpid, getppid};
@@ -32,12 +33,19 @@ pub struct NotSandboxed;
 /// When it doesn't. Each test ignored as signalling processes calls this first and unwraps it,
 /// so a run that includes it off a sandbox fails loudly instead of signalling anything.
 pub fn require_sandbox() -> Result<(), NotSandboxed> {
-    let marker = std::fs::symlink_metadata(DISPOSABLE_HOST_MARKER).ok();
-    if marks_sandbox(marker.map(|m| (m.is_file(), m.uid()))) {
+    if marks_sandbox(marker_at(Path::new(DISPOSABLE_HOST_MARKER))) {
         Ok(())
     } else {
         Err(NotSandboxed)
     }
+}
+
+/// The marker at `path`, as whether it is a plain file and who owns it. Read without following a
+/// link, so a link anyone made to a file root owns doesn't pass for root's marker.
+fn marker_at(path: &Path) -> Option<(bool, u32)> {
+    std::fs::symlink_metadata(path)
+        .ok()
+        .map(|m| (m.is_file(), m.uid()))
 }
 
 /// Whether a marker, as whether it is a plain file and who owns it, marks a sandbox.
@@ -277,6 +285,41 @@ mod tests {
         for marker in [None, Some((true, 1000)), Some((false, 0))] {
             assert!(!marks_sandbox(marker), "{marker:?}");
         }
+    }
+
+    #[test]
+    fn reads_a_marker_without_following_a_link() {
+        let link = std::env::temp_dir().join(format!("bz-marker-link-{}", std::process::id()));
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink("/etc/passwd", &link).unwrap();
+        let read = (marker_at(Path::new("/etc/passwd")), marker_at(&link));
+        std::fs::remove_file(&link).unwrap();
+        assert_eq!(read.0, Some((true, 0)));
+        assert_eq!(read.1.map(|(file, _)| file), Some(false));
+        assert_eq!(marker_at(&link), None);
+    }
+
+    // The check runs only once the process is pinned, so a process that is gone is never
+    // checked: a plain kill after the check would run it first. The check refuses, so even a
+    // reused pid gets nothing.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn pins_a_process_before_checking_it() {
+        let mut child = Command::new("true").spawn().unwrap();
+        let pid = child.id();
+        child.wait().unwrap();
+        let checked = std::cell::Cell::new(false);
+        let sent = signal_if(pid, Signal::KILL, || {
+            checked.set(true);
+            false
+        });
+        assert_eq!(
+            (sent, checked.get()),
+            (
+                Err(Refused::Failed(pid.into(), rustix::io::Errno::SRCH)),
+                false
+            )
+        );
     }
 
     #[test]

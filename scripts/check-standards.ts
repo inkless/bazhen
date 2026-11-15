@@ -1933,6 +1933,9 @@ function testLines(source: string): Set<number> {
   return new Set(all.flatMap((line, i) => (line === product[i] ? [] : [i + 1])));
 }
 
+/** A dev-dependencies table, plain or a target's, or a crate's own table inside one. */
+const devTable = (name: string) => /(?:^|\.)dev-dependencies(?:\.|$)/.test(name);
+
 const TEST_SIGNAL_MANIFEST = "crates/bazhen-test-signal/Cargo.toml";
 
 /**
@@ -1943,9 +1946,8 @@ export function testSignalDependencyFailures(manifest: string, text: string): st
   let table = "";
   return text.split("\n").flatMap((line, i) => {
     const header = /^\s*\[([^\]]+)\]/.exec(line);
-    if (header !== null) table = (header[1] ?? "").trim();
-    if (header !== null || !/\bbazhen-test-signal\b/.test(line) || table === "dev-dependencies")
-      return [];
+    if (header !== null) table = (header[1] ?? "").trim().replaceAll(/["']/g, "");
+    if (!/\bbazhen-test-signal\b/.test(line) || devTable(table)) return [];
     return [
       `${manifest}:${i + 1}: takes bazhen-test-signal under [${table}]; only [dev-dependencies] ` +
         "may, as it signals whatever a test names (docs/standards/testing.md).",

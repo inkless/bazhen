@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  groupInPs,
+  groupInStat,
   isAlive,
   killHolder,
   signalGroup,
@@ -127,5 +129,23 @@ describe("a proof for this process or its parent", () => {
       "this process",
     );
     expect(kill).not.toHaveBeenCalled();
+  });
+});
+
+describe("reading this process's group", () => {
+  it("reads the fifth field of a stat line, past a command holding spaces and parentheses", () => {
+    expect(groupInStat("4242 (node (x) y) S 4000 3000 3000 0 -1")).toBe(3000);
+  });
+
+  it("reads nothing, 0 or 1 as unknown, so the floor refuses every group", () => {
+    expect(
+      [
+        groupInStat("4242 (node) S 4000 0 0"),
+        groupInStat(""),
+        groupInPs(""),
+        groupInPs("  1\n"),
+      ].map(Number.isNaN),
+    ).toEqual([true, true, true, true]);
+    expect(groupInPs(" 3000\n")).toBe(3000);
   });
 });

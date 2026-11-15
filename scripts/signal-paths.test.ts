@@ -103,10 +103,60 @@ describe("kills by a process started to send them", () => {
   });
 
   it("allows host-guard's cap its own scope's systemctl kill, and nothing else there", () => {
+    const cap = "packages/host-guard/src/cap.ts";
+    const own = 'output("systemctl", ["--user", "kill", `--signal=${signal}`, unit]);';
+    expect(calls(cap, own)).toEqual([]);
+    expect(calls(cap, `${own}\noutput("systemctl", ["--user", "kill", other]);`)).toEqual([
+      "systemctl kill",
+    ]);
+    expect(calls(cap, "process.kill(pid);")).toEqual(["process.kill"]);
+  });
+
+  it("finds a kill a shell or a launcher hides: past --, quoted, formatted, bare, or handed on", () => {
+    const shells = [
+      "kill -- -1",
+      "kill -KILL -- -1",
+      "kill -s TERM -- -$pid",
+      'kill -TERM "$pid"',
+      "kill -TERM -{pid}",
+      "kill -9 {}",
+      "pgrep x | xargs kill",
+      "kill -9",
+    ];
     expect(
-      calls("packages/host-guard/src/cap.ts", 'output("systemctl", ["--user", "kill", u]);'),
-    ).toEqual([]);
-    expect(calls("packages/host-guard/src/cap.ts", "process.kill(pid);")).toEqual(["process.kill"]);
+      shells.map((shell) => calls("a.ts", `spawn("sh", ["-c", ${JSON.stringify(shell)}]);`).length),
+    ).toEqual(shells.map(() => 1));
+    const launchers = ["env", "sudo", "timeout", "/usr/bin/setsid"];
+    expect(launchers.flatMap((l) => calls("a.ts", `spawn("${l}", ["kill", "-9", pid]);`))).toEqual(
+      launchers.map((l) => `a kill by "${l}"`),
+    );
+  });
+
+  it("finds process.kill through an alias of process, by import or constant", () => {
+    const source = [
+      'import proc from "node:process";',
+      'import * as nproc from "node:process";',
+      "const p = globalThis.process;",
+      'proc.kill(-1, "SIGKILL");',
+      "nproc.kill(1);",
+      'p["kill"](2);',
+      "const s = 'proc.kill(3)';",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([4, 5, 6]);
+  });
+
+  it("finds Rust's kill by a use group or a raw syscall", () => {
+    expect(
+      calls(
+        "a.rs",
+        "use nix::sys::signal::{kill, Signal};\nuse libc::{getpid, kill};\nlibc::syscall(libc::SYS_kill, p, 9);\nlibc::sigqueue(p, 9, v);",
+      ),
+    ).toEqual([
+      "use nix::sys::signal::{kill, Signal}",
+      "use libc::{getpid, kill}",
+      "SYS_kill",
+      "sigqueue",
+    ]);
   });
 
   it("finds a computed process['kill'], but not one in a string", () => {

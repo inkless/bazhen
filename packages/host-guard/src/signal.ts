@@ -104,22 +104,33 @@ export function rethrowUnsafe(error: unknown): void {
 
 let group: number | undefined;
 
+/** A process group read as text, or NaN for anything but one above 1: 0 and 1 aren't ours. */
+const asGroup = (text: string | undefined) => {
+  const pgid = Number(text?.trim() === "" ? Number.NaN : text);
+  return Number.isSafeInteger(pgid) && pgid > 1 ? pgid : Number.NaN;
+};
+
+/** The process group in a /proc/<pid>/stat line: the fifth field, past the command's `)`. */
+export const groupInStat = (stat: string) =>
+  asGroup(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[2]);
+
+/** The process group `ps -o pgid=` printed. */
+export const groupInPs = (out: string) => asGroup(out);
+
 /**
  * This process's group, which a negated pid of it would end along with the run that started
- * this one: /proc/self/stat's fifth field, past the command in parentheses, or `ps` where there
- * is no /proc. NaN if neither says.
+ * this one: from /proc/self/stat, or `ps` where there is no /proc. NaN if neither says, and the
+ * floor then refuses every group.
  */
 function thisGroup(): number {
   if (group !== undefined) return group;
   try {
-    const stat = readFileSync("/proc/self/stat", "utf8");
-    group = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[2]);
+    group = groupInStat(readFileSync("/proc/self/stat", "utf8"));
   } catch {
     try {
-      const pgid = execFileSync("ps", ["-o", "pgid=", "-p", String(process.pid)], {
-        encoding: "utf8",
-      });
-      group = Number(pgid.trim());
+      group = groupInPs(
+        execFileSync("ps", ["-o", "pgid=", "-p", String(process.pid)], { encoding: "utf8" }),
+      );
     } catch {
       group = Number.NaN;
     }

@@ -126,9 +126,11 @@ const guard = (reports: { tmux: boolean; kill: boolean }) => ({
             } else childProcess.add(local);
           }
           if (PROCESS.has(source)) {
-            if (spec.type === "ImportSpecifier" && imported === "kill")
+            if (spec.type === "ImportSpecifier" && imported === "kill") {
               if (reports.kill) context.report({ node: spec, message: KILL });
-              else if (spec.type !== "ImportSpecifier") processes.add(local);
+            } else if (spec.type !== "ImportSpecifier") {
+              processes.add(local);
+            }
           }
         }
       },

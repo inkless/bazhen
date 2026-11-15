@@ -302,14 +302,18 @@ impl Drop for Started {
             // Not yet reaped, so the pid is still this holder's.
             let _ = child.kill();
             let _ = child.wait();
-        } else if !self.reaped {
+        } else if !self.reaped
             // `exit` timed out, and its thread still waits for the holder.
-            let ended = kill_holder(self.pid, self.start);
+            && let Err(refused) = kill_holder(self.pid, self.start)
+        {
+            // The holder may still run, so its entry stays for the next sweep. Already
+            // unwinding, a second panic would abort the run and hide the first.
             assert!(
-                ended.is_ok() || std::thread::panicking(),
-                "couldn't end holder {}: {ended:?}",
+                std::thread::panicking(),
+                "couldn't end holder {}: {refused}",
                 self.pid
             );
+            return;
         }
         let _ = std::fs::remove_file(&self.entry);
     }
