@@ -57,7 +57,7 @@ function animate(move: (change: { height: number }) => void, from: number, to: n
 }
 
 beforeEach(() => {
-  vi.useFakeTimers();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
 });
 
 afterEach(() => {

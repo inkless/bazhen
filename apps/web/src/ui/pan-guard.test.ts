@@ -45,6 +45,11 @@ describe("a drag's direction", () => {
     expect([mayScroll([list], 0, SLOP_PX), mayScroll([list], SLOP_PX, 0)]).toEqual([true, false]);
   });
 
+  it("moves nothing on a sideways scroller, the key bar, for a first move that leans up or down", () => {
+    const bar = box({ overflowX: "auto", scrollWidth: 600 });
+    expect([mayScroll([bar], 0, 3), mayScroll([bar], 3, 0)]).toEqual([false, true]);
+  });
+
   it("moves nothing, from its first pixel, where nothing scrolls either way", () => {
     expect(mayScroll([box()], 1, 0)).toBe(false);
   });

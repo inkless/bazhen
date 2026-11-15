@@ -75,7 +75,7 @@ export function followViewport(
   let last: AppViewport | null = null;
   let heldUntil = 0;
   const read = () => {
-    const held = last?.typing === true && Date.now() < heldUntil;
+    const held = last?.typing === true && performance.now() < heldUntil;
     const now = appViewport(window.innerHeight, viewport, focus.inTerminal() || held);
     if (now === null || same(now, last)) return;
     last = now;
@@ -95,7 +95,7 @@ export function followViewport(
   };
   const left = () => {
     if (last?.typing === true && !focus.inTerminal()) {
-      heldUntil = Date.now() + TYPING_HELD_MS;
+      heldUntil = performance.now() + TYPING_HELD_MS;
       clearTimeout(releasing);
       releasing = setTimeout(read, TYPING_HELD_MS);
     }

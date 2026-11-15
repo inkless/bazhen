@@ -85,6 +85,16 @@ const SCREENS: readonly Screen[] = [
     cap: 0.4,
     chrome: 310.6,
   },
+  // Too short to stack the TUI and the dock (under 40rem), wide enough to sit them beside each
+  // other: as on a desktop, but the TUI's column is its status and attach line, and a row.
+  {
+    name: "a short, wide desktop",
+    options: { viewport: { width: 1280, height: 560 } },
+    visible: 560,
+    above: 102,
+    cap: 0.4,
+    chrome: 106.4,
+  },
 ];
 
 function phone(width: number, height: number): BrowserContextOptions {
@@ -389,11 +399,16 @@ test("keeps a drag over what can't scroll from moving the page, but not a pinch 
   browser,
 }) => {
   const page = await open(browser, phone(390, 844), `#/agent/${agentId}`);
+  // The key bar scrolls sideways at this width, which mustn't let a drag up start a page pan.
+  const overflows = `(() => { const bar = document.querySelector(".key-bar");
+    return bar.scrollWidth > bar.clientWidth; })()`;
   expect([
+    await page.evaluate<boolean>(overflows),
     await dragPrevented(page, ".key-bar", -40),
+    await dragPrevented(page, ".key-bar", -3),
     await dragPrevented(page, ".key-bar", -40, 2),
     await dragPrevented(page, ".workspace-info input", -40),
-  ]).toEqual([true, false, false]);
+  ]).toEqual([true, true, true, false, false]);
   await page.context().close();
 });
 
@@ -407,5 +422,22 @@ test("keeps focus on the page when a phone swaps the fleet for the agent opened 
   await expect
     .poll(() => page.evaluate<boolean>(`document.activeElement?.closest(".centre") != null`))
     .toBe(true);
+  await page.context().close();
+});
+
+/** Whether the second terminal, the dock's shell, sits wholly to the right of the TUI. */
+async function dockBeside(page: Page): Promise<boolean> {
+  const [tui, shell] = await terminalBoxes(page);
+  return tui !== undefined && shell !== undefined && shell.x >= tui.x + tui.width;
+}
+
+test("sits the dock beside the TUI on a desktop too short to stack them", async ({ browser }) => {
+  const page = await open(
+    browser,
+    { viewport: { width: 1280, height: 560 } },
+    `#/agent/${agentId}`,
+  );
+  await expect(page.locator(".xterm-screen")).toHaveCount(2);
+  expect([await dockBeside(page), await terminalsInView(page)]).toEqual([true, true]);
   await page.context().close();
 });

@@ -24,12 +24,17 @@ export const SLOP_PX = 10;
 
 /**
  * Whether a drag `dx`, `dy` from where it started may move something in `boxes`: along its
- * direction once it has one, either way before.
+ * direction once it has one. Before then, something that scrolls up and down may take it whichever
+ * way it leans, since a swipe down a list can start a pixel or two sideways; something that only
+ * scrolls sideways, the key bar on a narrow phone, takes it only while it doesn't lean up or down,
+ * as once iOS starts panning the page a later move can't stop it.
  */
 export function mayScroll(boxes: readonly ScrollBox[], dx: number, dy: number): boolean {
   const x = Math.abs(dx);
   const y = Math.abs(dy);
-  if (Math.max(x, y) < SLOP_PX) return scrollsAlong(boxes, "x") || scrollsAlong(boxes, "y");
+  if (Math.max(x, y) < SLOP_PX) {
+    return scrollsAlong(boxes, "y") || (x >= y && scrollsAlong(boxes, "x"));
+  }
   return scrollsAlong(boxes, x > y ? "x" : "y");
 }
 
