@@ -65,6 +65,7 @@ version = "0.1.0"
 dependencies = [
  "bazhen-holder-proto",
  "libc",
+ "proptest",
  "rustix",
  "serde_json",
  "signal-hook",

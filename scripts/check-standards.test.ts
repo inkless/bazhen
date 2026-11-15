@@ -259,7 +259,7 @@ describe("attributeFailures", () => {
     const source = [
       "#[cfg(not(debug_assertions))]",
       '#[cfg(feature = "slow")]',
-      '#[cfg_attr(target_os = "macos", derive(Debug))]',
+      '#[cfg_attr(target_os = "windows", derive(Debug))]',
       "#[cfg(all(test, unix))]",
       "#[cfg(not(test))]",
       "#[cfg(test)]",
@@ -276,6 +276,46 @@ describe("attributeFailures", () => {
       "crates/x/src/a.rs:5",
       "crates/x/src/a.rs:10",
     ]);
+  });
+
+  it("lets code be built for Linux or macOS alone, which a gate each builds, and no other OS", () => {
+    const source = [
+      '#[cfg(target_os = "linux")]',
+      '#[cfg(any(target_os = "linux", target_os = "macos"))]',
+      '#[cfg_attr(target_os = "macos", derive(Debug))]',
+      '#[cfg(target_os = r"linux")] // a raw string is read for its value',
+      '#[cfg(target_os = "windows")]',
+      '#[cfg(any(target_os = "linux", target_os = "freebsd"))]',
+      '#[cfg(target_os = r#"windows"#)]',
+      "#[cfg(target_os)]",
+      '#[cfg(not(target_os = "linux"))]',
+      "#[cfg(",
+      '    target_os = "ios"',
+      ")]",
+      '#[cfg(target_os = r"windows")] // target_os = "linux"',
+      '#[cfg(target_os = "linux")] #[cfg(target_os = "android")]',
+      '#[cfg_attr(target_os = "linux", cfg(target_os = r"windows"))]',
+    ].join("\n");
+    const failures = scan(source);
+    expect(failures.map((f) => f.split(": ")[0])).toEqual([
+      "crates/x/src/a.rs:5",
+      "crates/x/src/a.rs:6",
+      "crates/x/src/a.rs:7",
+      "crates/x/src/a.rs:8",
+      "crates/x/src/a.rs:9",
+      "crates/x/src/a.rs:10",
+      "crates/x/src/a.rs:13",
+      "crates/x/src/a.rs:14",
+      "crates/x/src/a.rs:15",
+    ]);
+    const named = (line: number) =>
+      failures.find((f) => f.startsWith(`crates/x/src/a.rs:${line}:`));
+    expect(named(6)).toContain('target_os = "freebsd"');
+    expect(named(7)).toContain('target_os = "windows"');
+    expect(named(10)).toContain('target_os = "ios"');
+    expect(named(13)).toContain('target_os = "windows"');
+    expect(named(14)).toContain('target_os = "android"');
+    expect(named(15)).toContain('target_os = "windows"');
   });
 
   it("reads a C raw string as a string, so it can't hide what follows", () => {

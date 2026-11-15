@@ -403,6 +403,9 @@ const UNSAFE_MODULES: Record<string, string> = {
     "libc's sigprocmask and signal there, to give it an empty signal mask and default " +
     "dispositions; and libc's fcntl and close, for the fds the holder inherited, which no Rust " +
     "value owns; rustix covers none of them",
+  "crates/bazhen-holder/src/macos.rs":
+    "libc's sysctl(KERN_PROC_PID), the one call that says when a macOS process started, a zombie " +
+    "included, which ps reads too; rustix doesn't cover it",
 };
 
 const RAW_STRING = /r(#*)"/y;
@@ -412,9 +415,11 @@ const newlinesIn = (text: string) => text.replaceAll(/[^\n]/g, "");
 /**
  * Rust source with its comments removed and every string and char literal emptied, so neither a
  * `//` in a string nor an attribute quoted in one changes what the attributes are. Newlines are
- * kept, so a line in the result is the same line in the source.
+ * kept, so a line in the result is the same line in the source. Each string literal becomes
+ * `""`, and its contents, a raw string's included, are pushed to `strings` in order, so the nth
+ * `""` in the result is `strings[n]`.
  */
-export function rustCode(source: string): string {
+export function rustCode(source: string, strings: string[] = []): string {
   let out = "";
   let i = 0;
   while (i < source.length) {
@@ -447,10 +452,12 @@ export function rustCode(source: string): string {
       const close = `"${raw[1] ?? ""}`;
       const end = source.indexOf(close, i + raw[0].length);
       i = end === -1 ? source.length : end + close.length;
+      strings.push(source.slice(start + raw[0].length, end === -1 ? source.length : end));
       out += `""${newlinesIn(source.slice(start, i))}`;
     } else if (c === '"') {
       i++;
       while (i < source.length && source[i] !== '"') i += source[i] === "\\" ? 2 : 1;
+      strings.push(source.slice(start + 1, i));
       i++;
       out += `""${newlinesIn(source.slice(start, i))}`;
     } else if (c === "'" && (next === "\\" || source[i + 2] === "'")) {
@@ -482,12 +489,20 @@ function closingBracket(code: string, open: number): number {
 // it from the tests.
 const CFG_ALLOWED: Record<string, string> = {
   test: "nextest and clippy's --all-targets build the test configuration",
+  target_os:
+    "`check` builds Linux and `rust-macos` builds macOS, each running clippy and nextest; " +
+    "CFG_VALUES holds it to those two",
 };
 
-/** The predicates of a cfg or cfg_attr attribute that aren't in CFG_ALLOWED. */
-export function cfgOutsideAllowList(body: string): string[] {
+// The values a CFG_ALLOWED key that takes one may be given: only those a gate builds.
+const CFG_VALUES: Record<string, readonly string[]> = {
+  target_os: ["linux", "macos"],
+};
+
+/** The predicate of a cfg or cfg_attr attribute, or undefined for any other attribute. */
+function cfgPredicate(body: string): string | undefined {
   const cfg = /^cfg(_attr)?\s*\(/.exec(body);
-  if (cfg === null) return [];
+  if (cfg === null) return undefined;
   let predicate = body.slice(cfg[0].length);
   if (cfg[1] !== undefined) {
     for (let i = 0, depth = 0; i < predicate.length; i++) {
@@ -498,8 +513,34 @@ export function cfgOutsideAllowList(body: string): string[] {
       }
     }
   }
-  const atoms = predicate.match(/\b[A-Za-z_]\w*\b/g) ?? [];
+  return predicate;
+}
+
+/** The predicates of a cfg or cfg_attr attribute that aren't in CFG_ALLOWED. */
+export function cfgOutsideAllowList(body: string): string[] {
+  const atoms = cfgPredicate(body)?.match(/\b[A-Za-z_]\w*\b/g) ?? [];
   return [...new Set(atoms)].filter((a) => !["all", "any"].includes(a) && !(a in CFG_ALLOWED));
+}
+
+/**
+ * The values a cfg or cfg_attr attribute gives a CFG_VALUES key that aren't on its list, anywhere
+ * in it, a cfg nested in a cfg_attr included. `body` is the attribute as rustCode gives it, with
+ * comments gone and each string `""`, and `strings` the contents of those strings, in order. A use
+ * of the key that isn't `key = "value"` counts as outside the list.
+ */
+export function cfgValuesOutsideAllowList(body: string, strings: readonly string[]): string[] {
+  if (cfgPredicate(body) === undefined) return [];
+  const out: string[] = [];
+  for (const [key, allowed] of Object.entries(CFG_VALUES)) {
+    const uses = body.match(new RegExp(`\\b${key}\\b`, "g"))?.length ?? 0;
+    const given = [...body.matchAll(new RegExp(`\\b${key}\\s*=\\s*""`, "g"))].map((m) => {
+      const nth = body.slice(0, m.index + m[0].length).match(/""/g)?.length ?? 0;
+      return strings[nth - 1] ?? "";
+    });
+    out.push(...given.filter((v) => !allowed.includes(v)).map((v) => `${key} = "${v}"`));
+    if (given.length !== uses) out.push(`${key} written other than as ${key} = "..."`);
+  }
+  return out;
 }
 
 const UNSAFE_EXPECT = /^expect\s*\(\s*unsafe_code\s*,\s*reason\s*=\s*""\s*,?\s*\)$/;
@@ -516,7 +557,8 @@ export function attributeFailures(
   source: string,
   unsafeModules: Record<string, string>,
 ): string[] {
-  const code = rustCode(source);
+  const strings: string[] = [];
+  const code = rustCode(source, strings);
   const out: string[] = [];
   const at = (i: number) => `${file}:${code.slice(0, i).split("\n").length}`;
   for (let i = code.indexOf("#"); i !== -1; i = code.indexOf("#", i + 1)) {
@@ -533,6 +575,8 @@ export function attributeFailures(
     const body = code.slice(i + head[0].length, end - 1).trim();
     const where = at(i);
     const attribute = `#${head[1]}[${body.replaceAll(/\s+/g, " ")}]`;
+    const first = code.slice(0, i + head[0].length).match(/""/g)?.length ?? 0;
+    const values = cfgValuesOutsideAllowList(body, strings.slice(first));
     i = end - 1;
     if (body.includes("$")) {
       out.push(
@@ -559,6 +603,12 @@ export function attributeFailures(
         `${where}: ${attribute} compiles code only under ${cfgOutsideAllowList(body).join(", ")}, ` +
           "which the gates never build, so no lint or test reads it. Use a cfg in CFG_ALLOWED in " +
           `scripts/check-standards.ts, or add one there with why ${SEE_RUST_MD}`,
+      );
+    } else if (values.length > 0) {
+      out.push(
+        `${where}: ${attribute} compiles code only under ${values.join(", ")}, which no gate ` +
+          "builds. Use a value in CFG_VALUES in scripts/check-standards.ts, or add a gate that " +
+          `builds it ${SEE_RUST_MD}`,
       );
     } else if (/(?:^|,)\s*(ignore|should_panic)\b/.test(body)) {
       out.push(
@@ -620,8 +670,13 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-holder-proto/src/frame.rs::FrameDecoder::next_frame": "frame",
   "crates/bazhen-holder-proto/src/lib.rs::decode_spawn_spec": "spawn_spec",
   "crates/bazhen-holder-engine/src/lib.rs::Engine::advance": "advance",
+  "crates/bazhen-holder/src/start_time.rs::epoch_seconds": "proc_stat",
+  "crates/bazhen-holder/src/start_time.rs::start_ticks": "proc_stat",
+  "crates/bazhen-holder/src/start_time.rs::boot_time": "proc_stat",
 };
 const NOT_DECODERS: Record<string, string> = {
+  "crates/bazhen-holder/src/start_time.rs::decimal":
+    "reached only through start_ticks and boot_time, which proc_stat fuzzes",
   "crates/bazhen-holder/src/child.rs::Reaper::fd":
     "borrows the wake-up socket for poll; reads nothing",
   "crates/bazhen-holder/src/child.rs::Reaper::clear":
