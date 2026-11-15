@@ -74,6 +74,7 @@ fn report(stats: Option<Stats>, fed: usize, seconds: f64) -> String {
         history_bytes: 0,
         history_rows: 0,
         overflows: 0,
+        dropped_replies: 0,
     });
     // In KiB, which an f64 holds exactly for any count a run could feed.
     let megabytes = f64::from(u32::try_from(fed / 1024).unwrap_or(u32::MAX)) / 1024.0;

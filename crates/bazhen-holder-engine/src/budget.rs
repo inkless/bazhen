@@ -30,6 +30,9 @@ pub(crate) enum Stop {
     AltScreen,
     /// A title pushed past `MOST_TITLES`, which the engine undoes.
     TitlePush,
+    /// XTVERSION, which vte doesn't parse: the engine answers it here, in its place among the
+    /// replies.
+    Version,
 }
 
 #[derive(Debug)]
@@ -191,6 +194,9 @@ impl Perform for Budget {
             't' if handled && first == 22 && self.titles < MOST_TITLES => self.titles += 1,
             't' if handled && first == 22 => self.stop = Some(Stop::TitlePush),
             't' if handled && first == 23 => self.titles = self.titles.saturating_sub(1),
+            'q' if !ignore && intermediates == b">" && first == 0 => {
+                self.stop = Some(Stop::Version);
+            }
             'h' | 'l' if intermediates == b"?" && switches_screen(params) => {
                 self.stop = Some(Stop::AltScreen);
             }

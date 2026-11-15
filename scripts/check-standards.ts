@@ -673,6 +673,7 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-holder-proto/src/frame.rs::FrameDecoder::next_frame": "frame",
   "crates/bazhen-holder-proto/src/lib.rs::decode_spawn_spec": "spawn_spec",
   "crates/bazhen-holder-engine/src/lib.rs::Engine::advance": "advance",
+  "crates/bazhen-holder-engine/src/replies.rs::replies_are_whole": "advance",
   "crates/bazhen-holder/src/start_time.rs::epoch_seconds": "proc_stat",
   "crates/bazhen-holder/src/start_time.rs::start_ticks": "proc_stat",
   "crates/bazhen-holder/src/start_time.rs::boot_time": "proc_stat",
@@ -859,6 +860,8 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-holder-engine/src/capped.rs::Capped::clipboard_store":
     "vte's callback with what it parsed; reached only through Engine::advance, which is fuzzed",
   "crates/bazhen-holder-engine/src/differential.rs::FullHistory::advance":
+    "test code: the differential test's reference terminal, compiled only under cfg(test)",
+  "crates/bazhen-holder-engine/src/differential.rs::FullHistory::advance_noting_alt":
     "test code: the differential test's reference terminal, compiled only under cfg(test)",
   "crates/bazhen-holder-engine/src/differential.rs::FullHistory::feed":
     "test code: the differential test's reference terminal, compiled only under cfg(test)",

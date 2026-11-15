@@ -9,6 +9,9 @@
 //! It tells [`Tracker`] of the calls that change a mode alacritty keeps to itself or ignores,
 //! before passing them on, so the tracker sees them with alacritty's cursor as it was.
 //!
+//! It answers colour queries itself, as alacritty leaves them to a window that knows its colours:
+//! the program's own colour, if it set one, else what the engine was given.
+//!
 //! It drops OSC 8 hyperlinks too: alacritty keeps a link on every cell drawn while it is set, up
 //! to an OSC string's 1 KiB each, so a link per cell would cost a GiB at the largest size, and the
 //! engine serves none (only the pen is encoded). Every other call goes to alacritty as it is, but
@@ -20,6 +23,7 @@ use alacritty_terminal::index::Column;
 use alacritty_terminal::term::Term;
 use alacritty_terminal::term::TermMode;
 use alacritty_terminal::term::cell::Flags;
+use alacritty_terminal::term::color;
 use alacritty_terminal::vte::ansi::{
     Attr, CharsetIndex, ClearMode, CursorShape, CursorStyle, Handler, Hyperlink, KeyboardModes,
     KeyboardModesApplyBehavior, LineClearMode, Mode, ModifyOtherKeys, NamedPrivateMode,
@@ -27,14 +31,18 @@ use alacritty_terminal::vte::ansi::{
 };
 use unicode_width::UnicodeWidthChar as _;
 
-use crate::Sink;
 use crate::modes::Tracker;
+use crate::replies::Sink;
 
 /// The most bytes of UTF-8 one cell holds, its char and the zero-width chars on it, as tmux's
 /// `UTF8_SIZE`.
 pub(crate) const MOST_CELL_BYTES: usize = 21;
 
-pub(crate) struct Capped<'a>(pub(crate) &'a mut Term<Sink>, pub(crate) &'a mut Tracker);
+pub(crate) struct Capped<'a>(
+    pub(crate) &'a mut Term<Sink>,
+    pub(crate) &'a mut Tracker,
+    pub(crate) &'a Sink,
+);
 
 impl std::fmt::Debug for Capped<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -324,7 +332,9 @@ impl Handler for Capped<'_> {
     }
 
     fn dynamic_color_sequence(&mut self, a0: String, a1: usize, a2: &str) {
-        <Term<Sink> as Handler>::dynamic_color_sequence(self.0, a0, a1, a2);
+        // vte asks for no colour past the cursor's, but a table index is checked all the same.
+        let set = (a1 < color::COUNT).then(|| self.0.colors()[a1]).flatten();
+        self.2.answer_colour(set, &a0, a1, a2);
     }
 
     fn reset_color(&mut self, a: usize) {
