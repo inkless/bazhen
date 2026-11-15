@@ -5,6 +5,9 @@ import type { Store } from "../store/store.ts";
 /** What became of a report: kept, older than the kept line, or not the shell's own. */
 export type ReportOutcome = "kept" | "stale" | "refused";
 
+/** How far ahead of the daemon's clock a report's time may be. */
+const AHEAD_MICROS = 60_000_000;
+
 const hashOf = (token: string): string => createHash("sha256").update(token).digest("hex");
 
 /**
@@ -26,9 +29,11 @@ export function newShellToken(random: (size: number) => Buffer = randomBytes): {
  */
 export class ShellReports {
   private readonly store: Store;
+  private readonly nowMicros: () => number;
 
-  constructor(store: Store) {
+  constructor(store: Store, nowMicros: () => number = () => Date.now() * 1000) {
     this.store = store;
+    this.nowMicros = nowMicros;
   }
 
   report(terminalId: string, report: ShellReport): ReportOutcome {
@@ -37,6 +42,9 @@ export class ShellReports {
     const given = Buffer.from(hashOf(report.token), "hex");
     const expected = Buffer.from(kept, "hex");
     if (given.length !== expected.length || !timingSafeEqual(given, expected)) return "refused";
-    return this.store.noteShellCommand(terminalId, report.at, report.command) ? "kept" : "stale";
+    // A shell's clock, or a report forged with a time far ahead, could otherwise keep every later
+    // line from counting: a report counts as at most a minute ahead of the daemon's own clock.
+    const at = Math.min(report.at, this.nowMicros() + AHEAD_MICROS);
+    return this.store.noteShellCommand(terminalId, at, report.command) ? "kept" : "stale";
   }
 }

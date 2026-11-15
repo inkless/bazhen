@@ -1,5 +1,6 @@
 import type { HttpBindings } from "@hono/node-server";
 import { Hono, type Context } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import type { DeviceAuth } from "../auth/devices.ts";
 import type { AppEnv } from "../http/app.ts";
 import type { PairingCodes } from "../auth/pairing.ts";
@@ -38,6 +39,12 @@ export interface SocketParts {
   /** A shell's integration reported the line it is running (foundation-design §4.8). */
   readonly shellReport: (terminalId: string, report: ShellReport) => ReportOutcome;
 }
+
+/**
+ * The most bytes of a shell's report read before it is refused: a whole line the daemon keeps,
+ * every character escaped as `\uXXXX`, its token and the fields around them fit with room.
+ */
+const REPORT_MAX_BYTES = 16 * 1024;
 
 const forbidden = (c: Context, message: string) => {
   const body: ErrorResponse = { error: "forbidden", message };
@@ -128,19 +135,29 @@ export function socketApp(parts: SocketParts): Hono<{ Bindings: HttpBindings }> 
   // A shell's integration, through the hook client. The line can hold a secret the user typed:
   // it goes to the store and nowhere else, and a refusal names no part of it. Only the socket
   // serves this route, never HTTP.
-  app.post("/v1/shells/:id/report", async (c) => {
-    const req = ShellReport.safeParse(await c.req.json().catch(() => undefined));
-    if (!req.success) {
-      const body: ErrorResponse = {
-        error: "invalid_request",
-        message: "expected { token, at, command }",
-      };
-      return c.json(body, 400);
-    }
-    const outcome = parts.shellReport(c.req.param("id"), req.data);
-    if (outcome === "refused") return forbidden(c, "no such shell, or not its token");
-    return c.body(null, 204);
-  });
+  app.post(
+    "/v1/shells/:id/report",
+    bodyLimit({
+      maxSize: REPORT_MAX_BYTES,
+      onError: (c) => {
+        const body: ErrorResponse = { error: "invalid_request", message: "report too large" };
+        return c.json(body, 413);
+      },
+    }),
+    async (c) => {
+      const req = ShellReport.safeParse(await c.req.json().catch(() => undefined));
+      if (!req.success) {
+        const body: ErrorResponse = {
+          error: "invalid_request",
+          message: "expected { token, at, command }",
+        };
+        return c.json(body, 400);
+      }
+      const outcome = parts.shellReport(c.req.param("id"), req.data);
+      if (outcome === "refused") return forbidden(c, "no such shell, or not its token");
+      return c.body(null, 204);
+    },
+  );
 
   app.route("/", parts.hooks);
   app.route("/", parts.commands);

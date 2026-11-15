@@ -9,6 +9,16 @@ const RC_LINE: Record<IntegratedShell, string> = {
   fish: 'test -n "$BAZHEN_SHELL_INTEGRATION"; and test -r "$BAZHEN_SHELL_INTEGRATION/fish"; and source "$BAZHEN_SHELL_INTEGRATION/fish"',
 };
 
+/**
+ * Each test shell's rc: a prompt that shows the last line's status, around the integration's line,
+ * as a prompt framework would. bash's prompt command is already set, ending in `;`.
+ */
+const RC: Record<IntegratedShell, string> = {
+  zsh: `${RC_LINE.zsh}\nPS1='[st=%?] '`,
+  bash: `PROMPT_COMMAND='history -a;'\n${RC_LINE.bash}\nPS1='[st=$?] '`,
+  fish: `${RC_LINE.fish}\nfunction fish_prompt; echo -n "[st=$status] "; end`,
+};
+
 const TYPED = `echo "$HOME" 'a  b'`;
 const HIDDEN = " export TOKEN=s3cret-kept-out";
 
@@ -18,7 +28,7 @@ describe.each<IntegratedShell>(["zsh", "bash", "fish"])(
     let daemon: Daemon;
     let shell: ReturnType<typeof shellWithRc> | undefined;
     beforeAll(async () => {
-      shell = shellWithRc(kind, RC_LINE[kind]);
+      shell = shellWithRc(kind, RC[kind]);
       daemon = await Daemon.start({
         config: "[shells]\nretype_last_command = true\n",
         env: { SHELL: shell.shell },
@@ -67,6 +77,21 @@ describe.each<IntegratedShell>(["zsh", "bash", "fish"])(
           .map((secret) => `${secret} in ${where}`),
       );
       expect([token.length, found]).toEqual([43, []]);
+    });
+
+    it("leaves the prompt the status of the line that ran", async () => {
+      const { terminalId, view } = await driven();
+      view.type("false\r");
+      await expect
+        .poll(() => daemon.shellScreen(terminalId), { timeout: 15_000 })
+        .toContain("[st=1]");
+      view.type("true\r");
+      await expect
+        .poll(() => daemon.shellScreen(terminalId).trimEnd().split("\n").at(-1), {
+          timeout: 15_000,
+        })
+        .toBe("[st=0]");
+      view.close();
     });
 
     it("forgets the shell's line once it exits", async () => {

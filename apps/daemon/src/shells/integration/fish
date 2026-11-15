@@ -14,7 +14,7 @@ if set -q BAZHEN_SHELL_TOKEN; and test -x "$BAZHEN_HOOK"; and not set -q __bazhe
         string match -q -- ' *' $argv[1]; and return 0
         # The line goes on stdin, never as an argument: arguments show in `ps`.
         builtin printf '%s' $argv[1] | $BAZHEN_HOOK shell-report >/dev/null 2>&1 &
-        disown 2>/dev/null
+        disown $last_pid 2>/dev/null
         return 0
     end
 end

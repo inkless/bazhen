@@ -14,7 +14,7 @@ import { ShellReports } from "./reports.ts";
 const INTEGRATION = { hook: "/state/hook/bazhen-hook", dir: "/state/shell-integration" };
 
 /** Shells on a fake runtime, opened with the integration on unless `integration` is null. */
-function setup(integration: typeof INTEGRATION | null = INTEGRATION) {
+function setup(integration: typeof INTEGRATION | null = INTEGRATION, nowMicros = () => 0) {
   const path = join(mkdtempSync(join(tmpdir(), "bz-reports-")), "bazhen.db");
   const store = Store.open(path);
   const runtime = new FakeRuntime();
@@ -42,7 +42,7 @@ function setup(integration: typeof INTEGRATION | null = INTEGRATION) {
     if (ref == null) throw new Error(`shell ${terminalId} has no terminal`);
     return { terminalId, env: runtime.specOf(ref).env };
   };
-  return { path, store, open, reports: new ShellReports(store) };
+  return { path, store, open, reports: new ShellReports(store, () => nowMicros()) };
 }
 
 const line = (token: string | undefined, at: number, command: string | null) => ({
@@ -113,6 +113,18 @@ describe("shell reports", () => {
       reports.report(terminalId, line(token, 10, "ls")),
     ];
     expect([outcomes, store.lastShellCommand(terminalId)]).toEqual([["kept", "stale"], "pnpm dev"]);
+    store.close();
+  });
+
+  it("counts a report from far ahead as a minute ahead at most, so later lines still count", async () => {
+    let now = 1_000_000_000;
+    const { store, open, reports } = setup(INTEGRATION, () => now);
+    const { terminalId, env } = await open();
+    const token = env.BAZHEN_SHELL_TOKEN;
+    const outcomes = [reports.report(terminalId, line(token, Number.MAX_SAFE_INTEGER, "far"))];
+    now += 61_000_000;
+    outcomes.push(reports.report(terminalId, line(token, now, "pnpm dev")));
+    expect([outcomes, store.lastShellCommand(terminalId)]).toEqual([["kept", "kept"], "pnpm dev"]);
     store.close();
   });
 

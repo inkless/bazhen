@@ -54,21 +54,30 @@ The line is never a process argument, so `ps` never shows it.
   history (`HIST_IGNORE_SPACE`, `HISTCONTROL=ignorespace`). In bash, a line history doesn't keep
   isn't sent either.
 - **Only a line that is safe to type back is kept**: at most 2048 bytes, with no newline, tab,
-  escape or other control character, and no bidirectional override. A newer line that isn't safe
-  to keep clears the old one, so Bazhen never offers a command older than your last.
+  escape or other control character, no bidirectional override, and no character that draws as
+  nothing (a zero-width space or joiner, a directional mark, a line separator), which could hide
+  part of the line typed back. A newer line that isn't safe to keep clears the old one, so Bazhen
+  never offers a command older than your last.
+- **Newest wins.** zsh and bash say when each line started (`$EPOCHREALTIME`); fish can't
+  without starting a process, so the client stamps it as it starts, just after fish begins the
+  line. A report that arrives after a later one changes nothing. A time more than a minute ahead
+  of the daemon's clock counts as a minute ahead, so a wrong clock can't stop later lines from
+  counting for longer than that.
 - **One line per shell.** Each new line replaces the last.
 
 ## Where it is kept, and for how long
 
-The line is kept in one place: the shell's row in Bazhen's database, in `state/bazhen.db` under
-your Bazhen home. That file can only be read by you, and the directory it is in can only be
-opened by you. The line is never written to an event, so it never reaches the event stream, a
+The line is kept in one place: the shell's row in Bazhen's database, `bazhen.db` in its data
+directory (`~/.local/share/bazhen`, or `data/` under `BAZHEN_HOME`). The database and its
+journals can only be read by you. The line is never written to an event, so it never reaches the event stream, a
 dashboard, a paired device or a log, and it isn't in `GET /v1/state`. It is deleted when the
 shell closes, exits or fails to open. A lost shell keeps it for its restart.
 
-SQLite overwrites the deleted line with zeros where it was stored. Until its write-ahead log is
-checkpointed (automatically, and when the daemon stops), an earlier copy of the page can still be
-in `bazhen.db-wal`.
+When a shell closes, SQLite overwrites its line with zeros in the page that held it, and Bazhen
+then writes the write-ahead log into the database and truncates it, so `bazhen.db-wal` keeps no
+earlier copy either. Two limits remain: SQLite doesn't zero a page it frees whole, which keeps
+what it held until the page is reused; and while a shell lives, the lines it ran before its last
+can stay in the write-ahead log until SQLite next checkpoints it.
 
 Turning the setting off forgets every kept line, at the next daemon start.
 
@@ -84,3 +93,7 @@ environment. Any of them could report a line of its own, which the restart would
 prompt instead of yours. It is still checked as above, and it is never run until you press Enter.
 This is the same limit as the rest of Bazhen: it can't defend you against a hostile program
 running as your own user.
+
+On Linux, while Bazhen asks tmux to start the shell, the token is briefly in that tmux command's
+arguments, which other users can read in `/proc`. It gives them nothing: a report goes only over
+Bazhen's socket, which only you can open.

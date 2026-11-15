@@ -14,11 +14,12 @@ if [[ -n ${BAZHEN_SHELL_TOKEN-} && -x ${BAZHEN_HOOK-} && -z ${__bazhen_integrate
   __bazhen_seen=
 
   # At each prompt: the number of the newest history entry, so a line that adds none is told apart.
+  # It hands back the status it found, for a prompt that shows the last line's.
   __bazhen_prompt() {
-    local entry
+    local status=$? entry
     entry=$(HISTTIMEFORMAT='' builtin history 1)
     [[ $entry =~ ^\ *([0-9]+) ]] && __bazhen_seen=${BASH_REMATCH[1]}
-    return 0
+    return "$status"
   }
 
   # Runs from PS0, in a subshell, as the line starts; it prints nothing.
@@ -34,6 +35,12 @@ if [[ -n ${BAZHEN_SHELL_TOKEN-} && -x ${BAZHEN_HOOK-} && -z ${__bazhen_integrate
     return 0
   }
 
-  PROMPT_COMMAND="__bazhen_prompt${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
-  PS0='$(__bazhen_preexec)'"${PS0-}"
+  # Last, so a prompt command already there reads the line's status and PIPESTATUS first. A
+  # newline, not `;`, since PROMPT_COMMAND may already end in one.
+  PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND
+}__bazhen_prompt"
+  # Without promptvars, bash would print PS0's text instead of running it.
+  if shopt -q promptvars; then
+    PS0='$(__bazhen_preexec)'"${PS0-}"
+  fi
 fi

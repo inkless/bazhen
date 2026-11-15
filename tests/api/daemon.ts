@@ -250,6 +250,12 @@ export class Daemon {
     }
   }
 
+  /** A shell's visible screen, as tmux holds it. */
+  shellScreen(terminalId: string): string {
+    const session = this.paneFact(terminalId, "session_name", "@bazhen_terminal_id");
+    return session === undefined ? "" : this.tmux("capture-pane", "-p", "-t", session);
+  }
+
   /** What the daemon has printed since it last started. */
   log(): string {
     return this.output;

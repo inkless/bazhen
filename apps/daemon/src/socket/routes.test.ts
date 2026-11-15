@@ -136,6 +136,19 @@ describe("socketApp", () => {
     ]);
   });
 
+  it("refuses a report body larger than any whole line needs, unread", async () => {
+    const received: string[] = [];
+    const daemon = app(undefined, undefined, undefined, (terminalId) => {
+      received.push(terminalId);
+      return "kept";
+    });
+    const res = await daemon.request("/v1/shells/term_x/report", {
+      method: "POST",
+      body: JSON.stringify({ token: "t", at: 1, command: "x", pad: "y".repeat(17 * 1024) }),
+    });
+    expect([res.status, received]).toEqual([413, []]);
+  });
+
   it("refuses a report the shell's token doesn't vouch for, naming no part of its line", async () => {
     const daemon = app(undefined, undefined, undefined, () => "refused");
     const res = await daemon.request("/v1/shells/term_x/report", {

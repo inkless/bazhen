@@ -62,6 +62,11 @@ describe("a command line kept to type back", () => {
     ]);
   });
 
+  it("refuses a character that draws as nothing, which would hide text in the line typed back", () => {
+    const hidden = ["rm\u200b -rf", "a\u200eb", "a\u061cb", "a\u2028b", "a\u2060b", "\ufeffls"];
+    expect(hidden.map(kept)).toEqual(hidden.map(() => false));
+  });
+
   it("refuses a line the user kept out of their history with a leading space", () => {
     expect([kept(" export TOKEN=s3cret"), kept("export A=1 ")]).toEqual([false, true]);
   });

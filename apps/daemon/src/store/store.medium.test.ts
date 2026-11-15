@@ -1091,7 +1091,7 @@ describe("Store relaunch", () => {
       raw.close();
     });
 
-    it("leaves no trace of a closed shell's line in the database file", () => {
+    it("leaves no trace of a closed shell's line in the database or its journal", () => {
       const path = dbPath();
       const store = Store.open(path);
       // Rows after it on the same page keep a cleared row's old bytes where they stood, unzeroed.
@@ -1106,9 +1106,9 @@ describe("Store relaunch", () => {
         actor: "user",
         payload: { reason: "user" },
       });
-      // Closing the last connection checkpoints the WAL into the file and removes it.
+      const traces = [path, `${path}-wal`].map((file) => readFileSync(file).includes("s3cret"));
       store.close();
-      expect(readFileSync(path).includes("s3cret-on-disk")).toBe(false);
+      expect(traces).toEqual([false, false]);
     });
   });
 });

@@ -282,6 +282,9 @@ function keepPrivate(path: string): void {
   }
 }
 
+/** The events whose projection clears a shell's kept line. */
+const FORGETS_COMMAND: ReadonlySet<EventType> = new Set(["terminal.closed", "terminal.failed"]);
+
 /** A shell terminal as its lifecycle needs it. */
 export interface ShellTerminal {
   readonly terminalId: TerminalId;
@@ -378,6 +381,8 @@ export class Store {
   private host = "";
   private depth = 0;
   private appended = false;
+  /** Whether the transaction committing cleared a shell's kept line. */
+  private scrub = false;
   private afterCommits: (() => void)[] = [];
   private readonly listeners = new Set<() => void>();
   private readonly reactors = new Set<(event: Recorded) => void>();
@@ -418,11 +423,12 @@ export class Store {
     const db = new DatabaseSync(path);
     // NORMAL loses nothing when the daemon dies, only the commits since the last checkpoint on an
     // OS crash or power loss; FULL would flush on every commit, which blocks the event loop.
-    // A shell's last command can hold a secret, and secure_delete zeroes it where it stood once it
-    // is cleared or replaced, rather than leaving it in the page's free space. FAST does so only
-    // where that costs no extra I/O.
+    // A shell's last command can hold a secret. secure_delete zeroes it in its page once it is
+    // cleared or replaced, rather than leaving it in the page's free space; FAST does so only
+    // where that costs no extra I/O, so a page freed whole may keep it until reused. A zero
+    // journal_size_limit truncates the WAL after each checkpoint, rather than keep old frames.
     db.exec(
-      "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000; PRAGMA secure_delete = FAST;",
+      "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000; PRAGMA secure_delete = FAST; PRAGMA journal_size_limit = 0;",
     );
     db.exec("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL) STRICT");
     const store = new Store(db);
@@ -473,6 +479,8 @@ export class Store {
       );
       const id = Number(result.lastInsertRowid);
       this.appended = true;
+      if (FORGETS_COMMAND.has(event.type) && this.lastShellCommand(event.entityId) !== null)
+        this.scrub = true;
       // The projection parses the payload with its type's schema, rolling the event back if
       // it doesn't match.
       const recorded = { id, ts, hostId: this.host, ...event };
@@ -1037,10 +1045,11 @@ export class Store {
    * what it was given while on is no longer wanted, and no shell may report.
    */
   forgetShellCommands(): void {
-    this.prepare(
+    const { changes } = this.prepare(
       `UPDATE terminals SET last_command = NULL, last_command_seq = NULL, report_token_hash = NULL
        WHERE kind = 'shell' AND (last_command IS NOT NULL OR report_token_hash IS NOT NULL)`,
     ).run();
+    if (Number(changes) > 0) this.scrubJournal();
   }
 
   /** The line kept to type back into a shell's replacement, or null when none is. */
@@ -1511,6 +1520,7 @@ export class Store {
         this.db.exec("ROLLBACK");
         this.afterCommits = [];
         this.appended = false;
+        this.scrub = false;
         throw err;
       } finally {
         this.depth--;
@@ -1520,9 +1530,22 @@ export class Store {
     }
     const appended = this.appended;
     this.appended = false;
+    if (this.scrub) {
+      this.scrub = false;
+      this.scrubJournal();
+    }
     this.runAfterCommits();
     if (appended) this.notify();
     return out;
+  }
+
+  /**
+   * Writes the WAL into the database and truncates it, so a shell's cleared line, zeroed in the
+   * database's page, keeps no earlier copy in the journal. A reader holding the WAL open leaves it
+   * for the next checkpoint, which `journal_size_limit` truncates as well.
+   */
+  private scrubJournal(): void {
+    this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
   }
 
   /**

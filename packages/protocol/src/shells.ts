@@ -124,6 +124,13 @@ export const COMMAND_LINE_MAX_BYTES = 2048;
 const encoder = new TextEncoder();
 
 /**
+ * Characters that draw as nothing, or as a line break, so a line holding one types back other
+ * than it looks: zero-width spaces and joiners, the directional marks, the word joiner and
+ * invisible operators, the byte-order mark, and the line and paragraph separators.
+ */
+const INVISIBLE = /[\u061c\u200b-\u200f\u2028\u2029\u2060-\u2064\ufeff]/u;
+
+/**
  * A line the user ran at a shell's prompt, as their shell reported it, kept to type back into
  * the shell's replacement without Enter. A control character there is a key, not text: a newline
  * or carriage return would run the line, and an escape would drive the line editor. A line that
@@ -137,6 +144,9 @@ export const ShellCommandLine = z
   })
   .refine((line) => showable(line) && !hasLoneSurrogate(line), {
     message: "a command line can't hold control characters or bidirectional overrides",
+  })
+  .refine((line) => !INVISIBLE.test(line), {
+    message: "a command line can't hold a character that draws as nothing",
   })
   .refine((line) => encoder.encode(line).length <= COMMAND_LINE_MAX_BYTES, {
     message: `a command line is at most ${COMMAND_LINE_MAX_BYTES} bytes`,
