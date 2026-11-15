@@ -96,7 +96,9 @@ describe("kills by a process started to send them", () => {
       'let s = r#"sh -c "kill -s $s \\$\\$""#;',
       "let t = \"trap 'kill $! 2>/dev/null; exit 0' TERM\";",
       'let u = "kill -TERM \\"$pid\\" && kill -0 ${child}";',
+      'let v = "kill -0 \\"$pid\\"; kill -s TERM -- ${child}";',
       'let p = "the kill guard refuses a group it did not start";',
+      'let q = "resumes the thread after a kill -9, with no TUI to do it";',
       'vi.spyOn(process, "kill");',
     ].join("\n");
     expect(calls("a.rs", source)).toEqual([]);
@@ -139,10 +141,26 @@ describe("kills by a process started to send them", () => {
       "skill -KILL u",
       "loginctl terminate-user $USER",
       "fuser -k 8080/tcp",
+      "fuser --kill 8080/tcp",
+      "sudo -u root kill -9 -1",
+      "timeout -s KILL 5 kill -9 -1",
+      "env -u HOME kill -9 -1",
+      "flock /tmp/l kill -9 -1",
+      "sudo -u me pkill node",
+      "env -i A=1 kill -9 -1",
+      "kill\t-9\t-1",
+      "kill $!; kill 0",
+      "kill 0",
+      "kill -- -$pid",
+      "kill $((pid))",
     ];
     expect(
       shells.map((shell) => calls("a.ts", `spawn("sh", ["-c", ${JSON.stringify(shell)}]);`).length),
     ).toEqual(shells.map(() => 1));
+  });
+
+  it("reads a Rust raw string as a command line too", () => {
+    expect(calls("a.rs", 'let s = r#"sh -c "kill -9 -1""#;')).toHaveLength(1);
   });
 
   it("finds a kill program handed to a launcher, or a kill verb, as separate arguments", () => {

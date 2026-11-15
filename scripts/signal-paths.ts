@@ -102,41 +102,34 @@ const KILL_PROGRAM = /^(?:\S*\/)?(?:kill|pkill|killall|killall5|skill)$/;
 // host-guard's process starts.
 const STARTS_PROGRAM =
   /(?:Command\s*::\s*new|\b(?:spawn\w*|exec\w*|fork|runBounded|runIn\w*|output|run))\s*\(\s*\[?\s*$/;
-// Programs that run the program their arguments name, so `["env", "kill", ...]` is a kill, and
-// a shell's words that come before a command.
+// Programs that run the program their arguments name, so `["env", "kill", ...]` is a kill.
 const LAUNCHER =
   /^(?:\S*\/)?(?:env|sudo|doas|timeout|setsid|nohup|nice|ionice|xargs|stdbuf|chrt|taskset|flock|unshare|chroot|runuser|su|busybox|toybox|exec|command|builtin)$/;
-const SHELL_WORD = /^(?:then|do|else|elif|if|while|until|!|\{|\})$/;
+// What a command line may open with before the program it runs: a launcher, an assignment, or
+// a shell keyword.
+const STARTER = /^(?:\w+=\S*|then|do|else|elif|if|while|until|!|\{|\})$/;
+// A word that reads as a program's argument, not prose: an option, a number, a variable, a job,
+// a brace or a path. Prose punctuation ends no shell argument, so "after a kill -9, with" is a
+// sentence.
+const ARGUMENT = /^(?!.*[,.:]$)(?:-\S*|\d\S*|[$%{]\S*|\/\w\S*)$/;
 const SYSTEMCTL = /^(?:\S*\/)?systemctl$/;
 const LOGINCTL = /^(?:\S*\/)?loginctl$/;
 const LOGINCTL_KILL = /^(?:terminate-user|kill-user|terminate-session|kill-session)$/;
 const FUSER = /^(?:\S*\/)?fuser$/;
-const FUSER_KILL = /^-\w*k/;
+const FUSER_KILL = /^-\w*k|^--kill$/;
 // A `kill`'s one signal spec, and the only operands it may take: the shell itself, its last
 // background job, or a plain positive variable holding a pid the script started.
 const SIGNAL_SPEC = /^-(?:SIG)?[A-Z]+[0-9+]*$|^-\d+$|^--signal=\S+$/;
 const SIGNAL_SPEC_WITH_VALUE = /^(?:-s|-n|--signal)$/;
 const OWN_TARGET = /^(?:\$\$|\$!|\$[A-Za-z_]\w*|\$\{[A-Za-z_]\w*\})$/;
 
-/** What a shell command line runs: its program, and its words after it. */
-function command(segment: string): string[] {
-  const words = segment
+/** A shell command's words, unescaped, less its redirections and any comment. */
+function shellWords(segment: string): string[] {
+  return segment
     .replace(/(?:^|\s)#.*$/, "")
     .trim()
     .split(/\s+/)
-    .map((w) => w.replaceAll("\\", ""))
     .filter((w) => w !== "" && !/^\d*[<>]&?\S*$/.test(w));
-  let i = 0;
-  while (
-    i < words.length &&
-    (/^\w+=/.test(words[i] ?? "") ||
-      LAUNCHER.test(words[i] ?? "") ||
-      SHELL_WORD.test(words[i] ?? "") ||
-      (i > 0 && /^(?:-\S+|\d+)$/.test(words[i] ?? "")))
-  ) {
-    i++;
-  }
-  return words.slice(i);
 }
 
 /** Whether a `kill`'s words, past the program, name only its own targets. */
@@ -150,26 +143,37 @@ function killsOnlyItsOwn(words: string[]): boolean {
 }
 
 /**
- * Whether a string literal is a shell command line that sends a signal. It fails closed: a
- * `kill` passes only when, past one signal spec and a `--`, each operand is the shell itself,
- * its last job or a plain variable; every other kill program, `systemctl kill`, `loginctl
- * terminate-user` and the like, and `fuser -k`, count. Each command is read: the line is split
- * at the shell's operators and its quotes, so `sh -c "kill -9 -1"` is read as its inner command.
- * A literal holding no whitespace is a program's name, not a command line: the start of a
- * process with it is caught where the literal is passed (`kills`).
+ * Whether a string literal is a shell command line that sends a signal. It fails closed. Each
+ * command is read, the line split at the shell's operators and its quotes, so `sh -c "kill -9
+ * -1"` is read as its inner command; and any word of it that names a kill program starts a
+ * kill wherever it sits after a launcher, whatever options that launcher takes, or wherever an
+ * argument follows it. A `kill` passes only when, past
+ * one signal spec and a `--`, each operand is the shell itself, its last job or a plain
+ * variable; every other kill program, `systemctl kill`, `loginctl terminate-user` and the like,
+ * and `fuser -k`, count. A literal holding no whitespace, escaped whitespace aside, is a
+ * program's name rather than a command line: a process started with it is caught where the
+ * literal is passed (`kills`).
  */
 export function startsKill(literal: string): boolean {
-  if (!/\s/.test(literal)) return false;
+  const unescaped = literal.replaceAll(/\\[tnrfv]/g, " ");
+  if (!/\s/.test(unescaped)) return false;
   // A quoted variable is one word, not a nested command: unquote it before splitting at quotes.
-  const line = literal.replaceAll("\\", "").replaceAll(/(["'])(\$\{?\w+\}?|\$\$|\$!)\1/g, "$2");
+  const line = unescaped.replaceAll("\\", "").replaceAll(/(["'])(\$\{?\w+\}?|\$\$|\$!)\1/g, "$2");
   for (const segment of line.split(/&&|\|\||[;&|\n()`"']|\$\(/)) {
-    const [program = "", ...rest] = command(segment);
-    if (program === "kill" || program.endsWith("/kill")) {
-      if (!killsOnlyItsOwn(rest)) return true;
-    } else if (KILL_PROGRAM.test(program)) return true;
-    else if (SYSTEMCTL.test(program) && rest.includes("kill")) return true;
-    else if (LOGINCTL.test(program) && rest.some((w) => LOGINCTL_KILL.test(w))) return true;
-    else if (FUSER.test(program) && rest.some((w) => FUSER_KILL.test(w))) return true;
+    const words = shellWords(segment);
+    const launched = LAUNCHER.test(words[0] ?? "") || STARTER.test(words[0] ?? "");
+    for (const [i, word] of words.entries()) {
+      const rest = words.slice(i + 1);
+      // A word names the program a command runs when it opens the command, follows a launcher
+      // and its options however many there are, or takes an argument; elsewhere it is prose.
+      if (i > 0 && !launched && !ARGUMENT.test(rest[0] ?? "")) continue;
+      if (word === "kill" || word.endsWith("/kill")) {
+        if (!killsOnlyItsOwn(rest)) return true;
+      } else if (KILL_PROGRAM.test(word)) return true;
+      else if (SYSTEMCTL.test(word) && rest.includes("kill")) return true;
+      else if (LOGINCTL.test(word) && rest.some((w) => LOGINCTL_KILL.test(w))) return true;
+      else if (FUSER.test(word) && rest.some((w) => FUSER_KILL.test(w))) return true;
+    }
   }
   return false;
 }

@@ -218,13 +218,14 @@ A test owns everything it touches and leaves nothing behind.
   with no floor of its own until the holder's guard module takes over that path. The one process
   started to send a signal is `systemctl --user kill` of the cap's own scope
   (`packages/host-guard/src/cap.ts`). The check is defence in depth: it reads text, so the
-  chokepoints' own refusals are what stop a stray signal. It fails closed on a command line: a
-  `kill` there passes only when, past at most one signal spec and a `--`, and less its redirections
-  and any comment, each operand is `$$`, `$!` or a plain `$var`. It accepts these gaps: a kill
-  program held in a constant; in TypeScript, `{ default as p }`, `Reflect.get`, `require` and
-  dynamic imports of `process`; unusual Rust `use` forms; a kill program more than four arguments
-  after its launcher. A Rust test that may signal processes it didn't start is `#[ignore = "signals
-  processes; runs in pnpm test:real rust"]` and starts with
+  chokepoints' own refusals are what stop a stray signal. It fails closed on a command line: a kill
+  program there counts wherever it follows a launcher, whatever that launcher's options, or wherever
+  an argument follows it, and a `kill` passes only when, past at most one signal spec and a `--`,
+  and less its redirections and any comment, each operand is `$$`, `$!` or a plain `$var`. It
+  accepts these gaps: a kill program held in a constant; in TypeScript, `{ default as p }`,
+  `Reflect.get`, `require` and dynamic imports of `process`; unusual Rust `use` forms; a kill
+  program more than four arguments after its launcher. A Rust test that may signal processes it
+  didn't start is `#[ignore = "signals processes; runs in pnpm test:real rust"]` and starts with
   `bazhen_test_signal::require_sandbox().unwrap();`, both of which `pnpm check` requires, so the
   host skips it and `pnpm test:rust:all` runs it only on a host carrying a root-owned
   `/etc/bazhen-disposable-host`: the test container or a CI runner. A PID namespace doesn't count:
