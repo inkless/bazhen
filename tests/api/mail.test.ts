@@ -259,6 +259,7 @@ describe("mail to a Claude Code agent", () => {
     await daemon.caughtUp(stream);
     const story = eventsAbout(stream, messageId);
     stream.close();
+    expect(story.map((e) => e.type)).toContain("mailbox.delivered");
     expect(requeueReasons(story)).toEqual([]);
   });
 
@@ -368,6 +369,7 @@ describe("mail to a Claude Code agent", () => {
       .toBe("delivered");
     // The answer's tool result closes it, before the turn's end would have: the agent reads
     // working again in between, and idle only after.
+    await expect.poll(doing, { timeout: 10_000 }).toBe("idle");
     await daemon.caughtUp(stream);
     const story = itemAndActivity(stream, id);
     stream.close();

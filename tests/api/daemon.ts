@@ -395,7 +395,11 @@ export class Daemon {
    */
   async caughtUp(stream: EventClient): Promise<void> {
     const { eventId } = StateSnapshot.parse((await this.request("/v1/state")).body);
-    await waitUntil(() => stream.last() >= eventId, `the event stream to reach event ${eventId}`);
+    try {
+      await waitUntil(() => stream.last() >= eventId, "the event stream");
+    } catch (cause) {
+      throw new Error(`the event stream reached event ${stream.last()}, not ${eventId}`, { cause });
+    }
   }
 
   /** Adds `settings` to the user's own Claude Code settings, read at each agent's launch. */
