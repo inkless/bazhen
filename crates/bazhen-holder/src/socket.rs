@@ -669,9 +669,12 @@ mod tests {
     }
 
     #[test]
-    fn admits_a_connection_from_its_own_user() {
+    fn admits_a_connection_from_its_own_user_and_raises_its_send_buffer() {
         let (ours, _theirs) = UnixStream::pair().unwrap();
+        let before = rustix::net::sockopt::socket_send_buffer_size(&ours).unwrap();
         admit(&ours).unwrap();
         assert_eq!(peer_uid(&ours).unwrap(), geteuid().as_raw());
+        let after = rustix::net::sockopt::socket_send_buffer_size(&ours).unwrap();
+        assert!(after > before, "the send buffer stayed at {before}");
     }
 }

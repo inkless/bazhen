@@ -10,8 +10,8 @@ use std::io;
 use std::time::{Duration, Instant};
 
 use bazhen_holder_proto::body::{
-    self, Count, ErrorBody, ErrorCode, HelloReply, HelloRequest, Offset, OkBody, ProtocolVersion,
-    Size, StartTime, Tags, TerminalId, Versions,
+    self, Count, ErrorBody, ErrorCode, Exited, HelloReply, HelloRequest, Offset, OkBody,
+    ProtocolVersion, Size, StartTime, SubscribeFrom, Tags, TerminalId, Versions,
 };
 use bazhen_holder_proto::{PROTOCOL_VERSION, Reply, Request, RequestId, negotiate, request_name};
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
@@ -61,6 +61,8 @@ struct Shared {
     /// The connection whose `input` the holder takes.
     writer: Option<u64>,
     close_requested: bool,
+    /// Whether the child's exit has been sent to the connections open when it was published.
+    exit_sent: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,6 +105,7 @@ impl Server {
                 terminal,
                 writer: None,
                 close_requested: false,
+                exit_sent: false,
             },
             rebind_wakeups: rebind,
             recheck_at: now + RECHECK_EVERY,
@@ -140,6 +143,7 @@ impl Server {
         let ready = self.poll(holder, timeout.as_ref())?;
         let now = Instant::now();
         holder.after_poll(ready.master, now);
+        self.send_exit(holder);
         if ready.rebind {
             self.rebind_wakeups.clear();
             self.recheck_at = now;
@@ -174,7 +178,7 @@ impl Server {
             self.closing = Some(Closing::Ending { since: now });
         }
         for conn in &mut self.conns {
-            conn.flush(now);
+            conn.flush(now, holder.output());
         }
         self.release_writer();
         self.conns.retain(|conn| !conn.is_finished(now));
@@ -188,6 +192,31 @@ impl Server {
             self.recheck_at = now + RECHECK_EVERY;
         }
         Ok(false)
+    }
+
+    /// Sends the child's exit, once it is published, to every connection past `hello`, at the
+    /// offset it came at, so a subscriber gets it after every byte the child wrote before it. A
+    /// connection that says `hello` later finds it in the hello reply.
+    fn send_exit(&mut self, holder: &Holder<Ring>) {
+        let Some(exit) = holder.exit().filter(|_| !self.shared.exit_sent) else {
+            return;
+        };
+        self.shared.exit_sent = true;
+        let exited = Reply::Exited(Exited {
+            generation: exit.generation,
+            status: exit.status.clone(),
+        });
+        let frame = match exited.encode() {
+            Ok(frame) => frame,
+            Err(error) => {
+                tracing::warn!(%error, "could not encode the exit");
+                return;
+            }
+        };
+        let at = holder.output().end();
+        for conn in self.conns.iter_mut().filter(|conn| conn.is_open()) {
+            conn.queue_event(at, frame.clone());
+        }
     }
 
     /// Frees the writer slot once no open connection holds it: one hanging up, dropped or
@@ -271,9 +300,9 @@ impl Server {
         });
         let first_conn = fds.len();
         fds.extend(
-            self.conns
-                .iter()
-                .map(|conn| PollFd::from_borrowed_fd(conn.fd(), conn.interest())),
+            self.conns.iter().map(|conn| {
+                PollFd::from_borrowed_fd(conn.fd(), conn.interest(holder.output().end()))
+            }),
         );
         if !readiness(poll(&mut fds, timeout))? {
             return Ok(Ready::default());
@@ -405,6 +434,7 @@ fn answer(
             refuse(conn, id, "hello", ErrorCode::Invalid, why);
             conn.hang_up(now);
         }
+        Request::Subscribe { id, body } => subscribe(conn, holder, id, body.from),
         Request::Close { id } => {
             let request = "close".to_owned();
             send(
@@ -429,6 +459,43 @@ fn answer(
         other => {
             let why = "this holder doesn't serve that request";
             refuse(conn, id, &other.name(), ErrorCode::UnknownRequest, why);
+        }
+    }
+}
+
+/// Moves the connection's subscription to `from`, or to the holder's offset now without one.
+fn subscribe(
+    conn: &mut Connection,
+    holder: &Holder<Ring>,
+    id: RequestId,
+    from: Option<SubscribeFrom>,
+) {
+    let end = holder.output().end();
+    let offset = match from {
+        Some(from) if from.generation != holder.generation() => {
+            let why = "that offset is of another generation's output";
+            refuse(conn, id, "subscribe", ErrorCode::StaleGeneration, why);
+            return;
+        }
+        Some(from) if from.offset.get() > end => {
+            let why = "that offset is past the holder's";
+            refuse(conn, id, "subscribe", ErrorCode::OutOfRange, why);
+            return;
+        }
+        Some(from) => from.offset.get(),
+        None => end,
+    };
+    let request = "subscribe".to_owned();
+    match (Reply::Ok {
+        id,
+        body: OkBody { request },
+    })
+    .encode()
+    {
+        Ok(frame) => conn.queue_subscribed(frame, offset),
+        Err(error) => {
+            tracing::warn!(%error, "could not encode a reply");
+            conn.drop_now();
         }
     }
 }
@@ -552,12 +619,13 @@ mod tests {
             .unwrap();
         conn.receive(&mut vec![0; READ_CHUNK]);
         conn.queue(vec![0; QUEUE_MARK]);
+        let ring = Ring::new(1);
         let mut drained = vec![0; 1 << 20];
         while conn.queued() > 0 {
-            conn.flush(now);
+            conn.flush(now, &ring);
             let _ = peer.read(&mut drained).unwrap();
         }
-        assert_eq!(conn.interest(), PollFlags::empty());
+        assert_eq!(conn.interest(ring.end()), PollFlags::empty());
         server.conns.push(conn);
         assert_eq!(server.deadline(now), Some(now));
         std::fs::remove_dir_all(dir).unwrap();

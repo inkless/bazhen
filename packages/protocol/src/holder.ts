@@ -15,7 +15,8 @@ import { ProtocolVersion } from "./version.ts";
  * `error` coded `unknown-request`, whose `request` is the type byte, as `0x2a`. A request whose
  * body isn't UTF-8 JSON that passes its schema is answered `error` coded `invalid`, and its
  * connection closed; any other frame that fails, a type byte outside the requests' range
- * included, closes it at once. String limits count UTF-8 bytes.
+ * included, closes it at once. A holder answers a connection's requests in the order it read them.
+ * String limits count UTF-8 bytes.
  *
  * Frozen in every major, because it is how two peers find out what they share:
  * - the frame layout, the u32 request id and the type-byte ranges;
@@ -245,7 +246,8 @@ export type HolderHelloRequest = z.infer<typeof HolderHelloRequest>;
  * `stale-generation` rather than resuming at that offset of the new child's output. A `from` the
  * ring no longer holds is answered `ok`, then `gap` up to what it holds, then output; one past
  * the holder's offset is refused `out-of-range`. A connection has one subscription: subscribing
- * again moves it.
+ * again moves it, once the output and events owed under the old one have gone. A subscription
+ * ends with its connection's input.
  */
 export const HolderSubscribeRequest = z.object({
   from: z.object({ generation: Count, offset: Offset }).optional(),
