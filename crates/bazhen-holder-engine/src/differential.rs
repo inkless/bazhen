@@ -460,6 +460,15 @@ fn difference(engine: &Engine, full: &FullHistory) -> Option<String> {
     if saved != other {
         return Some(format!("saved cursor: {saved:?} against {other:?}"));
     }
+    // The one cell of history that output can still change: writing over the wide char that
+    // starts the screen unmarks the spacer before it, which then shows the pen it was drawn in.
+    // History is compared as text, and text carries no spacer, so it is compared here.
+    let (ours, theirs) = (newest_spacer(&engine.term), newest_spacer(&full.term));
+    if ours != theirs {
+        return Some(format!(
+            "newest history row's spacer: {ours:?} against {theirs:?}"
+        ));
+    }
     let mut history = String::new();
     engine.write_history(&mut history);
     // Under the alternate screen alacritty keeps the primary's history private, and the engine
@@ -477,6 +486,15 @@ fn difference(engine: &Engine, full: &FullHistory) -> Option<String> {
             shown(&theirs)
         )
     })
+}
+
+/// The cell a wide char didn't fit in, when it ends the newest row of history.
+fn newest_spacer(term: &Term<Sink>) -> Option<&Cell> {
+    let grid = term.grid();
+    (grid.history_size() > 0)
+        .then(|| grid[Line(-1)].into_iter().last())
+        .flatten()
+        .filter(|cell| cell.flags.contains(Flags::LEADING_WIDE_CHAR_SPACER))
 }
 
 /// The cells that draw something, in order: what a resize must not lose or reorder.
@@ -747,6 +765,30 @@ fn narrowed_onto_more_rows_then_fewer_a_prompt_of_wide_chars_keeps_the_cells_ala
         &[String::new(), "\taaa\t字a\taaa\ta中".to_owned()],
         "中中中中",
         &[((3, 7), None), ((2, 6), Some("a".to_owned()))],
+        &[1],
+    );
+}
+
+#[test]
+fn a_spacer_a_resize_leaves_in_another_colour_parts_the_two_at_the_resize() {
+    // The shrunk case CI found. Narrowed, the reference's reflow puts a spacer in default colours
+    // before 字; the engine's refill redraws the line at that width, in the pen. Widened, both
+    // keep their spacer ending the newest history row, and the "a" written over 字 unmarks it.
+    let lines = "\tabcaabcxyzzy\tbcxyzzybca\t文字def def \tbcdef def 中bc def axyzzy文字";
+    run(
+        Size { cols: 26, rows: 2 },
+        &[
+            Action::Index,
+            Action::Sgr(0, 0, false),
+            Action::Text(lines.to_owned()),
+            Action::CrLf,
+            Action::CrLf,
+            Action::Resize(3, 7),
+            Action::CrLf,
+            Action::Resize(11, 7),
+            Action::Region(0, 2),
+            Action::Text("a".to_owned()),
+        ],
         &[1],
     );
 }
