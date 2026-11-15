@@ -157,6 +157,12 @@ describe("resolveConfig", () => {
     expect(config.lan?.port).toBe(9443);
   });
 
+  it("refuses port 443 for the LAN, which browsers leave out of Host and Origin", () => {
+    expect(() =>
+      resolveConfig({ web: { listen: "lan", lan_port: 443, lan_allow: ["10.0.0.0/8"] } }, {}),
+    ).toThrow("web.lan_port: 443 isn't supported");
+  });
+
   it("refuses a range that admits everyone, saying why", () => {
     expect(() => resolveConfig({ web: { listen: "lan", lan_allow: ["::/0"] } }, {})).toThrow(
       "web.lan_allow: ::/0 admits every address; list your own network's range",

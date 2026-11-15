@@ -103,6 +103,15 @@ export class PairingCodes {
     return { kind: "failed" };
   }
 
+  /**
+   * How many attempt keys a bucket holds. A key is recorded only for an attempt the overall window
+   * allowed, so a peer minting addresses (link-local, or a fresh IPv6 /64 each time) adds at most
+   * ATTEMPTS_OVERALL a minute, and they expire with their windows.
+   */
+  keysHeld(bucket: Bucket): number {
+    return this.limits[bucket].perKey.size;
+  }
+
   /** Counts an attempt, or answers how many seconds until one is allowed again. */
   private count(now: number, key: string, limits: Limits): number | null {
     for (const [k, w] of limits.perKey) {

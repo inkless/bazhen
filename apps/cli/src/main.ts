@@ -21,6 +21,7 @@ import {
   StopResponse,
 } from "@bazhen/protocol";
 import { TASK_USAGE, Usage, taskVerb, type Verb } from "./tasks.ts";
+import { lanLines } from "./lan.ts";
 
 /** The exit status when the daemon isn't running. */
 const NOT_RUNNING = 3;
@@ -148,7 +149,8 @@ function printWeb(web: NonNullable<DoctorResponse["web"]>): void {
         : `web app: served from ${web.app}`,
     );
   }
-  if (web.lan !== undefined && web.lan !== null) printLan(web.lan);
+  if (web.lan !== undefined && web.lan !== null)
+    for (const line of lanLines(web.lan)) console.log(line);
   if (web.pairing === undefined) return;
   const { mode, required } = web.pairing;
   if (required) {
@@ -161,19 +163,6 @@ function printWeb(web: NonNullable<DoctorResponse["web"]>): void {
   console.log(
     '  warning: any local process or other user of this machine who can reach the daemon\'s port on 127.0.0.1 controls the agents; set web.pairing = "always" on a shared machine',
   );
-}
-
-/** The LAN listener: where it serves, to whom, and the certificate a browser must trust. */
-function printLan(lan: NonNullable<NonNullable<DoctorResponse["web"]>["lan"]>): void {
-  console.log(`LAN: ${lan.url}, to ${lan.allow.join(", ")}`);
-  if (lan.certificate === null) {
-    console.log(`  not serving: ${lan.error ?? "no certificate"}`);
-  } else {
-    console.log(`  certificate SHA-256: ${lan.certificate.fingerprint}`);
-    console.log(`  certificate: ${lan.certificate.path}, expires ${lan.certificate.expiresAt}`);
-  }
-  const subnets = lan.subnets.map((s) => `${s.cidr} (${s.interface})`).join(", ");
-  console.log(`  this host's subnets: ${subnets || "none"}`);
 }
 
 /**

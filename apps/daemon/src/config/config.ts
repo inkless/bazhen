@@ -189,6 +189,11 @@ function lanListener(
     DEFAULT_LAN_PORT;
   if (lanPort === port)
     throw new InvalidConfig(`web.lan_port: ${lanPort} is the daemon's own port`);
+  if (lanPort === 443) {
+    throw new InvalidConfig(
+      "web.lan_port: 443 isn't supported: browsers leave it out of Host and Origin, which the LAN listener matches with its port; pick another, such as 7942",
+    );
+  }
   const ranges = file.web?.lan_allow ?? [];
   if (ranges.length === 0) {
     const suggested = subnets.length === 0 ? "" : `, such as ${JSON.stringify(subnets)}`;

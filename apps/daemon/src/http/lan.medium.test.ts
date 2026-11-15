@@ -97,8 +97,9 @@ async function lan(over: Partial<LanParts> = {}) {
     path: /^\/echo$/,
     upgrade: (req, socket, head) => wss.handleUpgrade(req, socket, head, (ws) => ws.send("hello")),
   };
+  let server: Server | undefined;
   const port = await new Promise<number>((resolve, reject) => {
-    const server: Server = lanListener({
+    const started: Server = lanListener({
       commands,
       devices,
       codes,
@@ -111,11 +112,13 @@ async function lan(over: Partial<LanParts> = {}) {
       failed: reject,
       ...over,
     });
+    server = started;
     cleanups.push(() => {
-      server.closeAllConnections();
-      server.close();
+      started.closeAllConnections();
+      started.close();
     });
   });
+  if (server === undefined) throw new Error("no server");
   const origin = `https://${name}:${port}`;
   /** A request over TLS that trusts the certificate and names the host, as Safari would. */
   const call = (
@@ -176,7 +179,7 @@ async function lan(over: Partial<LanParts> = {}) {
       });
       socket.once("error", (err: NodeJS.ErrnoException) => resolve(err.code));
     });
-  return { call, pair, stream, handshake, codes, devices, origin, port };
+  return { call, pair, stream, handshake, codes, devices, origin, port, server };
 }
 
 describe("the LAN listener", () => {
@@ -319,5 +322,30 @@ describe("the LAN listener", () => {
     });
     const stillServing = await first.call("/v1/state");
     expect([failure.code, stillServing.status]).toEqual(["EADDRINUSE", 401]);
+  });
+
+  it("drops a peer's connection past its own share, though the listener has room", async () => {
+    const { handshake, port } = await lan({ limits: { maxPerPeer: 1 } });
+    const held = tcpConnect({ host: "127.0.0.1", port });
+    cleanups.push(() => held.destroy());
+    await new Promise((resolve) => held.once("connect", resolve));
+    expect(await handshake()).toBe("ECONNRESET");
+  });
+
+  it("stops listening and closes its open streams when it fails, as doctor then reports", async () => {
+    const failures: Error[] = [];
+    const { pair, stream, handshake, codes, origin, server } = await lan({
+      failed: (err) => failures.push(err),
+    });
+    const paired = await pair(codes.issue().code);
+    const ws = stream({ cookie: paired.cookie, origin });
+    await new Promise((resolve) => ws.once("message", resolve));
+    const closed = new Promise((resolve) => ws.once("close", () => resolve("closed")));
+    server.emit("error", Object.assign(new Error("accept failed"), { code: "EMFILE" }));
+    expect([await closed, failures.length, await handshake()]).toEqual([
+      "closed",
+      1,
+      "ECONNREFUSED",
+    ]);
   });
 });
