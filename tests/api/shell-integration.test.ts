@@ -52,7 +52,10 @@ describe.each<IntegratedShell>(["zsh", "bash", "fish"])(
       const { terminalId } = ShellCommandResponse.parse(opened.body);
       const view = await daemon.view(terminalId, "interactive");
       await view.drive();
-      await waitUntil(() => daemon.shellScreen(terminalId).includes("[st=0]"), "the first prompt");
+      // Polled with expect, so a prompt that never comes fails showing what the screen did hold.
+      await expect
+        .poll(() => daemon.shellScreen(terminalId), { timeout: 20_000 })
+        .toContain("[st=0]");
       return { terminalId, view };
     }
 
