@@ -23,7 +23,7 @@ import {
   rmSync,
   symlinkSync,
 } from "node:fs";
-import { availableParallelism, constants, hostname, tmpdir } from "node:os";
+import { availableParallelism, constants, hostname, tmpdir, totalmem } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { isAlive, signalGroup, spawnGroup } from "@bazhen/host-guard";
 import { isMain } from "./is-main.ts";
@@ -109,6 +109,26 @@ export function cpuBudget(
     return String(value);
   }
   return String(Math.max(2, Math.floor(cores / 2)));
+}
+
+/**
+ * The memory a suite's container may use, in bytes, swap included: a quarter of the machine,
+ * `BZ_TEST_MEMORY` (in GiB) when set. A test that runs away is then OOM-killed inside its
+ * container, never by the machine's own OOM killer, which may pick any process on it.
+ */
+export function memoryBudget(
+  env: Readonly<Record<string, string | undefined>>,
+  total: number,
+): string {
+  const override = env["BZ_TEST_MEMORY"];
+  if (override !== undefined && override !== "") {
+    const gib = Number(override);
+    if (!Number.isFinite(gib) || gib < 1) {
+      throw new Error(`BZ_TEST_MEMORY must be a number of GiB, at least 1, got "${override}"`);
+    }
+    return String(Math.floor(gib * 1024 ** 3));
+  }
+  return String(Math.floor(total / 4));
 }
 
 const SECRET_NAME =
@@ -467,6 +487,11 @@ export async function run(args: readonly string[], host: Host): Promise<number> 
           // agents working on it while the run goes on.
           "--cpus",
           cpuBudget(process.env, availableParallelism()),
+          // The same for memory and memory plus swap: no swap, so a runaway meets the cap at once.
+          "--memory",
+          memoryBudget(process.env, totalmem()),
+          "--memory-swap",
+          memoryBudget(process.env, totalmem()),
           image,
           "pnpm",
           SUITES[suite],

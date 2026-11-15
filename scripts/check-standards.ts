@@ -295,9 +295,12 @@ const PNPM_VALUE_FLAGS = new Set(["--filter", "-F", "--dir", "-C", "--reporter",
 const LINT_RULE = /^(import|vitest|typescript|unicorn|react|react-hooks|eslint|bazhen)\//;
 const PATH_LIKE = /^(\.?[\w@-]+\/)+[\w.@-]*$|^\.?[\w-]+\.(ts|tsx|md|json)$/;
 
-/** package.json's scripts, by name, read with `read`. */
-function packageScripts(read: (path: string) => string): Record<string, string> {
-  const pkg: unknown = JSON.parse(read("package.json"));
+/** A package.json's scripts, by name, read with `read`; the root one unless `file` says. */
+function packageScripts(
+  read: (path: string) => string,
+  file = "package.json",
+): Record<string, string> {
+  const pkg: unknown = JSON.parse(read(file));
   const scripts =
     typeof pkg === "object" && pkg !== null && "scripts" in pkg ? pkg.scripts : undefined;
   if (typeof scripts !== "object" || scripts === null) return {};
@@ -1123,14 +1126,62 @@ export const DENY_CONFIG = [
 ];
 
 // The package.json scripts that run the Rust gates, exactly, and `check` runs each of them. The
-// commands themselves are fixed in scripts/cargo-gate.ts.
+// commands themselves are fixed in scripts/cargo-gate.ts; the tests run under a cap like any.
 const GATE = "node --disable-warning=ExperimentalWarning scripts/cargo-gate.ts";
 export const RUST_GATE_SCRIPTS: Record<string, string> = {
   "format:check": `${GATE} fmt && oxfmt --check`,
   "lint:rust": `${GATE} lint`,
   deny: `${GATE} deny`,
-  "test:rust": `${GATE} test`,
+  "test:rust": `node scripts/capped.ts --memory 4G --time 30m -- ${GATE} test`,
 };
+
+// cargo's target runner, which caps every test binary, and cargo-mutants' test tool, nextest,
+// which runs no doctests: rustdoc starts those without the runner (docs/standards/testing.md
+// § Memory and time caps).
+export const CARGO_CONFIG = [
+  "[target.'cfg(all())']",
+  'runner = ["scripts/capped.ts", "--test-binary", "--"]',
+];
+export const MUTANTS_CONFIG = ['test_tool = "nextest"'];
+
+// What starts tests: vitest, playwright, nextest, cargo-mutants, cargo test, and the scripts that
+// run one of those. A script step that does runs under scripts/capped.ts, at most at these caps.
+const TEST_RUNNER =
+  /\b(?:vitest|playwright|cargo-nextest|cargo[- ]mutants|cargo\s+(?:\+\S+\s+)?test|cargo-gate\.ts test|falsify\.ts|hook-bench\.ts|engine-replay\.ts|test-real\.ts)\b/;
+const CAPPED_STEP = /^node (?:\.\.\/)*scripts\/capped\.ts --memory (\d+)G --time (\d+)m -- \S/;
+export const MAX_CAP = { gib: 24, minutes: 120 };
+
+/** Why a package.json's scripts would start tests without a cap, or with one too big to bite. */
+export function cappedScriptFailures(file: string, scripts: Record<string, string>): string[] {
+  const out: string[] = [];
+  for (const [name, script] of Object.entries(scripts)) {
+    if (!TEST_RUNNER.test(script)) continue;
+    if (/[|;\n\r]|(?<!&)&(?!&)/.test(script)) {
+      out.push(
+        `${file}: the "${name}" script starts tests, so it joins its steps with \`&&\` alone: ` +
+          "a `|`, `;`, `&` or line break could run one round its cap.",
+      );
+      continue;
+    }
+    for (const step of script.split("&&").map((s) => s.trim())) {
+      if (!TEST_RUNNER.test(step)) continue;
+      const capped = CAPPED_STEP.exec(step);
+      if (capped === null) {
+        out.push(
+          `${file}: the "${name}" script starts tests without a memory and time cap. Run the ` +
+            "step as `node scripts/capped.ts --memory <n>G --time <n>m -- <command>` " +
+            "(docs/standards/testing.md § Memory and time caps).",
+        );
+      } else if (Number(capped[1]) > MAX_CAP.gib || Number(capped[2]) > MAX_CAP.minutes) {
+        out.push(
+          `${file}: the "${name}" script's cap is above ${MAX_CAP.gib}G or ` +
+            `${MAX_CAP.minutes}m (MAX_CAP in scripts/check-standards.ts), too big to bite.`,
+        );
+      }
+    }
+  }
+  return out;
+}
 
 // Files that may name a flag or variable that can switch lints off, each with why. Anywhere else,
 // naming one is setting it where a gate would run.
@@ -1494,8 +1545,11 @@ export function rustFailures(
   }
   for (const file of paths) {
     const base = fileName(file);
-    if (/(^|\/)\.cargo\/config(\.toml)?$/.test(file)) {
-      out.push(`${file}: cargo config can pass flags that turn lints off; there is none here.`);
+    if (/(^|\/)\.cargo\/config(\.toml)?$/.test(file) && file !== ".cargo/config.toml") {
+      out.push(
+        `${file}: cargo config can pass flags that turn lints off; the root .cargo/config.toml ` +
+          "is the only one.",
+      );
     } else if (["clippy.toml", ".clippy.toml"].includes(base) && file !== "clippy.toml") {
       out.push(`${file}: clippy reads only the root clippy.toml here.`);
     } else if (["rustfmt.toml", ".rustfmt.toml"].includes(base)) {
@@ -1532,6 +1586,8 @@ export function rustFailures(
   if (paths.includes("package.json")) out.push(...gateScriptFailures(packageScripts(read)));
   else out.push("package.json is missing; the Rust gates run from its scripts.");
   pinned("clippy.toml", CLIPPY_CONFIG, "CLIPPY_CONFIG");
+  pinned(".cargo/config.toml", CARGO_CONFIG, "CARGO_CONFIG");
+  pinned(".cargo/mutants.toml", MUTANTS_CONFIG, "MUTANTS_CONFIG");
   out.push(...decoderFailures(paths, read, options.fuzzed ?? {}, options.notDecoders ?? {}));
   return out;
 }
@@ -1605,6 +1661,13 @@ function checkRust(): void {
       notDecoders: NOT_DECODERS,
     }),
   );
+}
+
+function checkCappedScripts(): void {
+  for (const file of repoFiles().filter((p) => fileName(p) === "package.json")) {
+    const scripts = packageScripts((p) => readFileSync(join(root, p), "utf8"), file);
+    failures.push(...cappedScriptFailures(file, scripts));
+  }
 }
 
 // Skills live once in .agents/skills (Codex, pi, opencode); .claude/skills links to it.
@@ -1745,6 +1808,7 @@ if (isMain(import.meta)) {
   checkSkills(scriptNames());
   checkWebTokens();
   checkRust();
+  checkCappedScripts();
 
   if (failures.length > 0) {
     console.error(`Standards check failed:\n${failures.map((f) => `  - ${f}`).join("\n")}`);

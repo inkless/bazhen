@@ -137,15 +137,17 @@ names the macro; the scan still guards it.
 **The configuration is pinned too.** `scripts/check-standards.ts` holds `[workspace.lints]`, the
 root manifest's other tables, `rust-toolchain.toml`, `clippy.toml` and `deny.toml` as
 `WORKSPACE_LINTS`, `ROOT_TABLES`, `TOOLCHAIN_CONFIG`, `CLIPPY_CONFIG` and `DENY_CONFIG`, and the
-gate scripts in `package.json` as `RUST_GATE_SCRIPTS`, and fails when the files differ, so a lint
-level, the toolchain or a gate changes only in a commit that changes the script and this page with
-it. The root manifest holds no other table (a patch, an excluded crate, another profile), and a
-workspace dependency is an exact version or a path to `crates/<name>`. It also fails on anything
-that would loosen them from beside: cargo config in a `.cargo` directory, whose `rustflags` can turn
-lints off; a second `clippy.toml` or `deny.toml`; a nextest config, whose profiles can filter tests
-out; a `rustfmt.toml`; a second toolchain file; a crate outside `crates/`; Rust source outside a
-crate there; and any file but those in `RUST_FLAG_EXEMPT` that names a flag or variable able to
-switch lints off (`RUSTFLAGS`, `--cap-lints`, a rustc wrapper, a cargo alias).
+gate scripts in `package.json` as `RUST_GATE_SCRIPTS`, and the root `.cargo/config.toml` (the
+capping test runner) and `.cargo/mutants.toml` as `CARGO_CONFIG` and `MUTANTS_CONFIG`, and fails
+when the files differ, so a lint level, the toolchain or a gate changes only in a commit that
+changes the script and this page with it. The root manifest holds no other table (a patch, an
+excluded crate, another profile), and a workspace dependency is an exact version or a path to
+`crates/<name>`. It also fails on anything that would loosen them from beside: cargo config in any
+other `.cargo` directory, whose `rustflags` can turn lints off; a second `clippy.toml` or
+`deny.toml`; a nextest config, whose profiles can filter tests out; a `rustfmt.toml`; a second
+toolchain file; a crate outside `crates/`; Rust source outside a crate there; and any file but those
+in `RUST_FLAG_EXEMPT` that names a flag or variable able to switch lints off (`RUSTFLAGS`,
+`--cap-lints`, a rustc wrapper, a cargo alias).
 
 **The gates run in a clean environment.** `--cap-lints allow` switches every lint off, forbidden
 ones included, whether it arrives through `RUSTFLAGS`, a cargo config in any parent directory, or an
@@ -320,7 +322,9 @@ What differs:
   by the full path nextest lists, after you break the code by hand and watch it fail on its
   assertion:
   `Control: pane_title::tests::refuses_a_window_id: accept @ ids -> left: Some, right: None`.
-  One trailer may name several tests it covers. Install cargo-mutants once:
+  One trailer may name several tests it covers. Each test process runs under the cargo runner's
+  memory cap (`testing.md` § Memory and time caps), and a mutant whose run had one killed there is
+  listed INVALID with that reason, as one that ran out of time is. Install cargo-mutants once:
   `cargo install --locked cargo-mutants@27.1.0`.
 
 **Black-box first.** A Rust component is certified by the TypeScript suites that drive it from

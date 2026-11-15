@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  CARGO_CONFIG,
   CLIPPY_CONFIG,
+  MAX_CAP,
+  MUTANTS_CONFIG,
+  cappedScriptFailures,
   ROOT_TABLES,
   TOOLCHAIN_CONFIG,
   DENY_CONFIG,
@@ -467,7 +471,7 @@ describe("rustFailures", () => {
     "crates/a/b/Cargo.toml": member,
     "apps/x/src/sneaky.rs": "#![expect(unsafe_code)]\n",
     "crates/notes/README.md": "#[allow(x)]\n",
-    ".cargo/config.toml": "[build]\njobs = 2\n",
+    "crates/a/.cargo/config.toml": "[build]\njobs = 2\n",
     "crates/a/clippy.toml": "allow-unwrap-in-tests = true\n",
     "rustfmt.toml": "max_width = 120\n",
     "crates/a/rust-toolchain.toml": '[toolchain]\nchannel = "nightly"\n',
@@ -507,9 +511,9 @@ describe("rustFailures", () => {
     ]);
   });
 
-  it("refuses any cargo config, and clippy, rustfmt or toolchain files beside the root ones", () => {
+  it("refuses a cargo config, and clippy, rustfmt or toolchain files, beside the root ones", () => {
     expect([
-      about(".cargo/config.toml"),
+      about("crates/a/.cargo/config.toml"),
       about("crates/a/clippy.toml"),
       about("rustfmt.toml"),
       about("crates/a/rust-toolchain.toml"),
@@ -772,6 +776,8 @@ describe("rustFailures on the gates' own configuration", () => {
     "deny.toml": DENY_CONFIG.join("\n"),
     "clippy.toml": CLIPPY_CONFIG.join("\n"),
     "rust-toolchain.toml": TOOLCHAIN_CONFIG.join("\n"),
+    ".cargo/config.toml": CARGO_CONFIG.join("\n"),
+    ".cargo/mutants.toml": MUTANTS_CONFIG.join("\n"),
     "package.json": JSON.stringify({ scripts: { ...RUST_GATE_SCRIPTS, check: CHECK } }),
     "scripts/cargo-gate.ts": "RUSTFLAGS",
     "scripts/cargo-gate.test.ts": "RUSTFLAGS",
@@ -810,6 +816,22 @@ describe("rustFailures on the gates' own configuration", () => {
     ]).toEqual([
       [expect.stringContaining("rust-toolchain.toml: differs from TOOLCHAIN_CONFIG")],
       [expect.stringContaining("rust-toolchain.toml is missing")],
+    ]);
+  });
+
+  it("refuses a cargo config without the capping test runner, or none", () => {
+    expect([
+      failures({ ".cargo/config.toml": "[build]\njobs = 2\n" }),
+      failures({}, [".cargo/config.toml"]),
+    ]).toEqual([
+      [expect.stringContaining(".cargo/config.toml: differs from CARGO_CONFIG")],
+      [expect.stringContaining(".cargo/config.toml is missing")],
+    ]);
+  });
+
+  it("refuses a cargo-mutants config whose test tool would run doctests uncapped", () => {
+    expect(failures({ ".cargo/mutants.toml": 'test_tool = "cargo"\n' })).toEqual([
+      expect.stringContaining(".cargo/mutants.toml: differs from MUTANTS_CONFIG"),
     ]);
   });
 
@@ -855,6 +877,70 @@ describe("rustFailures on the gates' own configuration", () => {
   it("names an exempt file that no longer exists", () => {
     expect(failures({}, ["scripts/cargo-gate.test.ts"])).toEqual([
       "scripts/check-standards.ts: RUST_FLAG_EXEMPT lists missing scripts/cargo-gate.test.ts.",
+    ]);
+  });
+});
+
+/** A capped test script's failures at the given caps. */
+const overCap = (memory: number, minutes: number) =>
+  cappedScriptFailures("package.json", {
+    t: `node scripts/capped.ts --memory ${memory}G --time ${minutes}m -- vitest run`,
+  });
+
+describe("cappedScriptFailures", () => {
+  const cap = "node scripts/capped.ts --memory 8G --time 20m --";
+
+  it("accepts a capped test step, a script that only runs another, and no test at all", () => {
+    expect(
+      cappedScriptFailures("package.json", {
+        test: `${cap} vitest run --project unit`,
+        "test:medium": `pnpm run build:hook && ${cap} vitest run --project medium`,
+        check: "pnpm run lint && pnpm run test:rust",
+        "lint:rust": "node scripts/cargo-gate.ts lint",
+      }),
+    ).toEqual([]);
+  });
+
+  it("accepts a workspace package's script reaching capped.ts by a relative path", () => {
+    const e2e = { test: "node ../../scripts/capped.ts --memory 8G --time 20m -- playwright test" };
+    expect(cappedScriptFailures("tests/e2e/package.json", e2e)).toEqual([]);
+  });
+
+  it("refuses each runner started without a cap, wherever it sits in the script", () => {
+    expect(
+      [
+        "vitest run",
+        "pnpm run build:hook && vitest run --project medium",
+        "playwright test",
+        "cargo-nextest nextest run",
+        "cargo mutants --in-diff x",
+        "cargo +nightly test",
+        "node scripts/cargo-gate.ts test",
+        "node scripts/falsify.ts",
+        "node scripts/hook-bench.ts",
+        "node scripts/test-real.ts",
+        `vitest run && ${cap} vitest run`,
+      ].map((t) => cappedScriptFailures("package.json", { t }).length),
+    ).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
+  });
+
+  it("refuses a capped step joined by anything but && to one that could run round it", () => {
+    expect(
+      ["; vitest", " | tee x", " & vitest", "\nvitest"].map(
+        (tail) => cappedScriptFailures("package.json", { t: `${cap} vitest run${tail}` })[0],
+      ),
+    ).toEqual(Array.from({ length: 4 }, () => expect.stringContaining("`&&` alone")));
+  });
+
+  it("refuses a cap too big to bite", () => {
+    expect([
+      overCap(MAX_CAP.gib, MAX_CAP.minutes),
+      overCap(MAX_CAP.gib + 1, 20),
+      overCap(8, MAX_CAP.minutes + 1),
+    ]).toEqual([
+      [],
+      [expect.stringContaining("too big to bite")],
+      [expect.stringContaining("too big")],
     ]);
   });
 });

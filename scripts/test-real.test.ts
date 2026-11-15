@@ -6,6 +6,7 @@ import {
   pins,
   tmuxBuildArgs,
   cpuBudget,
+  memoryBudget,
   run,
   stopper,
   sweep,
@@ -74,6 +75,14 @@ describe("pnpm test:real", () => {
     expect(cpuBudget({ BZ_TEST_CPUS: "0.5" }, 32)).toBe("0.5");
     expect(() => cpuBudget({ BZ_TEST_CPUS: "many" }, 32)).toThrow("BZ_TEST_CPUS");
     expect(() => cpuBudget({ BZ_TEST_CPUS: "0" }, 32)).toThrow("BZ_TEST_CPUS");
+  });
+
+  it("gives a suite a quarter of the machine's memory, so a runaway dies in its container", () => {
+    const gib = 1024 ** 3;
+    expect(memoryBudget({}, 64 * gib)).toBe(String(16 * gib));
+    expect(memoryBudget({ BZ_TEST_MEMORY: "6" }, 64 * gib)).toBe(String(6 * gib));
+    expect(() => memoryBudget({ BZ_TEST_MEMORY: "8G" }, 64 * gib)).toThrow("BZ_TEST_MEMORY");
+    expect(() => memoryBudget({ BZ_TEST_MEMORY: "0.5" }, 64 * gib)).toThrow("BZ_TEST_MEMORY");
   });
 
   it("keeps a file that looks like a secret out of the image, and every other file in", () => {
@@ -210,6 +219,14 @@ describe("pnpm test:real cleans up after itself", () => {
     const suite = fake.calls.find((c) => c[0] === "run");
     expect(suite).toContain("--cpus");
     expect(Number(valueAfter(suite, "--cpus"))).toBeGreaterThan(0);
+  });
+
+  it("gives each suite's container a memory cap with no swap beyond it", async () => {
+    const fake = fakeHost(passing);
+    expect(await run(["api"], fake.host)).toBe(0);
+    const suite = fake.calls.find((c) => c[0] === "run");
+    expect(Number(valueAfter(suite, "--memory"))).toBeGreaterThan(0);
+    expect(valueAfter(suite, "--memory-swap")).toBe(valueAfter(suite, "--memory"));
   });
 
   it("removes its image and context when the build fails, and runs no suite", async () => {
