@@ -111,7 +111,10 @@ source with comments and strings set aside, and fails on:
   macro's expansion, so a macro of ours wrapping `.unwrap()` hides it from `unwrap_used`. A module
   joins the list once a review has read its macros;
 - `#[ignore]` and `#[should_panic]`, which skip a test or pass it when it fails, and any
-  attribute naming `clippy` (`#[clippy::msrv]`), which changes how it lints;
+  attribute naming `clippy` (`#[clippy::msrv]`), which changes how it lints. The one `#[ignore]`
+  allowed is `#[ignore = "signals processes; runs in pnpm test:real rust"]`, exactly, on a test
+  that may signal processes it didn't start: the host skips it, and `pnpm test:rust:all` runs it
+  in a sandbox (`testing.md` § Hermeticity);
 - a `cfg` or `cfg_attr` predicate other than those in `CFG_ALLOWED` (`test` alone today), or
   `not` around one: code compiled only in a release build, on another OS, under a feature or
   outside tests is code the gates never build, so no lint or test reads it. A predicate joins

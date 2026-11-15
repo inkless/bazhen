@@ -90,8 +90,28 @@ export function killHolder(holder: HolderProcess, now = Date.now()): boolean {
   return send(holder.pid, "SIGKILL");
 }
 
+/**
+ * Why `target`, a pid or a negated pgid, is one no signal may reach, or undefined if it may be
+ * tried. 0, 1 and -1 name this process's group, init and every process the user owns; this
+ * process and its parent are never the work a signal here is meant to end.
+ */
+export function unsafeTarget(
+  target: number,
+  self = process.pid,
+  parent = process.ppid,
+): string | undefined {
+  if (!Number.isSafeInteger(target)) return "not a pid";
+  const pid = Math.abs(target);
+  if (pid <= 1) return "not a single process or group";
+  if (pid === self) return "this process";
+  if (pid === parent) return "this process's parent";
+  return undefined;
+}
+
 /** Whether the target existed; a group that already exited is the caller's to notice. */
 function send(target: number, signal: NodeJS.Signals): boolean {
+  const unsafe = unsafeTarget(target);
+  if (unsafe !== undefined) throw new RangeError(`refusing to signal ${target}: ${unsafe}`);
   try {
     process.kill(target, signal);
     return true;

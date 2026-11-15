@@ -9,6 +9,13 @@ import { fileURLToPath } from "node:url";
 import { cssDeclarations } from "../apps/web/src/ui/token-sheet.ts";
 import { gateEnv } from "./cargo-gate.ts";
 import { isMain } from "./is-main.ts";
+import { isIdent, newlinesIn, rustCode } from "./rust-source.ts";
+import {
+  SIGNALS_IGNORE,
+  SIGNAL_CHOKEPOINTS,
+  chokepointFor,
+  rawSignalCalls,
+} from "./signal-paths.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const failures: string[] = [];
@@ -412,71 +419,6 @@ const UNSAFE_MODULES: Record<string, string> = {
     "covers neither",
 };
 
-const RAW_STRING = /r(#*)"/y;
-const isIdent = (c: string | undefined) => c !== undefined && /\w/.test(c);
-const newlinesIn = (text: string) => text.replaceAll(/[^\n]/g, "");
-
-/**
- * Rust source with its comments removed and every string and char literal emptied, so neither a
- * `//` in a string nor an attribute quoted in one changes what the attributes are. Newlines are
- * kept, so a line in the result is the same line in the source. Each string literal becomes
- * `""`, and its contents, a raw string's included, are pushed to `strings` in order, so the nth
- * `""` in the result is `strings[n]`.
- */
-export function rustCode(source: string, strings: string[] = []): string {
-  let out = "";
-  let i = 0;
-  while (i < source.length) {
-    const c = source[i] ?? "";
-    const next = source[i + 1];
-    const start = i;
-    if (c === "/" && next === "/") {
-      while (i < source.length && source[i] !== "\n") i++;
-    } else if (c === "/" && next === "*") {
-      let depth = 1;
-      i += 2;
-      while (i < source.length && depth > 0) {
-        const pair = source.slice(i, i + 2);
-        const step = pair === "/*" ? 1 : pair === "*/" ? -1 : 0;
-        depth += step;
-        i += step === 0 ? 1 : 2;
-      }
-      out += ` ${newlinesIn(source.slice(start, i))}`;
-    } else if (
-      c === "r" &&
-      !isIdent(/[bc]/.test(source[i - 1] ?? "") ? source[i - 2] : source[i - 1])
-    ) {
-      RAW_STRING.lastIndex = i;
-      const raw = RAW_STRING.exec(source);
-      if (raw === null) {
-        out += c;
-        i++;
-        continue;
-      }
-      const close = `"${raw[1] ?? ""}`;
-      const end = source.indexOf(close, i + raw[0].length);
-      i = end === -1 ? source.length : end + close.length;
-      strings.push(source.slice(start + raw[0].length, end === -1 ? source.length : end));
-      out += `""${newlinesIn(source.slice(start, i))}`;
-    } else if (c === '"') {
-      i++;
-      while (i < source.length && source[i] !== '"') i += source[i] === "\\" ? 2 : 1;
-      strings.push(source.slice(start + 1, i));
-      i++;
-      out += `""${newlinesIn(source.slice(start, i))}`;
-    } else if (c === "'" && (next === "\\" || source[i + 2] === "'")) {
-      i += next === "\\" ? 3 : 1;
-      while (i < source.length && source[i] !== "'") i++;
-      i++;
-      out += "' '";
-    } else {
-      out += c;
-      i++;
-    }
-  }
-  return out;
-}
-
 /** The index just past the `]` that closes the `[` at `open`, or the end of `code`. */
 function closingBracket(code: string, open: number): number {
   let depth = 0;
@@ -614,10 +556,18 @@ export function attributeFailures(
           "builds. Use a value in CFG_VALUES in scripts/check-standards.ts, or add a gate that " +
           `builds it ${SEE_RUST_MD}`,
       );
+    } else if (
+      head[1] === "" &&
+      /^ignore\s*=\s*""$/.test(body) &&
+      strings[first] === SIGNALS_IGNORE
+    ) {
+      // A test that signals processes it didn't start: skipped on the host, and run in a sandbox
+      // by `cargo-gate test-all` (scripts/signal-paths.ts).
     } else if (/(?:^|,)\s*(ignore|should_panic)\b/.test(body)) {
       out.push(
         `${where}: ${attribute} skips a test, or passes it when it fails. A test runs, and fails ` +
-          "on what it asserts; check an error with a Result, not a panic.",
+          "on what it asserts; check an error with a Result, not a panic. The one exception is " +
+          `#[ignore = "${SIGNALS_IGNORE}"] (docs/standards/testing.md).`,
       );
     } else if (/\bclippy\b/.test(body)) {
       out.push(
@@ -1955,6 +1905,39 @@ function checkRust(): void {
   );
 }
 
+/**
+ * A raw signal call anywhere but a chokepoint (scripts/signal-paths.ts), each by file and line,
+ * and a chokepoint that no longer exists. A pid there unchecked can end every process the user
+ * owns, so each signal goes through code that checks its target.
+ */
+export function signalChokepointFailures(
+  files: readonly string[],
+  read: (file: string) => string,
+): string[] {
+  const out: string[] = [];
+  for (const file of files) {
+    if (Object.hasOwn(SIGNAL_CHOKEPOINTS, file) || file.includes("node_modules/")) continue;
+    for (const { line, call } of rawSignalCalls(file, read(file))) {
+      out.push(
+        `${file}:${line}: sends a signal directly (${call}); send it through ` +
+          `${chokepointFor(file)}, which checks its target (docs/standards/testing.md).`,
+      );
+    }
+  }
+  for (const chokepoint of Object.keys(SIGNAL_CHOKEPOINTS)) {
+    if (!files.includes(chokepoint)) {
+      out.push(`scripts/signal-paths.ts: SIGNAL_CHOKEPOINTS lists missing ${chokepoint}.`);
+    }
+  }
+  return out;
+}
+
+function checkSignalChokepoints(): void {
+  failures.push(
+    ...signalChokepointFailures(repoFiles(), (p) => readFileSync(join(root, p), "utf8")),
+  );
+}
+
 function checkCappedScripts(): void {
   for (const file of repoFiles().filter((p) => fileName(p) === "package.json")) {
     const scripts = packageScripts((p) => readFileSync(join(root, p), "utf8"), file);
@@ -2101,6 +2084,7 @@ if (isMain(import.meta)) {
   checkWebTokens();
   checkRust();
   checkCappedScripts();
+  checkSignalChokepoints();
 
   if (failures.length > 0) {
     console.error(`Standards check failed:\n${failures.map((f) => `  - ${f}`).join("\n")}`);

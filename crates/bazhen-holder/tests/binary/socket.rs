@@ -12,7 +12,7 @@ use bazhen_holder_proto::body::{
     VersionText, Versions,
 };
 use bazhen_holder_proto::{FrameDecoder, Reply, Request, RequestId, reply_decoder};
-use rustix::process::{Pid, Signal, kill_process};
+use rustix::process::{Pid, Signal};
 
 use super::{DEADLINE, Home, Result, Start, Started, home, spawn, spec, sweep};
 
@@ -420,7 +420,7 @@ fn binds_its_socket_again_on_sigusr1_and_unprompted() {
     let home = home("rebind").unwrap();
     let (holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
     std::fs::remove_file(&socket).unwrap();
-    kill_process(holder.pid().unwrap(), Signal::USR1).unwrap();
+    bazhen_test_signal::signal(holder.pid, Signal::USR1).unwrap();
     let signalled = Instant::now();
     connect_by(&socket, signalled + DEADLINE)
         .unwrap()
@@ -444,7 +444,7 @@ fn a_storm_of_sigusr1_during_a_flood_loses_no_output() {
     let count = format!("-c{flood}");
     let (holder, socket) = serving_with(&home, &["head", &count, "/dev/zero"], &FLOOD).unwrap();
     for _ in 0..500 {
-        kill_process(holder.pid().unwrap(), Signal::USR1).unwrap();
+        bazhen_test_signal::signal(holder.pid, Signal::USR1).unwrap();
     }
     let deadline = Instant::now() + DEADLINE;
     loop {
@@ -691,7 +691,7 @@ fn hears_its_signals_though_the_spawner_blocked_them() {
         "the exit waited for something to wake the holder"
     );
     std::fs::remove_file(&socket).unwrap();
-    kill_process(holder.pid().unwrap(), Signal::USR1).unwrap();
+    bazhen_test_signal::signal(holder.pid, Signal::USR1).unwrap();
     let signalled = Instant::now();
     connect_by(&socket, signalled + DEADLINE).unwrap();
     let quick = bazhen_holder::socket::RECHECK_EVERY / 2;

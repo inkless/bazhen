@@ -23,7 +23,7 @@ use std::sync::OnceLock;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use rustix::process::{Pid, Resource, Rlimit, Signal, getrlimit, getsid, kill_process, setrlimit};
+use rustix::process::{Pid, Resource, Rlimit, Signal, getrlimit, getsid, setrlimit};
 
 mod socket;
 
@@ -200,8 +200,8 @@ fn sweep() -> Result<()> {
         let ours = in_test_home(&entry.socket)
             && start_time(pid).is_some_and(|start| same_start(start, entry.holder_start))
             && ps("comm=", pid).is_some_and(|comm| is_holder(&comm));
-        if ours && let Some(pid) = i32::try_from(pid).ok().and_then(Pid::from_raw) {
-            let _ = kill_process(pid, Signal::KILL);
+        if ours {
+            let _ = bazhen_test_signal::signal(pid, Signal::KILL);
         }
         // A holder started since, at the same pid, has an entry of its own here.
         if std::fs::read_to_string(&path).is_ok_and(|now| now == text) {
@@ -294,10 +294,9 @@ impl Drop for Started {
         } else if !self.reaped
             && start_time(self.pid).is_some_and(|start| same_start(start, self.start))
             && ps("comm=", self.pid).is_some_and(|comm| is_holder(&comm))
-            && let Ok(pid) = self.pid()
         {
             // `exit` timed out, and its thread still waits for the holder.
-            let _ = kill_process(pid, Signal::KILL);
+            let _ = bazhen_test_signal::signal(self.pid, Signal::KILL);
         }
         let _ = std::fs::remove_file(&self.entry);
     }

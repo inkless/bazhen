@@ -1,5 +1,15 @@
-import { describe, expect, it } from "vitest";
-import { isAlive, signalGroup, signalPane, signalServer, vouch, vouchServer } from "./signal.ts";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  isAlive,
+  killHolder,
+  signalGroup,
+  signalPane,
+  signalServer,
+  unsafeTarget,
+  vouch,
+  vouchHolderProcess,
+  vouchServer,
+} from "./signal.ts";
 
 const pane = { pid: 4242, server: "/tmp/bz-x/s", pane: "%1", generation: "0" };
 
@@ -49,5 +59,57 @@ describe("the tmux server signal guard", () => {
   it("refuses to vouch for init, every process, or a group", () => {
     for (const pid of [1, 0, -1, -4242, 1.5])
       expect(() => vouchServer({ ...server, pid })).toThrow(RangeError);
+  });
+});
+
+describe("the target every signal is checked against", () => {
+  const self = 5_000;
+  const parent = 4_000;
+  const refused = (target: number) => unsafeTarget(target, self, parent);
+
+  it("refuses init, every process, and this process's own group", () => {
+    for (const target of [0, -0, 1, -1])
+      expect(refused(target)).toBe("not a single process or group");
+  });
+
+  it("refuses this process and its group, and its parent and its group", () => {
+    expect([refused(self), refused(-self)]).toEqual(["this process", "this process"]);
+    expect([refused(parent), refused(-parent)]).toEqual([
+      "this process's parent",
+      "this process's parent",
+    ]);
+  });
+
+  it("refuses what isn't a pid", () => {
+    for (const target of [Number.NaN, 1.5, -2.5, Infinity, -Infinity, 2 ** 53])
+      expect(refused(target)).toBe("not a pid");
+  });
+
+  it("allows another process or group", () => {
+    for (const target of [2, -2, self + 1, -(parent - 1)]) expect(refused(target)).toBeUndefined();
+  });
+
+  it("defaults to this process and its parent", () => {
+    expect([unsafeTarget(process.pid), unsafeTarget(-process.ppid)]).toEqual([
+      "this process",
+      "this process's parent",
+    ]);
+  });
+});
+
+describe("a proof for this process or its parent", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  // A proof checks only that a pid is above 1, so these reach the send itself, whose refusal is
+  // all that stands between them and the test runner. Stubbed, so a broken refusal sends nothing.
+  it("is refused at the send, with nothing sent", () => {
+    const kill = vi.spyOn(process, "kill").mockImplementation(() => true);
+    expect(() => killHolder(vouchHolderProcess({ pid: process.ppid, start: 0 }))).toThrow(
+      "this process's parent",
+    );
+    expect(() => signalServer(vouchServer({ pid: process.pid, socket: "/tmp/bz-x/s" }))).toThrow(
+      "this process",
+    );
+    expect(kill).not.toHaveBeenCalled();
   });
 });
