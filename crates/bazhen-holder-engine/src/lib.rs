@@ -11,6 +11,7 @@ mod budget;
 mod capped;
 mod encode;
 mod history;
+mod modes;
 mod osc;
 mod seam;
 
@@ -33,6 +34,11 @@ use crate::budget::{Budget, Stop};
 use crate::capped::Capped;
 use crate::encode::{Ending, Lines, encode_row};
 use crate::history::History;
+use crate::modes::Tracker;
+pub use crate::modes::{
+    ActiveCharset, Charset, CursorModes, CursorStyle, KeyMode, Keys, KittyFlags, LineFeed, Modes,
+    Mouse, MouseEncoding, MouseTracking, Origin, Screen, Shape,
+};
 use crate::osc::OscCap;
 use crate::seam::Utf8Seam;
 
@@ -128,6 +134,7 @@ pub struct Engine {
     osc: OscCap,
     utf8: Utf8Seam,
     history: History,
+    tracker: Tracker,
     replies: Sink,
     size: Size,
     /// alacritty's scrollback limit for the primary grid.
@@ -171,6 +178,7 @@ impl Engine {
             osc: OscCap::default(),
             utf8: Utf8Seam::default(),
             history: History::new(history.0.saturating_sub(KEPT_ROWS), MOST_HISTORY_BYTES),
+            tracker: Tracker::new(size.cols(), size.rows()),
             history_rows: history,
             replies,
             size,
@@ -263,11 +271,13 @@ impl Engine {
     }
 
     fn parse(&mut self, bytes: &[u8]) {
-        self.parser.advance(&mut Capped(&mut self.term), bytes);
+        self.parser
+            .advance(&mut Capped(&mut self.term, &mut self.tracker), bytes);
         if self.parser.sync_bytes_count() > 0 {
             // A synchronized update only holds back a frame, and a headless engine draws none:
             // buffering it would leave queries inside it unanswered.
-            self.parser.stop_sync(&mut Capped(&mut self.term));
+            self.parser
+                .stop_sync(&mut Capped(&mut self.term, &mut self.tracker));
         }
     }
 
@@ -307,6 +317,10 @@ impl Engine {
         self.set_scrollback(room);
         self.term.resize(size);
         mark_widened_rows(&mut self.term);
+        self.tracker.resize(
+            (self.size.cols(), self.size.rows()),
+            (size.cols(), size.rows()),
+        );
         self.size = size;
         self.budget.resize(size.cols(), size.rows());
         self.drain();
@@ -337,6 +351,11 @@ impl Engine {
         } else if let Some((text, ending)) = &self.kept {
             lines.row(text, *ending);
         }
+    }
+
+    /// The modes the program has set.
+    pub fn modes(&self) -> Modes {
+        self.tracker.modes(&self.term)
     }
 
     /// What the engine holds in memory, and how many rows of history.

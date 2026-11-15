@@ -26,6 +26,8 @@ use proptest::prelude::*;
 
 use super::*;
 
+mod tracked;
+
 const ALL_OF_IT: usize = 1_000_000;
 /// More rows than a case makes, so the engine drops none.
 const ENGINE_ROWS: usize = 20_000;
@@ -60,6 +62,34 @@ enum Action {
     Substitute,
     Resize(u16, u16),
     WriteHistory,
+    /// HTS wherever the cursor is.
+    TabStopHere,
+    /// HTS at a column, from 1.
+    TabStopAt(u8),
+    /// TBC 0 wherever the cursor is.
+    TabClearHere,
+    TabClearAt(u8),
+    TabClearAll,
+    ShiftOut,
+    ShiftIn,
+    /// G0 to G3, and whether to DEC line drawing.
+    Designate(u8, bool),
+    /// A DEC private mode set or reset.
+    Private(u16, bool),
+    Keypad(bool),
+    /// SM or RM: 4 is insert, 20 is new line.
+    Ansi(u8, bool),
+    /// DECSCUSR's parameter.
+    CursorStyle(u8),
+    /// OSC 50's shape.
+    CursorShape(u8),
+    KittyPush(u8),
+    KittyPop(u8),
+    /// The flags, and 1 to set, 2 to add, 3 to clear.
+    KittySet(u8, u8),
+    /// `CSI > Pp ; Pv m`.
+    ModifyOtherKeys(u8, u8),
+    SoftReset,
 }
 
 impl Action {
@@ -93,6 +123,27 @@ impl Action {
             Self::RestoreCursor => "\x1b8".into(),
             Self::TabForward(n) => format!("\x1b[{n}I"),
             Self::Substitute => "\x1a".into(),
+            Self::TabStopHere => "\x1bH".into(),
+            Self::TabStopAt(column) => format!("\x1b[{column}G\x1bH"),
+            Self::TabClearHere => "\x1b[g".into(),
+            Self::TabClearAt(column) => format!("\x1b[{column}G\x1b[0g"),
+            Self::TabClearAll => "\x1b[3g".into(),
+            Self::ShiftOut => "\x0e".into(),
+            Self::ShiftIn => "\x0f".into(),
+            Self::Designate(slot, drawing) => {
+                let slot = ['(', ')', '*', '+'][usize::from(*slot % 4)];
+                format!("\x1b{slot}{}", if *drawing { '0' } else { 'B' })
+            }
+            Self::Private(mode, on) => format!("\x1b[?{mode}{}", if *on { 'h' } else { 'l' }),
+            Self::Keypad(on) => (if *on { "\x1b=" } else { "\x1b>" }).into(),
+            Self::Ansi(mode, on) => format!("\x1b[{mode}{}", if *on { 'h' } else { 'l' }),
+            Self::CursorStyle(style) => format!("\x1b[{style} q"),
+            Self::CursorShape(shape) => format!("\x1b]50;CursorShape={shape}\x07"),
+            Self::KittyPush(flags) => format!("\x1b[>{flags}u"),
+            Self::KittyPop(count) => format!("\x1b[<{count}u"),
+            Self::KittySet(flags, how) => format!("\x1b[={flags};{how}u"),
+            Self::ModifyOtherKeys(resource, value) => format!("\x1b[>{resource};{value}m"),
+            Self::SoftReset => "\x1b[!p".into(),
             Self::Resize(..) | Self::WriteHistory => return None,
         })
     }
@@ -159,6 +210,8 @@ struct FullHistory {
     parser: Processor,
     utf8: Utf8Seam,
     replies: Sink,
+    /// Not compared: [`Capped`] needs one.
+    tracker: Tracker,
     /// Its history as it was when the alternate screen came up, which alacritty then keeps
     /// private, and how wide the screen was: a resize under the alternate screen doesn't touch
     /// what either terminal serves, but text that draws the same at one width can differ in its
@@ -174,6 +227,7 @@ impl FullHistory {
             parser: Processor::new(),
             utf8: Utf8Seam::default(),
             replies,
+            tracker: Tracker::new(size.usable().cols(), size.usable().rows()),
             under_alt: (String::new(), size.cols),
         }
     }
@@ -199,12 +253,15 @@ impl FullHistory {
     /// Feeds `bytes`, working around vte's split chars as the engine does.
     fn feed(&mut self, bytes: &[u8]) {
         let (finish, rest) = self.utf8.finish(bytes);
-        self.parser.advance(&mut Capped(&mut self.term), finish);
-        self.parser.advance(&mut Capped(&mut self.term), rest);
+        self.parser
+            .advance(&mut Capped(&mut self.term, &mut self.tracker), finish);
+        self.parser
+            .advance(&mut Capped(&mut self.term, &mut self.tracker), rest);
         if !rest.is_empty() {
             self.utf8.note(rest);
         }
-        self.parser.stop_sync(&mut Capped(&mut self.term));
+        self.parser
+            .stop_sync(&mut Capped(&mut self.term, &mut self.tracker));
     }
 
     fn resize(&mut self, size: Size) {

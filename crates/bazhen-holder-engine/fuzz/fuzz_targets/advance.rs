@@ -5,7 +5,8 @@ use libfuzzer_sys::fuzz_target;
 
 // Any output a program could write, read in any pieces and with resizes between them: the
 // engine never panics, never lets alacritty's scrollback fill up, which would lose a row, and
-// keeps no more history than asked. The first three bytes choose the size and history limit;
+// keeps no more history than asked; and the modes it ends in, given to a fresh engine of its
+// size, are the modes that engine holds. The first three bytes choose the size and history limit;
 // after that, 0xff and two bytes is a resize, and 0xfe ends a read.
 fuzz_target!(|input: &[u8]| {
     let [cols, rows, history, rest @ ..] = input else {
@@ -16,11 +17,13 @@ fuzz_target!(|input: &[u8]| {
         rows: u16::from(rows % 32),
     };
     let mut engine = Engine::new(size(*cols, *rows), HistoryRows(usize::from(*history)));
+    let mut now = size(*cols, *rows);
     let mut bytes = rest;
     while !bytes.is_empty() {
         match bytes {
             [0xff, cols, rows, after @ ..] => {
-                engine.resize(size(*cols, *rows));
+                now = size(*cols, *rows);
+                engine.resize(now);
                 bytes = after;
             }
             _ => {
@@ -40,4 +43,10 @@ fuzz_target!(|input: &[u8]| {
     let mut history = String::new();
     engine.write_history(&mut history);
     engine.take_replies();
+    let modes = engine.modes();
+    let mut fresh = Engine::new(now, HistoryRows(0));
+    let mut restore = String::new();
+    modes.write_for_engine(&mut restore);
+    fresh.advance(restore.as_bytes());
+    assert_eq!(fresh.modes(), modes);
 });
