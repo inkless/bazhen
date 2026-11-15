@@ -790,6 +790,8 @@ const NOT_DECODERS: Record<string, string> = {
     "test code: the differential test's reference terminal, compiled only under cfg(test)",
   "crates/bazhen-holder-engine/src/differential.rs::FullHistory::feed":
     "test code: the differential test's reference terminal, compiled only under cfg(test)",
+  "crates/bazhen-holder-engine/src/differential/tracked.rs::Case::feed":
+    "test code: feeds the engine and the mode test's references, compiled only under cfg(test)",
 };
 
 // An impl block, whose associated types its trait requires, so they aren't aliases. (A trait's

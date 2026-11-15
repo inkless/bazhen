@@ -6,6 +6,9 @@
 //! row it moves into history, without bound. Like tmux, which keeps 21 bytes a cell
 //! (`UTF8_SIZE`), the engine drops a zero-width char that would take a cell past 21 bytes.
 //!
+//! It tells [`Tracker`] of the calls that change a mode alacritty keeps to itself or ignores,
+//! before passing them on, so the tracker sees them with alacritty's cursor as it was.
+//!
 //! It drops OSC 8 hyperlinks too: alacritty keeps a link on every cell drawn while it is set, up
 //! to an OSC string's 1 KiB each, so a link per cell would cost a GiB at the largest size, and the
 //! engine serves none (only the pen is encoded). Every other call goes to alacritty as it is, but
@@ -15,21 +18,23 @@
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::Column;
 use alacritty_terminal::term::Term;
+use alacritty_terminal::term::TermMode;
 use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::vte::ansi::{
     Attr, CharsetIndex, ClearMode, CursorShape, CursorStyle, Handler, Hyperlink, KeyboardModes,
-    KeyboardModesApplyBehavior, LineClearMode, Mode, ModifyOtherKeys, PrivateMode, Rgb,
-    ScpCharPath, ScpUpdateMode, StandardCharset, TabulationClearMode,
+    KeyboardModesApplyBehavior, LineClearMode, Mode, ModifyOtherKeys, NamedPrivateMode,
+    PrivateMode, Rgb, ScpCharPath, ScpUpdateMode, StandardCharset, TabulationClearMode,
 };
 use unicode_width::UnicodeWidthChar as _;
 
 use crate::Sink;
+use crate::modes::Tracker;
 
 /// The most bytes of UTF-8 one cell holds, its char and the zero-width chars on it, as tmux's
 /// `UTF8_SIZE`.
 pub(crate) const MOST_CELL_BYTES: usize = 21;
 
-pub(crate) struct Capped<'a>(pub(crate) &'a mut Term<Sink>);
+pub(crate) struct Capped<'a>(pub(crate) &'a mut Term<Sink>, pub(crate) &'a mut Tracker);
 
 impl std::fmt::Debug for Capped<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -68,6 +73,29 @@ impl Capped<'_> {
             .sum();
         cell.c.len_utf8() + marks + mark.len_utf8() > MOST_CELL_BYTES
     }
+
+    fn alternate(&self) -> bool {
+        self.0.mode().contains(TermMode::ALT_SCREEN)
+    }
+
+    /// What a private mode set or reset changes that alacritty keeps to itself.
+    fn track_private_mode(&mut self, mode: PrivateMode, set: bool) {
+        let PrivateMode::Named(mode) = mode else {
+            return;
+        };
+        match mode {
+            // DECCOLM sets the region to the whole screen as DECSTBM would: a 1-row screen keeps it.
+            NamedPrivateMode::ColumnMode => self.1.set_region(1, None, self.0.screen_lines()),
+            NamedPrivateMode::BlinkingCursor => self.1.set_cursor_blinking(set),
+            NamedPrivateMode::SwapScreenAndSetRestoreCursor if set && !self.alternate() => {
+                self.1.alternate_on(&self.0.grid().cursor);
+            }
+            NamedPrivateMode::SwapScreenAndSetRestoreCursor if !set && self.alternate() => {
+                self.1.alternate_off();
+            }
+            _ => {}
+        }
+    }
 }
 
 impl Handler for Capped<'_> {
@@ -76,10 +104,12 @@ impl Handler for Capped<'_> {
     }
 
     fn set_cursor_style(&mut self, a: Option<CursorStyle>) {
+        self.1.set_cursor_style(a);
         <Term<Sink> as Handler>::set_cursor_style(self.0, a);
     }
 
     fn set_cursor_shape(&mut self, a: CursorShape) {
+        self.1.set_cursor_shape(a);
         <Term<Sink> as Handler>::set_cursor_shape(self.0, a);
     }
 
@@ -167,6 +197,7 @@ impl Handler for Capped<'_> {
     }
 
     fn set_horizontal_tabstop(&mut self) {
+        self.1.set_tab(self.0.grid().cursor.point.column);
         <Term<Sink> as Handler>::set_horizontal_tabstop(self.0);
     }
 
@@ -219,6 +250,7 @@ impl Handler for Capped<'_> {
     }
 
     fn clear_tabs(&mut self, a: TabulationClearMode) {
+        self.1.clear_tabs(&a, self.0.grid().cursor.point.column);
         <Term<Sink> as Handler>::clear_tabs(self.0, a);
     }
 
@@ -227,6 +259,7 @@ impl Handler for Capped<'_> {
     }
 
     fn reset_state(&mut self) {
+        *self.1 = Tracker::new(self.0.columns(), self.0.screen_lines());
         <Term<Sink> as Handler>::reset_state(self.0);
     }
 
@@ -251,10 +284,12 @@ impl Handler for Capped<'_> {
     }
 
     fn set_private_mode(&mut self, a: PrivateMode) {
+        self.track_private_mode(a, true);
         <Term<Sink> as Handler>::set_private_mode(self.0, a);
     }
 
     fn unset_private_mode(&mut self, a: PrivateMode) {
+        self.track_private_mode(a, false);
         <Term<Sink> as Handler>::unset_private_mode(self.0, a);
     }
 
@@ -263,6 +298,7 @@ impl Handler for Capped<'_> {
     }
 
     fn set_scrolling_region(&mut self, a0: usize, a1: Option<usize>) {
+        self.1.set_region(a0, a1, self.0.screen_lines());
         <Term<Sink> as Handler>::set_scrolling_region(self.0, a0, a1);
     }
 
@@ -275,6 +311,7 @@ impl Handler for Capped<'_> {
     }
 
     fn set_active_charset(&mut self, a: CharsetIndex) {
+        self.1.set_active_charset(a);
         <Term<Sink> as Handler>::set_active_charset(self.0, a);
     }
 
@@ -330,18 +367,22 @@ impl Handler for Capped<'_> {
     }
 
     fn push_keyboard_mode(&mut self, a: KeyboardModes) {
+        self.1.push_keys(a);
         <Term<Sink> as Handler>::push_keyboard_mode(self.0, a);
     }
 
     fn pop_keyboard_modes(&mut self, a: u16) {
+        self.1.pop_keys(a);
         <Term<Sink> as Handler>::pop_keyboard_modes(self.0, a);
     }
 
     fn set_keyboard_mode(&mut self, a0: KeyboardModes, a1: KeyboardModesApplyBehavior) {
+        self.1.set_keys(a0, a1);
         <Term<Sink> as Handler>::set_keyboard_mode(self.0, a0, a1);
     }
 
     fn set_modify_other_keys(&mut self, a: ModifyOtherKeys) {
+        self.1.set_modify_other_keys(a);
         <Term<Sink> as Handler>::set_modify_other_keys(self.0, a);
     }
 
