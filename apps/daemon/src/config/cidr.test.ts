@@ -51,19 +51,22 @@ describe("an address range", () => {
       problem("fc00::/6"),
       problem("192.168.1.0/24%eno1"),
       problem("fdeb:9f4b:2183:4c5b::/64%eno1"),
+      problem("fe80::/10%2"),
     ]).toEqual([
       "is link-local, so it needs its interface, such as fe80::/10%eno1",
       "is link-local, so it needs its interface, such as fe80::/10%eno1",
       "covers link-local addresses on every interface",
       "names an interface, which only link-local takes",
       "names an interface, which only link-local takes",
+      "names its interface by number; use its name, such as eno1",
     ]);
   });
 
   it("refuses an IPv4 range written as IPv6, which no peer would match", () => {
-    expect(problem("::ffff:192.168.1.0/120")).toBe(
+    expect([problem("::ffff:192.168.1.0/120"), problem("::ffff:0.0.0.0/96")]).toEqual([
       "is IPv4 written as IPv6, which no peer is compared as; list the IPv4 range",
-    );
+      "is IPv4 written as IPv6, which no peer is compared as; list the IPv4 range",
+    ]);
   });
 
   it("admits an address inside it and nothing just outside", () => {
@@ -125,6 +128,8 @@ describe("the subnets suggested for web.lan_allow", () => {
         ],
         docker0: [{ family: "IPv4", cidr: "172.17.0.1/16", internal: false }],
         wlan0: [{ family: "IPv6", cidr: "fe80::1/64", internal: false }],
+        "7": [{ family: "IPv6", cidr: "fe80::7/64", internal: false }],
+        "bad name": [{ family: "IPv6", cidr: "fe80::8/64", internal: false }],
       }),
     ).toEqual([
       { interface: "eno1", cidr: "192.168.1.0/24" },

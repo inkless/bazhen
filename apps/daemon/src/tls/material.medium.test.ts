@@ -11,6 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
+import { format, inspect } from "node:util";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -57,6 +58,15 @@ describe("the LAN certificate on disk", () => {
       key: mode(join(dir, KEY_FILE)),
       files: readdirSync(dir).toSorted(),
     }).toEqual({ dir: 0o700, key: 0o600, files: [CERT_FILE, KEY_FILE] });
+  });
+
+  it("leaves its key out when it is logged or serialised", () => {
+    const made = load();
+    const shown = [JSON.stringify(made), inspect(made), format("%o", made)];
+    expect([
+      made.key.includes("PRIVATE KEY"),
+      shown.some((t) => t.includes("PRIVATE KEY")),
+    ]).toEqual([true, false]);
   });
 
   it("is kept from one start to the next, so its fingerprint doesn't change", () => {
@@ -144,6 +154,18 @@ describe("writing the certificate", () => {
     expect(readdirSync(dir).toSorted()).toEqual([CERT_FILE, KEY_FILE]);
   });
 
+  it("names what an interrupted write left, and why, when it can't remove it", () => {
+    load();
+    const left = join(dir, `.${KEY_FILE}.${SUFFIX}`);
+    mkdirSync(left);
+    const refused = refusal();
+    expect([
+      refused.path,
+      refused.message.includes("couldn't be removed"),
+      refused.message.includes("EISDIR"),
+    ]).toEqual([left, true, true]);
+  });
+
   it("won't write the key into a file someone put at its temporary name", () => {
     const planted = () => {
       writeFileSync(temporary(), "planted", { mode: 0o644 });
@@ -181,8 +203,9 @@ describe("writing the certificate", () => {
     const refused = refusal();
     expect([
       refused.message.includes("Fix that and restart"),
+      refused.message.includes("ENOTDIR"),
       refused.message.includes("delete"),
-    ]).toEqual([true, false]);
+    ]).toEqual([true, true, false]);
   });
 
   it("writes everything however few bytes each write takes, and fails on a write that takes none", () => {

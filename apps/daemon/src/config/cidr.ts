@@ -108,6 +108,9 @@ export function parseRange(text: string): { range: Cidr } | { problem: string } 
     if (zone === undefined) {
       return { problem: "is link-local, so it needs its interface, such as fe80::/10%eno1" };
     }
+    // A peer's zone is reported by interface name, so a numeric zone would never match one.
+    if (/^[0-9]+$/.test(zone))
+      return { problem: "names its interface by number; use its name, such as eno1" };
     return { range: { ...range, zone } };
   }
   if (zone !== undefined) return { problem: "names an interface, which only link-local takes" };
@@ -189,12 +192,15 @@ export function localSubnets(
   const seen = new Set<string>();
   const out: { interface: string; cidr: string }[] = [];
   for (const [name, addresses] of Object.entries(interfaces)) {
+    // Only a name a range can carry as its zone; parseRange takes no other.
+    const zoneable = /^[A-Za-z0-9_.-]+$/.test(name) && !/^[0-9]+$/.test(name);
     for (const a of addresses ?? []) {
       if (a.internal || a.cidr === null) continue;
       const [text = "", length = ""] = a.cidr.split("/");
       const address = parseAddress(text);
       const bits = Number(length);
       if (address === undefined || !Number.isInteger(bits)) continue;
+      if (isLinkLocal(address) && !zoneable) continue;
       const cidr = isLinkLocal(address)
         ? `fe80::/10%${name}`
         : `${format(address.value & mask(address.v6, bits), address.v6)}/${bits}`;

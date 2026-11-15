@@ -65,11 +65,15 @@ describe("a self-signed LAN certificate", () => {
 
   it("encodes a positive serial: a DER integer whose first byte has its top bit clear", () => {
     const serialHeader = Buffer.from([0xa0, 0x03, 0x02, 0x01, 0x02, 0x02, 0x10]);
-    const firstBytes = Array.from({ length: 32 }, () => {
+    const found = Array.from({ length: 32 }, () => {
       const { der } = made();
-      return der.readUInt8(der.indexOf(serialHeader) + serialHeader.length);
+      const at = der.indexOf(serialHeader);
+      return { at, first: der.readUInt8(Math.max(at, 0) + serialHeader.length) };
     });
-    expect(firstBytes.every((b) => b < 0x80)).toBe(true);
+    expect([found.every((f) => f.at > 0), found.every((f) => f.first < 0x80)]).toEqual([
+      true,
+      true,
+    ]);
   });
 
   it("round-trips through PEM", () => {

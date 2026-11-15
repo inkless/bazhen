@@ -16,6 +16,7 @@ import { X509Certificate, createPrivateKey, generateKeyPairSync, randomBytes } f
 import { join } from "node:path";
 import { hostname } from "node:os";
 import { execFileSync } from "node:child_process";
+import { inspect } from "node:util";
 import { ensurePrivateDir } from "../config/private-dir.ts";
 import { fingerprint, selfSigned, toPem } from "./x509.ts";
 
@@ -39,7 +40,7 @@ export class LanCertificateInvalid extends Error {
 }
 
 export interface LanCertificate {
-  /** The private key, PEM. Never log this object whole. */
+  /** The private key, PEM: left out when the object is logged or serialised. */
   readonly key: string;
   readonly cert: string;
   /** The one name it serves, from the certificate itself. */
@@ -47,9 +48,28 @@ export interface LanCertificate {
   readonly fingerprint: string;
   readonly notAfter: Date;
   readonly path: string;
+  toJSON(): Record<string, unknown>;
+  [inspect.custom](): Record<string, unknown>;
 }
 
-const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
+/** Everything but the key, for whatever logs or serialises the certificate. */
+const redacted = (c: LanCertificate) => ({
+  key: "[redacted]",
+  cert: c.cert,
+  name: c.name,
+  fingerprint: c.fingerprint,
+  notAfter: c.notAfter,
+  path: c.path,
+});
+
+/** An error's message and its causes', so the errno a wrapper hides is still named. */
+function errorText(err: unknown): string {
+  const parts: string[] = [];
+  for (let at: unknown = err; at instanceof Error && parts.length < 5; at = at.cause) {
+    parts.push(at.message);
+  }
+  return parts.length === 0 ? "an unknown error" : parts.join(": ");
+}
 /** A failure that isn't the certificate's: the directory or a file couldn't be made or read. */
 const failed = (path: string, doing: string, cause: unknown) =>
   new LanCertificateInvalid(path, `${doing}: ${errorText(cause)}`, "Fix that and restart", {
@@ -80,15 +100,28 @@ export function lanCertificate(
   const unusable = (path: string, problem: string, cause?: unknown) =>
     new LanCertificateInvalid(path, problem, remake, cause === undefined ? undefined : { cause });
 
+  let entries: string[];
   try {
     ensurePrivateDir(dir, opts.uid);
-    for (const entry of readdirSync(dir)) {
-      if (TEMPORARY.test(entry)) rmSync(join(dir, entry), { force: true });
-    }
+    entries = readdirSync(dir);
   } catch (err) {
     throw failed(dir, "couldn't be made private", err);
   }
-  if (lstatSync(certPath, { throwIfNoEntry: false }) === undefined) {
+  for (const entry of entries.filter((e) => TEMPORARY.test(e))) {
+    const left = join(dir, entry);
+    try {
+      rmSync(left, { force: true });
+    } catch (err) {
+      throw failed(left, "is left from an interrupted write, and couldn't be removed", err);
+    }
+  }
+  let certFound: boolean;
+  try {
+    certFound = lstatSync(certPath, { throwIfNoEntry: false }) !== undefined;
+  } catch (err) {
+    throw failed(certPath, "couldn't be read", err);
+  }
+  if (!certFound) {
     try {
       create(dir, opts.name, now, suffix);
     } catch (err) {
@@ -97,14 +130,13 @@ export function lanCertificate(
   }
 
   /** A file read through one descriptor, so what was checked is what is read. */
-  const read = (path: string, check: (stat: Stats) => string | null): string => {
+  const read = (path: string, missing: string, check: (stat: Stats) => string | null): string => {
     let fd: number;
     try {
       fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     } catch (err) {
       if (codeOf(err) === "ELOOP") throw unusable(path, "is a symlink");
-      if (codeOf(err) === "ENOENT")
-        throw unusable(path, "is missing, though its certificate is there");
+      if (codeOf(err) === "ENOENT") throw unusable(path, missing);
       throw failed(path, "couldn't be read", err);
     }
     try {
@@ -117,11 +149,11 @@ export function lanCertificate(
       closeSync(fd);
     }
   };
-  const key = read(keyPath, (stat) => {
+  const key = read(keyPath, "is missing, though its certificate is there", (stat) => {
     if (stat.uid !== opts.uid) return `is owned by uid ${stat.uid}`;
     return (stat.mode & 0o077) === 0 ? null : "can be read by other users";
   });
-  const pem = read(certPath, () => null);
+  const pem = read(certPath, "went missing as it was read", () => null);
 
   let cert: X509Certificate;
   try {
@@ -140,7 +172,17 @@ export function lanCertificate(
   if (name === undefined) throw unusable(certPath, "doesn't name a single host");
   const notAfter = new Date(cert.validTo);
   if (notAfter <= now) throw unusable(certPath, `expired on ${notAfter.toISOString()}`);
-  return { key, cert: pem, name, fingerprint: fingerprint(cert.raw), notAfter, path: certPath };
+  const loaded: LanCertificate = {
+    key,
+    cert: pem,
+    name,
+    fingerprint: fingerprint(cert.raw),
+    notAfter,
+    path: certPath,
+    toJSON: () => redacted(loaded),
+    [inspect.custom]: () => redacted(loaded),
+  };
+  return loaded;
 }
 
 function create(dir: string, name: string, now: Date, suffix: () => string): void {
