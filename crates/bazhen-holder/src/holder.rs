@@ -6,12 +6,13 @@ use std::io;
 use std::os::fd::BorrowedFd;
 use std::time::{Duration, Instant};
 
-use bazhen_holder_proto::body::{ExitStatus, Generation};
+use bazhen_holder_proto::body::{self, ExitStatus, Generation};
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
 use rustix::process::Pid;
 
-use crate::child::{ChildProcess, Reaper};
-use crate::pty::Pty;
+use crate::child::{ChildProcess, Reaper, SignalRefused};
+use crate::input::{InputFull, InputQueue};
+use crate::pty::{Pty, WindowSize};
 
 /// How long, after the child is reaped, output it wrote before exiting may still arrive before the
 /// exit is published. Reading the end of the output (EIO or 0) publishes it sooner.
@@ -62,6 +63,15 @@ pub struct Holder<O: Output> {
     master_open: bool,
     draining_until: Option<Instant>,
     exit: Option<Exit>,
+    input: InputQueue,
+}
+
+/// Why `input` was refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputRefused {
+    /// The child's exit is published: nothing more reaches the terminal.
+    Exited,
+    Full(InputFull),
 }
 
 impl<O: Output> Holder<O> {
@@ -83,6 +93,7 @@ impl<O: Output> Holder<O> {
             master_open: true,
             draining_until: None,
             exit: None,
+            input: InputQueue::default(),
         };
         holder.step(Instant::now());
         holder
@@ -110,9 +121,71 @@ impl<O: Output> Holder<O> {
         self.reaper.fd()
     }
 
+    /// Whether the child has been reaped, its exit published or not.
+    pub fn child_reaped(&self) -> bool {
+        self.child.exit().is_some()
+    }
+
     /// The master, while it may still have output to read.
     pub fn master(&self) -> Option<BorrowedFd<'_>> {
         self.master_open.then(|| self.pty.master())
+    }
+
+    /// What `poll` should wait for on the master: output, and room for input while any waits.
+    pub fn master_interest(&self) -> PollFlags {
+        if self.input.is_empty() {
+            PollFlags::IN
+        } else {
+            PollFlags::IN | PollFlags::OUT
+        }
+    }
+
+    /// Queues input for the child, whole or not at all.
+    ///
+    /// # Errors
+    ///
+    /// `Exited` once the child's exit is published or nothing holds the terminal open to read it,
+    /// `Full` when the queue can't take it.
+    pub fn offer_input(&mut self, bytes: &[u8]) -> Result<(), InputRefused> {
+        if self.exit.is_some() || !self.master_open {
+            return Err(InputRefused::Exited);
+        }
+        self.input.offer(bytes).map_err(InputRefused::Full)
+    }
+
+    /// Writes queued input to the master as far as it takes it. A master that refuses it for good
+    /// has no reader left, so the input is dropped.
+    pub fn flush_input(&mut self) {
+        if self.input.is_empty() || !self.master_open {
+            return;
+        }
+        if let Err(error) = self.input.write_to(self.pty.master()) {
+            tracing::warn!(%error, queued = self.input.len(), "input can't reach the child; dropped");
+            self.input.clear();
+        }
+    }
+
+    /// Sets the terminal's size, which sends `SIGWINCH` to its foreground group.
+    ///
+    /// # Errors
+    ///
+    /// When the system refuses the size.
+    pub fn resize(&self, size: WindowSize) -> io::Result<()> {
+        self.pty.set_size(size)
+    }
+
+    /// The terminal's foreground process group (`Pty::foreground_group`).
+    pub fn foreground_group(&self) -> Option<Pid> {
+        self.pty.foreground_group()
+    }
+
+    /// Sends `signal` to the child's process group (`ChildProcess::signal`).
+    ///
+    /// # Errors
+    ///
+    /// `Exited` once the child is reaped, `Failed` when the system refuses.
+    pub fn signal(&self, signal: body::Signal) -> Result<(), SignalRefused> {
+        self.child.signal(signal)
     }
 
     /// Starts ending the child (`ChildProcess::close`).
@@ -173,7 +246,7 @@ impl<O: Output> Holder<O> {
         while read < MAX_READ_PER_TURN {
             match rustix::io::read(self.pty.master(), &mut *self.chunk) {
                 Ok(0) => {
-                    self.master_open = false;
+                    self.master_closed();
                     return;
                 }
                 Ok(n) => {
@@ -185,11 +258,24 @@ impl<O: Output> Holder<O> {
                 // EIO once nothing holds the slave open (Linux): the output is over, the
                 // terminal isn't.
                 Err(_) => {
-                    self.master_open = false;
+                    self.master_closed();
                     return;
                 }
             }
         }
+    }
+
+    /// The master's output is over: nothing holds the terminal open, so nothing will read input
+    /// either, and what is queued is dropped.
+    fn master_closed(&mut self) {
+        self.master_open = false;
+        if !self.input.is_empty() {
+            tracing::warn!(
+                queued = self.input.len(),
+                "input no reader is left for; dropped"
+            );
+        }
+        self.input.clear();
     }
 
     /// Reaps the child, starts its drain, and publishes its exit once the output has ended or
@@ -212,6 +298,7 @@ impl<O: Output> Holder<O> {
                 status: status.clone(),
             });
             self.draining_until = None;
+            self.input.clear();
         }
         self.child.close_step(self.pty.foreground_group(), now);
     }

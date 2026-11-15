@@ -13,6 +13,8 @@ use rustix::process::{Pid, Signal, kill_process};
 
 use super::{DEADLINE, Home, Result, Start, Started, home, spawn, spec, sweep};
 
+mod verbs;
+
 /// A `holder/1` client, as the daemon would be one.
 struct Client {
     stream: UnixStream,

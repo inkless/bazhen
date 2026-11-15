@@ -7,6 +7,7 @@
 pub mod child;
 pub mod conn;
 pub mod holder;
+pub mod input;
 pub mod log;
 #[cfg(target_os = "macos")]
 mod macos;

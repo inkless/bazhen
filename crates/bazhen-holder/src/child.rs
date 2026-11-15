@@ -5,7 +5,7 @@ use std::os::fd::BorrowedFd;
 use std::time::{Duration, Instant};
 
 use crate::signals::{self, Wakeups};
-use bazhen_holder_proto::body::{ExitCode, ExitStatus};
+use bazhen_holder_proto::body::{self, ExitCode, ExitStatus};
 use rustix::process::{Pid, Signal, WaitOptions, kill_process_group, waitpid};
 
 /// How long a close waits after `SIGHUP` before it sends `SIGKILL`.
@@ -33,6 +33,14 @@ impl Reaper {
     pub fn clear(&self) {
         self.0.clear();
     }
+}
+
+/// Why `ChildProcess::signal` sent nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SignalRefused {
+    /// The child has been reaped, or its group has nothing left to signal.
+    Exited,
+    Failed(rustix::io::Errno),
 }
 
 /// A close under way: `SIGHUP` sent, and `SIGKILL` due at `kill_at` unless the child is reaped.
@@ -106,6 +114,32 @@ impl ChildProcess {
             kill_at: now + CLOSE_GRACE,
             killed: false,
         });
+    }
+
+    /// Sends `signal` to the child's process group, and only while the child is unreaped. Until
+    /// it is reaped its pid, which is its group's, can't be given to another process, and as a
+    /// session leader it can't leave the group; once reaped, the number may since name a group
+    /// that isn't ours, so nothing is sent.
+    ///
+    /// # Errors
+    ///
+    /// `Exited` once the child is reaped, or when the group is gone (`ESRCH`, as macOS may say of
+    /// a group left with only the unreaped child's zombie); `Failed` for any other refusal.
+    pub fn signal(&self, signal: body::Signal) -> Result<(), SignalRefused> {
+        if self.exit.is_some() {
+            return Err(SignalRefused::Exited);
+        }
+        let signal = match signal {
+            body::Signal::Sigint => Signal::INT,
+            body::Signal::Sigterm => Signal::TERM,
+            body::Signal::Sighup => Signal::HUP,
+            body::Signal::Sigkill => Signal::KILL,
+        };
+        match kill_process_group(self.pid, signal) {
+            Ok(()) => Ok(()),
+            Err(rustix::io::Errno::SRCH) => Err(SignalRefused::Exited),
+            Err(errno) => Err(SignalRefused::Failed(errno)),
+        }
     }
 
     /// When the close next needs a `close_step`: the kill deadline, until the kill is sent.
@@ -236,6 +270,32 @@ mod tests {
         });
         assert!(status.success(), "{status:?}");
         assert_eq!(seen, "usr1\n");
+    }
+
+    #[test]
+    fn a_signal_to_a_reaped_child_is_refused_and_sends_nothing() {
+        let (status, seen) = signals_seen_by_a_stand_in(|pid| {
+            let child = ChildProcess {
+                pid,
+                exit: Some(ExitStatus::Unknown),
+                closing: None,
+            };
+            assert_eq!(
+                child.signal(body::Signal::Sighup),
+                Err(SignalRefused::Exited)
+            );
+        });
+        assert!(status.success(), "{status:?}");
+        assert_eq!(seen, "usr1\n");
+    }
+
+    #[test]
+    fn a_signal_to_a_live_child_reaches_its_group() {
+        let (_, seen) = signals_seen_by_a_stand_in(|pid| {
+            let child = ChildProcess::new(pid);
+            child.signal(body::Signal::Sighup).unwrap();
+        });
+        assert_eq!(seen, "hup\nusr1\n");
     }
 
     #[test]

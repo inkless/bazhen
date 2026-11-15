@@ -757,9 +757,10 @@ pub enum ErrorCode {
     Invalid,
     /// `hello` found no major both sides speak.
     NoSharedVersion,
-    /// `input` from a connection without the writer slot.
+    /// `input` or `resize` from a connection without the writer slot.
     NotWriter,
-    /// `input` past what the holder queues for a program that isn't reading.
+    /// `input` past what the holder queues for a program that isn't reading. Every later `input`
+    /// is refused too until the program has read what is queued.
     InputFull,
     /// The request needs a child, and it has exited.
     Exited,

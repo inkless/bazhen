@@ -228,7 +228,8 @@ export type HolderSpawnSpec = z.infer<typeof HolderSpawnSpec>;
 /**
  * Opens every connection, with the versions the client speaks. The holder answers with the
  * version they agree on, or with `error` coded `no-shared-version` and then closes. `writer` asks
- * for the one slot whose `input` the holder takes; the reply says whether this connection got it.
+ * for the one slot whose `input` and `resize` the holder takes; the reply says whether this
+ * connection got it.
  */
 export const HolderHelloRequest = z.object({
   protocol: HolderVersions,
@@ -366,7 +367,7 @@ export type HolderRequestName = z.infer<typeof HolderRequestName>;
  * Every request gets one answer under its id, except `input`, which gets one only when refused:
  * - `hello`, `snapshot`, `stats`, `foreground`: their own reply, or `error`;
  * - `subscribe`, `resize`, `signal`, `respawn`, `set-tags`, `set-theme`: `ok`, or `error`;
- * - `input`: nothing, or `error` (`not-writer`, `input-full`);
+ * - `input`: nothing, or `error` (`not-writer`, `input-full`, `exited`);
  * - `close`: `ok`; then the holder hangs up the child's process group, kills it if it outlives a
  *   grace period, removes its socket and exits, ending every connection.
  */
@@ -407,9 +408,12 @@ export const HOLDER_ERROR_CODES = [
   "invalid",
   /** `hello` found no major both sides speak. */
   "no-shared-version",
-  /** `input` from a connection without the writer slot. */
+  /** `input` or `resize` from a connection without the writer slot. */
   "not-writer",
-  /** `input` past what the holder queues for a program that isn't reading. */
+  /**
+   * `input` past what the holder queues for a program that isn't reading. Every later `input` is
+   * refused too until the program has read what is queued, so none overtakes the refused one.
+   */
   "input-full",
   /** The request needs a child, and it has exited. */
   "exited",
