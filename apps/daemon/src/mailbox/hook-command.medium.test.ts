@@ -20,6 +20,8 @@ let dir = "";
 const running = new Set<ChildProcess>();
 /** Connections a stub holds open, which closing the server leaves be. */
 const held = new Set<Socket>();
+/** Errors on a stub's connections other than a client hanging up, which no case expects. */
+const stubFailures: string[] = [];
 /** What each case's client and stub did, and when, for a case that timed out to report. */
 let trace: string[] = [];
 let caseStart = performance.now();
@@ -38,6 +40,8 @@ afterEach(() => {
   server?.close();
   rmSync(dir, { recursive: true, force: true });
   if (hung) throw new Error(`a client was still running; it got as far as:\n${trace.join("\n")}`);
+  const failures = stubFailures.splice(0);
+  if (failures.length > 0) throw new Error(`a stub's connection failed: ${failures.join(", ")}`);
 });
 
 /** Under /tmp: a socket path must fit in about 104 bytes. */
@@ -96,11 +100,16 @@ interface Held {
 /**
  * A socket answering each request with the next of `answers`: bytes to write and close, bytes to
  * write holding the connection open, or null to drop the connection after reading the request.
- * Records every request it reads.
+ * Records every request it reads. A client that refuses a reply at its head hangs up with the
+ * rest unread, which resets the stub's end, as it would the daemon's.
  */
 function listen(socket: string, answers: (Buffer | Held | null)[]) {
   const seen: Exchange[] = [];
   server = createServer((conn) => {
+    conn.on("error", (e: NodeJS.ErrnoException) => {
+      stage(`stub's connection failed: ${e.code}`);
+      if (e.code !== "ECONNRESET" && e.code !== "EPIPE") stubFailures.push(e.code ?? e.message);
+    });
     void readRequest(conn).then((request) => {
       seen.push(request);
       stage(`stub read ${request.path}`);
@@ -160,6 +169,19 @@ function run(
 
 const QUIET = { code: 0, stdout: "", stderr: "" };
 const MAIL = { exitCode: 2, stdout: "", stderr: "mail", offered: [] };
+
+const good = {
+  "content-type": HOOK_REPLY_TYPE,
+  "content-length": "4",
+  "bazhen-exit-code": "2",
+  "bazhen-offered": "",
+  "bazhen-stdout-bytes": "2",
+};
+/** A whole reply but for its length, which every client refuses rather than retries. */
+const noLength = raw(
+  Object.fromEntries(Object.entries(good).filter(([name]) => name !== "content-length")),
+  "oops",
+);
 
 describe("hook command", () => {
   it("runs the client through a shell even when its path has spaces, quotes and $", () => {
@@ -337,13 +359,6 @@ describe.each(clients)("hook client (%s)", { timeout: 30_000 }, (_kind, client) 
     expect(result).toEqual({ code: 2, stdout: "", stderr: "mail" });
   });
 
-  const good = {
-    "content-type": HOOK_REPLY_TYPE,
-    "content-length": "4",
-    "bazhen-exit-code": "2",
-    "bazhen-offered": "",
-    "bazhen-stdout-bytes": "2",
-  };
   const malformed: [string, Buffer][] = [
     ["a server error", raw({ ...good }, "oops", "500 Internal Server Error")],
     ["JSON instead of the frame", raw({ ...good, "content-type": "application/json" }, "oops")],
@@ -372,10 +387,6 @@ describe.each(clients)("hook client (%s)", { timeout: 30_000 }, (_kind, client) 
   ];
   it("gives the waiter up on a whole reply without Content-Length, rather than retrying it", async () => {
     const socket = socketPath();
-    const noLength = raw(
-      Object.fromEntries(Object.entries(good).filter(([name]) => name !== "content-length")),
-      "oops",
-    );
     const { seen, ready } = listen(socket, [noLength, framed(MAIL)]);
     await ready;
     const result = await run(client, "wait", {
@@ -385,6 +396,33 @@ describe.each(clients)("hook client (%s)", { timeout: 30_000 }, (_kind, client) 
     expect(result).toEqual(QUIET);
     expect(seen).toHaveLength(1);
   });
+
+  it("gives the waiter up on a reply announcing over 1 MiB, rather than retrying its short body", async () => {
+    const socket = socketPath();
+    const overLength = raw({ ...good, "content-length": String(2 ** 20 + 1) }, "oops");
+    const { seen, ready } = listen(socket, [overLength, framed(MAIL)]);
+    await ready;
+    const result = await run(client, "wait", {
+      BAZHEN_AGENT_ID: newId("agent"),
+      BAZHEN_SOCKET: socket,
+    });
+    expect([result, seen.length]).toEqual([QUIET, 1]);
+  });
+
+  it.each(["abc", "+4", "-1"])(
+    "gives the waiter up on a reply whose Content-Length is %s, rather than retrying it",
+    async (length) => {
+      const socket = socketPath();
+      const notALength = raw({ ...good, "content-length": length }, "oops");
+      const { seen, ready } = listen(socket, [notALength, framed(MAIL)]);
+      await ready;
+      const result = await run(client, "wait", {
+        BAZHEN_AGENT_ID: newId("agent"),
+        BAZHEN_SOCKET: socket,
+      });
+      expect([result, seen.length]).toEqual([QUIET, 1]);
+    },
+  );
 
   it.each(malformed)("fails open on %s", async (_what, answer) => {
     const socket = socketPath();
@@ -412,5 +450,16 @@ describe("hook client (binary), on a stalled reply", { timeout: 30_000 }, () => 
       BAZHEN_SOCKET: socket,
     });
     expect(result).toEqual(QUIET);
+  });
+
+  it("gives the waiter up on a whole reply without Content-Length that is held open", async () => {
+    const socket = socketPath();
+    const { seen, ready } = listen(socket, [{ held: noLength }, framed(MAIL)]);
+    await ready;
+    const result = await run(hookClient(), "wait", {
+      BAZHEN_AGENT_ID: newId("agent"),
+      BAZHEN_SOCKET: socket,
+    });
+    expect([result, seen.length]).toEqual([QUIET, 1]);
   });
 });
