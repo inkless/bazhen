@@ -2,6 +2,10 @@
 //! to that many engines, 64 KiB at a time as a PTY read would, and writes one JSON line: the
 //! engines' stats and how fast they took it. It then waits for stdin to close, so whoever runs it
 //! can read its memory while the engines are alive. `scripts/engine-replay.ts` drives it.
+//!
+//! `bazhen-holder-replay snapshot <cols> <rows> <history-rows> <recording>` feeds a recording to
+//! one engine the same way and writes the engine's snapshot for a viewer, and nothing else.
+//! `scripts/engine-snapshot.medium.test.ts` drives it.
 
 use std::fs::File;
 use std::io::{self, Read as _, Write as _};
@@ -25,6 +29,11 @@ fn main() -> ExitCode {
 
 fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if let [mode, cols, rows, history, recording] = args.as_slice()
+        && mode == "snapshot"
+    {
+        return snapshot(cols, rows, history, recording);
+    }
     let [cols, rows, history, engines, recording] = args.as_slice() else {
         return Err("usage: <cols> <rows> <history-rows> <engines> <recording>".into());
     };
@@ -50,6 +59,29 @@ fn run() -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     drop(kept);
     Ok(())
+}
+
+fn size_of(cols: &str, rows: &str) -> Result<Size, String> {
+    let side = |text: &str| text.parse::<u16>().map_err(|e| format!("{text}: {e}"));
+    Ok(Size {
+        cols: side(cols)?,
+        rows: side(rows)?,
+    })
+}
+
+fn snapshot(cols: &str, rows: &str, history: &str, recording: &str) -> Result<(), String> {
+    let history = history
+        .parse::<usize>()
+        .map_err(|e| format!("{history}: {e}"))?;
+    let mut engine = Engine::new(size_of(cols, rows)?, HistoryRows(history));
+    replay(&mut engine, recording)?;
+    let mut out = String::new();
+    engine
+        .snapshot(usize::MAX, &mut out)
+        .map_err(|e| e.to_string())?;
+    io::stdout()
+        .write_all(out.as_bytes())
+        .map_err(|e| e.to_string())
 }
 
 /// Feeds the recording at `path` to `engine` and returns how many bytes it was.
