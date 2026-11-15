@@ -273,7 +273,15 @@ function restrictions(area: Area, smallTest: boolean): Restriction {
   }
   if (area.startsProcessesVia !== undefined) {
     patterns.push({
-      group: ["node-pty", "child_process", "node:child_process"],
+      // Each of these starts a process: `module` through createRequire, `cluster` by forking,
+      // and `worker_threads` by running code given as a string.
+      group: [
+        "node-pty",
+        ...["child_process", "module", "cluster", "worker_threads"].flatMap((m) => [
+          m,
+          `node:${m}`,
+        ]),
+      ],
       message: `${where} starts processes only through ${area.startsProcessesVia}, which keeps their environment in the run's home (docs/standards/testing.md).`,
     });
   }

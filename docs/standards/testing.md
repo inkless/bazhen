@@ -162,7 +162,8 @@ A test owns everything it touches and leaves nothing behind.
   refusal first on `PATH`. `requireHolderEnv()` refuses any other, and any variable but those,
   terminal and locale settings and a test's own `BZ_TEST_*`. A holder test starts processes
   only through `tests/support/holder-spawn.ts`, which passes their env through it; lint bans
-  `child_process` and `node-pty` in `tests/holder`.
+  `tests/holder` everything else that starts one: `child_process`, `node-pty`, `module`'s
+  `createRequire`, `cluster` and `worker_threads`.
 - **PTYs are a machine-wide resource.** macOS has 511, and a leak starves every terminal on the
   machine. The setup refuses to run above 420 in use. A runtime change that opens PTYs needs a
   lifecycle test that repeats the operation and asserts the handle count returns to its baseline

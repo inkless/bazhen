@@ -2981,7 +2981,13 @@
                 "group": [
                   "node-pty",
                   "child_process",
-                  "node:child_process"
+                  "node:child_process",
+                  "module",
+                  "node:module",
+                  "cluster",
+                  "node:cluster",
+                  "worker_threads",
+                  "node:worker_threads"
                 ],
                 "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) starts processes only through tests/support/holder-spawn.ts, which keeps their environment in the run's home (docs/standards/testing.md)."
               }
@@ -3085,7 +3091,13 @@
                 "group": [
                   "node-pty",
                   "child_process",
-                  "node:child_process"
+                  "node:child_process",
+                  "module",
+                  "node:module",
+                  "cluster",
+                  "node:cluster",
+                  "worker_threads",
+                  "node:worker_threads"
                 ],
                 "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) starts processes only through tests/support/holder-spawn.ts, which keeps their environment in the run's home (docs/standards/testing.md)."
               }
@@ -3188,7 +3200,13 @@
                 "group": [
                   "node-pty",
                   "child_process",
-                  "node:child_process"
+                  "node:child_process",
+                  "module",
+                  "node:module",
+                  "cluster",
+                  "node:cluster",
+                  "worker_threads",
+                  "node:worker_threads"
                 ],
                 "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) starts processes only through tests/support/holder-spawn.ts, which keeps their environment in the run's home (docs/standards/testing.md)."
               }

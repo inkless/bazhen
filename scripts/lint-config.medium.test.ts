@@ -27,7 +27,9 @@ const FIXTURES: Record<string, string> = {
     'export { a } from "../../packages/runtime-tmux/src/index.ts";\n' +
     'export { connectHolder } from "@bazhen/runtime-holder";\n',
   "tests/holder/g.test.ts":
-    'export { spawn } from "node:child_process";\nexport { spawn as pty } from "node-pty";\n',
+    'export { spawn } from "node:child_process";\nexport { spawn as pty } from "node-pty";\n' +
+    'export { createRequire } from "node:module";\nexport { fork } from "cluster";\n' +
+    'export { Worker } from "node:worker_threads";\n',
 };
 
 type Diagnostic = { code?: string; filename?: string };
@@ -78,7 +80,7 @@ describe("the generated oxlint config, run by oxlint", () => {
       "apps/web/src/d.tsx": ["eslint(no-restricted-imports)"],
       "apps/web/src/ui/e.tsx": [],
       "tests/holder/f.test.ts": ["eslint(no-restricted-imports)", "eslint(no-restricted-imports)"],
-      "tests/holder/g.test.ts": ["eslint(no-restricted-imports)", "eslint(no-restricted-imports)"],
+      "tests/holder/g.test.ts": Array(5).fill("eslint(no-restricted-imports)"),
     });
   });
 });
