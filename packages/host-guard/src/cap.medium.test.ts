@@ -106,10 +106,13 @@ describe("a test binary its runner caps", () => {
 
   it("is killed with a runaway it started itself, which the kill doesn't leave behind", async () => {
     const pidFile = join(dir, "runaway-child");
-    const script = `"${process.execPath}" -e '${RUNAWAY}' & echo $! > "${pidFile}"; wait`;
+    // The runaway names itself before it allocates, so the kill can't come first.
+    const named = `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); ${RUNAWAY}`;
+    const script = `"${process.execPath}" -e '${named}'; true`;
     const ended = await runOwned("sh", ["-c", script], cap, process.env);
     expect(ended.memoryKills).toBe(1);
-    const pid = Number(readFileSync(pidFile, "utf8"));
+    await vi.waitFor(() => expect(pidIn(pidFile)).toBeGreaterThan(1));
+    const pid = pidIn(pidFile);
     await vi.waitFor(() => expect(isAlive(pid)).toBe(false), { timeout: 2_000 });
   });
 

@@ -50,9 +50,14 @@ const deps = (over: Partial<ModeDeps>): ModeDeps => ({
 });
 
 describe("the caps", () => {
+  it("holds a run to 90% of the limit of a cgroup it runs in, its budget already", () => {
+    expect(clampMemory(8 * GIB, 64 * GIB, 5 * GIB)).toBe(4.5 * GIB);
+    expect(clampMemory(8 * GIB, 16 * GIB, Infinity)).toBe(8 * GIB);
+  });
+
   it("holds a run to half the machine, so a cap above it still fires", () => {
-    expect(clampMemory(24 * GIB, 16 * GIB)).toBe(8 * GIB);
-    expect(clampMemory(4 * GIB, 64 * GIB)).toBe(4 * GIB);
+    expect(clampMemory(24 * GIB, 16 * GIB, Infinity)).toBe(8 * GIB);
+    expect(clampMemory(4 * GIB, 64 * GIB, Infinity)).toBe(4 * GIB);
   });
 
   it("reads the smallest memory limit of the cgroups a process runs in", () => {
@@ -78,7 +83,7 @@ describe("the caps", () => {
     expect(sliceMemory(10 * GIB)).toBe(6 * GIB);
     // Whole MiB, a multiple of any page size, so the cap reads back from the kernel as it was set.
     expect(sliceMemory(10 * GIB + 12_345) % 1024 ** 2).toBe(0);
-    expect(clampMemory(10 * GIB, 7 * GIB + 3) % 1024 ** 2).toBe(0);
+    expect(clampMemory(10 * GIB, 7 * GIB + 3, Infinity) % 1024 ** 2).toBe(0);
   });
 
   it("asks systemd to kill only the biggest process, without swap, and to forget a failed scope", () => {

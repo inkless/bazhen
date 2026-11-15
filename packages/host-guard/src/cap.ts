@@ -48,12 +48,13 @@ export const CAPPED_ENV = "BZ_CAPPED";
 const wholeMib = (bytes: number) => Math.floor(bytes / MIB) * MIB;
 
 /**
- * A run's own cap, at most half of what it may use: the machine's memory, or less where a cgroup
- * it runs in has a limit of its own. In a container `totalmem()` reports the host's memory, and
- * a cap above the container's limit would never fire before the container's OOM.
+ * A run's own cap, at most half the machine, and at most 90% of a memory limit on a cgroup it
+ * runs in. In a container `totalmem()` reports the host's memory, and a cap above the container's
+ * own limit would never fire before the container's OOM. The container's limit is this run's
+ * budget already, so only the margin a cap needs to fire first comes off it.
  */
-export const clampMemory = (bytes: number, total = Math.min(totalmem(), cgroupLimit())) =>
-  wholeMib(Math.min(bytes, total / 2));
+export const clampMemory = (bytes: number, total = totalmem(), cgroup = cgroupLimit()) =>
+  wholeMib(Math.min(bytes, total / 2, cgroup * 0.9));
 
 /**
  * The smallest `memory.max` on the way from this process's cgroup up to the root, or Infinity:
@@ -548,18 +549,23 @@ export function runWatched(
 
 /**
  * The setpriv that can set a parent-death signal: util-linux before 2.33 has no `--pdeathsig`, and
- * would refuse every test with "unknown option", so a dry run decides, once.
+ * would refuse every test with "unknown option", so a dry run decides, the first time a runner
+ * needs it rather than whenever host-guard is imported.
  */
-const SETPRIV = (() => {
+let setprivFound: string | null | undefined;
+function setprivWithPdeathsig(): string | null {
+  if (setprivFound !== undefined) return setprivFound;
+  setprivFound = null;
   const path = ["/usr/bin/setpriv", "/bin/setpriv"].find((p) => existsSync(p));
   if (path === undefined) return null;
   try {
-    execFileSync(path, ["--pdeathsig", "KILL", "--", "true"], { stdio: "ignore" });
-    return path;
+    execFileSync(path, ["--pdeathsig", "KILL", "--", "true"], { stdio: "ignore", timeout: 2_000 });
+    setprivFound = path;
   } catch {
-    return null;
+    // Too old for --pdeathsig, or it hung.
   }
-})();
+  return setprivFound;
+}
 
 /**
  * The CPU time, in seconds, a test binary may use while no runner watches it. The kernel counts CPU
@@ -587,7 +593,7 @@ export function ownedArgv(
   args: readonly string[],
   cap: Cap,
   platform = process.platform,
-  setpriv = SETPRIV,
+  setpriv = setprivWithPdeathsig(),
   cores = availableParallelism(),
 ): [string, string[]] {
   const cpu = cpuLimit(cap, cores);
