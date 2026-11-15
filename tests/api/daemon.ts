@@ -723,10 +723,12 @@ export class EventClient {
   constructor(ws: WebSocket, after: number) {
     this.ws = ws;
     this.after = after;
+    // CONTROL: a stream that trails the store by 300 ms.
     ws.on("message", (data: Buffer) => {
-      this.frames.push(EventFrame.parse(JSON.parse(data.toString("utf8"))));
+      const frame = EventFrame.parse(JSON.parse(data.toString("utf8")));
+      setTimeout(() => this.frames.push(frame), 300);
     });
-    ws.on("close", () => (this.closed = true));
+    ws.on("close", () => setTimeout(() => (this.closed = true), 300));
   }
 
   /** The ids of the events received, in the order they arrived. */
