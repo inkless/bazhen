@@ -5,11 +5,13 @@
 //! Synchronous and single-threaded: one `poll` loop, no async runtime.
 
 pub mod child;
+pub mod conn;
 pub mod holder;
 pub mod log;
 #[cfg(target_os = "macos")]
 mod macos;
 pub mod pty;
+pub mod ring;
 mod signals;
 pub mod socket;
 pub mod start;
