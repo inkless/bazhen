@@ -33,10 +33,8 @@ pub(crate) fn encode_row(row: &Row<Cell>, out: &mut String) -> Ending {
     let wrapped = row
         .last()
         .is_some_and(|cell| cell.flags.contains(Flags::WRAPLINE));
-    let wide_start = row
-        .into_iter()
-        .next()
-        .is_some_and(|cell| cell.flags.contains(Flags::WIDE_CHAR));
+    // Whether the first cell is written as a wide char, which an alone one isn't: set below.
+    let mut wide_start = false;
     let mut spacer = false;
     let end = if wrapped {
         row.len()
@@ -47,20 +45,41 @@ pub(crate) fn encode_row(row: &Row<Cell>, out: &mut String) -> Ending {
     };
     let mut pen = Pen::default();
     let mut covered = false;
-    for cell in row.into_iter().take(end) {
-        // A wide char takes the next cell too when written, whatever that cell holds now: an
-        // erase that starts there clears the spacer and leaves the wide char.
-        if std::mem::replace(&mut covered, cell.flags.contains(Flags::WIDE_CHAR)) {
+    let last = row.len().saturating_sub(1);
+    let cells: Vec<&Cell> = row.into_iter().collect();
+    for (column, &cell) in cells.iter().take(end).enumerate() {
+        // A wide char takes the next cell too when written, so the cell's own content is lost:
+        // fine for the blank an erase that starts there leaves, but a char written over the
+        // spacer would be lost, and every cell after it would move. That wide char, whose
+        // spacer is gone, is written as the blank it has room to draw.
+        let next = cells.get(column + 1);
+        let alone = cell.flags.contains(Flags::WIDE_CHAR)
+            && next.is_some_and(|next| {
+                // A real char: a blank, in any colour, is what an erase over the spacer leaves.
+                !next.flags.contains(Flags::WIDE_CHAR_SPACER) && !matches!(next.c, ' ' | '\t')
+            });
+        if std::mem::replace(
+            &mut covered,
+            cell.flags.contains(Flags::WIDE_CHAR) && !alone,
+        ) {
             continue;
         }
-        if cell.flags.contains(Flags::LEADING_WIDE_CHAR_SPACER) {
+        // The cell a wide char didn't fit in, when the row wraps there. Anywhere else, as a
+        // widening that doesn't reflow leaves it, it is the blank it draws.
+        if cell.flags.contains(Flags::LEADING_WIDE_CHAR_SPACER) && wrapped && column == last {
             spacer = true;
             continue;
         }
         pen = write_pen(out, pen, Pen::of(cell));
-        // A tab leaves its mark in the cell it started from; the cells it skipped are written
-        // as they are.
-        out.push(if cell.c == '\t' { ' ' } else { cell.c });
+        let blanked = alone || (column == last && cell.flags.contains(Flags::WIDE_CHAR));
+        wide_start |= column == 0 && cell.flags.contains(Flags::WIDE_CHAR) && !blanked;
+        if blanked {
+            // An insert can push a wide char's spacer off the row: written, the char wouldn't
+            // fit and would wrap, so its cell is written as the blank it has room to draw.
+            out.push(' ');
+            continue;
+        }
+        out.push(drawable(cell.c));
         for &mark in cell.zerowidth().unwrap_or_default() {
             out.push(mark);
         }
@@ -88,6 +107,11 @@ pub(crate) struct Lines<'a> {
     open: bool,
     /// The last row ended in the cell a wide char didn't fit in.
     spacer: bool,
+    /// The width the rows are drawn at, when a line's end must erase what follows it.
+    erase_at: Option<usize>,
+    /// The column the line so far ends in at `erase_at`, printed as a terminal that wide prints
+    /// it, whatever width its rows were kept at: `erase_at` itself for a cursor waiting to wrap.
+    column: usize,
 }
 
 impl<'a> Lines<'a> {
@@ -96,6 +120,18 @@ impl<'a> Lines<'a> {
             out,
             open: false,
             spacer: false,
+            erase_at: None,
+            column: 0,
+        }
+    }
+
+    /// Lines for a terminal `cols` wide, each erasing the rest of its row once it ends. A wrap
+    /// that scrolls fills the new row with the background of the pen that wraps, which is the
+    /// pen of the next row's first cell: the cells past a line's end never had it.
+    pub(crate) fn erasing(out: &'a mut String, cols: usize) -> Self {
+        Self {
+            erase_at: Some(cols.max(1)),
+            ..Self::new(out)
         }
     }
 
@@ -112,6 +148,12 @@ impl<'a> Lines<'a> {
         self.end_row(start, ending);
     }
 
+    /// What has been written since the last time this was emptied: a snapshot passes it on row
+    /// by row, so it never holds more than a row.
+    pub(crate) fn text(&mut self) -> &mut String {
+        self.out
+    }
+
     /// Whether the last row wrapped, so the line goes on in whatever is written next.
     pub(crate) fn is_open(&self) -> bool {
         self.open
@@ -125,21 +167,83 @@ impl<'a> Lines<'a> {
     }
 
     fn end_row(&mut self, start: usize, ending: Ending) {
-        let mut wrote = self.out.len() > start;
-        if std::mem::take(&mut self.spacer) && !ending.wide_start {
+        let wrote = self.out.len() > start;
+        // It fills the row before's last cell, so it can't be the cell that wraps; drawn at
+        // another width, only where the line ends a cell short of a row's end, or it would start
+        // the next row.
+        let owed = self.erase_at.is_none_or(|cols| self.column + 1 == cols);
+        if std::mem::take(&mut self.spacer) && !ending.wide_start && owed {
             self.out.insert(start, ' ');
-            wrote = true;
         }
         if self.open && !wrote {
             // A blank row a line wrapped into: one cell makes the wrap happen.
             self.out.push(' ');
         }
+        if let Some(cols) = self.erase_at {
+            self.column = printed_to(self.column, self.out.get(start..).unwrap_or_default(), cols);
+        }
         self.open = ending.wrapped;
         self.spacer = ending.spacer;
         if !ending.wrapped {
-            self.out.push_str("\r\n");
+            self.close_line();
         }
     }
+
+    /// Whether the line so far ends where a row does at `erase_at`, so what is written next starts
+    /// a row of its own: waiting to wrap, or in the last cell, which a spacer it owes fills or a
+    /// wide char that comes next wraps from.
+    pub(crate) fn at_a_row_start(&self) -> bool {
+        self.erase_at.is_none_or(|cols| {
+            !self.open || self.column == cols || (self.spacer && self.column + 1 == cols)
+        })
+    }
+
+    /// Ends the line where it is, for what follows to start a row of its own.
+    pub(crate) fn end_line(&mut self) {
+        if self.open {
+            self.open = false;
+            self.spacer = false;
+            self.close_line();
+        }
+    }
+
+    fn close_line(&mut self) {
+        // Not from a cursor waiting to wrap in the last column: that would erase the cell.
+        if self.erase_at.is_some_and(|cols| self.column != cols) {
+            self.out.push_str("\x1b[K");
+        }
+        self.out.push_str("\r\n");
+        self.column = 0;
+    }
+}
+
+/// The column a terminal `cols` wide ends in after printing `text`, the SGR in it skipped, from
+/// `column`: as alacritty prints, a char past a waiting cursor wraps first, and a wide char with
+/// one cell left wraps and leaves it. `cols` is a cursor waiting to wrap. It assumes autowrap
+/// on, as in a fresh terminal: a snapshot writes the modes after the rows.
+fn printed_to(mut column: usize, text: &str, cols: usize) -> usize {
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            chars.by_ref().find(|&c| c == 'm');
+            continue;
+        }
+        let width = c.width().unwrap_or(0);
+        if width == 0 {
+            continue;
+        }
+        if column >= cols || (width == 2 && column + 2 > cols) {
+            column = 0;
+        }
+        column = (column + width).min(cols);
+    }
+    column
+}
+
+/// The char a cell is written as. A tab leaves its mark in the cell it started from, which draws a
+/// blank; the cells it skipped are written as they are.
+pub(crate) fn drawable(c: char) -> char {
+    if c == '\t' { ' ' } else { c }
 }
 
 /// The cells a row [`encode_row`] wrote draws: its chars' widths, past the SGR it writes.
@@ -194,8 +298,9 @@ fn push_number(out: &mut String, mut n: u16) {
     }
 }
 
+/// The attributes a cell is drawn in, or a cursor draws in next.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Pen {
+pub(crate) struct Pen {
     fg: Color,
     bg: Color,
     underline: Option<Color>,
@@ -214,7 +319,7 @@ impl Default for Pen {
 }
 
 impl Pen {
-    fn of(cell: &Cell) -> Self {
+    pub(crate) fn of(cell: &Cell) -> Self {
         Self {
             fg: cell.fg,
             bg: cell.bg,
@@ -223,7 +328,8 @@ impl Pen {
         }
     }
 
-    fn write(&self, out: &mut String) {
+    /// SGR from a reset: the whole pen, whatever came before.
+    pub(crate) fn write(&self, out: &mut String) {
         const ATTRIBUTES: [(Flags, &str); 11] = [
             (Flags::BOLD, ";1"),
             (Flags::DIM, ";2"),
@@ -405,6 +511,60 @@ mod tests {
         let (original, replayed) = round_trip(stream, 6);
         assert_eq!(original[1], replayed[1]);
         assert_eq!(original[0][2..], replayed[0][2..]);
+    }
+
+    #[test]
+    fn a_space_a_row_owes_isn_t_written_once_its_line_fills_the_row() {
+        // Kept at 4 columns, abc ended in 中's spacer, and xyz was written over 中. At 3 columns
+        // abc fills its row, so the space would start the next one.
+        let mut out = String::new();
+        let mut lines = Lines::erasing(&mut out, 3);
+        let ending = |wrapped, spacer| Ending {
+            wrapped,
+            spacer,
+            wide_start: false,
+        };
+        lines.row("abc", ending(true, true));
+        lines.row("xyz", ending(false, false));
+        assert_eq!(out, "abcxyz\r\n");
+    }
+
+    #[test]
+    fn a_blank_row_after_a_wide_char_s_spacer_still_takes_a_row_of_its_own() {
+        // The wide char left for the next row, which was then erased and wraps no further.
+        let stream = "abc中\x1b[2K\r\nx".as_bytes();
+        let (original, replayed) = round_trip(stream, 4);
+        // The spacer comes back as the space it draws, still wrapping into the blank row.
+        assert_eq!(original[1..], replayed[1..]);
+        assert!(replayed[0][3].flags.contains(Flags::WRAPLINE));
+    }
+
+    #[test]
+    fn a_row_starting_with_a_wide_char_written_as_a_blank_still_takes_the_spacer_before_it() {
+        // 文 leaves a spacer at the end of the first row; ED then leaves 文 without its spacer,
+        // and 中 is written over it, so the second row starts with a blank, not a wide char.
+        let stream = "abcde文\x1b[2;2H\x1b[0J中x".as_bytes();
+        let (original, replayed) = round_trip(stream, 6);
+        assert_eq!(original[1][1..], replayed[1][1..]);
+        assert_eq!(original[2..], replayed[2..]);
+    }
+
+    #[test]
+    fn a_coloured_erase_over_a_wide_char_s_spacer_keeps_the_char() {
+        // ECH in red erases the spacer only: alacritty keeps 中 wide, its second cell red.
+        let (original, replayed) = round_trip("中\x1b[2G\x1b[41m\x1b[X".as_bytes(), 6);
+        assert_eq!(original[0][0].c, '中');
+        assert_eq!(replayed[0][0].c, '中');
+        assert_eq!(original[1..], replayed[1..]);
+    }
+
+    #[test]
+    fn a_wide_char_written_over_its_spacer_keeps_every_cell_after_it_in_place() {
+        // ED leaves 中 without its spacer, and 文 is then written where the spacer was.
+        let stream = "中\x1b[2G\x1b[0J文def".as_bytes();
+        let (original, replayed) = round_trip(stream, 11);
+        assert_eq!(original[0][1..], replayed[0][1..]);
+        assert_eq!(original[1..], replayed[1..]);
     }
 
     #[test]

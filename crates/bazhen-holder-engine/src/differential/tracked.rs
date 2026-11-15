@@ -205,7 +205,7 @@ fn mode_change() -> impl Strategy<Value = Action> {
     ]
 }
 
-fn stream() -> impl Strategy<Value = Action> {
+pub(super) fn stream() -> impl Strategy<Value = Action> {
     prop_oneof![
         3 => mode_change(),
         2 => output_and_resizes(),

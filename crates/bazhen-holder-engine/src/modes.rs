@@ -35,9 +35,17 @@ pub(crate) struct Tracker {
     style: Option<Style>,
     /// The primary screen's cursor while the alternate screen is up.
     primary: Option<Cursor<Cell>>,
+    /// The alternate screen's saved cursor while the primary screen is up, which alacritty keeps
+    /// from one visit to the next, and privately.
+    alternate_saved: Option<Cursor<Cell>>,
     keys: KeyStack,
     hidden_keys: KeyStack,
     modify_other_keys: u8,
+    /// The title, as alacritty keeps it privately: none until a program sets one.
+    title: Option<String>,
+    /// `CSI 22 t`'s stack, oldest first. The engine undoes a push past its own limit, so it
+    /// holds no more than that limit, of an OSC string each.
+    titles: Vec<Option<String>>,
 }
 
 impl Tracker {
@@ -50,10 +58,51 @@ impl Tracker {
             active: CharsetIndex::G0,
             style: None,
             primary: None,
+            alternate_saved: None,
             keys: KeyStack::default(),
             hidden_keys: KeyStack::default(),
             modify_other_keys: 0,
+            title: None,
+            titles: Vec::new(),
         }
+    }
+
+    pub(crate) fn set_title(&mut self, title: Option<String>) {
+        self.title = title;
+    }
+
+    pub(crate) fn push_title(&mut self) {
+        self.titles.push(self.title.clone());
+    }
+
+    /// As alacritty pops: the title comes back only if the stack had one.
+    pub(crate) fn pop_title(&mut self) {
+        if let Some(title) = self.titles.pop() {
+            self.title = title;
+        }
+    }
+
+    pub(crate) fn title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+
+    /// The title stack and then the title, for a fresh terminal. A title can be none only before
+    /// any is set, so the nones are at the bottom of the stack and are pushed before any title is.
+    pub(crate) fn write_titles(&self, out: &mut String) {
+        for title in &self.titles {
+            write_title(out, title.as_deref());
+            out.push_str("\x1b[22t");
+        }
+        write_title(out, self.title.as_deref());
+    }
+
+    /// The alternate screen's saved cursor, while the primary screen is up and if it has been.
+    pub(crate) fn alternate_saved(&self) -> Option<&Cursor<Cell>> {
+        self.alternate_saved.as_ref()
+    }
+
+    pub(crate) fn active_charset(&self) -> CharsetIndex {
+        self.active
     }
 
     /// DECSTBM as alacritty takes it: a region of fewer than two rows is ignored, and both ends
@@ -103,12 +152,14 @@ impl Tracker {
     /// `?1049h`, called only when it switches: the primary's cursor goes out of reach.
     pub(crate) fn alternate_on(&mut self, primary: &Cursor<Cell>) {
         self.primary = Some(primary.clone());
+        self.alternate_saved = None;
         std::mem::swap(&mut self.keys, &mut self.hidden_keys);
     }
 
-    /// `?1049l`, called only when it switches.
-    pub(crate) fn alternate_off(&mut self) {
+    /// `?1049l`, called only when it switches, with the alternate screen's saved cursor.
+    pub(crate) fn alternate_off(&mut self, alternate_saved: &Cursor<Cell>) {
         self.primary = None;
+        self.alternate_saved = Some(alternate_saved.clone());
         std::mem::swap(&mut self.keys, &mut self.hidden_keys);
     }
 
@@ -148,8 +199,11 @@ impl Tracker {
                 stop
             });
         }
-        if let Some(cursor) = &mut self.primary {
-            let last_line = i32::try_from(rows.saturating_sub(1)).unwrap_or(i32::MAX);
+        let last_line = i32::try_from(rows.saturating_sub(1)).unwrap_or(i32::MAX);
+        for cursor in [&mut self.primary, &mut self.alternate_saved]
+            .into_iter()
+            .flatten()
+        {
             cursor.point.line.0 = cursor.point.line.0.min(last_line);
             cursor.point.column.0 = cursor.point.column.0.min(cols.saturating_sub(1));
         }
@@ -276,7 +330,17 @@ impl KeyStack {
     }
 }
 
-fn designations(cursor: &Cursor<Cell>) -> [Charset; 4] {
+/// OSC 2, with no control char: a C1 ST (U+009C) ends an OSC in a viewer that decodes UTF-8 first,
+/// and would let the rest of a title through as text.
+fn write_title(out: &mut String, title: Option<&str>) {
+    if let Some(title) = title {
+        out.push_str("\x1b]2;");
+        out.extend(title.chars().filter(|c| !c.is_control()));
+        out.push_str("\x1b\\");
+    }
+}
+
+pub(crate) fn designations(cursor: &Cursor<Cell>) -> [Charset; 4] {
     [
         CharsetIndex::G0,
         CharsetIndex::G1,
@@ -554,6 +618,13 @@ impl Modes {
 }
 
 impl Modes {
+    /// The hidden screen's kitty flags, with no switch around them.
+    pub(crate) fn write_keys_hidden(&self, out: &mut String) {
+        write_kitty(out, &self.keys.kitty_requested_hidden);
+    }
+}
+
+impl Modes {
     /// Everything a fresh engine is given to take on these modes, in order, with nothing to put
     /// between: the hidden screen's keys, the hidden screen's modes, `?1049h` if the alternate
     /// screen is up, the shown screen's modes and then its keys. A snapshot writes the same
@@ -578,7 +649,7 @@ fn exclusive<T: PartialEq + Copy>(out: &mut String, modes: &[(u16, T)], set: T) 
     }
 }
 
-fn write_charsets(out: &mut String, charsets: [Charset; 4]) {
+pub(crate) fn write_charsets(out: &mut String, charsets: [Charset; 4]) {
     for (slot, charset) in ['(', ')', '*', '+'].iter().zip(charsets) {
         let set = match charset {
             Charset::Ascii => 'B',

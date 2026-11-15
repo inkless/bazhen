@@ -58,6 +58,7 @@ fuzz_target!(|input: &[u8]| {
         assert_eq!(stats.overflows, 0);
         assert!(stats.history_rows <= usize::from(*history));
     }
+    let limit = usize::from(*history);
     let mut history = String::new();
     engine.write_history(&mut history);
     engine.take_replies();
@@ -67,4 +68,25 @@ fuzz_target!(|input: &[u8]| {
     modes.write_for_engine(&mut restore);
     fresh.advance(restore.as_bytes());
     assert_eq!(fresh.modes(), modes);
+    // A snapshot gives a fresh engine of the size the same modes and title, asks it nothing, and
+    // changes nothing a second one would show; under a budget it fits, or writes nothing.
+    let mut whole = String::new();
+    assert!(engine.snapshot_for_engine(usize::MAX, &mut whole).is_ok());
+    let mut again = String::new();
+    assert!(engine.snapshot_for_engine(usize::MAX, &mut again).is_ok());
+    assert_eq!(whole, again);
+    let mut restored = Engine::new(now, HistoryRows(limit));
+    restored.advance(whole.as_bytes());
+    assert_eq!(restored.modes(), modes);
+    let shown = |title: Option<&str>| {
+        title.map(|t| t.chars().filter(|c| !c.is_control()).collect::<String>())
+    };
+    assert_eq!(shown(restored.title()), shown(engine.title()));
+    assert!(restored.take_replies().is_empty());
+    let most = whole.len() / 2;
+    let mut cut = String::new();
+    match engine.snapshot(most, &mut cut) {
+        Ok(_) => assert!(cut.len() <= most, "{} past {most}", cut.len()),
+        Err(_) => assert!(cut.is_empty()),
+    }
 });

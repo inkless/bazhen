@@ -15,6 +15,7 @@ mod modes;
 mod osc;
 mod replies;
 mod seam;
+mod snapshot;
 
 #[cfg(test)]
 mod differential;
@@ -41,6 +42,7 @@ use crate::osc::OscCap;
 use crate::replies::Sink;
 pub use crate::replies::{Colours, MOST_REPLY_BYTES, Rgb, replies_are_whole};
 use crate::seam::Utf8Seam;
+pub use crate::snapshot::TooLarge;
 
 /// A terminal's size in cells. The engine works at no fewer than 2 columns and 1 row, and no more
 /// than 1,000 of either.
@@ -284,6 +286,10 @@ impl Engine {
     /// - Under the alternate screen alacritty keeps the primary grid private, so the primary
     ///   screen reflows with only the row of history a drain leaves: on return it can differ,
     ///   and alacritty may drop rows below the primary's cursor.
+    ///
+    /// Under the alternate screen, the primary's saved cursor is made its cursor again, as the
+    /// reflow left it: xterm's meaning, where `?1049h` saves the cursor it switches from.
+    /// alacritty reflows the cursor and only clamps the saved one, so they would part.
     pub fn resize(&mut self, size: Size) {
         let size = size.usable();
         if size == self.size {
@@ -310,6 +316,8 @@ impl Engine {
         };
         self.set_scrollback(room);
         self.term.resize(size);
+        // Brought into reach and put back, which sets the primary's saved cursor to its cursor.
+        drop(PrimaryShown::new(&mut self.term));
         mark_widened_rows(&mut self.term);
         self.tracker.resize(
             (self.size.cols(), self.size.rows()),
@@ -352,6 +360,11 @@ impl Engine {
         } else if let Some((text, ending)) = &self.kept {
             lines.row(text, *ending);
         }
+    }
+
+    /// The title the program set, if it set one.
+    pub fn title(&self) -> Option<&str> {
+        self.tracker.title()
     }
 
     /// The modes the program has set.
@@ -547,6 +560,53 @@ fn mark_widened_rows(term: &mut Term<Sink>) {
         let row = &mut grid[scrollback_line(scrolled, n)];
         if let Some(last) = row.len().checked_sub(1) {
             let _: &mut Cell = &mut row[Column(last)];
+        }
+    }
+}
+
+/// The primary grid, brought into reach while the alternate screen is up, and put back when this
+/// is dropped, however that happens: alacritty keeps it in a private field.
+///
+/// The alternate grid is moved out, and alacritty's `swap_alt` from the alternate screen, a plain
+/// swap, shows the primary. To put it back, `swap_alt` from the primary screen hands the primary's
+/// cursor to the grid shown (a stand-in, which is then dropped for the alternate grid) and sets
+/// the primary's saved cursor to its cursor. Under the alternate screen they are already equal,
+/// set so at the switch and by [`Engine::resize`], so nothing changes.
+pub(crate) struct PrimaryShown<'a> {
+    term: &'a mut Term<Sink>,
+    alternate: Option<Grid<Cell>>,
+}
+
+impl fmt::Debug for PrimaryShown<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PrimaryShown").finish_non_exhaustive()
+    }
+}
+
+impl<'a> PrimaryShown<'a> {
+    /// `None` with the primary screen already up.
+    pub(crate) fn new(term: &'a mut Term<Sink>) -> Option<Self> {
+        if !term.mode().contains(TermMode::ALT_SCREEN) {
+            return None;
+        }
+        let alternate = std::mem::replace(term.grid_mut(), Grid::new(1, 2, 0));
+        term.swap_alt();
+        Some(Self {
+            term,
+            alternate: Some(alternate),
+        })
+    }
+
+    pub(crate) fn grid(&self) -> &Grid<Cell> {
+        self.term.grid()
+    }
+}
+
+impl Drop for PrimaryShown<'_> {
+    fn drop(&mut self) {
+        self.term.swap_alt();
+        if let Some(alternate) = self.alternate.take() {
+            *self.term.grid_mut() = alternate;
         }
     }
 }

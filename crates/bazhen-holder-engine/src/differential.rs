@@ -27,6 +27,7 @@ use proptest::prelude::*;
 use super::*;
 use crate::replies::VERSION;
 
+mod restored;
 mod tracked;
 
 const ALL_OF_IT: usize = 1_000_000;
