@@ -1,13 +1,9 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { TmuxServer } from "@bazhen/host-guard";
-import { TmuxRuntime } from "./index.ts";
+import { fakeTmux, removeFakes } from "./testing/fake-tmux.ts";
 
-const made: string[] = [];
-afterEach(() => {
-  for (const dir of made.splice(0)) rmSync(dir, { recursive: true, force: true });
-});
+afterEach(removeFakes);
 
 /**
  * A `tmux` that answers `-V` and `list-sessions` and logs each attempt at the settings. It refuses
@@ -19,10 +15,10 @@ case "$*" in
 *" -V") echo "tmux 3.5a" ;;
 *" list-sessions "*) ;;
 *" set-hook "*)
-  echo attempt >> "$FAKE_LOG"
+  echo attempt >> "$FAKE_DIR/attempts"
   [ "$FAKE_SETTINGS" = refuse ] && { echo "unknown command" >&2; exit 1; }
-  [ -e "$FAKE_LOG.hung" ] && exit 0
-  : > "$FAKE_LOG.hung"
+  [ -e "$FAKE_DIR/hung" ] && exit 0
+  : > "$FAKE_DIR/hung"
   trap 'kill $! 2>/dev/null; exit 0' TERM
   /bin/sleep 30 & wait $! ;;
 *) exit 1 ;;
@@ -31,21 +27,12 @@ esac
 
 /** A runtime whose every tmux command runs the fake; what it warned of; its settings attempts. */
 function onFake(settings: "refuse" | "slow") {
-  const root = mkdtempSync("/tmp/bz-settings-");
-  made.push(root);
-  writeFileSync(join(root, "tmux"), FAKE_TMUX, { mode: 0o755 });
-  const log = join(root, "attempts");
   const warnings: unknown[] = [];
-  const runtime = new TmuxRuntime({
-    server: TmuxServer.at(join(root, "tmux.sock"), { root, config: join(root, "tmux.conf") }),
-    pty: {
-      spawn: () => {
-        throw new Error("no PTY here");
-      },
-    },
-    env: { PATH: root, FAKE_LOG: log, FAKE_SETTINGS: settings },
+  const { runtime, root } = fakeTmux(FAKE_TMUX, {
+    env: { FAKE_SETTINGS: settings },
     onError: (err) => warnings.push(err),
   });
+  const log = join(root, "attempts");
   const attempts = () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").length - 1 : 0);
   return { runtime, warnings, attempts };
 }
