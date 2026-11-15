@@ -1100,6 +1100,12 @@ export class Store {
     return Number(row?.n ?? 0);
   }
 
+  /** How many terminals are recorded but not yet confirmed running: their PTYs may still be opening. */
+  startingTerminals(): number {
+    const row = this.prepare(`SELECT count(*) AS n FROM terminals WHERE state = 'creating'`).get();
+    return Number(row?.n ?? 0);
+  }
+
   /** How many agents `agentId` launched are still open: not closing, closed, failed or lost. */
   liveLaunchedBy(agentId: string): number {
     const row = this.prepare(

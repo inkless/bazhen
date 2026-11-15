@@ -98,6 +98,7 @@ const store = Store.open(join(paths.data, "bazhen.db"));
 const budget = new TerminalBudget({
   max: config.maxOpenTerminals,
   open: () => store.openTerminals(),
+  starting: () => store.startingTerminals(),
   host: hostPtyReader(),
   warn: (message) => console.warn(`bazhen: ${message}`),
 });

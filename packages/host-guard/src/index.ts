@@ -46,4 +46,10 @@ export {
   type Mode,
   type Verdict,
 } from "./cap.ts";
-export { hostPtyReader, machinePtySource, type HostPtys, type PtySource } from "./ptys.ts";
+export {
+  hostPtyReader,
+  machinePtySource,
+  ptyNodes,
+  type HostPtys,
+  type PtySource,
+} from "./ptys.ts";

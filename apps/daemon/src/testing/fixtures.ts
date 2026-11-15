@@ -44,7 +44,6 @@ export const testView: SnapshotView = {
   },
 };
 
-/** What starting an agent again needs, for a test that doesn't look at it. */
 /** Admits every terminal: for tests where the budget isn't what is tested. */
 export const unlimited: TerminalAdmission = { admit: () => {} };
 
@@ -53,10 +52,12 @@ export const storeBudget = (store: Store, max: number) =>
   new TerminalBudget({
     max,
     open: () => store.openTerminals(),
-    host: () => ({ ok: true, used: 0, max: 4096, exact: true }),
+    starting: () => store.startingTerminals(),
+    host: () => ({ ok: true, used: 0, max: 4096, exact: true, limit: "kernel.pty.max" }),
     warn: () => {},
   });
 
+/** What starting an agent again needs, for a test that doesn't look at it. */
 export const quietStartAgain = {
   size: { cols: 80, rows: 24 },
   replaced: () => {},

@@ -60,17 +60,18 @@ describe("DoctorResponse terminals", () => {
 
   it("takes the open count, the budget and the machine's PTYs, or none from an older daemon", () => {
     expect([
-      parses({ open: 3, max: 100, host }),
-      parses({ open: 3, max: 100, host: null }),
+      parses({ open: 3, max: 100, host, refusing: null }),
+      parses({ open: 3, max: 100, host: null, refusing: "budget" }),
       DoctorResponse.safeParse(base).success,
     ]).toEqual([true, true, true]);
   });
 
-  it("refuses a budget of no terminals, and a machine whose count isn't said to be exact or not", () => {
+  it("refuses a budget of no terminals, a machine count not said to be exact, and an unknown limit", () => {
     expect([
-      parses({ open: 0, max: 0, host }),
-      parses({ open: 3, max: 100, host: { used: 37, max: 4096 } }),
-    ]).toEqual([false, false]);
+      parses({ open: 0, max: 0, host, refusing: null }),
+      parses({ open: 3, max: 100, host: { used: 37, max: 4096 }, refusing: null }),
+      parses({ open: 3, max: 100, host, refusing: "machine" }),
+    ]).toEqual([false, false, false]);
   });
 });
 

@@ -9,7 +9,14 @@ import { readdirSync, readFileSync } from "node:fs";
  * `/dev/ttys*` nodes can outlive the PTY that made them, so the count is only an upper bound.
  */
 export type HostPtys =
-  | { readonly ok: true; readonly used: number; readonly max: number; readonly exact: boolean }
+  | {
+      readonly ok: true;
+      readonly used: number;
+      readonly max: number;
+      readonly exact: boolean;
+      /** The setting that raises `max`. */
+      readonly limit: "kernel.pty.max" | "kern.tty.ptmx_max";
+    }
   | { readonly ok: false; readonly reason: string };
 
 /** What the readers touch, so a small test can stand in for the machine. */
@@ -41,10 +48,17 @@ const count = (raw: string, what: string): number => {
 const reasonOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 /**
+ * `/dev/ttys*` nodes, macOS's only cheap count of PTYs in use. It includes the 16 legacy BSD
+ * names, and nodes can outlive their PTY: an upper bound, never an exact count.
+ */
+export const ptyNodes = (source: PtySource = machinePtySource): number =>
+  source.readdir("/dev").filter((name) => name.startsWith("ttys")).length;
+
+/**
  * A reader of the machine's PTYs, called as often as needed. On Linux each call reads the
  * kernel's own counters. On macOS the maximum is read once, by the first call, since it costs a
- * process; each call counts `/dev/ttys*`, which includes the 16 legacy BSD names: an overcount,
- * the safe direction. A machine whose figures can't be read answers why, never a guess.
+ * process, and a failure to read it is kept as well, so no later call waits on it again. A
+ * machine whose figures can't be read answers why, never a guess.
  */
 export function hostPtyReader(source: PtySource = machinePtySource): () => HostPtys {
   if (source.platform === "linux") {
@@ -52,19 +66,28 @@ export function hostPtyReader(source: PtySource = machinePtySource): () => HostP
       count(source.readFile(`/proc/sys/kernel/pty/${name}`), `kernel.pty.${name}`);
     return () => {
       try {
-        return { ok: true, used: sysctl("nr"), max: sysctl("max"), exact: true };
+        // The kernel keeps `reserve` of `max` for its first devpts mount. Which mount this
+        // process sees can't be told from here, so it takes the smaller limit, as any other
+        // mount, a container's, has.
+        const max = Math.max(0, sysctl("max") - sysctl("reserve"));
+        return { ok: true, used: sysctl("nr"), max, exact: true, limit: "kernel.pty.max" };
       } catch (err) {
         return { ok: false, reason: reasonOf(err) };
       }
     };
   }
   if (source.platform === "darwin") {
-    let max: number | undefined;
+    let max: { value: number } | { reason: string } | undefined;
     return () => {
       try {
-        max ??= count(source.ptmxMax(), "kern.tty.ptmx_max");
-        const used = source.readdir("/dev").filter((name) => name.startsWith("ttys")).length;
-        return { ok: true, used, max, exact: false };
+        max ??= { value: count(source.ptmxMax(), "kern.tty.ptmx_max") };
+      } catch (err) {
+        max = { reason: reasonOf(err) };
+      }
+      if ("reason" in max) return { ok: false, reason: max.reason };
+      try {
+        const used = ptyNodes(source);
+        return { ok: true, used, max: max.value, exact: false, limit: "kern.tty.ptmx_max" };
       } catch (err) {
         return { ok: false, reason: reasonOf(err) };
       }

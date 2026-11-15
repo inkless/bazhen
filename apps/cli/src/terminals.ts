@@ -3,9 +3,11 @@ import type { DoctorResponse } from "@bazhen/protocol";
 type Terminals = NonNullable<DoctorResponse["terminals"]>;
 
 /** What `bazhen doctor` says about the terminal budget and the machine's PTYs behind it. */
-export function terminalLines({ open, max, host }: Terminals): string[] {
+export function terminalLines({ open, max, host, refusing }: Terminals): string[] {
   const lines = [`terminals: ${open} open, at most ${max} (terminals.max_open)`];
-  if (open >= max) lines.push("  new agents and shells are refused until one is closed");
+  if (refusing === "budget") lines.push("  new agents and shells are refused until one is closed");
+  if (refusing === "host")
+    lines.push("  new agents and shells are refused: the machine is short of PTYs");
   if (host === null) lines.push("  machine PTYs: can't be counted here");
   else if (host.exact) lines.push(`  machine PTYs: ${host.used} of ${host.max} in use`);
   else

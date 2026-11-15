@@ -1,7 +1,7 @@
 // How many PTYs the machine has in use, against the cutoff every suite that opens real PTYs
 // refuses to start above (docs/standards/testing.md).
 
-import { hostPtyReader } from "@bazhen/host-guard";
+import { hostPtyReader, ptyNodes } from "@bazhen/host-guard";
 import { failSetup } from "./setup-error.ts";
 
 // The spikes' watchdog aborted above 420 of macOS's 511 PTYs (kern.tty.ptmx_max).
@@ -20,11 +20,11 @@ function cutoffOverride(): number | undefined {
 
 export function ptysInUse(): { used: number; cutoff: number } {
   const override = cutoffOverride();
+  // macOS's cutoff is fixed, so its guard counts nodes and never needs sysctl.
+  if (process.platform !== "linux") return { used: ptyNodes(), cutoff: override ?? MACOS_CUTOFF };
   const host = hostPtyReader()();
   if (!host.ok) failSetup(`Refusing to run: the machine's PTYs can't be counted (${host.reason}).`);
-  const cutoff =
-    process.platform === "linux" ? Math.floor(host.max * LINUX_CUTOFF_FRACTION) : MACOS_CUTOFF;
-  return { used: host.used, cutoff: override ?? cutoff };
+  return { used: host.used, cutoff: override ?? Math.floor(host.max * LINUX_CUTOFF_FRACTION) };
 }
 
 /** Throws, first in a suite's setup, when the machine is too short of PTYs to run it. */

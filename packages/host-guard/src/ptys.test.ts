@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hostPtyReader, type PtySource } from "./ptys.ts";
+import { hostPtyReader, ptyNodes, type PtySource } from "./ptys.ts";
 
 const source = (over: Partial<PtySource>): PtySource => ({
   platform: "linux",
@@ -22,16 +22,22 @@ const linux = (files: Record<string, string>) =>
     },
   });
 
+const kernel = { "/proc/sys/kernel/pty/max": "4096\n", "/proc/sys/kernel/pty/reserve": "1024\n" };
+
 describe("hostPtyReader", () => {
-  it("reads Linux's kernel counters as an exact count", () => {
-    const read = hostPtyReader(
-      linux({ "/proc/sys/kernel/pty/nr": "37\n", "/proc/sys/kernel/pty/max": "4096\n" }),
-    );
-    expect(read()).toEqual({ ok: true, used: 37, max: 4096, exact: true });
+  it("reads Linux's kernel counters as an exact count, the limit less the first mount's reserve", () => {
+    const read = hostPtyReader(linux({ ...kernel, "/proc/sys/kernel/pty/nr": "37\n" }));
+    expect(read()).toEqual({
+      ok: true,
+      used: 37,
+      max: 3072,
+      exact: true,
+      limit: "kernel.pty.max",
+    });
   });
 
   it("reads Linux's counters again on every call", () => {
-    const files = { "/proc/sys/kernel/pty/nr": "1", "/proc/sys/kernel/pty/max": "4096" };
+    const files = { ...kernel, "/proc/sys/kernel/pty/nr": "1" };
     const read = hostPtyReader(linux(files));
     read();
     files["/proc/sys/kernel/pty/nr"] = "2";
@@ -39,10 +45,8 @@ describe("hostPtyReader", () => {
   });
 
   it("answers why when a Linux counter is missing or not a count", () => {
-    const missing = hostPtyReader(linux({ "/proc/sys/kernel/pty/max": "4096" }))();
-    const garbled = hostPtyReader(
-      linux({ "/proc/sys/kernel/pty/nr": "lots", "/proc/sys/kernel/pty/max": "4096" }),
-    )();
+    const missing = hostPtyReader(linux(kernel))();
+    const garbled = hostPtyReader(linux({ ...kernel, "/proc/sys/kernel/pty/nr": "lots" }))();
     expect([missing, garbled]).toEqual([
       { ok: false, reason: "ENOENT: /proc/sys/kernel/pty/nr" },
       { ok: false, reason: 'kernel.pty.nr is "lots"' },
@@ -57,7 +61,13 @@ describe("hostPtyReader", () => {
         readdir: () => ["ttys000", "ttys001", "ttyp0", "console", "ttys"],
       }),
     );
-    expect(read()).toEqual({ ok: true, used: 3, max: 511, exact: false });
+    expect(read()).toEqual({
+      ok: true,
+      used: 3,
+      max: 511,
+      exact: false,
+      limit: "kern.tty.ptmx_max",
+    });
   });
 
   it("asks macOS for its maximum only once", () => {
@@ -74,6 +84,28 @@ describe("hostPtyReader", () => {
     read();
     read();
     expect(asked).toBe(1);
+  });
+
+  it("keeps a failure to read macOS's maximum, rather than asking again on every call", () => {
+    let asked = 0;
+    const read = hostPtyReader(
+      source({
+        platform: "darwin",
+        ptmxMax: () => {
+          asked += 1;
+          throw new Error("sysctl timed out");
+        },
+      }),
+    );
+    expect([read(), read(), asked]).toEqual([
+      { ok: false, reason: "sysctl timed out" },
+      { ok: false, reason: "sysctl timed out" },
+      1,
+    ]);
+  });
+
+  it("counts macOS's PTY nodes without asking for its maximum", () => {
+    expect(ptyNodes(source({ readdir: () => ["ttys000", "ttys001", "tty.usb"] }))).toBe(2);
   });
 
   it("counts nothing on a platform it can't read", () => {

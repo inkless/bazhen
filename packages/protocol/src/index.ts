@@ -96,7 +96,7 @@ export const DoctorResponse = z.object({
   /**
    * Terminals open and `terminals.max_open`, and the machine's PTYs in use and its most, or null
    * where they can't be counted. `exact` is false where `used` is an upper bound, as on macOS.
-   * Absent before 1.37.
+   * `refusing` names the limit refusing new terminals now, if one is. Absent before 1.37.
    */
   terminals: z
     .object({
@@ -105,6 +105,7 @@ export const DoctorResponse = z.object({
       host: z
         .object({ used: z.int().nonnegative(), max: z.int().positive(), exact: z.boolean() })
         .nullable(),
+      refusing: z.enum(["budget", "host"]).nullable(),
     })
     .optional(),
   env: z.object({

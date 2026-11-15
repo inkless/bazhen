@@ -2,14 +2,16 @@ import { describe, expect, it } from "vitest";
 import type { HostPtys } from "@bazhen/host-guard";
 import { TerminalBudget, TerminalLimit, hostHeadroom } from "./budget.ts";
 
-const roomy: HostPtys = { ok: true, used: 10, max: 4096, exact: true };
+const linux = { exact: true, limit: "kernel.pty.max" } as const;
+const roomy: HostPtys = { ok: true, used: 10, max: 4096, ...linux };
 
-function budget({ max = 3, open = 0, host = roomy } = {}) {
-  const state: { open: number; host: HostPtys } = { open, host };
+function budget({ max = 3, open = 0, starting = 0, host = roomy } = {}) {
+  const state: { open: number; starting: number; host: HostPtys } = { open, starting, host };
   const warnings: string[] = [];
   const b = new TerminalBudget({
     max,
     open: () => state.open,
+    starting: () => state.starting,
     host: () => state.host,
     warn: (m) => warnings.push(m),
   });
@@ -32,6 +34,7 @@ const leaving = (free: number, exact: boolean): HostPtys => ({
   used: 511 - 1 - free,
   max: 511,
   exact,
+  limit: exact ? "kernel.pty.max" : "kern.tty.ptmx_max",
 });
 
 describe("TerminalBudget", () => {
@@ -70,8 +73,16 @@ describe("TerminalBudget", () => {
     expect({ host: err.host, message: err.message }).toEqual({
       host: true,
       message:
-        "the machine has 459 of 511 PTYs in use, and Bazhen keeps 52 free for the rest of the system: close a terminal, or raise the machine's PTY limit",
+        "the machine has 459 of 511 PTYs in use or being opened, and Bazhen keeps 52 free for the rest of the system: close a terminal, or raise kernel.pty.max",
     });
+  });
+
+  it("counts the terminals still being created as PTYs the machine's count may not show yet", () => {
+    const roomFor = hostHeadroom(511);
+    const burst = budget({ starting: 1, host: leaving(roomFor, true) });
+    expect(refusal(() => burst.b.admit()).message).toContain(
+      "459 of 511 PTYs in use or being opened",
+    );
   });
 
   it("admits on an exact count that leaves the machine exactly its headroom", () => {
@@ -105,7 +116,7 @@ describe("TerminalBudget", () => {
   });
 
   it("warns at start about terminals kept above the budget and a budget above the machine's PTYs", () => {
-    const host: HostPtys = { ok: true, used: 10, max: 50, exact: true };
+    const host: HostPtys = { ok: true, used: 10, max: 50, ...linux };
     expect(budget({ max: 64, open: 70, host }).b.startupWarnings()).toEqual([
       "70 terminals are open, above terminals.max_open (64): they keep running, and a new one opens once 7 of them have closed",
       "terminals.max_open (64) is above the machine's 50 PTYs: the machine's own limit is reached first",
@@ -119,8 +130,18 @@ describe("TerminalBudget", () => {
   it("reports the count, the budget and the machine for doctor, the machine null when unread", () => {
     const unread = budget({ open: 1, host: { ok: false, reason: "x" } }).b.report();
     expect([budget({ open: 2 }).b.report(), unread]).toEqual([
-      { open: 2, max: 3, host: { used: 10, max: 4096, exact: true } },
-      { open: 1, max: 3, host: null },
+      { open: 2, max: 3, host: { used: 10, max: 4096, exact: true }, refusing: null },
+      { open: 1, max: 3, host: null, refusing: null },
     ]);
+  });
+
+  it("reports which limit refuses new terminals: the budget, an exactly counted machine, or none", () => {
+    const short = hostHeadroom(511) - 1;
+    const refusing = [
+      budget({ max: 2, open: 2 }),
+      budget({ host: leaving(short, true) }),
+      budget({ host: leaving(short, false) }),
+    ].map(({ b }) => b.report().refusing);
+    expect(refusing).toEqual(["budget", "host", null]);
   });
 });

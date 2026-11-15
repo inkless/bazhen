@@ -304,12 +304,27 @@
               "type": "null"
             }
           ]
+        },
+        "refusing": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "budget",
+                "host"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
         "open",
         "max",
-        "host"
+        "host",
+        "refusing"
       ]
     },
     "env": {
