@@ -8,4 +8,12 @@ disallowed-methods = [
   { path = "rustix::fs::open", reason = "it sets no O_CLOEXEC; use std::fs::OpenOptions, which does" },
   { path = "rustix::fs::openat", reason = "it sets no O_CLOEXEC; use std::fs::OpenOptions, which does" },
   { path = "rustix::io::dup", reason = "the copy has no FD_CLOEXEC; use OwnedFd::try_clone, which sets it" },
+  { path = "rustix::net::socket", reason = "it sets no SOCK_CLOEXEC; use std's sockets, which do" },
+  { path = "rustix::net::socketpair", reason = "it sets SOCK_CLOEXEC only if asked; use UnixStream::pair, which does" },
+  { path = "rustix::net::accept", reason = "it sets no SOCK_CLOEXEC; use UnixListener::accept, which does" },
+  { path = "rustix::net::acceptfrom", reason = "it sets no SOCK_CLOEXEC; use UnixListener::accept, which does" },
+  { path = "rustix::net::socket_with", reason = "it sets SOCK_CLOEXEC only if asked; use std's sockets, which do" },
+  { path = "rustix::net::accept_with", reason = "it sets SOCK_CLOEXEC only if asked; use UnixListener::accept, which does" },
+  { path = "rustix::net::acceptfrom_with", reason = "it sets SOCK_CLOEXEC only if asked; use UnixListener::accept, which does" },
+  { path = "rustix::net::recvmsg", reason = "fds it receives have no FD_CLOEXEC unless asked; the holder receives none" },
 ]

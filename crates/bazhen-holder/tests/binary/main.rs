@@ -24,6 +24,8 @@ use std::time::{Duration, Instant};
 
 use rustix::process::{Pid, Resource, Rlimit, Signal, getrlimit, getsid, kill_process, setrlimit};
 
+mod socket;
+
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 const HOLDER: &str = env!("CARGO_BIN_EXE_bazhen-holder");
@@ -209,14 +211,30 @@ fn spawn(spec: &[u8], how: &Start<'_>) -> Result<Started> {
     Ok(started)
 }
 
-/// A directory of the test's own, for the socket path the log sits beside.
-fn home(name: &str) -> Result<PathBuf> {
-    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
-        .join("homes")
-        .join(format!("{name}-{}", std::process::id()));
+/// The socket's directory, which must be private to the user and short enough for a socket path
+/// on macOS (103 bytes), so under `/tmp` rather than the target directory. Removed when dropped,
+/// after the holders the test started, which are declared after it.
+struct Home(PathBuf);
+
+impl std::ops::Deref for Home {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for Home {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn home(name: &str) -> Result<Home> {
+    let dir = PathBuf::from(format!("/tmp/bz-hb-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir)?;
-    Ok(dir)
+    std::fs::DirBuilder::new().mode(0o700).create(&dir)?;
+    Ok(Home(dir))
 }
 
 fn spec(home: &Path, argv: &[&str], change: impl FnOnce(&mut serde_json::Value)) -> Vec<u8> {

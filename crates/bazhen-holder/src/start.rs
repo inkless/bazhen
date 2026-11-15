@@ -4,13 +4,17 @@
 //!
 //! | Exit | Meaning |
 //! |---|---|
-//! | 1 | a start step failed: the PTY, the child's program or cwd, listing `/dev/fd` |
-//! | 2 | the spec is invalid, NUL bytes included |
+//! | 1 | a start step failed: the PTY, the child's program or cwd, listing `/dev/fd`, binding |
+//! | 2 | the spec is invalid, NUL bytes and a socket path that isn't absolute or is too long included |
 //! | 3 | the spec's daemon shares no major with this holder |
 //! | 4 | the holder leads a process group but not a session, so it can't start one |
 //! | 5 | the loop failed after `ready` |
+//! | 6 | the socket's directory isn't one only this user can enter |
+//! | 7 | another holder serves the terminal, or something other than a socket is at its path |
 //!
-//! Then it writes `ready\n` to stdout, points fds 0–2 at `/dev/null`, and runs until it is closed.
+//! The socket is bound before the child starts, so a holder that can't serve starts nothing, and
+//! `ready` means a client can connect. Then it writes `ready\n` to stdout, points fds 0–2 at
+//! `/dev/null`, and runs until it is closed.
 
 use std::io::{self, Read, Write as _};
 use std::path::Path;
@@ -24,6 +28,7 @@ use thiserror::Error;
 use crate::child::Reaper;
 use crate::holder::{Discard, Holder};
 use crate::pty::{self, Pty, SpawnError, WindowSize};
+use crate::socket::{self, BindError, Socket};
 
 pub const READY: &[u8] = b"ready\n";
 
@@ -42,15 +47,19 @@ pub enum StartError {
     Setup(#[source] io::Error),
     #[error(transparent)]
     Spawn(#[from] SpawnError),
+    #[error(transparent)]
+    Bind(#[from] BindError),
 }
 
 impl StartError {
     pub const fn exit_code(&self) -> u8 {
         match self {
-            Self::Setup(_) | Self::Spawn(_) => 1,
+            Self::Setup(_) | Self::Spawn(_) | Self::Bind(BindError::Io { .. }) => 1,
             Self::Invalid(_) => 2,
             Self::NoSharedVersion => 3,
             Self::GroupLeader => 4,
+            Self::Bind(BindError::NotPrivate(_)) => 6,
+            Self::Bind(BindError::Taken(_)) => 7,
         }
     }
 }
@@ -60,8 +69,8 @@ pub const EXIT_AFTER_READY: u8 = 5;
 
 /// Starts a holder from the spec on stdin, and runs it until it ends.
 pub fn run() -> ExitCode {
-    let holder = match start(&mut io::stdin().lock()) {
-        Ok(holder) => holder,
+    let (holder, _socket) = match start(&mut io::stdin().lock()) {
+        Ok(started) => started,
         Err(e) => {
             // Nothing is left to tell when stderr is gone too.
             let _ = writeln!(io::stderr(), "bazhen-holder: {e}");
@@ -83,12 +92,24 @@ pub fn run() -> ExitCode {
     ExitCode::from(EXIT_AFTER_READY)
 }
 
-fn start(stdin: &mut impl Read) -> Result<Holder<Discard>, StartError> {
+fn start(stdin: &mut impl Read) -> Result<(Holder<Discard>, Socket), StartError> {
     let spec = read_spec(stdin)?;
     become_session_leader()?;
     std::env::set_current_dir("/").map_err(StartError::Setup)?;
     pty::close_inherited_fds().map_err(StartError::Setup)?;
+    let socket = Socket::bind(Path::new(spec.socket.as_str()))?;
     crate::log::init(Path::new(spec.socket.as_str()));
+    match spawn(&spec) {
+        Ok(holder) => Ok((holder, socket)),
+        Err(error) => {
+            socket.remove();
+            Err(error)
+        }
+    }
+}
+
+/// Every start step after the bind.
+fn spawn(spec: &SpawnSpec) -> Result<Holder<Discard>, StartError> {
     let reaper = Reaper::new().map_err(StartError::Setup)?;
     let (pty, slave) = Pty::open(WindowSize::from(spec.size)).map_err(StartError::Setup)?;
     let child = pty::spawn(slave, &spec.process(), &reaper)?;
@@ -132,6 +153,9 @@ pub fn read_spec(stdin: &mut impl Read) -> Result<SpawnSpec, StartError> {
         SpawnSpecError::NoSharedVersion { .. } => StartError::NoSharedVersion,
         SpawnSpecError::Invalid(why) => StartError::Invalid(why.to_string()),
     })?;
+    if let Some(why) = socket::path_problem(spec.socket.as_str()) {
+        return Err(StartError::Invalid(why));
+    }
     let env = spec.env.as_map();
     let has_nul = spec.argv.as_slice().iter().any(|arg| arg.contains('\0'))
         || spec.cwd.as_str().contains('\0')
@@ -294,7 +318,9 @@ mod tests {
             StartError::NoSharedVersion.exit_code(),
             StartError::GroupLeader.exit_code(),
             EXIT_AFTER_READY,
+            StartError::Bind(BindError::NotPrivate(String::new())).exit_code(),
+            StartError::Bind(BindError::Taken(String::new())).exit_code(),
         ];
-        assert_eq!(codes, [1, 2, 3, 4, 5]);
+        assert_eq!(codes, [1, 2, 3, 4, 5, 6, 7]);
     }
 }

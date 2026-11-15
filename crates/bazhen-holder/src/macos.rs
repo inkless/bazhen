@@ -1,12 +1,14 @@
 #![expect(
     unsafe_code,
     reason = "libc's sysctl is the one call that says when a macOS process started, a zombie \
-              included, and rustix doesn't cover it; only unsafe can call it"
+              included, and getpeereid the one that names a socket peer's user; rustix covers \
+              neither, and only unsafe can call them"
 )]
 
 //! What only macOS's own calls can tell the holder.
 
 use std::io;
+use std::os::fd::{AsRawFd as _, BorrowedFd};
 use std::ptr;
 
 use rustix::process::Pid;
@@ -59,4 +61,18 @@ pub(crate) fn start_seconds(pid: Pid) -> Result<u64, StartTimeError> {
         .map(|bytes| i64::from_ne_bytes(*bytes))
         .ok_or_else(|| unreadable(io::Error::other("no start time")))?;
     u64::try_from(seconds).map_err(|e| unreadable(io::Error::other(e)))
+}
+
+/// The effective uid of the process at the other end of a Unix socket, as it was when it
+/// connected.
+pub(crate) fn peer_uid(socket: BorrowedFd<'_>) -> io::Result<u32> {
+    let mut uid: libc::uid_t = 0;
+    let mut gid: libc::gid_t = 0;
+    // SAFETY: `socket` is an open fd for the whole call, and `uid` and `gid` are writable.
+    let status = unsafe { libc::getpeereid(socket.as_raw_fd(), &raw mut uid, &raw mut gid) };
+    if status == 0 {
+        Ok(uid)
+    } else {
+        Err(io::Error::last_os_error())
+    }
 }

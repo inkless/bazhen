@@ -405,7 +405,8 @@ const UNSAFE_MODULES: Record<string, string> = {
     "value owns; rustix covers none of them",
   "crates/bazhen-holder/src/macos.rs":
     "libc's sysctl(KERN_PROC_PID), the one call that says when a macOS process started, a zombie " +
-    "included, which ps reads too; rustix doesn't cover it",
+    "included, which ps reads too; and getpeereid, which names a socket peer's user; rustix " +
+    "covers neither",
 };
 
 const RAW_STRING = /r(#*)"/y;
@@ -675,6 +676,21 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/start_time.rs::boot_time": "proc_stat",
 };
 const NOT_DECODERS: Record<string, string> = {
+  "crates/bazhen-holder/src/socket.rs::Socket::listener": "borrows the listener; reads nothing",
+  "crates/bazhen-holder/src/socket.rs::Socket::keep_lock":
+    "compares the held lock with the file at its name and locks again; reads no bytes",
+  "crates/bazhen-holder/src/socket.rs::Socket::bind_again":
+    "binds the socket again; reads no bytes",
+  "crates/bazhen-holder/src/socket.rs::renew": "sets the lock file's times; reads no bytes",
+  "crates/bazhen-holder/src/socket.rs::Socket::recheck_with":
+    "recheck, with the bind step passed in; reads no bytes",
+  "crates/bazhen-holder/src/socket.rs::Socket::recheck":
+    "looks the socket's path up and binds it again; reads no bytes",
+  "crates/bazhen-holder/src/socket.rs::Socket::remove": "removes the socket file; reads no bytes",
+  "crates/bazhen-holder/src/socket.rs::admit":
+    "asks the kernel for the peer's uid and sets socket options; reads no bytes",
+  "crates/bazhen-holder/src/socket.rs::peer_uid":
+    "asks the kernel for the peer's uid; reads no bytes",
   "crates/bazhen-holder/src/start_time.rs::decimal":
     "reached only through start_ticks and boot_time, which proc_stat fuzzes",
   "crates/bazhen-holder/src/child.rs::Reaper::fd":
@@ -1154,6 +1170,35 @@ export const CLIPPY_CONFIG = [
     NO_CLOEXEC(
       "rustix::io::dup",
       "the copy has no FD_CLOEXEC; use OwnedFd::try_clone, which sets it",
+    ),
+    NO_CLOEXEC("rustix::net::socket", "it sets no SOCK_CLOEXEC; use std's sockets, which do"),
+    NO_CLOEXEC(
+      "rustix::net::socketpair",
+      "it sets SOCK_CLOEXEC only if asked; use UnixStream::pair, which does",
+    ),
+    NO_CLOEXEC(
+      "rustix::net::accept",
+      "it sets no SOCK_CLOEXEC; use UnixListener::accept, which does",
+    ),
+    NO_CLOEXEC(
+      "rustix::net::acceptfrom",
+      "it sets no SOCK_CLOEXEC; use UnixListener::accept, which does",
+    ),
+    NO_CLOEXEC(
+      "rustix::net::socket_with",
+      "it sets SOCK_CLOEXEC only if asked; use std's sockets, which do",
+    ),
+    NO_CLOEXEC(
+      "rustix::net::accept_with",
+      "it sets SOCK_CLOEXEC only if asked; use UnixListener::accept, which does",
+    ),
+    NO_CLOEXEC(
+      "rustix::net::acceptfrom_with",
+      "it sets SOCK_CLOEXEC only if asked; use UnixListener::accept, which does",
+    ),
+    NO_CLOEXEC(
+      "rustix::net::recvmsg",
+      "fds it receives have no FD_CLOEXEC unless asked; the holder receives none",
     ),
     "]",
   ].join(" "),

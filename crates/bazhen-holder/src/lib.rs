@@ -11,5 +11,6 @@ pub mod log;
 mod macos;
 pub mod pty;
 mod signals;
+pub mod socket;
 pub mod start;
 pub mod start_time;
