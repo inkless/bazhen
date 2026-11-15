@@ -186,8 +186,8 @@ export type ServerVerdict =
   | { readonly is: "gone" }
   | { readonly is: "unsure"; readonly why: string };
 
-/** How far a process's start, as `ps` prints it, may lie from tmux's `#{start_time}`. */
-const START_SKEW_S = 2;
+/** How far a process's start, as `ps` prints it, may lie from a recorded one, as tmux's `#{start_time}`. */
+export const START_SKEW_S = 2;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /** `ps -o lstart=` in the C locale and UTC, `Thu Nov 12 17:10:38 2026`, as epoch seconds. */

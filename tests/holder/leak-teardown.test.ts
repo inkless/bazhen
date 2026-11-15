@@ -15,7 +15,7 @@ import { exitedPid } from "../support/holder-spawn.ts";
 import {
   closeLiveHolders,
   RUN_PREFIX,
-  setup,
+  prepareRun,
   teardown,
   teardownReport,
 } from "../support/holder-setup.ts";
@@ -40,7 +40,7 @@ async function fakeAt(...args: Parameters<typeof listenFakeHolder>) {
 
 /** Sets up a run of its own, whose home `afterEach` removes whatever its test leaves. */
 function ownRun(): string {
-  setup();
+  prepareRun();
   const home = String(process.env["BAZHEN_HOME"]);
   dirs.push(home);
   return home;

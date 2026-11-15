@@ -40,6 +40,7 @@ import {
   tmuxDir,
   userDir,
 } from "./holder-home.ts";
+import { sweep as sweepLedger } from "./holder-ledger.ts";
 import { requirePtyHeadroom } from "./ptys.ts";
 import { failSetup } from "./setup-error.ts";
 
@@ -68,7 +69,14 @@ export function scrubBazhenEnv(env: NodeJS.ProcessEnv): void {
   for (const name of Object.keys(env)) if (name.startsWith("BAZHEN_")) delete env[name];
 }
 
-export function setup(): void {
+/** Sweeps holders an earlier run left, then makes this run's home. */
+export async function setup(): Promise<void> {
+  await sweepLedger();
+  prepareRun();
+}
+
+/** Makes a run's home and points the environment at it. */
+export function prepareRun(): void {
   requirePtyHeadroom();
   home = mkdtempSync(RUN_PREFIX);
   for (const dir of [join(home, "run"), holdersDir(home), userDir(home)]) {

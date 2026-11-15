@@ -1,7 +1,8 @@
 // The one module that sends signals. A signal reaches only a process group this process started,
-// the process of a pane that one of Bazhen's own tmux servers vouched for, or one of those
-// servers itself, once its process was checked to be that server: a stray pid ends someone
-// else's work, and a stray negative one their whole session.
+// the process of a pane that one of Bazhen's own tmux servers vouched for, one of those servers
+// itself, once its process was checked to be that server, or a `bazhen-holder` checked to be the
+// one a holder test started: a stray pid ends someone else's work, and a stray negative one their
+// whole session.
 
 import { spawn, type SpawnOptions } from "node:child_process";
 import { constants } from "node:os";
@@ -59,6 +60,34 @@ export function signalServer(server: ServerProcess, now = Date.now()): boolean {
   if (expiry === undefined) throw new RangeError(`refusing to signal ${server.pid}: unvouched`);
   if (now > expiry) throw new RangeError(`refusing to signal ${server.pid}: stale proof`);
   return send(server.pid, "SIGUSR1");
+}
+
+/** A `bazhen-holder` process: its pid, and its start in epoch seconds, as `ps` gives it. */
+export interface HolderProcess {
+  readonly pid: number;
+  readonly start: number;
+}
+
+const holders = new WeakMap<HolderProcess, number>();
+
+/** A checked holder process, as one `killHolder` may reach once. Only holder.ts calls this. */
+export function vouchHolderProcess(holder: HolderProcess, now = Date.now()): HolderProcess {
+  if (!isPid(holder.pid)) throw new RangeError(`refusing to vouch for pid ${holder.pid}`);
+  const proof = Object.freeze({ ...holder });
+  holders.set(proof, now + PROOF_MS);
+  return proof;
+}
+
+/**
+ * Sends a checked holder `SIGKILL`, to the pid alone: what its child's group does once the holder
+ * is gone is the kernel's hang-up to its session. Whether the holder was still there.
+ */
+export function killHolder(holder: HolderProcess, now = Date.now()): boolean {
+  const expiry = holders.get(holder);
+  holders.delete(holder);
+  if (expiry === undefined) throw new RangeError(`refusing to kill ${holder.pid}: unvouched`);
+  if (now > expiry) throw new RangeError(`refusing to kill ${holder.pid}: stale proof`);
+  return send(holder.pid, "SIGKILL");
 }
 
 /** Whether the target existed; a group that already exited is the caller's to notice. */
