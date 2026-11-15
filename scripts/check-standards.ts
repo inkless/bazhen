@@ -1058,12 +1058,9 @@ export const CLIPPY_CONFIG = [
 export const DENY_CONFIG = [
   "[graph]",
   "all-features = true",
-  "targets = [",
-  '"x86_64-unknown-linux-gnu",',
-  '"aarch64-unknown-linux-gnu",',
-  '"x86_64-apple-darwin",',
-  '"aarch64-apple-darwin",',
-  "]",
+  // One line: an entry the formatter wraps is read joined (tomlLines).
+  'targets = [ "x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin", ' +
+    '"aarch64-apple-darwin", ]',
   "[advisories]",
   'yanked = "deny"',
   "[licenses]",
@@ -1125,27 +1122,59 @@ export function gateScriptFailures(scripts: Record<string, string>): string[] {
   return out;
 }
 
+const TOML_HEADER = /^\[\[?[^\]]*\]\]?$/;
+
+/**
+ * Where a scan of TOML stands after `code`: how many brackets are open outside strings, and the
+ * quote of a string still open (`"`, `'`, `"""` or `'''`), or "".
+ */
+function tomlScan(code: string, depth: number, quote: string): { depth: number; quote: string } {
+  for (let i = 0; i < code.length; i++) {
+    const c = code[i];
+    if (quote !== "") {
+      if (c === "\\" && quote.startsWith('"')) i++;
+      else if (code.startsWith(quote, i)) {
+        i += quote.length - 1;
+        quote = "";
+      }
+    } else if (code.startsWith('"""', i) || code.startsWith("'''", i)) {
+      quote = code.slice(i, i + 3);
+      i += 2;
+    } else if (c === '"' || c === "'") quote = c;
+    else if (c === "[" || c === "{") depth++;
+    else if (c === "]" || c === "}") depth--;
+  }
+  return { depth, quote };
+}
+
 /**
  * TOML's lines with comments and blank lines dropped, each trimmed, and an entry the formatter
- * wrapped across lines (a long inline table or array) joined back into one. Strings hold no `#`,
- * `[`, `]`, `{` or `}` here.
+ * wrapped across lines (a long inline table or array) joined back into one: brackets are counted
+ * outside strings, and a table header always starts afresh, so no entry left open can swallow the
+ * tables after it. Strings hold no `#` here.
  */
 function tomlLines(text: string): string[] {
   const lines: string[] = [];
   let entry = "";
-  let depth = 0;
+  let scan = { depth: 0, quote: "" };
+  const flush = () => {
+    if (entry !== "") lines.push(entry);
+    entry = "";
+    scan = { depth: 0, quote: "" };
+  };
   for (const line of text.split(/\r?\n/)) {
     const code = line.replace(/\s#.*$|^#.*$/, "").trim();
     if (code === "") continue;
-    entry = entry === "" ? code : `${entry} ${code}`;
-    for (const c of code) depth += c === "[" || c === "{" ? 1 : c === "]" || c === "}" ? -1 : 0;
-    if (depth <= 0 || /^\[\[?[^\]]*\]\]?$/.test(entry)) {
-      lines.push(entry);
-      entry = "";
-      depth = 0;
+    if (scan.quote === "" && TOML_HEADER.test(code)) {
+      flush();
+      lines.push(code);
+      continue;
     }
+    entry = entry === "" ? code : `${entry} ${code}`;
+    scan = tomlScan(code, scan.depth, scan.quote);
+    if (scan.depth <= 0 && scan.quote === "") flush();
   }
-  if (entry !== "") lines.push(entry);
+  flush();
   return lines;
 }
 
@@ -1154,7 +1183,7 @@ export function tomlTables(text: string): Map<string, string[]> {
   const tables = new Map<string, string[]>([["", []]]);
   let current: string[] = tables.get("") ?? [];
   for (const line of tomlLines(text)) {
-    if (/^\[\[?[^\]]*\]\]?$/.test(line)) {
+    if (TOML_HEADER.test(line)) {
       current = tables.get(line) ?? [];
       tables.set(line, current);
     } else current.push(line);

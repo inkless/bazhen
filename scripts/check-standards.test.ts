@@ -1185,6 +1185,36 @@ describe("tomlTables", () => {
     ]);
   });
 
+  it("joins an entry wrapped across lines, counting no bracket inside a string", () => {
+    const tables = tomlTables(
+      [
+        "[package]",
+        'description = "a [draft {"',
+        "name = 'x]'",
+        'notes = """',
+        "[dependencies]",
+        '"""',
+        "[dependencies]",
+        'serde = { version = "=1.0.229", features = [',
+        '  "derive",',
+        "] }",
+        'proptest = "=1.12.0"',
+      ].join("\n"),
+    );
+    expect([tables.get("[package]"), tables.get("[dependencies]")]).toEqual([
+      ['description = "a [draft {"', "name = 'x]'", 'notes = """ [dependencies] """'],
+      ['serde = { version = "=1.0.229", features = [ "derive", ] }', 'proptest = "=1.12.0"'],
+    ]);
+  });
+
+  it("starts each table afresh, whatever an entry before it left open", () => {
+    const tables = tomlTables('[package]\nname = { a = [\n[dependencies]\nserde = "1.0"\n');
+    expect([tables.get("[package]"), tables.get("[dependencies]")]).toEqual([
+      ["name = { a = ["],
+      ['serde = "1.0"'],
+    ]);
+  });
+
   it("reads an array table's header as a table of its own", () => {
     const tables = tomlTables('[dependencies]\na = "=1.0.0"\n[[bin]]\nname = "x"\n');
     expect([tables.get("[dependencies]"), tables.get("[[bin]]")]).toEqual([
