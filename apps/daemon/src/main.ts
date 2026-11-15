@@ -72,7 +72,7 @@ import {
 import { Tasks } from "./tasks/tasks.ts";
 import { TerminalBudget } from "./terminals/budget.ts";
 import { nodePtySpawner } from "./pty/node-pty.ts";
-import { Store, type SnapshotView } from "./store/store.ts";
+import { Store, UnsafeDatabase, type SnapshotView } from "./store/store.ts";
 
 const APP_VERSION = "0.1.0";
 const HOSTNAME = "127.0.0.1";
@@ -94,7 +94,7 @@ if (await answers(paths.socket)) {
 // session's internals (foundation-design §9.5).
 let captured = { ...capture(process.env, config.envRules), source: "start" as "start" | "refresh" };
 const hostEnv = captured.env;
-const store = Store.open(join(paths.data, "bazhen.db"));
+const store = storeOrExit(join(paths.data, "bazhen.db"));
 const budget = new TerminalBudget({
   max: config.maxOpenTerminals,
   open: () => store.openTerminals(),
@@ -530,6 +530,20 @@ process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
 /** A config error ends start-up with its message, which names the file and the key. */
+/** The store, or a one-line reason and exit when its files aren't this user's to open. */
+function storeOrExit(path: string): Store {
+  try {
+    return Store.open(path);
+  } catch (err) {
+    const code = err instanceof Error && "code" in err ? err.code : undefined;
+    if (err instanceof UnsafeDatabase) console.error(err.message);
+    else if (code === "EPERM" || code === "EACCES")
+      console.error(`bazhen can't open ${path} as its own (${code}): check who owns it`);
+    else throw err;
+    return process.exit(1);
+  }
+}
+
 function settingsOrExit(): ReturnType<typeof loadSettings> {
   try {
     return loadSettings(inputs);

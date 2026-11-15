@@ -1,3 +1,4 @@
+import { closeSync, constants, fchmodSync, fstatSync, openSync } from "node:fs";
 import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqlite";
 import {
   isId,
@@ -199,6 +200,54 @@ function refFrom(
 /** Agent states whose directory still holds their work, so a shell can be opened beside them. */
 export const LINKABLE: ReadonlySet<AgentState> = new Set(["running", "exited"]);
 
+/** The database, or a journal beside it, is not this user's own file, so it isn't opened. */
+export class UnsafeDatabase extends Error {
+  constructor(path: string, reason: string) {
+    super(`refusing to open ${path} as Bazhen's database: ${reason}`);
+  }
+}
+
+// O_NONBLOCK so a FIFO planted in a file's place fails the open (ENXIO) rather than blocking
+// it until something reads the other end.
+const NO_FOLLOW = constants.O_WRONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+
+/**
+ * Makes the database, and the journal files beside it, readable and writable by this user only:
+ * it holds what no other user may read. SQLite creates its journal files with the database's own
+ * mode, so a new database is created 0600, and one made before is tightened with its journals,
+ * which a daemon killed mid-write leaves behind. Each file is changed through a descriptor opened
+ * without following a symlink, so one planted in its place can't redirect the change. Anything
+ * but a regular file this user owns is refused rather than taken over.
+ */
+function keepPrivate(path: string): void {
+  for (const file of [path, `${path}-wal`, `${path}-shm`]) {
+    const flags = file === path ? NO_FOLLOW | constants.O_CREAT | constants.O_APPEND : NO_FOLLOW;
+    let fd: number;
+    try {
+      fd = openSync(file, flags, 0o600);
+    } catch (err) {
+      const code = err instanceof Error && "code" in err ? err.code : undefined;
+      // A journal SQLite hasn't made yet will be made with the database's mode.
+      if (code === "ENOENT" && file !== path) continue;
+      if (code === "ELOOP") throw new UnsafeDatabase(file, "it is a symlink");
+      if (code === "ENXIO" || code === "EISDIR")
+        throw new UnsafeDatabase(file, "it is not a regular file");
+      throw err;
+    }
+    try {
+      const stat = fstatSync(fd);
+      if (!stat.isFile()) throw new UnsafeDatabase(file, "it is not a regular file");
+      const { uid } = stat;
+      const own = process.getuid?.();
+      if (own !== undefined && uid !== own)
+        throw new UnsafeDatabase(file, `it is owned by uid ${uid}`);
+      fchmodSync(fd, 0o600);
+    } finally {
+      closeSync(fd);
+    }
+  }
+}
+
 /** A shell terminal as its lifecycle needs it. */
 export interface ShellTerminal {
   readonly terminalId: TerminalId;
@@ -331,6 +380,7 @@ export class Store {
   }
 
   static open(path: string, migrations: readonly Migration[] = MIGRATIONS): Store {
+    keepPrivate(path);
     const db = new DatabaseSync(path);
     // NORMAL loses nothing when the daemon dies, only the commits since the last checkpoint on an
     // OS crash or power loss; FULL would flush on every commit, which blocks the event loop.
