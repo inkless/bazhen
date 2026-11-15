@@ -1,3 +1,4 @@
+import { SLICE } from "@bazhen/host-guard";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   looksSecret,
@@ -6,6 +7,7 @@ import {
   pins,
   tmuxBuildArgs,
   cpuBudget,
+  memoryBudget,
   run,
   stopper,
   sweep,
@@ -76,6 +78,15 @@ describe("pnpm test:real", () => {
     expect(() => cpuBudget({ BZ_TEST_CPUS: "0" }, 32)).toThrow("BZ_TEST_CPUS");
   });
 
+  it("gives a suite half the machine's memory in the shared slice, a quarter outside it", () => {
+    const gib = 1024 ** 3;
+    expect(memoryBudget({}, 64 * gib, true)).toBe(String(32 * gib));
+    expect(memoryBudget({}, 64 * gib, false)).toBe(String(16 * gib));
+    expect(memoryBudget({ BZ_TEST_MEMORY: "6" }, 64 * gib, true)).toBe(String(6 * gib));
+    expect(() => memoryBudget({ BZ_TEST_MEMORY: "8G" }, 64 * gib, true)).toThrow("BZ_TEST_MEMORY");
+    expect(() => memoryBudget({ BZ_TEST_MEMORY: "0.5" }, 64 * gib, true)).toThrow("BZ_TEST_MEMORY");
+  });
+
   it("keeps a file that looks like a secret out of the image, and every other file in", () => {
     const secret = [
       ".env",
@@ -110,7 +121,14 @@ const never = new Promise<never>(() => {});
 /** A host in memory. `answer` decides each docker command's result. */
 function fakeHost(
   answer: (args: readonly string[]) => Answer,
-  more: { alive?: number[]; dirs?: string[]; prepare?: () => never; timeouts?: boolean } = {},
+  more: {
+    alive?: number[];
+    dirs?: string[];
+    prepare?: () => never;
+    timeouts?: boolean;
+    cgroup?: string;
+    sliceCap?: number;
+  } = {},
 ) {
   const calls: string[][] = [];
   const stopped: NodeJS.Signals[] = [];
@@ -142,6 +160,8 @@ function fakeHost(
       return () => handlers.delete(handler);
     },
     after: () => (more.timeouts === true ? Promise.resolve() : never),
+    cgroupOf: () => more.cgroup,
+    memoryMax: (cgroup) => (cgroup.endsWith(`/${SLICE}`) ? more.sliceCap : undefined),
   };
   const signal = (s: NodeJS.Signals) => {
     for (const handler of handlers) handler(s);
@@ -152,10 +172,23 @@ function fakeHost(
 }
 
 const verb = (args: readonly string[]) => args.slice(0, 2).join(" ");
+/** A suite's own container, not the probe that checks where containers land. */
+const isSuiteRun = (args: readonly string[]) => args[0] === "run" && !args.includes("--detach");
 /** The argument after `flag` in a command, or undefined when the command lacks it. */
 const valueAfter = (args: readonly string[] | undefined, flag: string) =>
   args?.[args.indexOf(flag) + 1];
 const passing = (): Answer => result(0);
+const uid = process.getuid?.() ?? -1;
+const userSlice = `/user.slice/user-${uid}.slice/user@${uid}.service/bazhen.slice/${SLICE}`;
+/** The memory a suite's container gets when the probe lands in `cgroup`. */
+async function memoryOf(cgroup: string): Promise<number> {
+  const fake = fakeHost(probeHasPid, { cgroup, sliceCap: 2 ** 34 });
+  await run(["api"], fake.host);
+  return Number(valueAfter(fake.calls.find(isSuiteRun), "--memory"));
+}
+
+const probeHasPid = (args: readonly string[]): Answer =>
+  verb(args) === "inspect --format" ? result(0, "4343\n") : passing();
 const isIntegration = (args: readonly string[]) =>
   args[0] === "run" && args.includes("test:integration");
 const buildFails = (args: readonly string[]) => (args[0] === "build" ? result(1) : passing());
@@ -194,7 +227,7 @@ describe("pnpm test:real cleans up after itself", () => {
     const fake = fakeHost(passing);
     expect(await run(["api"], fake.host)).toBe(0);
     const build = fake.calls.find((c) => c[0] === "build");
-    const suite = fake.calls.find((c) => c[0] === "run");
+    const suite = fake.calls.find(isSuiteRun);
     expect(build).toEqual(expect.arrayContaining(["--tag", IMAGE, "org.bazhen.test-real=1"]));
     expect(build).toContain(`org.bazhen.test-real.owner-pid=${OWN_PID}`);
     expect(build).toContain(`org.bazhen.test-real.host=${HOST}`);
@@ -207,15 +240,76 @@ describe("pnpm test:real cleans up after itself", () => {
   it("gives each suite's container a CPU budget, so the run cannot take the machine", async () => {
     const fake = fakeHost(passing);
     expect(await run(["api"], fake.host)).toBe(0);
-    const suite = fake.calls.find((c) => c[0] === "run");
+    const suite = fake.calls.find(isSuiteRun);
     expect(suite).toContain("--cpus");
     expect(Number(valueAfter(suite, "--cpus"))).toBeGreaterThan(0);
+  });
+
+  it("puts each suite's container in the slice every capped run shares, where a probe lands", async () => {
+    const fake = fakeHost(probeHasPid, {
+      cgroup: `${userSlice}/libpod-x.scope`,
+      sliceCap: 2 ** 34,
+    });
+    expect(await run(["api"], fake.host)).toBe(0);
+    expect(valueAfter(fake.calls.find(isSuiteRun), "--cgroup-parent")).toBe(SLICE);
+  });
+
+  it("gives a container in the slice twice the memory of one outside it", async () => {
+    quietly();
+    const inSlice = await memoryOf(`${userSlice}/libpod-x.scope`);
+    const outside = await memoryOf(`/bazhen.slice/${SLICE}/docker-x.scope`);
+    expect(Math.abs(inSlice - 2 * outside)).toBeLessThan(4);
+  });
+
+  it("stops the probe it started, and tries once more where it couldn't read where it landed", async () => {
+    const fake = fakeHost(passing);
+    quietly();
+    expect(await run(["api"], fake.host)).toBe(0);
+    expect(fake.calls.filter((c) => verb(c) === "run --detach")).toHaveLength(2);
+    expect(fake.calls.filter((c) => c[0] === "stop").map((c) => c.at(-1))).toEqual([
+      `${RUN}-slice-probe-0`,
+      `${RUN}-slice-probe-1`,
+    ]);
+  });
+
+  it("reads the slice's own cap, however deep a runtime puts its containers below it", async () => {
+    const fake = fakeHost(probeHasPid, {
+      cgroup: `${userSlice}/libpod-x.scope/container`,
+      sliceCap: 2 ** 34,
+    });
+    expect(await run(["api"], fake.host)).toBe(0);
+    expect(valueAfter(fake.calls.find(isSuiteRun), "--cgroup-parent")).toBe(SLICE);
+  });
+
+  it("keeps the containers out of a slice with no cap, which holds nothing together", async () => {
+    const warn = quietly();
+    const fake = fakeHost(probeHasPid, { cgroup: `${userSlice}/libpod-x.scope` });
+    expect(await run(["api"], fake.host)).toBe(0);
+    expect(fake.calls.find(isSuiteRun)).not.toContain("--cgroup-parent");
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`${SLICE} has no memory cap`));
+  });
+
+  it("runs the suites where they would have run, and says so, where the probe lands elsewhere", async () => {
+    const warn = quietly();
+    // Rootful Docker under systemd makes a system slice of the same name, without the cap.
+    const fake = fakeHost(probeHasPid, { cgroup: `/bazhen.slice/${SLICE}/docker-x.scope` });
+    expect(await run(["api"], fake.host)).toBe(0);
+    expect(fake.calls.find(isSuiteRun)).not.toContain("--cgroup-parent");
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("a quarter of the machine"));
+  });
+
+  it("gives each suite's container a memory cap with no swap beyond it", async () => {
+    const fake = fakeHost(passing);
+    expect(await run(["api"], fake.host)).toBe(0);
+    const suite = fake.calls.find(isSuiteRun);
+    expect(Number(valueAfter(suite, "--memory"))).toBeGreaterThan(0);
+    expect(valueAfter(suite, "--memory-swap")).toBe(valueAfter(suite, "--memory"));
   });
 
   it("removes its image and context when the build fails, and runs no suite", async () => {
     const fake = fakeHost(buildFails);
     expect(await run(["api"], fake.host)).toBe(1);
-    expect(fake.calls.some((c) => c[0] === "run")).toBe(false);
+    expect(fake.calls.some(isSuiteRun)).toBe(false);
     expect(cleanup(fake.calls)).toEqual([["image", "rm", IMAGE]]);
     expect(fake.removed).toEqual([`/tmp/${RUN}`]);
     expect(fake.handlers.size).toBe(0);
@@ -224,7 +318,7 @@ describe("pnpm test:real cleans up after itself", () => {
   it("removes its containers, image and context when a suite fails, after running the rest", async () => {
     const fake = fakeHost(integrationFails);
     expect(await run(["integration", "api"], fake.host)).toBe(1);
-    expect(fake.calls.filter((c) => c[0] === "run")).toHaveLength(2);
+    expect(fake.calls.filter(isSuiteRun)).toHaveLength(2);
     expect(cleanup(fake.calls)).toEqual([
       ["rm", "--force", `${RUN}-integration`, `${RUN}-api`],
       ["image", "rm", IMAGE],
@@ -239,7 +333,7 @@ describe("pnpm test:real cleans up after itself", () => {
     fake.signal("SIGTERM");
     expect(await exit).toBe(143);
     expect(fake.stopped).toEqual(["SIGTERM"]);
-    expect(fake.calls.filter((c) => c[0] === "run")).toHaveLength(1);
+    expect(fake.calls.filter(isSuiteRun)).toHaveLength(1);
     expect(cleanup(fake.calls)).toEqual([
       ["rm", "--force", `${RUN}-integration`],
       ["image", "rm", IMAGE],
@@ -255,7 +349,7 @@ describe("pnpm test:real cleans up after itself", () => {
     fake.signal("SIGINT");
     expect(await exit).toBe(130);
     expect(fake.stopped).toEqual(["SIGINT"]);
-    expect(fake.calls.some((c) => c[0] === "run")).toBe(false);
+    expect(fake.calls.some(isSuiteRun)).toBe(false);
     expect(cleanup(fake.calls)).toEqual([["image", "rm", IMAGE]]);
     expect(fake.removed).toEqual([`/tmp/${RUN}`]);
   });
@@ -305,7 +399,7 @@ describe("pnpm test:real cleans up after itself", () => {
     warn.mockClear();
     expect(await run(["api"], fakeHost(rmFindsNothing).host)).toBe(0);
     expect(await run(["api"], fakeHost(imageNotKnown).host)).toBe(0);
-    expect(warn).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining("left"));
   });
 
   it("stops listening for signals when the context can't be prepared", async () => {

@@ -1,0 +1,4 @@
+# cargo-mutants' default test tool, cargo test, also runs doctests, which rustdoc starts without the
+# target runner and so without a cap. nextest runs no doctests. Pinned as MUTANTS_CONFIG in
+# scripts/check-standards.ts.
+test_tool = "nextest"

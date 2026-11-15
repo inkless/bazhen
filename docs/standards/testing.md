@@ -16,6 +16,7 @@ page serves that rule, or keeps tests from hurting the machine and each other.
 | Test runs refuse to start when the machine is short of PTYs                        | integration, api and holder setup           |
 | Holder tests use only their run's home, reach no tmux, and leave no holder running | holder setup and teardown                   |
 | Suites never synthesise CPU load on a shared machine                               | review; `--cpus` quota on each container    |
+| Every test runs under a memory and time cap                                        | `pnpm check`; vitest setup; cargo's runner  |
 | Fakes over mocks; behaviour-named tests; no snapshots of terminal output           | review                                      |
 | Behaviour tests are black-box: they reach the daemon only through public surfaces  | review                                      |
 
@@ -49,7 +50,8 @@ anywhere else. Never create that file on a machine you work on. Inside a contain
 are the `pnpm test:integration`, `test:api` and `test:e2e` scripts, one worker each. Each run's
 containers have no network and get a CPU quota of half the machine (`BZ_TEST_CPUS` overrides it),
 because a suite that starts a busy process per core would otherwise take every core from the
-agents working on the same machine. A run removes its containers, image and build context on every exit
+agents working on the same machine. They also get a memory cap of a quarter of the machine, with
+no swap beyond it (`BZ_TEST_MEMORY`, in GiB, overrides it), so a runaway dies in its container. A run removes its containers, image and build context on every exit
 it sees, Ctrl-C, SIGTERM and SIGHUP included, and gives each cleanup command 30 seconds; a second
 signal abandons the cleanup. What a run killed outright or abandoned left, the next run on the
 same machine removes: it sweeps the stopped containers, images and contexts whose owning process
@@ -136,6 +138,39 @@ Two lessons from the scaffold's controls:
 that runs real tmux comes out INVALID, because its setup refuses; `pnpm test:real falsify` judges
 it in the container. Hand-made mutants of such a test run there too. Stryker-style mutation
 scores are not a gate, because their cost and equivalent mutants make the number meaningless.
+
+## Memory and time caps
+
+A test that runs away with memory takes more than its own run. Past the machine's memory the
+kernel's OOM killer picks a victim, and systemd may then stop the whole scope the victim lived in,
+terminals and agents included. So every test runs under a memory cap and a time cap, in a cgroup
+of its own, and a runaway dies alone.
+
+- **Scripts.** A `package.json` step that starts tests runs as
+  `node scripts/capped.ts --memory <n>G --time <n>m -- <command>`, its caps beside its command.
+  `pnpm check` fails a step without one, or with a cap above 24 GiB or 120 min. Run anything else
+  that runs tests by hand as `pnpm capped -- <command>` (8 GiB, 120 min): `cargo mutants`,
+  `cargo test`, a one-off script.
+- **Test binaries.** `.cargo/config.toml` makes `scripts/capped.ts --test-binary` cargo's target
+  runner, so cargo test, nextest and cargo-mutants start every test process through it, a
+  hand-typed `cargo mutants` included. Outside a capped run each test process gets a 4 GiB cap of
+  its own. Inside one it runs as it is, held by that run's cap. Where systemd can't cap, the runner
+  watches its test in a process group it started, since nextest gives each test a group of its own
+  that a run's watchdog can't reach. cargo-mutants runs its tests with nextest
+  (`.cargo/mutants.toml`), because rustdoc starts doctests without the runner.
+- **vitest** refuses to start outside a capped run. Under systemd it reads that from the kernel,
+  so setting the variable a watched run hands its children doesn't count.
+- **How a run is capped.** Where a systemd user manager enforces caps (systemd 253 or later, with
+  the memory controller delegated: a probe reads the caps back from inside a scope), each run is a
+  scope in `bazhen-tests.slice`, with no swap. Past its cap the kernel kills only the scope's
+  biggest process, and the run goes on to report it. A capped command inside a capped scope runs
+  in that scope, under its cap. The slice holds all capped runs together to
+  60% of the machine. Elsewhere (macOS, CI runners, containers) a watchdog sums the anonymous
+  memory of the run's process tree, and past the cap kills the whole run. A run prints its peak,
+  and the cap that fired, if one did: `capped: peak 1.2 GiB of 8 GiB`.
+- **A cap is a ceiling, not a budget.** A script's cap is about twice its measured peak, and at
+  least 4 GiB. A test that needs more than that is the bug, not the cap.
+- **A control that tests a cap runs under one,** like any other test.
 
 ## Hermeticity
 

@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "playwright test"
+    "test": "node ../../scripts/capped.ts --memory 10G --time 30m -- playwright test"
   },
   "dependencies": {
     "@bazhen/host-guard": "workspace:*",

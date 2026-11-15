@@ -56,6 +56,7 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { basename, join, posix } from "node:path";
 import { isAlive, signalGroup, spawnGroup } from "@bazhen/host-guard";
+import { KILLS_ENV } from "./capped.ts";
 import { GATES, configFailures, gateEnv, outsideConfigs } from "./cargo-gate.ts";
 import { isMain } from "./is-main.ts";
 import {
@@ -632,8 +633,14 @@ async function runRustTests(
   dir: string,
   top: string,
   tests: RustTest[],
-): Promise<{ out: string; timedOut: boolean }> {
-  const env: NodeJS.ProcessEnv = { ...rustEnv(top), NEXTEST_EXPERIMENTAL_LIBTEST_JSON: "1" };
+): Promise<{ out: string; timedOut: boolean; memoryKilled: boolean }> {
+  const kills = join(dir, "falsify-memory-kills");
+  rmSync(kills, { force: true });
+  const env: NodeJS.ProcessEnv = {
+    ...rustEnv(top),
+    NEXTEST_EXPERIMENTAL_LIBTEST_JSON: "1",
+    [KILLS_ENV]: kills,
+  };
   // A backtrace names product code, which would read as a crash rather than an assertion.
   delete env["RUST_BACKTRACE"];
   delete env["RUST_LIB_BACKTRACE"];
@@ -652,11 +659,12 @@ async function runRustTests(
     "-E",
     nextestFilter(tests),
   ];
+  // Each test process's runner names the test in `kills` when a memory cap killed it.
   const { out, timedOut } = await capture("cargo-nextest", args, dir, "falsify-results.json", {
     env,
     timeoutMs: MUTANT_TIMEOUT_MS,
   });
-  return { out, timedOut };
+  return { out, timedOut, memoryKilled: existsSync(kills) };
 }
 
 export type RustVerdict = RustTest & { outcome: Outcome; note: string };
@@ -664,6 +672,7 @@ type RustJudgement = {
   verdicts: RustVerdict[];
   unapplied: string[];
   timedOut: string[];
+  memoryKilled: string[];
   ran: number;
   total: number;
 };
@@ -730,7 +739,7 @@ async function mutateRustTests(
   const diff = git(["diff", "-M", ...range, "--", "*.rs"], dir);
   if (diff === "") {
     const verdicts = added.map((t) => invalidRust(t, "no Rust source changed"));
-    return { verdicts, unapplied: [], timedOut: [], ran: 0, total: 0 };
+    return { verdicts, unapplied: [], timedOut: [], memoryKilled: [], ran: 0, total: 0 };
   }
   const diffFile = join(dir, "falsify-rust.diff");
   writeFileSync(diffFile, diff);
@@ -766,20 +775,23 @@ async function mutateRustTests(
   const unmutated =
     runnable.length > 0 && mutants.length > 0
       ? await runRustTests(dir, top, runnable)
-      : { out: "", timedOut: false };
+      : { out: "", timedOut: false, memoryKilled: false };
   const passedUnmutated = passing(testEvents(unmutated.out, targets));
   let pending = runnable.filter(passedUnmutated);
   const killedBy = new Map<string, string>();
   const unapplied: string[] = [];
   const timedOut: string[] = [];
+  const memoryKilled: string[] = [];
   let ran = 0;
   for (const mutant of mutants) {
     if (pending.length === 0 || ran === MAX_MUTANTS) break;
     const isTest = isTestCode(unmutate(mutant.patch, mutant.file));
     let ranOutOfTime = false;
+    let ranOutOfMemory = false;
     const failedUnder = async (tests: RustTest[]) => {
       const tried = await runRustTests(dir, top, tests);
       ranOutOfTime ||= tried.timedOut;
+      ranOutOfMemory ||= tried.memoryKilled;
       const failed = new Set(
         testEvents(tried.out, targets)
           .filter((r) => failedOnAssertion(r, isTest))
@@ -797,6 +809,7 @@ async function mutateRustTests(
     });
     if (!applied) unapplied.push(mutant.name);
     if (ranOutOfTime) timedOut.push(mutant.name);
+    if (ranOutOfMemory) memoryKilled.push(mutant.name);
     if (confirmed.length > 0) {
       // And once with the mutant undone: a test that fails without it too, from state an earlier
       // run left behind, failed for some other reason than the mutant.
@@ -818,6 +831,9 @@ async function mutateRustTests(
     if (unmutated.timedOut && !passedUnmutated(t)) {
       return invalidRust(t, `the unmutated run timed out after ${MUTANT_TIMEOUT_MS / 1000} s`);
     }
+    if (unmutated.memoryKilled && !passedUnmutated(t)) {
+      return invalidRust(t, "a test process was killed at the memory cap unmutated");
+    }
     if (!passedUnmutated(t)) return invalidRust(t, "fails or doesn't run unmutated");
     return invalidRust(
       t,
@@ -826,7 +842,7 @@ async function mutateRustTests(
         : "no mutant of the change failed it on an assertion",
     );
   });
-  return { verdicts, unapplied, timedOut, ran, total: mutants.length };
+  return { verdicts, unapplied, timedOut, memoryKilled, ran, total: mutants.length };
 }
 
 /**
@@ -869,7 +885,8 @@ async function judgeRustTests(top: string, base: string, head: string) {
     }
     const atBase = rustTestIds(before);
     const added = addedRustTests(atBase, rustTestIds(after));
-    if (added.length === 0) return { verdicts: [], unapplied: [], timedOut: [], ran: 0, total: 0 };
+    if (added.length === 0)
+      return { verdicts: [], unapplied: [], timedOut: [], memoryKilled: [], ran: 0, total: 0 };
     return await mutateRustTests(dir, top, [base, head], after, added, new Set(atBase));
   } finally {
     cleanup?.();
@@ -971,7 +988,14 @@ async function main(args: string[]): Promise<number> {
       title,
     }));
   });
-  let rust: RustJudgement = { verdicts: [], unapplied: [], timedOut: [], ran: 0, total: 0 };
+  let rust: RustJudgement = {
+    verdicts: [],
+    unapplied: [],
+    timedOut: [],
+    memoryKilled: [],
+    ran: 0,
+    total: 0,
+  };
   if (changes.some((c) => RUST_INPUT.test(c.path) || RUST_INPUT.test(c.oldPath ?? ""))) {
     process.on("SIGINT", handleSignal);
     process.on("SIGTERM", handleSignal);
@@ -1089,6 +1113,9 @@ async function main(args: string[]): Promise<number> {
     console.log(
       `  INVALID  mutant ${name} (its run timed out after ${MUTANT_TIMEOUT_MS / 1000} s)`,
     );
+  }
+  for (const name of rust.memoryKilled) {
+    console.log(`  INVALID  mutant ${name} (a test process was killed at the memory cap)`);
   }
   for (const name of rust.unapplied) {
     console.log(`  INVALID  mutant ${name} (its patch left the file unchanged; not run)`);

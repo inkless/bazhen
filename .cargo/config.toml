@@ -1,0 +1,5 @@
+# cargo test, nextest and cargo-mutants start every test binary through this runner, which gives
+# each test process a memory and time cap of its own (docs/standards/testing.md § Memory and time
+# caps). Pinned as CARGO_CONFIG in scripts/check-standards.ts.
+[target.'cfg(all())']
+runner = ["scripts/capped.ts", "--test-binary", "--"]

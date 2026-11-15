@@ -1,5 +1,8 @@
 import { defineConfig } from "vitest/config";
 
+// First in every project: the tests start only inside a capped run.
+const CAPPED = "tests/support/capped-setup.ts";
+
 export default defineConfig({
   test: {
     projects: [
@@ -13,6 +16,7 @@ export default defineConfig({
             "tests/support/*.test.ts",
           ],
           exclude: ["**/*.medium.test.ts", "**/node_modules/**"],
+          globalSetup: [CAPPED],
           env: { BAZHEN_HOME: "/nonexistent/bazhen-unit-tests" },
           // Vitest blanks CSS it isn't told to keep, even imported as ?raw text; the web tokens
           // are tested by reading their text.
@@ -28,7 +32,7 @@ export default defineConfig({
             "scripts/*.medium.test.ts",
           ],
           exclude: ["scripts/hook-bench.medium.test.ts", "**/node_modules/**"],
-          globalSetup: ["tests/support/medium-setup.ts"],
+          globalSetup: [CAPPED, "tests/support/medium-setup.ts"],
         },
       },
       {
@@ -36,7 +40,7 @@ export default defineConfig({
         test: {
           name: "bench",
           include: ["scripts/hook-bench.medium.test.ts"],
-          globalSetup: ["tests/support/medium-setup.ts"],
+          globalSetup: [CAPPED, "tests/support/medium-setup.ts"],
           fileParallelism: false,
           maxWorkers: 1,
           testTimeout: 90_000,
@@ -46,7 +50,7 @@ export default defineConfig({
         test: {
           name: "integration",
           include: ["tests/integration/**/*.test.ts"],
-          globalSetup: ["tests/support/global-setup.ts"],
+          globalSetup: [CAPPED, "tests/support/global-setup.ts"],
           fileParallelism: false,
           maxWorkers: 1,
           testTimeout: 30_000,
@@ -57,7 +61,7 @@ export default defineConfig({
         test: {
           name: "holder",
           include: ["tests/holder/**/*.test.ts"],
-          globalSetup: ["tests/support/holder-setup.ts"],
+          globalSetup: [CAPPED, "tests/support/holder-setup.ts"],
           fileParallelism: false,
           maxWorkers: 1,
           testTimeout: 30_000,
@@ -67,7 +71,7 @@ export default defineConfig({
         test: {
           name: "api",
           include: ["tests/api/**/*.test.ts"],
-          globalSetup: ["tests/support/global-setup.ts"],
+          globalSetup: [CAPPED, "tests/support/global-setup.ts"],
           fileParallelism: false,
           maxWorkers: 1,
           testTimeout: 60_000,
