@@ -10,6 +10,7 @@
     "../support/agent-env.ts",
     "../support/transcript.ts",
     "../support/disposable-host.ts",
+    "../support/setup-error.ts",
     "../support/key-*.ts"
   ],
   "references": [

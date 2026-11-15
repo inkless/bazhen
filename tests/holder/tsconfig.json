@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    "outDir": "dist",
+    "noEmit": false,
+    "emitDeclarationOnly": true
+  },
+  "include": [
+    "*.ts",
+    "../support/holder-setup.ts",
+    "../support/holder-home.ts",
+    "../support/holder-spawn.ts",
+    "../support/ptys.ts",
+    "../support/setup-error.ts"
+  ],
+  "references": [
+    { "path": "../../packages/host-guard" },
+    { "path": "../../packages/runtime-holder" }
+  ]
+}

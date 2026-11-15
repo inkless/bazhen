@@ -16,6 +16,13 @@ export type Area = {
   onlySubpaths?: Record<string, string[]>;
   platformFree?: boolean;
   thirdParty?: string[];
+  /**
+   * Its `*.test.ts` are medium tests, as docs/standards/testing.md sizes the directory, so the
+   * small-test bans don't apply to them.
+   */
+  medium?: boolean;
+  /** Starts processes only through the helpers in this file, which check their environment. */
+  startsProcessesVia?: string;
   /** Libraries it may use only through the wrappers in `via`, which is an area of its own. */
   onlyThrough?: { packages: string[]; via: string };
 };
@@ -159,6 +166,24 @@ export const MATRIX: Area[] = [
       "@bazhen/web",
     ],
   },
+  // Holder tests run on the host, so they reach no tmux and no daemon: the holder client, and
+  // tests/support's home and teardown, are all they use. Teardown uses host-guard for them.
+  {
+    dir: "tests/holder",
+    medium: true,
+    startsProcessesVia: "tests/support/holder-spawn.ts",
+    banned: [
+      "@bazhen/core",
+      "@bazhen/host-guard",
+      "@bazhen/runtime-tmux",
+      "@bazhen/env-local",
+      "@bazhen/harness-claude-code",
+      "@bazhen/harness-codex",
+      "@bazhen/daemon",
+      "@bazhen/web",
+      "@bazhen/cli",
+    ],
+  },
   {
     dir: "apps/web",
     banned: ["@bazhen/core", "@bazhen/runtime-tmux", "@bazhen/runtime-holder", "@bazhen/daemon"],
@@ -246,6 +271,20 @@ function restrictions(area: Area, smallTest: boolean): Restriction {
       message: `${where} takes widgets from the wrappers in ${area.onlyThrough.via} (docs/standards/ui.md).`,
     });
   }
+  if (area.startsProcessesVia !== undefined) {
+    patterns.push({
+      // Each of these starts a process: `module` through createRequire, `cluster` by forking,
+      // and `worker_threads` by running code given as a string.
+      group: [
+        "node-pty",
+        ...["child_process", "module", "cluster", "worker_threads"].flatMap((m) => [
+          m,
+          `node:${m}`,
+        ]),
+      ],
+      message: `${where} starts processes only through ${area.startsProcessesVia}, which keeps their environment in the run's home (docs/standards/testing.md).`,
+    });
+  }
   if (smallTest) {
     patterns.push({
       group: ["node-pty", ...SMALL_TEST_BANS],
@@ -266,7 +305,7 @@ function overrides(): Override[] {
       },
       {
         files: [`${area.dir}/**/*.test.ts`, `${area.dir}/**/*.test.tsx`],
-        rules: { ...base, "no-restricted-imports": restrictions(area, true) },
+        rules: { ...base, "no-restricted-imports": restrictions(area, area.medium !== true) },
       },
       {
         files: [`${area.dir}/**/*.medium.test.ts`],

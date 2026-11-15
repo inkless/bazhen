@@ -46,6 +46,10 @@ Each layer has one job:
   holds: Node addresses it by the child's own pid, so it can't reach anything else.
 - `apps/daemon` is the composition root: it wires the adapters and implementations into core.
 - `apps/web` is the client: it talks to the daemon only through the protocol.
+- `tests/holder` runs on the host, so it imports the holder client and nothing that reaches tmux
+  or a daemon, host-guard included; teardown in `tests/support` uses host-guard on its behalf.
+  It starts processes only through `tests/support/holder-spawn.ts`, never `child_process`,
+  `node-pty`, `module`, `cluster` or `worker_threads` itself.
 
 The allowlist is each package's `package.json` dependencies: pnpm lets a package import only
 what it declares. Lint adds what `package.json` can't express: Node built-ins, type-only

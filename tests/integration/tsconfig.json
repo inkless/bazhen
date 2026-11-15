@@ -6,7 +6,13 @@
     "noEmit": false,
     "emitDeclarationOnly": true
   },
-  "include": ["*.ts", "../support/global-setup.ts", "../support/disposable-host.ts"],
+  "include": [
+    "*.ts",
+    "../support/global-setup.ts",
+    "../support/ptys.ts",
+    "../support/disposable-host.ts",
+    "../support/setup-error.ts"
+  ],
   "references": [
     {
       "path": "../../packages/core"

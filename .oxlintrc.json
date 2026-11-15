@@ -2888,6 +2888,335 @@
     },
     {
       "files": [
+        "tests/holder/**/*.ts",
+        "tests/holder/**/*.tsx"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/core",
+                  "@bazhen/core/**",
+                  "**/packages/core/**",
+                  "**/core/src/**"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/core."
+              },
+              {
+                "group": [
+                  "@bazhen/host-guard",
+                  "@bazhen/host-guard/**",
+                  "**/packages/host-guard/**",
+                  "**/host-guard/src/**"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/host-guard."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-tmux",
+                  "@bazhen/runtime-tmux/**",
+                  "**/packages/runtime-tmux/**",
+                  "**/runtime-tmux/src/**"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/env-local",
+                  "@bazhen/env-local/**",
+                  "**/packages/env-local/**",
+                  "**/env-local/src/**"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/env-local."
+              },
+              {
+                "group": [
+                  "@bazhen/harness-claude-code",
+                  "@bazhen/harness-claude-code/**",
+                  "**/packages/harness-claude-code/**",
+                  "**/harness-claude-code/src/**"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/harness-claude-code."
+              },
+              {
+                "group": [
+                  "@bazhen/harness-codex",
+                  "@bazhen/harness-codex/**",
+                  "**/packages/harness-codex/**",
+                  "**/harness-codex/src/**"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/harness-codex."
+              },
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "@bazhen/web",
+                  "@bazhen/web/**",
+                  "**/apps/web/**",
+                  "**/web/src/**"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "@bazhen/cli",
+                  "@bazhen/cli/**",
+                  "**/apps/cli/**",
+                  "**/cli/src/**"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/cli."
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "child_process",
+                  "node:child_process",
+                  "module",
+                  "node:module",
+                  "cluster",
+                  "node:cluster",
+                  "worker_threads",
+                  "node:worker_threads"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) starts processes only through tests/support/holder-spawn.ts, which keeps their environment in the run's home (docs/standards/testing.md)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "tests/holder/**/*.test.ts",
+        "tests/holder/**/*.test.tsx"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/core",
+                  "@bazhen/core/**",
+                  "**/packages/core/**",
+                  "**/core/src/**"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/core."
+              },
+              {
+                "group": [
+                  "@bazhen/host-guard",
+                  "@bazhen/host-guard/**",
+                  "**/packages/host-guard/**",
+                  "**/host-guard/src/**"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/host-guard."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-tmux",
+                  "@bazhen/runtime-tmux/**",
+                  "**/packages/runtime-tmux/**",
+                  "**/runtime-tmux/src/**"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/env-local",
+                  "@bazhen/env-local/**",
+                  "**/packages/env-local/**",
+                  "**/env-local/src/**"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/env-local."
+              },
+              {
+                "group": [
+                  "@bazhen/harness-claude-code",
+                  "@bazhen/harness-claude-code/**",
+                  "**/packages/harness-claude-code/**",
+                  "**/harness-claude-code/src/**"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/harness-claude-code."
+              },
+              {
+                "group": [
+                  "@bazhen/harness-codex",
+                  "@bazhen/harness-codex/**",
+                  "**/packages/harness-codex/**",
+                  "**/harness-codex/src/**"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/harness-codex."
+              },
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "@bazhen/web",
+                  "@bazhen/web/**",
+                  "**/apps/web/**",
+                  "**/web/src/**"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "@bazhen/cli",
+                  "@bazhen/cli/**",
+                  "**/apps/cli/**",
+                  "**/cli/src/**"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/cli."
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "child_process",
+                  "node:child_process",
+                  "module",
+                  "node:module",
+                  "cluster",
+                  "node:cluster",
+                  "worker_threads",
+                  "node:worker_threads"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) starts processes only through tests/support/holder-spawn.ts, which keeps their environment in the run's home (docs/standards/testing.md)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "tests/holder/**/*.medium.test.ts"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/core",
+                  "@bazhen/core/**",
+                  "**/packages/core/**",
+                  "**/core/src/**"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/core."
+              },
+              {
+                "group": [
+                  "@bazhen/host-guard",
+                  "@bazhen/host-guard/**",
+                  "**/packages/host-guard/**",
+                  "**/host-guard/src/**"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/host-guard."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-tmux",
+                  "@bazhen/runtime-tmux/**",
+                  "**/packages/runtime-tmux/**",
+                  "**/runtime-tmux/src/**"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/env-local",
+                  "@bazhen/env-local/**",
+                  "**/packages/env-local/**",
+                  "**/env-local/src/**"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/env-local."
+              },
+              {
+                "group": [
+                  "@bazhen/harness-claude-code",
+                  "@bazhen/harness-claude-code/**",
+                  "**/packages/harness-claude-code/**",
+                  "**/harness-claude-code/src/**"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/harness-claude-code."
+              },
+              {
+                "group": [
+                  "@bazhen/harness-codex",
+                  "@bazhen/harness-codex/**",
+                  "**/packages/harness-codex/**",
+                  "**/harness-codex/src/**"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/harness-codex."
+              },
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "@bazhen/web",
+                  "@bazhen/web/**",
+                  "**/apps/web/**",
+                  "**/web/src/**"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "@bazhen/cli",
+                  "@bazhen/cli/**",
+                  "**/apps/cli/**",
+                  "**/cli/src/**"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/cli."
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "child_process",
+                  "node:child_process",
+                  "module",
+                  "node:module",
+                  "cluster",
+                  "node:cluster",
+                  "worker_threads",
+                  "node:worker_threads"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) starts processes only through tests/support/holder-spawn.ts, which keeps their environment in the run's home (docs/standards/testing.md)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
         "apps/web/**/*.ts",
         "apps/web/**/*.tsx"
       ],

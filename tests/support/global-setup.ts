@@ -12,55 +12,18 @@
 // - The run refuses to start when the machine is close to running out of PTYs: a leak there
 //   starves every terminal on the machine, not just Bazhen's.
 
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TmuxServer } from "@bazhen/host-guard";
 import { requireDisposableHost } from "./disposable-host.ts";
-
-// The spikes' watchdog aborted above 420 of macOS's 511 PTYs (kern.tty.ptmx_max).
-const MACOS_CUTOFF = 420;
-const LINUX_CUTOFF_FRACTION = 420 / 511;
-
-const readPtySysctl = (name: string) =>
-  Number(readFileSync(`/proc/sys/kernel/pty/${name}`, "utf8").trim());
-
-function cutoffOverride(): number | undefined {
-  const raw = process.env["BZ_PTY_CUTOFF"];
-  if (raw === undefined || raw === "") return undefined;
-  const cutoff = Number(raw);
-  if (!Number.isFinite(cutoff) || cutoff <= 0) {
-    fail(`BZ_PTY_CUTOFF must be a positive number of PTYs, got "${raw}".`);
-  }
-  return cutoff;
-}
-
-export function ptysInUse(): { used: number; cutoff: number } {
-  const override = cutoffOverride();
-  if (process.platform === "linux") {
-    const max = readPtySysctl("max");
-    return {
-      used: readPtySysctl("nr"),
-      cutoff: override ?? Math.floor(max * LINUX_CUTOFF_FRACTION),
-    };
-  }
-  // Counts the 16 legacy BSD names too, which overcounts slightly: the safe direction, and the
-  // same way the spike measured the cutoff.
-  const used = readdirSync("/dev").filter((name) => name.startsWith("ttys")).length;
-  return { used, cutoff: override ?? MACOS_CUTOFF };
-}
+import { requirePtyHeadroom } from "./ptys.ts";
+import { failSetup } from "./setup-error.ts";
 
 // Under /tmp, not os.tmpdir(): a Unix socket path must fit in about 104 bytes on macOS, and the
 // per-user temp directory there is already over 50.
 function privateTmuxDir(): string {
   return mkdtempSync("/tmp/bz-tmux-");
-}
-
-// Vitest's source-map lookup crashes on errors thrown from globalSetup and hides their message,
-// so print it before throwing.
-function fail(message: string): never {
-  console.error(`\n${message}\n`);
-  throw new Error(message);
 }
 
 /**
@@ -99,13 +62,7 @@ export function setup(): void {
   process.env["BZ_TEST_SERVERS"] = socketDir(tmuxDir);
   delete process.env["TMUX"];
   delete process.env["TMUX_PANE"];
-  const { used, cutoff } = ptysInUse();
-  if (used > cutoff) {
-    fail(
-      `Refusing to run: ${used} PTYs are in use machine-wide (cutoff ${cutoff}). ` +
-        "Something is leaking PTYs; see the bz-debug-integration-test skill.",
-    );
-  }
+  requirePtyHeadroom();
   home = mkdtempSync(join(tmpdir(), "bz-test-home-"));
   process.env["BAZHEN_HOME"] = home;
   process.env["BZ_TEST_RUN"] = `${process.pid}`;
@@ -122,7 +79,7 @@ export function teardown(): void {
   for (const server of leaked.values()) server.kill();
   rmSync(dir, { recursive: true, force: true });
   if (leaked.size > 0) {
-    fail(
+    failSetup(
       `Tests left ${leaked.size} tmux server(s) running: ${[...leaked.keys()].join(", ")}. ` +
         "Kill every server a test starts in afterAll (docs/standards/testing.md).",
     );
