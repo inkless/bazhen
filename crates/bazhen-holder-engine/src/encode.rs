@@ -157,7 +157,7 @@ pub(crate) fn cells(text: &str) -> usize {
 }
 
 /// The attributes that make a space visible: a foreground colour alone doesn't.
-const VISIBLE_ON_A_SPACE: Flags = Flags::INVERSE
+pub(crate) const VISIBLE_ON_A_SPACE: Flags = Flags::INVERSE
     .union(Flags::ALL_UNDERLINES)
     .union(Flags::STRIKEOUT);
 

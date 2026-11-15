@@ -98,6 +98,12 @@ impl Action {
     }
 }
 
+/// Text with no wide chars and no tabs, as typed at a prompt.
+fn narrow_text() -> impl Strategy<Value = String> {
+    let pieces = prop::sample::select(vec!["a", "bc", "def ", " ", "e\u{301}", "xyzzy"]);
+    prop::collection::vec(pieces, 1..20).prop_map(|p| p.concat())
+}
+
 fn text() -> impl Strategy<Value = String> {
     let pieces = prop::sample::select(vec![
         "a", "bc", "def ", " ", "  ", "\t", "中", "文字", "😀", "e\u{301}", "xyzzy",
@@ -353,9 +359,13 @@ fn visible(rows: &[Cells]) -> Vec<Cell> {
     drawing(rows, |cell| cell.c != ' ')
 }
 
-/// The cells that draw something or a background, in order.
+/// The cells that draw something, a background, or an attribute a blank shows, in order.
 fn coloured(rows: &[Cells]) -> Vec<Cell> {
-    drawing(rows, |cell| cell.c != ' ' || cell.bg != Cell::default().bg)
+    drawing(rows, |cell| {
+        cell.c != ' '
+            || cell.bg != Cell::default().bg
+            || cell.flags.intersects(encode::VISIBLE_ON_A_SPACE)
+    })
 }
 
 fn drawing(rows: &[Cells], draws: fn(&Cell) -> bool) -> Vec<Cell> {
@@ -368,6 +378,29 @@ fn drawing(rows: &[Cells], draws: fn(&Cell) -> bool) -> Vec<Cell> {
             cell
         })
         .collect()
+}
+
+/// How many cells come before the cursor in its line, across the rows it wraps over and into
+/// history: `history` writes the history.
+fn cursor_offset(term: &Term<Sink>, history: impl FnOnce(&mut Lines<'_>)) -> usize {
+    let grid = term.grid();
+    let cursor = &grid.cursor;
+    let mut text = String::new();
+    let mut lines = Lines::new(&mut text);
+    history(&mut lines);
+    for n in 0..cursor.point.line.0 {
+        lines.grid_row(&grid[Line(n)]);
+    }
+    let line = text.rsplit("\r\n").next().unwrap_or_default();
+    encode::cells(line) + cursor.point.column.0 + usize::from(cursor.input_needs_wrap)
+}
+
+fn assert_same_cursor_offset(engine: &Engine, full: &FullHistory) {
+    let ours = cursor_offset(&engine.term, |lines| engine.write_lines(lines));
+    let theirs = cursor_offset(&full.term, |lines| {
+        write_scrollback(full.term.grid(), lines);
+    });
+    assert_eq!(ours, theirs, "the cursor's cells into its line");
 }
 
 /// Feeds both terminals `stream`, in pieces of the sizes `cuts` gives in turn.
@@ -505,6 +538,22 @@ fn has_a_wide_char_without_its_spacer(term: &Term<Sink>) -> bool {
     })
 }
 
+/// Whether `term` holds a row marked as wrapping in a cell but its last. alacritty leaves one when
+/// it widens a line the cursor ends, or wraps from a cursor waiting in the first column, and the
+/// next reflow reads it again; no text carries it, so the engine, which reflows history from
+/// text, can't.
+fn has_a_wrap_inside_a_row(term: &Term<Sink>) -> bool {
+    let grid = term.grid();
+    let scrolled = grid.history_size();
+    (0..scrolled + grid.screen_lines()).any(|n| {
+        let row = &grid[scrollback_line(scrolled, n)];
+        let cells: Vec<&Cell> = row.into_iter().collect();
+        cells
+            .split_last()
+            .is_some_and(|(_, inside)| inside.iter().any(|c| c.flags.contains(Flags::WRAPLINE)))
+    })
+}
+
 /// Whether a resize to `size` widens the screen while something below the cursor draws.
 /// alacritty's reflow then keeps the cursor's row where it was by pulling rows down from history
 /// and, short of history, drops rows below the cursor as if they were blank. The reference and
@@ -582,20 +631,27 @@ proptest! {
     fn through_any_resizes_coloured_lines_keep_every_cell_that_draws_something_or_a_background(
         size in size(),
         lines in prop::collection::vec(
-            (any::<u8>(), any::<u8>(), any::<bool>(), text(), any::<bool>()), 0..40),
+            (any::<u8>(), any::<Option<u8>>(), any::<bool>(), 0usize..5, text(), any::<bool>()),
+            0..40,
+        ),
         resizes in prop::collection::vec((1u16..30, 1u16..12), 1..8),
         cuts in cuts(),
     ) {
-        // Lines in a colour, their rest erased to the background or not, so that runs of blanks
-        // in a colour must stay too, in their colour. Each ends in the default pen: a line feed
+        // Lines in a colour, or on the default background with an attribute a blank shows, their
+        // rest erased to the background or not, so that runs of blanks in a colour or inverse or
+        // underlined must stay too, as they were drawn. Each ends in the default pen: a line feed
         // in a colour fills the row under the cursor, which a reflow may drop (see
         // `may_drop_rows_below_the_cursor`). The output all comes first: after a reflow the
         // cursor's row may differ, and a wrap in a colour then fills a new row only on one side.
         let mut engine = Engine::new(size, HistoryRows(ENGINE_ROWS));
         let mut full = FullHistory::new(size);
         let mut stream = String::new();
-        for (fg, bg, bold, text, erase) in lines {
-            stream += &Action::Sgr(fg, bg, bold).bytes().unwrap_or_default();
+        for (fg, bg, bold, attribute, text, erase) in lines {
+            stream += &Action::Sgr(fg, bg.unwrap_or_default(), bold).bytes().unwrap_or_default();
+            if bg.is_none() {
+                stream += "\x1b[49m";
+            }
+            stream += ["", "\x1b[7m", "\x1b[4m", "\x1b[4:3m", "\x1b[9m"][attribute];
             stream += &text;
             if erase {
                 stream += "\x1b[K";
@@ -608,6 +664,37 @@ proptest! {
             full.resize(Size { cols, rows });
             prop_assert_eq!(engine.stats().overflows, 0);
             assert_same_visible_cells(&engine, &full, i32::MAX, false, coloured);
+        }
+    }
+
+    #[test]
+    fn through_any_resizes_the_cursor_stays_as_far_into_its_line(
+        size in size(),
+        lines in prop::collection::vec(text(), 0..20),
+        prompt in text(),
+        resizes in prop::collection::vec(
+            ((1u16..30, 1u16..12), prop::option::of(narrow_text())), 1..8),
+        cuts in cuts(),
+    ) {
+        // A shell's prompt, left with the cursor in its line, then resizes, and text typed after
+        // some: the cursor must stay as many cells into the line, and the text land where it did,
+        // until alacritty leaves a mark the engine can't follow (see `has_a_wrap_inside_a_row`).
+        let mut engine = Engine::new(size, HistoryRows(ENGINE_ROWS));
+        let mut full = FullHistory::new(size);
+        let stream: String = lines.iter().map(|line| line.clone() + "\r\n").collect();
+        feed(&mut engine, &mut full, &(stream + &prompt), &cuts);
+        for ((cols, rows), typed) in resizes {
+            if has_a_wrap_inside_a_row(&full.term) {
+                return Ok(());
+            }
+            engine.resize(Size { cols, rows });
+            full.resize(Size { cols, rows });
+            assert_same_cursor_offset(&engine, &full);
+            if let Some(typed) = typed {
+                feed(&mut engine, &mut full, &typed, &cuts);
+                assert_same_cursor_offset(&engine, &full);
+                assert_same_visible_cells(&engine, &full, i32::MAX, false, visible);
+            }
         }
     }
 

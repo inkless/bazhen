@@ -196,18 +196,17 @@ impl Engine {
     fn advance_passed(&mut self, bytes: &[u8]) {
         let mut rest = bytes;
         while !rest.is_empty() {
-            let (finish, after) = self.utf8.finish(rest);
-            if !finish.is_empty() {
-                self.lookahead.advance(&mut self.budget, finish);
-                self.parser.advance(&mut Capped(&mut self.term), finish);
-                // The char may wrap the line, and scroll a row.
-                self.drain();
-                rest = after;
-                continue;
-            }
+            let (finish, _) = self.utf8.finish(rest);
             self.budget.start();
+            let finishing = !finish.is_empty();
             let mut read = 0;
-            while read < rest.len() && !self.budget.terminated() {
+            if finishing {
+                // Parsed on their own, and a stretch of their own: they may end a sequence, a REP
+                // or a switch to the alternate screen, as much as finish a char.
+                self.lookahead.advance(&mut self.budget, finish);
+                read = finish.len();
+            }
+            while !finishing && read < rest.len() && !self.budget.terminated() {
                 let ahead = rest.get(read..).unwrap_or_default();
                 let window = ahead
                     .get(..whole_chars(ahead, self.budget.room()))
@@ -248,7 +247,9 @@ impl Engine {
             } else {
                 self.parse(stretch);
             }
-            self.utf8.note(stretch);
+            if !finishing {
+                self.utf8.note(stretch);
+            }
             match stop {
                 Some(Stop::Reset) => self.clear_history(),
                 // alacritty keeps 4,096 titles; the engine undoes a push past its own limit.
@@ -362,8 +363,14 @@ impl Engine {
     /// out. Enough for the old screen and the new, counted at the new width: at the old one, a
     /// widening would take as many more rows as it joins into one.
     fn refill_for(&mut self, size: Size) {
+        self.refill_within(size, MOST_REFILL_CELLS);
+    }
+
+    /// [`Engine::refill_for`], taking back no more than `most_cells`.
+    fn refill_within(&mut self, size: Size, most_cells: usize) {
         let wanted = self.size.rows() + size.rows();
-        let refilled = refill(self.term.grid_mut(), &mut self.history, wanted, size.cols());
+        let grid = self.term.grid_mut();
+        let refilled = refill(grid, &mut self.history, wanted, size.cols(), most_cells);
         self.scrollback = self.scrollback.max(refilled);
     }
 
@@ -471,6 +478,11 @@ fn whole_chars(bytes: &[u8], len: usize) -> usize {
 /// How many times the rows a resize needs a refill may take off the store to finish a line.
 const REFILL_BOUND: usize = 8;
 
+/// The stored rows a refill may take however small the screens: a line wrapped over many rows of
+/// a small screen, a long command at a prompt, comes back whole, so the reflow keeps its cursor in
+/// place. `MOST_REFILL_CELLS` still bounds them.
+const LEAST_REFILL_ROWS: usize = 4096;
+
 /// The most cells a refill gives back: the old screen and the new at the largest size, 48 MB in
 /// alacritty.
 const MOST_REFILL_CELLS: usize = 1 << 21;
@@ -542,13 +554,19 @@ impl Primary {
 /// Puts the newest lines of the store back into `grid`'s scrollback, rewrapped to its width,
 /// until it holds `wanted` rows at `cols` wide, the width it's about to take, or the store is
 /// empty. A line that runs on from the store into the scrollback comes back whole first, so that
-/// a reflow sees all of it. No more than `REFILL_BOUND` times `wanted` stored rows come back, nor
-/// more than `MOST_REFILL_CELLS` cells, however long their lines: the rest of a longer line stays
-/// in the store. Returns how many rows the scrollback holds.
-fn refill(grid: &mut Grid<Cell>, history: &mut History, wanted: usize, cols: usize) -> usize {
+/// a reflow sees all of it. No more than `REFILL_BOUND` times `wanted` stored rows come back, or
+/// `LEAST_REFILL_ROWS`, nor more than `most_cells` cells, however long their lines: the rest of a
+/// longer line stays in the store. Returns how many rows the scrollback holds.
+fn refill(
+    grid: &mut Grid<Cell>,
+    history: &mut History,
+    wanted: usize,
+    cols: usize,
+    most_cells: usize,
+) -> usize {
     let mut got = grid.history_size();
-    let mut left = REFILL_BOUND * wanted.max(1);
-    let mut cells_left = MOST_REFILL_CELLS;
+    let mut left = (REFILL_BOUND * wanted).max(LEAST_REFILL_ROWS);
+    let mut cells_left = most_cells;
     let mut taken = Vec::new();
     let mut counter = RowCounter::new(cols);
     while left > 0
@@ -859,6 +877,17 @@ mod tests {
     }
 
     #[test]
+    fn a_repeat_the_bytes_finishing_a_split_char_end_still_has_room_for_its_rows() {
+        let mut engine = Engine::new(SIZE, HistoryRows(1000));
+        // A lead byte inside the CSI: the next read's first bytes finish it, and they hold the
+        // REP's final byte, which scrolls 400 rows.
+        engine.advance(b"x\x1b[8104\xe6");
+        engine.advance(b"b");
+        let stats = engine.stats();
+        assert_eq!((stats.overflows, stats.history_rows), (0, 8105 / 20 - 4));
+    }
+
+    #[test]
     fn a_char_split_across_reads_that_scrolls_a_row_still_keeps_history_to_its_limit() {
         let mut engine = Engine::new(Size { cols: 2, rows: 2 }, HistoryRows(1));
         engine.advance(b"xyabcd\xe4");
@@ -994,22 +1023,26 @@ mod tests {
 
     #[test]
     fn a_line_thousands_of_rows_long_comes_back_only_as_far_as_a_resize_needs() {
-        // A minified file at the largest size: one line, 9,000 rows of it in the store.
+        // A minified file, 900 rows of one line in the store, against a budget of 40 rows: at the
+        // largest size, 2^21 cells against 9,000 rows of 24 KB each.
         let size = Size {
-            cols: 1000,
-            rows: 1000,
+            cols: 100,
+            rows: 100,
         };
-        let mut engine = Engine::new(size, HistoryRows(10_000));
-        engine.advance("x".repeat(9000 * 1000).as_bytes());
-        engine.refill_for(Size {
-            cols: 999,
-            rows: 1000,
-        });
-        // A refill's cells, and the rows at either end of them: the one that goes past, the one a
-        // drain leaves, and the last, which goes on. A stored row costs 24 KB in alacritty, and
-        // all 9,000 would take 216 MB.
+        let mut engine = Engine::new(size, HistoryRows(1000));
+        engine.advance("x".repeat(1000 * 100).as_bytes());
+        let budget = 40 * 100;
+        engine.refill_within(
+            Size {
+                cols: 99,
+                rows: 100,
+            },
+            budget,
+        );
+        // The budget's rows, and the rows at either end of them: the one that goes past, the one
+        // a drain leaves, and the last, which goes on.
         let rows = engine.term.grid().history_size();
-        assert!(rows <= MOST_REFILL_CELLS / 1000 + 3, "{rows}");
+        assert!(rows <= budget / 100 + 3, "{rows}");
     }
 
     #[test]
