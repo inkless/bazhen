@@ -26,6 +26,12 @@ import {
 } from "../support/holder-spawn.ts";
 
 const RING_BYTES = 1 << 20;
+// A holder reads its resident set from /proc, so where there's none, as on macOS, it says null.
+const SAYS_RSS = existsSync("/proc/self/statm");
+const RSS = SAYS_RSS ? expect.any(Number) : null;
+/** Whether a holder's resident set is above `bytes`, or rightly unknown where the OS won't say. */
+const residentAbove = (rss: number | null, bytes: number) =>
+  rss === null ? !SAYS_RSS : rss > bytes;
 
 const running: SpawnedHolder[] = [];
 const clients: HolderClient[] = [];
@@ -508,12 +514,12 @@ describe("a holder's terminal engine", () => {
     expect(report.historyRows).toBeGreaterThan(1000);
     expect(stats).toEqual({
       engineBytes: report.engineBytes + report.historyBytes,
-      rss: expect.any(Number),
+      rss: RSS,
       ringBytes: read.length,
       historyLines: report.historyRows,
       engineResets: 0,
     });
-    expect(stats.rss!).toBeGreaterThan(stats.engineBytes);
+    expect(residentAbove(stats.rss, stats.engineBytes)).toBe(true);
   });
 });
 

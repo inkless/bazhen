@@ -1583,6 +1583,29 @@ describe("tests that signal processes they didn't start", () => {
     expect(unmarked({ "crates/h/tests/x.rs": source })).toEqual(["crates/h/tests/x.rs:3"]);
   });
 
+  it("must be marked when it names a type whose Drop closes, or signals a child itself", () => {
+    const source = [
+      "struct Failing;",
+      "impl Drop for Failing {\n    fn drop(&mut self) { self.holder.close(now); }\n}",
+      "#[test]\nfn a() { let f = Failing::start(); }",
+      "#[test]\nfn b() { child.signal(Sigint).unwrap(); }",
+      "#[test]\nfn c() { let x = 1; }",
+    ].join("\n");
+    expect(unmarked({ "crates/h/src/server.rs": source })).toEqual([
+      "crates/h/src/server.rs:5",
+      "crates/h/src/server.rs:7",
+    ]);
+  });
+
+  it("doesn't take a bodyless function for one with the next function's body", () => {
+    const source = [
+      "trait Tidy { fn tidy(&self); }",
+      "fn other() { x.close(now); }",
+      "#[test]\nfn a() { t.tidy(); }",
+    ].join("\n");
+    expect(unmarked({ "crates/h/tests/x.rs": source })).toEqual([]);
+  });
+
   it("isn't marked by another ignore, or by the reason in a string", () => {
     const source = [
       '#[test]\n#[ignore = "slow"]\nfn a() { sweep(); }',

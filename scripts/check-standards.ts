@@ -1948,9 +1948,9 @@ function closingBrace(code: string, from: number): number {
 }
 
 // What signals processes a test didn't start: a holder, which signals its child's whole
-// session when it closes; a child's close; and the ledger sweep, which kills holders.
+// session when it closes; a child's close or signal; and the ledger sweep, which kills holders.
 const HOLDER_BINARY = "CARGO_BIN_EXE_bazhen-holder";
-const SIGNALLING_CALL = /\.\s*close(?:_step)?\s*\(|\bsweep\s*\(/;
+const SIGNALLING_CALL = /\.\s*(?:close(?:_step)?|signal)\s*\(|\bsweep\s*\(/;
 
 /** A Rust test file's test binary: `tests/<name>.rs`, or every file under `tests/<name>/`. */
 const testBinary = (file: string) => /^(crates\/[^/]+\/tests\/[^/.]+)/.exec(file)?.[1];
@@ -1975,9 +1975,17 @@ export function unmarkedSignallingTests(
     const wholeBinary = holderBinaries.has(testBinary(file) ?? "");
     // A helper in the same file that closes or sweeps makes each test calling it signal too, one
     // call deep.
-    const helpers = [...code.matchAll(/\bfn\s+(\w+)/g)].flatMap((m) => {
-      const start = fnBodyStart(code, m.index);
-      return SIGNALLING_CALL.test(code.slice(start, closingBrace(code, start))) ? [m[1] ?? ""] : [];
+    // A bodyless function's "body" runs to the `}` closing its trait or extern block: empty.
+    const bodyOf = (start: number) => code.slice(start, closingBrace(code, start));
+    const helpers = [...code.matchAll(/\bfn\s+(\w+)/g)].flatMap((m) =>
+      SIGNALLING_CALL.test(bodyOf(fnBodyStart(code, m.index))) ? [m[1] ?? ""] : [],
+    );
+    const callsHelper = (body: string) =>
+      helpers.some((name) => new RegExp(`\\b${name}\\s*\\(`).test(body));
+    // A type whose Drop closes or signals, one helper deep, makes each test naming it signal.
+    const dropping = [...code.matchAll(/\bimpl\s+Drop\s+for\s+(\w+)[^{]*\{/g)].flatMap((m) => {
+      const block = code.slice(m.index, closingBrace(code, m.index + m[0].length));
+      return SIGNALLING_CALL.test(block) || callsHelper(block) ? [m[1] ?? ""] : [];
     });
     // A macro's test body can come from where it is invoked, so a file that closes or sweeps
     // anywhere makes each test its macros generate a signalling one.
@@ -1988,12 +1996,13 @@ export function unmarkedSignallingTests(
     }));
     const signals = (body: string, at: number) =>
       SIGNALLING_CALL.test(body) ||
-      helpers.some((name) => new RegExp(`\\b${name}\\s*\\(`).test(body)) ||
+      callsHelper(body) ||
+      dropping.some((type) => new RegExp(`\\b${type}\\b`).test(body)) ||
       (fileSignals && macros.some((m) => at >= m.from && at < m.to));
     const out: string[] = [];
     for (const test of code.matchAll(/#\s*\[\s*test\s*\]/g)) {
       const bodyStart = fnBodyStart(code, test.index);
-      const body = code.slice(bodyStart, closingBrace(code, bodyStart));
+      const body = bodyOf(bodyStart);
       if (!wholeBinary && !signals(body, test.index)) continue;
       const before = code.slice(0, bodyStart);
       const itemStart =

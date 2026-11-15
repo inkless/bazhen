@@ -1067,7 +1067,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
     fn a_holder_whose_engine_fails_keeps_its_child_and_answers_with_a_new_engine() {
+        bazhen_test_signal::require_sandbox().unwrap();
         let script = "stty -echoctl; printf '<fail>'; sleep 0.2; printf '\\033[6n'; exec sleep 30";
         let mut failing = Failing::start("engine-fails", script);
         failing.until("the query's answer, echoed", |f| {
@@ -1080,7 +1082,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
     fn a_holder_whose_engine_keeps_failing_runs_on_without_one() {
+        bazhen_test_signal::require_sandbox().unwrap();
         let script = "while :; do printf '<fail>'; sleep 0.02; done";
         let mut failing = Failing::start("engine-gone", script);
         failing.until("the engine given up", |f| {
