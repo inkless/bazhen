@@ -10,7 +10,8 @@
     "*.ts",
     "../support/global-setup.ts",
     "../support/ptys.ts",
-    "../support/disposable-host.ts"
+    "../support/disposable-host.ts",
+    "../support/setup-error.ts"
   ],
   "references": [
     {

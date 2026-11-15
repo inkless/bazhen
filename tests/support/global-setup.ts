@@ -18,18 +18,12 @@ import { join } from "node:path";
 import { TmuxServer } from "@bazhen/host-guard";
 import { requireDisposableHost } from "./disposable-host.ts";
 import { requirePtyHeadroom } from "./ptys.ts";
+import { failSetup } from "./setup-error.ts";
 
 // Under /tmp, not os.tmpdir(): a Unix socket path must fit in about 104 bytes on macOS, and the
 // per-user temp directory there is already over 50.
 function privateTmuxDir(): string {
   return mkdtempSync("/tmp/bz-tmux-");
-}
-
-// Vitest's source-map lookup crashes on errors thrown from globalSetup and hides their message,
-// so print it before throwing.
-function fail(message: string): never {
-  console.error(`\n${message}\n`);
-  throw new Error(message);
 }
 
 /**
@@ -85,7 +79,7 @@ export function teardown(): void {
   for (const server of leaked.values()) server.kill();
   rmSync(dir, { recursive: true, force: true });
   if (leaked.size > 0) {
-    fail(
+    failSetup(
       `Tests left ${leaked.size} tmux server(s) running: ${[...leaked.keys()].join(", ")}. ` +
         "Kill every server a test starts in afterAll (docs/standards/testing.md).",
     );

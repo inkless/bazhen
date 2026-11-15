@@ -3,12 +3,21 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { HolderClient } from "@bazhen/runtime-holder";
+
+type HolderProcessSpec = Parameters<HolderClient["respawn"]>[0];
 
 /** The file in a run's home naming the run, and the variable that names it to the tests. */
 export const RUN_MARKER = ".bz-holder-test-run";
 export const RUN_ENV = "BZ_HOLDER_TEST_RUN";
 
 export const holdersDir = (home: string) => join(home, "run", "holders");
+/** tmux's socket directory, empty unless something ran tmux. */
+export const tmuxDir = (home: string) => join(home, "tmux");
+/** The directory first on PATH, whose `tmux` refuses to run. */
+export const binDir = (home: string) => join(home, "bin");
+/** HOME for whatever a holder runs, so no shell reads the user's rc files or writes their history. */
+export const userDir = (home: string) => join(home, "home");
 
 function markerIn(home: string): string | undefined {
   try {
@@ -38,4 +47,77 @@ const TERMINAL_ID = /^[A-Za-z0-9_-]{1,64}$/;
 export function holderSocket(terminalId: string, env: NodeJS.ProcessEnv = process.env): string {
   if (!TERMINAL_ID.test(terminalId)) throw new Error(`${terminalId} is no terminal id`);
   return join(holdersDir(testHome(env)), `${terminalId}.sock`);
+}
+
+const XDG_DIRS = {
+  XDG_CONFIG_HOME: ".config",
+  XDG_CACHE_HOME: ".cache",
+  XDG_DATA_HOME: ".local/share",
+  XDG_STATE_HOME: ".local/state",
+  XDG_RUNTIME_DIR: "run",
+} as const;
+
+/** What a holder test's child must have as its environment, every other variable aside. */
+function guardedEnv(home: string): Record<string, string> {
+  const user = userDir(home);
+  return {
+    BAZHEN_HOME: home,
+    HOME: user,
+    TMUX_TMPDIR: tmuxDir(home),
+    ...Object.fromEntries(Object.entries(XDG_DIRS).map(([name, dir]) => [name, join(user, dir)])),
+  };
+}
+
+/**
+ * The whole environment for a process a holder test's holder runs: HOME and XDG_* inside the
+ * run's home, tmux's socket directory the run's, the run's tmux refusal first on PATH, and no
+ * TMUX. A spec's env is all its child gets, so build every one with this.
+ */
+export function holderEnv(
+  extra: Readonly<Record<string, string>> = {},
+  env: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+  const home = testHome(env);
+  const path = env["PATH"] ?? "";
+  return requireHolderEnv(
+    { TERM: "xterm-256color", ...extra, ...guardedEnv(home), PATH: path },
+    env,
+  );
+}
+
+/**
+ * Returns `childEnv` if it keeps a holder test's child from the user's tmux servers and files,
+ * and throws otherwise. Whatever starts a holder or respawns its child passes the spec's env here.
+ */
+export function requireHolderEnv(
+  childEnv: Readonly<Record<string, string>>,
+  env: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+  const home = testHome(env);
+  const wrong = Object.entries(guardedEnv(home))
+    .filter(([name, value]) => childEnv[name] !== value)
+    .map(([name]) => name);
+  if (childEnv["PATH"]?.split(":")[0] !== binDir(home)) wrong.push("PATH");
+  for (const name of ["TMUX", "TMUX_PANE", "ZDOTDIR"]) if (name in childEnv) wrong.push(name);
+  if (wrong.length > 0) {
+    throw new Error(
+      `Refusing a holder test's child environment: ${wrong.join(", ")} would reach outside ` +
+        `${home}. Build it with holderEnv().`,
+    );
+  }
+  return { ...childEnv };
+}
+
+/** A process spec for a holder test: `argv` run in the run's HOME, with `holderEnv(extra)`. */
+export function holderProcessSpec(
+  argv: readonly [string, ...string[]],
+  extra: Readonly<Record<string, string>> = {},
+  env: NodeJS.ProcessEnv = process.env,
+): HolderProcessSpec {
+  return {
+    argv: [...argv],
+    cwd: userDir(testHome(env)),
+    env: holderEnv(extra, env),
+    generation: 0,
+  };
 }

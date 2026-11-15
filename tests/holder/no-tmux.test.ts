@@ -1,7 +1,7 @@
 import { accessSync, constants, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { testHome } from "../support/holder-home.ts";
+import { holderEnv, testHome } from "../support/holder-home.ts";
 import { TMUX_REFUSAL } from "../support/holder-setup.ts";
 
 function executable(path: string): boolean {
@@ -13,9 +13,9 @@ function executable(path: string): boolean {
   }
 }
 
-/** What a shell would run as `tmux`: the first executable of that name on PATH. */
-const tmuxOnPath = () =>
-  String(process.env["PATH"])
+/** What a shell would run as `tmux`: the first executable of that name on `path`. */
+const tmuxOnPath = (path = process.env["PATH"]) =>
+  String(path)
     .split(":")
     .map((dir) => join(dir, "tmux"))
     .find(executable);
@@ -32,5 +32,11 @@ describe("the holder tests' tmux isolation", () => {
     expect(process.env["TMUX"]).toBeUndefined();
     expect(dir).toBe(`${testHome()}/tmux`);
     expect(readdirSync(dir)).toEqual([]);
+  });
+
+  it("gives a holder's child the same refusal as tmux, and the same socket directory", () => {
+    const env = holderEnv();
+    expect(tmuxOnPath(env["PATH"])).toBe(`${testHome()}/bin/tmux`);
+    expect(env["TMUX_TMPDIR"]).toBe(process.env["TMUX_TMPDIR"]);
   });
 });

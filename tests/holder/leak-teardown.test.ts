@@ -1,4 +1,13 @@
-import { existsSync, linkSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  existsSync,
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { listenFakeHolder, type FakeHolderServer } from "@bazhen/runtime-holder/testing";
 import { afterEach, describe, expect, it } from "vitest";
@@ -13,6 +22,9 @@ import {
 
 const dirs: string[] = [];
 const fakes: FakeHolderServer[] = [];
+
+/** The pid of a process that has exited and been reaped, as a closed holder's is. */
+const exitedPid = () => spawnSync("true").pid;
 
 // A scratch home, not the run's own, whose leaks would fail the run.
 function scratchHome(): string {
@@ -46,18 +58,29 @@ describe("closeLiveHolders", () => {
   it("closes a holder still answering, through the protocol, and names it with its pid", async () => {
     const dir = holdersDir(scratchHome());
     const socket = join(dir, "t1.sock");
-    await fakeAt(socket, { hello: { terminalId: "t1", holderPid: 777 } });
+    const holderPid = exitedPid();
+    await fakeAt(socket, { hello: { terminalId: "t1", holderPid } });
     await expect(closeLiveHolders(dir)).resolves.toEqual([
-      { socket, terminalId: "t1", holderPid: 777, closed: true, hello: null },
+      { socket, terminalId: "t1", holderPid, closed: true, hello: null },
     ]);
     expect(existsSync(socket)).toBe(false);
+  });
+
+  it("doesn't count a holder as closed while its pid runs, though it hung up as asked", async () => {
+    const dir = holdersDir(scratchHome());
+    const socket = join(dir, "crashed.sock");
+    // Hanging up proves nothing of its child's group: a holder that crashed hangs up too.
+    await fakeAt(socket, { hello: { terminalId: "crashed", holderPid: process.pid } });
+    await expect(closeLiveHolders(dir, { closeMs: 200 })).resolves.toEqual([
+      { socket, terminalId: "crashed", holderPid: process.pid, closed: false, hello: null },
+    ]);
   });
 
   it("names a holder that answers close but doesn't hang up, as one that may still run", async () => {
     const dir = holdersDir(scratchHome());
     const socket = join(dir, "t3.sock");
     await fakeAt(socket, { hello: { terminalId: "t3", holderPid: 779 }, close: "stays" });
-    await expect(closeLiveHolders(dir, 200)).resolves.toEqual([
+    await expect(closeLiveHolders(dir, { closeMs: 200 })).resolves.toEqual([
       { socket, terminalId: "t3", holderPid: 779, closed: false, hello: null },
     ]);
   });
@@ -69,7 +92,7 @@ describe("closeLiveHolders", () => {
       hello: { terminalId: "bad", holderPid: 780 },
       close: "ignores",
     });
-    const closing = closeLiveHolders(dir, 500);
+    const closing = closeLiveHolders(dir, { closeMs: 500 });
     const holder = await fake.connection();
     const close = await holder.request();
     holder.send({ type: "ok", id: close.id, body: { request: "close" } });
@@ -83,7 +106,7 @@ describe("closeLiveHolders", () => {
     const dir = holdersDir(scratchHome());
     const socket = join(dir, "t2.sock");
     await fakeAt(socket, { hello: { terminalId: "t2", holderPid: 778 }, close: "ignores" });
-    await expect(closeLiveHolders(dir, 200)).resolves.toEqual([
+    await expect(closeLiveHolders(dir, { closeMs: 200 })).resolves.toEqual([
       { socket, terminalId: "t2", holderPid: 778, closed: false, hello: null },
     ]);
   });
@@ -101,7 +124,7 @@ describe("closeLiveHolders", () => {
     const dir = holdersDir(scratchHome());
     const socket = join(dir, "stuck.sock");
     await fakeAt(socket, { hello: false });
-    await expect(closeLiveHolders(dir, 200)).resolves.toEqual([
+    await expect(closeLiveHolders(dir, { helloMs: 200 })).resolves.toEqual([
       { socket, terminalId: null, holderPid: null, closed: false, hello: expect.any(String) },
     ]);
   });
@@ -110,7 +133,7 @@ describe("closeLiveHolders", () => {
     const dir = holdersDir(scratchHome());
     const socket = join(dir, "newer.sock");
     await fakeAt(socket, { hello: { version: "9.0" } });
-    await expect(closeLiveHolders(dir, 200)).resolves.toEqual([
+    await expect(closeLiveHolders(dir)).resolves.toEqual([
       expect.objectContaining({ socket, closed: false, hello: expect.stringContaining("9.0") }),
     ]);
   });
@@ -118,6 +141,14 @@ describe("closeLiveHolders", () => {
   it("refuses a directory outside the holder tests' own, however it is spelled", async () => {
     await expect(closeLiveHolders("/run/user/1000/bazhen/holders")).rejects.toThrow(/Refusing/);
     await expect(closeLiveHolders(`${RUN_PREFIX}x/../../run/user`)).rejects.toThrow(/Refusing/);
+  });
+
+  it("refuses a directory under the holder tests' prefix that links to one outside", async () => {
+    const outside = mkdtempSync("/tmp/bz-not-holder-");
+    const link = `${RUN_PREFIX}link-${process.pid}`;
+    dirs.push(outside, link);
+    symlinkSync(outside, link);
+    await expect(closeLiveHolders(link)).rejects.toThrow(/Refusing/);
   });
 });
 
@@ -128,20 +159,21 @@ describe("teardownReport", () => {
 
   it("fails the run naming a holder it had to close, and lets the home go", async () => {
     const home = scratchHome();
-    await fakeAt(join(holdersDir(home), "t1.sock"), { hello: { terminalId: "t1", holderPid: 7 } });
+    const holderPid = exitedPid();
+    await fakeAt(join(holdersDir(home), "t1.sock"), { hello: { terminalId: "t1", holderPid } });
     const report = await teardownReport(home);
     expect(report.keep).toBe(false);
-    expect(report.problems).toEqual([expect.stringContaining("t1 (pid 7, closed)")]);
+    expect(report.problems).toEqual([expect.stringContaining(`t1 (pid ${holderPid}, closed)`)]);
   });
 
   it("keeps the home in place while a holder in it may still be running", async () => {
     const home = scratchHome();
     const socket = join(holdersDir(home), "t2.sock");
     await fakeAt(socket, { hello: { terminalId: "t2", holderPid: 8 }, close: "ignores" });
-    const report = await teardownReport(home, 200);
+    const report = await teardownReport(home, { closeMs: 200 });
     expect(report.keep).toBe(true);
     expect(report.problems).toEqual([
-      expect.stringContaining("t2 (pid 8, didn't close in time; may still run)"),
+      expect.stringContaining("t2 (pid 8, didn't close and exit in time; may still run)"),
       expect.stringContaining(`Left ${home} in place`),
     ]);
   });
@@ -181,10 +213,9 @@ describe("setup and teardown", () => {
 
   it("fails the run naming a holder left in its home, once it has closed it", async () => {
     const home = ownRun();
-    await fakeAt(join(holdersDir(home), "left.sock"), {
-      hello: { terminalId: "left", holderPid: 9 },
-    });
-    await expect(teardown()).rejects.toThrow("left (pid 9, closed)");
+    const holderPid = exitedPid();
+    await fakeAt(join(holdersDir(home), "left.sock"), { hello: { terminalId: "left", holderPid } });
+    await expect(teardown()).rejects.toThrow(`left (pid ${holderPid}, closed)`);
     expect(existsSync(home)).toBe(false);
   });
 

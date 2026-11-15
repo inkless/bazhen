@@ -16,6 +16,11 @@ export type Area = {
   onlySubpaths?: Record<string, string[]>;
   platformFree?: boolean;
   thirdParty?: string[];
+  /**
+   * Its `*.test.ts` are medium tests, as docs/standards/testing.md sizes the directory, so the
+   * small-test bans don't apply to them.
+   */
+  medium?: boolean;
   /** Libraries it may use only through the wrappers in `via`, which is an area of its own. */
   onlyThrough?: { packages: string[]; via: string };
 };
@@ -159,6 +164,23 @@ export const MATRIX: Area[] = [
       "@bazhen/web",
     ],
   },
+  // Holder tests run on the host, so they reach no tmux and no daemon: the holder client, and
+  // tests/support's home and teardown, are all they use. Teardown uses host-guard for them.
+  {
+    dir: "tests/holder",
+    medium: true,
+    banned: [
+      "@bazhen/core",
+      "@bazhen/host-guard",
+      "@bazhen/runtime-tmux",
+      "@bazhen/env-local",
+      "@bazhen/harness-claude-code",
+      "@bazhen/harness-codex",
+      "@bazhen/daemon",
+      "@bazhen/web",
+      "@bazhen/cli",
+    ],
+  },
   {
     dir: "apps/web",
     banned: ["@bazhen/core", "@bazhen/runtime-tmux", "@bazhen/runtime-holder", "@bazhen/daemon"],
@@ -266,7 +288,7 @@ function overrides(): Override[] {
       },
       {
         files: [`${area.dir}/**/*.test.ts`, `${area.dir}/**/*.test.tsx`],
-        rules: { ...base, "no-restricted-imports": restrictions(area, true) },
+        rules: { ...base, "no-restricted-imports": restrictions(area, area.medium !== true) },
       },
       {
         files: [`${area.dir}/**/*.medium.test.ts`],

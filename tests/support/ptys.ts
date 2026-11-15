@@ -2,17 +2,11 @@
 // refuses to start above (docs/standards/testing.md).
 
 import { readdirSync, readFileSync } from "node:fs";
+import { failSetup } from "./setup-error.ts";
 
 // The spikes' watchdog aborted above 420 of macOS's 511 PTYs (kern.tty.ptmx_max).
 const MACOS_CUTOFF = 420;
 const LINUX_CUTOFF_FRACTION = 420 / 511;
-
-// Vitest's source-map lookup crashes on errors thrown from globalSetup and hides their message,
-// so print it before throwing.
-function refuse(message: string): never {
-  console.error(`\n${message}\n`);
-  throw new Error(message);
-}
 
 const readPtySysctl = (name: string) =>
   Number(readFileSync(`/proc/sys/kernel/pty/${name}`, "utf8").trim());
@@ -22,7 +16,7 @@ function cutoffOverride(): number | undefined {
   if (raw === undefined || raw === "") return undefined;
   const cutoff = Number(raw);
   if (!Number.isFinite(cutoff) || cutoff <= 0) {
-    refuse(`BZ_PTY_CUTOFF must be a positive number of PTYs, got "${raw}".`);
+    failSetup(`BZ_PTY_CUTOFF must be a positive number of PTYs, got "${raw}".`);
   }
   return cutoff;
 }
@@ -46,7 +40,7 @@ export function ptysInUse(): { used: number; cutoff: number } {
 export function requirePtyHeadroom(): void {
   const { used, cutoff } = ptysInUse();
   if (used > cutoff) {
-    refuse(
+    failSetup(
       `Refusing to run: ${used} PTYs are in use machine-wide (cutoff ${cutoff}). ` +
         "Something is leaking PTYs; see the bz-debug-integration-test skill.",
     );

@@ -7,13 +7,15 @@
 // - No test can reach a tmux server: `tmux` on PATH is a script that refuses, TMUX is unset, and
 //   TMUX_TMPDIR is an empty directory of the run's, not a file or a missing path, from which
 //   tmux would fall back to /tmp and the user's own servers. Teardown fails the run if anything
-//   appears there.
+//   appears there. That holds for this process and the tests'; what a holder runs gets only its
+//   spec's env, which ./holder-home.ts's holderEnv() builds and requireHolderEnv() checks, with
+//   HOME and XDG_* in the home too, so no shell reads the user's rc files or history.
 // - Setup drops every inherited BAZHEN_ variable, so nothing a test runs can reach a real daemon.
 // - Teardown closes every holder still answering in the home, through the protocol, and fails
-//   the run naming them. It signals nothing: host-guard is the one place that does. A holder that
-//   may still run keeps the home in place, its tmux refusal included. One that closes in time
-//   has ended its child's process group, as holder/1's `close` requires, so nothing it ran is
-//   left using the home.
+//   the run naming them. It signals nothing: host-guard is the one place that does. It counts a
+//   holder closed only once it has hung up and its pid no longer exists, rather than trust the
+//   holder under test to have ended its child's group; any other keeps the home in place, its
+//   tmux refusal included, for whatever it ran.
 
 import { randomUUID } from "node:crypto";
 import {
@@ -22,21 +24,30 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
+import { isAlive } from "@bazhen/host-guard";
 import { connectHolder, HolderDisconnected } from "@bazhen/runtime-holder";
-import { holdersDir, RUN_ENV, RUN_MARKER } from "./holder-home.ts";
+import {
+  binDir,
+  holderEnv,
+  holdersDir,
+  RUN_ENV,
+  RUN_MARKER,
+  tmuxDir,
+  userDir,
+} from "./holder-home.ts";
 import { requirePtyHeadroom } from "./ptys.ts";
+import { failSetup } from "./setup-error.ts";
 
 /** What `tmux` on the holder tests' PATH is: a script that refuses. */
 export const TMUX_REFUSAL = '#!/bin/sh\necho "holder tests never run tmux" >&2\nexit 127\n';
-const CLOSE_WAIT_MS = 2000;
+const WAIT_MS = 2000;
 /** Every run's home, and every scratch home a test makes, starts with this. */
 export const RUN_PREFIX = "/tmp/bz-h-";
-
-const tmuxDir = (home: string) => join(home, "tmux");
 
 let home: string | undefined;
 
@@ -45,7 +56,7 @@ function isolateTmux(dir: string): void {
   delete process.env["TMUX_PANE"];
   mkdirSync(tmuxDir(dir), { mode: 0o700 });
   process.env["TMUX_TMPDIR"] = tmuxDir(dir);
-  const bin = join(dir, "bin");
+  const bin = binDir(dir);
   mkdirSync(bin);
   writeFileSync(join(bin, "tmux"), TMUX_REFUSAL, { mode: 0o755 });
   const path = process.env["PATH"];
@@ -60,7 +71,7 @@ export function scrubBazhenEnv(env: NodeJS.ProcessEnv): void {
 export function setup(): void {
   requirePtyHeadroom();
   home = mkdtempSync(RUN_PREFIX);
-  for (const dir of [join(home, "run"), holdersDir(home)]) {
+  for (const dir of [join(home, "run"), holdersDir(home), userDir(home)]) {
     mkdirSync(dir);
     chmodSync(dir, 0o700);
   }
@@ -70,6 +81,8 @@ export function setup(): void {
   scrubBazhenEnv(process.env);
   process.env["BAZHEN_HOME"] = home;
   process.env[RUN_ENV] = run;
+  // A child's XDG_RUNTIME_DIR must exist and be private, as the system's is.
+  mkdirSync(String(holderEnv()["XDG_RUNTIME_DIR"]), { mode: 0o700 });
 }
 
 export interface LeakedHolder {
@@ -77,13 +90,37 @@ export interface LeakedHolder {
   /** Null for a holder that took the connection but gave no usable answer to `hello`. */
   readonly terminalId: string | null;
   readonly holderPid: number | null;
-  /** Whether it answered `close` and hung up in time; one that didn't may still be running. */
+  /** Whether it answered `close`, hung up and exited in time; any other may still be running. */
   readonly closed: boolean;
   /** Why `hello` failed, for one that took the connection. */
   readonly hello: string | null;
 }
 
 const timeout = (ms: number) => new Promise<void>((done) => setTimeout(done, ms).unref());
+
+/** How long teardown waits on each holder: for `hello`, and then for `close` to take. */
+export interface CloseWait {
+  readonly helloMs?: number;
+  readonly closeMs?: number;
+}
+
+const exited = (pid: number) => {
+  try {
+    return !isAlive(pid);
+  } catch {
+    // A pid host-guard won't probe, such as 1, proves nothing.
+    return false;
+  }
+};
+
+/** Whether `pid` is gone before `deadline`; a pid reused since reads as still running. */
+async function exitsBy(pid: number, deadline: number): Promise<boolean> {
+  while (!exited(pid)) {
+    if (Date.now() >= deadline) return false;
+    await timeout(10);
+  }
+  return true;
+}
 
 const GONE = new Set(["ENOENT", "ECONNREFUSED"]);
 
@@ -94,12 +131,13 @@ function gone(error: unknown): boolean {
   return "code" in cause && typeof cause.code === "string" && GONE.has(cause.code);
 }
 
-async function closeIfLive(socket: string, waitMs: number): Promise<LeakedHolder | null> {
+async function closeIfLive(socket: string, wait: CloseWait): Promise<LeakedHolder | null> {
+  const { helloMs = WAIT_MS, closeMs = WAIT_MS } = wait;
   let client;
   try {
     client = await connectHolder(socket, {
       onEvent: () => {},
-      signal: AbortSignal.timeout(waitMs),
+      signal: AbortSignal.timeout(helloMs),
     });
   } catch (error) {
     if (gone(error)) return null;
@@ -107,41 +145,47 @@ async function closeIfLive(socket: string, waitMs: number): Promise<LeakedHolder
     return { socket, terminalId: null, holderPid: null, closed: false, hello };
   }
   const { terminalId, holderPid } = client.hello;
-  const answered = await client.close({ signal: AbortSignal.timeout(waitMs) }).then(
+  const deadline = Date.now() + closeMs;
+  const answered = await client.close({ signal: AbortSignal.timeout(closeMs) }).then(
     () => true,
     () => false,
   );
-  // A holder hangs up once its child's group is gone, so `ok` alone doesn't say it has exited;
-  // nor does a connection this side ended.
-  const closed =
+  // `ok` alone doesn't say the holder has exited; nor does a connection this side ended, or one
+  // the holder ended, as one that crashed would, without its pid gone.
+  const hungUp =
     answered &&
     (await Promise.race([
       client.ended.then((end) => end.reason === "eof"),
-      timeout(waitMs).then(() => false),
+      timeout(closeMs).then(() => false),
     ]));
+  const closed = hungUp && (await exitsBy(holderPid, deadline));
   client.end();
   return { socket, terminalId, holderPid, closed, hello: null };
 }
 
+/** Whether `dir`, wherever a symlink takes it, is under a holder test home. */
+function inTestHome(dir: string): boolean {
+  if (!existsSync(dir)) return resolve(dir).startsWith(RUN_PREFIX);
+  // /tmp itself is a symlink on macOS.
+  return realpathSync(dir).startsWith(join(realpathSync("/tmp"), "bz-h-"));
+}
+
 /**
  * Closes every holder still answering on a socket in `dir`, and says which they were. Refuses a
- * directory outside the holder tests' own, so it can't close a real holder.
+ * directory outside the holder tests' own, however it is reached, so it can't close a real holder.
  */
-export async function closeLiveHolders(
-  dir: string,
-  waitMs: number = CLOSE_WAIT_MS,
-): Promise<LeakedHolder[]> {
-  if (!resolve(dir).startsWith(RUN_PREFIX)) {
+export async function closeLiveHolders(dir: string, wait: CloseWait = {}): Promise<LeakedHolder[]> {
+  if (!inTestHome(dir)) {
     throw new Error(`Refusing to close holders in ${dir}: it isn't under ${RUN_PREFIX}*.`);
   }
   const sockets = existsSync(dir) ? readdirSync(dir).filter((name) => name.endsWith(".sock")) : [];
-  const found = await Promise.all(sockets.map((name) => closeIfLive(join(dir, name), waitMs)));
+  const found = await Promise.all(sockets.map((name) => closeIfLive(join(dir, name), wait)));
   return found.filter((holder) => holder !== null);
 }
 
 function describeLeak(holder: LeakedHolder): string {
   if (holder.terminalId === null) return `${holder.socket} (no answer to hello: ${holder.hello})`;
-  const state = holder.closed ? "closed" : "didn't close in time; may still run";
+  const state = holder.closed ? "closed" : "didn't close and exit in time; may still run";
   return `${holder.terminalId} (pid ${holder.holderPid}, ${state})`;
 }
 
@@ -152,8 +196,8 @@ export interface TeardownReport {
 }
 
 /** What a run left behind in its home `dir`, closing any holder that still answers. */
-export async function teardownReport(dir: string, waitMs?: number): Promise<TeardownReport> {
-  const leaked = await closeLiveHolders(holdersDir(dir), waitMs);
+export async function teardownReport(dir: string, wait?: CloseWait): Promise<TeardownReport> {
+  const leaked = await closeLiveHolders(holdersDir(dir), wait);
   const ranTmux = existsSync(tmuxDir(dir)) ? readdirSync(tmuxDir(dir)) : [];
   // A tmux server a test started still runs; its socket is how a person stops it.
   const keep = leaked.some((holder) => !holder.closed) || ranTmux.length > 0;
@@ -179,17 +223,11 @@ export async function teardownReport(dir: string, waitMs?: number): Promise<Tear
   return { problems, keep };
 }
 
-// Vitest's source-map lookup hides errors thrown from globalSetup, so print it as well.
-function fail(message: string): never {
-  console.error(`\n${message}\n`);
-  throw new Error(message);
-}
-
 export async function teardown(): Promise<void> {
   const dir = home;
   home = undefined;
   if (dir === undefined) return;
   const { problems, keep } = await teardownReport(dir);
   if (!keep) rmSync(dir, { recursive: true, force: true });
-  if (problems.length > 0) fail(problems.join("\n"));
+  if (problems.length > 0) failSetup(problems.join("\n"));
 }
