@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import { isAlive } from "@bazhen/host-guard";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { installCommand } from "./cargo-gate.ts";
+import { inSignalSandbox } from "./signal-paths.ts";
 
 const FALSIFY = fileURLToPath(new URL("falsify.ts", import.meta.url));
 const SOURCE = "packages/a/src/x.ts";
@@ -985,4 +986,62 @@ describe("falsify judging new Rust tests by mutating the change", () => {
     },
     30_000,
   );
+});
+
+describe("falsify outside a sandbox", () => {
+  const AS_HOST = { BZ_FALSIFY_AS_HOST: "1" };
+
+  it("refuses to revert source that signals processes, and makes no worktree", () => {
+    write(
+      fx.linked,
+      SOURCE,
+      'import { signalGroup } from "@bazhen/host-guard";\nexport const v = 2;\n' +
+        'export const stop = (c) => signalGroup(c, "SIGTERM");\n',
+    );
+    git(fx.linked, "add", SOURCE);
+    git(fx.linked, "commit", "--quiet", "-m", "feat: stop");
+    const result = againstBase(AS_HOST);
+    expect({
+      status: result.status,
+      named: result.output.includes(`  ${SOURCE}`),
+      pointsAt: result.output.includes("pnpm test:real falsify"),
+      installed: stubLog().includes("ARGS: install"),
+      leftovers: leftovers(),
+    }).toEqual({ status: 1, named: true, pointsAt: true, installed: false, leftovers: [] });
+  });
+
+  it("refuses to mutate Rust that signals processes, before any mutant runs", () => {
+    mutatedBranch(
+      ["tests::b_is_two"],
+      [mutantOfB("replace b -> u8 with 0")],
+      [`MUTATED|tests::b_is_two|${ASSERTION}`],
+      {
+        "crates/x/src/sweep.rs":
+          "pub fn sweep(pid: i32) {\n    unsafe { libc::kill(pid, 9) };\n}\n",
+      },
+    );
+    const result = againstBase(AS_HOST);
+    expect({
+      status: result.status,
+      named: result.output.includes("  crates/x/src/sweep.rs"),
+      runs: runs(),
+      leftovers: leftovers(),
+    }).toEqual({ status: 1, named: true, runs: 0, leftovers: [] });
+  });
+
+  it("judges the tests ignored as signalling only in a sandbox", () => {
+    mutatedBranch(
+      ["tests::b_is_two"],
+      [mutantOfB("replace b -> u8 with 0")],
+      [`MUTATED|tests::b_is_two|${ASSERTION}`],
+    );
+    expect(againstBase(AS_HOST).status).toBe(0);
+    const asHost = stubLog().includes("--run-ignored all");
+    writeFileSync(fx.log, "");
+    expect(againstBase().status).toBe(0);
+    expect({ asHost, here: stubLog().includes("--run-ignored all") }).toEqual({
+      asHost: false,
+      here: inSignalSandbox(),
+    });
+  });
 });

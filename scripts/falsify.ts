@@ -59,6 +59,7 @@ import { isAlive, rethrowUnsafe, signalGroup, spawnGroup } from "@bazhen/host-gu
 import { KILLS_ENV } from "./capped.ts";
 import { GATES, configFailures, gateEnv, installCommand, outsideConfigs } from "./cargo-gate.ts";
 import { isMain } from "./is-main.ts";
+import { inSignalSandbox, isSignallingSource, isSignallingTest } from "./signal-paths.ts";
 import {
   failedOnAssertion,
   inTestCode,
@@ -130,6 +131,16 @@ const git = (args: string[], cwd = process.cwd()) =>
     stdio: ["ignore", "pipe", "pipe"],
   });
 
+/** A file as the commit `rev` has it, or undefined where it has none. */
+function fileAt(rev: string, path: string): string | undefined {
+  try {
+    return git(["show", `${rev}:${path}`]);
+  } catch (error) {
+    if (signalExitCode(error) !== undefined) throw error;
+    return undefined;
+  }
+}
+
 /**
  * Whether a changed path is source the revert check puts back as the base had it: anything under
  * an app's or package's `src/`, and TypeScript under `scripts/`, but never a test. These are the
@@ -155,6 +166,60 @@ const within = (path: string, entries: readonly string[]) =>
   entries.some((e) => path === e || (e.endsWith("/") && path.startsWith(e)));
 
 const pathsOf = (c: Change) => (c.oldPath === undefined ? [c.path] : [c.path, c.oldPath]);
+
+/** What falsify would change or run that may signal processes it didn't start. */
+export interface SignallingWork {
+  readonly sources: string[];
+  readonly tests: string[];
+}
+
+/**
+ * Of the files falsify would revert or mutate, those that signal processes as the base or HEAD has
+ * them, and of the test files it would run, those whose HEAD holds a signalling test.
+ * `read(rev, path)` is a file at a revision, undefined where it has none.
+ */
+export function signallingWork(
+  changed: readonly string[],
+  testFiles: readonly string[],
+  [base, head]: readonly [string, string],
+  read: (rev: string, path: string) => string | undefined,
+): SignallingWork {
+  const holds = (rev: string, path: string, test: (file: string, text: string) => boolean) => {
+    const text = read(rev, path);
+    return text !== undefined && test(path, text);
+  };
+  return {
+    sources: [...new Set(changed)].filter(
+      (path) => holds(base, path, isSignallingSource) || holds(head, path, isSignallingSource),
+    ),
+    tests: [...new Set(testFiles)].filter((path) => holds(head, path, isSignallingTest)),
+  };
+}
+
+// Set by falsify's own tests to judge as a host would wherever they run. It can only make falsify
+// refuse more, never let it mutate signalling code outside a sandbox.
+const AS_HOST = "BZ_FALSIFY_AS_HOST";
+
+const inSandbox = () => process.env[AS_HOST] !== "1" && inSignalSandbox();
+
+const pathList = (title: string, paths: string[]) =>
+  paths.length === 0 ? "" : `\n${title}:\n${paths.map((p) => `  ${p}`).join("\n")}`;
+
+/**
+ * Whether falsify may judge `work` here. A mutant or revert of code that signals can turn a check
+ * of its target into a signal to anything the user runs, so outside a sandbox falsify names what
+ * it won't judge, and judges none of the branch: a partial verdict would read as a pass.
+ */
+function judgeableHere(work: SignallingWork): boolean {
+  if ((work.sources.length === 0 && work.tests.length === 0) || inSandbox()) return true;
+  console.error(
+    "falsify: this branch would revert or mutate code that signals processes, or run tests that " +
+      "do, which happens only in a sandbox. Run `pnpm test:real falsify`." +
+      pathList("Signalling code", work.sources) +
+      pathList("Signalling tests", work.tests),
+  );
+  return false;
+}
 
 /**
  * The changes the revert check puts back as the base had them: the revertible source, and the
@@ -697,6 +762,8 @@ async function runRustTests(
     "libtest-json-plus",
     "--message-format-version",
     LIBTEST_JSON_VERSION,
+    // A test that signals processes is ignored outside a sandbox; inside one it is judged.
+    ...(inSandbox() ? ["--run-ignored", "all"] : []),
     "-E",
     nextestFilter(tests),
   ];
@@ -893,7 +960,7 @@ async function mutateRustTests(
  * `#[test]`, proptest, or a macro of the crate's own. Mutants are applied only in that worktree,
  * which is removed on every way out, a signal included.
  */
-async function judgeRustTests(top: string, base: string, head: string) {
+async function judgeRustTests(top: string, base: string, head: string, rustFiles: string[]) {
   const dir = mkdtempSync(join(tmpdir(), WORKTREE_PREFIX));
   cleanup = () => {
     cleanup = undefined;
@@ -928,6 +995,10 @@ async function judgeRustTests(top: string, base: string, head: string) {
     const added = addedRustTests(atBase, rustTestIds(after));
     if (added.length === 0)
       return { verdicts: [], unapplied: [], timedOut: [], memoryKilled: [], ran: 0, total: 0 };
+    // Mutants are made only in the changed files, and the new tests live in them.
+    if (!judgeableHere(signallingWork(rustFiles, rustFiles, [base, head], fileAt))) {
+      return undefined;
+    }
     return await mutateRustTests(dir, top, [base, head], after, added, new Set(atBase));
   } finally {
     cleanup?.();
@@ -1042,7 +1113,8 @@ async function main(args: string[]): Promise<number> {
     process.on("SIGTERM", handleSignal);
     process.on("SIGHUP", handleSignal);
     try {
-      const judged = await judgeRustTests(top, base, head);
+      const rustFiles = changes.flatMap(pathsOf).filter((path) => path.endsWith(".rs"));
+      const judged = await judgeRustTests(top, base, head, rustFiles);
       if (judged === undefined) return 1;
       rust = judged;
     } finally {
@@ -1072,6 +1144,13 @@ async function main(args: string[]): Promise<number> {
   } else if (reverts.length === 0) {
     for (const t of targets) results.push({ ...t, outcome: "INVALID" });
   } else {
+    const work = signallingWork(
+      reverts.flatMap(pathsOf),
+      targets.map((t) => t.file),
+      [base, head],
+      fileAt,
+    );
+    if (!judgeableHere(work)) return 1;
     const dir = mkdtempSync(join(tmpdir(), WORKTREE_PREFIX));
     cleanup = () => {
       cleanup = undefined;

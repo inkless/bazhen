@@ -143,7 +143,14 @@ it in the container. Hand-made mutants of such a test run there too. The image c
 cargo-nextest and cargo-mutants at the versions `RUST_TOOLS` in `scripts/cargo-gate.ts` pins, and
 fetches what the base's lockfiles name as well as HEAD's, so a branch touching the Rust workspace
 is judged there with no network, the base's falsify included. When falsify can't install a
-worktree's dependencies, it prints the end of what pnpm said. Stryker-style mutation
+worktree's dependencies, it prints the end of what pnpm said.
+
+Falsify reverts and mutates code that signals processes only in a sandbox, as
+`scripts/signal-paths.ts` defines one. Outside it, a branch that would revert or mutate such code
+(`isSignallingSource`), or run a test that signals (`isSignallingTest`), is refused before any of
+its tests run. Falsify names the files and points at `pnpm test:real falsify`, and judges none of
+the branch, since a partial verdict would read as a pass. Inside the sandbox it also runs the Rust
+tests ignored as signalling, which a plain nextest run skips. Stryker-style mutation
 scores are not a gate, because their cost and equivalent mutants make the number meaningless.
 
 ## Memory and time caps

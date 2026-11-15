@@ -12,10 +12,12 @@ import {
   revertsOf,
   rustTestIds,
   signalExitCode,
+  signallingWork,
   staleWorktrees,
   uncontrolledRustTests,
   type VitestReport,
 } from "./falsify.ts";
+import { SIGNALS_IGNORE } from "./signal-paths.ts";
 
 const FILE = "packages/core/src/x.test.ts";
 
@@ -420,5 +422,45 @@ describe("relatedReverts", () => {
   it("ignores a type-only import", () => {
     const source = 'import type { TerminalState } from "@bazhen/protocol";';
     expect(related(source, ["packages/protocol/src/index.ts"])).toEqual([]);
+  });
+});
+
+describe("signallingWork", () => {
+  const SIGNALS =
+    'import { signalGroup } from "@bazhen/host-guard";\nsignalGroup(child, "SIGTERM");\n';
+  const files: Record<string, Record<string, string>> = {
+    base: { "packages/a/src/was.ts": SIGNALS, "packages/a/src/now.ts": "export {};\n" },
+    head: {
+      "packages/a/src/was.ts": "export {};\n",
+      "packages/a/src/now.ts": SIGNALS,
+      "packages/a/src/never.ts": "export {};\n",
+      "tests/holder/close.test.ts": 'it("closes", () => {});\n',
+      "packages/a/src/x.test.ts": 'it("x", () => {});\n',
+      "crates/x/src/lib.rs": `#[test]\n#[ignore = "${SIGNALS_IGNORE}"]\nfn sweeps() {}\n`,
+      "crates/x/src/plain.rs": "#[test]\nfn plain() {}\n",
+    },
+  };
+  const read = (rev: string, path: string) => files[rev]?.[path];
+
+  it("counts a file that signals as either the base or HEAD has it", () => {
+    const sources = ["packages/a/src/was.ts", "packages/a/src/now.ts", "packages/a/src/never.ts"];
+    expect(signallingWork(sources, [], ["base", "head"], read).sources).toEqual([
+      "packages/a/src/was.ts",
+      "packages/a/src/now.ts",
+    ]);
+  });
+
+  it("counts a test file of the holder suite or one with a test ignored as signalling", () => {
+    const tests = [
+      "tests/holder/close.test.ts",
+      "packages/a/src/x.test.ts",
+      "crates/x/src/lib.rs",
+      "crates/x/src/plain.rs",
+      "packages/a/src/gone.test.ts",
+    ];
+    expect(signallingWork([], tests, ["base", "head"], read).tests).toEqual([
+      "tests/holder/close.test.ts",
+      "crates/x/src/lib.rs",
+    ]);
   });
 });
