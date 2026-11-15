@@ -99,6 +99,11 @@ export class FakeHolder {
     this.stream.write(bytes);
   }
 
+  /** Stops taking what the client writes, as a holder stopped or wedged would. */
+  stopReading(): void {
+    this.stream.pause();
+  }
+
   hangUp(): void {
     this.stream.end(() => this.stream.destroy());
   }

@@ -110,8 +110,8 @@ const isReplyOf = <K extends AnswerName>(reply: HolderReply, type: K): reply is 
 
 interface Pending {
   readonly request: string;
-  /** Settles the request with its answer; false, settling nothing, for an answer of another kind. */
-  readonly accept: (reply: ReplyOf<AnswerName>) => boolean;
+  /** Settles the request with its answer; settles nothing for one of another kind or out of turn. */
+  readonly accept: (reply: ReplyOf<AnswerName>) => "taken" | "wrong" | "early";
   readonly reject: (error: unknown) => void;
   /** Whether the holder refusing it ends the connection. */
   readonly endsOnRefusal: boolean;
@@ -137,6 +137,15 @@ const asError = (value: unknown) => (value instanceof Error ? value : new Error(
 /** What one `input` frame carries: the cap less the type byte and the request id. */
 const INPUT_CHUNK = HOLDER_MAX_REQUEST_BYTES - 1 - 4;
 
+/**
+ * Bytes written but not yet taken by the holder past which it has stopped reading; the next write
+ * ends the connection, so a stalled holder can't grow this process without bound.
+ */
+export const HOLDER_MAX_UNSENT_BYTES = 8 * HOLDER_MAX_REQUEST_BYTES;
+
+/** How long a hang-up waits for the holder to take what is still unsent. */
+export const HOLDER_HANG_UP_MS = 5_000;
+
 /** One connection's requests, answers and events. `HolderClient` is its face after `hello`. */
 class Connection {
   readonly ended: Promise<HolderEnd>;
@@ -155,7 +164,8 @@ class Connection {
       this.settleEnded = resolve;
     });
     stream.on("data", (chunk: Uint8Array) => this.read(chunk));
-    stream.on("end", () => this.finish({ reason: "eof" }));
+    // The holder hung up: end this side too, whether or not the stream allows half-open.
+    stream.on("end", () => this.fail({ reason: "eof" }));
     stream.on("close", () => this.finish({ reason: "eof" }));
     stream.on("error", (error) => this.finish({ reason: "error", error }));
   }
@@ -196,11 +206,12 @@ class Connection {
       this.pending.set(request.id, {
         request: request.type,
         accept: (reply) => {
-          if (!isReplyOf(reply, expects) || sending.inTurn?.() === false) return false;
+          if (!isReplyOf(reply, expects)) return "wrong";
+          if (sending.inTurn?.() === false) return "early";
           stop();
           sending.onAnswer?.(reply);
           resolve(reply);
-          return true;
+          return "taken";
         },
         reject: (error) => {
           stop();
@@ -210,14 +221,25 @@ class Connection {
       });
     });
     if (sending.batch) sending.batch.push(frame);
-    else this.stream.write(frame);
+    else this.send(frame);
     return answer;
   }
 
   /** Writes frames in one write; nothing once the connection has ended, as its requests have. */
   write(frames: readonly Uint8Array[]): void {
     if (frames.length === 0 || this.end !== null) return;
-    this.stream.write(Buffer.concat(frames));
+    this.send(frames.length === 1 ? frames[0]! : Buffer.concat(frames));
+  }
+
+  /** Writes, or ends the connection, rejecting what waits, when the holder has stopped reading. */
+  private send(bytes: Uint8Array): void {
+    const unsent = this.stream.writableLength;
+    if (unsent > HOLDER_MAX_UNSENT_BYTES) {
+      const error = new Error(`holder stopped reading: ${unsent} bytes unsent`);
+      this.fail({ reason: "error", error });
+      return;
+    }
+    this.stream.write(bytes);
   }
 
   emit(event: HolderEvent): void {
@@ -236,13 +258,19 @@ class Connection {
       );
     }
     this.write(frames);
+    this.requireOpen();
     return ids;
   }
 
   hangUp(): void {
     if (this.end !== null) return;
     this.finish({ reason: "eof" });
-    this.stream.end(() => this.stream.destroy());
+    // A holder that isn't reading would leave the end unflushed, and the socket open, for good.
+    const stop = setTimeout(() => this.stream.destroy(), HOLDER_HANG_UP_MS).unref();
+    this.stream.end(() => {
+      clearTimeout(stop);
+      this.stream.destroy();
+    });
   }
 
   private read(chunk: Uint8Array): void {
@@ -262,7 +290,14 @@ class Connection {
   }
 
   private dispatch(frame: HolderReply | UnknownHolderReply): void {
-    if (frame.type === "unknown") return;
+    if (frame.type === "unknown") {
+      // This build sends only requests it knows, whose answers it knows too.
+      if (frame.id !== undefined && this.pending.has(frame.id)) {
+        const request = this.pending.get(frame.id)?.request;
+        this.breakProtocol(`reply 0x${frame.code.toString(16)} answered ${request} ${frame.id}`);
+      }
+      return;
+    }
     if (frame.type === "error") {
       this.answerError(frame);
       return;
@@ -273,8 +308,10 @@ class Connection {
     }
     const pending = this.pending.get(frame.id);
     if (pending === undefined) return;
-    if (!pending.accept(frame)) {
-      this.breakProtocol(`${frame.type} answered ${pending.request} request ${frame.id}`);
+    const taken = pending.accept(frame);
+    if (taken !== "taken") {
+      const answered = `${frame.type} answered ${pending.request} request ${frame.id}`;
+      this.breakProtocol(taken === "early" ? `${answered} out of turn` : answered);
       return;
     }
     this.pending.delete(frame.id);
@@ -435,12 +472,18 @@ export class HolderClient {
     return reply.body;
   }
 
-  /** Closes the terminal: once the holder says `ok`, it ends the child and exits. */
+  /**
+   * Closes the terminal: once the holder says `ok`, it ends the child and exits. This resolves on
+   * that `ok`, before the holder hangs up; await `ended` to know the connection is gone.
+   */
   async close(options?: RequestOptions): Promise<void> {
     await this.connection.ask((id) => ({ type: "close", id }), "ok", options);
   }
 
-  /** Hangs up this connection, leaving the holder running. */
+  /**
+   * Hangs up this connection, leaving the holder running. What is still unsent gets
+   * `HOLDER_HANG_UP_MS` to reach the holder before the stream is destroyed.
+   */
   end(): void {
     this.connection.hangUp();
   }

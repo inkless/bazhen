@@ -40,6 +40,7 @@ describe("connectHolder", () => {
   it("rejects before hello on a socket whose holder is gone", async () => {
     const live = socketPath();
     const fake = await listenFakeHolder(live);
+    fakes.push(fake);
     // A second name for the socket outlives the listener, as a dead holder's file does.
     const path = `${live}.stale`;
     linkSync(live, path);
