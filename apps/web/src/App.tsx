@@ -3,7 +3,9 @@ import { HealthResponse, isCompatible } from "@bazhen/protocol";
 import { noticeUnpaired, onUnpaired } from "./api.ts";
 import { Dashboard } from "./Dashboard.tsx";
 import { Pairing } from "./Pairing.tsx";
+import { KeyBar } from "./terminal/KeyBar.tsx";
 import { ThemeSwitch } from "./ui/ThemeSwitch.tsx";
+import { followViewport } from "./ui/viewport.ts";
 
 type Status =
   | { kind: "loading" }
@@ -35,30 +37,51 @@ export function App() {
   // `bazhen devices revoke`, swaps the dashboard for the pairing form.
   useEffect(() => onUnpaired(() => setStatus({ kind: "unpaired" })), []);
   useEffect(probe, [probe]);
+  const keyboard = useAppViewport();
 
   return (
-    <main>
-      <header className="app-head">
-        <h1>Bazhen</h1>
-        {status.kind === "loading" && <p>Connecting to the daemon…</p>}
-        {status.kind === "error" && <p role="alert">Daemon unavailable: {status.message}</p>}
-        {status.kind === "ok" && (
-          <dl>
-            <dt>Daemon</dt>
-            <dd>{status.health.appVersion}</dd>
-            <dt>Protocol</dt>
-            <dd>{status.health.protocolVersion}</dd>
-            <dt>tmux</dt>
-            <dd>
-              {status.health.runtime.state}
-              {status.health.runtime.version ? ` (${status.health.runtime.version})` : ""}
-            </dd>
-          </dl>
-        )}
-        <ThemeSwitch />
-      </header>
-      {status.kind === "unpaired" && <Pairing onPaired={probe} />}
-      {status.kind === "ok" && <Dashboard />}
-    </main>
+    <div className="app" {...(keyboard && { "data-keyboard": "" })}>
+      <main className="app-main">
+        <header className="app-head">
+          <h1>Bazhen</h1>
+          {status.kind === "loading" && <p>Connecting to the daemon…</p>}
+          {status.kind === "error" && <p role="alert">Daemon unavailable: {status.message}</p>}
+          {status.kind === "ok" && (
+            <dl>
+              <dt>Daemon</dt>
+              <dd>{status.health.appVersion}</dd>
+              <dt>Protocol</dt>
+              <dd>{status.health.protocolVersion}</dd>
+              <dt>tmux</dt>
+              <dd>
+                {status.health.runtime.state}
+                {status.health.runtime.version ? ` (${status.health.runtime.version})` : ""}
+              </dd>
+            </dl>
+          )}
+          <ThemeSwitch />
+        </header>
+        {status.kind === "unpaired" && <Pairing onPaired={probe} />}
+        {status.kind === "ok" && <Dashboard />}
+      </main>
+      {status.kind === "ok" && <KeyBar />}
+    </div>
   );
+}
+
+/**
+ * Sizes the app to the part of the window the user sees, as app.css reads it, so the soft keyboard
+ * shortens the app rather than covering its bottom; whether the keyboard is up.
+ */
+function useAppViewport(): boolean {
+  const [keyboard, setKeyboard] = useState(false);
+  useEffect(() => {
+    const root = document.documentElement.style;
+    return followViewport(window, (viewport) => {
+      root.setProperty("--app-top", `${viewport.top}px`);
+      root.setProperty("--app-height", `${viewport.height}px`);
+      setKeyboard(viewport.keyboard);
+    });
+  }, []);
+  return keyboard;
 }

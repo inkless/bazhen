@@ -98,17 +98,11 @@ export interface BarTarget {
   holdsFocus(): boolean;
 }
 
-/** While the bar shows: its height, which a terminal leaves room for under it. */
-export interface BarLayout {
-  readonly bar: number;
-}
-
 /** The terminal views on the page, which one the bar types into, and the bar's sticky Ctrl. */
 export function keyBarStore() {
   const views: BarTarget[] = [];
   let engaged: BarTarget | undefined;
   let ctrl = false;
-  let layout: BarLayout | null = null;
   const listeners = new Set<() => void>();
   const changed = () => listeners.forEach((listener) => listener());
   /** The view last engaged, else the one focus is in, else the agent's, else the newest. */
@@ -155,13 +149,6 @@ export function keyBarStore() {
       changed();
       return true;
     },
-    layout: () => layout,
-    /** The bar's layout while it shows, `null` while it doesn't. */
-    setLayout: (next: BarLayout | null): void => {
-      if (next?.bar === layout?.bar) return;
-      layout = next;
-      changed();
-    },
     subscribe: (listener: () => void): (() => void) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -175,18 +162,6 @@ let shared: KeyBarStore | undefined;
 
 /** This page's key bar store. */
 export const keyBar = (): KeyBarStore => (shared ??= keyBarStore());
-
-/**
- * How far the bar is raised to sit on what the page shows: iOS doesn't shrink the layout viewport
- * for the soft keyboard, so a bar fixed to its bottom would sit behind the keyboard.
- */
-export function lift(
-  innerHeight: number,
-  viewport: { readonly height: number; readonly offsetTop: number } | null,
-): number {
-  if (viewport === null) return 0;
-  return Math.max(0, innerHeight - (viewport.height + viewport.offsetTop));
-}
 
 export interface Device {
   /** Whether the primary pointer is a finger: a phone, or an iPad with no trackpad. */
@@ -202,21 +177,3 @@ export interface Device {
  */
 export const wantsKeyBar = ({ coarse, maxTouchPoints, userAgent }: Device): boolean =>
   coarse || (maxTouchPoints > 1 && /Macintosh/.test(userAgent));
-
-/** How much the page's covered height must change to be the soft keyboard, not a toolbar. */
-const KEYBOARD_PX = 100;
-
-/**
- * Once the viewport settles: how much of the page the soft keyboard and toolbars cover now, and
- * whether that changed by a keyboard since `covered`, last time. `null` while zoomed, when a
- * resize is the user's pinch and their view stays where they put it.
- */
-export function settled(
-  covered: number,
-  innerHeight: number,
-  viewport: { readonly height: number; readonly scale: number },
-): { readonly covered: number; readonly keyboard: boolean } | null {
-  if (viewport.scale !== 1) return null;
-  const now = Math.max(0, innerHeight - viewport.height);
-  return { covered: now, keyboard: Math.abs(now - covered) >= KEYBOARD_PX };
-}

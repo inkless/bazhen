@@ -15,7 +15,8 @@ const AGENT_TAB = "agent";
 /**
  * An agent's linked shells, as tabs under its TUI: one shell's terminal at a time, so the dock
  * streams one terminal however many shells it holds. Given `agentView`, as on a narrow screen,
- * the agent's TUI is its first tab instead of sitting above it, so each gets the full height.
+ * the agent's TUI is its first tab instead of sitting above it, so each gets the full height, or
+ * is all the dock shows while there is no shell.
  * Otherwise where it sits, below the TUI or to its right, and whether it shows are this
  * device's own choice.
  */
@@ -42,12 +43,16 @@ export function Dock({
     ...(agentView === undefined ? [] : [{ id: AGENT_TAB, label: agent.project }]),
     ...mine.map((shell) => ({ id: shell.id, label: <ShellTab shell={shell} /> })),
   ];
-  const height = agentView !== undefined ? "70vh" : position === "bottom" ? "30vh" : "60vh";
+  // With no shell to switch to, the agent's TUI needs no tab of its own.
+  const alone = agentView !== undefined && mine.length === 0;
   // Hiding is for a dock beside the TUI; where the TUI is a tab here, there is nothing to hide.
   const showing = agentView !== undefined || !hidden;
 
   return (
-    <section className={`dock dock-${position}`} aria-label="shells">
+    <section
+      className={`dock dock-${position}${showing && tabs.length > 0 ? " dock-open" : ""}`}
+      aria-label="shells"
+    >
       <header className="dock-head">
         <h3>Shells</h3>
         {agent.canOpenShell && (
@@ -92,7 +97,8 @@ export function Dock({
           </>
         )}
       </header>
-      {showing && tabs.length > 0 && (
+      {showing && alone && agentView}
+      {showing && !alone && tabs.length > 0 && (
         <Tabs
           label={`${agent.project} shells`}
           items={tabs}
@@ -102,13 +108,7 @@ export function Dock({
           {shown === undefined ? (
             agentView
           ) : (
-            <ShellPane
-              key={shown.id}
-              shell={shown}
-              height={height}
-              onRestarted={setPicked}
-              failed={failed}
-            />
+            <ShellPane key={shown.id} shell={shown} onRestarted={setPicked} failed={failed} />
           )}
         </Tabs>
       )}

@@ -1,5 +1,57 @@
-main {
-  padding: var(--space-3) var(--space-4);
+/*
+ * The app is the part of the window the user sees, and the document never scrolls: the
+ * soft keyboard shortens the app (`--app-top`, `--app-height`, from script) rather than covering
+ * it, and only a pane whose content is longer than it scrolls, inside itself.
+ */
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+.app {
+  position: fixed;
+  inset-inline: 0;
+  top: var(--app-top);
+  height: var(--app-height);
+  display: flex;
+  flex-direction: column;
+}
+
+.app-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: max(var(--space-3), env(safe-area-inset-top))
+    max(var(--space-4), env(safe-area-inset-right)) var(--space-3)
+    max(var(--space-4), env(safe-area-inset-left));
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+/* With no key bar under it, the app keeps clear of the home indicator itself. */
+.app:not(:has(.key-bar)) .app-main {
+  padding-bottom: max(var(--space-3), env(safe-area-inset-bottom));
+}
+
+.notices {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 30%;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.notices:empty {
+  display: none;
+}
+
+/* A flex column doesn't collapse margins: this takes back the launch form's, which a notice's own
+   margin would otherwise add to. */
+.notices:not(:empty) {
+  margin-top: calc(-1 * var(--space-3));
 }
 
 .app-head {
@@ -50,28 +102,71 @@ main {
 }
 
 .dashboard {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: minmax(200px, 260px) 1fr;
+  grid-template-rows: minmax(0, 1fr);
   gap: var(--space-4);
-  align-items: start;
 }
 
-@media (width < 700px) {
-  .dashboard {
-    grid-template-columns: 1fr;
-  }
-
-  /* The rail above already lists the fleet. */
-  .centre .fleet {
-    display: none;
-  }
-}
-
-.rail {
+.rail,
+.rail-links,
+.rail-lists {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
   min-width: 0;
+}
+
+.rail {
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+/*
+ * A phone, or a window too short for the fleet beside a terminal, shows one thing at a time: the
+ * fleet, or what was opened from it, under the links back. The app's header, the daemon's details
+ * and the launch form are on the fleet screen only.
+ */
+@media (width < 700px), (height < 500px) {
+  .dashboard {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: var(--space-2);
+  }
+
+  .dashboard[data-view="fleet"] {
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .dashboard[data-view="fleet"] .centre,
+  .dashboard[data-view="item"] .rail-lists {
+    display: none;
+  }
+
+  .dashboard[data-view="item"] .rail {
+    overflow: visible;
+  }
+
+  .dashboard[data-view="item"] .rail-links {
+    flex-flow: row wrap;
+    gap: var(--space-1) var(--space-4);
+  }
+
+  .app:has(.dashboard[data-view="item"]) :is(.app-head, .launch, .notices > .notice) {
+    display: none;
+  }
+
+  .workspace-info.capped {
+    max-height: 30%;
+  }
+}
+
+/* Typing into a terminal with the soft keyboard up, the terminal and the key bar are all there is. */
+.app[data-keyboard]:has(.terminal-host:focus-within)
+  :is(.app-head, .launch, .notices, .rail, .workspace-info, .shell-head, .terminal > p) {
+  display: none;
 }
 
 .fleet,
@@ -242,13 +337,53 @@ main {
 }
 
 /* The rail's links stand alone, so they keep a finger-sized target. */
-.rail > .button-link {
+:is(.rail-links, .rail-lists) > .button-link {
   align-self: flex-start;
   min-height: var(--size-hit-min);
 }
 
 .centre {
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+/* What fills the centre rather than scrolling in it: a workspace or a shell, down to a terminal. */
+.centre > :is(.workspace, .shell),
+.workspace-body,
+.workspace-body > *,
+.dock.dock-open,
+.tabs,
+.tab-panel,
+.tab-panel > .shell,
+.terminal {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Never so short that it has fewer rows than a terminal can have. */
+.terminal-host {
+  flex: 1;
+  min-height: 6rem;
+  /* xterm.js stacks its layers up to z-index 11; kept in here, they stay under the key bar. */
+  isolation: isolate;
+  background: var(--color-terminal-bg);
+}
+
+.workspace-info {
+  flex: 0 1 auto;
+  min-height: 0;
+}
+
+.workspace-info.capped {
+  max-height: 40%;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .workspace-head {
@@ -345,22 +480,49 @@ main {
 
 /* Shells: the dock beside an agent's TUI, the rail's standalone group, and a shell's own pane. */
 .workspace-body {
-  display: grid;
   gap: var(--space-3);
+}
+
+.workspace-body > .terminal {
+  flex: 1 1 0;
+}
+
+.workspace-body > .dock {
+  flex: none;
+}
+
+.workspace-body > .dock.dock-open {
+  flex: 1 1 0;
+}
+
+.workspace-body > .dock:only-child {
+  flex: 1;
 }
 
 /* Side by side only where both fit; a narrow screen stacks them, the dock under the TUI. */
 @media (min-width: 70rem) {
   .workspace-body.dock-right {
-    grid-template-columns: 3fr 2fr;
-    align-items: start;
+    flex-direction: row;
+  }
+
+  .workspace-body.dock-right > .dock {
+    flex: 2 1 0;
   }
 }
 
 .dock,
 .shell {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: var(--space-2);
+}
+
+.dock-head,
+.shell-head,
+.tab-list,
+.shell .attach,
+.workspace > .attach {
+  flex: none;
 }
 
 .dock-head,
@@ -462,20 +624,21 @@ main {
 }
 
 /*
- * The touch key bar, fixed to the bottom and raised above the soft keyboard from script; the room
- * under the page keeps it off the page's end. It scrolls sideways on the narrowest phones rather
- * than shrink a key below the hit size.
+ * The touch key bar, along the app's bottom, which sits on the soft keyboard. It scrolls sideways
+ * on the narrowest phones rather than shrink a key below the hit size.
  */
 .key-bar {
-  position: fixed;
-  left: 0;
-  right: 0;
-  z-index: var(--z-key-bar);
-  padding: var(--space-1);
-  padding-bottom: max(var(--space-1), env(safe-area-inset-bottom));
+  flex: none;
+  padding: var(--space-1) max(var(--space-1), env(safe-area-inset-right))
+    max(var(--space-1), env(safe-area-inset-bottom)) max(var(--space-1), env(safe-area-inset-left));
   overflow-x: auto;
   border-top: 1px solid var(--color-border-strong);
   background: var(--color-bg);
+}
+
+/* The keyboard covers the home indicator. */
+.app[data-keyboard] .key-bar {
+  padding-bottom: var(--space-1);
 }
 
 .key-bar .button {
@@ -484,14 +647,10 @@ main {
   font-family: var(--font-family-mono);
 }
 
-.key-bar-room {
-  height: calc(var(--size-hit-min) + 2 * var(--space-1) + 1px);
-}
-
-/* Where the hidden bar comes back from, raised with it above the soft keyboard. */
+/* Where the hidden bar comes back from, over the app's bottom corner. */
 .key-bar-show {
-  position: fixed;
-  right: var(--space-2);
-  margin-bottom: max(var(--space-2), env(safe-area-inset-bottom));
+  position: absolute;
+  right: max(var(--space-2), env(safe-area-inset-right));
+  bottom: max(var(--space-2), env(safe-area-inset-bottom));
   z-index: var(--z-key-bar);
 }

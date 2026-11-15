@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebglAddon } from "@xterm/addon-webgl";
@@ -17,7 +17,7 @@ import {
   type TuiTheme,
 } from "@bazhen/protocol";
 import { Heartbeat, PING_EVERY_MS } from "./heartbeat.ts";
-import { barBytes, keyBar, settled, withCtrl, type BarTarget } from "./bar-keys.ts";
+import { barBytes, keyBar, withCtrl, type BarTarget } from "./bar-keys.ts";
 import { guardClose } from "./close-guard.ts";
 import { closeNotice, offersInstall, pageNow, thisPlatform } from "../install.ts";
 import { isApple, matchKey } from "./keymap.ts";
@@ -42,18 +42,13 @@ export function TerminalView({
   terminalId,
   kind,
   scheme,
-  height = "70vh",
 }: {
   terminalId: string;
   kind: TerminalKind;
   /** The theme its program was started for, which it is drawn in whatever the page's. */
   scheme: TuiTheme;
-  /** How tall it is drawn, as a CSS length: less when a shell dock shares the screen. */
-  height?: string;
 }) {
   const host = useRef<HTMLDivElement>(null);
-  const bar = keyBar();
-  const layout = useSyncExternalStore(bar.subscribe, bar.layout);
   const [report, setReport] = useState<Report>({ status: { kind: "connecting" }, notice: null });
 
   useEffect(() => {
@@ -63,7 +58,7 @@ export function TerminalView({
 
   const { status, notice } = report;
   return (
-    <section aria-label="terminal">
+    <section aria-label="terminal" className="terminal">
       {status.kind === "ended" ? (
         <p role="alert">{status.message}</p>
       ) : (
@@ -75,17 +70,9 @@ export function TerminalView({
       {notice !== null && <p role="status">{notice}</p>}
       <div
         ref={host}
+        className="terminal-host"
         // xterm.js paints whole rows; the strip below the last one is the host's.
-        style={{
-          // Room for the key bar under it, the same whether the soft keyboard is open or not, so
-          // the keyboard never reflows the TUI.
-          height: layout === null ? height : `calc(${height} - ${layout.bar}px)`,
-          scrollMarginBottom: layout === null ? undefined : `${layout.bar}px`,
-          // xterm.js stacks its layers up to z-index 11; kept in here, they stay under the bar.
-          isolation: "isolate",
-          background: "var(--color-terminal-bg)",
-          colorScheme: scheme,
-        }}
+        style={{ colorScheme: scheme }}
       />
     </section>
   );
@@ -358,36 +345,6 @@ function connect(
     if (!toBar && bar.target() === target) bar.setCtrl(false);
   };
   element.addEventListener("focusout", left);
-  // When the bar shows or the soft keyboard opens or closes, bring a focused terminal into view
-  // with its last row, where a TUI's input sits, above the bar. Once the viewport settles, as
-  // Android resizes it all through its animation; not for a toolbar collapsing or a pinch, which
-  // would pull the page back from where the user panned or zoomed it.
-  let revealing: ReturnType<typeof setTimeout> | undefined;
-  let covered = Math.max(
-    0,
-    window.innerHeight - (window.visualViewport?.height ?? window.innerHeight),
-  );
-  const reveal = () => {
-    if (bar.layout() !== null && target.holdsFocus()) element.scrollIntoView({ block: "end" });
-  };
-  const resized = () => {
-    clearTimeout(revealing);
-    revealing = setTimeout(() => {
-      const viewport = window.visualViewport;
-      const now = viewport === null ? null : settled(covered, window.innerHeight, viewport);
-      if (now === null) return;
-      covered = now.covered;
-      if (now.keyboard) reveal();
-    }, REVEAL_SETTLE_MS);
-  };
-  let layout = bar.layout();
-  const unwatch = bar.subscribe(() => {
-    if (bar.layout() === layout) return;
-    layout = bar.layout();
-    clearTimeout(revealing);
-    revealing = setTimeout(reveal, REVEAL_SETTLE_MS);
-  });
-  window.visualViewport?.addEventListener("resize", resized);
   // A contrast preference can change while it is open; it repaints in place.
   const unfollow = page.subscribe(() => {
     term.options.theme = colours();
@@ -402,9 +359,6 @@ function connect(
     element.removeEventListener("pointerdown", aim);
     element.removeEventListener("focusin", aim);
     element.removeEventListener("focusout", left);
-    unwatch();
-    window.visualViewport?.removeEventListener("resize", resized);
-    clearTimeout(revealing);
     unregister();
     unguard();
     scroll.detach();
@@ -417,9 +371,6 @@ function connect(
     unhook();
   };
 }
-
-/** How long the viewport stays still before a focused terminal is brought into view. */
-const REVEAL_SETTLE_MS = 150;
 
 /**
  * WebGL where it draws correctly, xterm.js's DOM renderer otherwise. Under phone emulation WebGL

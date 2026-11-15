@@ -21,12 +21,10 @@ interface Refusal {
  */
 export function ShellPane({
   shell,
-  height,
   onRestarted,
   failed,
 }: {
   shell: Shell;
-  height: string;
   /** The new shell a restart opened, to show in place of the lost one. */
   onRestarted: (terminalId: string) => void;
   failed: (e: unknown) => void;
@@ -151,7 +149,6 @@ export function ShellPane({
           terminalId={shell.id}
           kind="shell"
           scheme={shell.theme}
-          height={height}
         />
       ) : (
         <p>{NOT_RUNNING[shell.state] ?? "Starting…"}</p>

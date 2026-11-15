@@ -117,6 +117,8 @@ async function launchProbe(page: Page, ...options: string[]): Promise<Probe> {
  */
 async function reopen(page: Page): Promise<void> {
   await page.reload();
+  // Back to the fleet first: a phone shows the list only there, not beside an agent.
+  await page.getByRole("button", { name: "Fleet", exact: true }).click();
   await page.getByRole("list", { name: "agents" }).getByRole("button").last().click();
   await expect.poll(() => screen(page), { timeout: 10_000 }).toContain("key-probe ready");
 }

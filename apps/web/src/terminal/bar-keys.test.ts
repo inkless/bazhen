@@ -1,13 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  barBytes,
-  keyBarStore,
-  lift,
-  settled,
-  wantsKeyBar,
-  withCtrl,
-  type BarKey,
-} from "./bar-keys.ts";
+import { barBytes, keyBarStore, wantsKeyBar, withCtrl, type BarKey } from "./bar-keys.ts";
 import { DEFAULT_KEY_MAP, parseKeyMap, type KeyMap } from "./keymap.ts";
 
 const plain = { keyMap: DEFAULT_KEY_MAP, ctrl: false, appCursor: false };
@@ -164,7 +156,7 @@ describe("key bar store", () => {
     expect(store.ctrl()).toBe(false);
   });
 
-  it("tells subscribers when Ctrl, the views or the layout change, and only then", () => {
+  it("tells subscribers when Ctrl or the views change, and only then", () => {
     const store = keyBarStore();
     const changed = vi.fn<() => void>();
     store.subscribe(changed);
@@ -172,23 +164,7 @@ describe("key bar store", () => {
     store.setCtrl(true);
     store.setCtrl(true);
     store.takeCtrl();
-    store.setLayout({ bar: 53 });
-    store.setLayout({ bar: 53 });
-    store.setLayout(null);
-    expect(changed).toHaveBeenCalledTimes(5);
-  });
-});
-
-describe("lift above the soft keyboard", () => {
-  it("is how far the visible viewport's bottom sits above the layout viewport's", () => {
-    expect(lift(800, { height: 500, offsetTop: 0 })).toBe(300);
-    expect(lift(800, { height: 500, offsetTop: 100 })).toBe(200);
-  });
-
-  it("is zero when nothing covers the page, or the browser has no visual viewport", () => {
-    expect(lift(800, { height: 800, offsetTop: 0 })).toBe(0);
-    expect(lift(800, { height: 820, offsetTop: 0 })).toBe(0);
-    expect(lift(800, null)).toBe(0);
+    expect(changed).toHaveBeenCalledTimes(3);
   });
 });
 
@@ -205,20 +181,5 @@ describe("which devices get the key bar", () => {
   it("leaves it off a touch-screen laptop and a Mac, whose keyboards have every key", () => {
     expect(wantsKeyBar({ coarse: false, maxTouchPoints: 10, userAgent: windows })).toBe(false);
     expect(wantsKeyBar({ coarse: false, maxTouchPoints: 0, userAgent: iPad })).toBe(false);
-  });
-});
-
-describe("the soft keyboard, once the viewport settles", () => {
-  it("is a change of a keyboard's height in how much of the page is covered", () => {
-    expect(settled(0, 800, { height: 450, scale: 1 })).toEqual({ covered: 350, keyboard: true });
-    expect(settled(350, 800, { height: 800, scale: 1 })).toEqual({ covered: 0, keyboard: true });
-  });
-
-  it("is not a toolbar collapsing as the page scrolls", () => {
-    expect(settled(0, 800, { height: 750, scale: 1 })).toEqual({ covered: 50, keyboard: false });
-  });
-
-  it("is never read while the user has zoomed in", () => {
-    expect(settled(0, 800, { height: 300, scale: 2 })).toBeNull();
   });
 });

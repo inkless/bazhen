@@ -12,7 +12,6 @@ import { pageTheme } from "./ui/theme.ts";
 import { Button } from "./ui/Button.tsx";
 import { ShellPane } from "./shells/ShellPane.tsx";
 import { ShellsRail } from "./shells/ShellsRail.tsx";
-import { KeyBar } from "./terminal/KeyBar.tsx";
 
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -90,6 +89,8 @@ export function Dashboard() {
   const open = state?.attention.filter((a) => a.state === "open").length ?? 0;
   const openTasks = state?.tasks.filter((t) => t.state === "open").length ?? 0;
   const opening = { onOpenTask: openTask, onOpenAgent: select, failed };
+  // One thing shown rather than the fleet, which a phone gives the whole screen.
+  const item = inbox || tasks || task !== null || shellId !== null || agent !== undefined;
 
   return (
     <>
@@ -113,61 +114,67 @@ export function Dashboard() {
         </Button>
         <Button onPress={() => launch("codex")}>Launch Codex</Button>
       </form>
-      {actionError !== null && (
-        <p>
-          <span role="alert">{actionError}</span>{" "}
-          <Button variant="link" onPress={() => setActionError(null)}>
-            Dismiss
-          </Button>
-        </p>
-      )}
-      {streamError !== null && <p role="status">{streamError}</p>}
-      {state !== null && <ThemeNotice agents={state.agents} scheme={scheme} failed={failed} />}
-      <div className="dashboard">
+      <div className="notices">
+        {actionError !== null && (
+          <p>
+            <span role="alert">{actionError}</span>{" "}
+            <Button variant="link" onPress={() => setActionError(null)}>
+              Dismiss
+            </Button>
+          </p>
+        )}
+        {streamError !== null && <p role="status">{streamError}</p>}
+        {state !== null && <ThemeNotice agents={state.agents} scheme={scheme} failed={failed} />}
+      </div>
+      <div className="dashboard" data-view={item ? "item" : "fleet"}>
         <nav className="rail" aria-label="fleet">
-          <Button variant="link" onPress={() => select(null)}>
-            Fleet
-          </Button>
-          <Button
-            variant="link"
-            {...(inbox && { "aria-current": "page" as const })}
-            onPress={() => (location.hash = INBOX_HASH)}
-          >
-            {open > 0 ? `Inbox (${open})` : "Inbox"}
-          </Button>
-          <Button
-            variant="link"
-            {...((tasks || task !== null) && { "aria-current": "page" as const })}
-            onPress={() => (location.hash = TASKS_HASH)}
-          >
-            {openTasks > 0 ? `Tasks (${openTasks})` : "Tasks"}
-          </Button>
+          <div className="rail-links">
+            <Button variant="link" onPress={() => select(null)}>
+              Fleet
+            </Button>
+            <Button
+              variant="link"
+              {...(inbox && { "aria-current": "page" as const })}
+              onPress={() => (location.hash = INBOX_HASH)}
+            >
+              {open > 0 ? `Inbox (${open})` : "Inbox"}
+            </Button>
+            <Button
+              variant="link"
+              {...((tasks || task !== null) && { "aria-current": "page" as const })}
+              onPress={() => (location.hash = TASKS_HASH)}
+            >
+              {openTasks > 0 ? `Tasks (${openTasks})` : "Tasks"}
+            </Button>
+          </div>
           <span className="visually-hidden" aria-live="polite">
             {open === 1 ? "1 item needs you" : `${open} items need you`}
           </span>
-          {fleet !== null && (
-            <FleetList
-              fleet={fleet}
-              label="agents"
-              selected={selected}
-              onSelect={select}
-              compact
-              shells={state?.shells ?? []}
-            />
-          )}
-          {fleet !== null && (showEnded || fleet.hidden > 0) && (
-            <Button variant="link" onPress={() => setShowEnded(!showEnded)}>
-              {showEnded ? "Hide ended agents" : `Show ended agents (${fleet.hidden})`}
-            </Button>
-          )}
-          {state !== null && (
-            <ShellsRail
-              shells={state.shells}
-              selected={shellId}
-              onSelect={selectShell}
-              failed={failed}
-            />
-          )}
+          <div className="rail-lists">
+            {fleet !== null && (
+              <FleetList
+                fleet={fleet}
+                label="agents"
+                selected={selected}
+                onSelect={select}
+                compact
+                shells={state?.shells ?? []}
+              />
+            )}
+            {fleet !== null && (showEnded || fleet.hidden > 0) && (
+              <Button variant="link" onPress={() => setShowEnded(!showEnded)}>
+                {showEnded ? "Hide ended agents" : `Show ended agents (${fleet.hidden})`}
+              </Button>
+            )}
+            {state !== null && (
+              <ShellsRail
+                shells={state.shells}
+                selected={shellId}
+                onSelect={selectShell}
+                failed={failed}
+              />
+            )}
+          </div>
         </nav>
         <section className="centre">
           {inbox && state !== null ? (
@@ -177,24 +184,30 @@ export function Dashboard() {
           ) : task !== null && state !== null ? (
             <TaskPage key={task} state={state} taskId={task} {...opening} />
           ) : agent !== undefined && state !== null ? (
-            <>
-              <AgentAttention state={state} agentId={agent.id} onOpen={select} failed={failed} />
-              <AgentTasks
-                state={state}
-                agentId={agent.id}
-                onOpenTask={openTask}
-                onOpenAgent={select}
-              />
-              <Workspace key={agent.id} agent={agent} shells={state.shells} failed={failed} />
-            </>
-          ) : shell !== undefined ? (
-            <ShellPane
-              key={shell.id}
-              shell={shell}
-              height="70vh"
-              onRestarted={selectShell}
+            <Workspace
+              key={agent.id}
+              agent={agent}
+              shells={state.shells}
               failed={failed}
+              about={
+                <>
+                  <AgentAttention
+                    state={state}
+                    agentId={agent.id}
+                    onOpen={select}
+                    failed={failed}
+                  />
+                  <AgentTasks
+                    state={state}
+                    agentId={agent.id}
+                    onOpenTask={openTask}
+                    onOpenAgent={select}
+                  />
+                </>
+              }
             />
+          ) : shell !== undefined ? (
+            <ShellPane key={shell.id} shell={shell} onRestarted={selectShell} failed={failed} />
           ) : shellId !== null && state !== null ? (
             <section aria-label="shell" className="gone">
               <p>This shell is no longer open.</p>
@@ -216,7 +229,6 @@ export function Dashboard() {
           )}
         </section>
       </div>
-      <KeyBar />
     </>
   );
 }
