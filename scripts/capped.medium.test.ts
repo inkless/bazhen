@@ -6,16 +6,21 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, describe, expect, it } from "vitest";
-import { cappedScope } from "../packages/host-guard/src/cap.ts";
-import { KILLS_ENV } from "./capped.ts";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { chooseMode } from "../packages/host-guard/src/cap.ts";
+import { KILLS_ENV, TEST_BINARY_CAP } from "./capped.ts";
 
 const capped = fileURLToPath(new URL("capped.ts", import.meta.url));
 const asRunner = (argv: string[], env: NodeJS.ProcessEnv = process.env) =>
   spawnSync(capped, ["--test-binary", "--", ...argv], { encoding: "utf8", timeout: 60_000, env });
-// Inside a watched run a test binary runs as it is, and the run's watchdog speaks for it.
-const ownScope = cappedScope() !== undefined;
 const dir = mkdtempSync(join(tmpdir(), "bz-capped-"));
+// Whether a test binary gets a scope of its own here. Inside a watched run it runs as it is, and
+// the run's watchdog speaks for it.
+let ownScope: boolean;
+beforeAll(async () => {
+  const chosen = await chooseMode(TEST_BINARY_CAP, true, process.env);
+  ownScope = "mode" in chosen && chosen.mode === "scope";
+});
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 describe("capped as cargo's test runner", () => {
