@@ -1,4 +1,11 @@
-import type { Attention, AttentionKind, StateSnapshot } from "@bazhen/protocol";
+import type {
+  Attention,
+  AttentionKind,
+  Notice,
+  NoticeCloseReason,
+  NoticeDevice,
+  StateSnapshot,
+} from "@bazhen/protocol";
 import { shortId } from "../fleet/model.ts";
 
 export interface InboxRow {
@@ -74,3 +81,31 @@ export const CLOSED: Record<NonNullable<Attention["closeReason"]>, string> = {
   dismissed: "dismissed",
   resent: "sent again",
 };
+
+/** What the inbox calls each notice kind it knows; a later kind shows as a plain notice. */
+const NOTICE_KINDS: ReadonlyMap<string, string> = new Map([["device_paired", "New device"]]);
+
+export const noticeLabel = (kind: string) => NOTICE_KINDS.get(kind) ?? "Notice";
+
+/** Why a closed notice ended, as the inbox says it. */
+export const NOTICE_CLOSED: Record<NoticeCloseReason, string> = {
+  dismissed: "dismissed",
+  revoked: "device revoked",
+};
+
+const newestNoticeFirst = (x: Notice, y: Notice) => y.openedAt.localeCompare(x.openedAt);
+
+/** The open notices, newest first. */
+export const openNotices = (state: StateSnapshot): Notice[] =>
+  state.notices.filter((n) => n.state === "open").toSorted(newestNoticeFirst);
+
+/** The latest closed notices, newest first. */
+export const closedNotices = (state: StateSnapshot, limit = 20): Notice[] =>
+  state.notices
+    .filter((n) => n.state === "closed")
+    .toSorted(newestNoticeFirst)
+    .slice(0, limit);
+
+/** Where a device paired from: its origin, and the address it connected from when known. */
+export const pairedFrom = (device: NoticeDevice): string =>
+  device.address === null ? device.origin : `${device.origin} from ${device.address}`;

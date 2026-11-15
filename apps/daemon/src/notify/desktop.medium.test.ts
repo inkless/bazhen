@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { Inbox } from "../attention/inbox.ts";
 import { Approvals } from "../mailbox/approvals.ts";
-import { withAgent } from "../testing/fixtures.ts";
+import { DEVICE_PAIRED_SUMMARY } from "../store/store.ts";
+import { loopbackPairing, withAgent } from "../testing/fixtures.ts";
 import { notifyOnAttention } from "./desktop.ts";
 import { Presence } from "./presence.ts";
 
@@ -36,5 +37,20 @@ describe("notifying the host's desktop", () => {
       true,
       ["The agent needs you", "A task is done"],
     ]);
+  });
+
+  it("shows a device pairing even while a dashboard is in sight, without the device's name", async () => {
+    const { store } = await withAgent();
+    const presence = new Presence();
+    const shown: string[][] = [];
+    notifyOnAttention(
+      store,
+      presence,
+      (title, body) => shown.push([title, body]),
+      () => 1_000,
+    );
+    presence.report({}, true, 1_000);
+    store.pairDevice("Mallory's phone", "hash", true, new Date(), loopbackPairing);
+    await expect.poll(() => shown).toEqual([["Bazhen", DEVICE_PAIRED_SUMMARY]]);
   });
 });

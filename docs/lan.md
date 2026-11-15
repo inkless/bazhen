@@ -83,6 +83,11 @@ way: loopback keeps serving, and the log and `bazhen doctor` say why.
   takes an address in the range, or a router's port forward, gets past it.
 - Pairing is the authentication: the code works once, for 5 minutes, and each device's attempts
   are limited.
+- Every pairing shows in the inbox as a new device, with the name it gave, the address it paired
+  from and when, and on this machine's desktop. The device itself can never dismiss it, so one
+  that paired with a stolen code can't hide. Another paired device can, or you can on this
+  machine: `bazhen devices` marks each new device, and `bazhen devices dismiss <id>` dismisses
+  its notice. Revoking the device closes its notice too.
 - The listener holds 64 connections, at most 16 from any one device address, and a handshake must
   finish within 10 seconds, so one device can't take every connection.
 - TLS 1.3 only. The certificate can't sign other certificates, so even someone who copies its key

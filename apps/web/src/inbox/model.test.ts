@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
-import type { Attention, AttentionKind, StateSnapshot } from "@bazhen/protocol";
-import { closedRows, openRows, waited } from "./model.ts";
+import type { Attention, AttentionKind, Notice, StateSnapshot } from "@bazhen/protocol";
+import {
+  closedNotices,
+  closedRows,
+  noticeLabel,
+  openNotices,
+  openRows,
+  pairedFrom,
+  waited,
+} from "./model.ts";
 
 let serial = 0;
 const id = <P extends string>(prefix: P) =>
@@ -74,6 +82,46 @@ describe("inbox rows", () => {
       "5 min",
       "3 h",
       "2 d",
+    ]);
+  });
+});
+
+const device = { id: id("dev"), name: "Phone", origin: "https://my-mac.local:7942", address: null };
+const notice = (openedAt: string, over: Partial<Notice> = {}): Notice => ({
+  id: id("ntc"),
+  kind: "device_paired",
+  state: "open",
+  closeReason: null,
+  summary: "A new device paired",
+  openedAt,
+  device,
+  actions: ["dismiss"],
+  ...over,
+});
+
+describe("inbox notices", () => {
+  it("lists open notices newest first, and leaves closed ones to the closed list", () => {
+    const older = notice("2026-11-12T08:00:00.000Z");
+    const newer = notice("2026-11-12T09:00:00.000Z");
+    const gone = notice("2026-11-12T10:00:00.000Z", { state: "closed", closeReason: "revoked" });
+    const state = { ...snapshot([]), notices: [older, gone, newer] };
+    expect([openNotices(state).map((n) => n.id), closedNotices(state).map((n) => n.id)]).toEqual([
+      [newer.id, older.id],
+      [gone.id],
+    ]);
+  });
+
+  it("calls a pairing a new device, and a kind it doesn't know a plain notice", () => {
+    expect([noticeLabel("device_paired"), noticeLabel("certificate_expiring")]).toEqual([
+      "New device",
+      "Notice",
+    ]);
+  });
+
+  it("says where a device paired from, with the address only when the daemon saw one", () => {
+    expect([pairedFrom(device), pairedFrom({ ...device, address: "192.168.1.30" })]).toEqual([
+      "https://my-mac.local:7942",
+      "https://my-mac.local:7942 from 192.168.1.30",
     ]);
   });
 });

@@ -11,6 +11,7 @@ import { currentInputs, resolvePaths } from "@bazhen/daemon/paths";
 import { DaemonError, DaemonUnreachable, answers, call } from "@bazhen/daemon/client";
 import {
   DevicesResponse,
+  DismissNoticeResponse,
   DoctorResponse,
   PairingCodeResponse,
   RevokeDeviceResponse,
@@ -29,7 +30,7 @@ const NOT_RUNNING = 3;
 const STOPPED_WITHIN_MS = 5000;
 /** A daemon that holds a status call this long is wedged, and reported as not answering. */
 const CALL_MS = 5000;
-const USAGE = `usage: bazhen <start|stop|status|doctor|env refresh|pair|devices [revoke <id>]> [--home <dir>] [--port <port>]
+const USAGE = `usage: bazhen <start|stop|status|doctor|env refresh|pair|devices [revoke|dismiss <id>]> [--home <dir>] [--port <port>]
 ${TASK_USAGE}`;
 
 // Not strict: the task verbs take options of their own, which they parse themselves.
@@ -221,7 +222,37 @@ async function pair(): Promise<number> {
   return 0;
 }
 
+/** Each device whose pairing notice is still open, with that notice's id. */
+async function openPairings(): Promise<Map<string, string>> {
+  const state = await call(socket, { method: "GET", path: "/v1/state", reply: StateSnapshot });
+  return new Map(
+    state.notices.flatMap((n) =>
+      n.state === "open" && n.device !== null ? [[n.device.id, n.id] as const] : [],
+    ),
+  );
+}
+
 async function devices(): Promise<number> {
+  if (positionals[1] === "dismiss") {
+    const id = positionals[2];
+    if (id === undefined) {
+      console.error("usage: bazhen devices dismiss <id>");
+      return 2;
+    }
+    const notice = (await openPairings()).get(id);
+    if (notice === undefined) {
+      console.error(`no open pairing notice for ${id}`);
+      return 1;
+    }
+    await call(socket, {
+      method: "POST",
+      path: `/v1/notices/${encodeURIComponent(notice)}/dismiss`,
+      reply: DismissNoticeResponse,
+      body: { idempotencyKey: randomUUID() },
+    });
+    console.log(`dismissed the pairing notice of ${id}`);
+    return 0;
+  }
   if (positionals[1] === "revoke") {
     const id = positionals[2];
     if (id === undefined) {
@@ -241,11 +272,13 @@ async function devices(): Promise<number> {
     return 2;
   }
   const r = await call(socket, { method: "GET", path: "/v1/devices", reply: DevicesResponse });
+  const pending = await openPairings();
   if (r.devices.length === 0) console.log("no paired devices; pair one with `bazhen pair`");
   for (const d of r.devices) {
     const lapsed = Date.parse(d.expiresAt) <= Date.now() ? " (expired)" : "";
+    const fresh = pending.has(d.id) ? " (new: `bazhen devices dismiss` once you know it)" : "";
     console.log(
-      `${d.id}  ${printable(d.name)}  paired ${d.pairedAt}, last used ${d.lastSeenAt}${lapsed}`,
+      `${d.id}  ${printable(d.name)}  paired ${d.pairedAt}, last used ${d.lastSeenAt}${lapsed}${fresh}`,
     );
   }
   return 0;

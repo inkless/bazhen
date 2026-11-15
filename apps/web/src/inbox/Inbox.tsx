@@ -1,8 +1,25 @@
 import { useEffect, useRef, useState, type RefObject, type SubmitEvent } from "react";
-import { SendMessageRequest, type ApprovalDecision, type StateSnapshot } from "@bazhen/protocol";
-import { answer, dismiss, reply, resend } from "../api.ts";
+import {
+  SendMessageRequest,
+  type ApprovalDecision,
+  type Notice,
+  type StateSnapshot,
+} from "@bazhen/protocol";
+import { answer, dismiss, dismissNotice, reply, resend } from "../api.ts";
 import { Button } from "../ui/Button.tsx";
-import { CLOSED, KINDS, closedRows, openRows, waited, type InboxRow } from "./model.ts";
+import {
+  CLOSED,
+  KINDS,
+  NOTICE_CLOSED,
+  closedNotices,
+  closedRows,
+  noticeLabel,
+  openNotices,
+  openRows,
+  pairedFrom,
+  waited,
+  type InboxRow,
+} from "./model.ts";
 import {
   disableNotifications,
   enableNotifications,
@@ -30,9 +47,35 @@ function useNow(): number {
 }
 
 /**
- * One open item, with exactly the actions the daemon offers for it. One request at a time: a
- * second tap, even in the same tick, sends nothing while the first is in flight.
+ * One request at a time: a second tap, even in the same tick, sends nothing while the first is in
+ * flight. `done` runs once it succeeds.
  */
+function useOneAtATime(done: () => void, failed: (e: unknown) => void) {
+  const inFlight = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const act = (request: () => Promise<unknown>) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setBusy(true);
+    const settle = () => {
+      inFlight.current = false;
+      setBusy(false);
+    };
+    request().then(
+      () => {
+        settle();
+        done();
+      },
+      (e: unknown) => {
+        settle();
+        failed(e);
+      },
+    );
+  };
+  return { busy, act };
+}
+
+/** One open item, with exactly the actions the daemon offers for it. */
 function ItemRow({
   row,
   onOpen,
@@ -47,32 +90,14 @@ function ItemRow({
   rowRef: (el: HTMLLIElement | null) => void;
 }) {
   const { item } = row;
-  const inFlight = useRef(false);
-  const [busy, setBusy] = useState(false);
   const [replying, setReplying] = useState(false);
   const [text, setText] = useState("");
   const kind = KINDS[item.kind];
   const now = useNow();
-  const act = (request: () => Promise<unknown>) => {
-    if (inFlight.current) return;
-    inFlight.current = true;
-    setBusy(true);
-    const settle = () => {
-      inFlight.current = false;
-      setBusy(false);
-    };
-    request().then(
-      () => {
-        settle();
-        setReplying(false);
-        acted();
-      },
-      (e: unknown) => {
-        settle();
-        failed(e);
-      },
-    );
-  };
+  const { busy, act } = useOneAtATime(() => {
+    setReplying(false);
+    acted();
+  }, failed);
   const decide = (decision: ApprovalDecision) => act(() => answer(item.id, decision));
   const send = (e: SubmitEvent) => {
     e.preventDefault();
@@ -202,6 +227,40 @@ function ItemList({
   );
 }
 
+/**
+ * A notice no agent raised, such as a device pairing: who, from where, and when. A dismissal is
+ * offered only when the daemon offers it, which it never does to the device a pairing is about.
+ */
+function NoticeRow({ notice, failed }: { notice: Notice; failed: (e: unknown) => void }) {
+  const now = useNow();
+  const { busy, act } = useOneAtATime(() => {}, failed);
+  const label = noticeLabel(notice.kind);
+  const { device } = notice;
+  return (
+    <li className="inbox-item" aria-label={`${label}: ${device?.name ?? notice.summary}`}>
+      <p className="inbox-line">
+        <span className="badge badge-danger">{label}</span>
+        <span className="summary">{device === null ? notice.summary : device.name}</span>
+        {device !== null && <span className="note">{pairedFrom(device)}</span>}
+        <span className="waited">{waited(notice.openedAt, now)}</span>
+      </p>
+      <p className="inbox-actions">
+        {notice.actions.includes("dismiss") ? (
+          <Button
+            variant="quiet"
+            isDisabled={busy}
+            onPress={() => act(() => dismissNotice(notice.id))}
+          >
+            Dismiss
+          </Button>
+        ) : (
+          <span className="note">Dismiss it from another device, or with bazhen devices.</span>
+        )}
+      </p>
+    </li>
+  );
+}
+
 /** One agent's open items, shown above its terminal so an answer sits beside what asked it. */
 export function AgentAttention({
   state,
@@ -251,6 +310,7 @@ export function Inbox({ state, ...acting }: Acting & { state: StateSnapshot }) {
   const [showClosed, setShowClosed] = useState(false);
   const heading = useRef<HTMLHeadingElement>(null);
   const rows = openRows(state);
+  const notices = openNotices(state);
   return (
     <section className="inbox" aria-label="inbox">
       <header className="inbox-head">
@@ -260,7 +320,14 @@ export function Inbox({ state, ...acting }: Acting & { state: StateSnapshot }) {
         <span className="spacer" />
         <NotificationsControl failed={acting.failed} />
       </header>
-      {rows.length === 0 && <p className="empty">Nothing needs you.</p>}
+      {rows.length === 0 && notices.length === 0 && <p className="empty">Nothing needs you.</p>}
+      {notices.length > 0 && (
+        <ul className="inbox-list" aria-label="notices">
+          {notices.map((notice) => (
+            <NoticeRow key={notice.id} notice={notice} failed={acting.failed} />
+          ))}
+        </ul>
+      )}
       <ItemList
         rows={rows}
         label="open items"
@@ -280,6 +347,15 @@ export function Inbox({ state, ...acting }: Acting & { state: StateSnapshot }) {
               {project ?? "An agent"} <span className="id">{agent}</span> {item.summary}
               {item.closeReason !== null && (
                 <span className="waited"> — {CLOSED[item.closeReason]}</span>
+              )}
+            </li>
+          ))}
+          {closedNotices(state).map((notice) => (
+            <li key={notice.id}>
+              <span className="badge badge-plain">{noticeLabel(notice.kind)}</span>{" "}
+              {notice.device?.name ?? notice.summary}
+              {notice.closeReason !== null && (
+                <span className="waited"> — {NOTICE_CLOSED[notice.closeReason]}</span>
               )}
             </li>
           ))}
