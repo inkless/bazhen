@@ -34,7 +34,7 @@ export function testHome(env: NodeJS.ProcessEnv = process.env): string {
   if (home === undefined || run === undefined || markerIn(home) !== run) {
     throw new Error(
       `Refusing BAZHEN_HOME=${home ?? "(unset)"}: holder tests run only under the temporary ` +
-        "home their run makes. Run them with pnpm test:holder.",
+        "home their run makes. Run them with pnpm test:real holder.",
     );
   }
   return home;

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { onDisposableHost, requireDisposableHost } from "./disposable-host.ts";
+import {
+  onDisposableHost,
+  requireDisposableHost,
+  requireSignalSandbox,
+} from "./disposable-host.ts";
 
 describe("the disposable-host check", () => {
   it("accepts only a Linux host that carries root's marker", () => {
@@ -12,5 +16,12 @@ describe("the disposable-host check", () => {
   it("refuses to start a suite off a disposable host, naming the command to use", () => {
     expect(() => requireDisposableHost(false)).toThrow("pnpm test:real");
     expect(() => requireDisposableHost(true)).not.toThrow();
+  });
+});
+
+describe("the signal-sandbox check", () => {
+  it("refuses to start the holder suite off a sandbox, naming the command to use", () => {
+    expect(() => requireSignalSandbox(false)).toThrow("pnpm test:real holder");
+    expect(() => requireSignalSandbox(true)).not.toThrow();
   });
 });

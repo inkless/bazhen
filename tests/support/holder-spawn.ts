@@ -17,6 +17,7 @@ import {
   testHome,
   userDir,
 } from "./holder-home.ts";
+import { requireSignalSandbox } from "./disposable-host.ts";
 import { record } from "./holder-ledger.ts";
 
 /** Runs `argv` to its end in the run's HOME, with `env`, which `requireHolderEnv` must pass. */
@@ -107,6 +108,7 @@ export async function spawnHolder(
   argv: readonly [string, ...string[]],
   { theme }: { readonly theme?: HolderTheme } = {},
 ): Promise<SpawnedHolder> {
+  requireSignalSandbox();
   const socket = holderSocket(terminalId);
   const spec = {
     protocol: [HOLDER_PROTOCOL_VERSION],

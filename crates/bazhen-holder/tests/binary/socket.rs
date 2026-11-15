@@ -149,7 +149,9 @@ fn pid(raw: u64) -> Result<Pid> {
 }
 
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn says_ready_once_its_socket_takes_connections_that_only_its_user_may_make() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("bound").unwrap();
     let (_holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
@@ -159,7 +161,9 @@ fn says_ready_once_its_socket_takes_connections_that_only_its_user_may_make() {
 }
 
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn refuses_a_directory_others_may_enter_with_exit_6_writing_nothing() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("open-dir").unwrap();
     std::fs::set_permissions(&*home, std::fs::Permissions::from_mode(0o750)).unwrap();
@@ -175,7 +179,9 @@ fn refuses_a_directory_others_may_enter_with_exit_6_writing_nothing() {
 }
 
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn a_second_holder_for_a_terminal_exits_7_and_the_first_keeps_its_socket() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("twice").unwrap();
     let (_first, socket) = serving(&home, &["sleep", "30"]).unwrap();
@@ -190,7 +196,9 @@ fn a_second_holder_for_a_terminal_exits_7_and_the_first_keeps_its_socket() {
 }
 
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn refuses_a_socket_path_that_is_relative_or_too_long_with_exit_2() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("path").unwrap();
     let long = format!("/tmp/{}.sock", "a".repeat(100));
@@ -204,7 +212,9 @@ fn refuses_a_socket_path_that_is_relative_or_too_long_with_exit_2() {
 }
 
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn replaces_a_dead_holders_socket() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("stale").unwrap();
     drop(UnixListener::bind(home.join("t1.sock")).unwrap());
@@ -214,7 +224,9 @@ fn replaces_a_dead_holders_socket() {
 
 /// The holder binds under a umask of its own; the child must get the spawner's back.
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn the_child_gets_the_spawners_umask() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("umask").unwrap();
     let report = home.join("umask");
@@ -230,7 +242,9 @@ fn the_child_gets_the_spawners_umask() {
 }
 
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn a_program_that_cant_start_leaves_no_socket_behind() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("no-program").unwrap();
     let mut holder = spawn(
@@ -243,7 +257,9 @@ fn a_program_that_cant_start_leaves_no_socket_behind() {
 }
 
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn says_ready_only_once_its_socket_answers_with_who_it_is() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("hello").unwrap();
     // exec keeps a process's start, so the holder's predates its child's by a second at least,
@@ -272,7 +288,9 @@ fn says_ready_only_once_its_socket_answers_with_who_it_is() {
 }
 
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn hands_the_writer_slot_to_one_connection_at_a_time() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("writer").unwrap();
     let (_holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
@@ -305,7 +323,9 @@ fn hands_the_writer_slot_to_one_connection_at_a_time() {
 }
 
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn takes_nothing_before_hello_and_no_second_hello() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("order").unwrap();
     let (_holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
@@ -322,7 +342,9 @@ fn takes_nothing_before_hello_and_no_second_hello() {
 }
 
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn tells_a_client_it_shares_no_major_with_the_versions_it_speaks() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("major").unwrap();
     let (_holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
@@ -339,7 +361,9 @@ fn tells_a_client_it_shares_no_major_with_the_versions_it_speaks() {
 }
 
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn answers_a_request_it_does_not_serve_and_one_it_does_not_know() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("unserved").unwrap();
     let (_holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
@@ -369,7 +393,9 @@ fn answers_a_request_it_does_not_serve_and_one_it_does_not_know() {
 }
 
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn a_malformed_frame_ends_only_its_own_connection() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("malformed").unwrap();
     let (_holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
@@ -387,7 +413,9 @@ fn a_malformed_frame_ends_only_its_own_connection() {
 }
 
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn close_answers_ok_ends_the_child_removes_the_socket_and_exits_0() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("close").unwrap();
     let (mut holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
@@ -415,7 +443,9 @@ fn close_answers_ok_ends_the_child_removes_the_socket_and_exits_0() {
 }
 
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn binds_its_socket_again_on_sigusr1_and_unprompted() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("rebind").unwrap();
     let (holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
@@ -437,7 +467,9 @@ fn binds_its_socket_again_on_sigusr1_and_unprompted() {
 }
 
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn a_storm_of_sigusr1_during_a_flood_loses_no_output() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("storm").unwrap();
     let flood: u64 = 20 << 20;
@@ -458,7 +490,9 @@ fn a_storm_of_sigusr1_during_a_flood_loses_no_output() {
 }
 
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn makes_room_for_a_new_connection_when_every_one_is_in_use() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("full").unwrap();
     let (_holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
@@ -525,7 +559,9 @@ fn write_behind(client: &Client, count: u32) -> Result<std::thread::JoinHandle<(
 }
 
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn a_request_whose_body_fails_is_answered_invalid_and_its_connection_hung_up() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("bad-body").unwrap();
     let (_holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
@@ -547,7 +583,9 @@ fn a_request_whose_body_fails_is_answered_invalid_and_its_connection_hung_up() {
 /// Out of fds, an accept fails; the holder pauses accepting for a second and then serves on,
 /// idle, rather than spinning: under `ulimit -t 2` a spinning holder dies within the window.
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn a_failed_accept_pauses_accepting_and_leaves_the_holder_idle() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("emfile").unwrap();
     let how = Start {
@@ -576,7 +614,9 @@ fn a_failed_accept_pauses_accepting_and_leaves_the_holder_idle() {
 /// A writer that pipelines requests, reads nothing and goes is dropped by a failed write, not
 /// by its read; its slot must still be freed.
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn frees_the_writer_slot_of_a_connection_dropped_by_a_failed_write() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("writer-gone").unwrap();
     let (_holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
@@ -597,7 +637,9 @@ fn frees_the_writer_slot_of_a_connection_dropped_by_a_failed_write() {
 
 /// Requests read past the mark wait for their peer to read, and are then all answered, in order.
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn answers_every_pipelined_request_in_order_past_the_mark() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("waited").unwrap();
     let (_holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
@@ -616,7 +658,9 @@ fn answers_every_pipelined_request_in_order_past_the_mark() {
 /// A closed holder keeps the terminal's lock until it exits, so no second holder starts a child
 /// for the terminal while the first one's may still run.
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn a_closing_holder_keeps_the_terminal_until_its_child_has_ended() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("closing").unwrap();
     let argv = ["sh", "-c", "trap '' HUP; echo armed; exec sleep 30"];
@@ -640,7 +684,9 @@ fn a_closing_holder_keeps_the_terminal_until_its_child_has_ended() {
 /// With every connection open and reading, a new one still gets in: it replaces the oldest that
 /// doesn't hold the writer slot, so no one can lock the daemon out.
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn a_full_holder_of_healthy_connections_still_takes_a_new_one() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("healthy").unwrap();
     let (_holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
@@ -665,7 +711,9 @@ fn a_full_holder_of_healthy_connections_still_takes_a_new_one() {
 /// A spawner that left `SIGCHLD` and `SIGUSR1` blocked mustn't leave the holder deaf to either.
 /// The child leaves the terminal held open as it exits, so only `SIGCHLD` can tell the holder.
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn hears_its_signals_though_the_spawner_blocked_them() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("blocked").unwrap();
     let how = Start {
@@ -704,7 +752,9 @@ fn hears_its_signals_though_the_spawner_blocked_them() {
 /// A newcomer to a full holder is safe for a moment, read or not, so the next one can't replace
 /// it, whichever turns the two arrive in.
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn a_newcomer_is_safe_from_the_next_while_it_is_new() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("newcomer").unwrap();
     let (_holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
@@ -730,7 +780,9 @@ fn a_newcomer_is_safe_from_the_next_while_it_is_new() {
 /// A peer that has left its buffer full for over a second is the one a newcomer replaces, ahead
 /// of the oldest connection.
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn a_newcomer_replaces_the_peer_that_stopped_reading_first() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("stuck").unwrap();
     let (_holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
@@ -771,7 +823,9 @@ fn a_newcomer_replaces_the_peer_that_stopped_reading_first() {
 
 /// A connection that never reads what it is owed holds up a close for a second at most.
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn a_close_waits_for_a_reader_that_never_reads_for_a_second_at_most() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("flush").unwrap();
     let (mut holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
@@ -886,7 +940,9 @@ fn is_ok(reply: &Reply) -> bool {
 }
 
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn streams_every_byte_of_the_childs_output_in_order_then_its_exit() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("seq").unwrap();
     // With `-onlcr` the terminal passes each newline on as it is: a BSD one whose output queue
@@ -906,7 +962,9 @@ fn streams_every_byte_of_the_childs_output_in_order_then_its_exit() {
 }
 
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn a_subscription_from_output_the_ring_dropped_gets_a_gap_then_the_rest() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("dropped").unwrap();
     let flood: u64 = 3_000_000;
@@ -937,7 +995,9 @@ fn a_subscription_from_output_the_ring_dropped_gets_a_gap_then_the_rest() {
 }
 
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn refuses_a_subscription_from_another_generation_or_past_its_output() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("refused").unwrap();
     let (_holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
@@ -956,7 +1016,9 @@ fn refuses_a_subscription_from_another_generation_or_past_its_output() {
 /// was read standing as a gap: nothing is lost unaccounted for, whatever the rates. This runs on
 /// macOS too, where a socket's buffer starts at 8 KiB.
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn a_subscriber_to_a_flood_is_sent_all_of_it_in_order_or_told_of_a_gap() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("keepup").unwrap();
     let flood: u64 = 50_000_000;
@@ -985,7 +1047,9 @@ fn a_subscriber_to_a_flood_is_sent_all_of_it_in_order_or_told_of_a_gap() {
 /// The holder never stops reading the child for a subscriber that has stopped reading: another
 /// connection sees the flood end, and the stalled one, once it reads again, gets a gap.
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn a_subscriber_that_stops_reading_holds_up_neither_the_child_nor_anyone_else() {
+    bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("stalled").unwrap();
     let flood: u64 = 8_000_000;

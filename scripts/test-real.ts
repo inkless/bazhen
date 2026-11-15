@@ -34,9 +34,11 @@ const SUITES = {
   api: "test:api",
   e2e: "test:e2e",
   falsify: "test:falsify",
+  rust: "test:rust:all",
+  holder: "test:holder",
 } as const;
 type Suite = keyof typeof SUITES;
-const DEFAULT_SUITES: Suite[] = ["integration", "api", "e2e"];
+const DEFAULT_SUITES: Suite[] = ["integration", "api", "e2e", "holder", "rust"];
 const DEFAULT_BASE = "origin/main";
 /** What falsify's base is called inside the image, whatever it was called here. */
 const BASE_REF = "refs/remotes/origin/main";

@@ -31,6 +31,7 @@ import {
   rustFailures,
   signalChokepointFailures,
   testSignalDependencyFailures,
+  unmarkedSignallingTests,
   skillFailures,
   unsafeModuleFailures,
 } from "./check-standards.ts";
@@ -1521,6 +1522,53 @@ describe("the signal chokepoints", () => {
   it("names a chokepoint that no longer exists", () => {
     expect(signalChokepointFailures(CHOKEPOINTS.slice(1), () => "")).toEqual([
       "scripts/signal-paths.ts: SIGNAL_CHOKEPOINTS lists missing packages/host-guard/src/signal.ts.",
+    ]);
+  });
+});
+
+const unmarked = (sources: Record<string, string>) =>
+  unmarkedSignallingTests(Object.keys(sources), (f) => sources[f] ?? "").map(
+    (f) => f.split(": ")[0],
+  );
+
+describe("tests that signal processes they didn't start", () => {
+  const MARK = '#[ignore = "signals processes; runs in pnpm test:real rust"]';
+  const marked = `#[test]\n${MARK}\nfn m() {\n    bazhen_test_signal::require_sandbox().unwrap();\n}`;
+
+  it("must be marked in a binary that runs the holder, in any of its files", () => {
+    expect(
+      unmarked({
+        "crates/h/tests/binary/main.rs":
+          'const BIN: &str = env!("CARGO_BIN_EXE_bazhen-holder");\n#[test]\nfn a() {}',
+        "crates/h/tests/binary/socket.rs": `#[test]\nfn b() {}\n${marked}`,
+        "crates/h/tests/other.rs": "#[test]\nfn c() {}",
+      }),
+    ).toEqual(["crates/h/tests/binary/main.rs:2", "crates/h/tests/binary/socket.rs:1"]);
+  });
+
+  it("must be marked anywhere when its own body closes a child or sweeps the ledger", () => {
+    const source = [
+      "#[test]\nfn a() { running.child.close(group, now); }",
+      "#[test]\nfn b() { child.close_step(group, now); }",
+      "#[test]\nfn c() { sweep().unwrap(); }",
+      "#[test]\nfn d() { let x = 1; }",
+      marked.replace("fn m() {", "fn e() {\n    child.close(group, now);"),
+    ].join("\n");
+    expect(unmarked({ "crates/h/src/child.rs": source })).toEqual([
+      "crates/h/src/child.rs:1",
+      "crates/h/src/child.rs:3",
+      "crates/h/src/child.rs:5",
+    ]);
+  });
+
+  it("isn't marked by another ignore, or by the reason in a string", () => {
+    const source = [
+      '#[test]\n#[ignore = "slow"]\nfn a() { sweep(); }',
+      `#[test]\nfn b() { let s = "${MARK.replaceAll('"', '\\"')}"; sweep(); }`,
+    ].join("\n");
+    expect(unmarked({ "crates/h/tests/x.rs": source })).toEqual([
+      "crates/h/tests/x.rs:1",
+      "crates/h/tests/x.rs:4",
     ]);
   });
 });

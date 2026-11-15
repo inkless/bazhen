@@ -1937,6 +1937,68 @@ function checkRust(): void {
   );
 }
 
+/** The index just past the `}` that closes the `{` just before `from`, or the end of `code`. */
+function closingBrace(code: string, from: number): number {
+  let depth = 1;
+  for (let i = from; i < code.length; i++) {
+    if (code[i] === "{") depth++;
+    else if (code[i] === "}" && --depth === 0) return i + 1;
+  }
+  return code.length;
+}
+
+// What signals processes a test didn't start: a holder, which signals its child's whole
+// session when it closes; a child's close; and the ledger sweep, which kills holders.
+const HOLDER_BINARY = "CARGO_BIN_EXE_bazhen-holder";
+const SIGNALLING_CALL = /\.\s*close(?:_step)?\s*\(|\bsweep\s*\(/;
+
+/** A Rust test file's test binary: `tests/<name>.rs`, or every file under `tests/<name>/`. */
+const testBinary = (file: string) => /^(crates\/[^/]+\/tests\/[^/.]+)/.exec(file)?.[1];
+
+/**
+ * Each Rust test that signals processes it didn't start but isn't ignored as doing so: every
+ * test of a binary that runs the holder, and any whose own body closes a child or sweeps the
+ * ledger. Such a test runs only on a disposable host (docs/standards/testing.md § Hermeticity).
+ */
+export function unmarkedSignallingTests(
+  files: readonly string[],
+  read: (file: string) => string,
+): string[] {
+  const rust = files.filter((f) => /^crates\/.+\.rs$/.test(f) && !f.includes("/fuzz/"));
+  const holderBinaries = new Set(
+    rust.flatMap((f) => (read(f).includes(HOLDER_BINARY) ? [testBinary(f) ?? ""] : [])),
+  );
+  holderBinaries.delete("");
+  return rust.flatMap((file) => {
+    const strings: string[] = [];
+    const code = rustCode(read(file), strings);
+    const wholeBinary = holderBinaries.has(testBinary(file) ?? "");
+    const out: string[] = [];
+    for (const test of code.matchAll(/#\s*\[\s*test\s*\]/g)) {
+      const bodyStart = fnBodyStart(code, test.index);
+      const body = code.slice(bodyStart, closingBrace(code, bodyStart));
+      if (!wholeBinary && !SIGNALLING_CALL.test(body)) continue;
+      const before = code.slice(0, bodyStart);
+      const itemStart =
+        Math.max(before.lastIndexOf("}", test.index), before.lastIndexOf(";", test.index)) + 1;
+      const marked = [...before.slice(itemStart).matchAll(/#\s*\[\s*ignore\s*=\s*""\s*\]/g)].some(
+        (m) =>
+          strings[(code.slice(0, itemStart + m.index).match(/""/g) ?? []).length] ===
+          SIGNALS_IGNORE,
+      );
+      if (!marked) {
+        out.push(
+          `${file}:${code.slice(0, test.index).split("\n").length}: this test signals processes it ` +
+            `didn't start (${wholeBinary ? "its binary runs the holder" : "it closes a child or sweeps the ledger"}), ` +
+            `so it carries #[ignore = "${SIGNALS_IGNORE}"] and starts with ` +
+            "`bazhen_test_signal::require_sandbox().unwrap();` (docs/standards/testing.md).",
+        );
+      }
+    }
+    return out;
+  });
+}
+
 /** The lines of Rust source that are test code: under `#[cfg(test)]`. */
 function testLines(source: string): Set<number> {
   const all = rustCode(source).split("\n");
@@ -2007,10 +2069,11 @@ export function signalChokepointFailures(
   return out;
 }
 
+const readRepoFile = (p: string) => readFileSync(join(root, p), "utf8");
+
 function checkSignalChokepoints(): void {
-  failures.push(
-    ...signalChokepointFailures(repoFiles(), (p) => readFileSync(join(root, p), "utf8")),
-  );
+  failures.push(...signalChokepointFailures(repoFiles(), readRepoFile));
+  failures.push(...unmarkedSignallingTests(repoFiles(), readRepoFile));
 }
 
 function checkCappedScripts(): void {

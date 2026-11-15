@@ -47,12 +47,26 @@ function fakes(owner: Start, overrides: Partial<SweepDeps> = {}) {
       return true;
     },
     now: Date.now,
+    sandboxed: () => true,
     ...overrides,
   };
   return { deps, killed };
 }
 
 describe("the holder ledger", () => {
+  it("refuses to sweep off a disposable host, before it reads the ledger", async () => {
+    const listed: string[] = [];
+    const { deps, killed } = fakes("absent", {
+      sandboxed: () => false,
+      list: (dir) => {
+        listed.push(dir);
+        return [];
+      },
+    });
+    await expect(sweep("/nonexistent/ledger", deps)).rejects.toThrow("pnpm test:real holder");
+    expect([listed, killed]).toEqual([[], []]);
+  });
+
   it("reads and writes the entry the Rust binary tests do", () => {
     expect(parseEntry("4242", FIXTURE)).toEqual(ENTRY);
     expect(entryText(ENTRY)).toBe(FIXTURE);

@@ -55,6 +55,11 @@ KILLED by one of those mutants or named by a `Control:` trailer you recorded by 
 - **Don't wait with `sleep`.** Bound the wait instead, as the socket tests do with a read timeout,
   so a hang fails fast with what it saw.
 - **nextest runs each test in its own process,** so a test can't lean on state another left.
+- **A test that starts the holder, closes a child or sweeps the ledger signals processes it
+  didn't start,** so it is `#[ignore = "signals processes; runs in pnpm test:real rust"]` and its
+  first line is `bazhen_test_signal::require_sandbox().unwrap();`; `pnpm check` requires both.
+  Run it with `pnpm test:real rust`, never on the host, and send any signal through
+  `bazhen_test_signal`.
 - **Never snapshot screen contents.** insta is for protocol frames only; assert the bytes that
   matter.
 
