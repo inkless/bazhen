@@ -11,11 +11,19 @@ const RC_LINE: Record<IntegratedShell, string> = {
 
 /**
  * Each test shell's rc: a prompt that shows the last line's status, around the integration's line,
- * as a prompt framework would. bash's prompt command is already set, ending in `;`.
+ * as a prompt framework would. bash's prompt reads the status in a prompt command set before the
+ * integration's line, one that hands the status on and ends in `;`, and in one added after it, and
+ * shows the lower of the two, so a hook that hands on another status shows 0 wherever it runs.
  */
 const RC: Record<IntegratedShell, string> = {
   zsh: `${RC_LINE.zsh}\nPS1='[st=%?] '`,
-  bash: `PROMPT_COMMAND='history -a;'\n${RC_LINE.bash}\nPS1='[st=$?] '`,
+  bash: [
+    "__before_hook() { __before=$?; return $__before; }",
+    "PROMPT_COMMAND='__before_hook;'",
+    RC_LINE.bash,
+    "PROMPT_COMMAND+=$'\\n''__after=$?'",
+    "PS1='[st=$(( __before < __after ? __before : __after ))] '",
+  ].join("\n"),
   fish: `${RC_LINE.fish}\nfunction fish_prompt; echo -n "[st=$status] "; end`,
 };
 
