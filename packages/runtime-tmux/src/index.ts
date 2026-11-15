@@ -669,7 +669,7 @@ export class TmuxRuntime implements RuntimeAdapter {
    * Through host-guard's `paste`, on tmux's stdin: the text never reaches argv, and a failure's
    * error carries none of what tmux printed, which could quote it.
    */
-  async paste(ref: RuntimeRef, text: string): Promise<void> {
+  async paste(ref: RuntimeRef, text: string, brackets: boolean): Promise<void> {
     const pane = await this.paneOf(ref);
     if (pane.exit !== null) throw new ProcessState(ref.terminalId, "running");
     assertSameGeneration(ref, pane.ref.locator.generation);
@@ -677,13 +677,15 @@ export class TmuxRuntime implements RuntimeAdapter {
     if (pane.ref.locator.panePid !== ref.locator.panePid)
       throw new StaleIncarnation(ref.terminalId, "process-replaced");
     const target = located(pane.ref, "paneId");
-    await this.opts.server.paste(target, text, { env: this.env }).catch((cause: unknown) => {
-      if (cause instanceof RangeError) throw cause;
-      const of = (key: string): unknown =>
-        typeof cause === "object" && cause !== null ? Reflect.get(cause, key) : undefined;
-      const status = { code: of("code"), killed: of("killed"), signal: of("signal") };
-      throw new TmuxError(["paste-buffer", "-t", target], status);
-    });
+    await this.opts.server
+      .paste(target, text, brackets, { env: this.env })
+      .catch((cause: unknown) => {
+        if (cause instanceof RangeError) throw cause;
+        const of = (key: string): unknown =>
+          typeof cause === "object" && cause !== null ? Reflect.get(cause, key) : undefined;
+        const status = { code: of("code"), killed: of("killed"), signal: of("signal") };
+        throw new TmuxError(["paste-buffer", "-t", target], status);
+      });
   }
 
   async signal(ref: RuntimeRef, signal: Signal): Promise<void> {

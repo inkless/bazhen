@@ -82,26 +82,44 @@ describe("environmentScript", () => {
 });
 
 describe("pasteScript", () => {
-  it("pastes the text as one single-quoted word, bracketed, and deletes its buffer", () => {
-    expect(pasteScript("b-1", "%7", `echo "$HOME" 'a  b'; #{pane_id}`)).toBe(
-      `set-buffer -b b-1 -- 'echo "$HOME" '\\''a  b'\\''; #{pane_id}'\n` +
-        "paste-buffer -p -d -b b-1 -t %7\n",
+  const hostile = `echo "$HOME" 'a  b'; #{pane_id}`;
+  const set = `set-buffer -b b-1 -- 'echo "$HOME" '\\''a  b'\\''; #{pane_id}'\n`;
+
+  it("pastes the text as one single-quoted word, bracketed as the program asks, and deletes its buffer", () => {
+    expect(pasteScript("b-1", "%7", hostile, false)).toBe(
+      `${set}paste-buffer -p -d -b b-1 -t %7\n`,
+    );
+  });
+
+  it("marks the paste with the bracketed-paste sequences itself when asked to", () => {
+    expect(pasteScript("b-1", "%7", hostile, true)).toBe(
+      set +
+        "send-keys -t %7 -H 1b 5b 32 30 30 7e\n" +
+        "paste-buffer -d -b b-1 -t %7\n" +
+        "send-keys -t %7 -H 1b 5b 32 30 31 7e\n",
     );
   });
 
   it.each(["make\n", "make\r", "a\tb", "\u001b[D", "\u007f", "\0", "\u009b2J", "\u0085"])(
     "refuses text holding a key rather than text: %j",
     (text) => {
-      expect(() => pasteScript("b", "%1", text)).toThrow(/control character$/);
+      expect(() => pasteScript("b", "%1", text, false)).toThrow(/control character$/);
+      expect(() => pasteScript("b", "%1", text, true)).toThrow(/control character$/);
     },
   );
+
+  it("refuses text that would end a marked paste early, so what follows is typed as keys", () => {
+    expect(() => pasteScript("b", "%1", "a\u001b[201~rm -rf ~", true)).toThrow(
+      /control character$/,
+    );
+  });
 
   it.each([
     ["b c", "%1"],
     ["b", "%1; kill-server"],
     ["b", "main"],
   ])("refuses a buffer or pane that isn't a plain name or id: %j %j", (buffer, target) => {
-    expect(() => pasteScript(buffer, target, "make")).toThrow(RangeError);
+    expect(() => pasteScript(buffer, target, "make", false)).toThrow(RangeError);
   });
 });
 

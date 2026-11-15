@@ -15,8 +15,11 @@ const afterTimeout: After = (ms, run) => {
 };
 
 export interface RetypeDeps {
-  /** Types the line at the prompt of the shell `ref` names, without Enter. */
-  readonly paste: (ref: RuntimeRef, line: string) => Promise<void>;
+  /**
+   * Types the line at the prompt of the shell `ref` names, without Enter, marked as a paste with
+   * the bracketed-paste sequences when `brackets` is true.
+   */
+  readonly paste: (ref: RuntimeRef, line: string, brackets: boolean) => Promise<void>;
   readonly log: (message: string) => void;
   readonly after?: After;
 }
@@ -24,7 +27,8 @@ export interface RetypeDeps {
 interface Pending {
   readonly line: string;
   ref: RuntimeRef | null;
-  prompted: boolean;
+  /** Null until the shell reports its prompt; then whether its editor reads a marked paste. */
+  brackets: boolean | null;
   readonly cancelExpiry: () => void;
 }
 
@@ -49,7 +53,7 @@ export class PendingRetypes {
       if (this.pending.delete(terminalId))
         this.skipped(terminalId, `no prompt reported within ${RETYPE_WITHIN_MS / 1000} s`);
     });
-    this.pending.set(terminalId, { line, ref: null, prompted: false, cancelExpiry });
+    this.pending.set(terminalId, { line, ref: null, brackets: null, cancelExpiry });
   }
 
   /** The shell started as `ref`; a prompt it reported meanwhile gets its line now. */
@@ -57,14 +61,14 @@ export class PendingRetypes {
     const held = this.pending.get(terminalId);
     if (held === undefined) return;
     held.ref = ref;
-    if (held.prompted) this.type(terminalId, held);
+    if (held.brackets !== null) this.type(terminalId, held);
   }
 
   /** The shell reported its first prompt: its line is typed, once it is known where. */
-  prompted(terminalId: string): void {
+  prompted(terminalId: string, brackets: boolean): void {
     const held = this.pending.get(terminalId);
     if (held === undefined) return;
-    held.prompted = true;
+    held.brackets = brackets;
     if (held.ref !== null) this.type(terminalId, held);
   }
 
@@ -85,7 +89,7 @@ export class PendingRetypes {
       return;
     }
     this.deps
-      .paste(held.ref, held.line)
+      .paste(held.ref, held.line, held.brackets === true)
       .catch((err: unknown) => this.skipped(terminalId, errorName(err)));
   }
 

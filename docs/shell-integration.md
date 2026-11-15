@@ -50,12 +50,15 @@ A lost shell whose last line was kept offers **Restart and retype last command**
 line appears there exactly as you typed it, `$VARIABLES` and quoting untouched. Enter is never
 pressed: you read the line, edit it if you like, and run it yourself.
 
-Bazhen types it as a paste, bracketed when the line editor asked for bracketed paste, so the
-editor inserts it as text. zsh, fish and bash 5.1 or later ask for it by default. bash 4.4 and
-5.0 don't, nor does an editor with it turned off (`set enable-bracketed-paste off` in
-`~/.inputrc`, or an empty `zle_bracketed_paste` in zsh): there the line arrives as keys, so a key
-you bound to something else, as `magic-space` or a fish abbreviation, does that instead. Nothing
-in the line is ever Enter.
+Bazhen types it as a paste, marked with the bracketed-paste sequences, so the line editor inserts
+it as text rather than taking it as keys, however long your prompt takes to draw. That holds
+wherever the editor takes those sequences as a paste: fish always does, zsh unless you rebound
+them, and bash when `enable-bracketed-paste` is on, as it is by default from bash 5.1. Elsewhere
+(bash 4.4 and 5.0, or bracketed paste turned off in `~/.inputrc`), Bazhen marks the paste only if
+the editor has asked for bracketed paste by the time it types it, and otherwise the line arrives
+as keys: a key you bound to something else, as `magic-space`, does that instead. Either way the
+line holds no newline, escape or other control character, so it is never Enter and can't end the
+paste early.
 
 The new shell must load the integration too, since it tells Bazhen when its line editor is
 reading. A prompt that takes more than 10 seconds to draw gets no line typed back. If no prompt is
@@ -65,8 +68,9 @@ a daemon restart in between loses it.
 
 ## What it sends, and what it doesn't
 
-Before each line runs, the shell starts `bazhen-hook shell-report` in the background and passes
-it the line on its stdin. The client sends the line to the daemon over its Unix socket, and exits
+Before each line runs, the shell starts `bazhen-hook shell-report` and passes it the line on its
+stdin; the client hands it to a copy of itself in the background and returns at once, so your `$!`
+stays yours. The client sends the line to the daemon over its Unix socket, and exits
 within a second whatever the daemon does, so a slow or stopped daemon never holds up your prompt.
 The line is never a process argument, so `ps` never shows it.
 
@@ -85,9 +89,10 @@ The line is never a process argument, so `ps` never shows it.
   counting for longer than that.
 - **One line per shell.** Each new line replaces the last.
 - **At the first prompt, the shell says so**, once, with `bazhen-hook shell-prompt`. It carries
-  the shell's token and nothing else. It waits, in the background, until the prompt is drawn and
-  the shell's line editor has taken the terminal, up to 10 seconds, so a line is never typed back
-  while the terminal would echo it twice or before the editor asks for a bracketed paste.
+  the shell's token, and whether the shell's editor takes the bracketed-paste sequences as a paste.
+  Its copy waits in the background until the line editor has taken the terminal, up to 10 seconds
+  and no longer than the shell lives, so a line is never typed back while the terminal would echo
+  it twice.
 
 ## Where it is kept, and for how long
 

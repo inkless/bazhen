@@ -188,8 +188,8 @@ export class LocalEnvironment implements EnvironmentAdapter {
     return this.opts.runtime.unlink(ref);
   }
 
-  pasteShell(ref: RuntimeRef, text: string): Promise<void> {
-    return this.opts.runtime.paste(ref, text);
+  pasteShell(ref: RuntimeRef, text: string, brackets: boolean): Promise<void> {
+    return this.opts.runtime.paste(ref, text, brackets);
   }
 
   private get shell(): string {

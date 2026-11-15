@@ -124,7 +124,7 @@ export class ShellLifecycle {
   constructor(deps: ShellDeps) {
     this.deps = deps;
     this.retypes = new PendingRetypes({
-      paste: (ref, line) => deps.environment.pasteShell(ref, line),
+      paste: (ref, line, brackets) => deps.environment.pasteShell(ref, line, brackets),
       log: (message) => this.log(message),
       ...(deps.retypeAfter && { after: deps.retypeAfter }),
     });
@@ -132,10 +132,11 @@ export class ShellLifecycle {
 
   /**
    * A shell's integration reported its first prompt, with the shell's own token: a line its
-   * restart is to type back is typed now.
+   * restart is to type back is typed now, marked as a paste itself where `brackets` says the
+   * shell's editor reads one so.
    */
-  prompted(terminalId: string): void {
-    this.retypes.prompted(terminalId);
+  prompted(terminalId: string, brackets: boolean): void {
+    this.retypes.prompted(terminalId, brackets);
   }
 
   /** Closes shells whose process the environment reports ended; returns the stop function. */

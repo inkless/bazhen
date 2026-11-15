@@ -68,7 +68,7 @@ interface Terminal {
   alternate: boolean;
   readonly streams: Set<Client>;
   readonly clients: ClientRecord;
-  readonly pasted: string[];
+  readonly pasted: Pasted[];
   /** Snapshots a test is holding back, while it holds them. */
   held?: HeldSnapshots;
 }
@@ -132,6 +132,12 @@ function screenAfter(text: string, alternate: boolean): boolean {
     }
   }
   return on;
+}
+
+/** A paste into a terminal, and whether it was to be marked as one whatever the program asked. */
+export interface Pasted {
+  readonly text: string;
+  readonly brackets: boolean;
 }
 
 export class FakeRuntime implements RuntimeAdapter {
@@ -311,7 +317,7 @@ export class FakeRuntime implements RuntimeAdapter {
     return { command: t.pane.child ?? own, own: t.pane.child === undefined };
   }
 
-  async paste(ref: RuntimeRef, text: string): Promise<void> {
+  async paste(ref: RuntimeRef, text: string, brackets: boolean): Promise<void> {
     for (let i = 0; i < text.length; i++) {
       const code = text.charCodeAt(i);
       if (code < 0x20 || (code >= 0x7f && code <= 0x9f))
@@ -320,8 +326,10 @@ export class FakeRuntime implements RuntimeAdapter {
     const t = this.paneOf(ref);
     if (t.pane.exit !== null) throw new ProcessState(ref.terminalId, "running");
     assertSameGeneration(ref, String(t.pane.generation));
-    t.pasted.push(text);
-    if (t.pane.echo) this.emit(t, encode(text));
+    t.pasted.push({ text, brackets });
+    // A program here never asks for bracketed paste, so only a paste asked to be is marked.
+    const marked = brackets ? `\x1b[200~${text}\x1b[201~` : text;
+    if (t.pane.echo) this.emit(t, encode(marked));
   }
 
   async unlink(ref: RuntimeRef): Promise<void> {
@@ -350,7 +358,7 @@ export class FakeRuntime implements RuntimeAdapter {
   }
 
   /** What was pasted into the terminal, oldest first. */
-  pasted(ref: RuntimeRef): readonly string[] {
+  pasted(ref: RuntimeRef): readonly Pasted[] {
     return this.terminalOf(ref).pasted;
   }
 

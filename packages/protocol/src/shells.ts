@@ -180,9 +180,15 @@ export type ShellReport = z.infer<typeof ShellReport>;
 
 /**
  * What a shell's integration reports over the daemon's socket once, at the shell's first prompt:
- * its line editor is reading, so a line can be typed back (protocol 1.40).
+ * its line editor is reading, so a line can be typed back (protocol 1.40). `brackets` says the
+ * editor reads a paste marked with the bracketed-paste sequences even before it has asked for
+ * bracketed paste, so the daemon marks it itself. Only a shell's own integration says so: no
+ * request from a client carries it.
  */
-export const ShellPrompt = z.object({ token: ShellReport.shape.token });
+export const ShellPrompt = z.object({
+  token: ShellReport.shape.token,
+  brackets: z.boolean().optional(),
+});
 export type ShellPrompt = z.infer<typeof ShellPrompt>;
 
 export const RenameShellRequest = z.object({

@@ -212,7 +212,7 @@ export interface EnvironmentAdapter {
    * Types `text` at the shell's prompt as a paste, without Enter (RuntimeAdapter.paste): the only
    * thing the daemon ever types into a terminal (§4.8).
    */
-  pasteShell(ref: RuntimeRef, text: string): Promise<void>;
+  pasteShell(ref: RuntimeRef, text: string, brackets: boolean): Promise<void>;
   /** Reports every terminal whose process has ended, as the runtime does (RuntimeAdapter.onExit). */
   onExit(cb: (ref: RuntimeRef, status: ExitStatus) => void): () => void;
 }

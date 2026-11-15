@@ -29,12 +29,12 @@ export function newShellToken(random: (size: number) => Buffer = randomBytes): {
  */
 export class ShellReports {
   private readonly store: Store;
-  private readonly prompted: (terminalId: string) => void;
+  private readonly prompted: (terminalId: string, brackets: boolean) => void;
   private readonly nowMicros: () => number;
 
   constructor(
     store: Store,
-    prompted: (terminalId: string) => void,
+    prompted: (terminalId: string, brackets: boolean) => void,
     nowMicros: () => number = () => Date.now() * 1000,
   ) {
     this.store = store;
@@ -53,7 +53,7 @@ export class ShellReports {
   /** The shell reached its first prompt: whether the report was the shell's own. */
   prompt(terminalId: string, report: ShellPrompt): boolean {
     if (!this.owns(terminalId, report.token)) return false;
-    this.prompted(terminalId);
+    this.prompted(terminalId, report.brackets === true);
     return true;
   }
 

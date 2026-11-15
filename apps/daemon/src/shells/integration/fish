@@ -11,36 +11,20 @@
 if set -q BAZHEN_SHELL_TOKEN; and test -x "$BAZHEN_HOOK"; and not set -q __bazhen_integrated
     set -g __bazhen_integrated 1
 
+    # The hook hands its work to a copy of itself and returns at once, so it runs in the foreground
+    # and `$last_pid` stays the user's.
     function __bazhen_preexec --on-event fish_preexec
         string match -q -- ' *' $argv[1]; and return 0
         # The line goes on stdin, never as an argument: arguments show in `ps`.
-        builtin printf '%s' $argv[1] | $BAZHEN_HOOK shell-report >/dev/null 2>&1 &
-        disown $last_pid 2>/dev/null
+        builtin printf '%s' $argv[1] | $BAZHEN_HOOK shell-report >/dev/null 2>&1
         return 0
     end
 
-    function __bazhen_report_prompt
-        $BAZHEN_HOOK shell-prompt >/dev/null 2>&1 &
-        disown $last_pid 2>/dev/null
-    end
-
-    # Once, at the first prompt: a restart's line is typed back from then on. fish takes the
-    # terminal out of canonical mode before it draws its prompt, and asks for bracketed paste only
-    # once it is drawn, so the report waits for the prompt function: for this one prompt, it runs
-    # wrapped by one that reports after it, then is put back as it was.
+    # Once, at the first prompt: a restart's line is typed back from then on. fish takes a paste
+    # marked with the bracketed-paste sequences as one even before it asks for bracketed paste,
+    # which it does only once its prompts are drawn, so the paste is marked by Bazhen.
     function __bazhen_prompt --on-event fish_prompt
         functions -e __bazhen_prompt
-        if not functions -q fish_prompt; or functions -q __bazhen_user_prompt
-            __bazhen_report_prompt
-            return
-        end
-        functions -c fish_prompt __bazhen_user_prompt
-        function fish_prompt
-            __bazhen_user_prompt
-            functions -e fish_prompt
-            functions -c __bazhen_user_prompt fish_prompt
-            functions -e __bazhen_user_prompt
-            __bazhen_report_prompt
-        end
+        $BAZHEN_HOOK shell-prompt --brackets --shell $fish_pid </dev/null >/dev/null 2>&1
     end
 end

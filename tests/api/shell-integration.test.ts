@@ -170,10 +170,12 @@ describe.each<IntegratedShell>(["zsh", "bash", "fish"])(
 
 /**
  * Each test shell's rc for a prompt that takes a while to draw, as a git-aware one does, after the
- * integration's hook has run; and, once `marker` exists, a Z key that types X instead. A line typed
- * back before the line editor reads would show twice, echoed by the terminal and then by the
- * editor; one typed unbracketed would run the editor's binding for Z. Typed by hand into the first
- * shell, before the marker exists, a Z is a Z.
+ * integration's hook has run: a slow prompt, and in zsh a slow zle-line-init, in fish a slow right
+ * prompt, which run after the editor has left canonical mode and before it asks for bracketed
+ * paste. And, once `marker` exists, a Z key that types X instead. A line typed back before the
+ * editor reads would show twice, echoed by the terminal and then by the editor; one typed as keys
+ * would run the editor's binding for Z. Typed by hand into the first shell, before the marker
+ * exists, a Z is a Z.
  */
 const SLOW_RC: Record<IntegratedShell, (marker: string) => string> = {
   zsh: (marker) =>
@@ -181,6 +183,8 @@ const SLOW_RC: Record<IntegratedShell, (marker: string) => string> = {
       RC_LINE.zsh,
       "setopt PROMPT_SUBST",
       "PS1='$(sleep 0.3)[st=%?] '",
+      "zle-line-init() { sleep 0.3 }",
+      "zle -N zle-line-init",
       `if [[ -e '${marker}' ]]; then __bz_z() { LBUFFER+=X }; zle -N __bz_z; bindkey Z __bz_z; fi`,
     ].join("\n"),
   bash: (marker) =>
@@ -191,6 +195,7 @@ const SLOW_RC: Record<IntegratedShell, (marker: string) => string> = {
     [
       RC_LINE.fish,
       'function fish_prompt; sleep 0.3; echo -n "[st=0] "; end',
+      "function fish_right_prompt; sleep 0.3; end",
       `test -e '${marker}'; and bind Z 'commandline -i X'`,
     ].join("\n"),
 };

@@ -169,19 +169,34 @@ const hasControl = (text: string) => {
   return false;
 };
 
+/** ESC [ 2 0 0 ~ and ESC [ 2 0 1 ~, which open and close a bracketed paste, as send-keys -H keys. */
+const PASTE_START = "1b 5b 32 30 30 7e";
+const PASTE_END = "1b 5b 32 30 31 7e";
+
 /**
  * The tmux commands that type `text` into the pane `target` without a newline: into a buffer of
- * its own, then pasted and the buffer deleted. `-p` brackets the paste when the program asked for
- * bracketed paste, so a line editor inserts it as text. The text is only ever a quoted word, and
- * text holding a control character, which would be a key such as Enter, is refused.
+ * its own, then pasted and the buffer deleted, so a line editor inserts it as text. With
+ * `brackets`, the paste is marked with the bracketed-paste sequences whether or not the program
+ * has asked for bracketed paste yet; without, `-p` marks it only if it has. The text is only ever a
+ * quoted word, and text holding a control character is refused: a newline would be Enter, and an
+ * ESC could end the marked paste early, so that what follows it is typed as keys.
  */
-export function pasteScript(buffer: string, target: string, text: string): string {
+export function pasteScript(
+  buffer: string,
+  target: string,
+  text: string,
+  brackets: boolean,
+): string {
   if (!/^[A-Za-z0-9_-]+$/.test(buffer)) throw new RangeError(`not a buffer name: ${buffer}`);
   if (!/^%[0-9]+$/.test(target)) throw new RangeError(`not a pane id: ${target}`);
   if (hasControl(text)) throw new RangeError("refusing to paste a control character");
+  const set = `set-buffer -b ${buffer} -- ${tmuxWord(text)}\n`;
+  if (!brackets) return `${set}paste-buffer -p -d -b ${buffer} -t ${target}\n`;
   return (
-    `set-buffer -b ${buffer} -- ${tmuxWord(text)}\n` +
-    `paste-buffer -p -d -b ${buffer} -t ${target}\n`
+    set +
+    `send-keys -t ${target} -H ${PASTE_START}\n` +
+    `paste-buffer -d -b ${buffer} -t ${target}\n` +
+    `send-keys -t ${target} -H ${PASTE_END}\n`
   );
 }
 
@@ -458,12 +473,19 @@ export class TmuxServer {
    * Types `text` into the pane `target` as a paste, without Enter, with no part of it in argv.
    * A paste that fails leaves no buffer holding it.
    */
-  async paste(target: string, text: string, opts: TmuxOptions = {}): Promise<void> {
+  async paste(
+    target: string,
+    text: string,
+    brackets: boolean,
+    opts: TmuxOptions = {},
+  ): Promise<void> {
     const buffer = `bazhen-paste-${process.pid}-${++this.pastes}`;
-    await this.source(pasteScript(buffer, target, text), opts).catch(async (err: unknown) => {
-      await this.run(["delete-buffer", "-b", buffer], opts).catch(() => undefined);
-      throw err;
-    });
+    await this.source(pasteScript(buffer, target, text, brackets), opts).catch(
+      async (err: unknown) => {
+        await this.run(["delete-buffer", "-b", buffer], opts).catch(() => undefined);
+        throw err;
+      },
+    );
   }
 
   /**

@@ -47,7 +47,7 @@ pub fn exit_code() -> i32 {
     let ran = match env::args().nth(1).as_deref() {
         Some("pane-title") => pane_title::run(env::args().skip(2)),
         Some("shell-report") => shell_report::run(env::args().skip(2)),
-        Some("shell-prompt") => shell_report::run_prompt(),
+        Some("shell-prompt") => shell_report::run_prompt(env::args().skip(2)),
         Some("statusline-wrap") => statusline::run(env::args().skip(2)),
         _ => run(),
     };

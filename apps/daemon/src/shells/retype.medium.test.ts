@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { newId, type RuntimeRef } from "@bazhen/core";
-import { FakeRuntime } from "@bazhen/core/testing";
+import { FakeRuntime, type Pasted } from "@bazhen/core/testing";
 import { LocalEnvironment } from "@bazhen/env-local";
 import { localEnvironmentId } from "../agents/launch.ts";
 import { AgentQueue } from "../agents/queue.ts";
@@ -61,11 +61,11 @@ async function lostShell({
     return openShell(open);
   };
   // Seen as the daemon asks for each paste, so a test needn't wait to know none was asked for.
-  const pasted: string[] = [];
+  const pasted: Pasted[] = [];
   const pasteShell = environment.pasteShell.bind(environment);
-  environment.pasteShell = (ref, text) => {
-    pasted.push(text);
-    return pasteShell(ref, text);
+  environment.pasteShell = (ref, text, brackets) => {
+    pasted.push({ text, brackets });
+    return pasteShell(ref, text, brackets);
   };
   const clock = testClock();
   const logs: string[] = [];
@@ -83,7 +83,9 @@ async function lostShell({
     });
   const opener = lifecycle(true);
   const shells = restartedReporting ? opener : lifecycle(false);
-  const reports = new ShellReports(store, (terminalId) => shells.prompted(terminalId));
+  const reports = new ShellReports(store, (terminalId, brackets) =>
+    shells.prompted(terminalId, brackets),
+  );
   const refOf = (terminalId: string): RuntimeRef => {
     const ref = store.shell(terminalId)?.runtime;
     if (ref == null) throw new Error(`shell ${terminalId} has no terminal`);
@@ -104,7 +106,8 @@ async function lostShell({
       ...(retype && { retype: true as const }),
     });
   /** The new shell's integration reports its first prompt with `token`, its own by default. */
-  const prompt = (id: string, token = tokenOf(id)) => reports.prompt(id, { token });
+  const prompt = (id: string, token = tokenOf(id), brackets?: boolean) =>
+    reports.prompt(id, { token, ...(brackets !== undefined && { brackets }) });
   const retypeable = (id: string, shellsReport = true) =>
     store.snapshot({ ...testView, shellsReport }).shells.find((s) => s.id === id)?.retypeable;
   return {
@@ -153,8 +156,22 @@ describe("restarting a lost shell with its last line typed back", () => {
     const before = [...pasted];
     expect(prompt(terminalId)).toBe(true);
     prompt(terminalId);
-    await expect.poll(() => runtime.pasted(refOf(terminalId))).toEqual([LINE]);
-    expect([before, pasted]).toEqual([[], [LINE]]);
+    const typed = { text: LINE, brackets: false };
+    await expect.poll(() => runtime.pasted(refOf(terminalId))).toEqual([typed]);
+    expect([before, pasted]).toEqual([[], [typed]]);
+  });
+
+  it("marks the paste itself only where the shell's own prompt report says its editor reads one", async () => {
+    const marked = await lostShell();
+    const unmarked = await lostShell();
+    const a = await marked.restart();
+    const b = await unmarked.restart();
+    marked.prompt(a.terminalId, marked.tokenOf(a.terminalId), true);
+    unmarked.prompt(b.terminalId, unmarked.tokenOf(b.terminalId), false);
+    expect([marked.pasted, unmarked.pasted]).toEqual([
+      [{ text: LINE, brackets: true }],
+      [{ text: LINE, brackets: false }],
+    ]);
   });
 
   it("types nothing into a shell restarted without asking to retype", async () => {
@@ -222,7 +239,9 @@ describe("restarting a lost shell with its last line typed back", () => {
     } = await lostShell();
     const { terminalId } = await restart();
     prompt(terminalId);
-    await expect.poll(() => runtime.pasted(refOf(terminalId))).toEqual([LINE]);
+    await expect
+      .poll(() => runtime.pasted(refOf(terminalId)))
+      .toEqual([{ text: LINE, brackets: false }]);
     const snapshot = JSON.stringify(store.snapshot(testView));
     expect([store.lastShellCommand(lost), store.lastShellCommand(terminalId)]).toEqual([
       null,
@@ -255,7 +274,7 @@ describe("the lines held for restarted shells", () => {
   it("types a line whose prompt came before its shell's start returned, once it returns", async () => {
     const { retypes, pasted } = held();
     retypes.hold(id, "make");
-    retypes.prompted(id);
+    retypes.prompted(id, false);
     const early = [...pasted];
     retypes.opened(id, ref);
     expect([early, pasted]).toEqual([[], ["make"]]);
@@ -265,7 +284,7 @@ describe("the lines held for restarted shells", () => {
     const { retypes, pasted, logs } = held();
     retypes.hold(id, line);
     retypes.opened(id, ref);
-    retypes.prompted(id);
+    retypes.prompted(id, false);
     expect([pasted, logs]).toEqual([
       [],
       [`shell ${id}: last command not retyped: it is not a line that can be typed safely`],
@@ -277,7 +296,7 @@ describe("the lines held for restarted shells", () => {
     retypes.hold(id, "make");
     retypes.drop(id);
     retypes.opened(id, ref);
-    retypes.prompted(id);
+    retypes.prompted(id, false);
     expect(pasted).toEqual([]);
   });
 
@@ -290,7 +309,7 @@ describe("the lines held for restarted shells", () => {
     });
     retypes.hold(id, "make");
     retypes.opened(id, ref);
-    retypes.prompted(id);
+    retypes.prompted(id, false);
     await expect
       .poll(() => logs)
       .toEqual([`shell ${id}: last command not retyped: tmux paste-buffer -t %3 failed`]);

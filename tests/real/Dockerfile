@@ -56,6 +56,9 @@ ARG LESS_VERSION=668-1
 ARG MAN_DB_VERSION=2.13.1-1
 ARG HTOP_VERSION=3.4.1-5
 ARG RUSTUP_VERSION
+# fish 4 draws its prompts after it leaves canonical mode, unlike 3.x, which the shell-integration
+# suite's slow-prompt case is there for.
+ARG FISH_VERSION=4.0.2-1
 # Without a UTF-8 locale, tmux prints a tab in a -F format as `_`, which merges every column
 # the runtime reads back. CI runners and login sessions set one.
 ENV HUSKY=0 CI=1 LANG=C.UTF-8
@@ -65,7 +68,7 @@ ENV HUSKY=0 CI=1 LANG=C.UTF-8
 # man-db would rebuild its index on install, which nothing here reads.
 RUN echo "man-db man-db/auto-update boolean false" | debconf-set-selections \
   && apt-get update \
-  && apt-get install -y --no-install-recommends libevent-core-2.1-7t64 fish zsh \
+  && apt-get install -y --no-install-recommends libevent-core-2.1-7t64 "fish=${FISH_VERSION}" zsh \
     "neovim=${NEOVIM_VERSION}" "less=${LESS_VERSION}" "man-db=${MAN_DB_VERSION}" \
     "htop=${HTOP_VERSION}" "rustup=${RUSTUP_VERSION}" \
   && npx -y "playwright@${PLAYWRIGHT_VERSION}" install-deps chromium \

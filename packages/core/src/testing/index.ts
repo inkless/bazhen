@@ -3,6 +3,7 @@ export {
   fakeContractHarness,
   type ClientRecord,
   type FakeRuntimeOptions,
+  type Pasted,
   type SnapshotHold,
 } from "./fake-runtime.ts";
 export {

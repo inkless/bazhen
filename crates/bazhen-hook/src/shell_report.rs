@@ -1,28 +1,35 @@
-//! `bazhen-hook shell-report [<time>]`: what a Bazhen shell's integration runs in the background
-//! as the shell starts a line, with the line on stdin, never as an argument, which `ps` would
-//! show. It sends the line to the daemon with the shell's token, and exits within `DEADLINE`
-//! whatever the daemon does, so that one started before every line can't pile up. Outside a
-//! Bazhen shell with the integration on, or on any failure, it sends nothing and exits 0.
+//! `bazhen-hook shell-report [<time>]`: what a Bazhen shell's integration runs as the shell starts
+//! a line, with the line on stdin, never as an argument, which `ps` would show. It reads the line,
+//! hands it to a copy of itself in a process group of its own, and exits at once, so the shell
+//! waits on nothing and its `$!` stays the user's. The copy sends the line to the daemon with the
+//! shell's token, and exits within `DEADLINE` whatever the daemon does, so that one started before
+//! every line can't pile up. Outside a Bazhen shell with the integration on, or on any failure, it
+//! sends nothing and exits 0.
 //!
 //! `<time>` is when the shell started the line, as `$EPOCHREALTIME` gives it; without one, now.
 //! The daemon keeps a line only if it started later than the line it has.
 //!
-//! `bazhen-hook shell-prompt`, which the integration runs once, in the background, as the shell
-//! draws its first prompt, tells the daemon its line editor is reading, so a restart can type a
-//! line back. The hook runs before the editor takes the terminal, so it first waits, up to
-//! `EDITOR_DEADLINE`, for the terminal to leave canonical mode, as every line editor puts it. A
-//! line typed before then would be echoed by the terminal as well as by the editor, its keys run
-//! as the editor's bindings rather than pasted, and a long one cut at the terminal's line limit.
-//! It carries only the token; the report itself is bound by `DEADLINE`.
+//! `bazhen-hook shell-prompt [--brackets] [--shell <pid>]`, which the integration runs once, as the
+//! shell draws its first prompt, tells the daemon its line editor is reading, so a restart can type
+//! a line back. It too hands the work to a copy of itself and exits. The shell runs it before its
+//! editor takes the terminal, so the copy first waits, up to `EDITOR_DEADLINE`, for the terminal to
+//! leave canonical mode, as every line editor puts it: a line typed before then would be echoed by
+//! the terminal as well as by the editor, and a long one cut at the terminal's line limit. It stops
+//! waiting once the shell `--shell` names is gone. `--brackets` says the editor reads a paste
+//! marked with the bracketed-paste sequences whether or not it has asked for bracketed paste yet,
+//! so the daemon marks it itself.
 
 use std::env;
 use std::fmt::Write as _;
 use std::fs::File;
-use std::io::{self, Read};
+use std::io::{self, Read, Write as _};
+use std::os::unix::process::CommandExt as _;
+use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use rustix::process::{Pid, getpgid};
 use rustix::termios::{LocalModes, tcgetattr};
 
 use crate::{is_token, post};
@@ -44,6 +51,9 @@ const EDITOR_POLL: Duration = Duration::from_millis(5);
 /// The largest integer a JSON number carries exactly to the daemon.
 const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
 
+/// What the copy a command hands its work to is told, ahead of the command's own arguments.
+const DETACHED: &str = "--detached";
+
 /// The shell's terminal, its token and the daemon's socket, from the shell's environment.
 fn reporter() -> Option<(String, String, String)> {
     let terminal = env::var("BAZHEN_TERMINAL_ID")
@@ -54,12 +64,66 @@ fn reporter() -> Option<(String, String, String)> {
     Some((terminal, token, socket))
 }
 
-pub(crate) fn run_prompt() -> Option<i32> {
+/// Starts this program again as `command --detached args`, in a process group of its own, so the
+/// shell's job control and its terminal's signals never reach it, with `stdin` as its input.
+fn detach(command: &str, args: &[String], stdin: Stdio) -> Option<std::process::Child> {
+    Command::new(env::current_exe().ok()?)
+        .arg(command)
+        .arg(DETACHED)
+        .args(args)
+        .stdin(stdin)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .process_group(0)
+        .spawn()
+        .ok()
+}
+
+/// What `shell-prompt` was asked: whether to ask for the paste to be marked, and the shell's pid.
+#[derive(Debug, PartialEq)]
+pub struct PromptArgs {
+    brackets: bool,
+    shell: Option<Pid>,
+}
+
+/// `[--brackets] [--shell <pid>]`, in either order; anything else, or a pid of 1 or less, is
+/// refused.
+pub fn prompt_args(args: &[String]) -> Option<PromptArgs> {
+    let mut parsed = PromptArgs {
+        brackets: false,
+        shell: None,
+    };
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--brackets" => parsed.brackets = true,
+            "--shell" => {
+                let pid: i32 = args.next()?.parse().ok()?;
+                parsed.shell = Some(Pid::from_raw((pid > 1).then_some(pid)?)?);
+            }
+            _ => return None,
+        }
+    }
+    Some(parsed)
+}
+
+pub(crate) fn run_prompt(args: impl Iterator<Item = String>) -> Option<i32> {
+    let args: Vec<String> = args.collect();
+    if args.first().map(String::as_str) != Some(DETACHED) {
+        prompt_args(&args)?;
+        detach("shell-prompt", &args, Stdio::null())?;
+        return Some(0);
+    }
+    let asked = prompt_args(args.get(1..)?)?;
     let (terminal, token, socket) = reporter()?;
-    let body = prompt_body(&token)?;
+    let body = prompt_body(&token, asked.brackets)?;
     // Without a terminal to read, the editor can't be told ready: no report, and no line typed.
     let tty = File::open("/dev/tty").ok()?;
     let canonical = || {
+        // A shell gone is one whose editor will never read: the wait ends, and its terminal with it.
+        if let Some(shell) = asked.shell {
+            getpgid(Some(shell)).ok()?;
+        }
         tcgetattr(&tty)
             .ok()
             .map(|t| t.local_modes.contains(LocalModes::ICANON))
@@ -67,6 +131,7 @@ pub(crate) fn run_prompt() -> Option<i32> {
     if !editor_reading(canonical, EDITOR_DEADLINE, EDITOR_POLL) {
         return Some(0);
     }
+    drop(tty);
     within(DEADLINE, move || {
         let path = format!("/v1/shells/{terminal}/prompt");
         // Like a line's report, nothing the daemon answers changes what the shell does.
@@ -94,16 +159,49 @@ fn editor_reading(
 }
 
 /// The prompt report's JSON, for a token that needs no escaping.
-pub fn prompt_body(token: &str) -> Option<Vec<u8>> {
-    is_token(token).then(|| format!("{{\"token\":\"{token}\"}}").into_bytes())
+pub fn prompt_body(token: &str, brackets: bool) -> Option<Vec<u8>> {
+    let marked = if brackets { ",\"brackets\":true" } else { "" };
+    is_token(token).then(|| format!("{{\"token\":\"{token}\"{marked}}}").into_bytes())
 }
 
-pub(crate) fn run(mut args: impl Iterator<Item = String>) -> Option<i32> {
-    let (terminal, token, socket) = reporter()?;
-    let at = match args.next() {
-        Some(time) => micros(&time)?,
+pub(crate) fn run(args: impl Iterator<Item = String>) -> Option<i32> {
+    let args: Vec<String> = args.collect();
+    if args.first().map(String::as_str) == Some(DETACHED) {
+        return send_line(args.get(1));
+    }
+    // Timed here, as the shell starts the line, not as the copy gets to it.
+    let at = match args.first() {
+        Some(time) => micros(time)?,
         None => now()?,
     };
+    let line = read_line()?;
+    let stamp = format!("{}.{:06}", at / 1_000_000, at % 1_000_000);
+    let mut copy = detach("shell-report", &[stamp], Stdio::piped())?;
+    // The copy reads it from a pipe: the line is never in argv or the environment.
+    let _ = copy.stdin.take()?.write_all(&line);
+    Some(0)
+}
+
+/// The line on stdin, up to one byte more than is kept, or None if it doesn't come within
+/// `DEADLINE`.
+fn read_line() -> Option<Vec<u8>> {
+    let (sent, got) = mpsc::channel();
+    within(DEADLINE, move || {
+        let mut line = Vec::new();
+        let read = io::stdin()
+            .take(u64::try_from(MAX_LINE).unwrap_or(u64::MAX) + 1)
+            .read_to_end(&mut line);
+        if read.is_ok() {
+            let _ = sent.send(line);
+        }
+    });
+    got.try_recv().ok()
+}
+
+/// The copy's half of `shell-report`: the line from its stdin, to the daemon.
+fn send_line(time: Option<&String>) -> Option<i32> {
+    let (terminal, token, socket) = reporter()?;
+    let at = micros(time?)?;
     within(DEADLINE, move || {
         let mut line = Vec::new();
         let read = io::stdin()
@@ -230,10 +328,17 @@ mod tests {
 
     #[test]
     fn reports_a_prompt_with_the_token_alone() {
-        let body = prompt_body("tok-_1").expect("a body");
-        assert_eq!(decoded(&body), serde_json::json!({ "token": "tok-_1" }));
-        assert_eq!(prompt_body("a\"b"), None);
-        assert_eq!(prompt_body(""), None);
+        let body = prompt_body("tok-_1", false).expect("a body");
+        let marked = prompt_body("tok-_1", true).expect("a body");
+        assert_eq!(
+            [decoded(&body), decoded(&marked)],
+            [
+                serde_json::json!({ "token": "tok-_1" }),
+                serde_json::json!({ "token": "tok-_1", "brackets": true })
+            ]
+        );
+        assert_eq!(prompt_body("a\"b", false), None);
+        assert_eq!(prompt_body("", true), None);
     }
 
     #[test]
@@ -261,6 +366,43 @@ mod tests {
             "{:?}",
             started.elapsed()
         );
+    }
+
+    #[test]
+    fn takes_prompt_flags_in_either_order_and_refuses_a_pid_that_names_no_shell() {
+        let args = |a: &[&str]| prompt_args(&a.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>());
+        let shell = Pid::from_raw(4242);
+        assert_eq!(
+            [
+                args(&[]),
+                args(&["--brackets", "--shell", "4242"]),
+                args(&["--shell", "4242"])
+            ],
+            [
+                Some(PromptArgs {
+                    brackets: false,
+                    shell: None
+                }),
+                Some(PromptArgs {
+                    brackets: true,
+                    shell
+                }),
+                Some(PromptArgs {
+                    brackets: false,
+                    shell
+                }),
+            ]
+        );
+        for refused in [
+            &["--shell"][..],
+            &["--shell", "1"],
+            &["--shell", "0"],
+            &["--shell", "-1"],
+            &["--shell", "x"],
+            &["--other"],
+        ] {
+            assert_eq!(args(refused), None, "{refused:?}");
+        }
     }
 
     #[test]
