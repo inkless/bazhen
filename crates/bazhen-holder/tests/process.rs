@@ -1,6 +1,8 @@
 //! The holder's child on real PTYs: its session and terminal, its fds and signals, how its exit
-//! is seen, and how a close ends it. Every wait has a deadline, and a guard kills the group of any
-//! child a test leaves running, so a failed test leaks nothing.
+//! is seen, and how a close ends it. Every wait has a deadline. A guard kills the group of any
+//! child a test leaves running, and the test's PTY, dropped with it, hangs up its terminal, which
+//! ends a foreground job in a group of its own; a grandchild a test starts on purpose ends by
+//! itself within 30 s.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
@@ -260,10 +262,17 @@ fn kill_grandchild(grandchild: Pid, child: Pid) {
     }
 }
 
-/// Waits, for at most `DEADLINE`, until `pid` no longer exists.
+/// Waits, for at most `DEADLINE`, until `pid` has died: gone, or a zombie its new parent hasn't
+/// reaped yet, which happens where PID 1 is slow to reap or never does.
 fn wait_gone(pid: Pid) -> Result<()> {
     let deadline = Instant::now() + DEADLINE;
-    while test_kill_process(pid).is_ok() {
+    let zombie = || {
+        Command::new("ps")
+            .args(["-o", "state=", "-p", &pid.as_raw_nonzero().to_string()])
+            .output()
+            .is_ok_and(|out| out.stdout.starts_with(b"Z"))
+    };
+    while test_kill_process(pid).is_ok() && !zombie() {
         if Instant::now() >= deadline {
             return Err(format!("{} still exists", pid.as_raw_nonzero()).into());
         }
@@ -272,6 +281,11 @@ fn wait_gone(pid: Pid) -> Result<()> {
     }
     Ok(())
 }
+
+/// Starts a grandchild that ignores `SIGHUP` and writes its own pid to the file named by `$0` once
+/// it does, so a test that reads the pid knows the grandchild can no longer be hung up.
+const HUP_IGNORING_GRANDCHILD: &str =
+    r#"(trap '' HUP; exec sh -c 'echo $$ > "$1"; exec sleep 30' sh "$0") &"#;
 
 /// Prints which of signals 1–31 the process running it has blocked, as `blocked=2,15`.
 const BLOCKED_PROBE: &str = r#"my $old = POSIX::SigSet->new;
@@ -300,9 +314,14 @@ fn the_child_leads_a_session_whose_controlling_terminal_is_the_pty() {
 #[test]
 fn the_child_gets_no_fd_the_holder_opened() {
     let before = own_fds().unwrap();
-    let mut running = start(&["sleep", "30"]).unwrap();
+    let mut running = start(&["sh", "-c", "echo started; read _"]).unwrap();
     let opened: BTreeSet<_> = own_fds().unwrap().difference(&before).copied().collect();
     assert!(!opened.is_empty(), "the PTY and the reaper opened fds");
+    // Only once the child has started: until then the dynamic loader holds fds of its own.
+    wait_for(&mut running, |r| {
+        r.output.windows(7).any(|w| w == b"started")
+    })
+    .unwrap();
     let child = fds_of(running.child.pid()).unwrap();
     assert!(child.is_superset(&BTreeSet::from([0, 1, 2])), "{child:?}");
     assert!(
@@ -328,8 +347,9 @@ fn a_child_that_exits_at_once_is_still_seen_to_exit() {
 #[test]
 fn the_exit_is_seen_while_a_grandchild_still_holds_the_terminal() {
     let file = scratch("grandchild").unwrap();
-    let script = r#"(trap '' HUP; exec sleep 30) & echo $! > "$0"; exit 3"#;
-    let mut running = start(&["sh", "-c", script, file.arg()]).unwrap();
+    let script =
+        format!(r#"{HUP_IGNORING_GRANDCHILD} while [ ! -s "$0" ]; do sleep 0.05; done; exit 3"#);
+    let mut running = start(&["sh", "-c", &script, file.arg()]).unwrap();
     assert_eq!(wait_exit(&mut running).unwrap(), exited(3).unwrap());
     let grandchild = pid_in(file.path()).unwrap();
     let alive = test_kill_process(grandchild);
@@ -449,8 +469,8 @@ fn fifty_spawns_leave_no_fd_behind() {
 #[test]
 fn a_close_kills_the_childs_whole_group_once_the_grace_is_over() {
     let file = scratch("group").unwrap();
-    let script = r#"(trap '' HUP; exec sleep 30) & echo $! > "$0"; trap '' HUP; wait"#;
-    let mut running = start(&["sh", "-c", script, file.arg()]).unwrap();
+    let script = format!("trap '' HUP; {HUP_IGNORING_GRANDCHILD} wait");
+    let mut running = start(&["sh", "-c", &script, file.arg()]).unwrap();
     wait_for(&mut running, |_| read_text(file.path()).ends_with('\n')).unwrap();
     let grandchild = pid_in(file.path()).unwrap();
     let now = Instant::now();

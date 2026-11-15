@@ -1125,33 +1125,48 @@ export function gateScriptFailures(scripts: Record<string, string>): string[] {
 const TOML_HEADER = /^\[\[?[^\]]*\]\]?$/;
 
 /**
- * Where a scan of TOML stands after `code`: how many brackets are open outside strings, and the
- * quote of a string still open (`"`, `'`, `"""` or `'''`), or "".
+ * Scans one line of TOML from where the scan before it left off. Returns the line with its comment
+ * cut and trimmed, how many brackets are open outside strings, and the quote of a multi-line
+ * string still open (`"""` or `'''`), or "". A `#` starts a comment only outside a string.
+ *
+ * @throws on a one-line string left open at the end of its line, which no valid TOML has: carried
+ *   on, it would join every later line into one entry and hide the tables there.
  */
-function tomlScan(code: string, depth: number, quote: string): { depth: number; quote: string } {
-  for (let i = 0; i < code.length; i++) {
-    const c = code[i];
+function tomlScan(
+  line: string,
+  depth: number,
+  quote: string,
+): { code: string; depth: number; quote: string } {
+  let end = line.length;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
     if (quote !== "") {
       if (c === "\\" && quote.startsWith('"')) i++;
-      else if (code.startsWith(quote, i)) {
+      else if (line.startsWith(quote, i)) {
         i += quote.length - 1;
         quote = "";
       }
-    } else if (code.startsWith('"""', i) || code.startsWith("'''", i)) {
-      quote = code.slice(i, i + 3);
+    } else if (c === "#") {
+      end = i;
+      break;
+    } else if (line.startsWith('"""', i) || line.startsWith("'''", i)) {
+      quote = line.slice(i, i + 3);
       i += 2;
     } else if (c === '"' || c === "'") quote = c;
     else if (c === "[" || c === "{") depth++;
     else if (c === "]" || c === "}") depth--;
   }
-  return { depth, quote };
+  if (quote === '"' || quote === "'") {
+    throw new Error(`TOML: a string left open at the end of the line \`${line.trim()}\``);
+  }
+  return { code: line.slice(0, end).trim(), depth, quote };
 }
 
 /**
  * TOML's lines with comments and blank lines dropped, each trimmed, and an entry the formatter
- * wrapped across lines (a long inline table or array) joined back into one: brackets are counted
- * outside strings, and a table header always starts afresh, so no entry left open can swallow the
- * tables after it. Strings hold no `#` here.
+ * wrapped across lines (a long inline table or array) joined back into one. Comments and brackets
+ * are found outside strings only, and a table header always starts afresh, so no entry left open
+ * can swallow the tables after it.
  */
 function tomlLines(text: string): string[] {
   const lines: string[] = [];
@@ -1163,15 +1178,16 @@ function tomlLines(text: string): string[] {
     scan = { depth: 0, quote: "" };
   };
   for (const line of text.split(/\r?\n/)) {
-    const code = line.replace(/\s#.*$|^#.*$/, "").trim();
-    if (code === "") continue;
-    if (scan.quote === "" && TOML_HEADER.test(code)) {
+    const inString = scan.quote !== "";
+    const next = tomlScan(line, scan.depth, scan.quote);
+    if (next.code === "") continue;
+    if (!inString && TOML_HEADER.test(next.code)) {
       flush();
-      lines.push(code);
+      lines.push(next.code);
       continue;
     }
-    entry = entry === "" ? code : `${entry} ${code}`;
-    scan = tomlScan(code, scan.depth, scan.quote);
+    entry = entry === "" ? next.code : `${entry} ${next.code}`;
+    scan = { depth: next.depth, quote: next.quote };
     if (scan.depth <= 0 && scan.quote === "") flush();
   }
   flush();

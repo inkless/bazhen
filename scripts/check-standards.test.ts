@@ -1207,6 +1207,29 @@ describe("tomlTables", () => {
     ]);
   });
 
+  it("cuts a comment only outside a string", () => {
+    const tables = tomlTables(
+      [
+        "[package]",
+        'description = "Fixes #12"',
+        'name = "x"#\'',
+        "edition = '2024' # a comment",
+        "[dependencies]",
+        'serde = "1.0"',
+      ].join("\n"),
+    );
+    expect([tables.get("[package]"), tables.get("[dependencies]")]).toEqual([
+      ['description = "Fixes #12"', 'name = "x"', "edition = '2024'"],
+      ['serde = "1.0"'],
+    ]);
+  });
+
+  it("refuses a one-line string left open at the end of its line", () => {
+    expect(() => tomlTables('[package]\nname = "x\n[dependencies]\nserde = "1.0"\n')).toThrow(
+      /a string left open at the end of the line `name = "x`/,
+    );
+  });
+
   it("starts each table afresh, whatever an entry before it left open", () => {
     const tables = tomlTables('[package]\nname = { a = [\n[dependencies]\nserde = "1.0"\n');
     expect([tables.get("[package]"), tables.get("[dependencies]")]).toEqual([

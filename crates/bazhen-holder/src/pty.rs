@@ -182,8 +182,19 @@ pub fn spawn(
 /// reset `SIGPIPE`. std keeps the holder's signal mask, and exec keeps both the mask and every
 /// ignored signal, so both go back to their defaults here, as tmux does for a pane: a blocked or
 /// ignored `SIGINT` would leave Ctrl-C doing nothing, and a blocked `SIGHUP` would leave a close
-/// waiting out its grace.
+/// waiting out its grace. The dispositions go first, so no signal is unblocked while the holder's
+/// handler for it is still installed.
 fn become_session_leader() -> io::Result<()> {
+    for (signal, _) in signals::NAMED {
+        if !signals::catchable(signal) {
+            continue;
+        }
+        // SAFETY: signal(2) is async-signal-safe, and `signal` is a valid, catchable signal.
+        let previous = unsafe { libc::signal(signal, libc::SIG_DFL) };
+        if previous == libc::SIG_ERR {
+            return Err(io::Error::last_os_error());
+        }
+    }
     let mut none = MaybeUninit::<libc::sigset_t>::uninit();
     // SAFETY: sigemptyset(3) is async-signal-safe and only writes the set it is given, which lives
     // on this stack frame.
@@ -196,16 +207,6 @@ fn become_session_leader() -> io::Result<()> {
     // isn't asked for. The child is single-threaded until exec, so the process mask is the thread's.
     if unsafe { libc::sigprocmask(libc::SIG_SETMASK, &raw const none, ptr::null_mut()) } != 0 {
         return Err(io::Error::last_os_error());
-    }
-    for (signal, _) in signals::NAMED {
-        if !signals::catchable(signal) {
-            continue;
-        }
-        // SAFETY: signal(2) is async-signal-safe, and `signal` is a valid, catchable signal.
-        let previous = unsafe { libc::signal(signal, libc::SIG_DFL) };
-        if previous == libc::SIG_ERR {
-            return Err(io::Error::last_os_error());
-        }
     }
     rustix::process::setsid()?;
     rustix::process::ioctl_tiocsctty(rustix::stdio::stdin())?;
