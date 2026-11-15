@@ -135,15 +135,22 @@ describe("key bar store", () => {
 
   it("has no target once every view has gone", () => {
     const store = keyBarStore();
+    const changed = vi.fn<() => void>();
+    store.subscribe(changed);
     store.register(view())();
     expect(store.target()).toBeUndefined();
+    expect(changed).toHaveBeenCalledTimes(2);
   });
 
   it("arms Ctrl for one key only", () => {
     const store = keyBarStore();
+    const changed = vi.fn<() => void>();
+    store.subscribe(changed);
+    store.setCtrl(true);
     store.setCtrl(true);
     expect(store.takeCtrl()).toBe(true);
     expect(store.takeCtrl()).toBe(false);
+    expect(changed).toHaveBeenCalledTimes(2);
   });
 
   it("releases Ctrl when the target changes, so it never lands on another terminal", () => {
@@ -154,17 +161,6 @@ describe("key bar store", () => {
     store.setCtrl(true);
     store.engaged(shell);
     expect(store.ctrl()).toBe(false);
-  });
-
-  it("tells subscribers when Ctrl or the views change, and only then", () => {
-    const store = keyBarStore();
-    const changed = vi.fn<() => void>();
-    store.subscribe(changed);
-    store.register(view());
-    store.setCtrl(true);
-    store.setCtrl(true);
-    store.takeCtrl();
-    expect(changed).toHaveBeenCalledTimes(3);
   });
 });
 
