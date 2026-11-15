@@ -10,7 +10,8 @@ import { Lifecycle } from "../agents/lifecycle.ts";
 import { AgentQueue } from "../agents/queue.ts";
 import { StaleGeneration, StateConflict } from "../commands.ts";
 import { IdempotencyConflict, type Store } from "../store/store.ts";
-import { quietStartAgain, testView, withAgent } from "../testing/fixtures.ts";
+import { quietStartAgain, storeBudget, testView, withAgent } from "../testing/fixtures.ts";
+import { TerminalLimit } from "../terminals/budget.ts";
 import {
   ShellBusy,
   ShellLifecycle,
@@ -26,7 +27,7 @@ const claude: HarnessAdapter = {
 };
 
 /** A store with one running agent, and shells on a fake runtime whose user's shell is zsh. */
-async function setup() {
+async function setup({ maxOpen = 100 } = {}) {
   const runtime = new FakeRuntime();
   const home = mkdtempSync(join(tmpdir(), "bz-home-"));
   const { store, agentId, environment } = await withAgent(
@@ -76,6 +77,7 @@ async function setup() {
     queue,
     size: { cols: 80, rows: 24 },
     home,
+    budget: storeBudget(store, maxOpen),
   });
   const refOf = (terminalId: string): RuntimeRef => {
     const ref = store.shell(terminalId)?.runtime;
@@ -374,8 +376,8 @@ describe("a shell beside an agent", () => {
 });
 
 /** A linked shell whose server died, as reconciliation records it. */
-async function lost(theme: "light" | "dark" = "light") {
-  const ctx = await setup();
+async function lost(theme: "light" | "dark" = "light", maxOpen = 100) {
+  const ctx = await setup({ maxOpen });
   const { terminalId } = await ctx.shells.open({
     idempotencyKey: "lost",
     linkedAgentId: ctx.agentId,
@@ -451,5 +453,56 @@ describe("naming a shell", () => {
     const named = shellOf(terminalId)?.name;
     await shells.rename(terminalId, { idempotencyKey: "n2", name: null });
     expect([named, shellOf(terminalId)?.name]).toEqual(["dev server", null]);
+  });
+});
+
+// Each setup runs one agent, which holds a slot of its own.
+describe("shells, against the terminal budget", () => {
+  it("refuses a shell past the budget, recording none", async () => {
+    const { open, store } = await setup({ maxOpen: 2 });
+    await open("a");
+    await expect(open("b")).rejects.toThrow(TerminalLimit);
+    expect(store.snapshot(testView).shells.length).toBe(1);
+  });
+
+  it("admits only one of two shells racing for the last slot", async () => {
+    const { open } = await setup({ maxOpen: 2 });
+    const both = await Promise.allSettled([open("a"), open("b")]);
+    expect(both.map((r) => r.status)).toEqual(["fulfilled", "rejected"]);
+  });
+
+  it("gives a shell's slot back once it is closed", async () => {
+    const { shells, open } = await setup({ maxOpen: 2 });
+    const terminalId = await open("a");
+    await shells.close(terminalId, { idempotencyKey: "c", generation: 0 });
+    await expect(open("b")).resolves.toMatch(/^term_/);
+  });
+
+  it("gives a shell's slot back once its shell exits", async () => {
+    const { shells, runtime, refOf, stateOf, open } = await setup({ maxOpen: 2 });
+    const terminalId = await open("a");
+    const stop = shells.watch();
+    runtime.exitProcess(refOf(terminalId));
+    await expect.poll(() => stateOf(terminalId)).toBe("closed");
+    await expect(open("b")).resolves.toMatch(/^term_/);
+    stop();
+  });
+
+  it("gives a shell's slot back when it fails to open", async () => {
+    const { open, failOpens } = await setup({ maxOpen: 2 });
+    failOpens(true);
+    await expect(open("a")).rejects.toThrow(ShellOpenFailed);
+    failOpens(false);
+    await expect(open("b")).resolves.toMatch(/^term_/);
+  });
+
+  it("restarts a lost shell into the slot it gave back, and refuses one with none left", async () => {
+    const roomy = await lost("light", 2);
+    const full = await lost("light", 2);
+    await full.open("fills-the-slot");
+    const asked = { idempotencyKey: "r", generation: 0 };
+    await expect(roomy.shells.restart(roomy.terminalId, asked)).resolves.toBeDefined();
+    await expect(full.shells.restart(full.terminalId, asked)).rejects.toThrow(TerminalLimit);
+    expect(full.stateOf(full.terminalId)).toBe("lost");
   });
 });

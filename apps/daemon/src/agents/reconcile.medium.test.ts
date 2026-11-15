@@ -12,7 +12,7 @@ import { FakeRuntime } from "@bazhen/core/testing";
 import { LocalEnvironment } from "@bazhen/env-local";
 import { Mailbox } from "../mailbox/mailbox.ts";
 import type { Store } from "../store/store.ts";
-import { fakeEnvironment, testView, withAgent } from "../testing/fixtures.ts";
+import { fakeEnvironment, testView, unlimited, withAgent } from "../testing/fixtures.ts";
 import { launchAgent, localEnvironmentId } from "./launch.ts";
 import { AgentQueue } from "./queue.ts";
 import { reconcile } from "./reconcile.ts";
@@ -56,6 +56,7 @@ function launchCut(store: Store) {
     size: { cols: 80, rows: 24 },
     home: tmpdir(),
     queue: new AgentQueue(),
+    budget: unlimited,
   });
   const req = { idempotencyKey: "launch-cut", harness: "claude-code", cwd: "~" } as const;
   const hung = { ...fakeEnvironment(store), launch: () => new Promise<never>(() => {}) };

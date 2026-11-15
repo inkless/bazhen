@@ -8,7 +8,7 @@ import { LocalEnvironment } from "@bazhen/env-local";
 import { ClaudeCodeHarness } from "@bazhen/harness-claude-code";
 import { CodexHarness, DAEMON_START_ARGS } from "@bazhen/harness-codex";
 import { filterEnv } from "@bazhen/core";
-import { TmuxServer, findNotifySend } from "@bazhen/host-guard";
+import { TmuxServer, findNotifySend, hostPtyReader } from "@bazhen/host-guard";
 import { PROTOCOL_VERSION } from "@bazhen/protocol";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
 import { launchAgent, launchSettled, localEnvironmentId } from "./agents/launch.ts";
@@ -70,6 +70,7 @@ import {
   type LanCertificate,
 } from "./tls/material.ts";
 import { Tasks } from "./tasks/tasks.ts";
+import { TerminalBudget } from "./terminals/budget.ts";
 import { nodePtySpawner } from "./pty/node-pty.ts";
 import { Store, type SnapshotView } from "./store/store.ts";
 
@@ -94,6 +95,12 @@ if (await answers(paths.socket)) {
 let captured = { ...capture(process.env, config.envRules), source: "start" as "start" | "refresh" };
 const hostEnv = captured.env;
 const store = Store.open(join(paths.data, "bazhen.db"));
+const budget = new TerminalBudget({
+  max: config.maxOpenTerminals,
+  open: () => store.openTerminals(),
+  host: hostPtyReader(),
+  warn: (message) => console.warn(`bazhen: ${message}`),
+});
 const codexHome = codexHomeOf(hostEnv, inputs.home);
 // The Codex CLI, in the environment the agents get, which names their Codex home.
 const codexCommand = codexCli(hostEnv);
@@ -114,7 +121,7 @@ mailbox.follow();
 const taskService = new Tasks(store, mailbox, (raised) => inbox.raise(raised), {
   launch: (req, launchedBy) =>
     launchSettled(
-      { store, environment, size: DEFAULT_SIZE, home: inputs.home, queue },
+      { store, environment, size: DEFAULT_SIZE, home: inputs.home, queue, budget },
       req,
       launchedBy,
     ),
@@ -225,6 +232,7 @@ const shells = new ShellLifecycle({
   queue,
   size: DEFAULT_SIZE,
   home: inputs.home,
+  budget,
 });
 await reconcileShells(store, environment, shells);
 // After both reconciles, whose health checks have a server whose socket was deleted recreate it.
@@ -232,6 +240,7 @@ await runtime.applyServerSettings().catch((err: unknown) => {
   console.warn("tmux server settings were not applied:", err);
 });
 await shells.settleOrphans();
+for (const warning of budget.startupWarnings()) console.warn(`bazhen: ${warning}`);
 const foreground = new ForegroundWatch({ store, environment });
 // A title that changed while the daemon was down, or a move it was waiting on, is read again;
 // until it has been, those agents' mail waits, so none goes to a thread the TUI has left.
@@ -240,6 +249,7 @@ codexThreads.followAll();
 codex.keepConnected();
 const lifecycle = new Lifecycle(store, environment, queue, {
   size: DEFAULT_SIZE,
+  budget,
   replaced: (agentId) => {
     mailbox.sessionStarted(agentId);
     activity.replaced(agentId);
@@ -300,7 +310,7 @@ const commands = {
   runtime,
   state: () => store.snapshot(snapshotView),
   launch: (req) =>
-    launchAgent({ store, environment, size: DEFAULT_SIZE, home: inputs.home, queue }, req),
+    launchAgent({ store, environment, size: DEFAULT_SIZE, home: inputs.home, queue, budget }, req),
   answer: (attentionId, req) => approvals.answer(attentionId, req),
   reply: (attentionId, req) => inbox.reply(attentionId, req),
   dismiss: (attentionId, req) => inbox.dismiss(attentionId, req),

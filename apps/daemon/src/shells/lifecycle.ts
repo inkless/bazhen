@@ -40,6 +40,7 @@ import {
   type ShellTerminal,
   type Store,
 } from "../store/store.ts";
+import type { TerminalAdmission } from "../terminals/budget.ts";
 
 export class UnknownShell extends Error {
   constructor(terminalId: string) {
@@ -90,6 +91,7 @@ export interface ShellDeps {
   readonly size: Size;
   /** The daemon user's home: a standalone shell's default directory, and what `~` names. */
   readonly home: string;
+  readonly budget: TerminalAdmission;
   readonly log?: (message: string) => void;
 }
 
@@ -314,10 +316,11 @@ export class ShellLifecycle {
     },
     first: (response: ShellCommandResponse) => void,
   ): Promise<ShellCommandResponse> {
-    const { store, environment, size } = this.deps;
+    const { store, environment, size, budget } = this.deps;
     const { cwd, linkedAgentId, theme, restartOf } = shell;
     const terminalId = newId("term");
     const opened = store.transaction(() => {
+      budget.admit();
       const response = {
         terminalId,
         eventIds: [

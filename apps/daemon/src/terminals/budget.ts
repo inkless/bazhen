@@ -25,6 +25,11 @@ export interface BudgetDeps {
   readonly warn: (message: string) => void;
 }
 
+/** Where a new terminal asks for its slot, in the same synchronous step that records it. */
+export interface TerminalAdmission {
+  admit(): void;
+}
+
 /** What `bazhen doctor` shows. */
 export interface BudgetReport {
   readonly open: number;
@@ -41,7 +46,7 @@ const terminals = (n: number) => (n === 1 ? "1 terminal is" : `${n} terminals ar
  * Admits new terminals. The open count is the store's, so admitting inside the transaction that
  * records the terminal reserves its slot, and every end the store records gives it back.
  */
-export class TerminalBudget {
+export class TerminalBudget implements TerminalAdmission {
   private readonly deps: BudgetDeps;
   private warnedUnreadable = false;
   private warnedShort = false;

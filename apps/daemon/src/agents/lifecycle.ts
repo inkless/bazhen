@@ -31,6 +31,7 @@ import {
   StaleGeneration,
   StateConflict,
 } from "../commands.ts";
+import type { TerminalAdmission } from "../terminals/budget.ts";
 import { launchOptions } from "./launch.ts";
 import type { AgentQueue } from "./queue.ts";
 import { runtimePayload, UnknownAgent, type AgentTerminal, type Store } from "../store/store.ts";
@@ -52,6 +53,8 @@ export interface StartAgainDeps {
    * asked, what it was doing) is settled before the new one starts.
    */
   readonly replaced: (agentId: string) => void;
+  /** A relaunch opens a new terminal, so it asks for a slot; a respawn keeps its terminal's. */
+  readonly budget: TerminalAdmission;
 }
 
 /** A message's states before it reaches its agent or can't. */
@@ -223,6 +226,7 @@ export class Lifecycle {
         throw new NotResumable(found.agentId);
       const terminalId = newId("term");
       const generation = found.generation + 1;
+      this.startAgain.budget.admit();
       const requested = this.record(agentId, "agent.relaunch_requested", {
         terminalId,
         generation,

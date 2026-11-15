@@ -17,7 +17,15 @@ import {
 import type { ExitStatus, Signal } from "@bazhen/protocol";
 import { Mailbox } from "../mailbox/mailbox.ts";
 import { IdempotencyConflict, type Store } from "../store/store.ts";
-import { fakeEnvironment, quietStartAgain, testView, withAgent } from "../testing/fixtures.ts";
+import {
+  fakeEnvironment,
+  quietStartAgain,
+  storeBudget,
+  testView,
+  unlimited,
+  withAgent,
+} from "../testing/fixtures.ts";
+import { TerminalLimit } from "../terminals/budget.ts";
 import { launchAgent, localEnvironmentId } from "./launch.ts";
 import { AgentQueue } from "./queue.ts";
 import {
@@ -60,6 +68,7 @@ async function unreachableThenForced(recovered: boolean) {
 async function running({
   session = true,
   duringRespawn = (_store: Store, _agentId: string) => {},
+  maxOpen = 100,
 } = {}) {
   const closed: AgentRefs[] = [];
   const launches: AgentLaunch[] = [];
@@ -108,9 +117,11 @@ async function running({
       },
     };
   });
+  const budget = storeBudget(store, maxOpen);
   const lifecycle = new Lifecycle(store, environment, new AgentQueue(), {
     size: { cols: 80, rows: 24 },
     replaced: (id) => replaced.push(id),
+    budget,
   });
   lifecycle.watch();
   const exit = (generation: string, status: ExitStatus = { type: "exited", code: 1 }) =>
@@ -120,6 +131,7 @@ async function running({
   const fail = (with_?: Error) => (failure = with_);
   return {
     store,
+    budget,
     lifecycle,
     agentId,
     closed,
@@ -140,7 +152,14 @@ async function failedLaunch(store: Store): Promise<string> {
   const environment = fakeEnvironment(store, () => Promise.reject(new Error("no tmux")));
   const request = { idempotencyKey: "launch-2", harness: "claude-code", cwd: "~" } as const;
   const failed = await launchAgent(
-    { store, environment, size: { cols: 80, rows: 24 }, home: tmpdir(), queue: new AgentQueue() },
+    {
+      store,
+      environment,
+      size: { cols: 80, rows: 24 },
+      home: tmpdir(),
+      queue: new AgentQueue(),
+      budget: unlimited,
+    },
     request,
   )
     .then(() => undefined)
@@ -585,5 +604,48 @@ describe("relaunching a lost agent", () => {
       "closed",
       [terminalId],
     ]);
+  });
+});
+
+/** Another terminal open beside the agent, as a shell, to fill a slot. */
+const fillSlot = (store: Store) =>
+  store.append({
+    type: "terminal.opened",
+    entityId: newId("term"),
+    actor: "user",
+    payload: { environmentId: localEnvironmentId(store), cwd: "/work", linkedAgentId: null },
+  });
+
+// The agent's own terminal holds one slot of each budget below.
+describe("an agent's terminal, against the terminal budget", () => {
+  it("keeps its slot while exited, and respawns into it at a full budget", async () => {
+    const { lifecycle, agentId, exit, agent, budget } = await running({ maxOpen: 1 });
+    exit("0");
+    expect(() => budget.admit()).toThrow(TerminalLimit);
+    await lifecycle.respawn(agentId, { idempotencyKey: "r", generation: 0 });
+    expect(agent()?.state).toBe("running");
+  });
+
+  it("gives its slot back once it is closed", async () => {
+    const { lifecycle, agentId, budget } = await running({ maxOpen: 1 });
+    expect(() => budget.admit()).toThrow(TerminalLimit);
+    await lifecycle.close(agentId, { idempotencyKey: "c", generation: 0 });
+    expect(() => budget.admit()).not.toThrow();
+  });
+
+  it("relaunches a lost agent into the slot its lost terminal gave back", async () => {
+    const { lifecycle, agentId, agent } = await lost({ maxOpen: 1 });
+    await lifecycle.relaunch(agentId, { idempotencyKey: "l", generation: 0 });
+    expect(agent()?.state).toBe("running");
+  });
+
+  it("refuses a relaunch with no slot left, leaving the agent lost and recording nothing", async () => {
+    const { lifecycle, agentId, agent, events, store, launches } = await lost({ maxOpen: 1 });
+    fillSlot(store);
+    const before = events();
+    await expect(
+      lifecycle.relaunch(agentId, { idempotencyKey: "l", generation: 0 }),
+    ).rejects.toThrow(TerminalLimit);
+    expect([agent()?.state, events(), launches.length]).toEqual(["lost", before, 1]);
   });
 });

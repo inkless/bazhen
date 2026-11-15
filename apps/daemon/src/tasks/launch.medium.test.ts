@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isId, LaunchFailed, newId, TaskRefused, type AgentSessionId } from "@bazhen/core";
+import { TerminalLimit } from "../terminals/budget.ts";
 import { inbox, taskFleet, testView } from "../testing/fixtures.ts";
 import type { Raised } from "../attention/inbox.ts";
 import { MailTooLong, Tasks } from "./tasks.ts";
@@ -17,8 +18,9 @@ const launchRequest = (key: string) => ({ idempotencyKey: key, launch, ...work }
 async function coordinated(
   limits = { maxLaunched: 5, maxDepth: 3 },
   delegated?: Parameters<typeof taskFleet>[1],
+  maxOpen?: number,
 ) {
-  const f = await taskFleet(limits, delegated);
+  const f = await taskFleet(limits, delegated, maxOpen);
   const { taskId } = f.tasks.create(null, {
     idempotencyKey: "c",
     ...brief,
@@ -87,6 +89,15 @@ describe("delegating to a new agent", () => {
       "conflict: 1 agents you launched are still open, the most at once (1): close one you no longer need to launch another",
       count,
     ]);
+  });
+
+  it("refuses past the terminal budget, launching and delegating nothing", async () => {
+    const { tasks, coordinator, agents, store } = await coordinated(undefined, undefined, 3);
+    const before = store.snapshot(testView).tasks.length;
+    await expect(tasks.launchAndDelegate(coordinator, launchRequest("d"))).rejects.toThrow(
+      TerminalLimit,
+    );
+    expect([agents().length, store.snapshot(testView).tasks.length]).toEqual([3, before]);
   });
 
   it("refuses an agent that was itself launched as deep as launches may go", async () => {

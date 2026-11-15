@@ -8,7 +8,7 @@ import { LocalEnvironment } from "@bazhen/env-local";
 import { localEnvironmentId } from "../agents/launch.ts";
 import { AgentQueue } from "../agents/queue.ts";
 import { Store } from "../store/store.ts";
-import { tempDb } from "../testing/fixtures.ts";
+import { tempDb, unlimited } from "../testing/fixtures.ts";
 import { ShellLifecycle } from "./lifecycle.ts";
 import { reconcileShells } from "./reconcile.ts";
 
@@ -27,6 +27,7 @@ function setup() {
     store,
     environment,
     queue: new AgentQueue(),
+    budget: unlimited,
     size: { cols: 80, rows: 24 },
     home,
   });
