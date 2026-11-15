@@ -244,7 +244,7 @@ export function project(db: Statements, e: Recorded): void {
       return moveShell(db, e, "runtime.rejected", FORGET_COMMAND);
     case "terminal.lost":
       // Nothing runs in a shell that is gone.
-      return moveShell(db, e, "target.absent", { foreground: null });
+      return moveShell(db, e, "target.absent", { foreground: null, report_token_hash: null });
     case "terminal.closing":
       return moveShell(db, e, "close.requested");
     case "terminal.closed":
@@ -525,7 +525,11 @@ function moveShell(db: Statements, e: Recorded, event: TerminalEvent, columns: C
 }
 
 /** A shell that has ended has no command left to type back, and keeps none it held. */
-const FORGET_COMMAND: Columns = { last_command: null, last_command_seq: null };
+const FORGET_COMMAND: Columns = {
+  last_command: null,
+  last_command_seq: null,
+  report_token_hash: null,
+};
 
 /** Changes what a shell is, never where it is in its lifecycle. */
 function setShell(db: Statements, e: Recorded, columns: Columns) {

@@ -1,0 +1,39 @@
+# Bazhen's shell integration for bash 4.4 or later. With `shells.retype_last_command = true` in
+# Bazhen's config, source it from ~/.bashrc:
+#
+#   [[ -n $BAZHEN_SHELL_INTEGRATION && -r $BAZHEN_SHELL_INTEGRATION/bash ]] && . "$BAZHEN_SHELL_INTEGRATION/bash"
+#
+# Before each line it runs, it tells Bazhen the line as history recorded it, so a restart after a
+# reboot can type it back at the new prompt, without Enter. A line history keeps out (a leading
+# space with HISTCONTROL=ignorespace) or that starts with a space is never sent. Outside a Bazhen
+# shell with the integration on, it does nothing.
+
+if [[ -n ${BAZHEN_SHELL_TOKEN-} && -x ${BAZHEN_HOOK-} && -z ${__bazhen_integrated-} ]] &&
+  ((BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4))); then
+  __bazhen_integrated=1
+  __bazhen_seen=
+
+  # At each prompt: the number of the newest history entry, so a line that adds none is told apart.
+  __bazhen_prompt() {
+    local entry
+    entry=$(HISTTIMEFORMAT='' builtin history 1)
+    [[ $entry =~ ^\ *([0-9]+) ]] && __bazhen_seen=${BASH_REMATCH[1]}
+    return 0
+  }
+
+  # Runs from PS0, in a subshell, as the line starts; it prints nothing.
+  __bazhen_preexec() {
+    local entry line
+    entry=$(HISTTIMEFORMAT='' builtin history 1)
+    [[ $entry =~ ^\ *([0-9]+)\*?\ \ (.*)$ ]] || return 0
+    [[ ${BASH_REMATCH[1]} == "$__bazhen_seen" ]] && return 0
+    line=${BASH_REMATCH[2]}
+    [[ $line == ' '* ]] && return 0
+    # The line goes on stdin, never as an argument: arguments show in `ps`.
+    { builtin printf '%s' "$line" | "$BAZHEN_HOOK" shell-report ${EPOCHREALTIME-}; } >/dev/null 2>&1 &
+    return 0
+  }
+
+  PROMPT_COMMAND="__bazhen_prompt${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
+  PS0='$(__bazhen_preexec)'"${PS0-}"
+fi

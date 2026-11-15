@@ -4,7 +4,7 @@ import { newId } from "@bazhen/core";
 import { PairingCodeResponse, type Device, type DoctorResponse } from "@bazhen/protocol";
 import type { AppEnv } from "../http/app.ts";
 import { UnknownDevice } from "../store/store.ts";
-import { socketApp } from "./routes.ts";
+import { socketApp, type SocketParts } from "./routes.ts";
 
 const report: DoctorResponse = {
   appVersion: "0.1.0",
@@ -48,6 +48,7 @@ function app(
   refreshEnv = async (_env: Env) => refreshed,
   paneTitleChanged = (_pane: string) => {},
   lan: () => PairingCodeResponse["lan"] = () => undefined,
+  shellReport: SocketParts["shellReport"] = () => "kept",
 ) {
   const commands = new Hono<AppEnv>();
   commands.post("/v1/attention/:id/answer", (c) => c.json({ answered: c.req.param("id") }));
@@ -69,6 +70,7 @@ function app(
     devices,
     externalOrigins: ["https://laptop.example.ts.net"],
     lan,
+    shellReport,
   });
 }
 
@@ -113,6 +115,35 @@ describe("socketApp", () => {
     expect((await notify({ pane: "%12; rm" })).status).toBe(400);
     expect((await notify({ title: "x" })).status).toBe(400);
     expect(panes).toEqual(["%12"]);
+  });
+
+  it("hands on a shell's report as it came, and refuses a body that isn't one", async () => {
+    const received: { terminalId: string; sent: unknown }[] = [];
+    const daemon = app(undefined, undefined, undefined, (terminalId, sent) => {
+      received.push({ terminalId, sent });
+      return "kept";
+    });
+    const post = (body: unknown) =>
+      daemon.request("/v1/shells/term_x/report", { method: "POST", body: JSON.stringify(body) });
+    const statuses = [
+      (await post({ token: "t", at: 1, command: "make" })).status,
+      (await post({ token: "t", at: 2, command: 7 })).status,
+      (await post({ token: "t", command: "make" })).status,
+    ];
+    expect([statuses, received]).toEqual([
+      [204, 400, 400],
+      [{ terminalId: "term_x", sent: { token: "t", at: 1, command: "make" } }],
+    ]);
+  });
+
+  it("refuses a report the shell's token doesn't vouch for, naming no part of its line", async () => {
+    const daemon = app(undefined, undefined, undefined, () => "refused");
+    const res = await daemon.request("/v1/shells/term_x/report", {
+      method: "POST",
+      body: JSON.stringify({ token: "t", at: 1, command: "export TOKEN=s3cret" }),
+    });
+    const text = await res.text();
+    expect([res.status, text.includes("s3cret")]).toEqual([403, false]);
   });
 
   it("lets a caller that presents no agent answer an approval", async () => {

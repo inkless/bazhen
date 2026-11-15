@@ -142,6 +142,22 @@ export const ShellCommandLine = z
     message: `a command line is at most ${COMMAND_LINE_MAX_BYTES} bytes`,
   });
 
+/**
+ * What a shell's integration reports over the daemon's socket, as the shell starts running a
+ * line: never over HTTP. `token` is the shell's own, from its environment.
+ */
+export const ShellReport = z.object({
+  token: z.string().min(1).max(128),
+  /**
+   * When the shell started running the line, in microseconds since the epoch: a report earlier
+   * than the kept one, arriving late, changes nothing.
+   */
+  at: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  /** The line, or null for one its client couldn't send whole: too long, or not UTF-8. */
+  command: z.string().max(COMMAND_LINE_MAX_BYTES).nullable(),
+});
+export type ShellReport = z.infer<typeof ShellReport>;
+
 export const RenameShellRequest = z.object({
   idempotencyKey: IdempotencyKey,
   name: ShellName.nullable(),

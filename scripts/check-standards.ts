@@ -671,6 +671,8 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-hook/src/lib.rs::header": "parse_reply",
   "crates/bazhen-hook/src/lib.rs::content_length": "parse_reply",
   "crates/bazhen-hook/src/pane_title.rs::body": "pane_title",
+  "crates/bazhen-hook/src/shell_report.rs::report_body": "shell_report",
+  "crates/bazhen-hook/src/shell_report.rs::micros": "shell_report",
   "crates/bazhen-holder-proto/src/frame.rs::FrameDecoder::push": "frame",
   "crates/bazhen-holder-proto/src/frame.rs::FrameDecoder::next_frame": "frame",
   "crates/bazhen-holder-proto/src/lib.rs::decode_spawn_spec": "spawn_spec",

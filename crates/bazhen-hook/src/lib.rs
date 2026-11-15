@@ -7,6 +7,7 @@
 //! decoders are public so the fuzz targets in `fuzz/` can reach them.
 
 pub mod pane_title;
+pub mod shell_report;
 mod statusline;
 
 use std::env;
@@ -45,6 +46,7 @@ pub struct Reply {
 pub fn exit_code() -> i32 {
     let ran = match env::args().nth(1).as_deref() {
         Some("pane-title") => pane_title::run(env::args().skip(2)),
+        Some("shell-report") => shell_report::run(env::args().skip(2)),
         Some("statusline-wrap") => statusline::run(env::args().skip(2)),
         _ => run(),
     };

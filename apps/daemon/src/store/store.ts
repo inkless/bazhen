@@ -1016,6 +1016,33 @@ export class Store {
     return Number(changes) > 0;
   }
 
+  /** Records the hash of the token a new shell's integration will report with. */
+  noteShellToken(terminalId: string, hash: string): void {
+    this.prepare("UPDATE terminals SET report_token_hash = ? WHERE id = ? AND kind = 'shell'").run(
+      hash,
+      terminalId,
+    );
+  }
+
+  /** The hash of the token a shell reports with, or null for one that can't report. */
+  shellTokenHash(terminalId: string): string | null {
+    const row = this.prepare(
+      "SELECT report_token_hash FROM terminals WHERE id = ? AND kind = 'shell'",
+    ).get(terminalId);
+    return typeof row?.report_token_hash === "string" ? row.report_token_hash : null;
+  }
+
+  /**
+   * Forgets every shell's kept line and token, for a daemon started with the integration off:
+   * what it was given while on is no longer wanted, and no shell may report.
+   */
+  forgetShellCommands(): void {
+    this.prepare(
+      `UPDATE terminals SET last_command = NULL, last_command_seq = NULL, report_token_hash = NULL
+       WHERE kind = 'shell' AND (last_command IS NOT NULL OR report_token_hash IS NOT NULL)`,
+    ).run();
+  }
+
   /** The line kept to type back into a shell's replacement, or null when none is. */
   lastShellCommand(terminalId: string): string | null {
     const row = this.prepare(

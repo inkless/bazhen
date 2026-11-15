@@ -24,6 +24,7 @@ const ConfigFile = z.strictObject({
   daemon: z.strictObject({ port: Port.optional() }).optional(),
   bank: z.strictObject({ path: z.string().startsWith("/").optional() }).optional(),
   notifications: z.strictObject({ desktop: z.boolean().optional() }).optional(),
+  shells: z.strictObject({ retype_last_command: z.boolean().optional() }).optional(),
   agents: z
     .strictObject({
       shell: Shell.optional(),
@@ -77,6 +78,11 @@ export interface Config {
   readonly allowInsecureOrigins: boolean;
   /** Whether what needs the human is shown on the host's desktop when no dashboard is. */
   readonly desktopNotifications: boolean;
+  /**
+   * Whether shells get the integration that reports each line they run, for a restart to type
+   * the last one back. Off unless the user turns it on: a line can hold a secret.
+   */
+  readonly retypeLastCommand: boolean;
   /** `web.pairing`: "always", or "auto", which pairs only once an external origin is set. */
   readonly pairing: "auto" | "always";
   /**
@@ -168,6 +174,7 @@ export function resolveConfig(
       passthrough: file.agents?.env?.passthrough ?? [],
     },
     desktopNotifications: file.notifications?.desktop ?? true,
+    retypeLastCommand: file.shells?.retype_last_command ?? false,
     launchLimits: {
       maxLaunched: file.agents?.max_launched ?? 5,
       maxDepth: file.agents?.max_launch_depth ?? 3,

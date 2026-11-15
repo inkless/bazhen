@@ -77,6 +77,9 @@ listen = "loopback" # or "lan" (BAZHEN_WEB_LISTEN), with lan_allow; see docs/lan
 
 [notifications]
 desktop = true # show what needs you on this machine's desktop while no dashboard is in sight
+
+[shells]
+retype_last_command = false # keep each shell's last line to type back; see docs/shell-integration.md
 ```
 
 Desktop notifications go through `notify-send` on Linux, and on macOS through Bazhen's own

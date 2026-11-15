@@ -3,10 +3,12 @@ import { Hono, type Context } from "hono";
 import type { DeviceAuth } from "../auth/devices.ts";
 import type { AppEnv } from "../http/app.ts";
 import type { PairingCodes } from "../auth/pairing.ts";
+import type { ReportOutcome } from "../shells/reports.ts";
 import { UnknownDevice } from "../store/store.ts";
 import {
   EnvRefreshRequest,
   PaneTitleChanged,
+  ShellReport,
   DoctorResponse,
   PairingCodeResponse,
   type DevicesResponse,
@@ -33,6 +35,8 @@ export interface SocketParts {
   readonly externalOrigins: readonly string[];
   /** The LAN listener's address and fingerprint while it serves, for `bazhen pair` to show. */
   readonly lan: () => PairingCodeResponse["lan"];
+  /** A shell's integration reported the line it is running (foundation-design §4.8). */
+  readonly shellReport: (terminalId: string, report: ShellReport) => ReportOutcome;
 }
 
 const forbidden = (c: Context, message: string) => {
@@ -118,6 +122,23 @@ export function socketApp(parts: SocketParts): Hono<{ Bindings: HttpBindings }> 
       return c.json(body, 400);
     }
     parts.paneTitleChanged(req.data.pane);
+    return c.body(null, 204);
+  });
+
+  // A shell's integration, through the hook client. The line can hold a secret the user typed:
+  // it goes to the store and nowhere else, and a refusal names no part of it. Only the socket
+  // serves this route, never HTTP.
+  app.post("/v1/shells/:id/report", async (c) => {
+    const req = ShellReport.safeParse(await c.req.json().catch(() => undefined));
+    if (!req.success) {
+      const body: ErrorResponse = {
+        error: "invalid_request",
+        message: "expected { token, at, command }",
+      };
+      return c.json(body, 400);
+    }
+    const outcome = parts.shellReport(c.req.param("id"), req.data);
+    if (outcome === "refused") return forbidden(c, "no such shell, or not its token");
     return c.body(null, 204);
   });
 

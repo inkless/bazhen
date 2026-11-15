@@ -33,6 +33,7 @@ import {
   TerminalReplaced,
 } from "../commands.ts";
 import type { AgentQueue } from "../agents/queue.ts";
+import { newShellToken } from "./reports.ts";
 import {
   LINKABLE,
   UnknownAgent,
@@ -93,6 +94,11 @@ export interface ShellDeps {
   /** The daemon user's home: a standalone shell's default directory, and what `~` names. */
   readonly home: string;
   readonly budget: TerminalAdmission;
+  /**
+   * With the user's opt-in, the hook client and snippets each new shell reports the lines it runs
+   * through, with a token of its own; without it, shells report nothing.
+   */
+  readonly integration?: { readonly hook: string; readonly dir: string };
   readonly log?: (message: string) => void;
 }
 
@@ -330,9 +336,10 @@ export class ShellLifecycle {
     },
     first: (response: ShellCommandResponse) => void,
   ): Promise<ShellCommandResponse> {
-    const { store, environment, size, budget } = this.deps;
+    const { store, environment, size, budget, integration } = this.deps;
     const { cwd, linkedAgentId, theme, restartOf, openedBy } = shell;
     const terminalId = newId("term");
+    const reporting = integration && { ...integration, ...newShellToken() };
     const opened = store.transaction(() => {
       budget.admit();
       const response = {
@@ -347,6 +354,7 @@ export class ShellLifecycle {
           }),
         ],
       };
+      if (reporting) store.noteShellToken(terminalId, reporting.hash);
       first(response);
       return response;
     });
@@ -358,6 +366,9 @@ export class ShellLifecycle {
         ...(linkedAgentId !== null && { linkedAgentId }),
         ...(theme && { theme }),
         ...(openedBy && { openedBy }),
+        ...(reporting && {
+          integration: { token: reporting.token, hook: reporting.hook, dir: reporting.dir },
+        }),
       })
       .catch((cause: unknown) => {
         console.error(`shell ${terminalId} failed to open:`, cause);
