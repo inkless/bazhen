@@ -58,9 +58,10 @@ jobs:
 
   # The Rust gates on macOS, where code behind `cfg(target_os = "macos")` is built and tested. Only
   # clippy and nextest: tmux isn't run here, and rustfmt and cargo-deny don't depend on the OS
-  # (deny.toml checks every target triple), so `check` covers them. Like the other jobs, it runs
-  # on every pull request, so a change to a crate, Cargo.*, rust-toolchain.toml or a gate script
-  # is always covered.
+  # (deny.toml checks every target triple), so `check` covers them. Like `check`, it runs on every
+  # pull request, so a change to a crate, Cargo.*, rust-toolchain.toml or a gate script is always
+  # covered. The gate scripts import only Node built-ins, so nothing is installed and no pnpm cache
+  # is saved: the cache is large enough to push the repo's other caches out.
   rust-macos:
     name: rust (macos)
     runs-on: macos-latest
@@ -71,13 +72,11 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 26.13.0
-          cache: pnpm
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-nextest@0.9.152
-      - run: pnpm install --frozen-lockfile
       - run: pnpm lint:rust
       - run: pnpm test:rust
 
