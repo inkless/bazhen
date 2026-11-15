@@ -73,6 +73,9 @@ mod tests {
 
     use super::*;
 
+    /// vte's `MAX_OSC_PARAMS`.
+    const MOST_OSC_PARAMS: usize = 16;
+
     /// What of `bytes`, fed in pieces of `piece`, the parsers see.
     fn passed(bytes: &[u8], piece: usize) -> Vec<u8> {
         let mut cap = OscCap::default();
@@ -134,26 +137,25 @@ mod tests {
         assert_eq!(passed(stream.as_bytes(), 13), stream.as_bytes());
     }
 
-    /// The most payload bytes of any OSC string vte dispatched. Past 16 params vte stops
-    /// recording where they end but still keeps their bytes, so a string with no `;` is one param
-    /// and all of what vte kept.
+    /// The most payload bytes of any OSC string vte dispatched.
     #[derive(Default)]
     struct Longest(usize);
 
     impl Perform for Longest {
         fn osc_dispatch(&mut self, params: &[&[u8]], _: bool) {
-            let bytes = params.iter().map(|p| p.len()).sum::<usize>();
+            // vte keeps no `;`: the payload is the params and a `;` between each.
+            let bytes =
+                params.iter().map(|p| p.len()).sum::<usize>() + params.len().saturating_sub(1);
             self.0 = self.0.max(bytes);
         }
     }
 
-    /// Bytes that move vte between its states, and runs long enough to pass the cap. No `;`, which
-    /// the cap reads as any other byte: see [`Longest`].
+    /// Bytes that move vte between its states, and runs long enough to pass the cap.
     fn piece() -> impl Strategy<Value = Vec<u8>> {
         prop_oneof![
             prop::sample::select(vec![
                 0x1b_u8, b']', 0x07, 0x18, 0x1a, 0x00, b'\n', 0x7f, 0x9c, 0xc3, 0xe9, b'[', b'P',
-                b'X', b'^', b'_', b'\\', b' ', b'(', b'0', b'a',
+                b'X', b'^', b'_', b'\\', b' ', b'(', b'0', b'a', b';',
             ])
             .prop_map(|byte| vec![byte]),
             (1usize..3 * MOST_OSC_BYTES).prop_map(|n| vec![b'x'; n]),
@@ -167,6 +169,10 @@ mod tests {
             cut in 1usize..200,
         ) {
             let mut stream: Vec<u8> = pieces.concat();
+            // Past 16 params vte stops recording where they end, but still keeps their bytes,
+            // which `Longest` would miss: no string here has more.
+            let separators = pieces.iter().filter(|piece| piece.as_slice() == b";").count();
+            prop_assume!(separators < MOST_OSC_PARAMS);
             // Ends whatever string is open, so vte dispatches what it held.
             stream.push(0x07);
             let mut parser = Parser::new();

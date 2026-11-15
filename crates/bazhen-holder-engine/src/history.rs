@@ -140,15 +140,21 @@ impl History {
     }
 
     /// Takes the newest line off the store, its rows oldest first, but no more than `most` of
-    /// them: the rest of a longer line stays, ending in a row that wraps.
-    pub(crate) fn pop_line(&mut self, most: usize) -> Vec<(String, Ending)> {
+    /// them, and none after a row `more` says is enough: the rest of a longer line stays, ending
+    /// in a row that wraps.
+    pub(crate) fn pop_line(
+        &mut self,
+        most: usize,
+        mut more: impl FnMut(&str) -> bool,
+    ) -> Vec<(String, Ending)> {
         let mut line = Vec::new();
         while line.len() < most {
             let Some(row) = self.pop_row() else {
                 break;
             };
+            let enough = !more(&row.0);
             line.push(row);
-            if !self.newest_wraps() {
+            if enough || !self.newest_wraps() {
                 break;
             }
         }
@@ -255,6 +261,7 @@ mod tests {
         ..LINE_END
     };
     const ANY_SIZE: usize = usize::MAX;
+    const ALL: fn(&str) -> bool = |_| true;
 
     fn written(history: &History) -> String {
         let mut out = String::new();
@@ -337,15 +344,15 @@ mod tests {
             history.push(row, ending);
         }
         history.push("d", WRAPS);
-        assert_eq!(history.pop_line(10), vec![("d".to_owned(), WRAPS)]);
+        assert_eq!(history.pop_line(10, ALL), vec![("d".to_owned(), WRAPS)]);
         let rows: Vec<_> = history
-            .pop_line(10)
+            .pop_line(10, ALL)
             .into_iter()
             .map(|(text, _)| text)
             .collect();
         assert_eq!(rows, ["b", "c"]);
         assert_eq!((history.rows(), written(&history)), (0, String::new()));
-        assert_eq!(history.pop_line(10), []);
+        assert_eq!(history.pop_line(10, ALL), []);
         history.push("e", LINE_END);
         assert_eq!(written(&history), "e\r\n");
     }
@@ -358,13 +365,33 @@ mod tests {
         }
         history.push("d", LINE_END);
         let rows: Vec<_> = history
-            .pop_line(2)
+            .pop_line(2, ALL)
             .into_iter()
             .map(|(text, _)| text)
             .collect();
         assert_eq!(rows, ["c", "d"]);
         assert!(history.newest_wraps());
         assert_eq!(written(&history), "ab");
+    }
+
+    #[test]
+    fn a_line_comes_off_no_further_than_the_row_that_is_enough() {
+        let mut history = History::new(10, ANY_SIZE);
+        for row in ["a", "bb", "ccc"] {
+            history.push(row, WRAPS);
+        }
+        history.push("dddd", LINE_END);
+        let mut bytes = 0;
+        let rows: Vec<_> = history
+            .pop_line(10, |row| {
+                bytes += row.len();
+                bytes < 7
+            })
+            .into_iter()
+            .map(|(text, _)| text)
+            .collect();
+        assert_eq!(rows, ["ccc", "dddd"]);
+        assert_eq!(written(&history), "abb");
     }
 
     #[test]

@@ -471,6 +471,10 @@ fn whole_chars(bytes: &[u8], len: usize) -> usize {
 /// How many times the rows a resize needs a refill may take off the store to finish a line.
 const REFILL_BOUND: usize = 8;
 
+/// The most cells a refill gives back: the old screen and the new at the largest size, 48 MB in
+/// alacritty.
+const MOST_REFILL_CELLS: usize = 1 << 21;
+
 /// The most rows of scrollback a resize makes room for.
 const MOST_RESIZE_ROOM: usize = 1 << 20;
 
@@ -537,17 +541,25 @@ impl Primary {
 
 /// Puts the newest lines of the store back into `grid`'s scrollback, rewrapped to its width,
 /// until it holds `wanted` rows at `cols` wide, the width it's about to take, or the store is
-/// empty. A line that runs on from the store into
-/// the scrollback comes back whole first, so that a reflow sees all of it. No more than
-/// `REFILL_BOUND` times `wanted` stored rows come back, however long their lines: the rest of a
-/// longer line stays in the store. Returns how many rows the scrollback holds.
+/// empty. A line that runs on from the store into the scrollback comes back whole first, so that
+/// a reflow sees all of it. No more than `REFILL_BOUND` times `wanted` stored rows come back, nor
+/// more than `MOST_REFILL_CELLS` cells, however long their lines: the rest of a longer line stays
+/// in the store. Returns how many rows the scrollback holds.
 fn refill(grid: &mut Grid<Cell>, history: &mut History, wanted: usize, cols: usize) -> usize {
     let mut got = grid.history_size();
     let mut left = REFILL_BOUND * wanted.max(1);
+    let mut cells_left = MOST_REFILL_CELLS;
     let mut taken = Vec::new();
     let mut counter = RowCounter::new(cols);
-    while left > 0 && (got < wanted || (taken.is_empty() && history.newest_wraps())) {
-        let line = history.pop_line(left);
+    while left > 0
+        && cells_left > 0
+        && (got < wanted || (taken.is_empty() && history.newest_wraps()))
+    {
+        // Counted as it comes off: a line of a minified file can run to thousands of rows.
+        let line = history.pop_line(left, |row| {
+            cells_left = cells_left.saturating_sub(encode::cells(row));
+            cells_left > 0
+        });
         if line.is_empty() {
             break;
         }
@@ -622,11 +634,28 @@ fn rows_of(text: &str, cols: usize, open: bool) -> Vec<Row<Cell>> {
         rows: 1,
     };
     let mut term = Term::new(config(text.len() + 1), &size, Sink::default());
-    Processor::<StdSyncHandler>::new().advance(&mut term, text.as_bytes());
-    let grid = term.grid();
+    let mut parser = Processor::<StdSyncHandler>::new();
+    for line in text.split_inclusive("\r\n") {
+        let (line, ends) = line
+            .strip_suffix("\r\n")
+            .map_or((line, false), |line| (line, true));
+        parser.advance(&mut term, line.as_bytes());
+        // A wrap that scrolls fills the new row with the pen's background, which the cells
+        // past a line's end never had: they go back to blank, unless the line filled its row.
+        // The last line, if it goes on, is no different: its row is marked as wrapping, and
+        // the reflow would take them for the line's.
+        if !term.grid().cursor.input_needs_wrap {
+            parser.advance(&mut term, b"\x1b[0m\x1b[K");
+        }
+        if ends {
+            parser.advance(&mut term, b"\r\n");
+        }
+    }
+    let grid = term.grid_mut();
     let scrolled = grid.history_size();
+    // Moved, not copied: a refill's rows can take tens of megabytes.
     let mut rows: Vec<_> = (0..scrolled)
-        .map(|n| grid[scrollback_line(scrolled, n)].clone())
+        .map(|n| std::mem::take(&mut grid[scrollback_line(scrolled, n)]))
         .collect();
     if open {
         let mut last = grid[Line(0)].clone();
@@ -961,6 +990,26 @@ mod tests {
         // A row a line at either width: the old screen's and the new's. Counted at the old
         // width, a widening 500 times over would take every row.
         assert_eq!(engine.term.grid().history_size(), 1 + 1000);
+    }
+
+    #[test]
+    fn a_line_thousands_of_rows_long_comes_back_only_as_far_as_a_resize_needs() {
+        // A minified file at the largest size: one line, 9,000 rows of it in the store.
+        let size = Size {
+            cols: 1000,
+            rows: 1000,
+        };
+        let mut engine = Engine::new(size, HistoryRows(10_000));
+        engine.advance("x".repeat(9000 * 1000).as_bytes());
+        engine.refill_for(Size {
+            cols: 999,
+            rows: 1000,
+        });
+        // A refill's cells, and the rows at either end of them: the one that goes past, the one a
+        // drain leaves, and the last, which goes on. A stored row costs 24 KB in alacritty, and
+        // all 9,000 would take 216 MB.
+        let rows = engine.term.grid().history_size();
+        assert!(rows <= MOST_REFILL_CELLS / 1000 + 3, "{rows}");
     }
 
     #[test]

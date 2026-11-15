@@ -8,6 +8,7 @@
 use alacritty_terminal::grid::Row;
 use alacritty_terminal::term::cell::{Cell, Flags};
 use alacritty_terminal::vte::ansi::{Color, NamedColor};
+use unicode_width::UnicodeWidthChar as _;
 
 const LAYOUT_FLAGS: Flags = Flags::WRAPLINE
     .union(Flags::WIDE_CHAR)
@@ -139,6 +140,20 @@ impl<'a> Lines<'a> {
             self.out.push_str("\r\n");
         }
     }
+}
+
+/// The cells a row [`encode_row`] wrote draws: its chars' widths, past the SGR it writes.
+pub(crate) fn cells(text: &str) -> usize {
+    let mut chars = text.chars();
+    let mut cells = 0;
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            chars.by_ref().find(|&c| c == 'm');
+        } else {
+            cells += c.width().unwrap_or(0);
+        }
+    }
+    cells
 }
 
 /// The attributes that make a space visible: a foreground colour alone doesn't.
@@ -304,6 +319,18 @@ mod tests {
 
     fn feed(term: &mut Term<Sink>, bytes: &[u8]) {
         Processor::<alacritty_terminal::vte::ansi::StdSyncHandler>::new().advance(term, bytes);
+    }
+
+    #[test]
+    fn a_row_s_cells_are_its_chars_widths_past_its_sgr() {
+        let mut t = term(12, 1);
+        feed(
+            &mut t,
+            "\x1b[1;38;5;9;48;2;1;2;3ma中e\u{301}\x1b[4:3;58:5:1mb\x1b[0m c".as_bytes(),
+        );
+        let mut text = String::new();
+        encode_row(&t.grid()[Line(0)], &mut text);
+        assert_eq!(cells(&text), 7);
     }
 
     /// Encodes every screen row of a terminal fed `stream`, replays the encoding into a fresh

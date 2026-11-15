@@ -350,9 +350,18 @@ fn difference(engine: &Engine, full: &FullHistory) -> Option<String> {
 
 /// The cells that draw something, in order: what a resize must not lose or reorder.
 fn visible(rows: &[Cells]) -> Vec<Cell> {
+    drawing(rows, |cell| cell.c != ' ')
+}
+
+/// The cells that draw something or a background, in order.
+fn coloured(rows: &[Cells]) -> Vec<Cell> {
+    drawing(rows, |cell| cell.c != ' ' || cell.bg != Cell::default().bg)
+}
+
+fn drawing(rows: &[Cells], draws: fn(&Cell) -> bool) -> Vec<Cell> {
     rows.iter()
         .flatten()
-        .filter(|cell| cell.c != ' ' && !cell.flags.intersects(SPACERS))
+        .filter(|cell| draws(cell) && !cell.flags.intersects(SPACERS))
         .map(|cell| {
             let mut cell = cell.clone();
             cell.flags.remove(Flags::WRAPLINE);
@@ -417,7 +426,7 @@ fn run(size: Size, actions: &[Action], cuts: &[usize]) -> (Engine, FullHistory) 
                         } else {
                             i32::MAX
                         };
-                        assert_same_visible_cells(&engine, &full, last, drop_below);
+                        assert_same_visible_cells(&engine, &full, last, drop_below, visible);
                     }
                     return (engine, full);
                 }
@@ -444,16 +453,22 @@ fn assert_same(engine: &Engine, full: &FullHistory) {
 /// cursor may have been dropped, `last` is the cursor's row and one side may hold more above it
 /// than the other, so one side's cells need only start the other's. What follows would differ,
 /// so a case ends there.
-fn assert_same_visible_cells(engine: &Engine, full: &FullHistory, last: i32, cut: bool) {
+fn assert_same_visible_cells(
+    engine: &Engine,
+    full: &FullHistory,
+    last: i32,
+    cut: bool,
+    kept: fn(&[Cells]) -> Vec<Cell>,
+) {
     let mut history = String::new();
     engine.write_history(&mut history);
     let cols = engine.size.cols;
     let last = usize::try_from(last).unwrap_or(0);
-    let ours = visible(&drawn(
+    let ours = kept(&drawn(
         &history_and_screen(history, &engine.term, last),
         cols,
     ));
-    let theirs = visible(&drawn(
+    let theirs = kept(&drawn(
         &history_and_screen(full.history(), &full.term, last),
         cols,
     ));
@@ -556,10 +571,43 @@ proptest! {
                     engine.resize(Size { cols, rows });
                     full.resize(Size { cols, rows });
                     prop_assert_eq!(engine.stats().overflows, 0);
-                    assert_same_visible_cells(&engine, &full, i32::MAX, false);
+                    assert_same_visible_cells(&engine, &full, i32::MAX, false, visible);
                 }
                 (None, _) => {}
             }
+        }
+    }
+
+    #[test]
+    fn through_any_resizes_coloured_lines_keep_every_cell_that_draws_something_or_a_background(
+        size in size(),
+        lines in prop::collection::vec(
+            (any::<u8>(), any::<u8>(), any::<bool>(), text(), any::<bool>()), 0..40),
+        resizes in prop::collection::vec((1u16..30, 1u16..12), 1..8),
+        cuts in cuts(),
+    ) {
+        // Lines in a colour, their rest erased to the background or not, so that runs of blanks
+        // in a colour must stay too, in their colour. Each ends in the default pen: a line feed
+        // in a colour fills the row under the cursor, which a reflow may drop (see
+        // `may_drop_rows_below_the_cursor`). The output all comes first: after a reflow the
+        // cursor's row may differ, and a wrap in a colour then fills a new row only on one side.
+        let mut engine = Engine::new(size, HistoryRows(ENGINE_ROWS));
+        let mut full = FullHistory::new(size);
+        let mut stream = String::new();
+        for (fg, bg, bold, text, erase) in lines {
+            stream += &Action::Sgr(fg, bg, bold).bytes().unwrap_or_default();
+            stream += &text;
+            if erase {
+                stream += "\x1b[K";
+            }
+            stream += "\x1b[0m\r\n";
+        }
+        feed(&mut engine, &mut full, &stream, &cuts);
+        for (cols, rows) in resizes {
+            engine.resize(Size { cols, rows });
+            full.resize(Size { cols, rows });
+            prop_assert_eq!(engine.stats().overflows, 0);
+            assert_same_visible_cells(&engine, &full, i32::MAX, false, coloured);
         }
     }
 
