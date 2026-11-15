@@ -22,6 +22,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isAlive } from "@bazhen/host-guard";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { installCommand } from "./cargo-gate.ts";
 
 const FALSIFY = fileURLToPath(new URL("falsify.ts", import.meta.url));
 const SOURCE = "packages/a/src/x.ts";
@@ -917,7 +918,7 @@ describe("falsify judging new Rust tests by mutating the change", () => {
     const result = againstBase({ STUB_MUTANTS_FAIL: "1" });
     expect({
       status: result.status,
-      hint: result.output.includes("cargo install --locked cargo-mutants@27.1.0"),
+      hint: result.output.includes(installCommand("cargo-mutants")),
       judged: result.output.includes("falsify: new tests run"),
     }).toEqual({ status: 1, hint: true, judged: false });
     expect(leftovers()).toEqual([]);

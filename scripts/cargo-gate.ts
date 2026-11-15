@@ -78,9 +78,24 @@ export type Gate = keyof typeof GATES;
 const INSTALL_TOOLCHAIN =
   "The Rust gates need cargo, rustfmt and clippy: install rustup, which installs the toolchain " +
   "rust-toolchain.toml pins.";
+/**
+ * The version of each cargo tool the gates and falsify run. CI, the test container and the docs
+ * install these, and a test holds them to this list.
+ */
+export const RUST_TOOLS = {
+  "cargo-nextest": "0.9.152",
+  "cargo-deny": "0.20.2",
+  "cargo-mutants": "27.1.0",
+} as const;
+export type RustTool = keyof typeof RUST_TOOLS;
+
+/** The command that installs `tools` at their pinned versions. */
+export const installCommand = (...tools: RustTool[]): string =>
+  `cargo install --locked ${tools.map((tool) => `${tool}@${RUST_TOOLS[tool]}`).join(" ")}`;
+
 const INSTALL_TOOLS =
   "The Rust gates need cargo-nextest and cargo-deny. Install them once: " +
-  "cargo install --locked cargo-nextest@0.9.152 cargo-deny@0.20.2";
+  installCommand("cargo-nextest", "cargo-deny");
 
 /** Each tool a gate runs, with the command that says it is installed and the hint when it isn't. */
 const TOOLS: Record<Gate, { probe: string[]; hint: string }> = {

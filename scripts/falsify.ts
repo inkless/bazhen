@@ -57,7 +57,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, join, posix } from "node:path";
 import { isAlive, rethrowUnsafe, signalGroup, spawnGroup } from "@bazhen/host-guard";
 import { KILLS_ENV } from "./capped.ts";
-import { GATES, configFailures, gateEnv, outsideConfigs } from "./cargo-gate.ts";
+import { GATES, configFailures, gateEnv, installCommand, outsideConfigs } from "./cargo-gate.ts";
 import { isMain } from "./is-main.ts";
 import {
   failedOnAssertion,
@@ -635,8 +635,7 @@ async function listRustTests(dir: string, top: string): Promise<unknown> {
   }
 }
 
-const MUTANTS_HINT =
-  "if cargo-mutants is missing, install it: cargo install --locked cargo-mutants@27.1.0";
+const MUTANTS_HINT = `if cargo-mutants is missing, install it: ${installCommand("cargo-mutants")}`;
 
 /** The mutants cargo-mutants lists in `dir` in the code the diff in the file `diff` touches. */
 async function listMutants(dir: string, top: string, diff: string): Promise<unknown> {
@@ -911,7 +910,7 @@ async function judgeRustTests(top: string, base: string, head: string) {
       console.error(
         `falsify: \`cargo-nextest nextest list\` failed at ${where}, so the Rust tests the ` +
           "branch adds are unknown. Run `pnpm test:rust` there to see why; if cargo-nextest is " +
-          "missing, install it: cargo install --locked cargo-nextest@0.9.152",
+          `missing, install it: ${installCommand("cargo-nextest")}`,
       );
       return undefined;
     }

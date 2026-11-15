@@ -1,5 +1,6 @@
 import { SLICE } from "@bazhen/host-guard";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { RUST_TOOLS } from "./cargo-gate.ts";
 import {
   looksSecret,
   ownerOf,
@@ -43,11 +44,13 @@ describe("pnpm test:real", () => {
     expect(() => parseArgs(["--base", "--api"])).toThrow("usage");
   });
 
-  it("builds the image on the repository's own node, pnpm and Playwright pins", () => {
+  it("builds the image on the repository's own node, pnpm, Playwright and Rust tool pins", () => {
     expect(pins(read(repo))).toEqual({
       NODE_VERSION: "26.13.0",
       PNPM_VERSION: "12.16.1",
       PLAYWRIGHT_VERSION: "1.64.1",
+      NEXTEST_VERSION: RUST_TOOLS["cargo-nextest"],
+      CARGO_MUTANTS_VERSION: RUST_TOOLS["cargo-mutants"],
     });
   });
 

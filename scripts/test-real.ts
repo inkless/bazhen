@@ -26,6 +26,7 @@ import {
 import { availableParallelism, constants, hostname, tmpdir, totalmem } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { SLICE, isAlive, signalGroup, spawnGroup } from "@bazhen/host-guard";
+import { RUST_TOOLS } from "./cargo-gate.ts";
 import { isMain } from "./is-main.ts";
 
 const SUITES = {
@@ -58,7 +59,7 @@ export function parseArgs(args: readonly string[]): { suites: Suite[]; base: str
   };
 }
 
-/** The image's build arguments, read from the repository's own pins. */
+/** The image's build arguments: the repository's own pins, and the Rust tools falsify runs. */
 export function pins(read: (path: string) => string): Record<string, string> {
   const pkg = (path: string): Record<string, unknown> => JSON.parse(read(path));
   const manager = String(pkg("package.json")["packageManager"]);
@@ -74,6 +75,8 @@ export function pins(read: (path: string) => string): Record<string, string> {
     NODE_VERSION: read(".nvmrc").trim(),
     PNPM_VERSION: manager.slice("pnpm@".length),
     PLAYWRIGHT_VERSION: playwright,
+    NEXTEST_VERSION: RUST_TOOLS["cargo-nextest"],
+    CARGO_MUTANTS_VERSION: RUST_TOOLS["cargo-mutants"],
   };
 }
 
