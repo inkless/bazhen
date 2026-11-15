@@ -5,5 +5,8 @@
 //! Synchronous and single-threaded: one `poll` loop, no async runtime.
 
 pub mod child;
+pub mod holder;
+pub mod log;
 pub mod pty;
 mod signals;
+pub mod start;

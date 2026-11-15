@@ -1,15 +1,15 @@
 #![expect(
     unsafe_code,
     reason = "Command::pre_exec runs a closure between fork and exec, where libc's sigprocmask \
-              and signal reset the mask and the dispositions; only unsafe can register the one \
-              or call the others"
+              and signal reset the mask and the dispositions, and libc::close closes an fd no \
+              Rust value owns; only unsafe can register the one or call the others"
 )]
 
 //! A terminal's PTY, and the child that runs on it as the leader of a session of its own.
 
 use std::io;
 use std::mem::MaybeUninit;
-use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
+use std::os::fd::{AsFd, BorrowedFd, OwnedFd, RawFd};
 use std::os::unix::process::CommandExt as _;
 use std::process::{Command, Stdio};
 use std::ptr;
@@ -210,5 +210,31 @@ fn become_session_leader() -> io::Result<()> {
     }
     rustix::process::setsid()?;
     rustix::process::ioctl_tiocsctty(rustix::stdio::stdin())?;
+    Ok(())
+}
+
+/// Closes every fd above 2 that this process inherited, so none reaches the child, nor keeps open
+/// whatever its spawner leaked. Every fd above 2 is taken for inherited, so this runs before the
+/// holder opens anything of its own.
+///
+/// # Errors
+///
+/// When `/dev/fd` can't be listed.
+pub fn close_inherited_fds() -> io::Result<()> {
+    let mut inherited = Vec::new();
+    for entry in std::fs::read_dir("/dev/fd")? {
+        if let Ok(fd) = entry?.file_name().to_string_lossy().parse::<RawFd>()
+            && fd > 2
+        {
+            inherited.push(fd);
+        }
+    }
+    // The listing's own fd is among them and closed by now; close(2) answers it EBADF.
+    for fd in inherited {
+        // SAFETY: no Rust value in this process owns `fd`: it was open before the holder opened
+        // anything, and the listing that also showed its own fd has dropped. close(2) of an fd
+        // that is no longer open fails with EBADF and does nothing.
+        let _ = unsafe { libc::close(fd) };
+    }
     Ok(())
 }
