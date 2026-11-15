@@ -7,7 +7,7 @@ import { spawn, spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { killHolder, readProcess, vouchHolder } from "@bazhen/host-guard";
-import { HOLDER_PROTOCOL_VERSION } from "@bazhen/protocol";
+import { HOLDER_PROTOCOL_VERSION, type HolderTheme } from "@bazhen/protocol";
 import { connectHolder, type HolderClient } from "@bazhen/runtime-holder";
 import {
   holderEnv,
@@ -35,10 +35,51 @@ export function runInHome(
 /** The pid of a process that has exited and been reaped, as a closed holder's is. */
 export const exitedPid = (): number => runInHome(["true"]).pid;
 
-/** The binary `pnpm test:holder` builds first (`build:holder`). */
+/** The binaries `pnpm test:holder` builds first (`build:holder`). */
 export const HOLDER_BINARY = fileURLToPath(
   new URL("../../target/debug/bazhen-holder", import.meta.url),
 );
+/** The engine's replay bin, which feeds a recording to an engine of its own and reports its stats. */
+const REPLAY_BINARY = fileURLToPath(
+  new URL("../../target/debug/bazhen-holder-replay", import.meta.url),
+);
+/** What `bazhen-holder-replay` says of an engine it fed a recording. */
+export interface EngineReport {
+  readonly engineBytes: number;
+  readonly historyBytes: number;
+  readonly historyRows: number;
+}
+
+function isEngineReport(parsed: unknown): parsed is EngineReport {
+  return (
+    typeof parsed === "object" &&
+    parsed !== null &&
+    "engineBytes" in parsed &&
+    typeof parsed.engineBytes === "number" &&
+    "historyBytes" in parsed &&
+    typeof parsed.historyBytes === "number" &&
+    "historyRows" in parsed &&
+    typeof parsed.historyRows === "number"
+  );
+}
+
+/**
+ * Feeds `recording` to an engine of the replay bin's own, of `size` keeping `historyLines` rows,
+ * and returns its stats: what a holder's engine fed the same bytes must report.
+ */
+export function replayEngine(
+  recording: string,
+  size: { readonly cols: number; readonly rows: number },
+  historyLines: number,
+): EngineReport {
+  const args = [String(size.cols), String(size.rows), String(historyLines), "1", recording];
+  const run = spawnSync(REPLAY_BINARY, args, { input: "", encoding: "utf8" });
+  if (run.status !== 0) throw new Error(`the replay bin failed: ${run.stderr || run.error}`);
+  const parsed: unknown = JSON.parse(run.stdout);
+  if (!isEngineReport(parsed)) throw new Error(`the replay bin said ${run.stdout}`);
+  return parsed;
+}
+
 /** CPU-seconds a holder may use: one that spins, under a mutant say, dies of SIGXCPU instead. */
 const CPU_SECONDS = 10;
 const READY_MS = 5_000;
@@ -64,6 +105,7 @@ export interface SpawnedHolder {
 export async function spawnHolder(
   terminalId: string,
   argv: readonly [string, ...string[]],
+  { theme }: { readonly theme?: HolderTheme } = {},
 ): Promise<SpawnedHolder> {
   const socket = holderSocket(terminalId);
   const spec = {
@@ -73,6 +115,7 @@ export async function spawnHolder(
     tags: {},
     size: { cols: 80, rows: 24 },
     ...holderProcessSpec(argv),
+    ...(theme === undefined ? {} : { theme }),
   };
   const script = `ulimit -t ${CPU_SECONDS} && exec "$0" "$@"`;
   const child = spawn("sh", ["-c", script, HOLDER_BINARY], {

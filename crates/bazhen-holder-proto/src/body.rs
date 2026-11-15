@@ -485,8 +485,9 @@ impl From<Signal> for &'static str {
     }
 }
 
-/// The background a program is told it is drawn on, when it asks. Read from a JSON string only,
-/// as `Signal` is.
+/// The background a program is told it is drawn on, when it asks (OSC 10 and 11), in the colours
+/// [`Theme::colours`] gives it. A terminal with no theme is told dark. Read from a JSON string
+/// only, as `Signal` is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "&'static str")]
 pub enum Theme {
@@ -503,6 +504,28 @@ impl Theme {
             Self::Dark => "dark",
         }
     }
+
+    /// The text and background a terminal in this theme is drawn in, which a program that asks is
+    /// told: `HOLDER_THEME_COLOURS`, as the daemon and the web client draw them.
+    pub const fn colours(self) -> ThemeColours {
+        match self {
+            Self::Light => ThemeColours {
+                text: [0x20, 0x22, 0x25],
+                background: [0xfd, 0xfd, 0xfd],
+            },
+            Self::Dark => ThemeColours {
+                text: [0xea, 0xeb, 0xee],
+                background: [0x0f, 0x0f, 0x10],
+            },
+        }
+    }
+}
+
+/// A theme's colours, each as red, green and blue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ThemeColours {
+    pub text: [u8; 3],
+    pub background: [u8; 3],
 }
 
 impl TryFrom<String> for Theme {
@@ -634,7 +657,7 @@ pub struct SetTagsRequest {
     pub tags: Tags,
 }
 
-/// `None` tells a program that asks nothing of the holder's own.
+/// `None` is a terminal with no theme, which is told dark, as at spawn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SetThemeRequest {
     #[serde(deserialize_with = "json::nullable")]
@@ -665,6 +688,15 @@ pub struct HelloReply {
     pub alternate: bool,
     pub history_lines: Count,
     pub writer: bool,
+    /// False once the holder's terminal engine has failed for good: the terminal still runs, but
+    /// the holder answers no program's queries and serves no `snapshot`. Since 1.2; a holder of
+    /// 1.1 leaves it out.
+    #[serde(
+        default,
+        deserialize_with = "json::optional",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub engine: Option<bool>,
 }
 
 /// What every major reads of a hello reply first, to know which major's schema the rest is in.
@@ -682,6 +714,15 @@ pub struct Stats {
     pub rss: Option<Count>,
     pub ring_bytes: Count,
     pub history_lines: Count,
+    /// Attempts to replace a failed terminal engine with an empty one, at most the holder's
+    /// `MOST_ENGINE_RESETS`: a failure after those is given up on, which `HelloReply::engine`
+    /// false marks. Since 1.2.
+    #[serde(
+        default,
+        deserialize_with = "json::optional",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub engine_resets: Option<Count>,
 }
 
 /// The PTY's foreground group, from its master, with start times.
@@ -770,10 +811,12 @@ pub enum ErrorCode {
     Failed,
     /// The request needs the child to have exited, and it still runs: a `respawn`.
     Running,
+    /// The holder's terminal engine has failed for good, so it has no screen: a `snapshot`.
+    Unavailable,
 }
 
 impl ErrorCode {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::UnknownRequest,
         Self::StaleGeneration,
         Self::OutOfRange,
@@ -785,6 +828,7 @@ impl ErrorCode {
         Self::SnapshotTooLarge,
         Self::Failed,
         Self::Running,
+        Self::Unavailable,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -800,6 +844,7 @@ impl ErrorCode {
             Self::SnapshotTooLarge => "snapshot-too-large",
             Self::Failed => "failed",
             Self::Running => "running",
+            Self::Unavailable => "unavailable",
         }
     }
 }

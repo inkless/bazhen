@@ -6,7 +6,9 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::os::unix::fs::OpenOptionsExt as _;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard, TryLockError};
+
+use tracing_subscriber::fmt::MakeWriter;
 
 /// The size past which the log is moved aside, so a holder keeps at most about twice this.
 pub const LOG_CAP: u64 = 1 << 20;
@@ -157,10 +159,58 @@ impl<F: LogFiles> Write for BoundedLog<F> {
     }
 }
 
+/// The log, handed to one event at a time. An event that finds it in use drops its line rather
+/// than wait: the holder has one thread, so the log is in use only when a panic inside its own
+/// write logs, and waiting for it would hang the holder with its child alive.
+#[derive(Debug)]
+pub struct Shared<W>(Mutex<W>);
+
+impl<W> Shared<W> {
+    pub const fn new(log: W) -> Self {
+        Self(Mutex::new(log))
+    }
+}
+
+/// One event's line: written to the log, or dropped.
+#[derive(Debug)]
+pub enum Line<'a, W> {
+    Held(MutexGuard<'a, W>),
+    Dropped,
+}
+
+impl<W: Write> Write for Line<'_, W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self {
+            Self::Held(log) => log.write(buf),
+            Self::Dropped => Ok(buf.len()),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            Self::Held(log) => log.flush(),
+            Self::Dropped => Ok(()),
+        }
+    }
+}
+
+impl<'a, W: Write + 'a> MakeWriter<'a> for Shared<W> {
+    type Writer = Line<'a, W>;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        match self.0.try_lock() {
+            Ok(log) => Line::Held(log),
+            // A panic mid-write leaves the log as whole as any failed write does.
+            Err(TryLockError::Poisoned(poisoned)) => Line::Held(poisoned.into_inner()),
+            Err(TryLockError::WouldBlock) => Line::Dropped,
+        }
+    }
+}
+
 /// Sends the process's `tracing` events to a bounded log beside `socket`. Lines carry no ANSI
 /// colour and no module path.
 pub fn init(socket: &Path) {
-    let writer = Mutex::new(BoundedLog::new(DiskLog::beside(socket), LOG_CAP));
+    let writer = Shared::new(BoundedLog::new(DiskLog::beside(socket), LOG_CAP));
     let subscriber = tracing_subscriber::fmt()
         .with_writer(writer)
         .with_target(false)
@@ -291,6 +341,47 @@ mod tests {
             text(&fake.0.lock().unwrap().current),
             "1 log lines dropped\nkept\n"
         );
+    }
+
+    #[test]
+    fn an_event_that_finds_the_log_in_use_drops_its_line_rather_than_wait() {
+        let fake = Fake::default();
+        let shared = Arc::new(Shared::new(BoundedLog::new(fake.clone(), LOG_CAP)));
+        let held = shared.make_writer();
+        let (done, waited) = std::sync::mpsc::channel();
+        let nested = Arc::clone(&shared);
+        // On a thread of its own, so a writer that waits fails the test instead of hanging it.
+        std::thread::spawn(move || {
+            let mut line = nested.make_writer();
+            let dropped = matches!(line, Line::Dropped);
+            line.write_all(b"from a panic inside a write\n").unwrap();
+            drop(line);
+            done.send(dropped).unwrap();
+        });
+        let dropped = waited.recv_timeout(std::time::Duration::from_secs(5));
+        assert_eq!(dropped, Ok(true), "the second writer waited for the first");
+        drop(held);
+        shared.make_writer().write_all(b"kept\n").unwrap();
+        assert_eq!(text(&fake.0.lock().unwrap().current), "kept\n");
+    }
+
+    #[test]
+    fn a_log_a_panic_left_locked_still_takes_lines() {
+        let fake = Fake::default();
+        let shared = Shared::new(BoundedLog::new(fake.clone(), LOG_CAP));
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _held = shared.make_writer();
+            panic!("inside a write");
+        }));
+        assert!(panicked.is_err());
+        let mut line = shared.make_writer();
+        assert!(
+            matches!(line, Line::Held(_)),
+            "a poisoned log dropped the line"
+        );
+        line.write_all(b"after\n").unwrap();
+        drop(line);
+        assert_eq!(text(&fake.0.lock().unwrap().current), "after\n");
     }
 
     #[test]

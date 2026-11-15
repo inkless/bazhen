@@ -681,8 +681,32 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/start_time.rs::epoch_seconds": "proc_stat",
   "crates/bazhen-holder/src/start_time.rs::start_ticks": "proc_stat",
   "crates/bazhen-holder/src/start_time.rs::boot_time": "proc_stat",
+  "crates/bazhen-holder/src/rss.rs::resident_pages": "proc_stat",
 };
 const NOT_DECODERS: Record<string, string> = {
+  "crates/bazhen-holder/src/engine.rs::advance":
+    "passes the child's output to the engine's Engine::advance, which its advance target fuzzes",
+  "crates/bazhen-holder/src/engine.rs::Engine::advance":
+    "passes the child's output to the engine's Engine::advance, which its advance target fuzzes",
+  "crates/bazhen-holder/src/engine.rs::Walled::advance":
+    "passes the child's output to the engine's Engine::advance, which its advance target fuzzes",
+  "crates/bazhen-holder/src/engine.rs::Screen::write":
+    "copies the child's output into the ring and the engine's Engine::advance, which its advance target fuzzes",
+  "crates/bazhen-holder/src/engine.rs::Screen::new": "keeps a ring and an engine; reads no bytes",
+  "crates/bazhen-holder/src/engine.rs::Screen::ring": "returns a field; reads no bytes",
+  "crates/bazhen-holder/src/engine.rs::Screen::engine": "returns a field; reads no bytes",
+  "crates/bazhen-holder/src/engine.rs::Screen::engine_mut": "returns a field; reads no bytes",
+  "crates/bazhen-holder/src/engine.rs::Screen::take_replies":
+    "hands over replies the engine wrote itself; reads no bytes",
+  "crates/bazhen-holder/src/holder.rs::Holder::output_mut": "returns a field; reads no bytes",
+  "crates/bazhen-holder/src/holder.rs::Holder::reply":
+    "queues replies the engine wrote itself for the child; reads no bytes",
+  "crates/bazhen-holder/src/input.rs::InputQueue::offer_replies":
+    "queues replies the engine wrote itself, whole; parses nothing",
+  "crates/bazhen-holder/src/server.rs::input":
+    "queues a decoded input request's bytes for the child; parses nothing",
+  "crates/bazhen-holder/src/server.rs::stats":
+    "reads the holder's own counts; no bytes from a peer",
   "crates/bazhen-holder/src/conn.rs::Connection::accepted":
     "returns a field or a state; reads no bytes",
   "crates/bazhen-holder/src/conn.rs::Connection::answering":
@@ -880,6 +904,8 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/holder.rs::Holder::step":
     "reaps the child and publishes its exit; reads no bytes",
   "crates/bazhen-holder/src/log.rs::BoundedLog::dropped": "returns a count; reads nothing",
+  "crates/bazhen-holder/src/log.rs::Line::write":
+    "hands the holder's own log line to the log, or drops it; parses nothing",
   "crates/bazhen-holder/src/log.rs::BoundedLog::line":
     "an encoder: writes a log line the holder formatted",
   "crates/bazhen-holder/src/log.rs::BoundedLog::make_room":
@@ -1303,12 +1329,15 @@ export const WORKSPACE_LINTS = [
   'allow_attributes = "forbid"',
   'allow_attributes_without_reason = "forbid"',
 ];
-// The root manifest's other tables, exactly: one workspace over crates/, nothing excluded, and the
-// one profile the hook's release build uses. Any other table (a patch, a test profile) is refused.
+// The root manifest's other tables, exactly: one workspace over crates/, nothing excluded, the
+// profile the hook's release build uses, and the holder's, which must unwind: the holder catches
+// a panic in its terminal engine and replaces the engine, and under `abort` the panic would end
+// the holder and hang its terminal up. Any other table (a patch, a test profile) is refused.
 export const ROOT_TABLES: Record<string, string[]> = {
   "[workspace]": ['members = ["crates/*"]', 'resolver = "3"'],
   "[workspace.package]": ['edition = "2024"', 'rust-version = "1.100"', "publish = false"],
   "[profile.release]": ["lto = true", "codegen-units = 1", 'panic = "abort"', "strip = true"],
+  "[profile.release-holder]": ['inherits = "release"', 'panic = "unwind"'],
 };
 export const TOOLCHAIN_CONFIG = [
   "[toolchain]",

@@ -6,11 +6,14 @@ use std::collections::VecDeque;
 use std::io;
 use std::os::fd::BorrowedFd;
 
+use bazhen_holder_engine::MOST_REPLY_BYTES;
 use bazhen_holder_proto::MAX_REQUEST_BYTES;
 
 /// The most input held for a child that isn't reading: a request's cap, so the largest `input`
 /// frame always fits an empty queue.
 pub const INPUT_CAP: usize = MAX_REQUEST_BYTES;
+/// The most held for a child that isn't reading, the terminal's replies to its queries included.
+pub const REPLY_CAP: usize = INPUT_CAP + MOST_REPLY_BYTES;
 /// The most input written to the master in one turn.
 const INPUT_PER_TURN: usize = 256 << 10;
 
@@ -18,10 +21,16 @@ const INPUT_PER_TURN: usize = 256 << 10;
 /// the child has read all that is queued: a small frame taken after a refused large one would
 /// reach the program ahead of it. The queue and its refusal are the terminal's, not a writer's:
 /// they carry over to whichever connection holds the slot next.
+///
+/// The terminal's replies to the program's queries share the queue, after the input already in
+/// it, so one never lands inside an input frame. They are never refused to anyone: past
+/// `REPLY_CAP` they are dropped, as a program that doesn't read gets no more answers.
 #[derive(Debug, Default)]
 pub struct InputQueue {
     bytes: VecDeque<u8>,
     refusing: bool,
+    /// Replies dropped since the queue last drained.
+    dropped_replies: u64,
 }
 
 /// The input was refused, and nothing of it queued.
@@ -52,10 +61,30 @@ impl InputQueue {
         Ok(())
     }
 
+    /// Queues the terminal's replies after what is queued, whole, or drops them whole past
+    /// `REPLY_CAP`. A writer's refusal is left as it was: replies are no frame of its.
+    pub fn offer_replies(&mut self, replies: &[u8]) {
+        if self.bytes.len().saturating_add(replies.len()) > REPLY_CAP {
+            if self.dropped_replies == 0 {
+                tracing::warn!(
+                    queued = self.bytes.len(),
+                    "the program isn't reading; its queries go unanswered until it does"
+                );
+            }
+            self.dropped_replies += 1;
+            return;
+        }
+        self.bytes.extend(replies);
+    }
+
     /// Drops what is queued: the child it was for is gone.
     pub fn clear(&mut self) {
+        if self.dropped_replies > 0 {
+            tracing::info!(dropped = self.dropped_replies, "replies dropped");
+        }
         self.bytes = VecDeque::new();
         self.refusing = false;
+        self.dropped_replies = 0;
     }
 
     /// Writes what is queued to `master`, up to `INPUT_PER_TURN`, until it would block.
@@ -150,6 +179,46 @@ mod tests {
             read.extend_from_slice(&chunk[..n]);
         }
         assert_eq!(read, sent);
+    }
+
+    #[test]
+    fn replies_queue_after_whole_frames_and_leave_the_writers_refusal_as_it_was() {
+        let (ours, mut peer) = UnixStream::pair().unwrap();
+        ours.set_nonblocking(true).unwrap();
+        let mut queue = InputQueue::default();
+        let taken = INPUT_CAP - 100;
+        queue.offer(&vec![b'a'; taken]).unwrap();
+        assert_eq!(queue.offer(&[b'b'; 200]), Err(InputFull));
+        queue.offer_replies(b"\x1b[1;1R");
+        assert_eq!(queue.len(), taken + 6);
+        // Room for it under the cap: only the refusal keeps it out.
+        assert_eq!(
+            queue.offer(b"d"),
+            Err(InputFull),
+            "a reply ended the refusal"
+        );
+        let mut read = Vec::new();
+        let mut chunk = vec![0; 1 << 16];
+        while !queue.is_empty() {
+            queue.write_to(ours.as_fd()).unwrap();
+            let n = std::io::Read::read(&mut peer, &mut chunk).unwrap();
+            read.extend_from_slice(&chunk[..n]);
+        }
+        while read.len() < taken + 6 {
+            let n = std::io::Read::read(&mut peer, &mut chunk).unwrap();
+            read.extend_from_slice(&chunk[..n]);
+        }
+        assert_eq!(&read[taken..], b"\x1b[1;1R");
+    }
+
+    #[test]
+    fn replies_past_the_cap_are_dropped_whole() {
+        let mut queue = InputQueue::default();
+        queue.offer(&vec![b'a'; INPUT_CAP]).unwrap();
+        queue.offer_replies(&vec![b'r'; MOST_REPLY_BYTES]);
+        assert_eq!(queue.len(), REPLY_CAP);
+        queue.offer_replies(b"\x1b[c");
+        assert_eq!(queue.len(), REPLY_CAP);
     }
 
     #[test]

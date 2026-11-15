@@ -26,7 +26,7 @@
     "test:real": "node scripts/capped.ts --memory 16G --time 120m -- node scripts/test-real.ts",
     "build:engine": "cargo build --release --quiet --locked -p bazhen-holder-engine",
     "build:hook": "cargo build --release --quiet --locked -p bazhen-hook",
-    "build:holder": "cargo build --quiet --locked -p bazhen-holder",
+    "build:holder": "cargo build --quiet --locked -p bazhen-holder -p bazhen-holder-engine",
     "build:notify": "node --disable-warning=ExperimentalWarning scripts/build-notify-mac.ts",
     "bench:engine": "pnpm run build:engine && node scripts/capped.ts --memory 4G --time 10m -- node scripts/engine-replay.ts",
     "bench:hook": "node scripts/capped.ts --memory 4G --time 10m -- node scripts/hook-bench.ts",

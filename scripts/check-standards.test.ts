@@ -617,6 +617,7 @@ describe("rootManifestFailures", () => {
     ...WORKSPACE_LINTS.flatMap((l) => (l.startsWith("[") ? ["", l] : [l])),
     "",
     ...table("[profile.release]"),
+    ...table("[profile.release-holder]"),
   ].join("\n");
 
   const deps = (lines: string) =>
@@ -652,12 +653,16 @@ describe("rootManifestFailures", () => {
       rootManifestFailures(`${root}\n[profile.test]\noverflow-checks = false\n`),
       rootManifestFailures(root.replace("lto = true", "")),
       rootManifestFailures(root.replace(/\[profile\.release\][^[]*/, "")),
+      rootManifestFailures(root.replace('panic = "unwind"', 'panic = "abort"')),
+      rootManifestFailures(root.replace(/\[profile\.release-holder\][^[]*/, "")),
     ]).toEqual([
       [expect.stringContaining("[workspace] differs from ROOT_TABLES")],
       [expect.stringContaining("[patch.crates-io] isn't one of the root manifest's tables")],
       [expect.stringContaining("[profile.test] isn't one of")],
       [expect.stringContaining("[profile.release] differs")],
       [expect.stringContaining("[profile.release] is missing")],
+      [expect.stringContaining("[profile.release-holder] differs")],
+      [expect.stringContaining("[profile.release-holder] is missing")],
     ]);
   });
 

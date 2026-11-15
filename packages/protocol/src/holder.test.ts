@@ -313,6 +313,7 @@ describe("holder error codes", () => {
       "snapshot-too-large",
       "failed",
       "running",
+      "unavailable",
     ]);
   });
 });

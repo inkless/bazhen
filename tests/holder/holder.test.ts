@@ -5,6 +5,7 @@ import { once } from "node:events";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { connect, createServer, type Socket } from "node:net";
 import { dirname, join } from "node:path";
+import { oscColour, TERMINAL_COLOURS, type TuiTheme } from "@bazhen/protocol";
 import {
   connectHolder,
   type HolderClient,
@@ -12,11 +13,13 @@ import {
   HolderRequestError,
 } from "@bazhen/runtime-holder";
 import { afterEach, describe, expect, it } from "vitest";
-import { holderProcessSpec, holderSocket, testHome } from "../support/holder-home.ts";
+import { agentStream } from "../support/agent-stream.ts";
+import { holderProcessSpec, holderSocket, testHome, userDir } from "../support/holder-home.ts";
 import {
   closeHolder,
   exitedPid,
   processStart,
+  replayEngine,
   type SpawnedHolder,
   spawnHolder,
   START_SKEW_S,
@@ -32,8 +35,12 @@ afterEach(async () => {
   await Promise.all(running.splice(0).map((holder) => closeHolder(holder)));
 });
 
-async function started(terminalId: string, argv: readonly [string, ...string[]]) {
-  const holder = await spawnHolder(terminalId, argv);
+async function started(
+  terminalId: string,
+  argv: readonly [string, ...string[]],
+  options?: Parameters<typeof spawnHolder>[2],
+) {
+  const holder = await spawnHolder(terminalId, argv, options);
   running.push(holder);
   return holder;
 }
@@ -120,13 +127,25 @@ describe("a holder", () => {
   });
 
   it("streams every byte of its child's output in order, then its exit, from any offset it holds", async () => {
-    const holder = await started("seq", ["seq", "1", "20000"]);
-    const { client, events, exit } = await listen(holder);
+    // It waits to be told, once its terminal no longer echoes, so it can't exit before the
+    // subscription.
+    const script = "stty -echo; echo R; read _; exec seq 1 20000";
+    const holder = await started("seq", ["sh", "-c", script]);
+    const { client, events, exit } = await listen(holder, true);
     await client.subscribe({ generation: 0, offset: 0 });
+    await until(() => output(events).includes("R\r\n"), "the child ready");
+    client.input(encode("\n"));
     await exit;
-    const expected = seqOutput(20000);
+    const expected = `R\r\n${seqOutput(20000)}`;
     expect(events.some((event) => event.type === "gap")).toBe(false);
-    expect(output(events)).toBe(expected);
+    expect(
+      output(
+        events.slice(
+          0,
+          events.findIndex((event) => event.type === "exited"),
+        ),
+      ),
+    ).toBe(expected);
     const later = await listen(holder);
     await later.client.subscribe({ generation: 0, offset: 1000 });
     const tail = Buffer.byteLength(expected) - 1000;
@@ -266,6 +285,235 @@ describe("a holder", () => {
     expect(await processStart(holder.pid)).toBeNull();
     expect(await closeHolder(holder)).toBe(0);
     expect(existsSync(holder.entry)).toBe(false);
+  });
+});
+
+/**
+ * A program that asks its terminal each query of a phase in turn, raw, and prints how long each
+ * answer took as `RESULT {…}`. Each phase after the first waits for `go` on its input.
+ */
+const QUERIES = `
+process.stdin.setRawMode(true);
+let read = "";
+const waiting = [];
+process.stdin.on("data", (chunk) => {
+  read += chunk.toString("latin1");
+  for (const wait of [...waiting]) {
+    const found = new RegExp(wait.pattern).exec(read);
+    if (found === null) continue;
+    read = read.slice(found.index + found[0].length);
+    waiting.splice(waiting.indexOf(wait), 1);
+    wait.done(found[0]);
+  }
+});
+const ask = (query, pattern) =>
+  new Promise((done) => {
+    const at = performance.now();
+    waiting.push({ pattern, done: (reply) => done({ reply, ms: performance.now() - at }) });
+    process.stdout.write(query);
+  });
+(async () => {
+  for (const [i, phase] of JSON.parse(process.argv[1]).entries()) {
+    if (i > 0) await ask("", "go");
+    const answers = {};
+    for (const [name, query, pattern] of phase) answers[name] = await ask(query, pattern);
+    process.stdout.write("\\r\\nRESULT " + JSON.stringify(answers) + "\\r\\n");
+  }
+  setInterval(() => {}, 1 << 30);
+})();
+`;
+
+type Answers = Record<string, { reply: string; ms: number }>;
+
+function isAnswers(parsed: unknown): parsed is Answers {
+  return (
+    typeof parsed === "object" &&
+    parsed !== null &&
+    Object.values(parsed).every(
+      (answer: unknown) =>
+        typeof answer === "object" &&
+        answer !== null &&
+        "reply" in answer &&
+        typeof answer.reply === "string" &&
+        "ms" in answer &&
+        typeof answer.ms === "number",
+    )
+  );
+}
+
+function readAnswers(json: string): Answers {
+  const parsed: unknown = JSON.parse(json);
+  if (!isAnswers(parsed)) throw new Error(`not a phase's answers: ${json}`);
+  return parsed;
+}
+
+/** Where in its input the program found the answer to its query, once it has read it all. */
+const answeredAt = (events: readonly HolderEvent[]): number | null => {
+  const found = /ANSWERED AT (\d+)/.exec(output(events));
+  return found === null ? null : Number(found[1]);
+};
+
+/** The output in `events`, as bytes. */
+const outputBytes = (events: readonly HolderEvent[]) =>
+  Buffer.concat(events.flatMap((event) => (event.type === "data" ? [event.bytes] : [])));
+
+/** The answers each phase of `QUERIES` printed, read from the holder's output from 0. */
+async function answers(holder: SpawnedHolder, phases: number, generation = 0): Promise<Answers[]> {
+  const { client, events } = await listen(holder);
+  await client.subscribe({ generation, offset: 0 });
+  const printed = () =>
+    [...output(events).matchAll(/RESULT (\{.*?\})\r+\n/g)].map(([, json]) => readAnswers(json!));
+  await until(() => printed().length === phases, "every phase's answers");
+  return printed();
+}
+
+const ESC = "\x1b";
+const colourQueries = [
+  ["text", `${ESC}]10;?\x07`, `${ESC}\\]10;[^\x07]*\x07`],
+  ["background", `${ESC}]11;?\x07`, `${ESC}\\]11;[^\x07]*\x07`],
+];
+const colourAnswers = (theme: TuiTheme) => ({
+  text: `${ESC}]10;${oscColour(TERMINAL_COLOURS[theme].text)}\x07`,
+  background: `${ESC}]11;${oscColour(TERMINAL_COLOURS[theme].background)}\x07`,
+});
+
+describe("a holder's terminal engine", () => {
+  it("answers every query with no connection subscribed, at once, in its theme", async () => {
+    const queries = [
+      ["cpr", `${ESC}[3;5H${ESC}[6n`, `${ESC}\\[\\d+;\\d+R`],
+      ["da1", `${ESC}[c`, `${ESC}\\[\\?[\\d;]*c`],
+      ["xtversion", `${ESC}[>0q`, `${ESC}P>\\|[^${ESC}]*${ESC}\\\\`],
+      ...colourQueries,
+    ];
+    const holder = await started(
+      "queries",
+      [process.execPath, "-e", QUERIES, JSON.stringify([queries, colourQueries])],
+      { theme: "light" },
+    );
+    const writer = await listen(holder, true);
+    const [first] = await answers(holder, 1);
+    expect(Object.fromEntries(Object.entries(first!).map(([k, v]) => [k, v.reply]))).toEqual({
+      cpr: `${ESC}[3;5R`,
+      da1: expect.stringMatching(new RegExp(`^${ESC}\\[\\?[\\d;]+c$`)),
+      xtversion: `${ESC}P>|bazhen${ESC}\\`,
+      ...colourAnswers("light"),
+    });
+    // Wide, for a debug holder on a busy host.
+    for (const { ms } of Object.values(first!)) expect(ms).toBeLessThan(250);
+    await writer.client.setTheme(null);
+    writer.client.input(encode("go"));
+    const [, second] = await answers(holder, 2);
+    expect(second!.text!.reply).toBe(colourAnswers("dark").text);
+    expect(second!.background!.reply).toBe(colourAnswers("dark").background);
+  });
+
+  it("answers at the size its writer set", async () => {
+    const corner = [["cpr", `${ESC}[999;999H${ESC}[6n`, `${ESC}\\[\\d+;\\d+R`]];
+    const phases = JSON.stringify([[], corner]);
+    const holder = await started("resized", [process.execPath, "-e", QUERIES, phases]);
+    const writer = await listen(holder, true);
+    await answers(holder, 1);
+    await writer.client.resize({ cols: 100, rows: 30 });
+    writer.client.input(encode("go"));
+    const [, second] = await answers(holder, 2);
+    expect(second!.cpr!.reply).toBe(`${ESC}[30;100R`);
+  });
+
+  it("tells a respawned program the colours of the theme it was respawned in", async () => {
+    const holder = await started("respawn-theme", ["true"]);
+    const { client } = await listen(holder, true);
+    await until(async () => (await listen(holder)).client.hello.exit !== null, "the exit");
+    const program = [process.execPath, "-e", QUERIES, JSON.stringify([colourQueries])] as const;
+    await client.respawn({ ...holderProcessSpec(program), generation: 1, theme: "light" });
+    const [first] = await answers(holder, 1, 1);
+    expect(first!.text!.reply).toBe(colourAnswers("light").text);
+    expect(first!.background!.reply).toBe(colourAnswers("light").background);
+  });
+
+  it("says in hello the title its program set and whether the alternate screen is up", async () => {
+    const script = "printf '\\033]2;the title\\007\\033[?1049h'; exec sleep 30";
+    const holder = await started("hello-engine", ["sh", "-c", script]);
+    const hello = async () => {
+      const { title, alternate } = (await listen(holder)).client.hello;
+      return { title, alternate };
+    };
+    let said = await hello();
+    await until(async () => {
+      said = await hello();
+      return said.alternate;
+    }, "the alternate screen in hello");
+    expect(said).toEqual({ title: "the title", alternate: true });
+  });
+
+  it("tells a program with no theme it is drawn on dark", async () => {
+    const holder = await started("no-theme", [
+      process.execPath,
+      "-e",
+      QUERIES,
+      JSON.stringify([colourQueries]),
+    ]);
+    const [first] = await answers(holder, 1);
+    expect(first!.text!.reply).toBe(colourAnswers("dark").text);
+    expect(first!.background!.reply).toBe(colourAnswers("dark").background);
+  });
+
+  it("puts an answer between its writer's input frames, never inside one", async () => {
+    const frames = 200;
+    const size = 1000;
+    const program = `
+      process.stdin.setRawMode(true);
+      process.stdout.write("READY\\r\\n");
+      let read = "";
+      process.stdin.on("data", (chunk) => {
+        if (read === "") {
+          // Stops reading, so the input piles up in the holder, and asks only then.
+          process.stdin.pause();
+          setTimeout(() => {
+            process.stdout.write("\\x1b[6n");
+            setTimeout(() => process.stdin.resume(), 300);
+          }, 300);
+        }
+        read += chunk.toString("latin1");
+        const at = read.indexOf("\\x1b");
+        const letters = read.replace(/\\x1b\\[\\d+;\\d+R/, "");
+        if (at >= 0 && letters.length === ${frames * size}) {
+          process.stdout.write("\\r\\nANSWERED AT " + at + "\\r\\n");
+        }
+      });
+    `;
+    const holder = await started("between", [process.execPath, "-e", program]);
+    const { client, events } = await listen(holder, true);
+    await client.subscribe({ generation: 0, offset: 0 });
+    await until(() => output(events).includes("READY"), "the program reading raw");
+    for (let i = 0; i < frames; i++) {
+      client.input(encode(String.fromCharCode(97 + (i % 26)).repeat(size)));
+    }
+    await until(() => answeredAt(events) !== null, "the answer, and every frame");
+    expect(answeredAt(events)! % size).toBe(0);
+  });
+
+  it("reports in stats what an engine of its own makes of a recorded agent stream", async () => {
+    const recording = join(userDir(testHome()), "agent-stream.txt");
+    writeFileSync(recording, agentStream(3000));
+    const holder = await started("stats", ["cat", recording]);
+    const { client, events } = await listen(holder);
+    const { offset } = await exitedHello(holder);
+    await client.subscribe({ generation: 0, offset: 0 });
+    await until(() => outputEnd(events) === offset, "the whole stream");
+    const read = outputBytes(events);
+    const replayed = join(userDir(testHome()), "agent-stream.read");
+    writeFileSync(replayed, read);
+    const report = replayEngine(replayed, { cols: 80, rows: 24 }, client.hello.historyLines);
+    const stats = await client.stats();
+    expect(report.historyRows).toBeGreaterThan(1000);
+    expect(stats).toEqual({
+      engineBytes: report.engineBytes + report.historyBytes,
+      rss: expect.any(Number),
+      ringBytes: read.length,
+      historyLines: report.historyRows,
+      engineResets: 0,
+    });
+    expect(stats.rss!).toBeGreaterThan(stats.engineBytes);
   });
 });
 

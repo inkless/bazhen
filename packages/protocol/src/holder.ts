@@ -27,7 +27,7 @@ import { ProtocolVersion } from "./version.ts";
  *   agree on, so the rest of its `hello` must satisfy the schema of every major it lists;
  * - `error`, and its codes `no-shared-version` and `invalid`.
  */
-export const HOLDER_PROTOCOL_VERSION = "1.1";
+export const HOLDER_PROTOCOL_VERSION = "1.2";
 
 /** Byte limits, in UTF-8 bytes, that both peers enforce on strings. */
 export const HOLDER_VERSION_MAX_BYTES = 32;
@@ -179,7 +179,10 @@ export type HolderTags = z.infer<typeof HolderTags>;
 export const HolderSignal = z.enum(["SIGINT", "SIGTERM", "SIGHUP", "SIGKILL"]);
 export type HolderSignal = z.infer<typeof HolderSignal>;
 
-/** The background a program is told it is drawn on, when it asks. */
+/**
+ * The background a program is told it is drawn on, when it asks (OSC 10 and 11), in the colours
+ * `TERMINAL_COLOURS` gives it. A terminal with no theme is told dark, as the daemon draws one.
+ */
 export const HolderTheme = z.enum(["light", "dark"]);
 export type HolderTheme = z.infer<typeof HolderTheme>;
 
@@ -264,7 +267,7 @@ export type HolderSignalRequest = z.infer<typeof HolderSignalRequest>;
 export const HolderSetTagsRequest = z.object({ tags: HolderTags });
 export type HolderSetTagsRequest = z.infer<typeof HolderSetTagsRequest>;
 
-/** Null tells a program that asks nothing of the holder's own. */
+/** Null is a terminal with no theme, which is told dark, as at spawn. */
 export const HolderSetThemeRequest = z.object({ theme: HolderTheme.nullable() });
 export type HolderSetThemeRequest = z.infer<typeof HolderSetThemeRequest>;
 
@@ -288,6 +291,11 @@ export const HolderHelloReply = z.object({
   alternate: z.boolean(),
   historyLines: Count,
   writer: z.boolean(),
+  /**
+   * False once the holder's terminal engine has failed for good: the terminal still runs, but
+   * the holder answers no program's queries and serves no `snapshot`. Since 1.2.
+   */
+  engine: z.boolean().optional(),
 });
 export type HolderHelloReply = z.infer<typeof HolderHelloReply>;
 
@@ -300,6 +308,12 @@ export const HolderStats = z.object({
   rss: Count.nullable(),
   ringBytes: Count,
   historyLines: Count,
+  /**
+   * Attempts to replace a failed terminal engine with an empty one, at most the holder's
+   * `MOST_ENGINE_RESETS`: a failure after those is given up on, which `hello`'s `engine: false`
+   * marks. Since 1.2.
+   */
+  engineResets: Count.optional(),
 });
 export type HolderStats = z.infer<typeof HolderStats>;
 
@@ -426,6 +440,8 @@ export const HOLDER_ERROR_CODES = [
   "failed",
   /** The request needs the child to have exited, and it still runs: a `respawn`. */
   "running",
+  /** The holder's terminal engine has failed for good, so it has no screen: a `snapshot`. */
+  "unavailable",
 ] as const;
 
 export const HolderError = z.object({
