@@ -143,8 +143,9 @@ const INPUT_OVERHEAD = 4 + 1 + 4;
 
 /**
  * The most a connection holds written but not yet taken by the holder. A write that would go past
- * it means the holder has stopped reading, and ends the connection rather than queue it, so a
- * stalled holder can't grow this process without bound.
+ * it ends the connection rather than queue it, so a holder that stopped reading can't grow this
+ * process without bound. A caller sending more than one holder keeps up with checks `room`, or
+ * awaits `drained()`, first.
  */
 export const HOLDER_MAX_UNSENT_BYTES = 8 * HOLDER_MAX_REQUEST_BYTES;
 
@@ -162,6 +163,8 @@ class Connection {
   private end: HolderEnd | null = null;
   private settleEnded: (end: HolderEnd) => void = () => {};
   private readonly hangUpMs: number;
+  /** Settles once the last write has gone to the holder, and so every one before it. */
+  private flushed: Promise<void> = Promise.resolve();
 
   constructor(stream: Duplex, onEvent: (event: HolderEvent) => void, hangUpMs: number) {
     this.stream = stream;
@@ -235,18 +238,35 @@ class Connection {
   /** Writes frames in one write; nothing once the connection has ended, as its requests have. */
   write(frames: readonly Uint8Array[]): void {
     if (frames.length === 0 || this.end !== null) return;
-    if (!this.room(frames.reduce((size, frame) => size + frame.length, 0))) return;
-    this.stream.write(frames.length === 1 ? frames[0]! : Buffer.concat(frames));
+    if (!this.fits(frames.reduce((size, frame) => size + frame.length, 0))) return;
+    this.push(frames.length === 1 ? frames[0]! : Buffer.concat(frames));
+  }
+
+  private push(bytes: Uint8Array): void {
+    // A write's callback runs once it has gone, or with an error once the stream is destroyed.
+    this.flushed = new Promise((done) => this.stream.write(bytes, () => done()));
+  }
+
+  /** What may still be written before the cap on unsent bytes. */
+  get room(): number {
+    return Math.max(0, HOLDER_MAX_UNSENT_BYTES - this.stream.writableLength);
+  }
+
+  /** Resolves once everything written has gone to the holder, or the connection has ended. */
+  drained(): Promise<void> {
+    return Promise.race([this.flushed, this.ended.then(() => {})]);
   }
 
   /**
-   * Whether `size` more bytes stay within what may be unsent. If not, the holder has stopped
-   * reading, and the connection ends, rejecting what waits.
+   * Whether `size` more bytes stay within what may be unsent. If not, the connection ends,
+   * rejecting what waits.
    */
-  private room(size: number): boolean {
+  private fits(size: number): boolean {
     const unsent = this.stream.writableLength;
     if (unsent + size <= HOLDER_MAX_UNSENT_BYTES) return true;
-    const error = new Error(`holder stopped reading: ${unsent} bytes unsent, ${size} more to send`);
+    const error = new Error(
+      `over the unsent cap of ${HOLDER_MAX_UNSENT_BYTES} bytes: ${unsent} unsent and ${size} more`,
+    );
     this.fail({ reason: "error", error });
     return false;
   }
@@ -265,13 +285,13 @@ class Connection {
       );
     }
     if (bytes.length === 0) return [];
-    if (!this.room(size)) this.requireOpen();
+    if (!this.fits(size)) this.requireOpen();
     // Frame by frame, each written as it is made, rather than copied into one buffer.
     const ids: number[] = [];
     for (let at = 0; at < bytes.length; at += INPUT_CHUNK) {
       const id = this.takeId();
       ids.push(id);
-      this.stream.write(
+      this.push(
         encodeHolderRequest({ type: "input", id, bytes: bytes.subarray(at, at + INPUT_CHUNK) }),
       );
     }
@@ -408,6 +428,24 @@ export class HolderClient {
     return this.connection.open;
   }
 
+  /**
+   * How many bytes may be written now before the cap on unsent bytes ends the connection: input
+   * takes its length plus 9 bytes for each frame of up to 1 MiB. A holder reading slowly lowers
+   * it for a while.
+   */
+  get room(): number {
+    return this.connection.room;
+  }
+
+  /**
+   * Resolves once everything written has gone to the holder, or the connection has ended. A
+   * caller with more to send than `room` awaits it first, rather than overrun a holder that is
+   * reading slowly.
+   */
+  drained(): Promise<void> {
+    return this.connection.drained();
+  }
+
   /** The terminal as of the holder's offset, resolved here rather than sent to `onEvent`. */
   snapshot(options?: RequestOptions): Promise<HolderSnapshot> {
     return this.connection.ask((id) => ({ type: "snapshot", id }), "snapshot", options);
@@ -455,7 +493,7 @@ export class HolderClient {
    * Sends input, cut into frames under the cap, and returns their ids. The holder answers input
    * only to refuse it, as a `refused` event carrying the id. Input over `HOLDER_MAX_UNSENT_BYTES`
    * in one call throws a `RangeError`, sending none of it; input past it with what is still
-   * unsent ends the connection, as the holder has stopped reading.
+   * unsent ends the connection, so a caller sending more than `room` awaits `drained()` first.
    */
   input(bytes: Uint8Array): number[] {
     return this.connection.input(bytes);

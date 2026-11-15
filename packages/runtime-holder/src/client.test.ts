@@ -378,9 +378,26 @@ describe("HolderClient", () => {
     await expect(answer).rejects.toBeInstanceOf(HolderDisconnected);
     await expect(client.ended).resolves.toMatchObject({
       reason: "error",
-      error: { message: expect.stringContaining("stopped reading") },
+      error: { message: expect.stringContaining("over the unsent cap") },
     });
     expect(near.destroyed).toBe(true);
+  });
+
+  it("takes two inputs near the cap back to back from a caller that awaits drained", async () => {
+    const { client, near, holder } = await connected();
+    const nearCap = new Uint8Array(HOLDER_MAX_UNSENT_BYTES - HOLDER_MAX_REQUEST_BYTES);
+    holder.stopReading();
+    const first = client.input(nearCap);
+    expect(client.room).toBe(HOLDER_MAX_UNSENT_BYTES - near.writableLength);
+    expect(client.room).toBeLessThan(nearCap.length);
+    const drained = client.drained();
+    holder.startReading();
+    await drained;
+    const second = client.input(nearCap);
+    const ids = [...first, ...second];
+    const taken = await Promise.all(ids.map(() => holder.request()));
+    expect(taken.map((request) => request.id)).toEqual(ids);
+    expect(client.open).toBe(true);
   });
 
   it("refuses an input over what a connection may hold unsent, queueing none of it", async () => {

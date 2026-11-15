@@ -104,6 +104,11 @@ export class FakeHolder {
     this.stream.pause();
   }
 
+  /** Takes what the client writes again, after `stopReading`. */
+  startReading(): void {
+    this.stream.resume();
+  }
+
   hangUp(): void {
     this.stream.end(() => this.stream.destroy());
   }
