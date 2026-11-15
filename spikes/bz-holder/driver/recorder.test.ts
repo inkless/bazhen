@@ -3,34 +3,47 @@ import { EventEmitter } from "node:events";
 import { describe, it } from "node:test";
 import { K, frame, type Frame } from "./lib.ts";
 import { type RecorderDeps, startRecorder } from "./recorder.ts";
-import { RESTORE, findDetach, restoreTerminal } from "./tty.ts";
+import { ScreenTracker, findDetach, restoreBytes, restoreTerminal } from "./tty.ts";
 
-describe("RESTORE", () => {
+describe("restoreBytes", () => {
   it("is the exact reset sequence an attach client copies", () => {
-    assert.equal(
-      RESTORE,
-      "\x1b[?2026l" +
-        "\x1b[<99u\x1b[?1049l\x1b[<99u" +
-        "\x1b[>4;0m" +
-        "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1015l" +
-        "\x1b[?1004l\x1b[?2004l" +
-        "\x1b[?1l\x1b>" +
-        "\x1b7\x1b[r\x1b8" +
-        "\x1b[0m\x1b(B\x1b[0 q\x1b[?7h\x1b[4l\x1b[?25h",
-    );
+    const tail =
+      "\x1b[>4;0m" +
+      "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1015l" +
+      "\x1b[?1004l\x1b[?2004l" +
+      "\x1b[?1l\x1b>" +
+      "\x1b7\x1b[r\x1b8" +
+      "\x1b[0m\x1b(B\x1b[0 q\x1b[?7h\x1b[4l\x1b[?25h";
+    assert.equal(restoreBytes(false), "\x1b[?2026l\x1b[<99u" + tail);
+    assert.equal(restoreBytes(true), "\x1b[?2026l\x1b[<99u\x1b[?1049l\x1b[<99u" + tail);
+  });
+});
+
+describe("ScreenTracker", () => {
+  it("follows the last switch, including one split across chunks", () => {
+    const t = new ScreenTracker();
+    t.observe(Buffer.from("a\x1b[?1049hb"));
+    assert.equal(t.alternate, true);
+    t.observe(Buffer.from("\x1b[?1049lc\x1b[?47h"));
+    assert.equal(t.alternate, true);
+    t.observe(Buffer.from("x\x1b[?10"));
+    t.observe(Buffer.from("47ly"));
+    assert.equal(t.alternate, false);
   });
 });
 
 describe("restoreTerminal", () => {
-  it("leaves raw mode and writes RESTORE", () => {
-    const raw: boolean[] = [];
-    const written: string[] = [];
-    restoreTerminal({ isTTY: true, setRawMode: (on) => raw.push(on) }, (s) => written.push(s));
-    assert.deepEqual(raw, [false]);
-    assert.deepEqual(written, [RESTORE]);
+  it("leaves raw mode and writes the restore for the screen the program left on", () => {
+    for (const alternate of [false, true]) {
+      const raw: boolean[] = [];
+      const written: string[] = [];
+      restoreTerminal({ isTTY: true, setRawMode: (on) => raw.push(on) }, (s) => written.push(s), alternate);
+      assert.deepEqual(raw, [false]);
+      assert.deepEqual(written, [restoreBytes(alternate)]);
+    }
   });
 
-  it("still writes RESTORE when leaving raw mode throws, and never throws itself", () => {
+  it("still writes the restore when leaving raw mode throws, and never throws itself", () => {
     const written: string[] = [];
     const tty = {
       isTTY: true,
@@ -38,12 +51,16 @@ describe("restoreTerminal", () => {
         throw new Error("EIO");
       },
     };
-    restoreTerminal(tty, (s) => written.push(s));
-    assert.deepEqual(written, [RESTORE]);
+    restoreTerminal(tty, (s) => written.push(s), false);
+    assert.deepEqual(written, [restoreBytes(false)]);
     assert.doesNotThrow(() =>
-      restoreTerminal(tty, () => {
-        throw new Error("EIO");
-      }),
+      restoreTerminal(
+        tty,
+        () => {
+          throw new Error("EIO");
+        },
+        false,
+      ),
     );
   });
 });
@@ -169,9 +186,10 @@ function harness(over: Partial<RecorderDeps> = {}): Harness {
   return { conn, stdin, proc, written, mirrored, saved, calls, done };
 }
 
-const restoredOnce = (h: Harness) => {
-  assert.equal(h.written.filter((s) => s === RESTORE).length, 1);
-  assert.equal(h.written[0], RESTORE, "restore is the first thing written");
+const restoredOnce = (h: Harness, alternate = false) => {
+  const restore = restoreBytes(alternate);
+  assert.equal(h.written.filter((s) => s.startsWith("\x1b[?2026l")).length, 1);
+  assert.equal(h.written[0], restore, "restore is the first thing written");
   assert.deepEqual(h.stdin.raw, [true, false]);
 };
 
@@ -244,6 +262,20 @@ describe("startRecorder", () => {
       assert.deepEqual(h.proc.codes, [1]);
     });
   }
+
+  it("leaves the alternate screen only when the program left it on", async () => {
+    for (const [output, alternate] of [
+      ["\x1b[?1049hdraw", true],
+      ["\x1b[?1049hdraw\x1b[?1049l", false],
+    ] as const) {
+      const h = harness();
+      h.written.length = 0;
+      h.conn.data(output);
+      h.stdin.emit("data", Buffer.from("\x1d"));
+      await h.done;
+      restoredOnce(h, alternate);
+    }
+  });
 
   it("forwards the bytes before Ctrl-] and nothing after it", async () => {
     const h = harness();

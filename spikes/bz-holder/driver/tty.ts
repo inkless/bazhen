@@ -5,37 +5,55 @@
  * Turns off every mode a TUI's output can leave on in the terminal mirroring it. Written whole on
  * every exit, whatever the program did: a reset of a mode that is off is harmless, and terminals
  * ignore what they don't support. Not `RIS`, which clears the user's screen and scrollback.
+ *
+ * The one exception is leaving the alternate screen, only when the program left it on: `?1049l`
+ * also restores the saved cursor on the normal screen (xterm.js does), which would move the
+ * shell prompt to wherever the program last saved it.
  */
-export const RESTORE = [
-  "\x1b[?2026l", // synchronized output, first, so the terminal draws the rest
-  // Kitty keeps one keyboard-flag stack per screen, and a pop deeper than the stack resets it.
-  "\x1b[<99u",
-  "\x1b[?1049l",
-  "\x1b[<99u",
-  "\x1b[>4;0m", // modifyOtherKeys
-  "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1015l", // mouse
-  "\x1b[?1004l\x1b[?2004l", // focus events, bracketed paste
-  "\x1b[?1l\x1b>", // cursor keys, keypad
-  // Resetting the scroll region homes the cursor; DECSC/DECRC keeps it where the output left
-  // it. On the normal screen, after 1049l: the alternate screen's restore shares that slot.
-  "\x1b7\x1b[r\x1b8",
-  "\x1b[0m\x1b(B\x1b[0 q\x1b[?7h\x1b[4l\x1b[?25h", // SGR, charset, cursor shape, autowrap, insert, cursor
-].join("");
+export function restoreBytes(alternate: boolean): string {
+  return [
+    "\x1b[?2026l", // synchronized output, first, so the terminal draws the rest
+    // Kitty keeps one keyboard-flag stack per screen, and a pop deeper than the stack resets it.
+    "\x1b[<99u",
+    alternate ? "\x1b[?1049l\x1b[<99u" : "",
+    "\x1b[>4;0m", // modifyOtherKeys
+    "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1015l", // mouse
+    "\x1b[?1004l\x1b[?2004l", // focus events, bracketed paste
+    "\x1b[?1l\x1b>", // cursor keys, keypad
+    // Resetting the scroll region homes the cursor; DECSC/DECRC keeps it where the output left
+    // it. On the normal screen, after 1049l: the alternate screen's restore shares that slot.
+    "\x1b7\x1b[r\x1b8",
+    "\x1b[0m\x1b(B\x1b[0 q\x1b[?7h\x1b[4l\x1b[?25h", // SGR, charset, cursor shape, autowrap, insert, cursor
+  ].join("");
+}
+
+/** Follows a program's output to know whether it left the terminal on the alternate screen. */
+export class ScreenTracker {
+  alternate = false;
+  private tail = "";
+
+  observe(chunk: Buffer): void {
+    const text = this.tail + chunk.toString("latin1");
+    for (const m of text.matchAll(/\x1b\[\?(?:1049|1047|47)([hl])/g)) this.alternate = m[1] === "h";
+    // A switch split across two chunks is matched on the next one.
+    this.tail = text.slice(-8);
+  }
+}
 
 export interface RawTty {
   isTTY?: boolean;
   setRawMode(on: boolean): unknown;
 }
 
-/** Cooked mode and `RESTORE`. Never throws: after SIGHUP the terminal is gone, and the caller still has work to do. */
-export function restoreTerminal(tty: RawTty, write: (bytes: string) => void): void {
+/** Cooked mode and `restoreBytes`. Never throws: after SIGHUP the terminal is gone, and the caller still has work to do. */
+export function restoreTerminal(tty: RawTty, write: (bytes: string) => void, alternate: boolean): void {
   try {
     if (tty.isTTY) tty.setRawMode(false);
   } catch {
     // The terminal is gone.
   }
   try {
-    write(RESTORE);
+    write(restoreBytes(alternate));
   } catch {
     // The terminal is gone.
   }

@@ -3,7 +3,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import { K, bytesOf, frame, u64, type Frame } from "./lib.ts";
-import { KEYBOARD_PROTOCOL, findDetach, restoreTerminal, type RawTty } from "./tty.ts";
+import { KEYBOARD_PROTOCOL, ScreenTracker, findDetach, restoreTerminal, type RawTty } from "./tty.ts";
 
 export interface RecorderDeps {
   name: string;
@@ -40,13 +40,14 @@ const SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 
 export function startRecorder(d: RecorderDeps): void {
   const chunks: Buffer[] = [];
+  const screen = new ScreenTracker();
   let restored = false;
   let finishing = false;
 
   const restore = () => {
     if (restored) return;
     restored = true;
-    restoreTerminal(d.stdin, d.write);
+    restoreTerminal(d.stdin, d.write, screen.alternate);
   };
   const say = (text: string) => {
     try {
@@ -110,6 +111,7 @@ export function startRecorder(d: RecorderDeps): void {
     if (f.kind !== K.R_DATA) return;
     const bytes = bytesOf(f);
     chunks.push(bytes);
+    screen.observe(bytes);
     if (d.keylog) {
       for (const m of bytes.toString("latin1").matchAll(KEYBOARD_PROTOCOL)) d.keylog(`out ${JSON.stringify(m[0])}`);
     }

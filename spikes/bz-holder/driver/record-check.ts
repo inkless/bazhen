@@ -6,13 +6,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { Conn, K, PROGRAMS, SPIKE, alive, bytesOf, frame, makeHome, newTerm, ptyGuard, reap, sleep, spawnHolder, u64, write, type Hello } from "./lib.ts";
-import { RESTORE } from "./tty.ts";
+import { restoreBytes } from "./tty.ts";
 
 const RECORD = path.resolve(process.argv[2] ?? path.join(SPIKE, "driver", "record.ts"));
 const PROBE = "rc-probe";
-const ENABLE = "\\033[?1000h\\033[?1002h\\033[?1006h\\033[?2004h\\033[?1004h\\033[?1h\\033=\\033[?25l\\033[>1u\\033[>4;2m\\033[?1049h";
-const SCRIPT = `#!/bin/sh
-printf '${ENABLE}'
+const ENABLE = "\\033[?1000h\\033[?1002h\\033[?1006h\\033[?2004h\\033[?1004h\\033[?1h\\033=\\033[?25l\\033[>1u\\033[>4;2m";
+const script = (alternate: boolean) => `#!/bin/sh
+printf '${ENABLE}${alternate ? "\\033[?1049h" : ""}'
 trap 'echo cancelled' INT
 echo ready
 while :; do if read line; then [ "$line" = q ] && exit 0; fi; done
@@ -23,6 +23,7 @@ interface Case {
   end: (run: Run) => Promise<void>;
   code: number;
   partial: boolean;
+  normalScreen?: boolean;
 }
 
 interface Run {
@@ -36,6 +37,13 @@ const cases: Case[] = [
   { name: "Ctrl-] as 0x1d", end: async (r) => r.outer.send(frame(K.INPUT, "\x1d")), code: 0, partial: false },
   { name: "Ctrl-] as kitty CSI 93;5u", end: async (r) => r.outer.send(frame(K.INPUT, "\x1b[93;5u")), code: 0, partial: false },
   { name: "the program exits", end: async (r) => r.outer.send(frame(K.INPUT, "q\r")), code: 0, partial: false },
+  {
+    name: "the program exits on the normal screen",
+    end: async (r) => r.outer.send(frame(K.INPUT, "q\r")),
+    code: 0,
+    partial: false,
+    normalScreen: true,
+  },
   {
     name: "Ctrl-C the program traps, then it exits",
     end: async (r) => {
@@ -63,7 +71,7 @@ async function runCase(c: Case): Promise<{ problems: string[]; exit: Hello["exit
   const problems: string[] = [];
   const home = makeHome("rc");
   const probe = path.join(home, PROBE);
-  fs.writeFileSync(probe, SCRIPT, { mode: 0o755 });
+  fs.writeFileSync(probe, script(!c.normalScreen), { mode: 0o755 });
   const before = recHomes();
   const outerRef = await spawnHolder(home, "outer", [process.execPath, RECORD, probe], { cwd: SPIKE });
   const outer = await Conn.connect(outerRef.socket);
@@ -101,7 +109,16 @@ async function runCase(c: Case): Promise<{ problems: string[]; exit: Hello["exit
     cursorHidden: (term as unknown as { _core: { coreService: { isCursorHidden: boolean } } })._core.coreService.isCursorHidden,
   }).filter(([, v]) => v).map(([k]) => k);
   if (on.length > 0) problems.push(`left on in the outer terminal: ${on.join(", ")}`);
-  if (stream.lastIndexOf(RESTORE) < stream.lastIndexOf("\x1b[>4;2m")) problems.push("no RESTORE after the keyboard protocols went on");
+  if (stream.lastIndexOf(restoreBytes(!c.normalScreen)) < stream.lastIndexOf("\x1b[>4;2m")) {
+    problems.push("no restore after the keyboard protocols went on");
+  }
+  if (c.normalScreen && exit) {
+    const buf = term.buffer.active;
+    const rows = Array.from({ length: buf.length }, (_, y) => buf.getLine(y)?.translateToString(true) ?? "");
+    const ready = rows.findIndex((l) => l === "ready");
+    const report = rows.findIndex((l) => l.startsWith("recorder: "));
+    if (ready < 0 || report <= ready) problems.push(`the report overwrote the program's output (ready at ${ready}, report at ${report})`);
+  }
 
   const leftAlive = inner.holderPid === 0 ? [] : [inner.holderPid, inner.childPid, -inner.childPid].filter(alive);
   if (leftAlive.length > 0) problems.push(`left alive: ${leftAlive.join(" ")}`);
