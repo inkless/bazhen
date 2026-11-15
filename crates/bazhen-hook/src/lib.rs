@@ -150,21 +150,21 @@ fn post(socket: &str, path: &str, body: &[u8], timeout: Duration) -> io::Result<
     Ok(response)
 }
 
-/// Reads one response, up to the end of the body its `Content-Length` promises, so it never
-/// waits on the daemon closing the connection: a reader blocked on that close has been seen to
-/// miss it and hang with the whole reply in hand. A response without a usable length is read to
-/// the end of the stream, for `parse_reply` to refuse. Once the reply has begun, each read gets
-/// `stall` at most, so one that stops short of its length times out rather than hangs.
+/// Reads one response, up to where `reply_end` says it ends, so it never waits on the daemon
+/// closing the connection: a reader blocked on that close has been seen to miss it and hang with
+/// the whole reply in hand. Once the reply has begun, each read gets `stall` at most, so one that
+/// stops short of its end times out rather than hangs.
 fn read_response(stream: &mut UnixStream, stall: Duration) -> io::Result<Vec<u8>> {
     const LIMIT: usize = MAX_HEAD + 4 + MAX_BODY + 1;
     let mut response = Vec::new();
     let mut chunk = vec![0; 64 << 10];
-    while response.len() < LIMIT {
-        if let Some(end) = promised_end(&response) {
+    let mut framing = Framing::default();
+    // reply_end answers by LIMIT - 1 bytes, and the chunk never reads past LIMIT, so this ends.
+    loop {
+        if let Some(end) = framing.end_of(&response) {
             response.truncate(end);
             break;
         }
-        // What is left to read only shrinks, so the buffer can shrink with it.
         chunk.truncate(LIMIT - response.len());
         match stream.read(&mut chunk) {
             Ok(0) => break,
@@ -197,22 +197,60 @@ fn bound_or_unblock(stream: &UnixStream, set: io::Result<()>) -> io::Result<()> 
     }
 }
 
-/// Where the response ends by its own `Content-Length`, once that much of it has arrived.
-pub fn promised_end(response: &[u8]) -> Option<usize> {
-    let (head, body) = split_head(response)?;
-    let length = content_length(head).filter(|&n| n <= MAX_BODY)?;
-    let head_len = response.len() - body.len();
-    (body.len() >= length).then_some(head_len + length)
+/// Where the response ends, once enough of it has arrived to say: at the end of the body its
+/// `Content-Length` promises; or at the end of a head that `parse_reply` will refuse whatever
+/// follows it, one without a usable length, over `MAX_HEAD`, or not UTF-8; or, with no end of head
+/// yet, as soon as any head would be over `MAX_HEAD`. A refused reply is never read on to the close:
+/// a close that comes late, or as a reset, would make the reader take it for one cut short, which
+/// the waiter retries.
+pub fn reply_end(response: &[u8]) -> Option<usize> {
+    Framing::default().end_of(response)
 }
 
-/// Whether the response ended early: in its head, or short of the body its `Content-Length`
-/// promises. Anything else, oversized or without the header, is refused by `parse_reply` rather
-/// than retried.
-pub fn is_truncated(response: &[u8]) -> bool {
-    match split_head(response) {
-        None => response.len() <= MAX_HEAD,
-        Some((head, body)) => content_length(head).is_some_and(|n| n <= MAX_BODY && body.len() < n),
+/// `reply_end` for a response read a little at a time, which keeps what each call learns: how far
+/// the end of head has been looked for, and, once the head is in, where the reply ends. A reply
+/// that arrives a few bytes at a time is so never scanned again from its start.
+#[derive(Debug, Default)]
+pub struct Framing {
+    searched: usize,
+    end: Option<usize>,
+}
+
+impl Framing {
+    /// `reply_end(response)`, where `response` extends every response this was given before.
+    pub fn end_of(&mut self, response: &[u8]) -> Option<usize> {
+        if self.end.is_none() {
+            let from = self.searched;
+            // The next end of head can begin in the last 3 bytes already searched.
+            self.searched = response.len().saturating_sub(3);
+            let found = response
+                .get(from..)
+                .and_then(|rest| rest.windows(4).position(|w| w == b"\r\n\r\n"));
+            match found {
+                Some(at) => self.end = Some(end_by_head(response, from + at)),
+                None => return (response.len() >= MAX_HEAD + 4).then_some(response.len()),
+            }
+        }
+        self.end.filter(|&end| response.len() >= end)
     }
+}
+
+/// Where a response whose head ends at `head_end` ends: after the body its `Content-Length`
+/// promises, or straight after a head `parse_reply` will refuse.
+fn end_by_head(response: &[u8], head_end: usize) -> usize {
+    let head_len = head_end + 4;
+    let length = response
+        .get(..head_end)
+        .and_then(|head| std::str::from_utf8(head).ok())
+        .and_then(content_length)
+        .filter(|&n| head_end <= MAX_HEAD && n <= MAX_BODY);
+    length.map_or(head_len, |n| head_len + n)
+}
+
+/// Whether the response ended early, before `reply_end` could say where it ends. Anything else is
+/// refused by `parse_reply` rather than retried.
+pub fn is_truncated(response: &[u8]) -> bool {
+    reply_end(response).is_none()
 }
 
 fn split_head(response: &[u8]) -> Option<(&str, &[u8])> {
@@ -235,8 +273,14 @@ pub fn header<'a>(head: &'a str, name: &str) -> Option<&'a str> {
     values.next().is_none().then_some(value)
 }
 
+/// The length in a single `Content-Length` of ASCII digits alone: `usize`'s parser would also
+/// take a sign.
 pub fn content_length(head: &str) -> Option<usize> {
-    header(head, "Content-Length")?.parse().ok()
+    let value = header(head, "Content-Length")?;
+    if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    value.parse().ok()
 }
 
 /// The daemon's framed reply, or None for anything else: the hook then fails open.
@@ -374,6 +418,10 @@ mod tests {
                     "Transfer-Encoding: chunked\r\nContent-Length",
                 ),
             ),
+            (
+                "signed length",
+                edit(&ok, "Content-Length: 2", "Content-Length: +2"),
+            ),
             ("stdout past body", framed("0", "", "3", b"hi")),
             ("exit code out of range", framed("256", "", "0", b"")),
             ("exit code not a number", framed("two", "", "0", b"")),
@@ -423,11 +471,18 @@ mod tests {
         assert_eq!(read_response(&mut client, STALL).unwrap(), ok);
     }
 
-    #[test]
-    fn reads_a_reply_without_a_length_to_the_end_of_the_stream() {
+    fn unframed_and_its_head() -> (Vec<u8>, Vec<u8>) {
         let unframed = edit(&framed("2", "", "2", b"hi"), "Content-Length: 2\r\n", "");
-        let (mut client, _) = daemon_wrote(&unframed, true);
-        assert_eq!(read_response(&mut client, STALL).unwrap(), unframed);
+        let head = unframed[..unframed.len() - 2].to_vec();
+        (unframed, head)
+    }
+
+    #[test]
+    fn stops_at_the_head_of_a_reply_without_a_length_on_a_connection_held_open() {
+        let (unframed, head) = unframed_and_its_head();
+        let (mut client, _open) = daemon_wrote(&unframed, false);
+        let read = read_response(&mut client, STALL).map_err(|e| e.kind());
+        assert_eq!(read, Ok(head));
     }
 
     #[test]
@@ -465,15 +520,31 @@ mod tests {
         assert!(is_truncated(&ok[..ok.len() - 1]));
         assert!(is_truncated(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n"));
         assert!(is_truncated(b""));
-        // Refused, not retried: no length, or more head or body than a reply may have.
+        // One more byte would end a head of exactly MAX_HEAD.
+        assert!(is_truncated(&[&[b'x'; MAX_HEAD][..], b"\r\n\r"].concat()));
+        // Refused, not retried: no length, a head that isn't text, or more head or body than a
+        // reply may have.
         assert!(!is_truncated(&edit(&ok, "Content-Length: 2\r\n", "")));
-        assert!(!is_truncated(&vec![b'x'; MAX_HEAD + 1]));
+        assert!(!is_truncated(b"HTTP/1.1 200 OK\r\nX: \xff\r\n\r\n"));
+        assert!(!is_truncated(&vec![b'x'; MAX_HEAD + 4]));
         let huge = (MAX_BODY + 1).to_string();
         assert!(!is_truncated(&edit(
             &ok,
             "Content-Length: 2",
             &format!("Content-Length: {huge}")
         )));
+    }
+
+    #[test]
+    fn a_reply_too_long_to_accept_ends_at_its_head() {
+        let ok = framed("0", "", "2", b"hi");
+        let over = (MAX_BODY + 1).to_string();
+        let huge = edit(&ok, "Content-Length: 2", &format!("Content-Length: {over}"));
+        let padding = format!("X-Pad: {}\r\nContent-Type", "x".repeat(MAX_HEAD));
+        let long_head = edit(&ok, "Content-Type", &padding);
+        for refused in [huge, long_head] {
+            assert_eq!(reply_end(&refused), Some(refused.len() - 2));
+        }
     }
 
     #[test]
@@ -533,6 +604,27 @@ mod tests {
                 let whole = frame(&reply);
                 let prefix = &whole[..cut.index(whole.len())];
                 prop_assert_eq!(parse_reply(prefix), None);
+            }
+
+            #[test]
+            fn read_a_byte_at_a_time_ends_where_each_whole_prefix_does(
+                reply in reply(),
+                after in prop::collection::vec(any::<u8>(), 0..16),
+            ) {
+                let framed = [frame(&reply), after].concat();
+                let length = format!("Content-Length: {}\r\n", reply.stdout.len() + reply.stderr.len());
+                let at = framed.windows(length.len()).position(|w| w == length.as_bytes()).unwrap();
+                let unframed = [&framed[..at], &framed[at + length.len()..]].concat();
+                for whole in [framed, unframed] {
+                    let mut framing = Framing::default();
+                    for k in 0..=whole.len() {
+                        let end = reply_end(&whole[..k]);
+                        prop_assert_eq!(framing.end_of(&whole[..k]), end);
+                        if end.is_some() {
+                            break;
+                        }
+                    }
+                }
             }
         }
     }

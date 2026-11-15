@@ -47,15 +47,35 @@ cat >"$dir/payload" || exit 0
 
 post() { # path, request file, seconds (curl reads 0 as no limit at all)
   [ "$3" -ge 1 ] || set -- "$1" "$2" 1
-  curl -sS --unix-socket "$BAZHEN_SOCKET" --max-time "$3" -H 'Content-Type: application/json' -H 'Expect:' \
+  rm -f "$dir/head"
+  curl -sS --unix-socket "$BAZHEN_SOCKET" --max-time "$3" --max-filesize "$MAX_BODY" \
+    -H 'Content-Type: application/json' -H 'Expect:' \
     --data-binary "@$2" -D "$dir/head" -o "$dir/body" "http://localhost$1" 2>/dev/null
 }
 
-# A waiter retries until its deadline when the daemon can't be reached or drops the request, as
-# it does across a restart; any other hook gives up at once.
+# A whole head came back that the reply is refused for whatever follows it, so a transfer that
+# then failed, as by a reset, is no reason to try again. The first head is the reply's own:
+# `Expect:` goes empty, so no 100 Continue comes before it.
+refused() {
+  awk -v max="$MAX_BODY" '
+    { sub(/\r$/, "") }
+    $0 == "" { whole = 1; exit }
+    { i = index($0, ":"); v = substr($0, i + 1); gsub(/^[ \t]+|[ \t]+$/, "", v) }
+    i && tolower(substr($0, 1, i)) == "content-length:" { n++; length_ = v }
+    END { exit !(whole && !(n == 1 && length_ ~ /^[0-9]+$/ && length_ + 0 <= max)) }
+  ' "$dir/head" 2>/dev/null
+}
+
+# A waiter retries until its deadline when the daemon can't be reached, drops the request, or cuts
+# a reply short, as it does across a restart; never on a reply it would refuse. Any other hook
+# gives up at once.
 if [ "$1" = wait ]; then
   deadline=$(($(date +%s) + 82800))
   until post /v1/hooks "$dir/request" $((deadline - $(date +%s))); do
+    # curl's own refusals of the reply: 8, a Content-Length that isn't one; 63, a body over
+    # MAX_BODY, or a length too large to read.
+    case $? in 8 | 63) exit 0 ;; esac
+    refused && exit 0
     [ "$(date +%s)" -lt $((deadline - 1)) ] || exit 0
     sleep 1
   done
