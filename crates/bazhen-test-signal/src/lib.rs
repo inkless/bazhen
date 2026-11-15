@@ -48,7 +48,7 @@ impl Tester {
     ///
     /// When `target` isn't a pid above 1, or is this test, its parent or its own group.
     pub fn check(&self, target: i64) -> Result<Pid, Refused> {
-        let raw = i32::try_from(target).map_err(|_| Refused::NotAPid(target))?;
+        let raw = raw_pid(target).ok_or(Refused::NotAPid(target))?;
         if raw <= 1 {
             return Err(Refused::NotSingle(target));
         }
@@ -63,6 +63,11 @@ impl Tester {
         }
         Pid::from_raw(raw).ok_or(Refused::NotSingle(target))
     }
+}
+
+/// `target` as a `pid_t`, if it is one: never truncated, which would name another process.
+fn raw_pid(target: i64) -> Option<i32> {
+    i32::try_from(target).ok()
 }
 
 /// Sends `signal` to `pid` alone: a process the test started, or one it checked is still the
@@ -113,7 +118,13 @@ mod tests {
 
     #[test]
     fn refuses_what_no_pid_can_be() {
-        for target in [i64::from(i32::MAX) + 1, i64::MAX, i64::MIN] {
+        // (1 << 32) + 4242 truncates to 4242, a live process somewhere.
+        for target in [
+            i64::from(i32::MAX) + 1,
+            (1 << 32) + 4242,
+            i64::MAX,
+            i64::MIN,
+        ] {
             assert_eq!(TESTER.check(target), Err(Refused::NotAPid(target)));
         }
     }
