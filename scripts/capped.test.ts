@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { formatDuration, parseArgs, parseDuration, parseSize, report } from "./capped.ts";
+import {
+  TEST_BINARY_CAP,
+  formatDuration,
+  parseArgs,
+  parseDuration,
+  parseSize,
+  report,
+} from "./capped.ts";
 
 const GIB = 1024 ** 3;
 const cap = { memory: 8 * GIB, timeMs: 20 * 60_000 };
@@ -15,12 +22,17 @@ describe("capped's arguments", () => {
     });
   });
 
-  it("takes a test binary with no caps of its own", () => {
+  it("gives a test binary the runner's cap, or a smaller memory cap it is given", () => {
     expect(parseArgs(["--test-binary", "--", "/t/deps/a-1f", "--list"])).toEqual({
       kind: "test-binary",
+      cap: TEST_BINARY_CAP,
       command: "/t/deps/a-1f",
       args: ["--list"],
     });
+    expect(parseArgs(["--test-binary", "--memory", "128M", "--", "/t/a"])).toMatchObject({
+      cap: { memory: 128 * 1024 ** 2, timeMs: TEST_BINARY_CAP.timeMs },
+    });
+    expect(() => parseArgs(["--test-binary", "--time", "1m", "--", "/t/a"])).toThrow("usage");
   });
 
   it("drops the `--` pnpm hands on, but not one the command itself is given", () => {
@@ -71,10 +83,11 @@ describe("what a run says when it ends", () => {
     ]);
   });
 
-  it("keeps a test binary quiet unless a cap fired, and reads an unexplained SIGKILL as memory", () => {
+  it("keeps a test binary quiet unless a cap fired, and takes no SIGKILL for a memory kill", () => {
     expect(report(ended, cap, "scope", true)).toEqual([]);
-    expect(report({ ...ended, code: null, signal: "SIGKILL" }, cap, "scope", true)).toEqual([
-      "capped: killed by SIGKILL, most likely at the 8.0 GiB memory cap",
+    expect(report({ ...ended, code: null, signal: "SIGKILL" }, cap, "scope", true)).toEqual([]);
+    expect(report({ ...ended, memoryKills: 1 }, cap, "owned", true)).toEqual([
+      "capped: killed the test process at the 8.0 GiB memory cap",
     ]);
   });
 

@@ -2,11 +2,12 @@
 // to fire costs the run 1 GiB and a failed assertion, never the machine's memory.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chooseMode, runIn, runWatched, type Mode } from "./cap.ts";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { chooseMode, ownedArgv, runIn, runOwned, runWatched, type Mode } from "./cap.ts";
+import { isAlive } from "./signal.ts";
 
 const MIB = 1024 ** 2;
 const cap = { memory: 128 * MIB, timeMs: 30_000 };
@@ -27,9 +28,7 @@ let mode: Mode;
 let dir: string;
 
 beforeAll(async () => {
-  const chosen = await chooseMode(cap, false, process.env);
-  if ("refused" in chosen) throw new Error(chosen.refused);
-  mode = chosen.mode;
+  ({ mode } = await chooseMode(cap, false));
   dir = mkdtempSync(join(tmpdir(), "bz-cap-"));
 });
 
@@ -54,8 +53,31 @@ describe("a capped run", () => {
     expect(ended).toMatchObject({ timedOut: true, signal: "SIGTERM", memoryKills: 0 });
   });
 
+  it("takes with it what its command left behind, even one that ignores SIGTERM", async () => {
+    const pidFile = join(dir, "left");
+    const script = `(trap "" TERM; exec sleep 60) & echo $! > "${pidFile}"`;
+    await runIn(mode, "sh", ["-c", script], cap, process.env);
+    expect(isAlive(Number(readFileSync(pidFile, "utf8")))).toBe(false);
+  }, 30_000);
+
   it("leaves no scope behind, whether it exited, ran out of time or was killed", () => {
     expect(scopesLeft()).toBe("");
+  });
+});
+
+// What `ulimit -d` reads in a test binary its runner caps: no limit where it counts no mappings.
+const [limitBin, limitArgs] = ownedArgv("sh", ["-c", "ulimit -d"], cap);
+const expectedLimit = limitBin === "sh" && limitArgs[0] === "-c" ? limitArgs[3] : "unlimited";
+
+describe("a test binary its runner caps", () => {
+  it("is killed at its cap, the runner signalling its own child", async () => {
+    const ended = await runOwned(process.execPath, ["-e", RUNAWAY], cap, process.env);
+    expect(ended).toMatchObject({ memoryKills: 1, signal: "SIGKILL" });
+  });
+
+  it("runs under the data limit that backs the watchdog up", () => {
+    const read = spawnSync(limitBin, limitArgs, { encoding: "utf8" });
+    expect(read.stdout.trim()).toBe(expectedLimit);
   });
 });
 
@@ -69,6 +91,15 @@ describe("the fallback watchdog", () => {
     );
     expect(ended).toMatchObject({ memoryKills: 1, signal: "SIGKILL" });
     expect(ended.peak).toBeGreaterThan(cap.memory);
+  });
+
+  it("kills what its command left in its group once the command has gone", async () => {
+    const pidFile = join(dir, "left-watched");
+    const script = `(trap "" TERM; exec sleep 60) & echo $! > "${pidFile}"`;
+    await runWatched("sh", ["-c", script], cap, process.env);
+    // Killed, it lingers only until whatever inherited it reaps it.
+    const pid = Number(readFileSync(pidFile, "utf8"));
+    await vi.waitFor(() => expect(isAlive(pid)).toBe(false), { timeout: 2_000 });
   });
 
   it("leaves a run under its cap alone", async () => {

@@ -8,8 +8,10 @@ import {
   chooseMode,
   clampMemory,
   fallbackWatchdog,
+  isAncestor,
   journalKills,
   judgeProbe,
+  ownedArgv,
   oomKills,
   parseTop,
   scopeArgv,
@@ -33,6 +35,7 @@ const reader =
   (path: string): string | undefined =>
     files[path];
 
+const yes = () => true;
 const ok: Verdict = { ok: true };
 const no: Verdict = { ok: false, why: "systemd-run is missing" };
 /** A probe that throws, so a mode that needs none is seen to make none. */
@@ -51,7 +54,9 @@ describe("the caps", () => {
 
   it("holds every run together below the whole machine, in whole pages", () => {
     expect(sliceMemory(10 * GIB)).toBe(6 * GIB);
-    expect(sliceMemory(10_000) % 4096).toBe(0);
+    // Whole MiB, a multiple of any page size, so the cap reads back from the kernel as it was set.
+    expect(sliceMemory(10 * GIB + 12_345) % 1024 ** 2).toBe(0);
+    expect(clampMemory(10 * GIB, 7 * GIB + 3) % 1024 ** 2).toBe(0);
   });
 
   it("asks systemd to kill only the biggest process, without swap, and to forget a failed scope", () => {
@@ -100,11 +105,20 @@ describe("whether this process is in a capped run", () => {
     expect(cgroupOf("12:pids:/x\n0::/a/b.scope\n")).toBe("/a/b.scope");
   });
 
-  it("trusts a fallback run's variable only while its watchdog lives", () => {
+  it("trusts a watched run's variable only while its watchdog lives, as an ancestor", () => {
     const env = { [CAPPED_ENV]: "fallback:4242" };
-    expect(fallbackWatchdog(env, () => true)).toBe(4242);
-    expect(fallbackWatchdog(env, () => false)).toBeUndefined();
-    expect(fallbackWatchdog({ [CAPPED_ENV]: "systemd:4242" }, () => true)).toBeUndefined();
+    expect(fallbackWatchdog(env, yes, yes)).toBe(4242);
+    expect(fallbackWatchdog(env, () => false, yes)).toBeUndefined();
+    expect(fallbackWatchdog(env, yes, () => false)).toBeUndefined();
+    expect(fallbackWatchdog({ [CAPPED_ENV]: "systemd:4242" }, yes, yes)).toBeUndefined();
+  });
+
+  it("finds an ancestor by walking parent pids, and stops at init or a loop", () => {
+    const parents: Record<number, number> = { 50: 40, 40: 30, 30: 1, 60: 61, 61: 60 };
+    const parent = (pid: number) => parents[pid];
+    expect([30, 40].map((pid) => isAncestor(pid, parent, 50))).toEqual([true, true]);
+    expect([50, 1, 99].map((pid) => isAncestor(pid, parent, 50))).toEqual([false, false, false]);
+    expect(isAncestor(99, parent, 60)).toBe(false);
   });
 });
 
@@ -115,6 +129,7 @@ describe("the probe's verdict", () => {
     memory: `${cap.memory}\n`,
     swap: "0\n",
     slice: `${slice}\n`,
+    sliceSwap: "0\n",
   };
 
   it("takes a scope that reads back every cap it was given", () => {
@@ -131,6 +146,7 @@ describe("the probe's verdict", () => {
   it("refuses a scope that can still swap, or a slice without its cap", () => {
     expect(judgeProbe(cap, slice, { ...good, swap: "max" })).toMatchObject({ ok: false });
     expect(judgeProbe(cap, slice, { ...good, slice: "max" })).toMatchObject({ ok: false });
+    expect(judgeProbe(cap, slice, { ...good, sliceSwap: "max" })).toMatchObject({ ok: false });
   });
 
   it("refuses a systemd whose scopes can't take OOMPolicy", () => {
@@ -142,35 +158,54 @@ describe("the probe's verdict", () => {
 });
 
 describe("how a run is capped", () => {
-  it("needs no probe inside a capped scope", async () => {
-    await expect(chooseMode(cap, true, {}, deps({ inScope: () => true }))).resolves.toEqual({
-      mode: "scope",
-    });
-  });
-
-  it("runs a test binary inside a watched run as it is, its watchdog covering it", async () => {
-    await expect(chooseMode(cap, true, {}, deps({ watchdog: () => 7 }))).resolves.toEqual({
+  it("runs a test binary inside a capped scope as it is, so the scope's cap holds its tests", async () => {
+    await expect(chooseMode(cap, true, deps({ inScope: () => true }))).resolves.toEqual({
       mode: "through",
     });
   });
 
-  it("refuses a test binary that nothing would cap", async () => {
-    await expect(chooseMode(cap, true, {}, deps({ probe: async () => no }))).resolves.toEqual({
-      refused: "systemd-run is missing",
+  it("gives a whole command inside a capped scope a scope of its own without a probe", async () => {
+    await expect(chooseMode(cap, false, deps({ inScope: () => true }))).resolves.toEqual({
+      mode: "scope",
     });
   });
 
+  it("gives a test binary outside a scope one of its own where systemd caps", async () => {
+    await expect(chooseMode(cap, true, deps({ probe: async () => ok }))).resolves.toEqual({
+      mode: "scope",
+    });
+  });
+
+  it("has the runner cap a test binary itself where systemd can't, its watched run or none", async () => {
+    await expect(
+      chooseMode(cap, true, deps({ watchdog: () => 7, probe: async () => no })),
+    ).resolves.toEqual({ mode: "owned", note: "systemd-run is missing" });
+  });
+
   it("watches a whole command where systemd can't cap it, and says why", async () => {
-    await expect(chooseMode(cap, false, {}, deps({ probe: async () => no }))).resolves.toEqual({
+    await expect(chooseMode(cap, false, deps({ probe: async () => no }))).resolves.toEqual({
       mode: "watched",
       note: "systemd-run is missing",
     });
   });
+});
 
-  it("gives a command its own scope where the probe passes", async () => {
-    await expect(chooseMode(cap, false, {}, deps({ probe: async () => ok }))).resolves.toEqual({
-      mode: "scope",
-    });
+describe("a test binary its runner caps", () => {
+  it("starts under a data limit a quarter above its cap on Linux, so the watchdog fires first", () => {
+    expect(ownedArgv("/t/a", ["--x"], { ...cap, memory: 4 * GIB }, "linux")).toEqual([
+      "sh",
+      ["-c", 'ulimit -d "$1" && shift && exec "$@"', "sh", String(5 * 1024 ** 2), "/t/a", "--x"],
+    ]);
+  });
+
+  it("never gets a data limit below 2 GiB, which would stop a runtime starting", () => {
+    expect(ownedArgv("/t/a", [], { ...cap, memory: 128 * 1024 ** 2 }, "linux")[1][3]).toBe(
+      String(2 * 1024 ** 2),
+    );
+  });
+
+  it("starts as it is where the data limit counts no mappings", () => {
+    expect(ownedArgv("/t/a", ["--x"], cap, "darwin")).toEqual(["/t/a", ["--x"]]);
   });
 });
 
@@ -238,9 +273,9 @@ describe("reading memory", () => {
     expect(statParent("4242 (a (b) c) S 77 4242 4242 0 -1")).toBe(77);
   });
 
-  it("reads anonymous resident memory, not file-backed", () => {
-    expect(statusAnon("VmRSS:\t  900 kB\nRssAnon:\t     300 kB\nRssFile:\t 600 kB\n")).toBe(
-      300 * 1024,
-    );
+  it("reads anonymous memory, shared and swapped out included, but not file-backed", () => {
+    const status =
+      "VmRSS:\t 900 kB\nRssAnon:\t 300 kB\nRssFile:\t 600 kB\nRssShmem:\t 20 kB\nVmSwap:\t 5 kB\n";
+    expect(statusAnon(status)).toBe(325 * 1024);
   });
 });
