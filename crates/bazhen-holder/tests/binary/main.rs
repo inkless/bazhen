@@ -4,7 +4,8 @@
 //! A holder here ends only by a signal, in a session of its own, so nothing the test runner does
 //! reaches it. Each one therefore:
 //! - starts through `sh -c 'ulimit -t 2 && exec "$0" "$@"'`, so a holder that spins dies of
-//!   `SIGXCPU` within 2 CPU-seconds, and `exec` keeps its pid;
+//!   `SIGXCPU` within 2 CPU-seconds, and `exec` keeps its pid; a flood's holder gets 10, since
+//!   on macOS it moves its output in many small reads;
 //! - runs a child that ends by itself;
 //! - is recorded in a ledger with its start time and its owning test process's, killed by a guard
 //!   when its test ends, and swept by a later test if its owner died first, whichever target
@@ -186,10 +187,14 @@ struct Start<'a> {
     /// shell can't block a signal, so this goes through `python3`, which execs the shell.
     blocked_signals: bool,
     stderr: bool,
+    /// CPU-seconds the holder may use before `SIGXCPU` ends it, 2 if none: enough for any test
+    /// but a flood, which moves its output in many small reads on macOS, in a debug build.
+    cpu_seconds: Option<u32>,
 }
 
 fn spawn(spec: &[u8], how: &Start<'_>) -> Result<Started> {
-    let script = format!("{} ulimit -t 2 && exec \"$0\" \"$@\"", how.prelude);
+    let cpu = how.cpu_seconds.unwrap_or(2);
+    let script = format!("{} ulimit -t {cpu} && exec \"$0\" \"$@\"", how.prelude);
     let mut command = if how.blocked_signals {
         let block = "import os, signal, sys; \
             signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGCHLD, signal.SIGUSR1}); \
