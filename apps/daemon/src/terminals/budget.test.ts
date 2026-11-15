@@ -107,7 +107,7 @@ describe("TerminalBudget", () => {
   it("warns at start about terminals kept above the budget and a budget above the machine's PTYs", () => {
     const host: HostPtys = { ok: true, used: 10, max: 50, exact: true };
     expect(budget({ max: 64, open: 70, host }).b.startupWarnings()).toEqual([
-      "70 terminals are open, above terminals.max_open (64): they keep running, and new ones are refused until fewer than 64 are open",
+      "70 terminals are open, above terminals.max_open (64): they keep running, and a new one opens once 7 of them have closed",
       "terminals.max_open (64) is above the machine's 50 PTYs: the machine's own limit is reached first",
     ]);
   });

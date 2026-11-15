@@ -270,6 +270,12 @@ export const ErrorResponse = z.object({
     /** The code was wrong, expired, used or burned; which one is not said. */
     "pairing_failed",
     "rate_limited",
+    /**
+     * A new agent or shell refused: as many terminals are open as the daemon allows, or the
+     * machine is short of PTYs. The message says which; closing a terminal makes room
+     * (protocol 1.37).
+     */
+    "terminal_limit",
   ]),
   message: z.string(),
   /** With `busy`: each shell, and what runs in it, that the close would end (protocol 1.28). */

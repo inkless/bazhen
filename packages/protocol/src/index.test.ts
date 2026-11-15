@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DoctorResponse, HealthResponse } from "./index.ts";
+import { DoctorResponse, ErrorResponse, HealthResponse } from "./index.ts";
 
 describe("HealthResponse schema", () => {
   it("rejects a runtime state outside the declared set", () => {
@@ -50,5 +50,34 @@ describe("DoctorResponse schema", () => {
       DoctorResponse.safeParse(doctor({ ...lan, certificate: { fingerprint: "ab cd" } })).success,
       DoctorResponse.safeParse(doctor({ ...lan, error: undefined })).success,
     ]).toEqual([true, true, false, false]);
+  });
+});
+
+describe("DoctorResponse terminals", () => {
+  const base = doctor(null);
+  const host = { used: 37, max: 4096, exact: true };
+  const parses = (terminals: unknown) => DoctorResponse.safeParse({ ...base, terminals }).success;
+
+  it("takes the open count, the budget and the machine's PTYs, or none from an older daemon", () => {
+    expect([
+      parses({ open: 3, max: 100, host }),
+      parses({ open: 3, max: 100, host: null }),
+      DoctorResponse.safeParse(base).success,
+    ]).toEqual([true, true, true]);
+  });
+
+  it("refuses a budget of no terminals, and a machine whose count isn't said to be exact or not", () => {
+    expect([
+      parses({ open: 0, max: 0, host }),
+      parses({ open: 3, max: 100, host: { used: 37, max: 4096 } }),
+    ]).toEqual([false, false]);
+  });
+});
+
+const errorParses = (error: string) => ErrorResponse.safeParse({ error, message: "m" }).success;
+
+describe("ErrorResponse", () => {
+  it("names a refused terminal as terminal_limit, and no code it doesn't know", () => {
+    expect([errorParses("terminal_limit"), errorParses("too_many")]).toEqual([true, false]);
   });
 });

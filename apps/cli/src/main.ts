@@ -22,6 +22,7 @@ import {
 } from "@bazhen/protocol";
 import { TASK_USAGE, Usage, taskVerb, type Verb } from "./tasks.ts";
 import { lanLines } from "./lan.ts";
+import { terminalLines } from "./terminals.ts";
 
 /** The exit status when the daemon isn't running. */
 const NOT_RUNNING = 3;
@@ -123,6 +124,7 @@ async function doctor(): Promise<number> {
       );
     }
   }
+  if (d.terminals !== undefined) for (const line of terminalLines(d.terminals)) console.log(line);
   const source = d.env.source === "start" ? "at start" : "by bazhen env refresh";
   console.log(`environment: captured ${d.env.capturedAt} ${source}, ${d.env.kept} variables kept`);
   console.log(`  removed: ${removed || "none"}`);

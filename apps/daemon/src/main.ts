@@ -492,6 +492,7 @@ const socketListener = getRequestListener(
           desktop: desktop !== null,
           notifier: process.platform === "darwin" ? notifiers.macApp : notifiers.notifySend,
         },
+        terminals: budget.report(),
         env: {
           capturedAt: captured.at,
           source: captured.source,

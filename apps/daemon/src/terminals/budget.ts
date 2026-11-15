@@ -117,7 +117,7 @@ export class TerminalBudget implements TerminalAdmission {
     return [
       ...(open > max
         ? [
-            `${terminals(open)} open, above terminals.max_open (${max}): they keep running, and new ones are refused until fewer than ${max} are open`,
+            `${terminals(open)} open, above terminals.max_open (${max}): they keep running, and a new one opens once ${open - max + 1} of them have closed`,
           ]
         : []),
       ...(host.ok && max > host.max
