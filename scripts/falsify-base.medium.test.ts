@@ -114,7 +114,7 @@ function falsifyBase(extra: Record<string, string> = {}) {
   const ran = readFileSync(log, "utf8")
     .split("\n")
     .filter((line) => line.startsWith("FALSIFY "));
-  return { status: result.status, ran, left: readdirSync(tmp) };
+  return { status: result.status, ran, left: readdirSync(tmp), stderr: result.stderr };
 }
 
 it("judges a branch that changes falsify with the base's falsify, on its exit code", () => {
@@ -128,7 +128,12 @@ it("judges a branch that changes falsify with the base's falsify, on its exit co
 
 it("judges a change to a file only the base's harness lists", () => {
   commit({ "scripts/base-only.ts": "export const weaker = true;\n" }, "change base-only");
-  expect(falsifyBase()).toEqual({ status: 0, ran: [expect.any(String)], left: [] });
+  expect(falsifyBase()).toEqual({
+    status: 0,
+    ran: [expect.any(String)],
+    left: [],
+    stderr: expect.any(String),
+  });
 });
 
 it("judges a change to how falsify is run", () => {
@@ -138,10 +143,26 @@ it("judges a change to how falsify is run", () => {
 
 it("leaves a branch that changes none of falsify's files to falsify alone", () => {
   commit({ "notes.txt": "two\n" }, "change notes");
-  expect(falsifyBase({ STUB_EXIT: "3" })).toEqual({ status: 0, ran: [], left: [] });
+  expect(falsifyBase({ STUB_EXIT: "3" })).toEqual({
+    status: 0,
+    ran: [],
+    left: [],
+    stderr: expect.any(String),
+  });
 });
 
 it("fails without judging when the base's dependencies don't install", () => {
   commit({ "scripts/falsify.ts": `${STUB_FALSIFY}// weakened\n` }, "change falsify");
-  expect(falsifyBase({ STUB_INSTALL_FAIL: "1" })).toEqual({ status: 1, ran: [], left: [] });
+  const { status, ran, left, stderr } = falsifyBase({ STUB_INSTALL_FAIL: "1" });
+  const installs = readFileSync(log, "utf8").match(/^PNPM: install .*$/gm);
+  expect({ status, ran, left, installs, said: stderr.includes("couldn't install") }).toEqual({
+    status: 1,
+    ran: [],
+    left: [],
+    installs: [
+      "PNPM: install --frozen-lockfile --ignore-scripts --offline",
+      "PNPM: install --frozen-lockfile --ignore-scripts --prefer-offline",
+    ],
+    said: true,
+  });
 });
