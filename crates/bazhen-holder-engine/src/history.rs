@@ -205,20 +205,35 @@ impl History {
     /// Every row held, oldest first, as stored.
     #[cfg(test)]
     pub(crate) fn rows_for_test(&self) -> Vec<(String, Ending)> {
-        let mut rows = Vec::new();
-        for (index, block) in self.blocks.iter().enumerate() {
-            let skip = if index == 0 { self.evicted } else { 0 };
-            let mut start = skip
-                .checked_sub(1)
-                .and_then(|before| block.rows.get(before))
-                .map_or(0, |r| r.end());
-            for row in block.rows.iter().skip(skip) {
-                let text = block.text.get(start..row.end()).unwrap_or_default();
-                rows.push((text.to_owned(), row.ending()));
-                start = row.end();
-            }
-        }
-        rows
+        self.iter()
+            .map(|(text, ending)| (text.to_owned(), ending))
+            .collect()
+    }
+
+    /// Every row held, as [`encode_row`](crate::encode::encode_row) wrote it, oldest first; and
+    /// newest first, reversed, for a snapshot to count back from the newest.
+    pub(crate) fn iter(&self) -> impl DoubleEndedIterator<Item = (&str, Ending)> + '_ {
+        self.blocks
+            .iter()
+            .enumerate()
+            .flat_map(move |(index, block)| {
+                let skip = if index == 0 { self.evicted } else { 0 };
+                block
+                    .rows
+                    .iter()
+                    .enumerate()
+                    .skip(skip)
+                    .map(move |(n, row)| {
+                        let start = n
+                            .checked_sub(1)
+                            .and_then(|before| block.rows.get(before))
+                            .map_or(0, |r| r.end());
+                        (
+                            block.text.get(start..row.end()).unwrap_or_default(),
+                            row.ending(),
+                        )
+                    })
+            })
     }
 
     pub(crate) fn clear(&mut self) {
@@ -230,19 +245,8 @@ impl History {
 
     /// Writes every row, oldest first.
     pub(crate) fn write(&self, lines: &mut Lines<'_>) {
-        for (index, block) in self.blocks.iter().enumerate() {
-            let skip = if index == 0 { self.evicted } else { 0 };
-            let mut start = match skip.checked_sub(1) {
-                Some(before) => block.rows.get(before).map_or(0, |r| r.end()),
-                None => 0,
-            };
-            for row in block.rows.iter().skip(skip) {
-                lines.row(
-                    block.text.get(start..row.end()).unwrap_or_default(),
-                    row.ending(),
-                );
-                start = row.end();
-            }
+        for (text, ending) in self.iter() {
+            lines.row(text, ending);
         }
     }
 }
