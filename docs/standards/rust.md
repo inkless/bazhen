@@ -258,8 +258,18 @@ What differs:
   at the bottom of the file they test; tests of a crate's public API go in its `tests/`.
 - **Property tests with proptest** for every decoder and state machine: a round trip through
   the encoder, and the decoder's answer for every malformed input, such as every truncation
-  (`crates/bazhen-hook/src/main.rs`, `mod properties`). Don't commit a `proptest-regressions`
-  file a mutant produced.
+  (`crates/bazhen-hook/src/lib.rs`, `mod properties`).
+  - **A pull request tests the change, not the draw.** `gateEnv` in `scripts/cargo-gate.ts` fixes
+    `PROPTEST_RNG_SEED` for every gate and for falsify, and each `proptest!` block fixes its case
+    count, so a run sees the cases the last one saw. A property that fails on a pull request
+    failed because of what changed. Changing the seed changes every property's cases at once: do
+    it on purpose, never to get past a failure.
+  - **New cases are drawn nightly**, by the `properties` job in `.github/workflows/fuzz.yml`,
+    round after round on random seeds that it prints. Run `PROPTEST_RNG_SEED=<n> pnpm test:rust`
+    to replay a round. A failure comes back with its fix as a named test of the shrunk case, plus
+    the `cc` line proptest wrote, committed to the crate's `proptest-regressions/<file>.txt`.
+    proptest replays every line in that file for every property in the source file, before its
+    own cases. Don't commit a line a mutant produced.
 - **Snapshots with insta, for protocol frames only.** An encoder's output is a contract other
   languages read, so a reviewed snapshot of it is the right assertion. insta joins
   `[workspace.dependencies]` with the first crate that needs it. A protocol whose source is a

@@ -141,12 +141,19 @@ const REMOVED_PREFIX =
   /^(CARGO_BUILD_(?!TARGET_DIR$)|CARGO_TARGET_(?!DIR$)|CARGO_ALIAS_|CARGO_PROFILE_|NEXTEST_)/;
 
 /**
+ * The seed every proptest draws its cases from unless the caller gives one, so that a run tests the
+ * change and not the draw: the scheduled job in `.github/workflows/fuzz.yml` gives a random one.
+ * Changing it changes every property's cases.
+ */
+export const PROPTEST_SEED = "1";
+
+/**
  * The environment a gate runs in: the caller's, less everything that changes the build's flags or
- * tools. `CARGO_ENCODED_RUSTFLAGS`, set and empty, outranks every other source of rustflags,
- * cargo config in any parent directory included.
+ * tools, with proptest's seed fixed unless the caller fixed it. `CARGO_ENCODED_RUSTFLAGS`, set and
+ * empty, outranks every other source of rustflags, cargo config in any parent directory included.
  */
 export function gateEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const clean: NodeJS.ProcessEnv = {};
+  const clean: NodeJS.ProcessEnv = { PROPTEST_RNG_SEED: PROPTEST_SEED };
   for (const [name, value] of Object.entries(env)) {
     if (!REMOVED.has(name) && !REMOVED_PREFIX.test(name)) clean[name] = value;
   }

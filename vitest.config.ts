@@ -2,6 +2,8 @@ import { defineConfig } from "vitest/config";
 
 // First in every project: the tests start only inside a capped run.
 const CAPPED = "tests/support/capped-setup.ts";
+// In every project whose tests can be property tests.
+const SEEDED = "tests/support/fast-check-setup.ts";
 
 export default defineConfig({
   test: {
@@ -17,6 +19,7 @@ export default defineConfig({
           ],
           exclude: ["**/*.medium.test.ts", "**/node_modules/**"],
           globalSetup: [CAPPED],
+          setupFiles: [SEEDED],
           env: { BAZHEN_HOME: "/nonexistent/bazhen-unit-tests" },
           // Vitest blanks CSS it isn't told to keep, even imported as ?raw text; the web tokens
           // are tested by reading their text.
@@ -33,6 +36,7 @@ export default defineConfig({
           ],
           exclude: ["scripts/hook-bench.medium.test.ts", "**/node_modules/**"],
           globalSetup: [CAPPED, "tests/support/medium-setup.ts"],
+          setupFiles: [SEEDED],
         },
       },
       {

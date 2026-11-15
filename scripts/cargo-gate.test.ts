@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   GATES,
+  PROPTEST_SEED,
   SHIPPED_LINT,
   configFailures,
   gateEnv,
@@ -45,7 +46,14 @@ describe("gateEnv", () => {
       CARGO_HOME: "/home/u/.cargo",
       CARGO_ENCODED_RUSTFLAGS: "",
       CARGO_ENCODED_RUSTDOCFLAGS: "",
+      PROPTEST_RNG_SEED: PROPTEST_SEED,
     });
+  });
+
+  it("fixes proptest's seed, unless the caller gave one", () => {
+    expect(
+      [gateEnv({}), gateEnv({ PROPTEST_RNG_SEED: "42" })].map((e) => e.PROPTEST_RNG_SEED),
+    ).toEqual([PROPTEST_SEED, "42"]);
   });
 });
 

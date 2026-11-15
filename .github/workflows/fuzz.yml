@@ -2,7 +2,8 @@ name: Fuzz
 
 # Runs every cargo-fuzz target in crates/*/fuzz (docs/standards/rust.md § Tests): nightly for long,
 # building on the corpus earlier runs kept, and briefly on a pull request that changes the Rust, so
-# a broken target or a decoder it breaks is seen before it merges.
+# a broken target or a decoder it breaks is seen before it merges. Nightly, it also runs the
+# property tests on random seeds: everywhere else they run on fixed ones.
 on:
   schedule:
     - cron: "17 3 * * *"
@@ -82,3 +83,54 @@ jobs:
         with:
           name: fuzz-artifacts
           path: crates/*/fuzz/artifacts/
+
+  # A pull request runs every property test on one fixed seed (scripts/cargo-gate.ts and
+  # tests/support/fast-check-seed.ts), so it fails only for what it changed. This job draws new
+  # cases: round after round, each on random seeds it prints, until its time is up.
+  properties:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      ROUNDS_MINUTES: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26.13.0
+          cache: pnpm
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-nextest@0.9.152
+      - run: pnpm install --frozen-lockfile
+      - name: Run the property tests on random seeds
+        run: |
+          set -euo pipefail
+          end=$((SECONDS + ROUNDS_MINUTES * 60))
+          round=0
+          while [ "$SECONDS" -lt "$end" ]; do
+            round=$((round + 1))
+            proptest_seed=$(od -An -N8 -tu8 /dev/urandom | tr -d ' ')
+            fc_seed=$(od -An -N4 -ti4 /dev/urandom | tr -d ' ')
+            seeds="PROPTEST_RNG_SEED=$proptest_seed FC_SEED=$fc_seed"
+            echo "::group::Round $round: $seeds"
+            if ! PROPTEST_RNG_SEED="$proptest_seed" pnpm test:rust \
+              || ! FC_SEED="$fc_seed" pnpm test; then
+              echo "::endgroup::"
+              echo "::error::Round $round failed. Replay it with $seeds pnpm test:rust or pnpm test."
+              exit 1
+            fi
+            echo "::endgroup::"
+          done
+      # A failed proptest writes its shrunk case's seed here; committed with the fix, every run
+      # after replays it.
+      - name: Keep what failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: proptest-regressions
+          path: crates/*/proptest-regressions/
+          if-no-files-found: ignore
