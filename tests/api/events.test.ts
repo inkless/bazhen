@@ -20,8 +20,6 @@ const launch = async (key: string) =>
       })
     ).body,
   );
-/** The newest event a stream has delivered, or 0 before any. */
-const lastOf = (ids: readonly number[]) => ids.at(-1) ?? 0;
 const consecutive = (from: number, to: number) =>
   Array.from({ length: to - from }, (_, i) => from + 1 + i);
 
@@ -31,20 +29,20 @@ describe("the event stream", () => {
     const client = await daemon.events(before);
     const launched = await launch("streamed");
     await expect.poll(() => client.ids()).toEqual(expect.arrayContaining(launched.eventIds));
-    await expect.poll(async () => client.ids().at(-1)).toBe((await state()).eventId);
-    expect(client.ids()).toEqual(consecutive(before.eventId, (await state()).eventId));
+    await daemon.caughtUp(client);
+    expect(client.ids()).toEqual(consecutive(before.eventId, client.last()));
     expect(client.types()).toContain("agent.launched");
     client.close();
   });
 
   it("resumes a client that reconnects after the last event it saw, with exactly the rest", async () => {
     const all = await daemon.events({ ...(await state()), eventId: 0 });
-    const newest = (await state()).eventId;
-    await expect.poll(() => all.ids().at(-1)).toBe(newest);
-    const seen = Math.floor(newest / 2);
+    await daemon.caughtUp(all);
+    const seen = Math.floor(all.last() / 2);
     const resumed = await daemon.events({ ...(await state()), eventId: seen });
-    await expect.poll(() => resumed.ids().at(-1)).toBe(newest);
-    expect(resumed.ids()).toEqual(all.ids().filter((id) => id > seen));
+    await daemon.caughtUp(resumed);
+    expect(all.ids()).toEqual(consecutive(0, all.last()));
+    expect(resumed.ids()).toEqual(consecutive(seen, resumed.last()));
     all.close();
     resumed.close();
   });
@@ -79,14 +77,11 @@ describe("the event stream", () => {
   });
 
   it("loses nothing a client saw across a kill -9, and resumes it where it stopped", async () => {
-    // The agents launched so far go on recording events, after a restart too, as the daemon
-    // reconciles them: a stream is caught up when it reaches the newest event, not a snapshot's.
-    const newest = async () => (await state()).eventId;
     const before = await state();
     const client = await daemon.events({ ...before, eventId: 0 });
-    await expect.poll(async () => client.ids().at(-1) === (await newest())).toBe(true);
+    await daemon.caughtUp(client);
     const seen = client.ids();
-    const stopped = lastOf(seen);
+    const stopped = client.last();
     await daemon.kill();
     await waitUntil(() => client.ended(), "the stream to drop");
     await daemon.restart();
@@ -94,11 +89,11 @@ describe("the event stream", () => {
     const after = await state();
     const resumed = await daemon.events({ epoch: before.epoch, eventId: stopped });
     const full = await daemon.events({ ...after, eventId: 0 });
-    await expect.poll(async () => full.ids().at(-1) === (await newest())).toBe(true);
-    await expect.poll(async () => resumed.ids().at(-1) === (await newest())).toBe(true);
+    await daemon.caughtUp(full);
+    await daemon.caughtUp(resumed);
     expect(after.epoch).toBe(before.epoch);
     expect(full.ids().slice(0, seen.length)).toEqual(seen);
-    expect(resumed.ids()).toEqual(consecutive(stopped, lastOf(resumed.ids())));
+    expect(resumed.ids()).toEqual(consecutive(stopped, resumed.last()));
     resumed.close();
     full.close();
   });

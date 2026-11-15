@@ -30,6 +30,7 @@ import {
   PROTOCOL_VERSION,
   StreamServerFrame,
   PairingCodeResponse,
+  StateSnapshot,
 } from "@bazhen/protocol";
 import { agentHomes, codexDaemonStarted, loginEnv } from "../support/agent-env.ts";
 import { giveTranscript } from "../support/transcript.ts";
@@ -382,9 +383,19 @@ export class Daemon {
         },
       },
     );
-    const client = new EventClient(ws);
+    const client = new EventClient(ws, cursor.eventId);
     await opened(ws);
     return client;
+  }
+
+  /**
+   * Resolves once `stream` has delivered every event the store holds now. The store goes on
+   * recording (agents report as they start, a stream's next page waits on its last write), so a
+   * stream is never compared with a snapshot at one instant: it is waited for to reach one.
+   */
+  async caughtUp(stream: EventClient): Promise<void> {
+    const { eventId } = StateSnapshot.parse((await this.request("/v1/state")).body);
+    await waitUntil(() => stream.last() >= eventId, `the event stream to reach event ${eventId}`);
   }
 
   /** Adds `settings` to the user's own Claude Code settings, read at each agent's launch. */
@@ -707,9 +718,11 @@ export class EventClient {
   readonly frames: EventFrame[] = [];
   private closed = false;
   private readonly ws: WebSocket;
+  private readonly after: number;
 
-  constructor(ws: WebSocket) {
+  constructor(ws: WebSocket, after: number) {
     this.ws = ws;
+    this.after = after;
     ws.on("message", (data: Buffer) => {
       this.frames.push(EventFrame.parse(JSON.parse(data.toString("utf8"))));
     });
@@ -719,6 +732,11 @@ export class EventClient {
   /** The ids of the events received, in the order they arrived. */
   ids(): number[] {
     return this.frames.flatMap((f) => (f.type === "event" ? [f.event.id] : []));
+  }
+
+  /** The newest event received, or the cursor the stream resumed after before any. */
+  last(): number {
+    return this.ids().at(-1) ?? this.after;
   }
 
   types(): string[] {
