@@ -90,6 +90,8 @@ export interface HolderClientOptions {
   readonly writer?: boolean;
   /** Abandons the handshake: a holder that never answers `hello` can't hold the caller. */
   readonly signal?: AbortSignal;
+  /** How long a hang-up waits for the holder to take what is unsent; `HOLDER_HANG_UP_MS` if unset. */
+  readonly hangUpMs?: number;
 }
 
 export interface RequestOptions {
@@ -136,10 +138,13 @@ const asError = (value: unknown) => (value instanceof Error ? value : new Error(
 
 /** What one `input` frame carries: the cap less the type byte and the request id. */
 const INPUT_CHUNK = HOLDER_MAX_REQUEST_BYTES - 1 - 4;
+/** What each `input` frame adds to its bytes: the length, the type byte and the request id. */
+const INPUT_OVERHEAD = 4 + 1 + 4;
 
 /**
- * Bytes written but not yet taken by the holder past which it has stopped reading; the next write
- * ends the connection, so a stalled holder can't grow this process without bound.
+ * The most a connection holds written but not yet taken by the holder. A write that would go past
+ * it means the holder has stopped reading, and ends the connection rather than queue it, so a
+ * stalled holder can't grow this process without bound.
  */
 export const HOLDER_MAX_UNSENT_BYTES = 8 * HOLDER_MAX_REQUEST_BYTES;
 
@@ -156,10 +161,12 @@ class Connection {
   private lastId = 0;
   private end: HolderEnd | null = null;
   private settleEnded: (end: HolderEnd) => void = () => {};
+  private readonly hangUpMs: number;
 
-  constructor(stream: Duplex, onEvent: (event: HolderEvent) => void) {
+  constructor(stream: Duplex, onEvent: (event: HolderEvent) => void, hangUpMs: number) {
     this.stream = stream;
     this.onEvent = onEvent;
+    this.hangUpMs = hangUpMs;
     this.ended = new Promise((resolve) => {
       this.settleEnded = resolve;
     });
@@ -221,25 +228,27 @@ class Connection {
       });
     });
     if (sending.batch) sending.batch.push(frame);
-    else this.send(frame);
+    else this.write([frame]);
     return answer;
   }
 
   /** Writes frames in one write; nothing once the connection has ended, as its requests have. */
   write(frames: readonly Uint8Array[]): void {
     if (frames.length === 0 || this.end !== null) return;
-    this.send(frames.length === 1 ? frames[0]! : Buffer.concat(frames));
+    if (!this.room(frames.reduce((size, frame) => size + frame.length, 0))) return;
+    this.stream.write(frames.length === 1 ? frames[0]! : Buffer.concat(frames));
   }
 
-  /** Writes, or ends the connection, rejecting what waits, when the holder has stopped reading. */
-  private send(bytes: Uint8Array): void {
+  /**
+   * Whether `size` more bytes stay within what may be unsent. If not, the holder has stopped
+   * reading, and the connection ends, rejecting what waits.
+   */
+  private room(size: number): boolean {
     const unsent = this.stream.writableLength;
-    if (unsent > HOLDER_MAX_UNSENT_BYTES) {
-      const error = new Error(`holder stopped reading: ${unsent} bytes unsent`);
-      this.fail({ reason: "error", error });
-      return;
-    }
-    this.stream.write(bytes);
+    if (unsent + size <= HOLDER_MAX_UNSENT_BYTES) return true;
+    const error = new Error(`holder stopped reading: ${unsent} bytes unsent, ${size} more to send`);
+    this.fail({ reason: "error", error });
+    return false;
   }
 
   emit(event: HolderEvent): void {
@@ -248,17 +257,24 @@ class Connection {
 
   input(bytes: Uint8Array): number[] {
     this.requireOpen();
+    const size = bytes.length + Math.ceil(bytes.length / INPUT_CHUNK) * INPUT_OVERHEAD;
+    if (size > HOLDER_MAX_UNSENT_BYTES) {
+      throw new RangeError(
+        `input of ${bytes.length} bytes is over the ${HOLDER_MAX_UNSENT_BYTES} a holder ` +
+          "connection holds unsent; send it in parts",
+      );
+    }
+    if (bytes.length === 0) return [];
+    if (!this.room(size)) this.requireOpen();
+    // Frame by frame, each written as it is made, rather than copied into one buffer.
     const ids: number[] = [];
-    const frames: Uint8Array[] = [];
     for (let at = 0; at < bytes.length; at += INPUT_CHUNK) {
       const id = this.takeId();
       ids.push(id);
-      frames.push(
+      this.stream.write(
         encodeHolderRequest({ type: "input", id, bytes: bytes.subarray(at, at + INPUT_CHUNK) }),
       );
     }
-    this.write(frames);
-    this.requireOpen();
     return ids;
   }
 
@@ -266,7 +282,7 @@ class Connection {
     if (this.end !== null) return;
     this.finish({ reason: "eof" });
     // A holder that isn't reading would leave the end unflushed, and the socket open, for good.
-    const stop = setTimeout(() => this.stream.destroy(), HOLDER_HANG_UP_MS).unref();
+    const stop = setTimeout(() => this.stream.destroy(), this.hangUpMs).unref();
     this.stream.end(() => {
       clearTimeout(stop);
       this.stream.destroy();
@@ -369,7 +385,11 @@ export class HolderClient {
    * A holder that shares no major with this build rejects it with `no-shared-version`.
    */
   static async open(stream: Duplex, options: HolderClientOptions): Promise<HolderClient> {
-    const connection = new Connection(stream, options.onEvent);
+    const connection = new Connection(
+      stream,
+      options.onEvent,
+      options.hangUpMs ?? HOLDER_HANG_UP_MS,
+    );
     const hello = { protocol: [HOLDER_PROTOCOL_VERSION], writer: options.writer ?? false };
     try {
       const reply = await connection.ask(
@@ -433,7 +453,9 @@ export class HolderClient {
 
   /**
    * Sends input, cut into frames under the cap, and returns their ids. The holder answers input
-   * only to refuse it, as a `refused` event carrying the id.
+   * only to refuse it, as a `refused` event carrying the id. Input over `HOLDER_MAX_UNSENT_BYTES`
+   * in one call throws a `RangeError`, sending none of it; input past it with what is still
+   * unsent ends the connection, as the holder has stopped reading.
    */
   input(bytes: Uint8Array): number[] {
     return this.connection.input(bytes);
@@ -481,8 +503,8 @@ export class HolderClient {
   }
 
   /**
-   * Hangs up this connection, leaving the holder running. What is still unsent gets
-   * `HOLDER_HANG_UP_MS` to reach the holder before the stream is destroyed.
+   * Hangs up this connection, leaving the holder running. What is still unsent gets the
+   * `hangUpMs` it was opened with to reach the holder before the stream is destroyed.
    */
   end(): void {
     this.connection.hangUp();

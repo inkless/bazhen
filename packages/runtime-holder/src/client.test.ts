@@ -5,9 +5,8 @@ import {
   type HolderReply,
   type HolderStats,
 } from "@bazhen/protocol";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-  HOLDER_HANG_UP_MS,
   HOLDER_MAX_UNSENT_BYTES,
   HolderClient,
   HolderDisconnected,
@@ -348,18 +347,12 @@ describe("HolderClient", () => {
   });
 
   it("destroys the stream when a holder that stopped reading doesn't take the hang-up", async () => {
-    const { client, near, holder } = await connected();
+    const { client, near, holder } = await connected({ hangUpMs: 20 });
     holder.stopReading();
     client.input(new Uint8Array(HOLDER_MAX_REQUEST_BYTES));
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    try {
-      client.end();
-      expect(near.destroyed).toBe(false);
-      vi.advanceTimersByTime(HOLDER_HANG_UP_MS);
-      expect(near.destroyed).toBe(true);
-    } finally {
-      vi.useRealTimers();
-    }
+    client.end();
+    expect(near.destroyed).toBe(false);
+    await expect.poll(() => near.destroyed).toBe(true);
   });
 
   it("ends its own side when the holder only half-closes", async () => {
@@ -374,17 +367,27 @@ describe("HolderClient", () => {
     holder.stopReading();
     const answer = client.stats();
     const chunk = new Uint8Array(HOLDER_MAX_REQUEST_BYTES);
-    let sent = 0;
+    let most = 0;
     expect(() => {
-      for (; sent < 4 * HOLDER_MAX_UNSENT_BYTES; sent += chunk.length) client.input(chunk);
+      for (let sent = 0; sent < 4 * HOLDER_MAX_UNSENT_BYTES; sent += chunk.length) {
+        client.input(chunk);
+        most = Math.max(most, near.writableLength);
+      }
     }).toThrow(HolderDisconnected);
-    expect(sent).toBeLessThanOrEqual(HOLDER_MAX_UNSENT_BYTES + chunk.length);
+    expect(most).toBeLessThanOrEqual(HOLDER_MAX_UNSENT_BYTES);
     await expect(answer).rejects.toBeInstanceOf(HolderDisconnected);
     await expect(client.ended).resolves.toMatchObject({
       reason: "error",
       error: { message: expect.stringContaining("stopped reading") },
     });
     expect(near.destroyed).toBe(true);
+  });
+
+  it("refuses an input over what a connection may hold unsent, queueing none of it", async () => {
+    const { client, near, holder } = await connected();
+    holder.stopReading();
+    expect(() => client.input(new Uint8Array(HOLDER_MAX_UNSENT_BYTES))).toThrow(RangeError);
+    expect({ unsent: near.writableLength, open: client.open }).toEqual({ unsent: 0, open: true });
   });
 
   it("ends with the socket's error when the stream fails", async () => {
