@@ -222,14 +222,19 @@ export class Daemon {
   }
 
   /**
-   * Submits a prompt in an agent's TUI through a view, as a person would. Enter waits until the
-   * text has drawn, so the TUI doesn't read both as one paste.
+   * Submits a prompt in an agent's TUI through a view, as a person would. Until a TUI draws the
+   * text it may still hold it as a paste and take an Enter for a newline in it, so Enter waits
+   * for one more copy of `text` on the cursor's row, where the TUI takes input. A copy on another
+   * row, such as a startup tip naming the same slash command, never counts, and history moving
+   * can't hold the count down. `text` must fit on one row.
    */
   async prompt(launched: { agentId: string; terminalId: string | null }, text: string) {
     const view = await this.view(String(launched.terminalId), "interactive");
     await view.drive();
+    const atCursor = () => this.cursorRow(launched.agentId).split(text).length - 1;
+    const before = atCursor();
     view.type(text);
-    await waitUntil(() => this.screen(launched.agentId).includes(text), "the typed prompt");
+    await waitUntil(() => atCursor() > before, "the typed prompt on the cursor's row");
     view.type("\r");
     view.close();
   }
@@ -546,6 +551,13 @@ export class Daemon {
     const out = this.tmux("display-message", "-p", "-t", session, "#{cursor_x} #{cursor_y}");
     const [x = 0, y = 0] = out.trim().split(" ").map(Number);
     return [x, y];
+  }
+
+  /** The screen row the program's cursor is on. */
+  cursorRow(agentId: string): string {
+    const session = this.requireSession(agentId);
+    const [, row] = this.cursor(agentId);
+    return this.tmux("capture-pane", "-p", "-t", session, "-S", `${row}`, "-E", `${row}`);
   }
 
   /**
