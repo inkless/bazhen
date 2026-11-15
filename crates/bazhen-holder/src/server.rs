@@ -10,18 +10,21 @@ use std::io;
 use std::time::{Duration, Instant};
 
 use bazhen_holder_proto::body::{
-    self, Count, ErrorBody, ErrorCode, Exited, HelloReply, HelloRequest, Offset, OkBody,
-    ProtocolVersion, Size, StartTime, SubscribeFrom, Tags, TerminalId, Versions,
+    self, Count, ErrorBody, ErrorCode, Exited, Foreground, HelloReply, HelloRequest, Offset,
+    OkBody, ProtocolVersion, Size, StartTime, SubscribeFrom, Tags, TerminalId, Versions,
 };
 use bazhen_holder_proto::{PROTOCOL_VERSION, Reply, Request, RequestId, negotiate, request_name};
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
+use rustix::process::Pid;
 
-use crate::child::CLOSE_GRACE;
+use crate::child::{CLOSE_GRACE, SignalRefused};
 use crate::conn::{Connection, READ_CHUNK};
-use crate::holder::{Holder, readiness};
+use crate::holder::{Holder, InputRefused, readiness};
+use crate::pty::WindowSize;
 use crate::ring::Ring;
 use crate::signals::Wakeups;
 use crate::socket::{self, RECHECK_EVERY, Socket};
+use crate::start_time::{self, StartTimeError};
 
 /// The most connections served at once. The daemon holds one; `bazhen attach --direct` and
 /// `doctor` add a few.
@@ -41,6 +44,8 @@ pub const NEW_GRACE: Duration = Duration::from_millis(250);
 /// How long a connection's peer must have left its buffer full before a new connection may
 /// replace it: a daemon that falls behind for a moment isn't the one to drop.
 pub const STUCK_TO_EVICT: Duration = Duration::from_secs(1);
+/// How many times `foreground` reads the group again when it changed while its start was read.
+const FOREGROUND_TRIES: usize = 3;
 
 /// What `hello` says of the terminal that doesn't change while it runs.
 #[derive(Debug, Clone)]
@@ -58,8 +63,11 @@ pub struct Terminal {
 #[derive(Debug)]
 struct Shared {
     terminal: Terminal,
-    /// The connection whose `input` the holder takes.
+    /// The connection whose `input` and `resize` the holder takes.
     writer: Option<u64>,
+    /// The latest size asked for this turn, applied once all are read, so a storm of resizes
+    /// costs one `SIGWINCH`.
+    resize: Option<Size>,
     close_requested: bool,
     /// Whether the child's exit has been sent to the connections open when it was published.
     exit_sent: bool,
@@ -104,6 +112,7 @@ impl Server {
             shared: Shared {
                 terminal,
                 writer: None,
+                resize: None,
                 close_requested: false,
                 exit_sent: false,
             },
@@ -164,6 +173,8 @@ impl Server {
                 self.shared.writer = None;
             }
         }
+        self.apply_resize(holder);
+        holder.flush_input();
         if ready.listener {
             self.accept(now);
         }
@@ -216,6 +227,21 @@ impl Server {
         let at = holder.output().end();
         for conn in self.conns.iter_mut().filter(|conn| conn.is_open()) {
             conn.queue_event(at, frame.clone());
+        }
+    }
+
+    /// Sets the size asked for last this turn: the terminal's program redraws on each `SIGWINCH`.
+    fn apply_resize(&mut self, holder: &Holder<Ring>) {
+        let Some(asked) = self.shared.resize.take() else {
+            return;
+        };
+        let window = WindowSize::from(asked);
+        let Some(size) = window.size() else {
+            return;
+        };
+        match holder.resize(window) {
+            Ok(()) => self.shared.terminal.size = size,
+            Err(error) => tracing::warn!(%error, "could not resize the terminal"),
         }
     }
 
@@ -291,7 +317,7 @@ impl Server {
             PollFd::from_borrowed_fd(self.rebind_wakeups.fd(), PollFlags::IN),
         ];
         let master = holder.master().map(|fd| {
-            fds.push(PollFd::from_borrowed_fd(fd, PollFlags::IN));
+            fds.push(PollFd::from_borrowed_fd(fd, holder.master_interest()));
             fds.len() - 1
         });
         let listener = listener.map(|fd| {
@@ -391,7 +417,7 @@ fn waiting_now(conns: &[Connection], now: Instant) -> Option<Instant> {
 }
 
 /// Answers every request the connection has read, while it is read.
-fn serve(conn: &mut Connection, shared: &mut Shared, holder: &Holder<Ring>, now: Instant) {
+fn serve(conn: &mut Connection, shared: &mut Shared, holder: &mut Holder<Ring>, now: Instant) {
     while let Some(next) = conn.next_request() {
         match next {
             Ok(request) => answer(conn, shared, holder, request, now),
@@ -413,7 +439,7 @@ fn serve(conn: &mut Connection, shared: &mut Shared, holder: &Holder<Ring>, now:
 fn answer(
     conn: &mut Connection,
     shared: &mut Shared,
-    holder: &Holder<Ring>,
+    holder: &mut Holder<Ring>,
     request: Request,
     now: Instant,
 ) {
@@ -435,15 +461,61 @@ fn answer(
             conn.hang_up(now);
         }
         Request::Subscribe { id, body } => subscribe(conn, holder, id, body.from),
-        Request::Close { id } => {
-            let request = "close".to_owned();
-            send(
-                conn,
-                &Reply::Ok {
+        Request::Input { id, bytes } => {
+            if shared.writer != Some(conn.id()) {
+                let why = "only the connection with the writer slot sends input";
+                refuse(conn, id, "input", ErrorCode::NotWriter, why);
+                return;
+            }
+            match holder.offer_input(&bytes) {
+                Ok(()) => {}
+                Err(InputRefused::Exited) => {
+                    let why = "the child has exited";
+                    refuse(conn, id, "input", ErrorCode::Exited, why);
+                }
+                Err(InputRefused::Full(_)) => {
+                    let why = "the program isn't reading its input: input is refused until the \
+                               queue drains";
+                    refuse(conn, id, "input", ErrorCode::InputFull, why);
+                }
+            }
+        }
+        Request::Resize { id, body } => {
+            if shared.writer == Some(conn.id()) {
+                shared.resize = Some(body);
+                ok(conn, id, "resize");
+            } else {
+                let why = "only the connection with the writer slot resizes";
+                refuse(conn, id, "resize", ErrorCode::NotWriter, why);
+            }
+        }
+        Request::Signal { id, body } => match holder.signal(body.signal) {
+            Ok(()) => ok(conn, id, "signal"),
+            Err(SignalRefused::Exited) => {
+                refuse(
+                    conn,
                     id,
-                    body: OkBody { request },
-                },
-            );
+                    "signal",
+                    ErrorCode::Exited,
+                    "the child has exited",
+                );
+            }
+            Err(SignalRefused::Failed(errno)) => {
+                tracing::warn!(error = %errno, "could not signal the child");
+                let why = format!("the system refused the signal: {errno}");
+                refuse(conn, id, "signal", ErrorCode::Failed, &why);
+            }
+        },
+        Request::SetTags { id, body } => {
+            shared.terminal.tags = body.tags;
+            ok(conn, id, "set-tags");
+        }
+        Request::Foreground { id } => match foreground(&shared.terminal, holder) {
+            Ok(body) => send(conn, &Reply::Foreground { id, body }),
+            Err((code, why)) => refuse(conn, id, "foreground", code, why),
+        },
+        Request::Close { id } => {
+            ok(conn, id, "close");
             shared.close_requested = true;
         }
         Request::Unknown { code, id } => {
@@ -533,13 +605,67 @@ fn hello(
     conn.open();
 }
 
+/// The terminal's foreground group and when its leader started. The terminal can name a group
+/// with no member left, whose number may since be any process's, so the start counts only if,
+/// after it is read, the terminal still names the group, the process at its number still leads it
+/// in the child's session, and that process's start, read again, is the same. A pid that numbers
+/// a live group is never given to a new process, so the start is that group's leader's.
+fn foreground(
+    terminal: &Terminal,
+    holder: &Holder<Ring>,
+) -> Result<Foreground, (ErrorCode, &'static str)> {
+    if holder.child_reaped() {
+        return Err((ErrorCode::Exited, "the child has exited"));
+    }
+    let failed = |why| (ErrorCode::Failed, why);
+    let child = holder.child_pid();
+    let child_pid = protocol_pid(child).ok_or(failed("a pid the protocol can't carry"))?;
+    for _ in 0..FOREGROUND_TRIES {
+        let pgid = holder
+            .foreground_group()
+            .ok_or(failed("the terminal has no foreground group"))?;
+        let start = if pgid == child {
+            Ok(terminal.child_start)
+        } else {
+            start_time::of(pgid)
+        };
+        if holder.foreground_group() != Some(pgid) {
+            continue;
+        }
+        let pgid_start = start.map_err(|e| match e {
+            StartTimeError::Absent(_) => failed("the foreground group's leader has exited"),
+            StartTimeError::Unreadable { .. } => failed("its leader's start can't be read"),
+        })?;
+        let leads = rustix::process::getpgid(Some(pgid)).ok() == Some(pgid)
+            && rustix::process::getsid(Some(pgid)).ok() == Some(child);
+        if !leads {
+            return Err(failed(
+                "the foreground group has no leader in the terminal's session",
+            ));
+        }
+        if pgid != child && start_time::of(pgid).ok() != Some(pgid_start) {
+            continue;
+        }
+        return Ok(Foreground {
+            child_pid,
+            child_start: terminal.child_start,
+            pgid: protocol_pid(pgid).ok_or(failed("a pid the protocol can't carry"))?,
+            pgid_start,
+        });
+    }
+    Err(failed("the foreground group kept changing"))
+}
+
+fn protocol_pid(pid: Pid) -> Option<body::Pid> {
+    body::Pid::new(u64::try_from(pid.as_raw_nonzero().get()).ok()?).ok()
+}
+
 fn hello_reply(
     terminal: &Terminal,
     holder: &Holder<Ring>,
     version: &str,
     writer: bool,
 ) -> Option<HelloReply> {
-    let child_pid = u64::try_from(holder.child_pid().as_raw_nonzero().get()).ok()?;
     Some(HelloReply {
         version: ProtocolVersion::new(version).ok()?,
         protocol: Versions::spoken(),
@@ -548,7 +674,7 @@ fn hello_reply(
         generation: holder.generation(),
         holder_pid: terminal.holder_pid,
         holder_start: terminal.holder_start,
-        child_pid: body::Pid::new(child_pid).ok()?,
+        child_pid: protocol_pid(holder.child_pid())?,
         child_start: terminal.child_start,
         exit: holder.exit().map(|exit| exit.status.clone()),
         size: terminal.size,
@@ -558,6 +684,17 @@ fn hello_reply(
         history_lines: terminal.history_lines,
         writer,
     })
+}
+
+fn ok(conn: &mut Connection, id: RequestId, request: &str) {
+    let request = request.to_owned();
+    send(
+        conn,
+        &Reply::Ok {
+            id,
+            body: OkBody { request },
+        },
+    );
 }
 
 fn refuse(conn: &mut Connection, id: RequestId, request: &str, code: ErrorCode, why: &str) {

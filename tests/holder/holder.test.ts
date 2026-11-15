@@ -88,6 +88,8 @@ async function startSkew(pid: number, start: number): Promise<number> {
   return Math.abs(actual - start);
 }
 
+const encode = (text: string) => new TextEncoder().encode(text);
+
 /** What `seq 1 n` prints through a terminal, which turns each newline into `\r\n`. */
 const seqOutput = (n: number) => Array.from({ length: n }, (_, i) => `${i + 1}\r\n`).join("");
 
@@ -175,6 +177,65 @@ describe("a holder", () => {
     await Promise.race([exit, ended]);
     const expected = Array.from({ length: 40 }, (_, i) => `${i}\r\n`).join("");
     expect(output(events)).toBe(expected);
+  });
+
+  it("passes its writer's input to the child and refuses another connection's", async () => {
+    const script = "stty raw -echo; echo R; exec head -c 5";
+    const holder = await started("input", ["sh", "-c", script]);
+    const { client, events, exit } = await listen(holder, true);
+    await client.subscribe({ generation: 0, offset: 0 });
+    await until(() => output(events).includes("R"), "the child's readiness");
+    const other = await listen(holder);
+    const [refusedId] = other.client.input(encode("nope!"));
+    await until(() => other.events.some((event) => event.type === "refused"), "the refusal");
+    expect(other.events).toContainEqual(
+      expect.objectContaining({
+        type: "refused",
+        id: refusedId,
+        error: expect.objectContaining({ code: "not-writer" }),
+      }),
+    );
+    client.input(encode("hello"));
+    await exit;
+    expect(output(events)).toBe("R\nhello");
+  });
+
+  it("sizes the terminal for its writer only, clamping a zero size", async () => {
+    const holder = await started("resize", ["sleep", "30"]);
+    const { client } = await listen(holder, true);
+    const other = await listen(holder);
+    await expect(other.client.resize({ cols: 100, rows: 30 })).rejects.toMatchObject({
+      code: "not-writer",
+    });
+    await client.resize({ cols: 0, rows: 0 });
+    expect((await listen(holder)).client.hello.size).toEqual({ cols: 1, rows: 1 });
+  });
+
+  it("signals its child's group, and refuses once the child has exited", async () => {
+    const holder = await started("signal", ["sleep", "30"]);
+    const { client, events, exit } = await listen(holder);
+    await client.subscribe();
+    await client.signal("SIGTERM");
+    await exit;
+    expect(events.at(-1)).toEqual({
+      type: "exited",
+      body: { generation: 0, status: { type: "signalled", signal: "SIGTERM" } },
+    });
+    await expect(client.signal("SIGKILL")).rejects.toMatchObject({ code: "exited" });
+  });
+
+  it("names its foreground group with start times, and echoes the tags it is given", async () => {
+    const holder = await started("foreground", ["sleep", "30"]);
+    const { client } = await listen(holder);
+    const { childPid, childStart } = client.hello;
+    expect(await client.foreground()).toEqual({
+      childPid,
+      childStart,
+      pgid: childPid,
+      pgidStart: childStart,
+    });
+    await client.setTags({ agent: "a1" });
+    expect((await listen(holder)).client.hello.tags).toEqual({ agent: "a1" });
   });
 
   it("closes: ok, its exit, a hang-up, its socket gone, and the holder gone", async () => {

@@ -86,7 +86,10 @@ export interface HolderClientOptions {
    * while the connection is open ends it with that error.
    */
   readonly onEvent: (event: HolderEvent) => void;
-  /** Ask for the slot whose `input` the holder takes; `hello.writer` says whether it was given. */
+  /**
+   * Ask for the slot whose `input` and `resize` the holder takes; `hello.writer` says whether it
+   * was given.
+   */
   readonly writer?: boolean;
   /** Abandons the handshake: a holder that never answers `hello` can't hold the caller. */
   readonly signal?: AbortSignal;

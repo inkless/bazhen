@@ -17,7 +17,7 @@ use std::os::unix::process::CommandExt as _;
 use std::process::{Command, Stdio};
 use std::ptr;
 
-use bazhen_holder_proto::body::{ProcessSpec, Size};
+use bazhen_holder_proto::body::{Cols, ProcessSpec, Rows, Size};
 use rustix::io::{FdFlags, fcntl_setfd, ioctl_fionbio};
 use rustix::process::Pid;
 use rustix::pty::{OpenptFlags, grantpt, openpt, ptsname, unlockpt};
@@ -53,6 +53,14 @@ impl WindowSize {
 
     pub const fn rows(self) -> u16 {
         self.rows
+    }
+
+    /// The size as the protocol carries it; `None` past what it can.
+    pub fn size(self) -> Option<Size> {
+        Some(Size {
+            cols: Cols::new(u64::from(self.cols)).ok()?,
+            rows: Rows::new(u64::from(self.rows)).ok()?,
+        })
     }
 
     fn winsize(self) -> Winsize {

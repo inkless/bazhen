@@ -23,7 +23,7 @@ use std::process::ExitCode;
 
 use std::time::Instant;
 
-use bazhen_holder_proto::body::{self, Count, Size, SpawnSpec, StartTime};
+use bazhen_holder_proto::body::{self, Count, SpawnSpec, StartTime};
 use bazhen_holder_proto::{MAX_REQUEST_BYTES, SpawnSpecError, decode_spawn_spec};
 use rustix::process::{getpid, getsid, setsid};
 use thiserror::Error;
@@ -144,11 +144,10 @@ fn serve(
         .ok()
         .and_then(|pid| body::Pid::new(pid).ok());
     let window = WindowSize::from(spec.size);
-    let size = body::Cols::new(u64::from(window.cols()))
-        .and_then(|cols| Ok((cols, body::Rows::new(u64::from(window.rows()))?)))
-        .map(|(cols, rows)| Size { cols, rows });
+    let size = window.size();
     let history_lines = Count::new(spec.history_lines.get());
-    let (Some(holder_pid), Ok(size), Ok(history_lines)) = (holder_pid, size, history_lines) else {
+    let (Some(holder_pid), Some(size), Ok(history_lines)) = (holder_pid, size, history_lines)
+    else {
         let why = "a pid, size or history depth the protocol can't carry";
         return Err((setup(io::Error::other(why)), socket));
     };

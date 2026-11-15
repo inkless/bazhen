@@ -784,6 +784,33 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/server.rs::subscribe": "answers a decoded subscribe; reads no bytes",
   "crates/bazhen-holder/src/server.rs::answer": "answers one decoded request; reads no bytes",
   "crates/bazhen-holder/src/server.rs::hello": "answers a decoded hello; reads no bytes",
+  "crates/bazhen-holder/src/server.rs::ok": "queues an ok this holder encodes; reads nothing",
+  "crates/bazhen-holder/src/server.rs::foreground":
+    "reads the foreground group and a start time; no bytes from a peer",
+  "crates/bazhen-holder/src/server.rs::Server::apply_resize":
+    "applies a size from a decoded resize; reads no bytes",
+  "crates/bazhen-holder/src/holder.rs::Holder::master_interest": "returns a state; reads no bytes",
+  "crates/bazhen-holder/src/holder.rs::Holder::offer_input":
+    "queues decoded input for the child, parsing none of it",
+  "crates/bazhen-holder/src/holder.rs::Holder::flush_input":
+    "writes queued input to the master; reads nothing",
+  "crates/bazhen-holder/src/holder.rs::Holder::resize": "sets the window size; reads nothing",
+  "crates/bazhen-holder/src/holder.rs::Holder::child_reaped":
+    "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/holder.rs::Holder::master_closed":
+    "marks the master's output over and drops queued input; reads nothing",
+  "crates/bazhen-holder/src/holder.rs::Holder::foreground_group":
+    "asks the master for its foreground group; reads no bytes",
+  "crates/bazhen-holder/src/holder.rs::Holder::signal": "signals the child's group; reads nothing",
+  "crates/bazhen-holder/src/input.rs::InputQueue::is_empty":
+    "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/input.rs::InputQueue::len":
+    "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/input.rs::InputQueue::offer":
+    "queues decoded input for the child, parsing none of it",
+  "crates/bazhen-holder/src/input.rs::InputQueue::clear": "drops what is queued; reads nothing",
+  "crates/bazhen-holder/src/input.rs::InputQueue::write_to":
+    "writes queued input to the master; reads nothing",
   "crates/bazhen-holder/src/server.rs::hello_reply":
     "builds the hello reply from the holder's state; reads no bytes",
   "crates/bazhen-holder/src/server.rs::refuse": "queues an error reply; reads no bytes",
