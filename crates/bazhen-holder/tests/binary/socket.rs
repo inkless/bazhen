@@ -101,6 +101,12 @@ fn serving(home: &Home, argv: &[&str]) -> Result<(Started, std::path::PathBuf)> 
     Ok((holder, home.join("t1.sock")))
 }
 
+/// How a holder that dropped a connection stands, and what it logged, for the test's failure.
+fn why(holder: &mut Started, socket: &Path) -> String {
+    let log = std::fs::read_to_string(socket.with_extension("log")).unwrap_or_default();
+    format!("the holder {}; its log:\n{log}", holder.state())
+}
+
 /// Connects once `path` takes connections, before `DEADLINE`.
 fn connect_by(path: &Path, deadline: Instant) -> Result<Client> {
     loop {
@@ -903,11 +909,14 @@ fn a_subscriber_to_a_flood_is_sent_all_of_it_in_order_or_told_of_a_gap() {
     let home = home("keepup").unwrap();
     let flood: u64 = 50_000_000;
     let script = format!("sleep 1; head -c {flood} /dev/zero");
-    let (_holder, socket) = serving(&home, &["sh", "-c", &script]).unwrap();
+    let (mut holder, socket) = serving(&home, &["sh", "-c", &script]).unwrap();
     let mut client = Client::connect(&socket).unwrap();
     client.hello(false).unwrap();
     assert!(is_ok(&client.subscribe(Some((0, 0))).unwrap()));
-    let stream = client.stream_to_exit_keeping(false).unwrap();
+    let stream = match client.stream_to_exit_keeping(false) {
+        Ok(stream) => stream,
+        Err(error) => panic!("{error}; {}", why(&mut holder, &socket)),
+    };
     assert_eq!(stream.end, flood);
     let dropped: u64 = stream.gaps.iter().map(|(from, to)| to - from).sum();
     assert_eq!(stream.received + dropped, flood);
@@ -929,7 +938,7 @@ fn a_subscriber_that_stops_reading_holds_up_neither_the_child_nor_anyone_else() 
     let home = home("stalled").unwrap();
     let flood: u64 = 8_000_000;
     let script = format!("sleep 0.5; head -c {flood} /dev/zero");
-    let (_holder, socket) = serving(&home, &["sh", "-c", &script]).unwrap();
+    let (mut holder, socket) = serving(&home, &["sh", "-c", &script]).unwrap();
     let mut stalled = Client::connect(&socket).unwrap();
     stalled.hello(false).unwrap();
     assert!(is_ok(&stalled.subscribe(Some((0, 0))).unwrap()));
@@ -942,7 +951,10 @@ fn a_subscriber_that_stops_reading_holds_up_neither_the_child_nor_anyone_else() 
         }
         assert!(Instant::now() < deadline, "the child was held up");
     }
-    let stream = stalled.stream_to_exit_keeping(false).unwrap();
+    let stream = match stalled.stream_to_exit_keeping(false) {
+        Ok(stream) => stream,
+        Err(error) => panic!("{error}; {}", why(&mut holder, &socket)),
+    };
     assert!(
         !stream.gaps.is_empty(),
         "no gap for a subscriber the ring lapped"

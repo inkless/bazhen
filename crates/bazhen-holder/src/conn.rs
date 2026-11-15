@@ -244,7 +244,10 @@ impl Connection {
                     e.kind(),
                     io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
                 ) => {}
-            Err(_) => self.drop_now(),
+            Err(error) => {
+                tracing::warn!(%error, "a read failed; dropping its connection");
+                self.drop_now();
+            }
         }
     }
 
@@ -402,7 +405,10 @@ impl Connection {
                     self.stuck_since.get_or_insert(now);
                     return;
                 }
-                Err(_) => self.drop_now(),
+                Err(error) => {
+                    tracing::warn!(%error, "a write failed; dropping its connection");
+                    self.drop_now();
+                }
             }
         }
     }

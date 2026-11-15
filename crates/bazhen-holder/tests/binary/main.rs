@@ -110,6 +110,17 @@ struct Started {
 }
 
 impl Started {
+    /// How the holder stands: still running, or how it ended, a signal such as `SIGXCPU`
+    /// included, for a test whose connection the holder dropped to say why.
+    fn state(&mut self) -> String {
+        match self.child.as_mut().map(Child::try_wait) {
+            Some(Ok(None)) => "still runs".to_owned(),
+            Some(Ok(Some(status))) => format!("ended: {status}"),
+            Some(Err(error)) => format!("can't say: {error}"),
+            None => "was already waited for".to_owned(),
+        }
+    }
+
     fn pid(&self) -> Result<Pid> {
         Pid::from_raw(i32::try_from(self.pid)?).ok_or_else(|| "not a pid".into())
     }
