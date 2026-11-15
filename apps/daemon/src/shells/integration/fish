@@ -19,10 +19,28 @@ if set -q BAZHEN_SHELL_TOKEN; and test -x "$BAZHEN_HOOK"; and not set -q __bazhe
         return 0
     end
 
-    # Once, at the first prompt: a restart's line is typed back from then on.
-    function __bazhen_prompt --on-event fish_prompt
-        functions -e __bazhen_prompt
+    function __bazhen_report_prompt
         $BAZHEN_HOOK shell-prompt >/dev/null 2>&1 &
         disown $last_pid 2>/dev/null
+    end
+
+    # Once, at the first prompt: a restart's line is typed back from then on. fish takes the
+    # terminal out of canonical mode before it draws its prompt, and asks for bracketed paste only
+    # once it is drawn, so the report waits for the prompt function: for this one prompt, it runs
+    # wrapped by one that reports after it, then is put back as it was.
+    function __bazhen_prompt --on-event fish_prompt
+        functions -e __bazhen_prompt
+        if not functions -q fish_prompt; or functions -q __bazhen_user_prompt
+            __bazhen_report_prompt
+            return
+        end
+        functions -c fish_prompt __bazhen_user_prompt
+        function fish_prompt
+            __bazhen_user_prompt
+            functions -e fish_prompt
+            functions -c __bazhen_user_prompt fish_prompt
+            functions -e __bazhen_user_prompt
+            __bazhen_report_prompt
+        end
     end
 end

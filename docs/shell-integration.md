@@ -85,9 +85,9 @@ The line is never a process argument, so `ps` never shows it.
   counting for longer than that.
 - **One line per shell.** Each new line replaces the last.
 - **At the first prompt, the shell says so**, once, with `bazhen-hook shell-prompt`. It carries
-  the shell's token and nothing else. It waits, in the background, until the shell's line editor
-  has taken the terminal, up to 10 seconds, so a line is never typed back while the terminal
-  would echo it twice.
+  the shell's token and nothing else. It waits, in the background, until the prompt is drawn and
+  the shell's line editor has taken the terminal, up to 10 seconds, so a line is never typed back
+  while the terminal would echo it twice or before the editor asks for a bracketed paste.
 
 ## Where it is kept, and for how long
 
