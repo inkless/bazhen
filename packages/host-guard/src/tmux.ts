@@ -157,11 +157,14 @@ export function environmentScript(
     .join("");
 }
 
-/** Whether any character of `text` is a C0 control or DEL: a key, such as Enter, not text. */
+/**
+ * Whether any character of `text` is a C0 or C1 control or DEL: a key, such as Enter, or the
+ * start of a sequence, not text.
+ */
 const hasControl = (text: string) => {
   for (let i = 0; i < text.length; i++) {
     const code = text.charCodeAt(i);
-    if (code < 0x20 || code === 0x7f) return true;
+    if (code < 0x20 || (code >= 0x7f && code <= 0x9f)) return true;
   }
   return false;
 };

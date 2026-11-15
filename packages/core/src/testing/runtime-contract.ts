@@ -237,6 +237,7 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       await expect(runtime.paste(ref, "make\r")).rejects.toThrow(RangeError);
       await expect(runtime.paste(ref, "make\n")).rejects.toThrow(RangeError);
       await expect(runtime.paste(ref, "\u001b[D")).rejects.toThrow(RangeError);
+      await expect(runtime.paste(ref, "\u009b2J")).rejects.toThrow(RangeError);
       harness.replaceProcess(runtime, ref);
       await expect(runtime.paste(ref, "make")).rejects.toThrow(StaleIncarnation);
       const dead = await runtime.create(spec(exiting(0)));

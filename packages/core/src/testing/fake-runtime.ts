@@ -314,7 +314,7 @@ export class FakeRuntime implements RuntimeAdapter {
   async paste(ref: RuntimeRef, text: string): Promise<void> {
     for (let i = 0; i < text.length; i++) {
       const code = text.charCodeAt(i);
-      if (code < 0x20 || code === 0x7f)
+      if (code < 0x20 || (code >= 0x7f && code <= 0x9f))
         throw new RangeError("refusing to paste a control character");
     }
     const t = this.paneOf(ref);

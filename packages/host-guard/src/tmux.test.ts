@@ -89,7 +89,7 @@ describe("pasteScript", () => {
     );
   });
 
-  it.each(["make\n", "make\r", "a\tb", "\u001b[D", "\u007f", "\0"])(
+  it.each(["make\n", "make\r", "a\tb", "\u001b[D", "\u007f", "\0", "\u009b2J", "\u0085"])(
     "refuses text holding a key rather than text: %j",
     (text) => {
       expect(() => pasteScript("b", "%1", text)).toThrow(/control character$/);

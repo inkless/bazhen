@@ -295,8 +295,8 @@ export interface RuntimeAdapter {
   unlink(ref: RuntimeRef): Promise<void>;
   /**
    * Types `text` into the terminal's process as a paste, bracketed if the program asked for
-   * bracketed paste, and without Enter: text holding a control character is refused with a
-   * RangeError. The text is never in a log or a process's arguments. A terminal whose process has
+   * bracketed paste, and without Enter: text holding a C0 or C1 control character or DEL is
+   * refused with a RangeError. The text is never in a log or a process's arguments. A terminal whose process has
    * exited is `ProcessState`; one replaced since `ref` is `StaleIncarnation`.
    */
   paste(ref: RuntimeRef, text: string): Promise<void>;
