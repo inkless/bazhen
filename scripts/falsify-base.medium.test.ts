@@ -1,7 +1,7 @@
 // Runs scripts/falsify-base.ts in a throwaway repository whose scripts/falsify.ts is a stub: with
 // --harness it prints its own tree's harness.txt, so the base and the branch can list different
 // files; otherwise it logs where it ran from and exits STUB_EXIT. A stub `pnpm` stands in for
-// install.
+// install. falsify-base runs only in a sandbox, so its judging is tested only there.
 
 import { execFileSync, spawnSync } from "node:child_process";
 import {
@@ -17,13 +17,17 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { inSignalSandbox } from "./signal-paths.ts";
 
 const SCRIPT = fileURLToPath(new URL("falsify-base.ts", import.meta.url));
 
 const STUB_FALSIFY = `import { appendFileSync, readFileSync } from "node:fs";
 const args = process.argv.slice(2);
 if (args[0] === "--harness") {
+  if (process.env.STUB_BASE_HARNESS_FAILS === "1" && import.meta.url.includes("/bz-falsify-")) {
+    process.exit(1);
+  }
   process.stdout.write(readFileSync(new URL("../harness.txt", import.meta.url), "utf8"));
   process.exit(0);
 }
@@ -117,52 +121,83 @@ function falsifyBase(extra: Record<string, string> = {}) {
   return { status: result.status, ran, left: readdirSync(tmp), stderr: result.stderr };
 }
 
-it("judges a branch that changes falsify with the base's falsify, on its exit code", () => {
+it("refuses outside a sandbox, before it installs or runs anything", () => {
   commit({ "scripts/falsify.ts": `${STUB_FALSIFY}// weakened\n` }, "change falsify");
-  const { status, ran, left } = falsifyBase({ STUB_EXIT: "3" });
-  expect({ status, ran: ran.length, left }).toEqual({ status: 3, ran: 1, left: [] });
-  // The base's copy, from its worktree, judging the branch's checkout against the base ref.
-  expect(ran[0]).toMatch(/^FALSIFY file:\/\/.*\/bz-falsify-[^/]+\/scripts\/falsify\.ts IN /);
-  expect(ran[0]?.endsWith(` IN ${repo} --base main`)).toBe(true);
+  const { status, ran, left, stderr } = falsifyBase({ BZ_FALSIFY_AS_HOST: "1" });
+  expect({
+    status,
+    ran,
+    left,
+    installed: readFileSync(log, "utf8").includes("PNPM:"),
+    said: stderr.includes("only in a sandbox"),
+  }).toEqual({ status: 1, ran: [], left: [], installed: false, said: true });
 });
 
-it("judges a change to a file only the base's harness lists", () => {
-  commit({ "scripts/base-only.ts": "export const weaker = true;\n" }, "change base-only");
-  expect(falsifyBase()).toEqual({
-    status: 0,
-    ran: [expect.any(String)],
-    left: [],
-    stderr: expect.any(String),
+describe.runIf(inSignalSandbox())("in a sandbox", () => {
+  it("judges a branch that changes falsify with the base's falsify, on its exit code", () => {
+    commit({ "scripts/falsify.ts": `${STUB_FALSIFY}// weakened\n` }, "change falsify");
+    const { status, ran, left } = falsifyBase({ STUB_EXIT: "3" });
+    expect({ status, ran: ran.length, left }).toEqual({ status: 3, ran: 1, left: [] });
+    // The base's copy, from its worktree, judging the branch's checkout against the base ref.
+    expect(ran[0]).toMatch(/^FALSIFY file:\/\/.*\/bz-falsify-[^/]+\/scripts\/falsify\.ts IN /);
+    expect(ran[0]?.endsWith(` IN ${repo} --base main`)).toBe(true);
   });
-});
 
-it("judges a change to how falsify is run", () => {
-  commit({ "package.json": '{ "scripts": {} }\n' }, "change package.json");
-  expect(falsifyBase().ran).toHaveLength(1);
-});
-
-it("leaves a branch that changes none of falsify's files to falsify alone", () => {
-  commit({ "notes.txt": "two\n" }, "change notes");
-  expect(falsifyBase({ STUB_EXIT: "3" })).toEqual({
-    status: 0,
-    ran: [],
-    left: [],
-    stderr: expect.any(String),
+  it("judges a change to a file only the base's harness lists", () => {
+    commit({ "scripts/base-only.ts": "export const weaker = true;\n" }, "change base-only");
+    expect(falsifyBase()).toEqual({
+      status: 0,
+      ran: [expect.any(String)],
+      left: [],
+      stderr: expect.any(String),
+    });
   });
-});
 
-it("fails without judging when the base's dependencies don't install", () => {
-  commit({ "scripts/falsify.ts": `${STUB_FALSIFY}// weakened\n` }, "change falsify");
-  const { status, ran, left, stderr } = falsifyBase({ STUB_INSTALL_FAIL: "1" });
-  const installs = readFileSync(log, "utf8").match(/^PNPM: install .*$/gm);
-  expect({ status, ran, left, installs, said: stderr.includes("couldn't install") }).toEqual({
-    status: 1,
-    ran: [],
-    left: [],
-    installs: [
-      "PNPM: install --frozen-lockfile --ignore-scripts --offline",
-      "PNPM: install --frozen-lockfile --ignore-scripts --prefer-offline",
-    ],
-    said: true,
+  it("judges a change to how falsify is run", () => {
+    commit({ "package.json": '{ "scripts": {} }\n' }, "change package.json");
+    expect(falsifyBase().ran).toHaveLength(1);
+  });
+
+  it("leaves a branch that changes none of falsify's files to falsify alone", () => {
+    commit({ "notes.txt": "two\n" }, "change notes");
+    expect(falsifyBase({ STUB_EXIT: "3" })).toEqual({
+      status: 0,
+      ran: [],
+      left: [],
+      stderr: expect.any(String),
+    });
+  });
+
+  it("fails without judging when the base's dependencies don't install", () => {
+    commit({ "scripts/falsify.ts": `${STUB_FALSIFY}// weakened\n` }, "change falsify");
+    const { status, ran, left, stderr } = falsifyBase({ STUB_INSTALL_FAIL: "1" });
+    const installs = readFileSync(log, "utf8").match(/^PNPM: install .*$/gm);
+    expect({ status, ran, left, installs, said: stderr.includes("couldn't install") }).toEqual({
+      status: 1,
+      ran: [],
+      left: [],
+      installs: [
+        "PNPM: install --frozen-lockfile --ignore-scripts --offline",
+        "PNPM: install --frozen-lockfile --ignore-scripts --prefer-offline",
+      ],
+      said: true,
+    });
+  });
+
+  it("judges a change to a file only the branch's harness lists", () => {
+    commit(
+      {
+        "harness.txt": "scripts/falsify.ts\nscripts/head-only.ts\n",
+        "scripts/head-only.ts": "export {};\n",
+      },
+      "list head-only",
+    );
+    expect(falsifyBase().ran).toHaveLength(1);
+  });
+
+  it("goes on with the branch's list when the base's --harness fails", () => {
+    commit({ "scripts/falsify.ts": `${STUB_FALSIFY}// weakened\n` }, "change falsify");
+    const { status, ran } = falsifyBase({ STUB_BASE_HARNESS_FAILS: "1", STUB_EXIT: "3" });
+    expect({ status, ran: ran.length }).toEqual({ status: 3, ran: 1 });
   });
 });

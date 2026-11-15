@@ -59,7 +59,7 @@ import { isAlive, rethrowUnsafe, signalGroup, spawnGroup } from "@bazhen/host-gu
 import { KILLS_ENV } from "./capped.ts";
 import { GATES, configFailures, gateEnv, installCommand, outsideConfigs } from "./cargo-gate.ts";
 import { isMain } from "./is-main.ts";
-import { inSignalSandbox, isSignallingSource, isSignallingTest } from "./signal-paths.ts";
+import { inSandbox, judgeableHere, signallingWork } from "./falsify-signals.ts";
 import {
   failedOnAssertion,
   inTestCode,
@@ -85,7 +85,7 @@ const TEST_CALL = /(?<![.\w])(?:it|test)(?:\.\w+)*\s*\(/;
 const CONTROL_TRAILER = /^Control: .+ -> .+$/m;
 export const WORKTREE_PREFIX = "bz-falsify-";
 const LOCK_REASON = /^bz-falsify pid=(\d+)$/;
-const INSTALL_TIMEOUT_MS = 120_000;
+export const INSTALL_TIMEOUT_MS = 120_000;
 const VITEST_TIMEOUT_MS = 300_000;
 const CARGO_TIMEOUT_MS = 900_000;
 // The most mutants run for one branch. A count, not a time budget, so a verdict is the same on
@@ -131,14 +131,13 @@ const git = (args: string[], cwd = process.cwd()) =>
     stdio: ["ignore", "pipe", "pipe"],
   });
 
-/** A file as the commit `rev` has it, or undefined where it has none. */
+/**
+ * A file as the commit `rev` has it, or undefined where it has none. Any other failure throws, so
+ * an unreadable file is never taken for an absent one.
+ */
 function fileAt(rev: string, path: string): string | undefined {
-  try {
-    return git(["show", `${rev}:${path}`]);
-  } catch (error) {
-    if (signalExitCode(error) !== undefined) throw error;
-    return undefined;
-  }
+  if (git(["ls-tree", "-z", rev, "--", path]) === "") return undefined;
+  return git(["cat-file", "blob", `${rev}:${path}`]);
 }
 
 /**
@@ -167,60 +166,6 @@ const within = (path: string, entries: readonly string[]) =>
 
 const pathsOf = (c: Change) => (c.oldPath === undefined ? [c.path] : [c.path, c.oldPath]);
 
-/** What falsify would change or run that may signal processes it didn't start. */
-export interface SignallingWork {
-  readonly sources: string[];
-  readonly tests: string[];
-}
-
-/**
- * Of the files falsify would revert or mutate, those that signal processes as the base or HEAD has
- * them, and of the test files it would run, those whose HEAD holds a signalling test.
- * `read(rev, path)` is a file at a revision, undefined where it has none.
- */
-export function signallingWork(
-  changed: readonly string[],
-  testFiles: readonly string[],
-  [base, head]: readonly [string, string],
-  read: (rev: string, path: string) => string | undefined,
-): SignallingWork {
-  const holds = (rev: string, path: string, test: (file: string, text: string) => boolean) => {
-    const text = read(rev, path);
-    return text !== undefined && test(path, text);
-  };
-  return {
-    sources: [...new Set(changed)].filter(
-      (path) => holds(base, path, isSignallingSource) || holds(head, path, isSignallingSource),
-    ),
-    tests: [...new Set(testFiles)].filter((path) => holds(head, path, isSignallingTest)),
-  };
-}
-
-// Set by falsify's own tests to judge as a host would wherever they run. It can only make falsify
-// refuse more, never let it mutate signalling code outside a sandbox.
-const AS_HOST = "BZ_FALSIFY_AS_HOST";
-
-const inSandbox = () => process.env[AS_HOST] !== "1" && inSignalSandbox();
-
-const pathList = (title: string, paths: string[]) =>
-  paths.length === 0 ? "" : `\n${title}:\n${paths.map((p) => `  ${p}`).join("\n")}`;
-
-/**
- * Whether falsify may judge `work` here. A mutant or revert of code that signals can turn a check
- * of its target into a signal to anything the user runs, so outside a sandbox falsify names what
- * it won't judge, and judges none of the branch: a partial verdict would read as a pass.
- */
-function judgeableHere(work: SignallingWork): boolean {
-  if ((work.sources.length === 0 && work.tests.length === 0) || inSandbox()) return true;
-  console.error(
-    "falsify: this branch would revert or mutate code that signals processes, or run tests that " +
-      "do, which happens only in a sandbox. Run `pnpm test:real falsify`." +
-      pathList("Signalling code", work.sources) +
-      pathList("Signalling tests", work.tests),
-  );
-  return false;
-}
-
 /**
  * The changes the revert check puts back as the base had them: the revertible source, and the
  * changed outputs of every generator whose source that includes.
@@ -235,17 +180,20 @@ export function revertsOf(changes: Change[]): Change[] {
 }
 
 export function parseNameStatus(out: string): Change[] {
-  return out
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => {
-      const parts = line.split("\t");
-      const status = parts[0]?.[0] ?? "";
-      const path = parts[parts.length - 1] ?? "";
-      return (status === "R" || status === "C") && parts.length >= 3
-        ? { status, path, oldPath: parts[1] ?? "" }
-        : { status, path };
-    });
+  const fields = out.split("\0");
+  const changes: Change[] = [];
+  for (let i = 0; i < fields.length;) {
+    const status = fields[i]?.[0] ?? "";
+    if (status === "") break;
+    if (status === "R" || status === "C") {
+      changes.push({ status, oldPath: fields[i + 1] ?? "", path: fields[i + 2] ?? "" });
+      i += 3;
+    } else {
+      changes.push({ status, path: fields[i + 1] ?? "" });
+      i += 2;
+    }
+  }
+  return changes;
 }
 
 const unescape = (title: string) => title.replace(/\\(["'`])/g, "$1");
@@ -762,7 +710,9 @@ async function runRustTests(
     "libtest-json-plus",
     "--message-format-version",
     LIBTEST_JSON_VERSION,
-    // A test that signals processes is ignored outside a sandbox; inside one it is judged.
+    // A test that signals processes is ignored outside a sandbox; inside one it is judged. The
+    // filter names only the branch's new tests, but every one of them runs, whatever it is
+    // ignored for.
     ...(inSandbox() ? ["--run-ignored", "all"] : []),
     "-E",
     nextestFilter(tests),
@@ -1091,7 +1041,7 @@ async function main(args: string[]): Promise<number> {
   const messages = git(["log", "--format=%B", `${base}..${head}`]);
   const range = [base, head];
 
-  const changes = parseNameStatus(git(["diff", "--name-status", "-M", ...range]));
+  const changes = parseNameStatus(git(["diff", "--name-status", "-z", "-M", ...range]));
   const tests = changes.filter((c) => c.status !== "D" && TEST_FILE.test(c.path));
   const targets = tests.flatMap((t) => {
     const paths = t.status === "R" && t.oldPath ? [t.oldPath, t.path] : [t.path];
@@ -1100,6 +1050,17 @@ async function main(args: string[]): Promise<number> {
       title,
     }));
   });
+  // Before any test runs, Rust's included: the TS side would refuse after the mutants had run.
+  const reverts = revertsOf(changes);
+  if (targets.length > 0 && reverts.length > 0) {
+    const work = signallingWork(
+      reverts.flatMap(pathsOf),
+      targets.map((t) => t.file),
+      [base, head],
+      fileAt,
+    );
+    if (!judgeableHere(work)) return 1;
+  }
   let rust: RustJudgement = {
     verdicts: [],
     unapplied: [],
@@ -1129,7 +1090,6 @@ async function main(args: string[]): Promise<number> {
     return 0;
   }
 
-  const reverts = revertsOf(changes);
   const results: {
     file: string;
     title: string;
@@ -1144,13 +1104,6 @@ async function main(args: string[]): Promise<number> {
   } else if (reverts.length === 0) {
     for (const t of targets) results.push({ ...t, outcome: "INVALID" });
   } else {
-    const work = signallingWork(
-      reverts.flatMap(pathsOf),
-      targets.map((t) => t.file),
-      [base, head],
-      fileAt,
-    );
-    if (!judgeableHere(work)) return 1;
     const dir = mkdtempSync(join(tmpdir(), WORKTREE_PREFIX));
     cleanup = () => {
       cleanup = undefined;

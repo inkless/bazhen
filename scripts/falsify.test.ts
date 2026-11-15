@@ -12,12 +12,10 @@ import {
   revertsOf,
   rustTestIds,
   signalExitCode,
-  signallingWork,
   staleWorktrees,
   uncontrolledRustTests,
   type VitestReport,
 } from "./falsify.ts";
-import { SIGNALS_IGNORE } from "./signal-paths.ts";
 
 const FILE = "packages/core/src/x.test.ts";
 
@@ -215,7 +213,7 @@ describe("classify", () => {
 
 describe("parseNameStatus", () => {
   it("reads plain statuses", () => {
-    expect(parseNameStatus("M\ta.ts\nA\tb.ts\nD\tc.ts\n")).toEqual([
+    expect(parseNameStatus("M\0a.ts\0A\0b.ts\0D\0c.ts\0")).toEqual([
       { status: "M", path: "a.ts" },
       { status: "A", path: "b.ts" },
       { status: "D", path: "c.ts" },
@@ -223,8 +221,15 @@ describe("parseNameStatus", () => {
   });
 
   it("keeps the old path of a rename", () => {
-    expect(parseNameStatus("R087\told.test.ts\tnew.test.ts\n")).toEqual([
+    expect(parseNameStatus("R087\0old.test.ts\0new.test.ts\0M\0a.ts\0")).toEqual([
       { status: "R", path: "new.test.ts", oldPath: "old.test.ts" },
+      { status: "M", path: "a.ts" },
+    ]);
+  });
+
+  it("reads a path git would quote, with a tab or a quote in it, as it is", () => {
+    expect(parseNameStatus('M\0odd\tname "x".ts\0')).toEqual([
+      { status: "M", path: 'odd\tname "x".ts' },
     ]);
   });
 });
@@ -422,45 +427,5 @@ describe("relatedReverts", () => {
   it("ignores a type-only import", () => {
     const source = 'import type { TerminalState } from "@bazhen/protocol";';
     expect(related(source, ["packages/protocol/src/index.ts"])).toEqual([]);
-  });
-});
-
-describe("signallingWork", () => {
-  const SIGNALS =
-    'import { signalGroup } from "@bazhen/host-guard";\nsignalGroup(child, "SIGTERM");\n';
-  const files: Record<string, Record<string, string>> = {
-    base: { "packages/a/src/was.ts": SIGNALS, "packages/a/src/now.ts": "export {};\n" },
-    head: {
-      "packages/a/src/was.ts": "export {};\n",
-      "packages/a/src/now.ts": SIGNALS,
-      "packages/a/src/never.ts": "export {};\n",
-      "tests/holder/close.test.ts": "export {};\n",
-      "packages/a/src/x.test.ts": "export {};\n",
-      "crates/x/src/lib.rs": `#[test]\n#[ignore = "${SIGNALS_IGNORE}"]\nfn sweeps() {}\n`,
-      "crates/x/src/plain.rs": "#[test]\nfn plain() {}\n",
-    },
-  };
-  const read = (rev: string, path: string) => files[rev]?.[path];
-
-  it("counts a file that signals as either the base or HEAD has it", () => {
-    const sources = ["packages/a/src/was.ts", "packages/a/src/now.ts", "packages/a/src/never.ts"];
-    expect(signallingWork(sources, [], ["base", "head"], read).sources).toEqual([
-      "packages/a/src/was.ts",
-      "packages/a/src/now.ts",
-    ]);
-  });
-
-  it("counts a test file of the holder suite or one with a test ignored as signalling", () => {
-    const tests = [
-      "tests/holder/close.test.ts",
-      "packages/a/src/x.test.ts",
-      "crates/x/src/lib.rs",
-      "crates/x/src/plain.rs",
-      "packages/a/src/gone.test.ts",
-    ];
-    expect(signallingWork([], tests, ["base", "head"], read).tests).toEqual([
-      "tests/holder/close.test.ts",
-      "crates/x/src/lib.rs",
-    ]);
   });
 });

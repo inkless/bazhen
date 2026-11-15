@@ -988,26 +988,61 @@ describe("falsify judging new Rust tests by mutating the change", () => {
   );
 });
 
+/** A branch commit whose source sends a signal through the TypeScript chokepoint. */
+const signallingSource = () => {
+  write(
+    fx.linked,
+    SOURCE,
+    'import { signalGroup } from "@bazhen/host-guard";\nexport const v = 2;\n' +
+      'export const stop = (c) => signalGroup(c, "SIGTERM");\n',
+  );
+  git(fx.linked, "add", SOURCE);
+  git(fx.linked, "commit", "--quiet", "-m", "feat: stop");
+};
+
 describe("falsify outside a sandbox", () => {
   const AS_HOST = { BZ_FALSIFY_AS_HOST: "1" };
 
-  it("refuses to revert source that signals processes, and makes no worktree", () => {
-    write(
-      fx.linked,
-      SOURCE,
-      'import { signalGroup } from "@bazhen/host-guard";\nexport const v = 2;\n' +
-        'export const stop = (c) => signalGroup(c, "SIGTERM");\n',
-    );
-    git(fx.linked, "add", SOURCE);
-    git(fx.linked, "commit", "--quiet", "-m", "feat: stop");
-    const result = againstBase(AS_HOST);
+  it("refuses to revert source that signals processes, before it makes a worktree", () => {
+    signallingSource();
+    // A worktree made before the refusal would fail here, on a folder it can't write to.
+    chmodSync(fx.tmp, 0o500);
+    let result: ReturnType<typeof againstBase>;
+    try {
+      result = againstBase(AS_HOST);
+    } finally {
+      chmodSync(fx.tmp, 0o700);
+    }
     expect({
       status: result.status,
       named: result.output.includes(`  ${SOURCE}`),
       pointsAt: result.output.includes("pnpm test:real falsify"),
+      crashed: /EACCES|permission denied/i.test(result.output),
       installed: stubLog().includes("ARGS: install"),
       leftovers: leftovers(),
-    }).toEqual({ status: 1, named: true, pointsAt: true, installed: false, leftovers: [] });
+    }).toEqual({
+      status: 1,
+      named: true,
+      pointsAt: true,
+      crashed: false,
+      installed: false,
+      leftovers: [],
+    });
+  });
+
+  it("refuses a branch whose TypeScript signals before its Rust tests run", () => {
+    signallingSource();
+    mutatedBranch(
+      ["tests::b_is_two"],
+      [mutantOfB("replace b -> u8 with 0")],
+      [`MUTATED|tests::b_is_two|${ASSERTION}`],
+    );
+    const result = againstBase(AS_HOST);
+    expect({
+      status: result.status,
+      named: result.output.includes(`  ${SOURCE}`),
+      nextest: stubLog().includes("NEXTEST:"),
+    }).toEqual({ status: 1, named: true, nextest: false });
   });
 
   it("refuses to mutate Rust that signals processes, before any mutant runs", () => {

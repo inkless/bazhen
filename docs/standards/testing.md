@@ -99,9 +99,10 @@ Every new test must be shown to fail without the code it covers.
   see the base's. A script's committed output is reverted with it (`.oxlintrc.json` with
   `scripts/lint-config.ts`; the protocol's schema and fixtures with their sources), listed in
   `GENERATED` in `scripts/falsify.ts`. A branch that changes falsify, anything it imports, or how
-  it is run is judged by the base's falsify too (`pnpm test:falsify:base`,
-  `scripts/falsify-base.ts`), in CI and in `pnpm test:real falsify`, so its new tests also need
-  what that falsify asks for, usually a `Control:` line. Only committed work counts. Each test comes out as one of:
+  it is run is judged by the base's falsify too, in CI and in `pnpm test:real falsify`
+  (`pnpm test:falsify:base`, `scripts/falsify-base.ts`, which runs only in a sandbox), so its new
+  tests also need what that falsify asks for, usually a `Control:` line. Only committed work
+  counts. Each test comes out as one of:
   - **KILLED** — it failed. Good.
   - **SURVIVED** — it passed without the change, so it can't detect the change. The check
     fails. Only a test that directly imports a reverted file, or runs one it names with

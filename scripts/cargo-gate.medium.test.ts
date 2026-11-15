@@ -120,7 +120,7 @@ const isRustTool = (name: string | undefined): name is RustTool =>
 
 describe("the pinned Rust tools", () => {
   const root = fileURLToPath(new URL("..", import.meta.url));
-  const PINNED = /\b(cargo-(?:nextest|deny|mutants))@(\d[\w.-]*)/g;
+  const PINNED = /\b(cargo-(?:nextest|deny|mutants))[@ ]v?(\d[\w.-]*)/g;
   const tracked = execFileSync("git", ["ls-files", "-z"], { cwd: root, encoding: "utf8" })
     .split("\0")
     .filter((file) => file !== "" && file !== "pnpm-lock.yaml" && isFile(join(root, file)));
