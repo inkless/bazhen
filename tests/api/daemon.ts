@@ -141,12 +141,15 @@ export type IntegratedShell = "zsh" | "bash" | "fish";
 
 /**
  * A `$SHELL` that starts `kind` with an rc file holding only `rcLine`, in a directory of its own
- * that `cleanup` removes: these tests keep the real HOME, and its rc files with it.
+ * that `cleanup` removes: these tests keep the real HOME, and its rc files with it. Given a
+ * function, the rc is what it makes of the path `mark` creates, so a shell started after `mark`
+ * can be told from one started before.
  */
-export function shellWithRc(kind: IntegratedShell, rcLine: string) {
+export function shellWithRc(kind: IntegratedShell, rcLine: string | ((marked: string) => string)) {
   const dir = mkdtempSync("/tmp/bz-rc-");
+  const marked = join(dir, "marked");
   const rc = join(dir, kind === "zsh" ? ".zshrc" : `${kind}rc`);
-  writeFileSync(rc, `${rcLine}\n`);
+  writeFileSync(rc, `${typeof rcLine === "string" ? rcLine : rcLine(marked)}\n`);
   // As bash's --rcfile does, zsh skips the host's global rc files, which can stop a shell to ask
   // something first: a CI runner's runs compinit, which asks about insecure directories and takes
   // the first keys typed as the answer.
@@ -159,7 +162,11 @@ export function shellWithRc(kind: IntegratedShell, rcLine: string) {
   const shell = join(dir, `${kind}-shell`);
   writeFileSync(shell, `#!/bin/sh\n${start[kind]}\n`);
   chmodSync(shell, 0o755);
-  return { shell, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  return {
+    shell,
+    mark: () => writeFileSync(marked, ""),
+    cleanup: () => rmSync(dir, { recursive: true, force: true }),
+  };
 }
 
 export interface DaemonOptions {

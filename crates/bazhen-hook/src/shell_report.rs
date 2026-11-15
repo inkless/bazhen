@@ -7,16 +7,23 @@
 //! `<time>` is when the shell started the line, as `$EPOCHREALTIME` gives it; without one, now.
 //! The daemon keeps a line only if it started later than the line it has.
 //!
-//! `bazhen-hook shell-prompt`, which the integration runs once, at the shell's first prompt, tells
-//! the daemon its line editor is reading, so a restart can type a line back. It carries only the
-//! token, and is bound by the same deadline.
+//! `bazhen-hook shell-prompt`, which the integration runs once, in the background, as the shell
+//! draws its first prompt, tells the daemon its line editor is reading, so a restart can type a
+//! line back. The hook runs before the editor takes the terminal, so it first waits, up to
+//! `EDITOR_DEADLINE`, for the terminal to leave canonical mode, as every line editor puts it. A
+//! line typed before then would be echoed by the terminal as well as by the editor, its keys run
+//! as the editor's bindings rather than pasted, and a long one cut at the terminal's line limit.
+//! It carries only the token; the report itself is bound by `DEADLINE`.
 
 use std::env;
 use std::fmt::Write as _;
+use std::fs::File;
 use std::io::{self, Read};
 use std::sync::mpsc;
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use rustix::termios::{LocalModes, tcgetattr};
 
 use crate::{is_token, post};
 
@@ -26,6 +33,13 @@ pub const MAX_LINE: usize = 2048;
 
 /// The longest the report may take, start to exit, however the daemon answers or doesn't.
 const DEADLINE: Duration = Duration::from_secs(1);
+
+/// The longest `shell-prompt` waits for the shell's line editor to take the terminal: a prompt that
+/// takes longer to draw gets no line typed back, which the daemon logs.
+const EDITOR_DEADLINE: Duration = Duration::from_secs(10);
+
+/// How often `shell-prompt` looks at the terminal's mode while it waits.
+const EDITOR_POLL: Duration = Duration::from_millis(5);
 
 /// The largest integer a JSON number carries exactly to the daemon.
 const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
@@ -43,12 +57,40 @@ fn reporter() -> Option<(String, String, String)> {
 pub(crate) fn run_prompt() -> Option<i32> {
     let (terminal, token, socket) = reporter()?;
     let body = prompt_body(&token)?;
+    // Without a terminal to read, the editor can't be told ready: no report, and no line typed.
+    let tty = File::open("/dev/tty").ok()?;
+    let canonical = || {
+        tcgetattr(&tty)
+            .ok()
+            .map(|t| t.local_modes.contains(LocalModes::ICANON))
+    };
+    if !editor_reading(canonical, EDITOR_DEADLINE, EDITOR_POLL) {
+        return Some(0);
+    }
     within(DEADLINE, move || {
         let path = format!("/v1/shells/{terminal}/prompt");
         // Like a line's report, nothing the daemon answers changes what the shell does.
         let _ = post(&socket, &path, &body, DEADLINE);
     });
     Some(0)
+}
+
+/// Whether the terminal left canonical mode within `deadline`, looking every `poll`. `canonical`
+/// says whether it is in canonical mode, or None when its mode can't be read, which ends the wait.
+fn editor_reading(
+    mut canonical: impl FnMut() -> Option<bool>,
+    deadline: Duration,
+    poll: Duration,
+) -> bool {
+    let started = Instant::now();
+    loop {
+        match canonical() {
+            Some(false) => return true,
+            None => return false,
+            Some(true) if started.elapsed() >= deadline => return false,
+            Some(true) => thread::sleep(poll),
+        }
+    }
 }
 
 /// The prompt report's JSON, for a token that needs no escaping.
@@ -192,6 +234,33 @@ mod tests {
         assert_eq!(decoded(&body), serde_json::json!({ "token": "tok-_1" }));
         assert_eq!(prompt_body("a\"b"), None);
         assert_eq!(prompt_body(""), None);
+    }
+
+    #[test]
+    fn reports_a_prompt_once_the_terminal_leaves_canonical_mode() {
+        let mut looks = 0;
+        let reading = editor_reading(
+            || {
+                looks += 1;
+                Some(looks < 4)
+            },
+            Duration::from_secs(30),
+            Duration::ZERO,
+        );
+        assert_eq!((reading, looks), (true, 4));
+    }
+
+    #[test]
+    fn reports_no_prompt_for_a_terminal_still_canonical_at_the_deadline_or_unreadable() {
+        let started = std::time::Instant::now();
+        let canonical = editor_reading(|| Some(true), Duration::from_millis(50), Duration::ZERO);
+        let unreadable = editor_reading(|| None, Duration::from_secs(30), Duration::ZERO);
+        assert_eq!((canonical, unreadable), (false, false));
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            started.elapsed()
+        );
     }
 
     #[test]

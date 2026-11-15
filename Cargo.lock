@@ -103,6 +103,7 @@ version = "0.1.0"
 dependencies = [
  "bazhen-test-signal",
  "proptest",
+ "rustix",
  "serde_json",
 ]
 

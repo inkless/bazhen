@@ -167,3 +167,83 @@ describe.each<IntegratedShell>(["zsh", "bash", "fish"])(
     });
   },
 );
+
+/**
+ * Each test shell's rc for a prompt that takes a while to draw, as a git-aware one does, after the
+ * integration's hook has run; and, once `marker` exists, a Z key that types X instead. A line typed
+ * back before the line editor reads would show twice, echoed by the terminal and then by the
+ * editor; one typed unbracketed would run the editor's binding for Z. Typed by hand into the first
+ * shell, before the marker exists, a Z is a Z.
+ */
+const SLOW_RC: Record<IntegratedShell, (marker: string) => string> = {
+  zsh: (marker) =>
+    [
+      RC_LINE.zsh,
+      "setopt PROMPT_SUBST",
+      "PS1='$(sleep 0.3)[st=%?] '",
+      `if [[ -e '${marker}' ]]; then __bz_z() { LBUFFER+=X }; zle -N __bz_z; bindkey Z __bz_z; fi`,
+    ].join("\n"),
+  bash: (marker) =>
+    [RC_LINE.bash, "PS1='$(sleep 0.3)[st=0] '", `[[ -e '${marker}' ]] && bind '"Z": "X"'`].join(
+      "\n",
+    ),
+  fish: (marker) =>
+    [
+      RC_LINE.fish,
+      'function fish_prompt; sleep 0.3; echo -n "[st=0] "; end',
+      `test -e '${marker}'; and bind Z 'commandline -i X'`,
+    ].join("\n"),
+};
+
+const SLOW_TYPED = `echo Z "$HOME"`;
+
+describe.each<IntegratedShell>(["zsh", "bash", "fish"])(
+  "a %s shell whose prompt is slow to draw, restarted with its last line",
+  (kind) => {
+    let daemon: Daemon;
+    let shell: ReturnType<typeof shellWithRc> | undefined;
+    beforeAll(async () => {
+      shell = shellWithRc(kind, SLOW_RC[kind]);
+      daemon = await Daemon.start({
+        config: "[shells]\nretype_last_command = true\n",
+        env: { SHELL: shell.shell },
+      });
+    });
+    afterAll(async () => {
+      await daemon?.stop();
+      shell?.cleanup();
+    });
+
+    it("types the line once the editor reads, once, and as a paste rather than as keys", async () => {
+      const opened = await daemon.request("/v1/shells", {
+        method: "POST",
+        body: { idempotencyKey: "open", cwd: daemon.work },
+      });
+      const { terminalId } = ShellCommandResponse.parse(opened.body);
+      const view = await daemon.view(terminalId, "interactive");
+      await view.drive();
+      await expect
+        .poll(() => daemon.shellScreen(terminalId), { timeout: 20_000 })
+        .toContain("[st=0]");
+      view.type(`${SLOW_TYPED}\r`);
+      await expect
+        .poll(() => daemon.keptShellLine(terminalId), { timeout: 15_000 })
+        .toBe(SLOW_TYPED);
+      view.close();
+      await daemon.kill();
+      daemon.tmuxServer.kill();
+      shell?.mark();
+      await daemon.restart();
+
+      const restarted = await daemon.request(`/v1/shells/${terminalId}/restart`, {
+        method: "POST",
+        body: { idempotencyKey: "retype", generation: 0, retype: true },
+      });
+      const { terminalId: next } = ShellCommandResponse.parse(restarted.body);
+      const lastLine = () => daemon.shellScreen(next).trimEnd().split("\n").at(-1);
+      await expect.poll(lastLine, { timeout: 20_000 }).toBe(`[st=0] ${SLOW_TYPED}`);
+      const screen = daemon.shellScreen(next);
+      expect([screen.split("echo").length - 1, screen.includes("X")]).toEqual([1, false]);
+    });
+  },
+);

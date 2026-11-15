@@ -48,13 +48,19 @@ so at start and shells report nothing.
 A lost shell whose last line was kept offers **Restart and retype last command** beside
 **Restart**. The new shell opens in the same directory and, once it shows its first prompt, the
 line appears there exactly as you typed it, `$VARIABLES` and quoting untouched. Enter is never
-pressed: you read the line, edit it if you like, and run it yourself. Bazhen types it as a
-bracketed paste where the shell asked for one, as zsh, bash and fish do, so the line editor
-inserts it as text.
+pressed: you read the line, edit it if you like, and run it yourself.
 
-The new shell must load the integration too, since it tells Bazhen when its prompt is ready. If
-no prompt is reported within 30 seconds, the line is dropped and the daemon logs that it wasn't
-retyped, naming the shell but not the line. Until then it is held only in the daemon's memory, so
+Bazhen types it as a paste, bracketed when the line editor asked for bracketed paste, so the
+editor inserts it as text. zsh, fish and bash 5.1 or later ask for it by default. bash 4.4 and
+5.0 don't, nor does an editor with it turned off (`set enable-bracketed-paste off` in
+`~/.inputrc`, or an empty `zle_bracketed_paste` in zsh): there the line arrives as keys, so a key
+you bound to something else, as `magic-space` or a fish abbreviation, does that instead. Nothing
+in the line is ever Enter.
+
+The new shell must load the integration too, since it tells Bazhen when its line editor is
+reading. A prompt that takes more than 10 seconds to draw gets no line typed back. If no prompt is
+reported within 30 seconds, the line is dropped and the daemon logs that it wasn't retyped,
+naming the shell but not the line. Until then it is held only in the daemon's memory, so
 a daemon restart in between loses it.
 
 ## What it sends, and what it doesn't
@@ -79,15 +85,20 @@ The line is never a process argument, so `ps` never shows it.
   counting for longer than that.
 - **One line per shell.** Each new line replaces the last.
 - **At the first prompt, the shell says so**, once, with `bazhen-hook shell-prompt`. It carries
-  the shell's token and nothing else.
+  the shell's token and nothing else. It waits, in the background, until the shell's line editor
+  has taken the terminal, up to 10 seconds, so a line is never typed back while the terminal
+  would echo it twice.
 
 ## Where it is kept, and for how long
 
 The line is kept in one place: the shell's row in Bazhen's database, `bazhen.db` in its data
 directory (`~/.local/share/bazhen`, or `data/` under `BAZHEN_HOME`). The database and its
-journals can only be read by you. The line is never written to an event, so it never reaches the event stream, a
-dashboard, a paired device or a log, and it isn't in `GET /v1/state`. It is deleted when the
-shell closes, exits or fails to open. A lost shell keeps it for its restart, and loses it once
+journals can only be read by you. The line is never written to an event, so it never reaches the
+event stream or a log, and it isn't in `GET /v1/state`: a dashboard or paired device only learns
+that a lost shell has one. The one way it leaves the database is a restart that retypes it, which
+anyone who can restart the shell can ask for, from the browser, the CLI or a paired device: the
+line is then typed into the new shell, where whoever views that terminal sees it. It is deleted
+when the shell closes, exits or fails to open. A lost shell keeps it for its restart, and loses it once
 its replacement runs, retyped or not.
 
 When a shell closes, SQLite overwrites its line with zeros in the page that held it, and Bazhen
