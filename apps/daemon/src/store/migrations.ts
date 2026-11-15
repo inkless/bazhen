@@ -345,6 +345,17 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX notices_state ON notices (state, created_event_id);
     `,
   },
+  {
+    version: 23,
+    sql: `
+      -- The line the user last ran in a shell, as its shell integration reported it, to type back
+      -- into its replacement. It can hold a secret the user typed, so it is written straight onto
+      -- the row and never by an event, and cleared once the shell closes or fails.
+      ALTER TABLE terminals ADD COLUMN last_command TEXT;
+      -- The number of the report that set it: an older report, arriving late, changes nothing.
+      ALTER TABLE terminals ADD COLUMN last_command_seq INTEGER;
+    `,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

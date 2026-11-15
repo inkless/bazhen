@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { hasLoneSurrogate } from "./holder.ts";
 import { TuiTheme } from "./theme.ts";
 import { Id, IdempotencyKey } from "./ids.ts";
 
@@ -113,6 +114,33 @@ function showable(name: string): boolean {
 export const ShellName = z.string().trim().min(1).max(80).refine(showable, {
   message: "a shell's name can't hold control characters or bidirectional overrides",
 });
+
+/**
+ * The most UTF-8 bytes of a command line kept to type back. A longer one is dropped, never cut:
+ * typing back part of a command is typing a different one.
+ */
+export const COMMAND_LINE_MAX_BYTES = 2048;
+
+const encoder = new TextEncoder();
+
+/**
+ * A line the user ran at a shell's prompt, as their shell reported it, kept to type back into
+ * the shell's replacement without Enter. A control character there is a key, not text: a newline
+ * or carriage return would run the line, and an escape would drive the line editor. A line that
+ * starts with a space is one the user kept out of their history, so it is kept out of this too.
+ */
+export const ShellCommandLine = z
+  .string()
+  .min(1)
+  .refine((line) => !line.startsWith(" "), {
+    message: "a line starting with a space is kept out of history, so it isn't kept",
+  })
+  .refine((line) => showable(line) && !hasLoneSurrogate(line), {
+    message: "a command line can't hold control characters or bidirectional overrides",
+  })
+  .refine((line) => encoder.encode(line).length <= COMMAND_LINE_MAX_BYTES, {
+    message: `a command line is at most ${COMMAND_LINE_MAX_BYTES} bytes`,
+  });
 
 export const RenameShellRequest = z.object({
   idempotencyKey: IdempotencyKey,

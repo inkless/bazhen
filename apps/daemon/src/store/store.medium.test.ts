@@ -81,6 +81,21 @@ function leftByKilledDaemon(path: string): void {
   for (const file of [path, ...journals.map((j) => j.file)]) chmodSync(file, 0o644);
 }
 
+function runningShell(store: Store) {
+  const terminalId = newId("term");
+  store.append(shellOpened(terminalId, withEnvironment(store), null));
+  store.append({
+    type: "terminal.running",
+    entityId: terminalId,
+    actor: "system",
+    payload: { runtimeRef: { runtime: "tmux", locator: { generation: "0" } } },
+  });
+  return terminalId;
+}
+
+const shellEvent = (terminalId: string, type: "terminal.closing" | "terminal.lost") =>
+  ({ type, entityId: terminalId, actor: "system", payload: {} }) as const;
+
 describe("Store", () => {
   it("migrates a fresh database to the latest schema, and reopening is a no-op", () => {
     const path = dbPath();
@@ -992,5 +1007,108 @@ describe("Store relaunch", () => {
       [["close", "relaunch"], false],
     ]);
     store.close();
+  });
+
+  describe("a shell's last command", () => {
+    it("upgrades a schema-22 database, its shells keeping no command until one is reported", () => {
+      const path = dbPath();
+      const v22 = Store.open(path, MIGRATIONS.slice(0, 22));
+      const terminalId = runningShell(v22);
+      v22.close();
+      const upgraded = Store.open(path);
+      const before = upgraded.lastShellCommand(terminalId);
+      upgraded.noteShellCommand(terminalId, 1, "make");
+      expect([before, upgraded.lastShellCommand(terminalId)]).toEqual([null, "make"]);
+      upgraded.close();
+    });
+
+    it("keeps the newest line a live shell reported, so a late older report changes nothing", () => {
+      const store = Store.open(dbPath());
+      const terminalId = runningShell(store);
+      const counted = [
+        store.noteShellCommand(terminalId, 2, "pnpm dev"),
+        store.noteShellCommand(terminalId, 1, "ls"),
+        store.noteShellCommand(terminalId, 2, "ls"),
+      ];
+      expect([counted, store.lastShellCommand(terminalId)]).toEqual([
+        [true, false, false],
+        "pnpm dev",
+      ]);
+      store.close();
+    });
+
+    it("clears the kept line when a newer one can't be typed back, rather than keep the older", () => {
+      const store = Store.open(dbPath());
+      const terminalId = runningShell(store);
+      store.noteShellCommand(terminalId, 1, "pnpm dev");
+      store.noteShellCommand(terminalId, 2, "make\nrm -rf ~");
+      const afterNewline = store.lastShellCommand(terminalId);
+      store.noteShellCommand(terminalId, 3, "pnpm dev");
+      store.noteShellCommand(terminalId, 4, null);
+      expect([afterNewline, store.lastShellCommand(terminalId)]).toEqual([null, null]);
+      store.close();
+    });
+
+    it("keeps a lost shell's line for its restart, and takes no report for it", () => {
+      const store = Store.open(dbPath());
+      const terminalId = runningShell(store);
+      store.noteShellCommand(terminalId, 1, "cargo watch");
+      store.append(shellEvent(terminalId, "terminal.lost"));
+      const counted = store.noteShellCommand(terminalId, 2, "ls");
+      expect([counted, store.lastShellCommand(terminalId)]).toEqual([false, "cargo watch"]);
+      store.close();
+    });
+
+    it("forgets the line once the shell closes or fails, and never writes it into an event", () => {
+      const path = dbPath();
+      const store = Store.open(path);
+      const closed = runningShell(store);
+      const failed = newId("term");
+      store.append(shellOpened(failed, withEnvironment(store), null));
+      store.noteShellCommand(closed, 1, "export TOKEN=s3cret-closed");
+      store.noteShellCommand(failed, 1, "export TOKEN=s3cret-failed");
+      store.append(shellEvent(closed, "terminal.closing"));
+      store.append({
+        type: "terminal.closed",
+        entityId: closed,
+        actor: "user",
+        payload: { reason: "user" },
+      });
+      store.append({
+        type: "terminal.failed",
+        entityId: failed,
+        actor: "system",
+        payload: { reason: "open_rejected" },
+      });
+      expect([store.lastShellCommand(closed), store.lastShellCommand(failed)]).toEqual([
+        null,
+        null,
+      ]);
+      store.close();
+      const raw = new DatabaseSync(path);
+      const events = raw.prepare("SELECT count(*) AS n FROM events WHERE payload LIKE '%s3cret%'");
+      expect(events.get()?.n).toBe(0);
+      raw.close();
+    });
+
+    it("leaves no trace of a closed shell's line in the database file", () => {
+      const path = dbPath();
+      const store = Store.open(path);
+      // Rows after it on the same page keep a cleared row's old bytes where they stood, unzeroed.
+      const terminalId = runningShell(store);
+      runningShell(store);
+      runningShell(store);
+      store.noteShellCommand(terminalId, 1, "export TOKEN=s3cret-on-disk");
+      store.append(shellEvent(terminalId, "terminal.closing"));
+      store.append({
+        type: "terminal.closed",
+        entityId: terminalId,
+        actor: "user",
+        payload: { reason: "user" },
+      });
+      // Closing the last connection checkpoints the WAL into the file and removes it.
+      store.close();
+      expect(readFileSync(path).includes("s3cret-on-disk")).toBe(false);
+    });
   });
 });

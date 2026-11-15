@@ -42,6 +42,7 @@ import {
   type ResetReason,
   type EventPayload,
   type EventType,
+  ShellCommandLine,
   type ShellCommand,
 } from "@bazhen/protocol";
 import { LATEST_SCHEMA_VERSION, MIGRATIONS, type Migration } from "./migrations.ts";
@@ -417,8 +418,11 @@ export class Store {
     const db = new DatabaseSync(path);
     // NORMAL loses nothing when the daemon dies, only the commits since the last checkpoint on an
     // OS crash or power loss; FULL would flush on every commit, which blocks the event loop.
+    // A shell's last command can hold a secret, and secure_delete zeroes it where it stood once it
+    // is cleared or replaced, rather than leaving it in the page's free space. FAST does so only
+    // where that costs no extra I/O.
     db.exec(
-      "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;",
+      "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000; PRAGMA secure_delete = FAST;",
     );
     db.exec("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL) STRICT");
     const store = new Store(db);
@@ -994,6 +998,30 @@ export class Store {
       `UPDATE terminals SET current_cwd = ?
        WHERE id = ? AND kind = 'shell' AND current_cwd IS NOT ?`,
     ).run(cwd, terminalId, cwd);
+  }
+
+  /**
+   * The line a live shell reported running, under the report's number. Only a report newer than
+   * the kept one counts, so one arriving late leaves the newer line. A line that can't be typed
+   * back safely clears the kept one: typing an older command instead would mislead. Returns
+   * whether the report counted.
+   */
+  noteShellCommand(terminalId: string, seq: number, line: string | null): boolean {
+    const kept = line !== null && ShellCommandLine.safeParse(line).success ? line : null;
+    const { changes } = this.prepare(
+      `UPDATE terminals SET last_command = ?, last_command_seq = ?
+       WHERE id = ? AND kind = 'shell' AND state IN ('creating', 'running')
+       AND (last_command_seq IS NULL OR last_command_seq < ?)`,
+    ).run(kept, seq, terminalId, seq);
+    return Number(changes) > 0;
+  }
+
+  /** The line kept to type back into a shell's replacement, or null when none is. */
+  lastShellCommand(terminalId: string): string | null {
+    const row = this.prepare(
+      "SELECT last_command FROM terminals WHERE id = ? AND kind = 'shell'",
+    ).get(terminalId);
+    return typeof row?.last_command === "string" ? row.last_command : null;
   }
 
   /** Agents that have closed or failed but still have shells linked to them, not yet closed. */
