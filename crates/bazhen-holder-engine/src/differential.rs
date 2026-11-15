@@ -703,6 +703,54 @@ fn cuts() -> impl Strategy<Value = Vec<usize>> {
     prop::collection::vec(1usize..400, 1..8)
 }
 
+/// A shell's prompt, left with the cursor in its line, then resizes, and text typed after some:
+/// the cursor must stay as many cells into the line, and the text land where it did, until
+/// alacritty leaves a mark the engine can't follow (see `has_a_wrap_inside_a_row`).
+fn cursor_stays_as_far_into_its_line(
+    size: Size,
+    lines: &[String],
+    prompt: &str,
+    resizes: &[((u16, u16), Option<String>)],
+    cuts: &[usize],
+) {
+    let mut engine = Engine::new(size, HistoryRows(ENGINE_ROWS));
+    let mut full = FullHistory::new(size);
+    let stream: String = lines.iter().map(|line| line.clone() + "\r\n").collect();
+    feed(&mut engine, &mut full, &(stream + prompt), cuts);
+    for ((cols, rows), typed) in resizes {
+        if has_a_wrap_inside_a_row(&full.term) {
+            return;
+        }
+        let size = Size {
+            cols: *cols,
+            rows: *rows,
+        };
+        engine.resize(size);
+        full.resize(size);
+        assert_same_cursor_offset(&engine, &full);
+        if let Some(typed) = typed {
+            feed(&mut engine, &mut full, typed, cuts);
+            assert_same_cursor_offset(&engine, &full);
+            assert_same_visible_cells(&engine, &full, i32::MAX, false, visible);
+        }
+    }
+}
+
+#[test]
+fn narrowed_onto_more_rows_then_fewer_a_prompt_of_wide_chars_keeps_the_cells_alacritty_keeps() {
+    // The shrunk case CI found. alacritty adds rows before it reflows the columns, so the rows
+    // a heightening pulls from history are counted at the old width, not the new: an engine
+    // that gave back too few pads the screen with a blank row the reference doesn't have, and
+    // the row-shrink after drops a different row below the cursor on each side.
+    cursor_stays_as_far_into_its_line(
+        Size { cols: 10, rows: 1 },
+        &[String::new(), "\taaa\t字a\taaa\ta中".to_owned()],
+        "中中中中",
+        &[((3, 7), None), ((2, 6), Some("a".to_owned()))],
+        &[1],
+    );
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(512))]
 
@@ -803,26 +851,7 @@ proptest! {
             ((1u16..30, 1u16..12), prop::option::of(narrow_text())), 1..8),
         cuts in cuts(),
     ) {
-        // A shell's prompt, left with the cursor in its line, then resizes, and text typed after
-        // some: the cursor must stay as many cells into the line, and the text land where it did,
-        // until alacritty leaves a mark the engine can't follow (see `has_a_wrap_inside_a_row`).
-        let mut engine = Engine::new(size, HistoryRows(ENGINE_ROWS));
-        let mut full = FullHistory::new(size);
-        let stream: String = lines.iter().map(|line| line.clone() + "\r\n").collect();
-        feed(&mut engine, &mut full, &(stream + &prompt), &cuts);
-        for ((cols, rows), typed) in resizes {
-            if has_a_wrap_inside_a_row(&full.term) {
-                return Ok(());
-            }
-            engine.resize(Size { cols, rows });
-            full.resize(Size { cols, rows });
-            assert_same_cursor_offset(&engine, &full);
-            if let Some(typed) = typed {
-                feed(&mut engine, &mut full, &typed, &cuts);
-                assert_same_cursor_offset(&engine, &full);
-                assert_same_visible_cells(&engine, &full, i32::MAX, false, visible);
-            }
-        }
+        cursor_stays_as_far_into_its_line(size, &lines, &prompt, &resizes, &cuts);
     }
 
     #[test]

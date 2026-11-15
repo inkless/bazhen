@@ -395,7 +395,11 @@ impl Engine {
     /// history: a row-grow fills the new rows from it, and a reflow that rejoins wrapped rows
     /// pulls rows down to keep the cursor's line, or drops rows below the cursor if history runs
     /// out. Enough for the old screen and the new, counted at the new width: at the old one, a
-    /// widening would take as many more rows as it joins into one.
+    /// widening would take as many more rows as it joins into one. And at least the rows the
+    /// screen gains, counted at the old width: alacritty adds them before it reflows, so a
+    /// narrowing that heightens takes more rows than the new width counts. Short of them it pads
+    /// the screen with blank rows below the cursor, where a terminal that held all its history
+    /// would pull its history down.
     fn refill_for(&mut self, size: Size) {
         self.refill_within(size, MOST_REFILL_CELLS);
     }
@@ -403,8 +407,16 @@ impl Engine {
     /// [`Engine::refill_for`], taking back no more than `most_cells`.
     fn refill_within(&mut self, size: Size, most_cells: usize) {
         let wanted = self.size.rows() + size.rows();
+        let pulled = size.rows().saturating_sub(self.size.rows());
         let grid = self.term.grid_mut();
-        let refilled = refill(grid, &mut self.history, wanted, size.cols(), most_cells);
+        let refilled = refill(
+            grid,
+            &mut self.history,
+            wanted,
+            pulled,
+            size.cols(),
+            most_cells,
+        );
         self.scrollback = self.scrollback.max(refilled);
     }
 
@@ -633,26 +645,30 @@ impl Primary {
 }
 
 /// Puts the newest lines of the store back into `grid`'s scrollback, rewrapped to its width,
-/// until it holds `wanted` rows at `cols` wide, the width it's about to take, or the store is
-/// empty. A line that runs on from the store into the scrollback comes back whole first, so that
-/// a reflow sees all of it. No more than `REFILL_BOUND` times `wanted` stored rows come back, or
-/// `LEAST_REFILL_ROWS`, nor more than `most_cells` cells, however long their lines: the rest of a
-/// longer line stays in the store. Returns how many rows the scrollback holds.
+/// until it holds `wanted` rows at `cols` wide, the width it's about to take, and `pulled` rows
+/// at its own width, or the store is empty. A line that runs on from the store into the
+/// scrollback comes back whole first, so that a reflow sees all of it. No more than
+/// `REFILL_BOUND` times `wanted` stored rows come back, or `LEAST_REFILL_ROWS`, nor more than
+/// `most_cells` cells, however long their lines: the rest of a longer line stays in the store.
+/// Returns how many rows the scrollback holds.
 fn refill(
     grid: &mut Grid<Cell>,
     history: &mut History,
     wanted: usize,
+    pulled: usize,
     cols: usize,
     most_cells: usize,
 ) -> usize {
     let mut got = grid.history_size();
+    let mut got_old = got;
     let mut left = (REFILL_BOUND * wanted).max(LEAST_REFILL_ROWS);
     let mut cells_left = most_cells;
     let mut taken = Vec::new();
     let mut counter = RowCounter::new(cols);
+    let mut old_counter = (pulled > 0).then(|| RowCounter::new(grid.columns()));
     while left > 0
         && cells_left > 0
-        && (got < wanted || (taken.is_empty() && history.newest_wraps()))
+        && (got < wanted || got_old < pulled || (taken.is_empty() && history.newest_wraps()))
     {
         // Counted as it comes off: a line of a minified file can run to thousands of rows.
         let line = history.pop_line(left, |row| {
@@ -666,6 +682,11 @@ fn refill(
         let mut text = String::new();
         write_rows(&mut Lines::new(&mut text), &line);
         got += counter.rows(&text);
+        if got_old < pulled
+            && let Some(counter) = &mut old_counter
+        {
+            got_old += counter.rows(&text);
+        }
         taken.push(line);
     }
     if taken.is_empty() {
@@ -1101,6 +1122,27 @@ mod tests {
         // A row a line at either width: the old screen's and the new's. Counted at the old
         // width, a widening 500 times over would take every row.
         assert_eq!(engine.term.grid().history_size(), 1 + 1000);
+    }
+
+    #[test]
+    fn a_narrowing_gives_back_the_rows_it_pulls_counted_at_the_old_width() {
+        // Lines a row each at 4 wide, two at 2, after the row a drain leaves. From 1 row to 10,
+        // alacritty adds 9 rows before it reflows, taken from history at 4 wide, where the 11
+        // rows the reflow needs at 2 wide are 5 lines, 6 rows at 4. From 10 rows to 5 it adds
+        // none, and the 15 rows at 2 wide are all it needs: 7 lines, 8 rows.
+        for (rows, after, history) in [(1, 10, 9), (10, 5, 8)] {
+            let mut engine = Engine::new(Size { cols: 4, rows }, HistoryRows(10_000));
+            engine.advance("abcd\r\n".repeat(100).as_bytes());
+            engine.refill_for(Size {
+                cols: 2,
+                rows: after,
+            });
+            assert_eq!(
+                engine.term.grid().history_size(),
+                history,
+                "{rows} to {after} rows"
+            );
+        }
     }
 
     #[test]
