@@ -3431,6 +3431,196 @@
         },
         "type": {
           "type": "string",
+          "const": "notice.opened"
+        },
+        "entityType": {
+          "type": "string",
+          "const": "notice"
+        },
+        "entityId": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string"
+        },
+        "causationId": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "correlationId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "device": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^dev_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "origin": {
+                      "type": "string"
+                    },
+                    "address": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "origin",
+                    "address"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "summary",
+            "device"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "ts",
+        "type",
+        "entityType",
+        "entityId",
+        "actor",
+        "causationId",
+        "correlationId",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "notice.closed"
+        },
+        "entityType": {
+          "type": "string",
+          "const": "notice"
+        },
+        "entityId": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string"
+        },
+        "causationId": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "correlationId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string",
+              "enum": [
+                "dismissed",
+                "revoked"
+              ]
+            },
+            "by": {
+              "type": "string",
+              "enum": [
+                "owner-socket",
+                "owner-loopback",
+                "revoke"
+              ]
+            },
+            "fromDevice": {
+              "type": "string",
+              "pattern": "^dev_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            }
+          },
+          "required": [
+            "reason",
+            "by"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "ts",
+        "type",
+        "entityType",
+        "entityId",
+        "actor",
+        "causationId",
+        "correlationId",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
           "const": "lease.granted"
         },
         "entityType": {

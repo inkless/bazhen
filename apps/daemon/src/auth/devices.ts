@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { parse } from "hono/utils/cookie";
 import type { DeviceId } from "@bazhen/core";
 import { DEVICE_NAME_MAX, type Device } from "@bazhen/protocol";
-import type { Store, StoredDevice } from "../store/store.ts";
+import type { PairedFrom, Store, StoredDevice } from "../store/store.ts";
 import { forwardedFromElsewhere } from "./forwarded.ts";
 
 /**
@@ -20,8 +20,11 @@ export const LOOPBACK_IDLE_MS = 24 * 60 * 60 * 1000;
 export const TOUCH_EVERY_MS = 60 * 60 * 1000;
 const DEFAULT_NAME = "Browser";
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
-/** Control and format characters, bidi overrides among them, which could disguise a name. */
-const UNPRINTABLE = /[\p{Cc}\p{Cf}]/gu;
+/**
+ * Control and format characters, bidi overrides among them, and the line and paragraph
+ * separators, which could disguise a name or break the line it is shown on.
+ */
+const UNPRINTABLE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
 
 const hashToken = (token: string) => createHash("sha256").update(token).digest("hex");
 const idleLimit = (device: { secure: boolean }) =>
@@ -64,10 +67,11 @@ export class DeviceAuth {
   pair(
     requested: string | undefined,
     secure: boolean,
+    from: PairedFrom,
   ): { deviceId: DeviceId; name: string; token: string } {
     const name = deviceName(requested);
     const token = randomBytes(32).toString("base64url");
-    const deviceId = this.store.pairDevice(name, hashToken(token), secure, this.now());
+    const deviceId = this.store.pairDevice(name, hashToken(token), secure, this.now(), from);
     this.log(`bazhen: paired a device, ${JSON.stringify(name)} (${deviceId})`);
     return { deviceId, name, token };
   }

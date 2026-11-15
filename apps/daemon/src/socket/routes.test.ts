@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { newId } from "@bazhen/core";
 import { PairingCodeResponse, type Device, type DoctorResponse } from "@bazhen/protocol";
+import type { AppEnv } from "../http/app.ts";
 import { UnknownDevice } from "../store/store.ts";
 import { socketApp } from "./routes.ts";
 
@@ -48,11 +49,12 @@ function app(
   paneTitleChanged = (_pane: string) => {},
   lan: () => PairingCodeResponse["lan"] = () => undefined,
 ) {
-  const commands = new Hono();
+  const commands = new Hono<AppEnv>();
   commands.post("/v1/attention/:id/answer", (c) => c.json({ answered: c.req.param("id") }));
   commands.post("/v1/attention/:id/reply", (c) => c.json({ replied: c.req.param("id") }));
   commands.post("/v1/attention/:id/dismiss", (c) => c.json({ dismissed: c.req.param("id") }));
   commands.post("/v1/attention/:id/resend", (c) => c.json({ resent: c.req.param("id") }));
+  commands.post("/v1/notices/:id/dismiss", (c) => c.json({ dismissed: c.req.param("id") }));
   commands.get("/v1/state", (c) => c.json({ state: true }));
   const hooks = new Hono();
   hooks.post("/v1/hooks", (c) => c.text("hook"));
@@ -75,6 +77,9 @@ const act = (action: string, headers: Record<string, string>) =>
 
 const answer = (headers: Record<string, string> = {}) =>
   app().request("/v1/attention/attn_x/answer", { method: "POST", headers });
+
+const dismissNotice = (headers: Record<string, string>) =>
+  app().request("/v1/notices/ntc_x/dismiss", { method: "POST", headers });
 
 describe("socketApp", () => {
   it("serves the command routes and the hook ingress", async () => {
@@ -121,6 +126,12 @@ describe("socketApp", () => {
     );
     const human = await (await act("reply", {})).json();
     expect([refused, human]).toEqual([[403, 403, 403], { replied: "attn_x" }]);
+  });
+
+  it("refuses a notice dismissal from a caller that says it is an agent, and takes a human's", async () => {
+    const refused = await dismissNotice({ "bazhen-agent-id": "agent_x" });
+    const human = await (await dismissNotice({})).json();
+    expect([refused.status, human]).toEqual([403, { dismissed: "ntc_x" }]);
   });
 
   it("refuses an approval answer from a caller that says it is an agent", async () => {

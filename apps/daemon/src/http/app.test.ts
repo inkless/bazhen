@@ -15,6 +15,7 @@ import { AttentionClosed } from "../mailbox/approvals.ts";
 import { AgentGone } from "../mailbox/mailbox.ts";
 import { ShellBusy, UnknownShell } from "../shells/lifecycle.ts";
 import { AttentionRefused } from "../attention/inbox.ts";
+import { NoticeClosed, NoticeRefused, type Viewer } from "../attention/notices.ts";
 import { TerminalLimit } from "../terminals/budget.ts";
 import { createApp, type AppDeps, type TaskCommands } from "./app.ts";
 
@@ -42,6 +43,9 @@ const tasks: TaskCommands = {
     return { messageId: newId("msg"), eventIds: [agentId === target ? 4 : 0] };
   },
 };
+/** The viewer and advisory device each notice dismissal reached the handler with. */
+const seenDismissals: [Viewer, string | undefined][] = [];
+
 const deps: AppDeps = {
   appVersion: "0.1.0",
   schemaVersion: () => 1,
@@ -57,6 +61,7 @@ const deps: AppDeps = {
     attention: [],
     messages: [],
     shells: [],
+    notices: [],
   }),
   answer: () => {
     throw new AttentionClosed("attn_x");
@@ -69,6 +74,12 @@ const deps: AppDeps = {
   },
   resend: () => {
     throw new AttentionRefused("attn_x", "resend");
+  },
+  dismissNotice: (noticeId, req, viewer, fromDevice) => {
+    if (req.idempotencyKey === "refused") throw new NoticeRefused(noticeId, "dismiss");
+    if (req.idempotencyKey === "closed") throw new NoticeClosed(noticeId);
+    seenDismissals.push([viewer, fromDevice]);
+    return { eventIds: [1] };
   },
   close: async (agentId, req) => {
     if (req.generation === 3) throw new ServerUnconfirmed(agentId, new Error("no server running"));
@@ -115,6 +126,12 @@ const act = (action: string, body: object) =>
     method: "POST",
     headers: { host, "content-type": "application/json" },
     body: JSON.stringify({ idempotencyKey: "a", ...body }),
+  });
+const dismissNotice = (body: unknown, on = app) =>
+  on.request("/v1/notices/ntc_x/dismiss", {
+    method: "POST",
+    headers: { host, "content-type": "application/json", "bazhen-device-id": "dev_x" },
+    body: JSON.stringify(body),
   });
 const post = (body: unknown, headers: Record<string, string> = {}) =>
   app.request("/v1/agents", {
@@ -171,6 +188,7 @@ describe("HTTP app", () => {
       shells: [],
       tasks: [],
       assignments: [],
+      notices: [],
     });
   });
 
@@ -239,6 +257,25 @@ describe("HTTP app", () => {
       (await act("dismiss", {})).status,
     ];
     expect(statuses).toEqual([409, 409, 409]);
+  });
+
+  it("takes an unpaired HTTP request for loopback's owner, and the socket's for the socket's, whose shell alone may name a device", async () => {
+    seenDismissals.length = 0;
+    await dismissNotice({ idempotencyKey: "k" });
+    await dismissNotice({ idempotencyKey: "k" }, socket);
+    expect(seenDismissals).toEqual([
+      ["owner-loopback", undefined],
+      ["owner-socket", "dev_x"],
+    ]);
+  });
+
+  it("answers a notice dismissal that is closed or refused with a conflict, and a bad body with 400", async () => {
+    const replies = [
+      await dismissNotice({ idempotencyKey: "closed" }),
+      await dismissNotice({ idempotencyKey: "refused" }),
+      await dismissNotice({}),
+    ];
+    expect(replies.map((r) => r.status)).toEqual([409, 409, 400]);
   });
 
   it("tells a stale generation from an environment that can't be reached, on close", async () => {

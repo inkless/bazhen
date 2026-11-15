@@ -7,12 +7,13 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket, WebSocketServer, type ClientOptions } from "ws";
 import { FakeRuntime } from "@bazhen/core/testing";
-import { PairResponse } from "@bazhen/protocol";
+import { PairResponse, StateSnapshot } from "@bazhen/protocol";
+import { Notices } from "../attention/notices.ts";
 import { DeviceAuth, LOOPBACK_COOKIE, SECURE_COOKIE } from "../auth/devices.ts";
 import { PairingCodes } from "../auth/pairing.ts";
 import { parseCidr, type Cidr } from "../config/cidr.ts";
 import { Store } from "../store/store.ts";
-import { tempDb, upgradeOutcome } from "../testing/fixtures.ts";
+import { loopbackPairing, tempDb, testView, upgradeOutcome } from "../testing/fixtures.ts";
 import { lanCertificate, type LanCertificate } from "../tls/material.ts";
 import { lanListener, lanPeer, type LanParts } from "./lan.ts";
 import type { UpgradeRoute } from "./upgrades.ts";
@@ -60,6 +61,7 @@ const commands: LanParts["commands"] = {
     shells: [],
     tasks: [],
     assignments: [],
+    notices: [],
   }),
   launch: unused,
   answer: refuse,
@@ -70,6 +72,7 @@ const commands: LanParts["commands"] = {
   reply: refuse,
   dismiss: refuse,
   resend: refuse,
+  dismissNotice: refuse,
   openShell: unused,
   closeShell: unused,
   restartShell: unused,
@@ -92,6 +95,13 @@ async function lan(over: Partial<LanParts> = {}) {
   const store = Store.open(tempDb());
   const devices = new DeviceAuth(store, { log: () => {} });
   const codes = new PairingCodes({ log: () => {} });
+  const notices = new Notices(store);
+  const served: LanParts["commands"] = {
+    ...commands,
+    state: (viewer) =>
+      store.snapshot({ ...testView, noticeActions: (n) => notices.actions(n, viewer) }),
+    dismissNotice: (id, req, viewer) => notices.dismiss(id, req, viewer),
+  };
   const wss = new WebSocketServer({ noServer: true });
   const echo: UpgradeRoute = {
     path: /^\/echo$/,
@@ -100,7 +110,7 @@ async function lan(over: Partial<LanParts> = {}) {
   let server: Server | undefined;
   const port = await new Promise<number>((resolve, reject) => {
     const started: Server = lanListener({
-      commands,
+      commands: served,
       devices,
       codes,
       certificate: cert(),
@@ -183,6 +193,41 @@ async function lan(over: Partial<LanParts> = {}) {
 }
 
 describe("the LAN listener", () => {
+  it("shows each pairing from its socket's address, and lets no paired device dismiss one", async () => {
+    const { call, codes, origin } = await lan();
+    const pairAs = async (label: string) => {
+      const res = await call("/v1/pairing", {
+        method: "POST",
+        headers: { origin, "x-forwarded-for": "203.0.113.9" },
+        body: { code: codes.issue().code, name: label },
+      });
+      return { cookie: res.cookie, id: PairResponse.parse(JSON.parse(res.body)).deviceId };
+    };
+    const phone = await pairAs("Phone");
+    const impostor = await pairAs("iPhone");
+    const seenBy = async (cookie: string) => {
+      const res = await call("/v1/state", { headers: { cookie } });
+      return StateSnapshot.parse(JSON.parse(res.body)).notices;
+    };
+    const ofPhone = (await seenBy(impostor.cookie)).find((n) => n.device?.id === phone.id);
+    const asPhone = (await seenBy(phone.cookie)).find((n) => n.device?.id === phone.id);
+    expect([ofPhone?.device?.address, ofPhone?.actions, asPhone?.actions]).toEqual([
+      "127.0.0.1",
+      [],
+      [],
+    ]);
+    const dismiss = (cookie: string, idempotencyKey: string) =>
+      call(`/v1/notices/${String(ofPhone?.id)}/dismiss`, {
+        method: "POST",
+        headers: { origin, cookie },
+        body: { idempotencyKey },
+      });
+    expect([
+      (await dismiss(phone.cookie, "k1")).status,
+      (await dismiss(impostor.cookie, "k2")).status,
+    ]).toEqual([409, 409]);
+  });
+
   it("asks for pairing, then pairs a browser with the HTTPS cookie and serves it", async () => {
     const { call, pair, codes } = await lan();
     const before = await call("/v1/state");
@@ -198,7 +243,7 @@ describe("the LAN listener", () => {
 
   it("refuses a device paired over loopback, by request and by upgrade, with or without Origin", async () => {
     const { call, stream, devices, origin } = await lan();
-    const { token } = devices.pair("Laptop", false);
+    const { token } = devices.pair("Laptop", false, loopbackPairing);
     const cookie = `${LOOPBACK_COOKIE}=${token}`;
     const statuses = [
       (await call("/v1/state", { headers: { cookie } })).status,

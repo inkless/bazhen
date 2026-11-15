@@ -5,6 +5,7 @@ import {
   assignment,
   attention,
   mailbox,
+  notice,
   task,
   type AgentEvent,
   type MailboxEvent,
@@ -17,6 +18,7 @@ import {
   AttentionState,
   EVENTS,
   MailboxState,
+  NoticeState,
   TaskState,
   TerminalState,
   type AssignmentEndReason,
@@ -343,6 +345,38 @@ export function project(db: Statements, e: Recorded): void {
       return closeAttention(db, e, "answered");
     case "attention.closed":
       return closeAttention(db, e, EVENTS[e.type].payload.parse(e.payload).reason);
+    case "notice.opened": {
+      const { kind, summary, device } = EVENTS[e.type].payload.parse(e.payload);
+      db.prepare(
+        `INSERT INTO notices (id, kind, state, summary, device_id, device_name, device_origin,
+           device_address, created_event_id, updated_event_id)
+         VALUES (?, ?, 'open', ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        e.entityId,
+        kind,
+        summary,
+        device?.id ?? null,
+        device?.name ?? null,
+        device?.origin ?? null,
+        device?.address ?? null,
+        e.id,
+        e.id,
+      );
+      return;
+    }
+    case "notice.closed": {
+      const { reason, by, fromDevice } = EVENTS[e.type].payload.parse(e.payload);
+      const row = db.prepare("SELECT state FROM notices WHERE id = ?").get(e.entityId);
+      if (row === undefined) throw new UnknownEntity("notice", e.entityId);
+      const state = notice.next(NoticeState.parse(row.state), reason);
+      update(db, "notices", "id", e.entityId, e.id, {
+        state,
+        close_reason: reason,
+        closed_by: by,
+        closed_from_device: fromDevice ?? null,
+      });
+      return;
+    }
     case "agent.usage": {
       const usage = EVENTS[e.type].payload.parse(e.payload);
       const row = db

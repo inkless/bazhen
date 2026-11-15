@@ -8,7 +8,7 @@ import type {
   Signal,
   TuiTheme,
 } from "@bazhen/protocol";
-import type { AgentSessionId, EnvironmentId, TerminalId } from "./ids.ts";
+import type { AgentSessionId, DeviceId, EnvironmentId, TerminalId } from "./ids.ts";
 import type { RuntimeRef, Size } from "./runtime.ts";
 
 export type EnvironmentHealthState =
@@ -56,6 +56,11 @@ export interface ShellOpen {
   readonly linkedAgentId?: AgentSessionId;
   readonly size: Size;
   readonly theme?: TuiTheme;
+  /**
+   * The paired device that opened it, named to the shell as BAZHEN_DEVICE_ID. Advisory: anything
+   * running in the shell can change its environment.
+   */
+  readonly openedBy?: DeviceId;
 }
 
 /**

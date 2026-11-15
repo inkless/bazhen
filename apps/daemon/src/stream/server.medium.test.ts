@@ -6,7 +6,7 @@ import { newId } from "@bazhen/core";
 import { EPOCH_FRAMES_SINCE, PROTOCOL_VERSION } from "@bazhen/protocol";
 import { DeviceAuth } from "../auth/devices.ts";
 import { Store } from "../store/store.ts";
-import { serveUpgrades, tempDb } from "../testing/fixtures.ts";
+import { loopbackPairing, serveUpgrades, tempDb } from "../testing/fixtures.ts";
 import { ViewRefused, type Attachment, type LeaveReason, type Viewer } from "./hub.ts";
 import { streamRoute, type StreamDeps } from "./server.ts";
 
@@ -223,7 +223,7 @@ describe("stream endpoint", () => {
         { devices, always: false },
       );
       server = served.server;
-      const { token } = devices.pair("Phone", false);
+      const { token } = devices.pair("Phone", false, loopbackPairing);
       const view = async (headers: Record<string, string>) => {
         const ws = new WebSocket(`ws://${served.host}/v1/terminals/${terminalId}/stream`, {
           origin: `http://${served.host}`,

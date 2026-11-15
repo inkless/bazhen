@@ -8,6 +8,7 @@ export type AgentSessionId = Branded<"AgentSessionId">;
 export type TaskId = Branded<"TaskId">;
 export type AssignmentId = Branded<"AssignmentId">;
 export type AttentionId = Branded<"AttentionId">;
+export type NoticeId = Branded<"NoticeId">;
 export type MessageId = Branded<"MessageId">;
 export type TerminalId = Branded<"TerminalId">;
 export type DeviceId = Branded<"DeviceId">;
@@ -22,6 +23,7 @@ export interface IdKinds {
   task: TaskId;
   asgn: AssignmentId;
   attn: AttentionId;
+  ntc: NoticeId;
   msg: MessageId;
   term: TerminalId;
   dev: DeviceId;

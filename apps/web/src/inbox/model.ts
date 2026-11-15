@@ -1,4 +1,10 @@
-import type { Attention, AttentionKind, StateSnapshot } from "@bazhen/protocol";
+import type {
+  Attention,
+  AttentionKind,
+  Notice,
+  NoticeDevice,
+  StateSnapshot,
+} from "@bazhen/protocol";
 import { shortId } from "../fleet/model.ts";
 
 export interface InboxRow {
@@ -74,3 +80,37 @@ export const CLOSED: Record<NonNullable<Attention["closeReason"]>, string> = {
   dismissed: "dismissed",
   resent: "sent again",
 };
+
+/** What the inbox calls each notice kind it knows; a later kind shows as a plain notice. */
+const NOTICE_KINDS: ReadonlyMap<string, string> = new Map([["device_paired", "New device"]]);
+
+export const noticeLabel = (kind: string) => NOTICE_KINDS.get(kind) ?? "Notice";
+
+/**
+ * How a closed notice ended, as the inbox says it. The device a dismissal came from is the claim
+ * of the shell it ran in, so it is said as a lead: from that device's shell, not by the device.
+ */
+export function noticeClosed(notice: Notice): string {
+  if (notice.closeReason === "revoked") return "device revoked";
+  if (notice.closeReason !== "dismissed") return "closed";
+  return notice.closedFrom === null
+    ? "dismissed on this machine"
+    : `dismissed from ${notice.closedFrom.name}'s shell (unverified)`;
+}
+
+const newestNoticeFirst = (x: Notice, y: Notice) => y.openedAt.localeCompare(x.openedAt);
+
+/** The open notices, newest first. */
+export const openNotices = (state: StateSnapshot): Notice[] =>
+  state.notices.filter((n) => n.state === "open").toSorted(newestNoticeFirst);
+
+/** The latest closed notices, newest first. */
+export const closedNotices = (state: StateSnapshot, limit = 20): Notice[] =>
+  state.notices
+    .filter((n) => n.state === "closed")
+    .toSorted(newestNoticeFirst)
+    .slice(0, limit);
+
+/** Where a device paired from: its origin, and the address it connected from when known. */
+export const pairedFrom = (device: NoticeDevice): string =>
+  device.address === null ? device.origin : `${device.origin} from ${device.address}`;

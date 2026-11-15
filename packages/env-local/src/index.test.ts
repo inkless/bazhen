@@ -220,6 +220,29 @@ describe("local environment", () => {
     ]);
   });
 
+  it("tells a shell the paired device that opened it, and no device when the owner did", async () => {
+    const runtime = new FakeRuntime();
+    const env = environment(runtime);
+    const openedBy = newId("dev");
+    const shell = async (by?: { openedBy: typeof openedBy }) =>
+      runtime.specOf(
+        await env.openShell({
+          terminalId: newId("term"),
+          cwd: "/work",
+          size: { cols: 80, rows: 24 },
+          ...by,
+        }),
+      ).env;
+    expect([await shell({ openedBy }), await shell()]).toEqual([
+      {
+        BAZHEN_TERMINAL_ID: expect.any(String),
+        BAZHEN_SOCKET: "/run/b.sock",
+        BAZHEN_DEVICE_ID: openedBy,
+      },
+      { BAZHEN_TERMINAL_ID: expect.any(String), BAZHEN_SOCKET: "/run/b.sock" },
+    ]);
+  });
+
   it("lists only agent terminals, by the agent their tags name", async () => {
     const runtime = new FakeRuntime();
     const env = environment(runtime);

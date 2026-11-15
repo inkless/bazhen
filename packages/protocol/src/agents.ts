@@ -3,6 +3,7 @@ import { EnvironmentKind, HarnessId, Id, IdempotencyKey } from "./ids.ts";
 
 export { HarnessId };
 import { Attention, Message } from "./mail.ts";
+import { Notice } from "./notices.ts";
 import { BusyShell, Shell } from "./shells.ts";
 import { TuiTheme } from "./theme.ts";
 import { Assignment, Task } from "./tasks.ts";
@@ -241,6 +242,8 @@ export const StateSnapshot = z.object({
   tasks: z.array(Task).default([]),
   /** Protocol 1.20. */
   assignments: z.array(Assignment).default([]),
+  /** Every open notice, and the latest closed ones. Protocol 1.38. */
+  notices: z.array(Notice).default([]),
 });
 export type StateSnapshot = z.infer<typeof StateSnapshot>;
 

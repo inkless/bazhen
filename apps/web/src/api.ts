@@ -8,6 +8,7 @@ import {
   type TaskOutcome,
   AnswerAttentionResponse,
   DismissAttentionResponse,
+  DismissNoticeResponse,
   ErrorResponse,
   ReplyAttentionResponse,
   ResendAttentionResponse,
@@ -225,6 +226,9 @@ export const resend = async (attentionId: string) =>
 
 export const dismiss = async (attentionId: string) =>
   DismissAttentionResponse.parse(await act(`/v1/attention/${attentionId}/dismiss`, {}));
+
+export const dismissNotice = async (noticeId: string) =>
+  DismissNoticeResponse.parse(await act(`/v1/notices/${noticeId}/dismiss`, {}));
 
 /**
  * Names the generation the UI saw, so a command meant for an earlier incarnation is refused. Its

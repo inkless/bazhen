@@ -85,7 +85,8 @@ const SAYS: Record<AttentionKind, string> = {
 
 /**
  * Notifies the host's desktop of each attention item as it opens, unless a dashboard is in sight
- * to show it. Returns the stop function.
+ * to show it, and of each notice by its summary, which carries nothing a device chose. Returns
+ * the stop function.
  */
 export function notifyOnAttention(
   store: Store,
@@ -99,6 +100,13 @@ export function notifyOnAttention(
     for (let batch = store.events(cursor); batch.length > 0; batch = store.events(cursor)) {
       for (const e of batch) {
         cursor = e.id;
+        // Not held back while a page is in sight: the page of the device that just paired is,
+        // the moment it loads.
+        if (e.type === "notice.opened") {
+          const notice = EVENTS["notice.opened"].payload.safeParse(e.payload);
+          if (notice.success) notify("Bazhen", notice.data.summary);
+          continue;
+        }
         if (e.type !== "attention.opened" || presence.seen(now())) continue;
         // The store checked this payload as it recorded it; one that doesn't read now is
         // skipped rather than allowed to stop the notifications after it.

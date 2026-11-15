@@ -126,10 +126,12 @@ for 5 minutes, and after 20 wrong tries it is burned and `bazhen pair` must issu
 browser paired over HTTPS stays paired until it goes 30 days unused. One paired over plain HTTP
 stays paired for a day: a browser sends a cookie to every port on a host, so other servers on
 this machine's loopback can receive that one. `bazhen devices` lists paired browsers, and
-`bazhen devices revoke <id>` ends one, closing the views it has open. Pairing guards the route,
-but a paired phone can do anything you can: never put the route on the public internet. Limit
-who can reach it with the route's own filter, such as Caddy's `remote_ip` matcher, which also
-keeps strangers away from the pairing form.
+`bazhen devices revoke <id>` ends one, closing the views it has open. Each pairing shows in the
+inbox, and on this machine's desktop as it happens, until `bazhen devices dismiss <id>` dismisses
+it; no browser can, though a paired device can run that command in a shell, as it can anything.
+Pairing guards the route, but a paired phone can do anything you can: never put the route on the
+public internet. Limit who can reach it with the route's own filter, such as Caddy's `remote_ip`
+matcher, which also keeps strangers away from the pairing form.
 
 With no external origin (`web.pairing = "auto"`, the default), Bazhen serves loopback only and
 asks no browser to pair: any process or user on this machine that can reach the daemon's port

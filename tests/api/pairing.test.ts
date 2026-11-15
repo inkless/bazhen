@@ -35,6 +35,21 @@ describe("pairing a browser through the CLI", () => {
     expect(listed.out).toContain(`${PairResponse.parse(first.body).deviceId}  Phone`);
   });
 
+  it("marks a new pairing in `bazhen devices` until `bazhen devices dismiss` dismisses it", async () => {
+    const { deviceId } = PairResponse.parse((await exchange(await pairCode())).body);
+    const lineOf = async () =>
+      (await bazhen(["devices"], daemon.env)).out.split("\n").find((l) => l.startsWith(deviceId));
+    const before = await lineOf();
+    const dismissed = await bazhen(["devices", "dismiss", deviceId], daemon.env);
+    const again = await bazhen(["devices", "dismiss", deviceId], daemon.env);
+    expect([before, dismissed.code, await lineOf(), again.code]).toEqual([
+      expect.stringContaining("(new:"),
+      0,
+      expect.not.stringContaining("(new:"),
+      1,
+    ]);
+  });
+
   it("revokes a device, so `bazhen devices` no longer lists it", async () => {
     const paired = await exchange(await pairCode());
     const { deviceId } = PairResponse.parse(paired.body);

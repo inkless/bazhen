@@ -3,6 +3,8 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import {
   AnswerAttentionRequest,
   DismissAttentionRequest,
+  DismissNoticeRequest,
+  type DismissNoticeResponse,
   ReplyAttentionRequest,
   ResendAttentionRequest,
   AssignTaskRequest,
@@ -49,6 +51,7 @@ import {
   LaunchFailed,
   TaskRefused,
   type Caller,
+  type DeviceId,
   NoTerminal,
   NotResumable,
   ProcessState,
@@ -70,6 +73,7 @@ import { AttentionClosed, AttentionUnavailable } from "../mailbox/approvals.ts";
 import { AgentGone } from "../mailbox/mailbox.ts";
 import { ShellBusy, ShellOpenFailed, ShellsUnsettled, UnknownShell } from "../shells/lifecycle.ts";
 import { AttentionRefused } from "../attention/inbox.ts";
+import { NoticeClosed, NoticeRefused, type Viewer } from "../attention/notices.ts";
 import { MailTooLong, UnknownTask } from "../tasks/tasks.ts";
 import { refusal, type Allowlists } from "./guard.ts";
 import { webPage } from "./web.ts";
@@ -82,7 +86,7 @@ import {
   type DeviceGate,
 } from "../auth/devices.ts";
 import type { PairingCodes } from "../auth/pairing.ts";
-import { pairingKey } from "../config/cidr.ts";
+import { pairingKey, peerKey } from "../config/cidr.ts";
 import { TerminalLimit } from "../terminals/budget.ts";
 
 export interface AppDeps {
@@ -102,17 +106,26 @@ export interface AppDeps {
   readonly lan?: { readonly peer: (c: Context) => string | undefined };
   /** The built web client's directory, served on every path outside `/v1`; absent on the socket. */
   readonly web?: { readonly root: string };
-  readonly state: () => StateSnapshot;
+  /** What `viewer` sees: the actions offered differ by who asks. */
+  readonly state: (viewer: Viewer) => StateSnapshot;
   readonly launch: (req: LaunchAgentRequest) => Promise<LaunchAgentResponse>;
   readonly answer: (attentionId: string, req: AnswerAttentionRequest) => AnswerAttentionResponse;
   readonly reply: (attentionId: string, req: ReplyAttentionRequest) => ReplyAttentionResponse;
   readonly dismiss: (attentionId: string, req: DismissAttentionRequest) => DismissAttentionResponse;
   readonly resend: (attentionId: string, req: ResendAttentionRequest) => ResendAttentionResponse;
+  /** `fromDevice` is the advisory device a socket caller's shell names; absent over HTTP. */
+  readonly dismissNotice: (
+    noticeId: string,
+    req: DismissNoticeRequest,
+    viewer: Viewer,
+    fromDevice: string | undefined,
+  ) => DismissNoticeResponse;
   readonly close: (agentId: string, req: CloseAgentRequest) => Promise<AgentCommandResponse>;
   readonly respawn: (agentId: string, req: RespawnAgentRequest) => Promise<AgentCommandResponse>;
   readonly relaunch: (agentId: string, req: RelaunchAgentRequest) => Promise<AgentCommandResponse>;
   readonly signal: (agentId: string, req: SignalAgentRequest) => Promise<AgentCommandResponse>;
-  readonly openShell: (req: OpenShellRequest) => Promise<ShellCommandResponse>;
+  /** `viewer` is who opens it: a paired device's shell is told which device that was. */
+  readonly openShell: (req: OpenShellRequest, viewer: Viewer) => Promise<ShellCommandResponse>;
   readonly closeShell: (
     terminalId: string,
     req: CloseShellRequest,
@@ -120,6 +133,7 @@ export interface AppDeps {
   readonly restartShell: (
     terminalId: string,
     req: RestartShellRequest,
+    viewer: Viewer,
   ) => Promise<ShellCommandResponse>;
   readonly renameShell: (
     terminalId: string,
@@ -166,8 +180,15 @@ function fail(
   return c.json(body, status);
 }
 
-export function createApp(deps: AppDeps): Hono {
-  const app = new Hono();
+/** The paired device a request came from, as the gate verified it; unset for the owner. */
+export type AppEnv = { Variables: { device?: DeviceId } };
+
+export function createApp(deps: AppDeps): Hono<AppEnv> {
+  const app = new Hono<AppEnv>();
+  // The socket's 0600 permission makes its caller the owner; over HTTP, a request the gate let
+  // through without a device is loopback's own where pairing isn't required.
+  const viewerOf = (c: Context<AppEnv>): Viewer =>
+    c.get("device") ?? (deps.allow === null ? "owner-socket" : "owner-loopback");
 
   const { allow } = deps;
   if (allow !== null) {
@@ -204,6 +225,7 @@ export function createApp(deps: AppDeps): Hono {
         remote: arrivedRemotely(gate, header),
         touch: fetchSite === undefined || fetchSite === "same-origin",
       });
+      if (verified !== null) c.set("device", verified.device.id);
       if (required) {
         if (verified === null)
           return fail(c, 401, "unpaired", "pair this browser: run `bazhen pair`");
@@ -227,10 +249,11 @@ export function createApp(deps: AppDeps): Hono {
       const body = PairRequest.safeParse(await c.req.json().catch(() => undefined));
       if (!body.success) return invalid(c, body.error);
       const { lan } = deps;
+      const peer = lan?.peer(c);
       const attempt =
         lan === undefined
           ? pairing.codes.attempt(body.data.code, origin)
-          : pairing.codes.attempt(body.data.code, pairingKey(lan.peer(c)), "lan");
+          : pairing.codes.attempt(body.data.code, pairingKey(peer), "lan");
       if (attempt.kind === "rate_limited") {
         c.header("retry-after", String(attempt.retryAfterSeconds));
         return fail(c, 429, "rate_limited", "too many attempts; wait a minute");
@@ -241,7 +264,10 @@ export function createApp(deps: AppDeps): Hono {
       // HTTPS gets the cookie only HTTPS can carry; plain HTTP is loopback (§9.2). Behind a proxy
       // only Origin says which; the LAN listener is HTTPS itself.
       const secure = lan !== undefined || origin.startsWith("https:");
-      const { deviceId, name, token } = pairing.devices.pair(body.data.name, secure);
+      const { deviceId, name, token } = pairing.devices.pair(body.data.name, secure, {
+        origin,
+        address: peer === undefined ? null : peerKey(peer),
+      });
       c.header("set-cookie", deviceCookie(token, secure));
       const res: PairResponse = { deviceId, name };
       return c.json(res);
@@ -260,7 +286,7 @@ export function createApp(deps: AppDeps): Hono {
     return c.json(body);
   });
 
-  app.get("/v1/state", (c) => c.json(deps.state()));
+  app.get("/v1/state", (c) => c.json(deps.state(viewerOf(c))));
 
   app.post("/v1/agents", async (c) => {
     const body = LaunchAgentRequest.safeParse(await c.req.json().catch(() => undefined));
@@ -271,19 +297,19 @@ export function createApp(deps: AppDeps): Hono {
   app.post("/v1/shells", async (c) => {
     const body = OpenShellRequest.safeParse(await c.req.json().catch(() => undefined));
     if (!body.success) return invalid(c, body.error);
-    return c.json(await deps.openShell(body.data));
+    return c.json(await deps.openShell(body.data, viewerOf(c)));
   });
 
   /** A request about one entity: the body is checked against its schema, then handed to `run`. */
   const route = <T, R>(
     path: `/v1/${string}/:id/${string}`,
     schema: z.ZodType<T>,
-    run: (id: string, req: T) => R | Promise<R>,
+    run: (id: string, req: T, viewer: Viewer, c: Context<AppEnv>) => R | Promise<R>,
   ) =>
     app.post(path, async (c) => {
       const body = schema.safeParse(await c.req.json().catch(() => undefined));
       if (!body.success) return invalid(c, body.error);
-      return c.json(await run(c.req.param("id"), body.data));
+      return c.json(await run(c.req.param("id"), body.data, viewerOf(c), c));
     });
   route("/v1/agents/:id/close", CloseAgentRequest, deps.close);
   route("/v1/agents/:id/respawn", RespawnAgentRequest, deps.respawn);
@@ -294,6 +320,15 @@ export function createApp(deps: AppDeps): Hono {
   route("/v1/attention/:id/reply", ReplyAttentionRequest, deps.reply);
   route("/v1/attention/:id/dismiss", DismissAttentionRequest, deps.dismiss);
   route("/v1/attention/:id/resend", ResendAttentionRequest, deps.resend);
+  // Only the socket's caller can say which device's shell it runs in; a browser can't.
+  route("/v1/notices/:id/dismiss", DismissNoticeRequest, (id, req, viewer, c) =>
+    deps.dismissNotice(
+      id,
+      req,
+      viewer,
+      deps.allow === null ? c.req.header("bazhen-device-id") : undefined,
+    ),
+  );
   route("/v1/shells/:id/restart", RestartShellRequest, deps.restartShell);
   route("/v1/shells/:id/rename", RenameShellRequest, deps.renameShell);
   route("/v1/shells/:id/unlink", UnlinkShellRequest, deps.unlinkShell);
@@ -345,6 +380,9 @@ export function createApp(deps: AppDeps): Hono {
     if (err instanceof IdempotencyConflict) return fail(c, 409, "conflict", err.message);
     if (err instanceof AttentionClosed) return fail(c, 409, "conflict", err.message);
     if (err instanceof AttentionRefused) return fail(c, 409, "conflict", err.message);
+    if (err instanceof NoticeClosed || err instanceof NoticeRefused) {
+      return fail(c, 409, "conflict", err.message);
+    }
     if (err instanceof AttentionUnavailable) return fail(c, 503, "unavailable", err.message);
     if (err instanceof UnknownAgent || err instanceof UnknownShell)
       return fail(c, 404, "not_found", err.message);

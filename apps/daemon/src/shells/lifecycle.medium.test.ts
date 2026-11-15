@@ -10,7 +10,13 @@ import { Lifecycle } from "../agents/lifecycle.ts";
 import { AgentQueue } from "../agents/queue.ts";
 import { StaleGeneration, StateConflict } from "../commands.ts";
 import { IdempotencyConflict, type Store } from "../store/store.ts";
-import { quietStartAgain, storeBudget, testView, withAgent } from "../testing/fixtures.ts";
+import {
+  loopbackPairing,
+  quietStartAgain,
+  storeBudget,
+  testView,
+  withAgent,
+} from "../testing/fixtures.ts";
 import { TerminalLimit } from "../terminals/budget.ts";
 import {
   ShellBusy,
@@ -389,6 +395,19 @@ async function lost(theme: "light" | "dark" = "light", maxOpen = 100) {
 }
 
 describe("a lost shell", () => {
+  it("tells the shell a paired device opens, or restarts, which device that was", async () => {
+    const { shells, terminalId, runtime, refOf, store } = await lost();
+    const phone = store.pairDevice("Phone", "hash", true, new Date(), loopbackPairing);
+    const opened = await shells.open({ idempotencyKey: "by-phone" }, phone);
+    const restarted = await shells.restart(
+      terminalId,
+      { idempotencyKey: "r", generation: 0 },
+      phone,
+    );
+    const deviceOf = (id: string) => runtime.specOf(refOf(id)).env["BAZHEN_DEVICE_ID"];
+    expect([deviceOf(opened.terminalId), deviceOf(restarted.terminalId)]).toEqual([phone, phone]);
+  });
+
   it("restarts as a new shell in its directory, beside its agent and in its theme", async () => {
     const { shells, terminalId, runtime, refOf, stateOf, agentId } = await lost();
     const restarted = await shells.restart(terminalId, { idempotencyKey: "r", generation: 0 });

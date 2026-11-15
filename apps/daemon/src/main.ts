@@ -40,6 +40,7 @@ import { ForegroundWatch } from "./shells/foreground.ts";
 import { streamRoute } from "./stream/server.ts";
 import { Approvals } from "./mailbox/approvals.ts";
 import { Inbox } from "./attention/inbox.ts";
+import { Notices, deviceOf } from "./attention/notices.ts";
 import { MAC_APP, desktopNotifier, hostNotifier, notifyOnAttention } from "./notify/desktop.ts";
 import { Presence } from "./notify/presence.ts";
 import { HOOK_SCRIPT, hookClient, hookCommand } from "./mailbox/hook-command.ts";
@@ -295,12 +296,14 @@ const pairing = new PairingCodes();
 const devices = new DeviceAuth(store);
 // Pairing as configured, and for any request a proxy forwarded from another machine regardless.
 const gate = { devices, always: config.pairingRequired };
+const notices = new Notices(store);
 const snapshotView: SnapshotView = {
   host: (kind) => (kind === "local" ? hostname() : ""),
   attachCommand: (ref) => runtime.attachCommand(ref),
   resumes: environment.resumes,
   themes: (harness) => environment.themes[harness] ?? [],
   attentionActions: (item) => inbox.actions(item),
+  noticeActions: (n) => notices.actions(n, "owner-socket"),
 };
 for (const a of store.snapshot(snapshotView).agents) {
   if (a.harness === "claude-code" && a.state === "running") activity.restarted(a.id);
@@ -309,20 +312,23 @@ const commands = {
   appVersion: APP_VERSION,
   schemaVersion: () => store.schemaVersion(),
   runtime,
-  state: () => store.snapshot(snapshotView),
+  state: (viewer) =>
+    store.snapshot({ ...snapshotView, noticeActions: (n) => notices.actions(n, viewer) }),
   launch: (req) =>
     launchAgent({ store, environment, size: DEFAULT_SIZE, home: inputs.home, queue, budget }, req),
   answer: (attentionId, req) => approvals.answer(attentionId, req),
   reply: (attentionId, req) => inbox.reply(attentionId, req),
   dismiss: (attentionId, req) => inbox.dismiss(attentionId, req),
   resend: (attentionId, req) => inbox.resend(attentionId, req),
+  dismissNotice: (noticeId, req, viewer, fromDevice) =>
+    notices.dismiss(noticeId, req, viewer, fromDevice),
   close: (agentId, req) => shells.closeAgent(agentId, req, (r) => lifecycle.close(agentId, r)),
   respawn: (agentId, req) => lifecycle.respawn(agentId, req),
   relaunch: (agentId, req) => lifecycle.relaunch(agentId, req),
   signal: (agentId, req) => lifecycle.signal(agentId, req),
-  openShell: (req) => shells.open(req),
+  openShell: (req, viewer) => shells.open(req, deviceOf(viewer)),
   closeShell: (terminalId, req) => shells.close(terminalId, req),
-  restartShell: (terminalId, req) => shells.restart(terminalId, req),
+  restartShell: (terminalId, req, viewer) => shells.restart(terminalId, req, deviceOf(viewer)),
   renameShell: (terminalId, req) => shells.rename(terminalId, req),
   unlinkShell: (terminalId, req) => shells.unlink(terminalId, req),
   tasks,

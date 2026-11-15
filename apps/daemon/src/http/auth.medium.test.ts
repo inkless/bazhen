@@ -6,7 +6,13 @@ import { PairResponse } from "@bazhen/protocol";
 import { DeviceAuth, LOOPBACK_IDLE_MS, TOUCH_EVERY_MS, tokenFrom } from "../auth/devices.ts";
 import { PairingCodes } from "../auth/pairing.ts";
 import { Store } from "../store/store.ts";
-import { serveUpgrades, tempDb, upgradeOutcome } from "../testing/fixtures.ts";
+import {
+  loopbackPairing,
+  serveUpgrades,
+  tempDb,
+  testView,
+  upgradeOutcome,
+} from "../testing/fixtures.ts";
 import { createApp, type AppDeps } from "./app.ts";
 
 const host = "127.0.0.1:7900";
@@ -52,6 +58,7 @@ function daemon(always = true) {
       shells: [],
       tasks: [],
       assignments: [],
+      notices: [],
     }),
     launch: unused,
     answer: refuse,
@@ -62,6 +69,7 @@ function daemon(always = true) {
     reply: refuse,
     dismiss: refuse,
     resend: refuse,
+    dismissNotice: refuse,
     openShell: unused,
     closeShell: unused,
     restartShell: unused,
@@ -110,7 +118,7 @@ function daemon(always = true) {
     }
     return answers;
   };
-  return { request, pair, paired, reads, codes, devices, clock };
+  return { request, pair, paired, reads, codes, devices, clock, store };
 }
 
 describe("device auth when pairing is not always required", () => {
@@ -227,6 +235,17 @@ describe("device auth on the TCP app", () => {
     expect(state.status).toBe(200);
   });
 
+  it("notes a pairing through a proxy by the origin it came from, never the address a header claims", async () => {
+    const { pair, codes, store } = daemon();
+    await pair(codes.issue().code, external, {
+      host: new URL(external).host,
+      "x-forwarded-for": "203.0.113.9",
+    });
+    expect(store.snapshot(testView).notices.map((n) => n.device)).toMatchObject([
+      { name: "Phone", origin: external, address: null },
+    ]);
+  });
+
   it("refuses a wrong code 401 and a burst of tries 429, with when to try again", async () => {
     const { pair, codes } = daemon();
     codes.issue();
@@ -331,7 +350,7 @@ async function serving(always = true) {
     { devices, always },
   );
   servers.push(served.server);
-  const { token, deviceId } = devices.pair("Phone", false);
+  const { token, deviceId } = devices.pair("Phone", false, loopbackPairing);
   return {
     url: `ws://${served.host}/echo`,
     pageOrigin: `http://${served.host}`,

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { HarnessId, StateSnapshot } from "@bazhen/protocol";
 import { launchAgent, watchState } from "./api.ts";
 import { AgentAttention, Inbox } from "./inbox/Inbox.tsx";
+import { openNotices } from "./inbox/model.ts";
 import { pageNotifier } from "./inbox/notify.ts";
 import { FleetList } from "./fleet/FleetList.tsx";
 import { groupFleet } from "./fleet/model.ts";
@@ -86,7 +87,10 @@ export function Dashboard() {
   const fleet = state === null ? null : groupFleet(state, showEnded);
   const agent = state?.agents.find((a) => a.id === selected);
   const shell = state?.shells.find((s) => s.id === shellId);
-  const open = state?.attention.filter((a) => a.state === "open").length ?? 0;
+  const open =
+    state === null
+      ? 0
+      : state.attention.filter((a) => a.state === "open").length + openNotices(state).length;
   const openTasks = state?.tasks.filter((t) => t.state === "open").length ?? 0;
   const opening = { onOpenTask: openTask, onOpenAgent: select, failed };
   // One thing shown rather than the fleet, which a phone gives the whole screen.

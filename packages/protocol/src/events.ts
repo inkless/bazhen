@@ -3,6 +3,7 @@ import { Activity, Usage, ExitStatus, ExternalRef, HarnessId, Signal } from "./a
 import { TuiTheme } from "./theme.ts";
 import { AttachmentMode, EnvironmentKind, Id } from "./ids.ts";
 import { ApprovalDecision, AttentionCloseReason, AttentionKind } from "./mail.ts";
+import { NoticeCloseReason, NoticeCloser, NoticeDevice } from "./notices.ts";
 import { Role, TaskBrief, TaskOutcome, TaskTitle } from "./tasks.ts";
 import { ProtocolVersion } from "./version.ts";
 
@@ -344,6 +345,24 @@ export const EVENTS = {
   /** Never the token, its hash or the code it was paired with. */
   "device.paired": { entity: "device", payload: z.object({ name: z.string() }) },
   "device.revoked": { entity: "device", payload: z.object({}) },
+  /** Something for the human that no agent raised, such as a device pairing (protocol 1.38). */
+  "notice.opened": {
+    entity: "notice",
+    payload: z.object({
+      kind: z.string(),
+      summary: z.string(),
+      device: NoticeDevice.nullable(),
+    }),
+  },
+  "notice.closed": {
+    entity: "notice",
+    payload: z.object({
+      reason: NoticeCloseReason,
+      by: NoticeCloser,
+      /** Advisory: the device whose shell the socket call came from, as its environment claimed. */
+      fromDevice: Id("dev").optional(),
+    }),
+  },
   "lease.granted": {
     entity: "terminal",
     payload: z.object({ attachmentId: Id("att"), epoch: z.number().int().positive() }),
