@@ -31,6 +31,8 @@ const COVERED_ELSEWHERE: Record<string, string> = {
   "apps/daemon/src/testing/fake-app-server.ts": "apps/daemon/src/codex/app-server.medium.test.ts",
   "packages/runtime-holder/src/testing/fake-holder.ts":
     "packages/runtime-holder/src/client.test.ts",
+  "packages/runtime-tmux/src/testing/fake-tmux.ts":
+    "packages/runtime-tmux/src/server-exit.medium.test.ts",
   "packages/core/src/environment.ts": "packages/env-local/src/index.test.ts",
   "packages/protocol/src/holder-fixtures.ts": "scripts/protocol-schema.medium.test.ts",
   "packages/core/src/runtime.ts": "packages/core/src/testing/fake-runtime.test.ts",
