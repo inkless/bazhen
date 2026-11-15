@@ -155,7 +155,7 @@ below the fold. So:
   `body` don't scroll or bounce.
 - Only a pane whose content can outgrow it scrolls, inside itself and without chaining
   (`overflow: auto; overscroll-behavior: contain`): the rail, a list in the centre, the notices,
-  and what sits above an agent's terminal, capped at 40% of the workspace, 30% where the app shows
+  and what sits above an agent's terminal, capped at 40% of the workspace, 25% where the app shows
   one thing at a time. Anything else fills its parent through flex with `min-height: 0`; no
   height is in `vh`. A one-finger drag over nothing that scrolls that way doesn't move the page
   (`apps/web/src/ui/pan-guard.ts`): with the keyboard up iOS would pan it, sliding the app off
@@ -164,7 +164,8 @@ below the fold. So:
   one thing at a time: the fleet, or what was opened from it under the Fleet, Inbox and Tasks
   links. The app's header, the daemon's details, the launch form and the attach commands are on
   the fleet screen, or a wider one, only there; an agent's TUI and its shells are tabs, not one
-  above the other. When the pane that opens leaves focus nowhere, as on a control the fleet's list
+  above the other. Elsewhere a screen too short to stack them (`TOO_SHORT_TO_STACK`; a touch
+  screen's controls are taller) puts the dock beside the TUI where it fits, whatever was chosen. When the pane that opens leaves focus nowhere, as on a control the fleet's list
   took with it, focus moves to the pane.
 - A terminal is never shorter than `6rem`: the daemon refuses a view of fewer than two rows.
 - The soft keyboard shortens the app, so a terminal resizes to what is left and its input row

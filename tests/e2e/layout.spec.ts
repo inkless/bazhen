@@ -16,15 +16,41 @@ const PROMPT = /[$#%>][\s ]*$/;
 interface Screen {
   readonly name: string;
   readonly options: BrowserContextOptions;
-  /** What share of what the user sees, at least, the terminals get. */
+  /** What share of the height the user sees, at least, the terminals' screens get. */
   readonly share: number;
 }
 
+/*
+ * Each share is the layout's arithmetic for the tighter of the two pages (the agent, with its
+ * linked shell), less a margin, from app.css and tokens.css. A touch screen's controls are 44px;
+ * the key bar is 53px (44 + 2 × 4 padding + 1 border), and what the user sees, V, ends at its top.
+ * The app's padding is 12px top and bottom; a status line is 22.4px (16px at 1.4) with 16px margins
+ * each side, 4px where the app shows one thing at a time; a screen may lose up to one row (18px)
+ * to the host's height.
+ *
+ * - iPhone upright, 390 × 844, one pane: V = 791. Under the links (44 + 8 gap) the workspace is
+ *   715; what sits above the terminal is capped at 25%, 179; the dock's header and tabs share a
+ *   row, 45, then an 8px gap and the status, 30.4: the TUI's host is 453, its screen ≥ 435, 0.55.
+ * - iPhone on its side, 844 × 390, one pane: V = 337; workspace 261, capped part 65, host
+ *   261 − 65 − 45 − 8 − 30.4 = 113, screen ≥ 95: 0.28.
+ * - iPad upright, 820 × 1180, the rail beside, the dock under the TUI: V = 1127; header 44, launch
+ *   form 68, dashboard 991; the agent's head, cwd and message form about 140, its attach line 34;
+ *   the TUI and the dock split 829 less a 12px gap, 408 each. The TUI's host is 408 − 54.4 = 354;
+ *   the dock's shell's is 408 less its header 44, gap 8, tabs 45, the shell's header 44, gap 8,
+ *   status 54.4, gap 8 and attach line 22.4, 174. Screens ≥ 336 + 156: 0.44.
+ * - iPad on its side, 1180 × 820: too short to stack them, so the dock sits beside. V = 767,
+ *   dashboard 631, the row 631 − 140 − 34 = 457; the TUI's host 457 − 54.4 = 403, screen ≥ 385:
+ *   0.5.
+ * - A desktop, 1280 × 800, with a mouse's 24px controls and no key bar: V = 800; header 30,
+ *   launch form 48, dashboard 698; above the terminals about 100, attach line 34; 564 less a 12px
+ *   gap split 276 each. The TUI's host 221; the shell's 276 − 24 − 8 − 25 − 24 − 8 − 54.4 − 8 −
+ *   22.4 = 102. Screens ≥ 203 + 84: 0.36.
+ */
 const SCREENS: readonly Screen[] = [
   { name: "an iPhone upright", options: phone(390, 844), share: 0.5 },
-  { name: "an iPhone on its side", options: phone(844, 390), share: 0.3 },
-  { name: "an iPad upright", options: phone(820, 1180), share: 0.5 },
-  { name: "an iPad on its side", options: phone(1180, 820), share: 0.4 },
+  { name: "an iPhone on its side", options: phone(844, 390), share: 0.25 },
+  { name: "an iPad upright", options: phone(820, 1180), share: 0.4 },
+  { name: "an iPad on its side", options: phone(1180, 820), share: 0.45 },
   { name: "a desktop", options: { viewport: { width: 1280, height: 800 } }, share: 0.3 },
 ];
 
@@ -145,7 +171,18 @@ async function open(browser: Browser, options: BrowserContextOptions, hash: stri
   const page = await (await browser.newContext(options)).newPage();
   await page.goto(`/${hash}`);
   await expect(page.locator(".xterm-screen").first()).toBeVisible();
+  await dismissThemeNotice(page);
   return page;
+}
+
+/**
+ * Dismisses the list of agents started in the other theme, where it shows. It is this run's own:
+ * other files start agents in dark on a page in light. A page whose agents it started itself shows
+ * none.
+ */
+async function dismissThemeNotice(page: Page): Promise<void> {
+  const notice = page.getByRole("status", { name: "theme" });
+  if ((await notice.count()) > 0) await notice.getByRole("button", { name: "Dismiss" }).click();
 }
 
 for (const { name, options, share } of SCREENS) {

@@ -161,7 +161,11 @@ body {
   }
 
   .workspace-info.capped {
-    max-height: 30%;
+    max-height: 25%;
+  }
+
+  .terminal > p {
+    margin: var(--space-1) 0;
   }
 
   .dock.dock-open:has(> .tabs) {
