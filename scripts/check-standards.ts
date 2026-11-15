@@ -1124,12 +1124,28 @@ export function gateScriptFailures(scripts: Record<string, string>): string[] {
   return out;
 }
 
-/** TOML's lines with comments and blank lines dropped, each trimmed. Strings hold no `#` here. */
+/**
+ * TOML's lines with comments and blank lines dropped, each trimmed, and an entry the formatter
+ * wrapped across lines (a long inline table or array) joined back into one. Strings hold no `#`,
+ * `[`, `]`, `{` or `}` here.
+ */
 function tomlLines(text: string): string[] {
-  return text
-    .split(/\r?\n/)
-    .map((l) => l.replace(/\s#.*$|^#.*$/, "").trim())
-    .filter((l) => l !== "");
+  const lines: string[] = [];
+  let entry = "";
+  let depth = 0;
+  for (const line of text.split(/\r?\n/)) {
+    const code = line.replace(/\s#.*$|^#.*$/, "").trim();
+    if (code === "") continue;
+    entry = entry === "" ? code : `${entry} ${code}`;
+    for (const c of code) depth += c === "[" || c === "{" ? 1 : c === "]" || c === "}" ? -1 : 0;
+    if (depth <= 0 || /^\[\[?[^\]]*\]\]?$/.test(entry)) {
+      lines.push(entry);
+      entry = "";
+      depth = 0;
+    }
+  }
+  if (entry !== "") lines.push(entry);
+  return lines;
 }
 
 /** Each table's lines, by its header; the lines before any header are under "". */

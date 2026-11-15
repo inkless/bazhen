@@ -580,6 +580,9 @@ describe("rootManifestFailures", () => {
       root.replace("[workspace.dependencies]\n", `[workspace.dependencies]\n${lines}\n`),
     );
 
+  const wrapped = (version: string) =>
+    deps(`rustix = { version = "${version}", features = [\n  "std",\n  "pty",\n] }`);
+
   it("accepts a manifest holding the standard's lints and exact pins", () => {
     expect(rootManifestFailures(root)).toEqual([]);
   });
@@ -627,6 +630,13 @@ describe("rootManifestFailures", () => {
       [],
       [],
       [expect.stringContaining('(`path = "crates/<name>"`)')],
+    ]);
+  });
+
+  it("reads an entry the formatter wrapped across lines as one", () => {
+    expect([wrapped("=1.1.6"), wrapped("1.1")]).toEqual([
+      [],
+      [expect.stringContaining('`rustix = { version = "1.1", features = [ "std", "pty", ] }`')],
     ]);
   });
 });
