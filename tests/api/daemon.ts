@@ -147,6 +147,10 @@ export function shellWithRc(kind: IntegratedShell, rcLine: string) {
   const dir = mkdtempSync("/tmp/bz-rc-");
   const rc = join(dir, kind === "zsh" ? ".zshrc" : `${kind}rc`);
   writeFileSync(rc, `${rcLine}\n`);
+  // As bash's --rcfile does, zsh skips the host's global rc files, which can stop a shell to ask
+  // something first: a CI runner's runs compinit, which asks about insecure directories and takes
+  // the first keys typed as the answer.
+  if (kind === "zsh") writeFileSync(join(dir, ".zshenv"), "unsetopt GLOBAL_RCS\n");
   const start: Record<IntegratedShell, string> = {
     zsh: `ZDOTDIR='${dir}' exec zsh -i`,
     bash: `exec bash --rcfile '${rc}' -i`,

@@ -42,7 +42,7 @@ describe.each<IntegratedShell>(["zsh", "bash", "fish"])(
     let keys = 0;
     /**
      * A new shell, and a view driving it, once the shell has drawn its first prompt: a key typed
-     * before its line editor starts can be lost, as zsh can lose the first.
+     * before its line editor starts can be lost, or taken by something its rc asks first.
      */
     async function driven() {
       const opened = await daemon.request("/v1/shells", {
