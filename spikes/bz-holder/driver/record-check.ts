@@ -48,8 +48,8 @@ const cases: Case[] = [
     code: 0,
     partial: false,
   },
-  { name: "SIGTERM to the recorder", end: async (r) => process.kill(r.recorderPid, "SIGTERM"), code: 143, partial: false },
-  { name: "the inner holder is killed", end: async (r) => process.kill(r.inner.holderPid, "SIGKILL"), code: 1, partial: true },
+  { name: "SIGTERM to the recorder", end: async (r) => void process.kill(r.recorderPid, "SIGTERM"), code: 143, partial: false },
+  { name: "the inner holder is killed", end: async (r) => void process.kill(r.inner.holderPid, "SIGKILL"), code: 1, partial: true },
 ];
 
 ptyGuard(2 * cases.length);

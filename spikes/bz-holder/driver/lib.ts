@@ -61,7 +61,7 @@ export const jsonOf = <T = Record<string, unknown>>(f: Frame): T =>
 
 /** One connection to a holder. Frames arrive in order; `next` waits for one of a kind. */
 export class Conn {
-  private buf = Buffer.alloc(0);
+  private buf: Buffer = Buffer.alloc(0);
   private waiters: { kinds: number[]; resolve: (f: Frame) => void }[] = [];
   private closed = false;
   onFrame: (f: Frame) => void = () => {};
