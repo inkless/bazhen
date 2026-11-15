@@ -117,7 +117,7 @@ source with comments and strings set aside, and fails on:
   outside tests is code the gates never build, so no lint or test reads it. A predicate joins
   the list with why the gates build it: a `target_os` joins only with a CI job in the same pull
   request that runs `pnpm lint:rust` and `pnpm test:rust` on that OS, as the PTY holder's
-  `linux` and `macos` code will need;
+  `linux` and `macos` code will need (CI's `rust-macos` job runs them on macOS);
 - a test harness of a member's own (`harness = false`), which could run nothing.
 
 The targets themselves are read from Cargo, not from the manifests' text, so no spelling of a
