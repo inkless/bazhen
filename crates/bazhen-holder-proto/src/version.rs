@@ -5,7 +5,7 @@ use crate::body::MAX_SAFE_INTEGER;
 
 /// The version this build speaks. Within a major, changes are additive only, and the minor is
 /// bumped with any addition.
-pub const PROTOCOL_VERSION: &str = "1.0";
+pub const PROTOCOL_VERSION: &str = "1.1";
 
 /// A `major.minor` version.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

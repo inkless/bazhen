@@ -11,7 +11,8 @@ use std::time::{Duration, Instant};
 
 use bazhen_holder_proto::body::{
     self, Count, ErrorBody, ErrorCode, Exited, Foreground, HelloReply, HelloRequest, Offset,
-    OkBody, ProtocolVersion, Size, StartTime, SubscribeFrom, Tags, TerminalId, Versions,
+    OkBody, ProcessSpec, ProtocolVersion, Respawned, Size, StartTime, SubscribeFrom, Tags,
+    TerminalId, Versions,
 };
 use bazhen_holder_proto::{PROTOCOL_VERSION, Reply, Request, RequestId, negotiate, request_name};
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
@@ -20,10 +21,11 @@ use rustix::process::Pid;
 use crate::child::{CLOSE_GRACE, SignalRefused};
 use crate::conn::{Connection, READ_CHUNK};
 use crate::holder::{Holder, InputRefused, readiness};
-use crate::pty::WindowSize;
+use crate::pty::{self, Pty, WindowSize};
 use crate::ring::Ring;
 use crate::signals::Wakeups;
 use crate::socket::{self, RECHECK_EVERY, Socket};
+use crate::start::{child_start, process_problem};
 use crate::start_time::{self, StartTimeError};
 
 /// The most connections served at once. The daemon holds one; `bazhen attach --direct` and
@@ -69,6 +71,9 @@ struct Shared {
     /// costs one `SIGWINCH`.
     resize: Option<Size>,
     close_requested: bool,
+    /// Where in the output the current generation starts: the offsets its peers see count from
+    /// here.
+    base: u64,
     /// Whether the child's exit has been sent to the connections open when it was published.
     exit_sent: bool,
 }
@@ -114,6 +119,7 @@ impl Server {
                 writer: None,
                 resize: None,
                 close_requested: false,
+                base: 0,
                 exit_sent: false,
             },
             rebind_wakeups: rebind,
@@ -162,14 +168,25 @@ impl Server {
         }
         // Connections already open first, so one whose `hello` is waiting is read before a
         // newcomer can take its place.
-        for (i, conn) in self.conns.iter_mut().enumerate() {
-            if ready.conns.get(i).copied().unwrap_or(false) {
+        for i in 0..self.conns.len() {
+            if ready.conns.get(i).copied().unwrap_or(false)
+                && let Some(conn) = self.conns.get_mut(i)
+            {
                 conn.receive(&mut self.buffer);
             }
-            serve(conn, &mut self.shared, holder, now);
+            // A respawn is answered here, with every connection at hand, and the connection's
+            // requests after it then go on being answered.
+            while let Some(conn) = self.conns.get_mut(i)
+                && let Some((id, spec)) = serve(conn, &mut self.shared, holder, now)
+            {
+                self.respawn(i, id, &spec, holder);
+            }
             // Freed here as well as after the writes, so a writer's `hello` later in this turn
             // can take the slot of one that hung up earlier in it.
-            if self.shared.writer == Some(conn.id()) && !conn.is_open() {
+            if let Some(conn) = self.conns.get(i)
+                && self.shared.writer == Some(conn.id())
+                && !conn.is_open()
+            {
                 self.shared.writer = None;
             }
         }
@@ -227,6 +244,82 @@ impl Server {
         let at = holder.output().end();
         for conn in self.conns.iter_mut().filter(|conn| conn.is_open()) {
             conn.queue_event(at, frame.clone());
+        }
+    }
+
+    /// Starts `spec` in place of the child, whose exit is published, as its next generation, on a
+    /// fresh PTY of the terminal's size, and tells every connection past `hello`: `respawned` comes
+    /// after the old child's output and its `exited`, and before anything of the new one, the
+    /// asker's `ok` included. Refused while the holder is closing, since it would exit and leave
+    /// the new child unwatched; while the child runs (`running`); for a generation not above the
+    /// current one; or when the system won't start it, which leaves the terminal as it was.
+    fn respawn(
+        &mut self,
+        asker: usize,
+        id: RequestId,
+        spec: &ProcessSpec,
+        holder: &mut Holder<Ring>,
+    ) {
+        if let Some((code, why)) = respawn_refusal(&self.shared, holder, spec) {
+            if let Some(conn) = self.conns.get_mut(asker) {
+                refuse(conn, id, "respawn", code, why);
+            }
+            return;
+        }
+        let spawned = Pty::open(WindowSize::from(self.shared.terminal.size))
+            .map_err(|e| e.to_string())
+            .and_then(|(pty, slave)| {
+                let child = pty::spawn(slave, spec, holder.reaper()).map_err(|e| e.to_string())?;
+                Ok((pty, child))
+            });
+        let (pty, child) = match spawned {
+            Ok(spawned) => spawned,
+            Err(why) => {
+                tracing::warn!(error = why, "could not respawn the child");
+                if let Some(conn) = self.conns.get_mut(asker) {
+                    let why = format!("could not start it: {why}");
+                    refuse(conn, id, "respawn", ErrorCode::Failed, &why);
+                }
+                return;
+            }
+        };
+        let started = child_start(child.pid(), self.shared.terminal.holder_start);
+        let respawned = protocol_pid(child.pid()).and_then(|child_pid| {
+            Reply::Respawned(Respawned {
+                generation: spec.generation,
+                child_pid,
+                child_start: started,
+            })
+            .encode()
+            .ok()
+        });
+        // Told to no one, the respawn can't happen: the new child is ended, and the terminal stays
+        // as it was.
+        let Some(frame) = respawned else {
+            tracing::error!("could not say the respawn; ending its child");
+            child.kill_now();
+            if let Some(conn) = self.conns.get_mut(asker) {
+                refuse(
+                    conn,
+                    id,
+                    "respawn",
+                    ErrorCode::Failed,
+                    "the holder can't say it",
+                );
+            }
+            return;
+        };
+        let at = holder.output().end();
+        holder.respawn(pty, child, spec.generation);
+        tracing::info!(generation = spec.generation.get(), "child respawned");
+        self.shared.base = at;
+        self.shared.terminal.child_start = started;
+        self.shared.exit_sent = false;
+        for conn in self.conns.iter_mut().filter(|conn| conn.is_open()) {
+            conn.queue_respawned(at, frame.clone());
+        }
+        if let Some(conn) = self.conns.get_mut(asker) {
+            ok(conn, id, "respawn");
         }
     }
 
@@ -416,10 +509,36 @@ fn waiting_now(conns: &[Connection], now: Instant) -> Option<Instant> {
     conns.iter().any(Connection::has_request).then_some(now)
 }
 
-/// Answers every request the connection has read, while it is read.
-fn serve(conn: &mut Connection, shared: &mut Shared, holder: &mut Holder<Ring>, now: Instant) {
+/// Why `spec` can't replace the child now, if it can't.
+fn respawn_refusal(
+    shared: &Shared,
+    holder: &Holder<Ring>,
+    spec: &ProcessSpec,
+) -> Option<(ErrorCode, &'static str)> {
+    if shared.close_requested {
+        return Some((ErrorCode::Failed, "the terminal is closing"));
+    }
+    if holder.exit().is_none() {
+        return Some((ErrorCode::Running, "the child still runs"));
+    }
+    if spec.generation <= holder.generation() {
+        let why = "a respawn's generation must be above the current one";
+        return Some((ErrorCode::StaleGeneration, why));
+    }
+    process_problem(&spec.argv, &spec.cwd, &spec.env).map(|why| (ErrorCode::Invalid, why))
+}
+
+/// Answers every request the connection has read, while it is read, but a `respawn`, which needs
+/// every connection: it is handed back, with the rest left to answer after it.
+fn serve(
+    conn: &mut Connection,
+    shared: &mut Shared,
+    holder: &mut Holder<Ring>,
+    now: Instant,
+) -> Option<(RequestId, ProcessSpec)> {
     while let Some(next) = conn.next_request() {
         match next {
+            Ok(Request::Respawn { id, body }) if conn.is_open() => return Some((id, body)),
             Ok(request) => answer(conn, shared, holder, request, now),
             Err(refused) => {
                 if let Some((code, id)) = refused.invalid_request() {
@@ -430,10 +549,11 @@ fn serve(conn: &mut Connection, shared: &mut Shared, holder: &mut Holder<Ring>, 
                     tracing::info!("a malformed frame; dropping its connection");
                     conn.drop_now();
                 }
-                return;
+                return None;
             }
         }
     }
+    None
 }
 
 fn answer(
@@ -460,7 +580,7 @@ fn answer(
             refuse(conn, id, "hello", ErrorCode::Invalid, why);
             conn.hang_up(now);
         }
-        Request::Subscribe { id, body } => subscribe(conn, holder, id, body.from),
+        Request::Subscribe { id, body } => subscribe(conn, holder, shared.base, id, body.from),
         Request::Input { id, bytes } => {
             if shared.writer != Some(conn.id()) {
                 let why = "only the connection with the writer slot sends input";
@@ -536,9 +656,11 @@ fn answer(
 }
 
 /// Moves the connection's subscription to `from`, or to the holder's offset now without one.
+/// `base` is where the current generation starts in the output, which its offsets count from.
 fn subscribe(
     conn: &mut Connection,
     holder: &Holder<Ring>,
+    base: u64,
     id: RequestId,
     from: Option<SubscribeFrom>,
 ) {
@@ -549,12 +671,12 @@ fn subscribe(
             refuse(conn, id, "subscribe", ErrorCode::StaleGeneration, why);
             return;
         }
-        Some(from) if from.offset.get() > end => {
+        Some(from) if from.offset.get() > end.saturating_sub(base) => {
             let why = "that offset is past the holder's";
             refuse(conn, id, "subscribe", ErrorCode::OutOfRange, why);
             return;
         }
-        Some(from) => from.offset.get(),
+        Some(from) => base + from.offset.get(),
         None => end,
     };
     let request = "subscribe".to_owned();
@@ -592,7 +714,7 @@ fn hello(
         return;
     };
     let writer = body.writer == Some(true) && shared.writer.is_none();
-    let Some(reply) = hello_reply(&shared.terminal, holder, &version.to_string(), writer) else {
+    let Some(reply) = hello_reply(shared, holder, &version.to_string(), writer) else {
         let why = "the holder's state is outside what the protocol can say";
         refuse(conn, id, "hello", ErrorCode::Failed, why);
         conn.hang_up(now);
@@ -602,7 +724,7 @@ fn hello(
         shared.writer = Some(conn.id());
     }
     send(conn, &Reply::Hello { id, body: reply });
-    conn.open();
+    conn.open(shared.base);
 }
 
 /// The terminal's foreground group and when its leader started. The terminal can name a group
@@ -661,11 +783,12 @@ fn protocol_pid(pid: Pid) -> Option<body::Pid> {
 }
 
 fn hello_reply(
-    terminal: &Terminal,
+    shared: &Shared,
     holder: &Holder<Ring>,
     version: &str,
     writer: bool,
 ) -> Option<HelloReply> {
+    let terminal = &shared.terminal;
     Some(HelloReply {
         version: ProtocolVersion::new(version).ok()?,
         protocol: Versions::spoken(),
@@ -678,7 +801,7 @@ fn hello_reply(
         child_start: terminal.child_start,
         exit: holder.exit().map(|exit| exit.status.clone()),
         size: terminal.size,
-        offset: Offset::new(holder.output().end()).ok()?,
+        offset: Offset::new(holder.output().end().checked_sub(shared.base)?).ok()?,
         title: String::new(),
         alternate: false,
         history_lines: terminal.history_lines,
@@ -751,7 +874,7 @@ mod tests {
         let (ours, mut peer) = UnixStream::pair().unwrap();
         ours.set_nonblocking(true).unwrap();
         let mut conn = Connection::new(1, ours, now);
-        conn.open();
+        conn.open(0);
         peer.write_all(&Request::Stats { id: RequestId(1) }.encode().unwrap())
             .unwrap();
         conn.receive(&mut vec![0; READ_CHUNK]);

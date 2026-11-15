@@ -30,7 +30,9 @@ export function drift(
  * it. Pin a version in the commit that moves past it, from the hash `--check` prints; a pin is
  * never changed after, as no peer can resend what that version sent.
  */
-export const FROZEN_HOLDER_FIXTURES: Readonly<Record<string, string>> = {};
+export const FROZEN_HOLDER_FIXTURES: Readonly<Record<string, string>> = {
+  "1.0": "95fc5e9e131f49682d48f9f38d0d95ef4f64027064cca1649465e4c9c9107657",
+};
 
 /** A directory's files, by name and content, as one hash. */
 export function fixtureHash(files: Readonly<Record<string, string>>): string {

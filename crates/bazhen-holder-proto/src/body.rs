@@ -768,10 +768,12 @@ pub enum ErrorCode {
     SnapshotTooLarge,
     /// The holder tried and the system refused.
     Failed,
+    /// The request needs the child to have exited, and it still runs: a `respawn`.
+    Running,
 }
 
 impl ErrorCode {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::UnknownRequest,
         Self::StaleGeneration,
         Self::OutOfRange,
@@ -782,6 +784,7 @@ impl ErrorCode {
         Self::Exited,
         Self::SnapshotTooLarge,
         Self::Failed,
+        Self::Running,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -796,6 +799,7 @@ impl ErrorCode {
             Self::Exited => "exited",
             Self::SnapshotTooLarge => "snapshot-too-large",
             Self::Failed => "failed",
+            Self::Running => "running",
         }
     }
 }

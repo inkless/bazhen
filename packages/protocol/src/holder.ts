@@ -27,7 +27,7 @@ import { ProtocolVersion } from "./version.ts";
  *   agree on, so the rest of its `hello` must satisfy the schema of every major it lists;
  * - `error`, and its codes `no-shared-version` and `invalid`.
  */
-export const HOLDER_PROTOCOL_VERSION = "1.0";
+export const HOLDER_PROTOCOL_VERSION = "1.1";
 
 /** Byte limits, in UTF-8 bytes, that both peers enforce on strings. */
 export const HOLDER_VERSION_MAX_BYTES = 32;
@@ -195,8 +195,10 @@ export type HolderExitStatus = z.infer<typeof HolderExitStatus>;
 const TerminalId = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/);
 
 /**
- * What a terminal runs. `respawn` replaces it, keeping the terminal, its tags and its size; its
- * `generation` must be above the current one, or the respawn is refused `stale-generation`.
+ * What a terminal runs. `respawn` replaces it, keeping the terminal, its tags and its size, on a
+ * fresh PTY, so no mode the old program set reaches the new one. Only a child whose exit has been
+ * published is replaced, or the respawn is refused `running`; its `generation` must be above the
+ * current one, or it is refused `stale-generation`.
  */
 export const HolderProcessSpec = z.object({
   argv: z.array(wellFormed()).min(1),
@@ -331,10 +333,11 @@ export const HolderExited = z.object({ generation: Count, status: HolderExitStat
 export type HolderExited = z.infer<typeof HolderExited>;
 
 /**
- * A new child runs on the same PTY. In order, on every connection past `hello`: the rest of the
- * old child's output, its `exited` if it ran until replaced, then this, then the new child's
- * output from offset 0, where a subscription goes on. A reply sent after this one, the
- * respawn's `ok` included, is of the new generation.
+ * A new child runs in the terminal. In order, on every connection past `hello`: the old
+ * generation's output and its child's `exited`, then this, then the new child's output from
+ * offset 0, where a subscription goes on; no `data` or `gap` spans it. Output can follow the old
+ * child's `exited`, from what its session left running, until this. A reply sent after this one,
+ * the respawn's `ok` included, is of the new generation.
  */
 export const HolderRespawned = z.object({
   generation: Count,
@@ -421,6 +424,8 @@ export const HOLDER_ERROR_CODES = [
   "snapshot-too-large",
   /** The holder tried and the system refused, as a respawn that can't start its program. */
   "failed",
+  /** The request needs the child to have exited, and it still runs: a `respawn`. */
+  "running",
 ] as const;
 
 export const HolderError = z.object({

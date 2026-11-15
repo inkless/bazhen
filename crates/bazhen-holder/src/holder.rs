@@ -116,6 +116,25 @@ impl<O: Output> Holder<O> {
         self.child.pid()
     }
 
+    /// What tells the holder its children exit, which a child must be spawned after.
+    pub const fn reaper(&self) -> &Reaper {
+        &self.reaper
+    }
+
+    /// Replaces the child, whose exit is published, with `child` of `generation`, on `pty`. The old
+    /// PTY is closed, so nothing left of the old session writes into the new generation's output
+    /// or reads its input, and no terminal mode the old program set reaches the new one.
+    pub fn respawn(&mut self, pty: Pty, child: ChildProcess, generation: Generation) {
+        self.pty = pty;
+        self.child = child;
+        self.generation = generation;
+        self.master_open = true;
+        self.draining_until = None;
+        self.exit = None;
+        self.input.clear();
+        self.step(Instant::now());
+    }
+
     /// Readable once the child may have exited.
     pub fn wakeups(&self) -> BorrowedFd<'_> {
         self.reaper.fd()
