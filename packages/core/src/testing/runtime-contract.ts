@@ -26,8 +26,8 @@ export interface ContractHarness {
   replaceProcess(runtime: RuntimeAdapter, ref: RuntimeRef): void;
   /** Ends the terminal outside Bazhen, as a killed session would. */
   vanish(runtime: RuntimeAdapter, ref: RuntimeRef): void;
-  /** Ends every terminal and whatever holds them, as a reboot would. */
-  reboot(runtime: RuntimeAdapter): void;
+  /** Ends every terminal and whatever holds them, as a reboot would, before it settles. */
+  reboot(runtime: RuntimeAdapter): void | Promise<void>;
   /** The same terminal's ref, as if it had been made on a server other than the one running it. */
   forge(ref: RuntimeRef): RuntimeRef;
   /** Where the runtime runs a terminal's process, for one that reuses it across a respawn. */
@@ -376,14 +376,14 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
     it("closes a terminal ended by a reboot, with nothing running", async () => {
       const runtime = fresh();
       const ref = await runtime.create(spec(sleeping));
-      harness.reboot(runtime);
+      await harness.reboot(runtime);
       await expect(runtime.close(ref)).resolves.toBeUndefined();
     });
 
     it("closes a terminal ended by a reboot, once another terminal runs", async () => {
       const runtime = fresh();
       const ref = await runtime.create(spec(sleeping));
-      harness.reboot(runtime);
+      await harness.reboot(runtime);
       const next = await runtime.create(spec(sleeping));
       await runtime.close(ref);
       expect((await runtime.inventory()).map((e) => e.ref.terminalId)).toEqual([next.terminalId]);

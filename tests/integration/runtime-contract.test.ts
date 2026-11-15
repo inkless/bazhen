@@ -1,9 +1,10 @@
 import { chmodSync, existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { vi } from "vitest";
 import { filterEnv, type RuntimeAdapter } from "@bazhen/core";
 import { runtimeContract } from "@bazhen/core/testing";
-import type { ConfiguredTmuxServer } from "@bazhen/host-guard";
+import { isAlive, type ConfiguredTmuxServer } from "@bazhen/host-guard";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
 import { nodePtySpawner } from "@bazhen/daemon/pty";
 import { testServer, tmuxOut } from "./helpers.ts";
@@ -13,6 +14,8 @@ let made = 0;
 
 const runtimeOn = (server: ConfiguredTmuxServer) =>
   new TmuxRuntime({ server, pty: nodePtySpawner, env: filterEnv(process.env).env, exitPollMs: 50 });
+
+const REBOOT_MS = 10_000;
 
 function serverOf(runtime: RuntimeAdapter): ConfiguredTmuxServer {
   const server = servers.get(runtime);
@@ -44,7 +47,19 @@ runtimeContract("TmuxRuntime", {
   vanish: (runtime, ref) => {
     tmuxOut(serverOf(runtime), "kill-session", "-t", String(ref.locator.sessionId));
   },
-  reboot: (runtime) => serverOf(runtime).kill(),
+  // kill-server returns before the server exits, and until it has, the server closes every
+  // connection unanswered: a command sent meanwhile fails rather than finding nothing.
+  reboot: async (runtime) => {
+    const server = serverOf(runtime);
+    const pid = Number(tmuxOut(server, "display-message", "-p", "#{pid}"));
+    server.kill();
+    await vi.waitFor(
+      () => {
+        if (isAlive(pid)) throw new Error(`tmux server ${pid} still runs after kill-server`);
+      },
+      { timeout: REBOOT_MS },
+    );
+  },
   forge: (ref) => ({ ...ref, locator: { ...ref.locator, serverStart: "1" } }),
   placeOf: (ref) => ref.locator.paneId,
   exitMayBeUnknown: true,
