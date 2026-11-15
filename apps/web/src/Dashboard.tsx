@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { HarnessId, StateSnapshot } from "@bazhen/protocol";
 import { launchAgent, watchState } from "./api.ts";
 import { AgentAttention, Inbox } from "./inbox/Inbox.tsx";
@@ -91,6 +91,8 @@ export function Dashboard() {
   const opening = { onOpenTask: openTask, onOpenAgent: select, failed };
   // One thing shown rather than the fleet, which a phone gives the whole screen.
   const item = inbox || tasks || task !== null || shellId !== null || agent !== undefined;
+  const centre = useRef<HTMLElement>(null);
+  useFocusKept(centre, location.hash);
 
   return (
     <>
@@ -176,7 +178,7 @@ export function Dashboard() {
             )}
           </div>
         </nav>
-        <section className="centre">
+        <section ref={centre} className="centre" tabIndex={-1}>
           {inbox && state !== null ? (
             <Inbox state={state} onOpen={select} failed={failed} />
           ) : tasks && state !== null ? (
@@ -231,4 +233,20 @@ export function Dashboard() {
       </div>
     </>
   );
+}
+
+/**
+ * Moves focus to `pane` when what is shown changes and leaves focus nowhere: on a page the user
+ * left, or on a control no longer shown, as the fleet's list is once a phone opens one of its
+ * agents. Focus left on the page body would put the next Tab back at the top.
+ */
+function useFocusKept(pane: { readonly current: HTMLElement | null }, shown: string): void {
+  const before = useRef(shown);
+  useEffect(() => {
+    if (before.current === shown) return;
+    before.current = shown;
+    const active = document.activeElement;
+    const lost = !(active instanceof HTMLElement) || active === document.body;
+    if (lost || !active.checkVisibility()) pane.current?.focus({ preventScroll: true });
+  }, [pane, shown]);
 }

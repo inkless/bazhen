@@ -13,55 +13,73 @@ import { launch, screen, status, viewportTop } from "./page.ts";
 const WORK = String(process.env["BZ_E2E_WORK"]);
 const PROMPT = /[$#%>][\s ]*$/;
 
-const SCREENS: readonly { name: string; options: BrowserContextOptions }[] = [
-  { name: "an iPhone upright", options: phone(390, 844) },
-  { name: "an iPhone on its side", options: phone(844, 390) },
-  { name: "an iPad upright", options: phone(820, 1180) },
-  { name: "an iPad on its side", options: phone(1180, 820) },
-  { name: "a desktop", options: { viewport: { width: 1280, height: 800 } } },
+interface Screen {
+  readonly name: string;
+  readonly options: BrowserContextOptions;
+  /** What share of what the user sees, at least, the terminals get. */
+  readonly share: number;
+}
+
+const SCREENS: readonly Screen[] = [
+  { name: "an iPhone upright", options: phone(390, 844), share: 0.5 },
+  { name: "an iPhone on its side", options: phone(844, 390), share: 0.3 },
+  { name: "an iPad upright", options: phone(820, 1180), share: 0.5 },
+  { name: "an iPad on its side", options: phone(1180, 820), share: 0.4 },
+  { name: "a desktop", options: { viewport: { width: 1280, height: 800 } }, share: 0.3 },
 ];
 
 function phone(width: number, height: number): BrowserContextOptions {
   return { hasTouch: true, isMobile: true, viewport: { width, height } };
 }
 
-/** An agent and a standalone shell, opened once for the whole file. */
+/** An agent with a shell linked to it, and a standalone shell, opened once for the whole file. */
 let agentId = "";
 let shellId = "";
+const shells: string[] = [];
+
+/** Opens a shell, standalone in the work directory or linked to an agent; answers its id. */
+const openShell = (page: Page, where: { cwd: string } | { linkedAgentId: string }) =>
+  page.evaluate(async (body) => {
+    const res = await fetch("/v1/shells", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ idempotencyKey: crypto.randomUUID(), ...body }),
+    });
+    return String(Reflect.get(Object(await res.json()), "terminalId"));
+  }, where);
 
 test.beforeAll(async ({ browser }) => {
   const page = await browser.newPage();
   agentId = await launch(page);
-  shellId = await page.evaluate(async (cwd) => {
-    const res = await fetch("/v1/shells", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ idempotencyKey: crypto.randomUUID(), cwd }),
-    });
-    return String(Reflect.get(Object(await res.json()), "terminalId"));
-  }, WORK);
+  shells.push(await openShell(page, { linkedAgentId: agentId }));
+  shellId = await openShell(page, { cwd: WORK });
+  shells.push(shellId);
   await page.close();
 });
 
 test.afterAll(async ({ browser }) => {
   const page = await browser.newPage();
   await page.goto("/");
-  await page.evaluate(async (id) => {
+  await page.evaluate(async (ids) => {
     const state: unknown = await (await fetch("/v1/state")).json();
     const listed: unknown = Reflect.get(Object(state), "shells");
-    const found: unknown = Array.isArray(listed)
-      ? listed.find((s: unknown) => Reflect.get(Object(s), "id") === id)
-      : undefined;
-    await fetch(`/v1/shells/${id}/close`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        idempotencyKey: crypto.randomUUID(),
-        generation: Reflect.get(Object(found), "generation"),
-        confirmedProgram: Reflect.get(Object(Reflect.get(Object(found), "foreground")), "command"),
-      }),
-    });
-  }, shellId);
+    for (const found of Array.isArray(listed) ? listed : []) {
+      const id = String(Reflect.get(Object(found), "id"));
+      if (!ids.includes(id)) continue;
+      await fetch(`/v1/shells/${id}/close`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          idempotencyKey: crypto.randomUUID(),
+          generation: Reflect.get(Object(found), "generation"),
+          confirmedProgram: Reflect.get(
+            Object(Reflect.get(Object(found), "foreground")),
+            "command",
+          ),
+        }),
+      });
+    }
+  }, shells);
   await page.close();
 });
 
@@ -81,25 +99,46 @@ function windowOf(page: Page): { width: number; height: number } {
   return size;
 }
 
-/** The bottom of what the user can see: the window's, or the key bar's top while it shows. */
-async function visibleBottom(page: Page): Promise<number> {
-  const bar = await keyBarBox(page);
-  return Math.min(windowOf(page).height, bar?.y ?? Number.POSITIVE_INFINITY);
-}
-
 /** Where the key bar is, or `null` where it doesn't show, as on a desktop. */
 async function keyBarBox(page: Page) {
   const bar = page.getByRole("toolbar", { name: "terminal keys" });
   return (await bar.count()) === 0 ? null : bar.boundingBox();
 }
 
-/** Whether the terminal's whole screen is inside the window and above the key bar. */
-async function terminalInView(page: Page): Promise<boolean> {
-  const box = await page.locator(".xterm-screen").first().boundingBox();
-  if (box === null) return false;
+/** The bottom of what the user can see: the window's, or the key bar's top while it shows. */
+async function visibleBottom(page: Page): Promise<number> {
+  const bar = await keyBarBox(page);
+  return Math.min(windowOf(page).height, bar?.y ?? Number.POSITIVE_INFINITY);
+}
+
+/** The screen of every terminal the page shows. */
+async function terminalBoxes(page: Page) {
+  const boxes = await Promise.all(
+    (await page.locator(".xterm-screen").all()).map((s) => s.boundingBox()),
+  );
+  return boxes.flatMap((box) => (box === null ? [] : [box]));
+}
+
+/** Whether every terminal's whole screen is inside the window and above the key bar. */
+async function terminalsInView(page: Page): Promise<boolean> {
+  const boxes = await terminalBoxes(page);
   const right = windowOf(page).width;
   const bottom = await visibleBottom(page);
-  return box.y >= 0 && box.x >= 0 && box.x + box.width <= right && box.y + box.height <= bottom;
+  return (
+    boxes.length > 0 &&
+    boxes.every((b) => b.y >= 0 && b.x >= 0 && b.x + b.width <= right && b.y + b.height <= bottom)
+  );
+}
+
+/**
+ * How much of the height the user sees, above the key bar, the terminals' screens take: the
+ * screens one above the other in the first one's column, where a dock beside it would count twice.
+ */
+async function terminalShare(page: Page): Promise<number> {
+  const boxes = await terminalBoxes(page);
+  const column = boxes.filter((b) => b.x === boxes[0]?.x);
+  const tall = column.reduce((sum, b) => sum + b.height, 0);
+  return Math.round((tall / (await visibleBottom(page))) * 100) / 100;
 }
 
 async function open(browser: Browser, options: BrowserContextOptions, hash: string) {
@@ -109,25 +148,26 @@ async function open(browser: Browser, options: BrowserContextOptions, hash: stri
   return page;
 }
 
-for (const { name, options } of SCREENS) {
-  test(`fits ${name}, with the agent's terminal and a shell's in view and no page scroll`, async ({
+for (const { name, options, share } of SCREENS) {
+  test(`fits ${name}, with the agent's terminals and a shell's in view and no page scroll`, async ({
     browser,
   }) => {
     for (const hash of [`#/agent/${agentId}`, `#/shell/${shellId}`]) {
       const page = await open(browser, options, hash);
       await expect
-        .poll(async () => ({ page: await overflow(page), terminal: await terminalInView(page) }), {
+        .poll(async () => ({ page: await overflow(page), terminal: await terminalsInView(page) }), {
           message: `${hash} at ${name}`,
         })
         .toEqual({ page: { down: 0, across: 0 }, terminal: true });
+      expect(await terminalShare(page), `${hash} at ${name}`).toBeGreaterThanOrEqual(share);
       await page.context().close();
     }
   });
 }
 
 /**
- * A soft keyboard, as the page sees one: the visual viewport shrinks by `covered` pixels from
- * the bottom, and says so, while the window keeps its size, as iOS does.
+ * A soft keyboard, as the page sees one: the visual viewport shrinks from the bottom, a frame at a
+ * time, and says so, while the window keeps its size, as iOS does.
  */
 function softKeyboard(page: Page) {
   return page.addInitScript(`{
@@ -145,9 +185,13 @@ function softKeyboard(page: Page) {
     });
     real?.addEventListener("resize", () => fake.dispatchEvent(new Event("resize")));
     Object.defineProperty(window, "visualViewport", { value: fake, configurable: true });
-    globalThis.bazhenKeyboard = (px) => {
-      covered = px;
-      fake.dispatchEvent(new Event("resize"));
+    globalThis.bazhenKeyboard = async (px) => {
+      const from = covered;
+      for (let frame = 1; frame <= 12; frame++) {
+        await new Promise(requestAnimationFrame);
+        covered = Math.round(from + ((px - from) * frame) / 12);
+        fake.dispatchEvent(new Event("resize"));
+      }
     };
   }`);
 }
@@ -172,25 +216,83 @@ async function aboveKeyboard(page: Page, covered: number) {
   };
 }
 
+/** Each resize the page sends for its terminals, as it sends them. */
+function resizesSent(page: Page): string[] {
+  const sent: string[] = [];
+  page.on("websocket", (ws) => {
+    ws.on("framesent", ({ payload }) => {
+      if (typeof payload === "string" && payload.includes('"resize"')) sent.push(payload);
+    });
+  });
+  return sent;
+}
+
+/** How many resizes went out from `since` on, once the page has had time to send any more. */
+async function resizesAfter(page: Page, sent: readonly string[], since: number) {
+  // Longer than the viewport takes to settle, so a second resize would have gone by now.
+  await page.waitForTimeout(600);
+  return sent.length - since;
+}
+
+/** A phone showing the standalone shell, typed into, with its prompt on the last row. */
+async function typingInShell(browser: Browser, options: BrowserContextOptions) {
+  const page = await (await browser.newContext(options)).newPage();
+  await softKeyboard(page);
+  const sent = resizesSent(page);
+  await page.goto(`/#/shell/${shellId}`);
+  const pane = page.getByRole("article", { name: /^shell / });
+  await pane.locator(".xterm-screen").tap();
+  await expect(status(pane)).toHaveText("Driving");
+  await page.keyboard.type("clear; seq 200");
+  await page.keyboard.press("Enter");
+  await expect.poll(() => screen(page, shellId)).toMatch(/^200\s*$/m);
+  return { page, pane, sent };
+}
+
 for (const { name, options } of SCREENS.slice(0, 2)) {
-  test(`keeps the cursor's row and the key bar above the soft keyboard on ${name}`, async ({
+  test(`resizes the terminal once for the soft keyboard, to above it, on ${name}`, async ({
     browser,
   }) => {
-    const page = await (await browser.newContext(options)).newPage();
-    await softKeyboard(page);
-    await page.goto(`/#/shell/${shellId}`);
-    const pane = page.getByRole("article", { name: /^shell / });
-    await pane.locator(".xterm-screen").tap();
-    await expect(status(pane)).toHaveText("Driving");
-    // Enough lines that the prompt, and the cursor with it, ends on the terminal's last row.
-    await page.keyboard.type("clear; seq 200");
-    await page.keyboard.press("Enter");
-    await expect.poll(() => screen(page, shellId)).toMatch(/^200\s*$/m);
+    const { page, pane, sent } = await typingInShell(browser, options);
     const covered = Math.round(windowOf(page).height * 0.4);
+    const beforeShow = sent.length;
     await page.evaluate(`bazhenKeyboard(${covered})`);
     await expect
       .poll(() => aboveKeyboard(page, covered))
       .toEqual({ bar: true, cursor: true, page: { down: 0, across: 0 } });
+    expect(await resizesAfter(page, sent, beforeShow)).toBe(1);
+    await expect(status(pane)).toBeVisible();
+
+    // As iOS closes it: the terminal loses focus first, then the keyboard animates away.
+    const beforeHide = sent.length;
+    await page.evaluate("document.activeElement.blur()");
+    await page.evaluate("bazhenKeyboard(0)");
+    await expect(page.getByRole("button", { name: "Fleet", exact: true })).toBeVisible();
+    expect(await resizesAfter(page, sent, beforeHide)).toBe(1);
     await page.context().close();
   });
 }
+
+test("closes the soft keyboard from the key bar, taking focus off the terminal", async ({
+  browser,
+}) => {
+  const { page } = await typingInShell(browser, phone(390, 844));
+  await page.getByRole("button", { name: "Close keyboard" }).tap();
+  await expect
+    .poll(() => page.evaluate<boolean>(`document.activeElement?.closest(".terminal-host") != null`))
+    .toBe(false);
+  await page.context().close();
+});
+
+test("keeps focus on the page when a phone swaps the fleet for the agent opened from it", async ({
+  browser,
+}) => {
+  const page = await (await browser.newContext(phone(390, 844))).newPage();
+  await page.goto("/");
+  await page.getByRole("list", { name: "agents" }).getByRole("button").last().tap();
+  await expect(page.getByRole("article", { name: "agent" })).toBeVisible();
+  await expect
+    .poll(() => page.evaluate<boolean>(`document.activeElement?.closest(".centre") != null`))
+    .toBe(true);
+  await page.context().close();
+});

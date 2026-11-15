@@ -86,6 +86,14 @@ export function KeyBar() {
           Ctrl
         </ToggleButton>
         {AFTER_CTRL.map(button)}
+        {/* Safari's own Done is on an accessory bar that may not show; this does the same. */}
+        <Button
+          preventFocusOnPress
+          aria-label="Close keyboard"
+          onPress={() => store.target()?.blur()}
+        >
+          Done
+        </Button>
         <Button variant="quiet" preventFocusOnPress onPress={() => hide(true)}>
           Hide
         </Button>

@@ -14,11 +14,9 @@ import { Button } from "../ui/Button.tsx";
 import { ConfirmDialog } from "../ui/ConfirmDialog.tsx";
 import { AttachCommand } from "./AttachCommand.tsx";
 import { Dock } from "../shells/Dock.tsx";
-import { useDockLayout, useMediaQuery } from "../shells/layout.ts";
+import { ONE_PANE, useDockLayout, useMediaQuery } from "../shells/layout.ts";
 import { linkedShells, shellLabel } from "../shells/model.ts";
 import { agentActions, exitText, shortId } from "./model.ts";
-
-const NARROW = "(max-width: 600px)";
 
 /** Why an agent that can't be opened shows no terminal. */
 const NO_TERMINAL: Partial<Record<AgentState, string>> = {
@@ -64,8 +62,8 @@ export function Workspace({
     );
   };
   const dock = useDockLayout();
-  // Too narrow for the TUI and a shell one above the other: the dock takes the TUI as a tab.
-  const narrow = useMediaQuery(NARROW);
+  // No room for the TUI and a shell one above the other: the dock takes the TUI as a tab.
+  const narrow = useMediaQuery(ONE_PANE);
   const tui = (terminalId: string) => (
     <TerminalView
       key={`${terminalId}:${agent.generation}`}

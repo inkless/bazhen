@@ -154,19 +154,31 @@ below the fold. So:
   `--app-height`, which `apps/web/src/ui/viewport.ts` sets from the visual viewport. `html` and
   `body` don't scroll or bounce.
 - Only a pane whose content can outgrow it scrolls, inside itself and without chaining
-  (`overflow: auto; overscroll-behavior: contain`): the rail, a list in the centre, what sits above
-  an agent's terminal (capped at 40% of it), the notices. Anything else fills its parent through
-  flex with `min-height: 0`; no height is in `vh`.
-- Under 700px wide, or 500px tall, the app shows one thing at a time: the fleet, or what was
-  opened from it under the Fleet, Inbox and Tasks links. The app's header, the daemon's details
-  and the launch form are on the fleet screen only there.
+  (`overflow: auto; overscroll-behavior: contain`): the rail, a list in the centre, the notices,
+  and what sits above an agent's terminal, capped at 40% of the workspace, 30% where the app shows
+  one thing at a time. Anything else fills its parent through flex with `min-height: 0`; no
+  height is in `vh`. A one-finger drag over nothing that scrolls that way doesn't move the page
+  (`apps/web/src/ui/pan-guard.ts`): with the keyboard up iOS would pan it, sliding the app off
+  what the user sees. A pinch, and a drag in a text field, are left alone.
+- Under 700px wide, or 500px tall (`ONE_PANE`, `apps/web/src/shells/layout.ts`), the app shows
+  one thing at a time: the fleet, or what was opened from it under the Fleet, Inbox and Tasks
+  links. The app's header, the daemon's details, the launch form and the attach commands are on
+  the fleet screen, or a wider one, only there; an agent's TUI and its shells are tabs, not one
+  above the other. When the pane that opens leaves focus nowhere, as on a control the fleet's list
+  took with it, focus moves to the pane.
 - A terminal is never shorter than `6rem`: the daemon refuses a view of fewer than two rows.
 - The soft keyboard shortens the app, so a terminal resizes to what is left and its input row
   stays above the keyboard. iOS doesn't shrink the layout viewport, or `dvh`, for the keyboard,
-  so nothing but the visual viewport says how much is left. The size is taken once the viewport
-  has held still for 150 ms, the last of a run of changes: a keyboard animating in is one resize
-  for the program, not one a frame, and a pinch zoom is none. While the keyboard is up over a
-  focused terminal, the app shows only that terminal and the key bar.
+  so nothing but the visual viewport says how much is left. A change of the visual viewport, or of
+  focus, is taken once both have held still for 150 ms, the last of a run of changes: a keyboard
+  animating in or out is one resize for the program, not one a frame, and a pinch zoom is none. A
+  change of the window itself, a phone turning, is taken at once, so the app is never taller than
+  the window.
+- While the keyboard is up for a focused terminal, the app shows that terminal with its status,
+  any alert, and the key bar (`data-typing` on `<html>`). It is set with the app's height, never
+  from focus alone: a terminal losing focus as the keyboard closes would otherwise bring the
+  chrome back while the app is still short, and the program would be resized twice. The key bar's
+  Done closes the keyboard, where Safari's own accessory bar may not show.
 - The viewport meta has `viewport-fit=cover`, so the app pads itself clear of the notch and the
   home indicator with `env(safe-area-inset-*)`.
 

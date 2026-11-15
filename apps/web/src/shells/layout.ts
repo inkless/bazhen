@@ -63,6 +63,12 @@ let shared: ReturnType<typeof layoutStore> | undefined;
 /** This page's dock layout, in the browser's local storage. */
 export const dockLayout = () => (shared ??= layoutStore(() => localStorage));
 
+/**
+ * Where the app shows one thing at a time, as app.css lays it out: too narrow, or too short, for
+ * a pane beside another, or an agent's TUI and a shell one above the other.
+ */
+export const ONE_PANE = "(width < 700px), (height < 500px)";
+
 /** Where the dock can sit beside the TUI rather than under it, as app.css lays it out. */
 export const SIDE_BY_SIDE = "(min-width: 70rem)";
 

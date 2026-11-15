@@ -126,8 +126,9 @@ body {
 
 /*
  * A phone, or a window too short for the fleet beside a terminal, shows one thing at a time: the
- * fleet, or what was opened from it, under the links back. The app's header, the daemon's details
- * and the launch form are on the fleet screen only.
+ * fleet, or what was opened from it, under the links back. The app's header, the daemon's details,
+ * the launch form and the attach commands are on the fleet screen, or a wider one, only. An
+ * agent's dock puts its shells' tabs beside its own header rather than under it.
  */
 @media (width < 700px), (height < 500px) {
   .dashboard {
@@ -154,19 +155,58 @@ body {
     gap: var(--space-1) var(--space-4);
   }
 
-  .app:has(.dashboard[data-view="item"]) :is(.app-head, .launch, .notices > .notice) {
+  .app:has(.dashboard[data-view="item"])
+    :is(.app-head, .launch, .notices > .notice, .workspace > .attach, .shell > .attach) {
     display: none;
   }
 
   .workspace-info.capped {
     max-height: 30%;
   }
+
+  .dock.dock-open:has(> .tabs) {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    column-gap: var(--space-2);
+  }
+
+  .dock > .tabs {
+    display: contents;
+  }
+
+  .dock > .tabs > .tab-panel {
+    grid-column: 1 / -1;
+  }
 }
 
-/* Typing into a terminal with the soft keyboard up, the terminal and the key bar are all there is. */
-.app[data-keyboard]:has(.terminal-host:focus-within)
-  :is(.app-head, .launch, .notices, .rail, .workspace-info, .shell-head, .terminal > p) {
+/*
+ * Typing into a terminal with the soft keyboard up, the terminal, its status and the key bar are
+ * what there is, with any alert. `data-typing` is set with the app's height, once the keyboard
+ * settles, never from focus alone, so the chrome and the height change together.
+ */
+:root[data-typing]
+  :is(
+    .app-head,
+    .launch,
+    .notices > .notice,
+    .rail,
+    .workspace-info,
+    .shell-head,
+    .dock-head,
+    .tab-list,
+    .attach
+  ) {
   display: none;
+}
+
+:root[data-typing] .terminal > p {
+  margin: 0;
+  font-size: var(--font-size-xs);
+}
+
+:root[data-typing] .notices {
+  max-height: 20%;
 }
 
 .fleet,
@@ -637,8 +677,12 @@ body {
 }
 
 /* The keyboard covers the home indicator. */
-.app[data-keyboard] .key-bar {
+:root[data-keyboard] .key-bar {
   padding-bottom: var(--space-1);
+}
+
+:root[data-keyboard] .key-bar-show {
+  bottom: var(--space-2);
 }
 
 .key-bar .button {

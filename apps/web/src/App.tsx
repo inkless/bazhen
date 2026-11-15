@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { HealthResponse, isCompatible } from "@bazhen/protocol";
 import { noticeUnpaired, onUnpaired } from "./api.ts";
 import { Dashboard } from "./Dashboard.tsx";
 import { Pairing } from "./Pairing.tsx";
 import { KeyBar } from "./terminal/KeyBar.tsx";
 import { ThemeSwitch } from "./ui/ThemeSwitch.tsx";
+import { guardPan } from "./ui/pan-guard.ts";
 import { followViewport } from "./ui/viewport.ts";
 
 type Status =
@@ -37,10 +38,12 @@ export function App() {
   // `bazhen devices revoke`, swaps the dashboard for the pairing form.
   useEffect(() => onUnpaired(() => setStatus({ kind: "unpaired" })), []);
   useEffect(probe, [probe]);
-  const keyboard = useAppViewport();
+  useAppViewport();
+  const app = useRef<HTMLDivElement>(null);
+  useEffect(() => (app.current === null ? undefined : guardPan(app.current)), []);
 
   return (
-    <div className="app" {...(keyboard && { "data-keyboard": "" })}>
+    <div ref={app} className="app">
       <main className="app-main">
         <header className="app-head">
           <h1>Bazhen</h1>
@@ -71,17 +74,22 @@ export function App() {
 
 /**
  * Sizes the app to the part of the window the user sees, as app.css reads it, so the soft keyboard
- * shortens the app rather than covering its bottom; whether the keyboard is up.
+ * shortens the app rather than covering its bottom. Whether the keyboard is up, and up for a
+ * terminal, are set with the size, in one change, so the layout changes once and every terminal
+ * refits once, never to chrome that comes back before the height does.
  */
-function useAppViewport(): boolean {
-  const [keyboard, setKeyboard] = useState(false);
+function useAppViewport(): void {
   useEffect(() => {
-    const root = document.documentElement.style;
-    return followViewport(window, (viewport) => {
-      root.setProperty("--app-top", `${viewport.top}px`);
-      root.setProperty("--app-height", `${viewport.height}px`);
-      setKeyboard(viewport.keyboard);
+    const root = document.documentElement;
+    const focus = {
+      events: document,
+      inTerminal: () => document.activeElement?.closest(".terminal-host") != null,
+    };
+    return followViewport(window, focus, (viewport) => {
+      root.style.setProperty("--app-top", `${viewport.top}px`);
+      root.style.setProperty("--app-height", `${viewport.height}px`);
+      root.toggleAttribute("data-keyboard", viewport.keyboard);
+      root.toggleAttribute("data-typing", viewport.typing);
     });
   }, []);
-  return keyboard;
 }
