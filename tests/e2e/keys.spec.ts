@@ -20,17 +20,9 @@ const probe = fileURLToPath(new URL("../support/key-probe.ts", import.meta.url))
 const work = String(process.env["BZ_E2E_WORK"]);
 
 /** The daemon's private tmux server, by its socket in the run's own home, as teardown finds it. */
-function tmux(...args: string[]): string {
+function tmux(...args: string[]): Promise<string> {
   const home = String(process.env["BZ_E2E_HOME"]);
-  return TmuxServer.at(join(home, "run", "tmux.sock"), { root: home }).runSync(args);
-}
-
-function sessionOf(agentId: string): string {
-  const line = tmux("list-panes", "-a", "-F", "#{@bazhen_agent_id} #{session_name}")
-    .split("\n")
-    .find((l) => l.startsWith(`${agentId} `));
-  if (line === undefined) throw new Error(`no session for ${agentId}`);
-  return line.split(" ")[1] ?? "";
+  return TmuxServer.at(join(home, "run", "tmux.sock"), { root: home }).run(args);
 }
 
 /** The id of the agent launched last, from the daemon's state. */
@@ -39,6 +31,32 @@ function newestAgentId(state: unknown): string {
   const id: unknown = Array.isArray(agents) ? Reflect.get(Object(agents.at(-1)), "id") : undefined;
   if (typeof id !== "string") throw new Error("the daemon's state lists no agent");
   return id;
+}
+
+/**
+ * The tmux session an agent's terminal runs in, once tmux lists it. It polls, and shows why
+ * it hasn't found one: `expect.poll` stops at the first error its function throws, so a tmux
+ * command that fails is reported as a value, and tried again.
+ */
+async function sessionOf(agentId: string): Promise<string> {
+  let session = "";
+  await expect
+    .poll(
+      async () => {
+        const listed = await tmux("list-panes", "-a", "-F", "#{@bazhen_agent_id} #{session_name}")
+          .then((out) => ({ out, problem: "" }))
+          .catch((err: unknown) => ({
+            out: "",
+            problem: `tmux list-panes failed: ${String(err)}`,
+          }));
+        const line = listed.out.split("\n").find((l) => l.startsWith(`${agentId} `));
+        session = line?.split(" ")[1] ?? "";
+        return { problem: listed.problem || (session === "" ? `no session for ${agentId}` : "") };
+      },
+      { timeout: 10_000 },
+    )
+    .toEqual({ problem: "" });
+  return session;
 }
 
 async function terminalBox(page: Page) {
@@ -80,9 +98,9 @@ async function launchProbe(page: Page, ...options: string[]): Promise<Probe> {
   await page.getByRole("button", { name: "Launch Claude Code" }).click();
   await expect(page.getByRole("region", { name: "terminal" })).toBeVisible();
   const agentId = newestAgentId(await (await page.request.get("/v1/state")).json());
-  const session = sessionOf(agentId);
+  const session = await sessionOf(agentId);
   const log = join(work, `keys-${agentId}.log`);
-  tmux("respawn-pane", "-k", "-t", `${session}:0`, process.execPath, probe, log, ...options);
+  await tmux("respawn-pane", "-k", "-t", `${session}:0`, process.execPath, probe, log, ...options);
   await expect.poll(() => screen(page), { timeout: 10_000 }).toContain("key-probe ready");
   const received = (since: number) =>
     readKeyLog(log)
@@ -414,9 +432,11 @@ test("scrolls a watching phone on a swipe without taking the lease, and takes it
   const box = await terminalBox(phone);
   const cdp = await phone.context().newCDPSession(phone);
   const at = (y: number) => [{ x: box.x + box.width / 2, y }];
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: at(box.y + 20) });
+  // The page may be scrolled to the terminal's cursor, its top above the window.
+  const start = Math.max(box.y, 0) + 20;
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: at(start) });
   for (let step = 1; step <= 10; step++) {
-    const touchPoints = at(box.y + 20 + step * 30);
+    const touchPoints = at(start + step * 30);
     await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints });
   }
   await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
@@ -439,7 +459,7 @@ test("reattaches after the daemon's tmux client is lost, at once, and drives aga
 }) => {
   const program = await launchProbe(page);
   await drive(page);
-  tmux("detach-client", "-s", program.session);
+  await tmux("detach-client", "-s", program.session);
   await expect(status(page)).toHaveText("Reconnecting…");
   // The page still has focus, which no event will announce again: it claims the lease itself.
   await expect(status(page)).toHaveText("Driving", { timeout: 10_000 });
