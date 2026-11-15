@@ -39,6 +39,12 @@ const ConfigFile = z.strictObject({
         .optional(),
     })
     .optional(),
+  terminals: z
+    .strictObject({
+      /** How many terminals, agents' and shells', may be open at once. */
+      max_open: z.int().min(1).optional(),
+    })
+    .optional(),
   web: z
     .strictObject({
       external_origins: z.array(Origin).optional(),
@@ -86,6 +92,8 @@ export interface Config {
   } | null;
   /** How far agents may launch agents to delegate to: at once, and down a chain. */
   readonly launchLimits: { readonly maxLaunched: number; readonly maxDepth: number };
+  /** `terminals.max_open`: past it, a new agent or shell is refused. */
+  readonly maxOpenTerminals: number;
 }
 
 export class InvalidConfig extends Error {
@@ -93,6 +101,8 @@ export class InvalidConfig extends Error {
 }
 
 const DEFAULT_PORT = 7900;
+// Twenty-odd agents with a shell or two each, well under macOS's 511 PTYs.
+const DEFAULT_MAX_OPEN_TERMINALS = 100;
 /** Next to the native app's 7943 (a separate listener with its own key). */
 const DEFAULT_LAN_PORT = 7942;
 const CONFIG_FILE = "config.toml";
@@ -162,6 +172,7 @@ export function resolveConfig(
       maxLaunched: file.agents?.max_launched ?? 5,
       maxDepth: file.agents?.max_launch_depth ?? 3,
     },
+    maxOpenTerminals: file.terminals?.max_open ?? DEFAULT_MAX_OPEN_TERMINALS,
     lan,
     ...withPairing(
       externalOrigins(file, env),
