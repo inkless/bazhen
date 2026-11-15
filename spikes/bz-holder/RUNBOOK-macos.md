@@ -65,16 +65,26 @@ launchd or other macOS-specific fix before any migration PR".
    Wait 10 seconds, then look at it: `node driver/look.ts $H/run/holders/codex.sock`
    (prints the snapshot's text). **Pass:** Codex's UI is drawn, not stuck waiting on a cursor
    position report. Close it with `node driver/cleanup.ts $H`.
-2. **Recordings for the parity check.** Run `node driver/record.ts claude` and then `node driver/record.ts codex`.
-   Each opens the agent in a holder, mirrored in your terminal (type normally, use it for a
-   minute), and saves `programs/recordings/<name>.bin` when you press Ctrl-] . Then run
+2. **Recordings for the parity check.** First `node driver/record-check.ts`. **Pass:**
+   `"result":"PASS"`: the recorder, run inside a holder, ends cleanly every way below and leaves
+   no mode on and no holder alive. Then run `node driver/record.ts claude` and then
+   `node driver/record.ts codex`. Each opens the agent in a holder, mirrored in your terminal
+   (type normally, use it for a minute), and saves `programs/recordings/<name>.bin` when the
+   recording ends:
+   - quit the agent normally (`/exit`, or Ctrl-C as the agent takes it);
+   - press Ctrl-] ;
+   - or, from any shell, `kill <pid>` with the pid the recorder printed when it started.
+
+   A lost holder or a crash saves `<name>.partial.bin` instead, and says so. Then run
    `node driver/parity.ts --replay claude codex`. **Pass:** both `PASS`. Don't commit the
    recordings: they hold your prompts and paths.
 
-   **If Ctrl-] doesn't stop it**, find out what the key sends: run
-   `node driver/record.ts --keylog /tmp/bzh-keys.log codex`, press Ctrl-] a few times, then stop it
-   from another shell (`kill <pid of node driver/record.ts>`, then `node driver/cleanup.ts
-   /tmp/bzh-rec-XXXX`, and `reset` in the stuck window). Do it once directly in the terminal app
-   and once inside tmux. Each `in` line is one key chunk as hex; each `out` line is a keyboard
+   After each way out, in Terminal.app, iTerm2 and Ghostty, once directly and once inside tmux:
+   the shell takes input normally and echoes it, the cursor shows, mouse selection and
+   copy/paste work, and `ls -d /tmp/bzh-rec-*` lists nothing.
+
+   **If Ctrl-] doesn't stop it**, find out what the key sends:
+   `node driver/record.ts --keylog /tmp/bzh-keys.log codex`, press Ctrl-] a few times, then stop
+   it with `kill <pid>`. Each `in` line is one key chunk as hex; each `out` line is a keyboard
    protocol the agent turned on. Paste only the `out` lines and the `in` lines from your Ctrl-]
    presses: the rest is what you typed.

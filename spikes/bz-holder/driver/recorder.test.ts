@@ -270,6 +270,22 @@ describe("startRecorder", () => {
     assert.ok(h.stdin.paused);
   });
 
+  it("a second end while the first is finishing restores, saves and reaps nothing again", async () => {
+    const h = harness();
+    h.conn.close = () => {
+      h.conn.closed++;
+    };
+    h.written.length = 0;
+    h.stdin.emit("data", Buffer.from("\x1d"));
+    h.proc.emit("SIGTERM", "SIGTERM");
+    await h.done;
+    await new Promise((r) => setImmediate(r));
+    restoredOnce(h);
+    assert.deepEqual(h.calls, ["save", "reap", "removeHome"]);
+    assert.equal(h.conn.closed, 1);
+    assert.deepEqual(h.proc.codes, [0]);
+  });
+
   it("still reaps and removes the home when saving throws, and exits 1", async () => {
     const h = harness({
       save: () => {
