@@ -24,9 +24,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macOS runners are billed at a premium while the repo is private; add macos-latest back
-        # once it is public. The real-tmux suites refuse any host but a marked Linux one, so on
-        # macOS they need a Linux container or a change to tests/support/disposable-host.ts.
+        # Linux only: the real-tmux suites refuse any host but a marked Linux one, so on macOS they
+        # need a Linux container or a change to tests/support/disposable-host.ts. The Rust crates
+        # run on macOS in `rust-macos`.
         os: [ubuntu-latest]
         node: ["24", "26.13.0"]
     steps:
@@ -56,6 +56,30 @@ jobs:
       - run: pnpm check
       - run: pnpm test:integration
 
+  # The Rust gates on macOS, where code behind `cfg(target_os = "macos")` is built and tested. Only
+  # clippy and nextest: tmux isn't run here, and rustfmt and cargo-deny don't depend on the OS
+  # (deny.toml checks every target triple), so `check` covers them. Like `check`, it runs on every
+  # pull request, so a change to a crate, Cargo.*, rust-toolchain.toml or a gate script is always
+  # covered. The gate scripts import only Node built-ins, so nothing is installed and no pnpm cache
+  # is saved: the cache is large enough to push the repo's other caches out.
+  rust-macos:
+    name: rust (macos)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26.13.0
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-nextest@0.9.152
+      - run: pnpm lint:rust
+      - run: pnpm test:rust
+
   # The black-box suite runs the real harness CLIs, pinned in tests/api. No agent is let reach a
   # model, so it needs no credentials. It is slower than `pnpm check`, so it is a job of its own.
   api:
@@ -65,9 +89,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macOS runners are billed at a premium while the repo is private; add macos-latest back
-        # once it is public. The real-tmux suites refuse any host but a marked Linux one, so on
-        # macOS they need a Linux container or a change to tests/support/disposable-host.ts.
+        # Linux only, as in `check`: the real-tmux suites refuse any host but a marked Linux one.
         os: [ubuntu-latest]
     steps:
       - uses: actions/checkout@v7
