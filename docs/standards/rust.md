@@ -160,6 +160,12 @@ profile (which can turn off overflow checks and debug assertions in the tests) o
 another file. The lint and test gates refuse to run under one. A global `RUSTFLAGS` or a wrapper
 such as sccache is ignored by the gates, not an error.
 
+**Every fd is close-on-exec.** `clippy.toml` disallows the rustix calls that make an fd without
+`O_CLOEXEC` (`rustix::fs::open`, `rustix::fs::openat`, `rustix::io::dup`): a child would inherit
+it, and the PTY holder takes any fd without the flag for one it inherited, and closes it. std's
+`OpenOptions` and `try_clone` set the flag; a crate that turns on another rustix module that makes
+fds (`pipe`, `net`) adds its flag-less calls to the list in the same commit.
+
 **The allow-list** is in `[workspace.lints.clippy]` only, one line each, with its reason beside
 it. It holds `must_use_candidate`, which fires on nearly every pure function; `#[must_use]` goes
 where ignoring the value is a bug. A lint joins the list only once it has fired on real code, its

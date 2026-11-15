@@ -178,6 +178,8 @@ fn detach_stdio() -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::os::fd::AsFd as _;
+
     use super::*;
 
     fn spec(change: impl FnOnce(&mut serde_json::Value)) -> Vec<u8> {
@@ -246,6 +248,42 @@ mod tests {
         let bytes = spec(|s| s["protocol"] = serde_json::json!(["99.0"]));
         assert!(matches!(read(&bytes), Err(StartError::NoSharedVersion)));
         assert!(matches!(read(b"not json"), Err(StartError::Invalid(_))));
+    }
+
+    /// What `close_inherited_fds` may close rests on every fd the holder owns being close-on-exec:
+    /// the socket and listener the holder will serve on, its PTY and its log among them.
+    #[test]
+    fn closing_inherited_fds_keeps_every_fd_the_holder_owns() {
+        use std::os::fd::OwnedFd;
+        use std::os::unix::net::{UnixListener, UnixStream};
+
+        let dir = std::env::temp_dir().join(format!("bz-holder-fds-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let listener = UnixListener::bind(dir.join("t.sock")).unwrap();
+        let (socket, _peer) = UnixStream::pair().unwrap();
+        let (pty, slave) = crate::pty::Pty::open(WindowSize::clamped(80, 24)).unwrap();
+        let log = std::fs::File::create(dir.join("t.log")).unwrap();
+        let inherited = OwnedFd::from(socket.try_clone().unwrap());
+        rustix::io::fcntl_setfd(&inherited, rustix::io::FdFlags::empty()).unwrap();
+
+        pty::close_inherited_fds().unwrap();
+
+        assert_eq!(
+            rustix::io::fcntl_getfd(&inherited),
+            Err(rustix::io::Errno::BADF)
+        );
+        // Closed by the call: dropping it would close a number it no longer owns.
+        std::mem::forget(inherited);
+        for fd in [
+            listener.as_fd(),
+            socket.as_fd(),
+            pty.master(),
+            slave.as_fd(),
+            log.as_fd(),
+        ] {
+            assert!(rustix::io::fcntl_getfd(fd).is_ok(), "fd {fd:?} was closed");
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

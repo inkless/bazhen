@@ -217,7 +217,6 @@ mod tests {
     use std::collections::BTreeMap;
 
     use bazhen_holder_proto::body::{Argv, Env, NonEmpty, ProcessSpec};
-    use rustix::fs::{Mode, OFlags};
 
     use super::*;
     use crate::pty::{self, WindowSize};
@@ -270,12 +269,7 @@ mod tests {
     fn the_exit_waits_out_the_drain_while_something_still_holds_the_terminal() {
         let mut holder = holder(&["sh", "-c", "read _; exit 0"]);
         let name = rustix::pty::ptsname(holder.pty.master(), Vec::new()).unwrap();
-        let held = rustix::fs::open(
-            name.as_c_str(),
-            OFlags::RDWR | OFlags::NOCTTY,
-            Mode::empty(),
-        )
-        .unwrap();
+        let held = pty::open_terminal(&name).unwrap();
         rustix::io::write(holder.pty.master(), b"\n").unwrap();
         let early = published_before_the_drain_was_over(&mut holder);
         drop(held);

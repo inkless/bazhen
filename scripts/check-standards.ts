@@ -625,6 +625,7 @@ const NOT_DECODERS: Record<string, string> = {
     "discards SIGCHLD wake-ups, whose bytes the signal handler wrote and which carry no content",
   "crates/bazhen-holder/src/child.rs::Reaper::drop": "removes the signal handler; reads nothing",
   "crates/bazhen-holder/src/pty.rs::Pty::master": "borrows the master fd; reads nothing",
+  "crates/bazhen-holder/src/pty.rs::Slave::as_fd": "borrows the slave fd; reads nothing",
   "crates/bazhen-holder/src/pty.rs::Pty::set_size": "sets the window size; reads nothing",
   "crates/bazhen-holder/src/pty.rs::Pty::foreground_group":
     "asks the terminal for its foreground group; reads no bytes",
@@ -1079,11 +1080,25 @@ export const TOOLCHAIN_CONFIG = [
   'profile = "minimal"',
   'components = ["rustfmt", "clippy", "rust-analyzer", "rust-src"]',
 ];
+const NO_CLOEXEC = (path: string, reason: string) => `{ path = "${path}", reason = "${reason}" },`;
+const SETS_NO_O_CLOEXEC = "it sets no O_CLOEXEC; use std::fs::OpenOptions, which does";
+
 export const CLIPPY_CONFIG = [
   "allow-unwrap-in-tests = true",
   "allow-expect-in-tests = true",
   "allow-panic-in-tests = true",
   "allow-indexing-slicing-in-tests = true",
+  // One line: an entry the formatter wraps is read joined (tomlLines).
+  [
+    "disallowed-methods = [",
+    NO_CLOEXEC("rustix::fs::open", SETS_NO_O_CLOEXEC),
+    NO_CLOEXEC("rustix::fs::openat", SETS_NO_O_CLOEXEC),
+    NO_CLOEXEC(
+      "rustix::io::dup",
+      "the copy has no FD_CLOEXEC; use OwnedFd::try_clone, which sets it",
+    ),
+    "]",
+  ].join(" "),
 ];
 
 export const DENY_CONFIG = [

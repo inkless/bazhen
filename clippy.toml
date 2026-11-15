@@ -2,3 +2,10 @@ allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 allow-panic-in-tests = true
 allow-indexing-slicing-in-tests = true
+# Each makes an fd without FD_CLOEXEC, which a child would inherit, and which the holder takes for
+# one it inherited and closes (crates/bazhen-holder/src/pty.rs, close_inherited_fds).
+disallowed-methods = [
+  { path = "rustix::fs::open", reason = "it sets no O_CLOEXEC; use std::fs::OpenOptions, which does" },
+  { path = "rustix::fs::openat", reason = "it sets no O_CLOEXEC; use std::fs::OpenOptions, which does" },
+  { path = "rustix::io::dup", reason = "the copy has no FD_CLOEXEC; use OwnedFd::try_clone, which sets it" },
+]

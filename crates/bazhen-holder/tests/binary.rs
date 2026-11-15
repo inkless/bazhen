@@ -103,6 +103,8 @@ struct Started {
     start: String,
     entry: PathBuf,
     child: Option<Child>,
+    /// `exit` has waited for the holder, so its pid may already be another process's.
+    reaped: bool,
 }
 
 impl Started {
@@ -137,7 +139,9 @@ impl Started {
             }
             let _ = tx.send(child.wait().map(|status| (status.code(), stderr)));
         });
-        Ok(rx.recv_timeout(DEADLINE)??)
+        let exited = rx.recv_timeout(DEADLINE)??;
+        self.reaped = true;
+        Ok(exited)
     }
 }
 
@@ -147,7 +151,9 @@ impl Drop for Started {
             // Not yet reaped, so the pid is still this holder's.
             let _ = child.kill();
             let _ = child.wait();
-        } else if start_time(self.pid).is_some_and(|start| start == self.start)
+        } else if !self.reaped
+            && start_time(self.pid).is_some_and(|start| start == self.start)
+            && ps("comm=", self.pid).is_some_and(|comm| comm.ends_with("bazhen-holder"))
             && let Ok(pid) = self.pid()
         {
             // `exit` timed out, and its thread still waits for the holder.
@@ -195,6 +201,7 @@ fn spawn(spec: &[u8], how: &Start<'_>) -> Result<Started> {
         start,
         entry,
         child: Some(child),
+        reaped: false,
     };
     // A holder that refused the spec early may have closed stdin already.
     let _ = stdin.write_all(spec);

@@ -10,12 +10,13 @@
 use std::io;
 use std::mem::MaybeUninit;
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd, RawFd};
+use std::os::unix::ffi::OsStrExt as _;
+use std::os::unix::fs::OpenOptionsExt as _;
 use std::os::unix::process::CommandExt as _;
 use std::process::{Command, Stdio};
 use std::ptr;
 
 use bazhen_holder_proto::body::{ProcessSpec, Size};
-use rustix::fs::{Mode, OFlags};
 use rustix::io::{FdFlags, fcntl_setfd, ioctl_fionbio};
 use rustix::process::Pid;
 use rustix::pty::{OpenptFlags, grantpt, openpt, ptsname, unlockpt};
@@ -90,6 +91,12 @@ pub struct Pty {
 #[derive(Debug)]
 pub struct Slave(OwnedFd);
 
+impl AsFd for Slave {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.0.as_fd()
+    }
+}
+
 impl Pty {
     /// Opens a PTY pair of `size`. Neither end becomes the caller's controlling terminal, both are
     /// close-on-exec, and the master doesn't block.
@@ -103,11 +110,7 @@ impl Pty {
         grantpt(&master)?;
         unlockpt(&master)?;
         let name = ptsname(&master, Vec::new())?;
-        let slave = rustix::fs::open(
-            name.as_c_str(),
-            OFlags::RDWR | OFlags::NOCTTY | OFlags::CLOEXEC,
-            Mode::empty(),
-        )?;
+        let slave = OwnedFd::from(open_terminal(&name)?);
         let mut termios = tcgetattr(&slave)?;
         termios.input_modes.insert(InputModes::IUTF8);
         tcsetattr(&slave, OptionalActions::Now, &termios)?;
@@ -216,9 +219,11 @@ fn become_session_leader() -> io::Result<()> {
 /// Closes every fd above 2 that this process inherited, so none reaches the child, nor keeps open
 /// whatever its spawner leaked.
 ///
-/// An inherited fd is one without `FD_CLOEXEC`: exec closed every fd that had it, and every fd the
-/// holder opens sets it (std, `signal-hook` and `Pty::open` all do). So this closes only fds no
-/// Rust value in the crate owns, wherever it is called; `start` calls it before opening anything.
+/// An inherited fd is one without `FD_CLOEXEC`, since exec closed every fd that had it. So this is
+/// sound as long as every fd the process owns is close-on-exec, and `start` calls it first, before
+/// the holder opens anything. std, `signal-hook` and `Pty::open` set the flag on every fd they
+/// make; rustix doesn't by default, so `clippy.toml` disallows the rustix calls that make an fd
+/// without it.
 ///
 /// # Errors
 ///
@@ -244,4 +249,18 @@ pub(crate) fn close_inherited_fds() -> io::Result<()> {
         let _ = unsafe { libc::close(fd) };
     }
     Ok(())
+}
+
+/// Opens the terminal at `path` to read and write, never as the caller's controlling terminal.
+/// std sets `O_CLOEXEC` on it.
+///
+/// # Errors
+///
+/// When it can't be opened.
+pub fn open_terminal(path: &std::ffi::CStr) -> io::Result<std::fs::File> {
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .custom_flags(libc::O_NOCTTY)
+        .open(std::ffi::OsStr::from_bytes(path.to_bytes()))
 }
