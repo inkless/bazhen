@@ -144,7 +144,7 @@ describe("inbox notices", () => {
     ]).toEqual([
       "device revoked",
       "dismissed on this machine",
-      "dismissed from Laptop's shell",
+      "dismissed from Laptop's shell (unverified)",
       "closed",
     ]);
   });

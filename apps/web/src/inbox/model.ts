@@ -95,7 +95,7 @@ export function noticeClosed(notice: Notice): string {
   if (notice.closeReason !== "dismissed") return "closed";
   return notice.closedFrom === null
     ? "dismissed on this machine"
-    : `dismissed from ${notice.closedFrom.name}'s shell`;
+    : `dismissed from ${notice.closedFrom.name}'s shell (unverified)`;
 }
 
 const newestNoticeFirst = (x: Notice, y: Notice) => y.openedAt.localeCompare(x.openedAt);

@@ -245,7 +245,7 @@ function NoticeRow({ notice, failed }: { notice: Notice; failed: (e: unknown) =>
         <span className="waited">{waited(notice.openedAt, now)}</span>
       </p>
       <p className="inbox-actions">
-        {notice.actions.includes("dismiss") ? (
+        {notice.actions.includes("dismiss") && (
           <Button
             variant="quiet"
             isDisabled={busy}
@@ -253,10 +253,10 @@ function NoticeRow({ notice, failed }: { notice: Notice; failed: (e: unknown) =>
           >
             Dismiss
           </Button>
-        ) : (
+        )}
+        {!notice.actions.includes("dismiss") && device !== null && (
           <span className="note">
-            Dismiss it on this machine with{" "}
-            <code>bazhen devices dismiss {device?.id ?? notice.id}</code>
+            Dismiss it on this machine with <code>bazhen devices dismiss {device.id}</code>
           </span>
         )}
       </p>
