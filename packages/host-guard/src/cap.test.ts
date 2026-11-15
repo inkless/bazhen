@@ -3,6 +3,7 @@ import {
   CAPPED_ENV,
   MIN_SYSTEMD,
   cappedRunRefusal,
+  cgroupLimit,
   cappedScope,
   cgroupOf,
   chooseMode,
@@ -52,6 +53,25 @@ describe("the caps", () => {
   it("holds a run to half the machine, so a cap above it still fires", () => {
     expect(clampMemory(24 * GIB, 16 * GIB)).toBe(8 * GIB);
     expect(clampMemory(4 * GIB, 64 * GIB)).toBe(4 * GIB);
+  });
+
+  it("reads the smallest memory limit of the cgroups a process runs in", () => {
+    const read = reader({
+      "/proc/self/cgroup": "0::/a/b\n",
+      "/sys/fs/cgroup/a/b/memory.max": "max\n",
+      "/sys/fs/cgroup/a/memory.max": `${4 * GIB}\n`,
+      "/sys/fs/cgroup/memory.max": `${8 * GIB}\n`,
+    });
+    expect(cgroupLimit(read)).toBe(4 * GIB);
+  });
+
+  it("reads a container's own limit at the root of its cgroup namespace", () => {
+    const read = reader({
+      "/proc/self/cgroup": "0::/\n",
+      "/sys/fs/cgroup/memory.max": `${4 * GIB}\n`,
+    });
+    expect(cgroupLimit(read)).toBe(4 * GIB);
+    expect(cgroupLimit(reader({}))).toBe(Infinity);
   });
 
   it("holds every run together below the whole machine, in whole pages", () => {

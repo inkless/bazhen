@@ -47,9 +47,30 @@ export const CAPPED_ENV = "BZ_CAPPED";
 // Whole MiB: a multiple of every page size, so a cap reads back from the kernel as it was set.
 const wholeMib = (bytes: number) => Math.floor(bytes / MIB) * MIB;
 
-/** A run's own cap, at most half the machine, so it can fire on a machine smaller than it. */
-export const clampMemory = (bytes: number, total = totalmem()) =>
+/**
+ * A run's own cap, at most half of what it may use: the machine's memory, or less where a cgroup
+ * it runs in has a limit of its own. In a container `totalmem()` reports the host's memory, and
+ * a cap above the container's limit would never fire before the container's OOM.
+ */
+export const clampMemory = (bytes: number, total = Math.min(totalmem(), cgroupLimit())) =>
   wholeMib(Math.min(bytes, total / 2));
+
+/**
+ * The smallest `memory.max` on the way from this process's cgroup up to the root, or Infinity:
+ * in a container's own cgroup namespace its path is `/`, whose `memory.max` is the container's.
+ */
+export function cgroupLimit(read = readText): number {
+  const path = cgroupOf(read("/proc/self/cgroup") ?? "");
+  if (path === undefined) return Infinity;
+  const parts = path.split("/").filter(Boolean);
+  let limit = Infinity;
+  for (let depth = parts.length; depth >= 0; depth -= 1) {
+    const dir = parts.slice(0, depth).join("/");
+    const max = Number(read(`/sys/fs/cgroup${dir === "" ? "" : `/${dir}`}/memory.max`)?.trim());
+    if (Number.isSafeInteger(max) && max > 0) limit = Math.min(limit, max);
+  }
+  return limit;
+}
 
 /** What all capped runs together may use: most of the machine, never all of it. */
 export const sliceMemory = (total = totalmem()) => wholeMib(total * 0.6);
