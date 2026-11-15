@@ -282,7 +282,8 @@ impl Engine {
     /// Two ways the result can differ from a terminal that held all its history itself:
     /// - Blank cells and line breaks: the engine gives alacritty back the history a reflow pulls
     ///   from rewrapped from its text, where that terminal reflows its rows as they were. Every
-    ///   cell that draws something is the same, and in the same order.
+    ///   cell that draws something is the same, and in the same order. A blank cell may differ in
+    ///   where it falls, and in how it draws: its background, or an attribute a blank shows.
     /// - Under the alternate screen alacritty keeps the primary grid private, so the primary
     ///   screen reflows with only the row of history a drain leaves: on return it can differ,
     ///   and alacritty may drop rows below the primary's cursor.

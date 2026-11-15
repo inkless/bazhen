@@ -460,9 +460,10 @@ fn difference(engine: &Engine, full: &FullHistory) -> Option<String> {
     if saved != other {
         return Some(format!("saved cursor: {saved:?} against {other:?}"));
     }
-    // The one cell of history that output can still change: writing over the wide char that
-    // starts the screen unmarks the spacer before it, which then shows the pen it was drawn in.
-    // History is compared as text, and text carries no spacer, so it is compared here.
+    // The one cell of history that output can still change: writing over either cell of the wide
+    // char that starts the screen unmarks the spacer ending the row above, which then draws as the
+    // blank it holds, in whatever pen it was given. History is compared as text, and text carries
+    // no spacer, so it is compared here.
     let (ours, theirs) = (newest_spacer(&engine.term), newest_spacer(&full.term));
     if ours != theirs {
         return Some(format!(
@@ -492,7 +493,7 @@ fn difference(engine: &Engine, full: &FullHistory) -> Option<String> {
 fn newest_spacer(term: &Term<Sink>) -> Option<&Cell> {
     let grid = term.grid();
     (grid.history_size() > 0)
-        .then(|| grid[Line(-1)].into_iter().last())
+        .then(|| grid[Line(-1)].last())
         .flatten()
         .filter(|cell| cell.flags.contains(Flags::LEADING_WIDE_CHAR_SPACER))
 }
@@ -775,7 +776,7 @@ fn a_spacer_a_resize_leaves_in_another_colour_parts_the_two_at_the_resize() {
     // before 字; the engine's refill redraws the line at that width, in the pen. Widened, both
     // keep their spacer ending the newest history row, and the "a" written over 字 unmarks it.
     let lines = "\tabcaabcxyzzy\tbcxyzzybca\t文字def def \tbcdef def 中bc def axyzzy文字";
-    run(
+    let (engine, full) = run(
         Size { cols: 26, rows: 2 },
         &[
             Action::Index,
@@ -790,6 +791,11 @@ fn a_spacer_a_resize_leaves_in_another_colour_parts_the_two_at_the_resize() {
             Action::Text("a".to_owned()),
         ],
         &[1],
+    );
+    assert!(
+        difference(&engine, &full).is_some_and(|d| d.starts_with("newest history row's spacer")),
+        "{:?}",
+        difference(&engine, &full)
     );
 }
 
