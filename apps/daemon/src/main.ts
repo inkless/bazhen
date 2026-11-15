@@ -40,7 +40,7 @@ import { ForegroundWatch } from "./shells/foreground.ts";
 import { streamRoute } from "./stream/server.ts";
 import { Approvals } from "./mailbox/approvals.ts";
 import { Inbox } from "./attention/inbox.ts";
-import { Notices } from "./attention/notices.ts";
+import { Notices, deviceOf } from "./attention/notices.ts";
 import { MAC_APP, desktopNotifier, hostNotifier, notifyOnAttention } from "./notify/desktop.ts";
 import { Presence } from "./notify/presence.ts";
 import { HOOK_SCRIPT, hookClient, hookCommand } from "./mailbox/hook-command.ts";
@@ -303,7 +303,7 @@ const snapshotView: SnapshotView = {
   resumes: environment.resumes,
   themes: (harness) => environment.themes[harness] ?? [],
   attentionActions: (item) => inbox.actions(item),
-  noticeActions: (n) => notices.actions(n, "owner"),
+  noticeActions: (n) => notices.actions(n, "owner-socket"),
 };
 for (const a of store.snapshot(snapshotView).agents) {
   if (a.harness === "claude-code" && a.state === "running") activity.restarted(a.id);
@@ -320,14 +320,15 @@ const commands = {
   reply: (attentionId, req) => inbox.reply(attentionId, req),
   dismiss: (attentionId, req) => inbox.dismiss(attentionId, req),
   resend: (attentionId, req) => inbox.resend(attentionId, req),
-  dismissNotice: (noticeId, req, viewer) => notices.dismiss(noticeId, req, viewer),
+  dismissNotice: (noticeId, req, viewer, fromDevice) =>
+    notices.dismiss(noticeId, req, viewer, fromDevice),
   close: (agentId, req) => shells.closeAgent(agentId, req, (r) => lifecycle.close(agentId, r)),
   respawn: (agentId, req) => lifecycle.respawn(agentId, req),
   relaunch: (agentId, req) => lifecycle.relaunch(agentId, req),
   signal: (agentId, req) => lifecycle.signal(agentId, req),
-  openShell: (req) => shells.open(req),
+  openShell: (req, viewer) => shells.open(req, deviceOf(viewer)),
   closeShell: (terminalId, req) => shells.close(terminalId, req),
-  restartShell: (terminalId, req) => shells.restart(terminalId, req),
+  restartShell: (terminalId, req, viewer) => shells.restart(terminalId, req, deviceOf(viewer)),
   renameShell: (terminalId, req) => shells.rename(terminalId, req),
   unlinkShell: (terminalId, req) => shells.unlink(terminalId, req),
   tasks,

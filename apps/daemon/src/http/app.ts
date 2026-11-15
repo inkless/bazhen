@@ -113,16 +113,19 @@ export interface AppDeps {
   readonly reply: (attentionId: string, req: ReplyAttentionRequest) => ReplyAttentionResponse;
   readonly dismiss: (attentionId: string, req: DismissAttentionRequest) => DismissAttentionResponse;
   readonly resend: (attentionId: string, req: ResendAttentionRequest) => ResendAttentionResponse;
+  /** `fromDevice` is the advisory device a socket caller's shell names; absent over HTTP. */
   readonly dismissNotice: (
     noticeId: string,
     req: DismissNoticeRequest,
     viewer: Viewer,
+    fromDevice: string | undefined,
   ) => DismissNoticeResponse;
   readonly close: (agentId: string, req: CloseAgentRequest) => Promise<AgentCommandResponse>;
   readonly respawn: (agentId: string, req: RespawnAgentRequest) => Promise<AgentCommandResponse>;
   readonly relaunch: (agentId: string, req: RelaunchAgentRequest) => Promise<AgentCommandResponse>;
   readonly signal: (agentId: string, req: SignalAgentRequest) => Promise<AgentCommandResponse>;
-  readonly openShell: (req: OpenShellRequest) => Promise<ShellCommandResponse>;
+  /** `viewer` is who opens it: a paired device's shell is told which device that was. */
+  readonly openShell: (req: OpenShellRequest, viewer: Viewer) => Promise<ShellCommandResponse>;
   readonly closeShell: (
     terminalId: string,
     req: CloseShellRequest,
@@ -130,6 +133,7 @@ export interface AppDeps {
   readonly restartShell: (
     terminalId: string,
     req: RestartShellRequest,
+    viewer: Viewer,
   ) => Promise<ShellCommandResponse>;
   readonly renameShell: (
     terminalId: string,
@@ -179,10 +183,12 @@ function fail(
 /** The paired device a request came from, as the gate verified it; unset for the owner. */
 export type AppEnv = { Variables: { device?: DeviceId } };
 
-const viewerOf = (c: Context<AppEnv>): Viewer => c.get("device") ?? "owner";
-
 export function createApp(deps: AppDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
+  // The socket's 0600 permission makes its caller the owner; over HTTP, a request the gate let
+  // through without a device is loopback's own where pairing isn't required.
+  const viewerOf = (c: Context<AppEnv>): Viewer =>
+    c.get("device") ?? (deps.allow === null ? "owner-socket" : "owner-loopback");
 
   const { allow } = deps;
   if (allow !== null) {
@@ -291,19 +297,19 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   app.post("/v1/shells", async (c) => {
     const body = OpenShellRequest.safeParse(await c.req.json().catch(() => undefined));
     if (!body.success) return invalid(c, body.error);
-    return c.json(await deps.openShell(body.data));
+    return c.json(await deps.openShell(body.data, viewerOf(c)));
   });
 
   /** A request about one entity: the body is checked against its schema, then handed to `run`. */
   const route = <T, R>(
     path: `/v1/${string}/:id/${string}`,
     schema: z.ZodType<T>,
-    run: (id: string, req: T, viewer: Viewer) => R | Promise<R>,
+    run: (id: string, req: T, viewer: Viewer, c: Context<AppEnv>) => R | Promise<R>,
   ) =>
     app.post(path, async (c) => {
       const body = schema.safeParse(await c.req.json().catch(() => undefined));
       if (!body.success) return invalid(c, body.error);
-      return c.json(await run(c.req.param("id"), body.data, viewerOf(c)));
+      return c.json(await run(c.req.param("id"), body.data, viewerOf(c), c));
     });
   route("/v1/agents/:id/close", CloseAgentRequest, deps.close);
   route("/v1/agents/:id/respawn", RespawnAgentRequest, deps.respawn);
@@ -314,7 +320,15 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   route("/v1/attention/:id/reply", ReplyAttentionRequest, deps.reply);
   route("/v1/attention/:id/dismiss", DismissAttentionRequest, deps.dismiss);
   route("/v1/attention/:id/resend", ResendAttentionRequest, deps.resend);
-  route("/v1/notices/:id/dismiss", DismissNoticeRequest, deps.dismissNotice);
+  // Only the socket's caller can say which device's shell it runs in; a browser can't.
+  route("/v1/notices/:id/dismiss", DismissNoticeRequest, (id, req, viewer, c) =>
+    deps.dismissNotice(
+      id,
+      req,
+      viewer,
+      deps.allow === null ? c.req.header("bazhen-device-id") : undefined,
+    ),
+  );
   route("/v1/shells/:id/restart", RestartShellRequest, deps.restartShell);
   route("/v1/shells/:id/rename", RenameShellRequest, deps.renameShell);
   route("/v1/shells/:id/unlink", UnlinkShellRequest, deps.unlinkShell);

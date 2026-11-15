@@ -18,17 +18,9 @@
       ]
     },
     "closeReason": {
-      "anyOf": [
-        {
-          "type": "string",
-          "enum": [
-            "dismissed",
-            "revoked"
-          ]
-        },
-        {
-          "type": "null"
-        }
+      "type": [
+        "string",
+        "null"
       ]
     },
     "summary": {
@@ -76,11 +68,37 @@
     "actions": {
       "type": "array",
       "items": {
-        "type": "string",
-        "enum": [
-          "dismiss"
-        ]
+        "type": "string"
       }
+    },
+    "closedBy": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "closedFrom": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^dev_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "required": [
@@ -91,6 +109,8 @@
     "summary",
     "openedAt",
     "device",
-    "actions"
+    "actions",
+    "closedBy",
+    "closedFrom"
   ]
 }

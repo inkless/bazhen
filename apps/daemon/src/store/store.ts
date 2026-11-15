@@ -91,7 +91,14 @@ export interface OpenAttention {
 export interface OpenNotice {
   readonly id: NoticeId;
   readonly kind: string;
-  readonly deviceId: string | null;
+  readonly deviceId: DeviceId | null;
+}
+
+/** A notices row as an open notice, or nothing if its ids aren't Bazhen's. */
+function openNotice(r: Record<string, SQLOutputValue>): OpenNotice | undefined {
+  if (typeof r.id !== "string" || !isId("ntc", r.id)) return undefined;
+  const device = typeof r.device_id === "string" && isId("dev", r.device_id) ? r.device_id : null;
+  return { id: r.id, kind: String(r.kind), deviceId: device };
 }
 
 /** Where a device paired from, for the notice its pairing opens. */
@@ -635,17 +642,12 @@ export class Store {
       "SELECT id, kind, device_id FROM notices WHERE state = 'open' ORDER BY created_event_id",
     )
       .all()
-      .flatMap((r) =>
-        typeof r.id === "string" && isId("ntc", r.id)
-          ? [
-              {
-                id: r.id,
-                kind: String(r.kind),
-                deviceId: typeof r.device_id === "string" ? r.device_id : null,
-              },
-            ]
-          : [],
-      );
+      .flatMap((r) => openNotice(r) ?? []);
+  }
+
+  /** Whether `id` names a device this daemon paired, revoked or not. */
+  pairedEver(id: string): boolean {
+    return this.prepare("SELECT 1 AS present FROM devices WHERE id = ?").get(id) !== undefined;
   }
 
   /** The device whose token hashes to `tokenHash`, revoked or not. */
@@ -683,7 +685,7 @@ export class Store {
           type: "notice.closed",
           entityId: open.id,
           actor: "user",
-          payload: { reason: "revoked" },
+          payload: { reason: "revoked", by: "revoke" },
         });
       }
     });
@@ -1126,30 +1128,30 @@ export class Store {
   private notices(view: SnapshotView) {
     return this.prepare(
       `SELECT n.id, n.kind, n.state, n.close_reason AS closeReason, n.summary, e.ts AS openedAt,
-              n.device_id, n.device_name, n.device_origin, n.device_address
+              n.device_id, n.device_name, n.device_origin, n.device_address,
+              n.closed_by AS closedBy, n.closed_from_device, d.name AS closed_from_name
        FROM notices n JOIN events e ON e.id = n.created_event_id
+       LEFT JOIN devices d ON d.id = n.closed_from_device
        WHERE n.state = 'open' OR n.id IN (
          SELECT id FROM notices WHERE state = 'closed' ORDER BY updated_event_id DESC LIMIT ?)
        ORDER BY n.created_event_id`,
     )
       .all(CLOSED_NOTICES_SHOWN)
-      .map(({ device_id, device_name, device_origin, device_address, ...r }) => {
-        const deviceId = typeof device_id === "string" ? device_id : null;
+      .map((row) => {
+        const { device_id, device_name, device_origin, device_address, ...rest } = row;
+        const { closed_from_device, closed_from_name, ...r } = rest;
+        const open = r.state === "open" ? openNotice(row) : undefined;
         return {
           ...r,
           device:
-            deviceId === null
-              ? null
-              : {
-                  id: deviceId,
-                  name: device_name,
-                  origin: device_origin,
-                  address: device_address ?? null,
-                },
-          actions:
-            r.state === "open" && typeof r.id === "string" && isId("ntc", r.id)
-              ? view.noticeActions({ id: r.id, kind: String(r.kind), deviceId })
-              : [],
+            typeof device_id === "string"
+              ? { id: device_id, name: device_name, origin: device_origin, address: device_address }
+              : null,
+          actions: open === undefined ? [] : view.noticeActions(open),
+          closedFrom:
+            typeof closed_from_device === "string"
+              ? { id: closed_from_device, name: closed_from_name }
+              : null,
         };
       });
   }

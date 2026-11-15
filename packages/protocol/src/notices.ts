@@ -15,6 +15,13 @@ export type NoticeCloseReason = z.infer<typeof NoticeCloseReason>;
 export const NoticeState = z.enum(["open", "closed"]);
 export type NoticeState = z.infer<typeof NoticeState>;
 
+/**
+ * Who closed a notice: the owner on the Unix socket, the owner from a loopback browser where no
+ * device must pair, or the device's revocation.
+ */
+export const NoticeCloser = z.enum(["owner-socket", "owner-loopback", "revoke"]);
+export type NoticeCloser = z.infer<typeof NoticeCloser>;
+
 export const NoticeAction = z.enum(["dismiss"]);
 export type NoticeAction = z.infer<typeof NoticeAction>;
 
@@ -31,22 +38,30 @@ export const NoticeDevice = z.object({
 export type NoticeDevice = z.infer<typeof NoticeDevice>;
 
 /**
- * Something the human should know that no agent raised (protocol 1.38). `kind` is a string,
- * not an enum: `/v1/state` can't tell which version a client speaks, so a kind added later
- * must not fail an older client's whole snapshot. A client shows a kind it doesn't know by its
- * `summary`, which the daemon writes and which carries nothing a device chose.
+ * Something the human should know that no agent raised (protocol 1.38). `kind`, `closeReason`
+ * and `actions` are strings, not enums: `/v1/state` can't tell which version a client speaks,
+ * so a value added later must not fail an older client's whole snapshot. A client shows a kind
+ * it doesn't know by its `summary`, which the daemon writes and which carries nothing a device
+ * chose, and ignores an action it doesn't know. The enums above are what this version sends.
  */
 export const Notice = z.object({
   id: Id("ntc"),
   kind: z.string(),
   state: NoticeState,
-  closeReason: NoticeCloseReason.nullable(),
+  closeReason: z.string().nullable(),
   summary: z.string(),
   /** When it opened, as an ISO timestamp. */
   openedAt: z.iso.datetime(),
   device: NoticeDevice.nullable(),
-  /** What the viewer can do about it now: never dismiss, for the device it is about. */
-  actions: z.array(NoticeAction),
+  /** What the viewer can do about it now: dismiss, for the owner on this machine only. */
+  actions: z.array(z.string()),
+  /** Who closed it, a `NoticeCloser`; null while it is open. */
+  closedBy: z.string().nullable(),
+  /**
+   * Advisory: the paired device whose shell the dismissal came from, as that shell's environment
+   * claimed. A paired device can run commands as the owner, so this is a lead, never proof.
+   */
+  closedFrom: z.object({ id: Id("dev"), name: z.string() }).nullable(),
 });
 export type Notice = z.infer<typeof Notice>;
 

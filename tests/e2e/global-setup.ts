@@ -11,7 +11,8 @@ export default async function setup(): Promise<void> {
     data: { code: await issueCode(), name: "e2e" },
   });
   if (!res.ok()) throw new Error(`pairing failed: ${res.status()} ${await res.text()}`);
-  await dismissNotices();
+  const paired: unknown = await res.json();
+  await dismissNotices(String(Reflect.get(Object(paired), "deviceId")));
   await context.storageState({ path: storageState() });
   await context.dispose();
 }

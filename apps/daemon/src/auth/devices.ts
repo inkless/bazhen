@@ -20,8 +20,11 @@ export const LOOPBACK_IDLE_MS = 24 * 60 * 60 * 1000;
 export const TOUCH_EVERY_MS = 60 * 60 * 1000;
 const DEFAULT_NAME = "Browser";
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
-/** Control and format characters, bidi overrides among them, which could disguise a name. */
-const UNPRINTABLE = /[\p{Cc}\p{Cf}]/gu;
+/**
+ * Control and format characters, bidi overrides among them, and the line and paragraph
+ * separators, which could disguise a name or break the line it is shown on.
+ */
+const UNPRINTABLE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
 
 const hashToken = (token: string) => createHash("sha256").update(token).digest("hex");
 const idleLimit = (device: { secure: boolean }) =>

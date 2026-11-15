@@ -365,11 +365,16 @@ export function project(db: Statements, e: Recorded): void {
       return;
     }
     case "notice.closed": {
-      const { reason } = EVENTS[e.type].payload.parse(e.payload);
+      const { reason, by, fromDevice } = EVENTS[e.type].payload.parse(e.payload);
       const row = db.prepare("SELECT state FROM notices WHERE id = ?").get(e.entityId);
       if (row === undefined) throw new UnknownEntity("notice", e.entityId);
       const state = notice.next(NoticeState.parse(row.state), reason);
-      update(db, "notices", "id", e.entityId, e.id, { state, close_reason: reason });
+      update(db, "notices", "id", e.entityId, e.id, {
+        state,
+        close_reason: reason,
+        closed_by: by,
+        closed_from_device: fromDevice ?? null,
+      });
       return;
     }
     case "agent.usage": {

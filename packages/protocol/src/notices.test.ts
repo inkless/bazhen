@@ -17,6 +17,8 @@ const notice = {
     address: "192.168.1.30",
   },
   actions: ["dismiss"],
+  closedBy: null,
+  closedFrom: null,
 };
 
 describe("notices", () => {
@@ -32,8 +34,16 @@ describe("notices", () => {
     expect(StateSnapshot.parse(older).notices).toEqual([]);
   });
 
-  it("reads a notice of a kind this build doesn't know, so a later kind can't fail a snapshot", () => {
-    const later = { ...notice, kind: "certificate_expiring", device: null };
+  it("reads a notice with a kind, close reason or action this build doesn't know", () => {
+    const later = {
+      ...notice,
+      kind: "certificate_expiring",
+      state: "closed",
+      closeReason: "expired",
+      closedBy: "timer",
+      device: null,
+      actions: ["renew"],
+    };
     expect(Notice.safeParse(later).success).toBe(true);
   });
 
@@ -42,12 +52,14 @@ describe("notices", () => {
     expect(Notice.safeParse({ ...notice, device }).success).toBe(false);
   });
 
-  it("records a notice closed as dismissed or revoked, and no other way", () => {
+  it("records who closed a notice from where, and refuses a close that doesn't say", () => {
     const closed = EVENTS["notice.closed"].payload;
     expect([
+      closed.safeParse({ reason: "dismissed", by: "owner-socket" }).success,
+      closed.safeParse({ reason: "revoked", by: "revoke" }).success,
+      closed.safeParse({ reason: "dismissed", by: "owner-loopback" }).success,
       closed.safeParse({ reason: "dismissed" }).success,
-      closed.safeParse({ reason: "revoked" }).success,
-      closed.safeParse({ reason: "answered" }).success,
-    ]).toEqual([true, true, false]);
+      closed.safeParse({ reason: "answered", by: "owner-socket" }).success,
+    ]).toEqual([true, true, true, false, false]);
   });
 });

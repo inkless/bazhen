@@ -1,14 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { DEVICE_PAIRED } from "@bazhen/protocol";
 import { DeviceAuth } from "../auth/devices.ts";
-import { CLOSED_NOTICES_SHOWN, DEVICE_PAIRED_SUMMARY, Store } from "../store/store.ts";
+import {
+  CLOSED_NOTICES_SHOWN,
+  DEVICE_PAIRED_SUMMARY,
+  IdempotencyConflict,
+  Store,
+} from "../store/store.ts";
 import { tempDb, testView } from "../testing/fixtures.ts";
 import { NoticeClosed, NoticeRefused, Notices, type Viewer } from "./notices.ts";
 
 const lan = { origin: "https://my-mac.local:7942", address: "192.168.1.30" };
 
-function paired(path = tempDb()) {
-  const store = Store.open(path);
+function paired() {
+  const store = Store.open(tempDb());
   const devices = new DeviceAuth(store, { log: () => {} });
   const notices = new Notices(store);
   const seenBy = (viewer: Viewer) =>
@@ -21,8 +26,8 @@ const key = (k: string) => ({ idempotencyKey: k });
 describe("a pairing's notice", () => {
   it("opens with the pairing, naming the device as stored and where it paired from", () => {
     const { store, devices, seenBy } = paired();
-    const { deviceId } = devices.pair("Ph‮one\n", true, lan);
-    expect(seenBy("owner")).toMatchObject([
+    const { deviceId } = devices.pair("Ph\u202eone\n", true, lan);
+    expect(seenBy("owner-socket")).toMatchObject([
       {
         kind: DEVICE_PAIRED,
         state: "open",
@@ -35,49 +40,68 @@ describe("a pairing's notice", () => {
     store.close();
   });
 
-  it("is still the only one after the daemon restarts", () => {
-    const path = tempDb();
-    const first = paired(path);
-    first.devices.pair("Phone", true, lan);
-    first.store.close();
-    const again = paired(path);
-    expect(again.seenBy("owner")).toHaveLength(1);
-    again.store.close();
-  });
-
-  it("offers its own device no dismissal, and every other device and the owner one", () => {
+  it("offers a dismissal to the owner on this machine only, never to a paired device", () => {
     const { store, devices, seenBy } = paired();
     const phone = devices.pair("Phone", true, lan).deviceId;
-    const laptop = devices.pair("Laptop", true, lan).deviceId;
-    const offered = (viewer: Viewer) =>
-      seenBy(viewer).map((n) => [n.device?.id, n.actions.length > 0]);
-    expect([offered(phone), offered(laptop), offered("owner")]).toEqual([
-      [
-        [phone, false],
-        [laptop, true],
-      ],
-      [
-        [phone, true],
-        [laptop, false],
-      ],
-      [
-        [phone, true],
-        [laptop, true],
-      ],
+    const other = devices.pair("iPhone", true, lan).deviceId;
+    const offered = (viewer: Viewer) => seenBy(viewer).map((n) => n.actions);
+    expect([
+      offered(phone),
+      offered(other),
+      offered("owner-socket"),
+      offered("owner-loopback"),
+    ]).toEqual([
+      [[], []],
+      [[], []],
+      [["dismiss"], ["dismiss"]],
+      [["dismiss"], ["dismiss"]],
     ]);
     store.close();
   });
 
-  it("refuses its own device's dismissal, and closes for another's, once per key", () => {
+  it("refuses a dismissal from any paired device, the one it is about or another", () => {
     const { store, devices, notices, seenBy } = paired();
     const phone = devices.pair("Phone", true, lan).deviceId;
-    const laptop = devices.pair("Laptop", true, lan).deviceId;
-    const id = String(seenBy("owner")[0]?.id);
+    const other = devices.pair("iPhone", true, lan).deviceId;
+    const id = String(seenBy("owner-socket")[0]?.id);
     expect(() => notices.dismiss(id, key("k1"), phone)).toThrow(NoticeRefused);
-    const first = notices.dismiss(id, key("k2"), laptop);
-    expect(notices.dismiss(id, key("k2"), laptop)).toEqual(first);
-    expect(() => notices.dismiss(id, key("k3"), "owner")).toThrow(NoticeClosed);
-    expect(seenBy("owner")[0]).toMatchObject({ state: "closed", closeReason: "dismissed" });
+    expect(() => notices.dismiss(id, key("k2"), other)).toThrow(NoticeRefused);
+    expect(seenBy("owner-socket")[0]?.state).toBe("open");
+    store.close();
+  });
+
+  it("closes for the owner, once per key and viewer, recording where the owner dismissed it", () => {
+    const { store, devices, notices, seenBy } = paired();
+    const phone = devices.pair("Phone", true, lan).deviceId;
+    const id = String(seenBy("owner-socket")[0]?.id);
+    const first = notices.dismiss(id, key("k1"), "owner-loopback");
+    expect(notices.dismiss(id, key("k1"), "owner-loopback")).toEqual(first);
+    expect(() => notices.dismiss(id, key("k1"), phone)).toThrow(IdempotencyConflict);
+    expect(() => notices.dismiss(id, key("k2"), "owner-socket")).toThrow(NoticeClosed);
+    const closed = store.events(0).find((e) => e.type === "notice.closed");
+    expect([seenBy("owner-socket")[0], closed?.payload]).toMatchObject([
+      { closeReason: "dismissed", closedBy: "owner-loopback", closedFrom: null },
+      { reason: "dismissed", by: "owner-loopback" },
+    ]);
+    store.close();
+  });
+
+  it("notes the paired device whose shell dismissed it, and nothing for an id it never paired", () => {
+    const { store, devices, notices, seenBy } = paired();
+    const laptop = devices.pair("Laptop", true, lan).deviceId;
+    devices.pair("Phone", true, lan);
+    const [ofLaptop, ofPhone] = seenBy("owner-socket").map((n) => n.id);
+    notices.dismiss(
+      String(ofLaptop),
+      key("k1"),
+      "owner-socket",
+      "dev_01900000000070008000000000000009",
+    );
+    notices.dismiss(String(ofPhone), key("k2"), "owner-socket", laptop);
+    expect(seenBy("owner-socket").map((n) => n.closedFrom)).toEqual([
+      null,
+      { id: laptop, name: "Laptop" },
+    ]);
     store.close();
   });
 
@@ -87,23 +111,37 @@ describe("a pairing's notice", () => {
     devices.revoke(deviceId);
     const after = store.latestEventId();
     devices.revoke(deviceId);
-    expect(seenBy("owner")).toMatchObject([
+    expect(seenBy("owner-socket")).toMatchObject([
       { state: "closed", closeReason: "revoked", actions: [] },
     ]);
     expect(store.latestEventId()).toBe(after);
     store.close();
   });
 
-  it("is in the snapshot while open, but only the latest closed ones are", () => {
+  it("revokes a device whose notice was already dismissed, closing nothing twice", () => {
+    const { store, devices, notices, seenBy } = paired();
+    const { deviceId } = devices.pair("Phone", true, lan);
+    notices.dismiss(String(seenBy("owner-socket")[0]?.id), key("k1"), "owner-socket");
+    devices.revoke(deviceId);
+    expect([
+      store.devices().map((d) => d.id),
+      store.events(0).filter((e) => e.type === "notice.closed").length,
+      seenBy("owner-socket")[0]?.closeReason,
+    ]).toEqual([[], 1, "dismissed"]);
+    store.close();
+  });
+
+  it("is in the snapshot while open, but of the closed only the latest closed are", () => {
     const { store, devices, seenBy } = paired();
-    const closed = Array.from({ length: CLOSED_NOTICES_SHOWN + 1 }, (_, i) => {
-      const { deviceId } = devices.pair(`Old ${i}`, true, lan);
-      devices.revoke(deviceId);
-      return deviceId;
-    });
+    const ids = Array.from(
+      { length: CLOSED_NOTICES_SHOWN + 1 },
+      (_, i) => devices.pair(`Old ${i}`, true, lan).deviceId,
+    );
     const open = devices.pair("New", true, lan).deviceId;
-    const shown = seenBy("owner").map((n) => n.device?.id);
-    expect(shown).toEqual([...closed.slice(1), open]);
+    // Closed newest-opened first, so the one closed first, and dropped, is the last to open.
+    for (const id of ids.toReversed()) devices.revoke(id);
+    const shown = seenBy("owner-socket").map((n) => n.device?.id);
+    expect(shown).toEqual([...ids.slice(0, -1), open]);
     store.close();
   });
 });

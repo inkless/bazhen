@@ -3,6 +3,7 @@ import type { Attention, AttentionKind, Notice, StateSnapshot } from "@bazhen/pr
 import {
   closedNotices,
   closedRows,
+  noticeClosed,
   noticeLabel,
   openNotices,
   openRows,
@@ -96,8 +97,13 @@ const notice = (openedAt: string, over: Partial<Notice> = {}): Notice => ({
   openedAt,
   device,
   actions: ["dismiss"],
+  closedBy: null,
+  closedFrom: null,
   ...over,
 });
+
+const endedAs = (over: Partial<Notice>) =>
+  noticeClosed(notice("2026-11-12T08:00:00.000Z", { state: "closed", ...over }));
 
 describe("inbox notices", () => {
   it("lists open notices newest first, and leaves closed ones to the closed list", () => {
@@ -122,6 +128,24 @@ describe("inbox notices", () => {
     expect([pairedFrom(device), pairedFrom({ ...device, address: "192.168.1.30" })]).toEqual([
       "https://my-mac.local:7942",
       "https://my-mac.local:7942 from 192.168.1.30",
+    ]);
+  });
+
+  it("says how a closed notice ended, naming a device's shell only as where it came from", () => {
+    expect([
+      endedAs({ closeReason: "revoked", closedBy: "revoke" }),
+      endedAs({ closeReason: "dismissed", closedBy: "owner-socket" }),
+      endedAs({
+        closeReason: "dismissed",
+        closedBy: "owner-socket",
+        closedFrom: { id: id("dev"), name: "Laptop" },
+      }),
+      endedAs({ closeReason: "expired", closedBy: "timer" }),
+    ]).toEqual([
+      "device revoked",
+      "dismissed on this machine",
+      "dismissed from Laptop's shell",
+      "closed",
     ]);
   });
 });

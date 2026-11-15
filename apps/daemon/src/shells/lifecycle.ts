@@ -3,6 +3,7 @@ import {
   NoTerminal,
   ProcessState,
   type AgentSessionId,
+  type DeviceId,
   type EnvironmentAdapter,
   type RuntimeRef,
   type Size,
@@ -123,7 +124,7 @@ export class ShellLifecycle {
    * Opens a shell, linked to a live agent in its directory or standalone. The terminal is recorded
    * before the environment starts it, and the key's answer with it, so a retry opens nothing new.
    */
-  open(req: OpenShellRequest): Promise<ShellCommandResponse> {
+  open(req: OpenShellRequest, openedBy?: DeviceId): Promise<ShellCommandResponse> {
     const { store, home, queue } = this.deps;
     const request = { command: "open", ...req };
     const opening = async () => {
@@ -139,6 +140,7 @@ export class ShellLifecycle {
           cwd: linked?.cwd ?? resolveDirectory(req.cwd ?? "~", home),
           linkedAgentId: linked?.agentId ?? null,
           theme: req.theme,
+          openedBy,
         },
         (response) => store.answered(req.idempotencyKey, request, response),
       );
@@ -175,7 +177,11 @@ export class ShellLifecycle {
    * Starts a new shell in a lost one's directory, beside the same agent if that agent can still
    * have one, and takes the lost one off the list. The answer names the new shell.
    */
-  restart(terminalId: string, req: RestartShellRequest): Promise<ShellCommandResponse> {
+  restart(
+    terminalId: string,
+    req: RestartShellRequest,
+    openedBy?: DeviceId,
+  ): Promise<ShellCommandResponse> {
     const { store, queue } = this.deps;
     return this.command("restart", terminalId, req, offers("restart"), async (found) => {
       const theme = req.theme ?? found.theme ?? undefined;
@@ -184,7 +190,13 @@ export class ShellLifecycle {
         const agent = found.linkedAgentId && store.agentTerminal({ agentId: found.linkedAgentId });
         const linkedAgentId = agent && LINKABLE.has(agent.state) ? agent.agentId : null;
         const response = await this.start(
-          { cwd: this.restartCwd(found), linkedAgentId, theme, restartOf: found.terminalId },
+          {
+            cwd: this.restartCwd(found),
+            linkedAgentId,
+            theme,
+            restartOf: found.terminalId,
+            openedBy,
+          },
           (first) => store.answered(req.idempotencyKey, request, first),
         );
         // Taken off the list only once its replacement runs: a restart that fails leaves it lost,
@@ -313,11 +325,13 @@ export class ShellLifecycle {
       linkedAgentId: AgentSessionId | null;
       theme: TuiTheme | undefined;
       restartOf?: TerminalId;
+      /** The paired device that asked for it, which its environment names. */
+      openedBy?: DeviceId | undefined;
     },
     first: (response: ShellCommandResponse) => void,
   ): Promise<ShellCommandResponse> {
     const { store, environment, size, budget } = this.deps;
-    const { cwd, linkedAgentId, theme, restartOf } = shell;
+    const { cwd, linkedAgentId, theme, restartOf, openedBy } = shell;
     const terminalId = newId("term");
     const opened = store.transaction(() => {
       budget.admit();
@@ -343,6 +357,7 @@ export class ShellLifecycle {
         size,
         ...(linkedAgentId !== null && { linkedAgentId }),
         ...(theme && { theme }),
+        ...(openedBy && { openedBy }),
       })
       .catch((cause: unknown) => {
         console.error(`shell ${terminalId} failed to open:`, cause);

@@ -131,16 +131,27 @@ export class LocalEnvironment implements EnvironmentAdapter {
 
   /**
    * The user's shell as an interactive login shell, as a new terminal tab runs it (§4.8). It is
-   * told its terminal and Bazhen's socket, never an agent id: a harness started in it by hand is
-   * not one of Bazhen's agents, so its hooks do nothing.
+   * told its terminal and Bazhen's socket, and the paired device that opened it, never an agent
+   * id: a harness started in it by hand is not one of Bazhen's agents, so its hooks do nothing.
    */
-  openShell({ terminalId, cwd, linkedAgentId, size, theme }: ShellOpen): Promise<RuntimeRef> {
+  openShell({
+    terminalId,
+    cwd,
+    linkedAgentId,
+    size,
+    theme,
+    openedBy,
+  }: ShellOpen): Promise<RuntimeRef> {
     return this.opts.runtime.create({
       terminalId,
       tags: linkedAgentId === undefined ? { kind: "shell" } : { kind: "shell", linkedAgentId },
       argv: [this.shell, "-l", "-i"],
       cwd,
-      env: { BAZHEN_TERMINAL_ID: terminalId, BAZHEN_SOCKET: this.opts.socket },
+      env: {
+        BAZHEN_TERMINAL_ID: terminalId,
+        BAZHEN_SOCKET: this.opts.socket,
+        ...(openedBy && { BAZHEN_DEVICE_ID: openedBy }),
+      },
       size,
       generation: 0,
       ...(theme && { theme }),

@@ -2,7 +2,6 @@ import type {
   Attention,
   AttentionKind,
   Notice,
-  NoticeCloseReason,
   NoticeDevice,
   StateSnapshot,
 } from "@bazhen/protocol";
@@ -87,11 +86,17 @@ const NOTICE_KINDS: ReadonlyMap<string, string> = new Map([["device_paired", "Ne
 
 export const noticeLabel = (kind: string) => NOTICE_KINDS.get(kind) ?? "Notice";
 
-/** Why a closed notice ended, as the inbox says it. */
-export const NOTICE_CLOSED: Record<NoticeCloseReason, string> = {
-  dismissed: "dismissed",
-  revoked: "device revoked",
-};
+/**
+ * How a closed notice ended, as the inbox says it. The device a dismissal came from is the claim
+ * of the shell it ran in, so it is said as a lead: from that device's shell, not by the device.
+ */
+export function noticeClosed(notice: Notice): string {
+  if (notice.closeReason === "revoked") return "device revoked";
+  if (notice.closeReason !== "dismissed") return "closed";
+  return notice.closedFrom === null
+    ? "dismissed on this machine"
+    : `dismissed from ${notice.closedFrom.name}'s shell`;
+}
 
 const newestNoticeFirst = (x: Notice, y: Notice) => y.openedAt.localeCompare(x.openedAt);
 

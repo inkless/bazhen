@@ -32,6 +32,8 @@ export interface Call<T> {
  */
 export function call<T>(socket: string, c: Call<T>, timeoutMs?: number): Promise<T> {
   const agentId = process.env["BAZHEN_AGENT_ID"];
+  // Advisory, like the agent's: which paired device's shell this runs in, if one opened it.
+  const deviceId = process.env["BAZHEN_DEVICE_ID"];
   return new Promise((resolve, reject) => {
     const req = request(
       {
@@ -41,6 +43,7 @@ export function call<T>(socket: string, c: Call<T>, timeoutMs?: number): Promise
         headers: {
           "content-type": "application/json",
           ...(agentId === undefined ? {} : { "bazhen-agent-id": agentId }),
+          ...(deviceId === undefined ? {} : { "bazhen-device-id": deviceId }),
         },
       },
       (res) => {

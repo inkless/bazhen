@@ -95,6 +95,11 @@ describe("DeviceAuth", () => {
     expect(devices.pair("Ph\u0000o‮ne\n\u001b[2J", true, loopbackPairing).name).toBe("Phone[2J");
   });
 
+  it("drops the line and paragraph separators from a name, which would break its line", () => {
+    const { devices } = auth();
+    expect(devices.pair("Ph\u2028o\u2029ne", true, loopbackPairing).name).toBe("Phone");
+  });
+
   it("refuses a revoked device's token", () => {
     const { devices } = auth();
     const { token, deviceId } = devices.pair("Phone", true, loopbackPairing);

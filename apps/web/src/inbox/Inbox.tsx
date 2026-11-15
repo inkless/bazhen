@@ -10,9 +10,9 @@ import { Button } from "../ui/Button.tsx";
 import {
   CLOSED,
   KINDS,
-  NOTICE_CLOSED,
   closedNotices,
   closedRows,
+  noticeClosed,
   noticeLabel,
   openNotices,
   openRows,
@@ -229,7 +229,7 @@ function ItemList({
 
 /**
  * A notice no agent raised, such as a device pairing: who, from where, and when. A dismissal is
- * offered only when the daemon offers it, which it never does to the device a pairing is about.
+ * offered only when the daemon offers it, which it never does to a paired device.
  */
 function NoticeRow({ notice, failed }: { notice: Notice; failed: (e: unknown) => void }) {
   const now = useNow();
@@ -254,7 +254,10 @@ function NoticeRow({ notice, failed }: { notice: Notice; failed: (e: unknown) =>
             Dismiss
           </Button>
         ) : (
-          <span className="note">Dismiss it from another device, or with bazhen devices.</span>
+          <span className="note">
+            Dismiss it on this machine with{" "}
+            <code>bazhen devices dismiss {device?.id ?? notice.id}</code>
+          </span>
         )}
       </p>
     </li>
@@ -355,7 +358,7 @@ export function Inbox({ state, ...acting }: Acting & { state: StateSnapshot }) {
               <span className="badge badge-plain">{noticeLabel(notice.kind)}</span>{" "}
               {notice.device?.name ?? notice.summary}
               {notice.closeReason !== null && (
-                <span className="waited"> — {NOTICE_CLOSED[notice.closeReason]}</span>
+                <span className="waited"> — {noticeClosed(notice)}</span>
               )}
             </li>
           ))}

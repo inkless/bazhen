@@ -47,14 +47,17 @@ export async function issueCode(): Promise<string> {
 }
 
 /**
- * Dismisses every open notice over the socket, as the owner does with `bazhen devices dismiss`:
- * a paired browser can't dismiss its own pairing, and the specs count what the inbox holds.
+ * Dismisses open notices over the socket, as the owner does with `bazhen devices dismiss`: no
+ * paired browser can dismiss a pairing, and the specs count what the inbox holds. Only those of
+ * `deviceId`, when it names one.
  */
-export async function dismissNotices(): Promise<void> {
+export async function dismissNotices(deviceId?: string): Promise<void> {
   const state = await socketCall("GET", "/v1/state");
   const notices: unknown = Reflect.get(Object(state), "notices");
   for (const notice of Array.isArray(notices) ? notices : []) {
     if (Reflect.get(Object(notice), "state") !== "open") continue;
+    const device: unknown = Reflect.get(Object(notice), "device");
+    if (deviceId !== undefined && Reflect.get(Object(device), "id") !== deviceId) continue;
     const id = String(Reflect.get(Object(notice), "id"));
     await socketCall("POST", `/v1/notices/${id}/dismiss`, { idempotencyKey: `e2e-${id}` });
   }

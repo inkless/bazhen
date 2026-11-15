@@ -193,7 +193,7 @@ async function lan(over: Partial<LanParts> = {}) {
 }
 
 describe("the LAN listener", () => {
-  it("shows a device's pairing to the others, from its socket's address, and never lets it dismiss it", async () => {
+  it("shows each pairing from its socket's address, and lets no paired device dismiss one", async () => {
     const { call, codes, origin } = await lan();
     const pairAs = async (label: string) => {
       const res = await call("/v1/pairing", {
@@ -204,16 +204,16 @@ describe("the LAN listener", () => {
       return { cookie: res.cookie, id: PairResponse.parse(JSON.parse(res.body)).deviceId };
     };
     const phone = await pairAs("Phone");
-    const laptop = await pairAs("Laptop");
+    const impostor = await pairAs("iPhone");
     const seenBy = async (cookie: string) => {
       const res = await call("/v1/state", { headers: { cookie } });
       return StateSnapshot.parse(JSON.parse(res.body)).notices;
     };
-    const ofPhone = (await seenBy(laptop.cookie)).find((n) => n.device?.id === phone.id);
+    const ofPhone = (await seenBy(impostor.cookie)).find((n) => n.device?.id === phone.id);
     const asPhone = (await seenBy(phone.cookie)).find((n) => n.device?.id === phone.id);
     expect([ofPhone?.device?.address, ofPhone?.actions, asPhone?.actions]).toEqual([
       "127.0.0.1",
-      ["dismiss"],
+      [],
       [],
     ]);
     const dismiss = (cookie: string, idempotencyKey: string) =>
@@ -224,8 +224,8 @@ describe("the LAN listener", () => {
       });
     expect([
       (await dismiss(phone.cookie, "k1")).status,
-      (await dismiss(laptop.cookie, "k2")).status,
-    ]).toEqual([409, 200]);
+      (await dismiss(impostor.cookie, "k2")).status,
+    ]).toEqual([409, 409]);
   });
 
   it("asks for pairing, then pairs a browser with the HTTPS cookie and serves it", async () => {

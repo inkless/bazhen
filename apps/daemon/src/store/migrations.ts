@@ -335,6 +335,9 @@ export const MIGRATIONS: readonly Migration[] = [
         device_name TEXT,
         device_origin TEXT,
         device_address TEXT,
+        -- Who closed it, and, advisory, the device whose shell asked, as its environment claimed.
+        closed_by TEXT,
+        closed_from_device TEXT REFERENCES devices (id),
         created_event_id INTEGER NOT NULL REFERENCES events (id),
         updated_event_id INTEGER NOT NULL REFERENCES events (id),
         UNIQUE (kind, device_id)
