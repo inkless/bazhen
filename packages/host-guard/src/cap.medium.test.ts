@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   cappedScope,
   chooseMode,
+  cpuLimit,
   ownedArgv,
   runIn,
   runOwned,
@@ -92,7 +93,7 @@ const [limitBin, limitArgs] = ownedArgv(
   ["-c", linux ? "ulimit -d; ulimit -t" : "ulimit -t"],
   cap,
 );
-const expectedLimits = linux ? `${2 * 1024 ** 2}\n30` : "30";
+const expectedLimits = linux ? `${2 * 1024 ** 2}\n${cpuLimit(cap)}` : String(cpuLimit(cap));
 // setpriv is what makes a test die with its runner; without it, only its limits bound it.
 const diesWithRunner = ownedArgv("x", [], cap)[0] !== "sh";
 const pidIn = (file: string) => (existsSync(file) ? Number(readFileSync(file, "utf8")) : 0);

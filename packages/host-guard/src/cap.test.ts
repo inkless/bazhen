@@ -7,6 +7,7 @@ import {
   cgroupOf,
   chooseMode,
   clampMemory,
+  cpuLimit,
   fallbackWatchdog,
   isAncestor,
   journalKills,
@@ -193,24 +194,30 @@ describe("how a run is capped", () => {
 
 describe("a test binary its runner caps", () => {
   const four = { memory: 4 * GIB, timeMs: 15 * 60_000 };
+  const cpu = 'ulimit -S -t "$1" && ulimit -H -t "$2" && shift 2';
 
-  it("on Linux starts under a data limit a quarter above its cap, and its time as CPU time", () => {
-    expect(ownedArgv("/t/a", ["--x"], four, "linux", null)).toEqual([
+  it("on Linux starts under a data limit a quarter above its cap, and a CPU-time limit", () => {
+    expect(ownedArgv("/t/a", ["--x"], four, "linux", null, 8)).toEqual([
       "sh",
       [
         "-c",
-        'ulimit -d "$1" && ulimit -t "$2" && shift 2 && exec "$@"',
+        `ulimit -d "$1" && shift && ${cpu} && exec "$@"`,
         "sh",
         String(5 * 1024 ** 2),
-        "900",
+        "7200",
+        "7210",
         "/t/a",
         "--x",
       ],
     ]);
   });
 
+  it("may use its time cap's CPU on every core, which counts CPU over all its threads", () => {
+    expect(cpuLimit(four, 8)).toBe(15 * 60 * 8);
+  });
+
   it("dies with its runner on Linux where setpriv can say so", () => {
-    const [bin, argv] = ownedArgv("/t/a", [], four, "linux", "/usr/bin/setpriv");
+    const [bin, argv] = ownedArgv("/t/a", [], four, "linux", "/usr/bin/setpriv", 8);
     expect([bin, ...argv.slice(0, 4)]).toEqual([
       "/usr/bin/setpriv",
       "--pdeathsig",
@@ -222,13 +229,13 @@ describe("a test binary its runner caps", () => {
 
   it("never gets a data limit below 2 GiB, which would stop a runtime starting", () => {
     const small = { ...four, memory: 128 * 1024 ** 2 };
-    expect(ownedArgv("/t/a", [], small, "linux", null)[1][3]).toBe(String(2 * 1024 ** 2));
+    expect(ownedArgv("/t/a", [], small, "linux", null, 8)[1][3]).toBe(String(2 * 1024 ** 2));
   });
 
   it("on darwin, which has no data limit that counts mappings, starts under its CPU time alone", () => {
-    expect(ownedArgv("/t/a", ["--x"], four, "darwin")).toEqual([
+    expect(ownedArgv("/t/a", ["--x"], four, "darwin", null, 8)).toEqual([
       "sh",
-      ["-c", 'ulimit -t "$1" && shift && exec "$@"', "sh", "900", "/t/a", "--x"],
+      ["-c", `${cpu} && exec "$@"`, "sh", "7200", "7210", "/t/a", "--x"],
     ]);
   });
 });

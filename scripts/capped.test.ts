@@ -100,6 +100,12 @@ describe("what a run says when it ends", () => {
     ]);
   });
 
+  it("names the CPU-time limit when a test dies of it", () => {
+    expect(report({ ...ended, code: null, signal: "SIGXCPU" }, cap, "owned", true)).toEqual([
+      "capped: stopped at its CPU-time limit, set for a test whose runner had died",
+    ]);
+  });
+
   it("gives a short time cap in seconds", () => {
     expect(formatDuration(2_000)).toBe("2 s");
     expect(formatDuration(120 * 60_000)).toBe("120 min");

@@ -13,7 +13,7 @@
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, watch, type FSWatcher } from "node:fs";
-import { totalmem } from "node:os";
+import { availableParallelism, totalmem } from "node:os";
 import { isAlive, signalGroup, spawnGroup } from "./signal.ts";
 
 export interface Cap {
@@ -525,18 +525,41 @@ export function runWatched(
   return runGroup(command, args, cap, env, "tree");
 }
 
-const SETPRIV = ["/usr/bin/setpriv", "/bin/setpriv"].find((path) => existsSync(path)) ?? null;
+/**
+ * The setpriv that can set a parent-death signal: util-linux before 2.33 has no `--pdeathsig`, and
+ * would refuse every test with "unknown option", so a dry run decides, once.
+ */
+const SETPRIV = (() => {
+  const path = ["/usr/bin/setpriv", "/bin/setpriv"].find((p) => existsSync(p));
+  if (path === undefined) return null;
+  try {
+    execFileSync(path, ["--pdeathsig", "KILL", "--", "true"], { stdio: "ignore" });
+    return path;
+  } catch {
+    return null;
+  }
+})();
+
+/**
+ * The CPU time, in seconds, a test binary may use while no runner watches it. The kernel counts CPU
+ * summed over every thread, so the wall-clock time cap is multiplied by the cores a test could use:
+ * the runner's timer is the real time cap, and this only ends a test whose runner has died.
+ */
+export const cpuLimit = (cap: Cap, cores = availableParallelism()) =>
+  Math.ceil(cap.timeMs / 1000) * cores;
 
 /**
  * The argv that starts a test binary under limits that hold it even if its runner is killed and
  * leaves it unwatched:
- * - a CPU-time limit at the time cap, everywhere;
+ * - a CPU-time limit, everywhere, its soft limit 10 s below its hard one, so the test gets SIGXCPU,
+ *   which says why, before the kernel's SIGKILL;
  * - on Linux, a data limit (RLIMIT_DATA counts anonymous mappings), a quarter above the cap, so the
  *   watchdog's kill comes first and says why, and never below 2 GiB, since a runtime's own
  *   reservations under a smaller one (V8's) would stop it starting;
- * - on Linux where util-linux has `setpriv`, SIGKILL when its runner dies.
- * darwin has no data limit that counts mappings, so a test whose runner was killed there is bounded
- * by its CPU time alone.
+ * - on Linux where util-linux's `setpriv` can, SIGKILL when its runner dies. The signal is set after
+ *   the fork, so a runner that dies in that moment still leaves its test running.
+ * darwin has no data limit that counts mappings and no parent-death signal, so a test whose runner
+ * was killed there is bounded by its CPU time alone.
  */
 export function ownedArgv(
   command: string,
@@ -544,14 +567,17 @@ export function ownedArgv(
   cap: Cap,
   platform = process.platform,
   setpriv = SETPRIV,
+  cores = availableParallelism(),
 ): [string, string[]] {
-  const cpu = String(Math.ceil(cap.timeMs / 1000));
+  const cpu = cpuLimit(cap, cores);
+  const cpuArgs = [String(cpu), String(cpu + 10)];
+  const cpuScript = 'ulimit -S -t "$1" && ulimit -H -t "$2" && shift 2';
   if (platform !== "linux") {
-    return ["sh", ["-c", 'ulimit -t "$1" && shift && exec "$@"', "sh", cpu, command, ...args]];
+    return ["sh", ["-c", `${cpuScript} && exec "$@"`, "sh", ...cpuArgs, command, ...args]];
   }
   const data = String(Math.ceil(Math.max(cap.memory * 1.25, 2 * 1024 ** 3) / 1024));
-  const script = 'ulimit -d "$1" && ulimit -t "$2" && shift 2 && exec "$@"';
-  const limited = ["sh", "-c", script, "sh", data, cpu, command, ...args];
+  const script = `ulimit -d "$1" && shift && ${cpuScript} && exec "$@"`;
+  const limited = ["sh", "-c", script, "sh", data, ...cpuArgs, command, ...args];
   return setpriv === null
     ? ["sh", limited.slice(1)]
     : [setpriv, ["--pdeathsig", "KILL", "--", ...limited]];

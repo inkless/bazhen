@@ -122,6 +122,8 @@ export function report(ended: Ended, cap: Cap, mode: Mode, testBinary: boolean):
     lines.push(`capped: ${killed} ${memory} memory cap`);
   } else if (ended.timedOut) {
     lines.push(`capped: stopped at the ${formatDuration(cap.timeMs)} time cap`);
+  } else if (ended.signal === "SIGXCPU") {
+    lines.push("capped: stopped at its CPU-time limit, set for a test whose runner had died");
   }
   return lines;
 }
