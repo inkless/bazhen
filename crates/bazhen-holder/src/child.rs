@@ -154,12 +154,23 @@ impl ChildProcess {
     }
 
     fn signal_groups(&self, foreground: Option<Pid>, signal: Signal) {
-        // Either refusal leaves nothing to do here: ESRCH, the group has already ended, which is
-        // what the signal was for; EPERM, the foreground group is another user's (a `sudo` in
-        // the foreground), which a close can't end, and the child's group still gets the signal.
-        let _ = kill_process_group(self.pid, signal);
-        if let Some(foreground) = foreground.filter(|group| *group != self.pid) {
-            let _ = kill_process_group(foreground, signal);
+        let groups = [
+            Some(self.pid),
+            foreground.filter(|group| *group != self.pid),
+        ];
+        for group in groups.into_iter().flatten() {
+            match kill_process_group(group, signal) {
+                // ESRCH: the group has already ended, which is what the signal was for.
+                Ok(()) | Err(rustix::io::Errno::SRCH) => {}
+                // EPERM, say: the foreground group is another user's (a `sudo` in the
+                // foreground), which a close can't end. The other group still gets the signal.
+                Err(error) => tracing::warn!(
+                    group = group.as_raw_nonzero(),
+                    signal = signals::name(signal.as_raw()),
+                    %error,
+                    "could not signal a group"
+                ),
+            }
         }
     }
 }

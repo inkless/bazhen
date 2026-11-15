@@ -398,7 +398,8 @@ const UNSAFE_MODULES: Record<string, string> = {
   "crates/bazhen-holder/src/pty.rs":
     "Command::pre_exec, to make the child a session leader on its PTY between fork and exec, and " +
     "libc's sigprocmask and signal there, to give it an empty signal mask and default " +
-    "dispositions; rustix covers none of them",
+    "dispositions; and libc's fcntl and close, for the fds the holder inherited, which no Rust " +
+    "value owns; rustix covers none of them",
 };
 
 const RAW_STRING = /r(#*)"/y;
@@ -624,11 +625,42 @@ const NOT_DECODERS: Record<string, string> = {
     "discards SIGCHLD wake-ups, whose bytes the signal handler wrote and which carry no content",
   "crates/bazhen-holder/src/child.rs::Reaper::drop": "removes the signal handler; reads nothing",
   "crates/bazhen-holder/src/pty.rs::Pty::master": "borrows the master fd; reads nothing",
+  "crates/bazhen-holder/src/pty.rs::Slave::as_fd": "borrows the slave fd; reads nothing",
   "crates/bazhen-holder/src/pty.rs::Pty::set_size": "sets the window size; reads nothing",
   "crates/bazhen-holder/src/pty.rs::Pty::foreground_group":
     "asks the terminal for its foreground group; reads no bytes",
   "crates/bazhen-holder/src/pty.rs::spawn":
     "hands the slave to a new child as its stdio; reads nothing",
+  "crates/bazhen-holder/src/holder.rs::write":
+    "the Output trait's method: a sink handed the child's bytes in order, to keep",
+  "crates/bazhen-holder/src/holder.rs::Discard::write":
+    "drops the bytes it is handed; parses nothing",
+  "crates/bazhen-holder/src/holder.rs::Holder::new":
+    "takes over a spawned child and reaps it if it has exited; reads nothing",
+  "crates/bazhen-holder/src/holder.rs::Holder::exit": "returns the published exit; reads nothing",
+  "crates/bazhen-holder/src/holder.rs::Holder::run":
+    "calls turn until it fails; reads nothing itself",
+  "crates/bazhen-holder/src/holder.rs::Holder::turn":
+    "polls, then hands a readable master to read_master; parses nothing",
+  "crates/bazhen-holder/src/holder.rs::Holder::deadline":
+    "picks the nearer of two deadlines; reads nothing",
+  "crates/bazhen-holder/src/holder.rs::Holder::read_master":
+    "copies the child's output to the Output in chunks, unparsed",
+  "crates/bazhen-holder/src/holder.rs::Holder::step":
+    "reaps the child and publishes its exit; reads no bytes",
+  "crates/bazhen-holder/src/log.rs::BoundedLog::dropped": "returns a count; reads nothing",
+  "crates/bazhen-holder/src/log.rs::BoundedLog::line":
+    "an encoder: writes a log line the holder formatted",
+  "crates/bazhen-holder/src/log.rs::BoundedLog::make_room":
+    "opens or moves aside the log file; reads nothing",
+  "crates/bazhen-holder/src/log.rs::BoundedLog::write":
+    "an encoder: hands tracing's formatted line to line",
+  "crates/bazhen-holder/src/log.rs::BoundedLog::flush": "does nothing: every line is written whole",
+  "crates/bazhen-holder/src/start.rs::StartError::exit_code":
+    "maps a variant to its exit code; reads no bytes",
+  "crates/bazhen-holder/src/start.rs::start": "reads stdin only through read_spec",
+  "crates/bazhen-holder/src/start.rs::read_spec":
+    "reads at most MAX_REQUEST_BYTES + 1 bytes for decode_spawn_spec, which is fuzzed (spawn_spec), then checks the strings it decoded",
   "crates/bazhen-hook/src/lib.rs::hook_request": "an encoder: it writes the request",
   "crates/bazhen-hook/src/lib.rs::ask": "sends a request; the reply goes to parse_reply",
   "crates/bazhen-hook/src/lib.rs::post": "writes a request; the reply goes to read_response",
@@ -1048,11 +1080,25 @@ export const TOOLCHAIN_CONFIG = [
   'profile = "minimal"',
   'components = ["rustfmt", "clippy", "rust-analyzer", "rust-src"]',
 ];
+const NO_CLOEXEC = (path: string, reason: string) => `{ path = "${path}", reason = "${reason}" },`;
+const SETS_NO_O_CLOEXEC = "it sets no O_CLOEXEC; use std::fs::OpenOptions, which does";
+
 export const CLIPPY_CONFIG = [
   "allow-unwrap-in-tests = true",
   "allow-expect-in-tests = true",
   "allow-panic-in-tests = true",
   "allow-indexing-slicing-in-tests = true",
+  // One line: an entry the formatter wraps is read joined (tomlLines).
+  [
+    "disallowed-methods = [",
+    NO_CLOEXEC("rustix::fs::open", SETS_NO_O_CLOEXEC),
+    NO_CLOEXEC("rustix::fs::openat", SETS_NO_O_CLOEXEC),
+    NO_CLOEXEC(
+      "rustix::io::dup",
+      "the copy has no FD_CLOEXEC; use OwnedFd::try_clone, which sets it",
+    ),
+    "]",
+  ].join(" "),
 ];
 
 export const DENY_CONFIG = [

@@ -1,0 +1,292 @@
+//! The holder's loop: one `poll` over the `SIGCHLD` wake-ups and the PTY master. It reads the
+//! child's output into an `Output`, reaps the child, and publishes its exit once the output that
+//! came before the exit has been read.
+
+use std::io;
+use std::time::{Duration, Instant};
+
+use bazhen_holder_proto::body::{ExitStatus, Generation};
+use rustix::event::{PollFd, PollFlags, Timespec, poll};
+
+use crate::child::{ChildProcess, Reaper};
+use crate::pty::Pty;
+
+/// How long, after the child is reaped, output it wrote before exiting may still arrive before the
+/// exit is published. Reading the end of the output (EIO or 0) publishes it sooner.
+pub const EXIT_DRAIN: Duration = Duration::from_millis(100);
+
+/// What a read of the master is cut into, and the most read in one turn, so one flooding child
+/// can't hold the loop.
+const READ_CHUNK: usize = 64 << 10;
+const MAX_READ_PER_TURN: usize = 1 << 20;
+
+/// Where the child's output goes, in order.
+pub trait Output {
+    fn write(&mut self, bytes: &[u8]);
+}
+
+/// An `Output` that keeps nothing.
+#[derive(Debug, Default)]
+pub struct Discard;
+
+impl Output for Discard {
+    fn write(&mut self, _bytes: &[u8]) {}
+}
+
+/// A child's end, as `holder/1` reports it: which generation, and how.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Exit {
+    pub generation: Generation,
+    pub status: ExitStatus,
+}
+
+/// One terminal: its PTY, its child and where the child's output goes.
+///
+/// The `Pty` must outlive any unwind that drops the rest: closing the master hangs the terminal
+/// up, and the kernel then sends `SIGHUP` to the child's session. An unwind boundary inside the
+/// loop, such as the engine's, keeps the `Holder`, and so the master, outside it.
+///
+/// Once the master reads EIO or 0 it leaves the poll set for good: a process that opens the
+/// terminal again afterwards isn't read, and blocks once the PTY's buffer fills.
+#[derive(Debug)]
+pub struct Holder<O: Output> {
+    pty: Pty,
+    reaper: Reaper,
+    child: ChildProcess,
+    generation: Generation,
+    output: O,
+    chunk: Box<[u8]>,
+    master_open: bool,
+    draining_until: Option<Instant>,
+    exit: Option<Exit>,
+}
+
+impl<O: Output> Holder<O> {
+    /// Takes over a child just spawned, and reaps it at once if it has already exited.
+    pub fn new(
+        pty: Pty,
+        reaper: Reaper,
+        child: ChildProcess,
+        generation: Generation,
+        output: O,
+    ) -> Self {
+        let mut holder = Self {
+            pty,
+            reaper,
+            child,
+            generation,
+            output,
+            chunk: vec![0; READ_CHUNK].into_boxed_slice(),
+            master_open: true,
+            draining_until: None,
+            exit: None,
+        };
+        holder.step(Instant::now());
+        holder
+    }
+
+    /// The child's exit, once it has been reaped and its output drained.
+    pub fn exit(&self) -> Option<&Exit> {
+        self.exit.as_ref()
+    }
+
+    /// Runs the loop until a turn fails. It returns nothing else: a holder ends by a close.
+    pub fn run(mut self) -> io::Error {
+        loop {
+            if let Err(e) = self.turn() {
+                return e;
+            }
+        }
+    }
+
+    /// Waits for the next thing to do, and does it. Waits with no timeout when no deadline is
+    /// pending, so an idle holder never wakes.
+    ///
+    /// # Errors
+    ///
+    /// When `poll` fails for any reason but an interrupting signal.
+    pub fn turn(&mut self) -> io::Result<()> {
+        let timeout = match self.deadline() {
+            Some(at) => Some(
+                Timespec::try_from(at.saturating_duration_since(Instant::now()))
+                    .map_err(io::Error::other)?,
+            ),
+            None => None,
+        };
+        let master_ready = {
+            let wakeups = self.reaper.fd();
+            let master = self.pty.master();
+            let mut fds = [
+                PollFd::new(&wakeups, PollFlags::IN),
+                PollFd::new(&master, PollFlags::IN),
+            ];
+            // A master nothing holds open any more reports `POLLHUP` whatever is asked, so it
+            // leaves the set rather than wake every turn.
+            let watched = if self.master_open { 2 } else { 1 };
+            let Some(fds) = fds.get_mut(..watched) else {
+                return Ok(());
+            };
+            readiness(poll(fds, timeout.as_ref()))?
+                && fds.get(1).is_some_and(|fd| !fd.revents().is_empty())
+        };
+        self.reaper.clear();
+        if master_ready {
+            self.read_master();
+        }
+        self.step(Instant::now());
+        Ok(())
+    }
+
+    fn deadline(&self) -> Option<Instant> {
+        match (self.draining_until, self.child.close_deadline()) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+    }
+
+    fn read_master(&mut self) {
+        let mut read = 0;
+        while read < MAX_READ_PER_TURN {
+            match rustix::io::read(self.pty.master(), &mut *self.chunk) {
+                Ok(0) => {
+                    self.master_open = false;
+                    return;
+                }
+                Ok(n) => {
+                    read += n;
+                    self.output.write(self.chunk.get(..n).unwrap_or_default());
+                }
+                Err(rustix::io::Errno::INTR) => {}
+                Err(rustix::io::Errno::AGAIN) => return,
+                // EIO once nothing holds the slave open (Linux): the output is over, the
+                // terminal isn't.
+                Err(_) => {
+                    self.master_open = false;
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Reaps the child, starts its drain, and publishes its exit once the output has ended or
+    /// the drain is over.
+    fn step(&mut self, now: Instant) {
+        if self.exit.is_none()
+            && self.draining_until.is_none()
+            && let Some(status) = self.child.reap().map(describe)
+        {
+            tracing::info!(status, "child reaped");
+            self.draining_until = Some(now + EXIT_DRAIN);
+        }
+        if let Some(until) = self.draining_until
+            && (!self.master_open || now >= until)
+            && let Some(status) = self.child.exit()
+        {
+            tracing::info!(status = %describe(status), "child exited");
+            self.exit = Some(Exit {
+                generation: self.generation,
+                status: status.clone(),
+            });
+            self.draining_until = None;
+        }
+        self.child.close_step(self.pty.foreground_group(), now);
+    }
+}
+
+/// Whether a `poll` found anything ready. An interrupting signal is a turn with nothing ready,
+/// never an error: `SIGCHLD` interrupts `poll` whenever a child exits.
+fn readiness(polled: rustix::io::Result<usize>) -> io::Result<bool> {
+    match polled {
+        Ok(ready) => Ok(ready > 0),
+        Err(rustix::io::Errno::INTR) => Ok(false),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// `exited 0`, `signalled SIGTERM` or `unknown`, for the log.
+pub fn describe(status: &ExitStatus) -> String {
+    match status {
+        ExitStatus::Exited { code } => format!("exited {}", code.get()),
+        ExitStatus::Signalled { signal } => format!("signalled {signal}"),
+        ExitStatus::Unknown => "unknown".to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use bazhen_holder_proto::body::{Argv, Env, NonEmpty, ProcessSpec};
+
+    use super::*;
+    use crate::pty::{self, WindowSize};
+
+    const DEADLINE: Duration = Duration::from_secs(5);
+
+    fn holder(argv: &[&str]) -> Holder<Discard> {
+        let mut env = BTreeMap::new();
+        env.insert("PATH".to_owned(), std::env::var("PATH").unwrap());
+        let process = ProcessSpec {
+            argv: Argv::new(argv.iter().map(|&a| a.to_owned()).collect()).unwrap(),
+            cwd: NonEmpty::new("/").unwrap(),
+            env: Env::new(env).unwrap(),
+            generation: Generation::new(3).unwrap(),
+            theme: None,
+        };
+        let reaper = Reaper::new().unwrap();
+        let (pty, slave) = Pty::open(WindowSize::clamped(80, 24)).unwrap();
+        let child = pty::spawn(slave, &process, &reaper).unwrap();
+        Holder::new(pty, reaper, child, process.generation, Discard)
+    }
+
+    /// Turns until the exit is published, and says whether that was before the drain's deadline:
+    /// in the same step as the reap, or on a turn the deadline hadn't reached.
+    fn published_before_the_drain_was_over(holder: &mut Holder<Discard>) -> bool {
+        let give_up = Instant::now() + DEADLINE;
+        let mut draining_until = holder.draining_until;
+        while holder.exit().is_none() {
+            assert!(Instant::now() < give_up, "the exit was never published");
+            holder.turn().unwrap();
+            if holder.exit().is_none() {
+                draining_until = holder.draining_until;
+            }
+        }
+        draining_until.is_none_or(|until| Instant::now() < until)
+    }
+
+    #[test]
+    fn the_exit_is_published_once_the_output_ends_without_waiting_out_the_drain() {
+        let mut holder = holder(&["sh", "-c", "echo bye; exit 6"]);
+        assert!(published_before_the_drain_was_over(&mut holder));
+        let exit = holder.exit().unwrap();
+        assert_eq!(exit.generation.get(), 3);
+        assert_eq!(describe(&exit.status), "exited 6");
+    }
+
+    /// Linux only in effect: macOS revokes the terminal when its session leader exits, so the
+    /// output always ends with the leader there, and only the case above can happen.
+    #[test]
+    fn the_exit_waits_out_the_drain_while_something_still_holds_the_terminal() {
+        let mut holder = holder(&["sh", "-c", "read _; exit 0"]);
+        let name = rustix::pty::ptsname(holder.pty.master(), Vec::new()).unwrap();
+        let held = pty::open_terminal(&name).unwrap();
+        rustix::io::write(holder.pty.master(), b"\n").unwrap();
+        let early = published_before_the_drain_was_over(&mut holder);
+        drop(held);
+        if std::env::consts::OS == "linux" {
+            assert!(
+                !early,
+                "the exit was published while the terminal was still held"
+            );
+        }
+        assert_eq!(describe(&holder.exit().unwrap().status), "exited 0");
+    }
+
+    #[test]
+    fn a_signal_that_interrupts_the_poll_is_a_turn_with_nothing_ready() {
+        assert!(!readiness(Err(rustix::io::Errno::INTR)).unwrap());
+        assert!(!readiness(Ok(0)).unwrap());
+        assert!(readiness(Ok(1)).unwrap());
+        assert!(readiness(Err(rustix::io::Errno::BADF)).is_err());
+    }
+}
