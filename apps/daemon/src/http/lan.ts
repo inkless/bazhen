@@ -5,7 +5,7 @@ import { serve } from "@hono/node-server";
 import type { Context } from "hono";
 import type { DeviceAuth } from "../auth/devices.ts";
 import type { PairingCodes } from "../auth/pairing.ts";
-import { admitted, pairingKey, type Cidr } from "../config/cidr.ts";
+import { admitted, peerKey, type Cidr } from "../config/cidr.ts";
 import type { LanCertificate } from "../tls/material.ts";
 import { createApp, type AppDeps } from "./app.ts";
 import { upgrades, type UpgradeRoute } from "./upgrades.ts";
@@ -99,7 +99,7 @@ export function lanListener(parts: LanParts): Server {
     for (const socket of open) socket.destroy();
   });
   server.on("connection", (socket: Duplex & { remoteAddress?: string }) => {
-    const peer = pairingKey(socket.remoteAddress);
+    const peer = peerKey(socket.remoteAddress);
     const held = perPeer.get(peer) ?? 0;
     if (!admitted(parts.allow, socket.remoteAddress) || held >= maxPerPeer) {
       socket.destroy();

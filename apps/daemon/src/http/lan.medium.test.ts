@@ -332,6 +332,21 @@ describe("the LAN listener", () => {
     expect(await handshake()).toBe("ECONNRESET");
   });
 
+  it("gives a peer its share back as its connections close", async () => {
+    const { handshake, port } = await lan({ limits: { maxPerPeer: 1 } });
+    const first = tcpConnect({ host: "127.0.0.1", port });
+    await new Promise((resolve) => first.once("connect", resolve));
+    first.destroy();
+    await new Promise((resolve) => first.once("close", resolve));
+    await expect
+      .poll(() => handshake(), {
+        timeout: 2_000,
+        interval: 50,
+        message: "127.0.0.1 never got its share back after its connection closed",
+      })
+      .toBe("handshake");
+  });
+
   it("stops listening and closes its open streams when it fails, as doctor then reports", async () => {
     const failures: Error[] = [];
     const { pair, stream, handshake, codes, origin, server } = await lan({

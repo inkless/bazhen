@@ -24,9 +24,9 @@ own domain or Caddy's local authority.
    admits every address (`0.0.0.0/0`, `::/0`) is refused; that catches a typo, not a choice, since
    two halves (`0.0.0.0/1` and `128.0.0.0/1`) still cover everything. The narrower the better: a
    guest on your network can use up a pairing code's wrong guesses, so if your devices have fixed
-   addresses, list just those (`192.168.1.30/32`), or the smallest range that holds them. Link-local addresses (`fe80::`) are
-   the same on every network, so a link-local range names its interface, such as
-   `fe80::/10%en0`, and admits only devices on that one.
+   addresses, list just those (`192.168.1.30/32`), or the smallest range that holds them.
+   Link-local addresses (`fe80::`) are the same on every network, so a link-local range names its
+   interface, such as `fe80::/10%en0`, and admits only devices on that one.
 
 2. Let the port through this machine's firewall, if it has one, for the same ranges. On Linux
    with `ufw`:
@@ -83,6 +83,8 @@ way: loopback keeps serving, and the log and `bazhen doctor` say why.
   takes an address in the range, or a router's port forward, gets past it.
 - Pairing is the authentication: the code works once, for 5 minutes, and each device's attempts
   are limited.
+- The listener holds 64 connections, at most 16 from any one device address, and a handshake must
+  finish within 10 seconds, so one device can't take every connection.
 - TLS 1.3 only. The certificate can't sign other certificates, so even someone who copies its key
   from this machine can only impersonate Bazhen's `.local` name, nothing else.
 - Backups of the state directory carry the key, with the same reach.
