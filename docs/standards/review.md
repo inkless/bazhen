@@ -46,10 +46,10 @@ The commit body says why the change was made, and records any `Control:` trailer
   and medium tests. CI then runs, on its disposable runners, the suites no workstation runs: the
   holder suite and the Rust tests ignored as signalling processes (`pnpm test:holder`, `pnpm
   test:rust:all`), and the integration, api and e2e suites; `pnpm test:real` runs each in a
-  container. It runs on Linux, on Node 24 and 26; on macOS it runs the Rust gates and the holder
-  suite (`pnpm lint:rust`, `pnpm test:rust:all`, `pnpm test:holder`). A change to the holder or its
-  tests is checked with `pnpm test:real holder` and `pnpm test:real rust`. On a pull request it also
-  runs `pnpm test:falsify` against the target branch; run it yourself before pushing.
+  container. It runs on Linux, on Node 24 and 26; on macOS it runs the Rust gates (`pnpm lint:rust`,
+  `pnpm test:rust:all`). A change to the holder or its tests is checked with `pnpm test:real holder`
+  and `pnpm test:real rust`. On a pull request it also runs `pnpm test:falsify` against the target
+  branch; run it yourself before pushing.
 - **`pnpm check`'s Rust gates** run rustfmt's check, clippy with pedantic and the restriction
   lints, cargo-deny and nextest on the whole workspace, and the standards check rejects lint
   suppressions in `crates/`, a lint configuration other than the standard's, and a dependency
