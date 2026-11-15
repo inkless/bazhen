@@ -9,6 +9,24 @@ beforeAll(async () => {
 afterAll(async () => {
   await daemon?.stop();
 });
+// CONTROL: the store goes on recording, an event every 100 ms, while the cases read it.
+let forced = 0;
+let trickle: ReturnType<typeof setInterval> | undefined;
+beforeAll(() => {
+  trickle = setInterval(() => {
+    daemon
+      .request("/v1/tasks", {
+        method: "POST",
+        body: {
+          idempotencyKey: `trickle-${++forced}`,
+          title: "Trickle",
+          brief: "An event recorded while a stream is read.",
+        },
+      })
+      .catch(() => undefined);
+  }, 100);
+});
+afterAll(() => clearInterval(trickle));
 
 const state = async () => StateSnapshot.parse((await daemon.request("/v1/state")).body);
 const launch = async (key: string) =>
