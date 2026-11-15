@@ -229,9 +229,12 @@ A test owns everything it touches and leaves nothing behind.
   is `packages/host-guard/src/signal.ts`, which refuses 0, ±1, this process, its parent and its
   group before it sends, and signals itself only in `dieBy`, on purpose. Rust tests use the
   `bazhen-test-signal` crate, a dev-dependency only, which refuses the same and checks a holder's
-  start time and command once a pidfd pins it. The holder itself sends from
-  `crates/bazhen-holder/src/child.rs`, to its child's group and the terminal's foreground group,
-  with no floor of its own until the holder's guard module takes over that path. The one process
+  start time and command once a pidfd pins it. The holder itself sends only from
+  `crates/bazhen-holder/src/guard.rs`, which holds each process by a pidfd (an exit watch on
+  macOS) and refuses 0, ±1 and any number ≤ 1, the holder, its group, its session and its
+  ancestors, a leader that isn't the holder's own unreaped child, and any process outside that
+  leader's session. In a test build it also refuses to send off a disposable host (its
+  `sandbox-tripwire` feature). The one process
   started to send a signal is `systemctl --user kill` of the cap's own scope
   (`packages/host-guard/src/cap.ts`). The check is defence in depth: it reads text, so the
   chokepoints' own refusals are what stop a stray signal. It fails closed on a command line: a kill

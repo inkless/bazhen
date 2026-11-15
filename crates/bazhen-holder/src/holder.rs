@@ -140,24 +140,27 @@ impl<O: Output> Holder<O> {
     pub fn respawn(&mut self, pty: Pty, child: ChildProcess, generation: Generation) {
         let now = Instant::now();
         self.pty = pty;
-        let mut old = std::mem::replace(&mut self.child, child);
-        old.close(now);
-        self.retiring.push(old);
+        let old = std::mem::replace(&mut self.child, child);
         self.generation = generation;
         self.master_open = true;
         self.draining_until = None;
         self.exit = None;
         self.input.clear();
         self.step(now);
+        self.retire_later(old, now);
     }
 
     /// Ends `child`, which no terminal will hold, and its session, as a respawn ends the old
     /// generation's: for a child just spawned that the respawn couldn't go ahead with.
-    pub fn retire(&mut self, mut child: ChildProcess) {
-        let now = Instant::now();
+    pub fn retire(&mut self, child: ChildProcess) {
+        self.retire_later(child, Instant::now());
+    }
+
+    /// Starts ending `child`'s session at the next turn, whose deadline is now: its passes list
+    /// every process, so they wait for the loop rather than hold up the respawn that retired it.
+    fn retire_later(&mut self, mut child: ChildProcess, now: Instant) {
         child.close(now);
         self.retiring.push(child);
-        self.step(now);
     }
 
     /// Readable once the child may have exited.

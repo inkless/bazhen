@@ -473,6 +473,27 @@ fn wait_gone(pid: Pid) -> Result<()> {
     Ok(())
 }
 
+/// A `hello` once the child's exit is published.
+pub(super) fn exited_hello(socket: &Path) -> Result<HelloReply> {
+    exited_in(socket, None)
+}
+
+/// A `hello` once the exit of `generation`'s child, or of any, is published: a new connection may
+/// be answered before a respawn sent on another reaches the holder.
+pub(super) fn exited_in(socket: &Path, generation: Option<u64>) -> Result<HelloReply> {
+    let deadline = Instant::now() + DEADLINE;
+    loop {
+        let hello = Client::connect(socket)?.hello(false)?;
+        if hello.exit.is_some() && generation.is_none_or(|g| g == hello.generation.get()) {
+            return Ok(hello);
+        }
+        if Instant::now() > deadline {
+            return Err("the child never exited".into());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
 /// Kills a straggler a test left, if it is still in the session the test's child led: a pid that
 /// has left it may already be another process's.
 fn kill_straggler(straggler: Pid, child: Pid) {
@@ -494,16 +515,7 @@ fn a_close_ends_what_the_child_left_running_before_the_holder_exits() {
     let mut client = Client::connect(&socket).unwrap();
     let hello = client.hello(false).unwrap();
     let child = pid(hello.child_pid.get()).unwrap();
-    let deadline = Instant::now() + DEADLINE;
-    while Client::connect(&socket)
-        .unwrap()
-        .hello(false)
-        .unwrap()
-        .exit
-        .is_none()
-    {
-        assert!(Instant::now() < deadline, "the child never exited");
-    }
+    exited_hello(&socket).unwrap();
     assert!(!gone(left));
     client.send(&Request::Close { id: RequestId(1) }).unwrap();
     let (code, _) = holder.exit().unwrap();

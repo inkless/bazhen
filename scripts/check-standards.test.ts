@@ -1447,15 +1447,16 @@ describe("rustFailures on decoders and fuzz crates", () => {
 });
 
 /** A reader that gives `source` for the holder's chokepoint and nothing for any other file. */
-const childOnly =
+const guardOnly =
   (source: string) =>
   (f: string): string =>
-    f === "crates/bazhen-holder/src/child.rs" ? source : "";
+    f === "crates/bazhen-holder/src/guard.rs" ? source : "";
 
 describe("the signal chokepoints", () => {
   const CHOKEPOINTS = [
     "packages/host-guard/src/signal.ts",
     "crates/bazhen-holder/src/guard.rs",
+    "crates/bazhen-holder/src/linux.rs",
     "crates/bazhen-test-signal/src/lib.rs",
   ];
   const failures = (sources: Record<string, string>) =>
@@ -1515,8 +1516,8 @@ describe("the signal chokepoints", () => {
     const source =
       "fn f() { kill_process(p, s); }\n#[cfg(test)]\nmod tests {\n    fn g() { kill_process(p, s); }\n}";
     expect(
-      signalChokepointFailures(CHOKEPOINTS, childOnly(source)).map((f) => f.split(": ")[0]),
-    ).toEqual(["crates/bazhen-holder/src/child.rs:4"]);
+      signalChokepointFailures(CHOKEPOINTS, guardOnly(source)).map((f) => f.split(": ")[0]),
+    ).toEqual(["crates/bazhen-holder/src/guard.rs:4"]);
   });
 
   it("names a chokepoint that no longer exists", () => {

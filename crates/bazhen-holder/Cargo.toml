@@ -5,6 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[features]
+# On in every test build (the dev-dependency on this crate below), off in the holder that ships:
+# the guard then refuses to send a signal off a disposable host, so a test that reaches a send by a
+# path its marks missed, in this crate or through the holder binary it starts, sends nothing.
+sandbox-tripwire = []
+
 [dependencies]
 bazhen-holder-engine = { workspace = true }
 bazhen-holder-proto = { workspace = true }
@@ -16,6 +22,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
+bazhen-holder = { workspace = true, features = ["sandbox-tripwire"] }
 bazhen-test-signal = { workspace = true }
 proptest = { workspace = true }
 serde_json = { workspace = true }

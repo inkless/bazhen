@@ -148,6 +148,8 @@ pub(crate) fn pids() -> io::Result<Vec<Pid>> {
 /// What `pid` is to `session`: a live member, or outside it, a zombie or gone. The guard checks
 /// a member again, under a watch for its exit, before it signals it (`guard::signal_member`).
 pub(crate) fn visit(pid: Pid, session: Pid, signal: Option<Signal>) -> Member {
+    // A session that can't be read, the process gone or another user's to ask about, is outside:
+    // a member that exited is no longer one, and the guard refuses what it can't prove.
     if getsid(Some(pid)).ok() != Some(session) {
         return Member::Outside;
     }
@@ -166,6 +168,7 @@ pub(crate) fn visit(pid: Pid, session: Pid, signal: Option<Signal>) -> Member {
 }
 
 /// A kqueue watching one process for its exit, from when it is made.
+#[derive(Debug)]
 pub(crate) struct ExitWatch(OwnedFd);
 
 impl ExitWatch {

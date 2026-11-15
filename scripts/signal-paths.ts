@@ -24,6 +24,9 @@ export const SIGNAL_CHOKEPOINTS: Readonly<Record<string, string>> = {
   "packages/host-guard/src/signal.ts":
     "every TypeScript signal: a group this process started, or a target checked to be one of " +
     "Bazhen's own, never 0, ±1, this process or its parent",
+  "crates/bazhen-holder/src/linux.rs":
+    "signal 0, which sends nothing, through the holder's own pidfd, to learn at start whether " +
+    "it may send through one",
   "crates/bazhen-holder/src/guard.rs":
     "every holder signal: to its own unreaped child's group, or to a process held and checked to " +
     "be in the session that child leads; never ≤ 1, the holder, its group, session or ancestors",
@@ -295,7 +298,7 @@ const TS_SENDERS = /\b(?:signalGroup|signalPane|signalServer|killHolder|runBound
 // The holder's own: its child's close and signal, which reach its group and the terminal's
 // foreground group, and the guard module that floors them.
 const RUST_SENDERS =
-  /\b(?:bazhen_test_signal|ChildProcess|close_step|kill_now|signal_groups?|signal_member|guard\s*::)|\bchild\s*\.\s*(?:close|signal)\s*\(/;
+  /\b(?:bazhen_test_signal|ChildProcess|Session|Ending|close_step|pass_among|signal_group|signal_member|guard\s*::)|\b(?:child|holder|old)\s*\.\s*(?:close|signal|respawn|retire)\s*\(/;
 
 /**
  * Whether a file sends signals, directly or through a chokepoint. Reverting or mutating one can

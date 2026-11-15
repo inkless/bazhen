@@ -328,6 +328,8 @@ pub fn supported() -> io::Result<()> {
 mod os {
     use std::io;
 
+    use std::os::fd::AsFd as _;
+
     use rustix::io::Errno;
     use rustix::process::{Pid, PidfdFlags, Signal, getpid, pidfd_open};
 
@@ -335,7 +337,12 @@ mod os {
 
     pub(super) fn supported() -> io::Result<()> {
         match pidfd_open(getpid(), PidfdFlags::empty()) {
-            Ok(_) => {}
+            Ok(own) => crate::linux::may_send_through(own.as_fd()).map_err(|error| {
+                io::Error::other(format!(
+                    "pidfd_send_signal, which the holder needs to end a terminal's processes \
+                     without reaching another's, is refused: {error}"
+                ))
+            })?,
             Err(Errno::NOSYS) => {
                 return Err(io::Error::other(
                     "this kernel has no pidfd_open, which the holder needs to end a terminal's \

@@ -27,6 +27,10 @@ pub enum Refused {
     NotPinned(i32),
     #[error("{pid} is not in the session {leader} leads")]
     Outside { pid: i32, leader: i32 },
+    /// A test build off a disposable host (the `sandbox-tripwire` feature).
+    #[cfg(feature = "sandbox-tripwire")]
+    #[error("this test build is off a disposable host, so it sends no signal")]
+    Unsandboxed,
 }
 
 /// Why a signal wasn't sent: the guard refused it, or the system did.
@@ -43,6 +47,8 @@ pub(crate) fn vet(raw: i32) -> Result<(), Refused> {
     if raw <= 1 {
         return Err(Refused::NotOne(raw));
     }
+    // A session that can't be read leaves only the pid and the group to refuse; the session's own
+    // check, which refuses whatever it can't read, still stands.
     let own = [Some(getpid()), Some(getpgrp()), getsid(None).ok()];
     if own.into_iter().flatten().any(|pid| pid.as_raw_pid() == raw) {
         return Err(Refused::Holder(raw));
@@ -74,6 +80,7 @@ pub(crate) fn vet_leader(leader: Pid) -> Result<(), Refused> {
 pub(crate) fn vet_member(pid: Pid, leader: Pid) -> Result<(), Refused> {
     vet(pid.as_raw_pid())?;
     vet_leader(leader)?;
+    // A session that can't be read, the process gone or not ours to ask about, is no proof.
     if getsid(Some(pid)).ok() == Some(leader) {
         Ok(())
     } else {
@@ -87,6 +94,8 @@ pub(crate) fn vet_member(pid: Pid, leader: Pid) -> Result<(), Refused> {
 /// Sends `signal` to the group `leader` leads, the holder's own child.
 pub(crate) fn signal_group(leader: Pid, signal: Signal) -> Result<(), SendError> {
     vet_leader(leader)?;
+    #[cfg(feature = "sandbox-tripwire")]
+    tripwire()?;
     rustix::process::kill_process_group(leader, signal)?;
     Ok(())
 }
@@ -96,9 +105,10 @@ pub(crate) fn signal_group(leader: Pid, signal: Signal) -> Result<(), SendError>
 /// the proof reads the other, and the signal still goes to the one held, which no longer takes it.
 #[cfg(target_os = "linux")]
 pub(crate) fn signal_member(pid: Pid, leader: Pid, signal: Signal) -> Result<(), SendError> {
-    vet(pid.as_raw_pid())?;
     let held = rustix::process::pidfd_open(pid, rustix::process::PidfdFlags::empty())?;
     vet_member(pid, leader)?;
+    #[cfg(feature = "sandbox-tripwire")]
+    tripwire()?;
     rustix::process::pidfd_send_signal(&held, signal)?;
     Ok(())
 }
@@ -111,14 +121,33 @@ pub(crate) fn signal_member(pid: Pid, leader: Pid, signal: Signal) -> Result<(),
 /// inside that window.
 #[cfg(target_os = "macos")]
 pub(crate) fn signal_member(pid: Pid, leader: Pid, signal: Signal) -> Result<(), SendError> {
-    vet(pid.as_raw_pid())?;
     let watch = crate::macos::ExitWatch::new(pid)?;
     vet_member(pid, leader)?;
+    #[cfg(feature = "sandbox-tripwire")]
+    tripwire()?;
     if watch.exited()? {
         return Err(SendError::Os(Errno::SRCH));
     }
     rustix::process::kill_process(pid, signal)?;
     Ok(())
+}
+
+/// The marker a disposable host carries, as `bazhen_test_signal::require_sandbox` reads it: that
+/// crate signals whatever a test names, so the holder can't depend on it, and a test holds the two
+/// to one rule.
+#[cfg(feature = "sandbox-tripwire")]
+const DISPOSABLE_HOST_MARKER: &str = "/etc/bazhen-disposable-host";
+
+/// Refuses a send off a disposable host, in a test build: the last check before every send. The
+/// host qualifies by the marker, a plain file, not a link, that root owns.
+#[cfg(feature = "sandbox-tripwire")]
+fn tripwire() -> Result<(), Refused> {
+    use std::os::unix::fs::MetadataExt as _;
+
+    match std::fs::symlink_metadata(DISPOSABLE_HOST_MARKER) {
+        Ok(marker) if marker.is_file() && marker.uid() == 0 => Ok(()),
+        _ => Err(Refused::Unsandboxed),
+    }
 }
 
 /// Whether `raw` is the holder's parent, or its parent's, and so on up. A parent that can't be
@@ -154,6 +183,36 @@ mod tests {
     use std::process::{Command, Stdio};
 
     use super::*;
+
+    #[test]
+    fn every_test_build_sends_only_where_the_test_crate_would() {
+        assert_eq!(
+            DISPOSABLE_HOST_MARKER,
+            bazhen_test_signal::DISPOSABLE_HOST_MARKER
+        );
+        assert_eq!(
+            tripwire().is_ok(),
+            bazhen_test_signal::require_sandbox().is_ok()
+        );
+    }
+
+    /// Each test runs in a process of its own, so no other child of this one can take the reaped
+    /// pid, and XNU hands pids out in increasing order, so no other process takes it this soon.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn an_exit_watch_sees_its_process_exit_and_refuses_one_already_reaped() {
+        use crate::macos::ExitWatch;
+
+        let mut child = Command::new("sleep").arg("30").spawn().unwrap();
+        let pid = Pid::from_child(&child);
+        let watch = ExitWatch::new(pid).unwrap();
+        let before = watch.exited().unwrap();
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert!(!before);
+        assert!(watch.exited().unwrap());
+        assert_eq!(ExitWatch::new(pid).err(), Some(Errno::SRCH));
+    }
 
     #[test]
     fn no_number_that_names_a_group_or_every_process_is_one() {
@@ -198,21 +257,36 @@ mod tests {
     }
 
     #[test]
-    fn a_leader_that_is_not_the_holders_child_is_refused() {
+    fn the_holders_own_live_child_is_a_leader_it_may_signal() {
         let mut child = Command::new("sleep").arg("5").spawn().unwrap();
-        let grandparent = parent(getppid().unwrap()).filter(|pid| !pid.is_init());
         let pinned = vet_leader(Pid::from_child(&child));
         child.kill().unwrap();
         child.wait().unwrap();
         assert_eq!(pinned, Ok(()));
-        let reaped = Pid::from_child(&child);
-        assert_eq!(
-            vet_leader(reaped),
-            Err(Refused::NotPinned(reaped.as_raw_pid()))
-        );
-        if let Some(grandparent) = grandparent {
-            assert!(vet_leader(grandparent).is_err());
-        }
+    }
+
+    /// A live process that is no child of the holder's, though one of its descendants: only the
+    /// wait proves a leader the holder's own, so any check that a process merely exists lets it by.
+    #[test]
+    fn a_leader_that_is_not_the_holders_child_is_refused() {
+        let mut child = Command::new("sh")
+            .args(["-c", "sleep 2 & echo $!; wait"])
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut line = String::new();
+        BufReader::new(child.stdout.take().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        let grandchild = Pid::from_raw(line.trim().parse().unwrap()).unwrap();
+        let pinned = vet_leader(grandchild);
+        let sent = signal_group(grandchild, Signal::CONT);
+        let alive = rustix::process::test_kill_process(grandchild);
+        child.wait().unwrap();
+        assert!(alive.is_ok(), "the grandchild had exited: {alive:?}");
+        let refused = Refused::NotPinned(grandchild.as_raw_pid());
+        assert_eq!(pinned, Err(refused));
+        assert_eq!(sent, Err(SendError::Refused(refused)));
     }
 
     #[test]

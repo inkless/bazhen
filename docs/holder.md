@@ -20,7 +20,9 @@ that whole session, and so does respawning it, for what the old program left beh
 A respawn ends the old program's session in the same way while the new program starts.
 
 A process that left the session with `setsid`, as a daemon does, isn't the terminal's any more,
-and a close leaves it running.
+and a close leaves it running. To keep a job running after its terminal closes, start it that
+way: `setsid -f <command>` on Linux. `nohup` isn't enough, since a `nohup` job stays in the
+session and the close kills it.
 
 ## `sudo` in a terminal
 

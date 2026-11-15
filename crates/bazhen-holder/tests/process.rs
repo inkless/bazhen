@@ -331,7 +331,7 @@ fn the_child_gets_no_fd_the_holder_opened() {
         child.iter().all(|fd| *fd <= 2 || before.contains(fd)),
         "the child has fds this process doesn't: {child:?}"
     );
-    close_now(&mut running);
+    close_now(&mut running).unwrap();
     assert_eq!(wait_exit(&mut running).unwrap(), signalled("SIGHUP"));
 }
 
@@ -377,7 +377,7 @@ fn a_close_hangs_up_the_foreground_group_as_well_as_the_childs() {
         r.pty.foreground_group().is_some_and(|group| group != pid)
     })
     .unwrap();
-    close_now(&mut running);
+    close_now(&mut running).unwrap();
     assert_eq!(wait_exit(&mut running).unwrap(), exited(4).unwrap());
 }
 
@@ -394,7 +394,7 @@ fn a_close_continues_a_stopped_child_so_it_acts_on_the_hangup() {
             .is_ok_and(|out| out.stdout.starts_with(b"T"))
     })
     .unwrap();
-    close_now(&mut running);
+    close_now(&mut running).unwrap();
     assert_eq!(wait_exit(&mut running).unwrap(), signalled("SIGHUP"));
 }
 
@@ -540,15 +540,18 @@ fn a_pty_is_never_sized_zero() {
 }
 
 /// Starts closing the child and makes the close's first pass, its hangup.
-fn close_now(running: &mut Running) {
+fn close_now(running: &mut Running) -> Result<()> {
+    bazhen_test_signal::require_sandbox()?;
     let now = Instant::now();
     running.child.close(now);
     running.child.close_step(now);
+    Ok(())
 }
 
 /// Closes the child and drives the close as the holder's loop does, until the child and its whole
 /// session have ended.
 fn close_until_ended(running: &mut Running) -> Result<()> {
+    bazhen_test_signal::require_sandbox()?;
     running.child.close(Instant::now());
     let deadline = Instant::now() + DEADLINE;
     while !running.child.ended() {
