@@ -68,6 +68,23 @@ export const DoctorResponse = z.object({
       pairing: z.object({ mode: z.enum(["auto", "always"]), required: z.boolean() }).optional(),
       /** The built web client the daemon serves, or null before `pnpm build`. Absent before 1.33. */
       app: z.string().nullable().optional(),
+      /**
+       * The LAN listener under `web.listen = "lan"`, or null without one. `certificate` is null,
+       * and `error` says why, when it isn't serving. No key material. Absent before 1.36.
+       */
+      lan: z
+        .object({
+          url: z.string(),
+          allow: z.array(z.string()),
+          certificate: z
+            .object({ fingerprint: z.string(), path: z.string(), expiresAt: z.iso.datetime() })
+            .nullable(),
+          error: z.string().nullable(),
+          /** This host's subnets, to choose `web.lan_allow` from. */
+          subnets: z.array(z.object({ interface: z.string(), cidr: z.string() })),
+        })
+        .nullable()
+        .optional(),
     })
     .optional(),
   /**

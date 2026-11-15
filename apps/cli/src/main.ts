@@ -21,6 +21,7 @@ import {
   StopResponse,
 } from "@bazhen/protocol";
 import { TASK_USAGE, Usage, taskVerb, type Verb } from "./tasks.ts";
+import { lanLines } from "./lan.ts";
 
 /** The exit status when the daemon isn't running. */
 const NOT_RUNNING = 3;
@@ -148,6 +149,8 @@ function printWeb(web: NonNullable<DoctorResponse["web"]>): void {
         : `web app: served from ${web.app}`,
     );
   }
+  if (web.lan !== undefined && web.lan !== null)
+    for (const line of lanLines(web.lan)) console.log(line);
   if (web.pairing === undefined) return;
   const { mode, required } = web.pairing;
   if (required) {
@@ -204,6 +207,15 @@ async function pair(): Promise<number> {
   console.log(`pairing code: ${r.code.slice(0, 4)}-${r.code.slice(4)}`);
   console.log(`enter it in the browser to pair; it works once, until ${expires}`);
   for (const origin of r.origins) console.log(`  open ${origin}`);
+  if (r.lan !== undefined) {
+    console.log(`  on the LAN, open ${r.lan.url}`);
+    console.log(`  before trusting its certificate, check that its SHA-256 is`);
+    console.log(`    ${r.lan.fingerprint}`);
+    console.log(
+      `  (the certificate lasts until ${new Date(r.lan.expiresAt).toLocaleDateString()})`,
+    );
+    console.log("  and if it isn't, don't trust it or pair");
+  }
   return 0;
 }
 

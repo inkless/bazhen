@@ -105,4 +105,40 @@ describe("PairingCodes", () => {
     clock.now += 60_000;
     expect(pairing.attempt(pairing.issue().code, A).kind).toBe("paired");
   });
+
+  it("counts LAN attempts apart, so a LAN guest burning the code leaves loopback able to pair", () => {
+    const { pairing, clock } = codes();
+    const { code } = pairing.issue();
+    for (let i = 0; i < 20; i++) {
+      clock.now += SPACED_MS;
+      pairing.attempt(otherThan(code), `192.168.1.${30 + (i % 3)}`, "lan");
+    }
+    expect([
+      pairing.attempt(code, "192.168.1.99", "lan").kind,
+      pairing.attempt(code, A).kind,
+    ]).toEqual(["failed", "paired"]);
+  });
+
+  it("limits LAN attempts by address, apart from loopback's", () => {
+    const { pairing } = codes();
+    for (let i = 0; i < ATTEMPTS_PER_ORIGIN; i++) {
+      pairing.attempt(pairing.issue().code, "192.168.1.30", "lan");
+    }
+    const { code } = pairing.issue();
+    expect([
+      pairing.attempt(code, "192.168.1.30", "lan").kind,
+      pairing.attempt(code, "192.168.1.30").kind,
+    ]).toEqual(["rate_limited", "paired"]);
+  });
+
+  it("holds a bounded number of attempt keys, however many addresses a peer mints", () => {
+    const { pairing, clock } = codes();
+    const { code } = pairing.issue();
+    for (let i = 0; i < 1000; i++)
+      pairing.attempt(otherThan(code), `fe80::${i.toString(16)}%eno1`, "lan");
+    const withinAMinute = pairing.keysHeld("lan");
+    clock.now += 61_000;
+    pairing.attempt(otherThan(code), "fe80::ffff%eno1", "lan");
+    expect([withinAMinute, pairing.keysHeld("lan")]).toEqual([ATTEMPTS_OVERALL, 1]);
+  });
 });

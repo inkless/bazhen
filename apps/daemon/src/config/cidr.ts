@@ -158,6 +158,17 @@ export function pairingKey(peer: string | undefined): string {
   return `${format(address.value & mask(true, 64), true)}/64`;
 }
 
+/**
+ * One device, for sharing connections out: its own address, with its interface on link-local. An
+ * IPv6 network's devices all sit in one /64, so pairingKey's /64 would make them share.
+ */
+export function peerKey(peer: string | undefined): string {
+  const address = peer === undefined ? undefined : normalise(peer);
+  if (address === undefined) return "unknown";
+  const text = format(address.value, address.v6);
+  return isLinkLocal(address) ? `${text}%${address.zone ?? ""}` : text;
+}
+
 function format(value: bigint, v6: boolean): string {
   if (!v6) return [24n, 16n, 8n, 0n].map((s) => String((value >> s) & 0xffn)).join(".");
   const hex = Array.from({ length: 8 }, (_, i) =>

@@ -4,6 +4,8 @@ import { parse } from "smol-toml";
 import { z } from "zod";
 import { ENV_RULE, type EnvRules } from "@bazhen/core";
 import { isOrigin, originList, originsProblem } from "@bazhen/protocol";
+import { networkInterfaces } from "node:os";
+import { localSubnets, parseRange, type Cidr } from "./cidr.ts";
 import { resolvePaths, type PathInputs } from "./paths.ts";
 
 const Port = z.int().min(1).max(65_535);
@@ -11,6 +13,11 @@ const Shell = z.enum(["direct", "login"]);
 const EnvRule = z.string().regex(ENV_RULE, "must be a variable name, or a prefix ending in *");
 const Origin = z.string().refine(isOrigin, "must be an origin, such as https://bazhen.example.com");
 const Flag = z.enum(["true", "false"]).transform((value) => value === "true");
+const Listen = z.enum(["loopback", "lan"]);
+const Range = z.string().superRefine((text, ctx) => {
+  const parsed = parseRange(text);
+  if ("problem" in parsed) ctx.addIssue({ code: "custom", message: `${text} ${parsed.problem}` });
+});
 
 /** The keys `config.toml` may hold. Unknown keys are refused, so a typo never means "default". */
 const ConfigFile = z.strictObject({
@@ -37,6 +44,10 @@ const ConfigFile = z.strictObject({
       external_origins: z.array(Origin).optional(),
       allow_insecure_origins: z.boolean().optional(),
       pairing: z.enum(["auto", "always"]).optional(),
+      /** "lan" also serves HTTPS on every interface, to the ranges `lan_allow` lists. */
+      listen: Listen.optional(),
+      lan_port: Port.optional(),
+      lan_allow: z.array(Range).optional(),
     })
     .optional(),
 });
@@ -67,6 +78,12 @@ export interface Config {
    * origin it always must, since a proxy in front can present any request as loopback's.
    */
   readonly pairingRequired: boolean;
+  /** The LAN listener under `web.listen = "lan"`: its port, and the ranges it admits. */
+  readonly lan: {
+    readonly port: number;
+    readonly allow: readonly Cidr[];
+    readonly ranges: readonly string[];
+  } | null;
   /** How far agents may launch agents to delegate to: at once, and down a chain. */
   readonly launchLimits: { readonly maxLaunched: number; readonly maxDepth: number };
 }
@@ -76,6 +93,8 @@ export class InvalidConfig extends Error {
 }
 
 const DEFAULT_PORT = 7900;
+/** Next to the native app's 7943 (a separate listener with its own key). */
+const DEFAULT_LAN_PORT = 7942;
 const CONFIG_FILE = "config.toml";
 
 /** The file's settings, or undefined when there is no file. */
@@ -122,12 +141,13 @@ const fromEnv = <T>(
 export function resolveConfig(
   file: ConfigFile,
   env: Readonly<Record<string, string | undefined>>,
+  subnets: readonly string[] = [],
 ): Config {
+  const port =
+    fromEnv(env, "BAZHEN_PORT", z.coerce.number().pipe(Port)) ?? file.daemon?.port ?? DEFAULT_PORT;
+  const lan = lanListener(file, env, port, subnets);
   return {
-    port:
-      fromEnv(env, "BAZHEN_PORT", z.coerce.number().pipe(Port)) ??
-      file.daemon?.port ??
-      DEFAULT_PORT,
+    port,
     bank: file.bank?.path,
     loginShell: loginShell(
       fromEnv(env, "BAZHEN_AGENTS_SHELL", Shell) ?? file.agents?.shell ?? "direct",
@@ -142,22 +162,64 @@ export function resolveConfig(
       maxLaunched: file.agents?.max_launched ?? 5,
       maxDepth: file.agents?.max_launch_depth ?? 3,
     },
+    lan,
     ...withPairing(
       externalOrigins(file, env),
       fromEnv(env, "BAZHEN_PAIRING", PairingMode) ?? file.web?.pairing ?? "auto",
+      lan !== null,
     ),
   };
 }
 
+/**
+ * The LAN listener, if `web.listen` asks for one. It admits only the ranges listed, never a
+ * default: the host's own subnets include a café's Wi-Fi, a VPN's and docker's.
+ */
+function lanListener(
+  file: ConfigFile,
+  env: Readonly<Record<string, string | undefined>>,
+  port: number,
+  subnets: readonly string[],
+): Config["lan"] {
+  const listen = fromEnv(env, "BAZHEN_WEB_LISTEN", Listen) ?? file.web?.listen ?? "loopback";
+  if (listen === "loopback") return null;
+  const lanPort =
+    fromEnv(env, "BAZHEN_LAN_PORT", z.coerce.number().pipe(Port)) ??
+    file.web?.lan_port ??
+    DEFAULT_LAN_PORT;
+  if (lanPort === port)
+    throw new InvalidConfig(`web.lan_port: ${lanPort} is the daemon's own port`);
+  if (lanPort === 443) {
+    throw new InvalidConfig(
+      "web.lan_port: 443 isn't supported: browsers leave it out of Host and Origin, which the LAN listener matches with its port; pick another, such as 7942",
+    );
+  }
+  const ranges = file.web?.lan_allow ?? [];
+  if (ranges.length === 0) {
+    const suggested = subnets.length === 0 ? "" : `, such as ${JSON.stringify(subnets)}`;
+    throw new InvalidConfig(
+      `web.lan_allow: web.listen is "lan", so list the address ranges that may connect${suggested}`,
+    );
+  }
+  const allow = ranges.map((text) => {
+    const parsed = parseRange(text);
+    if ("problem" in parsed) throw new InvalidConfig(`web.lan_allow: ${text} ${parsed.problem}`);
+    return parsed.range;
+  });
+  return { port: lanPort, ranges, allow };
+}
+
 const PairingMode = z.enum(["auto", "always"]);
 
+/** The LAN listener counts as an external origin: with it on, every browser pairs. */
 const withPairing = <T extends { externalOrigins: readonly string[] }>(
   origins: T,
   pairing: "auto" | "always",
+  lan: boolean,
 ) => ({
   ...origins,
   pairing,
-  pairingRequired: pairing === "always" || origins.externalOrigins.length > 0,
+  pairingRequired: pairing === "always" || origins.externalOrigins.length > 0 || lan,
 });
 
 /** The external origins, from the environment over the file, each checked as the dev server does. */
@@ -192,7 +254,8 @@ export function loadSettings(inputs: PathInputs) {
   const located = resolvePaths(inputs);
   const configFile = join(located.config, CONFIG_FILE);
   const settings = readConfigFile(configFile);
-  const config = resolveConfig(settings ?? {}, inputs.env);
+  const subnets = localSubnets(networkInterfaces()).map((s) => s.cidr);
+  const config = resolveConfig(settings ?? {}, inputs.env, subnets);
   const paths =
     config.bank === undefined ? located : resolvePaths({ ...inputs, configBank: config.bank });
   return { paths, config, configFile: { path: configFile, found: settings !== undefined } };

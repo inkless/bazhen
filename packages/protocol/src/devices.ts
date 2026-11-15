@@ -15,6 +15,13 @@ export const PairingCodeResponse = z.object({
   code: z.string().length(PAIRING_CODE_LENGTH),
   expiresAt: z.iso.datetime(),
   origins: z.array(z.string()),
+  /**
+   * The LAN listener, when it is serving: the address to open, and the certificate's fingerprint
+   * to compare in the browser before trusting it. Absent otherwise, and from a daemon before 1.36.
+   */
+  lan: z
+    .object({ url: z.string(), fingerprint: z.string(), expiresAt: z.iso.datetime() })
+    .optional(),
 });
 export type PairingCodeResponse = z.infer<typeof PairingCodeResponse>;
 

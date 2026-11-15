@@ -73,6 +73,7 @@ external_origins = [
   "https://bazhen.example.com",
 ] # or BAZHEN_EXTERNAL_ORIGINS, comma-separated; see below
 pairing = "auto" # or "always" (BAZHEN_PAIRING); see below
+listen = "loopback" # or "lan" (BAZHEN_WEB_LISTEN), with lan_allow; see docs/lan.md
 
 [notifications]
 desktop = true # show what needs you on this machine's desktop while no dashboard is in sight
@@ -97,7 +98,11 @@ must be an absolute path), so your rc files run again at every launch, like a ne
 
 ### Reaching Bazhen from another device
 
-Bazhen listens on `127.0.0.1` only and never terminates TLS. To open it from a phone, bring your
+On your home network, Bazhen can serve HTTPS itself: set `web.listen = "lan"` and the address
+ranges that may connect, and trust its certificate on the phone after checking its fingerprint
+([docs/lan.md](docs/lan.md)).
+
+Otherwise Bazhen listens on `127.0.0.1` only and never terminates TLS. To open it from a phone, bring your
 own route to that port that runs on this machine, such as a local reverse proxy: a proxy on
 another host can't reach a loopback port. [docs/caddy.md](docs/caddy.md) sets up Caddy, with
 your own domain or without one. Build the web app (`pnpm build`), point the route at the daemon,

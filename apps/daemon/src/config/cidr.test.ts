@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { admitted, localSubnets, pairingKey, parseCidr, parseRange } from "./cidr.ts";
+import { admitted, localSubnets, pairingKey, parseCidr, parseRange, peerKey } from "./cidr.ts";
 
 const ranges = (...texts: string[]) =>
   texts.map((t) => {
@@ -111,6 +111,22 @@ describe("the key pairing attempts are counted under", () => {
       "fdeb:9f4b:2183:4c5b::/64",
       "fe80::1%eno1",
       "fe80::2%eno1",
+    ]);
+  });
+});
+
+describe("the key a device's connections are counted under", () => {
+  it("is its own address, so devices in one IPv6 /64 each get a share", () => {
+    expect([
+      peerKey("fdeb:9f4b:2183:4c5b:69b3:6800:1294:d29e"),
+      peerKey("fdeb:9f4b:2183:4c5b::1"),
+      peerKey("::ffff:192.168.1.30"),
+      peerKey("fe80::1%eno1"),
+    ]).toEqual([
+      "fdeb:9f4b:2183:4c5b:69b3:6800:1294:d29e",
+      "fdeb:9f4b:2183:4c5b::1",
+      "192.168.1.30",
+      "fe80::1%eno1",
     ]);
   });
 });

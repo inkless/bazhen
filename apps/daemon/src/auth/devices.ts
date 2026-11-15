@@ -173,6 +173,11 @@ export function tokenFrom(header: string | undefined): Presented | undefined {
 export interface DeviceGate {
   readonly devices: DeviceAuth;
   readonly always: boolean;
+  /**
+   * Every request through this gate comes from another machine, as on the LAN listener: only a
+   * device paired over HTTPS is accepted, whatever the headers say.
+   */
+  readonly remote?: boolean;
 }
 
 export const mustPair = (gate: DeviceGate, header: (name: string) => string | undefined): boolean =>
@@ -185,8 +190,11 @@ const forwarded = (header: (name: string) => string | undefined) =>
   });
 
 /** Whether a request came from another machine or over HTTPS, rather than straight from loopback. */
-export const arrivedRemotely = (header: (name: string) => string | undefined): boolean =>
-  forwarded(header) || (header("origin")?.startsWith("https:") ?? false);
+export const arrivedRemotely = (
+  gate: DeviceGate,
+  header: (name: string) => string | undefined,
+): boolean =>
+  gate.remote === true || forwarded(header) || (header("origin")?.startsWith("https:") ?? false);
 
 /** The `Set-Cookie` value that carries a device's token. */
 export function deviceCookie(token: string, secure: boolean): string {

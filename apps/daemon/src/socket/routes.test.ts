@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { newId } from "@bazhen/core";
-import type { Device, DoctorResponse } from "@bazhen/protocol";
+import { PairingCodeResponse, type Device, type DoctorResponse } from "@bazhen/protocol";
 import { UnknownDevice } from "../store/store.ts";
 import { socketApp } from "./routes.ts";
 
@@ -46,6 +46,7 @@ const pairing = {
 function app(
   refreshEnv = async (_env: Env) => refreshed,
   paneTitleChanged = (_pane: string) => {},
+  lan: () => PairingCodeResponse["lan"] = () => undefined,
 ) {
   const commands = new Hono();
   commands.post("/v1/attention/:id/answer", (c) => c.json({ answered: c.req.param("id") }));
@@ -65,6 +66,7 @@ function app(
     pairing,
     devices,
     externalOrigins: ["https://laptop.example.ts.net"],
+    lan,
   });
 }
 
@@ -133,6 +135,18 @@ describe("socketApp", () => {
       expiresAt: "2026-11-12T00:05:00.000Z",
       origins: ["https://laptop.example.ts.net"],
     });
+  });
+
+  it("shows the LAN listener's address and fingerprint with the code while it serves", async () => {
+    const lan = {
+      url: "https://my-mac.local:7942",
+      fingerprint: "ab cd",
+      expiresAt: "2029-02-11T00:00:00.000Z",
+    };
+    const res = await app(undefined, undefined, () => lan).request("/v1/pairing/codes", {
+      method: "POST",
+    });
+    expect(PairingCodeResponse.parse(await res.json()).lan).toEqual(lan);
   });
 
   it("refuses to pair or revoke for a caller that says it is an agent", async () => {
