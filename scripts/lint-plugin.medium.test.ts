@@ -26,7 +26,9 @@ function flagged(source: string): number[] {
   } catch (error) {
     out = String(Reflect.get(Object(error), "stdout"));
   }
-  return [...out.matchAll(/fixture\.ts:(\d+):\d+: .*host-guard/g)].map((m) => Number(m[1]));
+  return [...out.matchAll(/fixture\.ts:(\d+):\d+: .*(?:host|signal)-guard/g)].map((m) =>
+    Number(m[1]),
+  );
 }
 
 const FIXTURE = [

@@ -197,11 +197,8 @@ fn sweep() -> Result<()> {
             continue;
         }
         let pid = entry.holder;
-        let ours = in_test_home(&entry.socket)
-            && start_time(pid).is_some_and(|start| same_start(start, entry.holder_start))
-            && ps("comm=", pid).is_some_and(|comm| is_holder(&comm));
-        if ours {
-            let _ = bazhen_test_signal::signal(pid, Signal::KILL);
+        if in_test_home(&entry.socket) {
+            kill_holder(pid, entry.holder_start)?;
         }
         // A holder started since, at the same pid, has an entry of its own here.
         if std::fs::read_to_string(&path).is_ok_and(|now| now == text) {
@@ -209,6 +206,20 @@ fn sweep() -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Kills the holder at `pid` if it is still the one that started at `start`, checked once the
+/// process is pinned, so a pid reused since is left alone. A holder already gone is fine; a
+/// refused target is a fault in the ledger or the test, so it is an error, never skipped.
+fn kill_holder(pid: u32, start: u64) -> std::result::Result<(), bazhen_test_signal::Refused> {
+    let ours = || {
+        start_time(pid).is_some_and(|now| same_start(now, start))
+            && ps("comm=", pid).is_some_and(|comm| is_holder(&comm))
+    };
+    match bazhen_test_signal::signal_if(pid, Signal::KILL, ours) {
+        Ok(_) | Err(bazhen_test_signal::Refused::Failed(_, rustix::io::Errno::SRCH)) => Ok(()),
+        Err(refused) => Err(refused),
+    }
 }
 
 /// A holder this test started, killed when the test ends if it is still the same process.
@@ -291,12 +302,14 @@ impl Drop for Started {
             // Not yet reaped, so the pid is still this holder's.
             let _ = child.kill();
             let _ = child.wait();
-        } else if !self.reaped
-            && start_time(self.pid).is_some_and(|start| same_start(start, self.start))
-            && ps("comm=", self.pid).is_some_and(|comm| is_holder(&comm))
-        {
+        } else if !self.reaped {
             // `exit` timed out, and its thread still waits for the holder.
-            let _ = bazhen_test_signal::signal(self.pid, Signal::KILL);
+            let ended = kill_holder(self.pid, self.start);
+            assert!(
+                ended.is_ok() || std::thread::panicking(),
+                "couldn't end holder {}: {ended:?}",
+                self.pid
+            );
         }
         let _ = std::fs::remove_file(&self.entry);
     }

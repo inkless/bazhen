@@ -8,8 +8,16 @@
 // Read by check-standards (the chokepoint rule), cargo-gate (which tests may run here) and
 // falsify (what it may mutate here). Only Node built-ins, as cargo-gate needs.
 
-import { lstatSync, readlinkSync } from "node:fs";
+import {
+  DISPOSABLE_HOST_MARKER,
+  SANDBOX_RULE,
+  type SandboxHost,
+  inSignalSandbox,
+  thisHost,
+} from "../packages/host-guard/src/sandbox.ts";
 import { rustCode } from "./rust-source.ts";
+
+export { DISPOSABLE_HOST_MARKER, SANDBOX_RULE, type SandboxHost, inSignalSandbox, thisHost };
 
 /** The files allowed a raw signal call, each with what it checks before it sends. */
 export const SIGNAL_CHOKEPOINTS: Readonly<Record<string, string>> = {
@@ -25,8 +33,9 @@ export const SIGNAL_CHOKEPOINTS: Readonly<Record<string, string>> = {
 };
 
 /** Where a file that wants to send a signal should send it from. */
-export function chokepointFor(file: string): string {
-  if (/^crates\/[^/]+\/tests\//.test(file)) return "bazhen_test_signal (crates/bazhen-test-signal)";
+export function chokepointFor(file: string, inTest = false): string {
+  if (inTest || /^crates\/[^/]+\/tests\//.test(file))
+    return "bazhen_test_signal (crates/bazhen-test-signal)";
   if (file.endsWith(".rs")) return "crates/bazhen-holder/src/child.rs";
   return "@bazhen/host-guard (packages/host-guard/src/signal.ts)";
 }
@@ -36,6 +45,7 @@ export function chokepointFor(file: string): string {
 const RUST_RAW =
   /\b(?:kill_process|kill_process_group|kill_current_process_group|pidfd_send_signal|killpg)\b|\b(?:libc|signal)\s*::\s*kill\b/g;
 const TS_KILL = /\bprocess\s*\??\.\s*kill\b/g;
+const TS_KILL_COMPUTED = /\bprocess\s*\??\.?\s*\[\s*["'`]kill["'`]\s*\]/g;
 const TS_KILL_BOUND = /\{[^}]*\bkill\b[^}]*\}\s*=\s*(?:globalThis\s*\.\s*)?process\b/g;
 const TS_KILL_IMPORT =
   /\bimport\s*(?:type\s+)?\{[^}]*\bkill\b[^}]*\}\s*from\s*["'](?:node:)?process["']/g;
@@ -48,7 +58,11 @@ const blank = (text: string) => text.replaceAll(/[^\n]/g, " ");
  * other and in the source. A regular expression literal holding a quote can hide what follows
  * it; the lint rule, which reads the syntax tree, is the TypeScript check that can't be fooled.
  */
-export function tsCode(source: string, keepStrings = false): string {
+export function tsCode(
+  source: string,
+  keepStrings = false,
+  literals: { index: number; body: string }[] = [],
+): string {
   let out = "";
   let i = 0;
   while (i < source.length) {
@@ -64,6 +78,7 @@ export function tsCode(source: string, keepStrings = false): string {
       while (i < source.length && source[i] !== c) i += source[i] === "\\" ? 2 : 1;
       i = Math.min(i + 1, source.length);
       const body = source.slice(start + 1, i - 1);
+      literals.push({ index: start, body });
       out += c + (keepStrings ? body : blank(body)) + (i - start > 1 ? c : "");
     } else {
       out += c;
@@ -81,24 +96,117 @@ const found = (code: string, pattern: RegExp) =>
     call: m[0],
   }));
 
+const KILL_PROGRAM = /^(?:\S*\/)?(?:kill|pkill|killall)$/;
+// What runs a program named by the literal that follows: Rust's Command, and Node's and
+// host-guard's process starts.
+const STARTS_PROGRAM =
+  /(?:Command\s*::\s*new|\b(?:spawn\w*|exec\w*|fork|runBounded|runIn\w*|output|run))\s*\(\s*\[?\s*$/;
+const SHELL_KILL = /(?:^|[\s;&|(`])(?:\S*\/)?(kill|pkill|killall)\s+(\S+(?:\s+\S+)*)/g;
+// Whether a shell `kill`'s first operand is a target: a pid, a group, a variable or a job.
+const KILL_TARGET = /^(?:-?\d+|-?\\?\$\S*|%\S*)$/;
+// Its own process ($$) or last background job ($!): a test fixture's script ending itself.
+const SHELL_ITSELF = /^(?:\\?\$\\?\$|\$!)$/;
+const SYSTEMCTL = /^(?:\S*\/)?systemctl$/;
+const SHELL_SYSTEMCTL_KILL = /\bsystemctl\s+(?:-\S+\s+)*kill\b/;
+
+/** The operands of a shell `kill`, past its options: `-TERM`, `-s TERM`, `-9`. */
+function killOperands(args: string): string[] {
+  const words =
+    args
+      .split(/[;&|)\n]/)[0]
+      ?.trim()
+      .split(/\s+/) ?? [];
+  let i = 0;
+  while (i < words.length && /^-[A-Za-z]/.test(words[i] ?? "")) i += words[i] === "-s" ? 2 : 1;
+  return words.slice(i).filter((w) => !/^\d?>/.test(w));
+}
+
+/**
+ * Whether a string literal starts a kill: a shell command that runs `kill` on anything but the
+ * shell itself or its own job, or `pkill` or `killall` at all. A process started to send a
+ * signal checks nothing the chokepoints would.
+ */
+export function startsKill(literal: string): boolean {
+  if (SHELL_SYSTEMCTL_KILL.test(literal)) return true;
+  for (const m of literal.matchAll(SHELL_KILL)) {
+    if (m[1] !== "kill") return true;
+    const [target, ...more] = killOperands(m[2] ?? "");
+    if (target === undefined || !KILL_TARGET.test(target)) continue;
+    if (!SHELL_ITSELF.test(target) || more.length > 0) return true;
+  }
+  return false;
+}
+
+/** The files allowed to start a kill, each with the target it stops and why it may. */
+export const CLI_KILLS: Readonly<Record<string, string>> = {
+  "scripts/signal-paths.ts": "the patterns that find kills, which start nothing",
+  "scripts/signal-paths.test.ts": "the fixtures those patterns are tested on, which start nothing",
+  "packages/host-guard/src/cap.ts":
+    "`systemctl --user kill` of the scope unit this process named and started, which reaches " +
+    "only that scope's processes",
+};
+
+/** The literals that start a kill: a program sending one, or a shell or systemctl doing so. */
+function kills(literals: { index: number; body: string }[], code: string) {
+  const out = literals
+    .filter(
+      (l) =>
+        startsKill(l.body) ||
+        (KILL_PROGRAM.test(l.body) &&
+          STARTS_PROGRAM.test(code.slice(Math.max(0, l.index - 40), l.index))),
+    )
+    .map((l) => ({ index: l.index, line: lineAt(code, l.index), call: `a kill by "${l.body}"` }));
+  // `systemctl kill` as a program and its arguments: "systemctl", options, then "kill".
+  literals.forEach((l, n) => {
+    if (SYSTEMCTL.test(l.body) && literals.slice(n + 1, n + 5).some((a) => a.body === "kill"))
+      out.push({ index: l.index, line: lineAt(code, l.index), call: "systemctl kill" });
+  });
+  return out;
+}
+
 /** Each raw signal call in a file, by line, whatever else the file is. */
 export function rawSignalCalls(file: string, text: string): { line: number; call: string }[] {
-  if (file.endsWith(".rs"))
-    return found(rustCode(text), RUST_RAW).map(({ line, call }) => ({ line, call }));
+  const startable = !Object.hasOwn(CLI_KILLS, file);
+  if (file.endsWith(".rs")) {
+    const strings: string[] = [];
+    const code = rustCode(text, strings);
+    const literals = [...code.matchAll(/""/g)].map((m, n) => ({
+      index: m.index,
+      body: strings[n] ?? "",
+    }));
+    return [...found(code, RUST_RAW), ...(startable ? kills(literals, code) : [])]
+      .toSorted((a, b) => a.index - b.index)
+      .map(({ line, call }) => ({ line, call }));
+  }
   if (!/\.[cm]?[jt]sx?$/.test(file)) return [];
-  const code = tsCode(text);
-  // An import is matched with its module's name kept, and counted only where it is code.
-  const imports = found(tsCode(text, true), TS_KILL_IMPORT).filter(
+  const literals: { index: number; body: string }[] = [];
+  const code = tsCode(text, false, literals);
+  const kept = tsCode(text, true);
+  // An import or a computed `process["kill"]` is matched with its strings kept, and counted only
+  // where it is code.
+  const inCode = (m: { index: number }) =>
+    code.slice(m.index, m.index + 1) === kept.slice(m.index, m.index + 1);
+  const imports = found(kept, TS_KILL_IMPORT).filter(
     (m) => code.slice(m.index, m.index + 6) === "import",
   );
-  return [...found(code, TS_KILL), ...found(code, TS_KILL_BOUND), ...imports]
-    .toSorted((a, b) => a.line - b.line)
+  const computed = found(kept, TS_KILL_COMPUTED).filter(inCode);
+  return [
+    ...found(code, TS_KILL),
+    ...found(code, TS_KILL_BOUND),
+    ...imports,
+    ...computed,
+    ...(startable ? kills(literals, code) : []),
+  ]
+    .toSorted((a, b) => a.index - b.index)
     .map(({ line, call }) => ({ line, call }));
 }
 
 /** The chokepoints' own ways in: a file calling one sends signals, though not directly. */
 const TS_SENDERS = /\b(?:signalGroup|signalPane|signalServer|killHolder|runBounded)\b/;
-const RUST_SENDERS = /\bbazhen_test_signal\b/;
+// The holder's own: its child's close and signal, which reach its group and the terminal's
+// foreground group, and the guard module that floors them.
+const RUST_SENDERS =
+  /\b(?:bazhen_test_signal|ChildProcess|close_step|kill_now|signal_groups?|signal_member|guard\s*::)|\bchild\s*\.\s*(?:close|signal)\s*\(/;
 
 /**
  * Whether a file sends signals, directly or through a chokepoint. Reverting or mutating one can
@@ -129,58 +237,3 @@ export function isSignallingTest(file: string, text: string): boolean {
   }
   return false;
 }
-
-/** `/proc/self/ns/pid` in the initial PID namespace: the kernel's fixed PROC_PID_INIT_INO. */
-export const INIT_PID_NAMESPACE = "pid:[4026531836]";
-/** Marks a host that exists to be thrown away: the test container, or a CI runner. */
-export const DISPOSABLE_HOST_MARKER = "/etc/bazhen-disposable-host";
-
-/** What decides whether a host is a sandbox: its platform, PID namespace and marker. */
-export interface SandboxHost {
-  readonly platform: NodeJS.Platform;
-  /** `/proc/self/ns/pid`'s link, or undefined if it can't be read. */
-  readonly pidNamespace: string | undefined;
-  /** The marker's owner, if it is a file and not a link; undefined if it isn't there. */
-  readonly markerOwner: number | undefined;
-}
-
-function read<T>(get: () => T): T | undefined {
-  try {
-    return get();
-  } catch {
-    return undefined;
-  }
-}
-
-/** This host, as `inSignalSandbox` reads it. */
-export function thisHost(): SandboxHost {
-  const marker = read(() => lstatSync(DISPOSABLE_HOST_MARKER));
-  return {
-    platform: process.platform,
-    pidNamespace: read(() => readlinkSync("/proc/self/ns/pid")),
-    markerOwner: marker?.isFile() === true ? marker.uid : undefined,
-  };
-}
-
-/** Whether the marker is there and root's, so no user could have made it by habit. */
-export const markedDisposable = (host: SandboxHost) => host.markerOwner === 0;
-
-/**
- * Whether a test may signal processes it didn't start: on a marked disposable host, or on Linux
- * in a PID namespace of its own, where nothing outside the namespace can be named.
- */
-export function inSignalSandbox(host: SandboxHost = thisHost()): boolean {
-  if (markedDisposable(host)) return true;
-  return (
-    host.platform === "linux" &&
-    host.pidNamespace !== undefined &&
-    host.pidNamespace !== INIT_PID_NAMESPACE
-  );
-}
-
-/** Why a signalling test won't run here, and where it does. */
-export const SANDBOX_RULE =
-  "such a test signals processes it didn't start, so it runs only in a sandbox: pnpm test:real, " +
-  `CI, or a Linux PID namespace (/proc/self/ns/pid other than ${INIT_PID_NAMESPACE}), or on a ` +
-  `host carrying a root-owned ${DISPOSABLE_HOST_MARKER}. Never create that file on a machine ` +
-  "you work on";

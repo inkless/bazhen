@@ -4,7 +4,8 @@
 // one a holder test started: a stray pid ends someone else's work, and a stray negative one their
 // whole session.
 
-import { spawn, type SpawnOptions } from "node:child_process";
+import { execFileSync, spawn, type SpawnOptions } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { constants } from "node:os";
 
 const groups = new Set<number>();
@@ -90,28 +91,68 @@ export function killHolder(holder: HolderProcess, now = Date.now()): boolean {
   return send(holder.pid, "SIGKILL");
 }
 
+/** A signal refused for its target, before anything was sent: a fault, never a gone group. */
+export class UnsafeTarget extends RangeError {}
+
+/**
+ * Lets a caller treat a group that has gone as done, and nothing else: a refusal of the target
+ * itself is rethrown, so a fault never passes for a run that already ended.
+ */
+export function rethrowUnsafe(error: unknown): void {
+  if (error instanceof UnsafeTarget) throw error;
+}
+
+let group: number | undefined;
+
+/**
+ * This process's group, which a negated pid of it would end along with the run that started
+ * this one: /proc/self/stat's fifth field, past the command in parentheses, or `ps` where there
+ * is no /proc. NaN if neither says.
+ */
+function thisGroup(): number {
+  if (group !== undefined) return group;
+  try {
+    const stat = readFileSync("/proc/self/stat", "utf8");
+    group = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[2]);
+  } catch {
+    try {
+      const pgid = execFileSync("ps", ["-o", "pgid=", "-p", String(process.pid)], {
+        encoding: "utf8",
+      });
+      group = Number(pgid.trim());
+    } catch {
+      group = Number.NaN;
+    }
+  }
+  return group;
+}
+
 /**
  * Why `target`, a pid or a negated pgid, is one no signal may reach, or undefined if it may be
  * tried. 0, 1 and -1 name this process's group, init and every process the user owns; this
- * process and its parent are never the work a signal here is meant to end.
+ * process, its parent and its group are never the work a signal here is meant to end. A group
+ * signal is refused outright while this process's own group can't be read.
  */
 export function unsafeTarget(
   target: number,
   self = process.pid,
   parent = process.ppid,
+  ownGroup = thisGroup(),
 ): string | undefined {
   if (!Number.isSafeInteger(target)) return "not a pid";
   const pid = Math.abs(target);
   if (pid <= 1) return "not a single process or group";
   if (pid === self) return "this process";
   if (pid === parent) return "this process's parent";
+  if (target < 0 && !Number.isSafeInteger(ownGroup)) return "this process's group is unknown";
+  if (pid === ownGroup) return "this process's group";
   return undefined;
 }
 
 /** Whether the target existed; a group that already exited is the caller's to notice. */
 function send(target: number, signal: NodeJS.Signals): boolean {
   const unsafe = unsafeTarget(target);
-  if (unsafe !== undefined) throw new RangeError(`refusing to signal ${target}: ${unsafe}`);
+  if (unsafe !== undefined) throw new UnsafeTarget(`refusing to signal ${target}: ${unsafe}`);
   try {
     process.kill(target, signal);
     return true;

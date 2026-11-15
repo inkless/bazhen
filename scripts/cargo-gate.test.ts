@@ -3,6 +3,7 @@ import {
   GATES,
   configFailures,
   gateEnv,
+  main,
   outsideConfigs,
   parseGate,
   sandboxRefusal,
@@ -113,6 +114,33 @@ describe("GATES", () => {
       true,
       true,
     ]);
+  });
+});
+
+/** What `main` exits with for `gate`, and the tools it would have started. */
+const ran = (sandboxed: boolean, gate: string) => {
+  const runs: string[] = [];
+  const run = (bin: string) => {
+    runs.push(bin);
+    return {
+      pid: 0,
+      output: [],
+      stdout: Buffer.of(),
+      stderr: Buffer.of(),
+      status: 0,
+      signal: null,
+    };
+  };
+  return { code: main([gate], { sandboxed, run }), runs };
+};
+
+describe("main", () => {
+  it("starts nothing for test-all off a sandbox, and exits 2", () => {
+    expect(ran(false, "test-all")).toEqual({ code: 2, runs: [] });
+  });
+
+  it("runs a gate that needs no sandbox anywhere", () => {
+    expect(ran(false, "fmt")).toEqual({ code: 0, runs: ["cargo-fmt", "cargo-fmt"] });
   });
 });
 

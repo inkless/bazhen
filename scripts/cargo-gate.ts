@@ -5,7 +5,7 @@
 //
 // Usage: node scripts/cargo-gate.ts <fmt|lint|deny|test>, or test <name>... to run some tests
 
-import { spawnSync } from "node:child_process";
+import { type SpawnSyncReturns, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -192,7 +192,25 @@ export function sandboxRefusal(gate: Gate, sandboxed = inSignalSandbox()): strin
 
 const readIfPresent = (path: string) => (existsSync(path) ? readFileSync(path, "utf8") : undefined);
 
-function main(args: string[]): number {
+/** What `main` reaches outside itself: whether this host is a sandbox, and how it runs a tool. */
+export interface GateHost {
+  readonly sandboxed: boolean;
+  readonly run: (
+    bin: string,
+    args: string[],
+    env: NodeJS.ProcessEnv,
+    quiet: boolean,
+  ) => SpawnSyncReturns<Buffer>;
+}
+
+const thisGateHost = (): GateHost => ({
+  sandboxed: inSignalSandbox(),
+  run: (bin, args, env, quiet) =>
+    spawnSync(bin, args, { cwd: root, env, stdio: quiet ? "ignore" : "inherit" }),
+});
+
+/** Runs a gate, and its exit code. */
+export function main(args: string[], host: GateHost = thisGateHost()): number {
   let gate: Gate;
   let tests: string[];
   try {
@@ -201,7 +219,7 @@ function main(args: string[]): number {
     console.error(error instanceof Error ? error.message : String(error));
     return 2;
   }
-  const refused = sandboxRefusal(gate);
+  const refused = sandboxRefusal(gate, host.sandboxed);
   if (refused !== undefined) {
     console.error(refused);
     return 2;
@@ -216,13 +234,13 @@ function main(args: string[]): number {
   }
   const { probe, hint } = TOOLS[gate];
   const [probeBin = "", ...probeArgs] = probe;
-  const probed = spawnSync(probeBin, probeArgs, { cwd: root, env, stdio: "ignore" });
+  const probed = host.run(probeBin, probeArgs, env, true);
   if (probed.error !== undefined || probed.status !== 0) {
     console.error(hint);
     return 1;
   }
   const [bin = "", ...rest] = GATES[gate];
-  const run = spawnSync(bin, [...rest, ...tests], { cwd: root, env, stdio: "inherit" });
+  const run = host.run(bin, [...rest, ...tests], env, false);
   if (run.error !== undefined) {
     console.error(run.error.message);
     return 1;

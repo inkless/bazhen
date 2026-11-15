@@ -30,6 +30,7 @@ import {
   pnpmScripts,
   rustFailures,
   signalChokepointFailures,
+  testSignalDependencyFailures,
   skillFailures,
   unsafeModuleFailures,
 } from "./check-standards.ts";
@@ -260,7 +261,7 @@ describe("attributeFailures", () => {
     const source = [
       "#[test]",
       '#[ignore = "signals processes; runs in pnpm test:real rust"]',
-      "fn a() {}",
+      "fn a() { bazhen_test_signal::require_sandbox().unwrap(); }",
       '#[ignore = "signals processes"]',
       '#![ignore = "signals processes; runs in pnpm test:real rust"]',
       '#[cfg_attr(test, ignore = "signals processes; runs in pnpm test:real rust")]',
@@ -269,6 +270,21 @@ describe("attributeFailures", () => {
       "crates/x/src/a.rs:4",
       "crates/x/src/a.rs:5",
       "crates/x/src/a.rs:6",
+    ]);
+  });
+  it("requires such a test to refuse to run off a sandbox, before anything else", () => {
+    const ignored = '#[test]\n#[ignore = "signals processes; runs in pnpm test:real rust"]\n';
+    const source = [
+      `${ignored}fn a() {\n    bazhen_test_signal::require_sandbox().unwrap();\n    sweep();\n}`,
+      `${ignored}fn b() -> Result<()> { bazhen_test_signal::require_sandbox()?; Ok(()) }`,
+      `${ignored}fn c() { sweep(); bazhen_test_signal::require_sandbox().unwrap(); }`,
+      `${ignored}fn d() { let _ = bazhen_test_signal::require_sandbox(); }`,
+      `${ignored}fn e() {}`,
+    ].join("\n");
+    expect(scan(source).map((f) => f.split(": ")[0])).toEqual([
+      "crates/x/src/a.rs:11",
+      "crates/x/src/a.rs:14",
+      "crates/x/src/a.rs:17",
     ]);
   });
 
@@ -1459,6 +1475,29 @@ describe("the signal chokepoints", () => {
     expect(signalChokepointFailures([...CHOKEPOINTS, "node_modules/x/a.ts"], () => raw)).toEqual(
       [],
     );
+  });
+
+  it("sends a test module's raw call to the test crate, and product code's to the holder's", () => {
+    const source =
+      "fn f() { kill_process(p, s); }\n#[cfg(test)]\nmod tests {\n    fn g() { kill_process(p, s); }\n}";
+    expect(failures({ "crates/bazhen-holder/src/a.rs": source })).toEqual([
+      expect.stringMatching(/^crates\/bazhen-holder\/src\/a\.rs:1: .*src\/child\.rs/),
+      expect.stringMatching(/^crates\/bazhen-holder\/src\/a\.rs:4: .*bazhen_test_signal/),
+    ]);
+  });
+
+  it("lets only a member's dev-dependencies take the test crate", () => {
+    const manifest = [
+      "[dependencies]",
+      "bazhen-test-signal = { workspace = true }",
+      "[target.'cfg(unix)'.dependencies]",
+      "bazhen-test-signal = { workspace = true }",
+      "[dev-dependencies]",
+      "bazhen-test-signal = { workspace = true }",
+    ].join("\n");
+    expect(
+      testSignalDependencyFailures("crates/x/Cargo.toml", manifest).map((f) => f.split(": ")[0]),
+    ).toEqual(["crates/x/Cargo.toml:2", "crates/x/Cargo.toml:4"]);
   });
 
   it("names a chokepoint that no longer exists", () => {

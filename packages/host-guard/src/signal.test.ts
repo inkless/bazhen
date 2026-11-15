@@ -65,7 +65,8 @@ describe("the tmux server signal guard", () => {
 describe("the target every signal is checked against", () => {
   const self = 5_000;
   const parent = 4_000;
-  const refused = (target: number) => unsafeTarget(target, self, parent);
+  const group = 3_000;
+  const refused = (target: number) => unsafeTarget(target, self, parent, group);
 
   it("refuses init, every process, and this process's own group", () => {
     for (const target of [0, -0, 1, -1])
@@ -80,13 +81,28 @@ describe("the target every signal is checked against", () => {
     ]);
   });
 
+  it("refuses this process's group, which ends the whole run it is in", () => {
+    expect([refused(-group), refused(group)]).toEqual([
+      "this process's group",
+      "this process's group",
+    ]);
+  });
+
+  it("refuses every group while this process's own can't be read, but not a single process", () => {
+    expect([
+      unsafeTarget(-4242, self, parent, Number.NaN),
+      unsafeTarget(4242, self, parent, Number.NaN),
+    ]).toEqual(["this process's group is unknown", undefined]);
+  });
+
   it("refuses what isn't a pid", () => {
     for (const target of [Number.NaN, 1.5, -2.5, Infinity, -Infinity, 2 ** 53])
       expect(refused(target)).toBe("not a pid");
   });
 
   it("allows another process or group", () => {
-    for (const target of [2, -2, self + 1, -(parent - 1)]) expect(refused(target)).toBeUndefined();
+    for (const target of [2, -2, self + 1, -(parent - 1), -(group + 1)])
+      expect(refused(target)).toBeUndefined();
   });
 
   it("defaults to this process and its parent", () => {

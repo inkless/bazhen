@@ -1,9 +1,10 @@
 // Oxlint rules no built-in rule covers, loaded through `jsPlugins` (scripts/lint-config.ts).
 //
-// `host-guard`: only @bazhen/host-guard runs tmux or sends a signal. Elsewhere a process-starting
-// call that runs tmux, by name, path, argv or shell string, and any way of reaching `kill` on
-// `process`, is an error. One wrong socket or pid ends someone else's work, so it is checked in
-// one module and banned everywhere else. The rule follows what a file binds: import aliases,
+// `host-guard`: only @bazhen/host-guard runs tmux; elsewhere a process-starting call that runs
+// tmux, by name, path, argv or shell string, is an error. `signal-guard`: only host-guard's
+// signal.ts sends a signal; elsewhere, host-guard's other modules included, any way of reaching
+// `kill` on `process` is an error. One wrong socket or pid ends someone else's work, so each is
+// checked in one place and banned everywhere else. The rule follows what a file binds: import aliases,
 // namespace imports, `promisify` and constants. It can flag an argument that merely says `tmux`
 // to a tool that isn't tmux; rename the argument or move the call into host-guard.
 
@@ -62,7 +63,8 @@ const nameOf = (node: unknown): string | undefined => {
 export const runsTmux = (text: string) =>
   text.split("/").at(-1) === "tmux" || /(^|[\s;&|`(/])tmux(\s|$|[;&|)`])/.test(text);
 
-const hostGuard = {
+/** A rule reporting tmux runs, kill calls, or both: tmux and signals are guarded apart. */
+const guard = (reports: { tmux: boolean; kill: boolean }) => ({
   create(context: Context) {
     const starts = new Set(STARTS);
     const childProcess = new Set<string>();
@@ -125,8 +127,8 @@ const hostGuard = {
           }
           if (PROCESS.has(source)) {
             if (spec.type === "ImportSpecifier" && imported === "kill")
-              context.report({ node: spec, message: KILL });
-            else if (spec.type !== "ImportSpecifier") processes.add(local);
+              if (reports.kill) context.report({ node: spec, message: KILL });
+              else if (spec.type !== "ImportSpecifier") processes.add(local);
           }
         }
       },
@@ -146,21 +148,27 @@ const hostGuard = {
         }
         if (id.type === "ObjectPattern" && isProcess(init)) {
           const keys = nodes(id["properties"]).map((p) => nameOf(p["key"]));
-          if (keys.includes("kill")) context.report({ node, message: KILL });
+          if (keys.includes("kill") && reports.kill) context.report({ node, message: KILL });
         }
       },
       MemberExpression(node: Node) {
-        if (isProcess(node["object"]) && nameOf(node["property"]) === "kill") {
+        if (reports.kill && isProcess(node["object"]) && nameOf(node["property"]) === "kill") {
           context.report({ node, message: KILL });
         }
       },
       CallExpression(node: Node) {
         const args = startArguments(node["callee"], nodes(node["arguments"]));
-        if (args?.flatMap((a) => strings(a)).some(runsTmux))
+        if (reports.tmux && args?.flatMap((a) => strings(a)).some(runsTmux))
           context.report({ node, message: TMUX });
       },
     };
   },
-};
+});
 
-export default { meta: { name: "bazhen" }, rules: { "host-guard": hostGuard } };
+export default {
+  meta: { name: "bazhen" },
+  rules: {
+    "host-guard": guard({ tmux: true, kill: false }),
+    "signal-guard": guard({ tmux: false, kill: true }),
+  },
+};

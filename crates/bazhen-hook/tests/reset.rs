@@ -119,13 +119,13 @@ fn wait_on_a_reset(client: &str, name: &str) -> Result<(Option<i32>, usize)> {
         .process_group(0)
         .spawn()?;
     child.stdin.take().ok_or("no stdin")?.write_all(b"{}")?;
-    let group = format!("-{}", child.id());
+    let leader = child.id();
     let (done, exited) = mpsc::channel();
     thread::spawn(move || done.send(child.wait()));
     let status = exited.recv_timeout(DEADLINE).map_err(|_| {
         // TERM, which the script traps to remove its own temporary directory.
-        let _ = Command::new("kill").args(["-TERM", &group]).status();
-        format!("{client} was still running after {DEADLINE:?}")
+        let stopped = bazhen_test_signal::signal_group(leader, bazhen_test_signal::Signal::TERM);
+        format!("{client} was still running after {DEADLINE:?}; stopping it: {stopped:?}")
     })??;
     Ok((status.code(), requests.load(Ordering::SeqCst)))
 }

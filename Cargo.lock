@@ -100,6 +100,7 @@ dependencies = [
 name = "bazhen-hook"
 version = "0.1.0"
 dependencies = [
+ "bazhen-test-signal",
  "proptest",
  "serde_json",
 ]

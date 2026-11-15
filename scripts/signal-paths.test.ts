@@ -1,12 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  INIT_PID_NAMESPACE,
-  type SandboxHost,
-  inSignalSandbox,
-  isSignallingSource,
-  isSignallingTest,
-  rawSignalCalls,
-} from "./signal-paths.ts";
+import { isSignallingSource, isSignallingTest, rawSignalCalls } from "./signal-paths.ts";
 
 const calls = (file: string, text: string) => rawSignalCalls(file, text).map((c) => c.call);
 
@@ -78,12 +71,64 @@ describe("raw signal calls in TypeScript", () => {
   });
 });
 
+describe("kills by a process started to send them", () => {
+  it("finds a kill program run directly, by a shell, or through systemctl", () => {
+    expect(calls("a.rs", 'Command::new("kill").args(["-TERM", &group]);')).toEqual([
+      'a kill by "kill"',
+    ]);
+    expect(calls("a.ts", 'spawn("/usr/bin/pkill", ["-f", "x"]);')).toEqual([
+      'a kill by "/usr/bin/pkill"',
+    ]);
+    expect(calls("a.ts", 'spawn("sh", ["-c", "sleep 1; kill -TERM -$pid"]);')).toEqual([
+      'a kill by "sleep 1; kill -TERM -$pid"',
+    ]);
+    expect(calls("a.ts", 'spawn("sh", ["-c", "killall node"]);')).toEqual([
+      'a kill by "killall node"',
+    ]);
+    expect(calls("a.ts", 'output("systemctl", ["--user", "kill", unit]);')).toEqual([
+      "systemctl kill",
+    ]);
+  });
+
+  it("lets a shell end itself or its own last job, and a word in prose", () => {
+    const source = [
+      'Command::new("sh").args(["-c", "kill -s TERM $$"]);',
+      'let s = r#"sh -c "kill -s $s \\$\\$""#;',
+      "let t = \"trap 'kill $! 2>/dev/null; exit 0' TERM\";",
+      'let p = "the kill guard refuses a group it did not start";',
+      'vi.spyOn(process, "kill");',
+    ].join("\n");
+    expect(calls("a.rs", source)).toEqual([]);
+    expect(calls("a.ts", 'vi.spyOn(process, "kill");')).toEqual([]);
+  });
+
+  it("allows host-guard's cap its own scope's systemctl kill, and nothing else there", () => {
+    expect(
+      calls("packages/host-guard/src/cap.ts", 'output("systemctl", ["--user", "kill", u]);'),
+    ).toEqual([]);
+    expect(calls("packages/host-guard/src/cap.ts", "process.kill(pid);")).toEqual(["process.kill"]);
+  });
+
+  it("finds a computed process['kill'], but not one in a string", () => {
+    expect(calls("a.ts", 'process["kill"](pid);\nconst s = \'process["kill"]\';')).toEqual([
+      'process["kill"]',
+    ]);
+  });
+});
+
 describe("signalling sources", () => {
   it("counts a chokepoint, a raw call and a call through a chokepoint", () => {
     expect(isSignallingSource("packages/host-guard/src/signal.ts", "")).toBe(true);
     expect(isSignallingSource("a.rs", "kill_process(p, s);")).toBe(true);
     expect(isSignallingSource("a.ts", "signalGroup(child, 'SIGTERM');")).toBe(true);
     expect(isSignallingSource("a.rs", "bazhen_test_signal::signal(pid, Signal::USR1)?;")).toBe(
+      true,
+    );
+    expect(isSignallingSource("a.rs", "self.child.close(self.pty.foreground_group(), now);")).toBe(
+      true,
+    );
+    expect(isSignallingSource("a.rs", "use crate::child::{ChildProcess, Reaper};")).toBe(true);
+    expect(isSignallingSource("a.rs", "if let Some(at) = self.child.close_step(now) {}")).toBe(
       true,
     );
   });
@@ -119,33 +164,5 @@ describe("signalling tests", () => {
     const source =
       'const A: &str = "a";\n#[ignore = "signals processes; runs in pnpm test:real rust"]\nfn t() {}';
     expect(isSignallingTest("a.rs", source)).toBe(true);
-  });
-});
-
-const host = (over: Partial<SandboxHost>): SandboxHost => ({
-  platform: "linux",
-  pidNamespace: INIT_PID_NAMESPACE,
-  markerOwner: undefined,
-  ...over,
-});
-
-describe("the signal sandbox", () => {
-  it("is a PID namespace other than the initial one, on Linux", () => {
-    expect(inSignalSandbox(host({ pidNamespace: "pid:[4026532999]" }))).toBe(true);
-    expect(inSignalSandbox(host({}))).toBe(false);
-    expect(inSignalSandbox(host({ pidNamespace: undefined }))).toBe(false);
-    expect(inSignalSandbox(host({ platform: "darwin", pidNamespace: "pid:[4026532999]" }))).toBe(
-      false,
-    );
-  });
-
-  it("is a host carrying root's marker, on any platform", () => {
-    expect(inSignalSandbox(host({ markerOwner: 0 }))).toBe(true);
-    expect(inSignalSandbox(host({ platform: "darwin", markerOwner: 0 }))).toBe(true);
-  });
-
-  it("isn't a host whose marker someone else made", () => {
-    expect(inSignalSandbox(host({ markerOwner: 1000 }))).toBe(false);
-    expect(inSignalSandbox(host({ platform: "darwin", markerOwner: 501 }))).toBe(false);
   });
 });

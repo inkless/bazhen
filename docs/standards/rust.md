@@ -112,9 +112,10 @@ source with comments and strings set aside, and fails on:
   joins the list once a review has read its macros;
 - `#[ignore]` and `#[should_panic]`, which skip a test or pass it when it fails, and any
   attribute naming `clippy` (`#[clippy::msrv]`), which changes how it lints. The one `#[ignore]`
-  allowed is `#[ignore = "signals processes; runs in pnpm test:real rust"]`, exactly, on a test
-  that may signal processes it didn't start: the host skips it, and `pnpm test:rust:all` runs it
-  in a sandbox (`testing.md` § Hermeticity);
+  allowed is `#[ignore = "signals processes; runs in pnpm test:real rust"]`, exactly, on a test that
+  may signal processes it didn't start, and only on one whose body starts with
+  `bazhen_test_signal::require_sandbox().unwrap();`: the host skips it, and `pnpm test:rust:all`
+  runs it on a disposable host (`testing.md` § Hermeticity);
 - a `cfg` or `cfg_attr` predicate other than those in `CFG_ALLOWED` (`test` alone today), or
   `not` around one: code compiled only in a release build, on another OS, under a feature or
   outside tests is code the gates never build, so no lint or test reads it. A predicate joins

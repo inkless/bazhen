@@ -492,6 +492,19 @@ export function cfgValuesOutsideAllowList(body: string, strings: readonly string
 const UNSAFE_EXPECT = /^expect\s*\(\s*unsafe_code\s*,\s*reason\s*=\s*""\s*,?\s*\)$/;
 const SEE_RUST_MD = "(docs/standards/rust.md § Lints).";
 
+// How a test ignored as signalling processes starts: by refusing to run off a sandbox.
+const REQUIRES_SANDBOX =
+  /^\s*bazhen_test_signal\s*::\s*require_sandbox\s*\(\s*\)\s*(?:\.\s*unwrap\s*\(\s*\)|\?)\s*;/;
+
+/** Where the body of the first `fn` at or after `from` begins, or the end of `code`. */
+function fnBodyStart(code: string, from: number): number {
+  const fn = /\bfn\s+\w+/g;
+  fn.lastIndex = from;
+  const found = fn.exec(code);
+  const brace = found === null ? -1 : code.indexOf("{", found.index);
+  return brace === -1 ? code.length : brace + 1;
+}
+
 /**
  * Why the attributes in a Rust file don't hold to the standard. Every `#` must begin an attribute
  * written out in full, so a macro can't assemble one from tokens no scan reads; no attribute may
@@ -562,7 +575,15 @@ export function attributeFailures(
       strings[first] === SIGNALS_IGNORE
     ) {
       // A test that signals processes it didn't start: skipped on the host, and run in a sandbox
-      // by `cargo-gate test-all` (scripts/signal-paths.ts).
+      // by `cargo-gate test-all` (scripts/signal-paths.ts). It refuses to run anywhere else
+      // itself, so the attribute can't serve as a plain way to switch a test off.
+      if (!REQUIRES_SANDBOX.test(code.slice(fnBodyStart(code, end)))) {
+        out.push(
+          `${where}: a test ignored as "${SIGNALS_IGNORE}" must start with ` +
+            "`bazhen_test_signal::require_sandbox().unwrap();`, so a run off a sandbox fails " +
+            "instead of signalling anything (docs/standards/testing.md).",
+        );
+      }
     } else if (/(?:^|,)\s*(ignore|should_panic)\b/.test(body)) {
       out.push(
         `${where}: ${attribute} skips a test, or passes it when it fails. A test runs, and fails ` +
@@ -1905,6 +1926,33 @@ function checkRust(): void {
   );
 }
 
+/** The lines of Rust source that are test code: under `#[cfg(test)]`. */
+function testLines(source: string): Set<number> {
+  const all = rustCode(source).split("\n");
+  const product = withoutTests(rustCode(source)).split("\n");
+  return new Set(all.flatMap((line, i) => (line === product[i] ? [] : [i + 1])));
+}
+
+const TEST_SIGNAL_MANIFEST = "crates/bazhen-test-signal/Cargo.toml";
+
+/**
+ * Where a member's manifest takes bazhen-test-signal for anything but its tests. It sends
+ * signals to whatever a test names, with checks fit for a test, so no product may link it.
+ */
+export function testSignalDependencyFailures(manifest: string, text: string): string[] {
+  let table = "";
+  return text.split("\n").flatMap((line, i) => {
+    const header = /^\s*\[([^\]]+)\]/.exec(line);
+    if (header !== null) table = (header[1] ?? "").trim();
+    if (header !== null || !/\bbazhen-test-signal\b/.test(line) || table === "dev-dependencies")
+      return [];
+    return [
+      `${manifest}:${i + 1}: takes bazhen-test-signal under [${table}]; only [dev-dependencies] ` +
+        "may, as it signals whatever a test names (docs/standards/testing.md).",
+    ];
+  });
+}
+
 /**
  * A raw signal call anywhere but a chokepoint (scripts/signal-paths.ts), each by file and line,
  * and a chokepoint that no longer exists. A pid there unchecked can end every process the user
@@ -1917,11 +1965,17 @@ export function signalChokepointFailures(
   const out: string[] = [];
   for (const file of files) {
     if (Object.hasOwn(SIGNAL_CHOKEPOINTS, file) || file.includes("node_modules/")) continue;
-    for (const { line, call } of rawSignalCalls(file, read(file))) {
+    const text = read(file);
+    const tests = file.endsWith(".rs") ? testLines(text) : new Set<number>();
+    for (const { line, call } of rawSignalCalls(file, text)) {
       out.push(
         `${file}:${line}: sends a signal directly (${call}); send it through ` +
-          `${chokepointFor(file)}, which checks its target (docs/standards/testing.md).`,
+          `${chokepointFor(file, tests.has(line))}, which checks its target ` +
+          "(docs/standards/testing.md).",
       );
+    }
+    if (/^crates\/[^/]+\/Cargo\.toml$/.test(file) && file !== TEST_SIGNAL_MANIFEST) {
+      out.push(...testSignalDependencyFailures(file, text));
     }
   }
   for (const chokepoint of Object.keys(SIGNAL_CHOKEPOINTS)) {

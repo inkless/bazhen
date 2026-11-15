@@ -2,8 +2,48 @@
 //! file, or the product of a mutant, and one that names init, the test, what ran it or the
 //! test's own group ends work the test never started. So every target is checked here first,
 //! and nothing else in a test may call `kill` (scripts/signal-paths.ts).
+//!
+//! It also says whether a test that signals processes it didn't start may run here at all:
+//! `require_sandbox`, which each such test calls first.
 
-use rustix::process::{Pid, Signal, getpgid, getpgrp, getpid, getppid};
+use std::os::unix::fs::MetadataExt as _;
+
+pub use rustix::process::Signal;
+use rustix::process::{Pid, getpgid, getpgrp, getpid, getppid};
+
+/// Marks a host that exists to be thrown away: the test container, or a CI runner.
+pub const DISPOSABLE_HOST_MARKER: &str = "/etc/bazhen-disposable-host";
+
+/// Why a test that signals processes it didn't start won't run here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "Refusing to run: this test signals processes it didn't start, so it runs only on a host that \
+     exists to be thrown away: the test container (pnpm test:real rust) or a CI runner, each \
+     carrying a root-owned /etc/bazhen-disposable-host. Never create that file on a machine you \
+     work on"
+)]
+pub struct NotSandboxed;
+
+/// Whether this host carries root's marker: a file, not a link, that root owns. A PID namespace
+/// alone doesn't count: Flatpak terminals, devcontainers and WSL2 are workstations in one.
+///
+/// # Errors
+///
+/// When it doesn't. Each test ignored as signalling processes calls this first and unwraps it,
+/// so a run that includes it off a sandbox fails loudly instead of signalling anything.
+pub fn require_sandbox() -> Result<(), NotSandboxed> {
+    let marker = std::fs::symlink_metadata(DISPOSABLE_HOST_MARKER).ok();
+    if marks_sandbox(marker.map(|m| (m.is_file(), m.uid()))) {
+        Ok(())
+    } else {
+        Err(NotSandboxed)
+    }
+}
+
+/// Whether a marker, as whether it is a plain file and who owns it, marks a sandbox.
+fn marks_sandbox(marker: Option<(bool, u32)>) -> bool {
+    marker == Some((true, 0))
+}
 
 /// Why a signal wasn't sent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -82,6 +122,52 @@ pub fn signal(pid: impl Into<i64>, signal: Signal) -> Result<(), Refused> {
     rustix::process::kill_process(pid, signal).map_err(|e| Refused::Failed(target, e))
 }
 
+/// Sends `signal` to `pid` alone, and only if `still_ours` holds once the process is pinned: a
+/// process the test didn't start but checked, such as a holder a ledger names, whose start time
+/// and command `still_ours` compares. On Linux a pidfd pins the process before the check, so a
+/// pid reused after it names the old, dead process and nothing is sent. macOS has no such
+/// handle, so there the check and the send stay a moment apart.
+///
+/// Whether it was sent: `false` when `still_ours` didn't hold.
+///
+/// # Errors
+///
+/// When the target is refused (`Tester::check`), is gone, or the system refuses the signal.
+pub fn signal_if(
+    pid: impl Into<i64>,
+    signal: Signal,
+    still_ours: impl FnOnce() -> bool,
+) -> Result<bool, Refused> {
+    let target = pid.into();
+    let pid = Tester::this().check(target)?;
+    send_if(pid, signal, still_ours).map_err(|e| Refused::Failed(target, e))
+}
+
+#[cfg(target_os = "linux")]
+fn send_if(
+    pid: Pid,
+    signal: Signal,
+    still_ours: impl FnOnce() -> bool,
+) -> rustix::io::Result<bool> {
+    let pinned = rustix::process::pidfd_open(pid, rustix::process::PidfdFlags::empty())?;
+    if !still_ours() {
+        return Ok(false);
+    }
+    rustix::process::pidfd_send_signal(&pinned, signal).map(|()| true)
+}
+
+#[cfg(target_os = "macos")]
+fn send_if(
+    pid: Pid,
+    signal: Signal,
+    still_ours: impl FnOnce() -> bool,
+) -> rustix::io::Result<bool> {
+    if !still_ours() {
+        return Ok(false);
+    }
+    rustix::process::kill_process(pid, signal).map(|()| true)
+}
+
 /// Sends `signal` to the whole group `leader` leads: a child the test started in a group of its
 /// own.
 ///
@@ -158,7 +244,8 @@ mod tests {
     }
 
     // Each sends SIGCONT, which changes nothing for a running process, so a check that let it
-    // through would still harm nothing.
+    // through would still harm nothing. The tests below that send SIGKILL send it only to a
+    // child they started.
     #[test]
     fn refuses_this_test_and_its_parent_and_group_before_sending() {
         let this = Tester::this();
@@ -171,11 +258,52 @@ mod tests {
             signal(parent, Signal::CONT),
             Err(Refused::Parent(parent.into()))
         );
-        // nextest starts each test as the leader of a group of its own, so the group is the test.
+        // nextest starts each test as the leader of a group of its own, and a capped run as a
+        // member of the cap's, so the group is the test or what runs it, whichever is refused
+        // first.
         let group = signal_group(this.group, Signal::CONT);
         assert!(
-            matches!(group, Err(Refused::This(_) | Refused::OwnGroup(_))),
+            matches!(
+                group,
+                Err(Refused::This(_) | Refused::Parent(_) | Refused::OwnGroup(_))
+            ),
             "{group:?}"
+        );
+    }
+
+    #[test]
+    fn only_a_plain_file_root_owns_marks_a_sandbox() {
+        assert!(marks_sandbox(Some((true, 0))));
+        for marker in [None, Some((true, 1000)), Some((false, 0))] {
+            assert!(!marks_sandbox(marker), "{marker:?}");
+        }
+    }
+
+    #[test]
+    fn signals_a_checked_process_only_while_the_check_holds() {
+        let mut child = Command::new("sleep")
+            .arg("30")
+            .stdin(Stdio::null())
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        assert_eq!(signal_if(pid, Signal::KILL, || false), Ok(false));
+        assert!(child.try_wait().unwrap().is_none());
+        assert_eq!(signal_if(pid, Signal::KILL, || true), Ok(true));
+        assert!(!child.wait().unwrap().success());
+    }
+
+    #[test]
+    fn refuses_a_checked_target_before_the_check_runs() {
+        let this = Tester::this();
+        let ran = std::cell::Cell::new(false);
+        let sent = signal_if(this.pid, Signal::CONT, || {
+            ran.set(true);
+            true
+        });
+        assert_eq!(
+            (sent, ran.get()),
+            (Err(Refused::This(this.pid.into())), false)
         );
     }
 
