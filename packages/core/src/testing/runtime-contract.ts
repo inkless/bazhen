@@ -216,6 +216,34 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       expect([entry?.tags, entry?.exit]).toEqual([{ kind: "shell" }, null]);
     });
 
+    it("pastes text into a terminal's process exactly, and never presses Enter", async () => {
+      const runtime = fresh();
+      const ref = await runtime.create(spec(["cat"]));
+      const { stream } = await runtime.attach(ref, { cols: 100, rows: 30 }, 0);
+      onTestFinished(() => stream.close());
+      let seen = "";
+      stream.onData((bytes) => (seen += decode(bytes)));
+      const text = `echo "$HOME" 'a  b'; #{pane_id} ~ \\ 你好`;
+      await runtime.paste(ref, text);
+      await expect.poll(() => seen, { timeout: harness.waitMs }).toContain(text);
+      // `cat` prints a line back once it ends: with no Enter, it is only ever seen echoed, once.
+      await delay(300);
+      expect(seen.split(text).length - 1).toBe(1);
+    });
+
+    it("refuses to paste a key, or into a process that has exited or been replaced", async () => {
+      const runtime = fresh();
+      const ref = await runtime.create(spec(["cat"]));
+      await expect(runtime.paste(ref, "make\r")).rejects.toThrow(RangeError);
+      await expect(runtime.paste(ref, "make\n")).rejects.toThrow(RangeError);
+      await expect(runtime.paste(ref, "\u001b[D")).rejects.toThrow(RangeError);
+      harness.replaceProcess(runtime, ref);
+      await expect(runtime.paste(ref, "make")).rejects.toThrow(StaleIncarnation);
+      const dead = await runtime.create(spec(exiting(0)));
+      await deadOf(runtime, dead);
+      await expect(runtime.paste(dead, "make")).rejects.toThrow(ProcessState);
+    });
+
     it("round-trips input through an attached terminal", async () => {
       const runtime = fresh();
       const ref = await runtime.create(spec(["cat"]));

@@ -68,6 +68,7 @@ interface Terminal {
   alternate: boolean;
   readonly streams: Set<Client>;
   readonly clients: ClientRecord;
+  readonly pasted: string[];
   /** Snapshots a test is holding back, while it holds them. */
   held?: HeldSnapshots;
 }
@@ -177,6 +178,7 @@ export class FakeRuntime implements RuntimeAdapter {
       alternate: false,
       streams: new Set(),
       clients: { attaches: [], written: [], resizes: [], closes: 0 },
+      pasted: [],
     };
     this.terminals.set(spec.terminalId, t);
     this.reportIfExited(t);
@@ -309,6 +311,19 @@ export class FakeRuntime implements RuntimeAdapter {
     return { command: t.pane.child ?? own, own: t.pane.child === undefined };
   }
 
+  async paste(ref: RuntimeRef, text: string): Promise<void> {
+    for (let i = 0; i < text.length; i++) {
+      const code = text.charCodeAt(i);
+      if (code < 0x20 || code === 0x7f)
+        throw new RangeError("refusing to paste a control character");
+    }
+    const t = this.paneOf(ref);
+    if (t.pane.exit !== null) throw new ProcessState(ref.terminalId, "running");
+    assertSameGeneration(ref, String(t.pane.generation));
+    t.pasted.push(text);
+    if (t.pane.echo) this.emit(t, encode(text));
+  }
+
   async unlink(ref: RuntimeRef): Promise<void> {
     const t = this.paneOf(ref);
     if (t.spec.tags.kind === "shell") t.spec = { ...t.spec, tags: { kind: "shell" } };
@@ -332,6 +347,11 @@ export class FakeRuntime implements RuntimeAdapter {
   /** What the terminal was created or last respawned with. */
   specOf(ref: RuntimeRef): TerminalSpec {
     return this.terminalOf(ref).spec;
+  }
+
+  /** What was pasted into the terminal, oldest first. */
+  pasted(ref: RuntimeRef): readonly string[] {
+    return this.terminalOf(ref).pasted;
   }
 
   /** What reached the terminal from its clients. */

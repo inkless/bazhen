@@ -208,6 +208,11 @@ export interface EnvironmentAdapter {
   shellForegrounds(refs: readonly RuntimeRef[]): Promise<ShellForeground[]>;
   /** Makes a linked shell standalone where it runs: its terminal no longer names the agent. */
   unlinkShell(ref: RuntimeRef): Promise<void>;
+  /**
+   * Types `text` at the shell's prompt as a paste, without Enter (RuntimeAdapter.paste): the only
+   * thing the daemon ever types into a terminal (§4.8).
+   */
+  pasteShell(ref: RuntimeRef, text: string): Promise<void>;
   /** Reports every terminal whose process has ended, as the runtime does (RuntimeAdapter.onExit). */
   onExit(cb: (ref: RuntimeRef, status: ExitStatus) => void): () => void;
 }

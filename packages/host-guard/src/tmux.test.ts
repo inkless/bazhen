@@ -4,6 +4,7 @@ import {
   parseGroups,
   parseLstart,
   parsePsLine,
+  pasteScript,
   psFailure,
   serverVerdict,
   socketRefusal,
@@ -77,6 +78,30 @@ describe("environmentScript", () => {
 
   it("names a refused variable but never its value", () => {
     expect(() => environmentScript({ SECRET: "token\nvalue" }, [])).toThrow(/^(?!.*token).*SECRET/);
+  });
+});
+
+describe("pasteScript", () => {
+  it("pastes the text as one single-quoted word, bracketed, and deletes its buffer", () => {
+    expect(pasteScript("b-1", "%7", `echo "$HOME" 'a  b'; #{pane_id}`)).toBe(
+      `set-buffer -b b-1 -- 'echo "$HOME" '\\''a  b'\\''; #{pane_id}'\n` +
+        "paste-buffer -p -d -b b-1 -t %7\n",
+    );
+  });
+
+  it.each(["make\n", "make\r", "a\tb", "\u001b[D", "\u007f", "\0"])(
+    "refuses text holding a key rather than text: %j",
+    (text) => {
+      expect(() => pasteScript("b", "%1", text)).toThrow(/control character$/);
+    },
+  );
+
+  it.each([
+    ["b c", "%1"],
+    ["b", "%1; kill-server"],
+    ["b", "main"],
+  ])("refuses a buffer or pane that isn't a plain name or id: %j %j", (buffer, target) => {
+    expect(() => pasteScript(buffer, target, "make")).toThrow(RangeError);
   });
 });
 

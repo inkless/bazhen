@@ -157,6 +157,31 @@ export function environmentScript(
     .join("");
 }
 
+/** Whether any character of `text` is a C0 control or DEL: a key, such as Enter, not text. */
+const hasControl = (text: string) => {
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f) return true;
+  }
+  return false;
+};
+
+/**
+ * The tmux commands that type `text` into the pane `target` without a newline: into a buffer of
+ * its own, then pasted and the buffer deleted. `-p` brackets the paste when the program asked for
+ * bracketed paste, so a line editor inserts it as text. The text is only ever a quoted word, and
+ * text holding a control character, which would be a key such as Enter, is refused.
+ */
+export function pasteScript(buffer: string, target: string, text: string): string {
+  if (!/^[A-Za-z0-9_-]+$/.test(buffer)) throw new RangeError(`not a buffer name: ${buffer}`);
+  if (!/^%[0-9]+$/.test(target)) throw new RangeError(`not a pane id: ${target}`);
+  if (hasControl(text)) throw new RangeError("refusing to paste a control character");
+  return (
+    `set-buffer -b ${buffer} -- ${tmuxWord(text)}\n` +
+    `paste-buffer -p -d -b ${buffer} -t ${target}\n`
+  );
+}
+
 /** A tmux server as a runtime ref records it: its `#{pid}` and `#{start_time}` (epoch seconds). */
 export interface ServerIdentity {
   readonly pid: string;
@@ -335,6 +360,8 @@ export class TmuxServer {
   readonly socket: string;
   /** The configuration file the server loads when a command starts it. */
   readonly config: string | undefined;
+  /** Pastes made so far, which name each one's buffer. */
+  private pastes = 0;
 
   private constructor(socket: string, config: string | undefined) {
     this.socket = socket;
@@ -413,8 +440,7 @@ export class TmuxServer {
 
   /**
    * Sets and unsets variables in this server's global environment, which every new pane starts
-   * from. The commands go to tmux's parser on stdin (`source-file -`), so no value ever appears in
-   * argv; this is the only command that reaches tmux on stdin.
+   * from, with no value in argv.
    */
   async setEnvironment(
     set: Readonly<Record<string, string>>,
@@ -422,9 +448,28 @@ export class TmuxServer {
     opts: TmuxOptions = {},
   ): Promise<void> {
     const script = environmentScript(set, unset);
-    if (script === "") return;
+    if (script !== "") await this.source(script, opts);
+  }
+
+  /**
+   * Types `text` into the pane `target` as a paste, without Enter, with no part of it in argv.
+   * A paste that fails leaves no buffer holding it.
+   */
+  async paste(target: string, text: string, opts: TmuxOptions = {}): Promise<void> {
+    const buffer = `bazhen-paste-${process.pid}-${++this.pastes}`;
+    await this.source(pasteScript(buffer, target, text), opts).catch(async (err: unknown) => {
+      await this.run(["delete-buffer", "-b", buffer], opts).catch(() => undefined);
+      throw err;
+    });
+  }
+
+  /**
+   * Runs `script` through tmux's parser on stdin (`source-file -`), so nothing it carries appears
+   * in argv, which any user can read. The only commands that reach tmux on stdin.
+   */
+  private source(script: string, opts: TmuxOptions): Promise<void> {
     const [bin, ...argv] = this.argv("source-file", "-");
-    await new Promise<void>((done, fail) => {
+    return new Promise<void>((done, fail) => {
       const child = execFile(
         bin,
         argv,

@@ -4,6 +4,7 @@ export {
   TmuxServer,
   environmentScript,
   isSafeEnvEntry,
+  pasteScript,
   readProcess,
   START_SKEW_S,
   terminalGroups,

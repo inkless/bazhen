@@ -293,6 +293,13 @@ export interface RuntimeAdapter {
   foregrounds(terminalIds: ReadonlySet<string>): Promise<TerminalForeground[]>;
   /** Drops a shell terminal's agent link from its tags, so a reconcile never links it again. */
   unlink(ref: RuntimeRef): Promise<void>;
+  /**
+   * Types `text` into the terminal's process as a paste, bracketed if the program asked for
+   * bracketed paste, and without Enter: text holding a control character is refused with a
+   * RangeError. The text is never in a log or a process's arguments. A terminal whose process has
+   * exited is `ProcessState`; one replaced since `ref` is `StaleIncarnation`.
+   */
+  paste(ref: RuntimeRef, text: string): Promise<void>;
   /** Signals the terminal's process and its process group. */
   signal(ref: RuntimeRef, signal: Signal): Promise<void>;
   /**

@@ -665,6 +665,27 @@ export class TmuxRuntime implements RuntimeAdapter {
     await this.tmux("set-option", "-u", "-t", located(pane.ref, "sessionId"), COLUMN.linkedAgentId);
   }
 
+  /**
+   * Through host-guard's `paste`, on tmux's stdin: the text never reaches argv, and a failure's
+   * error carries none of what tmux printed, which could quote it.
+   */
+  async paste(ref: RuntimeRef, text: string): Promise<void> {
+    const pane = await this.paneOf(ref);
+    if (pane.exit !== null) throw new ProcessState(ref.terminalId, "running");
+    assertSameGeneration(ref, pane.ref.locator.generation);
+    // The process the caller meant, not whichever the pane runs now.
+    if (pane.ref.locator.panePid !== ref.locator.panePid)
+      throw new StaleIncarnation(ref.terminalId, "process-replaced");
+    const target = located(pane.ref, "paneId");
+    await this.opts.server.paste(target, text, { env: this.env }).catch((cause: unknown) => {
+      if (cause instanceof RangeError) throw cause;
+      const of = (key: string): unknown =>
+        typeof cause === "object" && cause !== null ? Reflect.get(cause, key) : undefined;
+      const status = { code: of("code"), killed: of("killed"), signal: of("signal") };
+      throw new TmuxError(["paste-buffer", "-t", target], status);
+    });
+  }
+
   async signal(ref: RuntimeRef, signal: Signal): Promise<void> {
     const pane = await this.paneOf(ref);
     if (pane.exit !== null) throw new ProcessState(ref.terminalId, "running");
