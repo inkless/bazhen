@@ -1973,11 +1973,28 @@ export function unmarkedSignallingTests(
     const strings: string[] = [];
     const code = rustCode(read(file), strings);
     const wholeBinary = holderBinaries.has(testBinary(file) ?? "");
+    // A helper in the same file that closes or sweeps makes each test calling it signal too, one
+    // call deep.
+    const helpers = [...code.matchAll(/\bfn\s+(\w+)/g)].flatMap((m) => {
+      const start = fnBodyStart(code, m.index);
+      return SIGNALLING_CALL.test(code.slice(start, closingBrace(code, start))) ? [m[1] ?? ""] : [];
+    });
+    // A macro's test body can come from where it is invoked, so a file that closes or sweeps
+    // anywhere makes each test its macros generate a signalling one.
+    const fileSignals = SIGNALLING_CALL.test(code);
+    const macros = [...code.matchAll(/\bmacro_rules\s*!\s*\w+\s*\{/g)].map((m) => ({
+      from: m.index,
+      to: closingBrace(code, m.index + m[0].length),
+    }));
+    const signals = (body: string, at: number) =>
+      SIGNALLING_CALL.test(body) ||
+      helpers.some((name) => new RegExp(`\\b${name}\\s*\\(`).test(body)) ||
+      (fileSignals && macros.some((m) => at >= m.from && at < m.to));
     const out: string[] = [];
     for (const test of code.matchAll(/#\s*\[\s*test\s*\]/g)) {
       const bodyStart = fnBodyStart(code, test.index);
       const body = code.slice(bodyStart, closingBrace(code, bodyStart));
-      if (!wholeBinary && !SIGNALLING_CALL.test(body)) continue;
+      if (!wholeBinary && !signals(body, test.index)) continue;
       const before = code.slice(0, bodyStart);
       const itemStart =
         Math.max(before.lastIndexOf("}", test.index), before.lastIndexOf(";", test.index)) + 1;

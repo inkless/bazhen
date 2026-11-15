@@ -1561,6 +1561,28 @@ describe("tests that signal processes they didn't start", () => {
     ]);
   });
 
+  it("must be marked when it calls a same-file helper that closes or sweeps", () => {
+    const source = [
+      "fn end(r: &mut Running) { r.child.close(group, now); }",
+      "#[test]\nfn a() { end(&mut running); }",
+      "#[test]\nfn b() { let x = 1; }",
+    ].join("\n");
+    expect(unmarked({ "crates/h/tests/x.rs": source })).toEqual(["crates/h/tests/x.rs:2"]);
+  });
+
+  it("must be marked inside a macro that generates tests that close or sweep", () => {
+    const source = [
+      "macro_rules! closes {",
+      "    ($name:ident, $body:expr) => {",
+      "        #[test]",
+      "        fn $name() { $body; }",
+      "    };",
+      "}",
+      "closes!(a, running.child.close(group, now));",
+    ].join("\n");
+    expect(unmarked({ "crates/h/tests/x.rs": source })).toEqual(["crates/h/tests/x.rs:3"]);
+  });
+
   it("isn't marked by another ignore, or by the reason in a string", () => {
     const source = [
       '#[test]\n#[ignore = "slow"]\nfn a() { sweep(); }',
