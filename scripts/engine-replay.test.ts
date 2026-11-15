@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { agentStream, flood, replayReport, sgrStream } from "./engine-replay.ts";
+import { agentStream, flood, perEngine, replayReport, sgrStream } from "./engine-replay.ts";
+import type { Run } from "./engine-replay.ts";
 
 const SGR = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;]*m`, "g");
 /** The lines a stream prints, without its colours. */
@@ -56,5 +57,25 @@ describe("replayReport", () => {
   it("names the field a report lacks or got wrong", () => {
     expect(() => replayReport({ ...report, overflows: "0" })).toThrow(/overflows/);
     expect(() => replayReport(null)).toThrow(/engineBytes/);
+  });
+});
+
+/** A replay run of `engines` engines of `stream`, its resident set `rssMb`. */
+const run = (stream: string, engines: number, rssMb: number): Run => ({
+  stream,
+  engines,
+  rssMb,
+  historyRows: 0,
+  historyMb: 0,
+  engineMb: 0,
+  overflows: 0,
+  mbPerSecond: 0,
+});
+
+describe("perEngine", () => {
+  it("shares the resident set over the process floor out between the engines, and says so", () => {
+    expect(perEngine(run("agent", 25, 45.5), run("none", 1, 3))).toBe(
+      "agent: 1.7 MB per engine = (45.5 MB for 25 engines - 3 MB process floor) / 25",
+    );
   });
 });

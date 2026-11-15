@@ -4,7 +4,7 @@
 // `pnpm bench:engine`, which builds the bin first.
 
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, mkdtempSync, openSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -93,7 +93,18 @@ export function flood(line: string, megabytes: number): string {
   return line.repeat(Math.ceil((megabytes * 1_048_576) / line.length));
 }
 
-interface Run {
+/** Writes about `megabytes` of `line` to `file` a megabyte at a time, never holding it all. */
+function writeFlood(file: string, line: string, megabytes: number): void {
+  const piece = flood(line, 1);
+  const fd = openSync(file, "w");
+  try {
+    for (let i = 0; i < megabytes; i++) writeSync(fd, piece);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+export interface Run {
   stream: string;
   engines: number;
   rssMb: number;
@@ -131,6 +142,18 @@ export function replayReport(parsed: unknown): Report {
 
 const mb = (bytes: number) => Math.round((bytes / 1_048_576) * 10) / 10;
 
+/**
+ * What one engine of a stream costs, from a run of `engines` of them and the process floor: the
+ * resident set over the floor, shared out. Rounded to a tenth of a megabyte.
+ */
+export function perEngine(run: Run, floor: Run): string {
+  const each = Math.round(((run.rssMb - floor.rssMb) / run.engines) * 10) / 10;
+  return (
+    `${run.stream}: ${each} MB per engine = (${run.rssMb} MB for ${run.engines} engines` +
+    ` - ${floor.rssMb} MB process floor) / ${run.engines}`
+  );
+}
+
 async function replay(name: string, file: string, engines: number): Promise<Run> {
   const child = spawn(BINARY, [`${COLS}`, `${ROWS}`, `${HISTORY_ROWS}`, `${engines}`, file], {
     stdio: ["pipe", "pipe", "inherit"],
@@ -161,24 +184,33 @@ async function replay(name: string, file: string, engines: number): Promise<Run>
 async function main(): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), "engine-replay-"));
   try {
-    const streams: [string, string][] = [
-      ["agent", agentStream(HISTORY_ROWS + ROWS)],
-      ["sgr160", sgrStream(HISTORY_ROWS + ROWS)],
+    // Each stream is made when it's replayed, and the floods a megabyte at a time.
+    const streams: [string, (file: string) => void][] = [
+      ["agent", (file) => writeFileSync(file, agentStream(HISTORY_ROWS + ROWS))],
+      ["sgr160", (file) => writeFileSync(file, sgrStream(HISTORY_ROWS + ROWS))],
       // A PTY turns `yes`'s LF into CRLF (onlcr).
-      ["yes", flood("y\r\n", 64)],
-      ["100-byte lines", flood(`${"x".repeat(98)}\r\n`, 256)],
+      ["yes", (file) => writeFlood(file, "y\r\n", 64)],
+      ["100-byte lines", (file) => writeFlood(file, `${"x".repeat(98)}\r\n`, 256)],
     ];
     const runs: Run[] = [];
     const empty = join(dir, "empty");
     writeFileSync(empty, "");
-    runs.push(await replay("none (process floor)", empty, 1));
-    for (const [name, text] of streams) {
+    const floor = await replay("none (process floor)", empty, 1);
+    runs.push(floor);
+    const headlines: string[] = [];
+    for (const [name, write] of streams) {
       const file = join(dir, name);
-      writeFileSync(file, text);
+      write(file);
       const counts = name === "agent" || name === "sgr160" ? [1, 25] : [1];
-      for (const engines of counts) runs.push(await replay(name, file, engines));
+      for (const engines of counts) {
+        const run = await replay(name, file, engines);
+        runs.push(run);
+        if (engines > 1) headlines.push(perEngine(run, floor));
+      }
+      rmSync(file);
     }
     console.table(runs);
+    for (const headline of headlines) console.log(headline);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

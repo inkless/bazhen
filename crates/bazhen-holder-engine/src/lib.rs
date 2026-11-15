@@ -136,6 +136,9 @@ pub struct Engine {
     /// The row a drain leaves in alacritty's scrollback, encoded: alacritty keeps the primary grid
     /// private while the alternate screen is up.
     kept: Option<(String, Ending)>,
+    /// The primary grid's rows and cells when the alternate screen came up: a reflow while it's
+    /// up redraws them at another width, but adds nothing.
+    primary: Primary,
     encoded: String,
     overflows: u64,
 }
@@ -173,6 +176,7 @@ impl Engine {
             size,
             scrollback,
             kept: None,
+            primary: Primary::default(),
             encoded: String::new(),
             overflows: 0,
         }
@@ -277,31 +281,28 @@ impl Engine {
     ///   and alacritty may drop rows below the primary's cursor.
     pub fn resize(&mut self, size: Size) {
         let size = size.usable();
-        // A resize pulls rows back from history: a row-grow fills the new rows from it, and a
-        // reflow that rejoins wrapped rows pulls rows down to keep the cursor's line, or drops
-        // rows below the cursor if history runs out. A column-grow can join every `widen` rows
-        // into one, so alacritty gets back enough of the store for the old screen and the new.
-        if !self.alternate() {
-            let widen = size.cols().div_ceil(self.size.cols()).max(1);
-            let wanted = widen * (self.size.rows() + size.rows());
-            let refilled = refill(self.term.grid_mut(), &mut self.history, wanted);
-            self.scrollback = self.scrollback.max(refilled);
-            self.kept = None;
+        if size == self.size {
+            // alacritty doesn't reflow to the size it has either.
+            return;
         }
-        // Reflow can split a row into one per cell it holds, and a row-shrink pushes up to a
-        // screen into history: no row may fall off alacritty's scrollback before it's drained.
-        // Under the alternate screen the limit stays raised until a drain, so each resize builds
-        // on the last; past the cap, the overflow count says rows may have gone.
-        let split = self
-            .size
-            .cols()
-            .div_ceil(size.cols().saturating_sub(1).max(1));
-        let room = self
-            .scrollback
-            .saturating_add(self.size.rows())
-            .saturating_mul(split)
-            .saturating_add(size.rows())
-            .min(MOST_RESIZE_ROOM);
+        let room = if self.alternate() {
+            self.primary.room(size)
+        } else {
+            self.refill_for(size);
+            self.kept = None;
+            // Reflow can split a row into one per cell it holds, and a row-shrink pushes up to a
+            // screen into history: no row may fall off alacritty's scrollback before it's
+            // drained. Past the cap, the overflow count says rows may have gone.
+            let split = self
+                .size
+                .cols()
+                .div_ceil(size.cols().saturating_sub(1).max(1));
+            self.scrollback
+                .saturating_add(self.size.rows())
+                .saturating_mul(split)
+                .saturating_add(size.rows())
+                .min(MOST_RESIZE_ROOM)
+        };
         self.set_scrollback(room);
         self.term.resize(size);
         mark_widened_rows(&mut self.term);
@@ -355,6 +356,17 @@ impl Engine {
         }
     }
 
+    /// Gives alacritty back the newest lines of the store a resize to `size` may pull from
+    /// history: a row-grow fills the new rows from it, and a reflow that rejoins wrapped rows
+    /// pulls rows down to keep the cursor's line, or drops rows below the cursor if history runs
+    /// out. Enough for the old screen and the new, counted at the new width: at the old one, a
+    /// widening would take as many more rows as it joins into one.
+    fn refill_for(&mut self, size: Size) {
+        let wanted = self.size.rows() + size.rows();
+        let refilled = refill(self.term.grid_mut(), &mut self.history, wanted, size.cols());
+        self.scrollback = self.scrollback.max(refilled);
+    }
+
     fn set_scrollback(&mut self, rows: usize) {
         self.scrollback = rows;
         if self.alternate() {
@@ -397,6 +409,11 @@ impl Engine {
     /// overwritten and alacritty unmarks the spacer it ends in.
     fn keep_newest(&mut self) {
         let grid = self.term.grid();
+        let rows = grid.history_size() + grid.screen_lines();
+        self.primary = Primary {
+            rows,
+            cells: rows * grid.columns(),
+        };
         self.kept = (grid.history_size() > 0).then(|| {
             let mut text = String::new();
             let ending = encode_row(&grid[Line(-1)], &mut text);
@@ -497,13 +514,34 @@ fn mark_widened_rows(term: &mut Term<Sink>) {
     }
 }
 
+/// The primary grid while the alternate screen is up.
+#[derive(Debug, Default, Clone, Copy)]
+struct Primary {
+    rows: usize,
+    cells: usize,
+}
+
+impl Primary {
+    /// The scrollback the primary grid needs at `size`. Its rows hold no more than its cells,
+    /// at a cell a row less for a wide char that doesn't fit, plus a row for each line's end:
+    /// however many resizes came before, as many as the next row-shrink pushes into history.
+    fn room(self, size: Size) -> usize {
+        let per_row = size.cols().saturating_sub(1).max(1);
+        self.cells
+            .div_ceil(per_row)
+            .saturating_add(self.rows)
+            .saturating_add(size.rows())
+            .min(MOST_RESIZE_ROOM)
+    }
+}
+
 /// Puts the newest lines of the store back into `grid`'s scrollback, rewrapped to its width,
-/// until it holds `wanted` rows or the store is empty. A line that runs on from the store into
+/// until it holds `wanted` rows at `cols` wide, the width it's about to take, or the store is
+/// empty. A line that runs on from the store into
 /// the scrollback comes back whole first, so that a reflow sees all of it. No more than
 /// `REFILL_BOUND` times `wanted` stored rows come back, however long their lines: the rest of a
 /// longer line stays in the store. Returns how many rows the scrollback holds.
-fn refill(grid: &mut Grid<Cell>, history: &mut History, wanted: usize) -> usize {
-    let cols = grid.columns();
+fn refill(grid: &mut Grid<Cell>, history: &mut History, wanted: usize, cols: usize) -> usize {
     let mut got = grid.history_size();
     let mut left = REFILL_BOUND * wanted.max(1);
     let mut taken = Vec::new();
@@ -529,7 +567,8 @@ fn refill(grid: &mut Grid<Cell>, history: &mut History, wanted: usize) -> usize 
     }
     write_scrollback(grid, &mut lines);
     let open = lines.is_open();
-    let rows = rows_of(&text, cols, open);
+    // Rows at the width the grid has: alacritty reflows them to the new one.
+    let rows = rows_of(&text, grid.columns(), open);
     let refilled = rows.len();
     replace_scrollback(grid, rows, 0);
     refilled
@@ -645,6 +684,8 @@ fn write_scrollback(grid: &Grid<Cell>, lines: &mut Lines<'_>) {
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Write as _;
+
     use alacritty_terminal::index::Column;
 
     use super::*;
@@ -895,15 +936,68 @@ mod tests {
 
     #[test]
     fn a_row_coloured_before_a_widening_is_cleared_in_full_when_reused() {
-        let mut term = Term::new(config(100), &Size { cols: 4, rows: 1 }, Sink::default());
-        let mut parser = Processor::<StdSyncHandler>::new();
-        parser.advance(&mut term, b"\x1b[41m\n\n\n\n");
-        term.resize(Size { cols: 8, rows: 1 });
-        mark_widened_rows(&mut term);
-        // Clearing history leaves the widened rows for the next line feeds to reuse.
-        parser.advance(&mut term, b"\x1b[0m\x1b[3J\n\n");
-        let row = &term.grid()[Line(0)];
-        assert!(row.into_iter().all(|cell| cell.bg == Cell::default().bg));
+        let mut engine = Engine::new(Size { cols: 4, rows: 3 }, HistoryRows(100));
+        engine.advance(b"\x1b[41m\n\n\n\n");
+        engine.resize(Size { cols: 8, rows: 3 });
+        engine.advance(b"\x1b[0m");
+        // Once the line feeds have gone round alacritty's storage, they reuse the rows drawn red,
+        // and each must come in cleared.
+        for feed in 0..300 {
+            engine.advance(b"\n");
+            let row = &engine.term.grid()[Line(2)];
+            let red = row.into_iter().any(|cell| cell.bg != Cell::default().bg);
+            assert!(!red, "line feed {feed}");
+        }
+    }
+
+    #[test]
+    fn a_widening_gives_back_the_rows_it_needs_counted_at_the_new_width() {
+        let mut engine = Engine::new(Size { cols: 2, rows: 1 }, HistoryRows(10_000));
+        engine.advance("ab\r\n".repeat(10_000).as_bytes());
+        engine.refill_for(Size {
+            cols: 1000,
+            rows: 1000,
+        });
+        // A row a line at either width: the old screen's and the new's. Counted at the old
+        // width, a widening 500 times over would take every row.
+        assert_eq!(engine.term.grid().history_size(), 1 + 1000);
+    }
+
+    #[test]
+    fn after_resizes_under_the_alternate_screen_it_still_serves_the_primary_s_history() {
+        let mut engine = Engine::new(SIZE, HistoryRows(1000));
+        // Lines that wrap, so the reflows redraw the row a drain leaves.
+        let dashes = "-".repeat(25);
+        let long = (0..50).fold(String::new(), |mut out, i| {
+            let _ = write!(out, "{i:02}{dashes}\r\n");
+            out
+        });
+        engine.advance(long.as_bytes());
+        engine.advance(b"\x1b[?1049h");
+        engine.resize(Size { cols: 4, rows: 5 });
+        engine.resize(Size { cols: 40, rows: 5 });
+        engine.advance(b"\x1b[?1049l");
+        let before = history(&mut engine);
+        engine.advance(b"\x1b[?1049h");
+        assert_eq!(history(&mut engine), before);
+    }
+
+    #[test]
+    fn resizes_under_the_alternate_screen_leave_the_engine_no_larger_than_their_widest() {
+        let size = Size {
+            cols: 160,
+            rows: 50,
+        };
+        let mut engine = Engine::new(size, HistoryRows(10_000));
+        engine.advance(lines(0..1000).as_bytes());
+        engine.advance(b"\x1b[?1049h");
+        engine.resize(Size { cols: 20, rows: 50 });
+        let narrowed = engine.stats().engine_bytes;
+        for _ in 0..10 {
+            engine.resize(size);
+            engine.resize(Size { cols: 20, rows: 50 });
+        }
+        assert_eq!(engine.stats().engine_bytes, narrowed);
     }
 
     #[test]

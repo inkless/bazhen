@@ -154,8 +154,10 @@ struct FullHistory {
     utf8: Utf8Seam,
     replies: Sink,
     /// Its history as it was when the alternate screen came up, which alacritty then keeps
-    /// private.
-    under_alt: String,
+    /// private, and how wide the screen was: a resize under the alternate screen doesn't touch
+    /// what either terminal serves, but text that draws the same at one width can differ in its
+    /// blanks at another.
+    under_alt: (String, u16),
 }
 
 impl FullHistory {
@@ -166,7 +168,7 @@ impl FullHistory {
             parser: Processor::new(),
             utf8: Utf8Seam::default(),
             replies,
-            under_alt: String::new(),
+            under_alt: (String::new(), size.cols),
         }
     }
 
@@ -178,7 +180,8 @@ impl FullHistory {
             let (before, after) = rest.split_at(at);
             self.feed(before);
             if !self.alternate() {
-                self.under_alt = self.history();
+                let cols = u16::try_from(self.term.grid().columns()).unwrap();
+                self.under_alt = (self.history(), cols);
             }
             let (switch, after) = after.split_at(1);
             self.feed(switch);
@@ -318,15 +321,22 @@ fn difference(engine: &Engine, full: &FullHistory) -> Option<String> {
             cursor.point, other.point
         ));
     }
+    // A reflow moves the saved cursor too, which DECRC shows.
+    let (saved, other) = (
+        engine.term.grid().saved_cursor.point,
+        full.term.grid().saved_cursor.point,
+    );
+    if saved != other {
+        return Some(format!("saved cursor: {saved:?} against {other:?}"));
+    }
     let mut history = String::new();
     engine.write_history(&mut history);
-    let cols = engine.size.cols;
     // Under the alternate screen alacritty keeps the primary's history private, and the engine
     // serves what it was when the screen came up.
-    let theirs = if full.alternate() {
-        &full.under_alt
+    let (theirs, cols) = if full.alternate() {
+        (&full.under_alt.0, full.under_alt.1)
     } else {
-        &full.history()
+        (&full.history(), engine.size.cols)
     };
     let (ours, theirs) = (drawn(&history, cols), drawn(theirs, cols));
     (ours != theirs).then(|| {
@@ -521,6 +531,36 @@ proptest! {
         cuts in cuts(),
     ) {
         run(size, &actions, &cuts);
+    }
+
+    #[test]
+    fn through_any_resizes_lines_of_text_keep_every_cell_that_draws_something_in_order(
+        size in size(),
+        actions in prop::collection::vec(prop_oneof![
+            4 => text().prop_map(|text| Action::Text(text + "\r\n")),
+            1 => (0u8..40).prop_map(Action::Lines),
+            2 => (1u16..30, 1u16..12).prop_map(|(c, r)| Action::Resize(c, r)),
+        ], 0..60),
+        cuts in cuts(),
+    ) {
+        // Whole lines of text draw nothing below the cursor and leave every wide char its
+        // spacer, so no reflow loses a cell, and leave the cursor where a line starts, where
+        // what follows lands the same after a reflow that broke lines differently: every resize
+        // is compared, not just the first.
+        let mut engine = Engine::new(size, HistoryRows(ENGINE_ROWS));
+        let mut full = FullHistory::new(size);
+        for action in &actions {
+            match (action.bytes(), action) {
+                (Some(bytes), _) => feed(&mut engine, &mut full, &bytes, &cuts),
+                (None, &Action::Resize(cols, rows)) => {
+                    engine.resize(Size { cols, rows });
+                    full.resize(Size { cols, rows });
+                    prop_assert_eq!(engine.stats().overflows, 0);
+                    assert_same_visible_cells(&engine, &full, i32::MAX, false);
+                }
+                (None, _) => {}
+            }
+        }
     }
 
     #[test]

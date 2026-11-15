@@ -122,30 +122,38 @@ mod tests {
     }
 
     #[test]
+    fn a_string_of_many_params_is_cut_at_the_cap_too() {
+        let params = "x;".repeat(MOST_OSC_BYTES);
+        let stream = format!("\x1b]{params}\x07");
+        assert_eq!(passed(stream.as_bytes(), 64).len(), MOST_OSC_BYTES + 3);
+    }
+
+    #[test]
     fn bytes_outside_an_osc_string_all_pass() {
         let stream = "]]] \x1b[31m]text\x1b(B]\x1b]short\x07".repeat(300);
         assert_eq!(passed(stream.as_bytes(), 13), stream.as_bytes());
     }
 
-    /// The most payload bytes of any OSC string vte dispatched.
+    /// The most payload bytes of any OSC string vte dispatched. Past 16 params vte stops
+    /// recording where they end but still keeps their bytes, so a string with no `;` is one param
+    /// and all of what vte kept.
     #[derive(Default)]
     struct Longest(usize);
 
     impl Perform for Longest {
         fn osc_dispatch(&mut self, params: &[&[u8]], _: bool) {
-            // vte keeps no `;`, so the payload is at least the params and one `;` between each.
-            let bytes =
-                params.iter().map(|p| p.len()).sum::<usize>() + params.len().saturating_sub(1);
+            let bytes = params.iter().map(|p| p.len()).sum::<usize>();
             self.0 = self.0.max(bytes);
         }
     }
 
-    /// Bytes that move vte between its states, and runs long enough to pass the cap.
+    /// Bytes that move vte between its states, and runs long enough to pass the cap. No `;`, which
+    /// the cap reads as any other byte: see [`Longest`].
     fn piece() -> impl Strategy<Value = Vec<u8>> {
         prop_oneof![
             prop::sample::select(vec![
                 0x1b_u8, b']', 0x07, 0x18, 0x1a, 0x00, b'\n', 0x7f, 0x9c, 0xc3, 0xe9, b'[', b'P',
-                b'X', b'^', b'_', b'\\', b' ', b'(', b'0', b'a', b';',
+                b'X', b'^', b'_', b'\\', b' ', b'(', b'0', b'a',
             ])
             .prop_map(|byte| vec![byte]),
             (1usize..3 * MOST_OSC_BYTES).prop_map(|n| vec![b'x'; n]),
