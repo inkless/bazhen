@@ -331,7 +331,8 @@ What differs:
   One trailer may name several tests it covers. Each test process runs under the cargo runner's
   memory cap (`testing.md` § Memory and time caps), and a mutant whose run had one killed there is
   listed INVALID with that reason, as one that ran out of time is. Install cargo-mutants once:
-  `cargo install --locked cargo-mutants@27.1.0`.
+  `cargo install --locked cargo-mutants@27.1.0`; the `pnpm test:real` image carries it, and
+  cargo-nextest, at the versions `RUST_TOOLS` in `scripts/cargo-gate.ts` pins.
 
 **Black-box first.** A Rust component is certified by the TypeScript suites that drive it from
 outside, as `testing.md` § Black-box behaviour tests describes: `tests/api` delivers mail to
