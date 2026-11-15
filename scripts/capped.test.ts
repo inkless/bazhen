@@ -91,6 +91,15 @@ describe("what a run says when it ends", () => {
     ]);
   });
 
+  it("names the enclosing run's memory cap for a run through, and a kill by it", () => {
+    expect(report(ended, cap, "through", false)).toEqual([
+      "capped: under the enclosing run's 8.0 GiB memory cap",
+    ]);
+    expect(report({ ...ended, memoryKills: 1 }, cap, "through", true)).toEqual([
+      "capped: killed by the enclosing run's 8.0 GiB memory cap",
+    ]);
+  });
+
   it("gives a short time cap in seconds", () => {
     expect(formatDuration(2_000)).toBe("2 s");
     expect(formatDuration(120 * 60_000)).toBe("120 min");

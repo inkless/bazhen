@@ -13,7 +13,7 @@ import {
   judgeProbe,
   ownedArgv,
   oomKills,
-  parseTop,
+  parsePs,
   smapsShmem,
   scopeArgv,
   sliceMemory,
@@ -192,21 +192,44 @@ describe("how a run is capped", () => {
 });
 
 describe("a test binary its runner caps", () => {
-  it("starts under a data limit a quarter above its cap on Linux, so the watchdog fires first", () => {
-    expect(ownedArgv("/t/a", ["--x"], { ...cap, memory: 4 * GIB }, "linux")).toEqual([
+  const four = { memory: 4 * GIB, timeMs: 15 * 60_000 };
+
+  it("on Linux starts under a data limit a quarter above its cap, and its time as CPU time", () => {
+    expect(ownedArgv("/t/a", ["--x"], four, "linux", null)).toEqual([
       "sh",
-      ["-c", 'ulimit -d "$1" && shift && exec "$@"', "sh", String(5 * 1024 ** 2), "/t/a", "--x"],
+      [
+        "-c",
+        'ulimit -d "$1" && ulimit -t "$2" && shift 2 && exec "$@"',
+        "sh",
+        String(5 * 1024 ** 2),
+        "900",
+        "/t/a",
+        "--x",
+      ],
+    ]);
+  });
+
+  it("dies with its runner on Linux where setpriv can say so", () => {
+    const [bin, argv] = ownedArgv("/t/a", [], four, "linux", "/usr/bin/setpriv");
+    expect([bin, ...argv.slice(0, 4)]).toEqual([
+      "/usr/bin/setpriv",
+      "--pdeathsig",
+      "KILL",
+      "--",
+      "sh",
     ]);
   });
 
   it("never gets a data limit below 2 GiB, which would stop a runtime starting", () => {
-    expect(ownedArgv("/t/a", [], { ...cap, memory: 128 * 1024 ** 2 }, "linux")[1][3]).toBe(
-      String(2 * 1024 ** 2),
-    );
+    const small = { ...four, memory: 128 * 1024 ** 2 };
+    expect(ownedArgv("/t/a", [], small, "linux", null)[1][3]).toBe(String(2 * 1024 ** 2));
   });
 
-  it("starts as it is where the data limit counts no mappings", () => {
-    expect(ownedArgv("/t/a", ["--x"], cap, "darwin")).toEqual(["/t/a", ["--x"]]);
+  it("on darwin, which has no data limit that counts mappings, starts under its CPU time alone", () => {
+    expect(ownedArgv("/t/a", ["--x"], four, "darwin")).toEqual([
+      "sh",
+      ["-c", 'ulimit -t "$1" && shift && exec "$@"', "sh", "900", "/t/a", "--x"],
+    ]);
   });
 });
 
@@ -255,18 +278,11 @@ describe("reading memory", () => {
     expect(treeRows(rows, 10).map((r) => r.pid)).toEqual([10, 11, 12]);
   });
 
-  it("reads top's footprint in each of its units", () => {
-    const top = [
-      "Processes: 3 total",
-      "PID    PPID  MEM",
-      "501    1     12M+",
-      "502    501   1.5G",
-      "503    501   900K-",
-    ].join("\n");
-    expect(parseTop(top)).toEqual([
+  it("reads ps's resident memory, in KiB", () => {
+    const ps = ["  501     1  12288", "  502   501 1572864", "garbage"].join("\n");
+    expect(parsePs(ps)).toEqual([
       { pid: 501, ppid: 1, bytes: 12 * 1024 ** 2 },
       { pid: 502, ppid: 501, bytes: 1.5 * GIB },
-      { pid: 503, ppid: 501, bytes: 900 * 1024 },
     ]);
   });
 

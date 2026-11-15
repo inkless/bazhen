@@ -12,10 +12,11 @@ import {
   ownedArgv,
   runIn,
   runOwned,
+  runThrough,
   runWatched,
   type Mode,
 } from "./cap.ts";
-import { isAlive } from "./signal.ts";
+import { isAlive, signalGroup, spawnGroup } from "./signal.ts";
 
 const MIB = 1024 ** 2;
 const cap = { memory: 128 * MIB, timeMs: 30_000 };
@@ -42,6 +43,13 @@ beforeAll(async () => {
 });
 
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+describe("a run through the capped scope around it", () => {
+  it("still keeps its own time cap", async () => {
+    const ended = await runThrough("sleep", ["30"], { ...cap, timeMs: 1_000 }, process.env);
+    expect(ended).toMatchObject({ timedOut: true, signal: "SIGTERM" });
+  });
+});
 
 describe("a capped run", () => {
   it("is killed at its memory cap, and says the memory cap did it", async () => {
@@ -77,8 +85,17 @@ describe("a capped run", () => {
 });
 
 // What `ulimit -d` reads in a test binary its runner caps: no limit where it counts no mappings.
-const [limitBin, limitArgs] = ownedArgv("sh", ["-c", "ulimit -d"], cap);
-const expectedLimit = limitBin === "sh" && limitArgs[0] === "-c" ? limitArgs[3] : "unlimited";
+// The limits a test binary its runner caps reads: a data limit on Linux only, and CPU time.
+const linux = process.platform === "linux";
+const [limitBin, limitArgs] = ownedArgv(
+  "sh",
+  ["-c", linux ? "ulimit -d; ulimit -t" : "ulimit -t"],
+  cap,
+);
+const expectedLimits = linux ? `${2 * 1024 ** 2}\n30` : "30";
+// setpriv is what makes a test die with its runner; without it, only its limits bound it.
+const diesWithRunner = ownedArgv("x", [], cap)[0] !== "sh";
+const pidIn = (file: string) => (existsSync(file) ? Number(readFileSync(file, "utf8")) : 0);
 
 describe("a test binary its runner caps", () => {
   it("is killed at its cap, the runner signalling the group it started", async () => {
@@ -95,9 +112,25 @@ describe("a test binary its runner caps", () => {
     await vi.waitFor(() => expect(isAlive(pid)).toBe(false), { timeout: 2_000 });
   });
 
-  it("runs under the data limit that backs the watchdog up", () => {
+  it("runs under the limits that hold it when no runner watches it", () => {
     const read = spawnSync(limitBin, limitArgs, { encoding: "utf8" });
-    expect(read.stdout.trim()).toBe(expectedLimit);
+    expect(read.stdout.trim()).toBe(expectedLimits);
+  });
+
+  it("dies with a runner that is killed outright, where setpriv can arrange it", async () => {
+    const pidFile = join(dir, "orphan");
+    const runner = [
+      `import { runOwned } from ${JSON.stringify(join(import.meta.dirname, "cap.ts"))};`,
+      `const cap = ${JSON.stringify(cap)};`,
+      `await runOwned("sh", ["-c", "echo $$ > ${pidFile}; exec sleep 5"], cap, process.env);`,
+    ].join("\n");
+    const child = spawnGroup(process.execPath, ["--input-type=module", "-e", runner], {
+      stdio: "ignore",
+    });
+    await vi.waitFor(() => expect(pidIn(pidFile)).toBeGreaterThan(1));
+    const pid = pidIn(pidFile);
+    signalGroup(child, "SIGKILL");
+    await vi.waitFor(() => expect(isAlive(pid)).toBe(!diesWithRunner), { timeout: 2_000 });
   });
 });
 

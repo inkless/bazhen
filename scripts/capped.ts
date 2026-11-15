@@ -16,6 +16,7 @@
 // runs the Rust gates without installing it.
 
 import {
+  cappedScope,
   chooseMode,
   clampMemory,
   runIn,
@@ -96,22 +97,29 @@ export const formatDuration = (ms: number) =>
   ms >= 60_000 ? `${Math.round(ms / 60_000)} min` : `${Math.round(ms / 1000)} s`;
 
 const KILLED: Record<Mode, string> = {
-  scope: "killed N process(es)",
-  watched: "stopped the run",
-  owned: "killed the test process",
-  through: "",
+  scope: "killed N process(es) at the",
+  watched: "stopped the run at the",
+  owned: "killed the test process at the",
+  through: "killed by the enclosing run's",
 };
 
-/** What a run's end says about its caps; a test binary says nothing unless a cap fired. */
+/**
+ * What a run's end says about its caps; a test binary says nothing unless a cap fired. A run
+ * through has the enclosing run's memory cap, which `cap.memory` then is, and its own time cap.
+ */
 export function report(ended: Ended, cap: Cap, mode: Mode, testBinary: boolean): string[] {
   const lines: string[] = [];
   const memory = formatBytes(cap.memory);
-  if (!testBinary && mode !== "through") {
-    lines.push(`capped: peak ${formatBytes(ended.peak)} of ${memory}`);
+  if (!testBinary) {
+    lines.push(
+      mode === "through"
+        ? `capped: under the enclosing run's ${memory} memory cap`
+        : `capped: peak ${formatBytes(ended.peak)} of ${memory}`,
+    );
   }
   if (ended.memoryKills > 0) {
     const killed = KILLED[mode].replace("N", String(ended.memoryKills));
-    lines.push(`capped: ${killed} at the ${memory} memory cap`);
+    lines.push(`capped: ${killed} ${memory} memory cap`);
   } else if (ended.timedOut) {
     lines.push(`capped: stopped at the ${formatDuration(cap.timeMs)} time cap`);
   }
@@ -128,7 +136,9 @@ async function run(invocation: Invocation): Promise<number | NodeJS.Signals> {
     console.error(`capped: ${chosen.note}, so a watchdog checks memory instead`);
   }
   const ended = await runIn(chosen.mode, command, args, cap, process.env);
-  for (const line of report(ended, cap, chosen.mode, testBinary)) console.error(line);
+  const enclosing = chosen.mode === "through" ? cappedScope() : undefined;
+  const reported = { ...cap, memory: enclosing ?? cap.memory };
+  for (const line of report(ended, reported, chosen.mode, testBinary)) console.error(line);
   const kills = process.env[KILLS_ENV];
   if (kills !== undefined && ended.memoryKills > 0) {
     appendFileSync(kills, `${[command, ...args].join(" ")}\n`);

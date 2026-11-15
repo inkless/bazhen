@@ -12,7 +12,7 @@
 
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { readFileSync, readdirSync, watch, type FSWatcher } from "node:fs";
+import { existsSync, readFileSync, readdirSync, watch, type FSWatcher } from "node:fs";
 import { totalmem } from "node:os";
 import { isAlive, signalGroup, spawnGroup } from "./signal.ts";
 
@@ -372,20 +372,18 @@ export function treeRows(rows: readonly ProcessRow[], root: number): ProcessRow[
 
 const sum = (rows: readonly ProcessRow[]) => rows.reduce((total, r) => total + r.bytes, 0);
 
-const UNITS: Record<string, number> = { B: 1, K: 1024, M: MIB, G: 1024 ** 3, T: 1024 ** 4 };
-
 /**
- * The rows of `top -l 1 -stats pid,ppid,mem`. MEM is darwin's footprint, which counts compressed
- * memory: RSS leaves it out, and a loop that repeats the same data compresses well.
+ * The rows of `ps -o pid=,ppid=,rss=`, its sizes in KiB. On darwin that is resident memory, which
+ * leaves out compressed memory. top's footprint counts it, but a `top -l 1` costs about 170 ms of
+ * CPU against `ps`'s 4 ms (measured on CI's macOS runner), and a sampler runs once a second for
+ * every test process.
  */
-export function parseTop(text: string): ProcessRow[] {
-  return [...text.matchAll(/^\s*(\d+)\s+(\d+)\s+([\d.]+)([BKMGT])[+-]?\s*$/gm)].map(
-    ([, pid, ppid, size, unit]) => ({
-      pid: Number(pid),
-      ppid: Number(ppid),
-      bytes: Math.round(Number(size) * (UNITS[unit ?? "B"] ?? 1)),
-    }),
-  );
+export function parsePs(text: string): ProcessRow[] {
+  return [...text.matchAll(/^\s*(\d+)\s+(\d+)\s+(\d+)\s*$/gm)].map(([, pid, ppid, kib]) => ({
+    pid: Number(pid),
+    ppid: Number(ppid),
+    bytes: Number(kib) * 1024,
+  }));
 }
 
 /**
@@ -432,37 +430,41 @@ function linuxTree(root: number): number[] {
   return tree;
 }
 
-/** The memory of `root` and, but for darwin's `onlyRoot`, its tree: `/proc` or `top`. */
+/** The memory of `root` and, but for darwin's `onlyRoot`, its tree: `/proc` or `ps`. */
 async function sampleTree(root: number, onlyRoot: boolean): Promise<number> {
   if (process.platform === "darwin") {
-    const pid = onlyRoot ? ["-pid", String(root)] : [];
-    const top = await output("top", ["-l", "1", ...pid, "-stats", "pid,ppid,mem"]);
-    return sum(treeRows(parseTop(top ?? ""), root));
+    const which = onlyRoot ? ["-p", String(root)] : ["-A"];
+    const ps = await output("ps", [...which, "-o", "pid=,ppid=,rss="]);
+    return sum(treeRows(parsePs(ps ?? ""), root));
   }
   return linuxTree(root).reduce((total, pid) => total + processMemory(pid), 0);
 }
 
-const SAMPLE_MS = process.platform === "darwin" ? 1000 : 100;
+const SAMPLE_MS = process.platform === "darwin" ? 500 : 100;
 // Under nextest's own grace of 10 s, so the group's kill lands before nextest kills the runner and
 // leaves the group with no one watching it.
 const FORWARD_GRACE_MS = 5_000;
 
+/** What a group's own watchdog samples: its whole tree, its root alone, or nothing. */
+type Watch = "tree" | "root" | "none";
+
 /**
- * Runs `bin` in a process group of its own and watches its tree. Past the memory cap the group
- * gets SIGKILL at once (at gigabytes a second, a grace period is gigabytes more); past the time
- * cap, or on a SIGTERM or SIGHUP passed on to it, SIGTERM, then SIGKILL if it hasn't gone. Once
- * the command has gone, whatever it left in its group is killed with it.
+ * Runs `bin` in a process group of its own and, but for `none`, watches its memory. Past the
+ * memory cap the group gets SIGKILL at once (at gigabytes a second, a grace period is gigabytes
+ * more); past the time cap, or on a SIGTERM or SIGHUP passed on to it, SIGTERM, then SIGKILL if
+ * it hasn't gone. Once the command has gone, whatever it left in its group is killed with it.
  */
 async function runGroup(
   bin: string,
   argv: readonly string[],
   cap: Cap,
   env: NodeJS.ProcessEnv,
-  onlyRoot: boolean,
+  watching: Watch,
 ): Promise<Ended> {
+  const scopeKillsBefore = watching === "none" ? scopeKills() : 0;
   const child = spawnGroup(bin, argv, {
     stdio: "inherit",
-    env: { ...env, [CAPPED_ENV]: `fallback:${process.pid}` },
+    env: watching === "none" ? env : { ...env, [CAPPED_ENV]: `fallback:${process.pid}` },
   });
   const pid = child.pid;
   const stop = (signal: NodeJS.Signals) => {
@@ -483,9 +485,9 @@ async function runGroup(
   };
   const offSignals = onSignals((signal) => stopSoon(signal, FORWARD_GRACE_MS), true);
   const watchdog = setInterval(() => {
-    if (sampling || pid === undefined) return;
+    if (sampling || pid === undefined || watching === "none") return;
     sampling = true;
-    void sampleTree(pid, onlyRoot).then((bytes) => {
+    void sampleTree(pid, watching === "root").then((bytes) => {
       sampling = false;
       peak = Math.max(peak, bytes);
       if (bytes > cap.memory && kills === 0) {
@@ -507,6 +509,9 @@ async function runGroup(
   clearTimeout(escalation);
   stop("SIGKILL");
   offSignals();
+  // A run through dies of the enclosing scope's cap: one that died by SIGKILL while the scope
+  // counted an OOM kill is taken as that kill.
+  if (watching === "none" && signal === "SIGKILL" && scopeKills() > scopeKillsBefore) kills = 1;
   return { code, signal, peak, memoryKills: kills, timedOut };
 }
 
@@ -517,25 +522,39 @@ export function runWatched(
   cap: Cap,
   env: NodeJS.ProcessEnv,
 ): Promise<Ended> {
-  return runGroup(command, args, cap, env, false);
+  return runGroup(command, args, cap, env, "tree");
 }
 
+const SETPRIV = ["/usr/bin/setpriv", "/bin/setpriv"].find((path) => existsSync(path)) ?? null;
+
 /**
- * The argv that starts a test binary under a data limit backing its runner's watchdog up, on
- * Linux, where RLIMIT_DATA counts anonymous mappings. It is a quarter above the cap, so the
- * watchdog's kill comes first and says why, and never below 2 GiB: a runtime's own reservations
- * under a smaller one (V8's) would stop it starting.
+ * The argv that starts a test binary under limits that hold it even if its runner is killed and
+ * leaves it unwatched:
+ * - a CPU-time limit at the time cap, everywhere;
+ * - on Linux, a data limit (RLIMIT_DATA counts anonymous mappings), a quarter above the cap, so the
+ *   watchdog's kill comes first and says why, and never below 2 GiB, since a runtime's own
+ *   reservations under a smaller one (V8's) would stop it starting;
+ * - on Linux where util-linux has `setpriv`, SIGKILL when its runner dies.
+ * darwin has no data limit that counts mappings, so a test whose runner was killed there is bounded
+ * by its CPU time alone.
  */
 export function ownedArgv(
   command: string,
   args: readonly string[],
   cap: Cap,
   platform = process.platform,
+  setpriv = SETPRIV,
 ): [string, string[]] {
-  if (platform !== "linux") return [command, [...args]];
-  const limit = Math.ceil(Math.max(cap.memory * 1.25, 2 * 1024 ** 3) / 1024);
-  const script = 'ulimit -d "$1" && shift && exec "$@"';
-  return ["sh", ["-c", script, "sh", String(limit), command, ...args]];
+  const cpu = String(Math.ceil(cap.timeMs / 1000));
+  if (platform !== "linux") {
+    return ["sh", ["-c", 'ulimit -t "$1" && shift && exec "$@"', "sh", cpu, command, ...args]];
+  }
+  const data = String(Math.ceil(Math.max(cap.memory * 1.25, 2 * 1024 ** 3) / 1024));
+  const script = 'ulimit -d "$1" && ulimit -t "$2" && shift 2 && exec "$@"';
+  const limited = ["sh", "-c", script, "sh", data, cpu, command, ...args];
+  return setpriv === null
+    ? ["sh", limited.slice(1)]
+    : [setpriv, ["--pdeathsig", "KILL", "--", ...limited]];
 }
 
 /**
@@ -550,7 +569,7 @@ export function runOwned(
   env: NodeJS.ProcessEnv,
 ): Promise<Ended> {
   const [bin, argv] = ownedArgv(command, args, cap);
-  return runGroup(bin, argv, cap, env, true);
+  return runGroup(bin, argv, cap, env, "root");
 }
 
 /** The OOM kills the capped scope this process runs in has counted so far. */
@@ -560,23 +579,16 @@ function scopeKills(read = readText): number {
 }
 
 /**
- * Runs a command inside a capped scope that already covers it, in this process's group, and ends
- * the way it ended. Signals to this process alone are waited out: the group's reach the child. A
- * command that died by SIGKILL while the scope counted an OOM kill is taken as that kill.
+ * Runs a command inside the capped scope around it, so the scope's memory cap holds it, in a
+ * group of its own that keeps its own time cap: a scope's runtime is the outer run's, and longer.
  */
-export function runThrough(command: string, args: readonly string[]): Promise<Ended> {
-  const before = scopeKills();
-  const offSignals = onSignals(() => undefined, false);
-  const child = spawn(command, args, { stdio: "inherit" });
-  return new Promise((done) => {
-    const finish = (code: number | null, signal: NodeJS.Signals | null) => {
-      offSignals();
-      const memoryKills = signal === "SIGKILL" && scopeKills() > before ? 1 : 0;
-      done({ code, signal, peak: 0, memoryKills, timedOut: false });
-    };
-    child.once("error", () => finish(127, null));
-    child.once("exit", finish);
-  });
+export function runThrough(
+  command: string,
+  args: readonly string[],
+  cap: Cap,
+  env: NodeJS.ProcessEnv,
+): Promise<Ended> {
+  return runGroup(command, args, cap, env, "none");
 }
 
 /**
@@ -623,7 +635,7 @@ export function runIn(
   if (mode === "scope") return runInScope(command, args, cap, env);
   if (mode === "watched") return runWatched(command, args, cap, env);
   if (mode === "owned") return runOwned(command, args, cap, env);
-  return runThrough(command, args);
+  return runThrough(command, args, cap, env);
 }
 
 /**
