@@ -99,7 +99,7 @@ impl Capped<'_> {
                 self.1.alternate_on(&self.0.grid().cursor);
             }
             NamedPrivateMode::SwapScreenAndSetRestoreCursor if !set && self.alternate() => {
-                self.1.alternate_off();
+                self.1.alternate_off(&self.0.grid().saved_cursor);
             }
             _ => {}
         }
@@ -108,6 +108,7 @@ impl Capped<'_> {
 
 impl Handler for Capped<'_> {
     fn set_title(&mut self, a: Option<String>) {
+        self.1.set_title(a.clone());
         <Term<Sink> as Handler>::set_title(self.0, a);
     }
 
@@ -354,10 +355,12 @@ impl Handler for Capped<'_> {
     }
 
     fn push_title(&mut self) {
+        self.1.push_title();
         <Term<Sink> as Handler>::push_title(self.0);
     }
 
     fn pop_title(&mut self) {
+        self.1.pop_title();
         <Term<Sink> as Handler>::pop_title(self.0);
     }
 

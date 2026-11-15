@@ -80,6 +80,7 @@ version = "0.1.0"
 dependencies = [
  "alacritty_terminal",
  "proptest",
+ "thiserror",
  "unicode-width",
 ]
 
