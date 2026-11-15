@@ -1,0 +1,268 @@
+//! The one place the holder sends a signal.
+//!
+//! Each call is checked here again, by its own reads, whatever its caller has already checked, so
+//! that no single wrong check elsewhere reaches a process that isn't the terminal's. Nothing is
+//! sent to a number that names a group or every process (0, 1 and anything negative), to the
+//! holder, its group, its session or any process it descends from, or to a process that isn't
+//! proven the holder's own unreaped child or a member of the session such a child leads.
+
+use rustix::io::Errno;
+use rustix::process::{
+    Pid, Signal, WaitId, WaitIdOptions, getpgrp, getpid, getppid, getsid, waitid,
+};
+
+/// How far up its parents the holder looks for a process it descends from.
+const MAX_ANCESTORS: usize = 1024;
+
+/// Why the guard sent nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum Refused {
+    #[error("{0} names a group of processes or every process, not one")]
+    NotOne(i32),
+    #[error("{0} is the holder, its group or its session")]
+    Holder(i32),
+    #[error("{0} is a process the holder descends from")]
+    Ancestor(i32),
+    #[error("{0} is not a child of the holder's, unreaped")]
+    NotPinned(i32),
+    #[error("{pid} is not in the session {leader} leads")]
+    Outside { pid: i32, leader: i32 },
+}
+
+/// Why a signal wasn't sent: the guard refused it, or the system did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum SendError {
+    #[error(transparent)]
+    Refused(#[from] Refused),
+    #[error(transparent)]
+    Os(#[from] Errno),
+}
+
+/// Refuses a number that can't be signalled as one process of a terminal's.
+pub(crate) fn vet(raw: i32) -> Result<(), Refused> {
+    if raw <= 1 {
+        return Err(Refused::NotOne(raw));
+    }
+    let own = [Some(getpid()), Some(getpgrp()), getsid(None).ok()];
+    if own.into_iter().flatten().any(|pid| pid.as_raw_pid() == raw) {
+        return Err(Refused::Holder(raw));
+    }
+    if is_ancestor(raw) {
+        return Err(Refused::Ancestor(raw));
+    }
+    Ok(())
+}
+
+/// Refuses a session leader that isn't the holder's own child, unreaped. Only such a child's pid,
+/// which is its group's and its session's, can't be given to another process.
+pub(crate) fn vet_leader(leader: Pid) -> Result<(), Refused> {
+    let raw = leader.as_raw_pid();
+    vet(raw)?;
+    loop {
+        match waitid(
+            WaitId::Pid(leader),
+            WaitIdOptions::EXITED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT,
+        ) {
+            Ok(_) => return Ok(()),
+            Err(Errno::INTR) => {}
+            Err(_) => return Err(Refused::NotPinned(raw)),
+        }
+    }
+}
+
+/// Refuses `pid` unless it is in the session `leader` leads, and `leader` is pinned.
+pub(crate) fn vet_member(pid: Pid, leader: Pid) -> Result<(), Refused> {
+    vet(pid.as_raw_pid())?;
+    vet_leader(leader)?;
+    if getsid(Some(pid)).ok() == Some(leader) {
+        Ok(())
+    } else {
+        Err(Refused::Outside {
+            pid: pid.as_raw_pid(),
+            leader: leader.as_raw_pid(),
+        })
+    }
+}
+
+/// Sends `signal` to the group `leader` leads, the holder's own child.
+pub(crate) fn signal_group(leader: Pid, signal: Signal) -> Result<(), SendError> {
+    vet_leader(leader)?;
+    rustix::process::kill_process_group(leader, signal)?;
+    Ok(())
+}
+
+/// Holds `pid` by a pidfd, proves the process it holds a member of the session `leader` leads,
+/// then sends `signal` to it. Should `pid` have been given to another process before the proof,
+/// the proof reads the other, and the signal still goes to the one held, which no longer takes it.
+#[cfg(target_os = "linux")]
+pub(crate) fn signal_member(pid: Pid, leader: Pid, signal: Signal) -> Result<(), SendError> {
+    vet(pid.as_raw_pid())?;
+    let held = rustix::process::pidfd_open(pid, rustix::process::PidfdFlags::empty())?;
+    vet_member(pid, leader)?;
+    rustix::process::pidfd_send_signal(&held, signal)?;
+    Ok(())
+}
+
+/// Watches `pid` for its exit, proves it a member of the session `leader` leads, and sends
+/// `signal` to it unless the watch saw it exit. macOS can't hold a process: what is left is the
+/// process exiting **and** its pid being given to another, both in the microseconds between the
+/// last look at the watch and `kill(2)`. XNU hands pids out in increasing order up to 99 999,
+/// skipping any in use as a pid, group or session, so the number would have to come round again
+/// inside that window.
+#[cfg(target_os = "macos")]
+pub(crate) fn signal_member(pid: Pid, leader: Pid, signal: Signal) -> Result<(), SendError> {
+    vet(pid.as_raw_pid())?;
+    let watch = crate::macos::ExitWatch::new(pid)?;
+    vet_member(pid, leader)?;
+    if watch.exited()? {
+        return Err(SendError::Os(Errno::SRCH));
+    }
+    rustix::process::kill_process(pid, signal)?;
+    Ok(())
+}
+
+/// Whether `raw` is the holder's parent, or its parent's, and so on up. A parent that can't be
+/// read ends the walk: every ancestor is outside every session the holder starts, since a process
+/// can join no session but its own new one, so this only backs up the session's check.
+fn is_ancestor(raw: i32) -> bool {
+    let mut next = getppid();
+    for _ in 0..MAX_ANCESTORS {
+        match next {
+            Some(pid) if pid.as_raw_pid() == raw => return true,
+            Some(pid) if !pid.is_init() => next = parent(pid),
+            _ => return false,
+        }
+    }
+    true
+}
+
+#[cfg(target_os = "linux")]
+fn parent(pid: Pid) -> Option<Pid> {
+    let stat = std::fs::read(format!("/proc/{}/stat", pid.as_raw_pid())).ok()?;
+    let field = crate::start_time::stat_field(&stat, 4)?;
+    Pid::from_raw(std::str::from_utf8(field).ok()?.parse().ok()?)
+}
+
+#[cfg(target_os = "macos")]
+fn parent(pid: Pid) -> Option<Pid> {
+    crate::macos::parent(pid)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{BufRead as _, BufReader, Read as _};
+    use std::process::{Command, Stdio};
+
+    use super::*;
+
+    #[test]
+    fn no_number_that_names_a_group_or_every_process_is_one() {
+        for raw in [0, 1, -1, -2, i32::MIN] {
+            assert_eq!(vet(raw), Err(Refused::NotOne(raw)));
+        }
+    }
+
+    #[test]
+    fn the_holder_its_group_and_its_session_are_refused() {
+        for pid in [getpid(), getpgrp(), getsid(None).unwrap()] {
+            let raw = pid.as_raw_pid();
+            if raw > 1 {
+                assert_eq!(vet(raw), Err(Refused::Holder(raw)));
+            }
+        }
+    }
+
+    #[test]
+    fn every_process_the_holder_descends_from_is_refused() {
+        let own = [getpid(), getpgrp(), getsid(None).unwrap()].map(Pid::as_raw_pid);
+        let mut next = getppid();
+        let mut seen = 0;
+        while let Some(pid) = next.filter(|pid| !pid.is_init()) {
+            let raw = pid.as_raw_pid();
+            if !own.contains(&raw) {
+                assert_eq!(vet(raw), Err(Refused::Ancestor(raw)));
+                seen += 1;
+            }
+            next = parent(pid);
+        }
+        assert!(seen > 0, "no ancestor to try");
+    }
+
+    #[test]
+    fn a_child_of_the_holders_is_neither_the_holder_nor_an_ancestor() {
+        let mut child = Command::new("sleep").arg("5").spawn().unwrap();
+        let checked = vet(Pid::from_child(&child).as_raw_pid());
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert_eq!(checked, Ok(()));
+    }
+
+    #[test]
+    fn a_leader_that_is_not_the_holders_child_is_refused() {
+        let mut child = Command::new("sleep").arg("5").spawn().unwrap();
+        let grandparent = parent(getppid().unwrap()).filter(|pid| !pid.is_init());
+        let pinned = vet_leader(Pid::from_child(&child));
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert_eq!(pinned, Ok(()));
+        let reaped = Pid::from_child(&child);
+        assert_eq!(
+            vet_leader(reaped),
+            Err(Refused::NotPinned(reaped.as_raw_pid()))
+        );
+        if let Some(grandparent) = grandparent {
+            assert!(vet_leader(grandparent).is_err());
+        }
+    }
+
+    #[test]
+    fn a_process_outside_the_leaders_session_is_refused() {
+        let mut leader = Command::new("sleep").arg("5").spawn().unwrap();
+        let mut other = Command::new("sleep").arg("5").spawn().unwrap();
+        let (leader_pid, other_pid) = (Pid::from_child(&leader), Pid::from_child(&other));
+        let checked = vet_member(other_pid, leader_pid);
+        for child in [&mut leader, &mut other] {
+            child.kill().unwrap();
+            child.wait().unwrap();
+        }
+        assert_eq!(
+            checked,
+            Err(Refused::Outside {
+                pid: other_pid.as_raw_pid(),
+                leader: leader_pid.as_raw_pid(),
+            })
+        );
+    }
+
+    /// The sweep's own membership check passing a stranger, as a wrong edit of it would: the
+    /// guard's check, made apart from it, still sends the stranger nothing.
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn a_stranger_vouched_for_as_a_member_is_sent_nothing() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let mut leader = Command::new("sleep").arg("30").spawn().unwrap();
+        let mut stranger = Command::new("sh")
+            .args(["-c", "trap 'echo hup' HUP; echo armed; read _; echo done"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut stdout = BufReader::new(stranger.stdout.take().unwrap());
+        let mut line = String::new();
+        stdout.read_line(&mut line).unwrap();
+        assert_eq!(line, "armed\n");
+        let pid = Pid::from_child(&stranger);
+        let sent = signal_member(pid, Pid::from_child(&leader), Signal::HUP);
+        drop(stranger.stdin.take());
+        let mut rest = String::new();
+        stdout.read_to_string(&mut rest).unwrap();
+        stranger.wait().unwrap();
+        leader.kill().unwrap();
+        leader.wait().unwrap();
+        assert!(
+            matches!(sent, Err(SendError::Refused(Refused::Outside { .. }))),
+            "{sent:?}"
+        );
+        assert_eq!(rest, "done\n");
+    }
+}

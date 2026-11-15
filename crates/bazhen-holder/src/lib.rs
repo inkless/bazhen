@@ -7,6 +7,7 @@
 pub mod child;
 pub mod conn;
 pub mod engine;
+pub mod guard;
 pub mod holder;
 pub mod input;
 pub mod log;
@@ -16,6 +17,7 @@ pub mod pty;
 pub mod ring;
 pub mod rss;
 pub mod server;
+pub mod session;
 mod signals;
 pub mod socket;
 pub mod start;

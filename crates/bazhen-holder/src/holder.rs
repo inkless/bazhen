@@ -1,5 +1,5 @@
 //! The holder's loop: one `poll` over the `SIGCHLD` wake-ups and the PTY master. It reads the
-//! child's output into an `Output`, reaps the child, and publishes its exit once the output that
+//! child's output into an `Output`, sees the child's exit, and publishes it once the output that
 //! came before the exit has been read.
 
 use std::io;
@@ -14,8 +14,8 @@ use crate::child::{ChildProcess, Reaper, SignalRefused};
 use crate::input::{InputFull, InputQueue};
 use crate::pty::{Pty, WindowSize};
 
-/// How long, after the child is reaped, output it wrote before exiting may still arrive before the
-/// exit is published. Reading the end of the output (EIO or 0) publishes it sooner.
+/// How long, after the child's exit is seen, output it wrote before exiting may still arrive before
+/// the exit is published. Reading the end of the output (EIO or 0) publishes it sooner.
 pub const EXIT_DRAIN: Duration = Duration::from_millis(100);
 
 /// What a read of the master is cut into, and the most read in one turn: enough that a flood
@@ -52,8 +52,8 @@ pub struct Exit {
 /// One terminal: its PTY, its child and where the child's output goes.
 ///
 /// The `Pty` must outlive any unwind that drops the rest: closing the master hangs the terminal
-/// up, and the kernel then sends `SIGHUP` to the child's session. An unwind boundary inside the
-/// loop, such as the engine's, keeps the `Holder`, and so the master, outside it.
+/// up, and the kernel then sends `SIGHUP` to the child, its session's leader. An unwind boundary
+/// inside the loop, such as the engine's, keeps the `Holder`, and so the master, outside it.
 ///
 /// Once the master reads EIO or 0 it leaves the poll set for good: a process that opens the
 /// terminal again afterwards isn't read, and blocks once the PTY's buffer fills.
@@ -62,6 +62,8 @@ pub struct Holder<O: Output> {
     pty: Pty,
     reaper: Reaper,
     child: ChildProcess,
+    /// Children of earlier generations whose sessions are being ended (`respawn`).
+    retiring: Vec<ChildProcess>,
     generation: Generation,
     output: O,
     chunk: Box<[u8]>,
@@ -80,7 +82,7 @@ pub enum InputRefused {
 }
 
 impl<O: Output> Holder<O> {
-    /// Takes over a child just spawned, and reaps it at once if it has already exited.
+    /// Takes over a child just spawned, and sees its exit at once if it has already exited.
     pub fn new(
         pty: Pty,
         reaper: Reaper,
@@ -92,6 +94,7 @@ impl<O: Output> Holder<O> {
             pty,
             reaper,
             child,
+            retiring: Vec::new(),
             generation,
             output,
             chunk: vec![0; READ_CHUNK].into_boxed_slice(),
@@ -104,7 +107,7 @@ impl<O: Output> Holder<O> {
         holder
     }
 
-    /// The child's exit, once it has been reaped and its output drained.
+    /// The child's exit, once it has been seen and its output drained.
     pub fn exit(&self) -> Option<&Exit> {
         self.exit.as_ref()
     }
@@ -132,16 +135,29 @@ impl<O: Output> Holder<O> {
 
     /// Replaces the child, whose exit is published, with `child` of `generation`, on `pty`. The old
     /// PTY is closed, so nothing left of the old session writes into the new generation's output
-    /// or reads its input, and no terminal mode the old program set reaches the new one.
+    /// or reads its input, and no terminal mode the old program set reaches the new one. What is
+    /// left of the old child's session is ended as a close ends it, alongside the new child.
     pub fn respawn(&mut self, pty: Pty, child: ChildProcess, generation: Generation) {
+        let now = Instant::now();
         self.pty = pty;
-        self.child = child;
+        let mut old = std::mem::replace(&mut self.child, child);
+        old.close(now);
+        self.retiring.push(old);
         self.generation = generation;
         self.master_open = true;
         self.draining_until = None;
         self.exit = None;
         self.input.clear();
-        self.step(Instant::now());
+        self.step(now);
+    }
+
+    /// Ends `child`, which no terminal will hold, and its session, as a respawn ends the old
+    /// generation's: for a child just spawned that the respawn couldn't go ahead with.
+    pub fn retire(&mut self, mut child: ChildProcess) {
+        let now = Instant::now();
+        child.close(now);
+        self.retiring.push(child);
+        self.step(now);
     }
 
     /// Readable once the child may have exited.
@@ -149,9 +165,15 @@ impl<O: Output> Holder<O> {
         self.reaper.fd()
     }
 
-    /// Whether the child has been reaped, its exit published or not.
-    pub fn child_reaped(&self) -> bool {
+    /// Whether the child's exit has been seen, published or not.
+    pub fn child_exited(&self) -> bool {
         self.child.exit().is_some()
+    }
+
+    /// Whether every session the holder started has been ended, or given up on: what a close
+    /// waits for.
+    pub fn ended(&self) -> bool {
+        self.child.ended() && self.retiring.is_empty()
     }
 
     /// The master, while it may still have output to read.
@@ -211,14 +233,15 @@ impl<O: Output> Holder<O> {
     ///
     /// # Errors
     ///
-    /// `Exited` once the child is reaped, `Failed` when the system refuses.
+    /// `Exited` once the child has exited, `Failed` when the system refuses.
     pub fn signal(&self, signal: body::Signal) -> Result<(), SignalRefused> {
         self.child.signal(signal)
     }
 
-    /// Starts ending the child (`ChildProcess::close`).
+    /// Starts ending the child and its session (`ChildProcess::close`); the sessions of earlier
+    /// generations are already being ended.
     pub fn close(&mut self, now: Instant) {
-        self.child.close(self.pty.foreground_group(), now);
+        self.child.close(now);
     }
 
     /// Does what a `poll` found to do: reads the master if it was ready, reaps, and publishes.
@@ -260,13 +283,14 @@ impl<O: Output> Holder<O> {
         Ok(())
     }
 
-    /// When the process side next needs a turn with nothing ready: the end of an exit's drain, or a
-    /// close's kill.
+    /// When the process side next needs a turn with nothing ready: the end of an exit's drain, or
+    /// the next pass of a session being ended.
     pub fn deadline(&self) -> Option<Instant> {
-        match (self.draining_until, self.child.close_deadline()) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
-        }
+        [self.draining_until, self.child.close_deadline()]
+            .into_iter()
+            .chain(self.retiring.iter().map(ChildProcess::close_deadline))
+            .flatten()
+            .min()
     }
 
     fn read_master(&mut self) {
@@ -317,14 +341,14 @@ impl<O: Output> Holder<O> {
         self.input.clear();
     }
 
-    /// Reaps the child, starts its drain, and publishes its exit once the output has ended or
-    /// the drain is over.
+    /// Sees the child's exit, starts its drain, publishes the exit once the output has ended or
+    /// the drain is over, and moves on the sessions being ended.
     fn step(&mut self, now: Instant) {
         if self.exit.is_none()
             && self.draining_until.is_none()
-            && let Some(status) = self.child.reap().map(describe)
+            && let Some(status) = self.child.poll_exit().map(describe)
         {
-            tracing::info!(status, "child reaped");
+            tracing::info!(status, "child exit seen");
             self.draining_until = Some(now + EXIT_DRAIN);
         }
         if let Some(until) = self.draining_until
@@ -339,7 +363,12 @@ impl<O: Output> Holder<O> {
             self.draining_until = None;
             self.input.clear();
         }
-        self.child.close_step(self.pty.foreground_group(), now);
+        self.child.close_step(now);
+        for old in &mut self.retiring {
+            old.poll_exit();
+            old.close_step(now);
+        }
+        self.retiring.retain(|old| !old.ended());
     }
 }
 

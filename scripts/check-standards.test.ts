@@ -1455,7 +1455,7 @@ const childOnly =
 describe("the signal chokepoints", () => {
   const CHOKEPOINTS = [
     "packages/host-guard/src/signal.ts",
-    "crates/bazhen-holder/src/child.rs",
+    "crates/bazhen-holder/src/guard.rs",
     "crates/bazhen-test-signal/src/lib.rs",
   ];
   const failures = (sources: Record<string, string>) =>
@@ -1472,7 +1472,7 @@ describe("the signal chokepoints", () => {
       expect.stringMatching(
         /^crates\/bazhen-holder\/tests\/a\.rs:2: .*kill_process.*bazhen_test_signal/,
       ),
-      expect.stringMatching(/^crates\/bazhen-holder\/src\/b\.rs:1: .*killpg.*src\/child\.rs/),
+      expect.stringMatching(/^crates\/bazhen-holder\/src\/b\.rs:1: .*killpg.*src\/guard\.rs/),
       expect.stringMatching(/^scripts\/c\.ts:1: .*process\.kill.*@bazhen\/host-guard/),
     ]);
   });
@@ -1488,7 +1488,7 @@ describe("the signal chokepoints", () => {
     const source =
       "fn f() { kill_process(p, s); }\n#[cfg(test)]\nmod tests {\n    fn g() { kill_process(p, s); }\n}";
     expect(failures({ "crates/bazhen-holder/src/a.rs": source })).toEqual([
-      expect.stringMatching(/^crates\/bazhen-holder\/src\/a\.rs:1: .*src\/child\.rs/),
+      expect.stringMatching(/^crates\/bazhen-holder\/src\/a\.rs:1: .*src\/guard\.rs/),
       expect.stringMatching(/^crates\/bazhen-holder\/src\/a\.rs:4: .*bazhen_test_signal/),
     ]);
   });

@@ -89,7 +89,8 @@ pub enum SpawnError {
 }
 
 /// The master side of a PTY, which the holder keeps for the terminal's whole life. Closing it hangs
-/// the terminal up, and the kernel then sends `SIGHUP` to the session on it.
+/// the terminal up, and the kernel then sends `SIGHUP` to the session's leader, and to no other
+/// process of the session: ending those is `session::Ending`'s.
 #[derive(Debug)]
 pub struct Pty {
     master: OwnedFd,

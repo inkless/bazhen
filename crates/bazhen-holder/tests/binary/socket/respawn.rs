@@ -10,7 +10,10 @@ use bazhen_holder_proto::body::{
 };
 use bazhen_holder_proto::{Reply, Request};
 
-use super::{Client, FLOOD, is_ok, serving, serving_with};
+use super::{
+    Client, FLOOD, LEAVES_A_STRAGGLER, gone, is_ok, kill_straggler, pid, serving, serving_with,
+    straggler, wait_gone,
+};
 use crate::{DEADLINE, Result, home, start_time, sweep};
 
 impl Client {
@@ -330,4 +333,65 @@ fn the_new_child_gets_a_fresh_terminal_and_the_old_one_is_closed() {
     if let Some(held) = ptys_held(holder.pid().unwrap()) {
         assert_eq!(held, (1, 0), "PTYs left open across respawns");
     }
+}
+
+/// The old generation's straggler, started before its child exited, and the respawn, answered.
+fn respawned_past_a_straggler(
+    home: &crate::Home,
+) -> Result<(
+    crate::Started,
+    Client,
+    rustix::process::Pid,
+    rustix::process::Pid,
+)> {
+    let file = home.join("straggler");
+    let path = file.to_str().ok_or("a path that isn't UTF-8")?;
+    let (holder, socket) = serving(home, &["sh", "-c", LEAVES_A_STRAGGLER, path])?;
+    let left = straggler(&file)?;
+    let old = pid(exited_hello(&socket)?.child_pid.get())?;
+    if gone(left) {
+        return Err("the straggler died with its child".into());
+    }
+    let mut client = Client::connect(&socket)?;
+    client.hello(false)?;
+    let respawn = client.respawn(1, &["sleep", "30"])?;
+    client.send(&respawn)?;
+    if !matches!(client.reply()?, Reply::Respawned(_)) {
+        return Err("the respawn wasn't told".into());
+    }
+    if !matches!(client.reply()?, Reply::Ok { id, .. } if id == respawn.id()) {
+        return Err("the respawn wasn't answered ok".into());
+    }
+    Ok((holder, client, left, old))
+}
+
+#[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
+fn a_respawn_ends_what_the_old_generation_left_running() {
+    bazhen_test_signal::require_sandbox().unwrap();
+    sweep().unwrap();
+    let home = home("rsstraggler").unwrap();
+    let (_holder, _client, left, old) = respawned_past_a_straggler(&home).unwrap();
+    let ended = wait_gone(left);
+    kill_straggler(left, old);
+    ended.unwrap();
+}
+
+#[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
+fn a_close_right_after_a_respawn_ends_the_old_generation_before_the_holder_exits() {
+    bazhen_test_signal::require_sandbox().unwrap();
+    sweep().unwrap();
+    let home = home("rsclosestraggler").unwrap();
+    let (mut holder, mut client, left, old) = respawned_past_a_straggler(&home).unwrap();
+    let close = Request::Close { id: client.id() };
+    client.send(&close).unwrap();
+    let (code, _) = holder.exit().unwrap();
+    let ended = gone(left);
+    kill_straggler(left, old);
+    assert_eq!(code, Some(0));
+    assert!(
+        ended,
+        "the holder exited with the old generation's job still running"
+    );
 }

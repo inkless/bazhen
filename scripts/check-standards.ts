@@ -415,8 +415,9 @@ const UNSAFE_MODULES: Record<string, string> = {
     "value owns; rustix covers none of them",
   "crates/bazhen-holder/src/macos.rs":
     "libc's sysctl(KERN_PROC_PID), the one call that says when a macOS process started, a zombie " +
-    "included, which ps reads too; and getpeereid, which names a socket peer's user; rustix " +
-    "covers neither",
+    "included, which ps reads too, and sysctl(KERN_PROC_ALL), which lists every process; and " +
+    "getpeereid, which names a socket peer's user; rustix covers neither. rustix's kevent, which " +
+    "watches a process for its exit before a close signals it, is unsafe",
 };
 
 /** The index just past the `]` that closes the `[` at `open`, or the end of `code`. */
@@ -664,8 +665,16 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/start_time.rs::start_ticks": "proc_stat",
   "crates/bazhen-holder/src/start_time.rs::boot_time": "proc_stat",
   "crates/bazhen-holder/src/rss.rs::resident_pages": "proc_stat",
+  "crates/bazhen-holder/src/start_time.rs::stat_field": "proc_stat",
+  "crates/bazhen-holder/src/session.rs::member_state": "proc_stat",
 };
 const NOT_DECODERS: Record<string, string> = {
+  "crates/bazhen-holder/src/holder.rs::Holder::retire":
+    "starts ending a child the holder spawned; reads no bytes",
+  "crates/bazhen-holder/src/macos.rs::ExitWatch::exited":
+    "asks the kernel whether a watched process exited; reads no bytes",
+  "crates/bazhen-holder/src/session.rs::Member::of_send":
+    "names what the guard's send made of a process; reads no bytes",
   "crates/bazhen-holder/src/engine.rs::advance":
     "passes the child's output to the engine's Engine::advance, which its advance target fuzzes",
   "crates/bazhen-holder/src/engine.rs::Engine::advance":
@@ -814,8 +823,9 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/holder.rs::Holder::flush_input":
     "writes queued input to the master; reads nothing",
   "crates/bazhen-holder/src/holder.rs::Holder::resize": "sets the window size; reads nothing",
-  "crates/bazhen-holder/src/holder.rs::Holder::child_reaped":
+  "crates/bazhen-holder/src/holder.rs::Holder::child_exited":
     "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/holder.rs::Holder::ended": "returns a state; reads no bytes",
   "crates/bazhen-holder/src/holder.rs::Holder::master_closed":
     "marks the master's output over and drops queued input; reads nothing",
   "crates/bazhen-holder/src/holder.rs::Holder::foreground_group":

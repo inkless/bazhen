@@ -35,6 +35,7 @@ use crate::holder::Holder;
 use crate::pty::{self, Pty, SpawnError, WindowSize};
 use crate::ring::{RING_BYTES, Ring};
 use crate::server::{Server, Terminal};
+use crate::session;
 use crate::signals::Wakeups;
 use crate::socket::{self, BindError, Socket};
 use crate::start_time;
@@ -58,6 +59,8 @@ pub enum StartError {
     Spawn(#[from] SpawnError),
     #[error(transparent)]
     Bind(#[from] BindError),
+    #[error("this system can't end a terminal's processes safely: {0}")]
+    Unsupported(#[source] io::Error),
 }
 
 impl StartError {
@@ -69,6 +72,7 @@ impl StartError {
             Self::GroupLeader => 4,
             Self::Bind(BindError::NotPrivate(_)) => 6,
             Self::Bind(BindError::Taken(_)) => 7,
+            Self::Unsupported(_) => 8,
         }
     }
 }
@@ -113,6 +117,7 @@ fn start(stdin: &mut impl Read) -> Result<(Holder<Screen>, Server), StartError> 
     become_session_leader()?;
     std::env::set_current_dir("/").map_err(StartError::Setup)?;
     pty::close_inherited_fds().map_err(StartError::Setup)?;
+    session::supported().map_err(StartError::Unsupported)?;
     // Before the bind: a SIGUSR1 sent once the socket exists must find its handler, and not end
     // the holder by its default action. The handlers go first, then the unblocking, so neither
     // signal is ever deliverable with no handler for it.
@@ -426,7 +431,8 @@ mod tests {
             EXIT_AFTER_READY,
             StartError::Bind(BindError::NotPrivate(String::new())).exit_code(),
             StartError::Bind(BindError::Taken(String::new())).exit_code(),
+            StartError::Unsupported(io::Error::other("x")).exit_code(),
         ];
-        assert_eq!(codes, [1, 2, 3, 4, 5, 6, 7]);
+        assert_eq!(codes, [1, 2, 3, 4, 5, 6, 7, 8]);
     }
 }

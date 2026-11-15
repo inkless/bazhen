@@ -24,9 +24,9 @@ export const SIGNAL_CHOKEPOINTS: Readonly<Record<string, string>> = {
   "packages/host-guard/src/signal.ts":
     "every TypeScript signal: a group this process started, or a target checked to be one of " +
     "Bazhen's own, never 0, ±1, this process or its parent",
-  "crates/bazhen-holder/src/child.rs":
-    "the holder's signals to its child's group, which it leads, and to the terminal's foreground " +
-    "group",
+  "crates/bazhen-holder/src/guard.rs":
+    "every holder signal: to its own unreaped child's group, or to a process held and checked to " +
+    "be in the session that child leads; never ≤ 1, the holder, its group, session or ancestors",
   "crates/bazhen-test-signal/src/lib.rs":
     "every Rust test's signals: to a process it started or checked is still the one it started, " +
     "never 0, ±1, the test, its parent or its own group",
@@ -36,7 +36,7 @@ export const SIGNAL_CHOKEPOINTS: Readonly<Record<string, string>> = {
 export function chokepointFor(file: string, inTest = false): string {
   if (inTest || /^crates\/[^/]+\/tests\//.test(file))
     return "bazhen_test_signal (crates/bazhen-test-signal)";
-  if (file.endsWith(".rs")) return "crates/bazhen-holder/src/child.rs";
+  if (file.endsWith(".rs")) return "crates/bazhen-holder/src/guard.rs";
   return "@bazhen/host-guard (packages/host-guard/src/signal.ts)";
 }
 
