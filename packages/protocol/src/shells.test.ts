@@ -4,7 +4,10 @@ import {
   COMMAND_LINE_MAX_BYTES,
   OpenShellRequest,
   RenameShellRequest,
+  RestartShellRequest,
+  Shell,
   ShellCommandLine,
+  ShellPrompt,
 } from "./shells.ts";
 
 const named = (name: string) => RenameShellRequest.safeParse({ idempotencyKey: "k", name });
@@ -27,6 +30,36 @@ describe("shell requests", () => {
       messages: [],
     };
     expect(StateSnapshot.parse(older).shells).toEqual([]);
+  });
+
+  it("restarts as before without retype, and takes retype only as true", () => {
+    const restart = { idempotencyKey: "k", generation: 0 };
+    const parsed = [undefined, true, false, "yes"].map(
+      (retype) => RestartShellRequest.safeParse({ ...restart, retype }).success,
+    );
+    expect(parsed).toEqual([true, true, false, false]);
+  });
+
+  it("reads a shell from a daemon older than retyping as not retypeable", () => {
+    const older = {
+      id: "term_0190000000007000800000000000aaaa",
+      environmentId: "env_0190000000007000800000000000aaaa",
+      state: "lost",
+      generation: 0,
+      cwd: "/work",
+      linkedAgentId: null,
+      theme: "dark",
+      attachCommand: null,
+      commands: ["close", "restart"],
+    };
+    expect(Shell.parse(older).retypeable).toBe(false);
+  });
+
+  it("takes a prompt report with the shell's token alone, and refuses one without a token", () => {
+    const parsed = ["t", "", "x".repeat(129), undefined].map(
+      (token) => ShellPrompt.safeParse({ token }).success,
+    );
+    expect(parsed).toEqual([true, false, false, false]);
   });
 
   it("takes a shell's name trimmed, and refuses one that is blank or too long to show", () => {
