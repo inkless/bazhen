@@ -159,8 +159,10 @@ A test owns everything it touches and leaves nothing behind.
   refuses to run, and teardown fails the run if anything appears in their `TMUX_TMPDIR`. A
   holder's child gets only its spec's environment: build it with `holderEnv()` or
   `holderProcessSpec()`, which put `HOME`, `XDG_*` and `TMUX_TMPDIR` in the run's home and the
-  refusal first on `PATH`, and pass any other through `requireHolderEnv()`, which refuses one
-  that reaches outside it.
+  refusal first on `PATH`. `requireHolderEnv()` refuses any other, and any variable but those,
+  terminal and locale settings and a test's own `BZ_TEST_*`. A holder test starts processes
+  only through `tests/support/holder-spawn.ts`, which passes their env through it; lint bans
+  `child_process` and `node-pty` in `tests/holder`.
 - **PTYs are a machine-wide resource.** macOS has 511, and a leak starves every terminal on the
   machine. The setup refuses to run above 420 in use. A runtime change that opens PTYs needs a
   lifecycle test that repeats the operation and asserts the handle count returns to its baseline

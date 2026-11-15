@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import {
   existsSync,
   linkSync,
@@ -12,6 +11,7 @@ import { join } from "node:path";
 import { listenFakeHolder, type FakeHolderServer } from "@bazhen/runtime-holder/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { holdersDir } from "../support/holder-home.ts";
+import { exitedPid } from "../support/holder-spawn.ts";
 import {
   closeLiveHolders,
   RUN_PREFIX,
@@ -22,9 +22,6 @@ import {
 
 const dirs: string[] = [];
 const fakes: FakeHolderServer[] = [];
-
-/** The pid of a process that has exited and been reaped, as a closed holder's is. */
-const exitedPid = () => spawnSync("true").pid;
 
 // A scratch home, not the run's own, whose leaks would fail the run.
 function scratchHome(): string {

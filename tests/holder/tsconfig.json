@@ -10,6 +10,7 @@
     "*.ts",
     "../support/holder-setup.ts",
     "../support/holder-home.ts",
+    "../support/holder-spawn.ts",
     "../support/ptys.ts",
     "../support/setup-error.ts"
   ],

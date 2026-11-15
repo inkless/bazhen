@@ -57,6 +57,15 @@ const XDG_DIRS = {
   XDG_RUNTIME_DIR: "run",
 } as const;
 
+/**
+ * What a child may carry besides the guarded variables: terminal and locale settings, and a
+ * test's own BZ_TEST_*. Anything else, such as BASH_ENV, ENV, ZDOTDIR, SSH_AUTH_SOCK, TMUX or
+ * DBUS_SESSION_BUS_ADDRESS, could lead it to the user's shell setup, agents or tmux.
+ */
+const ALLOWED = new Set(["PATH", "TERM", "COLORTERM", "LANG", "LANGUAGE", "TZ"]);
+const isAllowed = (name: string) =>
+  ALLOWED.has(name) || /^LC_[A-Z]+$/.test(name) || /^BZ_TEST_[A-Z0-9_]+$/.test(name);
+
 /** What a holder test's child must have as its environment, every other variable aside. */
 function guardedEnv(home: string): Record<string, string> {
   const user = userDir(home);
@@ -94,15 +103,17 @@ export function requireHolderEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): Record<string, string> {
   const home = testHome(env);
-  const wrong = Object.entries(guardedEnv(home))
+  const guarded = guardedEnv(home);
+  const wrong = Object.entries(guarded)
     .filter(([name, value]) => childEnv[name] !== value)
     .map(([name]) => name);
   if (childEnv["PATH"]?.split(":")[0] !== binDir(home)) wrong.push("PATH");
-  for (const name of ["TMUX", "TMUX_PANE", "ZDOTDIR"]) if (name in childEnv) wrong.push(name);
-  if (wrong.length > 0) {
+  const unknown = Object.keys(childEnv).filter((name) => !(name in guarded) && !isAllowed(name));
+  if (wrong.length > 0 || unknown.length > 0) {
     throw new Error(
-      `Refusing a holder test's child environment: ${wrong.join(", ")} would reach outside ` +
-        `${home}. Build it with holderEnv().`,
+      `Refusing a holder test's child environment: ${[...wrong, ...unknown].join(", ")} ` +
+        `could reach outside ${home}. Build it with holderEnv(), whose extras may be only ` +
+        "terminal and locale variables or BZ_TEST_*.",
     );
   }
   return { ...childEnv };

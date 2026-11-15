@@ -2,6 +2,7 @@ import { accessSync, constants, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { holderEnv, testHome } from "../support/holder-home.ts";
+import { runInHome } from "../support/holder-spawn.ts";
 import { TMUX_REFUSAL } from "../support/holder-setup.ts";
 
 function executable(path: string): boolean {
@@ -38,5 +39,16 @@ describe("the holder tests' tmux isolation", () => {
     const env = holderEnv();
     expect(tmuxOnPath(env["PATH"])).toBe(`${testHome()}/bin/tmux`);
     expect(env["TMUX_TMPDIR"]).toBe(process.env["TMUX_TMPDIR"]);
+  });
+
+  it("starts a process in the run's HOME, with nothing of the user's environment", () => {
+    const run = runInHome(["sh", "-c", 'echo "$PWD $HOME ${SSH_AUTH_SOCK-none} ${TMUX-none}"']);
+    const home = `${testHome()}/home`;
+    expect(run.stdout.trim()).toBe(`${home} ${home} none none`);
+  });
+
+  it("refuses to start a process whose environment reaches outside the run's home", () => {
+    const env = { ...holderEnv(), SSH_AUTH_SOCK: "/tmp/ssh-x/agent.1" };
+    expect(() => runInHome(["true"], env)).toThrow(/Refusing .*SSH_AUTH_SOCK/);
   });
 });

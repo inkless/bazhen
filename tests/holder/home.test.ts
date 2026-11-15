@@ -85,6 +85,11 @@ describe("a holder test's child environment", () => {
     }
   });
 
+  it("takes terminal and locale variables, and a test's own, as extras", () => {
+    const extra = { LC_ALL: "C.UTF-8", COLORTERM: "truecolor", BZ_TEST_MARK: "1" };
+    expect(holderEnv(extra)).toMatchObject(extra);
+  });
+
   it("lets no extra variable point the child back at the user's own", () => {
     expect(holderEnv({ HOME: homedir() })["HOME"]).toBe(`${testHome()}/home`);
     expect(() => holderEnv({ TMUX: "/tmp/tmux-1000/default,1,0" })).toThrow(/TMUX/);
@@ -101,6 +106,26 @@ describe("a holder test's child environment", () => {
     ],
     ["without the refusal first on PATH", (env) => ({ ...env, PATH: "/usr/bin:/bin" }), "PATH"],
     ["inside a tmux client", (env) => ({ ...env, TMUX: "/tmp/tmux-1000/default,1,0" }), "TMUX"],
+    [
+      "with a script for every shell",
+      (env) => ({ ...env, BASH_ENV: `${homedir()}/.bashrc` }),
+      "BASH_ENV",
+    ],
+    [
+      "with the user's ssh agent",
+      (env) => ({ ...env, SSH_AUTH_SOCK: "/tmp/ssh-x/agent.1" }),
+      "SSH_AUTH_SOCK",
+    ],
+    [
+      "with the user's session bus",
+      (env) => ({ ...env, DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/1000/bus" }),
+      "DBUS_SESSION_BUS_ADDRESS",
+    ],
+    [
+      "with a variable this process has, passed on",
+      (env) => ({ ...env, VITEST: String(process.env["VITEST"]) }),
+      "VITEST",
+    ],
   ])("refuses an environment %s", (_, change, name) => {
     expect(() => requireHolderEnv(change(holderEnv()))).toThrow(
       new RegExp(`Refusing .*\\b${name}\\b`),

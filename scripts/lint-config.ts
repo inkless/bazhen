@@ -21,6 +21,8 @@ export type Area = {
    * small-test bans don't apply to them.
    */
   medium?: boolean;
+  /** Starts processes only through the helpers in this file, which check their environment. */
+  startsProcessesVia?: string;
   /** Libraries it may use only through the wrappers in `via`, which is an area of its own. */
   onlyThrough?: { packages: string[]; via: string };
 };
@@ -169,6 +171,7 @@ export const MATRIX: Area[] = [
   {
     dir: "tests/holder",
     medium: true,
+    startsProcessesVia: "tests/support/holder-spawn.ts",
     banned: [
       "@bazhen/core",
       "@bazhen/host-guard",
@@ -266,6 +269,12 @@ function restrictions(area: Area, smallTest: boolean): Restriction {
     patterns.push({
       group: area.onlyThrough.packages,
       message: `${where} takes widgets from the wrappers in ${area.onlyThrough.via} (docs/standards/ui.md).`,
+    });
+  }
+  if (area.startsProcessesVia !== undefined) {
+    patterns.push({
+      group: ["node-pty", "child_process", "node:child_process"],
+      message: `${where} starts processes only through ${area.startsProcessesVia}, which keeps their environment in the run's home (docs/standards/testing.md).`,
     });
   }
   if (smallTest) {

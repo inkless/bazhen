@@ -2976,6 +2976,14 @@
                   "**/cli/src/**"
                 ],
                 "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/cli."
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "child_process",
+                  "node:child_process"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) starts processes only through tests/support/holder-spawn.ts, which keeps their environment in the run's home (docs/standards/testing.md)."
               }
             ]
           }
@@ -3072,6 +3080,14 @@
                   "**/cli/src/**"
                 ],
                 "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/cli."
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "child_process",
+                  "node:child_process"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) starts processes only through tests/support/holder-spawn.ts, which keeps their environment in the run's home (docs/standards/testing.md)."
               }
             ]
           }
@@ -3167,6 +3183,14 @@
                   "**/cli/src/**"
                 ],
                 "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/cli."
+              },
+              {
+                "group": [
+                  "node-pty",
+                  "child_process",
+                  "node:child_process"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) starts processes only through tests/support/holder-spawn.ts, which keeps their environment in the run's home (docs/standards/testing.md)."
               }
             ]
           }

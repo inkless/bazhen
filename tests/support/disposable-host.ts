@@ -4,6 +4,7 @@
 // marker file, never by an environment variable, which any agent sets out of habit.
 
 import { existsSync } from "node:fs";
+import { failSetup } from "./setup-error.ts";
 
 export const DISPOSABLE_HOST_MARKER = "/etc/bazhen-disposable-host";
 
@@ -21,7 +22,5 @@ export function requireDisposableHost(host = onDisposableHost()): void {
     "Refusing to run: these tests start real tmux servers and agent processes, and run only " +
     `in the test container (pnpm test:real) or CI, on a Linux host carrying ` +
     `${DISPOSABLE_HOST_MARKER}. Never create that file on a machine you work on.`;
-  // Vitest's source-map lookup hides errors thrown from globalSetup, so print it as well.
-  console.error(`\n${message}\n`);
-  throw new Error(message);
+  failSetup(message);
 }
