@@ -394,7 +394,11 @@ function checkAgentContext(): void {
 
 // The modules that may hold `unsafe` code, each with why it must (docs/standards/rust.md § Unsafe).
 // Each may set `#![expect(unsafe_code, reason = "...")]`, and nothing else in crates/ may.
-const UNSAFE_MODULES: Record<string, string> = {};
+const UNSAFE_MODULES: Record<string, string> = {
+  "crates/bazhen-holder/src/pty.rs":
+    "Command::pre_exec, to make the child a session leader on its PTY between fork and exec, and " +
+    "libc::signal there, to give it default signal dispositions; rustix covers neither",
+};
 
 const RAW_STRING = /r(#*)"/y;
 const isIdent = (c: string | undefined) => c !== undefined && /\w/.test(c);
@@ -613,6 +617,17 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-holder-engine/src/lib.rs::Engine::advance": "advance",
 };
 const NOT_DECODERS: Record<string, string> = {
+  "crates/bazhen-holder/src/child.rs::Reaper::fd":
+    "borrows the wake-up socket for poll; reads nothing",
+  "crates/bazhen-holder/src/child.rs::Reaper::clear":
+    "discards SIGCHLD wake-ups, whose bytes the signal handler wrote and which carry no content",
+  "crates/bazhen-holder/src/child.rs::Reaper::drop": "removes the signal handler; reads nothing",
+  "crates/bazhen-holder/src/pty.rs::Pty::master": "borrows the master fd; reads nothing",
+  "crates/bazhen-holder/src/pty.rs::Pty::set_size": "sets the window size; reads nothing",
+  "crates/bazhen-holder/src/pty.rs::Pty::foreground_group":
+    "asks the terminal for its foreground group; reads no bytes",
+  "crates/bazhen-holder/src/pty.rs::spawn":
+    "hands the slave to a new child as its stdio; reads nothing",
   "crates/bazhen-hook/src/lib.rs::hook_request": "an encoder: it writes the request",
   "crates/bazhen-hook/src/lib.rs::ask": "sends a request; the reply goes to parse_reply",
   "crates/bazhen-hook/src/lib.rs::post": "writes a request; the reply goes to read_response",

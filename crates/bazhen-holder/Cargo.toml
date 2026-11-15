@@ -1,0 +1,16 @@
+[package]
+name = "bazhen-holder"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+bazhen-holder-proto = { workspace = true }
+libc = { workspace = true }
+rustix = { workspace = true }
+signal-hook = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true
