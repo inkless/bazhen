@@ -214,26 +214,33 @@ fn become_session_leader() -> io::Result<()> {
 }
 
 /// Closes every fd above 2 that this process inherited, so none reaches the child, nor keeps open
-/// whatever its spawner leaked. Every fd above 2 is taken for inherited, so this runs before the
-/// holder opens anything of its own.
+/// whatever its spawner leaked.
+///
+/// An inherited fd is one without `FD_CLOEXEC`: exec closed every fd that had it, and every fd the
+/// holder opens sets it (std, `signal-hook` and `Pty::open` all do). So this closes only fds no
+/// Rust value in the crate owns, wherever it is called; `start` calls it before opening anything.
 ///
 /// # Errors
 ///
 /// When `/dev/fd` can't be listed.
-pub fn close_inherited_fds() -> io::Result<()> {
-    let mut inherited = Vec::new();
+pub(crate) fn close_inherited_fds() -> io::Result<()> {
+    let mut listed = Vec::new();
     for entry in std::fs::read_dir("/dev/fd")? {
         if let Ok(fd) = entry?.file_name().to_string_lossy().parse::<RawFd>()
             && fd > 2
         {
-            inherited.push(fd);
+            listed.push(fd);
         }
     }
-    // The listing's own fd is among them and closed by now; close(2) answers it EBADF.
-    for fd in inherited {
-        // SAFETY: no Rust value in this process owns `fd`: it was open before the holder opened
-        // anything, and the listing that also showed its own fd has dropped. close(2) of an fd
-        // that is no longer open fails with EBADF and does nothing.
+    for fd in listed {
+        // SAFETY: fcntl(F_GETFD) only reads the fd's flags. An fd no longer open, such as the
+        // listing's own, answers -1 (EBADF) and is skipped.
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+        if flags == -1 || flags & libc::FD_CLOEXEC != 0 {
+            continue;
+        }
+        // SAFETY: `fd` has no FD_CLOEXEC, so it was inherited across exec: no Rust value in this
+        // crate owns it (see above), and closing it invalidates no handle.
         let _ = unsafe { libc::close(fd) };
     }
     Ok(())

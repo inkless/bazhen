@@ -22,7 +22,7 @@ use rustix::process::{getpid, getsid, setsid};
 use thiserror::Error;
 
 use crate::child::Reaper;
-use crate::holder::{Discard, Holder, describe};
+use crate::holder::{Discard, Holder};
 use crate::pty::{self, Pty, SpawnError, WindowSize};
 
 pub const READY: &[u8] = b"ready\n";
@@ -104,11 +104,7 @@ fn start(stdin: &mut impl Read) -> Result<Holder<Discard>, StartError> {
         pid = child.pid().as_raw_nonzero(),
         "holder started"
     );
-    let holder = Holder::new(pty, reaper, child, spec.generation, Discard);
-    if let Some(exit) = holder.exit() {
-        tracing::info!(status = %describe(&exit.status), "child already exited");
-    }
-    Ok(holder)
+    Ok(Holder::new(pty, reaper, child, spec.generation, Discard))
 }
 
 /// Reads and checks the spec, refusing more than `MAX_REQUEST_BYTES` of it.

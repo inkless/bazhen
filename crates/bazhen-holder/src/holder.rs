@@ -45,6 +45,9 @@ pub struct Exit {
 /// The `Pty` must outlive any unwind that drops the rest: closing the master hangs the terminal
 /// up, and the kernel then sends `SIGHUP` to the child's session. An unwind boundary inside the
 /// loop, such as the engine's, keeps the `Holder`, and so the master, outside it.
+///
+/// Once the master reads EIO or 0 it leaves the poll set for good: a process that opens the
+/// terminal again afterwards isn't read, and blocks once the PTY's buffer fills.
 #[derive(Debug)]
 pub struct Holder<O: Output> {
     pty: Pty,

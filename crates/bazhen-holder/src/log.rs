@@ -95,24 +95,28 @@ impl<F: LogFiles> BoundedLog<F> {
     }
 
     fn line(&mut self, line: &[u8]) {
-        let len = u64::try_from(line.len()).unwrap_or(u64::MAX);
-        if !self.make_room(len) {
+        let note = (self.dropped > 0).then(|| format!("{} log lines dropped\n", self.dropped));
+        let len = note
+            .as_ref()
+            .map_or(0, String::len)
+            .saturating_add(line.len());
+        if !self.make_room(u64::try_from(len).unwrap_or(u64::MAX)) {
             self.dropped = self.dropped.saturating_add(1);
             return;
         }
         let Some(file) = &mut self.file else {
             return;
         };
-        if self.dropped > 0 {
-            let note = format!("{} log lines dropped\n", self.dropped);
-            if file.write_all(note.as_bytes()).is_ok() {
-                self.written = self.written.saturating_add(note.len() as u64);
-                self.dropped = 0;
-            }
-        }
-        if file.write_all(line).is_ok() {
-            self.written = self.written.saturating_add(len);
+        let written = note
+            .as_ref()
+            .map_or(Ok(()), |note| file.write_all(note.as_bytes()))
+            .and_then(|()| file.write_all(line));
+        if written.is_ok() {
+            self.written = self.written.saturating_add(len as u64);
+            self.dropped = 0;
         } else {
+            // Part of it may be on disk: reopening reads the length again, so the cap holds.
+            self.file = None;
             self.dropped = self.dropped.saturating_add(1);
         }
     }
@@ -258,6 +262,20 @@ mod tests {
             text(&fake.0.lock().unwrap().current),
             "before\n2 log lines dropped\nafter\n"
         );
+    }
+
+    #[test]
+    fn the_note_of_dropped_lines_counts_toward_the_cap() {
+        let fake = Fake::default();
+        let mut log = BoundedLog::new(fake.clone(), 40);
+        log.write_all(&[b'x'; 30]).unwrap();
+        fake.0.lock().unwrap().full = true;
+        log.write_all(b"lost\n").unwrap();
+        fake.0.lock().unwrap().full = false;
+        log.write_all(b"kept\n").unwrap();
+        let disk = fake.0.lock().unwrap();
+        assert_eq!(text(&disk.current), "1 log lines dropped\nkept\n");
+        assert_eq!(disk.aside.len(), 30);
     }
 
     #[test]

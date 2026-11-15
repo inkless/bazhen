@@ -398,8 +398,8 @@ const UNSAFE_MODULES: Record<string, string> = {
   "crates/bazhen-holder/src/pty.rs":
     "Command::pre_exec, to make the child a session leader on its PTY between fork and exec, and " +
     "libc's sigprocmask and signal there, to give it an empty signal mask and default " +
-    "dispositions; and libc::close, for the fds the holder inherited, which no Rust value owns; " +
-    "rustix covers none of them",
+    "dispositions; and libc's fcntl and close, for the fds the holder inherited, which no Rust " +
+    "value owns; rustix covers none of them",
 };
 
 const RAW_STRING = /r(#*)"/y;

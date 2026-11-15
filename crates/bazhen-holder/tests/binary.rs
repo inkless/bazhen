@@ -3,16 +3,18 @@
 //!
 //! A holder here ends only by a signal, in a session of its own, so nothing the test runner does
 //! reaches it. Each one therefore:
-//! - starts through `sh -c 'ulimit -t 20 && exec "$0" "$@"'`, so a holder that spins dies of
-//!   `SIGXCPU`, and `exec` keeps its pid;
+//! - starts through `sh -c 'ulimit -t 2 && exec "$0" "$@"'`, so a holder that spins dies of
+//!   `SIGXCPU` within 2 CPU-seconds, and `exec` keeps its pid;
 //! - runs a child that ends by itself;
 //! - is recorded in a ledger with its start time and its owning test process's, killed by a guard
-//!   when its test ends, and swept by a later test if its owner died first. Nothing is killed
-//!   unless its start time and command still match the entry, so a reused pid is left alone.
+//!   when its test ends, and swept by a later test if its owner died first, whichever target
+//!   directory either ran from. A sweep kills nothing unless its start time and command still
+//!   match the entry, so a reused pid is left alone.
 
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
+use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _};
 use std::os::unix::process::CommandExt as _;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -45,9 +47,21 @@ fn own_start() -> &'static str {
     START.get_or_init(|| start_time(std::process::id()).unwrap_or_default())
 }
 
+/// One ledger per user, whatever target directory the tests were built in, so a holder that a
+/// falsify run left is swept by the next plain run too. It must be the user's own and private.
 fn ledger() -> Result<PathBuf> {
-    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("holders");
-    std::fs::create_dir_all(&dir)?;
+    let uid = rustix::process::getuid().as_raw();
+    let base = std::env::var_os("XDG_RUNTIME_DIR").map_or_else(std::env::temp_dir, PathBuf::from);
+    let dir = base.join(format!("bazhen-test-holders-{uid}"));
+    match std::fs::DirBuilder::new().mode(0o700).create(&dir) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => return Err(e.into()),
+    }
+    let meta = std::fs::symlink_metadata(&dir)?;
+    if !meta.is_dir() || meta.uid() != uid || meta.mode() & 0o077 != 0 {
+        return Err(format!("{} isn't a private directory of this user's", dir.display()).into());
+    }
     Ok(dir)
 }
 
@@ -129,12 +143,15 @@ impl Started {
 
 impl Drop for Started {
     fn drop(&mut self) {
-        let same = start_time(self.pid).is_some_and(|start| start == self.start);
-        if same && let Ok(pid) = self.pid() {
-            let _ = kill_process(pid, Signal::KILL);
-        }
         if let Some(mut child) = self.child.take() {
+            // Not yet reaped, so the pid is still this holder's.
+            let _ = child.kill();
             let _ = child.wait();
+        } else if start_time(self.pid).is_some_and(|start| start == self.start)
+            && let Ok(pid) = self.pid()
+        {
+            // `exit` timed out, and its thread still waits for the holder.
+            let _ = kill_process(pid, Signal::KILL);
         }
         let _ = std::fs::remove_file(&self.entry);
     }
@@ -150,7 +167,7 @@ struct Start<'a> {
 }
 
 fn spawn(spec: &[u8], how: &Start<'_>) -> Result<Started> {
-    let script = format!("{} ulimit -t 20 && exec \"$0\" \"$@\"", how.prelude);
+    let script = format!("{} ulimit -t 2 && exec \"$0\" \"$@\"", how.prelude);
     let mut command = Command::new("sh");
     command
         .args(["-c", &script, HOLDER])
