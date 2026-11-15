@@ -22,6 +22,10 @@ const FIXTURES: Record<string, string> = {
   "packages/core/src/c.test.ts": 'export { readFileSync } from "node:fs";\n',
   "apps/web/src/d.tsx": 'export { Button } from "react-aria-components";\n',
   "apps/web/src/ui/e.tsx": 'export { Button } from "react-aria-components";\n',
+  "tests/e2e/h.spec.ts":
+    'export { TmuxServer } from "@bazhen/host-guard";\n' +
+    'export { sessionName } from "@bazhen/runtime-tmux";\n' +
+    'export { isId } from "../../packages/core/src/ids.ts";\n',
   "tests/holder/f.test.ts":
     'export { TmuxServer } from "@bazhen/host-guard";\n' +
     'export { a } from "../../packages/runtime-tmux/src/index.ts";\n' +
@@ -79,6 +83,7 @@ describe("the generated oxlint config, run by oxlint", () => {
       "packages/core/src/c.test.ts": ["eslint(no-restricted-imports)", "import(no-nodejs-modules)"],
       "apps/web/src/d.tsx": ["eslint(no-restricted-imports)"],
       "apps/web/src/ui/e.tsx": [],
+      "tests/e2e/h.spec.ts": ["eslint(no-restricted-imports)", "eslint(no-restricted-imports)"],
       "tests/holder/f.test.ts": ["eslint(no-restricted-imports)", "eslint(no-restricted-imports)"],
       "tests/holder/g.test.ts": Array(5).fill("eslint(no-restricted-imports)"),
     });
@@ -117,6 +122,7 @@ describe("each package.json, against the import matrix", () => {
       "apps/cli": [],
       "apps/web": [],
       "tests/api": [],
+      "tests/e2e": [],
       "tests/holder": [],
     });
   });

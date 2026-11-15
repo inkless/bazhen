@@ -166,6 +166,20 @@ export const MATRIX: Area[] = [
       "@bazhen/web",
     ],
   },
+  // The page against the real daemon: it reaches the daemon over its public surfaces too.
+  {
+    dir: "tests/e2e",
+    banned: [
+      "@bazhen/core",
+      "@bazhen/runtime-tmux",
+      "@bazhen/runtime-holder",
+      "@bazhen/env-local",
+      "@bazhen/harness-claude-code",
+      "@bazhen/harness-codex",
+      "@bazhen/daemon",
+      "@bazhen/web",
+    ],
+  },
   // Holder tests run on the host, so they reach no tmux and no daemon: the holder client, and
   // tests/support's home and teardown, are all they use. Teardown uses host-guard for them.
   {
