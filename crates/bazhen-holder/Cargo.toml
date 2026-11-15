@@ -6,6 +6,7 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+bazhen-holder-engine = { workspace = true }
 bazhen-holder-proto = { workspace = true }
 libc = { workspace = true }
 rustix = { workspace = true }

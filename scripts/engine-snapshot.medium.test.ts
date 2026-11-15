@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import headless from "@xterm/headless";
 import { afterAll, describe, expect, it } from "vitest";
-import { agentStream, sgrStream } from "./engine-replay.ts";
+import { agentStream, sgrStream } from "../tests/support/agent-stream.ts";
 
 const BINARY = fileURLToPath(new URL("../target/release/bazhen-holder-replay", import.meta.url));
 const RECORDINGS = fileURLToPath(new URL("engine-snapshot/", import.meta.url));

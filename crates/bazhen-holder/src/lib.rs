@@ -6,6 +6,7 @@
 
 pub mod child;
 pub mod conn;
+pub mod engine;
 pub mod holder;
 pub mod input;
 pub mod log;
@@ -13,6 +14,7 @@ pub mod log;
 mod macos;
 pub mod pty;
 pub mod ring;
+pub mod rss;
 pub mod server;
 mod signals;
 pub mod socket;

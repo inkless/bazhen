@@ -434,7 +434,8 @@ impl Engine {
         self.kept = None;
     }
 
-    fn alternate(&self) -> bool {
+    /// Whether the alternate screen is up.
+    pub fn alternate(&self) -> bool {
         self.term.mode().contains(TermMode::ALT_SCREEN)
     }
 

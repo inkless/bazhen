@@ -27,6 +27,11 @@ const MAX_READ_PER_TURN: usize = 256 << 10;
 /// Where the child's output goes, in order.
 pub trait Output {
     fn write(&mut self, bytes: &[u8]);
+
+    /// What the terminal answers the output written so far, to go to the child.
+    fn take_replies(&mut self) -> Vec<u8> {
+        Vec::new()
+    }
 }
 
 /// An `Output` that keeps nothing.
@@ -106,6 +111,10 @@ impl<O: Output> Holder<O> {
 
     pub const fn output(&self) -> &O {
         &self.output
+    }
+
+    pub const fn output_mut(&mut self) -> &mut O {
+        &mut self.output
     }
 
     pub const fn generation(&self) -> Generation {
@@ -271,6 +280,7 @@ impl<O: Output> Holder<O> {
                 Ok(n) => {
                     read += n;
                     self.output.write(self.chunk.get(..n).unwrap_or_default());
+                    self.reply();
                 }
                 Err(rustix::io::Errno::INTR) => {}
                 Err(rustix::io::Errno::AGAIN) => return,
@@ -281,6 +291,16 @@ impl<O: Output> Holder<O> {
                     return;
                 }
             }
+        }
+    }
+
+    /// Queues what the terminal answers the output just written, whether or not anyone is
+    /// connected: a program that asks waits for the answer. Once the child's exit is published,
+    /// nothing more reaches the terminal, answers included.
+    fn reply(&mut self) {
+        let replies = self.output.take_replies();
+        if !replies.is_empty() && self.exit.is_none() {
+            self.input.offer_replies(&replies);
         }
     }
 

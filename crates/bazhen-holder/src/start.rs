@@ -23,12 +23,14 @@ use std::process::ExitCode;
 
 use std::time::Instant;
 
+use bazhen_holder_engine::HistoryRows;
 use bazhen_holder_proto::body::{self, Argv, Count, Env, NonEmpty, SpawnSpec, StartTime};
 use bazhen_holder_proto::{MAX_REQUEST_BYTES, SpawnSpecError, decode_spawn_spec};
 use rustix::process::{Pid, getpid, getsid, setsid};
 use thiserror::Error;
 
 use crate::child::Reaper;
+use crate::engine::{self, Screen, Walled};
 use crate::holder::Holder;
 use crate::pty::{self, Pty, SpawnError, WindowSize};
 use crate::ring::{RING_BYTES, Ring};
@@ -106,7 +108,7 @@ pub fn run() -> ExitCode {
     }
 }
 
-fn start(stdin: &mut impl Read) -> Result<(Holder<Ring>, Server), StartError> {
+fn start(stdin: &mut impl Read) -> Result<(Holder<Screen>, Server), StartError> {
     let spec = read_spec(stdin)?;
     become_session_leader()?;
     std::env::set_current_dir("/").map_err(StartError::Setup)?;
@@ -119,6 +121,13 @@ fn start(stdin: &mut impl Read) -> Result<(Holder<Ring>, Server), StartError> {
     pty::unblock_wakeup_signals().map_err(StartError::Setup)?;
     let socket = Socket::bind(Path::new(spec.socket.as_str()))?;
     crate::log::init(Path::new(spec.socket.as_str()));
+    log_panics();
+    if cfg!(panic = "abort") {
+        tracing::warn!(
+            "built to abort on a panic, so one in the terminal engine ends the holder: build it \
+             with the release-holder profile"
+        );
+    }
     match serve(&spec, socket, reaper, rebind) {
         Ok(started) => Ok(started),
         Err((error, socket)) => {
@@ -134,7 +143,7 @@ fn serve(
     socket: Socket,
     reaper: Reaper,
     rebind: Wakeups,
-) -> Result<(Holder<Ring>, Server), (StartError, Socket)> {
+) -> Result<(Holder<Screen>, Server), (StartError, Socket)> {
     let setup = |e: io::Error| StartError::Setup(e);
     let holder_start = match start_time::of(getpid()) {
         Ok(start) => start,
@@ -182,9 +191,34 @@ fn serve(
         holder_start,
         child_start,
     };
-    let holder = Holder::new(pty, reaper, child, spec.generation, Ring::new(RING_BYTES));
+    let engine_size = bazhen_holder_engine::Size {
+        cols: window.cols(),
+        rows: window.rows(),
+    };
+    let history = usize::try_from(spec.history_lines.get()).unwrap_or(usize::MAX);
+    let engine = Walled::new(
+        engine::engine,
+        engine_size,
+        HistoryRows(history),
+        spec.theme,
+    );
+    let screen = Screen::new(Ring::new(RING_BYTES), engine);
+    let holder = Holder::new(pty, reaper, child, spec.generation, screen);
     let server = Server::new(socket, terminal, rebind, Instant::now());
     Ok((holder, server))
+}
+
+/// Writes every panic to the log, where its location and message survive stderr pointing at
+/// `/dev/null`, and then to stderr as before. One in the engine is caught and the engine
+/// replaced; one anywhere else ends the holder.
+fn log_panics() {
+    let before = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic| {
+        let location = panic.location().map(ToString::to_string);
+        let message = panic.payload_as_str().unwrap_or("(not text)");
+        tracing::error!(location, message, "panicked");
+        before(panic);
+    }));
 }
 
 /// Reads and checks the spec, refusing more than `MAX_REQUEST_BYTES` of it.

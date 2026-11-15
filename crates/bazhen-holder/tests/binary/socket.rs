@@ -7,7 +7,10 @@ use std::path::Path;
 use std::time::Instant;
 
 use bazhen_holder::start_time;
-use bazhen_holder_proto::body::{ErrorBody, HelloReply, HelloRequest, VersionText, Versions};
+use bazhen_holder_proto::body::{
+    ErrorBody, Generation, HelloReply, HelloRequest, Offset, SubscribeFrom, SubscribeRequest,
+    VersionText, Versions,
+};
 use bazhen_holder_proto::{FrameDecoder, Reply, Request, RequestId, reply_decoder};
 use rustix::process::{Pid, Signal, kill_process};
 
@@ -265,7 +268,7 @@ fn says_ready_only_once_its_socket_answers_with_who_it_is() {
     assert_eq!(hello.offset.get(), 0);
     assert_eq!((hello.size.cols.get(), hello.size.rows.get()), (80, 24));
     assert!(hello.writer);
-    assert_eq!(hello.version.as_str(), "1.1");
+    assert_eq!(hello.version.as_str(), "1.2");
 }
 
 #[test]
@@ -379,8 +382,8 @@ fn a_malformed_frame_ends_only_its_own_connection() {
     let mut gone = Client::connect(&socket).unwrap();
     gone.send(&Request::Close { id: RequestId(1) }).unwrap();
     drop(gone);
-    let answer = good.refused(&Request::Stats { id: RequestId(9) }).unwrap();
-    assert_eq!(answer.code, "unknown-request");
+    let answer = good.refused(&refused_request(9).unwrap()).unwrap();
+    assert_eq!(answer.code, "stale-generation");
 }
 
 #[test]
@@ -470,12 +473,25 @@ fn makes_room_for_a_new_connection_when_every_one_is_in_use() {
     );
 }
 
-/// `count` requests the holder answers `unknown-request`, in one write.
-fn stats_requests(count: u32) -> Vec<u8> {
+/// A request the holder always refuses, `stale-generation`, and that changes nothing: a subscribe
+/// from a generation the holder hasn't reached.
+fn refused_request(id: u32) -> Result<Request> {
+    let from = SubscribeFrom {
+        generation: Generation::new(1 << 20)?,
+        offset: Offset::new(0)?,
+    };
+    Ok(Request::Subscribe {
+        id: RequestId(id),
+        body: SubscribeRequest { from: Some(from) },
+    })
+}
+
+/// `count` requests the holder refuses, in one write.
+fn refused_requests(count: u32) -> Vec<u8> {
     (1..=count)
         .flat_map(|id| {
-            Request::Stats { id: RequestId(id) }
-                .encode()
+            refused_request(id)
+                .and_then(|request| Ok(request.encode()?))
                 .unwrap_or_default()
         })
         .collect()
@@ -501,7 +517,7 @@ fn write_behind(client: &Client, count: u32) -> Result<std::thread::JoinHandle<(
     let mut stream = client.stream.try_clone()?;
     Ok(std::thread::spawn(move || {
         for _ in 0..count.div_ceil(1000) {
-            if stream.write_all(&stats_requests(1000)).is_err() {
+            if stream.write_all(&refused_requests(1000)).is_err() {
                 return;
             }
         }
@@ -566,7 +582,7 @@ fn frees_the_writer_slot_of_a_connection_dropped_by_a_failed_write() {
     let (_holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
     let mut writer = Client::connect(&socket).unwrap();
     assert!(writer.hello(true).unwrap().writer);
-    writer.stream.write_all(&stats_requests(4000)).unwrap();
+    writer.stream.write_all(&refused_requests(4000)).unwrap();
     drop(writer);
     let deadline = Instant::now() + DEADLINE;
     while !Client::connect(&socket)
@@ -588,7 +604,7 @@ fn answers_every_pipelined_request_in_order_past_the_mark() {
     let mut client = Client::connect(&socket).unwrap();
     client.hello(false).unwrap();
     let count = 4000;
-    client.stream.write_all(&stats_requests(count)).unwrap();
+    client.stream.write_all(&refused_requests(count)).unwrap();
     for id in 1..=count {
         match client.reply().unwrap() {
             Reply::Error { id: got, .. } => assert_eq!(got, RequestId(id)),
@@ -642,10 +658,8 @@ fn a_full_holder_of_healthy_connections_still_takes_a_new_one() {
         open.remove(0).hangs_up().unwrap(),
         "the oldest non-writer stayed"
     );
-    let answer = writer
-        .refused(&Request::Stats { id: RequestId(9) })
-        .unwrap();
-    assert_eq!(answer.code, "unknown-request");
+    let answer = writer.refused(&refused_request(9).unwrap()).unwrap();
+    assert_eq!(answer.code, "stale-generation");
 }
 
 /// A spawner that left `SIGCHLD` and `SIGUSR1` blocked mustn't leave the holder deaf to either.
@@ -737,10 +751,8 @@ fn a_newcomer_replaces_the_peer_that_stopped_reading_first() {
     );
     Client::connect(&socket).unwrap().hello(false).unwrap();
     let mut oldest = open.remove(1);
-    let answer = oldest
-        .refused(&Request::Stats { id: RequestId(9) })
-        .unwrap();
-    assert_eq!(answer.code, "unknown-request");
+    let answer = oldest.refused(&refused_request(9).unwrap()).unwrap();
+    assert_eq!(answer.code, "stale-generation");
     // Dropped, it ends in a reset or an end of stream, with its writer let go; kept, its reads
     // would only time out.
     loop {
@@ -802,18 +814,32 @@ impl Client {
         self.reply()
     }
 
-    /// The output and gaps sent until `exited`, which must come.
-    fn stream_to_exit(&mut self) -> Result<Stream> {
-        self.stream_to_exit_keeping(true)
+    /// The output and gaps sent until `exited`, which must come, keeping the output only if
+    /// `keep`: a flood's is counted, and checked to be all zeros, instead.
+    fn stream_to_exit_keeping(&mut self, keep: bool) -> Result<Stream> {
+        self.stream_on_to_exit(
+            Stream {
+                zeros: true,
+                ..Stream::default()
+            },
+            keep,
+        )
     }
 
-    /// As `stream_to_exit`, keeping the output only if `keep`: a flood's is counted, and checked
-    /// to be all zeros, instead.
-    fn stream_to_exit_keeping(&mut self, keep: bool) -> Result<Stream> {
-        let mut stream = Stream {
+    /// As `stream_to_exit_keeping`, keeping the output, on from the output in `seen`, already
+    /// read from offset 0.
+    fn stream_to_exit_after(&mut self, seen: Vec<u8>) -> Result<Stream> {
+        let end = seen.len() as u64;
+        let stream = Stream {
+            bytes: seen,
+            end,
             zeros: true,
             ..Stream::default()
         };
+        self.stream_on_to_exit(stream, true)
+    }
+
+    fn stream_on_to_exit(&mut self, mut stream: Stream, keep: bool) -> Result<Stream> {
         loop {
             match self.reply()? {
                 Reply::Data { offset, bytes } => {
@@ -865,14 +891,16 @@ fn streams_every_byte_of_the_childs_output_in_order_then_its_exit() {
     let home = home("seq").unwrap();
     // With `-onlcr` the terminal passes each newline on as it is: a BSD one whose output queue
     // fills between the carriage return it adds and the newline writes the carriage return again.
-    let script = "stty -onlcr && seq 1 20000";
+    // It waits to be told, once its terminal no longer echoes, so it can't exit, and its
+    // `exited` go out, before the subscription.
+    let script = "stty -onlcr -echo && echo R && read _ && seq 1 20000";
     let (_holder, socket) = serving(&home, &["sh", "-c", script]).unwrap();
     let mut client = Client::connect(&socket).unwrap();
-    client.hello(false).unwrap();
-    assert!(is_ok(&client.subscribe(Some((0, 0))).unwrap()));
-    let stream = client.stream_to_exit().unwrap();
+    let seen = client.writer_after("R\n").unwrap();
+    client.input(b"\n").unwrap();
+    let stream = client.stream_to_exit_after(seen).unwrap();
     let expected: Vec<String> = (1..=20000).map(|n| n.to_string()).collect();
-    let expected = expected.join("\n") + "\n";
+    let expected = "R\n".to_owned() + &expected.join("\n") + "\n";
     assert_eq!(stream.gaps, []);
     assert_eq!(String::from_utf8(stream.bytes).unwrap(), expected);
 }

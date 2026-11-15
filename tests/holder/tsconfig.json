@@ -8,6 +8,7 @@
   },
   "include": [
     "*.ts",
+    "../support/agent-stream.ts",
     "../support/holder-setup.ts",
     "../support/holder-home.ts",
     "../support/holder-ledger.ts",

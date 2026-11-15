@@ -31,6 +31,7 @@ import {
   type UnknownHolderRequest,
 } from "./holder-frame.ts";
 import { parseJson } from "./json.ts";
+import { TERMINAL_COLOURS } from "./theme.ts";
 
 /*
  * Frames and spawn specs that pin `holder/1` for every other speaker, written by
@@ -459,6 +460,11 @@ const REPLY_SOURCES: readonly FrameSource[] = [
     id: 1,
     body: { ...helloReply, exit: { type: "exited", code: -1 }, writer: true },
   }),
+  reply("hello of a holder whose engine has failed", {
+    type: "hello",
+    id: 1,
+    body: { ...helloReply, engine: false },
+  }),
   reply("snapshot at the largest offset", {
     type: "snapshot",
     id: 2,
@@ -492,6 +498,11 @@ const REPLY_SOURCES: readonly FrameSource[] = [
     type: "stats",
     id: 3,
     body: { engineBytes: 1, rss: 2, ringBytes: 3, historyLines: 4 },
+  }),
+  reply("stats with engine resets", {
+    type: "stats",
+    id: 3,
+    body: { engineBytes: 1, rss: 2, ringBytes: 3, historyLines: 4, engineResets: 3 },
   }),
   reply("stats with no rss", {
     type: "stats",
@@ -570,6 +581,11 @@ const REPLY_SOURCES: readonly FrameSource[] = [
     "hello with no exit, as nullable is never missing",
     "malformed",
     rawAnswer(rep.hello, 30, JSON.stringify({ ...helloReply, exit: undefined })),
+  ),
+  outbound(
+    "hello with engine null, as optional is never null",
+    "malformed",
+    rawAnswer(rep.hello, 30, JSON.stringify({ ...helloReply, engine: null })),
   ),
   outbound(
     "hello with a terminal id that isn't a file name",
@@ -872,6 +888,7 @@ export function holderConstants() {
     HOLDER_REQUEST_CODES,
     HOLDER_REPLY_CODES,
     HOLDER_ERROR_CODES,
+    HOLDER_THEME_COLOURS: TERMINAL_COLOURS,
   };
 }
 

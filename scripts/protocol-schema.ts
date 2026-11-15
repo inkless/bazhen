@@ -32,6 +32,7 @@ export function drift(
  */
 export const FROZEN_HOLDER_FIXTURES: Readonly<Record<string, string>> = {
   "1.0": "95fc5e9e131f49682d48f9f38d0d95ef4f64027064cca1649465e4c9c9107657",
+  "1.1": "ee44ec4937861b11b86e3224ca37ed6067982e2e03d51b438a39a0208216ef1d",
 };
 
 /** A directory's files, by name and content, as one hash. */

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { agentStream, flood, perEngine, replayReport, sgrStream } from "./engine-replay.ts";
+import { agentStream, sgrStream } from "../tests/support/agent-stream.ts";
+import { flood, perEngine, replayReport } from "./engine-replay.ts";
 import type { Run } from "./engine-replay.ts";
 
 const SGR = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;]*m`, "g");

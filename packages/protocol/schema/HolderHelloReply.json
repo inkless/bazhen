@@ -154,6 +154,9 @@
     },
     "writer": {
       "type": "boolean"
+    },
+    "engine": {
+      "type": "boolean"
     }
   },
   "required": [

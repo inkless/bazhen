@@ -11,6 +11,7 @@ publish = false
 # (docs/standards/rust.md § Dependencies).
 [workspace.dependencies]
 alacritty_terminal = { version = "=0.26.0", default-features = false }
+bazhen-holder-engine = { path = "crates/bazhen-holder-engine" }
 bazhen-holder-proto = { path = "crates/bazhen-holder-proto" }
 libc = { version = "=0.2.191", default-features = false, features = ["std"] }
 proptest = { version = "=1.12.0", default-features = false, features = ["std"] }
@@ -65,3 +66,9 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# The holder's build: a panic in its terminal engine is caught and the engine replaced, which
+# needs it to unwind. Everything else keeps `release`, which aborts.
+[profile.release-holder]
+inherits = "release"
+panic = "unwind"

@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use bazhen_holder_proto::body::{
     self, Count, ErrorBody, ErrorCode, Exited, Foreground, HelloReply, HelloRequest, Offset,
-    OkBody, ProcessSpec, ProtocolVersion, Respawned, Size, StartTime, SubscribeFrom, Tags,
+    OkBody, ProcessSpec, ProtocolVersion, Respawned, Size, StartTime, Stats, SubscribeFrom, Tags,
     TerminalId, Versions,
 };
 use bazhen_holder_proto::{PROTOCOL_VERSION, Reply, Request, RequestId, negotiate, request_name};
@@ -20,9 +20,10 @@ use rustix::process::Pid;
 
 use crate::child::{CLOSE_GRACE, SignalRefused};
 use crate::conn::{Connection, READ_CHUNK};
+use crate::engine::Screen;
 use crate::holder::{Holder, InputRefused, readiness};
 use crate::pty::{self, Pty, WindowSize};
-use crate::ring::Ring;
+use crate::rss;
 use crate::signals::Wakeups;
 use crate::socket::{self, RECHECK_EVERY, Socket};
 use crate::start::{child_start, process_problem};
@@ -136,7 +137,7 @@ impl Server {
     /// # Errors
     ///
     /// When `poll` fails for any reason but an interrupting signal.
-    pub fn run(mut self, holder: &mut Holder<Ring>) -> io::Result<()> {
+    pub fn run(mut self, holder: &mut Holder<Screen>) -> io::Result<()> {
         while !self.turn(holder)? {}
         Ok(())
     }
@@ -146,7 +147,7 @@ impl Server {
     /// # Errors
     ///
     /// When `poll` fails for any reason but an interrupting signal.
-    pub fn turn(&mut self, holder: &mut Holder<Ring>) -> io::Result<bool> {
+    pub fn turn(&mut self, holder: &mut Holder<Screen>) -> io::Result<bool> {
         let deadline = [holder.deadline(), self.deadline(Instant::now())]
             .into_iter()
             .flatten()
@@ -206,7 +207,7 @@ impl Server {
             self.closing = Some(Closing::Ending { since: now });
         }
         for conn in &mut self.conns {
-            conn.flush(now, holder.output());
+            conn.flush(now, holder.output().ring());
         }
         self.release_writer();
         self.conns.retain(|conn| !conn.is_finished(now));
@@ -225,7 +226,7 @@ impl Server {
     /// Sends the child's exit, once it is published, to every connection past `hello`, at the
     /// offset it came at, so a subscriber gets it after every byte the child wrote before it. A
     /// connection that says `hello` later finds it in the hello reply.
-    fn send_exit(&mut self, holder: &Holder<Ring>) {
+    fn send_exit(&mut self, holder: &Holder<Screen>) {
         let Some(exit) = holder.exit().filter(|_| !self.shared.exit_sent) else {
             return;
         };
@@ -241,7 +242,7 @@ impl Server {
                 return;
             }
         };
-        let at = holder.output().end();
+        let at = holder.output().ring().end();
         for conn in self.conns.iter_mut().filter(|conn| conn.is_open()) {
             conn.queue_event(at, frame.clone());
         }
@@ -258,7 +259,7 @@ impl Server {
         asker: usize,
         id: RequestId,
         spec: &ProcessSpec,
-        holder: &mut Holder<Ring>,
+        holder: &mut Holder<Screen>,
     ) {
         if let Some((code, why)) = respawn_refusal(&self.shared, holder, spec) {
             if let Some(conn) = self.conns.get_mut(asker) {
@@ -309,8 +310,9 @@ impl Server {
             }
             return;
         };
-        let at = holder.output().end();
+        let at = holder.output().ring().end();
         holder.respawn(pty, child, spec.generation);
+        holder.output_mut().engine_mut().set_theme(spec.theme);
         tracing::info!(generation = spec.generation.get(), "child respawned");
         self.shared.base = at;
         self.shared.terminal.child_start = started;
@@ -324,7 +326,8 @@ impl Server {
     }
 
     /// Sets the size asked for last this turn: the terminal's program redraws on each `SIGWINCH`.
-    fn apply_resize(&mut self, holder: &Holder<Ring>) {
+    /// The engine takes it at the same point of the output, after every byte read before it.
+    fn apply_resize(&mut self, holder: &mut Holder<Screen>) {
         let Some(asked) = self.shared.resize.take() else {
             return;
         };
@@ -333,7 +336,14 @@ impl Server {
             return;
         };
         match holder.resize(window) {
-            Ok(()) => self.shared.terminal.size = size,
+            Ok(()) => {
+                self.shared.terminal.size = size;
+                let size = bazhen_holder_engine::Size {
+                    cols: window.cols(),
+                    rows: window.rows(),
+                };
+                holder.output_mut().engine_mut().resize(size);
+            }
             Err(error) => tracing::warn!(%error, "could not resize the terminal"),
         }
     }
@@ -350,7 +360,7 @@ impl Server {
 
     /// Whether a close is done: the child has ended and its connections have read what they are
     /// owed or run out of time, or the child has outlived its kill by `CLOSE_GIVE_UP`.
-    fn close_done(&mut self, holder: &Holder<Ring>, now: Instant) -> bool {
+    fn close_done(&mut self, holder: &Holder<Screen>, now: Instant) -> bool {
         let until = match self.closing {
             None => return false,
             Some(Closing::Ending { since }) if holder.exit().is_none() => {
@@ -399,7 +409,7 @@ impl Server {
         .min()
     }
 
-    fn poll(&self, holder: &Holder<Ring>, timeout: Option<&Timespec>) -> io::Result<Ready> {
+    fn poll(&self, holder: &Holder<Screen>, timeout: Option<&Timespec>) -> io::Result<Ready> {
         let listener = self
             .socket
             .as_ref()
@@ -418,11 +428,9 @@ impl Server {
             fds.len() - 1
         });
         let first_conn = fds.len();
-        fds.extend(
-            self.conns.iter().map(|conn| {
-                PollFd::from_borrowed_fd(conn.fd(), conn.interest(holder.output().end()))
-            }),
-        );
+        fds.extend(self.conns.iter().map(|conn| {
+            PollFd::from_borrowed_fd(conn.fd(), conn.interest(holder.output().ring().end()))
+        }));
         if !readiness(poll(&mut fds, timeout))? {
             return Ok(Ready::default());
         }
@@ -512,7 +520,7 @@ fn waiting_now(conns: &[Connection], now: Instant) -> Option<Instant> {
 /// Why `spec` can't replace the child now, if it can't.
 fn respawn_refusal(
     shared: &Shared,
-    holder: &Holder<Ring>,
+    holder: &Holder<Screen>,
     spec: &ProcessSpec,
 ) -> Option<(ErrorCode, &'static str)> {
     if shared.close_requested {
@@ -533,7 +541,7 @@ fn respawn_refusal(
 fn serve(
     conn: &mut Connection,
     shared: &mut Shared,
-    holder: &mut Holder<Ring>,
+    holder: &mut Holder<Screen>,
     now: Instant,
 ) -> Option<(RequestId, ProcessSpec)> {
     while let Some(next) = conn.next_request() {
@@ -559,7 +567,7 @@ fn serve(
 fn answer(
     conn: &mut Connection,
     shared: &mut Shared,
-    holder: &mut Holder<Ring>,
+    holder: &mut Holder<Screen>,
     request: Request,
     now: Instant,
 ) {
@@ -581,25 +589,7 @@ fn answer(
             conn.hang_up(now);
         }
         Request::Subscribe { id, body } => subscribe(conn, holder, shared.base, id, body.from),
-        Request::Input { id, bytes } => {
-            if shared.writer != Some(conn.id()) {
-                let why = "only the connection with the writer slot sends input";
-                refuse(conn, id, "input", ErrorCode::NotWriter, why);
-                return;
-            }
-            match holder.offer_input(&bytes) {
-                Ok(()) => {}
-                Err(InputRefused::Exited) => {
-                    let why = "the child has exited";
-                    refuse(conn, id, "input", ErrorCode::Exited, why);
-                }
-                Err(InputRefused::Full(_)) => {
-                    let why = "the program isn't reading its input: input is refused until the \
-                               queue drains";
-                    refuse(conn, id, "input", ErrorCode::InputFull, why);
-                }
-            }
-        }
+        Request::Input { id, bytes } => input(conn, shared, holder, id, &bytes),
         Request::Resize { id, body } => {
             if shared.writer == Some(conn.id()) {
                 shared.resize = Some(body);
@@ -630,6 +620,18 @@ fn answer(
             shared.terminal.tags = body.tags;
             ok(conn, id, "set-tags");
         }
+        Request::SetTheme { id, body } => {
+            holder.output_mut().engine_mut().set_theme(body.theme);
+            ok(conn, id, "set-theme");
+        }
+        Request::Stats { id } => {
+            if let Some(body) = stats(holder) {
+                send(conn, &Reply::Stats { id, body });
+            } else {
+                let why = "the holder's memory is past what the protocol can say";
+                refuse(conn, id, "stats", ErrorCode::Failed, why);
+            }
+        }
         Request::Foreground { id } => match foreground(&shared.terminal, holder) {
             Ok(body) => send(conn, &Reply::Foreground { id, body }),
             Err((code, why)) => refuse(conn, id, "foreground", code, why),
@@ -655,16 +657,43 @@ fn answer(
     }
 }
 
+/// Queues the writer's input for the child; anyone else's is refused.
+fn input(
+    conn: &mut Connection,
+    shared: &Shared,
+    holder: &mut Holder<Screen>,
+    id: RequestId,
+    bytes: &[u8],
+) {
+    if shared.writer != Some(conn.id()) {
+        let why = "only the connection with the writer slot sends input";
+        refuse(conn, id, "input", ErrorCode::NotWriter, why);
+        return;
+    }
+    match holder.offer_input(bytes) {
+        Ok(()) => {}
+        Err(InputRefused::Exited) => {
+            let why = "the child has exited";
+            refuse(conn, id, "input", ErrorCode::Exited, why);
+        }
+        Err(InputRefused::Full(_)) => {
+            let why = "the program isn't reading its input: input is refused until the queue \
+                       drains";
+            refuse(conn, id, "input", ErrorCode::InputFull, why);
+        }
+    }
+}
+
 /// Moves the connection's subscription to `from`, or to the holder's offset now without one.
 /// `base` is where the current generation starts in the output, which its offsets count from.
 fn subscribe(
     conn: &mut Connection,
-    holder: &Holder<Ring>,
+    holder: &Holder<Screen>,
     base: u64,
     id: RequestId,
     from: Option<SubscribeFrom>,
 ) {
-    let end = holder.output().end();
+    let end = holder.output().ring().end();
     let offset = match from {
         Some(from) if from.generation != holder.generation() => {
             let why = "that offset is of another generation's output";
@@ -697,7 +726,7 @@ fn subscribe(
 fn hello(
     conn: &mut Connection,
     shared: &mut Shared,
-    holder: &Holder<Ring>,
+    holder: &mut Holder<Screen>,
     id: RequestId,
     body: &HelloRequest,
     now: Instant,
@@ -734,7 +763,7 @@ fn hello(
 /// a live group is never given to a new process, so the start is that group's leader's.
 fn foreground(
     terminal: &Terminal,
-    holder: &Holder<Ring>,
+    holder: &Holder<Screen>,
 ) -> Result<Foreground, (ErrorCode, &'static str)> {
     if holder.child_reaped() {
         return Err((ErrorCode::Exited, "the child has exited"));
@@ -782,12 +811,31 @@ fn protocol_pid(pid: Pid) -> Option<body::Pid> {
     body::Pid::new(u64::try_from(pid.as_raw_nonzero().get()).ok()?).ok()
 }
 
+/// What the terminal holds in memory, and the holder's resident set, read now.
+fn stats(holder: &mut Holder<Screen>) -> Option<Stats> {
+    let ring_bytes = holder.output().ring().held();
+    let walled = holder.output_mut().engine_mut();
+    let engine = walled.stats();
+    let resets = walled.resets();
+    let count = |n: usize| Count::new(u64::try_from(n).ok()?).ok();
+    Some(Stats {
+        engine_bytes: count(engine.map_or(0, |e| e.engine_bytes.saturating_add(e.history_bytes)))?,
+        rss: rss::resident_bytes().and_then(|bytes| Count::new(bytes).ok()),
+        ring_bytes: Count::new(ring_bytes).ok()?,
+        history_lines: count(engine.map_or(0, |e| e.history_rows))?,
+        engine_resets: Some(Count::new(u64::from(resets)).ok()?),
+    })
+}
+
 fn hello_reply(
     shared: &Shared,
-    holder: &Holder<Ring>,
+    holder: &mut Holder<Screen>,
     version: &str,
     writer: bool,
 ) -> Option<HelloReply> {
+    let offset = Offset::new(holder.output().ring().end().checked_sub(shared.base)?).ok()?;
+    let walled = holder.output_mut().engine_mut();
+    let (title, alternate, engine) = (walled.title(), walled.alternate(), walled.alive());
     let terminal = &shared.terminal;
     Some(HelloReply {
         version: ProtocolVersion::new(version).ok()?,
@@ -801,11 +849,12 @@ fn hello_reply(
         child_start: terminal.child_start,
         exit: holder.exit().map(|exit| exit.status.clone()),
         size: terminal.size,
-        offset: Offset::new(holder.output().end().checked_sub(shared.base)?).ok()?,
-        title: String::new(),
-        alternate: false,
+        offset,
+        title,
+        alternate,
         history_lines: terminal.history_lines,
         writer,
+        engine: Some(engine),
     })
 }
 
@@ -847,6 +896,7 @@ mod tests {
 
     use super::*;
     use crate::conn::QUEUE_MARK;
+    use crate::ring::Ring;
 
     /// A request that waited past the mark is answerable once the peer has read, but its socket
     /// then has nothing to say and nothing owed: only the loop's deadline wakes it to answer.
@@ -889,5 +939,162 @@ mod tests {
         server.conns.push(conn);
         assert_eq!(server.deadline(now), Some(now));
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A holder whose engine panics on `FAIL` in the output, serving `script` under `sh -c`.
+    struct Failing {
+        server: Server,
+        holder: Holder<Screen>,
+        dir: std::path::PathBuf,
+    }
+
+    impl Failing {
+        fn start(name: &str, script: &str) -> Self {
+            use bazhen_holder_proto::body::{Argv, Env, Generation, NonEmpty};
+
+            use crate::child::Reaper;
+            use crate::engine::{Walled, tests::failing};
+
+            let dir = std::env::temp_dir().join(format!("bz-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
+            let socket = Socket::bind(&dir.join("t.sock")).unwrap();
+            let size = Size {
+                cols: body::Cols::new(80).unwrap(),
+                rows: body::Rows::new(24).unwrap(),
+            };
+            let mut env = std::collections::BTreeMap::new();
+            env.insert("PATH".to_owned(), std::env::var("PATH").unwrap());
+            let process = ProcessSpec {
+                argv: Argv::new(vec!["sh".into(), "-c".into(), script.into()]).unwrap(),
+                cwd: NonEmpty::new("/").unwrap(),
+                env: Env::new(env).unwrap(),
+                generation: Generation::new(0).unwrap(),
+                theme: None,
+            };
+            let reaper = Reaper::new().unwrap();
+            let (pty, slave) = Pty::open(WindowSize::from(size)).unwrap();
+            let child = pty::spawn(slave, &process, &reaper).unwrap();
+            let engine_size = bazhen_holder_engine::Size { cols: 80, rows: 24 };
+            let history = bazhen_holder_engine::HistoryRows(100);
+            let engine = Walled::new(failing, engine_size, history, None);
+            let screen = Screen::new(Ring::new(1 << 16), engine);
+            let holder = Holder::new(pty, reaper, child, process.generation, screen);
+            let terminal = Terminal {
+                terminal_id: TerminalId::new("t").unwrap(),
+                tags: Tags::new(std::collections::BTreeMap::new()).unwrap(),
+                size,
+                history_lines: Count::new(100).unwrap(),
+                holder_pid: body::Pid::new(1).unwrap(),
+                holder_start: StartTime::new(0).unwrap(),
+                child_start: StartTime::new(0).unwrap(),
+            };
+            let rebind = Wakeups::new(libc::SIGUSR1).unwrap();
+            let server = Server::new(socket, terminal, rebind, Instant::now());
+            Self {
+                server,
+                holder,
+                dir,
+            }
+        }
+
+        fn output(&self) -> String {
+            let ring = self.holder.output().ring();
+            let bytes = ring.read(ring.start(), usize::MAX).unwrap();
+            String::from_utf8_lossy(bytes).into_owned()
+        }
+
+        /// Turns the loop until `done`, for five seconds at most.
+        fn until(&mut self, what: &str, done: impl Fn(&Self) -> bool) {
+            let give_up = Instant::now() + Duration::from_secs(5);
+            while !done(self) {
+                assert!(Instant::now() < give_up, "{what} never happened");
+                let polled = self.server.turn(&mut self.holder);
+                assert!(!polled.unwrap(), "the holder closed");
+            }
+        }
+
+        /// The answer to `request`, from a connection of its own after its `hello`.
+        fn ask(&mut self, request: &Request) -> Vec<Reply> {
+            let mut peer = UnixStream::connect(self.dir.join("t.sock")).unwrap();
+            peer.set_nonblocking(true).unwrap();
+            let hello = Request::Hello {
+                id: RequestId(1),
+                body: HelloRequest {
+                    protocol: Versions::spoken(),
+                    writer: None,
+                },
+            };
+            peer.write_all(&[hello.encode().unwrap(), request.encode().unwrap()].concat())
+                .unwrap();
+            let mut decoder = bazhen_holder_proto::reply_decoder();
+            let mut replies = Vec::new();
+            let mut chunk = vec![0; 1 << 16];
+            let give_up = Instant::now() + Duration::from_secs(5);
+            while replies.len() < 2 {
+                assert!(Instant::now() < give_up, "no answer to {request:?}");
+                assert!(!self.server.turn(&mut self.holder).unwrap());
+                if let Ok(n) = peer.read(&mut chunk) {
+                    decoder.push(&chunk[..n]);
+                }
+                while let Some(reply) = decoder.next_frame().unwrap() {
+                    replies.push(reply);
+                }
+            }
+            replies
+        }
+
+        fn hello_and_stats(&mut self) -> (HelloReply, Stats) {
+            match self.ask(&Request::Stats { id: RequestId(2) }).as_slice() {
+                [
+                    Reply::Hello { body: hello, .. },
+                    Reply::Stats { body: stats, .. },
+                ] => (hello.clone(), *stats),
+                other => panic!("answered {other:?}"),
+            }
+        }
+    }
+
+    impl Drop for Failing {
+        fn drop(&mut self) {
+            self.holder.close(Instant::now());
+            let give_up = Instant::now() + CLOSE_GIVE_UP;
+            while self.holder.exit().is_none() && Instant::now() < give_up {
+                let _ = self.server.turn(&mut self.holder);
+            }
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    #[test]
+    fn a_holder_whose_engine_fails_keeps_its_child_and_answers_with_a_new_engine() {
+        let script = "stty -echoctl; printf '<fail>'; sleep 0.2; printf '\\033[6n'; exec sleep 30";
+        let mut failing = Failing::start("engine-fails", script);
+        failing.until("the query's answer, echoed", |f| {
+            f.output().contains("[1;1R")
+        });
+        assert!(failing.holder.exit().is_none(), "the child ended");
+        let (hello, stats) = failing.hello_and_stats();
+        assert_eq!(hello.engine, Some(true));
+        assert_eq!(stats.engine_resets.map(Count::get), Some(1));
+    }
+
+    #[test]
+    fn a_holder_whose_engine_keeps_failing_runs_on_without_one() {
+        let script = "while :; do printf '<fail>'; sleep 0.02; done";
+        let mut failing = Failing::start("engine-gone", script);
+        failing.until("the engine given up", |f| {
+            !f.holder.output().engine().alive()
+        });
+        let end = failing.holder.output().ring().end();
+        failing.until("more output", |f| f.holder.output().ring().end() > end);
+        assert!(failing.holder.exit().is_none(), "the child ended");
+        let (hello, stats) = failing.hello_and_stats();
+        assert_eq!(hello.engine, Some(false));
+        assert_eq!(
+            stats.engine_resets.map(Count::get),
+            Some(u64::from(crate::engine::MOST_ENGINE_RESETS))
+        );
+        assert_eq!(stats.history_lines.get(), 0);
     }
 }

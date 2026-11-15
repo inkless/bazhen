@@ -14,7 +14,7 @@ use super::{Client, is_ok, serving};
 use crate::{DEADLINE, Result, home, start_time, sweep};
 
 impl Client {
-    fn input(&mut self, bytes: &[u8]) -> Result<()> {
+    pub(super) fn input(&mut self, bytes: &[u8]) -> Result<()> {
         let id = self.id();
         self.send(&Request::Input {
             id,
@@ -120,7 +120,7 @@ impl Client {
     }
 
     /// A writer subscribed from the start, once `marker` shows the child is ready.
-    fn writer_after(&mut self, marker: &str) -> Result<Vec<u8>> {
+    pub(super) fn writer_after(&mut self, marker: &str) -> Result<Vec<u8>> {
         assert!(self.hello(true)?.writer, "no writer slot");
         assert!(is_ok(&self.subscribe(Some((0, 0)))?));
         let mut seen = Vec::new();

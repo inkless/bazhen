@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use bazhen_holder_proto::body::{
     DEFAULT_HISTORY_LINES, ErrorCode, MAX_COLS, MAX_HISTORY_LINES, MAX_ROWS, RESERVED_ENV_NAMES,
-    RESERVED_TAG_NAMES, TAG_NAME_MAX_BYTES, TAG_VALUE_MAX_BYTES, VERSION_MAX_BYTES,
+    RESERVED_TAG_NAMES, TAG_NAME_MAX_BYTES, TAG_VALUE_MAX_BYTES, Theme, VERSION_MAX_BYTES,
 };
 use bazhen_holder_proto::{
     MAX_REPLY_BYTES, MAX_REQUEST_BYTES, PROTOCOL_VERSION, SpawnSpecError, decode_spawn_spec,
@@ -331,6 +331,24 @@ fn every_negotiation_agrees_with_the_typescript_one() {
     }
 }
 
+/// Each theme's colours as `TERMINAL_COLOURS` writes them, `#rrggbb`.
+fn theme_colours() -> Value {
+    let hex = |[r, g, b]: [u8; 3]| format!("#{r:02x}{g:02x}{b:02x}");
+    Value::Object(
+        Theme::ALL
+            .into_iter()
+            .map(|theme| {
+                let colours = theme.colours();
+                let json = json!({
+                    "text": hex(colours.text),
+                    "background": hex(colours.background),
+                });
+                (theme.as_str().to_owned(), json)
+            })
+            .collect(),
+    )
+}
+
 #[test]
 fn every_constant_is_the_typescript_one() {
     let request_codes = [
@@ -388,6 +406,7 @@ fn every_constant_is_the_typescript_one() {
             "HOLDER_REQUEST_CODES": codes(&request_codes),
             "HOLDER_REPLY_CODES": codes(&reply_codes),
             "HOLDER_ERROR_CODES": ErrorCode::ALL.map(ErrorCode::as_str),
+            "HOLDER_THEME_COLOURS": theme_colours(),
         })
     );
 }
