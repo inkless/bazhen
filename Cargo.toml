@@ -11,9 +11,21 @@ publish = false
 # (docs/standards/rust.md § Dependencies).
 [workspace.dependencies]
 alacritty_terminal = { version = "=0.26.0", default-features = false }
+bazhen-holder-proto = { path = "crates/bazhen-holder-proto" }
+libc = { version = "=0.2.191", default-features = false, features = ["std"] }
 proptest = { version = "=1.12.0", default-features = false, features = ["std"] }
+rustix = { version = "=1.1.6", default-features = false, features = [
+  "std",
+  "event",
+  "fs",
+  "process",
+  "pty",
+  "stdio",
+  "termios",
+] }
 serde = { version = "=1.0.229", default-features = false, features = ["std", "derive"] }
 serde_json = { version = "=1.0.154", default-features = false, features = ["std"] }
+signal-hook = { version = "=0.4.6", default-features = false }
 thiserror = { version = "=2.0.21", default-features = false, features = ["std"] }
 unicode-width = { version = "=0.2.3", default-features = false }
 

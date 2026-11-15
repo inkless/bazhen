@@ -580,6 +580,9 @@ describe("rootManifestFailures", () => {
       root.replace("[workspace.dependencies]\n", `[workspace.dependencies]\n${lines}\n`),
     );
 
+  const wrapped = (version: string) =>
+    deps(`rustix = { version = "${version}", features = [\n  "std",\n  "pty",\n] }`);
+
   it("accepts a manifest holding the standard's lints and exact pins", () => {
     expect(rootManifestFailures(root)).toEqual([]);
   });
@@ -627,6 +630,13 @@ describe("rootManifestFailures", () => {
       [],
       [],
       [expect.stringContaining('(`path = "crates/<name>"`)')],
+    ]);
+  });
+
+  it("reads an entry the formatter wrapped across lines as one", () => {
+    expect([wrapped("=1.1.6"), wrapped("1.1")]).toEqual([
+      [],
+      [expect.stringContaining('`rustix = { version = "1.1", features = [ "std", "pty", ] }`')],
     ]);
   });
 });
@@ -1172,6 +1182,61 @@ describe("tomlTables", () => {
     expect(tomlTables('[[bin]]\nname = "a"\n[[bin]]\nname = "b"\n').get("[[bin]]")).toEqual([
       'name = "a"',
       'name = "b"',
+    ]);
+  });
+
+  it("joins an entry wrapped across lines, counting no bracket inside a string", () => {
+    const tables = tomlTables(
+      [
+        "[package]",
+        'description = "a [draft {"',
+        "name = 'x]'",
+        'notes = """',
+        "[dependencies]",
+        '"""',
+        "[dependencies]",
+        'serde = { version = "=1.0.229", features = [',
+        '  "derive",',
+        "] }",
+        'proptest = "=1.12.0"',
+      ].join("\n"),
+    );
+    expect([tables.get("[package]"), tables.get("[dependencies]")]).toEqual([
+      ['description = "a [draft {"', "name = 'x]'", 'notes = """ [dependencies] """'],
+      ['serde = { version = "=1.0.229", features = [ "derive", ] }', 'proptest = "=1.12.0"'],
+    ]);
+  });
+
+  it("cuts a comment only outside a string", () => {
+    const tables = tomlTables(
+      [
+        "[package]",
+        'description = "Fixes #12"',
+        'name = "x"#\'',
+        "edition = '2024' # a comment",
+        "[dependencies]",
+        'serde = "1.0"',
+      ].join("\n"),
+    );
+    expect([tables.get("[package]"), tables.get("[dependencies]")]).toEqual([
+      ['description = "Fixes #12"', 'name = "x"', "edition = '2024'"],
+      ['serde = "1.0"'],
+    ]);
+  });
+
+  it("refuses a one-line string left open at the end of its line", () => {
+    expect(() => tomlTables('[package]\nname = "x\n[dependencies]\nserde = "1.0"\n')).toThrow(
+      /a string left open at the end of the line `name = "x`/,
+    );
+  });
+
+  it("starts each table afresh, whatever an entry before it left open", () => {
+    const tables = tomlTables(
+      '[package]\nname = { a = [\n[dependencies]\nserde = { version = "1.0", features = [\n  "derive",\n] }\n',
+    );
+    expect([tables.get("[package]"), tables.get("[dependencies]")]).toEqual([
+      ["name = { a = ["],
+      ['serde = { version = "1.0", features = [ "derive", ] }'],
     ]);
   });
 

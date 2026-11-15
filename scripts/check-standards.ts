@@ -394,7 +394,12 @@ function checkAgentContext(): void {
 
 // The modules that may hold `unsafe` code, each with why it must (docs/standards/rust.md § Unsafe).
 // Each may set `#![expect(unsafe_code, reason = "...")]`, and nothing else in crates/ may.
-const UNSAFE_MODULES: Record<string, string> = {};
+const UNSAFE_MODULES: Record<string, string> = {
+  "crates/bazhen-holder/src/pty.rs":
+    "Command::pre_exec, to make the child a session leader on its PTY between fork and exec, and " +
+    "libc's sigprocmask and signal there, to give it an empty signal mask and default " +
+    "dispositions; rustix covers none of them",
+};
 
 const RAW_STRING = /r(#*)"/y;
 const isIdent = (c: string | undefined) => c !== undefined && /\w/.test(c);
@@ -613,6 +618,17 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-holder-engine/src/lib.rs::Engine::advance": "advance",
 };
 const NOT_DECODERS: Record<string, string> = {
+  "crates/bazhen-holder/src/child.rs::Reaper::fd":
+    "borrows the wake-up socket for poll; reads nothing",
+  "crates/bazhen-holder/src/child.rs::Reaper::clear":
+    "discards SIGCHLD wake-ups, whose bytes the signal handler wrote and which carry no content",
+  "crates/bazhen-holder/src/child.rs::Reaper::drop": "removes the signal handler; reads nothing",
+  "crates/bazhen-holder/src/pty.rs::Pty::master": "borrows the master fd; reads nothing",
+  "crates/bazhen-holder/src/pty.rs::Pty::set_size": "sets the window size; reads nothing",
+  "crates/bazhen-holder/src/pty.rs::Pty::foreground_group":
+    "asks the terminal for its foreground group; reads no bytes",
+  "crates/bazhen-holder/src/pty.rs::spawn":
+    "hands the slave to a new child as its stdio; reads nothing",
   "crates/bazhen-hook/src/lib.rs::hook_request": "an encoder: it writes the request",
   "crates/bazhen-hook/src/lib.rs::ask": "sends a request; the reply goes to parse_reply",
   "crates/bazhen-hook/src/lib.rs::post": "writes a request; the reply goes to read_response",
@@ -1042,12 +1058,9 @@ export const CLIPPY_CONFIG = [
 export const DENY_CONFIG = [
   "[graph]",
   "all-features = true",
-  "targets = [",
-  '"x86_64-unknown-linux-gnu",',
-  '"aarch64-unknown-linux-gnu",',
-  '"x86_64-apple-darwin",',
-  '"aarch64-apple-darwin",',
-  "]",
+  // One line: an entry the formatter wraps is read joined (tomlLines).
+  'targets = [ "x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin", ' +
+    '"aarch64-apple-darwin", ]',
   "[advisories]",
   'yanked = "deny"',
   "[licenses]",
@@ -1109,12 +1122,76 @@ export function gateScriptFailures(scripts: Record<string, string>): string[] {
   return out;
 }
 
-/** TOML's lines with comments and blank lines dropped, each trimmed. Strings hold no `#` here. */
+const TOML_HEADER = /^\[\[?[^\]]*\]\]?$/;
+
+/**
+ * Scans one line of TOML from where the scan before it left off. Returns the line with its comment
+ * cut and trimmed, how many brackets are open outside strings, and the quote of a multi-line
+ * string still open (`"""` or `'''`), or "". A `#` starts a comment only outside a string.
+ *
+ * @throws on a one-line string left open at the end of its line, which no valid TOML has: carried
+ *   on, it would join every later line into one entry and hide the tables there.
+ */
+function tomlScan(
+  line: string,
+  depth: number,
+  quote: string,
+): { code: string; depth: number; quote: string } {
+  let end = line.length;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quote !== "") {
+      if (c === "\\" && quote.startsWith('"')) i++;
+      else if (line.startsWith(quote, i)) {
+        i += quote.length - 1;
+        quote = "";
+      }
+    } else if (c === "#") {
+      end = i;
+      break;
+    } else if (line.startsWith('"""', i) || line.startsWith("'''", i)) {
+      quote = line.slice(i, i + 3);
+      i += 2;
+    } else if (c === '"' || c === "'") quote = c;
+    else if (c === "[" || c === "{") depth++;
+    else if (c === "]" || c === "}") depth--;
+  }
+  if (quote === '"' || quote === "'") {
+    throw new Error(`TOML: a string left open at the end of the line \`${line.trim()}\``);
+  }
+  return { code: line.slice(0, end).trim(), depth, quote };
+}
+
+/**
+ * TOML's lines with comments and blank lines dropped, each trimmed, and an entry the formatter
+ * wrapped across lines (a long inline table or array) joined back into one. Comments and brackets
+ * are found outside strings only, and a table header always starts afresh, so no entry left open
+ * can swallow the tables after it.
+ */
 function tomlLines(text: string): string[] {
-  return text
-    .split(/\r?\n/)
-    .map((l) => l.replace(/\s#.*$|^#.*$/, "").trim())
-    .filter((l) => l !== "");
+  const lines: string[] = [];
+  let entry = "";
+  let scan = { depth: 0, quote: "" };
+  const flush = () => {
+    if (entry !== "") lines.push(entry);
+    entry = "";
+    scan = { depth: 0, quote: "" };
+  };
+  for (const line of text.split(/\r?\n/)) {
+    const inString = scan.quote !== "";
+    const next = tomlScan(line, scan.depth, scan.quote);
+    if (next.code === "") continue;
+    if (!inString && TOML_HEADER.test(next.code)) {
+      flush();
+      lines.push(next.code);
+      continue;
+    }
+    entry = entry === "" ? next.code : `${entry} ${next.code}`;
+    scan = { depth: next.depth, quote: next.quote };
+    if (scan.depth <= 0 && scan.quote === "") flush();
+  }
+  flush();
+  return lines;
 }
 
 /** Each table's lines, by its header; the lines before any header are under "". */
@@ -1122,7 +1199,7 @@ export function tomlTables(text: string): Map<string, string[]> {
   const tables = new Map<string, string[]>([["", []]]);
   let current: string[] = tables.get("") ?? [];
   for (const line of tomlLines(text)) {
-    if (/^\[\[?[^\]]*\]\]?$/.test(line)) {
+    if (TOML_HEADER.test(line)) {
       current = tables.get(line) ?? [];
       tables.set(line, current);
     } else current.push(line);
