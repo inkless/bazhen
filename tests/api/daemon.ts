@@ -224,9 +224,9 @@ export class Daemon {
   /**
    * Submits a prompt in an agent's TUI through a view, as a person would. Until a TUI draws the
    * text it may still hold it as a paste and take an Enter for a newline in it, so Enter waits
-   * for one more copy of `text` on the cursor's row, where the TUI takes input. A copy elsewhere
-   * on the screen, such as a startup tip naming the same slash command, never counts, nor does
-   * one that scrolls. `text` must fit on one row.
+   * for one more copy of `text` on the cursor's row, where the TUI takes input. A copy on another
+   * row, such as a startup tip naming the same slash command, never counts, and history moving
+   * can't hold the count down. `text` must fit on one row.
    */
   async prompt(launched: { agentId: string; terminalId: string | null }, text: string) {
     const view = await this.view(String(launched.terminalId), "interactive");
