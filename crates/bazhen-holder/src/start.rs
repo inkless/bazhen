@@ -23,9 +23,9 @@ use std::process::ExitCode;
 
 use std::time::Instant;
 
-use bazhen_holder_proto::body::{self, Count, SpawnSpec, StartTime};
+use bazhen_holder_proto::body::{self, Argv, Count, Env, NonEmpty, SpawnSpec, StartTime};
 use bazhen_holder_proto::{MAX_REQUEST_BYTES, SpawnSpecError, decode_spawn_spec};
-use rustix::process::{getpid, getsid, setsid};
+use rustix::process::{Pid, getpid, getsid, setsid};
 use thiserror::Error;
 
 use crate::child::Reaper;
@@ -159,12 +159,8 @@ fn serve(
         Ok(child) => child,
         Err(e) => return Err((e.into(), socket)),
     };
-    // The child is ours and not yet reaped, so its pid can't have been reused. Nothing fails from
-    // here: the child runs, and only a close may end it.
-    let child_start = start_time::of(child.pid()).unwrap_or_else(|error| {
-        tracing::warn!(%error, "could not read when the child started");
-        StartTime::new(0).unwrap_or(holder_start)
-    });
+    // Nothing fails from here: the child runs, and only a close may end it.
+    let child_start = child_start(child.pid(), holder_start);
     let program = Path::new(spec.argv.as_slice().first().map_or("", String::as_str))
         .file_name()
         .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
@@ -219,23 +215,36 @@ pub fn read_spec(stdin: &mut impl Read) -> Result<SpawnSpec, StartError> {
     if let Some(why) = socket::path_problem(spec.socket.as_str()) {
         return Err(StartError::Invalid(why));
     }
-    let env = spec.env.as_map();
-    let has_nul = spec.argv.as_slice().iter().any(|arg| arg.contains('\0'))
-        || spec.cwd.as_str().contains('\0')
+    if let Some(why) = process_problem(&spec.argv, &spec.cwd, &spec.env) {
+        return Err(StartError::Invalid(why.to_owned()));
+    }
+    Ok(spec)
+}
+
+/// When `child`, just spawned and not yet reaped, started: its pid can't have been reused yet. 0
+/// when the OS won't say, logged; `holder_start` only if 0 can't be carried.
+pub(crate) fn child_start(child: Pid, holder_start: StartTime) -> StartTime {
+    start_time::of(child).unwrap_or_else(|error| {
+        tracing::warn!(%error, "could not read when the child started");
+        StartTime::new(0).unwrap_or(holder_start)
+    })
+}
+
+/// Why no process can be started from this argv, cwd and env, which the protocol's schema allows:
+/// a NUL byte, which none can carry, or an environment name that is empty or holds `=`.
+pub(crate) fn process_problem(argv: &Argv, cwd: &NonEmpty, env: &Env) -> Option<&'static str> {
+    let env = env.as_map();
+    let has_nul = argv.as_slice().iter().any(|arg| arg.contains('\0'))
+        || cwd.as_str().contains('\0')
         || env
             .iter()
             .any(|(k, v)| k.contains('\0') || v.contains('\0'));
     if has_nul {
-        return Err(StartError::Invalid(
-            "a NUL byte in argv, cwd or env".to_owned(),
-        ));
+        return Some("a NUL byte in argv, cwd or env");
     }
-    if env.keys().any(|k| k.is_empty() || k.contains('=')) {
-        return Err(StartError::Invalid(
-            "an environment name that is empty or holds `=`".to_owned(),
-        ));
-    }
-    Ok(spec)
+    env.keys()
+        .any(|k| k.is_empty() || k.contains('='))
+        .then_some("an environment name that is empty or holds `=`")
 }
 
 /// Makes the holder the leader of a session of its own, unless it already is one, so no signal

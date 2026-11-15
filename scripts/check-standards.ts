@@ -785,6 +785,17 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/server.rs::answer": "answers one decoded request; reads no bytes",
   "crates/bazhen-holder/src/server.rs::hello": "answers a decoded hello; reads no bytes",
   "crates/bazhen-holder/src/server.rs::ok": "queues an ok this holder encodes; reads nothing",
+  "crates/bazhen-holder/src/server.rs::Server::respawn":
+    "starts a decoded process spec on a new PTY and queues events it encodes; reads no bytes",
+  "crates/bazhen-holder/src/server.rs::respawn_refusal":
+    "checks a decoded process spec against the holder's state; reads no bytes",
+  "crates/bazhen-holder/src/conn.rs::Connection::queue_respawned":
+    "queues an event this holder encoded; reads nothing",
+  "crates/bazhen-holder/src/conn.rs::Connection::push_event":
+    "queues an event this holder encoded; reads nothing",
+  "crates/bazhen-holder/src/holder.rs::Holder::reaper": "returns a field; reads no bytes",
+  "crates/bazhen-holder/src/holder.rs::Holder::respawn":
+    "swaps in a new PTY and child; reads no bytes",
   "crates/bazhen-holder/src/server.rs::foreground":
     "reads the foreground group and a start time; no bytes from a peer",
   "crates/bazhen-holder/src/server.rs::Server::apply_resize":

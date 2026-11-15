@@ -12,7 +12,7 @@ import {
   HolderRequestError,
 } from "@bazhen/runtime-holder";
 import { afterEach, describe, expect, it } from "vitest";
-import { holderSocket, testHome } from "../support/holder-home.ts";
+import { holderProcessSpec, holderSocket, testHome } from "../support/holder-home.ts";
 import {
   closeHolder,
   exitedPid,
@@ -222,6 +222,23 @@ describe("a holder", () => {
       body: { generation: 0, status: { type: "signalled", signal: "SIGTERM" } },
     });
     await expect(client.signal("SIGKILL")).rejects.toMatchObject({ code: "exited" });
+  });
+
+  it("respawns only an exited child, as its next generation counting from 0", async () => {
+    const holder = await started("respawn", ["sh", "-c", "read _; printf old"]);
+    const { client, events } = await listen(holder, true);
+    await client.subscribe({ generation: 0, offset: 0 });
+    const next = { ...holderProcessSpec(["printf", "new"]), generation: 1 };
+    await expect(client.respawn(next)).rejects.toMatchObject({ code: "running" });
+    client.input(encode("\n"));
+    await until(() => events.some((event) => event.type === "exited"), "the old child's exit");
+    await client.respawn(next);
+    await until(() => events.filter((event) => event.type === "exited").length === 2, "the exit");
+    const respawnAt = events.findIndex((event) => event.type === "respawned");
+    expect(events[respawnAt]).toMatchObject({ type: "respawned", body: { generation: 1 } });
+    expect(output(events.slice(0, respawnAt))).toBe("\r\nold");
+    expect(output(events.slice(respawnAt + 1))).toBe("new");
+    expect((await listen(holder)).client.hello).toMatchObject({ generation: 1, offset: 3 });
   });
 
   it("names its foreground group with start times, and echoes the tags it is given", async () => {

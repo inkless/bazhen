@@ -50,12 +50,14 @@ enum Phase {
 /// A frame owed to the peer: an answer, written as soon as those before it are, or an event that
 /// happened at an offset of the output, written to a subscriber only once its output has reached
 /// that offset. A subscription's `ok` carries where its output starts, which takes effect only
-/// once the `ok` goes out, so what was owed under the old subscription goes first.
+/// once the `ok` goes out, so what was owed under the old subscription goes first. A `respawned`
+/// carries where the new generation starts, from which offsets count once it goes out.
 #[derive(Debug)]
 struct Queued {
     at: Option<u64>,
     frame: Vec<u8>,
     subscribes: Option<u64>,
+    rebases: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -82,6 +84,9 @@ pub struct Connection {
     out_queued: bool,
     /// The offset of the next output this connection is sent, while it is subscribed.
     cursor: Option<u64>,
+    /// Where in the output the generation this connection was last told of starts: offsets it is
+    /// sent count from here.
+    base: u64,
     /// Since when a write has found the peer's buffer full, with nothing written since.
     stuck_since: Option<Instant>,
     accepted: Instant,
@@ -104,6 +109,7 @@ impl Connection {
             out: Vec::new(),
             out_queued: false,
             cursor: None,
+            base: 0,
             queued: 0,
             written: 0,
             stuck_since: None,
@@ -144,10 +150,12 @@ impl Connection {
         self.queued
     }
 
-    /// `hello` is answered: the connection takes any request from here.
-    pub fn open(&mut self) {
+    /// `hello` is answered, in the generation that starts at `base`: the connection takes any
+    /// request from here.
+    pub fn open(&mut self, base: u64) {
         if self.is_opening() {
             self.phase = Phase::Open;
+            self.base = base;
         }
     }
 
@@ -218,6 +226,7 @@ impl Connection {
             at: None,
             frame,
             subscribes: Some(from),
+            rebases: None,
         });
     }
 
@@ -286,12 +295,23 @@ impl Connection {
             at: None,
             frame,
             subscribes: None,
+            rebases: None,
         });
     }
 
     /// Queues an event that happened at offset `at` of the output: a subscriber gets it once it has
     /// been sent the output before it, and any other connection as soon as the frames before it.
     pub fn queue_event(&mut self, at: u64, frame: Vec<u8>) {
+        self.push_event(at, frame, None);
+    }
+
+    /// Queues `respawned`, an event at `at` where the new generation's output starts: once it is
+    /// sent, offsets count from there.
+    pub fn queue_respawned(&mut self, at: u64, frame: Vec<u8>) {
+        self.push_event(at, frame, Some(at));
+    }
+
+    fn push_event(&mut self, at: u64, frame: Vec<u8>, rebases: Option<u64>) {
         if self.is_gone() || frame.is_empty() {
             return;
         }
@@ -300,13 +320,15 @@ impl Connection {
             at: Some(at),
             frame,
             subscribes: None,
+            rebases,
         });
     }
 
     /// The next frame to write: the queue's first if it is an answer, or an event the output has
     /// reached; else, while subscribed, a `gap` if the ring has dropped the cursor's output, or
     /// output from the cursor up to the first queued event. An event waiting on output never
-    /// blocks the output that frees it.
+    /// blocks the output that frees it, and neither output nor a gap crosses one, so none spans a
+    /// respawn.
     fn next_frame(&mut self, ring: &Ring) -> Option<(Vec<u8>, bool)> {
         let live = self.live_cursor();
         let gate = match self.queue.front() {
@@ -318,6 +340,9 @@ impl Connection {
                 let front = self.queue.pop_front()?;
                 if let Some(from) = front.subscribes {
                     self.cursor = Some(from);
+                }
+                if let Some(base) = front.rebases {
+                    self.base = base;
                 }
                 return Some((front.frame, true));
             }
@@ -332,15 +357,16 @@ impl Connection {
                 None
             }
         };
+        let limit = gate.unwrap_or(u64::MAX).min(ring.end());
         if cursor < ring.start() {
+            let to = ring.start().min(limit);
             let gap = Gap {
                 from: self.offset(cursor)?,
-                to: self.offset(ring.start())?,
+                to: self.offset(to)?,
             };
-            self.cursor = Some(ring.start());
+            self.cursor = Some(to);
             return encoded(Reply::Gap(gap)).map(|frame| (frame, false));
         }
-        let limit = gate.unwrap_or(u64::MAX).min(ring.end());
         let room = usize::try_from(limit.checked_sub(cursor)?).unwrap_or(usize::MAX);
         let bytes = ring.read(cursor, room.min(DATA_FRAME))?;
         if bytes.is_empty() {
@@ -355,10 +381,13 @@ impl Connection {
         Some((frame, false))
     }
 
-    /// `offset` as the protocol carries it. One past its range, 2^53 bytes of output in, can't be
-    /// sent, so the connection is dropped rather than left owed output it can never write.
+    /// `offset` as the protocol carries it, counted from the start of the connection's generation.
+    /// One past its range, 2^53 bytes of output in, can't be sent, so the connection is dropped
+    /// rather than left owed output it can never write.
     fn offset(&mut self, offset: u64) -> Option<Offset> {
-        let carried = Offset::new(offset).ok();
+        let carried = offset
+            .checked_sub(self.base)
+            .and_then(|offset| Offset::new(offset).ok());
         if carried.is_none() {
             tracing::error!(offset, "output past what the protocol can carry; dropping");
             self.drop_now();
@@ -572,6 +601,75 @@ mod tests {
         }
     }
 
+    fn respawned_frame() -> Vec<u8> {
+        Reply::Respawned(bazhen_holder_proto::body::Respawned {
+            generation: bazhen_holder_proto::body::Generation::new(1).unwrap(),
+            child_pid: bazhen_holder_proto::body::Pid::new(7).unwrap(),
+            child_start: bazhen_holder_proto::body::StartTime::new(0).unwrap(),
+        })
+        .encode()
+        .unwrap()
+    }
+
+    /// Output before a respawn keeps its offsets; output after it counts from 0, and no data
+    /// frame holds output of both.
+    #[test]
+    fn output_after_a_respawn_counts_from_zero_and_no_frame_spans_it() {
+        let now = Instant::now();
+        let (mut conn, mut peer) = subscribed(now, 0);
+        conn.queue_event(4, exited_frame());
+        conn.queue_respawned(6, respawned_frame());
+        conn.flush(now, &ring_of(64, b"0123ab456789"));
+        let replies = peer.sent();
+        assert!(is_ok(&replies[0], 1));
+        assert_eq!(data(&replies[1]), Some((0, &b"0123"[..])));
+        assert!(matches!(replies[2], Reply::Exited(_)));
+        assert_eq!(data(&replies[3]), Some((4, &b"ab"[..])));
+        assert!(matches!(replies[4], Reply::Respawned(_)));
+        assert_eq!(data(&replies[5]), Some((0, &b"456789"[..])));
+        assert_eq!(replies.len(), 6);
+    }
+
+    /// A subscriber the ring lapped across a respawn is told of a gap to the end of the old
+    /// generation, then of the respawn, then of a gap from 0 in the new one.
+    #[test]
+    fn a_gap_across_a_respawn_ends_at_it_and_goes_on_from_zero() {
+        let now = Instant::now();
+        let (mut conn, mut peer) = subscribed(now, 0);
+        conn.queue_respawned(4, respawned_frame());
+        conn.flush(now, &ring_of(4, b"0123456789"));
+        let replies = peer.sent();
+        let gaps: Vec<(u64, u64)> = replies
+            .iter()
+            .filter_map(|reply| match reply {
+                Reply::Gap(gap) => Some((gap.from.get(), gap.to.get())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(gaps, [(0, 4), (0, 2)]);
+        assert!(matches!(replies[2], Reply::Respawned(_)));
+        assert_eq!(data(&replies[4]).map(|(offset, _)| offset), Some(2));
+        let rest: Vec<u8> = replies[4..]
+            .iter()
+            .flat_map(|reply| data(reply).unwrap().1.to_vec())
+            .collect();
+        assert_eq!(rest, b"6789");
+    }
+
+    /// A connection that says `hello` after a respawn counts offsets from the new generation's
+    /// start.
+    #[test]
+    fn a_connection_opened_after_a_respawn_counts_from_its_start() {
+        let now = Instant::now();
+        let (mut conn, peer) = pair(now);
+        let mut peer = Peer::of(peer);
+        conn.open(6);
+        conn.queue_subscribed(ok_frame(1), 6);
+        conn.flush(now, &ring_of(64, b"012345abc"));
+        let replies = peer.sent();
+        assert_eq!(data(&replies[1]), Some((0, &b"abc"[..])));
+    }
+
     #[test]
     fn a_connection_not_subscribed_gets_an_event_at_once() {
         let now = Instant::now();
@@ -643,7 +741,7 @@ mod tests {
     fn a_subscription_ends_with_its_peers_input() {
         let now = Instant::now();
         let (mut conn, peer) = pair(now);
-        conn.open();
+        conn.open(0);
         conn.queue_subscribed(ok_frame(1), 0);
         conn.queue_event(10, exited_frame());
         let mut peer = Peer::of(peer);
@@ -784,7 +882,7 @@ mod tests {
         let (mut conn, _peer) = pair(now);
         assert_eq!(conn.deadline(), Some(now + HELLO_WITHIN));
         assert!(conn.is_finished(now + HELLO_WITHIN));
-        conn.open();
+        conn.open(0);
         assert!(!conn.is_finished(now + HELLO_WITHIN * 10));
         assert_eq!(conn.deadline(), None);
     }
@@ -793,7 +891,7 @@ mod tests {
     fn a_peer_that_ends_its_side_is_read_no_more_and_one_that_goes_is_dropped() {
         let now = Instant::now();
         let (mut conn, peer) = pair(now);
-        conn.open();
+        conn.open(0);
         conn.queue(vec![1; 10]);
         peer.shutdown(std::net::Shutdown::Write).unwrap();
         conn.receive(&mut vec![0; READ_CHUNK]);
@@ -815,7 +913,7 @@ mod tests {
     fn an_empty_frame_or_buffer_ends_nothing() {
         let now = Instant::now();
         let (mut conn, mut peer) = pair(now);
-        conn.open();
+        conn.open(0);
         conn.queue(Vec::new());
         conn.flush(now, &no_output());
         assert!(!conn.is_gone());
@@ -832,7 +930,7 @@ mod tests {
     fn hands_over_a_malformed_frame_once_and_nothing_after_it() {
         let now = Instant::now();
         let (mut conn, mut peer) = pair(now);
-        conn.open();
+        conn.open(0);
         peer.write_all(&u32::MAX.to_be_bytes()).unwrap();
         conn.receive(&mut vec![0; READ_CHUNK]);
         assert!(matches!(conn.next_request(), Some(Err(_))));
@@ -849,7 +947,7 @@ mod tests {
     fn answers_every_request_sent_before_the_peer_ended_its_side() {
         let now = Instant::now();
         let (mut conn, mut peer) = pair(now);
-        conn.open();
+        conn.open(0);
         peer.write_all(&[close_request(1), close_request(2)].concat())
             .unwrap();
         peer.shutdown(std::net::Shutdown::Write).unwrap();

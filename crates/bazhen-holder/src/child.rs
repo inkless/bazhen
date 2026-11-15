@@ -142,6 +142,15 @@ impl ChildProcess {
         }
     }
 
+    /// Ends a child no terminal will hold: `SIGKILL` to its group, then a wait for it, so it isn't
+    /// left a zombie. For a child just spawned, which nothing has had time to stop or hold up.
+    pub fn kill_now(self) {
+        if let Err(SignalRefused::Failed(error)) = self.signal(body::Signal::Sigkill) {
+            tracing::warn!(%error, "could not kill a child");
+        }
+        while let Err(rustix::io::Errno::INTR) = waitpid(Some(self.pid), WaitOptions::empty()) {}
+    }
+
     /// When the close next needs a `close_step`: the kill deadline, until the kill is sent.
     pub fn close_deadline(&self) -> Option<Instant> {
         match self.closing {

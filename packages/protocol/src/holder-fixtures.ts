@@ -750,7 +750,7 @@ export function readSpawnSpec(json: string): SpawnSpecOutcome {
 }
 
 const spawnSpec = {
-  protocol: ["1.0"],
+  protocol: [HOLDER_PROTOCOL_VERSION],
   terminalId: TERMINAL,
   socket: "/run/user/1000/bazhen/holders/t.sock",
   tags: { kind: "agent" },
