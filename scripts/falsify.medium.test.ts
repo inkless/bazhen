@@ -38,6 +38,12 @@ const STUB_PNPM = `#!/bin/sh
 } >> "$STUB_LOG"
 case "$1" in
   install)
+    if [ "\${STUB_FAIL_INSTALL:-}" = 1 ]; then
+      for arg in "$@"; do mode="$arg"; done
+      i=1
+      while [ $i -le 25 ]; do echo "pnpm $mode line $i" >&2; i=$((i + 1)); done
+      exit 1
+    fi
     if [ "\${STUB_FAIL_OFFLINE:-}" = 1 ]; then
       for arg in "$@"; do [ "$arg" = --offline ] && exit 1; done
     fi
@@ -319,6 +325,16 @@ describe("falsify on a branch in a linked worktree", () => {
       status: 0,
       log: expect.stringContaining("--prefer-offline"),
     });
+  });
+
+  it("prints the end of what each failed install attempt said", () => {
+    const result = againstBase({ STUB_FAIL_INSTALL: "1" });
+    expect({
+      status: result.status,
+      offlineEnd: result.output.includes("pnpm --offline line 25"),
+      onlineEnd: result.output.includes("pnpm --prefer-offline line 25"),
+      offlineStart: result.output.includes("pnpm --offline line 1\n"),
+    }).toEqual({ status: 1, offlineEnd: true, onlineEnd: true, offlineStart: false });
   });
 
   it("sweeps a stale worktree whose pid is dead and keeps one whose pid is alive", () => {

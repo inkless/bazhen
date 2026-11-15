@@ -502,13 +502,18 @@ function run(
   args: string[],
   cwd: string,
   timeoutMs: number,
-  options: { env?: NodeJS.ProcessEnv; stdout?: number; onTimeout?: () => void } = {},
+  options: {
+    env?: NodeJS.ProcessEnv;
+    stdout?: number;
+    stderr?: number;
+    onTimeout?: () => void;
+  } = {},
 ): Promise<boolean> {
   return new Promise((done) => {
     const child = spawnGroup(cmd, args, {
       cwd,
       env: options.env ?? isolatedEnv(),
-      stdio: ["ignore", options.stdout ?? "ignore", "ignore"],
+      stdio: ["ignore", options.stdout ?? "ignore", options.stderr ?? "ignore"],
     });
     running = child;
     let timedOut = false;
@@ -533,13 +538,38 @@ function run(
 
 // --ignore-scripts: the root `prepare` script (husky) would set core.hooksPath in the shared git
 // config, and nothing else needs a lifecycle script (node-pty's build is declined via
-// allowBuilds).
-async function install(dir: string): Promise<boolean> {
+// allowBuilds). Returns what each failed attempt printed to stderr, or undefined once one succeeds.
+async function install(dir: string): Promise<string[] | undefined> {
   const flags = ["--frozen-lockfile", "--ignore-scripts"];
-  return (
-    (await run("pnpm", ["install", ...flags, "--offline"], dir, INSTALL_TIMEOUT_MS)) ||
-    run("pnpm", ["install", ...flags, "--prefer-offline"], dir, INSTALL_TIMEOUT_MS)
-  );
+  const said: string[] = [];
+  for (const mode of ["--offline", "--prefer-offline"]) {
+    const path = join(dir, `falsify-install${mode.slice(1)}.log`);
+    const fd = openSync(path, "w");
+    let ok: boolean;
+    try {
+      ok = await run("pnpm", ["install", ...flags, mode], dir, INSTALL_TIMEOUT_MS, { stderr: fd });
+    } finally {
+      closeSync(fd);
+    }
+    if (ok) return undefined;
+    said.push(`\`pnpm install ${mode}\` said:\n${indentedTail(readFileSync(path, "utf8"))}`);
+  }
+  return said;
+}
+
+const INSTALL_TAIL_LINES = 20;
+
+/** The last lines of a command's output, indented, or a note that it printed nothing. */
+function indentedTail(text: string): string {
+  const lines = text
+    .trimEnd()
+    .split("\n")
+    .filter((line) => line.trim() !== "");
+  if (lines.length === 0) return "  (nothing)";
+  return lines
+    .slice(-INSTALL_TAIL_LINES)
+    .map((line) => `  ${line}`)
+    .join("\n");
 }
 
 /**
@@ -1051,10 +1081,11 @@ async function main(args: string[]): Promise<number> {
           git(["checkout", base, "--", c.oldPath], dir);
         } else git(["checkout", base, "--", c.path], dir);
       }
-      if (!(await install(dir))) {
+      const installFailed = await install(dir);
+      if (installFailed !== undefined) {
         console.error(
           "falsify: couldn't install dependencies in the temporary worktree; run `pnpm install` " +
-            "and retry.",
+            `and retry.\n${installFailed.join("\n")}`,
         );
         return 1;
       }
