@@ -18,6 +18,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { request } from "node:http";
+import { DatabaseSync } from "node:sqlite";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -135,6 +136,32 @@ export async function waitUntil(
   throw new Error(`timed out waiting for ${what}`);
 }
 
+/** A shell Bazhen can integrate with, by the name of its snippet. */
+export type IntegratedShell = "zsh" | "bash" | "fish";
+
+/**
+ * A `$SHELL` that starts `kind` with an rc file holding only `rcLine`, in a directory of its own
+ * that `cleanup` removes: these tests keep the real HOME, and its rc files with it.
+ */
+export function shellWithRc(kind: IntegratedShell, rcLine: string) {
+  const dir = mkdtempSync("/tmp/bz-rc-");
+  const rc = join(dir, kind === "zsh" ? ".zshrc" : `${kind}rc`);
+  writeFileSync(rc, `${rcLine}\n`);
+  // As bash's --rcfile does, zsh skips the host's global rc files, which can stop a shell to ask
+  // something first: a CI runner's runs compinit, which asks about insecure directories and takes
+  // the first keys typed as the answer.
+  if (kind === "zsh") writeFileSync(join(dir, ".zshenv"), "unsetopt GLOBAL_RCS\n");
+  const start: Record<IntegratedShell, string> = {
+    zsh: `ZDOTDIR='${dir}' exec zsh -i`,
+    bash: `exec bash --rcfile '${rc}' -i`,
+    fish: `exec fish -i -C "source '${rc}'"`,
+  };
+  const shell = join(dir, `${kind}-shell`);
+  writeFileSync(shell, `#!/bin/sh\n${start[kind]}\n`);
+  chmodSync(shell, 0o755);
+  return { shell, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
 export interface DaemonOptions {
   /** The fake Anthropic API's base URL, for Claude Code. */
   readonly modelUrl?: string;
@@ -142,6 +169,8 @@ export interface DaemonOptions {
   readonly responsesUrl?: string;
   /** More of the daemon's environment, such as a setting's variable. */
   readonly env?: Record<string, string>;
+  /** The daemon's config.toml. */
+  readonly config?: string;
 }
 
 /** A process's environment, from /proc (Linux only). */
@@ -171,6 +200,7 @@ export class Daemon {
     this.work = join(home, "work");
     this.tmuxServer = TmuxServer.at(join(home, "run", "tmux.sock"), { root: home });
     mkdirSync(this.work, { recursive: true });
+    if (opts.config !== undefined) this.writeConfig(opts.config);
 
     this.env = {
       ...homeEnv(home),
@@ -208,6 +238,26 @@ export class Daemon {
   writeConfig(toml: string): void {
     mkdirSync(join(this.home, "config"), { recursive: true });
     writeFileSync(join(this.home, "config", "config.toml"), toml);
+  }
+
+  /**
+   * The line the daemon keeps for a shell to type back, read from its database: no client is
+   * shown it, so a test that the right line was kept can only look there.
+   */
+  keptShellLine(terminalId: string): string | null {
+    const db = new DatabaseSync(join(this.home, "data", "bazhen.db"), { readOnly: true });
+    try {
+      const row = db.prepare("SELECT last_command FROM terminals WHERE id = ?").get(terminalId);
+      return typeof row?.last_command === "string" ? row.last_command : null;
+    } finally {
+      db.close();
+    }
+  }
+
+  /** A shell's visible screen, as tmux holds it. */
+  shellScreen(terminalId: string): string {
+    const session = this.paneFact(terminalId, "session_name", "@bazhen_terminal_id");
+    return session === undefined ? "" : this.tmux("capture-pane", "-p", "-t", session);
   }
 
   /** What the daemon has printed since it last started. */

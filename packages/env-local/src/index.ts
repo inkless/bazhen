@@ -141,6 +141,7 @@ export class LocalEnvironment implements EnvironmentAdapter {
     size,
     theme,
     openedBy,
+    integration,
   }: ShellOpen): Promise<RuntimeRef> {
     return this.opts.runtime.create({
       terminalId,
@@ -151,6 +152,11 @@ export class LocalEnvironment implements EnvironmentAdapter {
         BAZHEN_TERMINAL_ID: terminalId,
         BAZHEN_SOCKET: this.opts.socket,
         ...(openedBy && { BAZHEN_DEVICE_ID: openedBy }),
+        ...(integration && {
+          BAZHEN_SHELL_TOKEN: integration.token,
+          BAZHEN_HOOK: integration.hook,
+          BAZHEN_SHELL_INTEGRATION: integration.dir,
+        }),
       },
       size,
       generation: 0,

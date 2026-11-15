@@ -241,15 +241,15 @@ export function project(db: Statements, e: Recorded): void {
     }
     case "terminal.failed":
       EVENTS[e.type].payload.parse(e.payload);
-      return moveShell(db, e, "runtime.rejected");
+      return moveShell(db, e, "runtime.rejected", FORGET_COMMAND);
     case "terminal.lost":
       // Nothing runs in a shell that is gone.
-      return moveShell(db, e, "target.absent", { foreground: null });
+      return moveShell(db, e, "target.absent", { foreground: null, report_token_hash: null });
     case "terminal.closing":
       return moveShell(db, e, "close.requested");
     case "terminal.closed":
       EVENTS[e.type].payload.parse(e.payload);
-      return moveShell(db, e, "close.completed");
+      return moveShell(db, e, "close.completed", FORGET_COMMAND);
     case "terminal.foreground_changed": {
       const { command } = EVENTS[e.type].payload.parse(e.payload);
       return setShell(db, e, {
@@ -523,6 +523,13 @@ function moveShell(db: Statements, e: Recorded, event: TerminalEvent, columns: C
   );
   update(db, "terminals", "id", e.entityId, e.id, { ...at, ...columns });
 }
+
+/** A shell that has ended has no command left to type back, and keeps none it held. */
+const FORGET_COMMAND: Columns = {
+  last_command: null,
+  last_command_seq: null,
+  report_token_hash: null,
+};
 
 /** Changes what a shell is, never where it is in its lifecycle. */
 function setShell(db: Statements, e: Recorded, columns: Columns) {

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { hasLoneSurrogate } from "./holder.ts";
 import { TuiTheme } from "./theme.ts";
 import { Id, IdempotencyKey } from "./ids.ts";
 
@@ -113,6 +114,59 @@ function showable(name: string): boolean {
 export const ShellName = z.string().trim().min(1).max(80).refine(showable, {
   message: "a shell's name can't hold control characters or bidirectional overrides",
 });
+
+/**
+ * The most UTF-8 bytes of a command line kept to type back. A longer one is dropped, never cut:
+ * typing back part of a command is typing a different one.
+ */
+export const COMMAND_LINE_MAX_BYTES = 2048;
+
+const encoder = new TextEncoder();
+
+/**
+ * Characters that draw as nothing, or as a line break, so a line holding one types back other
+ * than it looks: zero-width spaces and joiners, the directional marks, the word joiner and
+ * invisible operators, the byte-order mark, and the line and paragraph separators.
+ */
+const INVISIBLE = /[\u061c\u200b-\u200f\u2028\u2029\u2060-\u2064\ufeff]/u;
+
+/**
+ * A line the user ran at a shell's prompt, as their shell reported it, kept to type back into
+ * the shell's replacement without Enter. A control character there is a key, not text: a newline
+ * or carriage return would run the line, and an escape would drive the line editor. A line that
+ * starts with a space is one the user kept out of their history, so it is kept out of this too.
+ */
+export const ShellCommandLine = z
+  .string()
+  .min(1)
+  .refine((line) => !line.startsWith(" "), {
+    message: "a line starting with a space is kept out of history, so it isn't kept",
+  })
+  .refine((line) => showable(line) && !hasLoneSurrogate(line), {
+    message: "a command line can't hold control characters or bidirectional overrides",
+  })
+  .refine((line) => !INVISIBLE.test(line), {
+    message: "a command line can't hold a character that draws as nothing",
+  })
+  .refine((line) => encoder.encode(line).length <= COMMAND_LINE_MAX_BYTES, {
+    message: `a command line is at most ${COMMAND_LINE_MAX_BYTES} bytes`,
+  });
+
+/**
+ * What a shell's integration reports over the daemon's socket, as the shell starts running a
+ * line: never over HTTP. `token` is the shell's own, from its environment.
+ */
+export const ShellReport = z.object({
+  token: z.string().min(1).max(128),
+  /**
+   * When the shell started running the line, in microseconds since the epoch: a report earlier
+   * than the kept one, arriving late, changes nothing.
+   */
+  at: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  /** The line, or null for one its client couldn't send whole: too long, or not UTF-8. */
+  command: z.string().max(COMMAND_LINE_MAX_BYTES).nullable(),
+});
+export type ShellReport = z.infer<typeof ShellReport>;
 
 export const RenameShellRequest = z.object({
   idempotencyKey: IdempotencyKey,

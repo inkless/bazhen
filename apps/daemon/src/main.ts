@@ -45,6 +45,8 @@ import { MAC_APP, desktopNotifier, hostNotifier, notifyOnAttention } from "./not
 import { Presence } from "./notify/presence.ts";
 import { HOOK_SCRIPT, hookClient, hookCommand } from "./mailbox/hook-command.ts";
 import { stableHookClient } from "./mailbox/hook-link.ts";
+import { installShellIntegration } from "./shells/integration.ts";
+import { ShellReports } from "./shells/reports.ts";
 import { ActivityTracker } from "./mailbox/activity.ts";
 import { SessionBinding, psTable } from "./mailbox/binding.ts";
 import { hookApp } from "./mailbox/ingress.ts";
@@ -156,6 +158,30 @@ approvals.closeAbandoned();
 const hookRunner = hookClient();
 if (hookRunner === HOOK_SCRIPT) console.warn(`bazhen-hook is not built; hooks use ${HOOK_SCRIPT}`);
 const hookPath = stableHookClient(join(paths.state, "hook"), hookRunner, inputs.uid);
+
+/**
+ * With `shells.retype_last_command` on, what new shells report their lines through. Turned off,
+ * every line and token kept while it was on is forgotten.
+ */
+function shellIntegration(): { hook: string; dir: string } | undefined {
+  if (!config.retypeLastCommand) {
+    store.forgetShellCommands();
+    return undefined;
+  }
+  if (hookRunner === HOOK_SCRIPT) {
+    console.warn(
+      "shells.retype_last_command is on, but bazhen-hook is not built: shells report nothing",
+    );
+    return undefined;
+  }
+  try {
+    const dir = installShellIntegration(join(paths.state, "shell-integration"), inputs.uid);
+    return { hook: hookPath, dir };
+  } catch (err) {
+    console.warn(`shells.retype_last_command is on, but shells report nothing: ${String(err)}`);
+    return undefined;
+  }
+}
 const runtime = new TmuxRuntime({
   server: TmuxServer.at(paths.tmuxSocket, {
     root: paths.run,
@@ -228,6 +254,7 @@ await reconcile(store, environment);
 // What a Claude Code agent was doing went with the last daemon's memory (foundation-design §4.6).
 const activity = new ActivityTracker((agentId, a) => store.recordActivity(agentId, a));
 const queue = new AgentQueue();
+const integration = shellIntegration();
 const shells = new ShellLifecycle({
   store,
   environment,
@@ -235,7 +262,9 @@ const shells = new ShellLifecycle({
   size: DEFAULT_SIZE,
   home: inputs.home,
   budget,
+  ...(integration && { integration }),
 });
+const shellReports = new ShellReports(store);
 await reconcileShells(store, environment, shells);
 // After both reconciles, whose health checks have a server whose socket was deleted recreate it.
 await runtime.applyServerSettings().catch((err: unknown) => {
@@ -441,6 +470,7 @@ const socketListener = getRequestListener(
             expiresAt: lanCert.notAfter.toISOString(),
           },
     paneTitleChanged: (pane) => void codexThreads.paneTitleChanged(pane),
+    shellReport: (terminalId, report) => shellReports.report(terminalId, report),
     refreshEnv: async (env) => {
       const next = filterEnv(env, config.envRules);
       const { refused } = await runtime.replaceEnv(next.env);

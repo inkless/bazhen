@@ -21,6 +21,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "shell_report"
+path = "fuzz_targets/shell_report.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "pane_title"
 path = "fuzz_targets/pane_title.rs"
 test = false

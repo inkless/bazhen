@@ -49,6 +49,16 @@ export interface ShellForeground {
   readonly cwd: string | null;
 }
 
+/**
+ * What a shell needs to report the lines it runs, when the user turned that on: the token only it
+ * holds, the hook client it reports through, and the directory of the snippets its rc sources.
+ */
+export interface ShellIntegration {
+  readonly token: string;
+  readonly hook: string;
+  readonly dir: string;
+}
+
 /** A shell to open, its TerminalId minted by the daemon, which recorded it first. */
 export interface ShellOpen {
   readonly terminalId: TerminalId;
@@ -61,6 +71,7 @@ export interface ShellOpen {
    * running in the shell can change its environment.
    */
   readonly openedBy?: DeviceId;
+  readonly integration?: ShellIntegration;
 }
 
 /**

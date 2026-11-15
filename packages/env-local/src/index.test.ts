@@ -243,6 +243,28 @@ describe("local environment", () => {
     ]);
   });
 
+  it("gives a shell its integration's token, hook and snippets only when it has one", async () => {
+    const runtime = new FakeRuntime();
+    const env = environment(runtime);
+    const open = { cwd: "/work", size: { cols: 80, rows: 24 } };
+    const plain = await env.openShell({ ...open, terminalId: newId("term") });
+    const integrated = await env.openShell({
+      ...open,
+      terminalId: newId("term"),
+      integration: { token: "tok", hook: "/state/hook/bazhen-hook", dir: "/state/shell" },
+    });
+    expect([runtime.specOf(plain).env, runtime.specOf(integrated).env]).toEqual([
+      { BAZHEN_TERMINAL_ID: plain.terminalId, BAZHEN_SOCKET: "/run/b.sock" },
+      {
+        BAZHEN_TERMINAL_ID: integrated.terminalId,
+        BAZHEN_SOCKET: "/run/b.sock",
+        BAZHEN_SHELL_TOKEN: "tok",
+        BAZHEN_HOOK: "/state/hook/bazhen-hook",
+        BAZHEN_SHELL_INTEGRATION: "/state/shell",
+      },
+    ]);
+  });
+
   it("lists only agent terminals, by the agent their tags name", async () => {
     const runtime = new FakeRuntime();
     const env = environment(runtime);

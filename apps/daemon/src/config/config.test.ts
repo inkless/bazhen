@@ -18,6 +18,7 @@ describe("resolveConfig", () => {
       externalOriginsFrom: null,
       allowInsecureOrigins: false,
       desktopNotifications: true,
+      retypeLastCommand: false,
       pairing: "auto",
       pairingRequired: false,
       lan: null,
@@ -33,6 +34,7 @@ describe("resolveConfig", () => {
       loginShell: undefined,
       envRules: { deny: ["SECRET_*"], passthrough: ["TERM"] },
       desktopNotifications: true,
+      retypeLastCommand: false,
       externalOrigins: [],
       externalOriginsFrom: null,
       allowInsecureOrigins: false,
@@ -91,6 +93,13 @@ describe("resolveConfig", () => {
       off.desktopNotifications,
       resolveConfig({ notifications: {} }, {}).desktopNotifications,
     ]).toEqual([false, true]);
+  });
+
+  it("gives shells the integration that reports their lines only when the file turns it on", () => {
+    expect([
+      resolveConfig({ shells: { retype_last_command: true } }, {}).retypeLastCommand,
+      resolveConfig({ shells: {} }, {}).retypeLastCommand,
+    ]).toEqual([true, false]);
   });
 
   it("takes the environment over the file", () => {

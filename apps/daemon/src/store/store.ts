@@ -42,6 +42,7 @@ import {
   type ResetReason,
   type EventPayload,
   type EventType,
+  ShellCommandLine,
   type ShellCommand,
 } from "@bazhen/protocol";
 import { LATEST_SCHEMA_VERSION, MIGRATIONS, type Migration } from "./migrations.ts";
@@ -281,6 +282,9 @@ function keepPrivate(path: string): void {
   }
 }
 
+/** The events whose projection clears a shell's kept line. */
+const FORGETS_COMMAND: ReadonlySet<EventType> = new Set(["terminal.closed", "terminal.failed"]);
+
 /** A shell terminal as its lifecycle needs it. */
 export interface ShellTerminal {
   readonly terminalId: TerminalId;
@@ -377,6 +381,8 @@ export class Store {
   private host = "";
   private depth = 0;
   private appended = false;
+  /** Whether the transaction committing cleared a shell's kept line. */
+  private scrub = false;
   private afterCommits: (() => void)[] = [];
   private readonly listeners = new Set<() => void>();
   private readonly reactors = new Set<(event: Recorded) => void>();
@@ -417,8 +423,12 @@ export class Store {
     const db = new DatabaseSync(path);
     // NORMAL loses nothing when the daemon dies, only the commits since the last checkpoint on an
     // OS crash or power loss; FULL would flush on every commit, which blocks the event loop.
+    // A shell's last command can hold a secret. secure_delete zeroes it in its page once it is
+    // cleared or replaced, rather than leaving it in the page's free space; FAST does so only
+    // where that costs no extra I/O, so a page freed whole may keep it until reused. A zero
+    // journal_size_limit truncates the WAL after each checkpoint, rather than keep old frames.
     db.exec(
-      "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;",
+      "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000; PRAGMA secure_delete = FAST; PRAGMA journal_size_limit = 0;",
     );
     db.exec("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL) STRICT");
     const store = new Store(db);
@@ -469,6 +479,8 @@ export class Store {
       );
       const id = Number(result.lastInsertRowid);
       this.appended = true;
+      if (FORGETS_COMMAND.has(event.type) && this.lastShellCommand(event.entityId) !== null)
+        this.scrub = true;
       // The projection parses the payload with its type's schema, rolling the event back if
       // it doesn't match.
       const recorded = { id, ts, hostId: this.host, ...event };
@@ -996,6 +1008,58 @@ export class Store {
     ).run(cwd, terminalId, cwd);
   }
 
+  /**
+   * The line a live shell reported running, under the report's number. Only a report newer than
+   * the kept one counts, so one arriving late leaves the newer line. A line that can't be typed
+   * back safely clears the kept one: typing an older command instead would mislead. Returns
+   * whether the report counted.
+   */
+  noteShellCommand(terminalId: string, seq: number, line: string | null): boolean {
+    const kept = line !== null && ShellCommandLine.safeParse(line).success ? line : null;
+    const { changes } = this.prepare(
+      `UPDATE terminals SET last_command = ?, last_command_seq = ?
+       WHERE id = ? AND kind = 'shell' AND state IN ('creating', 'running')
+       AND (last_command_seq IS NULL OR last_command_seq < ?)`,
+    ).run(kept, seq, terminalId, seq);
+    return Number(changes) > 0;
+  }
+
+  /** Records the hash of the token a new shell's integration will report with. */
+  noteShellToken(terminalId: string, hash: string): void {
+    this.prepare("UPDATE terminals SET report_token_hash = ? WHERE id = ? AND kind = 'shell'").run(
+      hash,
+      terminalId,
+    );
+  }
+
+  /** The hash of the token a shell reports with, or null for one that can't report. */
+  shellTokenHash(terminalId: string): string | null {
+    const row = this.prepare(
+      "SELECT report_token_hash FROM terminals WHERE id = ? AND kind = 'shell'",
+    ).get(terminalId);
+    return typeof row?.report_token_hash === "string" ? row.report_token_hash : null;
+  }
+
+  /**
+   * Forgets every shell's kept line and token, for a daemon started with the integration off:
+   * what it was given while on is no longer wanted, and no shell may report.
+   */
+  forgetShellCommands(): void {
+    const { changes } = this.prepare(
+      `UPDATE terminals SET last_command = NULL, last_command_seq = NULL, report_token_hash = NULL
+       WHERE kind = 'shell' AND (last_command IS NOT NULL OR report_token_hash IS NOT NULL)`,
+    ).run();
+    if (Number(changes) > 0) this.scrubJournal();
+  }
+
+  /** The line kept to type back into a shell's replacement, or null when none is. */
+  lastShellCommand(terminalId: string): string | null {
+    const row = this.prepare(
+      "SELECT last_command FROM terminals WHERE id = ? AND kind = 'shell'",
+    ).get(terminalId);
+    return typeof row?.last_command === "string" ? row.last_command : null;
+  }
+
   /** Agents that have closed or failed but still have shells linked to them, not yet closed. */
   agentsWithOrphanedShells(): string[] {
     const sql = `SELECT DISTINCT t.linked_agent_id AS id FROM terminals t
@@ -1456,6 +1520,7 @@ export class Store {
         this.db.exec("ROLLBACK");
         this.afterCommits = [];
         this.appended = false;
+        this.scrub = false;
         throw err;
       } finally {
         this.depth--;
@@ -1465,9 +1530,29 @@ export class Store {
     }
     const appended = this.appended;
     this.appended = false;
+    const scrub = this.scrub;
+    this.scrub = false;
     this.runAfterCommits();
     if (appended) this.notify();
+    if (scrub) this.scrubJournal();
     return out;
+  }
+
+  /**
+   * Writes the WAL into the database and truncates it, so a shell's cleared line, zeroed in the
+   * database's page, keeps no earlier copy in the journal. A reader holding the WAL open leaves it
+   * for the next checkpoint, which `journal_size_limit` truncates as well.
+   */
+  private scrubJournal(): void {
+    // The daemon is the database's only connection, so the checkpoint waits on no reader. Were
+    // one to hold the WAL, busy_timeout would block the event loop for up to 5 s here.
+    try {
+      this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    } catch (err) {
+      // The line is cleared and committed either way; only its earlier copy waits for the next
+      // checkpoint.
+      console.warn("the WAL could not be truncated after a shell's line was cleared:", err);
+    }
   }
 
   /**
