@@ -46,7 +46,6 @@ const failsReadsDropsTheRest = (method: string) =>
     ? { error: { code: -32603, message: "could not read the rollout" } }
     : null;
 
-/** Ends a connection once the server has answered its first request after `initialize`. */
 /**
  * Ends a connection once the server has answered its first request after `initialize`: the fake
  * server's own listener, added first, has sent its answer by the time this one runs.
@@ -144,8 +143,9 @@ describe("Codex channel", () => {
       codexHome,
       (_method, connection) => answers[connection],
     );
-    // The draining server exits a moment after refusing.
-    wss.once("connection", (ws) => setTimeout(() => ws.terminate(), 50));
+    // The draining server exits once it has refused, never before: on a timer, a slow run's
+    // refusal could be cut off, which is a connection that ended, not a drain.
+    wss.once("connection", endsOnceAnswered);
     const channel = channelOn(codexHome);
     expect(await channel.request("thread/start", {})).toBe("launched");
     channel.close();
