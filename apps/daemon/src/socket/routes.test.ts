@@ -49,6 +49,7 @@ function app(
   paneTitleChanged = (_pane: string) => {},
   lan: () => PairingCodeResponse["lan"] = () => undefined,
   shellReport: SocketParts["shellReport"] = () => "kept",
+  shellPrompt: SocketParts["shellPrompt"] = () => true,
 ) {
   const commands = new Hono<AppEnv>();
   commands.post("/v1/attention/:id/answer", (c) => c.json({ answered: c.req.param("id") }));
@@ -71,6 +72,7 @@ function app(
     externalOrigins: ["https://laptop.example.ts.net"],
     lan,
     shellReport,
+    shellPrompt,
   });
 }
 
@@ -157,6 +159,26 @@ describe("socketApp", () => {
     });
     const text = await res.text();
     expect([res.status, text.includes("s3cret")]).toEqual([403, false]);
+  });
+
+  it("hands on a shell's prompt report, and refuses one its token doesn't vouch for", async () => {
+    const received: { terminalId: string; sent: unknown }[] = [];
+    const daemon = app(undefined, undefined, undefined, undefined, (terminalId, sent) => {
+      received.push({ terminalId, sent });
+      return sent.token === "mine";
+    });
+    const post = (body: unknown) =>
+      daemon.request("/v1/shells/term_x/prompt", { method: "POST", body: JSON.stringify(body) });
+    const statuses = [
+      (await post({ token: "mine" })).status,
+      (await post({ token: "theirs" })).status,
+      (await post({ token: "" })).status,
+      (await post({ token: "mine", pad: "y".repeat(2048) })).status,
+    ];
+    expect([statuses, received.map((r) => r.sent)]).toEqual([
+      [204, 403, 400, 413],
+      [{ token: "mine" }, { token: "theirs" }],
+    ]);
   });
 
   it("lets a caller that presents no agent answer an approval", async () => {

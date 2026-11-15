@@ -4,8 +4,9 @@
 #   test -n "$BAZHEN_SHELL_INTEGRATION"; and test -r "$BAZHEN_SHELL_INTEGRATION/fish"; and source "$BAZHEN_SHELL_INTEGRATION/fish"
 #
 # Before each line it runs, it tells Bazhen the line as you typed it, so a restart after a reboot
-# can type it back at the new prompt, without Enter. A line that starts with a space is never
-# sent. Outside a Bazhen shell with the integration on, it does nothing.
+# can type it back at the new prompt, without Enter, which it tells Bazhen it has reached. A line
+# that starts with a space is never sent. Outside a Bazhen shell with the integration on, it does
+# nothing.
 
 if set -q BAZHEN_SHELL_TOKEN; and test -x "$BAZHEN_HOOK"; and not set -q __bazhen_integrated
     set -g __bazhen_integrated 1
@@ -16,5 +17,12 @@ if set -q BAZHEN_SHELL_TOKEN; and test -x "$BAZHEN_HOOK"; and not set -q __bazhe
         builtin printf '%s' $argv[1] | $BAZHEN_HOOK shell-report >/dev/null 2>&1 &
         disown $last_pid 2>/dev/null
         return 0
+    end
+
+    # Once, at the first prompt: a restart's line is typed back from then on.
+    function __bazhen_prompt --on-event fish_prompt
+        functions -e __bazhen_prompt
+        $BAZHEN_HOOK shell-prompt >/dev/null 2>&1 &
+        disown $last_pid 2>/dev/null
     end
 end

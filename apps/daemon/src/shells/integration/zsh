@@ -4,8 +4,9 @@
 #   [[ -n $BAZHEN_SHELL_INTEGRATION && -r $BAZHEN_SHELL_INTEGRATION/zsh ]] && source "$BAZHEN_SHELL_INTEGRATION/zsh"
 #
 # Before each line it runs, it tells Bazhen the line as you typed it, so a restart after a reboot
-# can type it back at the new prompt, without Enter. A line that starts with a space is never
-# sent. Outside a Bazhen shell with the integration on, it does nothing.
+# can type it back at the new prompt, without Enter, which it tells Bazhen it has reached. A line
+# that starts with a space is never sent. Outside a Bazhen shell with the integration on, it does
+# nothing.
 
 if [[ -n ${BAZHEN_SHELL_TOKEN-} && -x ${BAZHEN_HOOK-} && -z ${__bazhen_integrated-} ]]; then
   typeset -g __bazhen_integrated=1
@@ -18,6 +19,14 @@ if [[ -n ${BAZHEN_SHELL_TOKEN-} && -x ${BAZHEN_HOOK-} && -z ${__bazhen_integrate
     return 0
   }
 
+  # Once, at the first prompt: a restart's line is typed back from then on.
+  __bazhen_prompt() {
+    add-zsh-hook -d precmd __bazhen_prompt
+    { "$BAZHEN_HOOK" shell-prompt } >/dev/null 2>&1 &!
+    return 0
+  }
+
   autoload -Uz add-zsh-hook
   add-zsh-hook preexec __bazhen_preexec
+  add-zsh-hook precmd __bazhen_prompt
 fi

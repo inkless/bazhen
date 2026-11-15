@@ -9,6 +9,7 @@ import { UnknownDevice } from "../store/store.ts";
 import {
   EnvRefreshRequest,
   PaneTitleChanged,
+  ShellPrompt,
   ShellReport,
   DoctorResponse,
   PairingCodeResponse,
@@ -38,6 +39,8 @@ export interface SocketParts {
   readonly lan: () => PairingCodeResponse["lan"];
   /** A shell's integration reported the line it is running (foundation-design §4.8). */
   readonly shellReport: (terminalId: string, report: ShellReport) => ReportOutcome;
+  /** It reached its first prompt; false when the report wasn't the shell's own. */
+  readonly shellPrompt: (terminalId: string, report: ShellPrompt) => boolean;
 }
 
 /**
@@ -45,6 +48,8 @@ export interface SocketParts {
  * every character escaped as `\uXXXX`, its token and the fields around them fit with room.
  */
 const REPORT_MAX_BYTES = 16 * 1024;
+/** A prompt report is its token alone. */
+const PROMPT_MAX_BYTES = 1024;
 
 const forbidden = (c: Context, message: string) => {
   const body: ErrorResponse = { error: "forbidden", message };
@@ -158,6 +163,17 @@ export function socketApp(parts: SocketParts): Hono<{ Bindings: HttpBindings }> 
       return c.body(null, 204);
     },
   );
+
+  app.post("/v1/shells/:id/prompt", bodyLimit({ maxSize: PROMPT_MAX_BYTES }), async (c) => {
+    const req = ShellPrompt.safeParse(await c.req.json().catch(() => undefined));
+    if (!req.success) {
+      const body: ErrorResponse = { error: "invalid_request", message: "expected { token }" };
+      return c.json(body, 400);
+    }
+    if (!parts.shellPrompt(c.req.param("id"), req.data))
+      return forbidden(c, "no such shell, or not its token");
+    return c.body(null, 204);
+  });
 
   app.route("/", parts.hooks);
   app.route("/", parts.commands);

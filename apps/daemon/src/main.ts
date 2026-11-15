@@ -265,7 +265,7 @@ const shells = new ShellLifecycle({
   budget,
   ...(integration && { integration }),
 });
-const shellReports = new ShellReports(store);
+const shellReports = new ShellReports(store, (terminalId) => shells.prompted(terminalId));
 await reconcileShells(store, environment, shells);
 // After both reconciles, whose health checks have a server whose socket was deleted recreate it.
 await runtime.applyServerSettings().catch((err: unknown) => {
@@ -474,6 +474,7 @@ const socketListener = getRequestListener(
           },
     paneTitleChanged: (pane) => void codexThreads.paneTitleChanged(pane),
     shellReport: (terminalId, report) => shellReports.report(terminalId, report),
+    shellPrompt: (terminalId, report) => shellReports.prompt(terminalId, report),
     refreshEnv: async (env) => {
       const next = filterEnv(env, config.envRules);
       const { refused } = await runtime.replaceEnv(next.env);

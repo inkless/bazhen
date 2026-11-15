@@ -123,5 +123,47 @@ describe.each<IntegratedShell>(["zsh", "bash", "fish"])(
       view.close();
       expect(daemon.keptShellLine(terminalId)).toBeNull();
     });
+
+    // Last: it ends the daemon and its tmux server, as a reboot would.
+    it("types the line back at a restarted shell's prompt, exactly and without running it", async () => {
+      const { terminalId, view } = await driven();
+      view.type(`${TYPED}\r`);
+      await expect.poll(() => daemon.keptShellLine(terminalId), { timeout: 15_000 }).toBe(TYPED);
+      const ran = `${daemon.shellEnv(terminalId).HOME} a  b`;
+      view.close();
+      await daemon.kill();
+      daemon.tmuxServer.kill();
+      await daemon.restart();
+
+      const lost = StateSnapshot.parse((await daemon.request("/v1/state")).body).shells.find(
+        (s) => s.id === terminalId,
+      );
+      expect([lost?.state, lost?.retypeable]).toEqual(["lost", true]);
+      const restarted = await daemon.request(`/v1/shells/${terminalId}/restart`, {
+        method: "POST",
+        body: { idempotencyKey: "retype", generation: lost?.generation, retype: true },
+      });
+      const { terminalId: next } = ShellCommandResponse.parse(restarted.body);
+      const lastLine = () => daemon.shellScreen(next).trimEnd().split("\n").at(-1);
+      await expect.poll(lastLine, { timeout: 20_000 }).toBe(`[st=0] ${TYPED}`);
+      // Had Enter been pressed, the line's output and a new prompt would follow it.
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      expect([lastLine(), daemon.shellScreen(next).includes(ran)]).toEqual([
+        `[st=0] ${TYPED}`,
+        false,
+      ]);
+
+      const state = StateSnapshot.parse((await daemon.request("/v1/state")).body);
+      const events = await daemon.events({ epoch: state.epoch, eventId: 0 });
+      await daemon.caughtUp(events);
+      const seen = { events: JSON.stringify(events.frames), log: daemon.log() };
+      events.close();
+      expect([
+        seen.events.includes("a  b"),
+        seen.log.includes("a  b"),
+        daemon.keptShellLine(terminalId),
+        daemon.keptShellLine(next),
+      ]).toEqual([false, false, null, null]);
+    });
   },
 );

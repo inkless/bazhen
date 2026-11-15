@@ -34,6 +34,7 @@ import {
 } from "../commands.ts";
 import type { AgentQueue } from "../agents/queue.ts";
 import { newShellToken } from "./reports.ts";
+import { PendingRetypes } from "./retype.ts";
 import {
   LINKABLE,
   UnknownAgent,
@@ -100,6 +101,8 @@ export interface ShellDeps {
    */
   readonly integration?: { readonly hook: string; readonly dir: string };
   readonly log?: (message: string) => void;
+  /** How long a restarted shell has to report its first prompt for its line to be typed. */
+  readonly retypeWithinMs?: number;
 }
 
 /**
@@ -116,9 +119,23 @@ export class ShellLifecycle {
    * a dead pane every second until it is ended, so a failure is logged once, not every time.
    */
   private readonly unended = new Set<string>();
+  private readonly retypes: PendingRetypes;
 
   constructor(deps: ShellDeps) {
     this.deps = deps;
+    this.retypes = new PendingRetypes({
+      paste: (ref, line) => deps.environment.pasteShell(ref, line),
+      log: (message) => this.log(message),
+      ...(deps.retypeWithinMs !== undefined && { withinMs: deps.retypeWithinMs }),
+    });
+  }
+
+  /**
+   * A shell's integration reported its first prompt, with the shell's own token: a line its
+   * restart is to type back is typed now.
+   */
+  prompted(terminalId: string): void {
+    this.retypes.prompted(terminalId);
   }
 
   /** Closes shells whose process the environment reports ended; returns the stop function. */
@@ -181,7 +198,9 @@ export class ShellLifecycle {
 
   /**
    * Starts a new shell in a lost one's directory, beside the same agent if that agent can still
-   * have one, and takes the lost one off the list. The answer names the new shell.
+   * have one, and takes the lost one off the list. The answer names the new shell. With `retype`,
+   * the lost shell's last line is typed at the new one's first prompt, without Enter; it is held
+   * in memory only until then, and the lost shell's row forgets it as it closes.
    */
   restart(
     terminalId: string,
@@ -190,6 +209,7 @@ export class ShellLifecycle {
   ): Promise<ShellCommandResponse> {
     const { store, queue } = this.deps;
     return this.command("restart", terminalId, req, offers("restart"), async (found) => {
+      const retype = req.retype === true ? this.retypeable(found) : undefined;
       const theme = req.theme ?? found.theme ?? undefined;
       const request = { command: "restart", terminalId, ...req };
       const replace = async () => {
@@ -202,6 +222,7 @@ export class ShellLifecycle {
             theme,
             restartOf: found.terminalId,
             openedBy,
+            retype,
           },
           (first) => store.answered(req.idempotencyKey, request, first),
         );
@@ -333,11 +354,13 @@ export class ShellLifecycle {
       restartOf?: TerminalId;
       /** The paired device that asked for it, which its environment names. */
       openedBy?: DeviceId | undefined;
+      /** A line to type at its first prompt. */
+      retype?: string | undefined;
     },
     first: (response: ShellCommandResponse) => void,
   ): Promise<ShellCommandResponse> {
     const { store, environment, size, budget, integration } = this.deps;
-    const { cwd, linkedAgentId, theme, restartOf, openedBy } = shell;
+    const { cwd, linkedAgentId, theme, restartOf, openedBy, retype } = shell;
     const terminalId = newId("term");
     const reporting = integration && { ...integration, ...newShellToken() };
     const opened = store.transaction(() => {
@@ -358,6 +381,8 @@ export class ShellLifecycle {
       first(response);
       return response;
     });
+    // Held before the shell starts, which may reach its prompt before its start returns here.
+    if (retype !== undefined) this.retypes.hold(terminalId, retype);
     const ref = await environment
       .openShell({
         terminalId,
@@ -372,12 +397,14 @@ export class ShellLifecycle {
       })
       .catch((cause: unknown) => {
         console.error(`shell ${terminalId} failed to open:`, cause);
+        this.retypes.drop(terminalId);
         this.record(terminalId, "terminal.failed", { reason: "open_rejected" });
         throw new ShellOpenFailed(terminalId, cause);
       });
     const running = this.record(terminalId, "terminal.running", {
       runtimeRef: runtimePayload(ref),
     });
+    this.retypes.opened(terminalId, ref);
     return { terminalId, eventIds: [...opened.eventIds, running] };
   }
 
@@ -495,6 +522,19 @@ export class ShellLifecycle {
             `(pid ${found.runtime?.locator.serverPid ?? "unknown"}) may still be running it`,
         );
       });
+  }
+
+  /**
+   * The lost shell's last line, for a restart to type back: refused when none is kept, or when
+   * new shells can't report the prompt it waits for.
+   */
+  private retypeable(found: ShellTerminal): string {
+    const line = this.deps.store.lastShellCommand(found.terminalId);
+    if (line === null)
+      throw new StateConflict(`shell ${found.terminalId}`, "lost with no last command kept");
+    if (this.deps.integration === undefined)
+      throw new StateConflict("shell integration", "off, so a new shell can't report its prompt");
+    return line;
   }
 
   /**

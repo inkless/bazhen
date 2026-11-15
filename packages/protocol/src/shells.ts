@@ -44,6 +44,11 @@ export const Shell = z.object({
   /** As an agent's: null while the runtime holds no terminal for it. */
   attachCommand: z.string().nullable(),
   commands: z.array(ShellCommand),
+  /**
+   * A lost shell whose last line its shell integration kept: a restart can type it back at the
+   * new shell's prompt (`retype`). The line itself is never sent (protocol 1.40).
+   */
+  retypeable: z.boolean().default(false),
 });
 export type Shell = z.infer<typeof Shell>;
 
@@ -91,6 +96,11 @@ export const RestartShellRequest = z.object({
   idempotencyKey: IdempotencyKey,
   generation: z.number().int().nonnegative(),
   theme: TuiTheme.optional(),
+  /**
+   * Type the lost shell's last line at the new shell's first prompt, without Enter; refused for
+   * a shell that isn't `retypeable` (protocol 1.40).
+   */
+  retype: z.literal(true).optional(),
 });
 export type RestartShellRequest = z.infer<typeof RestartShellRequest>;
 
@@ -167,6 +177,13 @@ export const ShellReport = z.object({
   command: z.string().max(COMMAND_LINE_MAX_BYTES).nullable(),
 });
 export type ShellReport = z.infer<typeof ShellReport>;
+
+/**
+ * What a shell's integration reports over the daemon's socket once, at the shell's first prompt:
+ * its line editor is reading, so a line can be typed back (protocol 1.40).
+ */
+export const ShellPrompt = z.object({ token: ShellReport.shape.token });
+export type ShellPrompt = z.infer<typeof ShellPrompt>;
 
 export const RenameShellRequest = z.object({
   idempotencyKey: IdempotencyKey,

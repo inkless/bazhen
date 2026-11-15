@@ -43,6 +43,19 @@ It is off by default, because a command line can hold a secret: `export TOKEN=â€
 The integration needs the `bazhen-hook` client (`pnpm build:hook`). Without it, the daemon says
 so at start and shells report nothing.
 
+## Restarting with the last command
+
+A lost shell whose last line was kept offers **Restart and retype last command** beside
+**Restart**. The new shell opens in the same directory and, once it shows its first prompt, the
+line appears there exactly as you typed it, `$VARIABLES` and quoting untouched. Enter is never
+pressed: you read the line, edit it if you like, and run it yourself. Bazhen types it as a paste,
+so a line editor in vi mode inserts it as text rather than taking it as keys.
+
+The new shell must load the integration too, since it tells Bazhen when its prompt is ready. If
+no prompt is reported within 30 seconds, the line is dropped and the daemon logs that it wasn't
+retyped, naming the shell but not the line. Until then it is held only in the daemon's memory, so
+a daemon restart in between loses it.
+
 ## What it sends, and what it doesn't
 
 Before each line runs, the shell starts `bazhen-hook shell-report` in the background and passes
@@ -64,6 +77,8 @@ The line is never a process argument, so `ps` never shows it.
   of the daemon's clock counts as a minute ahead, so a wrong clock can't stop later lines from
   counting for longer than that.
 - **One line per shell.** Each new line replaces the last.
+- **At the first prompt, the shell says so**, once, with `bazhen-hook shell-prompt`. It carries
+  the shell's token and nothing else.
 
 ## Where it is kept, and for how long
 
@@ -71,7 +86,8 @@ The line is kept in one place: the shell's row in Bazhen's database, `bazhen.db`
 directory (`~/.local/share/bazhen`, or `data/` under `BAZHEN_HOME`). The database and its
 journals can only be read by you. The line is never written to an event, so it never reaches the event stream, a
 dashboard, a paired device or a log, and it isn't in `GET /v1/state`. It is deleted when the
-shell closes, exits or fails to open. A lost shell keeps it for its restart.
+shell closes, exits or fails to open. A lost shell keeps it for its restart, and loses it once
+its replacement runs, retyped or not.
 
 When a shell closes, SQLite overwrites its line with zeros in the page that held it, and Bazhen
 then writes the write-ahead log into the database and truncates it, so `bazhen.db-wal` keeps no

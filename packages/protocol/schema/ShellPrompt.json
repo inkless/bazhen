@@ -1,0 +1,15 @@
+{
+  "$id": "ShellPrompt",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "token": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    }
+  },
+  "required": [
+    "token"
+  ]
+}

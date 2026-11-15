@@ -6,6 +6,10 @@
 //!
 //! `<time>` is when the shell started the line, as `$EPOCHREALTIME` gives it; without one, now.
 //! The daemon keeps a line only if it started later than the line it has.
+//!
+//! `bazhen-hook shell-prompt`, which the integration runs once, at the shell's first prompt, tells
+//! the daemon its line editor is reading, so a restart can type a line back. It carries only the
+//! token, and is bound by the same deadline.
 
 use std::env;
 use std::fmt::Write as _;
@@ -26,12 +30,34 @@ const DEADLINE: Duration = Duration::from_secs(1);
 /// The largest integer a JSON number carries exactly to the daemon.
 const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
 
-pub(crate) fn run(mut args: impl Iterator<Item = String>) -> Option<i32> {
+/// The shell's terminal, its token and the daemon's socket, from the shell's environment.
+fn reporter() -> Option<(String, String, String)> {
     let terminal = env::var("BAZHEN_TERMINAL_ID")
         .ok()
         .filter(|t| is_token(t))?;
     let token = env::var("BAZHEN_SHELL_TOKEN").ok()?;
     let socket = env::var("BAZHEN_SOCKET").ok()?;
+    Some((terminal, token, socket))
+}
+
+pub(crate) fn run_prompt() -> Option<i32> {
+    let (terminal, token, socket) = reporter()?;
+    let body = prompt_body(&token)?;
+    within(DEADLINE, move || {
+        let path = format!("/v1/shells/{terminal}/prompt");
+        // Like a line's report, nothing the daemon answers changes what the shell does.
+        let _ = post(&socket, &path, &body, DEADLINE);
+    });
+    Some(0)
+}
+
+/// The prompt report's JSON, for a token that needs no escaping.
+pub fn prompt_body(token: &str) -> Option<Vec<u8>> {
+    is_token(token).then(|| format!("{{\"token\":\"{token}\"}}").into_bytes())
+}
+
+pub(crate) fn run(mut args: impl Iterator<Item = String>) -> Option<i32> {
+    let (terminal, token, socket) = reporter()?;
     let at = match args.next() {
         Some(time) => micros(&time)?,
         None => now()?,
@@ -158,6 +184,14 @@ mod tests {
     fn sends_nothing_for_a_token_that_would_need_escaping() {
         assert_eq!(report_body(b"make", 1, "a\"b"), None);
         assert_eq!(report_body(b"make", 1, ""), None);
+    }
+
+    #[test]
+    fn reports_a_prompt_with_the_token_alone() {
+        let body = prompt_body("tok-_1").expect("a body");
+        assert_eq!(decoded(&body), serde_json::json!({ "token": "tok-_1" }));
+        assert_eq!(prompt_body("a\"b"), None);
+        assert_eq!(prompt_body(""), None);
     }
 
     #[test]
