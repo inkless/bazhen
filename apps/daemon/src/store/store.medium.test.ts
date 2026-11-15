@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InvalidTransition, newId, type ResumeEvidence } from "@bazhen/core";
-import type { ExternalRef } from "@bazhen/protocol";
+import { TerminalState, type ExternalRef } from "@bazhen/protocol";
 import {
   age,
   register,
@@ -243,6 +243,34 @@ describe("Store", () => {
     ).toThrow("abandoned");
     expect(store.snapshot(testView)).toMatchObject({ eventId: before, environments: [] });
     store.close();
+  });
+
+  it("counts as open every terminal, agent's or shell's, but the lost, closed and failed, and as starting the creating", () => {
+    const path = dbPath();
+    const store = Store.open(path);
+    const environmentId = withEnvironment(store);
+    launch(store, environmentId);
+    store.append(shellOpened(newId("term"), environmentId, null));
+    store.close();
+    const counted: Record<string, [number, number]> = {};
+    for (const state of TerminalState.options) {
+      const raw = new DatabaseSync(path);
+      raw.prepare("UPDATE terminals SET state = ?").run(state);
+      raw.close();
+      const reopened = Store.open(path);
+      counted[state] = [reopened.openTerminals(), reopened.startingTerminals()];
+      reopened.close();
+    }
+    expect(counted).toEqual({
+      creating: [2, 2],
+      running: [2, 0],
+      unknown: [2, 0],
+      exited: [2, 0],
+      closing: [2, 0],
+      lost: [0, 0],
+      closed: [0, 0],
+      failed: [0, 0],
+    });
   });
 });
 

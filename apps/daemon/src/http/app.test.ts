@@ -15,6 +15,7 @@ import { AttentionClosed } from "../mailbox/approvals.ts";
 import { AgentGone } from "../mailbox/mailbox.ts";
 import { ShellBusy, UnknownShell } from "../shells/lifecycle.ts";
 import { AttentionRefused } from "../attention/inbox.ts";
+import { TerminalLimit } from "../terminals/budget.ts";
 import { createApp, type AppDeps, type TaskCommands } from "./app.ts";
 
 const runtime = new FakeRuntime();
@@ -94,6 +95,12 @@ const deps: AppDeps = {
   },
   launch: async (req: LaunchAgentRequest) => {
     if (req.harness === "codex") throw new UnsupportedHarness("codex");
+    if (req.cwd === "/full")
+      throw new TerminalLimit("4 terminals are open, the most at once", {
+        open: 4,
+        max: 4,
+        host: false,
+      });
     return launched;
   },
   tasks,
@@ -195,6 +202,25 @@ describe("HTTP app", () => {
     const bad = await post({ ...launch, cwd: "" });
     const unsupported = await post({ ...launch, harness: "codex" });
     expect([bad.status, unsupported.status]).toEqual([400, 422]);
+  });
+
+  it("answers a launch past the terminal budget as terminal_limit, with its reason, on either listener", async () => {
+    const asked = {
+      method: "POST",
+      headers: { host, "content-type": "application/json" },
+      body: JSON.stringify({ ...launch, cwd: "/full" }),
+    };
+    const answers = await Promise.all(
+      [app, socket].map(async (on) => {
+        const res = await on.request("/v1/agents", asked);
+        return [res.status, await res.json()];
+      }),
+    );
+    const refused = [
+      409,
+      { error: "terminal_limit", message: "4 terminals are open, the most at once" },
+    ];
+    expect(answers).toEqual([refused, refused]);
   });
 
   it("answers a late answer to an attention item with a conflict, not a success", async () => {

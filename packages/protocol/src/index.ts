@@ -93,6 +93,21 @@ export const DoctorResponse = z.object({
    * Absent from a daemon before 1.24.
    */
   notifications: z.object({ desktop: z.boolean(), notifier: z.string().nullable() }).optional(),
+  /**
+   * Terminals open and `terminals.max_open`, and the machine's PTYs in use and its most, or null
+   * where they can't be counted. `exact` is false where `used` is an upper bound, as on macOS.
+   * `refusing` names the limit refusing new terminals now, if one is. Absent before 1.37.
+   */
+  terminals: z
+    .object({
+      open: z.int().nonnegative(),
+      max: z.int().positive(),
+      host: z
+        .object({ used: z.int().nonnegative(), max: z.int().positive(), exact: z.boolean() })
+        .nullable(),
+      refusing: z.enum(["budget", "host"]).nullable(),
+    })
+    .optional(),
   env: z.object({
     capturedAt: z.string(),
     /** Captured when the daemon started, or by the latest `bazhen env refresh`. */

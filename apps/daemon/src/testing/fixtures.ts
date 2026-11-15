@@ -26,6 +26,7 @@ import { upgrades, type UpgradeRoute } from "../http/upgrades.ts";
 import { Mailbox } from "../mailbox/mailbox.ts";
 import type { Raised } from "../attention/inbox.ts";
 import { Tasks } from "../tasks/tasks.ts";
+import { TerminalBudget, type TerminalAdmission } from "../terminals/budget.ts";
 import { Store, type SnapshotView } from "../store/store.ts";
 
 /** Claude Code sessions resume, whatever their transcript; a test of the transcript says its own. */
@@ -43,8 +44,25 @@ export const testView: SnapshotView = {
   },
 };
 
+/** Admits every terminal: for tests where the budget isn't what is tested. */
+export const unlimited: TerminalAdmission = { admit: () => {} };
+
+/** The daemon's budget on `store`'s count, on a machine with PTYs to spare. */
+export const storeBudget = (store: Store, max: number) =>
+  new TerminalBudget({
+    max,
+    open: () => store.openTerminals(),
+    starting: () => store.startingTerminals(),
+    host: () => ({ ok: true, used: 0, max: 4096, exact: true, limit: "kernel.pty.max" }),
+    warn: () => {},
+  });
+
 /** What starting an agent again needs, for a test that doesn't look at it. */
-export const quietStartAgain = { size: { cols: 80, rows: 24 }, replaced: () => {} };
+export const quietStartAgain = {
+  size: { cols: 80, rows: 24 },
+  replaced: () => {},
+  budget: unlimited,
+};
 
 export const tempDb = () => join(mkdtempSync(join(tmpdir(), "bz-store-")), "bazhen.db");
 
@@ -109,6 +127,7 @@ export async function withAgent(
       size: { cols: 80, rows: 24 },
       home: tmpdir(),
       queue: new AgentQueue(),
+      budget: unlimited,
     },
     { idempotencyKey: "launch", harness: "claude-code", cwd: "~" },
   );
@@ -227,7 +246,14 @@ export async function withCodexAgents(...threads: (string | null)[]) {
       harnesses: ["codex"],
     };
     const { agentId } = await launchAgent(
-      { store, environment, size: { cols: 80, rows: 24 }, home: tmpdir(), queue: new AgentQueue() },
+      {
+        store,
+        environment,
+        size: { cols: 80, rows: 24 },
+        home: tmpdir(),
+        queue: new AgentQueue(),
+        budget: unlimited,
+      },
       { idempotencyKey: `codex-${String(threadId)}`, harness: "codex", cwd: "~" },
     );
     agents.set(threadId, agentId);
@@ -254,6 +280,7 @@ export async function withCodexAgent(threadId = "thr-1") {
 export async function taskFleet(
   limits = { maxLaunched: 5, maxDepth: 3 },
   delegated?: (l: AgentLaunch) => Promise<AgentRefs>,
+  maxOpen = Number.POSITIVE_INFINITY,
 ) {
   const { store, agentId: coordinator, environment } = await withAgent();
   const deps = {
@@ -262,6 +289,7 @@ export async function taskFleet(
     size: { cols: 80, rows: 24 },
     home: tmpdir(),
     queue: new AgentQueue(),
+    budget: unlimited,
   };
   const launch = async (key: string) => {
     const { agentId } = await launchAgent(deps, {
@@ -276,8 +304,11 @@ export async function taskFleet(
   const mailbox = new Mailbox(store);
   mailbox.follow();
   const raised: Raised[] = [];
-  const delegating =
-    delegated === undefined ? deps : { ...deps, environment: fakeEnvironment(store, delegated) };
+  const delegating = {
+    ...deps,
+    budget: storeBudget(store, maxOpen),
+    ...(delegated === undefined ? {} : { environment: fakeEnvironment(store, delegated) }),
+  };
   const launcher = {
     launch: (req: LaunchAgentRequest, by: AgentSessionId) => launchSettled(delegating, req, by),
     ...limits,

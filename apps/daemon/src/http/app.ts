@@ -83,6 +83,7 @@ import {
 } from "../auth/devices.ts";
 import type { PairingCodes } from "../auth/pairing.ts";
 import { pairingKey } from "../config/cidr.ts";
+import { TerminalLimit } from "../terminals/budget.ts";
 
 export interface AppDeps {
   readonly appVersion: string;
@@ -338,6 +339,7 @@ export function createApp(deps: AppDeps): Hono {
   app.onError((err, c) => {
     if (err instanceof UnsupportedHarness) return fail(c, 422, "unsupported", err.message);
     if (err instanceof InvalidDirectory) return fail(c, 400, "invalid_request", err.message);
+    if (err instanceof TerminalLimit) return fail(c, 409, "terminal_limit", err.message);
     if (err instanceof LaunchFailed) return fail(c, 502, "launch_failed", err.message);
     if (err instanceof HarnessRefused) return fail(c, 502, "launch_failed", failureDetail(err));
     if (err instanceof IdempotencyConflict) return fail(c, 409, "conflict", err.message);

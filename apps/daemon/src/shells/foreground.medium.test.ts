@@ -8,7 +8,7 @@ import { LocalEnvironment } from "@bazhen/env-local";
 import { localEnvironmentId } from "../agents/launch.ts";
 import { AgentQueue } from "../agents/queue.ts";
 import { Store } from "../store/store.ts";
-import { tempDb, testView } from "../testing/fixtures.ts";
+import { tempDb, testView, unlimited } from "../testing/fixtures.ts";
 import { ForegroundWatch } from "./foreground.ts";
 import { ShellLifecycle } from "./lifecycle.ts";
 
@@ -28,6 +28,7 @@ async function setup() {
     store,
     environment,
     queue: new AgentQueue(),
+    budget: unlimited,
     size: { cols: 80, rows: 24 },
     home,
   });

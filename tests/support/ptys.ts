@@ -1,15 +1,12 @@
 // How many PTYs the machine has in use, against the cutoff every suite that opens real PTYs
 // refuses to start above (docs/standards/testing.md).
 
-import { readdirSync, readFileSync } from "node:fs";
+import { hostPtyReader, ptyNodes } from "@bazhen/host-guard";
 import { failSetup } from "./setup-error.ts";
 
 // The spikes' watchdog aborted above 420 of macOS's 511 PTYs (kern.tty.ptmx_max).
 const MACOS_CUTOFF = 420;
 const LINUX_CUTOFF_FRACTION = 420 / 511;
-
-const readPtySysctl = (name: string) =>
-  Number(readFileSync(`/proc/sys/kernel/pty/${name}`, "utf8").trim());
 
 function cutoffOverride(): number | undefined {
   const raw = process.env["BZ_PTY_CUTOFF"];
@@ -23,17 +20,11 @@ function cutoffOverride(): number | undefined {
 
 export function ptysInUse(): { used: number; cutoff: number } {
   const override = cutoffOverride();
-  if (process.platform === "linux") {
-    const max = readPtySysctl("max");
-    return {
-      used: readPtySysctl("nr"),
-      cutoff: override ?? Math.floor(max * LINUX_CUTOFF_FRACTION),
-    };
-  }
-  // Counts the 16 legacy BSD names too, which overcounts slightly: the safe direction, and the
-  // same way the spike measured the cutoff.
-  const used = readdirSync("/dev").filter((name) => name.startsWith("ttys")).length;
-  return { used, cutoff: override ?? MACOS_CUTOFF };
+  // macOS's cutoff is fixed, so its guard counts nodes and never needs sysctl.
+  if (process.platform !== "linux") return { used: ptyNodes(), cutoff: override ?? MACOS_CUTOFF };
+  const host = hostPtyReader()();
+  if (!host.ok) failSetup(`Refusing to run: the machine's PTYs can't be counted (${host.reason}).`);
+  return { used: host.used, cutoff: override ?? Math.floor(host.max * LINUX_CUTOFF_FRACTION) };
 }
 
 /** Throws, first in a suite's setup, when the machine is too short of PTYs to run it. */

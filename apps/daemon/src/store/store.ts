@@ -1088,6 +1088,24 @@ export class Store {
     );
   }
 
+  /**
+   * How many terminals, agents' and shells', hold a PTY or may take one back without a new
+   * terminal: an exited one is respawned on the same terminal. Lost, closed and failed hold none.
+   */
+  openTerminals(): number {
+    const row = this.prepare(
+      `SELECT count(*) AS n FROM terminals
+       WHERE state IN ('creating', 'running', 'unknown', 'exited', 'closing')`,
+    ).get();
+    return Number(row?.n ?? 0);
+  }
+
+  /** How many terminals are recorded but not yet confirmed running: their PTYs may still be opening. */
+  startingTerminals(): number {
+    const row = this.prepare(`SELECT count(*) AS n FROM terminals WHERE state = 'creating'`).get();
+    return Number(row?.n ?? 0);
+  }
+
   /** How many agents `agentId` launched are still open: not closing, closed, failed or lost. */
   liveLaunchedBy(agentId: string): number {
     const row = this.prepare(

@@ -5,13 +5,14 @@ import { FLEET_INSTRUCTIONS } from "../tasks/mail.ts";
 import { describe, expect, it } from "vitest";
 import { LaunchFailed, UnsupportedHarness, type AgentLaunch } from "@bazhen/core";
 import { Store } from "../store/store.ts";
-import { fakeEnvironment, tempDb, testView } from "../testing/fixtures.ts";
+import { fakeEnvironment, storeBudget, tempDb, testView } from "../testing/fixtures.ts";
 import { IdempotencyConflict } from "../store/store.ts";
 import { InvalidDirectory } from "./cwd.ts";
 import { launchAgent, launchSettled, localEnvironmentId } from "./launch.ts";
 import { AgentQueue } from "./queue.ts";
+import { TerminalLimit } from "../terminals/budget.ts";
 
-function setup(fail = false) {
+function setup(fail = false, maxOpen = 100) {
   // The daemon user's home, with the project a launch names as ~/repo.
   const home = mkdtempSync(join(tmpdir(), "bz-launch-"));
   mkdirSync(join(home, "repo"));
@@ -26,7 +27,14 @@ function setup(fail = false) {
       ...(l.options.theme && { theme: l.options.theme }),
     };
   });
-  const deps = { store, environment, size: { cols: 120, rows: 40 }, home, queue: new AgentQueue() };
+  const deps = {
+    store,
+    environment,
+    size: { cols: 120, rows: 40 },
+    home,
+    queue: new AgentQueue(),
+    budget: storeBudget(store, maxOpen),
+  };
   return { store, deps, launches, home };
 }
 
@@ -187,5 +195,35 @@ describe("launchAgent", () => {
     await launchAgent(deps, request);
     await expect(launchAgent(deps, { ...request, cwd: "~" })).rejects.toThrow(IdempotencyConflict);
     expect(launches.length).toBe(1);
+  });
+});
+
+describe("launchAgent, against the terminal budget", () => {
+  const second = { ...request, idempotencyKey: "k-2" };
+
+  it("refuses a launch past the budget, starting and recording nothing", async () => {
+    const { store, deps, launches } = setup(false, 1);
+    await launchAgent(deps, request);
+    await expect(launchAgent(deps, second)).rejects.toThrow(TerminalLimit);
+    expect([store.snapshot(testView).agents.length, launches.length]).toEqual([1, 1]);
+  });
+
+  it("admits only one of two launches racing for the last slot", async () => {
+    const { deps, launches } = setup(false, 1);
+    const both = await Promise.allSettled([launchAgent(deps, request), launchAgent(deps, second)]);
+    expect([both.map((r) => r.status), launches.length]).toEqual([["fulfilled", "rejected"], 1]);
+  });
+
+  it("gives the slot back when the launch fails", async () => {
+    const { deps, launches } = setup(true, 1);
+    await expect(launchAgent(deps, request)).rejects.toThrow(LaunchFailed);
+    await expect(launchAgent(deps, second)).rejects.toThrow(LaunchFailed);
+    expect(launches.length).toBe(2);
+  });
+
+  it("answers a repeat of the launch holding the last slot, rather than refusing it", async () => {
+    const { deps } = setup(false, 1);
+    const first = await launchAgent(deps, request);
+    expect(await launchAgent(deps, request)).toEqual(first);
   });
 });

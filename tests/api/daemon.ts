@@ -195,14 +195,19 @@ export class Daemon {
     const daemon = new Daemon(realpathSync(mkdtempSync("/tmp/bz-api-")), {});
     daemon.port = await freePort();
     Object.assign(daemon.env, { BAZHEN_PORT: String(daemon.port) });
-    mkdirSync(join(daemon.home, "config"), { recursive: true });
-    writeFileSync(join(daemon.home, "config", "config.toml"), config);
+    daemon.writeConfig(config);
     const started = await bazhen(["start"], { ...daemon.env, ...env });
     if (started.code !== 0) {
       await daemon.stop();
       throw new Error(`bazhen start failed:\n${started.out}`);
     }
     return daemon;
+  }
+
+  /** Replaces its config.toml, which the daemon reads when it next starts. */
+  writeConfig(toml: string): void {
+    mkdirSync(join(this.home, "config"), { recursive: true });
+    writeFileSync(join(this.home, "config", "config.toml"), toml);
   }
 
   /** What the daemon has printed since it last started. */

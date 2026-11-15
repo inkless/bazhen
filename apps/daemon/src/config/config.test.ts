@@ -22,6 +22,7 @@ describe("resolveConfig", () => {
       pairingRequired: false,
       lan: null,
       launchLimits: { maxLaunched: 5, maxDepth: 3 },
+      maxOpenTerminals: 100,
     });
   });
 
@@ -39,12 +40,17 @@ describe("resolveConfig", () => {
       pairingRequired: false,
       lan: null,
       launchLimits: { maxLaunched: 5, maxDepth: 3 },
+      maxOpenTerminals: 100,
     });
   });
 
   it("takes how far agents may launch agents from the file", () => {
     const limits = { agents: { max_launched: 2, max_launch_depth: 1 } };
     expect(resolveConfig(limits, {}).launchLimits).toEqual({ maxLaunched: 2, maxDepth: 1 });
+  });
+
+  it("takes how many terminals may be open at once from the file", () => {
+    expect(resolveConfig({ terminals: { max_open: 12 } }, {}).maxOpenTerminals).toBe(12);
   });
 
   it("lists the origins the user's own route to the daemon presents, and where they came from", () => {

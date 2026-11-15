@@ -22,6 +22,7 @@ import { failureDetail } from "../commands.ts";
 import { IdempotencyConflict, runtimePayload, type Store } from "../store/store.ts";
 import { FLEET_INSTRUCTIONS } from "../tasks/mail.ts";
 import { resolveDirectory } from "./cwd.ts";
+import type { TerminalAdmission } from "../terminals/budget.ts";
 import type { AgentQueue } from "./queue.ts";
 
 /** The local environment's id, registering it on the first run (foundation-design §3). */
@@ -55,6 +56,7 @@ export interface LaunchDeps {
   readonly home: string;
   /** The agents' command queue: a launch holds its new agent's slot until its last event. */
   readonly queue: AgentQueue;
+  readonly budget: TerminalAdmission;
 }
 
 /**
@@ -126,7 +128,7 @@ export const launchOptions = (theme: TuiTheme | undefined): LaunchOptions => ({
  * human does.
  */
 export async function launchAgent(
-  { store, environment, size, home, queue }: LaunchDeps,
+  { store, environment, size, home, queue, budget }: LaunchDeps,
   req: LaunchAgentRequest,
   launchedBy?: AgentSessionId,
 ): Promise<LaunchAgentResponse> {
@@ -153,20 +155,19 @@ export async function launchAgent(
     });
 
   // Recorded before this call first yields, so a repeat in the same tick finds the key answered.
-  const launched = record(
-    () =>
-      store.append({
-        ...event,
-        type: "agent.launched",
-        payload: {
-          environmentId: environment.id,
-          ...request,
-          terminalId,
-          ...(launchedBy === undefined ? {} : { launchedBy }),
-        },
-      }),
-    [],
-  );
+  const launched = record(() => {
+    budget.admit();
+    return store.append({
+      ...event,
+      type: "agent.launched",
+      payload: {
+        environmentId: environment.id,
+        ...request,
+        terminalId,
+        ...(launchedBy === undefined ? {} : { launchedBy }),
+      },
+    });
+  }, []);
   // Nothing else may settle the agent while its launch is in flight, so it takes its slot in the
   // same synchronous step as it is recorded: no await may come between the two.
   return queue.run(agentId, async () => {
