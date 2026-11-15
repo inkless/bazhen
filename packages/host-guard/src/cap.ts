@@ -10,11 +10,11 @@
 // process group of its own (nextest gives each one) is out of the group's reach. Nothing here
 // signals a pid read from a listing.
 
-import { execFile, execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { readFileSync, readdirSync, watch, type FSWatcher } from "node:fs";
 import { totalmem } from "node:os";
-import { isAlive, signalChild, signalGroup, spawnGroup } from "./signal.ts";
+import { isAlive, signalGroup, spawnGroup } from "./signal.ts";
 
 export interface Cap {
   readonly memory: number;
@@ -388,11 +388,27 @@ export function parseTop(text: string): ProcessRow[] {
   );
 }
 
-/** A `/proc/<pid>/status`'s anonymous memory in bytes: resident, shared and swapped out. */
+/**
+ * A `/proc/<pid>/status`'s own anonymous memory in bytes, resident and swapped out. Shared memory
+ * is left to `smapsShmem`: counted here, it would count once for every process that maps it.
+ */
 export function statusAnon(text: string): number {
-  const kib = (field: string) =>
-    Number(new RegExp(`^${field}:\\s+(\\d+) kB$`, "m").exec(text)?.[1] ?? 0);
-  return (kib("RssAnon") + kib("RssShmem") + kib("VmSwap")) * 1024;
+  return (kib(text, "RssAnon") + kib(text, "VmSwap")) * 1024;
+}
+
+const kib = (text: string, field: string) =>
+  Number(new RegExp(`^${field}:\\s+(\\d+) kB$`, "m").exec(text)?.[1] ?? 0);
+
+/** A `/proc/<pid>/smaps_rollup`'s share of the shared memory it maps, in bytes. */
+export const smapsShmem = (text: string) => kib(text, "Pss_Shmem") * 1024;
+
+/** A process's memory: its own anonymous memory, and its proportional share of what it shares. */
+function processMemory(pid: number): number {
+  const status = readText(`/proc/${pid}/status`) ?? "";
+  // smaps_rollup walks the process's page tables, so it is read only where there is shmem.
+  const shared =
+    kib(status, "RssShmem") > 0 ? smapsShmem(readText(`/proc/${pid}/smaps_rollup`) ?? "") : 0;
+  return statusAnon(status) + shared;
 }
 
 /** `root` and its descendants, from each thread's `children` file: no scan of all of `/proc`. */
@@ -417,36 +433,55 @@ function linuxTree(root: number): number[] {
 }
 
 /** The memory of `root` and, but for darwin's `onlyRoot`, its tree: `/proc` or `top`. */
-async function sampleTree(root: number, onlyRoot = false): Promise<number> {
+async function sampleTree(root: number, onlyRoot: boolean): Promise<number> {
   if (process.platform === "darwin") {
     const pid = onlyRoot ? ["-pid", String(root)] : [];
     const top = await output("top", ["-l", "1", ...pid, "-stats", "pid,ppid,mem"]);
     return sum(treeRows(parseTop(top ?? ""), root));
   }
-  return linuxTree(root).reduce(
-    (total, pid) => total + statusAnon(readText(`/proc/${pid}/status`) ?? ""),
-    0,
-  );
+  return linuxTree(root).reduce((total, pid) => total + processMemory(pid), 0);
 }
 
 const SAMPLE_MS = process.platform === "darwin" ? 1000 : 100;
+// Under nextest's own grace of 10 s, so the group's kill lands before nextest kills the runner and
+// leaves the group with no one watching it.
+const FORWARD_GRACE_MS = 5_000;
 
 /**
- * Watches a child's memory and time: past the memory cap `kill` gets SIGKILL at once (at
- * gigabytes a second, a grace period is gigabytes more), and past the time cap SIGTERM, then
- * SIGKILL 10 s later.
+ * Runs `bin` in a process group of its own and watches its tree. Past the memory cap the group
+ * gets SIGKILL at once (at gigabytes a second, a grace period is gigabytes more); past the time
+ * cap, or on a SIGTERM or SIGHUP passed on to it, SIGTERM, then SIGKILL if it hasn't gone. Once
+ * the command has gone, whatever it left in its group is killed with it.
  */
-function watchChild(
-  child: ChildProcess,
+async function runGroup(
+  bin: string,
+  argv: readonly string[],
   cap: Cap,
-  kill: (signal: NodeJS.Signals) => void,
+  env: NodeJS.ProcessEnv,
   onlyRoot: boolean,
 ): Promise<Ended> {
+  const child = spawnGroup(bin, argv, {
+    stdio: "inherit",
+    env: { ...env, [CAPPED_ENV]: `fallback:${process.pid}` },
+  });
   const pid = child.pid;
+  const stop = (signal: NodeJS.Signals) => {
+    try {
+      signalGroup(child, signal);
+    } catch {
+      // The group has gone.
+    }
+  };
   let peak = 0;
   let kills = 0;
   let timedOut = false;
   let sampling = false;
+  let escalation: NodeJS.Timeout | undefined;
+  const stopSoon = (signal: NodeJS.Signals, graceMs: number) => {
+    stop(signal);
+    escalation ??= setTimeout(() => stop("SIGKILL"), graceMs);
+  };
+  const offSignals = onSignals((signal) => stopSoon(signal, FORWARD_GRACE_MS), true);
   const watchdog = setInterval(() => {
     if (sampling || pid === undefined) return;
     sampling = true;
@@ -455,54 +490,34 @@ function watchChild(
       peak = Math.max(peak, bytes);
       if (bytes > cap.memory && kills === 0) {
         kills = 1;
-        kill("SIGKILL");
+        stop("SIGKILL");
       }
     });
   }, SAMPLE_MS);
-  let escalation: NodeJS.Timeout | undefined;
   const timer = setTimeout(() => {
     timedOut = true;
-    kill("SIGTERM");
-    escalation = setTimeout(() => kill("SIGKILL"), STOP_GRACE_MS);
+    stopSoon("SIGTERM", STOP_GRACE_MS);
   }, cap.timeMs);
-  return new Promise((done) => {
-    const finish = (code: number | null, signal: NodeJS.Signals | null) => {
-      clearInterval(watchdog);
-      clearTimeout(timer);
-      clearTimeout(escalation);
-      done({ code, signal, peak, memoryKills: kills, timedOut });
-    };
-    child.once("error", () => finish(127, null));
-    child.once("exit", finish);
+  const [code, signal] = await new Promise<[number | null, NodeJS.Signals | null]>((done) => {
+    child.once("error", () => done([127, null]));
+    child.once("exit", (c, s) => done([c, s]));
   });
+  clearInterval(watchdog);
+  clearTimeout(timer);
+  clearTimeout(escalation);
+  stop("SIGKILL");
+  offSignals();
+  return { code, signal, peak, memoryKills: kills, timedOut };
 }
 
-/**
- * Runs a command in a process group of its own and watches its tree, stopping the group at a cap.
- * Once the command has gone, whatever it left in its group is killed with it.
- */
-export async function runWatched(
+/** Runs a command in a process group of its own, watching its tree and stopping the group. */
+export function runWatched(
   command: string,
   args: readonly string[],
   cap: Cap,
   env: NodeJS.ProcessEnv,
 ): Promise<Ended> {
-  const child = spawnGroup(command, args, {
-    stdio: "inherit",
-    env: { ...env, [CAPPED_ENV]: `fallback:${process.pid}` },
-  });
-  const stop = (signal: NodeJS.Signals) => {
-    try {
-      signalGroup(child, signal);
-    } catch {
-      // The group has gone.
-    }
-  };
-  const offSignals = onSignals(stop, true);
-  const ended = await watchChild(child, cap, stop, false);
-  stop("SIGKILL");
-  offSignals();
-  return ended;
+  return runGroup(command, args, cap, env, false);
 }
 
 /**
@@ -518,14 +533,15 @@ export function ownedArgv(
   platform = process.platform,
 ): [string, string[]] {
   if (platform !== "linux") return [command, [...args]];
-  const kib = Math.ceil(Math.max(cap.memory * 1.25, 2 * 1024 ** 3) / 1024);
-  const limit = 'ulimit -d "$1" && shift && exec "$@"';
-  return ["sh", ["-c", limit, "sh", String(kib), command, ...args]];
+  const limit = Math.ceil(Math.max(cap.memory * 1.25, 2 * 1024 ** 3) / 1024);
+  const script = 'ulimit -d "$1" && shift && exec "$@"';
+  return ["sh", ["-c", script, "sh", String(limit), command, ...args]];
 }
 
 /**
- * Runs a test binary as this process's own child and caps it itself: where systemd can't, the
- * runner that spawned a test is the one process that may signal it.
+ * Runs a test binary in a group of its own that its runner watches, where systemd can't cap it:
+ * nextest gives each test a group, so the runner, which spawned the test, is the one process
+ * that may stop the test and anything the test starts.
  */
 export function runOwned(
   command: string,
@@ -534,23 +550,29 @@ export function runOwned(
   env: NodeJS.ProcessEnv,
 ): Promise<Ended> {
   const [bin, argv] = ownedArgv(command, args, cap);
-  const child = spawn(bin, argv, { stdio: "inherit", env });
-  const kill = (signal: NodeJS.Signals) => void signalChild(child, signal);
-  const offSignals = onSignals(kill, false);
-  return watchChild(child, cap, kill, true).finally(offSignals);
+  return runGroup(bin, argv, cap, env, true);
+}
+
+/** The OOM kills the capped scope this process runs in has counted so far. */
+function scopeKills(read = readText): number {
+  const path = cgroupOf(read("/proc/self/cgroup") ?? "");
+  return path === undefined ? 0 : oomKills(read(`/sys/fs/cgroup${path}/memory.events`) ?? "");
 }
 
 /**
  * Runs a command inside a capped scope that already covers it, in this process's group, and ends
- * the way it ended. Signals to this process alone are waited out: the group's reach the child.
+ * the way it ended. Signals to this process alone are waited out: the group's reach the child. A
+ * command that died by SIGKILL while the scope counted an OOM kill is taken as that kill.
  */
 export function runThrough(command: string, args: readonly string[]): Promise<Ended> {
+  const before = scopeKills();
   const offSignals = onSignals(() => undefined, false);
   const child = spawn(command, args, { stdio: "inherit" });
   return new Promise((done) => {
     const finish = (code: number | null, signal: NodeJS.Signals | null) => {
       offSignals();
-      done({ code, signal, peak: 0, memoryKills: 0, timedOut: false });
+      const memoryKills = signal === "SIGKILL" && scopeKills() > before ? 1 : 0;
+      done({ code, signal, peak: 0, memoryKills, timedOut: false });
     };
     child.once("error", () => finish(127, null));
     child.once("exit", finish);
@@ -576,16 +598,16 @@ const realDeps: ModeDeps = {
 };
 
 /**
- * How to run under `cap`, and, when systemd can't cap here, why. A test binary inside a capped
- * scope runs through, so the scope's cap holds its tests too; anywhere else it gets a scope of
- * its own, or its runner's watch. A whole command inside a capped scope needs no probe.
+ * How to run under `cap`, and, when systemd can't cap here, why. Inside a capped scope a command
+ * runs through, so the scope's cap holds it too: a scope of its own would be a sibling, outside
+ * that cap. Anywhere else it gets a scope of its own, or a watch where systemd can't cap.
  */
 export async function chooseMode(
   cap: Cap,
   testBinary: boolean,
   deps: ModeDeps = realDeps,
 ): Promise<{ mode: Mode; note?: string }> {
-  if (deps.inScope()) return { mode: testBinary ? "through" : "scope" };
+  if (deps.inScope()) return { mode: "through" };
   const verdict = await deps.probe(cap);
   if (verdict.ok) return { mode: "scope" };
   return { mode: testBinary ? "owned" : "watched", note: verdict.why };

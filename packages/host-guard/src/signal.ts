@@ -3,7 +3,7 @@
 // servers itself, once its process was checked to be that server: a stray pid ends someone
 // else's work, and a stray negative one their whole session.
 
-import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { spawn, type SpawnOptions } from "node:child_process";
 import { constants } from "node:os";
 
 const groups = new Set<number>();
@@ -134,15 +134,6 @@ export function signalPane(pane: PaneGroup, signal: NodeJS.Signals, now = Date.n
   if (expiry === undefined) throw new RangeError(`refusing to signal group ${pane.pid}: unvouched`);
   if (now > expiry) throw new RangeError(`refusing to signal group ${pane.pid}: stale proof`);
   send(-pane.pid, signal);
-}
-
-/**
- * Signals a child this process spawned and has not yet seen exit. Its pid can't have been reused,
- * since until this process reaps it the kernel keeps it. Whether it was still running.
- */
-export function signalChild(child: ChildProcess, signal: NodeJS.Signals): boolean {
-  if (child.exitCode !== null || child.signalCode !== null) return false;
-  return child.kill(signal);
 }
 
 // Node ignores SIGPIPE and starts its inspector on SIGUSR1, so neither would end this process.

@@ -14,6 +14,7 @@ import {
   ownedArgv,
   oomKills,
   parseTop,
+  smapsShmem,
   scopeArgv,
   sliceMemory,
   statAnon,
@@ -164,9 +165,9 @@ describe("how a run is capped", () => {
     });
   });
 
-  it("gives a whole command inside a capped scope a scope of its own without a probe", async () => {
+  it("runs a whole command inside a capped scope through, so that scope's cap holds it", async () => {
     await expect(chooseMode(cap, false, deps({ inScope: () => true }))).resolves.toEqual({
-      mode: "scope",
+      mode: "through",
     });
   });
 
@@ -273,9 +274,14 @@ describe("reading memory", () => {
     expect(statParent("4242 (a (b) c) S 77 4242 4242 0 -1")).toBe(77);
   });
 
-  it("reads anonymous memory, shared and swapped out included, but not file-backed", () => {
+  it("reads a process's own anonymous memory, swapped out included, but no shared memory", () => {
     const status =
       "VmRSS:\t 900 kB\nRssAnon:\t 300 kB\nRssFile:\t 600 kB\nRssShmem:\t 20 kB\nVmSwap:\t 5 kB\n";
-    expect(statusAnon(status)).toBe(325 * 1024);
+    expect(statusAnon(status)).toBe(305 * 1024);
+  });
+
+  it("reads a process's proportional share of the shared memory it maps", () => {
+    const rollup = "Rss:\t 1000 kB\nPss:\t 400 kB\nPss_Anon:\t 100 kB\nPss_Shmem:\t 75 kB\n";
+    expect(smapsShmem(rollup)).toBe(75 * 1024);
   });
 });

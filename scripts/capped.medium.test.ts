@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { cappedScope, chooseMode } from "../packages/host-guard/src/cap.ts";
+import { cappedScope, chooseMode, runIn } from "../packages/host-guard/src/cap.ts";
 import { KILLS_ENV, TEST_BINARY_CAP } from "./capped.ts";
 
 const capped = fileURLToPath(new URL("capped.ts", import.meta.url));
@@ -21,6 +21,9 @@ const asRunner = (argv: string[], env: NodeJS.ProcessEnv = process.env) =>
 // where the runner runs it as it is, inside a scope whose own cap is larger.
 const RUNAWAY =
   "const a = []; setInterval(() => a.length < 64 ? a.push(Buffer.alloc(16 << 20, 1)) : process.exit(0), 20)";
+const SMALL = { memory: 128 * 1024 ** 2, timeMs: 30_000 };
+/** A run of its own: a sibling scope beside the one this test runs in, else what the host offers. */
+const outerMode = async () => (inScope ? "scope" : (await chooseMode(SMALL, false)).mode);
 const dir = mkdtempSync(join(tmpdir(), "bz-capped-"));
 // Inside a capped scope a test binary runs through, whatever the host offers.
 const inScope = cappedScope() !== undefined;
@@ -73,6 +76,21 @@ describe("capped as cargo's test runner", () => {
     const kills = join(dir, "kills-owned");
     asRunner([process.execPath, "-e", RUNAWAY], { ...withoutSystemd(), [KILLS_ENV]: kills });
     expect(existsSync(kills)).toBe(!inScope);
+  });
+
+  it("names a test killed by the cap of the scope it runs through in", async () => {
+    // A run of its own around the runner, with a cap the runaway passes: inside a scope the runner
+    // runs its test through, and where systemd can't cap, it caps the test itself.
+    const outer = await outerMode();
+    const kills = join(dir, "kills-through");
+    await runIn(
+      outer,
+      capped,
+      ["--test-binary", "--memory", "128M", "--", process.execPath, "-e", RUNAWAY],
+      SMALL,
+      { ...process.env, [KILLS_ENV]: kills },
+    );
+    expect(existsSync(kills)).toBe(true);
   });
 
   it("names no test that a SIGKILL from elsewhere ended", () => {

@@ -6,7 +6,15 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { chooseMode, ownedArgv, runIn, runOwned, runWatched, type Mode } from "./cap.ts";
+import {
+  cappedScope,
+  chooseMode,
+  ownedArgv,
+  runIn,
+  runOwned,
+  runWatched,
+  type Mode,
+} from "./cap.ts";
 import { isAlive } from "./signal.ts";
 
 const MIB = 1024 ** 2;
@@ -28,7 +36,8 @@ let mode: Mode;
 let dir: string;
 
 beforeAll(async () => {
-  ({ mode } = await chooseMode(cap, false));
+  // A run of its own: inside a capped scope (this one's), chooseMode would run it through.
+  mode = cappedScope() === undefined ? (await chooseMode(cap, false)).mode : "scope";
   dir = mkdtempSync(join(tmpdir(), "bz-cap-"));
 });
 
@@ -57,7 +66,9 @@ describe("a capped run", () => {
     const pidFile = join(dir, "left");
     const script = `(trap "" TERM; exec sleep 60) & echo $! > "${pidFile}"`;
     await runIn(mode, "sh", ["-c", script], cap, process.env);
-    expect(isAlive(Number(readFileSync(pidFile, "utf8")))).toBe(false);
+    // Killed, it lingers only until whatever inherited it reaps it.
+    const pid = Number(readFileSync(pidFile, "utf8"));
+    await vi.waitFor(() => expect(isAlive(pid)).toBe(false), { timeout: 2_000 });
   }, 30_000);
 
   it("leaves no scope behind, whether it exited, ran out of time or was killed", () => {
@@ -70,9 +81,18 @@ const [limitBin, limitArgs] = ownedArgv("sh", ["-c", "ulimit -d"], cap);
 const expectedLimit = limitBin === "sh" && limitArgs[0] === "-c" ? limitArgs[3] : "unlimited";
 
 describe("a test binary its runner caps", () => {
-  it("is killed at its cap, the runner signalling its own child", async () => {
+  it("is killed at its cap, the runner signalling the group it started", async () => {
     const ended = await runOwned(process.execPath, ["-e", RUNAWAY], cap, process.env);
     expect(ended).toMatchObject({ memoryKills: 1, signal: "SIGKILL" });
+  });
+
+  it("is killed with a runaway it started itself, which the kill doesn't leave behind", async () => {
+    const pidFile = join(dir, "runaway-child");
+    const script = `"${process.execPath}" -e '${RUNAWAY}' & echo $! > "${pidFile}"; wait`;
+    const ended = await runOwned("sh", ["-c", script], cap, process.env);
+    expect(ended.memoryKills).toBe(1);
+    const pid = Number(readFileSync(pidFile, "utf8"));
+    await vi.waitFor(() => expect(isAlive(pid)).toBe(false), { timeout: 2_000 });
   });
 
   it("runs under the data limit that backs the watchdog up", () => {

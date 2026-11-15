@@ -39,6 +39,7 @@ const STARTS = new Set([
   "runIn",
   "runInScope",
   "runWatched",
+  "runOwned",
   "runThrough",
   "linuxNotifier",
   "macNotifier",
