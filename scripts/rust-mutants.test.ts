@@ -3,6 +3,7 @@ import {
   failedOnAssertion,
   filterable,
   libtestTargets,
+  mutantListing,
   nextestFilter,
   parseMutants,
   inTestCode,
@@ -76,6 +77,18 @@ describe("parseMutants", () => {
     for (const listing of [null, {}, "[]", [{ file: LIB }], [mutant("x", null)]]) {
       expect(() => parseMutants(listing)).toThrow(/not a cargo-mutants listing/);
     }
+  });
+});
+
+describe("mutantListing", () => {
+  it("reads the nothing cargo-mutants prints for a diff with no code to mutate as no mutants", () => {
+    expect(mutantListing("")).toEqual([]);
+    expect(mutantListing("\n")).toEqual([]);
+  });
+
+  it("reads a listing it printed, and refuses output that isn't JSON", () => {
+    expect(mutantListing('[{"name":"x"}]\n')).toEqual([{ name: "x" }]);
+    expect(() => mutantListing("warning: x")).toThrow(SyntaxError);
   });
 });
 

@@ -66,6 +66,7 @@ import {
   unmutate,
   libtestTargets,
   nextestFilter,
+  mutantListing,
   parseMutants,
   testEvents,
   type Mutant,
@@ -616,7 +617,7 @@ async function listMutants(dir: string, top: string, diff: string): Promise<unkn
     { env: rustEnv(top), timeoutMs: CARGO_TIMEOUT_MS },
   );
   if (!ok) throw new Error("cargo-mutants failed");
-  return JSON.parse(out);
+  return mutantListing(out);
 }
 
 // Each test's own timeout, so a mutant that loops ends that test, not the whole run.
