@@ -233,3 +233,58 @@ test("says a shell is no longer open for a link to one, with a way back", async 
   await page.getByRole("button", { name: "Back to the fleet" }).click();
   await expect(page.getByRole("list", { name: "fleet overview" })).toBeVisible();
 });
+
+/**
+ * Shows the page the shell `shellId` lost, as after a reboot, with a line kept to retype while
+ * `retypeable` says so.
+ */
+async function showLost(page: Page, shellId: string, retypeable: () => boolean): Promise<void> {
+  const lost = (s: unknown) =>
+    Reflect.get(Object(s), "id") === shellId
+      ? {
+          ...Object(s),
+          state: "lost",
+          commands: ["close", "restart", "rename"],
+          retypeable: retypeable(),
+        }
+      : s;
+  await page.route("**/v1/state", async (route) => {
+    const res = await route.fetch();
+    const state: unknown = await res.json();
+    const shells: unknown = Reflect.get(Object(state), "shells");
+    await route.fulfill({
+      response: res,
+      json: { ...Object(state), shells: Array.isArray(shells) ? shells.map(lost) : shells },
+    });
+  });
+}
+
+test("offers to retype a lost shell's last command only where its integration kept one", async ({
+  page,
+}) => {
+  await launch(page);
+  const shellId = await openBeside(page);
+  let retypeable = false;
+  await showLost(page, shellId, () => retypeable);
+  const sent: unknown[] = [];
+  await page.route(`**/v1/shells/${shellId}/restart`, async (route) => {
+    sent.push(route.request().postDataJSON());
+    await route.fulfill({ json: { terminalId: shellId, eventIds: [1] } });
+  });
+  const restart = pane(page).getByRole("button", { name: "Restart", exact: true });
+  const retype = pane(page).getByRole("button", { name: "Restart and retype last command" });
+
+  await page.reload();
+  await expect(restart).toBeVisible();
+  await expect(retype).toHaveCount(0);
+
+  retypeable = true;
+  await page.reload();
+  await retype.click();
+  await restart.click();
+  await expect.poll(() => sent.length).toBe(2);
+  expect(sent).toEqual([
+    { idempotencyKey: expect.any(String), generation: 0, retype: true },
+    { idempotencyKey: expect.any(String), generation: 0 },
+  ]);
+});
