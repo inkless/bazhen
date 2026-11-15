@@ -135,6 +135,17 @@ export function signalPane(pane: PaneGroup, signal: NodeJS.Signals, now = Date.n
   send(-pane.pid, signal);
 }
 
+/**
+ * Ends this process by `signal`, the way the child it ran for ended, so its own parent (nextest,
+ * a shell) reads the same death rather than an exit code standing for it.
+ */
+export function dieBy(signal: NodeJS.Signals): never {
+  process.removeAllListeners(signal);
+  process.kill(process.pid, signal);
+  // Only a signal whose default action doesn't end a process gets here.
+  process.exit(1);
+}
+
 /** Whether a process exists; one this user may not signal counts as alive. */
 export function isAlive(pid: number): boolean {
   if (!isPid(pid)) throw new RangeError(`refusing to probe pid ${pid}`);

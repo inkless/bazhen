@@ -13,6 +13,7 @@ export {
   type ServerVerdict,
 } from "./tmux.ts";
 export {
+  dieBy,
   isAlive,
   signalGroup,
   signalPane,
@@ -28,3 +29,20 @@ export {
   type DesktopNotification,
   type ShowNotification,
 } from "./notify.ts";
+export {
+  CAPPED_ENV,
+  MIN_SYSTEMD,
+  SLICE,
+  cappedRunRefusal,
+  cappedScope,
+  chooseMode,
+  clampMemory,
+  fallbackWatchdog,
+  probeSystemd,
+  runIn,
+  sliceMemory,
+  type Cap,
+  type Ended,
+  type Mode,
+  type Verdict,
+} from "./cap.ts";
