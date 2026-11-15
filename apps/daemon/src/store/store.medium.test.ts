@@ -1,4 +1,13 @@
-import { mkdtempSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -16,7 +25,13 @@ import {
 } from "../testing/fixtures.ts";
 import { MIGRATIONS } from "./migrations.ts";
 import { UnknownEntity } from "./projections.ts";
-import { LATEST_SCHEMA_VERSION, SchemaTooNew, Store, UnknownAgent } from "./store.ts";
+import {
+  LATEST_SCHEMA_VERSION,
+  SchemaTooNew,
+  Store,
+  UnknownAgent,
+  UnsafeDatabase,
+} from "./store.ts";
 
 const dbPath = () => join(mkdtempSync(join(tmpdir(), "bz-store-")), "bazhen.db");
 
@@ -48,6 +63,22 @@ const shellOpened = (terminalId: string, environmentId: string, linkedAgentId: s
     actor: "user",
     payload: { environmentId, cwd: "/work", linkedAgentId },
   }) as const;
+
+/**
+ * Leaves `path` as a daemon killed with a live WAL would, made before databases were private:
+ * the database and both journals on disk, 0644.
+ */
+function leftByKilledDaemon(path: string): void {
+  const killed = Store.open(path);
+  withEnvironment(killed);
+  const journals = [`${path}-wal`, `${path}-shm`].map((file) => ({
+    file,
+    bytes: readFileSync(file),
+  }));
+  killed.close();
+  for (const { file, bytes } of journals) writeFileSync(file, bytes, { mode: 0o644 });
+  for (const file of [path, ...journals.map((j) => j.file)]) chmodSync(file, 0o644);
+}
 
 describe("Store", () => {
   it("migrates a fresh database to the latest schema, and reopening is a no-op", () => {
@@ -197,6 +228,43 @@ describe("Store", () => {
       runtime: "tmux",
     });
     raw.close();
+  });
+
+  it("keeps its database and journals readable by this user only, tightening an older one", () => {
+    const fresh = dbPath();
+    const older = dbPath();
+    leftByKilledDaemon(older);
+    const store = Store.open(fresh);
+    withEnvironment(store);
+    const reopened = Store.open(older);
+    const files = [fresh, `${fresh}-wal`, `${fresh}-shm`, older, `${older}-wal`, `${older}-shm`];
+    expect(files.map((file) => statSync(file).mode & 0o777)).toEqual(files.map(() => 0o600));
+    store.close();
+    reopened.close();
+  });
+
+  it("refuses a database or journal that is a symlink, changing nothing it points at", () => {
+    const path = dbPath();
+    const elsewhere = join(mkdtempSync(join(tmpdir(), "bz-elsewhere-")), "target");
+    writeFileSync(elsewhere, "", { mode: 0o644 });
+    symlinkSync(elsewhere, `${path}-wal`);
+    expect(() => Store.open(path)).toThrow(UnsafeDatabase);
+    symlinkSync(elsewhere, `${path}.db`);
+    expect(() => Store.open(`${path}.db`)).toThrow("it is a symlink");
+    expect(statSync(elsewhere).mode & 0o777).toBe(0o644);
+  });
+
+  it("refuses a FIFO or a directory in a journal's place at once, rather than wait on it", () => {
+    const fifo = dbPath();
+    execFileSync("mkfifo", [`${fifo}-wal`]);
+    const dir = dbPath();
+    mkdirSync(`${dir}-shm`);
+    expect(() => Store.open(fifo)).toThrow("it is not a regular file");
+    expect(() => Store.open(dir)).toThrow("it is not a regular file");
+  });
+
+  it("refuses a device as its database, which opens for writing like a file", () => {
+    expect(() => Store.open("/dev/null")).toThrow("it is not a regular file");
   });
 
   it("keeps the same HostId across reopen", () => {
