@@ -40,6 +40,7 @@ const snapshot = (tasks: StateSnapshot["tasks"], assignments: StateSnapshot["ass
     shells: [],
     tasks,
     assignments,
+    notices: [],
   }) satisfies StateSnapshot;
 
 /** The call the verb's answer to `reply` leads to, as path and body; what it prints, if it prints. */

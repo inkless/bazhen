@@ -16,6 +16,7 @@ import { InvalidTransition, newId, type ResumeEvidence } from "@bazhen/core";
 import { TerminalState, type ExternalRef } from "@bazhen/protocol";
 import {
   age,
+  loopbackPairing,
   register,
   resumesClaude,
   settled,
@@ -152,6 +153,15 @@ describe("Store", () => {
       payload: { name: "logs" },
     });
     expect([before, upgraded.snapshot(testView).shells[0]?.name]).toEqual([null, "logs"]);
+    upgraded.close();
+  });
+
+  it("upgrades a schema-21 database, and a device paired after it opens a notice", () => {
+    const path = dbPath();
+    Store.open(path, MIGRATIONS.slice(0, 21)).close();
+    const upgraded = Store.open(path);
+    const device = upgraded.pairDevice("phone", "hash", true, new Date(), loopbackPairing);
+    expect(upgraded.snapshot(testView).notices.map((n) => n.device?.id)).toEqual([device]);
     upgraded.close();
   });
 
@@ -372,7 +382,7 @@ describe("Store durability", () => {
     const store = Store.open(dbPath());
     const now = new Date("2026-02-01T00:00:00.000Z");
     const levels = commitLevels();
-    const device = store.pairDevice("phone", "hash", true, now);
+    const device = store.pairDevice("phone", "hash", true, now, loopbackPairing);
     store.revokeDevice(device, now);
     withEnvironment(store);
     expect(levels).toEqual([1, 2, 1]);
@@ -381,7 +391,7 @@ describe("Store durability", () => {
 
   it("goes back to NORMAL when a durable transaction can't even begin", () => {
     const store = Store.open(dbPath());
-    const device = store.pairDevice("phone", "hash", true, new Date());
+    const device = store.pairDevice("phone", "hash", true, new Date(), loopbackPairing);
     const levels = commitLevels({ lockedOnce: true });
     expect(() => store.revokeDevice(device, new Date())).toThrow("database is locked");
     withEnvironment(store);
@@ -391,7 +401,7 @@ describe("Store durability", () => {
 
   it("refuses a durable transaction inside another, whose commit would decide its durability", () => {
     const store = Store.open(dbPath());
-    const device = store.pairDevice("phone", "hash", true, new Date());
+    const device = store.pairDevice("phone", "hash", true, new Date(), loopbackPairing);
     expect(() => store.transaction(() => store.revokeDevice(device, new Date()))).toThrow(
       /durable/,
     );
@@ -416,6 +426,7 @@ describe("Store snapshot view", () => {
     resumes: resumesClaude,
     themes: () => ["light", "dark"] as const,
     attentionActions: () => [],
+    noticeActions: () => [],
   };
 
   it("names each environment's host as the view says", () => {

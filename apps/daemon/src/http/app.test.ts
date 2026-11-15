@@ -15,6 +15,7 @@ import { AttentionClosed } from "../mailbox/approvals.ts";
 import { AgentGone } from "../mailbox/mailbox.ts";
 import { ShellBusy, UnknownShell } from "../shells/lifecycle.ts";
 import { AttentionRefused } from "../attention/inbox.ts";
+import { NoticeClosed, NoticeRefused } from "../attention/notices.ts";
 import { TerminalLimit } from "../terminals/budget.ts";
 import { createApp, type AppDeps, type TaskCommands } from "./app.ts";
 
@@ -57,6 +58,7 @@ const deps: AppDeps = {
     attention: [],
     messages: [],
     shells: [],
+    notices: [],
   }),
   answer: () => {
     throw new AttentionClosed("attn_x");
@@ -69,6 +71,11 @@ const deps: AppDeps = {
   },
   resend: () => {
     throw new AttentionRefused("attn_x", "resend");
+  },
+  dismissNotice: (noticeId, req, viewer) => {
+    if (req.idempotencyKey === "refused") throw new NoticeRefused(noticeId, "dismiss");
+    if (viewer !== "owner") throw new Error("a request with no paired device is the owner's");
+    throw new NoticeClosed(noticeId);
   },
   close: async (agentId, req) => {
     if (req.generation === 3) throw new ServerUnconfirmed(agentId, new Error("no server running"));
@@ -115,6 +122,12 @@ const act = (action: string, body: object) =>
     method: "POST",
     headers: { host, "content-type": "application/json" },
     body: JSON.stringify({ idempotencyKey: "a", ...body }),
+  });
+const dismissNotice = (body: unknown) =>
+  app.request("/v1/notices/ntc_x/dismiss", {
+    method: "POST",
+    headers: { host, "content-type": "application/json" },
+    body: JSON.stringify(body),
   });
 const post = (body: unknown, headers: Record<string, string> = {}) =>
   app.request("/v1/agents", {
@@ -171,6 +184,7 @@ describe("HTTP app", () => {
       shells: [],
       tasks: [],
       assignments: [],
+      notices: [],
     });
   });
 
@@ -239,6 +253,15 @@ describe("HTTP app", () => {
       (await act("dismiss", {})).status,
     ];
     expect(statuses).toEqual([409, 409, 409]);
+  });
+
+  it("answers a notice dismissal that is closed or refused with a conflict, and a bad body with 400", async () => {
+    const replies = [
+      await dismissNotice({ idempotencyKey: "closed" }),
+      await dismissNotice({ idempotencyKey: "refused" }),
+      await dismissNotice({}),
+    ];
+    expect(replies.map((r) => r.status)).toEqual([409, 409, 400]);
   });
 
   it("tells a stale generation from an environment that can't be reached, on close", async () => {

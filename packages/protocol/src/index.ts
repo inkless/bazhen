@@ -11,6 +11,7 @@ export * from "./ids.ts";
 export * from "./input.ts";
 export * from "./json.ts";
 export * from "./mail.ts";
+export * from "./notices.ts";
 export * from "./origins.ts";
 export * from "./shells.ts";
 export * from "./stream.ts";

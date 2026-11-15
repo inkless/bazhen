@@ -35,6 +35,7 @@ const snapshot = (attention: Attention[]): StateSnapshot => ({
   shells: [],
   tasks: [],
   assignments: [],
+  notices: [],
 });
 
 describe("inbox rows", () => {

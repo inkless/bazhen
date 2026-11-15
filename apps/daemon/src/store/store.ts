@@ -13,6 +13,7 @@ import {
   type EnvironmentId,
   type IdPrefix,
   type MessageId,
+  type NoticeId,
   type RuntimeRef,
   type TerminalId,
   type TaskView,
@@ -34,7 +35,9 @@ import {
   TerminalState,
   EnvironmentKind,
   AttentionKind,
+  DEVICE_PAIRED,
   type AttentionAction,
+  type NoticeAction,
   type MailboxState,
   type ResetReason,
   type EventPayload,
@@ -83,6 +86,27 @@ export interface OpenAttention {
   /** The task it is about, for an escalation or a task done. */
   readonly taskId: string | null;
 }
+
+/** An open notice, with the device it is about, if any. */
+export interface OpenNotice {
+  readonly id: NoticeId;
+  readonly kind: string;
+  readonly deviceId: string | null;
+}
+
+/** Where a device paired from, for the notice its pairing opens. */
+export interface PairedFrom {
+  /** The allowed origin it paired from. */
+  readonly origin: string;
+  /** The connection's own peer, on the LAN listener only: a forwarding header is the client's. */
+  readonly address: string | null;
+}
+
+/** What a pairing's notice says, here and on a locked screen: nothing the device chose. */
+export const DEVICE_PAIRED_SUMMARY = "A new device paired";
+
+/** How many closed notices the snapshot carries, newest first, besides every open one. */
+export const CLOSED_NOTICES_SHOWN = 20;
 
 export class UnknownDevice extends Error {
   override readonly name = "UnknownDevice";
@@ -141,6 +165,8 @@ export interface SnapshotView {
   themes(harness: HarnessId): readonly TuiTheme[];
   /** What the human can do about an open item now. */
   attentionActions(item: OpenAttention): readonly AttentionAction[];
+  /** What the viewer can do about an open notice now. */
+  noticeActions(notice: OpenNotice): readonly NoticeAction[];
 }
 
 /** Terminal states whose runtime target still exists, so a human can attach to it. */
@@ -570,8 +596,17 @@ export class Store {
       );
   }
 
-  /** Records a newly paired device under the hash of its token; the token itself never comes here. */
-  pairDevice(name: string, tokenHash: string, secure: boolean, now: Date): DeviceId {
+  /**
+   * Records a newly paired device under the hash of its token; the token itself never comes here.
+   * Its notice opens in the same transaction, so no crash leaves a pairing the inbox never shows.
+   */
+  pairDevice(
+    name: string,
+    tokenHash: string,
+    secure: boolean,
+    now: Date,
+    from: PairedFrom,
+  ): DeviceId {
     return this.transaction(() => {
       const id = newId("dev");
       const at = now.toISOString();
@@ -580,8 +615,37 @@ export class Store {
            VALUES (?, ?, ?, ?, ?, ?)`,
       ).run(id, name, tokenHash, at, at, secure ? 1 : 0);
       this.append({ type: "device.paired", entityId: id, actor: "user", payload: { name } });
+      this.append({
+        type: "notice.opened",
+        entityId: newId("ntc"),
+        actor: "system",
+        payload: {
+          kind: DEVICE_PAIRED,
+          summary: DEVICE_PAIRED_SUMMARY,
+          device: { id, name, origin: from.origin, address: from.address },
+        },
+      });
       return id;
     });
+  }
+
+  /** Every open notice, oldest first. */
+  openNotices(): OpenNotice[] {
+    return this.prepare(
+      "SELECT id, kind, device_id FROM notices WHERE state = 'open' ORDER BY created_event_id",
+    )
+      .all()
+      .flatMap((r) =>
+        typeof r.id === "string" && isId("ntc", r.id)
+          ? [
+              {
+                id: r.id,
+                kind: String(r.kind),
+                deviceId: typeof r.device_id === "string" ? r.device_id : null,
+              },
+            ]
+          : [],
+      );
   }
 
   /** The device whose token hashes to `tokenHash`, revoked or not. */
@@ -614,6 +678,14 @@ export class Store {
       if (row.revoked_at !== null) return;
       this.prepare("UPDATE devices SET revoked_at = ? WHERE id = ?").run(now.toISOString(), id);
       this.append({ type: "device.revoked", entityId: id, actor: "user", payload: {} });
+      for (const open of this.openNotices().filter((n) => n.deviceId === id)) {
+        this.append({
+          type: "notice.closed",
+          entityId: open.id,
+          actor: "user",
+          payload: { reason: "revoked" },
+        });
+      }
     });
   }
 
@@ -1045,8 +1117,41 @@ export class Store {
           }),
         tasks: this.prepare(`${TASK} ORDER BY created_event_id`).all(),
         assignments: this.prepare(`${ASSIGNMENT} ORDER BY created_event_id`).all(),
+        notices: this.notices(view),
       }),
     );
+  }
+
+  /** Every open notice, and the latest closed ones, oldest first. */
+  private notices(view: SnapshotView) {
+    return this.prepare(
+      `SELECT n.id, n.kind, n.state, n.close_reason AS closeReason, n.summary, e.ts AS openedAt,
+              n.device_id, n.device_name, n.device_origin, n.device_address
+       FROM notices n JOIN events e ON e.id = n.created_event_id
+       WHERE n.state = 'open' OR n.id IN (
+         SELECT id FROM notices WHERE state = 'closed' ORDER BY updated_event_id DESC LIMIT ?)
+       ORDER BY n.created_event_id`,
+    )
+      .all(CLOSED_NOTICES_SHOWN)
+      .map(({ device_id, device_name, device_origin, device_address, ...r }) => {
+        const deviceId = typeof device_id === "string" ? device_id : null;
+        return {
+          ...r,
+          device:
+            deviceId === null
+              ? null
+              : {
+                  id: deviceId,
+                  name: device_name,
+                  origin: device_origin,
+                  address: device_address ?? null,
+                },
+          actions:
+            r.state === "open" && typeof r.id === "string" && isId("ntc", r.id)
+              ? view.noticeActions({ id: r.id, kind: String(r.kind), deviceId })
+              : [],
+        };
+      });
   }
 
   /** A task with its active assignments, for deciding whether a command on it is allowed. */

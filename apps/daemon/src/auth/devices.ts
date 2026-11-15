@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { parse } from "hono/utils/cookie";
 import type { DeviceId } from "@bazhen/core";
 import { DEVICE_NAME_MAX, type Device } from "@bazhen/protocol";
-import type { Store, StoredDevice } from "../store/store.ts";
+import type { PairedFrom, Store, StoredDevice } from "../store/store.ts";
 import { forwardedFromElsewhere } from "./forwarded.ts";
 
 /**
@@ -64,10 +64,11 @@ export class DeviceAuth {
   pair(
     requested: string | undefined,
     secure: boolean,
+    from: PairedFrom,
   ): { deviceId: DeviceId; name: string; token: string } {
     const name = deviceName(requested);
     const token = randomBytes(32).toString("base64url");
-    const deviceId = this.store.pairDevice(name, hashToken(token), secure, this.now());
+    const deviceId = this.store.pairDevice(name, hashToken(token), secure, this.now(), from);
     this.log(`bazhen: paired a device, ${JSON.stringify(name)} (${deviceId})`);
     return { deviceId, name, token };
   }

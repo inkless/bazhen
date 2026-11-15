@@ -27,7 +27,7 @@ import { Mailbox } from "../mailbox/mailbox.ts";
 import type { Raised } from "../attention/inbox.ts";
 import { Tasks } from "../tasks/tasks.ts";
 import { TerminalBudget, type TerminalAdmission } from "../terminals/budget.ts";
-import { Store, type SnapshotView } from "../store/store.ts";
+import { Store, type PairedFrom, type SnapshotView } from "../store/store.ts";
 
 /** Claude Code sessions resume, whatever their transcript; a test of the transcript says its own. */
 export const resumesClaude: Resumes = (a) => a.harness === "claude-code" && a.externalRef !== null;
@@ -42,7 +42,11 @@ export const testView: SnapshotView = {
     if (item.kind === "approval") return ["allow", "deny"];
     return item.kind === "question" ? [] : ["reply", "dismiss"];
   },
+  noticeActions: () => ["dismiss"],
 };
+
+/** A browser paired on loopback, which shows no address: for tests where that isn't what is tested. */
+export const loopbackPairing: PairedFrom = { origin: "http://127.0.0.1:7900", address: null };
 
 /** Admits every terminal: for tests where the budget isn't what is tested. */
 export const unlimited: TerminalAdmission = { admit: () => {} };

@@ -1,6 +1,7 @@
 import type { HttpBindings } from "@hono/node-server";
 import { Hono, type Context } from "hono";
 import type { DeviceAuth } from "../auth/devices.ts";
+import type { AppEnv } from "../http/app.ts";
 import type { PairingCodes } from "../auth/pairing.ts";
 import { UnknownDevice } from "../store/store.ts";
 import {
@@ -17,7 +18,7 @@ import {
 
 export interface SocketParts {
   /** The `/v1` command routes, unguarded: the socket's permission is the authentication. */
-  readonly commands: Hono;
+  readonly commands: Hono<AppEnv>;
   readonly hooks: Hono;
   /** Stops the daemon; called once the reply to `stop` has been written. */
   readonly stop: () => void;
@@ -46,7 +47,7 @@ const forbidden = (c: Context, message: string) => {
 export function socketApp(parts: SocketParts): Hono<{ Bindings: HttpBindings }> {
   const app = new Hono<{ Bindings: HttpBindings }>();
 
-  // Only a human acts on an attention item, pairs a browser or revokes one: a caller that says it
+  // Only a human acts on an attention item or a notice, pairs a browser or revokes one: a caller that says it
   // is an agent is refused (§9.1). Advisory against a hostile process of the same user, which
   // could just not say (§9.4).
   const humansOnly = (path: string, message: string) =>
@@ -56,6 +57,7 @@ export function socketApp(parts: SocketParts): Hono<{ Bindings: HttpBindings }> 
   for (const action of ["answer", "reply", "resend", "dismiss"]) {
     humansOnly(`/v1/attention/:id/${action}`, `an agent can't ${action} an attention item`);
   }
+  humansOnly("/v1/notices/:id/dismiss", "an agent can't dismiss a notice");
   humansOnly("/v1/pairing/codes", "an agent can't pair a device");
   humansOnly("/v1/devices/:id/revoke", "an agent can't revoke a device");
 
