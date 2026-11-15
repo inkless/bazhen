@@ -1445,6 +1445,12 @@ describe("rustFailures on decoders and fuzz crates", () => {
   });
 });
 
+/** A reader that gives `source` for the holder's chokepoint and nothing for any other file. */
+const childOnly =
+  (source: string) =>
+  (f: string): string =>
+    f === "crates/bazhen-holder/src/child.rs" ? source : "";
+
 describe("the signal chokepoints", () => {
   const CHOKEPOINTS = [
     "packages/host-guard/src/signal.ts",
@@ -1502,6 +1508,14 @@ describe("the signal chokepoints", () => {
     expect(
       testSignalDependencyFailures("crates/x/Cargo.toml", manifest).map((f) => f.split(": ")[0]),
     ).toEqual(["crates/x/Cargo.toml:2", "crates/x/Cargo.toml:4", "crates/x/Cargo.toml:7"]);
+  });
+
+  it("exempts the holder's chokepoint in its product code alone, not in its tests", () => {
+    const source =
+      "fn f() { kill_process(p, s); }\n#[cfg(test)]\nmod tests {\n    fn g() { kill_process(p, s); }\n}";
+    expect(
+      signalChokepointFailures(CHOKEPOINTS, childOnly(source)).map((f) => f.split(": ")[0]),
+    ).toEqual(["crates/bazhen-holder/src/child.rs:4"]);
   });
 
   it("names a chokepoint that no longer exists", () => {

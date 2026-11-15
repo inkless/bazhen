@@ -90,11 +90,12 @@ describe("kills by a process started to send them", () => {
     ]);
   });
 
-  it("lets a shell end itself or its own last job, and a word in prose", () => {
+  it("lets a shell end itself, its own last job, or a pid in a plain variable, and a word in prose", () => {
     const source = [
       'Command::new("sh").args(["-c", "kill -s TERM $$"]);',
       'let s = r#"sh -c "kill -s $s \\$\\$""#;',
       "let t = \"trap 'kill $! 2>/dev/null; exit 0' TERM\";",
+      'let u = "kill -TERM \\"$pid\\" && kill -0 ${child}";',
       'let p = "the kill guard refuses a group it did not start";',
       'vi.spyOn(process, "kill");',
     ].join("\n");
@@ -112,23 +113,51 @@ describe("kills by a process started to send them", () => {
     expect(calls(cap, "process.kill(pid);")).toEqual(["process.kill"]);
   });
 
-  it("finds a kill a shell or a launcher hides: past --, quoted, formatted, bare, or handed on", () => {
+  it("fails closed on a shell kill: one past --, a redirect or a comment, by path, nested, or second", () => {
     const shells = [
       "kill -- -1",
       "kill -KILL -- -1",
       "kill -s TERM -- -$pid",
-      'kill -TERM "$pid"',
+      "kill -s KILL -1",
+      "kill -n 9 -1",
+      "kill -9 -1 2>/dev/null",
+      "kill -KILL -1 2>&1",
+      "kill -9 -1 </dev/null",
+      "kill -9 -1 # x",
+      "/bin/kill -9 -1",
+      "/usr/bin/kill -KILL -1",
+      'sh -c "kill -9 -1"',
+      "bash -c 'kill -s KILL 0'",
+      "kill -0 $$ && kill 0",
       "kill -TERM -{pid}",
       "kill -9 {}",
-      "pgrep x | xargs kill",
       "kill -9",
+      "pgrep x | xargs kill",
+      "xargs -n 1 kill",
+      "xargs -P 4 kill -9",
+      "killall5 -9",
+      "skill -KILL u",
+      "loginctl terminate-user $USER",
+      "fuser -k 8080/tcp",
     ];
     expect(
       shells.map((shell) => calls("a.ts", `spawn("sh", ["-c", ${JSON.stringify(shell)}]);`).length),
     ).toEqual(shells.map(() => 1));
-    const launchers = ["env", "sudo", "timeout", "/usr/bin/setsid"];
-    expect(launchers.flatMap((l) => calls("a.ts", `spawn("${l}", ["kill", "-9", pid]);`))).toEqual(
-      launchers.map((l) => `a kill by "${l}"`),
+  });
+
+  it("finds a kill program handed to a launcher, or a kill verb, as separate arguments", () => {
+    const argvs = [
+      '"env", "kill", "-9", pid',
+      '"sudo", "kill", "-9", pid',
+      '"timeout", "5", "kill", pid',
+      '"/usr/bin/setsid", "kill", pid',
+      '"busybox", "kill", "-9", pid',
+      '"xargs", "-n", "1", "kill"',
+      '"loginctl", "terminate-user", user',
+      '"fuser", "-k", port',
+    ];
+    expect(argvs.map((argv) => calls("a.ts", `spawn("sh", [${argv}]);`).length)).toEqual(
+      argvs.map(() => 1),
     );
   });
 

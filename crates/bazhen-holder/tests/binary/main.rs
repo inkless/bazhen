@@ -198,7 +198,8 @@ fn sweep() -> Result<()> {
         }
         let pid = entry.holder;
         if in_test_home(&entry.socket) {
-            kill_holder(pid, entry.holder_start)?;
+            kill_holder(pid, entry.holder_start)
+                .map_err(|refused| format!("{}: {refused}", path.display()))?;
         }
         // A holder started since, at the same pid, has an entry of its own here.
         if std::fs::read_to_string(&path).is_ok_and(|now| now == text) {
@@ -208,16 +209,29 @@ fn sweep() -> Result<()> {
     Ok(())
 }
 
+/// What became of a holder a ledger entry names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Ended {
+    /// Killed, or already gone.
+    Gone,
+    /// Not the holder the entry names: another process at its pid, or this test or what runs it.
+    NotOurs,
+}
+
 /// Kills the holder at `pid` if it is still the one that started at `start`, checked once the
-/// process is pinned, so a pid reused since is left alone. A holder already gone is fine; a
-/// refused target is a fault in the ledger or the test, so it is an error, never skipped.
-fn kill_holder(pid: u32, start: u64) -> std::result::Result<(), bazhen_test_signal::Refused> {
+/// process is pinned, so a pid reused since is left alone. A refused or failed kill is an error,
+/// never skipped.
+fn kill_holder(pid: u32, start: u64) -> std::result::Result<Ended, bazhen_test_signal::Refused> {
+    use bazhen_test_signal::Refused;
     let ours = || {
         start_time(pid).is_some_and(|now| same_start(now, start))
             && ps("comm=", pid).is_some_and(|comm| is_holder(&comm))
     };
     match bazhen_test_signal::signal_if(pid, Signal::KILL, ours) {
-        Ok(_) | Err(bazhen_test_signal::Refused::Failed(_, rustix::io::Errno::SRCH)) => Ok(()),
+        Ok(true) | Err(Refused::Failed(_, rustix::io::Errno::SRCH)) => Ok(Ended::Gone),
+        Ok(false) | Err(Refused::This(_) | Refused::Parent(_) | Refused::OwnGroup(_)) => {
+            Ok(Ended::NotOurs)
+        }
         Err(refused) => Err(refused),
     }
 }
@@ -302,18 +316,24 @@ impl Drop for Started {
             // Not yet reaped, so the pid is still this holder's.
             let _ = child.kill();
             let _ = child.wait();
-        } else if !self.reaped
+        } else if !self.reaped {
             // `exit` timed out, and its thread still waits for the holder.
-            && let Err(refused) = kill_holder(self.pid, self.start)
-        {
-            // The holder may still run, so its entry stays for the next sweep. Already
-            // unwinding, a second panic would abort the run and hide the first.
-            assert!(
-                std::thread::panicking(),
-                "couldn't end holder {}: {refused}",
-                self.pid
-            );
-            return;
+            match kill_holder(self.pid, self.start) {
+                Ok(Ended::Gone) => {}
+                // A check that failed to read the holder doesn't show it gone, so its entry
+                // stays for the next sweep.
+                Ok(Ended::NotOurs) => return,
+                Err(refused) => {
+                    // Already unwinding, a second panic would abort the run and hide the first.
+                    assert!(
+                        std::thread::panicking(),
+                        "{}: couldn't end holder {}: {refused}",
+                        self.entry.display(),
+                        self.pid
+                    );
+                    return;
+                }
+            }
         }
         let _ = std::fs::remove_file(&self.entry);
     }

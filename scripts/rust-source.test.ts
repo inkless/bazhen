@@ -8,8 +8,8 @@ describe("rustCode", () => {
 
   it("empties strings, raw ones included, and hands their contents back in order", () => {
     const strings: string[] = [];
-    expect(rustCode('f("kill(1)", r#"a "q" b"#)', strings)).toBe('f("", "")');
-    expect(strings).toEqual(["kill(1)", 'a "q" b']);
+    expect(rustCode('f("wipe(1)", r#"a "q" b"#)', strings)).toBe('f("", "")');
+    expect(strings).toEqual(["wipe(1)", 'a "q" b']);
   });
 
   it("empties a char literal but leaves a lifetime alone", () => {

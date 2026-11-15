@@ -496,13 +496,24 @@ const SEE_RUST_MD = "(docs/standards/rust.md § Lints).";
 const REQUIRES_SANDBOX =
   /^\s*bazhen_test_signal\s*::\s*require_sandbox\s*\(\s*\)\s*(?:\.\s*unwrap\s*\(\s*\)|\?)\s*;/;
 
-/** Where the body of the first `fn` at or after `from` begins, or the end of `code`. */
+/**
+ * Where the body of the first `fn` at or after `from` begins: just past its `{`, or, for a
+ * function declared without one (`fn f(&self);` in a trait), just past its `;`, with no body.
+ * The end of `code` if there is none.
+ */
 function fnBodyStart(code: string, from: number): number {
-  const fn = /\bfn\s+\w+/g;
+  const fn = /\bfn\s+\$?\w+/g;
   fn.lastIndex = from;
   const found = fn.exec(code);
-  const brace = found === null ? -1 : code.indexOf("{", found.index);
-  return brace === -1 ? code.length : brace + 1;
+  if (found === null) return code.length;
+  let depth = 0;
+  for (let i = found.index + found[0].length; i < code.length; i++) {
+    const c = code[i];
+    if (c === "(" || c === "[" || c === "<") depth++;
+    else if (c === ")" || c === "]" || (c === ">" && code[i - 1] !== "-")) depth--;
+    else if (depth <= 0 && (c === "{" || c === ";")) return i + 1;
+  }
+  return code.length;
 }
 
 /**
@@ -1936,6 +1947,9 @@ function testLines(source: string): Set<number> {
 /** A dev-dependencies table, plain or a target's, or a crate's own table inside one. */
 const devTable = (name: string) => /(?:^|\.)dev-dependencies(?:\.|$)/.test(name);
 
+/** The chokepoints that are product code, whose test modules are checked like any test. */
+const PRODUCT_CHOKEPOINTS = new Set(["crates/bazhen-holder/src/child.rs"]);
+
 const TEST_SIGNAL_MANIFEST = "crates/bazhen-test-signal/Cargo.toml";
 
 /**
@@ -1966,10 +1980,15 @@ export function signalChokepointFailures(
 ): string[] {
   const out: string[] = [];
   for (const file of files) {
-    if (Object.hasOwn(SIGNAL_CHOKEPOINTS, file) || file.includes("node_modules/")) continue;
+    if (file.includes("node_modules/")) continue;
+    // A product chokepoint is exempt in its product code alone: its tests send through the
+    // tests' own chokepoint like any others.
+    const product = PRODUCT_CHOKEPOINTS.has(file);
+    if (Object.hasOwn(SIGNAL_CHOKEPOINTS, file) && !product) continue;
     const text = read(file);
     const tests = file.endsWith(".rs") ? testLines(text) : new Set<number>();
     for (const { line, call } of rawSignalCalls(file, text)) {
+      if (product && !tests.has(line)) continue;
       out.push(
         `${file}:${line}: sends a signal directly (${call}); send it through ` +
           `${chokepointFor(file, tests.has(line))}, which checks its target ` +

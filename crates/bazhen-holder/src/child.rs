@@ -258,7 +258,7 @@ mod tests {
         assert_eq!(armed, "armed\n");
         let pid = Pid::from_child(&group);
         close(pid);
-        rustix::process::kill_process(pid, Signal::USR1).unwrap();
+        bazhen_test_signal::signal(pid.as_raw_nonzero().get(), Signal::USR1).unwrap();
         let status = group.wait().unwrap();
         let mut rest = String::new();
         stdout.read_to_string(&mut rest).unwrap();

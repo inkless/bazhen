@@ -97,58 +97,79 @@ const found = (code: string, pattern: RegExp) =>
     call: m[0],
   }));
 
-const KILL_PROGRAM = /^(?:\S*\/)?(?:kill|pkill|killall)$/;
+const KILL_PROGRAM = /^(?:\S*\/)?(?:kill|pkill|killall|killall5|skill)$/;
 // What runs a program named by the literal that follows: Rust's Command, and Node's and
 // host-guard's process starts.
 const STARTS_PROGRAM =
   /(?:Command\s*::\s*new|\b(?:spawn\w*|exec\w*|fork|runBounded|runIn\w*|output|run))\s*\(\s*\[?\s*$/;
-const SHELL_KILL = /(?:^|[\s;&|(`])(?:\S*\/)?(kill|pkill|killall)\s+(\S+(?:\s+\S+)*)/g;
-// Whether a shell `kill`'s first operand is a target: a pid, a group, a variable or a job.
-// Quotes are stripped first, so "$pid" counts, and so do a Rust format's `{}` and `-{pid}`.
-const KILL_TARGET = /^(?:-?\d+|-?\\?\$\S*|%\S*|-?\{[^}]*\})$/;
-// Its own process ($$) or last background job ($!): a test fixture's script ending itself.
-const SHELL_ITSELF = /^(?:\\?\$\\?\$|\$!)$/;
+// Programs that run the program their arguments name, so `["env", "kill", ...]` is a kill, and
+// a shell's words that come before a command.
+const LAUNCHER =
+  /^(?:\S*\/)?(?:env|sudo|doas|timeout|setsid|nohup|nice|ionice|xargs|stdbuf|chrt|taskset|flock|unshare|chroot|runuser|su|busybox|toybox|exec|command|builtin)$/;
+const SHELL_WORD = /^(?:then|do|else|elif|if|while|until|!|\{|\})$/;
 const SYSTEMCTL = /^(?:\S*\/)?systemctl$/;
-const SHELL_SYSTEMCTL_KILL = /\bsystemctl\s+(?:-\S+\s+)*kill\b/;
+const LOGINCTL = /^(?:\S*\/)?loginctl$/;
+const LOGINCTL_KILL = /^(?:terminate-user|kill-user|terminate-session|kill-session)$/;
+const FUSER = /^(?:\S*\/)?fuser$/;
+const FUSER_KILL = /^-\w*k/;
+// A `kill`'s one signal spec, and the only operands it may take: the shell itself, its last
+// background job, or a plain positive variable holding a pid the script started.
+const SIGNAL_SPEC = /^-(?:SIG)?[A-Z]+[0-9+]*$|^-\d+$|^--signal=\S+$/;
+const SIGNAL_SPEC_WITH_VALUE = /^(?:-s|-n|--signal)$/;
+const OWN_TARGET = /^(?:\$\$|\$!|\$[A-Za-z_]\w*|\$\{[A-Za-z_]\w*\})$/;
 
-/**
- * The operands of a shell `kill`, unquoted, past its options (`-TERM`, `-s TERM`, `-9`) and the
- * `--` that ends them, and less any redirection.
- */
-function killOperands(args: string): string[] {
-  const words = (args.split(/[;&|)\n]/)[0] ?? "")
+/** What a shell command line runs: its program, and its words after it. */
+function command(segment: string): string[] {
+  const words = segment
+    .replace(/(?:^|\s)#.*$/, "")
     .trim()
     .split(/\s+/)
-    .filter((w) => w !== "")
-    .map((w) => w.replaceAll(/["']/g, ""));
+    .map((w) => w.replaceAll("\\", ""))
+    .filter((w) => w !== "" && !/^\d*[<>]&?\S*$/.test(w));
   let i = 0;
-  while (i < words.length && /^-[A-Za-z0-9]/.test(words[i] ?? "")) {
-    i += words[i] === "-s" || words[i] === "-n" ? 2 : 1;
+  while (
+    i < words.length &&
+    (/^\w+=/.test(words[i] ?? "") ||
+      LAUNCHER.test(words[i] ?? "") ||
+      SHELL_WORD.test(words[i] ?? "") ||
+      (i > 0 && /^(?:-\S+|\d+)$/.test(words[i] ?? "")))
+  ) {
+    i++;
   }
-  if (words[i] === "--") i++;
-  return words.slice(i).filter((w) => !/^\d?>/.test(w));
+  return words.slice(i);
 }
 
-// `kill` with nothing to kill but options, or fed its targets by xargs: either way, whatever
-// reaches it is unchecked.
-const SHELL_BARE_KILL =
-  /(?:^|[\s;&|(`])(?:xargs(?:\s+-\S+)*\s+kill\b|kill(?:\s+-\S+)+\s*(?:$|[;&|)\n]))/;
-// Programs that run the program their arguments name, so `["env", "kill", ...]` is a kill.
-const LAUNCHER =
-  /^(?:\S*\/)?(?:env|sudo|doas|timeout|setsid|nohup|nice|ionice|xargs|stdbuf|chrt|taskset|flock|unshare|chroot|runuser|su)$/;
+/** Whether a `kill`'s words, past the program, name only its own targets. */
+function killsOnlyItsOwn(words: string[]): boolean {
+  let i = 0;
+  if (SIGNAL_SPEC_WITH_VALUE.test(words[i] ?? "")) i += 2;
+  else if (SIGNAL_SPEC.test(words[i] ?? "")) i++;
+  if (words[i] === "--") i++;
+  const operands = words.slice(i);
+  return operands.length > 0 && operands.every((w) => OWN_TARGET.test(w));
+}
 
 /**
- * Whether a string literal starts a kill: a shell command that runs `kill` on anything but the
- * shell itself or its own job, or `pkill` or `killall` at all. A process started to send a
- * signal checks nothing the chokepoints would.
+ * Whether a string literal is a shell command line that sends a signal. It fails closed: a
+ * `kill` passes only when, past one signal spec and a `--`, each operand is the shell itself,
+ * its last job or a plain variable; every other kill program, `systemctl kill`, `loginctl
+ * terminate-user` and the like, and `fuser -k`, count. Each command is read: the line is split
+ * at the shell's operators and its quotes, so `sh -c "kill -9 -1"` is read as its inner command.
+ * A literal holding no whitespace is a program's name, not a command line: the start of a
+ * process with it is caught where the literal is passed (`kills`).
  */
 export function startsKill(literal: string): boolean {
-  if (SHELL_SYSTEMCTL_KILL.test(literal) || SHELL_BARE_KILL.test(literal)) return true;
-  for (const m of literal.matchAll(SHELL_KILL)) {
-    if (m[1] !== "kill") return true;
-    const [target, ...more] = killOperands(m[2] ?? "");
-    if (target === undefined || !KILL_TARGET.test(target)) continue;
-    if (!SHELL_ITSELF.test(target) || more.length > 0) return true;
+  if (!/\s/.test(literal)) return false;
+  // A quoted variable is one word, not a nested command: unquote it before splitting at quotes.
+  const line = literal.replaceAll("\\", "").replaceAll(/(["'])(\$\{?\w+\}?|\$\$|\$!)\1/g, "$2");
+  for (const segment of line.split(/&&|\|\||[;&|\n()`"']|\$\(/)) {
+    const [program = "", ...rest] = command(segment);
+    if (program === "kill" || program.endsWith("/kill")) {
+      if (!killsOnlyItsOwn(rest)) return true;
+    } else if (KILL_PROGRAM.test(program)) return true;
+    else if (SYSTEMCTL.test(program) && rest.includes("kill")) return true;
+    else if (LOGINCTL.test(program) && rest.some((w) => LOGINCTL_KILL.test(w))) return true;
+    else if (FUSER.test(program) && rest.some((w) => FUSER_KILL.test(w))) return true;
   }
   return false;
 }
@@ -165,6 +186,10 @@ export const CLI_KILLS: Readonly<Record<string, { code: RegExp; why: string }>> 
   "scripts/signal-paths.test.ts": {
     code: /[\s\S]*/,
     why: "the fixtures those patterns are tested on, which start nothing",
+  },
+  "scripts/lint-plugin.medium.test.ts": {
+    code: /const FIXTURE = \[[\s\S]*?\]\.join\("\\n"\)/,
+    why: "the lint rule's fixture, which oxlint reads and nothing runs",
   },
   "packages/host-guard/src/cap.ts": {
     code: /output\(\s*"systemctl",\s*\["--user",\s*"kill",\s*`--signal=\$\{signal\}`,\s*unit\]\)/,
@@ -184,14 +209,16 @@ function kills(literals: { index: number; body: string }[], code: string) {
           STARTS_PROGRAM.test(code.slice(Math.max(0, l.index - 40), l.index))),
     )
     .map((l) => ({ index: l.index, line: lineAt(code, l.index), call: `a kill by "${l.body}"` }));
+  // A program and its arguments as literals in a row: systemctl's or loginctl's kill verbs,
+  // fuser -k, or a launcher handed a kill program.
   literals.forEach((l, n) => {
-    const next = literals.slice(n + 1, n + 5);
-    // `systemctl kill` as a program and its arguments: "systemctl", options, then "kill".
-    if (SYSTEMCTL.test(l.body) && next.some((a) => a.body === "kill"))
-      out.push({ index: l.index, line: lineAt(code, l.index), call: "systemctl kill" });
-    // A launcher handed a kill program: `env`, `sudo`, `timeout` and the like, then "kill".
-    if (LAUNCHER.test(l.body) && next.some((a) => KILL_PROGRAM.test(a.body)))
-      out.push({ index: l.index, line: lineAt(code, l.index), call: `a kill by "${l.body}"` });
+    const next = literals.slice(n + 1, n + 5).map((a) => a.body);
+    const hit = (call: string) => out.push({ index: l.index, line: lineAt(code, l.index), call });
+    if (SYSTEMCTL.test(l.body) && next.includes("kill")) hit("systemctl kill");
+    if (LOGINCTL.test(l.body) && next.some((a) => LOGINCTL_KILL.test(a))) hit("loginctl kill");
+    if (FUSER.test(l.body) && next.some((a) => FUSER_KILL.test(a))) hit("fuser -k");
+    if (LAUNCHER.test(l.body) && next.some((a) => KILL_PROGRAM.test(a)))
+      hit(`a kill by "${l.body}"`);
   });
   return out;
 }
