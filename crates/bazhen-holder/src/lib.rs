@@ -12,6 +12,7 @@ pub mod log;
 mod macos;
 pub mod pty;
 pub mod ring;
+pub mod server;
 mod signals;
 pub mod socket;
 pub mod start;

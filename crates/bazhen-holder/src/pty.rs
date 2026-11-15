@@ -1,8 +1,9 @@
 #![expect(
     unsafe_code,
     reason = "Command::pre_exec runs a closure between fork and exec, where libc's sigprocmask \
-              and signal reset the mask and the dispositions, and libc::close closes an fd no \
-              Rust value owns; only unsafe can register the one or call the others"
+              and signal reset the mask and the dispositions; libc's sigprocmask unblocks the \
+              holder's own wake-up signals; and libc::close closes an fd no Rust value owns; only \
+              unsafe can register the one or call the others"
 )]
 
 //! A terminal's PTY, and the child that runs on it as the leader of a session of its own.
@@ -213,6 +214,35 @@ fn become_session_leader() -> io::Result<()> {
     }
     rustix::process::setsid()?;
     rustix::process::ioctl_tiocsctty(rustix::stdio::stdin())?;
+    Ok(())
+}
+
+/// Unblocks `SIGCHLD` and `SIGUSR1` in the holder itself: its loop wakes on them, and a spawner
+/// may have left them blocked, which would leave a child's exit unseen until the next deadline and
+/// a rebind asked for in vain.
+///
+/// # Errors
+///
+/// When the mask can't be changed.
+pub fn unblock_wakeup_signals() -> io::Result<()> {
+    let mut set = MaybeUninit::<libc::sigset_t>::uninit();
+    // SAFETY: sigemptyset(3) only writes the set it is given, which lives on this stack frame.
+    if unsafe { libc::sigemptyset(set.as_mut_ptr()) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: sigemptyset succeeded, so it initialised the set.
+    let mut set = unsafe { set.assume_init() };
+    for signal in [libc::SIGCHLD, libc::SIGUSR1] {
+        // SAFETY: `set` is initialised, and `signal` is a valid signal on every OS.
+        if unsafe { libc::sigaddset(&raw mut set, signal) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+    }
+    // SAFETY: `set` is initialised and the old mask isn't asked for. The holder has one thread, so
+    // the process mask is that thread's.
+    if unsafe { libc::sigprocmask(libc::SIG_UNBLOCK, &raw const set, ptr::null_mut()) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
     Ok(())
 }
 

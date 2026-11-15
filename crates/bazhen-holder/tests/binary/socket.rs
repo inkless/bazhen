@@ -1,9 +1,95 @@
-//! The holder's socket, through the built binary: where it binds, and when it refuses to.
+//! The holder's socket, through the built binary: where it binds, who it serves, and how it ends.
 
+use std::io::{Read as _, Write as _};
 use std::os::unix::fs::PermissionsExt as _;
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::Path;
+use std::time::Instant;
 
-use super::{Home, Result, Start, Started, home, spawn, spec, sweep};
+use bazhen_holder::start_time;
+use bazhen_holder_proto::body::{ErrorBody, HelloReply, HelloRequest, VersionText, Versions};
+use bazhen_holder_proto::{FrameDecoder, Reply, Request, RequestId, reply_decoder};
+use rustix::process::{Pid, Signal, kill_process};
+
+use super::{DEADLINE, Home, Result, Start, Started, home, spawn, spec, sweep};
+
+/// A `holder/1` client, as the daemon would be one.
+struct Client {
+    stream: UnixStream,
+    decoder: FrameDecoder<Reply>,
+    next_id: u32,
+}
+
+impl Client {
+    fn connect(path: &Path) -> Result<Self> {
+        let stream = UnixStream::connect(path)?;
+        stream.set_read_timeout(Some(DEADLINE))?;
+        Ok(Self {
+            stream,
+            decoder: reply_decoder(),
+            next_id: 0,
+        })
+    }
+
+    fn id(&mut self) -> RequestId {
+        self.next_id += 1;
+        RequestId(self.next_id)
+    }
+
+    fn send(&mut self, request: &Request) -> Result<()> {
+        self.stream.write_all(&request.encode()?)?;
+        Ok(())
+    }
+
+    /// The next frame, or `None` once the holder has hung up.
+    fn next(&mut self) -> Result<Option<Reply>> {
+        let mut chunk = vec![0u8; 1 << 16];
+        loop {
+            if let Some(reply) = self.decoder.next_frame()? {
+                return Ok(Some(reply));
+            }
+            match self.stream.read(&mut chunk)? {
+                0 => return Ok(None),
+                n => self.decoder.push(chunk.get(..n).unwrap_or_default()),
+            }
+        }
+    }
+
+    fn reply(&mut self) -> Result<Reply> {
+        self.next()?.ok_or_else(|| "the holder hung up".into())
+    }
+
+    fn hello_with(&mut self, protocol: Versions, writer: bool) -> Result<Reply> {
+        let id = self.id();
+        let body = HelloRequest {
+            protocol,
+            writer: Some(writer),
+        };
+        self.send(&Request::Hello { id, body })?;
+        self.reply()
+    }
+
+    fn hello(&mut self, writer: bool) -> Result<HelloReply> {
+        match self.hello_with(Versions::spoken(), writer)? {
+            Reply::Hello { body, .. } => Ok(body),
+            other => Err(format!("hello was answered {other:?}").into()),
+        }
+    }
+
+    /// The error a request was answered with.
+    fn refused(&mut self, request: &Request) -> Result<ErrorBody> {
+        self.send(request)?;
+        match self.reply()? {
+            Reply::Error { id, body } if id == request.id() => Ok(body),
+            other => Err(format!("{request:?} was answered {other:?}").into()),
+        }
+    }
+
+    /// Whether the holder hangs up with nothing more to say.
+    fn hangs_up(&mut self) -> Result<bool> {
+        Ok(self.next()?.is_none())
+    }
+}
 
 /// A holder serving `argv`, once it has said `ready`, and its socket's path.
 fn serving(home: &Home, argv: &[&str]) -> Result<(Started, std::path::PathBuf)> {
@@ -13,6 +99,22 @@ fn serving(home: &Home, argv: &[&str]) -> Result<(Started, std::path::PathBuf)> 
         return Err(format!("the holder said {line:?}").into());
     }
     Ok((holder, home.join("t1.sock")))
+}
+
+/// Connects once `path` takes connections, before `DEADLINE`.
+fn connect_by(path: &Path, deadline: Instant) -> Result<Client> {
+    loop {
+        match Client::connect(path) {
+            Ok(client) => return Ok(client),
+            Err(e) if Instant::now() >= deadline => return Err(e),
+            // Something else binds it: there is nothing to wait on but the file.
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(20)),
+        }
+    }
+}
+
+fn pid(raw: u64) -> Result<Pid> {
+    Pid::from_raw(i32::try_from(raw)?).ok_or_else(|| "not a pid".into())
 }
 
 #[test]
@@ -107,4 +209,551 @@ fn a_program_that_cant_start_leaves_no_socket_behind() {
     .unwrap();
     assert_eq!(holder.exit().unwrap().0, Some(1));
     assert!(!home.join("t1.sock").exists());
+}
+
+#[test]
+fn says_ready_only_once_its_socket_answers_with_who_it_is() {
+    sweep().unwrap();
+    let home = home("hello").unwrap();
+    // exec keeps a process's start, so the holder's predates its child's by a second at least,
+    // and a mix-up of the two shows.
+    let how = Start {
+        prelude: "sleep 1 &&",
+        ..Start::default()
+    };
+    let mut holder = spawn(&spec(&home, &["sleep", "30"], |_| {}), &how).unwrap();
+    assert_eq!(holder.first_line().unwrap(), "ready\n");
+    let socket = home.join("t1.sock");
+    let hello = Client::connect(&socket).unwrap().hello(true).unwrap();
+    assert_eq!(hello.terminal_id.as_str(), "t1");
+    assert_eq!(hello.holder_pid.get(), u64::from(holder.pid));
+    let holder_start = start_time::of(holder.pid().unwrap()).unwrap();
+    assert_eq!(hello.holder_start, holder_start);
+    let child = pid(hello.child_pid.get()).unwrap();
+    assert_eq!(rustix::process::getsid(Some(child)).unwrap(), child);
+    assert_eq!(hello.child_start, start_time::of(child).unwrap());
+    assert!(hello.child_start > hello.holder_start);
+    assert_eq!(hello.exit, None);
+    assert_eq!(hello.offset.get(), 0);
+    assert_eq!((hello.size.cols.get(), hello.size.rows.get()), (80, 24));
+    assert!(hello.writer);
+    assert_eq!(hello.version.as_str(), "1.0");
+}
+
+#[test]
+fn hands_the_writer_slot_to_one_connection_at_a_time() {
+    sweep().unwrap();
+    let home = home("writer").unwrap();
+    let (_holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
+    let mut first = Client::connect(&socket).unwrap();
+    assert!(first.hello(true).unwrap().writer);
+    assert!(
+        !Client::connect(&socket)
+            .unwrap()
+            .hello(true)
+            .unwrap()
+            .writer
+    );
+    assert!(
+        !Client::connect(&socket)
+            .unwrap()
+            .hello(false)
+            .unwrap()
+            .writer
+    );
+    drop(first);
+    let deadline = Instant::now() + DEADLINE;
+    while !Client::connect(&socket)
+        .unwrap()
+        .hello(true)
+        .unwrap()
+        .writer
+    {
+        assert!(Instant::now() < deadline, "the slot was never freed");
+    }
+}
+
+#[test]
+fn takes_nothing_before_hello_and_no_second_hello() {
+    sweep().unwrap();
+    let home = home("order").unwrap();
+    let (_holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
+    let mut early = Client::connect(&socket).unwrap();
+    let close = Request::Close { id: RequestId(7) };
+    assert_eq!(early.refused(&close).unwrap().code, "invalid");
+    assert!(early.hangs_up().unwrap());
+    let mut twice = Client::connect(&socket).unwrap();
+    twice.hello(false).unwrap();
+    let again = twice.hello_with(Versions::spoken(), false).unwrap();
+    assert!(matches!(again, Reply::Error { body, .. } if body.code == "invalid"));
+    assert!(twice.hangs_up().unwrap());
+    Client::connect(&socket).unwrap().hello(false).unwrap();
+}
+
+#[test]
+fn tells_a_client_it_shares_no_major_with_the_versions_it_speaks() {
+    sweep().unwrap();
+    let home = home("major").unwrap();
+    let (_holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
+    let mut client = Client::connect(&socket).unwrap();
+    let theirs = Versions::new(vec![VersionText::new("99.0").unwrap()]).unwrap();
+    match client.hello_with(theirs, false).unwrap() {
+        Reply::Error { body, .. } => {
+            assert_eq!(body.code, "no-shared-version");
+            assert_eq!(body.protocol, Some(Versions::spoken()));
+        }
+        other => panic!("answered {other:?}"),
+    }
+    assert!(client.hangs_up().unwrap());
+}
+
+#[test]
+fn answers_a_request_it_does_not_serve_and_one_it_does_not_know() {
+    sweep().unwrap();
+    let home = home("unserved").unwrap();
+    let (_holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
+    let mut client = Client::connect(&socket).unwrap();
+    client.hello(false).unwrap();
+    let snapshot = client
+        .refused(&Request::Snapshot { id: RequestId(5) })
+        .unwrap();
+    assert_eq!(
+        (snapshot.request.as_str(), snapshot.code.as_str()),
+        ("snapshot", "unknown-request")
+    );
+    // A request type in the requests' range that this build doesn't know: length 5, type 0x2a,
+    // request id 6.
+    let frame = [&5u32.to_be_bytes()[..], &[0x2a], &6u32.to_be_bytes()].concat();
+    client.stream.write_all(&frame).unwrap();
+    match client.reply().unwrap() {
+        Reply::Error { body, .. } => {
+            assert_eq!(
+                (body.request.as_str(), body.code.as_str()),
+                ("0x2a", "unknown-request")
+            );
+        }
+        other => panic!("answered {other:?}"),
+    }
+    client.hello_with(Versions::spoken(), false).unwrap();
+}
+
+#[test]
+fn a_malformed_frame_ends_only_its_own_connection() {
+    sweep().unwrap();
+    let home = home("malformed").unwrap();
+    let (_holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
+    let mut good = Client::connect(&socket).unwrap();
+    good.hello(false).unwrap();
+    let mut bad = Client::connect(&socket).unwrap();
+    bad.hello(false).unwrap();
+    bad.stream.write_all(&u32::MAX.to_be_bytes()).unwrap();
+    assert!(bad.hangs_up().unwrap());
+    let mut gone = Client::connect(&socket).unwrap();
+    gone.send(&Request::Close { id: RequestId(1) }).unwrap();
+    drop(gone);
+    let answer = good.refused(&Request::Stats { id: RequestId(9) }).unwrap();
+    assert_eq!(answer.code, "unknown-request");
+}
+
+#[test]
+fn close_answers_ok_ends_the_child_removes_the_socket_and_exits_0() {
+    sweep().unwrap();
+    let home = home("close").unwrap();
+    let (mut holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
+    let mut client = Client::connect(&socket).unwrap();
+    let hello = client.hello(false).unwrap();
+    let child = pid(hello.child_pid.get()).unwrap();
+    client.send(&Request::Close { id: RequestId(3) }).unwrap();
+    assert!(matches!(
+        client.reply().unwrap(),
+        Reply::Ok {
+            id: RequestId(3),
+            ..
+        }
+    ));
+    assert!(client.hangs_up().unwrap());
+    let (code, _) = holder.exit().unwrap();
+    assert_eq!(code, Some(0));
+    assert!(!socket.exists(), "the socket is still there");
+    assert!(matches!(
+        start_time::of(child),
+        Err(start_time::StartTimeError::Absent(_))
+    ));
+    assert!(home.join("t1.lock").exists());
+}
+
+#[test]
+fn binds_its_socket_again_on_sigusr1_and_unprompted() {
+    sweep().unwrap();
+    let home = home("rebind").unwrap();
+    let (holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
+    std::fs::remove_file(&socket).unwrap();
+    kill_process(holder.pid().unwrap(), Signal::USR1).unwrap();
+    let signalled = Instant::now();
+    connect_by(&socket, signalled + DEADLINE)
+        .unwrap()
+        .hello(false)
+        .unwrap();
+    assert!(signalled.elapsed() < bazhen_holder::socket::RECHECK_EVERY);
+    std::fs::remove_file(&socket).unwrap();
+    let removed = Instant::now();
+    let unprompted = removed + bazhen_holder::socket::RECHECK_EVERY + DEADLINE;
+    connect_by(&socket, unprompted)
+        .unwrap()
+        .hello(false)
+        .unwrap();
+}
+
+#[test]
+fn a_storm_of_sigusr1_during_a_flood_loses_no_output() {
+    sweep().unwrap();
+    let home = home("storm").unwrap();
+    let flood: u64 = 20 << 20;
+    let count = format!("-c{flood}");
+    let (holder, socket) = serving(&home, &["head", &count, "/dev/zero"]).unwrap();
+    for _ in 0..500 {
+        kill_process(holder.pid().unwrap(), Signal::USR1).unwrap();
+    }
+    let deadline = Instant::now() + DEADLINE;
+    loop {
+        let hello = Client::connect(&socket).unwrap().hello(false).unwrap();
+        if hello.exit.is_some() {
+            assert_eq!(hello.offset.get(), flood);
+            break;
+        }
+        assert!(Instant::now() < deadline, "the flood never ended");
+    }
+}
+
+#[test]
+fn makes_room_for_a_new_connection_when_every_one_is_in_use() {
+    sweep().unwrap();
+    let home = home("full").unwrap();
+    let (_holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
+    let mut silent: Vec<Client> = (0..bazhen_holder::server::MAX_CONNECTIONS)
+        .map(|_| Client::connect(&socket).unwrap())
+        .collect();
+    past_grace();
+    Client::connect(&socket).unwrap().hello(false).unwrap();
+    assert!(
+        silent.remove(0).hangs_up().unwrap(),
+        "the oldest wasn't replaced"
+    );
+}
+
+/// `count` requests the holder answers `unknown-request`, in one write.
+fn stats_requests(count: u32) -> Vec<u8> {
+    (1..=count)
+        .flat_map(|id| {
+            Request::Stats { id: RequestId(id) }
+                .encode()
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
+/// Waits out the grace that keeps a new connection from being replaced: connections opened
+/// before this may then be. Nothing to wait on but the time.
+fn past_grace() {
+    std::thread::sleep(bazhen_holder::server::NEW_GRACE * 2);
+}
+
+/// Enough requests that their answers fill the holder's raised send buffer and the queue's mark
+/// five times over, so the holder stops reading them and their peer is stuck, on any OS.
+fn flood_of_requests() -> Result<u32> {
+    let answers = 5 * (bazhen_holder::socket::SEND_BUFFER + bazhen_holder::conn::QUEUE_MARK);
+    // Each answer is about 100 bytes; counting 90 errs towards more of them.
+    Ok(u32::try_from(answers / 90)?)
+}
+
+/// Writes `count` requests to the holder from a thread, a thousand at a time, which a holder
+/// that stops reading leaves blocked.
+fn write_behind(client: &Client, count: u32) -> Result<std::thread::JoinHandle<()>> {
+    let mut stream = client.stream.try_clone()?;
+    Ok(std::thread::spawn(move || {
+        for _ in 0..count.div_ceil(1000) {
+            if stream.write_all(&stats_requests(1000)).is_err() {
+                return;
+            }
+        }
+    }))
+}
+
+#[test]
+fn a_request_whose_body_fails_is_answered_invalid_and_its_connection_hung_up() {
+    sweep().unwrap();
+    let home = home("bad-body").unwrap();
+    let (_holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
+    let mut client = Client::connect(&socket).unwrap();
+    client.hello(false).unwrap();
+    // A subscribe, type 0x40, id 4, whose body isn't JSON.
+    let frame = [&6u32.to_be_bytes()[..], &[0x40], &4u32.to_be_bytes(), b"{"].concat();
+    client.stream.write_all(&frame).unwrap();
+    match client.reply().unwrap() {
+        Reply::Error { id, body } => {
+            assert_eq!((id, body.code.as_str()), (RequestId(4), "invalid"));
+        }
+        other => panic!("answered {other:?}"),
+    }
+    assert!(client.hangs_up().unwrap());
+    Client::connect(&socket).unwrap().hello(false).unwrap();
+}
+
+/// Out of fds, an accept fails; the holder pauses accepting for a second and then serves on,
+/// idle, rather than spinning: under `ulimit -t 2` a spinning holder dies within the window.
+#[test]
+fn a_failed_accept_pauses_accepting_and_leaves_the_holder_idle() {
+    sweep().unwrap();
+    let home = home("emfile").unwrap();
+    let how = Start {
+        prelude: "ulimit -n 20 &&",
+        ..Start::default()
+    };
+    let mut holder = spawn(&spec(&home, &["sleep", "30"], |_| {}), &how).unwrap();
+    assert_eq!(holder.first_line().unwrap(), "ready\n");
+    let socket = home.join("t1.sock");
+    let crowd: Vec<UnixStream> = (0..15)
+        .map(|_| UnixStream::connect(&socket).unwrap())
+        .collect();
+    drop(crowd);
+    let window = Instant::now() + std::time::Duration::from_secs(4);
+    while Instant::now() < window {
+        // The holder is only being watched here; there is nothing to wait on.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    assert!(
+        start_time::of(holder.pid().unwrap()).is_ok(),
+        "the holder died, of SIGXCPU if it spun"
+    );
+    Client::connect(&socket).unwrap().hello(false).unwrap();
+}
+
+/// A writer that pipelines requests, reads nothing and goes is dropped by a failed write, not
+/// by its read; its slot must still be freed.
+#[test]
+fn frees_the_writer_slot_of_a_connection_dropped_by_a_failed_write() {
+    sweep().unwrap();
+    let home = home("writer-gone").unwrap();
+    let (_holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
+    let mut writer = Client::connect(&socket).unwrap();
+    assert!(writer.hello(true).unwrap().writer);
+    writer.stream.write_all(&stats_requests(4000)).unwrap();
+    drop(writer);
+    let deadline = Instant::now() + DEADLINE;
+    while !Client::connect(&socket)
+        .unwrap()
+        .hello(true)
+        .unwrap()
+        .writer
+    {
+        assert!(Instant::now() < deadline, "the slot was never freed");
+    }
+}
+
+/// Requests read past the mark wait for their peer to read, and are then all answered, in order.
+#[test]
+fn answers_every_pipelined_request_in_order_past_the_mark() {
+    sweep().unwrap();
+    let home = home("waited").unwrap();
+    let (_holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
+    let mut client = Client::connect(&socket).unwrap();
+    client.hello(false).unwrap();
+    let count = 4000;
+    client.stream.write_all(&stats_requests(count)).unwrap();
+    for id in 1..=count {
+        match client.reply().unwrap() {
+            Reply::Error { id: got, .. } => assert_eq!(got, RequestId(id)),
+            other => panic!("answered {other:?}"),
+        }
+    }
+}
+
+/// A closed holder keeps the terminal's lock until it exits, so no second holder starts a child
+/// for the terminal while the first one's may still run.
+#[test]
+fn a_closing_holder_keeps_the_terminal_until_its_child_has_ended() {
+    sweep().unwrap();
+    let home = home("closing").unwrap();
+    let argv = ["sh", "-c", "trap '' HUP; echo armed; exec sleep 30"];
+    let (mut holder, socket) = serving(&home, &argv).unwrap();
+    // The child's output says its trap is set; a close before that would end it at once.
+    let deadline = Instant::now() + DEADLINE;
+    let mut client = loop {
+        let mut client = Client::connect(&socket).unwrap();
+        if client.hello(false).unwrap().offset.get() > 0 {
+            break client;
+        }
+        assert!(Instant::now() < deadline, "the child never armed its trap");
+    };
+    client.send(&Request::Close { id: RequestId(1) }).unwrap();
+    assert!(matches!(client.reply().unwrap(), Reply::Ok { .. }));
+    let mut second = spawn(&spec(&home, &["sleep", "30"], |_| {}), &Start::default()).unwrap();
+    assert_eq!(second.exit().unwrap().0, Some(7));
+    assert_eq!(holder.exit().unwrap().0, Some(0));
+}
+
+/// With every connection open and reading, a new one still gets in: it replaces the oldest that
+/// doesn't hold the writer slot, so no one can lock the daemon out.
+#[test]
+fn a_full_holder_of_healthy_connections_still_takes_a_new_one() {
+    sweep().unwrap();
+    let home = home("healthy").unwrap();
+    let (_holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
+    let mut open: Vec<Client> = (0..bazhen_holder::server::MAX_CONNECTIONS)
+        .map(|n| {
+            let mut client = Client::connect(&socket).unwrap();
+            client.hello(n == 0).unwrap();
+            client
+        })
+        .collect();
+    past_grace();
+    Client::connect(&socket).unwrap().hello(false).unwrap();
+    let mut writer = open.remove(0);
+    assert!(
+        open.remove(0).hangs_up().unwrap(),
+        "the oldest non-writer stayed"
+    );
+    let answer = writer
+        .refused(&Request::Stats { id: RequestId(9) })
+        .unwrap();
+    assert_eq!(answer.code, "unknown-request");
+}
+
+/// A spawner that left `SIGCHLD` and `SIGUSR1` blocked mustn't leave the holder deaf to either.
+/// The child leaves the terminal held open as it exits, so only `SIGCHLD` can tell the holder.
+#[test]
+fn hears_its_signals_though_the_spawner_blocked_them() {
+    sweep().unwrap();
+    let home = home("blocked").unwrap();
+    let how = Start {
+        blocked_signals: true,
+        ..Start::default()
+    };
+    // It exits once the holder is idle in its loop, not before `Holder::new` can reap it, and
+    // leaves behind a process that survives its hang-up and keeps the terminal open (on Linux;
+    // macOS revokes the terminal as its leader exits, which wakes the holder anyway).
+    let argv = [
+        "sh",
+        "-c",
+        "(trap '' HUP; exec sleep 3) & sleep 0.3; exit 0",
+    ];
+    let mut holder = spawn(&spec(&home, &argv, |_| {}), &how).unwrap();
+    assert_eq!(holder.first_line().unwrap(), "ready\n");
+    let socket = home.join("t1.sock");
+    // Nothing connects meanwhile: a turn of the loop would reap the child whatever the signals.
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    let hello = Client::connect(&socket).unwrap().hello(false).unwrap();
+    assert!(
+        hello.exit.is_some(),
+        "the exit waited for something to wake the holder"
+    );
+    std::fs::remove_file(&socket).unwrap();
+    kill_process(holder.pid().unwrap(), Signal::USR1).unwrap();
+    let signalled = Instant::now();
+    connect_by(&socket, signalled + DEADLINE).unwrap();
+    let quick = bazhen_holder::socket::RECHECK_EVERY / 2;
+    assert!(
+        signalled.elapsed() < quick,
+        "the rebind waited for its timer"
+    );
+}
+
+/// A newcomer to a full holder is safe for a moment, read or not, so the next one can't replace
+/// it, whichever turns the two arrive in.
+#[test]
+fn a_newcomer_is_safe_from_the_next_while_it_is_new() {
+    sweep().unwrap();
+    let home = home("newcomer").unwrap();
+    let (_holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
+    let _open: Vec<Client> = (0..bazhen_holder::server::MAX_CONNECTIONS)
+        .map(|n| {
+            let mut client = Client::connect(&socket).unwrap();
+            client.hello(n == 0).unwrap();
+            client
+        })
+        .collect();
+    past_grace();
+    let mut first = Client::connect(&socket).unwrap();
+    // The holder accepts `first` in a turn of its own before `second` arrives.
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    let mut second = Client::connect(&socket).unwrap();
+    assert!(
+        first.hello(false).is_ok(),
+        "the first newcomer was replaced"
+    );
+    assert!(second.hello(false).is_ok());
+}
+
+/// A peer that has left its buffer full for over a second is the one a newcomer replaces, ahead
+/// of the oldest connection.
+#[test]
+fn a_newcomer_replaces_the_peer_that_stopped_reading_first() {
+    sweep().unwrap();
+    let home = home("stuck").unwrap();
+    let (_holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
+    let mut open: Vec<Client> = (0..bazhen_holder::server::MAX_CONNECTIONS)
+        .map(|n| {
+            let mut client = Client::connect(&socket).unwrap();
+            client.hello(n == 0).unwrap();
+            client
+        })
+        .collect();
+    let mut stuck = open.remove(5);
+    let writing = write_behind(&stuck, flood_of_requests().unwrap()).unwrap();
+    // Being stuck is what the holder measures; there is nothing to wait on but the time.
+    std::thread::sleep(bazhen_holder::server::STUCK_TO_EVICT * 3 / 2);
+    assert!(
+        !writing.is_finished(),
+        "the holder read every request: its peer wasn't stuck"
+    );
+    Client::connect(&socket).unwrap().hello(false).unwrap();
+    let mut oldest = open.remove(1);
+    let answer = oldest
+        .refused(&Request::Stats { id: RequestId(9) })
+        .unwrap();
+    assert_eq!(answer.code, "unknown-request");
+    // Dropped, it ends in a reset or an end of stream, with its writer let go; kept, its reads
+    // would only time out.
+    loop {
+        match stuck.next() {
+            Ok(Some(reply)) => assert!(matches!(reply, Reply::Error { .. }), "sent {reply:?}"),
+            Ok(None) => break,
+            Err(error) => match error.downcast::<std::io::Error>() {
+                Ok(io) if io.kind() == std::io::ErrorKind::ConnectionReset => break,
+                Ok(io) => panic!("the stuck connection wasn't dropped: {io}"),
+                Err(other) => panic!("the stuck connection sent something else: {other}"),
+            },
+        }
+    }
+    writing.join().unwrap();
+}
+
+/// A connection that never reads what it is owed holds up a close for a second at most.
+#[test]
+fn a_close_waits_for_a_reader_that_never_reads_for_a_second_at_most() {
+    sweep().unwrap();
+    let home = home("flush").unwrap();
+    let (mut holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
+    let mut stuck = Client::connect(&socket).unwrap();
+    stuck.hello(false).unwrap();
+    let writing = write_behind(&stuck, flood_of_requests().unwrap()).unwrap();
+    // The holder stops reading the requests once their answers fill the buffer and the queue,
+    // which leaves the writer blocked: proof the peer is stuck. Nothing to wait on but the time.
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    assert!(
+        !writing.is_finished(),
+        "the holder read every request: its peer wasn't stuck"
+    );
+    let mut closer = Client::connect(&socket).unwrap();
+    closer.hello(false).unwrap();
+    closer.send(&Request::Close { id: RequestId(1) }).unwrap();
+    let asked = Instant::now();
+    assert_eq!(holder.exit().unwrap().0, Some(0));
+    assert!(
+        asked.elapsed() < std::time::Duration::from_secs(3),
+        "the close waited {:?}",
+        asked.elapsed()
+    );
+    drop(stuck);
+    writing.join().unwrap();
 }

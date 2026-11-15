@@ -3,10 +3,12 @@
 //! came before the exit has been read.
 
 use std::io;
+use std::os::fd::BorrowedFd;
 use std::time::{Duration, Instant};
 
 use bazhen_holder_proto::body::{ExitStatus, Generation};
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
+use rustix::process::Pid;
 
 use crate::child::{ChildProcess, Reaper};
 use crate::pty::Pty;
@@ -15,10 +17,11 @@ use crate::pty::Pty;
 /// exit is published. Reading the end of the output (EIO or 0) publishes it sooner.
 pub const EXIT_DRAIN: Duration = Duration::from_millis(100);
 
-/// What a read of the master is cut into, and the most read in one turn, so one flooding child
-/// can't hold the loop.
+/// What a read of the master is cut into, and the most read in one turn: enough that a flood
+/// moves, little enough that one flooding child can't hold the loop, and a quarter of the ring,
+/// so a turn's reading can't lap a subscriber that the turn before left caught up.
 const READ_CHUNK: usize = 64 << 10;
-const MAX_READ_PER_TURN: usize = 1 << 20;
+const MAX_READ_PER_TURN: usize = 256 << 10;
 
 /// Where the child's output goes, in order.
 pub trait Output {
@@ -90,17 +93,44 @@ impl<O: Output> Holder<O> {
         self.exit.as_ref()
     }
 
-    /// Runs the loop until a turn fails. It returns nothing else: a holder ends by a close.
-    pub fn run(mut self) -> io::Error {
-        loop {
-            if let Err(e) = self.turn() {
-                return e;
-            }
-        }
+    pub const fn output(&self) -> &O {
+        &self.output
     }
 
-    /// Waits for the next thing to do, and does it. Waits with no timeout when no deadline is
-    /// pending, so an idle holder never wakes.
+    pub const fn generation(&self) -> Generation {
+        self.generation
+    }
+
+    pub const fn child_pid(&self) -> Pid {
+        self.child.pid()
+    }
+
+    /// Readable once the child may have exited.
+    pub fn wakeups(&self) -> BorrowedFd<'_> {
+        self.reaper.fd()
+    }
+
+    /// The master, while it may still have output to read.
+    pub fn master(&self) -> Option<BorrowedFd<'_>> {
+        self.master_open.then(|| self.pty.master())
+    }
+
+    /// Starts ending the child (`ChildProcess::close`).
+    pub fn close(&mut self, now: Instant) {
+        self.child.close(self.pty.foreground_group(), now);
+    }
+
+    /// Does what a `poll` found to do: reads the master if it was ready, reaps, and publishes.
+    pub fn after_poll(&mut self, master_ready: bool, now: Instant) {
+        self.reaper.clear();
+        if master_ready {
+            self.read_master();
+        }
+        self.step(now);
+    }
+
+    /// Waits for the next thing to do, and does it, with nothing but the child to serve: the
+    /// holder's own loop is `Server::run`. Waits with no timeout when no deadline is pending.
     ///
     /// # Errors
     ///
@@ -114,30 +144,24 @@ impl<O: Output> Holder<O> {
             None => None,
         };
         let master_ready = {
-            let wakeups = self.reaper.fd();
-            let master = self.pty.master();
-            let mut fds = [
-                PollFd::new(&wakeups, PollFlags::IN),
-                PollFd::new(&master, PollFlags::IN),
-            ];
+            let wakeups = self.wakeups();
             // A master nothing holds open any more reports `POLLHUP` whatever is asked, so it
             // leaves the set rather than wake every turn.
-            let watched = if self.master_open { 2 } else { 1 };
-            let Some(fds) = fds.get_mut(..watched) else {
-                return Ok(());
-            };
-            readiness(poll(fds, timeout.as_ref()))?
+            let mut fds: Vec<PollFd<'_>> = [Some(wakeups), self.master()]
+                .into_iter()
+                .flatten()
+                .map(|fd| PollFd::from_borrowed_fd(fd, PollFlags::IN))
+                .collect();
+            readiness(poll(&mut fds, timeout.as_ref()))?
                 && fds.get(1).is_some_and(|fd| !fd.revents().is_empty())
         };
-        self.reaper.clear();
-        if master_ready {
-            self.read_master();
-        }
-        self.step(Instant::now());
+        self.after_poll(master_ready, Instant::now());
         Ok(())
     }
 
-    fn deadline(&self) -> Option<Instant> {
+    /// When the process side next needs a turn with nothing ready: the end of an exit's drain, or a
+    /// close's kill.
+    pub fn deadline(&self) -> Option<Instant> {
         match (self.draining_until, self.child.close_deadline()) {
             (Some(a), Some(b)) => Some(a.min(b)),
             (a, b) => a.or(b),
@@ -195,7 +219,7 @@ impl<O: Output> Holder<O> {
 
 /// Whether a `poll` found anything ready. An interrupting signal is a turn with nothing ready,
 /// never an error: `SIGCHLD` interrupts `poll` whenever a child exits.
-fn readiness(polled: rustix::io::Result<usize>) -> io::Result<bool> {
+pub(crate) fn readiness(polled: rustix::io::Result<usize>) -> io::Result<bool> {
     match polled {
         Ok(ready) => Ok(ready > 0),
         Err(rustix::io::Errno::INTR) => Ok(false),

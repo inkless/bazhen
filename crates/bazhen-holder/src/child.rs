@@ -1,15 +1,12 @@
 //! A terminal's child: learning that it exited and how, and ending it on close.
 
-use std::io::{self, ErrorKind, Read as _};
-use std::os::fd::{AsFd, BorrowedFd};
-use std::os::unix::net::UnixStream;
+use std::io;
+use std::os::fd::BorrowedFd;
 use std::time::{Duration, Instant};
 
+use crate::signals::{self, Wakeups};
 use bazhen_holder_proto::body::{ExitCode, ExitStatus};
 use rustix::process::{Pid, Signal, WaitOptions, kill_process_group, waitpid};
-use signal_hook::SigId;
-
-use crate::signals;
 
 /// How long a close waits after `SIGHUP` before it sends `SIGKILL`.
 pub const CLOSE_GRACE: Duration = Duration::from_secs(2);
@@ -17,43 +14,24 @@ pub const CLOSE_GRACE: Duration = Duration::from_secs(2);
 /// Turns `SIGCHLD` into a readable fd, for the holder's `poll`. Only one exists at a time in a
 /// holder; the handler is removed when it drops.
 #[derive(Debug)]
-pub struct Reaper {
-    wakeups: UnixStream,
-    handler: SigId,
-}
+pub struct Reaper(Wakeups);
 
 impl Reaper {
     /// # Errors
     ///
     /// When no socket pair can be made or the handler can't be installed.
     pub fn new() -> io::Result<Self> {
-        let (wakeups, sender) = UnixStream::pair()?;
-        wakeups.set_nonblocking(true)?;
-        let handler = signal_hook::low_level::pipe::register(libc::SIGCHLD, sender)?;
-        Ok(Self { wakeups, handler })
+        Wakeups::new(libc::SIGCHLD).map(Self)
     }
 
     /// Readable once a `SIGCHLD` has arrived since the last `clear`.
     pub fn fd(&self) -> BorrowedFd<'_> {
-        self.wakeups.as_fd()
+        self.0.fd()
     }
 
     /// Empties the wake-ups, so `fd` waits for the next `SIGCHLD`.
     pub fn clear(&self) {
-        let mut drained = [0u8; 64];
-        loop {
-            match (&self.wakeups).read(&mut drained) {
-                Ok(n) if n > 0 => {}
-                Err(e) if e.kind() == ErrorKind::Interrupted => {}
-                _ => return,
-            }
-        }
-    }
-}
-
-impl Drop for Reaper {
-    fn drop(&mut self) {
-        signal_hook::low_level::unregister(self.handler);
+        self.0.clear();
     }
 }
 

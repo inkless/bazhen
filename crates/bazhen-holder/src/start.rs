@@ -4,6 +4,7 @@
 //!
 //! | Exit | Meaning |
 //! |---|---|
+//! | 0 | it was closed |
 //! | 1 | a start step failed: the PTY, the child's program or cwd, listing `/dev/fd`, binding |
 //! | 2 | the spec is invalid, NUL bytes and a socket path that isn't absolute or is too long included |
 //! | 3 | the spec's daemon shares no major with this holder |
@@ -20,15 +21,21 @@ use std::io::{self, Read, Write as _};
 use std::path::Path;
 use std::process::ExitCode;
 
-use bazhen_holder_proto::body::SpawnSpec;
+use std::time::Instant;
+
+use bazhen_holder_proto::body::{self, Count, Size, SpawnSpec, StartTime};
 use bazhen_holder_proto::{MAX_REQUEST_BYTES, SpawnSpecError, decode_spawn_spec};
 use rustix::process::{getpid, getsid, setsid};
 use thiserror::Error;
 
 use crate::child::Reaper;
-use crate::holder::{Discard, Holder};
+use crate::holder::Holder;
 use crate::pty::{self, Pty, SpawnError, WindowSize};
+use crate::ring::{RING_BYTES, Ring};
+use crate::server::{Server, Terminal};
+use crate::signals::Wakeups;
 use crate::socket::{self, BindError, Socket};
+use crate::start_time;
 
 pub const READY: &[u8] = b"ready\n";
 
@@ -69,7 +76,7 @@ pub const EXIT_AFTER_READY: u8 = 5;
 
 /// Starts a holder from the spec on stdin, and runs it until it ends.
 pub fn run() -> ExitCode {
-    let (holder, _socket) = match start(&mut io::stdin().lock()) {
+    let (mut holder, server) = match start(&mut io::stdin().lock()) {
         Ok(started) => started,
         Err(e) => {
             // Nothing is left to tell when stderr is gone too.
@@ -87,32 +94,78 @@ pub fn run() -> ExitCode {
     if let Err(e) = detach_stdio() {
         tracing::warn!(error = %e, "could not point stdio at /dev/null");
     }
-    let error = holder.run();
-    tracing::error!(error = %error, "the holder's loop failed");
-    ExitCode::from(EXIT_AFTER_READY)
+    match server.run(&mut holder) {
+        Ok(()) => {
+            tracing::info!("closed");
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            tracing::error!(%error, "the holder's loop failed");
+            ExitCode::from(EXIT_AFTER_READY)
+        }
+    }
 }
 
-fn start(stdin: &mut impl Read) -> Result<(Holder<Discard>, Socket), StartError> {
+fn start(stdin: &mut impl Read) -> Result<(Holder<Ring>, Server), StartError> {
     let spec = read_spec(stdin)?;
     become_session_leader()?;
     std::env::set_current_dir("/").map_err(StartError::Setup)?;
     pty::close_inherited_fds().map_err(StartError::Setup)?;
+    // Before the bind: a SIGUSR1 sent once the socket exists must find its handler, and not end
+    // the holder by its default action. The handlers go first, then the unblocking, so neither
+    // signal is ever deliverable with no handler for it.
+    let reaper = Reaper::new().map_err(StartError::Setup)?;
+    let rebind = Wakeups::new(libc::SIGUSR1).map_err(StartError::Setup)?;
+    pty::unblock_wakeup_signals().map_err(StartError::Setup)?;
     let socket = Socket::bind(Path::new(spec.socket.as_str()))?;
     crate::log::init(Path::new(spec.socket.as_str()));
-    match spawn(&spec) {
-        Ok(holder) => Ok((holder, socket)),
-        Err(error) => {
+    match serve(&spec, socket, reaper, rebind) {
+        Ok(started) => Ok(started),
+        Err((error, socket)) => {
             socket.remove();
             Err(error)
         }
     }
 }
 
-/// Every start step after the bind.
-fn spawn(spec: &SpawnSpec) -> Result<Holder<Discard>, StartError> {
-    let reaper = Reaper::new().map_err(StartError::Setup)?;
-    let (pty, slave) = Pty::open(WindowSize::from(spec.size)).map_err(StartError::Setup)?;
-    let child = pty::spawn(slave, &spec.process(), &reaper)?;
+/// Every start step after the bind; one that fails hands the socket back to be removed.
+fn serve(
+    spec: &SpawnSpec,
+    socket: Socket,
+    reaper: Reaper,
+    rebind: Wakeups,
+) -> Result<(Holder<Ring>, Server), (StartError, Socket)> {
+    let setup = |e: io::Error| StartError::Setup(e);
+    let holder_start = match start_time::of(getpid()) {
+        Ok(start) => start,
+        Err(e) => return Err((setup(io::Error::other(e)), socket)),
+    };
+    let holder_pid = u64::try_from(getpid().as_raw_nonzero().get())
+        .ok()
+        .and_then(|pid| body::Pid::new(pid).ok());
+    let window = WindowSize::from(spec.size);
+    let size = body::Cols::new(u64::from(window.cols()))
+        .and_then(|cols| Ok((cols, body::Rows::new(u64::from(window.rows()))?)))
+        .map(|(cols, rows)| Size { cols, rows });
+    let history_lines = Count::new(spec.history_lines.get());
+    let (Some(holder_pid), Ok(size), Ok(history_lines)) = (holder_pid, size, history_lines) else {
+        let why = "a pid, size or history depth the protocol can't carry";
+        return Err((setup(io::Error::other(why)), socket));
+    };
+    let (pty, slave) = match Pty::open(window) {
+        Ok(opened) => opened,
+        Err(e) => return Err((setup(e), socket)),
+    };
+    let child = match pty::spawn(slave, &spec.process(), &reaper) {
+        Ok(child) => child,
+        Err(e) => return Err((e.into(), socket)),
+    };
+    // The child is ours and not yet reaped, so its pid can't have been reused. Nothing fails from
+    // here: the child runs, and only a close may end it.
+    let child_start = start_time::of(child.pid()).unwrap_or_else(|error| {
+        tracing::warn!(%error, "could not read when the child started");
+        StartTime::new(0).unwrap_or(holder_start)
+    });
     let program = Path::new(spec.argv.as_slice().first().map_or("", String::as_str))
         .file_name()
         .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
@@ -125,7 +178,18 @@ fn spawn(spec: &SpawnSpec) -> Result<Holder<Discard>, StartError> {
         pid = child.pid().as_raw_nonzero(),
         "holder started"
     );
-    Ok(Holder::new(pty, reaper, child, spec.generation, Discard))
+    let terminal = Terminal {
+        terminal_id: spec.terminal_id.clone(),
+        tags: spec.tags.clone(),
+        size,
+        history_lines,
+        holder_pid,
+        holder_start,
+        child_start,
+    };
+    let holder = Holder::new(pty, reaper, child, spec.generation, Ring::new(RING_BYTES));
+    let server = Server::new(socket, terminal, rebind, Instant::now());
+    Ok((holder, server))
 }
 
 /// Reads and checks the spec, refusing more than `MAX_REQUEST_BYTES` of it.

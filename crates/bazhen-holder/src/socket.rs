@@ -36,7 +36,7 @@ const RENEW_EVERY: Duration = Duration::from_hours(1);
 /// What each accepted connection asks the kernel to buffer for it: the default on macOS is about
 /// 8 KiB, which a subscriber keeping up with a flood would fill every few writes. The kernel may
 /// grant less.
-const SEND_BUFFER: usize = 1 << 20;
+pub const SEND_BUFFER: usize = 1 << 20;
 
 #[derive(Debug, Error)]
 pub enum BindError {
@@ -241,8 +241,9 @@ impl Socket {
         }
     }
 
-    /// Removes the socket, if what is at its path is still this one, and stops listening.
-    pub fn remove(self) {
+    /// Removes the socket, if what is at its path is still this one. The listener and the lock
+    /// stay open until the `Socket` is dropped.
+    pub fn remove(&self) {
         let removed = in_private_dir(&self.path, |name| match std::fs::symlink_metadata(name) {
             Ok(meta) if Identity::of(&meta) == self.identity => {
                 std::fs::remove_file(name).map_err(io_error(name))

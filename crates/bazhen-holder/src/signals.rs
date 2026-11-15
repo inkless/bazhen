@@ -1,4 +1,49 @@
+use std::io::{self, ErrorKind, Read as _};
+use std::os::fd::{AsFd as _, BorrowedFd};
+use std::os::unix::net::UnixStream;
+
 use libc::c_int;
+use signal_hook::SigId;
+
+/// Turns one signal into a readable fd, for the holder's `poll`; the handler is removed when it
+/// drops.
+#[derive(Debug)]
+pub(crate) struct Wakeups {
+    wakeups: UnixStream,
+    handler: SigId,
+}
+
+impl Wakeups {
+    pub(crate) fn new(signal: c_int) -> io::Result<Self> {
+        let (wakeups, sender) = UnixStream::pair()?;
+        wakeups.set_nonblocking(true)?;
+        let handler = signal_hook::low_level::pipe::register(signal, sender)?;
+        Ok(Self { wakeups, handler })
+    }
+
+    /// Readable once the signal has arrived since the last `clear`.
+    pub(crate) fn fd(&self) -> BorrowedFd<'_> {
+        self.wakeups.as_fd()
+    }
+
+    /// Empties the wake-ups, so `fd` waits for the next signal.
+    pub(crate) fn clear(&self) {
+        let mut drained = [0u8; 64];
+        loop {
+            match (&self.wakeups).read(&mut drained) {
+                Ok(n) if n > 0 => {}
+                Err(e) if e.kind() == ErrorKind::Interrupted => {}
+                _ => return,
+            }
+        }
+    }
+}
+
+impl Drop for Wakeups {
+    fn drop(&mut self) {
+        signal_hook::low_level::unregister(self.handler);
+    }
+}
 
 /// The standard signals both Linux and macOS define, by name: their numbers differ between the
 /// two (`SIGSYS` is 31 on Linux and 12 on macOS), so code never assumes a range of them.
