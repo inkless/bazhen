@@ -403,7 +403,8 @@ const UNSAFE_MODULES: Record<string, string> = {
   "crates/bazhen-holder/src/pty.rs":
     "Command::pre_exec, to make the child a session leader on its PTY between fork and exec, and " +
     "libc's sigprocmask and signal there, to give it an empty signal mask and default " +
-    "dispositions; and libc's fcntl and close, for the fds the holder inherited, which no Rust " +
+    "dispositions; libc's sigprocmask in the holder itself, to unblock the signals its loop " +
+    "wakes on; and libc's fcntl and close, for the fds the holder inherited, which no Rust " +
     "value owns; rustix covers none of them",
   "crates/bazhen-holder/src/macos.rs":
     "libc's sysctl(KERN_PROC_PID), the one call that says when a macOS process started, a zombie " +
@@ -733,6 +734,54 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/ring.rs::Ring::start": "returns a field or a state; reads no bytes",
   "crates/bazhen-holder/src/ring.rs::Ring::write":
     "the ring's Output: copies the child's output in; parses nothing",
+  "crates/bazhen-holder/src/holder.rs::Holder::after_poll":
+    "reads the master into the Output, a sink that parses nothing; reaps the child",
+  "crates/bazhen-holder/src/holder.rs::Holder::child_pid":
+    "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/holder.rs::Holder::close":
+    "starts signalling the child's groups; reads nothing",
+  "crates/bazhen-holder/src/holder.rs::Holder::generation":
+    "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/holder.rs::Holder::master":
+    "borrows the master fd for poll; reads nothing",
+  "crates/bazhen-holder/src/holder.rs::Holder::output":
+    "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/holder.rs::Holder::wakeups":
+    "borrows the SIGCHLD wake-up fd for poll; reads nothing",
+  "crates/bazhen-holder/src/server.rs::Server::accept": "accepts connections; reads no bytes",
+  "crates/bazhen-holder/src/server.rs::Server::close_done":
+    "checks whether a close is done; reads nothing",
+  "crates/bazhen-holder/src/server.rs::Server::release_writer":
+    "frees the writer slot once no open connection holds it; reads nothing",
+  "crates/bazhen-holder/src/server.rs::Server::deadline":
+    "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/server.rs::Server::listening":
+    "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/server.rs::Server::new":
+    "takes the bound socket and terminal; reads nothing",
+  "crates/bazhen-holder/src/server.rs::Server::poll": "waits on fds; reads nothing",
+  "crates/bazhen-holder/src/server.rs::Server::run":
+    "runs turns; bytes it reads go to Connection::receive and the ring",
+  "crates/bazhen-holder/src/server.rs::Server::turn":
+    "runs the loop; bytes it reads go to Connection::receive and the ring",
+  "crates/bazhen-holder/src/server.rs::Server::victim":
+    "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/server.rs::waiting_now":
+    "asks each connection whether a request waits; reads no bytes",
+  "crates/bazhen-holder/src/server.rs::answer": "answers one decoded request; reads no bytes",
+  "crates/bazhen-holder/src/server.rs::hello": "answers a decoded hello; reads no bytes",
+  "crates/bazhen-holder/src/server.rs::hello_reply":
+    "builds the hello reply from the holder's state; reads no bytes",
+  "crates/bazhen-holder/src/server.rs::refuse": "queues an error reply; reads no bytes",
+  "crates/bazhen-holder/src/server.rs::send": "encodes and queues a reply; reads no bytes",
+  "crates/bazhen-holder/src/server.rs::serve":
+    "answers requests FrameDecoder decoded, which the proto crate's frame target fuzzes",
+  "crates/bazhen-holder/src/signals.rs::Wakeups::clear":
+    "discards signal wake-ups, whose bytes the handler wrote and which carry no content",
+  "crates/bazhen-holder/src/signals.rs::Wakeups::drop": "removes the signal handler; reads nothing",
+  "crates/bazhen-holder/src/signals.rs::Wakeups::fd":
+    "borrows the wake-up socket for poll; reads nothing",
+  "crates/bazhen-holder/src/start.rs::serve": "sets up the PTY, child and server; reads no bytes",
   "crates/bazhen-holder/src/socket.rs::Socket::listener": "borrows the listener; reads nothing",
   "crates/bazhen-holder/src/socket.rs::Socket::keep_lock":
     "compares the held lock with the file at its name and locks again; reads no bytes",
@@ -754,7 +803,6 @@ const NOT_DECODERS: Record<string, string> = {
     "borrows the wake-up socket for poll; reads nothing",
   "crates/bazhen-holder/src/child.rs::Reaper::clear":
     "discards SIGCHLD wake-ups, whose bytes the signal handler wrote and which carry no content",
-  "crates/bazhen-holder/src/child.rs::Reaper::drop": "removes the signal handler; reads nothing",
   "crates/bazhen-holder/src/pty.rs::Pty::master": "borrows the master fd; reads nothing",
   "crates/bazhen-holder/src/pty.rs::Slave::as_fd": "borrows the slave fd; reads nothing",
   "crates/bazhen-holder/src/pty.rs::Pty::set_size": "sets the window size; reads nothing",
@@ -769,8 +817,6 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/holder.rs::Holder::new":
     "takes over a spawned child and reaps it if it has exited; reads nothing",
   "crates/bazhen-holder/src/holder.rs::Holder::exit": "returns the published exit; reads nothing",
-  "crates/bazhen-holder/src/holder.rs::Holder::run":
-    "calls turn until it fails; reads nothing itself",
   "crates/bazhen-holder/src/holder.rs::Holder::turn":
     "polls, then hands a readable master to read_master; parses nothing",
   "crates/bazhen-holder/src/holder.rs::Holder::deadline":

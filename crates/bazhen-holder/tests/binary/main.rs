@@ -171,14 +171,28 @@ struct Start<'a> {
     prelude: &'a str,
     /// Starts the holder as the leader of a process group of its own, but not of a session.
     own_group: bool,
+    /// Starts the holder with `SIGCHLD` and `SIGUSR1` blocked, as a careless spawner could. A
+    /// shell can't block a signal, so this goes through `python3`, which execs the shell.
+    blocked_signals: bool,
     stderr: bool,
 }
 
 fn spawn(spec: &[u8], how: &Start<'_>) -> Result<Started> {
     let script = format!("{} ulimit -t 2 && exec \"$0\" \"$@\"", how.prelude);
-    let mut command = Command::new("sh");
+    let mut command = if how.blocked_signals {
+        let block = "import os, signal, sys; \
+            signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGCHLD, signal.SIGUSR1}); \
+            os.execvp('sh', ['sh', '-c'] + sys.argv[1:])";
+        let mut python = Command::new("python3");
+        python.args(["-c", block]);
+        python
+    } else {
+        let mut sh = Command::new("sh");
+        sh.arg("-c");
+        sh
+    };
     command
-        .args(["-c", &script, HOLDER])
+        .args([&script, HOLDER])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(if how.stderr {
