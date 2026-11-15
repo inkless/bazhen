@@ -256,8 +256,10 @@ describe("mail to a Claude Code agent", () => {
         timeout: 30_000,
       })
       .toBe("delivered");
+    await daemon.caughtUp(stream);
     const story = eventsAbout(stream, messageId);
     stream.close();
+    expect(story.map((e) => e.type)).toContain("mailbox.delivered");
     expect(requeueReasons(story)).toEqual([]);
   });
 
@@ -277,6 +279,7 @@ describe("mail to a Claude Code agent", () => {
         timeout: 60_000,
       })
       .toBe("delivered");
+    await daemon.caughtUp(stream);
     const story = eventsAbout(stream, messageId);
     stream.close();
     expect(requeueReasons(story)).toEqual(["interrupted"]);
@@ -301,6 +304,7 @@ describe("mail to a Claude Code agent", () => {
         })
         .toBe("delivered");
     }
+    await daemon.caughtUp(stream);
     const story = eventsAbout(stream, folded.messageId);
     stream.close();
     // Folded, not woken: no prompt carried it, so it was never `seen`.
@@ -335,6 +339,7 @@ describe("mail to a Claude Code agent", () => {
         })
         .toBe("delivered");
     }
+    await daemon.caughtUp(stream);
     const story = eventsAbout(stream, long.messageId);
     stream.close();
     expect(story.map((e) => e.type)).toContain("mailbox.seen");
@@ -364,6 +369,8 @@ describe("mail to a Claude Code agent", () => {
       .toBe("delivered");
     // The answer's tool result closes it, before the turn's end would have: the agent reads
     // working again in between, and idle only after.
+    await expect.poll(doing, { timeout: 10_000 }).toBe("idle");
+    await daemon.caughtUp(stream);
     const story = itemAndActivity(stream, id);
     stream.close();
     const closed = story.indexOf("attention.closed");
@@ -384,6 +391,7 @@ describe("mail to a Claude Code agent", () => {
         timeout: 90_000,
       })
       .toBe("undeliverable");
+    await daemon.caughtUp(stream);
     const story = eventsAbout(stream, messageId);
     stream.close();
     expect(story.filter((e) => e.type === "mailbox.offered")).toHaveLength(4);
