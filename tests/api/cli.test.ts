@@ -1,5 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { StateSnapshot } from "@bazhen/protocol";
 import { Daemon, LOGIN_SHELL, bazhen, cliHome, overSocket } from "./daemon.ts";
+
+/** What each notice offers its viewer. */
+const offered = (state: StateSnapshot) => state.notices.map((n) => n.actions);
+/** The state as every viewer sees it: all of it but what a notice offers. */
+const shared = (state: StateSnapshot) => ({
+  ...state,
+  notices: state.notices.map(({ actions: _actions, ...n }) => n),
+});
 
 describe("the daemon's Unix socket", () => {
   let daemon: Daemon;
@@ -10,9 +19,15 @@ describe("the daemon's Unix socket", () => {
     await daemon?.stop();
   });
 
-  it("serves the same commands as HTTP", async () => {
+  it("serves the same commands as HTTP, but for what each caller may do about a notice", async () => {
     const http = await daemon.request("/v1/state");
-    expect(await overSocket(daemon.socket, "GET", "/v1/state")).toEqual(http);
+    const socket = await overSocket(daemon.socket, "GET", "/v1/state");
+    const overHttp = StateSnapshot.parse(http.body);
+    const asOwner = StateSnapshot.parse(socket.body);
+    // The socket's caller is the owner, who alone dismisses a notice; these HTTP requests come
+    // from the harness's paired browser, which never may, its own pairing's included.
+    expect(shared(asOwner)).toEqual(shared(overHttp));
+    expect([offered(asOwner), offered(overHttp)]).toEqual([[["dismiss"]], [[]]]);
   });
 
   it("serves stop on the socket only, never over HTTP", async () => {
