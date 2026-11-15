@@ -1231,10 +1231,12 @@ describe("tomlTables", () => {
   });
 
   it("starts each table afresh, whatever an entry before it left open", () => {
-    const tables = tomlTables('[package]\nname = { a = [\n[dependencies]\nserde = "1.0"\n');
+    const tables = tomlTables(
+      '[package]\nname = { a = [\n[dependencies]\nserde = { version = "1.0", features = [\n  "derive",\n] }\n',
+    );
     expect([tables.get("[package]"), tables.get("[dependencies]")]).toEqual([
       ["name = { a = ["],
-      ['serde = "1.0"'],
+      ['serde = { version = "1.0", features = [ "derive", ] }'],
     ]);
   });
 
