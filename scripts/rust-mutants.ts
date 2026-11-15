@@ -24,6 +24,15 @@ function entries(listing: unknown): Record<string, unknown>[] {
 }
 
 /**
+ * The listing in what a `cargo mutants --list --json` that succeeded printed. Given a diff with
+ * no code it would mutate, cargo-mutants 27.1.0 logs "No mutants to filter", exits 0 and prints
+ * nothing, not even `[]`: that is the one empty output read as no mutants.
+ */
+export function mutantListing(stdout: string): unknown {
+  return stdout.trim() === "" ? [] : JSON.parse(stdout);
+}
+
+/**
  * The mutants of `cargo mutants --list --json --diff`, each with a patch `git apply` takes: the
  * listing's own diff names the mutant where a file name belongs.
  */
