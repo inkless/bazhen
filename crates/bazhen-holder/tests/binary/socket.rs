@@ -371,6 +371,7 @@ fn close_answers_ok_ends_the_child_removes_the_socket_and_exits_0() {
             ..
         }
     ));
+    assert!(matches!(client.reply().unwrap(), Reply::Exited(_)));
     assert!(client.hangs_up().unwrap());
     let (code, _) = holder.exit().unwrap();
     assert_eq!(code, Some(0));
@@ -756,4 +757,195 @@ fn a_close_waits_for_a_reader_that_never_reads_for_a_second_at_most() {
     );
     drop(stuck);
     writing.join().unwrap();
+}
+
+impl Client {
+    fn subscribe(&mut self, from: Option<(u64, u64)>) -> Result<Reply> {
+        let id = self.id();
+        let from = match from {
+            Some((generation, offset)) => Some(bazhen_holder_proto::body::SubscribeFrom {
+                generation: bazhen_holder_proto::body::Generation::new(generation)?,
+                offset: bazhen_holder_proto::body::Offset::new(offset)?,
+            }),
+            None => None,
+        };
+        let body = bazhen_holder_proto::body::SubscribeRequest { from };
+        self.send(&Request::Subscribe { id, body })?;
+        self.reply()
+    }
+
+    /// The output and gaps sent until `exited`, which must come.
+    fn stream_to_exit(&mut self) -> Result<Stream> {
+        self.stream_to_exit_keeping(true)
+    }
+
+    /// As `stream_to_exit`, keeping the output only if `keep`: a flood's is counted, and checked
+    /// to be all zeros, instead.
+    fn stream_to_exit_keeping(&mut self, keep: bool) -> Result<Stream> {
+        let mut stream = Stream {
+            zeros: true,
+            ..Stream::default()
+        };
+        loop {
+            match self.reply()? {
+                Reply::Data { offset, bytes } => {
+                    if offset.get() != stream.end {
+                        return Err(
+                            format!("data at {}, after {}", offset.get(), stream.end).into()
+                        );
+                    }
+                    stream.end += bytes.len() as u64;
+                    stream.received += bytes.len() as u64;
+                    stream.zeros &= bytes.iter().all(|&b| b == 0);
+                    if keep {
+                        stream.bytes.extend_from_slice(&bytes);
+                    }
+                }
+                Reply::Gap(gap) => {
+                    if gap.from.get() != stream.end {
+                        return Err(
+                            format!("a gap from {}, after {}", gap.from.get(), stream.end).into(),
+                        );
+                    }
+                    stream.gaps.push((gap.from.get(), gap.to.get()));
+                    stream.end = gap.to.get();
+                }
+                Reply::Exited(_) => return Ok(stream),
+                other => return Err(format!("sent {other:?}").into()),
+            }
+        }
+    }
+}
+
+/// What a subscriber was sent: its output, the gaps in it, and the offset it reached.
+#[derive(Debug, Default)]
+struct Stream {
+    bytes: Vec<u8>,
+    received: u64,
+    zeros: bool,
+    gaps: Vec<(u64, u64)>,
+    end: u64,
+}
+
+fn is_ok(reply: &Reply) -> bool {
+    matches!(reply, Reply::Ok { body, .. } if body.request == "subscribe")
+}
+
+#[test]
+fn streams_every_byte_of_the_childs_output_in_order_then_its_exit() {
+    sweep().unwrap();
+    let home = home("seq").unwrap();
+    let (_holder, socket) = serving(&home, &["seq", "1", "20000"]).unwrap();
+    let mut client = Client::connect(&socket).unwrap();
+    client.hello(false).unwrap();
+    assert!(is_ok(&client.subscribe(Some((0, 0))).unwrap()));
+    let stream = client.stream_to_exit().unwrap();
+    // The terminal turns each newline into a carriage return and a newline.
+    let expected: Vec<String> = (1..=20000).map(|n| n.to_string()).collect();
+    let expected = expected.join("\r\n") + "\r\n";
+    assert_eq!(stream.gaps, []);
+    assert_eq!(String::from_utf8(stream.bytes).unwrap(), expected);
+}
+
+#[test]
+fn a_subscription_from_output_the_ring_dropped_gets_a_gap_then_the_rest() {
+    sweep().unwrap();
+    let home = home("dropped").unwrap();
+    let flood: u64 = 3_000_000;
+    let count = format!("-c{flood}");
+    let (_holder, socket) = serving(&home, &["head", &count, "/dev/zero"]).unwrap();
+    let deadline = Instant::now() + DEADLINE;
+    let mut client = loop {
+        let mut client = Client::connect(&socket).unwrap();
+        if client.hello(false).unwrap().exit.is_some() {
+            break client;
+        }
+        assert!(Instant::now() < deadline, "the flood never ended");
+    };
+    assert!(is_ok(&client.subscribe(Some((0, 0))).unwrap()));
+    let held = bazhen_holder::ring::RING_BYTES as u64;
+    match client.reply().unwrap() {
+        Reply::Gap(gap) => assert_eq!((gap.from.get(), gap.to.get()), (0, flood - held)),
+        other => panic!("sent {other:?}"),
+    }
+    let mut received = 0;
+    while received < held {
+        let Reply::Data { bytes, .. } = client.reply().unwrap() else {
+            panic!("not output");
+        };
+        received += bytes.len() as u64;
+    }
+    assert_eq!(received, held);
+}
+
+#[test]
+fn refuses_a_subscription_from_another_generation_or_past_its_output() {
+    sweep().unwrap();
+    let home = home("refused").unwrap();
+    let (_holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
+    let mut client = Client::connect(&socket).unwrap();
+    let end = client.hello(false).unwrap().offset.get();
+    for (from, code) in [((1, 0), "stale-generation"), ((0, end + 1), "out-of-range")] {
+        match client.subscribe(Some(from)).unwrap() {
+            Reply::Error { body, .. } => assert_eq!(body.code, code),
+            other => panic!("answered {other:?}"),
+        }
+    }
+    assert!(is_ok(&client.subscribe(Some((0, end))).unwrap()));
+}
+
+/// A subscriber to a flood is sent all of it, in order, with any output the ring dropped before it
+/// was read standing as a gap: nothing is lost unaccounted for, whatever the rates. This runs on
+/// macOS too, where a socket's buffer starts at 8 KiB.
+#[test]
+fn a_subscriber_to_a_flood_is_sent_all_of_it_in_order_or_told_of_a_gap() {
+    sweep().unwrap();
+    let home = home("keepup").unwrap();
+    let flood: u64 = 50_000_000;
+    let script = format!("sleep 1; head -c {flood} /dev/zero");
+    let (_holder, socket) = serving(&home, &["sh", "-c", &script]).unwrap();
+    let mut client = Client::connect(&socket).unwrap();
+    client.hello(false).unwrap();
+    assert!(is_ok(&client.subscribe(Some((0, 0))).unwrap()));
+    let stream = client.stream_to_exit_keeping(false).unwrap();
+    assert_eq!(stream.end, flood);
+    let dropped: u64 = stream.gaps.iter().map(|(from, to)| to - from).sum();
+    assert_eq!(stream.received + dropped, flood);
+    // After the last gap, everything the ring held must have come.
+    let held = bazhen_holder::ring::RING_BYTES as u64;
+    assert!(
+        stream.received >= flood.min(held),
+        "{} received",
+        stream.received
+    );
+    assert!(stream.zeros);
+}
+
+/// The holder never stops reading the child for a subscriber that has stopped reading: another
+/// connection sees the flood end, and the stalled one, once it reads again, gets a gap.
+#[test]
+fn a_subscriber_that_stops_reading_holds_up_neither_the_child_nor_anyone_else() {
+    sweep().unwrap();
+    let home = home("stalled").unwrap();
+    let flood: u64 = 8_000_000;
+    let script = format!("sleep 0.5; head -c {flood} /dev/zero");
+    let (_holder, socket) = serving(&home, &["sh", "-c", &script]).unwrap();
+    let mut stalled = Client::connect(&socket).unwrap();
+    stalled.hello(false).unwrap();
+    assert!(is_ok(&stalled.subscribe(Some((0, 0))).unwrap()));
+    let deadline = Instant::now() + DEADLINE;
+    loop {
+        let hello = Client::connect(&socket).unwrap().hello(false).unwrap();
+        if hello.exit.is_some() {
+            assert_eq!(hello.offset.get(), flood);
+            break;
+        }
+        assert!(Instant::now() < deadline, "the child was held up");
+    }
+    let stream = stalled.stream_to_exit_keeping(false).unwrap();
+    assert!(
+        !stream.gaps.is_empty(),
+        "no gap for a subscriber the ring lapped"
+    );
+    assert_eq!(stream.end, flood);
 }

@@ -9,8 +9,11 @@ use std::os::fd::{AsFd as _, BorrowedFd};
 use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
-use bazhen_holder_proto::{FrameDecoder, Malformed, Request, request_decoder};
+use bazhen_holder_proto::body::{Gap, Offset};
+use bazhen_holder_proto::{FrameDecoder, Malformed, Reply, Request, request_decoder};
 use rustix::event::PollFlags;
+
+use crate::ring::Ring;
 
 /// The most read from a connection in one turn.
 pub const READ_CHUNK: usize = 64 << 10;
@@ -21,6 +24,9 @@ pub const QUEUE_MARK: usize = 256 << 10;
 /// a queue of many small frames, can't hold the loop.
 const WRITE_PER_TURN: usize = 1 << 20;
 const WRITES_PER_TURN: usize = 128;
+/// The most output one `data` frame carries: a subscriber costs this much buffer however far
+/// behind it is, since output is copied from the ring only into the frame being written.
+pub const DATA_FRAME: usize = 64 << 10;
 /// How long a new connection has to say `hello`.
 pub const HELLO_WITHIN: Duration = Duration::from_secs(5);
 /// How long a connection being hung up has to read what it is owed.
@@ -41,6 +47,17 @@ enum Phase {
     Gone,
 }
 
+/// A frame owed to the peer: an answer, written as soon as those before it are, or an event that
+/// happened at an offset of the output, written to a subscriber only once its output has reached
+/// that offset. A subscription's `ok` carries where its output starts, which takes effect only
+/// once the `ok` goes out, so what was owed under the old subscription goes first.
+#[derive(Debug)]
+struct Queued {
+    at: Option<u64>,
+    frame: Vec<u8>,
+    subscribes: Option<u64>,
+}
+
 #[derive(Debug)]
 pub struct Connection {
     id: u64,
@@ -56,10 +73,15 @@ pub struct Connection {
     /// nothing more is read or handed over: the caller hangs the connection up or drops it.
     refused: bool,
     phase: Phase,
-    queue: VecDeque<Vec<u8>>,
+    queue: VecDeque<Queued>,
     queued: usize,
-    /// How much of the queue's first frame is written.
+    /// The frame being written, how much of it is, and whether it came from the queue, whose
+    /// bytes count against the mark until written; output from the ring doesn't.
+    out: Vec<u8>,
     written: usize,
+    out_queued: bool,
+    /// The offset of the next output this connection is sent, while it is subscribed.
+    cursor: Option<u64>,
     /// Since when a write has found the peer's buffer full, with nothing written since.
     stuck_since: Option<Instant>,
     accepted: Instant,
@@ -79,6 +101,9 @@ impl Connection {
                 until: now + HELLO_WITHIN,
             },
             queue: VecDeque::new(),
+            out: Vec::new(),
+            out_queued: false,
+            cursor: None,
             queued: 0,
             written: 0,
             stuck_since: None,
@@ -159,16 +184,41 @@ impl Connection {
     }
 
     /// What `poll` should wait for: to read while the socket is read, and to write while anything
-    /// is queued, since a turn's writes are capped and may stop before the peer's buffer fills.
-    pub fn interest(&self) -> PollFlags {
+    /// is owed, output up to `end` included, since a turn's writes are capped and may stop before
+    /// the peer's buffer fills.
+    pub fn interest(&self, end: u64) -> PollFlags {
         let mut flags = PollFlags::empty();
         if self.reading() {
             flags |= PollFlags::IN;
         }
-        if !self.queue.is_empty() && !self.is_gone() {
+        let owed = !self.out.is_empty()
+            || !self.queue.is_empty()
+            || self.live_cursor().is_some_and(|cursor| cursor < end);
+        if owed && !self.is_gone() {
             flags |= PollFlags::OUT;
         }
         flags
+    }
+
+    /// The cursor, while the subscription lasts: it ends with the connection's input, after which
+    /// no output is started or owed, and no event waits on output.
+    fn live_cursor(&self) -> Option<u64> {
+        self.cursor.filter(|_| !self.input_ended)
+    }
+
+    /// Queues a subscription's `ok`, after which output goes from `from` on: subscribing again
+    /// moves it. Until the `ok` goes out, the subscription before it, if any, still has its output
+    /// and events sent.
+    pub fn queue_subscribed(&mut self, frame: Vec<u8>, from: u64) {
+        if self.is_gone() || frame.is_empty() {
+            return;
+        }
+        self.queued = self.queued.saturating_add(frame.len());
+        self.queue.push_back(Queued {
+            at: None,
+            frame,
+            subscribes: Some(from),
+        });
     }
 
     /// One read, into the decoder, while the socket is read. An end of input stops the reading
@@ -229,22 +279,109 @@ impl Connection {
             return;
         }
         self.queued = self.queued.saturating_add(frame.len());
-        self.queue.push_back(frame);
+        self.queue.push_back(Queued {
+            at: None,
+            frame,
+            subscribes: None,
+        });
     }
 
-    /// Writes what is queued, up to `WRITE_PER_TURN`, until the peer's buffer is full. A failed
-    /// write, such as to a peer that has gone, drops the connection.
-    pub fn flush(&mut self, now: Instant) {
+    /// Queues an event that happened at offset `at` of the output: a subscriber gets it once it has
+    /// been sent the output before it, and any other connection as soon as the frames before it.
+    pub fn queue_event(&mut self, at: u64, frame: Vec<u8>) {
+        if self.is_gone() || frame.is_empty() {
+            return;
+        }
+        self.queued = self.queued.saturating_add(frame.len());
+        self.queue.push_back(Queued {
+            at: Some(at),
+            frame,
+            subscribes: None,
+        });
+    }
+
+    /// The next frame to write: the queue's first if it is an answer, or an event the output has
+    /// reached; else, while subscribed, a `gap` if the ring has dropped the cursor's output, or
+    /// output from the cursor up to the first queued event. An event waiting on output never
+    /// blocks the output that frees it.
+    fn next_frame(&mut self, ring: &Ring) -> Option<(Vec<u8>, bool)> {
+        let live = self.live_cursor();
+        let gate = match self.queue.front() {
+            Some(front)
+                if front
+                    .at
+                    .is_none_or(|at| live.is_none_or(|cursor| cursor >= at)) =>
+            {
+                let front = self.queue.pop_front()?;
+                if let Some(from) = front.subscribes {
+                    self.cursor = Some(from);
+                }
+                return Some((front.frame, true));
+            }
+            Some(front) => front.at,
+            None => None,
+        };
+        let cursor = live?;
+        let encoded = |reply: Reply| match reply.encode() {
+            Ok(frame) => Some(frame),
+            Err(error) => {
+                tracing::warn!(%error, "could not encode output");
+                None
+            }
+        };
+        if cursor < ring.start() {
+            let gap = Gap {
+                from: self.offset(cursor)?,
+                to: self.offset(ring.start())?,
+            };
+            self.cursor = Some(ring.start());
+            return encoded(Reply::Gap(gap)).map(|frame| (frame, false));
+        }
+        let limit = gate.unwrap_or(u64::MAX).min(ring.end());
+        let room = usize::try_from(limit.checked_sub(cursor)?).unwrap_or(usize::MAX);
+        let bytes = ring.read(cursor, room.min(DATA_FRAME))?;
+        if bytes.is_empty() {
+            return None;
+        }
+        let offset = self.offset(cursor)?;
+        let frame = encoded(Reply::Data {
+            offset,
+            bytes: bytes.to_vec(),
+        })?;
+        self.cursor = Some(cursor.saturating_add(u64::try_from(bytes.len()).unwrap_or(u64::MAX)));
+        Some((frame, false))
+    }
+
+    /// `offset` as the protocol carries it. One past its range, 2^53 bytes of output in, can't be
+    /// sent, so the connection is dropped rather than left owed output it can never write.
+    fn offset(&mut self, offset: u64) -> Option<Offset> {
+        let carried = Offset::new(offset).ok();
+        if carried.is_none() {
+            tracing::error!(offset, "output past what the protocol can carry; dropping");
+            self.drop_now();
+        }
+        carried
+    }
+
+    /// Writes what is owed, output from `ring` included, up to `WRITE_PER_TURN`, until the peer's
+    /// buffer is full. A frame is written whole, in parts if need be, before the next is chosen. A
+    /// failed write, such as to a peer that has gone, drops the connection.
+    pub fn flush(&mut self, now: Instant, ring: &Ring) {
         let mut budget = WRITE_PER_TURN;
         for _ in 0..WRITES_PER_TURN {
             if budget == 0 || self.is_gone() {
                 return;
             }
-            let Some(front) = self.queue.front() else {
-                self.stuck_since = None;
-                return;
-            };
-            let pending = front.get(self.written..).unwrap_or_default();
+            if self.out.is_empty() {
+                let Some((frame, queued)) = self.next_frame(ring) else {
+                    self.stuck_since = None;
+                    return;
+                };
+                self.out = frame;
+                self.out_queued = queued;
+                self.written = 0;
+            }
+            let pending = self.out.get(self.written..).unwrap_or_default();
             let cut = pending.get(..pending.len().min(budget)).unwrap_or_default();
             match (&self.stream).write(cut) {
                 Ok(0) => self.drop_now(),
@@ -252,9 +389,11 @@ impl Connection {
                     self.stuck_since = None;
                     budget -= n;
                     self.written += n;
-                    if self.written == front.len() {
-                        self.queued = self.queued.saturating_sub(front.len());
-                        self.queue.pop_front();
+                    if self.written == self.out.len() {
+                        if self.out_queued {
+                            self.queued = self.queued.saturating_sub(self.out.len());
+                        }
+                        self.out.clear();
                         self.written = 0;
                     }
                 }
@@ -278,13 +417,16 @@ impl Connection {
 
     /// Whether the connection is over: dropped, hung up with all written or out of time, never
     /// said `hello` in time, or ended by its peer with every whole request answered and written.
+    /// A subscription ends with its peer's input: a peer that has ended its side is owed answers,
+    /// not output, which a live child would make endless.
     pub fn is_finished(&self, now: Instant) -> bool {
         // The end of input is read only once no whole request waits, and nothing is read after it.
-        let answered = self.input_ended && self.queue.is_empty();
+        let written = self.queue.is_empty() && self.out.is_empty();
+        let answered = self.input_ended && written;
         match self.phase {
             Phase::Gone => true,
             Phase::Opening { until } => answered || now >= until,
-            Phase::HangingUp { until } => self.queue.is_empty() || now >= until,
+            Phase::HangingUp { until } => written || now >= until,
             Phase::Open => answered,
         }
     }
@@ -295,6 +437,229 @@ mod tests {
     use bazhen_holder_proto::RequestId;
 
     use super::*;
+
+    /// The peer's side, reading frames as they come: one decoder for the connection's life, since
+    /// a frame may arrive across reads.
+    struct Peer {
+        stream: UnixStream,
+        decoder: bazhen_holder_proto::FrameDecoder<Reply>,
+    }
+
+    impl Peer {
+        fn of(stream: UnixStream) -> Self {
+            stream.set_nonblocking(true).unwrap();
+            Self {
+                stream,
+                decoder: bazhen_holder_proto::reply_decoder(),
+            }
+        }
+
+        /// Every whole frame sent since the last call.
+        fn sent(&mut self) -> Vec<Reply> {
+            let mut chunk = vec![0; 1 << 16];
+            loop {
+                match self.stream.read(&mut chunk) {
+                    Ok(0) => break,
+                    Ok(n) => self.decoder.push(&chunk[..n]),
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
+                    Err(e) => panic!("{e}"),
+                }
+            }
+            std::iter::from_fn(|| self.decoder.next_frame().unwrap()).collect()
+        }
+    }
+
+    fn subscribed(now: Instant, from: u64) -> (Connection, Peer) {
+        let (mut conn, peer) = pair(now);
+        conn.queue_subscribed(ok_frame(1), from);
+        (conn, Peer::of(peer))
+    }
+
+    fn ok_frame(id: u32) -> Vec<u8> {
+        let request = "subscribe".to_owned();
+        let body = bazhen_holder_proto::body::OkBody { request };
+        Reply::Ok {
+            id: RequestId(id),
+            body,
+        }
+        .encode()
+        .unwrap()
+    }
+
+    fn exited_frame() -> Vec<u8> {
+        let exited = bazhen_holder_proto::body::Exited {
+            generation: bazhen_holder_proto::body::Generation::new(0).unwrap(),
+            status: bazhen_holder_proto::body::ExitStatus::Unknown,
+        };
+        Reply::Exited(exited).encode().unwrap()
+    }
+
+    fn ring_of(capacity: usize, bytes: &[u8]) -> Ring {
+        let mut ring = Ring::new(capacity);
+        ring.push(bytes);
+        ring
+    }
+
+    /// (offset, bytes) of a data frame, or None for any other.
+    fn data(reply: &Reply) -> Option<(u64, &[u8])> {
+        match reply {
+            Reply::Data { offset, bytes } => Some((offset.get(), bytes)),
+            _ => None,
+        }
+    }
+
+    fn is_ok(reply: &Reply, id: u32) -> bool {
+        matches!(reply, Reply::Ok { id: got, .. } if *got == RequestId(id))
+    }
+
+    #[test]
+    fn a_subscription_is_answered_before_any_of_its_output() {
+        let now = Instant::now();
+        let (mut conn, mut peer) = subscribed(now, 0);
+        conn.flush(now, &ring_of(64, b"hello"));
+        let replies = peer.sent();
+        assert!(is_ok(&replies[0], 1));
+        assert_eq!(data(&replies[1]), Some((0, &b"hello"[..])));
+        assert_eq!(replies.len(), 2);
+    }
+
+    /// An event waits for the output before it, and doesn't stop that output going out, nor the
+    /// answers queued after it once it has gone.
+    #[test]
+    fn an_event_goes_after_the_output_before_it_and_holds_up_nothing_else() {
+        let now = Instant::now();
+        let (mut conn, mut peer) = subscribed(now, 0);
+        let ring = ring_of(64, b"0123456789");
+        conn.queue_event(6, exited_frame());
+        conn.queue(ok_frame(2));
+        conn.flush(now, &ring);
+        let replies = peer.sent();
+        assert!(is_ok(&replies[0], 1));
+        assert_eq!(data(&replies[1]), Some((0, &b"012345"[..])));
+        assert!(matches!(replies[2], Reply::Exited(_)));
+        assert!(is_ok(&replies[3], 2));
+        assert_eq!(data(&replies[4]), Some((6, &b"6789"[..])));
+    }
+
+    /// Subscribing again, back or to the end, while a live subscription has an event waiting on
+    /// its output: that output and the event go first, then the `ok`, then the new output.
+    #[test]
+    fn subscribing_again_waits_for_what_the_old_subscription_was_owed() {
+        let now = Instant::now();
+        for (from, after) in [(2, &b"23456789ab"[..]), (12, &b""[..])] {
+            let (mut conn, mut peer) = subscribed(now, 0);
+            conn.queue_event(10, exited_frame());
+            conn.flush(now, &ring_of(64, b"012345"));
+            let first = peer.sent();
+            assert_eq!(data(&first[1]), Some((0, &b"012345"[..])), "{from}");
+            conn.queue_subscribed(ok_frame(2), from);
+            conn.flush(now, &ring_of(64, b"0123456789ab"));
+            let replies = peer.sent();
+            assert_eq!(data(&replies[0]), Some((6, &b"6789"[..])), "{from}");
+            assert!(matches!(replies[1], Reply::Exited(_)), "{from}");
+            assert!(is_ok(&replies[2], 2), "{from}");
+            let rest: Vec<u8> = replies[3..]
+                .iter()
+                .flat_map(|reply| data(reply).unwrap().1.to_vec())
+                .collect();
+            assert_eq!(rest, after, "{from}");
+        }
+    }
+
+    #[test]
+    fn a_connection_not_subscribed_gets_an_event_at_once() {
+        let now = Instant::now();
+        let (mut conn, peer) = pair(now);
+        let mut peer = Peer::of(peer);
+        conn.queue_event(1_000, exited_frame());
+        conn.flush(now, &ring_of(64, b"0123"));
+        assert!(matches!(peer.sent().as_slice(), [Reply::Exited(_)]));
+    }
+
+    #[test]
+    fn a_subscriber_the_ring_has_lapped_gets_a_gap_then_output_from_its_start() {
+        let now = Instant::now();
+        let (mut conn, mut peer) = subscribed(now, 0);
+        conn.flush(now, &ring_of(16, &[7; 40]));
+        let replies = peer.sent();
+        match &replies[1] {
+            Reply::Gap(gap) => assert_eq!((gap.from.get(), gap.to.get()), (0, 24)),
+            other => panic!("sent {other:?}"),
+        }
+        // The buffer wraps at offset 32, so the output comes in two frames.
+        let mut offset = 24;
+        let mut after = Vec::new();
+        for reply in &replies[2..] {
+            let (at, bytes) = data(reply).unwrap();
+            assert_eq!(at, offset);
+            offset += bytes.len() as u64;
+            after.extend_from_slice(bytes);
+        }
+        assert_eq!(after, [7; 16]);
+    }
+
+    #[test]
+    fn output_goes_out_whole_in_order_and_in_frames_of_at_most_64_kib() {
+        let now = Instant::now();
+        let (mut conn, mut peer) = subscribed(now, 0);
+        let all: Vec<u8> = (0..200_000u32).map(|n| (n % 251) as u8).collect();
+        let ring = ring_of(1 << 20, &all);
+        let mut got = Vec::new();
+        while got.len() < all.len() {
+            conn.flush(now, &ring);
+            for reply in peer.sent() {
+                let Some((offset, bytes)) = data(&reply) else {
+                    continue;
+                };
+                assert_eq!(offset, got.len() as u64);
+                assert!(bytes.len() <= DATA_FRAME);
+                got.extend_from_slice(bytes);
+            }
+        }
+        assert_eq!(got, all);
+        assert!(!conn.interest(ring.end()).contains(PollFlags::OUT));
+    }
+
+    #[test]
+    fn a_caught_up_subscriber_asks_poll_for_nothing_until_there_is_output() {
+        let now = Instant::now();
+        let (mut conn, mut peer) = subscribed(now, 0);
+        let ring = ring_of(64, b"abcdef");
+        conn.flush(now, &ring);
+        peer.sent();
+        assert!(!conn.interest(ring.end()).contains(PollFlags::OUT));
+        assert!(conn.interest(ring.end() + 1).contains(PollFlags::OUT));
+    }
+
+    /// A peer that has ended its side is owed its answers, not output a live child would make
+    /// endless: its subscription ends with its input.
+    #[test]
+    fn a_subscription_ends_with_its_peers_input() {
+        let now = Instant::now();
+        let (mut conn, peer) = pair(now);
+        conn.open();
+        conn.queue_subscribed(ok_frame(1), 0);
+        conn.queue_event(10, exited_frame());
+        let mut peer = Peer::of(peer);
+        peer.stream.shutdown(std::net::Shutdown::Write).unwrap();
+        conn.receive(&mut vec![0; READ_CHUNK]);
+        // More than a turn writes, so ending with the input differs from ending once caught up.
+        let ring = ring_of(2 * WRITE_PER_TURN, &vec![7; 2 * WRITE_PER_TURN]);
+        let mut sent = Vec::new();
+        while !conn.is_finished(now) && sent.len() < 1000 {
+            conn.flush(now, &ring);
+            sent.extend(peer.sent());
+        }
+        assert!(conn.is_finished(now));
+        assert!(is_ok(&sent[0], 1));
+        assert!(matches!(sent[1], Reply::Exited(_)));
+        assert_eq!(sent.len(), 2, "output sent after the input ended");
+        assert!(!conn.interest(ring.end()).contains(PollFlags::OUT));
+    }
+
+    fn no_output() -> Ring {
+        Ring::new(1)
+    }
 
     fn pair(now: Instant) -> (Connection, UnixStream) {
         let (ours, theirs) = UnixStream::pair().unwrap();
@@ -333,21 +698,21 @@ mod tests {
         conn.receive(&mut vec![0; READ_CHUNK]);
         while conn.queued() < QUEUE_MARK {
             conn.queue(vec![0; 64 << 10]);
-            conn.flush(now);
+            conn.flush(now, &no_output());
         }
         assert!(conn.next_request().is_none(), "read past the mark");
         assert!(
             !conn.has_request(),
             "a request waiting past the mark counts as one to serve"
         );
-        assert!(!conn.interest().contains(PollFlags::IN));
-        assert!(conn.interest().contains(PollFlags::OUT));
+        assert!(!conn.interest(0).contains(PollFlags::IN));
+        assert!(conn.interest(0).contains(PollFlags::OUT));
         assert_eq!(conn.stuck_since(), Some(now));
         let mut drained = vec![0; 1 << 20];
         while conn.queued() > 0 {
             let n = peer.read(&mut drained).unwrap();
             assert!(n > 0);
-            conn.flush(now);
+            conn.flush(now, &no_output());
         }
         assert_eq!(conn.next_request().unwrap().unwrap().id(), RequestId(1));
         assert_eq!(conn.stuck_since(), None);
@@ -367,7 +732,7 @@ mod tests {
         let mut got = Vec::new();
         let mut chunk = vec![0; 1 << 16];
         while got.len() < expected.len() {
-            conn.flush(now);
+            conn.flush(now, &no_output());
             let n = peer.read(&mut chunk).unwrap();
             got.extend_from_slice(&chunk[..n]);
         }
@@ -383,13 +748,13 @@ mod tests {
         for _ in 0..WRITES_PER_TURN + 10 {
             conn.queue(vec![7; 8]);
         }
-        conn.flush(now);
+        conn.flush(now, &no_output());
         assert_eq!(conn.queued(), 10 * 8);
         assert_eq!(conn.stuck_since(), None);
-        assert!(conn.interest().contains(PollFlags::OUT));
-        conn.flush(now);
+        assert!(conn.interest(0).contains(PollFlags::OUT));
+        conn.flush(now, &no_output());
         assert_eq!(conn.queued(), 0);
-        assert!(!conn.interest().contains(PollFlags::OUT));
+        assert!(!conn.interest(0).contains(PollFlags::OUT));
     }
 
     #[test]
@@ -403,7 +768,7 @@ mod tests {
         assert!(conn.next_request().is_none());
         assert!(!conn.is_finished(now));
         assert!(conn.is_finished(now + HANG_UP_WITHIN));
-        conn.flush(now);
+        conn.flush(now, &no_output());
         assert!(conn.is_finished(now));
     }
 
@@ -426,16 +791,16 @@ mod tests {
         conn.queue(vec![1; 10]);
         peer.shutdown(std::net::Shutdown::Write).unwrap();
         conn.receive(&mut vec![0; READ_CHUNK]);
-        assert!(!conn.interest().contains(PollFlags::IN));
+        assert!(!conn.interest(0).contains(PollFlags::IN));
         assert!(!conn.is_finished(now), "ended with an answer still owed");
-        conn.flush(now);
+        conn.flush(now, &no_output());
         assert!(conn.is_finished(now));
         let (mut conn, peer) = pair(now);
         drop(peer);
         conn.queue(vec![1; 10]);
-        conn.flush(now);
+        conn.flush(now, &no_output());
         assert!(conn.is_gone());
-        assert_eq!(conn.interest(), PollFlags::empty());
+        assert_eq!(conn.interest(0), PollFlags::empty());
     }
 
     /// Writing nothing, or reading into nothing, returns 0, which is how a gone or finished peer
@@ -446,12 +811,12 @@ mod tests {
         let (mut conn, mut peer) = pair(now);
         conn.open();
         conn.queue(Vec::new());
-        conn.flush(now);
+        conn.flush(now, &no_output());
         assert!(!conn.is_gone());
         // With bytes waiting, a read into nothing returns 0 at once.
         peer.write_all(&[0]).unwrap();
         conn.receive(&mut []);
-        assert!(conn.interest().contains(PollFlags::IN));
+        assert!(conn.interest(0).contains(PollFlags::IN));
         assert!(!conn.is_finished(now));
     }
 
@@ -470,7 +835,7 @@ mod tests {
         peer.write_all(&close_request(1)).unwrap();
         conn.receive(&mut vec![0; READ_CHUNK]);
         assert!(conn.next_request().is_none());
-        assert!(!conn.interest().contains(PollFlags::IN));
+        assert!(!conn.interest(0).contains(PollFlags::IN));
     }
 
     /// A peer that sends its requests, ends its side and then reads is owed every answer.
@@ -488,7 +853,7 @@ mod tests {
         assert!(conn.next_request().is_none(), "answered past the mark");
         let mut drained = vec![0; 1 << 20];
         while conn.queued() > 0 {
-            conn.flush(now);
+            conn.flush(now, &no_output());
             let _ = peer.read(&mut drained).unwrap();
         }
         conn.receive(&mut vec![0; READ_CHUNK]);
@@ -508,7 +873,7 @@ mod tests {
         peer.write_all(&close_request(1)).unwrap();
         conn.receive(&mut vec![0; READ_CHUNK]);
         assert!(conn.has_request());
-        assert!(!conn.interest().contains(PollFlags::IN));
+        assert!(!conn.interest(0).contains(PollFlags::IN));
         peer.write_all(&close_request(2)).unwrap();
         conn.receive(&mut vec![0; READ_CHUNK]);
         assert_eq!(conn.next_request().unwrap().unwrap().id(), RequestId(1));

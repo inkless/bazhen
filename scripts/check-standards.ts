@@ -686,6 +686,16 @@ const NOT_DECODERS: Record<string, string> = {
     "returns a field or a state; reads no bytes",
   "crates/bazhen-holder/src/conn.rs::Connection::has_request":
     "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/conn.rs::Connection::queue_subscribed":
+    "queues a frame this holder encoded, with where output then starts; reads nothing",
+  "crates/bazhen-holder/src/conn.rs::Connection::live_cursor":
+    "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/conn.rs::Connection::offset":
+    "checks an offset fits the protocol; reads no bytes",
+  "crates/bazhen-holder/src/conn.rs::Connection::queue_event":
+    "queues a frame this holder encoded; reads nothing",
+  "crates/bazhen-holder/src/conn.rs::Connection::next_frame":
+    "chooses and encodes the next frame from the queue and the ring; reads no bytes",
   "crates/bazhen-holder/src/conn.rs::Connection::take_next":
     "takes FrameDecoder::next_frame's result, which the proto crate's frame target fuzzes",
   "crates/bazhen-holder/src/conn.rs::Connection::deadline":
@@ -768,6 +778,9 @@ const NOT_DECODERS: Record<string, string> = {
     "returns a field or a state; reads no bytes",
   "crates/bazhen-holder/src/server.rs::waiting_now":
     "asks each connection whether a request waits; reads no bytes",
+  "crates/bazhen-holder/src/server.rs::Server::send_exit":
+    "queues the child's exit, an event this holder encoded; reads nothing",
+  "crates/bazhen-holder/src/server.rs::subscribe": "answers a decoded subscribe; reads no bytes",
   "crates/bazhen-holder/src/server.rs::answer": "answers one decoded request; reads no bytes",
   "crates/bazhen-holder/src/server.rs::hello": "answers a decoded hello; reads no bytes",
   "crates/bazhen-holder/src/server.rs::hello_reply":
