@@ -397,7 +397,8 @@ function checkAgentContext(): void {
 const UNSAFE_MODULES: Record<string, string> = {
   "crates/bazhen-holder/src/pty.rs":
     "Command::pre_exec, to make the child a session leader on its PTY between fork and exec, and " +
-    "libc::signal there, to give it default signal dispositions; rustix covers neither",
+    "libc's sigprocmask and signal there, to give it an empty signal mask and default " +
+    "dispositions; rustix covers none of them",
 };
 
 const RAW_STRING = /r(#*)"/y;

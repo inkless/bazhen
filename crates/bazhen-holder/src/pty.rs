@@ -1,15 +1,18 @@
 #![expect(
     unsafe_code,
-    reason = "Command::pre_exec runs a closure between fork and exec, and libc::signal resets a \
-              disposition there; only unsafe can register the one or call the other"
+    reason = "Command::pre_exec runs a closure between fork and exec, where libc's sigprocmask \
+              and signal reset the mask and the dispositions; only unsafe can register the one \
+              or call the others"
 )]
 
 //! A terminal's PTY, and the child that runs on it as the leader of a session of its own.
 
 use std::io;
+use std::mem::MaybeUninit;
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::os::unix::process::CommandExt as _;
 use std::process::{Command, Stdio};
+use std::ptr;
 
 use bazhen_holder_proto::body::{ProcessSpec, Size};
 use rustix::fs::{Mode, OFlags};
@@ -135,8 +138,8 @@ impl Pty {
 
 /// Starts `process` on `slave` as the leader of a new session, whose controlling terminal the PTY
 /// is. The child's environment is `process.env` alone, with `TERM` set to the holder's; its
-/// signals start at their defaults, whatever the holder inherited; its umask and resource limits
-/// are the holder's. `reaper` must exist before the child does, so no exit goes unseen.
+/// signal mask is empty and its dispositions are the defaults, whatever the holder inherited; its
+/// umask and resource limits are the holder's. `reaper` must exist before the child does, so no exit goes unseen.
 ///
 /// # Errors
 ///
@@ -165,8 +168,9 @@ pub fn spawn(
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(slave.0));
     // SAFETY: the closure runs in the forked child before exec, where only async-signal-safe
-    // calls are sound. `become_session_leader` makes only signal(2), setsid(2) and
-    // ioctl(TIOCSCTTY), which are, and allocates nothing and takes no lock.
+    // calls are sound. `become_session_leader` makes only sigemptyset(3), sigprocmask(2),
+    // signal(2), setsid(2) and ioctl(TIOCSCTTY), which are, and allocates nothing and takes no
+    // lock.
     unsafe {
         command.pre_exec(become_session_leader);
     }
@@ -174,10 +178,25 @@ pub fn spawn(
     Ok(ChildProcess::new(Pid::from_child(&child)))
 }
 
-/// Runs in the child between fork and exec. std has already put the slave on fds 0–2 and reset
-/// the signal mask and `SIGPIPE`; exec resets caught signals but keeps ignored ones, so each of
-/// the rest goes back to its default here, as tmux does for a pane.
+/// Runs in the child between fork and exec, where std has already put the slave on fds 0–2 and
+/// reset `SIGPIPE`. std keeps the holder's signal mask, and exec keeps both the mask and every
+/// ignored signal, so both go back to their defaults here, as tmux does for a pane: a blocked or
+/// ignored `SIGINT` would leave Ctrl-C doing nothing, and a blocked `SIGHUP` would leave a close
+/// waiting out its grace.
 fn become_session_leader() -> io::Result<()> {
+    let mut none = MaybeUninit::<libc::sigset_t>::uninit();
+    // SAFETY: sigemptyset(3) is async-signal-safe and only writes the set it is given, which lives
+    // on this stack frame.
+    if unsafe { libc::sigemptyset(none.as_mut_ptr()) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: sigemptyset succeeded, so it initialised the set.
+    let none = unsafe { none.assume_init() };
+    // SAFETY: sigprocmask(2) is async-signal-safe; `none` is an initialised set and the old mask
+    // isn't asked for. The child is single-threaded until exec, so the process mask is the thread's.
+    if unsafe { libc::sigprocmask(libc::SIG_SETMASK, &raw const none, ptr::null_mut()) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
     for (signal, _) in signals::NAMED {
         if !signals::catchable(signal) {
             continue;

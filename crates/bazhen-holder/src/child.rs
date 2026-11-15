@@ -154,7 +154,9 @@ impl ChildProcess {
     }
 
     fn signal_groups(&self, foreground: Option<Pid>, signal: Signal) {
-        // ESRCH means the group has already ended, which is what the signal was for.
+        // Either refusal leaves nothing to do here: ESRCH, the group has already ended, which is
+        // what the signal was for; EPERM, the foreground group is another user's (a `sudo` in
+        // the foreground), which a close can't end, and the child's group still gets the signal.
         let _ = kill_process_group(self.pid, signal);
         if let Some(foreground) = foreground.filter(|group| *group != self.pid) {
             let _ = kill_process_group(foreground, signal);
