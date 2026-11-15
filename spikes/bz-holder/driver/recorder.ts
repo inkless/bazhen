@@ -3,10 +3,12 @@
 import fs from "node:fs";
 import os from "node:os";
 import { K, bytesOf, frame, u64, type Frame } from "./lib.ts";
-import { KEYBOARD_PROTOCOL, ScreenTracker, findDetach, restoreTerminal, type RawTty } from "./tty.ts";
+import { DetachScanner, KEYBOARD_PROTOCOL, ScreenTracker, restoreTerminal, type RawTty } from "./tty.ts";
 
 export interface RecorderDeps {
   name: string;
+  /** The recorder's holder home, named when the user skips the rest of cleanup. */
+  home: string;
   conn: {
     onFrame: (f: Frame) => void;
     onClose: () => void;
@@ -32,6 +34,8 @@ export interface RecorderDeps {
   removeHome(): void;
   keylog?: (line: string) => void;
   watchdogMs?: number;
+  /** How long the start of a split escape sequence is held back before it goes to the program. */
+  escapeMs?: number;
 }
 
 type End = "detach" | "exited" | "lost" | "error" | NodeJS.Signals;
@@ -41,13 +45,16 @@ const SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 export function startRecorder(d: RecorderDeps): void {
   const chunks: Buffer[] = [];
   const screen = new ScreenTracker();
+  const scanner = new DetachScanner();
+  let escapeTimer: NodeJS.Timeout | undefined;
+  let watchdog: NodeJS.Timeout | undefined;
   let restored = false;
   let finishing = false;
 
   const restore = () => {
     if (restored) return;
     restored = true;
-    restoreTerminal(d.stdin, d.write, screen.alternate);
+    restoreTerminal(d.stdin, d.write, screen);
   };
   const say = (text: string) => {
     try {
@@ -59,22 +66,34 @@ export function startRecorder(d: RecorderDeps): void {
 
   const onKey = (key: Buffer) => {
     d.keylog?.(`in ${key.toString("hex")} ${JSON.stringify(key.toString("latin1"))}`);
-    const at = findDetach(key);
-    if (at !== 0) d.conn.send(frame(K.INPUT, at < 0 ? key : key.subarray(0, at)));
-    if (at >= 0) void finish("detach");
+    clearTimeout(escapeTimer);
+    const { forward, detach } = scanner.feed(key);
+    if (forward.length > 0) d.conn.send(frame(K.INPUT, forward));
+    if (detach) {
+      void finish("detach");
+      return;
+    }
+    if (scanner.holding) {
+      escapeTimer = setTimeout(() => {
+        const held = scanner.flush();
+        if (!finishing && held.length > 0) d.conn.send(frame(K.INPUT, held));
+      }, d.escapeMs ?? 10);
+    }
   };
 
   async function finish(end: End, cause?: unknown): Promise<void> {
     if (finishing) return;
     finishing = true;
-    const watchdog = setTimeout(() => {
+    watchdog = setTimeout(() => {
       say(`\r\nrecorder: cleanup did not finish in ${d.watchdogMs ?? 10_000} ms\r\n`);
       d.proc.exit(1);
     }, d.watchdogMs ?? 10_000);
     d.conn.onFrame = () => {};
     d.stdin.off("data", onKey);
     d.stdin.pause();
+    clearTimeout(escapeTimer);
     restore();
+    say(`recorder: ${end}, saving and closing the holder (Ctrl-C again to skip)\r\n`);
 
     const report: string[] = [`recorder: ${end}${cause === undefined ? "" : `: ${message(cause)}`}`];
     let failed = end === "lost" || end === "error";
@@ -118,6 +137,14 @@ export function startRecorder(d: RecorderDeps): void {
     d.mirror(bytes);
   };
   d.conn.onClose = () => void finish("lost");
+  // Cooked again once finishing, so Ctrl-C is SIGINT: the user's way past a slow reap. Registered
+  // before the finish handlers, so the SIGINT that starts finishing doesn't also skip it.
+  d.proc.on("SIGINT", () => {
+    if (!finishing) return;
+    clearTimeout(watchdog);
+    say(`\r\nrecorder: cleanup skipped; close what is left with node driver/cleanup.ts ${d.home}\r\n`);
+    d.proc.exit(130);
+  });
   for (const s of SIGNALS) d.proc.on(s, () => void finish(s));
   d.proc.on("uncaughtException", (e) => void finish("error", e));
   d.proc.on("unhandledRejection", (e) => void finish("error", e));

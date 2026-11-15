@@ -28,6 +28,7 @@ const conn = await Conn.connect(h.socket).catch(async (e: unknown) => {
 
 startRecorder({
   name,
+  home,
   conn,
   stdin: process.stdin,
   proc: process,

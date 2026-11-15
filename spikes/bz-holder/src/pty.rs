@@ -98,7 +98,10 @@ impl Pty {
             });
         }
         let child = command.spawn();
-        command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
         child
     }
 }
@@ -127,7 +130,10 @@ mod tests {
     #[test]
     fn master_reads_the_end_once_the_child_exits() -> std::io::Result<()> {
         let mut pty = Pty::open(Size { cols: 80, rows: 24 })?;
-        let mut child = pty.spawn(Command::new("/bin/sh").args(["-c", "printf last-words"]))?;
+        // Kept alive past the read, as a caller's Command can be: the slave it was given must not be.
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "printf last-words"]);
+        let mut child = pty.spawn(&mut command)?;
         child.wait()?;
         let mut master = std::fs::File::from(pty.master.try_clone()?);
         let mut out = Vec::new();
@@ -146,6 +152,7 @@ mod tests {
         };
         assert!(ended, "the master never read the end of the output");
         assert!(String::from_utf8_lossy(&out).contains("last-words"));
+        drop(command);
         Ok(())
     }
 }

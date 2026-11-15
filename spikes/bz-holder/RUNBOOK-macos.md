@@ -10,7 +10,7 @@ everything lives under a temporary `/tmp/bzh-*` home, which each script deletes 
 cd spikes/bz-holder
 cargo build --release
 (cd driver && pnpm install --ignore-workspace)
-node driver/smoke.ts          # expect: echo seen: true, snapshot vs stream: identical, left alive: []
+node driver/smoke.ts          # expect: echo seen: true, snapshot vs stream: identical, resize seen: true, left alive: []
 ```
 
 If a run is interrupted, close whatever it left: `node driver/cleanup.ts /tmp/bzh-<name>-XXXX`.
@@ -73,15 +73,22 @@ launchd or other macOS-specific fix before any migration PR".
    recording ends:
    - quit the agent normally (`/exit`, or Ctrl-C as the agent takes it);
    - press Ctrl-] ;
-   - or, from any shell, `kill <pid>` with the pid the recorder printed when it started.
+   - or, from any shell, `kill <pid>` with the pid the recorder printed when it started
+     (`pgrep -f driver/record.ts` if the agent drew over it);
+   - closing the window also saves and closes the holder.
 
-   A lost holder or a crash saves `<name>.partial.bin` instead, and says so. Then run
+   It then prints `saving and closing the holder`; a second Ctrl-C skips the rest and names the
+   `cleanup.ts` command for what's left. A lost holder or a crash saves `<name>.partial.bin`
+   instead, and says so. Then run
    `node driver/parity.ts --replay claude codex`. **Pass:** both `PASS`. Don't commit the
    recordings: they hold your prompts and paths.
 
    After each way out, in Terminal.app, iTerm2 and Ghostty, once directly and once inside tmux:
    the shell takes input normally and echoes it, the cursor shows, mouse selection and
-   copy/paste work, and `ls -d /tmp/bzh-rec-*` lists nothing.
+   copy/paste work, and `ls -d /tmp/bzh-rec-*` lists nothing. After `/exit`, the end of the
+   recording still holds Codex's last output: `node driver/parity.ts --replay codex` passes, and
+   `tail -c 300 programs/recordings/codex.bin | cat -v` shows its goodbye text. That is the
+   check that a macOS PTY keeps output written just before the agent exits.
 
    **If Ctrl-] doesn't stop it**, find out what the key sends:
    `node driver/record.ts --keylog /tmp/bzh-keys.log codex`, press Ctrl-] a few times, then stop

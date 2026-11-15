@@ -3,24 +3,34 @@ import { EventEmitter } from "node:events";
 import { describe, it } from "node:test";
 import { K, frame, type Frame } from "./lib.ts";
 import { type RecorderDeps, startRecorder } from "./recorder.ts";
-import { ScreenTracker, findDetach, restoreBytes, restoreTerminal } from "./tty.ts";
+import { DetachScanner, ScreenTracker, findDetach, restoreBytes, restoreTerminal, type ScreenState } from "./tty.ts";
+
+const none = { alternate: false, kitty: { normal: false, alternate: false } };
 
 describe("restoreBytes", () => {
+  const tail =
+    "\x1b[>4;0m" +
+    "\x1b[?9l\x1b[?1000l\x1b[?1001l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1007l\x1b[?1015l\x1b[?1016l" +
+    "\x1b[?1004l\x1b[?2004l" +
+    "\x1b[?1l\x1b>" +
+    "\x1b7\x1b[r\x1b8" +
+    "\x1b[0m\x1b(B\x1b[0 q\x1b[?7h\x1b[4l\x1b[?25h";
+
   it("is the exact reset sequence an attach client copies", () => {
-    const tail =
-      "\x1b[>4;0m" +
-      "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1015l" +
-      "\x1b[?1004l\x1b[?2004l" +
-      "\x1b[?1l\x1b>" +
-      "\x1b7\x1b[r\x1b8" +
-      "\x1b[0m\x1b(B\x1b[0 q\x1b[?7h\x1b[4l\x1b[?25h";
-    assert.equal(restoreBytes(false), "\x1b[?2026l\x1b[<99u" + tail);
-    assert.equal(restoreBytes(true), "\x1b[?2026l\x1b[<99u\x1b[?1049l\x1b[<99u" + tail);
+    assert.equal(restoreBytes(none), "\x1b[?2026l" + tail);
+  });
+
+  it("pops kitty flags only on a screen they were pushed on, and leaves the alternate screen only if on it", () => {
+    const state = (alternate: boolean, normal: boolean, alt: boolean) => ({ alternate, kitty: { normal, alternate: alt } });
+    assert.equal(restoreBytes(state(false, true, false)), "\x1b[?2026l\x1b[<99u" + tail);
+    assert.equal(restoreBytes(state(true, false, false)), "\x1b[?2026l\x1b[?1049l" + tail);
+    assert.equal(restoreBytes(state(true, false, true)), "\x1b[?2026l\x1b[<99u\x1b[?1049l" + tail);
+    assert.equal(restoreBytes(state(true, true, true)), "\x1b[?2026l\x1b[<99u\x1b[?1049l\x1b[<99u" + tail);
   });
 });
 
 describe("ScreenTracker", () => {
-  it("follows the last switch, including one split across chunks", () => {
+  it("follows the last switch, including one split across chunks and combined modes", () => {
     const t = new ScreenTracker();
     t.observe(Buffer.from("a\x1b[?1049hb"));
     assert.equal(t.alternate, true);
@@ -29,18 +39,36 @@ describe("ScreenTracker", () => {
     t.observe(Buffer.from("x\x1b[?10"));
     t.observe(Buffer.from("47ly"));
     assert.equal(t.alternate, false);
+    t.observe(Buffer.from("\x1b[?2004;1049h"));
+    assert.equal(t.alternate, true);
+  });
+
+  it("notes kitty flags pushed or set on each screen, in order with the switches", () => {
+    const t = new ScreenTracker();
+    t.observe(Buffer.from("\x1b[?u\x1b[>4;0m"));
+    assert.deepEqual(t.kitty, { normal: false, alternate: false }, "a query and modifyOtherKeys are not kitty pushes");
+    t.observe(Buffer.from("\x1b[?1049h\x1b[>5u\x1b[?1049l"));
+    assert.deepEqual(t.kitty, { normal: false, alternate: true });
+    t.observe(Buffer.from("\x1b[=1;1u"));
+    assert.deepEqual(t.kitty, { normal: true, alternate: true });
+  });
+
+  it("counts a push once, on the screen it was sent on, however many chunks follow", () => {
+    const t = new ScreenTracker();
+    t.observe(Buffer.from("\x1b[>1u\x1b[?1049h"));
+    t.observe(Buffer.from("q"));
+    assert.deepEqual(t.kitty, { normal: true, alternate: false });
   });
 });
 
 describe("restoreTerminal", () => {
-  it("leaves raw mode and writes the restore for the screen the program left on", () => {
-    for (const alternate of [false, true]) {
-      const raw: boolean[] = [];
-      const written: string[] = [];
-      restoreTerminal({ isTTY: true, setRawMode: (on) => raw.push(on) }, (s) => written.push(s), alternate);
-      assert.deepEqual(raw, [false]);
-      assert.deepEqual(written, [restoreBytes(alternate)]);
-    }
+  it("leaves raw mode and writes the restore for the state the program left", () => {
+    const state = { alternate: true, kitty: { normal: true, alternate: false } };
+    const raw: boolean[] = [];
+    const written: string[] = [];
+    restoreTerminal({ isTTY: true, setRawMode: (on) => raw.push(on) }, (s) => written.push(s), state);
+    assert.deepEqual(raw, [false]);
+    assert.deepEqual(written, [restoreBytes(state)]);
   });
 
   it("still writes the restore when leaving raw mode throws, and never throws itself", () => {
@@ -51,17 +79,54 @@ describe("restoreTerminal", () => {
         throw new Error("EIO");
       },
     };
-    restoreTerminal(tty, (s) => written.push(s), false);
-    assert.deepEqual(written, [restoreBytes(false)]);
+    restoreTerminal(tty, (s) => written.push(s), none);
+    assert.deepEqual(written, [restoreBytes(none)]);
     assert.doesNotThrow(() =>
       restoreTerminal(
         tty,
         () => {
           throw new Error("EIO");
         },
-        false,
+        none,
       ),
     );
+  });
+});
+
+describe("DetachScanner", () => {
+  const feed = (s: DetachScanner, text: string) => {
+    const { forward, detach } = s.feed(Buffer.from(text, "latin1"));
+    return [forward.toString("latin1"), detach] as const;
+  };
+
+  it("finds Ctrl-] split across reads, and forwards none of it", () => {
+    for (const [a, b] of [
+      ["ab\x1b[93", ";5u"],
+      ["\x1b", "[93;5u"],
+      ["x\x1b[27;5", ";93~"],
+    ]) {
+      const s = new DetachScanner();
+      assert.deepEqual(feed(s, a!), [a!.slice(0, a!.indexOf("\x1b")), false]);
+      assert.equal(s.holding, true);
+      assert.deepEqual(feed(s, b!), ["", true]);
+    }
+  });
+
+  it("forwards a held start once it turns out to be another key, or on flush", () => {
+    const s = new DetachScanner();
+    feed(s, "\x1b[9");
+    assert.deepEqual(feed(s, "1;5u"), ["\x1b[91;5u", false]);
+    feed(s, "\x1b");
+    assert.equal(s.flush().toString(), "\x1b");
+    assert.equal(s.holding, false);
+  });
+
+  it("holds back nothing that can't start a Ctrl-]", () => {
+    const s = new DetachScanner();
+    assert.deepEqual(feed(s, "a\x1b[A"), ["a\x1b[A", false]);
+    assert.deepEqual(feed(s, "\x1b[93;5"), ["", false]);
+    assert.deepEqual(feed(s, "9"), ["", false], "still a possible start, still held");
+    assert.deepEqual(feed(s, "x"), ["\x1b[93;59x", false]);
   });
 });
 
@@ -166,6 +231,7 @@ function harness(over: Partial<RecorderDeps> = {}): Harness {
   };
   startRecorder({
     name: "agent",
+    home: "/tmp/bzh-rec-test",
     conn,
     stdin,
     proc,
@@ -186,8 +252,8 @@ function harness(over: Partial<RecorderDeps> = {}): Harness {
   return { conn, stdin, proc, written, mirrored, saved, calls, done };
 }
 
-const restoredOnce = (h: Harness, alternate = false) => {
-  const restore = restoreBytes(alternate);
+const restoredOnce = (h: Harness, state: ScreenState = none) => {
+  const restore = restoreBytes(state);
   assert.equal(h.written.filter((s) => s.startsWith("\x1b[?2026l")).length, 1);
   assert.equal(h.written[0], restore, "restore is the first thing written");
   assert.deepEqual(h.stdin.raw, [true, false]);
@@ -268,13 +334,45 @@ describe("startRecorder", () => {
       ["\x1b[?1049hdraw", true],
       ["\x1b[?1049hdraw\x1b[?1049l", false],
     ] as const) {
+      const state = { alternate, kitty: { normal: false, alternate: false } };
       const h = harness();
       h.written.length = 0;
       h.conn.data(output);
       h.stdin.emit("data", Buffer.from("\x1d"));
       await h.done;
-      restoredOnce(h, alternate);
+      restoredOnce(h, state);
     }
+  });
+
+  it("detaches on a Ctrl-] split over two reads, forwarding none of it", async () => {
+    const h = harness();
+    const sent = h.conn.sent.length;
+    h.stdin.emit("data", Buffer.from("\x1b[93"));
+    h.stdin.emit("data", Buffer.from(";5u"));
+    await h.done;
+    assert.equal(h.conn.sent.length, sent);
+    assert.deepEqual(h.proc.codes, [0]);
+  });
+
+  it("forwards a lone Esc after the hold-back", async () => {
+    const h = harness({ escapeMs: 5 });
+    h.stdin.emit("data", Buffer.from("\x1b"));
+    await new Promise((r) => setTimeout(r, 30));
+    assert.deepEqual(h.conn.sent.at(-1), frame(K.INPUT, "\x1b"));
+    assert.deepEqual(h.proc.codes, []);
+  });
+
+  it("says it is closing, and a second Ctrl-C skips a slow reap and names the cleanup", async () => {
+    const h = harness({ reap: () => new Promise(() => {}) });
+    h.written.length = 0;
+    h.proc.emit("SIGINT", "SIGINT");
+    await new Promise((r) => setImmediate(r));
+    assert.deepEqual(h.proc.codes, [], "the first Ctrl-C starts cleanup, not the skip");
+    assert.match(h.written[1]!, /saving and closing/);
+    h.proc.emit("SIGINT", "SIGINT");
+    await h.done;
+    assert.deepEqual(h.proc.codes, [130]);
+    assert.match(h.written.join(""), /cleanup\.ts \/tmp\/bzh-rec-test/);
   });
 
   it("forwards the bytes before Ctrl-] and nothing after it", async () => {

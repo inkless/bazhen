@@ -1,23 +1,31 @@
 // What a client mirroring a program's output into the user's terminal must undo when it stops,
 // and how it recognises its own detach key under whatever keyboard protocol the program enabled.
 
+/** What a program's output left on that a blind reset would get wrong. */
+export interface ScreenState {
+  alternate: boolean;
+  kitty: { normal: boolean; alternate: boolean };
+}
+
 /**
- * Turns off every mode a TUI's output can leave on in the terminal mirroring it. Written whole on
- * every exit, whatever the program did: a reset of a mode that is off is harmless, and terminals
- * ignore what they don't support. Not `RIS`, which clears the user's screen and scrollback.
+ * Turns off every mode a TUI's output can leave on in the terminal mirroring it. Written on every
+ * exit, whatever the program did: a reset of a mode that is off is harmless, and terminals ignore
+ * what they don't support. Not `RIS`, which clears the user's screen and scrollback.
  *
- * The one exception is leaving the alternate screen, only when the program left it on: `?1049l`
- * also restores the saved cursor on the normal screen (xterm.js does), which would move the
- * shell prompt to wherever the program last saved it.
+ * Two parts are written only when the program's output called for them. `?1049l` also restores
+ * the saved cursor on the normal screen (xterm.js does), which would move the prompt. And a
+ * terminal that ignores the `<` marker reads the kitty pop `CSI < 99 u` as `CSI 99 u`, restore
+ * cursor, so it is sent only to a screen the program pushed kitty flags on.
  */
-export function restoreBytes(alternate: boolean): string {
+export function restoreBytes(state: ScreenState): string {
+  // A pop deeper than the stack empties it. Kitty keeps one stack per screen.
+  const pop = (pushed: boolean) => (pushed ? "\x1b[<99u" : "");
   return [
     "\x1b[?2026l", // synchronized output, first, so the terminal draws the rest
-    // Kitty keeps one keyboard-flag stack per screen, and a pop deeper than the stack resets it.
-    "\x1b[<99u",
-    alternate ? "\x1b[?1049l\x1b[<99u" : "",
+    state.alternate ? pop(state.kitty.alternate) + "\x1b[?1049l" : "",
+    pop(state.kitty.normal),
     "\x1b[>4;0m", // modifyOtherKeys
-    "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1015l", // mouse
+    "\x1b[?9l\x1b[?1000l\x1b[?1001l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1007l\x1b[?1015l\x1b[?1016l", // mouse
     "\x1b[?1004l\x1b[?2004l", // focus events, bracketed paste
     "\x1b[?1l\x1b>", // cursor keys, keypad
     // Resetting the scroll region homes the cursor; DECSC/DECRC keeps it where the output left
@@ -27,16 +35,32 @@ export function restoreBytes(alternate: boolean): string {
   ].join("");
 }
 
-/** Follows a program's output to know whether it left the terminal on the alternate screen. */
-export class ScreenTracker {
+const PRIVATE_MODES = /\x1b\[\?([\d;]+)([hl])/g;
+const KITTY_SET = /\x1b\[[>=][\d;:]*u/g;
+const SCREEN_SWITCH = new Set(["1049", "1047", "47"]);
+
+/** Follows a program's output for the parts of `ScreenState` it changes. */
+export class ScreenTracker implements ScreenState {
   alternate = false;
+  kitty = { normal: false, alternate: false };
   private tail = "";
 
   observe(chunk: Buffer): void {
     const text = this.tail + chunk.toString("latin1");
-    for (const m of text.matchAll(/\x1b\[\?(?:1049|1047|47)([hl])/g)) this.alternate = m[1] === "h";
-    // A switch split across two chunks is matched on the next one.
-    this.tail = text.slice(-8);
+    // A match wholly inside the tail was handled with the last chunk; one that ends past it is new.
+    const fresh = (m: RegExpExecArray) => m.index + m[0].length > this.tail.length;
+    const events = [
+      ...[...text.matchAll(PRIVATE_MODES)]
+        .filter((m) => fresh(m) && m[1]!.split(";").some((n) => SCREEN_SWITCH.has(n)))
+        .map((m) => ({ at: m.index, on: m[2] === "h", kitty: false })),
+      ...[...text.matchAll(KITTY_SET)].filter(fresh).map((m) => ({ at: m.index, on: true, kitty: true })),
+    ].sort((a, b) => a.at - b.at);
+    for (const e of events) {
+      if (e.kitty) this.kitty[this.alternate ? "alternate" : "normal"] = true;
+      else this.alternate = e.on;
+    }
+    // A sequence split across two chunks is matched on the next one.
+    this.tail = text.slice(-32);
   }
 }
 
@@ -46,14 +70,14 @@ export interface RawTty {
 }
 
 /** Cooked mode and `restoreBytes`. Never throws: after SIGHUP the terminal is gone, and the caller still has work to do. */
-export function restoreTerminal(tty: RawTty, write: (bytes: string) => void, alternate: boolean): void {
+export function restoreTerminal(tty: RawTty, write: (bytes: string) => void, state: ScreenState): void {
   try {
     if (tty.isTTY) tty.setRawMode(false);
   } catch {
     // The terminal is gone.
   }
   try {
-    write(restoreBytes(alternate));
+    write(restoreBytes(state));
   } catch {
     // The terminal is gone.
   }
@@ -78,6 +102,43 @@ export function findDetach(chunk: Buffer): number {
   for (const m of text.matchAll(MODIFY_OTHER_KEYS)) if (ctrlOnly(m[1]!)) found.push(m.index);
   const hits = found.filter((i) => i >= 0);
   return hits.length === 0 ? -1 : Math.min(...hits);
+}
+
+// The start of a Ctrl-] escape sequence, cut off by the end of a read.
+const DETACH_PREFIX = /\x1b(?:\[(?:9(?:3(?:[:;][\d:;]*)?)?|2(?:7(?:;\d*(?:;(?:9(?:3)?)?)?)?)?)?)?$/;
+
+/**
+ * Finds Ctrl-] across reads: a sequence split over two chunks would otherwise go to the program
+ * half by half. A chunk ending in what may be the start of one holds that tail back until the
+ * next chunk, or until `flush` (the caller's short timer, so a lone Esc still reaches the program).
+ */
+export class DetachScanner {
+  private held = Buffer.alloc(0);
+
+  /** The bytes to forward now, and whether Ctrl-] came after them. */
+  feed(chunk: Buffer): { forward: Buffer; detach: boolean } {
+    const data = Buffer.concat([this.held, chunk]);
+    this.held = Buffer.alloc(0);
+    const at = findDetach(data);
+    if (at >= 0) return { forward: data.subarray(0, at), detach: true };
+    const text = data.toString("latin1");
+    const esc = text.lastIndexOf("\x1b");
+    if (esc >= 0 && DETACH_PREFIX.test(text.slice(esc))) {
+      this.held = data.subarray(esc);
+      return { forward: data.subarray(0, esc), detach: false };
+    }
+    return { forward: data, detach: false };
+  }
+
+  get holding(): boolean {
+    return this.held.length > 0;
+  }
+
+  flush(): Buffer {
+    const out = this.held;
+    this.held = Buffer.alloc(0);
+    return out;
+  }
 }
 
 /** Sequences in a program's output that switch the terminal's keyboard protocol. */

@@ -109,7 +109,8 @@ async function runCase(c: Case): Promise<{ problems: string[]; exit: Hello["exit
     cursorHidden: (term as unknown as { _core: { coreService: { isCursorHidden: boolean } } })._core.coreService.isCursorHidden,
   }).filter(([, v]) => v).map(([k]) => k);
   if (on.length > 0) problems.push(`left on in the outer terminal: ${on.join(", ")}`);
-  if (stream.lastIndexOf(restoreBytes(!c.normalScreen)) < stream.lastIndexOf("\x1b[>4;2m")) {
+  const restore = restoreBytes({ alternate: !c.normalScreen, kitty: { normal: true, alternate: false } });
+  if (stream.lastIndexOf(restore) < stream.lastIndexOf("\x1b[>4;2m")) {
     problems.push("no restore after the keyboard protocols went on");
   }
   if (c.normalScreen && exit) {
