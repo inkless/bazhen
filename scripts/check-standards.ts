@@ -678,6 +678,60 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/start_time.rs::boot_time": "proc_stat",
 };
 const NOT_DECODERS: Record<string, string> = {
+  "crates/bazhen-holder/src/conn.rs::Connection::accepted":
+    "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/conn.rs::Connection::answering":
+    "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/conn.rs::Connection::has_request":
+    "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/conn.rs::Connection::take_next":
+    "takes FrameDecoder::next_frame's result, which the proto crate's frame target fuzzes",
+  "crates/bazhen-holder/src/conn.rs::Connection::deadline":
+    "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/conn.rs::Connection::drop_now":
+    "changes the connection's phase; reads nothing",
+  "crates/bazhen-holder/src/conn.rs::Connection::fd": "borrows the socket for poll; reads nothing",
+  "crates/bazhen-holder/src/conn.rs::Connection::flush":
+    "writes frames this holder encoded; reads nothing",
+  "crates/bazhen-holder/src/conn.rs::Connection::hang_up":
+    "changes the connection's phase; reads nothing",
+  "crates/bazhen-holder/src/conn.rs::Connection::id": "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/conn.rs::Connection::interest":
+    "says what poll should wait for; reads nothing",
+  "crates/bazhen-holder/src/conn.rs::Connection::is_finished":
+    "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/conn.rs::Connection::is_gone":
+    "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/conn.rs::Connection::is_open":
+    "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/conn.rs::Connection::is_opening":
+    "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/conn.rs::Connection::new": "wraps an accepted socket; reads nothing",
+  "crates/bazhen-holder/src/conn.rs::Connection::next_request":
+    "hands over FrameDecoder::next_frame's result, which the proto crate's frame target fuzzes",
+  "crates/bazhen-holder/src/conn.rs::Connection::open":
+    "changes the connection's phase; reads nothing",
+  "crates/bazhen-holder/src/conn.rs::Connection::queue":
+    "queues a frame this holder encoded; reads nothing",
+  "crates/bazhen-holder/src/conn.rs::Connection::queued":
+    "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/conn.rs::Connection::reading":
+    "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/conn.rs::Connection::receive":
+    "reads the socket into FrameDecoder::push, which the proto crate's frame target fuzzes; parses nothing itself",
+  "crates/bazhen-holder/src/conn.rs::Connection::stuck_since":
+    "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/ring.rs::Ring::capacity": "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/ring.rs::Ring::end": "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/ring.rs::Ring::held": "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/ring.rs::Ring::push":
+    "copies the child's output into the ring as it came; parses nothing",
+  "crates/bazhen-holder/src/ring.rs::Ring::read":
+    "returns a slice of bytes already held; parses nothing",
+  "crates/bazhen-holder/src/ring.rs::Ring::slot": "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/ring.rs::Ring::start": "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/ring.rs::Ring::write":
+    "the ring's Output: copies the child's output in; parses nothing",
   "crates/bazhen-holder/src/socket.rs::Socket::listener": "borrows the listener; reads nothing",
   "crates/bazhen-holder/src/socket.rs::Socket::keep_lock":
     "compares the held lock with the file at its name and locks again; reads no bytes",
