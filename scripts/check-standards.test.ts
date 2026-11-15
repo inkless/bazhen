@@ -1597,6 +1597,16 @@ describe("tests that signal processes they didn't start", () => {
     ]);
   });
 
+  it("must be marked when it names a type whose Drop only calls a helper that closes", () => {
+    const source = [
+      "struct Guard;",
+      "fn end(h: &mut Holder) { h.close(now); }",
+      "impl Drop for Guard {\n    fn drop(&mut self) { end(&mut self.holder); }\n}",
+      "#[test]\nfn a() { let g = Guard; }",
+    ].join("\n");
+    expect(unmarked({ "crates/h/src/server.rs": source })).toEqual(["crates/h/src/server.rs:6"]);
+  });
+
   it("doesn't take a bodyless function for one with the next function's body", () => {
     const source = [
       "trait Tidy { fn tidy(&self); }",
