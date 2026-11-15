@@ -44,6 +44,16 @@ const BASE_REF = "refs/remotes/origin/main";
 const isSuite = (name: string): name is Suite => Object.hasOwn(SUITES, name);
 const USAGE = `usage: pnpm test:real [${Object.keys(SUITES).join("|")}]… [--base <ref>]`;
 
+/**
+ * What a suite's container runs. Falsify judges against the base the image carries, and then, as
+ * CI does, has the base's falsify judge a branch that changes falsify.
+ */
+export function suiteCommand(suite: Suite): string[] {
+  if (suite !== "falsify") return ["pnpm", SUITES[suite]];
+  const base = `--base ${BASE_REF}`;
+  return ["sh", "-c", `pnpm ${SUITES.falsify} ${base} && pnpm test:falsify:base ${base}`];
+}
+
 /** The suites named on the command line, in order, or the default set, and falsify's base. */
 export function parseArgs(args: readonly string[]): { suites: Suite[]; base: string } {
   const at = args.indexOf("--base");
@@ -569,9 +579,7 @@ export async function run(args: readonly string[], host: Host): Promise<number> 
           "--memory-swap",
           memory,
           image,
-          "pnpm",
-          SUITES[suite],
-          ...(suite === "falsify" ? ["--base", BASE_REF] : []),
+          ...suiteCommand(suite),
         ]);
         if (interrupted !== undefined) return 1;
         if (!passed) failedSuites.push(suite);
@@ -667,6 +675,7 @@ const host: Host = {
       buildArgs: {
         ...pins((p) => readFileSync(join(dir, p), "utf8")),
         ...tmuxBuildArgs(process.env),
+        BASE_REF,
       },
     };
   },

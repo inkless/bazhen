@@ -82,7 +82,7 @@ const REVERTIBLE = /^(?:(?:apps|packages)\/[^/]+\/src\/|scripts\/.+\.tsx?$)/;
 const TITLE = /(?<![.\w])(?:it|test)(?:\.\w+(?:\([^()]*\))?)*\(\s*(["'`])((?:\\.|(?!\1).)+)\1/g;
 const TEST_CALL = /(?<![.\w])(?:it|test)(?:\.\w+)*\s*\(/;
 const CONTROL_TRAILER = /^Control: .+ -> .+$/m;
-const WORKTREE_PREFIX = "bz-falsify-";
+export const WORKTREE_PREFIX = "bz-falsify-";
 const LOCK_REASON = /^bz-falsify pid=(\d+)$/;
 const INSTALL_TIMEOUT_MS = 120_000;
 const VITEST_TIMEOUT_MS = 300_000;
@@ -439,7 +439,7 @@ function sweepStale(top: string): void {
   }
 }
 
-function removeWorktree(dir: string, top: string): void {
+export function removeWorktree(dir: string, top: string): void {
   const quiet = (args: string[]) => {
     try {
       git(args, top);
@@ -536,18 +536,28 @@ function run(
   });
 }
 
+/** Offline first: in the test container, the store the image fetched is all there is. */
+export const INSTALL_MODES = ["--offline", "--prefer-offline"] as const;
+
 // --ignore-scripts: the root `prepare` script (husky) would set core.hooksPath in the shared git
 // config, and nothing else needs a lifecycle script (node-pty's build is declined via
-// allowBuilds). Returns what each failed attempt printed to stderr, or undefined once one succeeds.
+// allowBuilds).
+export const installArgs = (mode: (typeof INSTALL_MODES)[number]) => [
+  "install",
+  "--frozen-lockfile",
+  "--ignore-scripts",
+  mode,
+];
+
+/** What each failed install attempt printed to stderr, or undefined once one succeeds. */
 async function install(dir: string): Promise<string[] | undefined> {
-  const flags = ["--frozen-lockfile", "--ignore-scripts"];
   const said: string[] = [];
-  for (const mode of ["--offline", "--prefer-offline"]) {
+  for (const mode of INSTALL_MODES) {
     const path = join(dir, `falsify-install${mode.slice(1)}.log`);
     const fd = openSync(path, "w");
     let ok: boolean;
     try {
-      ok = await run("pnpm", ["install", ...flags, mode], dir, INSTALL_TIMEOUT_MS, { stderr: fd });
+      ok = await run("pnpm", installArgs(mode), dir, INSTALL_TIMEOUT_MS, { stderr: fd });
     } finally {
       closeSync(fd);
     }
@@ -576,7 +586,7 @@ function indentedTail(text: string): string {
  * A detached worktree of `commit` in `dir`, locked in the same step as it is created, so a crash
  * can never leave an unlocked (and so never-swept) worktree behind.
  */
-function addWorktree(dir: string, commit: string, top: string): void {
+export function addWorktree(dir: string, commit: string, top: string): void {
   git(["worktree", "add", "--quiet", "--detach", "--lock", "--reason", LOCK, dir, commit], top);
 }
 

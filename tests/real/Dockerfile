@@ -99,3 +99,10 @@ COPY --chown=node crates crates
 RUN cargo fetch --locked
 COPY --chown=node . .
 RUN pnpm install --offline --frozen-lockfile
+# Falsify lists the Rust tests at the merge base, and judges a branch that changes falsify with
+# the base's falsify too: both need what the base's lockfiles name, which HEAD's may not. They
+# are fetched from a throwaway worktree of the base while the build still has a network.
+ARG BASE_REF
+RUN git worktree add --quiet --detach /tmp/base "${BASE_REF}" \
+  && (cd /tmp/base && cargo fetch --locked && pnpm fetch) \
+  && git worktree remove --force /tmp/base

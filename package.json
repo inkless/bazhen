@@ -22,6 +22,7 @@
     "test:medium": "pnpm run build:hook && pnpm run build:engine && node scripts/capped.ts --memory 8G --time 20m -- vitest run --project medium",
     "prepare": "husky",
     "test:falsify": "node scripts/capped.ts --memory 8G --time 120m -- node scripts/falsify.ts",
+    "test:falsify:base": "node scripts/capped.ts --memory 8G --time 120m -- node scripts/falsify-base.ts",
     "test:file": "node scripts/capped.ts --memory 8G --time 20m -- vitest run",
     "test:real": "node scripts/capped.ts --memory 16G --time 120m -- node scripts/test-real.ts",
     "build:engine": "cargo build --release --quiet --locked -p bazhen-holder-engine",
