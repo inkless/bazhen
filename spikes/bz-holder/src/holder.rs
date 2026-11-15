@@ -94,7 +94,7 @@ pub(crate) struct Holder {
 impl Holder {
     pub(crate) fn start(spec: Spec, listener: UnixListener) -> io::Result<Self> {
         let size = Size::clamped(spec.cols, spec.rows);
-        let pty = Pty::open(size)?;
+        let mut pty = Pty::open(size)?;
         let (program, args) = spec
             .argv
             .split_first()

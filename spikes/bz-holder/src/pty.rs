@@ -41,7 +41,9 @@ impl Size {
 #[derive(Debug)]
 pub(crate) struct Pty {
     pub(crate) master: OwnedFd,
-    slave: OwnedFd,
+    /// Only until the child is spawned: a slave the holder keeps would stop the master from ever
+    /// reading the end of the output, so the holder could never tell its clients the child exited.
+    slave: Option<OwnedFd>,
 }
 
 impl Pty {
@@ -63,20 +65,29 @@ impl Pty {
         tcsetattr(&slave, OptionalActions::Now, &termios)?;
         tcsetwinsize(&slave, size.winsize())?;
         rustix::io::ioctl_fionbio(&master, true)?;
-        Ok(Self { master, slave })
+        Ok(Self {
+            master,
+            slave: Some(slave),
+        })
     }
 
     pub(crate) fn resize(&self, size: Size) -> io::Result<()> {
-        tcsetwinsize(&self.slave, size.winsize())?;
+        tcsetwinsize(&self.master, size.winsize())?;
         Ok(())
     }
 
-    /// Spawns `command` as the leader of a new session whose controlling terminal is the PTY.
-    pub(crate) fn spawn(&self, command: &mut Command) -> io::Result<Child> {
+    /// Spawns `command` as the leader of a new session whose controlling terminal is the PTY, and
+    /// gives up the holder's slave: once the child and anything it passed the PTY to have closed
+    /// theirs, the master reads the end of the output. Callable once.
+    pub(crate) fn spawn(&mut self, command: &mut Command) -> io::Result<Child> {
+        let slave = self
+            .slave
+            .take()
+            .ok_or_else(|| io::Error::other("the PTY's child was already spawned"))?;
         command
-            .stdin(Stdio::from(self.slave.try_clone()?))
-            .stdout(Stdio::from(self.slave.try_clone()?))
-            .stderr(Stdio::from(self.slave.try_clone()?));
+            .stdin(Stdio::from(slave.try_clone()?))
+            .stdout(Stdio::from(slave.try_clone()?))
+            .stderr(Stdio::from(slave));
         // SAFETY: the closure runs in the forked child before exec. It calls only setsid(2) and
         // ioctl(TIOCSCTTY), both async-signal-safe, allocates nothing and takes no lock.
         unsafe {
@@ -86,7 +97,9 @@ impl Pty {
                 Ok(())
             });
         }
-        command.spawn()
+        let child = command.spawn();
+        command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        child
     }
 }
 
@@ -102,4 +115,37 @@ pub(crate) fn spawn_detached(command: &mut Command) -> io::Result<Child> {
         });
     }
     command.spawn()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{ErrorKind, Read};
+    use std::time::{Duration, Instant};
+
+    use super::{Command, Pty, Size};
+
+    #[test]
+    fn master_reads_the_end_once_the_child_exits() -> std::io::Result<()> {
+        let mut pty = Pty::open(Size { cols: 80, rows: 24 })?;
+        let mut child = pty.spawn(Command::new("/bin/sh").args(["-c", "printf last-words"]))?;
+        child.wait()?;
+        let mut master = std::fs::File::from(pty.master.try_clone()?);
+        let mut out = Vec::new();
+        let mut buf = [0u8; 4096];
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let ended = loop {
+            match master.read(&mut buf) {
+                Ok(0) => break true,
+                Ok(n) => out.extend_from_slice(buf.get(..n).unwrap_or_default()),
+                Err(e) if e.kind() == ErrorKind::WouldBlock && Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(e) if e.kind() == ErrorKind::WouldBlock => break false,
+                Err(_) => break true,
+            }
+        };
+        assert!(ended, "the master never read the end of the output");
+        assert!(String::from_utf8_lossy(&out).contains("last-words"));
+        Ok(())
+    }
 }
