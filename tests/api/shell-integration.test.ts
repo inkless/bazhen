@@ -40,7 +40,10 @@ describe.each<IntegratedShell>(["zsh", "bash", "fish"])(
     });
 
     let keys = 0;
-    /** A new shell, and a view driving it. */
+    /**
+     * A new shell, and a view driving it, once the shell has drawn its first prompt: a key typed
+     * before its line editor starts can be lost, as zsh can lose the first.
+     */
     async function driven() {
       const opened = await daemon.request("/v1/shells", {
         method: "POST",
@@ -49,6 +52,7 @@ describe.each<IntegratedShell>(["zsh", "bash", "fish"])(
       const { terminalId } = ShellCommandResponse.parse(opened.body);
       const view = await daemon.view(terminalId, "interactive");
       await view.drive();
+      await waitUntil(() => daemon.shellScreen(terminalId).includes("[st=0]"), "the first prompt");
       return { terminalId, view };
     }
 
