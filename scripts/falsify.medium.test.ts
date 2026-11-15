@@ -18,7 +18,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isAlive } from "@bazhen/host-guard";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -1084,7 +1084,38 @@ describe("falsify outside a sandbox", () => {
       status: result.status,
       named: result.stderr.includes("  crates/x/src/sweep.rs"),
       runs: runs(),
-    }).toEqual({ status: 1, named: true, runs: 0 });
+      leftovers: leftovers(),
+    }).toEqual({ status: 1, named: true, runs: 0, leftovers: [] });
+  });
+
+  it("refuses signalling TypeScript however deep in the repository it is run from", () => {
+    signallingSource();
+    const result = spawnSync("node", [FALSIFY, "--base", fx.base], {
+      cwd: join(fx.linked, "packages/a/src"),
+      env: env(AS_HOST),
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    expect({
+      status: result.status,
+      named: result.stderr.includes(`  ${SOURCE}`),
+      installed: stubLog().includes("ARGS: install"),
+      leftovers: leftovers(),
+    }).toEqual({ status: 1, named: true, installed: false, leftovers: [] });
+  });
+
+  it("keeps a relative TMPDIR the caller's, run from a subdirectory", () => {
+    const cwd = join(fx.linked, "packages/a/src");
+    const result = spawnSync("node", [FALSIFY, "--base", fx.base], {
+      cwd,
+      env: env({ ...AS_HOST, TMPDIR: relative(cwd, fx.tmp) }),
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    expect({
+      status: result.status,
+      inTmp: stubLog().includes(`PWD: ${fx.tmp}/bz-falsify-`),
+    }).toEqual({ status: 0, inTmp: true });
   });
 
   it("judges the tests ignored as signalling only in a sandbox", () => {

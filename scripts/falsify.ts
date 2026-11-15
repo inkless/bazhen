@@ -54,7 +54,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { basename, join, posix } from "node:path";
+import { basename, isAbsolute, join, posix, resolve } from "node:path";
 import { isAlive, rethrowUnsafe, signalGroup, spawnGroup } from "@bazhen/host-guard";
 import { KILLS_ENV } from "./capped.ts";
 import { GATES, configFailures, gateEnv, installCommand, outsideConfigs } from "./cargo-gate.ts";
@@ -130,6 +130,20 @@ const git = (args: string[], cwd = process.cwd()) =>
     maxBuffer: 64 * 1024 * 1024,
     stdio: ["ignore", "pipe", "pipe"],
   });
+
+/**
+ * Moves to the repository's root, as every path falsify and falsify-base read is the root's,
+ * whatever folder they were run from. A relative TMPDIR or CARGO_HOME is resolved first, so it
+ * still names the folder the caller meant.
+ */
+export function workFromRoot(top: string): void {
+  for (const name of ["TMPDIR", "CARGO_HOME"]) {
+    const value = process.env[name];
+    if (value !== undefined && value !== "" && !isAbsolute(value))
+      process.env[name] = resolve(value);
+  }
+  process.chdir(top);
+}
 
 /**
  * A file as the commit `rev` has it, or undefined where it has none. Any other failure throws, so
@@ -1001,8 +1015,7 @@ async function main(args: string[]): Promise<number> {
     return 2;
   }
   const top = git(["rev-parse", "--show-toplevel"]).trim();
-  // Every path falsify reads is the repository's, from its root, whatever folder it was run from.
-  process.chdir(top);
+  workFromRoot(top);
   if (options.harness) {
     const read = (path: string) => {
       const file = join(top, path);

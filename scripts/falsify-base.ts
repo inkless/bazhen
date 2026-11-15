@@ -24,6 +24,7 @@ import {
   installArgs,
   isolatedEnv,
   removeWorktree,
+  workFromRoot,
 } from "./falsify.ts";
 import { isMain } from "./is-main.ts";
 
@@ -79,6 +80,7 @@ function main(args: readonly string[]): number {
     return 1;
   }
   const top = git("rev-parse", "--show-toplevel");
+  workFromRoot(top);
   const base = git("merge-base", ref, "HEAD");
   const dir = mkdtempSync(join(tmpdir(), WORKTREE_PREFIX));
   try {
