@@ -109,8 +109,11 @@ struct Sink(Rc<RefCell<String>>);
 
 impl EventListener for Sink {
     fn send_event(&self, event: Event) {
-        if let Event::PtyWrite(reply) = event {
-            self.0.borrow_mut().push_str(&reply);
+        match event {
+            Event::PtyWrite(reply) => self.0.borrow_mut().push_str(&reply),
+            #[cfg(test)]
+            Event::Title(title) => tests::TITLE.with_borrow_mut(|last| *last = title),
+            _ => {}
         }
     }
 }
@@ -439,6 +442,11 @@ mod tests {
 
     const SIZE: Size = Size { cols: 20, rows: 5 };
 
+    thread_local! {
+        /// The last title alacritty set, on this test's thread.
+        pub(super) static TITLE: RefCell<String> = const { RefCell::new(String::new()) };
+    }
+
     fn history(engine: &mut Engine) -> String {
         let mut out = String::new();
         engine.write_history(&mut out);
@@ -603,13 +611,49 @@ mod tests {
     }
 
     #[test]
-    fn a_link_past_the_osc_cap_arrives_cut_short() {
+    fn a_title_past_the_osc_cap_arrives_cut_short() {
         let mut engine = Engine::new(SIZE, HistoryRows(1000));
-        let uri = "x".repeat(64 * 1024);
-        engine.advance(format!("\x1b]8;;{uri}\x07a\x1b]8;;\x07").as_bytes());
-        let link = engine.term.grid()[Line(0)][Column(0)].hyperlink();
-        // The payload starts `8;;`.
-        assert_eq!(link.map(|l| l.uri().len()), Some(osc::MOST_OSC_BYTES - 3));
+        let title = "x".repeat(64 * 1024);
+        engine.advance(format!("\x1b]0;{title}\x07").as_bytes());
+        // The payload starts `0;`.
+        let got = TITLE.with_borrow(String::len);
+        assert_eq!(got, osc::MOST_OSC_BYTES - 2);
+    }
+
+    #[test]
+    fn a_link_is_kept_on_no_cell() {
+        let mut engine = Engine::new(SIZE, HistoryRows(1000));
+        engine.advance(b"\x1b]8;;https://example.com\x07a\x1b]8;;\x07");
+        let cell = &engine.term.grid()[Line(0)][Column(0)];
+        assert_eq!((cell.c, cell.hyperlink()), ('a', None));
+    }
+
+    #[test]
+    fn marks_on_a_wide_char_count_its_bytes_not_its_spacer_s() {
+        let mut engine = Engine::new(SIZE, HistoryRows(1000));
+        engine.advance(
+            "中"
+                .bytes()
+                .chain("\u{301}".repeat(20).bytes())
+                .collect::<Vec<_>>()
+                .as_slice(),
+        );
+        let cell = &engine.term.grid()[Line(0)][Column(0)];
+        // 中 takes 3 bytes and each mark 2: 9 fit in 21.
+        assert_eq!(cell.zerowidth().map(<[char]>::len), Some(9));
+    }
+
+    #[test]
+    fn marks_on_the_last_cell_of_a_row_waiting_to_wrap_count_that_cell_s_bytes() {
+        let mut engine = Engine::new(SIZE, HistoryRows(1000));
+        engine.advance("x".repeat(19).as_bytes());
+        engine.advance("\u{301}".repeat(20).as_bytes());
+        engine.advance("y".as_bytes());
+        engine.advance("\u{301}".repeat(20).as_bytes());
+        let row = &engine.term.grid()[Line(0)];
+        let marks = |column: usize| row[Column(column)].zerowidth().map(<[char]>::len);
+        // The cursor waits on y, the last cell, and its marks go on it: 10 fit beside it.
+        assert_eq!((marks(18), marks(19)), (Some(10), Some(10)));
     }
 
     #[test]

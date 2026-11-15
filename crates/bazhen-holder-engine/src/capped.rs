@@ -4,9 +4,13 @@
 //! alacritty pushes every zero-width char onto the cell before the cursor, with no limit, and
 //! REP repeats one 65,535 times for eight bytes of input: a program could grow one cell, and the
 //! row it moves into history, without bound. Like tmux, which keeps 21 bytes a cell
-//! (`UTF8_SIZE`), the engine drops a zero-width char that would take a cell past 21 bytes. Every
-//! other call goes to alacritty as it is, but OSC 22's mouse pointer shape, which a terminal
-//! with no window has no use for, and whose type vte doesn't export.
+//! (`UTF8_SIZE`), the engine drops a zero-width char that would take a cell past 21 bytes.
+//!
+//! It drops OSC 8 hyperlinks too: alacritty keeps a link on every cell drawn while it is set, up
+//! to an OSC string's 1 KiB each, so a link per cell would cost a GiB at the largest size, and the
+//! engine serves none (only the pen is encoded). Every other call goes to alacritty as it is, but
+//! OSC 22's mouse pointer shape, which a terminal with no window has no use for, and whose type
+//! vte doesn't export.
 
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::Column;
@@ -318,9 +322,8 @@ impl Handler for Capped<'_> {
         <Term<Sink> as Handler>::text_area_size_chars(self.0);
     }
 
-    fn set_hyperlink(&mut self, a: Option<Hyperlink>) {
-        <Term<Sink> as Handler>::set_hyperlink(self.0, a);
-    }
+    /// Dropped: see the module's doc.
+    fn set_hyperlink(&mut self, _: Option<Hyperlink>) {}
 
     fn report_keyboard_mode(&mut self) {
         <Term<Sink> as Handler>::report_keyboard_mode(self.0);
