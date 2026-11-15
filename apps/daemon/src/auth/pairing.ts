@@ -19,16 +19,29 @@ export type Attempt =
   | { readonly kind: "failed" }
   | { readonly kind: "rate_limited"; readonly retryAfterSeconds: number };
 
+/**
+ * Where an attempt came from. LAN attempts are keyed by the peer's address and counted apart, so
+ * a guest on the LAN can neither spend loopback's attempts nor burn the code for loopback.
+ */
+export type Bucket = "loopback" | "lan";
+
 interface LiveCode {
   readonly hash: Buffer;
   readonly expiresAt: number;
-  failures: number;
+  readonly failures: Record<Bucket, number>;
 }
 
 interface Window {
   start: number;
   count: number;
 }
+
+interface Limits {
+  overall: Window;
+  readonly perKey: Map<string, Window>;
+}
+
+const freshLimits = (): Limits => ({ overall: { start: 0, count: 0 }, perKey: new Map() });
 
 const digest = (code: string) => createHash("sha256").update(code).digest();
 
@@ -41,8 +54,7 @@ export const normalizeCode = (typed: string) => typed.toUpperCase().replace(/[\s
  */
 export class PairingCodes {
   private live: LiveCode | undefined;
-  private overall: Window = { start: 0, count: 0 };
-  private readonly perOrigin = new Map<string, Window>();
+  private readonly limits: Record<Bucket, Limits> = { loopback: freshLimits(), lan: freshLimits() };
   private readonly now: () => number;
   private readonly log: (line: string) => void;
 
@@ -58,14 +70,17 @@ export class PairingCodes {
       code += PAIRING_ALPHABET[randomInt(PAIRING_ALPHABET.length)];
     }
     const expiresAt = this.now() + CODE_LIFETIME_MS;
-    this.live = { hash: digest(code), expiresAt, failures: 0 };
+    this.live = { hash: digest(code), expiresAt, failures: { loopback: 0, lan: 0 } };
     return { code, expiresAt: new Date(expiresAt) };
   }
 
-  /** Tries `typed` against the live code; a match uses it up. */
-  attempt(typed: string, origin: string): Attempt {
+  /**
+   * Tries `typed` against the live code; a match uses it up. `key` is what attempts are limited
+   * by: the Origin on loopback, the peer's address on the LAN.
+   */
+  attempt(typed: string, key: string, bucket: Bucket = "loopback"): Attempt {
     const now = this.now();
-    const limited = this.count(now, origin);
+    const limited = this.count(now, key, this.limits[bucket]);
     if (limited !== null) return { kind: "rate_limited", retryAfterSeconds: limited };
     const live = this.live;
     // Hashing both sides gives equal lengths, so the comparison's time says nothing of the code.
@@ -74,32 +89,36 @@ export class PairingCodes {
       this.live = undefined;
       return { kind: "failed" };
     }
+    if (live.failures[bucket] >= FAILURES_PER_CODE) return { kind: "failed" };
     if (matches) {
       this.live = undefined;
       return { kind: "paired" };
     }
-    live.failures++;
-    if (live.failures >= FAILURES_PER_CODE) {
-      this.live = undefined;
-      this.log(`pairing: the code was burned after ${FAILURES_PER_CODE} failed attempts`);
+    live.failures[bucket]++;
+    if (live.failures[bucket] >= FAILURES_PER_CODE) {
+      this.log(
+        `pairing: the code was burned for ${bucket} after ${FAILURES_PER_CODE} failed attempts`,
+      );
     }
     return { kind: "failed" };
   }
 
   /** Counts an attempt, or answers how many seconds until one is allowed again. */
-  private count(now: number, origin: string): number | null {
-    for (const [key, w] of this.perOrigin) {
-      if (now - w.start >= WINDOW_MS) this.perOrigin.delete(key);
+  private count(now: number, key: string, limits: Limits): number | null {
+    for (const [k, w] of limits.perKey) {
+      if (now - w.start >= WINDOW_MS) limits.perKey.delete(k);
     }
-    if (now - this.overall.start >= WINDOW_MS) this.overall = { start: now, count: 0 };
-    const mine = this.perOrigin.get(origin) ?? { start: now, count: 0 };
+    if (now - limits.overall.start >= WINDOW_MS) limits.overall = { start: now, count: 0 };
+    const mine = limits.perKey.get(key) ?? { start: now, count: 0 };
     const waits: number[] = [];
     if (mine.count >= ATTEMPTS_PER_ORIGIN) waits.push(mine.start + WINDOW_MS - now);
-    if (this.overall.count >= ATTEMPTS_OVERALL) waits.push(this.overall.start + WINDOW_MS - now);
+    if (limits.overall.count >= ATTEMPTS_OVERALL) {
+      waits.push(limits.overall.start + WINDOW_MS - now);
+    }
     if (waits.length > 0) return Math.ceil(Math.max(...waits) / 1000);
     mine.count++;
-    this.overall.count++;
-    this.perOrigin.set(origin, mine);
+    limits.overall.count++;
+    limits.perKey.set(key, mine);
     return null;
   }
 }

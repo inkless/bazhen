@@ -52,7 +52,7 @@ export function upgrades(
     const verified =
       gate?.devices.verify(tokenFrom(req.headers.cookie), {
         touch: false,
-        remote: arrivedRemotely(header),
+        remote: arrivedRemotely(gate, header),
       }) ?? null;
     const required = gate !== null && mustPair(gate, header);
     if (required) {

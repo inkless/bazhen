@@ -82,6 +82,7 @@ import {
   type DeviceGate,
 } from "../auth/devices.ts";
 import type { PairingCodes } from "../auth/pairing.ts";
+import { pairingKey } from "../config/cidr.ts";
 
 export interface AppDeps {
   readonly appVersion: string;
@@ -93,6 +94,11 @@ export interface AppDeps {
   readonly pairing?: { readonly codes: PairingCodes; readonly devices: DeviceAuth };
   /** When a request other than the pairing exchange must come from a paired device (§9.2). */
   readonly gate?: DeviceGate;
+  /**
+   * Set on the LAN listener: pairing attempts are counted by the peer's address, which the client
+   * can't choose as it can Origin, and every device paired there gets the HTTPS cookie.
+   */
+  readonly lan?: { readonly peer: (c: Context) => string | undefined };
   /** The built web client's directory, served on every path outside `/v1`; absent on the socket. */
   readonly web?: { readonly root: string };
   readonly state: () => StateSnapshot;
@@ -194,7 +200,7 @@ export function createApp(deps: AppDeps): Hono {
       const fetchSite = header("sec-fetch-site");
       const presented = tokenFrom(header("cookie"));
       const verified = gate.devices.verify(presented, {
-        remote: arrivedRemotely(header),
+        remote: arrivedRemotely(gate, header),
         touch: fetchSite === undefined || fetchSite === "same-origin",
       });
       if (required) {
@@ -219,7 +225,11 @@ export function createApp(deps: AppDeps): Hono {
       if (origin === undefined) return fail(c, 403, "origin_not_allowed", "");
       const body = PairRequest.safeParse(await c.req.json().catch(() => undefined));
       if (!body.success) return invalid(c, body.error);
-      const attempt = pairing.codes.attempt(body.data.code, origin);
+      const { lan } = deps;
+      const attempt =
+        lan === undefined
+          ? pairing.codes.attempt(body.data.code, origin)
+          : pairing.codes.attempt(body.data.code, pairingKey(lan.peer(c)), "lan");
       if (attempt.kind === "rate_limited") {
         c.header("retry-after", String(attempt.retryAfterSeconds));
         return fail(c, 429, "rate_limited", "too many attempts; wait a minute");
@@ -227,8 +237,9 @@ export function createApp(deps: AppDeps): Hono {
       if (attempt.kind === "failed") {
         return fail(c, 401, "pairing_failed", "that code is wrong or has expired");
       }
-      // HTTPS gets the cookie only HTTPS can carry; plain HTTP is loopback (§9.2).
-      const secure = origin.startsWith("https:");
+      // HTTPS gets the cookie only HTTPS can carry; plain HTTP is loopback (§9.2). Behind a proxy
+      // only Origin says which; the LAN listener is HTTPS itself.
+      const secure = lan !== undefined || origin.startsWith("https:");
       const { deviceId, name, token } = pairing.devices.pair(body.data.name, secure);
       c.header("set-cookie", deviceCookie(token, secure));
       const res: PairResponse = { deviceId, name };

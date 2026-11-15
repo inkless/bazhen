@@ -148,6 +148,7 @@ function printWeb(web: NonNullable<DoctorResponse["web"]>): void {
         : `web app: served from ${web.app}`,
     );
   }
+  if (web.lan !== undefined && web.lan !== null) printLan(web.lan);
   if (web.pairing === undefined) return;
   const { mode, required } = web.pairing;
   if (required) {
@@ -160,6 +161,19 @@ function printWeb(web: NonNullable<DoctorResponse["web"]>): void {
   console.log(
     '  warning: any local process or other user of this machine who can reach the daemon\'s port on 127.0.0.1 controls the agents; set web.pairing = "always" on a shared machine',
   );
+}
+
+/** The LAN listener: where it serves, to whom, and the certificate a browser must trust. */
+function printLan(lan: NonNullable<NonNullable<DoctorResponse["web"]>["lan"]>): void {
+  console.log(`LAN: ${lan.url}, to ${lan.allow.join(", ")}`);
+  if (lan.certificate === null) {
+    console.log(`  not serving: ${lan.error ?? "no certificate"}`);
+  } else {
+    console.log(`  certificate SHA-256: ${lan.certificate.fingerprint}`);
+    console.log(`  certificate: ${lan.certificate.path}, expires ${lan.certificate.expiresAt}`);
+  }
+  const subnets = lan.subnets.map((s) => `${s.cidr} (${s.interface})`).join(", ");
+  console.log(`  this host's subnets: ${subnets || "none"}`);
 }
 
 /**
@@ -204,6 +218,12 @@ async function pair(): Promise<number> {
   console.log(`pairing code: ${r.code.slice(0, 4)}-${r.code.slice(4)}`);
   console.log(`enter it in the browser to pair; it works once, until ${expires}`);
   for (const origin of r.origins) console.log(`  open ${origin}`);
+  if (r.lan !== undefined) {
+    console.log(`  on the LAN, open ${r.lan.url}`);
+    console.log(`  before trusting its certificate, check that its SHA-256 is`);
+    console.log(`    ${r.lan.fingerprint}`);
+    console.log("  and if it isn't, don't trust it or pair");
+  }
   return 0;
 }
 

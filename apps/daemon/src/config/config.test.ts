@@ -20,6 +20,7 @@ describe("resolveConfig", () => {
       desktopNotifications: true,
       pairing: "auto",
       pairingRequired: false,
+      lan: null,
       launchLimits: { maxLaunched: 5, maxDepth: 3 },
     });
   });
@@ -36,6 +37,7 @@ describe("resolveConfig", () => {
       allowInsecureOrigins: false,
       pairing: "auto",
       pairingRequired: false,
+      lan: null,
       launchLimits: { maxLaunched: 5, maxDepth: 3 },
     });
   });
@@ -128,5 +130,39 @@ describe("resolveConfig", () => {
 
   it("refuses a pairing mode it doesn't know, so a typo never turns pairing off", () => {
     expect(() => resolveConfig({}, { BAZHEN_PAIRING: "never" })).toThrow(InvalidConfig);
+  });
+
+  it("refuses a LAN listener without the ranges it admits, suggesting this host's subnets", () => {
+    expect(() =>
+      resolveConfig({ web: { listen: "lan" } }, {}, ["192.168.1.0/24", "fe80::/10"]),
+    ).toThrow(
+      'web.lan_allow: web.listen is "lan", so list the address ranges that may connect, such as ["192.168.1.0/24","fe80::/10"]',
+    );
+  });
+
+  it("serves the LAN on its own port with the ranges listed, and then every browser pairs", () => {
+    const config = resolveConfig({ web: { listen: "lan", lan_allow: ["192.168.1.0/24"] } }, {});
+    expect({
+      port: config.lan?.port,
+      ranges: config.lan?.ranges,
+      pairingRequired: config.pairingRequired,
+    }).toEqual({ port: 7942, ranges: ["192.168.1.0/24"], pairingRequired: true });
+  });
+
+  it("takes the listener and its port from the environment over the file", () => {
+    const config = resolveConfig(
+      { web: { lan_allow: ["10.0.0.0/8"] } },
+      { BAZHEN_WEB_LISTEN: "lan", BAZHEN_LAN_PORT: "9443" },
+    );
+    expect(config.lan?.port).toBe(9443);
+  });
+
+  it("refuses a range that isn't one, and a LAN port that is the daemon's own", () => {
+    expect(() => resolveConfig({ web: { listen: "lan", lan_allow: ["192.168.1.0"] } }, {})).toThrow(
+      InvalidConfig,
+    );
+    expect(() =>
+      resolveConfig({ web: { listen: "lan", lan_port: 7900, lan_allow: ["10.0.0.0/8"] } }, {}),
+    ).toThrow("web.lan_port: 7900 is the daemon's own port");
   });
 });

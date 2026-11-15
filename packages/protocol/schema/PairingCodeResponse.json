@@ -18,6 +18,21 @@
       "items": {
         "type": "string"
       }
+    },
+    "lan": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string"
+        },
+        "fingerprint": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url",
+        "fingerprint"
+      ]
     }
   },
   "required": [

@@ -6,9 +6,9 @@ import { UnknownDevice } from "../store/store.ts";
 import {
   EnvRefreshRequest,
   PaneTitleChanged,
+  DoctorResponse,
+  PairingCodeResponse,
   type DevicesResponse,
-  type DoctorResponse,
-  type PairingCodeResponse,
   type RevokeDeviceResponse,
   type EnvRefreshResponse,
   type ErrorResponse,
@@ -30,6 +30,8 @@ export interface SocketParts {
   readonly devices: Pick<DeviceAuth, "list" | "revoke">;
   /** The configured external origins, which `bazhen pair` shows as the addresses to open. */
   readonly externalOrigins: readonly string[];
+  /** The LAN listener's address and fingerprint while it serves, for `bazhen pair` to show. */
+  readonly lan: () => PairingCodeResponse["lan"];
 }
 
 const forbidden = (c: Context, message: string) => {
@@ -60,11 +62,13 @@ export function socketApp(parts: SocketParts): Hono<{ Bindings: HttpBindings }> 
   // The code is in this reply only, to the person who ran `bazhen pair`; the daemon never logs it.
   app.post("/v1/pairing/codes", (c) => {
     const { code, expiresAt } = parts.pairing.issue();
-    const body: PairingCodeResponse = {
+    const lan = parts.lan();
+    const body = PairingCodeResponse.parse({
       code,
       expiresAt: expiresAt.toISOString(),
       origins: [...parts.externalOrigins],
-    };
+      ...(lan === undefined ? {} : { lan }),
+    });
     return c.json(body);
   });
 
@@ -92,7 +96,7 @@ export function socketApp(parts: SocketParts): Hono<{ Bindings: HttpBindings }> 
     return c.json(body);
   });
 
-  app.get("/v1/daemon/doctor", async (c) => c.json(await parts.doctor()));
+  app.get("/v1/daemon/doctor", async (c) => c.json(DoctorResponse.parse(await parts.doctor())));
 
   // The body is the user's whole environment: it is used and dropped, never logged or stored.
   app.post("/v1/daemon/env", async (c) => {

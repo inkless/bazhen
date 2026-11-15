@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { hostname } from "node:os";
+import { hostname, networkInterfaces } from "node:os";
 import { getRequestListener, serve } from "@hono/node-server";
 import { LocalEnvironment } from "@bazhen/env-local";
 import { ClaudeCodeHarness } from "@bazhen/harness-claude-code";
@@ -60,6 +60,15 @@ import { BUNDLE, built } from "./http/web.ts";
 import { DeviceAuth } from "./auth/devices.ts";
 import { PairingCodes } from "./auth/pairing.ts";
 import { socketApp } from "./socket/routes.ts";
+import { localSubnets } from "./config/cidr.ts";
+import { lanAllowlists, lanPeer, serveLan } from "./http/lan.ts";
+import {
+  LanCertificateInvalid,
+  NoLocalName,
+  lanCertificate,
+  localName,
+  type LanCertificate,
+} from "./tls/material.ts";
 import { Tasks } from "./tasks/tasks.ts";
 import { nodePtySpawner } from "./pty/node-pty.ts";
 import { Store, type SnapshotView } from "./store/store.ts";
@@ -327,14 +336,52 @@ const hub = new TerminalHub(runtime, {
 const server = serve({ fetch: app.fetch, hostname: HOSTNAME, port }, (info) => {
   console.log(`bazhen daemon listening on http://${HOSTNAME}:${info.port} (data: ${paths.data})`);
 });
-server.on(
-  "upgrade",
-  upgrades(
-    allow,
-    [streamRoute({ hub, runtimeRef: (id) => store.runtimeRef(id) }), eventRoute(store, presence)],
-    gate,
-  ),
-);
+const streams = [
+  streamRoute({ hub, runtimeRef: (id) => store.runtimeRef(id) }),
+  eventRoute(store, presence),
+];
+server.on("upgrade", upgrades(allow, streams, gate));
+
+// The LAN listener. A certificate it can't use stops only this listener: loopback keeps serving,
+// and the error says how to make a new one.
+let lanCert: LanCertificate | null = null;
+let lanError: string | null = null;
+let lanServer: ReturnType<typeof serveLan> | null = null;
+if (config.lan !== null) {
+  const { lan } = config;
+  try {
+    lanCert = lanCertificate(join(paths.state, "tls"), { name: localName(), uid: inputs.uid });
+  } catch (err) {
+    if (!(err instanceof LanCertificateInvalid || err instanceof NoLocalName)) throw err;
+    lanError = err.message;
+    console.error(`bazhen: not serving the LAN: ${err.message}`);
+  }
+  if (lanCert !== null) {
+    const served = lanCert;
+    const lanAllow = lanAllowlists(served.name, lan.port);
+    const lanGate = { devices, always: true, remote: true };
+    lanServer = serveLan({
+      app: createApp({
+        ...commands,
+        allow: lanAllow,
+        pairing: { codes: pairing, devices },
+        gate: lanGate,
+        lan: { peer: lanPeer },
+        web: { root: BUNDLE },
+      }),
+      certificate: served,
+      port: lan.port,
+      allow: lan.allow,
+      upgrade: upgrades(lanAllow, streams, lanGate),
+      listening: (p) =>
+        console.log(
+          `bazhen: serving the LAN at https://${served.name}:${p} to ${lan.ranges.join(", ")}; ` +
+            `certificate SHA-256 ${served.fingerprint}`,
+        ),
+    });
+  }
+}
+const lanUrl = (cert: LanCertificate, lanPort: number) => `https://${cert.name}:${lanPort}`;
 
 const RETIRE_EVERY_MS = 60 * 60 * 1000;
 const shuttingDown = new AbortController();
@@ -370,6 +417,10 @@ const socketListener = getRequestListener(
     pairing,
     devices,
     externalOrigins: config.externalOrigins,
+    lan: () =>
+      lanCert === null || config.lan === null
+        ? undefined
+        : { url: lanUrl(lanCert, config.lan.port), fingerprint: lanCert.fingerprint },
     paneTitleChanged: (pane) => void codexThreads.paneTitleChanged(pane),
     refreshEnv: async (env) => {
       const next = filterEnv(env, config.envRules);
@@ -404,6 +455,26 @@ const socketListener = getRequestListener(
           allowInsecureOrigins: config.allowInsecureOrigins,
           pairing: { mode: config.pairing, required: config.pairingRequired },
           app: (await built(BUNDLE)) ? BUNDLE : null,
+          lan:
+            config.lan === null
+              ? null
+              : {
+                  url:
+                    lanCert === null
+                      ? `https://<this host>.local:${config.lan.port}`
+                      : lanUrl(lanCert, config.lan.port),
+                  allow: [...config.lan.ranges],
+                  certificate:
+                    lanCert === null
+                      ? null
+                      : {
+                          fingerprint: lanCert.fingerprint,
+                          path: lanCert.path,
+                          expiresAt: lanCert.notAfter.toISOString(),
+                        },
+                  error: lanError,
+                  subnets: localSubnets(networkInterfaces()),
+                },
         },
         notifications: {
           desktop: desktop !== null,
@@ -434,6 +505,7 @@ function shutdown(reason: NodeJS.Signals | "requested") {
   clearInterval(deviceSweep);
   serverWatch.stop();
   server.close();
+  lanServer?.close();
   socketServer.close();
   codex.close();
   store.close();
