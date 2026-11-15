@@ -4,6 +4,7 @@
 // else's work, and a stray negative one their whole session.
 
 import { spawn, type SpawnOptions } from "node:child_process";
+import { constants } from "node:os";
 
 const groups = new Set<number>();
 /** Each proof's expiry; a proof is used once, and only within a second of the check behind it. */
@@ -133,6 +134,24 @@ export function signalPane(pane: PaneGroup, signal: NodeJS.Signals, now = Date.n
   if (expiry === undefined) throw new RangeError(`refusing to signal group ${pane.pid}: unvouched`);
   if (now > expiry) throw new RangeError(`refusing to signal group ${pane.pid}: stale proof`);
   send(-pane.pid, signal);
+}
+
+// Node ignores SIGPIPE and starts its inspector on SIGUSR1, so neither would end this process.
+const NOT_FATAL_TO_NODE = new Set<NodeJS.Signals>(["SIGPIPE", "SIGUSR1"]);
+
+/**
+ * Ends this process by `signal`, the way the child it ran for ended, so its own parent (nextest,
+ * a shell) reads the same death rather than an exit code standing for it. A signal Node won't die
+ * of ends it with the shell's code for that signal instead.
+ */
+export function dieBy(signal: NodeJS.Signals): never {
+  const code = 128 + constants.signals[signal];
+  if (!NOT_FATAL_TO_NODE.has(signal)) {
+    process.removeAllListeners(signal);
+    process.kill(process.pid, signal);
+  }
+  // A signal whose default action doesn't end a process gets here too.
+  process.exit(code);
 }
 
 /** Whether a process exists; one this user may not signal counts as alive. */
