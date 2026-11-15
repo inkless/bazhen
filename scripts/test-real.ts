@@ -112,14 +112,16 @@ export function cpuBudget(
 }
 
 /**
- * The memory a suite's container may use, in bytes, swap included: half the machine, as with its
- * CPUs, `BZ_TEST_MEMORY` (in GiB) when set. A test that runs away is then OOM-killed inside its
- * container, never by the machine's own OOM killer, which may pick any process on it. In the
- * slice every capped run shares, the slice's cap holds all the containers together.
+ * The memory a suite's container may use, in bytes, swap included, `BZ_TEST_MEMORY` (in GiB) when
+ * set. A test that runs away is then OOM-killed inside its container, never by the machine's own
+ * OOM killer, which may pick any process on it. In the slice every capped run shares, whose cap
+ * holds all the containers together, a container may have half the machine, as with its CPUs.
+ * Outside it nothing holds several runs together, so each container gets a quarter.
  */
 export function memoryBudget(
   env: Readonly<Record<string, string | undefined>>,
   total: number,
+  inSlice: boolean,
 ): string {
   const override = env["BZ_TEST_MEMORY"];
   if (override !== undefined && override !== "") {
@@ -129,52 +131,61 @@ export function memoryBudget(
     }
     return String(Math.floor(gib * 1024 ** 3));
   }
-  return String(Math.floor(total / 2));
+  return String(Math.floor(total / (inSlice ? 2 : 4)));
 }
 
+/** Where a run's containers go: the flag that puts them in the slice, or why they can't go there. */
+export type Placement = { readonly parent: string[] } | { readonly why: string };
+
 /**
- * The flag that puts a run's containers in the slice every capped run shares, so their memory
- * counts against its cap with every other test's. A probe container started with it decides: under
- * rootful Docker, or a cgroup manager other than the user's systemd, it lands elsewhere, and the
- * run goes on without it, saying so.
+ * Whether a run's containers can join the slice every capped run shares, so their memory counts
+ * against its cap with every other test's. A probe container started with the flag decides, and
+ * is tried twice, so a host under load alone doesn't keep a run out. It must land in this user's
+ * own slice, under the user's systemd, and the slice must have a cap: rootful Docker makes a
+ * system slice of the same name, and a run not started through scripts/capped.ts may find the
+ * slice uncapped.
  */
 export async function sliceParent(
   host: Host,
   quiet: Quiet,
   names: { image: string; probe: string; labels: readonly string[] },
-): Promise<string[]> {
+): Promise<Placement> {
   const parent = ["--cgroup-parent", SLICE];
-  const started = await quiet([
-    "run",
-    "--detach",
-    "--rm",
-    "--name",
-    names.probe,
-    ...names.labels,
-    "--network",
-    "none",
-    ...parent,
-    "--entrypoint",
-    "sleep",
-    names.image,
-    // Long enough to be inspected, short enough that `--rm` removes it with no command of ours.
-    "5",
-  ]);
-  let inSlice = false;
-  if (started.code === 0) {
-    const inspected = await quiet(["inspect", "--format", "{{.State.Pid}}", names.probe]);
+  const ours = `/user@${process.getuid?.() ?? -1}.service/bazhen.slice/${SLICE}`;
+  let why = `a probe container wouldn't start in ${SLICE}`;
+  for (let tries = 0; tries < 2; tries += 1) {
+    const probe = `${names.probe}-${tries}`;
+    const started = await quiet([
+      "run",
+      "--detach",
+      "--rm",
+      "--name",
+      probe,
+      ...names.labels,
+      "--network",
+      "none",
+      ...parent,
+      "--entrypoint",
+      "sleep",
+      names.image,
+      // `--rm` removes it once stopped, or once it ends by itself, should this run be killed.
+      "60",
+    ]);
+    if (started.code !== 0) continue;
+    const inspected = await quiet(["inspect", "--format", "{{.State.Pid}}", probe]);
+    await quiet(["stop", "--time", "0", probe]);
     const pid = Number(inspected.out.trim());
-    // This user's own slice, the one with the cap: rootful Docker makes a system slice of the name.
-    const ours = `/user@${process.getuid?.() ?? -1}.service/bazhen.slice/${SLICE}/`;
-    inSlice = pid > 1 && (host.cgroupOf(pid) ?? "").includes(ours);
+    const cgroup = pid > 1 ? host.cgroupOf(pid) : undefined;
+    if (cgroup === undefined) {
+      why = "a probe container's cgroup couldn't be read";
+      continue;
+    }
+    if (!cgroup.includes(`${ours}/`)) return { why: `a container lands in ${cgroup}, not ${ours}` };
+    // The slice itself, however deep a runtime puts its containers below it.
+    const cap = host.memoryMax(cgroup.slice(0, cgroup.indexOf(`${ours}/`) + ours.length));
+    return cap === undefined ? { why: `${SLICE} has no memory cap` } : { parent };
   }
-  if (!inSlice) {
-    console.warn(
-      `test:real: a container can't join ${SLICE} here, so the suites' memory counts outside ` +
-        "the cap every capped run shares",
-    );
-  }
-  return inSlice ? parent : [];
+  return { why };
 }
 
 const SECRET_NAME =
@@ -331,6 +342,8 @@ export interface Host {
   after(ms: number): Promise<void>;
   /** The cgroup a process on this host is in, from its `/proc/<pid>/cgroup`. */
   cgroupOf(pid: number): string | undefined;
+  /** A cgroup's `memory.max` in bytes, or undefined where it is unset or can't be read. */
+  memoryMax(cgroup: string): number | undefined;
 }
 
 /** Runs one quiet docker command to its end, or its timeout. */
@@ -516,7 +529,16 @@ export async function run(args: readonly string[], host: Host): Promise<number> 
       ]);
       if (!built) return 1;
       const probe = `${name}-slice-probe`;
-      const parent = await sliceParent(host, quiet, { image, probe, labels });
+      const placement = await sliceParent(host, quiet, { image, probe, labels });
+      const inSlice = "parent" in placement;
+      if (!inSlice) {
+        console.warn(
+          `test:real: ${placement.why}, so each container gets a quarter of the machine's ` +
+            "memory, outside the cap every capped run shares",
+        );
+      }
+      const parent = inSlice ? placement.parent : [];
+      const memory = memoryBudget(process.env, totalmem(), inSlice);
       const failedSuites: Suite[] = [];
       for (const suite of suites) {
         const container = `${name}-${suite}`;
@@ -540,9 +562,9 @@ export async function run(args: readonly string[], host: Host): Promise<number> 
           ...parent,
           // The same for memory and memory plus swap: no swap, so a runaway meets the cap at once.
           "--memory",
-          memoryBudget(process.env, totalmem()),
+          memory,
           "--memory-swap",
-          memoryBudget(process.env, totalmem()),
+          memory,
           image,
           "pnpm",
           SUITES[suite],
@@ -646,6 +668,14 @@ const host: Host = {
     };
   },
   removeDir: (dir) => rmSync(dir, { recursive: true, force: true }),
+  memoryMax(cgroup) {
+    try {
+      const max = Number(readFileSync(`/sys/fs/cgroup${cgroup}/memory.max`, "utf8").trim());
+      return Number.isSafeInteger(max) && max > 0 ? max : undefined;
+    } catch {
+      return undefined;
+    }
+  },
   cgroupOf(pid) {
     try {
       return /^0::(\S*)$/m.exec(readFileSync(`/proc/${pid}/cgroup`, "utf8"))?.[1];

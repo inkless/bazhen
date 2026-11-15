@@ -78,12 +78,13 @@ describe("pnpm test:real", () => {
     expect(() => cpuBudget({ BZ_TEST_CPUS: "0" }, 32)).toThrow("BZ_TEST_CPUS");
   });
 
-  it("gives a suite half the machine's memory, so a runaway dies in its container", () => {
+  it("gives a suite half the machine's memory in the shared slice, a quarter outside it", () => {
     const gib = 1024 ** 3;
-    expect(memoryBudget({}, 64 * gib)).toBe(String(32 * gib));
-    expect(memoryBudget({ BZ_TEST_MEMORY: "6" }, 64 * gib)).toBe(String(6 * gib));
-    expect(() => memoryBudget({ BZ_TEST_MEMORY: "8G" }, 64 * gib)).toThrow("BZ_TEST_MEMORY");
-    expect(() => memoryBudget({ BZ_TEST_MEMORY: "0.5" }, 64 * gib)).toThrow("BZ_TEST_MEMORY");
+    expect(memoryBudget({}, 64 * gib, true)).toBe(String(32 * gib));
+    expect(memoryBudget({}, 64 * gib, false)).toBe(String(16 * gib));
+    expect(memoryBudget({ BZ_TEST_MEMORY: "6" }, 64 * gib, true)).toBe(String(6 * gib));
+    expect(() => memoryBudget({ BZ_TEST_MEMORY: "8G" }, 64 * gib, true)).toThrow("BZ_TEST_MEMORY");
+    expect(() => memoryBudget({ BZ_TEST_MEMORY: "0.5" }, 64 * gib, true)).toThrow("BZ_TEST_MEMORY");
   });
 
   it("keeps a file that looks like a secret out of the image, and every other file in", () => {
@@ -126,6 +127,7 @@ function fakeHost(
     prepare?: () => never;
     timeouts?: boolean;
     cgroup?: string;
+    sliceCap?: number;
   } = {},
 ) {
   const calls: string[][] = [];
@@ -159,6 +161,7 @@ function fakeHost(
     },
     after: () => (more.timeouts === true ? Promise.resolve() : never),
     cgroupOf: () => more.cgroup,
+    memoryMax: (cgroup) => (cgroup.endsWith(`/${SLICE}`) ? more.sliceCap : undefined),
   };
   const signal = (s: NodeJS.Signals) => {
     for (const handler of handlers) handler(s);
@@ -177,6 +180,13 @@ const valueAfter = (args: readonly string[] | undefined, flag: string) =>
 const passing = (): Answer => result(0);
 const uid = process.getuid?.() ?? -1;
 const userSlice = `/user.slice/user-${uid}.slice/user@${uid}.service/bazhen.slice/${SLICE}`;
+/** The memory a suite's container gets when the probe lands in `cgroup`. */
+async function memoryOf(cgroup: string): Promise<number> {
+  const fake = fakeHost(probeHasPid, { cgroup, sliceCap: 2 ** 34 });
+  await run(["api"], fake.host);
+  return Number(valueAfter(fake.calls.find(isSuiteRun), "--memory"));
+}
+
 const probeHasPid = (args: readonly string[]): Answer =>
   verb(args) === "inspect --format" ? result(0, "4343\n") : passing();
 const isIntegration = (args: readonly string[]) =>
@@ -238,9 +248,45 @@ describe("pnpm test:real cleans up after itself", () => {
   it("puts each suite's container in the slice every capped run shares, where a probe lands", async () => {
     const fake = fakeHost(probeHasPid, {
       cgroup: `${userSlice}/libpod-x.scope`,
+      sliceCap: 2 ** 34,
     });
     expect(await run(["api"], fake.host)).toBe(0);
     expect(valueAfter(fake.calls.find(isSuiteRun), "--cgroup-parent")).toBe(SLICE);
+  });
+
+  it("gives a container in the slice twice the memory of one outside it", async () => {
+    quietly();
+    const inSlice = await memoryOf(`${userSlice}/libpod-x.scope`);
+    const outside = await memoryOf(`/bazhen.slice/${SLICE}/docker-x.scope`);
+    expect(Math.abs(inSlice - 2 * outside)).toBeLessThan(4);
+  });
+
+  it("stops the probe it started, and tries once more where it couldn't read where it landed", async () => {
+    const fake = fakeHost(passing);
+    quietly();
+    expect(await run(["api"], fake.host)).toBe(0);
+    expect(fake.calls.filter((c) => verb(c) === "run --detach")).toHaveLength(2);
+    expect(fake.calls.filter((c) => c[0] === "stop").map((c) => c.at(-1))).toEqual([
+      `${RUN}-slice-probe-0`,
+      `${RUN}-slice-probe-1`,
+    ]);
+  });
+
+  it("reads the slice's own cap, however deep a runtime puts its containers below it", async () => {
+    const fake = fakeHost(probeHasPid, {
+      cgroup: `${userSlice}/libpod-x.scope/container`,
+      sliceCap: 2 ** 34,
+    });
+    expect(await run(["api"], fake.host)).toBe(0);
+    expect(valueAfter(fake.calls.find(isSuiteRun), "--cgroup-parent")).toBe(SLICE);
+  });
+
+  it("keeps the containers out of a slice with no cap, which holds nothing together", async () => {
+    const warn = quietly();
+    const fake = fakeHost(probeHasPid, { cgroup: `${userSlice}/libpod-x.scope` });
+    expect(await run(["api"], fake.host)).toBe(0);
+    expect(fake.calls.find(isSuiteRun)).not.toContain("--cgroup-parent");
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`${SLICE} has no memory cap`));
   });
 
   it("runs the suites where they would have run, and says so, where the probe lands elsewhere", async () => {
@@ -249,7 +295,7 @@ describe("pnpm test:real cleans up after itself", () => {
     const fake = fakeHost(probeHasPid, { cgroup: `/bazhen.slice/${SLICE}/docker-x.scope` });
     expect(await run(["api"], fake.host)).toBe(0);
     expect(fake.calls.find(isSuiteRun)).not.toContain("--cgroup-parent");
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`can't join ${SLICE}`));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("a quarter of the machine"));
   });
 
   it("gives each suite's container a memory cap with no swap beyond it", async () => {
