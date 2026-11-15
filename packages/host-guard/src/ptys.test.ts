@@ -53,6 +53,16 @@ describe("hostPtyReader", () => {
     ]);
   });
 
+  it("can't say the limit when the first mount's reserve is all of the PTYs", () => {
+    const read = hostPtyReader(
+      linux({ ...kernel, "/proc/sys/kernel/pty/reserve": "4096", "/proc/sys/kernel/pty/nr": "3" }),
+    );
+    expect(read()).toEqual({
+      ok: false,
+      reason: "kernel.pty.reserve (4096) is all of kernel.pty.max (4096)",
+    });
+  });
+
   it("counts macOS's /dev/ttys nodes as an upper bound, not an exact count", () => {
     const read = hostPtyReader(
       source({
@@ -102,6 +112,11 @@ describe("hostPtyReader", () => {
       { ok: false, reason: "sysctl timed out" },
       1,
     ]);
+  });
+
+  it("can't say the limit of a macOS that allows no PTYs", () => {
+    const read = hostPtyReader(source({ platform: "darwin", ptmxMax: () => "0" }));
+    expect(read()).toEqual({ ok: false, reason: "kern.tty.ptmx_max is 0" });
   });
 
   it("counts macOS's PTY nodes without asking for its maximum", () => {

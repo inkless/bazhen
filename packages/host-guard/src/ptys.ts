@@ -69,7 +69,13 @@ export function hostPtyReader(source: PtySource = machinePtySource): () => HostP
         // The kernel keeps `reserve` of `max` for its first devpts mount. Which mount this
         // process sees can't be told from here, so it takes the smaller limit, as any other
         // mount, a container's, has.
-        const max = Math.max(0, sysctl("max") - sysctl("reserve"));
+        const [all, reserve] = [sysctl("max"), sysctl("reserve")];
+        if (reserve >= all) {
+          // On the first mount every PTY is still there, so this says nothing about the limit.
+          const reason = `kernel.pty.reserve (${reserve}) is all of kernel.pty.max (${all})`;
+          return { ok: false, reason };
+        }
+        const max = all - reserve;
         return { ok: true, used: sysctl("nr"), max, exact: true, limit: "kernel.pty.max" };
       } catch (err) {
         return { ok: false, reason: reasonOf(err) };
@@ -81,6 +87,7 @@ export function hostPtyReader(source: PtySource = machinePtySource): () => HostP
     return () => {
       try {
         max ??= { value: count(source.ptmxMax(), "kern.tty.ptmx_max") };
+        if ("value" in max && max.value === 0) max = { reason: "kern.tty.ptmx_max is 0" };
       } catch (err) {
         max = { reason: reasonOf(err) };
       }
