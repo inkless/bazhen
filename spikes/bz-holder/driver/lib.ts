@@ -65,18 +65,21 @@ export class Conn {
   private waiters: { kinds: number[]; resolve: (f: Frame) => void }[] = [];
   private closed = false;
   onFrame: (f: Frame) => void = () => {};
+  /** Called once, when the socket closes or fails, from either side. */
+  onClose: () => void = () => {};
 
   readonly sock: net.Socket;
 
   private constructor(sock: net.Socket) {
     this.sock = sock;
     sock.on("data", (chunk: Buffer) => this.feed(chunk));
-    sock.on("close", () => {
+    const closed = () => {
+      if (this.closed) return;
       this.closed = true;
-    });
-    sock.on("error", () => {
-      this.closed = true;
-    });
+      this.onClose();
+    };
+    sock.on("close", closed);
+    sock.on("error", closed);
   }
 
   static connect(socket: string): Promise<Conn> {
