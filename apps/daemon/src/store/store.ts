@@ -1530,12 +1530,11 @@ export class Store {
     }
     const appended = this.appended;
     this.appended = false;
-    if (this.scrub) {
-      this.scrub = false;
-      this.scrubJournal();
-    }
+    const scrub = this.scrub;
+    this.scrub = false;
     this.runAfterCommits();
     if (appended) this.notify();
+    if (scrub) this.scrubJournal();
     return out;
   }
 
@@ -1545,7 +1544,15 @@ export class Store {
    * for the next checkpoint, which `journal_size_limit` truncates as well.
    */
   private scrubJournal(): void {
-    this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    // The daemon is the database's only connection, so the checkpoint waits on no reader. Were
+    // one to hold the WAL, busy_timeout would block the event loop for up to 5 s here.
+    try {
+      this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    } catch (err) {
+      // The line is cleared and committed either way; only its earlier copy waits for the next
+      // checkpoint.
+      console.warn("the WAL could not be truncated after a shell's line was cleared:", err);
+    }
   }
 
   /**

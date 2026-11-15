@@ -35,8 +35,10 @@ if [[ -n ${BAZHEN_SHELL_TOKEN-} && -x ${BAZHEN_HOOK-} && -z ${__bazhen_integrate
     return 0
   }
 
-  # Last, so a prompt command already there reads the line's status and PIPESTATUS first. A
-  # newline, not `;`, since PROMPT_COMMAND may already end in one.
+  # Last in the prompt command already there, so that command reads the line's status and
+  # PIPESTATUS first. A newline, not `;`, since it may already end in one. In an array
+  # PROMPT_COMMAND (bash 5.1), this is the end of its first element: later elements still get
+  # the status, but not the line's PIPESTATUS.
   PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND
 }__bazhen_prompt"
   # Without promptvars, bash would print PS0's text instead of running it.
