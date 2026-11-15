@@ -10,12 +10,14 @@
     "*.ts",
     "../support/holder-setup.ts",
     "../support/holder-home.ts",
+    "../support/holder-ledger.ts",
     "../support/holder-spawn.ts",
     "../support/ptys.ts",
     "../support/setup-error.ts"
   ],
   "references": [
     { "path": "../../packages/host-guard" },
+    { "path": "../../packages/protocol" },
     { "path": "../../packages/runtime-holder" }
   ]
 }

@@ -15,7 +15,7 @@
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
-use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _};
+use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _, OpenOptionsExt as _};
 use std::os::unix::process::CommandExt as _;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -41,13 +41,114 @@ fn ps(field: &str, pid: u32) -> Option<String> {
     (out.status.success() && !text.is_empty()).then_some(text)
 }
 
-fn start_time(pid: u32) -> Option<String> {
-    ps("lstart=", pid)
+/// How far two readings of one process's start may lie apart: host-guard's `START_SKEW_S`, since
+/// the TypeScript harness writes this ledger too, from `ps`.
+const START_SKEW_S: u64 = 2;
+
+/// When `pid` started, in epoch seconds. Read for pids no test holds too, so every use compares
+/// it with a start recorded when the pid was known to be the one meant.
+fn start_time(pid: u32) -> Option<u64> {
+    let pid = Pid::from_raw(i32::try_from(pid).ok()?)?;
+    bazhen_holder::start_time::of(pid).ok().map(u64::from)
 }
 
-fn own_start() -> &'static str {
-    static START: OnceLock<String> = OnceLock::new();
-    START.get_or_init(|| start_time(std::process::id()).unwrap_or_default())
+fn same_start(a: u64, b: u64) -> bool {
+    a.abs_diff(b) <= START_SKEW_S
+}
+
+/// This process's start, which every entry it writes names it by. One it can't read refuses
+/// the write: an owner of unknown start would read as dead to every sweep, its holders killed in
+/// use.
+fn own_start() -> Result<u64> {
+    static START: OnceLock<Option<u64>> = OnceLock::new();
+    START
+        .get_or_init(|| start_time(std::process::id()))
+        .ok_or_else(|| "can't read when this test process started".into())
+}
+
+/// Whether `comm`, as `ps -o comm=` gives it, names the holder: on macOS it is a whole path.
+fn is_holder(comm: &str) -> bool {
+    Path::new(comm)
+        .file_name()
+        .is_some_and(|name| name == "bazhen-holder")
+}
+
+/// Where the TypeScript and the Rust holder tests put their homes, and so their sockets.
+const TEST_HOMES: [&str; 2] = ["/tmp/bz-h-", "/tmp/bz-hb-"];
+
+/// Whether `socket` is a test holder's, so its holder is one a sweep may kill.
+fn in_test_home(socket: &str) -> bool {
+    TEST_HOMES.iter().any(|home| socket.starts_with(home)) && !socket.contains("/../")
+}
+
+/// What `ps` says of an entry's owner, for the sweep.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Owner {
+    Started(u64),
+    Absent,
+    Unreadable,
+}
+
+fn owner_of(pid: u32) -> Owner {
+    let Some(pid) = i32::try_from(pid).ok().and_then(Pid::from_raw) else {
+        return Owner::Unreadable;
+    };
+    match bazhen_holder::start_time::of(pid) {
+        Ok(start) => Owner::Started(start.get()),
+        Err(bazhen_holder::start_time::StartTimeError::Absent(_)) => Owner::Absent,
+        Err(_) => Owner::Unreadable,
+    }
+}
+
+/// Whether an entry's owner is provably gone: no process, or another one at its pid. One `ps`
+/// can't read may live.
+fn owner_gone(entry: &Entry, owner: Owner) -> bool {
+    match owner {
+        Owner::Absent => true,
+        Owner::Started(start) => !same_start(start, entry.owner_start),
+        Owner::Unreadable => false,
+    }
+}
+
+/// One ledger entry: a file named by the holder's pid, holding the holder's start, its owner's
+/// pid and its owner's start, each in epoch seconds on a line of its own.
+/// `tests/support/holder-ledger.ts` reads and writes the same, and
+/// `tests/support/fixtures/holder-ledger-entry` pins the format for both.
+#[derive(Debug, PartialEq, Eq)]
+struct Entry {
+    holder: u32,
+    holder_start: u64,
+    owner: u32,
+    owner_start: u64,
+    socket: String,
+}
+
+impl Entry {
+    fn parse(name: &str, text: &str) -> Option<Self> {
+        let lines: Vec<&str> = text.strip_suffix('\n')?.split('\n').collect();
+        let [holder_start, owner, owner_start, socket] = lines.as_slice() else {
+            return None;
+        };
+        let digits = |text: &str| text.bytes().all(|b| b.is_ascii_digit()).then_some(());
+        digits(name)?;
+        digits(holder_start)?;
+        digits(owner)?;
+        digits(owner_start)?;
+        Some(Self {
+            holder: name.parse().ok()?,
+            holder_start: holder_start.parse().ok()?,
+            owner: owner.parse().ok()?,
+            owner_start: owner_start.parse().ok()?,
+            socket: Some(*socket).filter(|s| !s.is_empty())?.to_owned(),
+        })
+    }
+
+    fn text(&self) -> String {
+        format!(
+            "{}\n{}\n{}\n{}\n",
+            self.holder_start, self.owner, self.owner_start, self.socket
+        )
+    }
 }
 
 /// One ledger per user, whatever target directory the tests were built in, so a holder that a
@@ -68,34 +169,44 @@ fn ledger() -> Result<PathBuf> {
     Ok(dir)
 }
 
+/// How old a ledger file that isn't an entry must be before the sweep removes it.
+const STALE: Duration = Duration::from_hours(24);
+
 /// Kills the holders of test processes that died before their guards ran, and forgets them.
 fn sweep() -> Result<()> {
     for entry in std::fs::read_dir(ledger()?)? {
         let path = entry?.path();
         let text = std::fs::read_to_string(&path).unwrap_or_default();
-        let lines: Vec<&str> = text.lines().collect();
-        let (Some(pid), [holder_start, owner, owner_start]) = (
-            path.file_name()
-                .and_then(|n| n.to_str())
-                .and_then(|n| n.parse::<u32>().ok()),
-            lines.as_slice(),
-        ) else {
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default();
+        let Some(entry) = Entry::parse(name, &text) else {
+            // Half of one can't be read, as entries are renamed into place: this is something
+            // else, removed once surely abandoned, as the TypeScript sweep does.
+            let age = std::fs::symlink_metadata(&path)
+                .and_then(|meta| meta.modified())
+                .ok()
+                .and_then(|modified| modified.elapsed().ok());
+            if age.is_some_and(|age| age > STALE) {
+                let _ = std::fs::remove_file(path);
+            }
             continue;
         };
-        let owner_alive = owner
-            .parse::<u32>()
-            .ok()
-            .and_then(start_time)
-            .is_some_and(|start| start == *owner_start);
-        if owner_alive {
+        if !owner_gone(&entry, owner_of(entry.owner)) {
             continue;
         }
-        let ours = start_time(pid).is_some_and(|start| start == *holder_start)
-            && ps("comm=", pid).is_some_and(|comm| comm.ends_with("bazhen-holder"));
+        let pid = entry.holder;
+        let ours = in_test_home(&entry.socket)
+            && start_time(pid).is_some_and(|start| same_start(start, entry.holder_start))
+            && ps("comm=", pid).is_some_and(|comm| is_holder(&comm));
         if ours && let Some(pid) = i32::try_from(pid).ok().and_then(Pid::from_raw) {
             let _ = kill_process(pid, Signal::KILL);
         }
-        let _ = std::fs::remove_file(path);
+        // A holder started since, at the same pid, has an entry of its own here.
+        if std::fs::read_to_string(&path).is_ok_and(|now| now == text) {
+            let _ = std::fs::remove_file(path);
+        }
     }
     Ok(())
 }
@@ -103,7 +214,7 @@ fn sweep() -> Result<()> {
 /// A holder this test started, killed when the test ends if it is still the same process.
 struct Started {
     pid: u32,
-    start: String,
+    start: u64,
     entry: PathBuf,
     child: Option<Child>,
     /// `exit` has waited for the holder, so its pid may already be another process's.
@@ -166,8 +277,8 @@ impl Drop for Started {
             let _ = child.kill();
             let _ = child.wait();
         } else if !self.reaped
-            && start_time(self.pid).is_some_and(|start| start == self.start)
-            && ps("comm=", self.pid).is_some_and(|comm| comm.ends_with("bazhen-holder"))
+            && start_time(self.pid).is_some_and(|start| same_start(start, self.start))
+            && ps("comm=", self.pid).is_some_and(|comm| is_holder(&comm))
             && let Ok(pid) = self.pid()
         {
             // `exit` timed out, and its thread still waits for the holder.
@@ -223,10 +334,28 @@ fn spawn(spec: &[u8], how: &Start<'_>) -> Result<Started> {
     let pid = child.id();
     let start = start_time(pid).ok_or("the holder is already gone")?;
     let entry = ledger()?.join(pid.to_string());
-    std::fs::write(
-        &entry,
-        format!("{start}\n{}\n{}\n", std::process::id(), own_start()),
-    )?;
+    let socket = serde_json::from_slice::<serde_json::Value>(spec)
+        .ok()
+        .and_then(|spec| spec.get("socket")?.as_str().map(str::to_owned))
+        .unwrap_or_else(|| "(no socket)".to_owned());
+    let text = Entry {
+        holder: pid,
+        holder_start: start,
+        owner: std::process::id(),
+        owner_start: own_start()?,
+        socket,
+    }
+    .text();
+    // Whole or not at all, so no sweep reads half of it.
+    let partial = entry.with_extension("partial");
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&partial)?
+        .write_all(text.as_bytes())?;
+    std::fs::rename(&partial, &entry)?;
     let mut stdin = child.stdin.take().ok_or("no stdin")?;
     let started = Started {
         pid,
@@ -502,4 +631,48 @@ fn a_hundred_holders_start_from_a_spawner_whose_soft_nofile_is_256() {
         assert_eq!(holder.first_line().unwrap(), "ready\n", "holder {n}");
         holders.push(holder);
     }
+}
+
+/// The TypeScript harness reads and writes this ledger too: both hold to one checked-in entry.
+#[test]
+fn reads_and_writes_the_ledger_entry_the_typescript_harness_does() {
+    let fixture = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/support/fixtures/holder-ledger-entry"
+    );
+    let text = std::fs::read_to_string(fixture).unwrap();
+    let entry = Entry::parse("4242", &text).unwrap();
+    assert_eq!(
+        entry,
+        Entry {
+            holder: 4242,
+            holder_start: 1_794_630_000,
+            owner: 4243,
+            owner_start: 1_794_629_990,
+            socket: "/tmp/bz-h-abc/run/holders/t1.sock".to_owned(),
+        }
+    );
+    assert_eq!(entry.text(), text);
+    let unended = text.strip_suffix('\n').unwrap();
+    for bad in [unended, "1794630000\n4243\n1794629990\n"] {
+        assert_eq!(Entry::parse("4242", bad), None, "{bad:?}");
+    }
+}
+
+/// An owner `ps` can't read may live: its holders are spared, never killed in use.
+#[test]
+fn a_sweep_counts_an_owner_gone_only_when_it_provably_is() {
+    let fixture = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/support/fixtures/holder-ledger-entry"
+    );
+    let entry = Entry::parse("4242", &std::fs::read_to_string(fixture).unwrap()).unwrap();
+    assert!(owner_gone(&entry, Owner::Absent));
+    assert!(owner_gone(&entry, Owner::Started(entry.owner_start + 60)));
+    assert!(!owner_gone(&entry, Owner::Started(entry.owner_start + 2)));
+    assert!(!owner_gone(&entry, Owner::Unreadable));
+    assert!(in_test_home(&entry.socket));
+    assert!(!in_test_home("/home/u/.bazhen/run/holders/t1.sock"));
+    assert!(is_holder("/x/bazhen-holder") && is_holder("bazhen-holder"));
+    assert!(!is_holder("bazhen-holderx") && !is_holder("/x/notbazhen-holder"));
 }

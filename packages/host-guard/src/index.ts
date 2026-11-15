@@ -4,6 +4,8 @@ export {
   TmuxServer,
   environmentScript,
   isSafeEnvEntry,
+  readProcess,
+  START_SKEW_S,
   terminalGroups,
   terminalForeground,
   tmuxVersion,
@@ -12,12 +14,15 @@ export {
   type ServerIdentity,
   type ServerVerdict,
 } from "./tmux.ts";
+export { HOLDER_COMMAND, vouchHolder } from "./holder.ts";
 export {
   dieBy,
   isAlive,
+  killHolder,
   signalGroup,
   signalPane,
   spawnGroup,
+  type HolderProcess,
   type PaneGroup,
   type RunOutcome,
 } from "./signal.ts";
