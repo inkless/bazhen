@@ -48,8 +48,9 @@ so at start and shells report nothing.
 A lost shell whose last line was kept offers **Restart and retype last command** beside
 **Restart**. The new shell opens in the same directory and, once it shows its first prompt, the
 line appears there exactly as you typed it, `$VARIABLES` and quoting untouched. Enter is never
-pressed: you read the line, edit it if you like, and run it yourself. Bazhen types it as a paste,
-so a line editor in vi mode inserts it as text rather than taking it as keys.
+pressed: you read the line, edit it if you like, and run it yourself. Bazhen types it as a
+bracketed paste where the shell asked for one, as zsh, bash and fish do, so the line editor
+inserts it as text.
 
 The new shell must load the integration too, since it tells Bazhen when its prompt is ready. If
 no prompt is reported within 30 seconds, the line is dropped and the daemon logs that it wasn't

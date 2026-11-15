@@ -86,8 +86,5 @@ export class PendingRetypes {
   }
 }
 
-/**
- * What a failed paste was, by its kind and the message the runtime wrote for logs, which names
- * the pane and never the text.
- */
+/** A failed paste, by the message the runtime wrote for logs, which names the pane, never the text. */
 const errorName = (err: unknown): string => (err instanceof Error ? err.message : "paste failed");
