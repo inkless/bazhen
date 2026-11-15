@@ -13,16 +13,14 @@ mod encode;
 mod history;
 mod modes;
 mod osc;
+mod replies;
 mod seam;
 
 #[cfg(test)]
 mod differential;
 
-use std::cell::RefCell;
 use std::fmt;
-use std::rc::Rc;
 
-use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::grid::{Dimensions, Grid, Row};
 use alacritty_terminal::index::{Column, Line};
 use alacritty_terminal::term::cell::{Cell, Flags};
@@ -40,6 +38,8 @@ pub use crate::modes::{
     Mouse, MouseEncoding, MouseTracking, Origin, Screen, Shape,
 };
 use crate::osc::OscCap;
+use crate::replies::Sink;
+pub use crate::replies::{Colours, MOST_REPLY_BYTES, Rgb, replies_are_whole};
 use crate::seam::Utf8Seam;
 
 /// A terminal's size in cells. The engine works at no fewer than 2 columns and 1 row, and no more
@@ -107,21 +107,8 @@ pub struct Stats {
     /// Times alacritty's scrollback filled up, which may have dropped a row. Always zero unless
     /// the engine misjudged how far the stream could scroll.
     pub overflows: u64,
-}
-
-/// Collects what alacritty writes back to the program: its answers to CPR, DA and DSR.
-#[derive(Debug, Clone, Default)]
-struct Sink(Rc<RefCell<String>>);
-
-impl EventListener for Sink {
-    fn send_event(&self, event: Event) {
-        match event {
-            Event::PtyWrite(reply) => self.0.borrow_mut().push_str(&reply),
-            #[cfg(test)]
-            Event::Title(title) => tests::TITLE.with_borrow_mut(|last| *last = title),
-            _ => {}
-        }
-    }
+    /// Replies dropped because those before them went untaken.
+    pub dropped_replies: u64,
 }
 
 /// A terminal's screen and history: the program's output goes in through [`Engine::advance`],
@@ -262,6 +249,8 @@ impl Engine {
                 Some(Stop::Reset) => self.clear_history(),
                 // alacritty keeps 4,096 titles; the engine undoes a push past its own limit.
                 Some(Stop::TitlePush) => self.parse(b"\x1b[23t"),
+                // Answered as the stretch ends at it, after every query before it.
+                Some(Stop::Version) => self.replies.push(replies::VERSION),
                 Some(Stop::ClearHistory) if !self.alternate() => self.clear_history(),
                 _ => {}
             }
@@ -271,13 +260,18 @@ impl Engine {
     }
 
     fn parse(&mut self, bytes: &[u8]) {
-        self.parser
-            .advance(&mut Capped(&mut self.term, &mut self.tracker), bytes);
+        self.parser.advance(
+            &mut Capped(&mut self.term, &mut self.tracker, &self.replies),
+            bytes,
+        );
         if self.parser.sync_bytes_count() > 0 {
             // A synchronized update only holds back a frame, and a headless engine draws none:
             // buffering it would leave queries inside it unanswered.
-            self.parser
-                .stop_sync(&mut Capped(&mut self.term, &mut self.tracker));
+            self.parser.stop_sync(&mut Capped(
+                &mut self.term,
+                &mut self.tracker,
+                &self.replies,
+            ));
         }
     }
 
@@ -327,9 +321,16 @@ impl Engine {
     }
 
     /// What the terminal wrote back to the program since the last call. They pile up until
-    /// taken, so take them after every [`Engine::advance`].
+    /// taken, so take them after every [`Engine::advance`]: from the first that would take them
+    /// past [`MOST_REPLY_BYTES`], every reply is dropped whole until the next take.
     pub fn take_replies(&mut self) -> Vec<u8> {
-        std::mem::take(&mut *self.replies.0.borrow_mut()).into_bytes()
+        self.replies.take()
+    }
+
+    /// The text and background a program that asks (OSC 10 and 11) is told, unless it set its
+    /// own. With none, those queries go unanswered.
+    pub fn set_colours(&mut self, colours: Option<Colours>) {
+        self.replies.set_colours(colours);
     }
 
     /// Appends the history, oldest row first, as VT text: one line after another, each ended by
@@ -373,6 +374,7 @@ impl Engine {
             history_bytes: self.history.bytes(),
             history_rows: (self.history.rows() + scrolled).min(self.history_rows.0),
             overflows: self.overflows,
+            dropped_replies: self.replies.dropped(),
         }
     }
 
@@ -750,6 +752,7 @@ fn write_scrollback(grid: &Grid<Cell>, lines: &mut Lines<'_>) {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
     use std::fmt::Write as _;
 
     use alacritty_terminal::index::Column;
@@ -760,7 +763,7 @@ mod tests {
 
     thread_local! {
         /// The last title alacritty set, on this test's thread.
-        pub(super) static TITLE: RefCell<String> = const { RefCell::new(String::new()) };
+        pub(crate) static TITLE: RefCell<String> = const { RefCell::new(String::new()) };
     }
 
     fn history(engine: &mut Engine) -> String {

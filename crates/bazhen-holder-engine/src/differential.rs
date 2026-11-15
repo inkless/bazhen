@@ -25,10 +25,19 @@ use alacritty_terminal::vte::ansi::{Color, NamedColor};
 use proptest::prelude::*;
 
 use super::*;
+use crate::replies::VERSION;
 
 mod tracked;
 
 const ALL_OF_IT: usize = 1_000_000;
+
+const VERSION_QUERY: &str = "\x1b[>q";
+
+/// What a program that asks is told its colours are, on both sides.
+const COLOURS: Colours = Colours {
+    text: Rgb { r: 1, g: 2, b: 3 },
+    background: Rgb { r: 4, g: 5, b: 6 },
+};
 /// More rows than a case makes, so the engine drops none.
 const ENGINE_ROWS: usize = 20_000;
 
@@ -55,6 +64,12 @@ enum Action {
     SyncOn,
     SyncOff,
     Query,
+    /// XTVERSION, `CSI > q`.
+    Version,
+    /// OSC 10, 11, 4;1 or 12 asked, by `% 4`.
+    ColourQuery(u8),
+    /// OSC 11 or 4;1 set, by the first `% 2`, to a red of the second.
+    SetColour(u8, u8),
     Repeat(u16),
     SaveCursor,
     RestoreCursor,
@@ -118,6 +133,18 @@ impl Action {
             Self::SyncOn => "\x1b[?2026h".into(),
             Self::SyncOff => "\x1b[?2026l".into(),
             Self::Query => "\x1b[6n".into(),
+            Self::Version => VERSION_QUERY.into(),
+            Self::ColourQuery(which) => [
+                "\x1b]10;?\x07",
+                "\x1b]11;?\x1b\\",
+                "\x1b]4;1;?\x07",
+                "\x1b]12;?\x07",
+            ][usize::from(*which % 4)]
+            .into(),
+            Self::SetColour(which, red) => {
+                let slot = if which % 2 == 0 { "11" } else { "4;1" };
+                format!("\x1b]{slot};#{red:02x}0000\x07")
+            }
             Self::Repeat(n) => format!("\x1b[{n}b"),
             Self::SaveCursor => "\x1b7".into(),
             Self::RestoreCursor => "\x1b8".into(),
@@ -186,6 +213,9 @@ fn output() -> impl Strategy<Value = Action> {
         1 => Just(Action::SyncOn),
         1 => Just(Action::SyncOff),
         1 => Just(Action::Query),
+        1 => Just(Action::Version),
+        1 => (0u8..4).prop_map(Action::ColourQuery),
+        1 => (0u8..2, any::<u8>()).prop_map(|(which, red)| Action::SetColour(which, red)),
         1 => (0u16..200).prop_map(Action::Repeat),
         1 => Just(Action::SaveCursor),
         1 => Just(Action::RestoreCursor),
@@ -212,6 +242,9 @@ struct FullHistory {
     replies: Sink,
     /// Not compared: [`Capped`] needs one.
     tracker: Tracker,
+    /// How much of [`VERSION_QUERY`] the bytes so far end in: the reference answers XTVERSION by
+    /// matching the one form the cases write, not by the engine's read-ahead.
+    version_matched: usize,
     /// Its history as it was when the alternate screen came up, which alacritty then keeps
     /// private, and how wide the screen was: a resize under the alternate screen doesn't touch
     /// what either terminal serves, but text that draws the same at one width can differ in its
@@ -228,13 +261,40 @@ impl FullHistory {
             utf8: Utf8Seam::default(),
             replies,
             tracker: Tracker::new(size.usable().cols(), size.usable().rows()),
+            version_matched: 0,
             under_alt: (String::new(), size.cols),
+        }
+    }
+
+    /// Feeds `bytes`, answering each XTVERSION as it ends.
+    fn advance(&mut self, bytes: &[u8]) {
+        let query = VERSION_QUERY.as_bytes();
+        let mut rest = bytes;
+        while !rest.is_empty() {
+            let mut end = None;
+            for (at, &byte) in rest.iter().enumerate() {
+                self.version_matched = match self.version_matched {
+                    matched if query.get(matched) == Some(&byte) => matched + 1,
+                    _ => usize::from(byte == 0x1b),
+                };
+                if self.version_matched == query.len() {
+                    self.version_matched = 0;
+                    end = Some(at + 1);
+                    break;
+                }
+            }
+            let (piece, after) = rest.split_at(end.unwrap_or(rest.len()));
+            self.advance_noting_alt(piece);
+            if end.is_some() {
+                self.replies.push(VERSION);
+            }
+            rest = after;
         }
     }
 
     /// Feeds `bytes`, noting history just before each `h` that may bring up the alternate
     /// screen: no other byte does.
-    fn advance(&mut self, bytes: &[u8]) {
+    fn advance_noting_alt(&mut self, bytes: &[u8]) {
         let mut rest = bytes;
         while let Some(at) = rest.iter().position(|&byte| byte == b'h') {
             let (before, after) = rest.split_at(at);
@@ -253,15 +313,22 @@ impl FullHistory {
     /// Feeds `bytes`, working around vte's split chars as the engine does.
     fn feed(&mut self, bytes: &[u8]) {
         let (finish, rest) = self.utf8.finish(bytes);
-        self.parser
-            .advance(&mut Capped(&mut self.term, &mut self.tracker), finish);
-        self.parser
-            .advance(&mut Capped(&mut self.term, &mut self.tracker), rest);
+        self.parser.advance(
+            &mut Capped(&mut self.term, &mut self.tracker, &self.replies),
+            finish,
+        );
+        self.parser.advance(
+            &mut Capped(&mut self.term, &mut self.tracker, &self.replies),
+            rest,
+        );
         if !rest.is_empty() {
             self.utf8.note(rest);
         }
-        self.parser
-            .stop_sync(&mut Capped(&mut self.term, &mut self.tracker));
+        self.parser.stop_sync(&mut Capped(
+            &mut self.term,
+            &mut self.tracker,
+            &self.replies,
+        ));
     }
 
     fn resize(&mut self, size: Size) {
@@ -479,6 +546,8 @@ fn feed(engine: &mut Engine, full: &mut FullHistory, stream: &str, cuts: &[usize
 fn run(size: Size, actions: &[Action], cuts: &[usize]) -> (Engine, FullHistory) {
     let mut engine = Engine::new(size, HistoryRows(ENGINE_ROWS));
     let mut full = FullHistory::new(size);
+    engine.set_colours(Some(COLOURS));
+    full.replies.set_colours(Some(COLOURS));
     let mut pending = String::new();
     // A resize under the alternate screen leaves the primary screen free to differ, and with it
     // everything after the alternate screen ends: the case ends there.
@@ -527,7 +596,7 @@ fn run(size: Size, actions: &[Action], cuts: &[usize]) -> (Engine, FullHistory) 
     }
     feed(&mut engine, &mut full, &pending, cuts);
     assert_same(&engine, &full);
-    assert_eq!(engine.take_replies(), full.replies.0.take().into_bytes());
+    assert_eq!(engine.take_replies(), full.replies.take());
     (engine, full)
 }
 

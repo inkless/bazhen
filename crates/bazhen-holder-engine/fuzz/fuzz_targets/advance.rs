@@ -1,13 +1,17 @@
 #![no_main]
 
-use bazhen_holder_engine::{Engine, HistoryRows, Size};
+use bazhen_holder_engine::{
+    Colours, Engine, HistoryRows, MOST_REPLY_BYTES, Rgb, Size, replies_are_whole,
+};
 use libfuzzer_sys::fuzz_target;
 
 // Any output a program could write, read in any pieces and with resizes between them: the
 // engine never panics, never lets alacritty's scrollback fill up, which would lose a row, and
 // keeps no more history than asked; and the modes it ends in, given to a fresh engine of its
-// size, are the modes that engine holds. The first three bytes choose the size and history limit;
-// after that, 0xff and two bytes is a resize, and 0xfe ends a read.
+// size, are the modes that engine holds. Its replies, taken after each read, are within their cap
+// and whole sequences. The first three bytes choose the size and history limit, and the first's
+// top bit whether the engine is given colours to answer with; after that, 0xff and two bytes is a
+// resize, and 0xfe ends a read.
 fuzz_target!(|input: &[u8]| {
     let [cols, rows, history, rest @ ..] = input else {
         return;
@@ -17,6 +21,13 @@ fuzz_target!(|input: &[u8]| {
         rows: u16::from(rows % 32),
     };
     let mut engine = Engine::new(size(*cols, *rows), HistoryRows(usize::from(*history)));
+    if cols & 0x80 != 0 {
+        let grey = |v| Rgb { r: v, g: v, b: v };
+        engine.set_colours(Some(Colours {
+            text: grey(*rows),
+            background: grey(*history),
+        }));
+    }
     let mut now = size(*cols, *rows);
     let mut bytes = rest;
     while !bytes.is_empty() {
@@ -36,6 +47,13 @@ fuzz_target!(|input: &[u8]| {
                 bytes = after;
             }
         }
+        let replies = engine.take_replies();
+        assert!(replies.len() <= MOST_REPLY_BYTES, "{}", replies.len());
+        assert!(
+            replies_are_whole(&replies),
+            "{:?}",
+            String::from_utf8_lossy(&replies)
+        );
         let stats = engine.stats();
         assert_eq!(stats.overflows, 0);
         assert!(stats.history_rows <= usize::from(*history));
