@@ -93,7 +93,32 @@ impl Client {
 
 /// A holder serving `argv`, once it has said `ready`, and its socket's path.
 fn serving(home: &Home, argv: &[&str]) -> Result<(Started, std::path::PathBuf)> {
-    let mut holder = spawn(&spec(home, argv, |_| {}), &Start::default())?;
+    serving_with(home, argv, &Start::default())
+}
+
+/// A holder for a flood: macOS hands its output over in small reads, so moving tens of
+/// megabytes costs the holder far more turns, and CPU-seconds, than the 2 a holder gets
+/// otherwise, in a debug build.
+const FLOOD: Start<'static> = Start {
+    prelude: "",
+    own_group: false,
+    blocked_signals: false,
+    stderr: false,
+    cpu_seconds: Some(10),
+};
+
+/// How a holder that dropped a connection stands, and what it logged, for the test's failure.
+fn why(holder: &mut Started, socket: &Path) -> String {
+    let log = std::fs::read_to_string(socket.with_extension("log")).unwrap_or_default();
+    format!("the holder {}; its log:\n{log}", holder.state())
+}
+
+fn serving_with(
+    home: &Home,
+    argv: &[&str],
+    how: &Start<'_>,
+) -> Result<(Started, std::path::PathBuf)> {
+    let mut holder = spawn(&spec(home, argv, |_| {}), how)?;
     let line = holder.first_line()?;
     if line != "ready\n" {
         return Err(format!("the holder said {line:?}").into());
@@ -411,7 +436,7 @@ fn a_storm_of_sigusr1_during_a_flood_loses_no_output() {
     let home = home("storm").unwrap();
     let flood: u64 = 20 << 20;
     let count = format!("-c{flood}");
-    let (holder, socket) = serving(&home, &["head", &count, "/dev/zero"]).unwrap();
+    let (holder, socket) = serving_with(&home, &["head", &count, "/dev/zero"], &FLOOD).unwrap();
     for _ in 0..500 {
         kill_process(holder.pid().unwrap(), Signal::USR1).unwrap();
     }
@@ -835,14 +860,16 @@ fn is_ok(reply: &Reply) -> bool {
 fn streams_every_byte_of_the_childs_output_in_order_then_its_exit() {
     sweep().unwrap();
     let home = home("seq").unwrap();
-    let (_holder, socket) = serving(&home, &["seq", "1", "20000"]).unwrap();
+    // With `-onlcr` the terminal passes each newline on as it is: a BSD one whose output queue
+    // fills between the carriage return it adds and the newline writes the carriage return again.
+    let script = "stty -onlcr && seq 1 20000";
+    let (_holder, socket) = serving(&home, &["sh", "-c", script]).unwrap();
     let mut client = Client::connect(&socket).unwrap();
     client.hello(false).unwrap();
     assert!(is_ok(&client.subscribe(Some((0, 0))).unwrap()));
     let stream = client.stream_to_exit().unwrap();
-    // The terminal turns each newline into a carriage return and a newline.
     let expected: Vec<String> = (1..=20000).map(|n| n.to_string()).collect();
-    let expected = expected.join("\r\n") + "\r\n";
+    let expected = expected.join("\n") + "\n";
     assert_eq!(stream.gaps, []);
     assert_eq!(String::from_utf8(stream.bytes).unwrap(), expected);
 }
@@ -903,11 +930,14 @@ fn a_subscriber_to_a_flood_is_sent_all_of_it_in_order_or_told_of_a_gap() {
     let home = home("keepup").unwrap();
     let flood: u64 = 50_000_000;
     let script = format!("sleep 1; head -c {flood} /dev/zero");
-    let (_holder, socket) = serving(&home, &["sh", "-c", &script]).unwrap();
+    let (mut holder, socket) = serving_with(&home, &["sh", "-c", &script], &FLOOD).unwrap();
     let mut client = Client::connect(&socket).unwrap();
     client.hello(false).unwrap();
     assert!(is_ok(&client.subscribe(Some((0, 0))).unwrap()));
-    let stream = client.stream_to_exit_keeping(false).unwrap();
+    let stream = match client.stream_to_exit_keeping(false) {
+        Ok(stream) => stream,
+        Err(error) => panic!("{error}; {}", why(&mut holder, &socket)),
+    };
     assert_eq!(stream.end, flood);
     let dropped: u64 = stream.gaps.iter().map(|(from, to)| to - from).sum();
     assert_eq!(stream.received + dropped, flood);
@@ -929,7 +959,7 @@ fn a_subscriber_that_stops_reading_holds_up_neither_the_child_nor_anyone_else() 
     let home = home("stalled").unwrap();
     let flood: u64 = 8_000_000;
     let script = format!("sleep 0.5; head -c {flood} /dev/zero");
-    let (_holder, socket) = serving(&home, &["sh", "-c", &script]).unwrap();
+    let (mut holder, socket) = serving_with(&home, &["sh", "-c", &script], &FLOOD).unwrap();
     let mut stalled = Client::connect(&socket).unwrap();
     stalled.hello(false).unwrap();
     assert!(is_ok(&stalled.subscribe(Some((0, 0))).unwrap()));
@@ -942,7 +972,10 @@ fn a_subscriber_that_stops_reading_holds_up_neither_the_child_nor_anyone_else() 
         }
         assert!(Instant::now() < deadline, "the child was held up");
     }
-    let stream = stalled.stream_to_exit_keeping(false).unwrap();
+    let stream = match stalled.stream_to_exit_keeping(false) {
+        Ok(stream) => stream,
+        Err(error) => panic!("{error}; {}", why(&mut holder, &socket)),
+    };
     assert!(
         !stream.gaps.is_empty(),
         "no gap for a subscriber the ring lapped"
