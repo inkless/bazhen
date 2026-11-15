@@ -1064,6 +1064,29 @@ describe("falsify outside a sandbox", () => {
     }).toEqual({ status: 1, named: true, runs: 0, leftovers: [] });
   });
 
+  it("refuses signalling Rust however deep in the repository it is run from", () => {
+    mutatedBranch(
+      ["tests::b_is_two"],
+      [mutantOfB("replace b -> u8 with 0")],
+      [`MUTATED|tests::b_is_two|${ASSERTION}`],
+      {
+        "crates/x/src/sweep.rs":
+          "pub fn sweep(pid: i32) {\n    unsafe { libc::kill(pid, 9) };\n}\n",
+      },
+    );
+    const result = spawnSync("node", [FALSIFY, "--base", fx.base], {
+      cwd: join(fx.linked, "crates/x/src"),
+      env: env(AS_HOST),
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    expect({
+      status: result.status,
+      named: result.stderr.includes("  crates/x/src/sweep.rs"),
+      runs: runs(),
+    }).toEqual({ status: 1, named: true, runs: 0 });
+  });
+
   it("judges the tests ignored as signalling only in a sandbox", () => {
     mutatedBranch(
       ["tests::b_is_two"],

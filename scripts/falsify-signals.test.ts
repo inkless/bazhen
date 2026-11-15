@@ -42,6 +42,16 @@ describe("signallingWork", () => {
     ).toEqual({ sources: ["packages/a/src/never.ts"], tests: ["packages/a/src/x.test.ts"] });
   });
 
+  it("passes on a git child killed by a signal, which is the run being stopped", () => {
+    const interrupted = Object.assign(new Error("killed"), { signal: "SIGINT" });
+    const stopped = () => {
+      throw interrupted;
+    };
+    expect(() => signallingWork(["packages/a/src/never.ts"], [], ["b", "h"], stopped)).toThrow(
+      interrupted,
+    );
+  });
+
   it("counts a test file of the holder suite or one with a test ignored as signalling", () => {
     const tests = [
       "tests/holder/close.test.ts",

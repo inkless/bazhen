@@ -136,7 +136,7 @@ const git = (args: string[], cwd = process.cwd()) =>
  * an unreadable file is never taken for an absent one.
  */
 function fileAt(rev: string, path: string): string | undefined {
-  if (git(["ls-tree", "-z", rev, "--", path]) === "") return undefined;
+  if (git(["ls-tree", "-z", "--full-tree", rev, "--", path]) === "") return undefined;
   return git(["cat-file", "blob", `${rev}:${path}`]);
 }
 
@@ -1001,6 +1001,8 @@ async function main(args: string[]): Promise<number> {
     return 2;
   }
   const top = git(["rev-parse", "--show-toplevel"]).trim();
+  // Every path falsify reads is the repository's, from its root, whatever folder it was run from.
+  process.chdir(top);
   if (options.harness) {
     const read = (path: string) => {
       const file = join(top, path);

@@ -19,6 +19,9 @@ export interface SignallingWork {
   readonly tests: string[];
 }
 
+const killedBySignal = (error: unknown): boolean =>
+  typeof error === "object" && error !== null && "signal" in error && Boolean(error.signal);
+
 /**
  * Of the files falsify would revert or mutate, those that signal processes as the base or HEAD has
  * them, and of the test files it would run, those whose HEAD holds a signalling test.
@@ -35,7 +38,9 @@ export function signallingWork(
     let text: string | undefined;
     try {
       text = read(rev, path);
-    } catch {
+    } catch (error) {
+      // A git child killed by a signal is the run being stopped, not a file that can't be read.
+      if (killedBySignal(error)) throw error;
       return true;
     }
     return text !== undefined && test(path, text);
