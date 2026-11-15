@@ -5,7 +5,7 @@ import {
   type HolderReply,
   type HolderStats,
 } from "@bazhen/protocol";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   HOLDER_MAX_UNSENT_BYTES,
   HolderClient,
@@ -398,6 +398,34 @@ describe("HolderClient", () => {
     const taken = await Promise.all(ids.map(() => holder.request()));
     expect(taken.map((request) => request.id)).toEqual(ids);
     expect(client.open).toBe(true);
+  });
+
+  it("waits for drained() without a reaction on ended, which lives as long as the connection", async () => {
+    const { client, holder } = await connected();
+    holder.stopReading();
+    client.input(new Uint8Array(HOLDER_MAX_REQUEST_BYTES));
+    const then = vi.spyOn(client.ended, "then");
+    const waits = Array.from({ length: 100_000 }, () => client.drained());
+    holder.startReading();
+    await Promise.all(waits);
+    expect(then).not.toHaveBeenCalled();
+  });
+
+  it("stops waiting for drained() on its signal, leaving the connection open", async () => {
+    const { client, holder } = await connected();
+    holder.stopReading();
+    client.input(new Uint8Array(HOLDER_MAX_REQUEST_BYTES));
+    const abort = new AbortController();
+    const drained = client.drained({ signal: abort.signal });
+    abort.abort(new Error("deadline"));
+    await expect(drained).rejects.toThrow("deadline");
+    expect(client.open).toBe(true);
+  });
+
+  it("has no room once the connection has ended", async () => {
+    const { client } = await connected();
+    client.end();
+    expect(client.room).toBe(0);
   });
 
   it("refuses an input over what a connection may hold unsent, queueing none of it", async () => {

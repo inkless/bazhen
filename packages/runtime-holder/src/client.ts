@@ -163,8 +163,9 @@ class Connection {
   private end: HolderEnd | null = null;
   private settleEnded: (end: HolderEnd) => void = () => {};
   private readonly hangUpMs: number;
-  /** Settles once the last write has gone to the holder, and so every one before it. */
-  private flushed: Promise<void> = Promise.resolve();
+  /** Writes the stream hasn't yet passed on, and who waits for there to be none. */
+  private writing = 0;
+  private readonly drainWaiters = new Set<() => void>();
 
   constructor(stream: Duplex, onEvent: (event: HolderEvent) => void, hangUpMs: number) {
     this.stream = stream;
@@ -243,18 +244,45 @@ class Connection {
   }
 
   private push(bytes: Uint8Array): void {
-    // A write's callback runs once it has gone, or with an error once the stream is destroyed.
-    this.flushed = new Promise((done) => this.stream.write(bytes, () => done()));
+    this.writing += 1;
+    // A write's callback runs once the stream has passed it on, or with an error once destroyed.
+    this.stream.write(bytes, () => {
+      this.writing -= 1;
+      if (this.writing === 0) this.settleDrained();
+    });
   }
 
-  /** What may still be written before the cap on unsent bytes. */
+  private settleDrained(): void {
+    const waiting = [...this.drainWaiters];
+    this.drainWaiters.clear();
+    for (const done of waiting) done();
+  }
+
+  /** What may still be written before the cap on unsent bytes; none once the connection ends. */
   get room(): number {
+    if (this.end !== null) return 0;
     return Math.max(0, HOLDER_MAX_UNSENT_BYTES - this.stream.writableLength);
   }
 
-  /** Resolves once everything written has gone to the holder, or the connection has ended. */
-  drained(): Promise<void> {
-    return Promise.race([this.flushed, this.ended.then(() => {})]);
+  /**
+   * Resolves once the stream has passed on everything written, or the connection has ended;
+   * rejects on `signal`'s abort. Each waiter is dropped as it settles, so calls don't add up.
+   */
+  drained(signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted === true) return Promise.reject(signal.reason);
+    if (this.end !== null || this.writing === 0) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const abort = () => {
+        this.drainWaiters.delete(done);
+        reject(signal?.reason);
+      };
+      const done = () => {
+        signal?.removeEventListener("abort", abort);
+        resolve();
+      };
+      this.drainWaiters.add(done);
+      signal?.addEventListener("abort", abort, { once: true });
+    });
   }
 
   /**
@@ -384,6 +412,7 @@ class Connection {
     this.pending.clear();
     for (const pending of waiting) pending.reject(error);
     this.settleEnded(end);
+    this.settleDrained();
   }
 }
 
@@ -431,19 +460,20 @@ export class HolderClient {
   /**
    * How many bytes may be written now before the cap on unsent bytes ends the connection: input
    * takes its length plus 9 bytes for each frame of up to 1 MiB. A holder reading slowly lowers
-   * it for a while.
+   * it for a while; it is 0 once the connection has ended.
    */
   get room(): number {
     return this.connection.room;
   }
 
   /**
-   * Resolves once everything written has gone to the holder, or the connection has ended. A
-   * caller with more to send than `room` awaits it first, rather than overrun a holder that is
-   * reading slowly.
+   * Resolves once everything written has left this process, or the connection has ended. On a
+   * socket that means the kernel holds the bytes, not that the holder has read them. A caller
+   * with more to send than `room` awaits it first, rather than overrun a holder that is reading
+   * slowly; `signal` bounds the wait on one that has stopped.
    */
-  drained(): Promise<void> {
-    return this.connection.drained();
+  drained(options: RequestOptions = {}): Promise<void> {
+    return this.connection.drained(options.signal);
   }
 
   /** The terminal as of the holder's offset, resolved here rather than sent to `onEvent`. */
