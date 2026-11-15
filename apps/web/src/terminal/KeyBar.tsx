@@ -86,12 +86,9 @@ export function KeyBar() {
           Ctrl
         </ToggleButton>
         {AFTER_CTRL.map(button)}
-        {/* Safari's own Done is on an accessory bar that may not show; this does the same. */}
-        <Button
-          preventFocusOnPress
-          aria-label="Close keyboard"
-          onPress={() => store.target()?.blur()}
-        >
+        {/* Safari's own Done is on an accessory bar that may not show; this does the same. It shows
+            only with the soft keyboard up (app.css). */}
+        <Button preventFocusOnPress aria-label="Close keyboard" onPress={closeKeyboard}>
           Done
         </Button>
         <Button variant="quiet" preventFocusOnPress onPress={() => hide(true)}>
@@ -108,4 +105,9 @@ function useCtrlReleased(shown: boolean): void {
     if (!shown) return undefined;
     return () => keyBar().setCtrl(false);
   }, [shown]);
+}
+
+/** Takes focus off whatever holds it, a terminal or a field, which closes the soft keyboard. */
+function closeKeyboard(): void {
+  if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
 }

@@ -104,3 +104,16 @@ export function useDockLayout(): DockLayout & { readonly canSit: boolean } {
   const position = !beside ? "bottom" : short ? "right" : chosen.position;
   return { ...chosen, position, canSit: beside && !short };
 }
+
+/**
+ * Whether an agent's TUI and its shells are tabs, one terminal at a time, rather than side by side
+ * or one above the other: where the app shows one thing at a time, and where the screen is too
+ * short to stack them and too narrow to sit them beside each other. Every terminal shown then has
+ * room to be wholly in view.
+ */
+export function useTabbedDock(): boolean {
+  const onePane = useMediaQuery(ONE_PANE);
+  const short = useMediaQuery(TOO_SHORT_TO_STACK);
+  const beside = useMediaQuery(SIDE_BY_SIDE);
+  return onePane || (short && !beside);
+}

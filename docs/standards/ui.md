@@ -156,16 +156,20 @@ below the fold. So:
 - Only a pane whose content can outgrow it scrolls, inside itself and without chaining
   (`overflow: auto; overscroll-behavior: contain`): the rail, a list in the centre, the notices,
   and what sits above an agent's terminal, capped at 40% of the workspace, 25% where the app shows
-  one thing at a time. Anything else fills its parent through flex with `min-height: 0`; no
+  one thing at a time. An agent's terminals get the rest, less their fixed chrome (status lines,
+  the dock's and shells' headers and tabs), and `tests/e2e/layout.spec.ts` holds each screen to it. Anything else fills its parent through flex with `min-height: 0`; no
   height is in `vh`. A one-finger drag over nothing that scrolls that way doesn't move the page
   (`apps/web/src/ui/pan-guard.ts`): with the keyboard up iOS would pan it, sliding the app off
-  what the user sees. A pinch, and a drag in a text field, are left alone.
+  what the user sees. A pinch and a drag in a text field are left alone, and so is a drag's
+  first 10px where anything scrolls either way, since a swipe can lean the wrong way at first.
+  React Aria's modals and popovers prevent it themselves.
 - Under 700px wide, or 500px tall (`ONE_PANE`, `apps/web/src/shells/layout.ts`), the app shows
   one thing at a time: the fleet, or what was opened from it under the Fleet, Inbox and Tasks
   links. The app's header, the daemon's details, the launch form and the attach commands are on
   the fleet screen, or a wider one, only there; an agent's TUI and its shells are tabs, not one
   above the other. Elsewhere a screen too short to stack them (`TOO_SHORT_TO_STACK`; a touch
-  screen's controls are taller) puts the dock beside the TUI where it fits, whatever was chosen. When the pane that opens leaves focus nowhere, as on a control the fleet's list
+  screen's controls are taller) puts the dock beside the TUI where it fits, whatever was chosen,
+  and makes them tabs where it doesn't (`useTabbedDock`), so every terminal shown is wholly in view. When the pane that opens leaves focus nowhere, as on a control the fleet's list
   took with it, focus moves to the pane.
 - A terminal is never shorter than `6rem`: the daemon refuses a view of fewer than two rows.
 - The soft keyboard shortens the app, so a terminal resizes to what is left and its input row

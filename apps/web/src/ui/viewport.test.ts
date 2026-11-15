@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { followViewport, SETTLE_MS, type AppViewport } from "./viewport.ts";
+import { followViewport, SETTLE_MS, TYPING_HELD_MS, type AppViewport } from "./viewport.ts";
 
 /** A window and its visual viewport the test moves, and where focus is. */
 function fakeWindow(innerWidth: number, innerHeight: number) {
@@ -96,6 +96,28 @@ describe("the app's viewport", () => {
     expect(applied.slice(2)).toEqual([{ top: 0, height: 800, keyboard: false, typing: false }]);
   });
 
+  it("takes the keyboard closing as one change when iOS reports it only after its animation", () => {
+    const { move, focusTerminal, applied } = follow(800);
+    focusTerminal(true);
+    move({ height: 450 });
+    vi.advanceTimersByTime(SETTLE_MS);
+    focusTerminal(false);
+    vi.advanceTimersByTime(300);
+    move({ height: 800 });
+    vi.advanceTimersByTime(SETTLE_MS);
+    expect(applied.slice(2)).toEqual([{ top: 0, height: 800, keyboard: false, typing: false }]);
+  });
+
+  it("gives the chrome back once focus has moved to another field with the keyboard still up", () => {
+    const { move, focusTerminal, applied } = follow(800);
+    focusTerminal(true);
+    move({ height: 450 });
+    vi.advanceTimersByTime(SETTLE_MS);
+    focusTerminal(false);
+    vi.advanceTimersByTime(TYPING_HELD_MS);
+    expect(applied.slice(2)).toEqual([{ top: 0, height: 450, keyboard: true, typing: false }]);
+  });
+
   it("follows focus moving into a terminal while the keyboard stays up", () => {
     const { move, focusTerminal, applied } = follow(800);
     move({ height: 450 });
@@ -111,6 +133,16 @@ describe("the app's viewport", () => {
     expect(applied.slice(1)).toEqual([{ top: 0, height: 390, keyboard: false, typing: false }]);
     vi.advanceTimersByTime(SETTLE_MS);
     expect(applied).toHaveLength(2);
+  });
+
+  it("takes a window dragged taller once it settles, not a frame at a time", () => {
+    const { turn, applied } = follow(600, 1200);
+    for (let height = 610; height <= 800; height += 10) {
+      turn(1200, height);
+      vi.advanceTimersByTime(16);
+    }
+    vi.advanceTimersByTime(SETTLE_MS);
+    expect(applied.slice(1)).toEqual([{ top: 0, height: 800, keyboard: false, typing: false }]);
   });
 
   it("follows the visible part where the browser pans it, as iOS does to a focused field", () => {

@@ -94,8 +94,6 @@ export interface BarTarget {
   press(key: BarKey): void;
   /** Focuses its terminal, which on a phone opens the soft keyboard. */
   focus(): void;
-  /** Takes focus off its terminal, which closes the soft keyboard. */
-  blur(): void;
   /** Whether focus is in its terminal. */
   holdsFocus(): boolean;
 }

@@ -50,11 +50,20 @@ export function appViewport(
 }
 
 /**
- * Calls `apply` with the app's viewport now, then with each new one: at once when the window
- * itself changes size, as a rotation does, and otherwise once the visual viewport and focus
- * settle, the last of a run of changes. Focus moving in or out of a terminal is read with the
- * viewport it settles with, so the keyboard closing as a terminal loses focus is one change, not
- * the app's chrome coming back first and its height after. Returns the teardown.
+ * How long a terminal that lost focus with the keyboard up still counts as typed into. iOS can
+ * report the keyboard going only after its dismiss animation, longer after the blur than the
+ * viewport takes to settle; the chrome must not come back before the height does.
+ */
+export const TYPING_HELD_MS = 600;
+
+/**
+ * Calls `apply` with the app's viewport now, then with each new one: at once when the window gets
+ * wider or narrower, as when a phone turns, and otherwise once the visual viewport and focus settle,
+ * the last of a run of changes. A window only changing height, a desktop's being dragged, settles
+ * too. Focus moving in or out of a terminal is read with the viewport it settles with, and a
+ * terminal that loses focus with the keyboard up stays typed into until the keyboard goes or
+ * `TYPING_HELD_MS` passes, so the keyboard closing is one change, not the app's chrome coming back
+ * first and its height after. Returns the teardown.
  */
 export function followViewport(
   window: ViewportWindow,
@@ -64,36 +73,47 @@ export function followViewport(
   const viewport = window.visualViewport;
   if (viewport === null) return () => {};
   let last: AppViewport | null = null;
+  let heldUntil = 0;
   const read = () => {
-    const now = appViewport(window.innerHeight, viewport, focus.inTerminal());
+    const held = last?.typing === true && Date.now() < heldUntil;
+    const now = appViewport(window.innerHeight, viewport, focus.inTerminal() || held);
     if (now === null || same(now, last)) return;
     last = now;
     apply(now);
   };
-  const sizeOf = () => `${window.innerWidth}x${window.innerHeight}`;
-  let size = sizeOf();
+  let width = window.innerWidth;
   let settling: ReturnType<typeof setTimeout> | undefined;
+  let releasing: ReturnType<typeof setTimeout> | undefined;
   const changed = () => {
     clearTimeout(settling);
-    if (sizeOf() !== size) {
-      size = sizeOf();
+    if (window.innerWidth !== width) {
+      width = window.innerWidth;
       read();
       return;
     }
     settling = setTimeout(read, SETTLE_MS);
   };
+  const left = () => {
+    if (last?.typing === true && !focus.inTerminal()) {
+      heldUntil = Date.now() + TYPING_HELD_MS;
+      clearTimeout(releasing);
+      releasing = setTimeout(read, TYPING_HELD_MS);
+    }
+    changed();
+  };
   read();
-  const sources: [Listening, string][] = [
-    [viewport, "resize"],
-    [viewport, "scroll"],
-    [window, "resize"],
-    [focus.events, "focusin"],
-    [focus.events, "focusout"],
+  const sources: [Listening, string, () => void][] = [
+    [viewport, "resize", changed],
+    [viewport, "scroll", changed],
+    [window, "resize", changed],
+    [focus.events, "focusin", changed],
+    [focus.events, "focusout", left],
   ];
-  for (const [source, type] of sources) source.addEventListener(type, changed);
+  for (const [source, type, listener] of sources) source.addEventListener(type, listener);
   return () => {
     clearTimeout(settling);
-    for (const [source, type] of sources) source.removeEventListener(type, changed);
+    clearTimeout(releasing);
+    for (const [source, type, listener] of sources) source.removeEventListener(type, listener);
   };
 }
 

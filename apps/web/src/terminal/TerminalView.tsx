@@ -312,7 +312,6 @@ function connect(
         }),
       ),
     focus: () => term.focus(),
-    blur: () => term.blur(),
     holdsFocus: () => element.contains(document.activeElement),
   };
   const unregister = bar.register(target);

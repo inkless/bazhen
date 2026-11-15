@@ -14,9 +14,9 @@ const AGENT_TAB = "agent";
 
 /**
  * An agent's linked shells, as tabs under its TUI: one shell's terminal at a time, so the dock
- * streams one terminal however many shells it holds. Given `agentView`, as on a narrow screen,
- * the agent's TUI is its first tab instead of sitting above it, so each gets the full height, or
- * is all the dock shows while there is no shell.
+ * streams one terminal however many shells it holds. Given `agentView`, where there is no room
+ * for the TUI and a shell together, the agent's TUI is its first tab instead of sitting above it,
+ * so each gets the full height, or is all the dock shows while there is no shell.
  * Otherwise where it sits, below the TUI or to its right, and whether it shows are this
  * device's own choice.
  */

@@ -14,7 +14,7 @@ import { Button } from "../ui/Button.tsx";
 import { ConfirmDialog } from "../ui/ConfirmDialog.tsx";
 import { AttachCommand } from "./AttachCommand.tsx";
 import { Dock } from "../shells/Dock.tsx";
-import { ONE_PANE, useDockLayout, useMediaQuery } from "../shells/layout.ts";
+import { useDockLayout, useTabbedDock } from "../shells/layout.ts";
 import { linkedShells, shellLabel } from "../shells/model.ts";
 import { agentActions, exitText, shortId } from "./model.ts";
 
@@ -62,8 +62,8 @@ export function Workspace({
     );
   };
   const dock = useDockLayout();
-  // No room for the TUI and a shell one above the other: the dock takes the TUI as a tab.
-  const narrow = useMediaQuery(ONE_PANE);
+  // No room for the TUI and a shell together: the dock takes the TUI as a tab.
+  const narrow = useTabbedDock();
   const tui = (terminalId: string) => (
     <TerminalView
       key={`${terminalId}:${agent.generation}`}

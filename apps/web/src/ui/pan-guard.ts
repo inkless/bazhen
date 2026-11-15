@@ -19,12 +19,27 @@ export function scrollsAlong(boxes: readonly ScrollBox[], axis: "x" | "y"): bool
   );
 }
 
+/** How far a finger moves before its drag has a direction; until then, a scroll either way may be it. */
+export const SLOP_PX = 10;
+
+/**
+ * Whether a drag `dx`, `dy` from where it started may move something in `boxes`: along its
+ * direction once it has one, either way before.
+ */
+export function mayScroll(boxes: readonly ScrollBox[], dx: number, dy: number): boolean {
+  const x = Math.abs(dx);
+  const y = Math.abs(dy);
+  if (Math.max(x, y) < SLOP_PX) return scrollsAlong(boxes, "x") || scrollsAlong(boxes, "y");
+  return scrollsAlong(boxes, x > y ? "x" : "y");
+}
+
 /**
  * Keeps a one-finger drag inside `root` from moving the page. With the soft keyboard up, iOS
  * pans the whole page under a drag that nothing in it can scroll, the key bar or a pane's header
  * say, which slides the app off the visible part of the window. A drag over something that
  * scrolls that way, or over a text field, where it moves the caret, is left alone, and so is a
- * pinch. Returns the teardown.
+ * pinch. Overlays outside `root`, React Aria's modals and popovers, prevent it themselves. Returns
+ * the teardown.
  */
 export function guardPan(root: HTMLElement): () => void {
   let start: { x: number; y: number } | null = null;
@@ -34,12 +49,13 @@ export function guardPan(root: HTMLElement): () => void {
   };
   const touchMove = (event: TouchEvent) => {
     const touch = event.touches.length === 1 ? event.touches[0] : undefined;
-    if (event.defaultPrevented || start === null || touch === undefined) return;
+    if (!event.cancelable || event.defaultPrevented || start === null || touch === undefined) {
+      return;
+    }
     const target = event.target instanceof Element ? event.target : null;
     if (target === null || target.closest("input, textarea, [contenteditable]") !== null) return;
-    const dx = Math.abs(touch.clientX - start.x);
-    const dy = Math.abs(touch.clientY - start.y);
-    if (!scrollsAlong(boxesFrom(target, root), dx > dy ? "x" : "y")) event.preventDefault();
+    const boxes = boxesFrom(target, root);
+    if (!mayScroll(boxes, touch.clientX - start.x, touch.clientY - start.y)) event.preventDefault();
   };
   root.addEventListener("touchstart", touchStart, { passive: true });
   root.addEventListener("touchmove", touchMove, { passive: false });

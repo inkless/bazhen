@@ -16,42 +16,75 @@ const PROMPT = /[$#%>][\s ]*$/;
 interface Screen {
   readonly name: string;
   readonly options: BrowserContextOptions;
-  /** What share of the height the user sees, at least, the terminals' screens get. */
-  readonly share: number;
+  /** What the user sees: the window's height, less the key bar where it shows. */
+  readonly visible: number;
+  /** The app's own chrome above the workspace: its padding, header, launch form, links. */
+  readonly above: number;
+  /** The cap on what sits above an agent's terminals, as a share of the workspace. */
+  readonly cap: number;
+  /** The terminals' fixed chrome: status lines, the dock's and shells' headers and tabs, gaps. */
+  readonly chrome: number;
 }
 
 /*
- * Each share is the layout's arithmetic for the tighter of the two pages (the agent, with its
- * linked shell), less a margin, from app.css and tokens.css. A touch screen's controls are 44px;
- * the key bar is 53px (44 + 2 × 4 padding + 1 border), and what the user sees, V, ends at its top.
- * The app's padding is 12px top and bottom; a status line is 22.4px (16px at 1.4) with 16px margins
- * each side, 4px where the app shows one thing at a time; a screen may lose up to one row (18px)
- * to the host's height.
- *
- * - iPhone upright, 390 × 844, one pane: V = 791. Under the links (44 + 8 gap) the workspace is
- *   715; what sits above the terminal is capped at 25%, 179; the dock's header and tabs share a
- *   row, 45, then an 8px gap and the status, 30.4: the TUI's host is 453, its screen ≥ 435, 0.55.
- * - iPhone on its side, 844 × 390, one pane: V = 337; workspace 261, capped part 65, host
- *   261 − 65 − 45 − 8 − 30.4 = 113, screen ≥ 95: 0.28.
- * - iPad upright, 820 × 1180, the rail beside, the dock under the TUI: V = 1127; header 44, launch
- *   form 68, dashboard 991; the agent's head, cwd and message form about 140, its attach line 34;
- *   the TUI and the dock split 829 less a 12px gap, 408 each. The TUI's host is 408 − 54.4 = 354;
- *   the dock's shell's is 408 less its header 44, gap 8, tabs 45, the shell's header 44, gap 8,
- *   status 54.4, gap 8 and attach line 22.4, 174. Screens ≥ 336 + 156: 0.44.
- * - iPad on its side, 1180 × 820: too short to stack them, so the dock sits beside. V = 767,
- *   dashboard 631, the row 631 − 140 − 34 = 457; the TUI's host 457 − 54.4 = 403, screen ≥ 385:
- *   0.5.
- * - A desktop, 1280 × 800, with a mouse's 24px controls and no key bar: V = 800; header 30,
- *   launch form 48, dashboard 698; above the terminals about 100, attach line 34; 564 less a 12px
- *   gap split 276 each. The TUI's host 221; the shell's 276 − 24 − 8 − 25 − 24 − 8 − 54.4 − 8 −
- *   22.4 = 102. Screens ≥ 203 + 84: 0.36.
+ * The least share of what the user sees the terminals' screens, one above the other, take on the
+ * agent's page, with its linked shell, by the rule in docs/standards/ui.md: the workspace's
+ * terminals get what the capped part above them leaves, less their fixed chrome. Sizes are
+ * app.css's and tokens.css's: a touch screen's controls are 44px, a mouse's 24px; the key bar is
+ * 53px (44 + 2 × 4 padding + 1 border); the app's padding 12px top and bottom; a status line 22.4px
+ * with 16px margins, 4px where the app shows one thing at a time; and a screen may lose a row
+ * (18px) to its host's height, counted in `chrome` once per terminal.
  */
+const share = ({ visible, above, cap, chrome }: Screen) =>
+  ((visible - above) * (1 - cap) - chrome) / visible;
+
 const SCREENS: readonly Screen[] = [
-  { name: "an iPhone upright", options: phone(390, 844), share: 0.5 },
-  { name: "an iPhone on its side", options: phone(844, 390), share: 0.25 },
-  { name: "an iPad upright", options: phone(820, 1180), share: 0.4 },
-  { name: "an iPad on its side", options: phone(1180, 820), share: 0.45 },
-  { name: "a desktop", options: { viewport: { width: 1280, height: 800 } }, share: 0.3 },
+  // One pane, the TUI and shell as tabs: links 44 + gap 8; the dock's row 45, gap 8, status 30.4.
+  {
+    name: "an iPhone upright",
+    options: phone(390, 844),
+    visible: 791,
+    above: 76,
+    cap: 0.25,
+    chrome: 101.4,
+  },
+  {
+    name: "an iPhone on its side",
+    options: phone(844, 390),
+    visible: 337,
+    above: 76,
+    cap: 0.25,
+    chrome: 101.4,
+  },
+  // The rail beside, the dock under the TUI: header 44, launch form 68. Chrome: the attach line
+  // 34, gap 12, the TUI's status 54.4, the dock's header 44, gap 8, tabs 45, the shell's header
+  // 44, gap 8, status 54.4, gap 8, attach line 22.4, and two rows.
+  {
+    name: "an iPad upright",
+    options: phone(820, 1180),
+    visible: 1127,
+    above: 136,
+    cap: 0.4,
+    chrome: 370.6,
+  },
+  // Too short to stack, so the dock sits beside: the TUI's column is its status and attach line.
+  {
+    name: "an iPad on its side",
+    options: phone(1180, 820),
+    visible: 767,
+    above: 136,
+    cap: 0.4,
+    chrome: 106.4,
+  },
+  // No key bar; header 30, launch form 48; the dock as on an iPad upright, with 24px controls.
+  {
+    name: "a desktop",
+    options: { viewport: { width: 1280, height: 800 } },
+    visible: 800,
+    above: 102,
+    cap: 0.4,
+    chrome: 310.6,
+  },
 ];
 
 function phone(width: number, height: number): BrowserContextOptions {
@@ -157,14 +190,20 @@ async function terminalsInView(page: Page): Promise<boolean> {
 }
 
 /**
- * How much of the height the user sees, above the key bar, the terminals' screens take: the
- * screens one above the other in the first one's column, where a dock beside it would count twice.
+ * How much of the height the user sees, above the key bar, the terminals' screens take: the union
+ * of their heights, so a dock beside the TUI counts once and one under it counts too.
  */
 async function terminalShare(page: Page): Promise<number> {
-  const boxes = await terminalBoxes(page);
-  const column = boxes.filter((b) => b.x === boxes[0]?.x);
-  const tall = column.reduce((sum, b) => sum + b.height, 0);
-  return Math.round((tall / (await visibleBottom(page))) * 100) / 100;
+  const spans = (await terminalBoxes(page))
+    .map((b) => [b.y, b.y + b.height] as const)
+    .toSorted((a, b) => a[0] - b[0]);
+  let covered = 0;
+  let reached = Number.NEGATIVE_INFINITY;
+  for (const [top, bottom] of spans) {
+    covered += Math.max(0, bottom - Math.max(top, reached));
+    reached = Math.max(reached, bottom);
+  }
+  return covered / (await visibleBottom(page));
 }
 
 async function open(browser: Browser, options: BrowserContextOptions, hash: string) {
@@ -185,7 +224,8 @@ async function dismissThemeNotice(page: Page): Promise<void> {
   if ((await notice.count()) > 0) await notice.getByRole("button", { name: "Dismiss" }).click();
 }
 
-for (const { name, options, share } of SCREENS) {
+for (const device of SCREENS) {
+  const { name, options } = device;
   test(`fits ${name}, with the agent's terminals and a shell's in view and no page scroll`, async ({
     browser,
   }) => {
@@ -196,7 +236,7 @@ for (const { name, options, share } of SCREENS) {
           message: `${hash} at ${name}`,
         })
         .toEqual({ page: { down: 0, across: 0 }, terminal: true });
-      expect(await terminalShare(page), `${hash} at ${name}`).toBeGreaterThanOrEqual(share);
+      expect(await terminalShare(page), `${hash} at ${name}`).toBeGreaterThanOrEqual(share(device));
       await page.context().close();
     }
   });
@@ -310,14 +350,50 @@ for (const { name, options } of SCREENS.slice(0, 2)) {
   });
 }
 
-test("closes the soft keyboard from the key bar, taking focus off the terminal", async ({
+test("offers to close the soft keyboard from the key bar while it is up, and closes it", async ({
   browser,
 }) => {
   const { page } = await typingInShell(browser, phone(390, 844));
-  await page.getByRole("button", { name: "Close keyboard" }).tap();
+  const done = page.getByRole("button", { name: "Close keyboard" });
+  await expect(done).toBeHidden();
+  await page.evaluate("bazhenKeyboard(340)");
+  await done.tap();
   await expect
     .poll(() => page.evaluate<boolean>(`document.activeElement?.closest(".terminal-host") != null`))
     .toBe(false);
+  await page.context().close();
+});
+
+/**
+ * Drags from the middle of `selector`'s element by `dy`, with `fingers`, as touch events; answers
+ * whether the page kept the drag from moving it.
+ */
+const dragPrevented = (page: Page, selector: string, dy: number, fingers = 1) =>
+  page.evaluate<boolean>(`(() => {
+    const el = document.querySelector(${JSON.stringify(selector)});
+    const box = el.getBoundingClientRect();
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    const touches = (dy) =>
+      Array.from({ length: ${fingers} }, (_, i) =>
+        new Touch({ identifier: i, target: el, clientX: x + i * 40, clientY: y + dy }));
+    const init = (dy) => ({ bubbles: true, cancelable: true, touches: touches(dy) });
+    el.dispatchEvent(new TouchEvent("touchstart", init(0)));
+    const move = new TouchEvent("touchmove", init(${dy}));
+    el.dispatchEvent(move);
+    el.dispatchEvent(new TouchEvent("touchend", { bubbles: true, cancelable: true }));
+    return move.defaultPrevented;
+  })()`);
+
+test("keeps a drag over what can't scroll from moving the page, but not a pinch or a text field", async ({
+  browser,
+}) => {
+  const page = await open(browser, phone(390, 844), `#/agent/${agentId}`);
+  expect([
+    await dragPrevented(page, ".key-bar", -40),
+    await dragPrevented(page, ".key-bar", -40, 2),
+    await dragPrevented(page, ".workspace-info input", -40),
+  ]).toEqual([true, false, false]);
   await page.context().close();
 });
 

@@ -90,7 +90,6 @@ function view(kind: "agent" | "shell" = "shell", focused = false) {
     kind,
     press: vi.fn<(key: BarKey) => void>(),
     focus: vi.fn<() => void>(),
-    blur: vi.fn<() => void>(),
     holdsFocus: () => focused,
   };
 }

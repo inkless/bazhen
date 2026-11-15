@@ -160,8 +160,13 @@ body {
     display: none;
   }
 
-  .workspace-info.capped {
+  .workspace > .workspace-info.capped {
     max-height: 25%;
+  }
+
+  /* No launch form above them here, so nothing to take back. */
+  .app:has(.dashboard[data-view="item"]) .notices {
+    margin-top: 0;
   }
 
   .terminal > p {
@@ -202,6 +207,11 @@ body {
     .attach
   ) {
   display: none;
+}
+
+/* Without their hidden headers, a dock and a shell need no gap above their terminal either. */
+:root[data-typing] :is(.dock, .shell) {
+  gap: 0;
 }
 
 :root[data-typing] .terminal > p {
@@ -683,6 +693,10 @@ body {
 /* The keyboard covers the home indicator. */
 :root[data-keyboard] .key-bar {
   padding-bottom: var(--space-1);
+}
+
+:root:not([data-keyboard]) .key-bar [aria-label="Close keyboard"] {
+  display: none;
 }
 
 :root[data-keyboard] .key-bar-show {
