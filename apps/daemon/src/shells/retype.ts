@@ -4,18 +4,28 @@ import { ShellCommandLine } from "@bazhen/protocol";
 /** How long a restarted shell has to report its first prompt before its line is dropped. */
 export const RETYPE_WITHIN_MS = 30_000;
 
+/** Runs `run` once `ms` have passed, unless the function it returns cancels it first. */
+export type After = (ms: number, run: () => void) => () => void;
+
+/** On the daemon's clock, never keeping the daemon running for it. */
+const afterTimeout: After = (ms, run) => {
+  const timer = setTimeout(run, ms);
+  timer.unref();
+  return () => clearTimeout(timer);
+};
+
 export interface RetypeDeps {
   /** Types the line at the prompt of the shell `ref` names, without Enter. */
   readonly paste: (ref: RuntimeRef, line: string) => Promise<void>;
   readonly log: (message: string) => void;
-  readonly withinMs?: number;
+  readonly after?: After;
 }
 
 interface Pending {
   readonly line: string;
   ref: RuntimeRef | null;
   prompted: boolean;
-  readonly expiry: ReturnType<typeof setTimeout>;
+  readonly cancelExpiry: () => void;
 }
 
 /**
@@ -35,13 +45,11 @@ export class PendingRetypes {
   /** Holds `line` for the shell `terminalId`, recorded but not yet started. */
   hold(terminalId: string, line: string): void {
     this.drop(terminalId);
-    const withinMs = this.deps.withinMs ?? RETYPE_WITHIN_MS;
-    const expiry = setTimeout(() => {
+    const cancelExpiry = (this.deps.after ?? afterTimeout)(RETYPE_WITHIN_MS, () => {
       if (this.pending.delete(terminalId))
-        this.skipped(terminalId, `no prompt reported within ${withinMs / 1000} s`);
-    }, withinMs);
-    expiry.unref();
-    this.pending.set(terminalId, { line, ref: null, prompted: false, expiry });
+        this.skipped(terminalId, `no prompt reported within ${RETYPE_WITHIN_MS / 1000} s`);
+    });
+    this.pending.set(terminalId, { line, ref: null, prompted: false, cancelExpiry });
   }
 
   /** The shell started as `ref`; a prompt it reported meanwhile gets its line now. */
@@ -64,7 +72,7 @@ export class PendingRetypes {
   drop(terminalId: string): void {
     const held = this.pending.get(terminalId);
     if (held === undefined) return;
-    clearTimeout(held.expiry);
+    held.cancelExpiry();
     this.pending.delete(terminalId);
   }
 

@@ -34,7 +34,7 @@ import {
 } from "../commands.ts";
 import type { AgentQueue } from "../agents/queue.ts";
 import { newShellToken } from "./reports.ts";
-import { PendingRetypes } from "./retype.ts";
+import { PendingRetypes, type After } from "./retype.ts";
 import {
   LINKABLE,
   UnknownAgent,
@@ -101,8 +101,8 @@ export interface ShellDeps {
    */
   readonly integration?: { readonly hook: string; readonly dir: string };
   readonly log?: (message: string) => void;
-  /** How long a restarted shell has to report its first prompt for its line to be typed. */
-  readonly retypeWithinMs?: number;
+  /** What times a restarted shell's wait for its first prompt; the daemon's clock by default. */
+  readonly retypeAfter?: After;
 }
 
 /**
@@ -126,7 +126,7 @@ export class ShellLifecycle {
     this.retypes = new PendingRetypes({
       paste: (ref, line) => deps.environment.pasteShell(ref, line),
       log: (message) => this.log(message),
-      ...(deps.retypeWithinMs !== undefined && { withinMs: deps.retypeWithinMs }),
+      ...(deps.retypeAfter && { after: deps.retypeAfter }),
     });
   }
 

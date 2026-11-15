@@ -51,6 +51,11 @@ const REPORT_MAX_BYTES = 16 * 1024;
 /** A prompt report is its token alone. */
 const PROMPT_MAX_BYTES = 1024;
 
+const tooLarge = (c: Context) => {
+  const body: ErrorResponse = { error: "invalid_request", message: "report too large" };
+  return c.json(body, 413);
+};
+
 const forbidden = (c: Context, message: string) => {
   const body: ErrorResponse = { error: "forbidden", message };
   return c.json(body, 403);
@@ -144,10 +149,7 @@ export function socketApp(parts: SocketParts): Hono<{ Bindings: HttpBindings }> 
     "/v1/shells/:id/report",
     bodyLimit({
       maxSize: REPORT_MAX_BYTES,
-      onError: (c) => {
-        const body: ErrorResponse = { error: "invalid_request", message: "report too large" };
-        return c.json(body, 413);
-      },
+      onError: tooLarge,
     }),
     async (c) => {
       const req = ShellReport.safeParse(await c.req.json().catch(() => undefined));
@@ -164,16 +166,20 @@ export function socketApp(parts: SocketParts): Hono<{ Bindings: HttpBindings }> 
     },
   );
 
-  app.post("/v1/shells/:id/prompt", bodyLimit({ maxSize: PROMPT_MAX_BYTES }), async (c) => {
-    const req = ShellPrompt.safeParse(await c.req.json().catch(() => undefined));
-    if (!req.success) {
-      const body: ErrorResponse = { error: "invalid_request", message: "expected { token }" };
-      return c.json(body, 400);
-    }
-    if (!parts.shellPrompt(c.req.param("id"), req.data))
-      return forbidden(c, "no such shell, or not its token");
-    return c.body(null, 204);
-  });
+  app.post(
+    "/v1/shells/:id/prompt",
+    bodyLimit({ maxSize: PROMPT_MAX_BYTES, onError: tooLarge }),
+    async (c) => {
+      const req = ShellPrompt.safeParse(await c.req.json().catch(() => undefined));
+      if (!req.success) {
+        const body: ErrorResponse = { error: "invalid_request", message: "expected { token }" };
+        return c.json(body, 400);
+      }
+      if (!parts.shellPrompt(c.req.param("id"), req.data))
+        return forbidden(c, "no such shell, or not its token");
+      return c.body(null, 204);
+    },
+  );
 
   app.route("/", parts.hooks);
   app.route("/", parts.commands);

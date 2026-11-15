@@ -173,11 +173,15 @@ describe("socketApp", () => {
       (await post({ token: "mine" })).status,
       (await post({ token: "theirs" })).status,
       (await post({ token: "" })).status,
-      (await post({ token: "mine", pad: "y".repeat(2048) })).status,
     ];
+    const large = await post({ token: "mine", pad: "y".repeat(2048) });
     expect([statuses, received.map((r) => r.sent)]).toEqual([
-      [204, 403, 400, 413],
+      [204, 403, 400],
       [{ token: "mine" }, { token: "theirs" }],
+    ]);
+    expect([large.status, await large.json()]).toEqual([
+      413,
+      { error: "invalid_request", message: "report too large" },
     ]);
   });
 

@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { newId, type RuntimeRef } from "@bazhen/core";
 import { FakeRuntime } from "@bazhen/core/testing";
 import { LocalEnvironment } from "@bazhen/env-local";
@@ -12,21 +12,37 @@ import { Store } from "../store/store.ts";
 import { testView, unlimited } from "../testing/fixtures.ts";
 import { ShellLifecycle, ShellOpenFailed } from "./lifecycle.ts";
 import { ShellReports } from "./reports.ts";
-import { PendingRetypes } from "./retype.ts";
+import { PendingRetypes, RETYPE_WITHIN_MS, type After } from "./retype.ts";
 
 const INTEGRATION = { hook: "/state/hook/bazhen-hook", dir: "/state/shell-integration" };
 const LINE = `echo "$HOME" 'a  b' TOKEN=s3cret`;
+
+/** A clock that runs what is scheduled on it only when told to, as if that much time had passed. */
+function testClock() {
+  const due: { ms: number; run: () => void; cancelled: boolean }[] = [];
+  const after: After = (ms, run) => {
+    const timer = { ms, run, cancelled: false };
+    due.push(timer);
+    return () => (timer.cancelled = true);
+  };
+  /** Runs everything scheduled at most `ms` ahead and not cancelled. */
+  const pass = (ms: number) => {
+    for (const timer of due.filter((t) => !t.cancelled && t.ms <= ms)) {
+      timer.cancelled = true;
+      timer.run();
+    }
+  };
+  return { after, pass };
+}
 
 /** A lost shell whose integration kept `line`, on a fake runtime, with what restarts it. */
 async function lostShell({
   line = LINE,
   restartedReporting = true,
-  retypeWithinMs = 30_000,
 }: {
   line?: string | null;
   /** Whether the daemon that restarts the shell has the integration, as one without its hook doesn't. */
   restartedReporting?: boolean;
-  retypeWithinMs?: number;
 } = {}) {
   const path = join(mkdtempSync(join(tmpdir(), "bz-retype-")), "bazhen.db");
   const store = Store.open(path);
@@ -44,6 +60,14 @@ async function lostShell({
     if (opensFail) throw new Error("tmux refused");
     return openShell(open);
   };
+  // Seen as the daemon asks for each paste, so a test needn't wait to know none was asked for.
+  const pasted: string[] = [];
+  const pasteShell = environment.pasteShell.bind(environment);
+  environment.pasteShell = (ref, text) => {
+    pasted.push(text);
+    return pasteShell(ref, text);
+  };
+  const clock = testClock();
   const logs: string[] = [];
   const lifecycle = (reporting: boolean) =>
     new ShellLifecycle({
@@ -53,7 +77,7 @@ async function lostShell({
       size: { cols: 80, rows: 24 },
       home: tmpdir(),
       budget: unlimited,
-      retypeWithinMs,
+      retypeAfter: clock.after,
       log: (message) => logs.push(message),
       ...(reporting && { integration: INTEGRATION }),
     });
@@ -81,8 +105,8 @@ async function lostShell({
     });
   /** The new shell's integration reports its first prompt with `token`, its own by default. */
   const prompt = (id: string, token = tokenOf(id)) => reports.prompt(id, { token });
-  const retypeable = (id: string) =>
-    store.snapshot(testView).shells.find((s) => s.id === id)?.retypeable;
+  const retypeable = (id: string, shellsReport = true) =>
+    store.snapshot({ ...testView, shellsReport }).shells.find((s) => s.id === id)?.retypeable;
   return {
     path,
     store,
@@ -91,6 +115,8 @@ async function lostShell({
     terminalId,
     lostToken,
     logs,
+    pasted,
+    clock,
     reports,
     tokenOf,
     restart,
@@ -102,14 +128,19 @@ async function lostShell({
 }
 
 describe("restarting a lost shell with its last line typed back", () => {
-  it("offers it only for a lost shell whose line was kept", async () => {
+  it("offers it only for a lost shell whose line was kept, while new shells can report", async () => {
     const kept = await lostShell();
     const none = await lostShell({ line: null });
-    const offered = [kept.retypeable(kept.terminalId), none.retypeable(none.terminalId)];
+    const offered = [
+      kept.retypeable(kept.terminalId),
+      none.retypeable(none.terminalId),
+      kept.retypeable(kept.terminalId, false),
+    ];
     const { terminalId: running } = await kept.restart(false);
     kept.reports.report(running, { token: kept.tokenOf(running), at: 2, command: "make" });
     expect([...offered, kept.store.lastShellCommand(running), kept.retypeable(running)]).toEqual([
       true,
+      false,
       false,
       "make",
       false,
@@ -117,26 +148,24 @@ describe("restarting a lost shell with its last line typed back", () => {
   });
 
   it("types the line, exactly, only once the new shell reports its first prompt, and once", async () => {
-    const { runtime, restart, prompt, refOf } = await lostShell();
+    const { runtime, restart, prompt, refOf, pasted } = await lostShell();
     const { terminalId } = await restart();
-    const before = [...runtime.pasted(refOf(terminalId))];
+    const before = [...pasted];
     expect(prompt(terminalId)).toBe(true);
-    await vi.waitFor(() => expect(runtime.pasted(refOf(terminalId))).toHaveLength(1));
     prompt(terminalId);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect([before, runtime.pasted(refOf(terminalId))]).toEqual([[], [LINE]]);
+    await expect.poll(() => runtime.pasted(refOf(terminalId))).toEqual([LINE]);
+    expect([before, pasted]).toEqual([[], [LINE]]);
   });
 
   it("types nothing into a shell restarted without asking to retype", async () => {
-    const { runtime, restart, prompt, refOf } = await lostShell();
+    const { restart, prompt, pasted } = await lostShell();
     const { terminalId } = await restart(false);
     prompt(terminalId);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(runtime.pasted(refOf(terminalId))).toEqual([]);
+    expect(pasted).toEqual([]);
   });
 
   it("types nothing for a prompt report that isn't the new shell's own", async () => {
-    const { runtime, restart, prompt, refOf, terminalId: lost, lostToken } = await lostShell();
+    const { restart, prompt, pasted, terminalId: lost, lostToken } = await lostShell();
     const { terminalId } = await restart();
     const refused = [
       prompt(terminalId, ""),
@@ -144,22 +173,20 @@ describe("restarting a lost shell with its last line typed back", () => {
       prompt(terminalId, lostToken),
       prompt(lost, lostToken),
     ];
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect([refused, runtime.pasted(refOf(terminalId))]).toEqual([
-      [false, false, false, false],
-      [],
-    ]);
+    expect([refused, pasted]).toEqual([[false, false, false, false], []]);
   });
 
   it("types nothing once its time to report a prompt has passed, and logs that without the line", async () => {
-    const { runtime, restart, prompt, refOf, logs } = await lostShell({ retypeWithinMs: 20 });
+    const { restart, prompt, pasted, logs, clock } = await lostShell();
     const { terminalId } = await restart();
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    clock.pass(RETYPE_WITHIN_MS - 1);
+    const early = [...logs];
+    clock.pass(RETYPE_WITHIN_MS);
     prompt(terminalId);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(runtime.pasted(refOf(terminalId))).toEqual([]);
-    expect(logs).toEqual([
-      `shell ${terminalId}: last command not retyped: no prompt reported within 0.02 s`,
+    expect([early, pasted, logs]).toEqual([
+      [],
+      [],
+      [`shell ${terminalId}: last command not retyped: no prompt reported within 30 s`],
     ]);
   });
 
@@ -195,7 +222,7 @@ describe("restarting a lost shell with its last line typed back", () => {
     } = await lostShell();
     const { terminalId } = await restart();
     prompt(terminalId);
-    await vi.waitFor(() => expect(runtime.pasted(refOf(terminalId))).toEqual([LINE]));
+    await expect.poll(() => runtime.pasted(refOf(terminalId))).toEqual([LINE]);
     const snapshot = JSON.stringify(store.snapshot(testView));
     expect([store.lastShellCommand(lost), store.lastShellCommand(terminalId)]).toEqual([
       null,
@@ -211,13 +238,13 @@ describe("restarting a lost shell with its last line typed back", () => {
 });
 
 /** Lines held for restarted shells, with what they pasted and logged. */
-function held(withinMs = 30_000) {
+function held() {
   const pasted: string[] = [];
   const logs: string[] = [];
   const retypes = new PendingRetypes({
     paste: async (_ref, line) => void pasted.push(line),
     log: (message) => logs.push(message),
-    withinMs,
+    after: testClock().after,
   });
   return { retypes, pasted, logs };
 }
@@ -231,24 +258,19 @@ describe("the lines held for restarted shells", () => {
     retypes.prompted(id);
     const early = [...pasted];
     retypes.opened(id, ref);
-    await Promise.resolve();
     expect([early, pasted]).toEqual([[], ["make"]]);
   });
 
-  it.each(["make\n", "make\r", "make\u001b[D"])(
-    "never types a line holding a key: %j",
-    async (line) => {
-      const { retypes, pasted, logs } = held();
-      retypes.hold(id, line);
-      retypes.opened(id, ref);
-      retypes.prompted(id);
-      await Promise.resolve();
-      expect([pasted, logs]).toEqual([
-        [],
-        [`shell ${id}: last command not retyped: it is not a line that can be typed safely`],
-      ]);
-    },
-  );
+  it.each(["make\n", "make\r", "make\u001b[D"])("never types a line holding a key: %j", (line) => {
+    const { retypes, pasted, logs } = held();
+    retypes.hold(id, line);
+    retypes.opened(id, ref);
+    retypes.prompted(id);
+    expect([pasted, logs]).toEqual([
+      [],
+      [`shell ${id}: last command not retyped: it is not a line that can be typed safely`],
+    ]);
+  });
 
   it("types nothing for a shell whose line was dropped, as one that failed to open", async () => {
     const { retypes, pasted } = held();
@@ -256,7 +278,6 @@ describe("the lines held for restarted shells", () => {
     retypes.drop(id);
     retypes.opened(id, ref);
     retypes.prompted(id);
-    await Promise.resolve();
     expect(pasted).toEqual([]);
   });
 
@@ -265,11 +286,13 @@ describe("the lines held for restarted shells", () => {
     const retypes = new PendingRetypes({
       paste: () => Promise.reject(new Error("tmux paste-buffer -t %3 failed")),
       log: (message) => logs.push(message),
+      after: testClock().after,
     });
     retypes.hold(id, "make");
     retypes.opened(id, ref);
     retypes.prompted(id);
-    await vi.waitFor(() => expect(logs).toHaveLength(1));
-    expect(logs).toEqual([`shell ${id}: last command not retyped: tmux paste-buffer -t %3 failed`]);
+    await expect
+      .poll(() => logs)
+      .toEqual([`shell ${id}: last command not retyped: tmux paste-buffer -t %3 failed`]);
   });
 });

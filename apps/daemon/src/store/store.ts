@@ -177,6 +177,11 @@ export interface SnapshotView {
   attentionActions(item: OpenAttention): readonly AttentionAction[];
   /** What the viewer can do about an open notice now. */
   noticeActions(notice: OpenNotice): readonly NoticeAction[];
+  /**
+   * Whether new shells report their first prompt, which a restart that retypes a line waits for:
+   * without, no lost shell is offered as retypeable.
+   */
+  readonly shellsReport: boolean;
 }
 
 /** Terminal states whose runtime target still exists, so a human can attach to it. */
@@ -1233,7 +1238,7 @@ export class Store {
               foreground: typeof foreground === "string" ? JSON.parse(foreground) : null,
               attachCommand: ref === null ? null : view.attachCommand(ref),
               commands: shellCommands(state, r.linkedAgentId !== null),
-              retypeable: retypeable === 1,
+              retypeable: view.shellsReport && retypeable === 1,
             };
           }),
         tasks: this.prepare(`${TASK} ORDER BY created_event_id`).all(),

@@ -43,6 +43,7 @@ export const testView: SnapshotView = {
     return item.kind === "question" ? [] : ["reply", "dismiss"];
   },
   noticeActions: () => ["dismiss"],
+  shellsReport: true,
 };
 
 /** A browser paired on loopback, which shows no address: for tests where that isn't what is tested. */

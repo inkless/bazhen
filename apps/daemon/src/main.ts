@@ -334,6 +334,7 @@ const snapshotView: SnapshotView = {
   themes: (harness) => environment.themes[harness] ?? [],
   attentionActions: (item) => inbox.actions(item),
   noticeActions: (n) => notices.actions(n, "owner-socket"),
+  shellsReport: integration !== undefined,
 };
 for (const a of store.snapshot(snapshotView).agents) {
   if (a.harness === "claude-code" && a.state === "running") activity.restarted(a.id);
