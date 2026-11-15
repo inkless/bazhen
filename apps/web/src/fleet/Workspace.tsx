@@ -1,4 +1,4 @@
-import { useState, type SubmitEvent } from "react";
+import { useState, type ReactNode, type SubmitEvent } from "react";
 import type { Agent, AgentState, Shell } from "@bazhen/protocol";
 import {
   closeAgent,
@@ -14,11 +14,9 @@ import { Button } from "../ui/Button.tsx";
 import { ConfirmDialog } from "../ui/ConfirmDialog.tsx";
 import { AttachCommand } from "./AttachCommand.tsx";
 import { Dock } from "../shells/Dock.tsx";
-import { useDockLayout, useMediaQuery } from "../shells/layout.ts";
+import { useDockLayout, useTabbedDock } from "../shells/layout.ts";
 import { linkedShells, shellLabel } from "../shells/model.ts";
 import { agentActions, exitText, shortId } from "./model.ts";
-
-const NARROW = "(max-width: 600px)";
 
 /** Why an agent that can't be opened shows no terminal. */
 const NO_TERMINAL: Partial<Record<AgentState, string>> = {
@@ -31,14 +29,19 @@ const NO_TERMINAL: Partial<Record<AgentState, string>> = {
   failed: "It failed to start.",
 };
 
-/** One agent: what it is, what can be done to it, and its terminal while there is one. */
+/**
+ * One agent: what it is, what can be done to it, and its terminal while there is one. What sits
+ * above the terminal, `about` first, scrolls on its own, so the terminal keeps the rest.
+ */
 export function Workspace({
   agent,
   shells,
+  about,
   failed,
 }: {
   agent: Agent;
   shells: readonly Shell[];
+  about?: ReactNode;
   failed: (e: unknown) => void;
 }) {
   const mine = linkedShells(shells, agent.id).filter((s) => s.state !== "closing");
@@ -59,16 +62,14 @@ export function Workspace({
     );
   };
   const dock = useDockLayout();
-  const sharing = mine.length > 0 && !dock.hidden && dock.position === "bottom";
-  // Too narrow for the TUI and a shell one above the other: the dock takes the TUI as a tab.
-  const narrow = useMediaQuery(NARROW);
-  const tui = (terminalId: string, height: string) => (
+  // No room for the TUI and a shell together: the dock takes the TUI as a tab.
+  const narrow = useTabbedDock();
+  const tui = (terminalId: string) => (
     <TerminalView
       key={`${terminalId}:${agent.generation}`}
       terminalId={terminalId}
       kind="agent"
       scheme={agent.theme}
-      height={height}
     />
   );
   const { open, buttons } = agentActions(agent);
@@ -97,114 +98,112 @@ export function Workspace({
     sendMessage(agent.id, message).then(() => setMessage(""), failed);
   };
 
+  const terminalId = open ? agent.terminalId : null;
+
   return (
     <article className="workspace" aria-label="agent">
-      <header className="workspace-head">
-        <h2>{agent.project}</h2>
-        <span>{agent.harness}</span>
-        <span className="id">{shortId(agent.id)}</span>
-        <span className={`state state-${agent.state}`}>{agent.state}</span>
-        {agent.exit !== null && <span>{exitText(agent.exit)}</span>}
-        <span className="spacer" />
-        {buttons.includes("respawn") && (
-          <Button
-            isDisabled={busy}
-            onPress={() => run((id, gen) => respawnAgent(id, gen, pageTheme().scheme()))}
-          >
-            Respawn
-          </Button>
-        )}
-        {buttons.includes("relaunch") && (
-          <ConfirmDialog
-            key={String(agent.resumable)}
-            isDisabled={busy}
-            trigger="Relaunch…"
-            title="Relaunch agent"
-            message={
-              agent.resumable
-                ? `Relaunch ${agent.project}? Its ${agent.harness} session starts again in a new terminal.`
-                : `Relaunch ${agent.project} on a new ${agent.harness} session? Its last session ` +
-                  "can't be resumed, so its conversation isn't carried over."
-            }
-            confirm={agent.resumable ? "Relaunch" : "Relaunch fresh"}
-            onConfirm={() =>
-              run((id, gen) => relaunchAgent(id, gen, pageTheme().scheme(), !agent.resumable))
-            }
-          />
-        )}
-        {/* Remounted the moment close changes name, and gone once it is no longer offered, so a
-            confirm left open can't send it. */}
-        {closable && (
-          <ConfirmDialog
-            key={String(removing)}
-            isDisabled={busy}
-            trigger={removing ? "Remove…" : "Close agent…"}
-            title={removing ? "Remove agent" : "Close agent"}
-            message={
-              <CloseMessage
-                agent={agent}
-                removing={removing}
-                shells={mine}
-                busy={shownBusy}
-                keep={keep}
-                onKeep={setKeep}
-              />
-            }
-            confirm={removing ? "Remove" : "Close agent"}
-            onOpen={opened}
-            onConfirm={() =>
-              run((id, generation) =>
-                closeAgent(id, generation, {
-                  keepShells: kept.map((s) => s.id),
-                  confirmedBusy,
-                }),
-              )
-            }
-          />
-        )}
-        {unconfirmed && closable && (
-          <ConfirmDialog
-            isDisabled={busy}
-            trigger="Force close…"
-            title="Force close agent"
-            message={
-              `Force close ${agent.project}? Bazhen can't show its old tmux server has ended; ` +
-              "it is recorded closed, and that server may still be running it."
-            }
-            confirm="Force close"
-            onConfirm={() => run(forceCloseAgent)}
-          />
-        )}
-      </header>
-      <p className="cwd">{agent.cwd}</p>
-      {open ? (
-        <>
+      <div className={terminalId === null ? "workspace-info" : "workspace-info capped"}>
+        {about}
+        <header className="workspace-head">
+          <h2>{agent.project}</h2>
+          <span>{agent.harness}</span>
+          <span className="id">{shortId(agent.id)}</span>
+          <span className={`state state-${agent.state}`}>{agent.state}</span>
+          {agent.exit !== null && <span>{exitText(agent.exit)}</span>}
+          <span className="spacer" />
+          {buttons.includes("respawn") && (
+            <Button
+              isDisabled={busy}
+              onPress={() => run((id, gen) => respawnAgent(id, gen, pageTheme().scheme()))}
+            >
+              Respawn
+            </Button>
+          )}
+          {buttons.includes("relaunch") && (
+            <ConfirmDialog
+              key={String(agent.resumable)}
+              isDisabled={busy}
+              trigger="Relaunch…"
+              title="Relaunch agent"
+              message={
+                agent.resumable
+                  ? `Relaunch ${agent.project}? Its ${agent.harness} session starts again in a new terminal.`
+                  : `Relaunch ${agent.project} on a new ${agent.harness} session? Its last session ` +
+                    "can't be resumed, so its conversation isn't carried over."
+              }
+              confirm={agent.resumable ? "Relaunch" : "Relaunch fresh"}
+              onConfirm={() =>
+                run((id, gen) => relaunchAgent(id, gen, pageTheme().scheme(), !agent.resumable))
+              }
+            />
+          )}
+          {/* Remounted the moment close changes name, and gone once it is no longer offered, so a
+              confirm left open can't send it. */}
+          {closable && (
+            <ConfirmDialog
+              key={String(removing)}
+              isDisabled={busy}
+              trigger={removing ? "Remove…" : "Close agent…"}
+              title={removing ? "Remove agent" : "Close agent"}
+              message={
+                <CloseMessage
+                  agent={agent}
+                  removing={removing}
+                  shells={mine}
+                  busy={shownBusy}
+                  keep={keep}
+                  onKeep={setKeep}
+                />
+              }
+              confirm={removing ? "Remove" : "Close agent"}
+              onOpen={opened}
+              onConfirm={() =>
+                run((id, generation) =>
+                  closeAgent(id, generation, {
+                    keepShells: kept.map((s) => s.id),
+                    confirmedBusy,
+                  }),
+                )
+              }
+            />
+          )}
+          {unconfirmed && closable && (
+            <ConfirmDialog
+              isDisabled={busy}
+              trigger="Force close…"
+              title="Force close agent"
+              message={
+                `Force close ${agent.project}? Bazhen can't show its old tmux server has ended; ` +
+                "it is recorded closed, and that server may still be running it."
+              }
+              confirm="Force close"
+              onConfirm={() => run(forceCloseAgent)}
+            />
+          )}
+        </header>
+        <p className="cwd">{agent.cwd}</p>
+        {open ? (
           <form onSubmit={send}>
             <label>
               Message <input value={message} onChange={(e) => setMessage(e.target.value)} />
             </label>
             <Button type="submit">Send</Button>
           </form>
-          {agent.terminalId !== null && (
-            <div className={`workspace-body dock-${dock.position}`}>
-              {narrow ? (
-                <Dock
-                  agent={agent}
-                  shells={shells}
-                  failed={failed}
-                  agentView={tui(agent.terminalId, "70vh")}
-                />
-              ) : (
-                <>
-                  {tui(agent.terminalId, sharing ? "40vh" : "70vh")}
-                  <Dock agent={agent} shells={shells} failed={failed} />
-                </>
-              )}
-            </div>
+        ) : (
+          <p>{NO_TERMINAL[agent.state] ?? "There is no terminal to show."}</p>
+        )}
+      </div>
+      {terminalId !== null && (
+        <div className={`workspace-body dock-${dock.position}`}>
+          {narrow ? (
+            <Dock agent={agent} shells={shells} failed={failed} agentView={tui(terminalId)} />
+          ) : (
+            <>
+              {tui(terminalId)}
+              <Dock agent={agent} shells={shells} failed={failed} />
+            </>
           )}
-        </>
-      ) : (
-        <p>{NO_TERMINAL[agent.state] ?? "There is no terminal to show."}</p>
+        </div>
       )}
       {agent.attachCommand !== null && <AttachCommand command={agent.attachCommand} />}
     </article>

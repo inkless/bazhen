@@ -131,9 +131,8 @@ tap on a phone.
 
 On a phone or an iPad, a key bar under the terminal types what their keyboards lack: Esc, Tab,
 Ctrl, the arrows, newline and Enter, through the same key map and lease as a typed key. Its keys
-take `preventFocusOnPress`, so a tap leaves focus, and the soft keyboard, on the terminal. While
-it shows, a terminal leaves room for it underneath, the same with the soft keyboard open or
-closed so the keyboard never reflows the TUI, and the user can hide it per device.
+take `preventFocusOnPress`, so a tap leaves focus, and the soft keyboard, on the terminal. It is
+the app's bottom row, so it sits on the soft keyboard, and the user can hide it per device.
 Stacking goes by `--z-key-bar` and `--z-modal`; a terminal's host isolates xterm.js's own layers.
 
 A new widget (a menu, a combo box, a toast) is a new wrapper: import the React Aria component by
@@ -144,6 +143,49 @@ locale the UI is translated into goes in that list too.
 Not everything needs one. A list that navigates, like the fleet, stays a native list of
 buttons: React Aria's `GridList` is a selection widget, with `role="grid"`. Native inputs and
 `<details>` stay native too, since React Aria adds nothing to them.
+
+## The app shell
+
+The page is an app the size of the screen, never a document that scrolls: on a phone a page
+scroll and a terminal's scroll fight over the same swipe, and the terminal ends up somewhere
+below the fold. So:
+
+- `.app` (`apps/web/src/app.css`) is the part of the window the user sees, `--app-top` and
+  `--app-height`, which `apps/web/src/ui/viewport.ts` sets from the visual viewport. `html` and
+  `body` don't scroll or bounce.
+- Only a pane whose content can outgrow it scrolls, inside itself and without chaining
+  (`overflow: auto; overscroll-behavior: contain`): the rail, a list in the centre, the notices,
+  and what sits above an agent's terminal, capped at 40% of the workspace, 25% where the app shows
+  one thing at a time. An agent's terminals get the rest, less their fixed chrome (status lines,
+  the dock's and shells' headers and tabs), and `tests/e2e/layout.spec.ts` holds each screen to it. Anything else fills its parent through flex with `min-height: 0`; no
+  height is in `vh`. A one-finger drag over nothing that scrolls that way doesn't move the page
+  (`apps/web/src/ui/pan-guard.ts`): with the keyboard up iOS would pan it, sliding the app off
+  what the user sees. A pinch and a drag in a text field are left alone, and so is a drag's
+  first 10px where anything scrolls either way, since a swipe can lean the wrong way at first.
+  React Aria's modals and popovers prevent it themselves.
+- Under 700px wide, or 500px tall (`ONE_PANE`, `apps/web/src/shells/layout.ts`), the app shows
+  one thing at a time: the fleet, or what was opened from it under the Fleet, Inbox and Tasks
+  links. The app's header, the daemon's details, the launch form and the attach commands are on
+  the fleet screen, or a wider one, only there; an agent's TUI and its shells are tabs, not one
+  above the other. Elsewhere a screen too short to stack them (`TOO_SHORT_TO_STACK`; a touch
+  screen's controls are taller) puts the dock beside the TUI where it fits, whatever was chosen,
+  and makes them tabs where it doesn't (`useTabbedDock`), so every terminal shown is wholly in view. When the pane that opens leaves focus nowhere, as on a control the fleet's list
+  took with it, focus moves to the pane.
+- A terminal is never shorter than `6rem`: the daemon refuses a view of fewer than two rows.
+- The soft keyboard shortens the app, so a terminal resizes to what is left and its input row
+  stays above the keyboard. iOS doesn't shrink the layout viewport, or `dvh`, for the keyboard,
+  so nothing but the visual viewport says how much is left. A change of the visual viewport, or of
+  focus, is taken once both have held still for 150 ms, the last of a run of changes: a keyboard
+  animating in or out is one resize for the program, not one a frame, and a pinch zoom is none. A
+  change of the window itself, a phone turning, is taken at once, so the app is never taller than
+  the window.
+- While the keyboard is up for a focused terminal, the app shows that terminal with its status,
+  any alert, and the key bar (`data-typing` on `<html>`). It is set with the app's height, never
+  from focus alone: a terminal losing focus as the keyboard closes would otherwise bring the
+  chrome back while the app is still short, and the program would be resized twice. The key bar's
+  Done closes the keyboard, where Safari's own accessory bar may not show.
+- The viewport meta has `viewport-fit=cover`, so the app pads itself clear of the notch and the
+  home indicator with `env(safe-area-inset-*)`.
 
 ## Responsiveness
 

@@ -75,6 +75,10 @@
   --font-size-sm: 0.85rem;
   --font-size-md: 1rem;
   --font-size-lg: 1.25rem;
+  /* The part of the window the user sees, which the app is drawn in. Script sets it from the
+     visual viewport, which the soft keyboard shrinks; this is the value until it does. */
+  --app-top: 0px;
+  --app-height: 100dvh;
 
   /* $type: fontFamily */
   --font-family-sans: system-ui, sans-serif;
@@ -82,7 +86,7 @@
 
   /* $type: number */
   --line-height-body: 1.4;
-  /* Stacking: the key bar over the page and its terminals, a modal over everything. */
+  /* Stacking: the key bar's show button over the terminals, a modal over everything. */
   --z-key-bar: 5;
   --z-modal: 10;
 
