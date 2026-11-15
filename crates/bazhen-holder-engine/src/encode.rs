@@ -1,6 +1,9 @@
 //! Writes grid rows as plain VT: their characters with the SGR that draws them. Written from
 //! column 0 of a terminal of the same width, in the default pen, [`Lines`] reproduces each row's
 //! cells and where it wraps; at another width, a viewer rewraps each line as it reads it.
+//!
+//! Only the pen is written: a cell's OSC 8 hyperlink is not, so a link's text reaches history
+//! as plain text.
 
 use alacritty_terminal::grid::Row;
 use alacritty_terminal::term::cell::{Cell, Flags};

@@ -11,6 +11,10 @@ use alacritty_terminal::vte::{Params, Perform};
 /// The fewest rows a stretch may scroll before it stops.
 const MIN_STRETCH: usize = 128;
 
+/// The most titles kept on the stack `CSI 22 t` pushes onto: alacritty keeps 4,096, each up to an
+/// OSC string long.
+const MOST_TITLES: usize = 16;
+
 /// The most bytes a read may go past `room` to finish a char.
 pub(crate) const MOST_CONTINUATIONS: usize = 3;
 
@@ -24,6 +28,8 @@ pub(crate) enum Stop {
     /// A switch to or from the alternate screen: alacritty keeps the primary grid private while
     /// the alternate screen is up.
     AltScreen,
+    /// A title pushed past `MOST_TITLES`, which the engine undoes.
+    TitlePush,
 }
 
 #[derive(Debug)]
@@ -39,6 +45,8 @@ pub(crate) struct Budget {
     unknown_column: bool,
     /// Chars printed since the column was last known, less those already counted as a row.
     printed: usize,
+    /// Titles on alacritty's stack.
+    titles: usize,
 }
 
 impl Budget {
@@ -51,6 +59,7 @@ impl Budget {
             stop: None,
             unknown_column: true,
             printed: 0,
+            titles: 0,
         };
         budget.resize(cols, rows);
         budget
@@ -179,6 +188,9 @@ impl Perform for Budget {
                 self.may_wrap();
                 self.scrolled += repeats / self.chars_per_row + 1;
             }
+            't' if handled && first == 22 && self.titles < MOST_TITLES => self.titles += 1,
+            't' if handled && first == 22 => self.stop = Some(Stop::TitlePush),
+            't' if handled && first == 23 => self.titles = self.titles.saturating_sub(1),
             'h' | 'l' if intermediates == b"?" && switches_screen(params) => {
                 self.stop = Some(Stop::AltScreen);
             }
@@ -198,6 +210,7 @@ impl Perform for Budget {
             }
             (b'c', []) => {
                 self.stop = Some(Stop::Reset);
+                self.titles = 0;
                 self.column_lost();
             }
             _ => self.column_lost(),
@@ -298,6 +311,22 @@ mod tests {
         // With the column known at zero, neither can.
         assert_eq!(stretch(b"\r\x1b[I").1, 0);
         assert_eq!(stretch(b"\r\x1a").1, 0);
+    }
+
+    #[test]
+    fn a_title_pushed_past_the_limit_stops_the_stretch_and_pops_free_a_place() {
+        let mut budget = small();
+        let mut parser = Parser::new();
+        let push = "\x1b[22t".repeat(MOST_TITLES);
+        budget.start();
+        let read = parser.advance_until_terminated(&mut budget, push.as_bytes());
+        assert_eq!((read, budget.stop()), (push.len(), None));
+        budget.start();
+        let read = parser.advance_until_terminated(&mut budget, b"\x1b[22tmore");
+        assert_eq!((read, budget.stop()), (5, Some(Stop::TitlePush)));
+        budget.start();
+        let read = parser.advance_until_terminated(&mut budget, b"\x1b[23t\x1b[22;0tmore");
+        assert_eq!((read, budget.stop()), (16, None));
     }
 
     #[test]

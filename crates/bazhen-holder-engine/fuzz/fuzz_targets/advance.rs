@@ -23,8 +23,7 @@ fuzz_target!(|input: &[u8]| {
         bytes = after;
         let stats = engine.stats();
         assert_eq!(stats.overflows, 0);
-        // The store, and the one row a drain leaves in alacritty.
-        assert!(stats.history_rows <= usize::from(*history) + 1);
+        assert!(stats.history_rows <= usize::from(*history));
     }
     let mut history = String::new();
     engine.write_history(&mut history);

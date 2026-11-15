@@ -21,6 +21,13 @@ struct Block {
     rows: Vec<RowEnd>,
 }
 
+impl Block {
+    /// The memory the block holds, whatever of it is used.
+    fn held(&self) -> usize {
+        self.text.capacity() + self.rows.capacity() * size_of::<RowEnd>()
+    }
+}
+
 /// Where a row ends in its block's text, and how, in four bytes: a store of short rows holds
 /// more of these than text.
 #[derive(Debug, Clone, Copy)]
@@ -63,13 +70,13 @@ pub(crate) struct History {
     evicted: usize,
     rows: usize,
     limit: usize,
-    /// The text of the rows held.
-    text_bytes: usize,
+    /// The memory the blocks hold: their text's capacity and their rows'.
+    held: usize,
     most_bytes: usize,
 }
 
 impl History {
-    /// A store of at most `limit` rows, and of at most `most_bytes` bytes of their text: a row
+    /// A store of at most `limit` rows, in blocks holding at most `most_bytes` bytes: a row
     /// of text drawn in a new colour every cell runs to kilobytes.
     pub(crate) fn new(limit: usize, most_bytes: usize) -> Self {
         Self {
@@ -77,7 +84,7 @@ impl History {
             evicted: 0,
             rows: 0,
             limit,
-            text_bytes: 0,
+            held: 0,
             most_bytes,
         }
     }
@@ -88,10 +95,7 @@ impl History {
 
     /// The memory the store holds, spare capacity included.
     pub(crate) fn bytes(&self) -> usize {
-        self.blocks
-            .iter()
-            .map(|b| b.text.capacity() + b.rows.capacity() * size_of::<RowEnd>())
-            .sum()
+        self.held
     }
 
     pub(crate) fn push(&mut self, row: &str, ending: Ending) {
@@ -99,35 +103,40 @@ impl History {
             b.text.len() + row.len() <= b.text.capacity() && b.rows.len() < BLOCK_ROWS
         });
         if !fits {
-            self.blocks.push_back(Block {
+            let block = Block {
                 text: String::with_capacity(BLOCK_BYTES.max(row.len())),
-                rows: Vec::new(),
-            });
+                rows: Vec::with_capacity(BLOCK_ROWS),
+            };
+            self.held += block.held();
+            self.blocks.push_back(block);
         }
         if let Some(block) = self.blocks.back_mut() {
             block.text.push_str(row);
             block.rows.push(RowEnd::new(block.text.len(), ending));
             self.rows += 1;
-            self.text_bytes += row.len();
         }
-        while self.rows > self.limit || self.text_bytes > self.most_bytes {
-            self.evict();
+        while self.rows > self.limit || self.held > self.most_bytes {
+            if !self.evict() {
+                break;
+            }
         }
     }
 
-    fn evict(&mut self) {
+    /// Evicts the oldest row, and its block if it was the block's last. Returns whether there
+    /// was a row.
+    fn evict(&mut self) -> bool {
         let Some(front) = self.blocks.front() else {
-            return;
+            return false;
         };
-        let end = |n: Option<usize>| n.and_then(|n| front.rows.get(n)).map_or(0, |r| r.end());
-        let length = end(Some(self.evicted)) - end(self.evicted.checked_sub(1));
-        self.text_bytes -= length.min(self.text_bytes);
         self.evicted += 1;
         self.rows -= 1;
         if self.evicted >= front.rows.len() {
-            self.blocks.pop_front();
+            if let Some(block) = self.blocks.pop_front() {
+                self.held -= block.held().min(self.held);
+            }
             self.evicted = 0;
         }
+        true
     }
 
     /// Every row held, oldest first, as stored.
@@ -153,7 +162,7 @@ impl History {
         self.blocks.clear();
         self.evicted = 0;
         self.rows = 0;
-        self.text_bytes = 0;
+        self.held = 0;
     }
 
     /// Writes every row, oldest first.
@@ -229,7 +238,7 @@ mod tests {
         history.push(&row, LINE_END);
         assert_eq!((history.blocks.len(), history.evicted), (2, 0));
         assert_eq!(history.rows(), 3);
-        assert!(history.bytes() <= 2 * (BLOCK_BYTES + 1024));
+        assert!(history.bytes() <= 2 * (BLOCK_BYTES + BLOCK_ROWS * size_of::<RowEnd>()));
     }
 
     #[test]
@@ -244,13 +253,19 @@ mod tests {
     }
 
     #[test]
-    fn past_its_bytes_the_oldest_rows_go_first() {
-        let mut history = History::new(10, 5);
-        for row in ["ab", "cd", "ef"] {
+    fn past_its_bytes_the_oldest_blocks_go_first() {
+        // Rows too long to share a block, and room for two blocks.
+        let block = BLOCK_BYTES + BLOCK_ROWS * size_of::<RowEnd>();
+        let mut history = History::new(10, 2 * block);
+        let rows: Vec<String> = ["a", "b", "c"]
+            .map(|c| c.repeat(BLOCK_BYTES / 2 + 1))
+            .into();
+        for row in &rows {
             history.push(row, LINE_END);
         }
-        assert_eq!(written(&history), "cd\r\nef\r\n");
         assert_eq!(history.rows(), 2);
+        assert_eq!(written(&history), format!("{}\r\n{}\r\n", rows[1], rows[2]));
+        assert!(history.bytes() <= 2 * block);
     }
 
     #[test]

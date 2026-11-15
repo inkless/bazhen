@@ -674,7 +674,15 @@ const NOT_DECODERS: Record<string, string> = {
     "vte's callback with what it parsed; reached only through Engine::advance, which is fuzzed",
   "crates/bazhen-holder-engine/src/budget.rs::Budget::esc_dispatch":
     "vte's callback with what it parsed; reached only through Engine::advance, which is fuzzed",
+  "crates/bazhen-holder-engine/src/lib.rs::Engine::advance_passed":
+    "reached only through Engine::advance, which is fuzzed",
+  "crates/bazhen-holder-engine/src/osc.rs::OscCap::split":
+    "reached only through Engine::advance, which is fuzzed",
+  "crates/bazhen-holder-engine/src/capped.rs::Capped::clipboard_store":
+    "vte's callback with what it parsed; reached only through Engine::advance, which is fuzzed",
   "crates/bazhen-holder-engine/src/differential.rs::FullHistory::advance":
+    "test code: the differential test's reference terminal, compiled only under cfg(test)",
+  "crates/bazhen-holder-engine/src/differential.rs::FullHistory::feed":
     "test code: the differential test's reference terminal, compiled only under cfg(test)",
 };
 

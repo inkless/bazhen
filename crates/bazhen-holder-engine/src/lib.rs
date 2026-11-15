@@ -8,8 +8,10 @@
 //! however long a line a program prints.
 
 mod budget;
+mod capped;
 mod encode;
 mod history;
+mod osc;
 mod seam;
 
 #[cfg(test)]
@@ -28,8 +30,10 @@ use alacritty_terminal::vte::ansi::Processor;
 use alacritty_terminal::vte::{Parser, Perform as _};
 
 use crate::budget::{Budget, Stop};
+use crate::capped::Capped;
 use crate::encode::{Ending, Lines, encode_row};
 use crate::history::History;
+use crate::osc::OscCap;
 use crate::seam::Utf8Seam;
 
 /// A terminal's size in cells. The engine works at no fewer than 2 columns and 1 row, and no more
@@ -63,7 +67,7 @@ impl Size {
 const MOST_CELLS_A_SIDE: u16 = 1000;
 
 /// How many rows of history an engine keeps, as tmux's `history-limit` counts them: wrapped rows
-/// each count, so one long line can't take more than its share.
+/// each count, so one long line can't take more than its share, and 0 keeps none.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HistoryRows(pub usize);
 
@@ -118,12 +122,14 @@ pub struct Engine {
     parser: Processor,
     lookahead: Parser,
     budget: Budget,
+    osc: OscCap,
     utf8: Utf8Seam,
     history: History,
     replies: Sink,
     size: Size,
     /// alacritty's scrollback limit for the primary grid.
     scrollback: usize,
+    history_rows: HistoryRows,
     /// The row a drain leaves in alacritty's scrollback, encoded: alacritty keeps the primary grid
     /// private while the alternate screen is up.
     kept: Option<(String, Ending)>,
@@ -156,8 +162,10 @@ impl Engine {
             parser: Processor::new(),
             lookahead: Parser::new(),
             budget,
+            osc: OscCap::default(),
             utf8: Utf8Seam::default(),
-            history: History::new(history.0, MOST_HISTORY_BYTES),
+            history: History::new(history.0.saturating_sub(KEPT_ROWS), MOST_HISTORY_BYTES),
+            history_rows: history,
             replies,
             size,
             scrollback,
@@ -171,10 +179,22 @@ impl Engine {
     pub fn advance(&mut self, bytes: &[u8]) {
         let mut rest = bytes;
         while !rest.is_empty() {
+            let (keep, drop) = self.osc.split(rest);
+            let (passed, after) = rest.split_at_checked(keep).unwrap_or((rest, &[]));
+            self.advance_passed(passed);
+            rest = after.get(drop..).unwrap_or_default();
+        }
+    }
+
+    fn advance_passed(&mut self, bytes: &[u8]) {
+        let mut rest = bytes;
+        while !rest.is_empty() {
             let (finish, after) = self.utf8.finish(rest);
             if !finish.is_empty() {
                 self.lookahead.advance(&mut self.budget, finish);
-                self.parser.advance(&mut self.term, finish);
+                self.parser.advance(&mut Capped(&mut self.term), finish);
+                // The char may wrap the line, and scroll a row.
+                self.drain();
                 rest = after;
                 continue;
             }
@@ -206,14 +226,17 @@ impl Engine {
                 self.term.grid_mut().update_history(room);
             }
             let stop = self.budget.stop();
-            let switch = (stop == Some(Stop::AltScreen) && !self.alternate())
-                .then(|| stretch.iter().rposition(|&byte| byte == 0x1b))
-                .flatten();
-            if let Some((before, switch)) = switch.and_then(|at| stretch.split_at_checked(at)) {
-                // The switch ends the stretch and starts at its last ESC: the rows the primary
-                // screen scrolled before it are drained while alacritty still shows them.
+            let switch = (stop == Some(Stop::AltScreen) && !self.alternate()).then(|| {
+                // The switch ends the stretch and starts at its last ESC, or in an earlier read.
+                let at = stretch.iter().rposition(|&byte| byte == 0x1b).unwrap_or(0);
+                stretch.split_at(at)
+            });
+            if let Some((before, switch)) = switch {
+                // The rows the primary screen scrolled before the switch are drained while
+                // alacritty still shows them, and the one it keeps is copied.
                 self.parse(before);
                 self.drain();
+                self.keep_newest();
                 self.parse(switch);
             } else {
                 self.parse(stretch);
@@ -221,6 +244,8 @@ impl Engine {
             self.utf8.note(stretch);
             match stop {
                 Some(Stop::Reset) => self.clear_history(),
+                // alacritty keeps 4,096 titles; the engine undoes a push past its own limit.
+                Some(Stop::TitlePush) => self.parse(b"\x1b[23t"),
                 Some(Stop::ClearHistory) if !self.alternate() => self.clear_history(),
                 _ => {}
             }
@@ -230,11 +255,11 @@ impl Engine {
     }
 
     fn parse(&mut self, bytes: &[u8]) {
-        self.parser.advance(&mut self.term, bytes);
+        self.parser.advance(&mut Capped(&mut self.term), bytes);
         if self.parser.sync_bytes_count() > 0 {
             // A synchronized update only holds back a frame, and a headless engine draws none:
             // buffering it would leave queries inside it unanswered.
-            self.parser.stop_sync(&mut self.term);
+            self.parser.stop_sync(&mut Capped(&mut self.term));
         }
     }
 
@@ -253,6 +278,10 @@ impl Engine {
     }
 
     fn write_lines(&self, lines: &mut Lines<'_>) {
+        // With no history kept, the row a drain leaves in alacritty isn't history either.
+        if self.history_rows.0 == 0 {
+            return;
+        }
         self.history.write(lines);
         if !self.alternate() {
             write_scrollback(self.term.grid(), lines);
@@ -274,7 +303,7 @@ impl Engine {
         Stats {
             engine_bytes: grids * self.size.cols() * size_of::<Cell>(),
             history_bytes: self.history.bytes(),
-            history_rows: self.history.rows() + scrolled,
+            history_rows: (self.history.rows() + scrolled).min(self.history_rows.0),
             overflows: self.overflows,
         }
     }
@@ -305,15 +334,18 @@ impl Engine {
         ) {
             self.overflows += 1;
         }
+    }
+
+    /// Copies the row a drain leaves in alacritty's scrollback, for the alternate screen to
+    /// serve. Only then: the row changes without scrolling, as when the wide char under it is
+    /// overwritten and alacritty unmarks the spacer it ends in.
+    fn keep_newest(&mut self) {
         let grid = self.term.grid();
-        // The kept row changes only when a row scrolled after it, or history was cleared.
-        if grid.history_size() != KEPT_ROWS || self.kept.is_none() {
-            self.kept = (grid.history_size() > 0).then(|| {
-                let mut text = String::new();
-                let ending = encode_row(&grid[Line(-1)], &mut text);
-                (text, ending)
-            });
-        }
+        self.kept = (grid.history_size() > 0).then(|| {
+            let mut text = String::new();
+            let ending = encode_row(&grid[Line(-1)], &mut text);
+            (text, ending)
+        });
     }
 }
 
@@ -401,6 +433,8 @@ fn write_scrollback(grid: &Grid<Cell>, lines: &mut Lines<'_>) {
 
 #[cfg(test)]
 mod tests {
+    use alacritty_terminal::index::Column;
+
     use super::*;
 
     const SIZE: Size = Size { cols: 20, rows: 5 };
@@ -409,6 +443,17 @@ mod tests {
         let mut out = String::new();
         engine.write_history(&mut out);
         out
+    }
+
+    fn screen(engine: &Engine) -> Vec<String> {
+        let grid = engine.term.grid();
+        (0..grid.screen_lines())
+            .map(|n| {
+                let mut text = String::new();
+                encode_row(&grid[scrollback_line(0, n)], &mut text);
+                text
+            })
+            .collect()
     }
 
     fn lines(range: std::ops::Range<usize>) -> String {
@@ -427,13 +472,13 @@ mod tests {
         let mut engine = Engine::new(SIZE, HistoryRows(1000));
         engine.advance(lines(0..100).as_bytes());
         assert_eq!(history(&mut engine), lines(0..96));
-        assert_eq!(engine.history.rows(), 95);
+        assert_eq!(engine.history.rows(), 96 - KEPT_ROWS);
         assert_eq!(engine.term.grid().history_size(), KEPT_ROWS);
     }
 
     #[test]
     fn a_flood_in_one_read_overflows_nothing() {
-        let mut engine = Engine::new(SIZE, HistoryRows(100_000));
+        let mut engine = Engine::new(SIZE, HistoryRows(20_000));
         let flood = "\n".repeat(10_000) + &"\x1b[99S".repeat(1000) + &"x".repeat(50_000);
         engine.advance(flood.as_bytes());
         let stats = engine.stats();
@@ -450,8 +495,8 @@ mod tests {
     fn the_history_limit_counts_rows_and_drops_the_oldest() {
         let mut engine = Engine::new(SIZE, HistoryRows(30));
         engine.advance(lines(0..200).as_bytes());
-        assert_eq!(engine.history.rows(), 30);
-        assert_eq!(history(&mut engine), lines(196 - 30 - KEPT_ROWS..196));
+        assert_eq!(engine.stats().history_rows, 30);
+        assert_eq!(history(&mut engine), lines(196 - 30..196));
     }
 
     #[test]
@@ -474,7 +519,7 @@ mod tests {
 
     #[test]
     fn a_char_repeated_thousands_of_times_overflows_nothing() {
-        let mut engine = Engine::new(Size { cols: 2, rows: 1 }, HistoryRows(100_000));
+        let mut engine = Engine::new(Size { cols: 2, rows: 1 }, HistoryRows(40_000));
         engine.advance(b"x\x1b[65535b");
         let stats = engine.stats();
         assert_eq!(stats.overflows, 0);
@@ -495,5 +540,86 @@ mod tests {
         let mut engine = Engine::new(SIZE, HistoryRows(10_000));
         engine.advance(lines(0..1000).as_bytes());
         assert_eq!(history(&mut engine), lines(0..996));
+    }
+
+    #[test]
+    fn a_history_limit_of_zero_keeps_nothing() {
+        let mut engine = Engine::new(SIZE, HistoryRows(0));
+        engine.advance(lines(0..50).as_bytes());
+        assert_eq!(history(&mut engine), "");
+        assert_eq!(engine.stats().history_rows, 0);
+    }
+
+    #[test]
+    fn under_the_alternate_screen_history_holds_what_scrolled_in_every_read_before() {
+        let mut engine = Engine::new(SIZE, HistoryRows(1000));
+        engine.advance(lines(0..50).as_bytes());
+        engine.advance(lines(50..60).as_bytes());
+        engine.advance(b"\x1b[?1049hvim");
+        assert_eq!(history(&mut engine), lines(0..56));
+    }
+
+    #[test]
+    fn under_the_alternate_screen_history_holds_the_newest_row_as_it_was_at_the_switch() {
+        let mut engine = Engine::new(Size { cols: 4, rows: 2 }, HistoryRows(100));
+        // 文 doesn't fit after abc: the row ends in a spacer, in blue, and scrolls away.
+        engine.advance("\x1b[44mabc文\r\n".as_bytes());
+        // Overwriting 文 unmarks the spacer, in a row already scrolled.
+        engine.advance(b"\x1b[Hx");
+        let before = history(&mut engine);
+        engine.advance(b"\x1b[?1049h");
+        assert_eq!(history(&mut engine), before);
+    }
+
+    #[test]
+    fn a_char_split_across_reads_that_scrolls_a_row_still_keeps_history_to_its_limit() {
+        let mut engine = Engine::new(Size { cols: 2, rows: 2 }, HistoryRows(1));
+        engine.advance(b"xyabcd\xe4");
+        // 中 wraps the line, and ab scrolls after xy.
+        engine.advance(b"\xb8\xad");
+        assert_eq!(history(&mut engine), "ab");
+    }
+
+    #[test]
+    fn a_cell_holds_no_more_than_tmux_s_21_bytes_of_marks() {
+        let mut engine = Engine::new(SIZE, HistoryRows(1000));
+        // Two marks fit; a flood of repeats adds none past the cap.
+        engine.advance("e\u{301}\u{302}".as_bytes());
+        let cell = engine.term.grid()[Line(0)][Column(0)].clone();
+        assert_eq!(cell.zerowidth(), Some(&['\u{301}', '\u{302}'][..]));
+        engine.advance(&"\x1b[65535b".repeat(64).into_bytes());
+        let cell = &engine.term.grid()[Line(0)][Column(0)];
+        let marks: usize = cell
+            .zerowidth()
+            .unwrap_or_default()
+            .iter()
+            .map(|c| c.len_utf8())
+            .sum();
+        assert!(
+            cell.c.len_utf8() + marks <= capped::MOST_CELL_BYTES,
+            "{marks}"
+        );
+        assert_eq!(engine.term.grid().cursor.point.column, Column(1));
+    }
+
+    #[test]
+    fn a_link_past_the_osc_cap_arrives_cut_short() {
+        let mut engine = Engine::new(SIZE, HistoryRows(1000));
+        let uri = "x".repeat(64 * 1024);
+        engine.advance(format!("\x1b]8;;{uri}\x07a\x1b]8;;\x07").as_bytes());
+        let link = engine.term.grid()[Line(0)][Column(0)].hyperlink();
+        // The payload starts `8;;`.
+        assert_eq!(link.map(|l| l.uri().len()), Some(osc::MOST_OSC_BYTES - 3));
+    }
+
+    #[test]
+    fn an_osc_string_with_no_end_still_lets_the_output_after_it_through() {
+        let mut engine = Engine::new(SIZE, HistoryRows(1000));
+        engine.advance(b"\x1b]0;");
+        for _ in 0..64 {
+            engine.advance("y\n".repeat(32 * 1024).as_bytes());
+        }
+        engine.advance(b"\x07done");
+        assert_eq!(screen(&engine)[0], "done");
     }
 }

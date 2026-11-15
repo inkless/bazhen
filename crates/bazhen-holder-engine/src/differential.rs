@@ -15,6 +15,8 @@ use proptest::prelude::*;
 use super::*;
 
 const ALL_OF_IT: usize = 1_000_000;
+/// More rows than a case makes, so the engine drops none.
+const ENGINE_ROWS: usize = 20_000;
 
 #[derive(Debug, Clone)]
 enum Action {
@@ -124,12 +126,16 @@ fn output() -> impl Strategy<Value = Action> {
 }
 
 /// The reference: alacritty alone, with room for all the history a case makes, and the engine's
-/// workarounds for alacritty's and vte's bugs, which aren't what the test compares.
+/// workarounds for alacritty's and vte's bugs and its cap on marks a cell holds, which aren't
+/// what the test compares.
 struct FullHistory {
     term: Term<Sink>,
     parser: Processor,
     utf8: Utf8Seam,
     replies: Sink,
+    /// Its history as it was when the alternate screen came up, which alacritty then keeps
+    /// private.
+    under_alt: String,
 }
 
 impl FullHistory {
@@ -140,17 +146,36 @@ impl FullHistory {
             parser: Processor::new(),
             utf8: Utf8Seam::default(),
             replies,
+            under_alt: String::new(),
         }
     }
 
+    /// Feeds `bytes`, noting history just before each `h` that may bring up the alternate
+    /// screen: no other byte does.
     fn advance(&mut self, bytes: &[u8]) {
+        let mut rest = bytes;
+        while let Some(at) = rest.iter().position(|&byte| byte == b'h') {
+            let (before, after) = rest.split_at(at);
+            self.feed(before);
+            if !self.alternate() {
+                self.under_alt = self.history();
+            }
+            let (switch, after) = after.split_at(1);
+            self.feed(switch);
+            rest = after;
+        }
+        self.feed(rest);
+    }
+
+    /// Feeds `bytes`, working around vte's split chars as the engine does.
+    fn feed(&mut self, bytes: &[u8]) {
         let (finish, rest) = self.utf8.finish(bytes);
-        self.parser.advance(&mut self.term, finish);
-        self.parser.advance(&mut self.term, rest);
+        self.parser.advance(&mut Capped(&mut self.term), finish);
+        self.parser.advance(&mut Capped(&mut self.term), rest);
         if !rest.is_empty() {
             self.utf8.note(rest);
         }
-        self.parser.stop_sync(&mut self.term);
+        self.parser.stop_sync(&mut Capped(&mut self.term));
     }
 
     fn history(&self) -> String {
@@ -256,13 +281,17 @@ fn difference(engine: &Engine, full: &FullHistory) -> Option<String> {
             cursor.point, other.point
         ));
     }
-    if full.alternate() {
-        return None;
-    }
     let mut history = String::new();
     engine.write_history(&mut history);
     let cols = engine.size.cols;
-    let (ours, theirs) = (drawn(&history, cols), drawn(&full.history(), cols));
+    // Under the alternate screen alacritty keeps the primary's history private, and the engine
+    // serves what it was when the screen came up.
+    let theirs = if full.alternate() {
+        &full.under_alt
+    } else {
+        &full.history()
+    };
+    let (ours, theirs) = (drawn(&history, cols), drawn(theirs, cols));
     (ours != theirs).then(|| {
         format!(
             "history\nengine:\n{}reference:\n{}",
@@ -289,7 +318,7 @@ fn feed(engine: &mut Engine, full: &mut FullHistory, stream: &str, cuts: &[usize
 /// Plays `actions` to both, checking they hold the same after each that isn't output, and
 /// returns them.
 fn run(size: Size, actions: &[Action], cuts: &[usize]) -> (Engine, FullHistory) {
-    let mut engine = Engine::new(size, HistoryRows(ALL_OF_IT));
+    let mut engine = Engine::new(size, HistoryRows(ENGINE_ROWS));
     let mut full = FullHistory::new(size);
     let mut pending = String::new();
     for action in actions {
@@ -369,11 +398,14 @@ proptest! {
                 })
                 .collect()
         };
+        // What the engine keeps: the store and the row a drain leaves, unless it keeps none.
         let mut ours = engine.history.rows_for_test();
-        ours.extend(encoded(engine.term.grid()));
+        if limit > 0 {
+            ours.extend(encoded(engine.term.grid()));
+        }
         let theirs = encoded(full.term.grid());
-        prop_assert!(engine.history.rows() <= limit);
-        prop_assert_eq!(ours.len(), theirs.len().min(limit + engine.term.grid().history_size()));
+        prop_assert_eq!(ours.len(), theirs.len().min(limit));
+        prop_assert_eq!(engine.stats().history_rows, ours.len());
         prop_assert_eq!(&ours[..], &theirs[theirs.len() - ours.len()..]);
     }
 }

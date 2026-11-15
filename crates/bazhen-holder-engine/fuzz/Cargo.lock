@@ -64,6 +64,7 @@ name = "bazhen-holder-engine"
 version = "0.1.0"
 dependencies = [
  "alacritty_terminal",
+ "unicode-width",
 ]
 
 [[package]]
