@@ -1,19 +1,18 @@
-/** An address range, as `web.lan_allow` lists it: IPv4 or IPv6, held as a number and a length. */
+/**
+ * An address range, as `web.lan_allow` lists it: IPv4 or IPv6, held as a number and a length. A
+ * link-local range is on one interface, its `zone`: the same addresses exist on every link.
+ */
 export interface Cidr {
   readonly v6: boolean;
   readonly base: bigint;
   readonly bits: number;
+  readonly zone?: string;
 }
 
-/** An address as a number, or undefined if it isn't one; a `%zone` is dropped. */
-function parseAddress(raw: string): { v6: boolean; value: bigint } | undefined {
-  const text = raw.split("%")[0] ?? "";
-  if (!text.includes(":")) {
-    const value = ipv4(text);
-    return value === undefined ? undefined : { v6: false, value };
-  }
-  const value = ipv6(text);
-  return value === undefined ? undefined : { v6: true, value };
+interface Address {
+  readonly v6: boolean;
+  readonly value: bigint;
+  readonly zone?: string;
 }
 
 function ipv4(text: string): bigint | undefined {
@@ -27,13 +26,16 @@ function ipv4(text: string): bigint | undefined {
   return value;
 }
 
-/** The 16-bit groups on one side of an IPv6 address's `::`; a trailing IPv4 part counts as two. */
-function groups(half: string | undefined): bigint[] | undefined {
-  if (half === undefined || half === "") return [];
+/**
+ * The 16-bit groups of one side of an IPv6 address's `::`. A trailing IPv4 part counts as two,
+ * and only where it ends the whole address.
+ */
+function groups(half: string, endsAddress: boolean): bigint[] | undefined {
+  if (half === "") return [];
   const out: bigint[] = [];
   const parts = half.split(":");
   for (const [i, part] of parts.entries()) {
-    if (i === parts.length - 1 && part.includes(".")) {
+    if (endsAddress && i === parts.length - 1 && part.includes(".")) {
       const v4 = ipv4(part);
       if (v4 === undefined) return undefined;
       out.push(v4 >> 16n, v4 & 0xffffn);
@@ -46,13 +48,24 @@ function groups(half: string | undefined): bigint[] | undefined {
 function ipv6(text: string): bigint | undefined {
   const halves = text.split("::");
   if (halves.length > 2) return undefined;
-  const head = groups(halves[0]);
-  const tail = groups(halves[1]);
+  const [first = "", second] = halves;
+  const head = groups(first, second === undefined);
+  const tail = second === undefined ? [] : groups(second, true);
   if (head === undefined || tail === undefined) return undefined;
   const missing = 8 - head.length - tail.length;
-  if (halves.length === 1 ? missing !== 0 : missing < 1) return undefined;
-  const all = [...head, ...Array<bigint>(halves.length === 1 ? 0 : missing).fill(0n), ...tail];
+  if (second === undefined ? missing !== 0 : missing < 1) return undefined;
+  const all = [...head, ...Array<bigint>(second === undefined ? 0 : missing).fill(0n), ...tail];
   return all.reduce((value, group) => (value << 16n) | group, 0n);
+}
+
+/** An address as a socket reports it, with its `%zone` if it has one; undefined if it isn't one. */
+function parseAddress(raw: string): Address | undefined {
+  const [text = "", zone, ...rest] = raw.split("%");
+  if (rest.length > 0 || zone === "") return undefined;
+  const v6 = text.includes(":");
+  const value = v6 ? ipv6(text) : ipv4(text);
+  if (value === undefined || (zone !== undefined && !v6)) return undefined;
+  return zone === undefined ? { v6, value } : { v6, value, zone };
 }
 
 const mask = (v6: boolean, bits: number) => {
@@ -60,46 +73,85 @@ const mask = (v6: boolean, bits: number) => {
   return ((1n << width) - 1n) ^ ((1n << (width - BigInt(bits))) - 1n);
 };
 
-/** A range like `192.168.1.0/24` or `fe80::/10`, or undefined if it isn't one. */
-export function parseCidr(text: string): Cidr | undefined {
-  const [address, length, ...rest] = text.split("/");
-  if (address === undefined || length === undefined || rest.length > 0) return undefined;
-  const parsed = parseAddress(address);
-  if (parsed === undefined || !/^(0|[1-9][0-9]{0,2})$/.test(length)) return undefined;
-  const bits = Number(length);
-  if (bits > (parsed.v6 ? 128 : 32)) return undefined;
-  return { v6: parsed.v6, base: parsed.value & mask(parsed.v6, bits), bits };
+const LINK_LOCAL = { base: 0xfe80n << 112n, bits: 10 };
+const isLinkLocal = (a: { v6: boolean; value: bigint }) =>
+  a.v6 && (a.value & mask(true, LINK_LOCAL.bits)) === LINK_LOCAL.base;
+const MAPPED_V4 = 0xffffn << 32n;
+const isMapped = (a: { v6: boolean; value: bigint }) => a.v6 && a.value >> 32n === 0xffffn;
+
+/**
+ * A range like `192.168.1.0/24`, `fdeb:9f4b:2183:4c5b::/64` or `fe80::/10%eno1`, or why it
+ * can't be one `web.lan_allow` admits.
+ */
+export function parseRange(text: string): { range: Cidr } | { problem: string } {
+  const match = /^([^/%]+)\/(0|[1-9][0-9]{0,2})(?:%([A-Za-z0-9_.-]+))?$/.exec(text);
+  const address = match?.[1] === undefined ? undefined : parseAddress(match[1]);
+  if (match === null || address === undefined) {
+    return { problem: "is not a range, such as 192.168.1.0/24" };
+  }
+  const bits = Number(match[2]);
+  const zone = match[3];
+  if (bits > (address.v6 ? 128 : 32)) return { problem: "is longer than an address" };
+  if (bits === 0) return { problem: "admits every address; list your own network's range" };
+  const base = address.value & mask(address.v6, bits);
+  const range = { v6: address.v6, base, bits };
+  const network = { v6: address.v6, value: base };
+  if (isMapped(network) && bits >= 96) {
+    return {
+      problem: "is IPv4 written as IPv6, which no peer is compared as; list the IPv4 range",
+    };
+  }
+  if (address.v6 && bits < LINK_LOCAL.bits && (LINK_LOCAL.base & mask(true, bits)) === base) {
+    return { problem: "covers link-local addresses on every interface" };
+  }
+  if (isLinkLocal(network)) {
+    if (zone === undefined) {
+      return { problem: "is link-local, so it needs its interface, such as fe80::/10%eno1" };
+    }
+    return { range: { ...range, zone } };
+  }
+  if (zone !== undefined) return { problem: "names an interface, which only link-local takes" };
+  return { range };
 }
 
-const MAPPED_V4 = 0xffffn << 32n;
+export function parseCidr(text: string): Cidr | undefined {
+  const parsed = parseRange(text);
+  return "range" in parsed ? parsed.range : undefined;
+}
 
 /**
  * A peer's address as compared: an IPv4 address that a dual-stack socket reports as
  * `::ffff:a.b.c.d` is the IPv4 address it is.
  */
-function normalise(raw: string): { v6: boolean; value: bigint } | undefined {
+function normalise(raw: string): Address | undefined {
   const parsed = parseAddress(raw);
-  if (parsed?.v6 === true && parsed.value >> 32n === 0xffffn) {
+  if (parsed !== undefined && isMapped(parsed))
     return { v6: false, value: parsed.value ^ MAPPED_V4 };
-  }
   return parsed;
 }
 
-/** Whether a peer's address is inside any of the ranges. */
+/** Whether a peer's address is inside any of the ranges, on the same interface for link-local. */
 export function admitted(ranges: readonly Cidr[], peer: string | undefined): boolean {
   const address = peer === undefined ? undefined : normalise(peer);
   if (address === undefined) return false;
-  return ranges.some((r) => r.v6 === address.v6 && (address.value & mask(r.v6, r.bits)) === r.base);
+  return ranges.some(
+    (r) =>
+      r.v6 === address.v6 &&
+      (address.value & mask(r.v6, r.bits)) === r.base &&
+      r.zone === (isLinkLocal(address) ? address.zone : undefined),
+  );
 }
 
 /**
- * What pairing attempts from a peer are counted under: its IPv4 address, or its IPv6 /64, since
- * one IPv6 host can take any address in its network.
+ * What pairing attempts from a peer are counted under: its IPv4 address; its IPv6 /64, since one
+ * host can take any address in its network; or, on link-local, where every device shares fe80::/64,
+ * its whole address on its interface.
  */
 export function pairingKey(peer: string | undefined): string {
   const address = peer === undefined ? undefined : normalise(peer);
   if (address === undefined) return "unknown";
   if (!address.v6) return format(address.value, false);
+  if (isLinkLocal(address)) return `${format(address.value, true)}%${address.zone ?? ""}`;
   return `${format(address.value & mask(true, 64), true)}/64`;
 }
 
@@ -129,7 +181,7 @@ export interface InterfaceAddress {
 
 /**
  * The ranges this host's interfaces are on, each with its interface, for suggesting a
- * `web.lan_allow`. Link-local IPv6 is one range for every interface.
+ * `web.lan_allow`: each network once, and link-local once per interface, with its zone.
  */
 export function localSubnets(
   interfaces: Readonly<Record<string, readonly InterfaceAddress[] | undefined>>,
@@ -139,13 +191,16 @@ export function localSubnets(
   for (const [name, addresses] of Object.entries(interfaces)) {
     for (const a of addresses ?? []) {
       if (a.internal || a.cidr === null) continue;
-      const range = parseCidr(a.cidr);
-      if (range === undefined) continue;
-      const linkLocal = range.v6 && range.base >> 118n === 0x3fan;
-      const cidr = linkLocal ? "fe80::/10" : `${format(range.base, range.v6)}/${range.bits}`;
+      const [text = "", length = ""] = a.cidr.split("/");
+      const address = parseAddress(text);
+      const bits = Number(length);
+      if (address === undefined || !Number.isInteger(bits)) continue;
+      const cidr = isLinkLocal(address)
+        ? `fe80::/10%${name}`
+        : `${format(address.value & mask(address.v6, bits), address.v6)}/${bits}`;
       if (seen.has(cidr)) continue;
       seen.add(cidr);
-      out.push({ interface: linkLocal ? "link-local" : name, cidr });
+      out.push({ interface: name, cidr });
     }
   }
   return out;

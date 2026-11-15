@@ -1,12 +1,16 @@
 import {
   closeSync,
   constants,
+  fstatSync,
   fsyncSync,
   lstatSync,
   openSync,
   readFileSync,
+  readdirSync,
   renameSync,
+  rmSync,
   writeSync,
+  type Stats,
 } from "node:fs";
 import { X509Certificate, createPrivateKey, generateKeyPairSync, randomBytes } from "node:crypto";
 import { join } from "node:path";
@@ -17,26 +21,25 @@ import { fingerprint, selfSigned, toPem } from "./x509.ts";
 
 export const KEY_FILE = "lan.key";
 export const CERT_FILE = "lan.crt";
+/** What an interrupted write leaves: `.lan.key.<12 hex>` or `.lan.crt.<12 hex>`. */
+const TEMPORARY = /^\.lan\.(key|crt)\.[0-9a-f]{12}$/;
 
 /**
- * The LAN certificate can't be used as it is. It is never replaced on its own: the iPad trusts
- * this fingerprint, and a new one would change it behind the owner's back.
+ * The LAN certificate can't be used as it is. A bad certificate is never replaced on its own: the
+ * browser trusts this fingerprint, and a new one would change it behind the owner's back.
  */
 export class LanCertificateInvalid extends Error {
   override readonly name = "LanCertificateInvalid";
   readonly path: string;
 
-  constructor(path: string, reason: string, dir: string, options?: ErrorOptions) {
-    super(
-      `the LAN certificate can't be used: ${path} ${reason}. ` +
-        `To make a new one, delete ${dir} and restart; then trust its new fingerprint on each device`,
-      options,
-    );
+  constructor(path: string, problem: string, recovery: string, options?: ErrorOptions) {
+    super(`the LAN certificate can't be used: ${path} ${problem}. ${recovery}`, options);
     this.path = path;
   }
 }
 
 export interface LanCertificate {
+  /** The private key, PEM. Never log this object whole. */
   readonly key: string;
   readonly cert: string;
   /** The one name it serves, from the certificate itself. */
@@ -46,83 +49,142 @@ export interface LanCertificate {
   readonly path: string;
 }
 
+const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
+/** A failure that isn't the certificate's: the directory or a file couldn't be made or read. */
+const failed = (path: string, doing: string, cause: unknown) =>
+  new LanCertificateInvalid(path, `${doing}: ${errorText(cause)}`, "Fix that and restart", {
+    cause,
+  });
+const codeOf = (err: unknown) =>
+  err instanceof Error && "code" in err && typeof err.code === "string" ? err.code : undefined;
+
 /**
  * The LAN listener's certificate in `dir`, made for `name` if there is none. A key without its
- * certificate is an interrupted first start, since the certificate is written last.
+ * certificate is an interrupted first start, since the certificate is written last. `suffix`
+ * names temporary files; it is only for tests.
  */
 export function lanCertificate(
   dir: string,
-  opts: { readonly name: string; readonly uid: number; readonly now?: Date },
+  opts: {
+    readonly name: string;
+    readonly uid: number;
+    readonly now?: Date;
+    readonly suffix?: () => string;
+  },
 ): LanCertificate {
   const now = opts.now ?? new Date();
+  const suffix = opts.suffix ?? (() => randomBytes(6).toString("hex"));
   const keyPath = join(dir, KEY_FILE);
   const certPath = join(dir, CERT_FILE);
-  const invalid = (path: string, reason: string, cause?: unknown) =>
-    new LanCertificateInvalid(path, reason, dir, cause === undefined ? undefined : { cause });
+  const remake = `To make a new one, delete ${dir} and restart; then trust its new fingerprint on each device`;
+  const unusable = (path: string, problem: string, cause?: unknown) =>
+    new LanCertificateInvalid(path, problem, remake, cause === undefined ? undefined : { cause });
+
   try {
     ensurePrivateDir(dir, opts.uid);
-    if (!present(certPath)) create(dir, opts.name, now);
+    for (const entry of readdirSync(dir)) {
+      if (TEMPORARY.test(entry)) rmSync(join(dir, entry), { force: true });
+    }
   } catch (err) {
-    throw invalid(dir, "could not be made private and written", err);
+    throw failed(dir, "couldn't be made private", err);
+  }
+  if (lstatSync(certPath, { throwIfNoEntry: false }) === undefined) {
+    try {
+      create(dir, opts.name, now, suffix);
+    } catch (err) {
+      throw failed(dir, "couldn't be written", err);
+    }
   }
 
-  const keyStat = lstatSync(keyPath, { throwIfNoEntry: false });
-  if (keyStat === undefined) throw invalid(keyPath, "is missing, though its certificate is there");
-  if (!keyStat.isFile()) throw invalid(keyPath, "is not a regular file");
-  if (keyStat.uid !== opts.uid) throw invalid(keyPath, `is owned by uid ${keyStat.uid}`);
-  if ((keyStat.mode & 0o077) !== 0) throw invalid(keyPath, "can be read by other users");
-  if (!lstatSync(certPath).isFile()) throw invalid(certPath, "is not a regular file");
+  /** A file read through one descriptor, so what was checked is what is read. */
+  const read = (path: string, check: (stat: Stats) => string | null): string => {
+    let fd: number;
+    try {
+      fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    } catch (err) {
+      if (codeOf(err) === "ELOOP") throw unusable(path, "is a symlink");
+      if (codeOf(err) === "ENOENT")
+        throw unusable(path, "is missing, though its certificate is there");
+      throw failed(path, "couldn't be read", err);
+    }
+    try {
+      const stat = fstatSync(fd);
+      if (!stat.isFile()) throw unusable(path, "is not a regular file");
+      const problem = check(stat);
+      if (problem !== null) throw unusable(path, problem);
+      return readFileSync(fd, "utf8");
+    } finally {
+      closeSync(fd);
+    }
+  };
+  const key = read(keyPath, (stat) => {
+    if (stat.uid !== opts.uid) return `is owned by uid ${stat.uid}`;
+    return (stat.mode & 0o077) === 0 ? null : "can be read by other users";
+  });
+  const pem = read(certPath, () => null);
 
-  const key = readFileSync(keyPath, "utf8");
-  const pem = readFileSync(certPath, "utf8");
   let cert: X509Certificate;
   try {
     cert = new X509Certificate(pem);
   } catch (err) {
-    throw invalid(certPath, "is not a certificate", err);
+    throw unusable(certPath, "is not a certificate", err);
   }
+  let matches: boolean;
   try {
-    if (!cert.checkPrivateKey(createPrivateKey(key))) throw invalid(keyPath, "doesn't match it");
+    matches = cert.checkPrivateKey(createPrivateKey(key));
   } catch (err) {
-    if (err instanceof LanCertificateInvalid) throw err;
-    throw invalid(keyPath, "is not a private key", err);
+    throw unusable(keyPath, "is not a private key", err);
   }
+  if (!matches) throw unusable(keyPath, `is not the key of the certificate ${certPath}`);
   const name = /^DNS:([^,]+)$/.exec(cert.subjectAltName ?? "")?.[1];
-  if (name === undefined) throw invalid(certPath, "doesn't name a single host");
+  if (name === undefined) throw unusable(certPath, "doesn't name a single host");
   const notAfter = new Date(cert.validTo);
-  if (notAfter <= now) throw invalid(certPath, `expired on ${notAfter.toISOString()}`);
+  if (notAfter <= now) throw unusable(certPath, `expired on ${notAfter.toISOString()}`);
   return { key, cert: pem, name, fingerprint: fingerprint(cert.raw), notAfter, path: certPath };
 }
 
-const present = (path: string) => lstatSync(path, { throwIfNoEntry: false }) !== undefined;
-
-function create(dir: string, name: string, now: Date): void {
+function create(dir: string, name: string, now: Date, suffix: () => string): void {
   const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
   const { der } = selfSigned({ name, privateKey, publicKey, now });
-  writeNew(dir, KEY_FILE, privateKey.export({ type: "pkcs8", format: "pem" }));
-  writeNew(dir, CERT_FILE, toPem(der));
+  writeNew(dir, KEY_FILE, privateKey.export({ type: "pkcs8", format: "pem" }), suffix());
+  writeNew(dir, CERT_FILE, toPem(der), suffix());
 }
 
 /**
- * Writes a file whole or not at all, 0600 from the moment it exists: a fresh temporary name that
- * a symlink can't stand in for, synced, renamed over the target, then the directory synced.
+ * Writes a file whole or not at all, 0600 from the moment it exists. The temporary name must not
+ * exist yet (`O_EXCL`, which also refuses a symlink there), and is removed if anything after its
+ * creation fails; then it is synced, renamed over the target, and the directory synced.
  */
-function writeNew(dir: string, file: string, data: string): void {
-  const temporary = join(dir, `.${file}.${randomBytes(6).toString("hex")}`);
+function writeNew(dir: string, file: string, data: string, suffix: string): void {
+  const temporary = join(dir, `.${file}.${suffix}`);
   const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
   const fd = openSync(temporary, flags, 0o600);
   try {
-    writeSync(fd, data);
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
+    try {
+      writeAll((buffer, offset) => writeSync(fd, buffer, offset), Buffer.from(data, "utf8"));
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    renameSync(temporary, join(dir, file));
+  } catch (err) {
+    rmSync(temporary, { force: true });
+    throw err;
   }
-  renameSync(temporary, join(dir, file));
   const dirFd = openSync(dir, constants.O_RDONLY);
   try {
     fsyncSync(dirFd);
   } finally {
     closeSync(dirFd);
+  }
+}
+
+/** Writes all of `buffer`, however few bytes each write takes; a write that takes none fails. */
+export function writeAll(write: (buffer: Buffer, offset: number) => number, buffer: Buffer): void {
+  for (let offset = 0; offset < buffer.length;) {
+    const written = write(buffer, offset);
+    if (written <= 0) throw new Error(`a write stopped after ${offset} of ${buffer.length} bytes`);
+    offset += written;
   }
 }
 

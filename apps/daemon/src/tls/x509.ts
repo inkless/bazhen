@@ -131,6 +131,6 @@ export const toPem = (der: Buffer) =>
     .replace(/.{64}/g, "$&\n")
     .trimEnd()}\n-----END CERTIFICATE-----\n`;
 
-/** The certificate's SHA-256 as Safari's certificate details show it. */
+/** The certificate's SHA-256 as Safari's certificate details show it: lowercase hex pairs. */
 export const fingerprint = (der: Buffer) =>
-  (createHash("sha256").update(der).digest("hex").toUpperCase().match(/../g) ?? []).join(" ");
+  (createHash("sha256").update(der).digest("hex").match(/../g) ?? []).join(" ");

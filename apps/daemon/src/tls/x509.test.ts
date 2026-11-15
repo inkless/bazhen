@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import { LIFETIME_DAYS, fingerprint, selfSigned, toPem } from "./x509.ts";
 
 const now = new Date("2026-11-14T12:00:00.000Z");
+/** The time that makes notAfter `at`: notBefore is an hour back, plus the lifetime. */
+const startFor = (at: string) =>
+  new Date(Date.parse(at) + 60 * 60 * 1000 - LIFETIME_DAYS * 86_400_000);
 const made = (name = "my-mac.local", at = now) => {
   const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
   const { der, notAfter } = selfSigned({ name, privateKey, publicKey, now: at });
@@ -45,13 +48,28 @@ describe("a self-signed LAN certificate", () => {
     expect(notAfter.getTime()).toBe(to);
   });
 
-  it("encodes a date from 2050 on as GeneralizedTime, which still parses", () => {
-    const { cert } = made("my-mac.local", new Date("2049-06-01T00:00:00.000Z"));
-    expect(new Date(cert.validTo).getUTCFullYear()).toBe(2051);
+  it("encodes notAfter as UTCTime through 2049 and GeneralizedTime from 2050", () => {
+    const lastUtc = made("my-mac.local", startFor("2049-12-31T23:59:59.000Z")).der;
+    const firstGeneralized = made("my-mac.local", startFor("2050-01-01T00:00:00.000Z")).der;
+    const utcTime = Buffer.concat([Buffer.from([0x17, 13]), Buffer.from("491231235959Z")]);
+    const generalized = Buffer.concat([Buffer.from([0x18, 15]), Buffer.from("20500101000000Z")]);
+    expect([lastUtc.includes(utcTime), firstGeneralized.includes(generalized)]).toEqual([
+      true,
+      true,
+    ]);
   });
 
   it("gets a different serial each time", () => {
     expect(made().cert.serialNumber).not.toBe(made().cert.serialNumber);
+  });
+
+  it("encodes a positive serial: a DER integer whose first byte has its top bit clear", () => {
+    const serialHeader = Buffer.from([0xa0, 0x03, 0x02, 0x01, 0x02, 0x02, 0x10]);
+    const firstBytes = Array.from({ length: 32 }, () => {
+      const { der } = made();
+      return der.readUInt8(der.indexOf(serialHeader) + serialHeader.length);
+    });
+    expect(firstBytes.every((b) => b < 0x80)).toBe(true);
   });
 
   it("round-trips through PEM", () => {
@@ -61,9 +79,9 @@ describe("a self-signed LAN certificate", () => {
 });
 
 describe("the fingerprint", () => {
-  it("is the certificate's SHA-256 as uppercase hex pairs separated by spaces", () => {
+  it("is the certificate's SHA-256 as lowercase hex pairs separated by spaces, as Safari shows it", () => {
     const { cert, der } = made();
-    expect(fingerprint(der)).toBe(cert.fingerprint256.replaceAll(":", " "));
-    expect(fingerprint(der)).toMatch(/^([0-9A-F]{2} ){31}[0-9A-F]{2}$/);
+    expect(fingerprint(der)).toBe(cert.fingerprint256.replaceAll(":", " ").toLowerCase());
+    expect(fingerprint(der)).toMatch(/^([0-9a-f]{2} ){31}[0-9a-f]{2}$/);
   });
 });
