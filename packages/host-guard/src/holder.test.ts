@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { holderSocket, holderSocketRefusal, rebindHolderWith, vouchHolderWith } from "./holder.ts";
+import {
+  holderBuildOf,
+  holderSocket,
+  holderSocketRefusal,
+  rebindHolderWith,
+  vouchHolderWith,
+} from "./holder.ts";
 import { killHolder, killHolderAt, rebindHolder, rebindHolderAt } from "./signal.ts";
 import type { PsReading } from "./tmux.ts";
 
@@ -114,5 +120,32 @@ describe("a holder's socket", () => {
 
   it("is refused under a root that isn't absolute and normalized", () => {
     expect(holderSocketRefusal("/run/bz/holders/t.sock", "/run/bz/", "t")).toMatch(/root/);
+  });
+});
+
+describe("the build a holder runs", () => {
+  const dir = "/home/u/.local/state/bazhen/holder";
+  const build = "0123456789abcdef";
+
+  it("is read from an argv[0] installed under the directory, with or without arguments", () => {
+    expect([
+      holderBuildOf(`${dir}/${build}/bazhen-holder`, dir),
+      holderBuildOf(`${dir}/${build}/bazhen-holder --flag`, dir),
+    ]).toEqual([build, build]);
+  });
+
+  it("is null for any other process, however close its path", () => {
+    const others = [
+      `/bin/sh -c ulimit -t 5 && exec "$0" "$@" ${dir}/${build}/bazhen-holder`,
+      `vim ${dir}/${build}/bazhen-holder`,
+      `${dir}x/${build}/bazhen-holder`,
+      `${dir}/${build}0/bazhen-holder`,
+      `${dir}/0123456789ABCDEF/bazhen-holder`,
+      `${dir}/${build}/bazhen-holderx`,
+      `${dir}/${build}/sub/bazhen-holder`,
+      `${dir}/${build}`,
+      `${dir}/.tmp-01234567/bazhen-holder`,
+    ];
+    expect(others.map((args) => holderBuildOf(args, dir))).toEqual(others.map(() => null));
   });
 });

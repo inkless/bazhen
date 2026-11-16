@@ -471,6 +471,21 @@ describe("refusing to start a holder, before anything is spawned", () => {
     ]);
   });
 
+  it("refuses a binary every user may write, who would choose what the next holder runs", async () => {
+    const dir = privateRoot();
+    const binary = join(dir, "bazhen-holder");
+    writeFileSync(binary, "");
+    const refusals = [];
+    for (const mode of [0o757, 0o777]) {
+      chmodSync(binary, mode);
+      refusals.push(await refused({ binary }));
+    }
+    expect(refusals).toEqual([
+      { spawned: 0, error: expect.stringMatching(/every user may write it/) },
+      { spawned: 0, error: expect.stringMatching(/every user may write it/) },
+    ]);
+  });
+
   it("refuses an environment name that isn't a plain identifier, which a shell could run", async () => {
     const env = { PATH: "/bin", "BASH_FUNC_ulimit%%": "() { :; }" };
     expect(await refused({ env })).toEqual({

@@ -23,6 +23,7 @@ import {
 } from "@bazhen/core";
 import {
   type HolderProcess,
+  holderBuildOf,
   holderSocket,
   holderSocketRefusal,
   holdersDir,
@@ -65,6 +66,8 @@ export interface HolderRuntimeOptions {
   readonly root: string;
   /** The `bazhen-holder` binary every new terminal's holder runs. */
   readonly binary: string;
+  /** Where holder builds are installed, each in a directory named by its build. */
+  readonly installDir?: string;
   /** The environment every new terminal starts from, already filtered (foundation-design §9.5). */
   readonly env: Readonly<Record<string, string>>;
   /** How often dead terminals are looked for while anyone listens. */
@@ -75,6 +78,14 @@ export interface HolderRuntimeOptions {
   readonly onError?: (err: unknown) => void;
   /** Starts a holder: host-guard's `startHolder`, unless a test records what it starts. */
   readonly start?: (options: StartHolderOptions) => Promise<StartedHolder>;
+}
+
+/** A holder that answered, the build it runs and the protocol versions it speaks. */
+export interface HolderBuild {
+  readonly terminalId: string;
+  /** Null for a holder not run from an install, or that `ps` no longer shows. */
+  readonly build: string | null;
+  readonly protocol: readonly string[];
 }
 
 /** What saying `hello` at a socket found. */
@@ -277,6 +288,25 @@ export class HolderRuntime implements RuntimeAdapter {
     });
     const sockets = names.filter((name) => name.endsWith(".sock")).map((name) => join(dir, name));
     return Promise.all(sockets.map(async (socket) => ({ ...(await this.reach(socket)), socket })));
+  }
+
+  /**
+   * The build each holder that answers runs, as its argv[0] names it: what `ps` shows of the pid
+   * that answered, if it started when the holder says it did. Reads only.
+   */
+  async builds(): Promise<HolderBuild[]> {
+    const installDir = this.opts.installDir ?? null;
+    const answering = (await this.reachAll()).flatMap((r) => (r.is === "holder" ? [r.hello] : []));
+    return Promise.all(
+      answering.map(async (hello) => {
+        const reading = installDir === null ? "unread" : await readProcess(hello.holderPid);
+        const same =
+          typeof reading !== "string" &&
+          Math.abs(reading.start - hello.holderStart) <= START_SKEW_S;
+        const build = same && installDir !== null ? holderBuildOf(reading.args, installDir) : null;
+        return { terminalId: hello.terminalId, build, protocol: hello.protocol };
+      }),
+    );
   }
 
   async inventory(): Promise<RuntimeInventoryEntry[]> {

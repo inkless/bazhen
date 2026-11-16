@@ -327,6 +327,63 @@
         "refusing"
       ]
     },
+    "holder": {
+      "type": "object",
+      "properties": {
+        "binary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "build": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "holders": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "terminalId": {
+                "type": "string"
+              },
+              "build": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "protocol": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "terminalId",
+              "build",
+              "protocol"
+            ]
+          }
+        }
+      },
+      "required": [
+        "binary",
+        "build",
+        "reason",
+        "holders"
+      ]
+    },
     "env": {
       "type": "object",
       "properties": {

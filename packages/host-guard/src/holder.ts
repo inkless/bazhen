@@ -53,7 +53,9 @@ const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 /**
  * Why `binary` can't be run as a holder, or undefined when it can: it must be an absolute path to
  * a regular file named `bazhen-holder`, as `ps` will show it, or a link to one, since the spec it
- * is sent on stdin would be a script to a shell.
+ * is sent on stdin would be a script to a shell. The file must be this user's, and not writable by
+ * every user, who could otherwise choose what the next holder runs. Its group may write it: a
+ * umask of 002 builds every binary so, under a group of the user alone.
  */
 function binaryRefusal(binary: string): string | undefined {
   if (!isAbsolute(binary)) return "it isn't absolute";
@@ -65,8 +67,32 @@ function binaryRefusal(binary: string): string | undefined {
     return "it doesn't exist";
   }
   if (basename(real) !== HOLDER_COMMAND) return `it links to ${real}`;
-  if (!statSync(real).isFile()) return "it isn't a regular file";
+  const stat = statSync(real);
+  if (!stat.isFile()) return "it isn't a regular file";
+  const uid = process.getuid?.() ?? -1;
+  if (stat.uid !== uid) return `it belongs to uid ${stat.uid}`;
+  if ((stat.mode & 0o002) !== 0) return "every user may write it";
   return undefined;
+}
+
+/** A holder build's name: the first 16 hex digits of the SHA-256 of its binary. */
+export const HOLDER_BUILD = /^[0-9a-f]{16}$/;
+
+/** Where a holder build is installed under `installDir`. */
+export const installedHolder = (installDir: string, build: string) =>
+  join(installDir, build, HOLDER_COMMAND);
+
+/**
+ * The build a process runs, from its `ps` args, when its argv[0] is a holder installed under
+ * `installDir`; null for anything else. A holder runs with argv[0] as the daemon gave it, through
+ * the limits shell's `exec` too.
+ */
+export function holderBuildOf(args: string, installDir: string): string | null {
+  const prefix = `${installDir}/`;
+  if (!args.startsWith(prefix)) return null;
+  const [build = "", rest = ""] = args.slice(prefix.length).split(/\/(.*)/s);
+  if (!HOLDER_BUILD.test(build)) return null;
+  return rest === HOLDER_COMMAND || rest.startsWith(`${HOLDER_COMMAND} `) ? build : null;
 }
 
 /** Where `root`'s holders bind: one directory, inside the run root, holding nothing else. */
