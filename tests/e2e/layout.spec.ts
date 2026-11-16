@@ -38,16 +38,18 @@ interface Screen {
 const share = ({ visible, above, cap, chrome }: Screen) =>
   ((visible - above) * (1 - cap) - chrome) / visible;
 
+// One pane, the TUI and shell as tabs: links 44 + gap 8; the dock's row 45, gap 8, status 30.4.
+const IPHONE: Screen = {
+  name: "an iPhone upright",
+  options: phone(390, 844),
+  visible: 791,
+  above: 76,
+  cap: 0.25,
+  chrome: 101.4,
+};
+
 const SCREENS: readonly Screen[] = [
-  // One pane, the TUI and shell as tabs: links 44 + gap 8; the dock's row 45, gap 8, status 30.4.
-  {
-    name: "an iPhone upright",
-    options: phone(390, 844),
-    visible: 791,
-    above: 76,
-    cap: 0.25,
-    chrome: 101.4,
-  },
+  IPHONE,
   {
     name: "an iPhone on its side",
     options: phone(844, 390),
@@ -251,6 +253,20 @@ for (const device of SCREENS) {
     }
   });
 }
+
+test("keeps the terminals in view on a phone with the agent's rename form open", async ({
+  browser,
+}) => {
+  const page = await open(browser, IPHONE.options, `#/agent/${agentId}`);
+  const agent = page.getByRole("article", { name: "agent" });
+  await agent.getByRole("button", { name: "Rename" }).tap();
+  await expect(agent.getByRole("form", { name: "rename agent" })).toBeVisible();
+  await expect
+    .poll(async () => ({ page: await overflow(page), terminal: await terminalsInView(page) }))
+    .toEqual({ page: { down: 0, across: 0 }, terminal: true });
+  expect(await terminalShare(page)).toBeGreaterThanOrEqual(share(IPHONE));
+  await page.context().close();
+});
 
 /**
  * A soft keyboard, as the page sees one: the visual viewport shrinks from the bottom, a frame at a

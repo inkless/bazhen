@@ -1,11 +1,14 @@
 import { hostname } from "node:os";
 import { expect, test, type Page } from "@playwright/test";
-import { givePageAgentTranscript, kill, launch, screen } from "./page.ts";
+import { givePageAgentTranscript, kill, launch, screen, uniqueName } from "./page.ts";
 
-/** Launches an agent from outside the page, as another device would; answers the status. */
-function launchElsewhere(page: Page): Promise<number> {
+/**
+ * Launches an agent from outside the page, as another device would, under `name` if given;
+ * answers the status.
+ */
+function launchElsewhere(page: Page, name?: string): Promise<number> {
   return page.evaluate(
-    async (cwd) =>
+    async ({ cwd, asked }) =>
       (
         await fetch("/v1/agents", {
           method: "POST",
@@ -14,10 +17,11 @@ function launchElsewhere(page: Page): Promise<number> {
             idempotencyKey: crypto.randomUUID(),
             harness: "claude-code",
             cwd,
+            ...(asked === undefined ? {} : { name: asked }),
           }),
         })
       ).status,
-    String(process.env["BZ_E2E_WORK"]),
+    { cwd: String(process.env["BZ_E2E_WORK"]), asked: name },
   );
 }
 
@@ -65,6 +69,8 @@ test("shows the fleet under its host, and closes an agent from its workspace", a
   const agents = page.getByRole("list", { name: "agents" });
   await expect(agents.getByRole("heading", { level: 2 })).toHaveText(new RegExp(`^${hostname()}`));
   await expect(agents.locator('[aria-current="true"]')).toBeVisible();
+  // Launched without a name, it is given its project's next number.
+  await expect(workspace(page).getByRole("heading", { level: 2 })).toHaveText(/^[\w-]+-\d+$/);
 
   await workspace(page).getByText("Attach from a terminal").click();
   await expect(workspace(page).locator(".attach code")).toContainText(" attach-session -t ");
@@ -80,6 +86,34 @@ test("shows the fleet under its host, and closes an agent from its workspace", a
   await agents.locator('[aria-current="true"]').click();
   expect(new URL(page.url()).hash).toBe(`#/agent/${agentId}`);
   await expect(page.getByRole("region", { name: "terminal" })).toHaveCount(0);
+});
+
+test("names an agent at launch, renames it from its workspace, and refuses a name another holds", async ({
+  page,
+}) => {
+  const name = uniqueName("scout");
+  await launch(page, name);
+  const current = page.getByRole("list", { name: "agents" }).locator('[aria-current="true"]');
+  const heading = workspace(page).getByRole("heading", { level: 2 });
+  await expect(heading).toHaveText(name);
+  await expect(current).toContainText(name);
+
+  const renamed = uniqueName("reviewer");
+  await workspace(page).getByRole("button", { name: "Rename" }).click();
+  const form = workspace(page).getByRole("form", { name: "rename agent" });
+  await form.getByLabel("Name").fill(renamed);
+  await form.getByRole("button", { name: "Save" }).click();
+  await expect(heading).toHaveText(renamed);
+  await expect(current).toContainText(renamed);
+  await expect(form).toHaveCount(0);
+
+  const taken = uniqueName("taken");
+  expect(await launchElsewhere(page, taken)).toBe(200);
+  await workspace(page).getByRole("button", { name: "Rename" }).click();
+  await form.getByLabel("Name").fill(taken);
+  await form.getByRole("button", { name: "Save" }).click();
+  await expect(form.getByRole("alert")).toContainText(`another agent is named ${taken}`);
+  await expect(heading).toHaveText(renamed);
 });
 
 test("respawns an agent whose process ended, onto a fresh terminal", async ({ page }) => {

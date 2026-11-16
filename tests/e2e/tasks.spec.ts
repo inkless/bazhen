@@ -1,14 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { screen } from "./page.ts";
-
-/** Launches Claude Code from the page and waits for its TUI; answers the agent's id. */
-async function launch(page: Page): Promise<string> {
-  await page.goto("/");
-  await page.getByPlaceholder("/path/to/project").fill(String(process.env["BZ_E2E_WORK"]));
-  await page.getByRole("button", { name: "Launch Claude Code" }).click();
-  await expect.poll(() => screen(page), { timeout: 20_000 }).toContain("Claude Code");
-  return new URL(page.url()).hash.replace("#/agent/", "");
-}
+import { launch, uniqueName } from "./page.ts";
 
 test("gives an agent a task from the page, shows it on the agent, unassigns it, and marks it done", async ({
   page,
@@ -51,6 +42,24 @@ test("gives an agent a task from the page, shows it on the agent, unassigns it, 
   await expect(task.getByText("done", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Tasks" }).click();
   await expect(page.getByRole("region", { name: "tasks" })).toContainText("No open tasks.");
+});
+
+test("offers a task only to agents not ended, each by its name", async ({ page }) => {
+  const name = uniqueName("closer");
+  await launch(page, name);
+  const workspace = page.getByRole("article", { name: "agent" });
+  await page.getByRole("button", { name: "Tasks" }).click();
+  const agentField = page.getByRole("form", { name: "new task" }).getByLabel("Agent");
+  await expect(agentField.getByRole("option", { name, exact: true })).toHaveCount(1);
+
+  await page.goBack();
+  await workspace.getByRole("button", { name: "Close agent…" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Close agent" }).click();
+  await expect(
+    workspace.locator(".workspace-head").getByText("closed", { exact: true }),
+  ).toBeVisible({ timeout: 10_000 });
+  await page.getByRole("button", { name: "Tasks" }).click();
+  await expect(agentField.getByRole("option", { name: new RegExp(name) })).toHaveCount(0);
 });
 
 /**
