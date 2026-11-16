@@ -644,6 +644,10 @@ mod tests {
             .collect()
     }
 
+    /// Above the largest `pid_max` the kernel allows, so no process has it: a pid the test
+    /// scripts a pass to reach names nothing, should anything ever signal it.
+    const NO_PROCESS: i32 = 4_194_305;
+
     fn reaching(pids: &[i32]) -> Sweep {
         Sweep {
             reached: pids
@@ -656,7 +660,7 @@ mod tests {
 
     #[test]
     fn an_ending_kills_what_a_pass_missed_and_ends_only_after_two_empty_passes() {
-        let (leader, job) = (101, 102);
+        let (leader, job) = (NO_PROCESS, NO_PROCESS + 1);
         let now = Instant::now();
         let hangup = [reaching(&[leader, job]), reaching(&[leader, job])];
         // The second kill's listing was made before the job started, so it found nothing.
@@ -683,15 +687,17 @@ mod tests {
         assert_eq!(ending.deadline(false), Some(now));
         ending.step(false, now);
         let mut at = now;
-        for _ in 0..EMPTY_PASSES {
+        for _ in 0..2 {
             assert!(!ending.is_over());
             at = ending.deadline(true).unwrap();
             ending.step(true, at);
         }
         assert!(ending.is_over());
-        assert_eq!(at, now + SWEEP_EVERY * EMPTY_PASSES);
-        assert!(at < now + CLOSE_GRACE);
+        assert_eq!(at, now + Duration::from_millis(100));
+        assert!(at < now + GRACE);
         assert_eq!(ending.deadline(true), None);
+        let hup = [Some(Signal::HUP), Some(Signal::CONT)];
+        assert_eq!(signals(&ending), [hup.as_slice(), &[None, None]].concat());
     }
 
     /// An ending's rules as `docs/holder.md` gives them to users, rather than as the constants
@@ -779,7 +785,7 @@ mod tests {
 
     fn sweeps() -> impl Strategy<Value = Sweep> {
         let pids = |most: usize| {
-            proptest::collection::vec(2i32..1000, 0..=most).prop_map(|pids| {
+            proptest::collection::vec(NO_PROCESS..NO_PROCESS + 1000, 0..=most).prop_map(|pids| {
                 pids.into_iter()
                     .map(|pid| Pid::from_raw(pid).unwrap())
                     .collect()
