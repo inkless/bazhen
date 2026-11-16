@@ -8,6 +8,7 @@ pub mod framing;
 
 use std::env;
 use std::io::{self, Read, Write};
+use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Duration;
@@ -88,10 +89,19 @@ pub fn agent_token() -> Option<String> {
 /// more holds no token, and is never read to its end, so a huge file costs the hook nothing.
 const TOKEN_FILE_MAX: u64 = 4096;
 
-/// The token the regular file at `path` holds, trimmed; none from anything else, such as a FIFO
-/// that would block the read or a device with no end.
+/// The token the regular file at `path` holds, trimmed; none from anything else. A FIFO would block
+/// an open until a writer came, and a device may have no end, so neither is read: the path is
+/// looked at first, opened without blocking, and looked at again through the open file, which a
+/// FIFO put in its place between the two can't pass.
 fn token_in(path: &Path) -> Option<String> {
-    let file = std::fs::File::open(path).ok()?;
+    if !std::fs::metadata(path).ok()?.is_file() {
+        return None;
+    }
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(o_nonblock())
+        .open(path)
+        .ok()?;
     if !file.metadata().ok()?.is_file() {
         return None;
     }
@@ -102,6 +112,16 @@ fn token_in(path: &Path) -> Option<String> {
     let token = text.trim();
     (u64::try_from(text.len()).ok()? <= TOKEN_FILE_MAX && is_agent_token(token))
         .then(|| token.to_owned())
+}
+
+/// `O_NONBLOCK` on the systems Bazhen runs on, which std doesn't name: Linux's on every
+/// architecture, and macOS's. A regular file reads the same with it.
+fn o_nonblock() -> i32 {
+    if env::consts::OS == "macos" {
+        0x0004
+    } else {
+        0o4000
+    }
 }
 
 /// A token as the daemon mints it: 32 bytes, base64url, so 43 characters that need no escaping
@@ -304,6 +324,23 @@ mod tests {
             assert_eq!(token_in(&refused), None, "{refused:?}");
         }
         assert_eq!(token_in(Path::new("/dev/zero")), None);
+    }
+
+    #[test]
+    fn reads_no_token_from_a_fifo_and_never_waits_for_a_writer() {
+        let dir = TempDir::new("fifo");
+        let fifo = dir.0.join("token");
+        let made = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let (sent, read) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            // The test is gone if this send fails, so there is no one to tell.
+            let _ = sent.send(token_in(&fifo));
+        });
+        assert_eq!(read.recv_timeout(Duration::from_secs(2)), Ok(None));
     }
 
     #[test]
