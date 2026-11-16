@@ -168,9 +168,21 @@ function redacted(text: string): string {
  * or a request could echo taken out, and cut to DETAIL_MAX characters (grapheme clusters), never
  * through one.
  */
+/** The characters of `text` as a person counts them: grapheme clusters, never half of one. */
+export const graphemes = (text: string): string[] =>
+  [...new Intl.Segmenter().segment(text)].map((s) => s.segment);
+
+/**
+ * Text an agent wrote, safe to store and show, with its lines and tabs kept: no other control
+ * characters, which can drive a terminal, and no bidi controls, which can make text read as
+ * something else. Other format characters stay, since emoji sequences are joined by them.
+ */
+export const withoutControls = (text: string): string =>
+  text.replace(/[^\P{Cc}\n\t]|[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/gu, "");
+
 export function failureDetail(cause: unknown): string {
   const text = cause instanceof Error ? cause.message : String(cause);
   const safe = redacted(searched(text));
-  const chars = [...new Intl.Segmenter().segment(safe)].map((s) => s.segment);
+  const chars = graphemes(safe);
   return chars.length <= DETAIL_MAX ? safe : `${chars.slice(0, DETAIL_MAX - 1).join("")}…`;
 }

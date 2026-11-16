@@ -18,6 +18,7 @@ export const ID_PREFIXES = [
   "dev",
   "att",
   "lease",
+  "obs",
 ] as const;
 
 /** The most characters an agent's name has. */

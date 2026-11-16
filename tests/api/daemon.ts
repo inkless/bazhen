@@ -103,6 +103,19 @@ export function bazhen(
   });
 }
 
+/**
+ * A directory under `home` holding a `bazhen` that runs this checkout's CLI, so an agent finds
+ * the command by name, as it would where Bazhen is installed.
+ */
+function cliOnPath(home: string): string {
+  const dir = join(home, "cli");
+  mkdirSync(dir, { recursive: true });
+  const main = join(repo, "apps/cli/src/main.ts");
+  writeFileSync(join(dir, "bazhen"), `#!/bin/sh\nexec '${process.execPath}' '${main}' "$@"\n`);
+  chmodSync(join(dir, "bazhen"), 0o755);
+  return dir;
+}
+
 /** A daemon's environment on `home`: the login session's, and nothing of the test run's. */
 export function homeEnv(home: string): Record<string, string> {
   return { ...loginEnv(), PATH: process.env["PATH"] ?? "/usr/bin:/bin", BAZHEN_HOME: home };
@@ -212,7 +225,7 @@ export class Daemon {
 
     this.env = {
       ...homeEnv(home),
-      PATH: `${bin}:${process.env["PATH"] ?? "/usr/bin:/bin"}`,
+      PATH: `${cliOnPath(home)}:${bin}:${process.env["PATH"] ?? "/usr/bin:/bin"}`,
       ...agentHomes(home, this.work, { anthropic: opts.modelUrl, responses: opts.responsesUrl }),
       ...opts.env,
     };

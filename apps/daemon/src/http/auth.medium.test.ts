@@ -60,6 +60,7 @@ function daemon(always = true) {
       tasks: [],
       assignments: [],
       notices: [],
+      observed: [],
     }),
     launch: unused,
     answer: refuse,

@@ -1159,6 +1159,32 @@ describe("agent names", () => {
     upgraded.close();
   });
 
+  it("upgrades a schema-24 database, its running agents answering to no name until restarted", () => {
+    const path = dbPath();
+    const v24 = Store.open(path, MIGRATIONS.slice(0, 24));
+    const from = named(v24, "p", "BZ-1");
+    const to = named(v24, "p", "BZ-127");
+    v24.append({
+      type: "agent.running",
+      entityId: to,
+      actor: "system",
+      payload: { externalRef: null, runtimeRef: null },
+    });
+    v24.close();
+    const upgraded = Store.open(path);
+    upgraded.append({
+      type: "message.observed",
+      entityId: newId("obs"),
+      actor: from,
+      payload: { from, to, summary: "hi", text: "hi", accepted: true, toolUseId: "t-1" },
+    });
+    expect([
+      upgraded.agentsStartedAs("BZ-127"),
+      upgraded.snapshot(testView).observed.map((m) => [m.from, m.to]),
+    ]).toEqual([[], [[from, to]]]);
+    upgraded.close();
+  });
+
   it("upgrades projects that make one base onto one counter, each keeping its own spelling", () => {
     const path = dbPath();
     const v23 = Store.open(path, MIGRATIONS.slice(0, 23));

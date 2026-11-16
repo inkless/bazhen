@@ -52,6 +52,7 @@ import { ActivityTracker } from "./mailbox/activity.ts";
 import { SessionBinding, psTable } from "./mailbox/binding.ts";
 import { hookApp } from "./mailbox/ingress.ts";
 import { Mailbox } from "./mailbox/mailbox.ts";
+import { observeSend } from "./mailbox/observed.ts";
 import { InvalidConfig, loadSettings } from "./config/config.ts";
 import { capture } from "./env/capture.ts";
 import { answers } from "./socket/client.ts";
@@ -477,6 +478,7 @@ const socketListener = getRequestListener(
       binding: new SessionBinding(store, psTable),
       activity,
       recordUsage: (agentId, usage) => store.recordUsage(agentId, usage),
+      observeSend: (agentId, toolUseId, sent) => observeSend(store, agentId, toolUseId, sent),
     }),
     stop: () => shutdown("requested"),
     pairing,

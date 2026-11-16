@@ -14,6 +14,7 @@ export type TerminalId = Branded<"TerminalId">;
 export type DeviceId = Branded<"DeviceId">;
 export type AttachmentId = Branded<"AttachmentId">;
 export type LeaseId = Branded<"LeaseId">;
+export type ObservedMessageId = Branded<"ObservedMessageId">;
 
 /** Each prefix and the identity it names (foundation-design §3). */
 export interface IdKinds {
@@ -29,6 +30,7 @@ export interface IdKinds {
   dev: DeviceId;
   att: AttachmentId;
   lease: LeaseId;
+  obs: ObservedMessageId;
 }
 export type IdPrefix = keyof IdKinds;
 

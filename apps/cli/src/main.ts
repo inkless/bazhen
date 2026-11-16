@@ -21,7 +21,7 @@ import {
   StateSnapshot,
   StopResponse,
 } from "@bazhen/protocol";
-import { TASK_USAGE, Usage, taskVerb, type Verb } from "./tasks.ts";
+import { TASK_USAGE, Usage, taskSocket, taskVerb, type Verb } from "./tasks.ts";
 import { lanLines } from "./lan.ts";
 import { terminalLines } from "./terminals.ts";
 
@@ -293,7 +293,8 @@ async function taskCommand(): Promise<number> {
       readFile: (path) => readFileSync(path, "utf8"),
       key: () => randomUUID(),
     });
-    while (typeof next !== "string") next = next.answer(await call(socket, next.call, CALL_MS));
+    const daemon = taskSocket(process.env, socket);
+    while (typeof next !== "string") next = next.answer(await call(daemon, next.call, CALL_MS));
   } catch (err) {
     if (!(err instanceof Usage)) throw err;
     console.error(`${err.message}\n${TASK_USAGE}`);

@@ -41,6 +41,22 @@ export const Message = z.object({ id: Id("msg"), agentId: Id("agent"), state: Ma
 export type Message = z.infer<typeof Message>;
 
 /**
+ * A message one agent sent another through its harness's own channel, which Bazhen saw sent and
+ * can't follow further (foundation-design §5.6).
+ */
+export const ObservedMessage = z.object({
+  id: Id("obs"),
+  from: Id("agent"),
+  to: Id("agent"),
+  summary: z.string(),
+  /** Whether the harness said it was sent. */
+  accepted: z.boolean(),
+  /** When it was sent, as an ISO timestamp. */
+  at: z.iso.datetime(),
+});
+export type ObservedMessage = z.infer<typeof ObservedMessage>;
+
+/**
  * What an item is about (foundation-design §4.6): a harness asking to run a tool, a question
  * the agent asked, a turn that failed, mail that could not be delivered, or something the agent
  * or a task raised for the human.

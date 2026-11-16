@@ -355,6 +355,20 @@ describe("agent lifecycle", () => {
     expect(respawned[0]?.options.name).toBe("reviewer");
   });
 
+  it("answers to the name it was started with until a respawn starts it under its new one", async () => {
+    const { store, lifecycle, agentId, exit, agent } = await running();
+    const launched = String(agent()?.name);
+    const answers = () => [launched, "reviewer"].map((n) => store.agentsStartedAs(n).length);
+    renameAgent(store, null, agentId, { idempotencyKey: "n", name: "reviewer" });
+    const renamed = answers();
+    exit("0");
+    await lifecycle.respawn(agentId, { idempotencyKey: "r", generation: 0 });
+    expect([renamed, answers()]).toEqual([
+      [1, 0],
+      [0, 1],
+    ]);
+  });
+
   it("keeps a binding the new TUI moved while it started, over the session it resumed", async () => {
     const { lifecycle, agentId, exit, agent } = await running({
       duringRespawn: (store, id) =>
@@ -508,6 +522,13 @@ describe("relaunching a lost agent", () => {
       launches[1]?.resume?.id,
       replaced,
     ]).toEqual(["running", false, 1, "light", "s-1", "s-1", [agentId]]);
+  });
+
+  it("starts a relaunched agent's session under the name the agent has now", async () => {
+    const { store, lifecycle, agentId } = await lost();
+    renameAgent(store, null, agentId, { idempotencyKey: "n", name: "reviewer" });
+    await lifecycle.relaunch(agentId, { idempotencyKey: "l", generation: 0 });
+    expect(store.agentsStartedAs("reviewer").map((a) => a.id)).toEqual([agentId]);
   });
 
   it("refuses an agent it can't resume unless asked for a fresh session, recording nothing", async () => {

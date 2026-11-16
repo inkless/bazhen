@@ -18,6 +18,17 @@ const queued = z.object({
    */
   from: Id("agent").optional(),
 });
+const observed = z.object({
+  from: Id("agent"),
+  to: Id("agent"),
+  /** The harness's own label for it, else its first line, at most 120 characters. */
+  summary: z.string(),
+  text: z.string(),
+  /** Whether the harness said it was sent; nothing says it was read. */
+  accepted: z.boolean(),
+  /** The tool call that sent it, which records it once. */
+  toolUseId: z.string(),
+});
 const taskCreated = z.object({
   title: TaskTitle,
   brief: TaskBrief,
@@ -93,6 +104,8 @@ export const EVENTS = {
       runtimeRef: RuntimeRefPayload.nullable(),
       /** The theme the TUI was started for, when one was named. */
       theme: TuiTheme.optional(),
+      /** The name the harness's session was started with, for one that is addressed by it (1.43). */
+      harnessName: z.string().optional(),
     }),
   },
   "agent.failed": {
@@ -119,6 +132,8 @@ export const EVENTS = {
       runtimeRef: RuntimeRefPayload,
       /** The theme the TUI was started for, when one was named. */
       theme: TuiTheme.optional(),
+      /** The name the harness's session was started with, for one that is addressed by it (1.43). */
+      harnessName: z.string().optional(),
     }),
   },
   /** The respawn failed; the agent is exited again, with its terminal, and still closable. */
@@ -165,6 +180,8 @@ export const EVENTS = {
       runtimeRef: RuntimeRefPayload,
       /** The theme the TUI was started for, when one was named. */
       theme: TuiTheme.optional(),
+      /** The name the harness's session was started with, for one that is addressed by it (1.43). */
+      harnessName: z.string().optional(),
     }),
   },
   /** The relaunch failed: its new terminal failed, and the agent is lost on its old one again. */
@@ -311,6 +328,16 @@ export const EVENTS = {
   "mailbox.undeliverable": {
     entity: "message",
     payload: z.object({ reason: z.enum(["agent_closed", "gave_up"]) }),
+  },
+  /**
+   * The agent sent another Bazhen agent a message through its harness's own channel (Claude
+   * Code's SendMessage), which Bazhen sees sent but can't follow to delivery (§5.6). Protocol 1.43.
+   */
+  "message.observed": {
+    entity: "observed_message",
+    payload: observed,
+    /** The text stays in the log, as a mail body does; clients get the summary. */
+    streamed: observed.omit({ text: true }),
   },
   "mailbox.requeued": {
     entity: "message",

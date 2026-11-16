@@ -456,6 +456,9 @@
                         "light",
                         "dark"
                       ]
+                    },
+                    "harnessName": {
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -775,6 +778,9 @@
                         "light",
                         "dark"
                       ]
+                    },
+                    "harnessName": {
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -1056,6 +1062,9 @@
                         "light",
                         "dark"
                       ]
+                    },
+                    "harnessName": {
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -3040,6 +3049,91 @@
                   },
                   "required": [
                     "reason"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "ts",
+                "type",
+                "entityType",
+                "entityId",
+                "actor",
+                "causationId",
+                "correlationId",
+                "payload"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "ts": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string",
+                  "const": "message.observed"
+                },
+                "entityType": {
+                  "type": "string",
+                  "const": "observed_message"
+                },
+                "entityId": {
+                  "type": "string"
+                },
+                "actor": {
+                  "type": "string"
+                },
+                "causationId": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "correlationId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "payload": {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "type": "string",
+                      "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                    },
+                    "to": {
+                      "type": "string",
+                      "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                    },
+                    "summary": {
+                      "type": "string"
+                    },
+                    "accepted": {
+                      "type": "boolean"
+                    },
+                    "toolUseId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "from",
+                    "to",
+                    "summary",
+                    "accepted",
+                    "toolUseId"
                   ]
                 }
               },

@@ -38,11 +38,14 @@ export function Workspace({
   agent,
   shells,
   about,
+  messages,
   failed,
 }: {
   agent: Agent;
   shells: readonly Shell[];
   about?: ReactNode;
+  /** What the agent sent and was sent, under its send box. */
+  messages?: ReactNode;
   failed: (e: unknown) => void;
 }) {
   const mine = linkedShells(shells, agent.id).filter((s) => s.state !== "closing");
@@ -220,6 +223,7 @@ export function Workspace({
         ) : (
           <p>{NO_TERMINAL[agent.state] ?? "There is no terminal to show."}</p>
         )}
+        {messages}
       </div>
       {terminalId !== null && (
         <div className={`workspace-body dock-${dock.position}`}>

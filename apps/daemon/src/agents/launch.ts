@@ -131,6 +131,10 @@ export const launchOptions = (theme: TuiTheme | undefined, name: string): Launch
   ...(name === "" ? {} : { name }),
 });
 
+/** What a start event records of the name its harness was given, which a rename doesn't reach. */
+export const startedAs = ({ name }: LaunchOptions): { harnessName?: string } =>
+  name === undefined ? {} : { harnessName: name };
+
 /**
  * Launches one agent. The daemon mints every id and records the launch before the environment
  * starts anything (foundation-design §8.1), and the request's key makes a retry return the first
@@ -226,6 +230,7 @@ export async function launchAgent(
             externalRef: refs.externalRef,
             runtimeRef: refs.runtime && runtimePayload(refs.runtime),
             ...(refs.theme && { theme: refs.theme }),
+            ...startedAs(options),
           },
         }),
       launched.eventIds,

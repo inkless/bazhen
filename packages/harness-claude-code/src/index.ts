@@ -101,7 +101,15 @@ export class ClaudeCodeHarness implements HarnessAdapter {
         ...session,
         ...(name === undefined ? [] : ["-n", name]),
         "--settings",
-        JSON.stringify({ ...hooks(this.opts.hookCommand), ...statusLine, ...(theme && { theme }) }),
+        JSON.stringify({
+          ...hooks(this.opts.hookCommand),
+          permissions: {
+            allow: AGENT_VERBS.map((verb) => `Bash(bazhen ${verb}:*)`),
+            ask: [READS_A_FILE],
+          },
+          ...statusLine,
+          ...(theme && { theme }),
+        }),
         ...(this.opts.permissionMode === undefined
           ? []
           : ["--permission-mode", this.opts.permissionMode]),
@@ -113,6 +121,27 @@ export class ClaudeCodeHarness implements HarnessAdapter {
     };
   }
 }
+
+/**
+ * The bazhen verbs an agent is taught, which run without a permission prompt: the daemon decides
+ * what each caller may do with them. Its admin verbs, and answering approvals, still ask.
+ */
+const AGENT_VERBS = [
+  "agents",
+  "whoami",
+  "roles",
+  "rename",
+  "task",
+  "delegate",
+  "escalate",
+  "send",
+] as const;
+
+/**
+ * A verb given a file to read (`--file`, `--brief-file`) asks as before: allowed, it would put
+ * any file the agent can read into mail and the event log with no prompt. Ask overrides allow.
+ */
+const READS_A_FILE = "Bash(bazhen *-file*)";
 
 /**
  * The waiter runs asynchronously after every turn and at start, and wakes an idle session when
@@ -209,12 +238,25 @@ export type Hook =
       readonly useId: string;
       /** A PostToolUse, whose reply can fold mail into the turn; a failed call's can't. */
       readonly fold: { readonly promptId: string | null } | null;
+      /** The agent's own SendMessage, to the session `to` names. */
+      readonly sent?: SentMessage;
     }
   /** The status line redrew, saying which model runs and how full its context is. */
   | { readonly kind: "statusline"; readonly usage: Usage }
   /** One of the agent's subagents started or ended, by its `agent_id`. */
   | { readonly kind: "subagentStarted" | "subagentStopped"; readonly subagentId: string }
   | { readonly kind: "ignored" };
+
+/** A message the agent sent with Claude Code's SendMessage, as its PostToolUse reports it. */
+export interface SentMessage {
+  /** The session's name as the agent wrote it; Claude Code matches it ignoring case. */
+  readonly to: string;
+  readonly text: string;
+  /** The agent's own label for it, when it gave one. */
+  readonly summary: string | null;
+  /** Whether Claude Code said it was sent: a name no session holds is reported, not sent. */
+  readonly accepted: boolean;
+}
 
 /** Reads one of the hooks `launchSpec` installed; the daemon never sees Claude Code's formats. */
 export function readHook(event: string, payload: unknown): Hook {
@@ -256,8 +298,15 @@ export function readHook(event: string, payload: unknown): Hook {
     case "PostToolUse":
     case "PostToolUseFailure": {
       const useId = toolUseIdOf(payload);
-      const fold = event === "PostToolUse" ? { promptId: promptIdOf(payload) } : null;
-      return useId === null ? IGNORED : { kind: "toolSettled", useId, fold };
+      if (useId === null) return IGNORED;
+      if (event === "PostToolUseFailure") return { kind: "toolSettled", useId, fold: null };
+      const sent = sentOf(payload);
+      return {
+        kind: "toolSettled",
+        useId,
+        fold: { promptId: promptIdOf(payload) },
+        ...(sent && { sent }),
+      };
     }
     default:
       return IGNORED;
@@ -265,6 +314,27 @@ export function readHook(event: string, payload: unknown): Hook {
 }
 
 const IGNORED: Hook = { kind: "ignored" };
+
+/**
+ * A SendMessage the agent itself made, not one of its subagents. A structured message is a
+ * teammate protocol request, not words for a peer.
+ */
+function sentOf(payload: unknown): SentMessage | undefined {
+  if (field(payload, "tool_name") !== "SendMessage" || field(payload, "agent_id") !== undefined) {
+    return undefined;
+  }
+  const input = field(payload, "tool_input");
+  const to = field(input, "to");
+  const text = field(input, "message");
+  const summary = field(input, "summary");
+  if (typeof to !== "string" || to === "" || typeof text !== "string") return undefined;
+  return {
+    to,
+    text,
+    summary: typeof summary === "string" && summary !== "" ? summary : null,
+    accepted: field(field(payload, "tool_response"), "success") === true,
+  };
+}
 
 /** The model and context use a status line's input gives, as far as it gives them. */
 function usageOf(payload: unknown): Usage {

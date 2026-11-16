@@ -63,6 +63,7 @@ const commands: LanParts["commands"] = {
     tasks: [],
     assignments: [],
     notices: [],
+    observed: [],
   }),
   launch: unused,
   answer: refuse,
