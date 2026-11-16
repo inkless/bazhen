@@ -1,4 +1,11 @@
-import type { Agent, Assignment, Role, StateSnapshot, Task } from "@bazhen/protocol";
+import {
+  BUILTIN_ROLES,
+  type Agent,
+  type Assignment,
+  type Role,
+  type StateSnapshot,
+  type Task,
+} from "@bazhen/protocol";
 import { agentLabelOf, isEnded } from "../fleet/model.ts";
 
 /** Who holds a role on a task, as a row names them. */
@@ -16,13 +23,17 @@ export interface TaskNode {
   readonly children: readonly TaskNode[];
 }
 
-const ROLE_ORDER: Readonly<Record<Role, number>> = { coordinator: 0, lead: 1, worker: 2 };
+/** The built-ins in their order, then any other role. */
+const roleOrder = (role: Role) => {
+  const i = (BUILTIN_ROLES as readonly string[]).indexOf(role);
+  return i === -1 ? BUILTIN_ROLES.length : i;
+};
 
 /** A task's active assignments, coordinator first, each with its agent's label. */
 export function holdersOf(state: StateSnapshot, taskId: string): Holder[] {
   return state.assignments
     .filter((a) => a.taskId === taskId && a.state === "active")
-    .toSorted((a, b) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role])
+    .toSorted((a, b) => roleOrder(a.role) - roleOrder(b.role))
     .map((a: Assignment) => ({
       assignmentId: a.id,
       agentId: a.agentId,

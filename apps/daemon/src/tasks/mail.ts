@@ -22,6 +22,7 @@ const by = (who: Who) => (who === null ? "the human" : agentNamed(who));
 export function assignedMail(
   task: Named & { readonly brief: string; readonly parentTaskId: string | null },
   role: Role,
+  grants: readonly Role[],
   from: Who,
 ) {
   const part = task.parentTaskId === null ? "" : ` It is part of task ${task.parentTaskId}.`;
@@ -31,20 +32,25 @@ export function assignedMail(
     task.brief,
     "When it is finished, run:",
     `  bazhen task done ${task.id} --note "<what you did, in a sentence or two>"`,
-    ...(role === "worker" ? [] : [DELEGATE(task.id, role)]),
+    ...(grants.length === 0 ? [] : [DELEGATE(task.id, grants)]),
     `If you are stuck, or need the human to decide: bazhen escalate "<question>" --task ${task.id}`,
     `To read the task again: bazhen task show ${task.id}`,
   ].join("\n\n");
 }
 
-/** How a coordinator or lead hands part of its task to another agent. */
-const DELEGATE = (taskId: string, role: Role) =>
+/** How an agent whose role grants others hands part of its task to another agent. */
+const DELEGATE = (taskId: string, grants: readonly Role[]) =>
   [
-    `To hand part of it to another agent (${role === "coordinator" ? "as a lead or a worker" : "as a worker"}), run:`,
-    `  bazhen delegate <agent> --task ${taskId} --title "<title>" --brief "<instructions>"`,
+    `To hand part of it to another agent (as ${orList(grants.map(article))}), run:`,
+    `  bazhen delegate <agent> --task ${taskId} --title "<title>" --brief "<instructions>" [--role ${grants.join("|")}]`,
     "  <agent> is a name or id; `bazhen agents` lists them, and whoever you delegate to tells you when they finish.",
     "  To start a new agent for it instead, put --launch claude-code or --launch codex in place of the agent, and --name <name> to name it.",
   ].join("\n");
+
+const article = (role: Role) => (/^[aeiou]/.test(role) ? `an ${role}` : `a ${role}`);
+
+const orList = (items: readonly string[]) =>
+  items.length <= 1 ? items.join("") : `${items.slice(0, -1).join(", ")} or ${items.at(-1)}`;
 
 export function unassignedMail(task: Named, from: Who) {
   return `You are no longer assigned to task ${task.id} (${task.title}); ${by(from)} took it away. Stop working on it.`;

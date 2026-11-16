@@ -7,6 +7,7 @@ import type {
 } from "@bazhen/protocol";
 import type { AgentSessionId, AssignmentId } from "./ids.ts";
 import { machine } from "./machine.ts";
+import type { RoleBook } from "./roles.ts";
 
 export const task = machine<TaskState, TaskOutcome>("task", {
   open: { done: "done", cancelled: "cancelled" },
@@ -64,40 +65,39 @@ export class TaskRefused extends Error {
 const owns = (view: TaskView, caller: Caller) =>
   caller !== null && view.ownerHolds && view.ownerAgentId === caller;
 
-/** Only one agent at a time coordinates a task, and only one leads it. */
-const SINGLE: ReadonlySet<Role> = new Set<Role>(["coordinator", "lead"]);
-
-/**
- * The roles each holder may hand on. A worker hands on nothing: it escalates instead. Only the
- * human makes a coordinator, so an agent never promotes another to its own standing.
- */
-const GRANTS: Readonly<Record<Role, readonly Role[]>> = {
-  coordinator: ["lead", "worker"],
-  lead: ["worker"],
-  worker: [],
-};
-
 /**
  * The assignment a caller grants from on a task, or null for the human. The agent that created
  * the task grants as its coordinator would, without holding the role.
  */
-export function grantingAssignment(view: TaskView, caller: Caller): ActiveAssignment | null {
+export function grantingAssignment(
+  view: TaskView,
+  caller: Caller,
+  roles: RoleBook,
+): ActiveAssignment | null {
   if (caller === null) return null;
-  const held = view.active.filter((a) => a.agentId === caller && GRANTS[a.role].length > 0);
+  const held = view.active.filter(
+    (a) => a.agentId === caller && roles.rules(a.role).grants.length > 0,
+  );
   const strongest = held.find((a) => a.role === "coordinator") ?? held[0];
   if (strongest !== undefined) return strongest;
   if (owns(view, caller)) return null;
   throw new TaskRefused("forbidden", "only the task's coordinator, lead or owner can assign it");
 }
 
-const ALL_ROLES: readonly Role[] = ["coordinator", "lead", "worker"];
-
 /** Checks that `caller` may hand the role on from the open task, and returns what it grants from. */
-function checkHandOn(view: TaskView, caller: Caller, role: Role): ActiveAssignment | null {
+function checkHandOn(
+  view: TaskView,
+  caller: Caller,
+  role: Role,
+  roles: RoleBook,
+): ActiveAssignment | null {
   if (view.state !== "open") throw new TaskRefused("conflict", `the task is ${view.state}`);
-  const from = grantingAssignment(view, caller);
+  const from = grantingAssignment(view, caller, roles);
+  // Only the human makes a coordinator, unless a user's own role file says otherwise.
   const grantable =
-    caller === null ? ALL_ROLES : from === null ? GRANTS.coordinator : GRANTS[from.role];
+    caller === null
+      ? roles.roles.map((r) => r.key)
+      : roles.rules(from === null ? "coordinator" : from.role).grants;
   if (!grantable.includes(role)) {
     throw new TaskRefused("forbidden", `${callerName(caller)} can't make an agent ${role}`);
   }
@@ -114,26 +114,37 @@ export function checkDelegate(
   parent: TaskView,
   caller: AgentSessionId,
   role: Role,
+  roles: RoleBook,
 ): AssignmentId | null {
-  return checkHandOn(parent, caller, role)?.id ?? null;
+  return checkHandOn(parent, caller, role, roles)?.id ?? null;
 }
 
 /**
  * Checks that `caller` may give `agentId` the role on the task, and returns the assignment the
- * new one is delegated from: null when the human or the task's owner grants it.
+ * new one is delegated from: null when the human or the task's owner grants it. `held` is how
+ * many tasks the agent already holds that role on, which the role may limit.
  */
 export function checkGrant(
   view: TaskView,
   caller: Caller,
   grant: { readonly agentId: AgentSessionId; readonly role: Role },
+  roles: RoleBook,
+  held: number,
 ): AssignmentId | null {
-  const from = checkHandOn(view, caller, grant.role);
+  const from = checkHandOn(view, caller, grant.role, roles);
   if (view.active.some((a) => a.agentId === grant.agentId)) {
     throw new TaskRefused("conflict", `${grant.agentId} is already assigned to the task`);
   }
-  const holder = view.active.find((a) => SINGLE.has(grant.role) && a.role === grant.role);
+  const rules = roles.rules(grant.role);
+  const holder = view.active.find((a) => rules.singlePerTask && a.role === grant.role);
   if (holder !== undefined) {
     throw new TaskRefused("conflict", `${holder.agentId} is already the task's ${grant.role}`);
+  }
+  if (rules.maxActiveTasks !== null && held >= rules.maxActiveTasks) {
+    throw new TaskRefused(
+      "conflict",
+      `${grant.agentId} already works on ${held} task${held === 1 ? "" : "s"} as a ${grant.role}, the most a ${grant.role} may at once: finish or unassign one first`,
+    );
   }
   return from?.id ?? null;
 }
@@ -175,13 +186,17 @@ export function checkFinish(
   caller: Caller,
   outcome: TaskOutcome,
   cascade: boolean,
+  roles: RoleBook,
 ): Finish {
   if (view.state !== "open") throw new TaskRefused("conflict", `the task is already ${view.state}`);
   if (outcome === "cancelled" && view.ownerAgentId === null && caller !== null) {
     throw new TaskRefused("forbidden", "the human's task: only the human cancels it");
   }
   const mine = view.active.filter((a) => a.agentId === caller);
-  const runsIt = caller === null || owns(view, caller) || mine.some((a) => a.role !== "worker");
+  const runsIt =
+    caller === null ||
+    owns(view, caller) ||
+    mine.some((a) => roles.rules(a.role).grants.length > 0);
   if (!runsIt) {
     const own = mine[0];
     if (own !== undefined && outcome === "done") return { kind: "assignment", assignment: own };

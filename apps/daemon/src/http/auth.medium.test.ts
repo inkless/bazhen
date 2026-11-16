@@ -48,6 +48,7 @@ function daemon(always = true) {
     schemaVersion: () => 1,
     runtime: new FakeRuntime(),
     allow: { hosts: [host, new URL(external).host], origins: [origin, external] },
+    roles: () => ({ roles: [], problems: [] }),
     state: () => ({
       epoch: "e1",
       eventId: 0,

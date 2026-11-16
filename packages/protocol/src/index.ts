@@ -14,6 +14,7 @@ export * from "./json.ts";
 export * from "./mail.ts";
 export * from "./notices.ts";
 export * from "./origins.ts";
+export * from "./roles.ts";
 export * from "./shells.ts";
 export * from "./stream.ts";
 export * from "./theme.ts";

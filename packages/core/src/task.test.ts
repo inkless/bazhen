@@ -3,6 +3,7 @@ import type { Role } from "@bazhen/protocol";
 import { describe, expect, it } from "vitest";
 import { newId, type AgentSessionId, type AssignmentId } from "./ids.ts";
 import { InvalidTransition } from "./machine.ts";
+import { RoleBook } from "./roles.ts";
 import {
   assignment,
   checkDelegate,
@@ -15,6 +16,29 @@ import {
   type Caller,
   type TaskView,
 } from "./task.ts";
+
+const definition = (
+  key: string,
+  grants: string[],
+  singlePerTask = false,
+  maxActiveTasks: number | null = null,
+) => ({
+  key,
+  title: key,
+  description: "",
+  grants,
+  singlePerTask,
+  maxActiveTasks,
+  prompt: key,
+  source: "builtin" as const,
+});
+
+const ROLES = new RoleBook([
+  definition("coordinator", ["lead", "worker", "reviewer"], true),
+  definition("lead", ["worker", "reviewer"], true),
+  definition("worker", [], false, 1),
+  definition("reviewer", []),
+]);
 
 const [A, B, C, D] = [newId("agent"), newId("agent"), newId("agent"), newId("agent")];
 const AGENTS = [A, B, C, D];
@@ -54,26 +78,32 @@ describe("task and assignment states", () => {
 });
 
 describe("who may assign", () => {
-  it("lets a coordinator grant a lead and a worker, but never another coordinator", () => {
+  it("lets a coordinator grant a lead, a worker and a reviewer, but never another coordinator", () => {
     const coord = asgn(A, "coordinator");
     const view = open([coord]);
-    expect(checkGrant(view, A, { agentId: B, role: "lead" })).toBe(coord.id);
-    expect(refusal(() => checkGrant(view, A, { agentId: B, role: "coordinator" }))).toBe(
+    expect(checkGrant(view, A, { agentId: B, role: "lead" }, ROLES, 0)).toBe(coord.id);
+    expect(refusal(() => checkGrant(view, A, { agentId: B, role: "coordinator" }, ROLES, 0))).toBe(
       "forbidden",
     );
   });
 
-  it("lets a lead grant only workers, and a worker nothing", () => {
+  it("lets a lead grant no lead, and a worker nothing", () => {
     const view = open([asgn(A, "lead"), asgn(B, "worker")]);
-    expect(refusal(() => checkGrant(view, A, { agentId: C, role: "worker" }))).toBe("allowed");
-    expect(refusal(() => checkGrant(view, A, { agentId: C, role: "lead" }))).toBe("forbidden");
-    expect(refusal(() => checkGrant(view, B, { agentId: C, role: "worker" }))).toBe("forbidden");
+    expect(refusal(() => checkGrant(view, A, { agentId: C, role: "worker" }, ROLES, 0))).toBe(
+      "allowed",
+    );
+    expect(refusal(() => checkGrant(view, A, { agentId: C, role: "lead" }, ROLES, 0))).toBe(
+      "forbidden",
+    );
+    expect(refusal(() => checkGrant(view, B, { agentId: C, role: "worker" }, ROLES, 0))).toBe(
+      "forbidden",
+    );
   });
 
   it("lets the agent that created a task grant as its coordinator would, from no assignment", () => {
     const view = open([], A);
-    expect(checkGrant(view, A, { agentId: B, role: "lead" })).toBeNull();
-    expect(refusal(() => checkGrant(view, A, { agentId: B, role: "coordinator" }))).toBe(
+    expect(checkGrant(view, A, { agentId: B, role: "lead" }, ROLES, 0)).toBeNull();
+    expect(refusal(() => checkGrant(view, A, { agentId: B, role: "coordinator" }, ROLES, 0))).toBe(
       "forbidden",
     );
   });
@@ -81,15 +111,19 @@ describe("who may assign", () => {
   it("gives an owner that no longer holds its subtask's authority no say over it", () => {
     const view = { ...open([], A), ownerHolds: false };
     expect([
-      refusal(() => checkGrant(view, A, { agentId: B, role: "worker" })),
-      refusal(() => checkFinish(view, A, "cancelled", false)),
+      refusal(() => checkGrant(view, A, { agentId: B, role: "worker" }, ROLES, 0)),
+      refusal(() => checkFinish(view, A, "cancelled", false, ROLES)),
     ]).toEqual(["forbidden", "forbidden"]);
   });
 
   it("refuses a second lead while one is active, but takes any number of workers", () => {
     const view = open([asgn(A, "lead"), asgn(B, "worker")]);
-    expect(refusal(() => checkGrant(view, null, { agentId: C, role: "lead" }))).toBe("conflict");
-    expect(refusal(() => checkGrant(view, null, { agentId: C, role: "worker" }))).toBe("allowed");
+    expect(refusal(() => checkGrant(view, null, { agentId: C, role: "lead" }, ROLES, 0))).toBe(
+      "conflict",
+    );
+    expect(refusal(() => checkGrant(view, null, { agentId: C, role: "worker" }, ROLES, 0))).toBe(
+      "allowed",
+    );
   });
 
   it("refuses to assign anyone to a finished task", () => {
@@ -100,18 +134,71 @@ describe("who may assign", () => {
       active: [],
       openSubtasks: [],
     };
-    expect(refusal(() => checkGrant(view, null, { agentId: A, role: "worker" }))).toBe("conflict");
+    expect(refusal(() => checkGrant(view, null, { agentId: A, role: "worker" }, ROLES, 0))).toBe(
+      "conflict",
+    );
+  });
+});
+
+describe("what a role's definition decides", () => {
+  it("refuses a worker a second task, the most a worker holds, and limits no coordinator", () => {
+    const view = open([]);
+    expect([
+      refusal(() => checkGrant(view, null, { agentId: A, role: "worker" }, ROLES, 0)),
+      refusal(() => checkGrant(view, null, { agentId: A, role: "worker" }, ROLES, 1)),
+      refusal(() => checkGrant(view, null, { agentId: A, role: "coordinator" }, ROLES, 9)),
+    ]).toEqual(["allowed", "conflict", "allowed"]);
+  });
+
+  it("hands on what the holder's definition grants, not what the built-in would", () => {
+    const flat = new RoleBook([
+      definition("coordinator", ["worker"]),
+      definition("worker", ["worker2"]),
+      definition("worker2", []),
+    ]);
+    const view = open([asgn(A, "coordinator"), asgn(B, "worker")]);
+    expect([
+      refusal(() => checkGrant(view, A, { agentId: C, role: "worker" }, flat, 0)),
+      refusal(() => checkGrant(view, B, { agentId: C, role: "worker2" }, flat, 0)),
+      refusal(() => checkGrant(view, A, { agentId: C, role: "worker2" }, flat, 0)),
+    ]).toEqual(["allowed", "allowed", "forbidden"]);
+  });
+
+  it("lets nobody grant a role no definition has, the human included", () => {
+    expect(
+      refusal(() => checkGrant(open([]), null, { agentId: A, role: "auditor" }, ROLES, 0)),
+    ).toBe("forbidden");
+  });
+
+  it("leaves an assignment whose role is no longer defined able to finish only its own part", () => {
+    const orphan = asgn(A, "auditor");
+    const view = open([orphan]);
+    expect([
+      refusal(() => checkGrant(view, A, { agentId: B, role: "worker" }, ROLES, 0)),
+      checkFinish(view, A, "done", false, ROLES),
+    ]).toEqual(["forbidden", { kind: "assignment", assignment: orphan }]);
+  });
+
+  it("makes a reviewer's done complete only its own part, as a worker's does", () => {
+    const reviewer = asgn(B, "reviewer");
+    const view = open([asgn(A, "lead"), reviewer]);
+    expect(checkFinish(view, B, "done", false, ROLES)).toEqual({
+      kind: "assignment",
+      assignment: reviewer,
+    });
   });
 });
 
 describe("who may delegate", () => {
   it("refuses a worker that would own the subtask it hands on", () => {
-    expect(refusal(() => checkDelegate(open([asgn(A, "worker")]), A, "worker"))).toBe("forbidden");
+    expect(refusal(() => checkDelegate(open([asgn(A, "worker")]), A, "worker", ROLES))).toBe(
+      "forbidden",
+    );
   });
 
   it("delegates from the lead's own assignment, so the subtask's worker answers to it", () => {
     const lead = asgn(A, "lead");
-    expect(checkDelegate(open([lead]), A, "worker")).toBe(lead.id);
+    expect(checkDelegate(open([lead]), A, "worker", ROLES)).toBe(lead.id);
   });
 });
 
@@ -130,33 +217,33 @@ describe("who may finish", () => {
   it("lets a lead finish the task, but makes a worker's done complete only its own part", () => {
     const worker = asgn(B, "worker");
     const view = open([asgn(A, "lead"), worker]);
-    expect([checkFinish(view, A, "done", false), checkFinish(view, B, "done", false)]).toEqual([
-      { kind: "task" },
-      { kind: "assignment", assignment: worker },
-    ]);
+    expect([
+      checkFinish(view, A, "done", false, ROLES),
+      checkFinish(view, B, "done", false, ROLES),
+    ]).toEqual([{ kind: "task" }, { kind: "assignment", assignment: worker }]);
   });
 
   it("refuses a worker that cancels, and an agent with no part in the task", () => {
     const view = open([asgn(B, "worker")], A);
     expect([
-      refusal(() => checkFinish(view, B, "cancelled", false)),
-      refusal(() => checkFinish(view, C, "done", false)),
+      refusal(() => checkFinish(view, B, "cancelled", false, ROLES)),
+      refusal(() => checkFinish(view, C, "done", false, ROLES)),
     ]).toEqual(["forbidden", "forbidden"]);
   });
 
   it("lets a coordinator mark the human's task done, but not cancel it", () => {
     const view = open([asgn(A, "coordinator")]);
     expect([
-      refusal(() => checkFinish(view, A, "done", false)),
-      refusal(() => checkFinish(view, A, "cancelled", false)),
-      refusal(() => checkFinish(view, null, "cancelled", false)),
+      refusal(() => checkFinish(view, A, "done", false, ROLES)),
+      refusal(() => checkFinish(view, A, "cancelled", false, ROLES)),
+      refusal(() => checkFinish(view, null, "cancelled", false, ROLES)),
     ]).toEqual(["allowed", "forbidden", "allowed"]);
   });
 
   it("refuses to finish over open subtasks unless they are cancelled with it", () => {
     const view = open([], A, ["task_sub"]);
-    expect(refusal(() => checkFinish(view, A, "done", false))).toBe("conflict");
-    expect(checkFinish(view, A, "done", true)).toEqual({ kind: "task" });
+    expect(refusal(() => checkFinish(view, A, "done", false, ROLES))).toBe("conflict");
+    expect(checkFinish(view, A, "done", true, ROLES)).toEqual({ kind: "task" });
   });
 });
 
@@ -173,7 +260,7 @@ const commands = fc.array(
         kind: fc.constant("grant" as const),
         caller: callers,
         agentId: fc.constantFrom(...AGENTS),
-        role: fc.constantFrom<Role>("coordinator", "lead", "worker"),
+        role: fc.constantFrom<Role>("coordinator", "lead", "worker", "reviewer"),
       }),
     },
     {
@@ -195,7 +282,7 @@ interface Granted extends ActiveAssignment {
 /** The assignment the rules let `c` grant from, or undefined when they refuse it. */
 function tryGrant(view: TaskView, c: Extract<Command, { kind: "grant" }>) {
   try {
-    return checkGrant(view, c.caller, c);
+    return checkGrant(view, c.caller, c, ROLES, 0);
   } catch (error) {
     if (error instanceof TaskRefused) return undefined;
     throw error;

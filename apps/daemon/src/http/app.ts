@@ -17,6 +17,7 @@ import {
   type AssignTaskResponse,
   type CreateTaskResponse,
   type TaskCommandResponse,
+  RolesResponse,
   type TaskDetail,
   CloseAgentRequest,
   CloseShellRequest,
@@ -76,7 +77,7 @@ import { AgentGone } from "../mailbox/mailbox.ts";
 import { ShellBusy, ShellOpenFailed, ShellsUnsettled, UnknownShell } from "../shells/lifecycle.ts";
 import { AttentionRefused } from "../attention/inbox.ts";
 import { NoticeClosed, NoticeRefused, type Viewer } from "../attention/notices.ts";
-import { MailTooLong, UnknownTask } from "../tasks/tasks.ts";
+import { MailTooLong, UnknownRole, UnknownTask } from "../tasks/tasks.ts";
 import { refusal, type Allowlists } from "./guard.ts";
 import { webPage } from "./web.ts";
 import {
@@ -110,6 +111,8 @@ export interface AppDeps {
   readonly web?: { readonly root: string };
   /** What `viewer` sees: the actions offered differ by who asks. */
   readonly state: (viewer: Viewer) => StateSnapshot;
+  /** The role definitions in force, and the role files skipped. */
+  readonly roles: () => RolesResponse;
   readonly launch: (req: LaunchAgentRequest) => Promise<LaunchAgentResponse>;
   readonly answer: (attentionId: string, req: AnswerAttentionRequest) => AnswerAttentionResponse;
   readonly reply: (attentionId: string, req: ReplyAttentionRequest) => ReplyAttentionResponse;
@@ -300,6 +303,8 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
 
   app.get("/v1/state", (c) => c.json(deps.state(viewerOf(c))));
 
+  app.get("/v1/roles", (c) => c.json(RolesResponse.parse(deps.roles())));
+
   app.post("/v1/agents", async (c) => {
     const body = LaunchAgentRequest.safeParse(await c.req.json().catch(() => undefined));
     if (!body.success) return invalid(c, body.error);
@@ -426,7 +431,9 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     if (err instanceof ShellOpenFailed) return fail(c, 502, "launch_failed", err.message);
     if (err instanceof ShellsUnsettled) return fail(c, 503, "unavailable", err.message);
     if (err instanceof UnknownTask) return fail(c, 404, "not_found", err.message);
-    if (err instanceof MailTooLong) return fail(c, 400, "invalid_request", err.message);
+    if (err instanceof MailTooLong || err instanceof UnknownRole) {
+      return fail(c, 400, "invalid_request", err.message);
+    }
     if (err instanceof NotAnAgent) return fail(c, 400, "invalid_request", err.message);
     if (err instanceof TaskRefused) {
       return err.code === "forbidden"

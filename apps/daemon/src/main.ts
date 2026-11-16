@@ -73,6 +73,7 @@ import {
   localName,
   type LanCertificate,
 } from "./tls/material.ts";
+import { Roles } from "./roles/roles.ts";
 import { Tasks } from "./tasks/tasks.ts";
 import { TerminalBudget } from "./terminals/budget.ts";
 import { nodePtySpawner } from "./pty/node-pty.ts";
@@ -123,15 +124,24 @@ const approvals = new Approvals(store);
 const inbox = new Inbox(store, approvals, (agentId, req) => mailbox.send(agentId, req));
 inbox.follow();
 mailbox.follow();
-const taskService = new Tasks(store, mailbox, (raised) => inbox.raise(raised), {
-  launch: (req, launchedBy) =>
-    launchSettled(
-      { store, environment, size: DEFAULT_SIZE, home: inputs.home, queue, budget },
-      req,
-      launchedBy,
-    ),
-  ...config.launchLimits,
-});
+// Read now, so a bad role file is reported at start, not first at a launch.
+const roles = new Roles(join(paths.config, "roles"));
+roles.current();
+const taskService = new Tasks(
+  store,
+  mailbox,
+  (raised) => inbox.raise(raised),
+  {
+    launch: (req, launchedBy) =>
+      launchSettled(
+        { store, environment, size: DEFAULT_SIZE, home: inputs.home, queue, budget },
+        req,
+        launchedBy,
+      ),
+    ...config.launchLimits,
+  },
+  () => roles.current().book,
+);
 taskService.watch();
 const tasks: TaskCommands = {
   create: (caller, req) => taskService.create(caller, req),
@@ -348,6 +358,10 @@ const commands = {
   runtime,
   state: (viewer) =>
     store.snapshot({ ...snapshotView, noticeActions: (n) => notices.actions(n, viewer) }),
+  roles: () => {
+    const { book, problems } = roles.current();
+    return { roles: [...book.roles], problems: [...problems] };
+  },
   launch: (req) =>
     launchAgent({ store, environment, size: DEFAULT_SIZE, home: inputs.home, queue, budget }, req),
   answer: (attentionId, req) => approvals.answer(attentionId, req),

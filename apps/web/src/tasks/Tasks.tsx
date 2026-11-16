@@ -1,5 +1,6 @@
 import { useEffect, useEffectEvent, useRef, useState, type SubmitEvent } from "react";
 import {
+  BUILTIN_ROLES,
   Role,
   TaskBrief,
   TaskTitle,
@@ -29,7 +30,7 @@ interface Opening {
   readonly failed: (e: unknown) => void;
 }
 
-const ROLES = Role.options;
+const ROLES = BUILTIN_ROLES;
 const BRIEF_MAX = TaskBrief.maxLength ?? undefined;
 const TITLE_MAX = TaskTitle.maxLength ?? undefined;
 

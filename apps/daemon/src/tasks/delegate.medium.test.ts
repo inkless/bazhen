@@ -122,17 +122,18 @@ describe("Tasks delegate", () => {
 
   it("refuses delegating to itself, or up to whoever gave it the work", async () => {
     const { tasks, coordinator, lead, worker, taskId } = await delegatedByLead();
-    const req = (agentId: string, key: string) => ({
+    const req = (agentId: string, key: string, role = "worker") => ({
       idempotencyKey: key,
       fromTaskId: taskId,
       agentId,
-      role: "worker" as const,
+      role,
       ...sub,
     });
+    // The worker already holds the one task a worker may, so it is asked down as a reviewer.
     expect([
       refusal(() => tasks.delegate(lead, req(lead, "self"))),
       refusal(() => tasks.delegate(lead, req(coordinator, "up"))),
-      refusal(() => tasks.delegate(lead, req(worker, "down"))),
+      refusal(() => tasks.delegate(lead, req(worker, "down", "reviewer"))),
     ]).toEqual(["forbidden", "forbidden", "allowed"]);
   });
 });

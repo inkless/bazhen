@@ -12,7 +12,7 @@ const task = {
 describe("task mail", () => {
   it("says who assigned the task and in what role, naming an agent by its name and id", () => {
     const id = newId("agent");
-    expect(assignedMail(task, "lead", { id, name: "BZ-127" })).toContain(
+    expect(assignedMail(task, "lead", ["worker"], { id, name: "BZ-127" })).toContain(
       `as its lead, by BZ-127 (${id}).`,
     );
   });

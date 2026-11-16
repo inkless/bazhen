@@ -12,6 +12,7 @@ import {
   HarnessId,
   EscalateResponse,
   Role,
+  RolesResponse,
   SendMessageResponse,
   StateSnapshot,
   TaskCommandResponse,
@@ -25,18 +26,19 @@ import type { Call } from "@bazhen/daemon/client";
 export const TASK_USAGE = `usage:
   bazhen agents
   bazhen whoami
+  bazhen roles
   bazhen rename <agent> <name>
   bazhen task list [--all]
   bazhen task show <task>
   bazhen task create --title <title> (--brief <text> | --brief-file <path>) [--parent <task>] [--assign <agent> [--role <role>]]
-  bazhen task assign <task> <agent> [--role coordinator|lead|worker]
+  bazhen task assign <task> <agent> [--role <role>]
   bazhen task unassign <task> <assignment>
   bazhen task done [<task>] [--note <text>] [--cascade]
   bazhen task cancel <task> [--note <text>] [--cascade]
   bazhen escalate <question> [--task <task>]
   bazhen send <agent> (<text> | --file <path>)
-  bazhen delegate (<agent> | --launch claude-code|codex [--dir <dir>] [--name <name>]) --title <title> (--brief <text> | --brief-file <path>) [--task <task>] [--role lead|worker]
-<agent> is an agent's name or id.`;
+  bazhen delegate (<agent> | --launch claude-code|codex [--dir <dir>] [--name <name>]) --title <title> (--brief <text> | --brief-file <path>) [--task <task>] [--role <role>]
+<agent> is an agent's name or id, and <role> one of the roles bazhen roles lists.`;
 
 /** A command line that doesn't say what to do; the message says why. */
 export class Usage extends Error {}
@@ -103,6 +105,7 @@ function parse(argv: readonly string[]) {
 const SEND_OPTIONS: ReadonlySet<string> = new Set(["file", "home", "port"]);
 
 const state: Call<StateSnapshot> = { method: "GET", path: "/v1/state", reply: StateSnapshot };
+const rolesCall: Call<RolesResponse> = { method: "GET", path: "/v1/roles", reply: RolesResponse };
 
 /** Builds the verb `argv` names (the words after `bazhen`), or throws Usage. */
 export function taskVerb(argv: readonly string[], ctx: Context): Verb {
@@ -121,8 +124,7 @@ export function taskVerb(argv: readonly string[], ctx: Context): Verb {
   };
   const role = (fallback: Role) => {
     const parsed = Role.safeParse(values.role ?? fallback);
-    if (!parsed.success)
-      throw new Usage(`--role is coordinator, lead or worker, not ${values.role}`);
+    if (!parsed.success) throw new Usage(`--role is a role bazhen roles lists, not ${values.role}`);
     return parsed.data;
   };
   const post = <T>(path: string, reply: Call<T>["reply"], body: object, print: (r: T) => string) =>
@@ -144,6 +146,7 @@ export function taskVerb(argv: readonly string[], ctx: Context): Verb {
     return ref;
   };
   if (name === "agents") return verb(state, listAgents);
+  if (name === "roles") return verb(rolesCall, listRoles);
   if (name === "whoami") {
     const self = ctx.agentId;
     if (self === undefined) throw new Usage("whoami runs inside an agent Bazhen launched");
@@ -330,6 +333,21 @@ export function listAgents(s: StateSnapshot): string {
       [a.name, a.id, a.harness, a.state, a.project, a.cwd].filter((f) => f !== "").join("  "),
     )
     .join("\n");
+}
+
+/** Each role with what it hands on and limits, then each role file that was skipped and why. */
+export function listRoles({ roles, problems }: RolesResponse): string {
+  const lines = roles.map((r) =>
+    [
+      `${r.key}  ${r.title}`,
+      r.grants.length === 0 ? "grants nothing" : `grants ${r.grants.join(", ")}`,
+      ...(r.singlePerTask ? ["one per task"] : []),
+      ...(r.maxActiveTasks === null ? [] : [`at most ${r.maxActiveTasks} task(s) at once`]),
+      ...(r.description === "" ? [] : [r.description]),
+    ].join("  "),
+  );
+  const skipped = problems.map((p) => `skipped ${p.file}: ${p.problem}`);
+  return [...lines, ...skipped].join("\n");
 }
 
 /**

@@ -9,7 +9,7 @@ import {
   type Caller,
 } from "@bazhen/core";
 import { FakeRuntime } from "@bazhen/core/testing";
-import { PROTOCOL_VERSION, type LaunchAgentRequest } from "@bazhen/protocol";
+import { PROTOCOL_VERSION, RolesResponse, type LaunchAgentRequest } from "@bazhen/protocol";
 import { EnvironmentUnavailable, ServerUnconfirmed, StaleGeneration } from "../agents/lifecycle.ts";
 import { AttentionClosed } from "../mailbox/approvals.ts";
 import { AgentGone } from "../mailbox/mailbox.ts";
@@ -64,6 +64,21 @@ const deps: AppDeps = {
   schemaVersion: () => 1,
   runtime,
   allow: { hosts: ["127.0.0.1:7900"], origins: ["http://127.0.0.1:7900"] },
+  roles: () => ({
+    roles: [
+      {
+        key: "worker",
+        title: "Worker",
+        description: "",
+        grants: [],
+        singlePerTask: false,
+        maxActiveTasks: 1,
+        prompt: "Do the work.",
+        source: "builtin",
+      },
+    ],
+    problems: [{ file: "/home/u/.config/bazhen/roles/lead.md", problem: "no prompt" }],
+  }),
   state: () => ({
     epoch: "e1",
     eventId: 3,
@@ -459,6 +474,18 @@ describe("HTTP task routes", () => {
   it("refuses a socket caller that gives its name in place of its id", async () => {
     const res = await createTask(socket, "named", { "bazhen-agent-id": "BZ-127" });
     expect(res.status).toBe(400);
+  });
+
+  it("lists the roles in force and the role files skipped, to an agent on the socket too", async () => {
+    const res = await socket.request("/v1/roles", {
+      headers: { "bazhen-agent-id": newId("agent") },
+    });
+    const body = RolesResponse.parse(await res.json());
+    expect([res.status, body.roles.map((r) => r.key), body.problems.length]).toEqual([
+      200,
+      ["worker"],
+      1,
+    ]);
   });
 
   it("answers a read of a task it doesn't have with not found", async () => {

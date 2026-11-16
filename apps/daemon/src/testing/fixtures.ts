@@ -18,6 +18,7 @@ import {
   type AgentSessionId,
   type AgentRefs,
   type EnvironmentAdapter,
+  RoleBook,
   type Resumes,
 } from "@bazhen/core";
 import { launchAgent, launchSettled, localEnvironmentId } from "../agents/launch.ts";
@@ -25,6 +26,7 @@ import { AgentQueue } from "../agents/queue.ts";
 import { upgrades, type UpgradeRoute } from "../http/upgrades.ts";
 import { Mailbox } from "../mailbox/mailbox.ts";
 import type { Raised } from "../attention/inbox.ts";
+import { builtinRoles } from "../roles/roles.ts";
 import { Tasks } from "../tasks/tasks.ts";
 import { TerminalBudget, type TerminalAdmission } from "../terminals/budget.ts";
 import { Store, type PairedFrom, type SnapshotView } from "../store/store.ts";
@@ -327,9 +329,13 @@ export async function taskFleet(
       return newId("attn");
     },
     launcher,
+    () => BUILTIN_BOOK,
   );
   return { store, mailbox, tasks, raised, launcher, coordinator, lead, worker };
 }
+
+/** The roles Bazhen ships, as a daemon with no role files of the user's has them. */
+export const BUILTIN_BOOK = new RoleBook(builtinRoles());
 
 const SENT = ["queued", "offered", "emitted", "seen", "delivered"] as const;
 

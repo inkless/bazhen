@@ -4,7 +4,8 @@ import { TuiTheme } from "./theme.ts";
 import { AttachmentMode, EnvironmentKind, Id } from "./ids.ts";
 import { ApprovalDecision, AttentionCloseReason, AttentionKind } from "./mail.ts";
 import { NoticeCloseReason, NoticeCloser, NoticeDevice } from "./notices.ts";
-import { Role, TaskBrief, TaskOutcome, TaskTitle } from "./tasks.ts";
+import { Role } from "./roles.ts";
+import { TaskBrief, TaskOutcome, TaskTitle } from "./tasks.ts";
 import { ProtocolVersion } from "./version.ts";
 
 const queued = z.object({

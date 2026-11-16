@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { newId, TaskRefused } from "@bazhen/core";
+import { newId, resolveRoles, TaskRefused } from "@bazhen/core";
 import { recordClosed } from "../agents/lifecycle.ts";
 import { UnknownAgent, type Store } from "../store/store.ts";
 import { inbox, settled, taskFleet, testView } from "../testing/fixtures.ts";
-import { MailTooLong } from "./tasks.ts";
+import { builtinRoles } from "../roles/roles.ts";
+import { MailTooLong, Tasks, UnknownRole } from "./tasks.ts";
 
 const brief = { title: "Fix the build", brief: "It fails on Node 26." };
 
@@ -202,11 +203,12 @@ describe("Tasks finish", () => {
   });
 
   it("finishes over open subtasks only when cancelling them with it, and tells their workers", async () => {
-    const { store, tasks, coordinator, worker, taskId } = await staffed();
+    const { store, tasks, coordinator, lead, taskId } = await staffed();
     const sub = tasks.create(coordinator, { idempotencyKey: "s", ...brief, parentTaskId: taskId });
+    // The lead, since the worker already holds the one task a worker may.
     tasks.assign(coordinator, sub.taskId, {
       idempotencyKey: "sa",
-      agentId: worker,
+      agentId: lead,
       role: "worker",
     });
     const finish = { idempotencyKey: "f", outcome: "done" as const };
@@ -216,7 +218,7 @@ describe("Tasks finish", () => {
       "cancelled",
       "done",
     ]);
-    expect(inbox(store, worker)).toContainEqual(expect.stringContaining(`Task ${sub.taskId}`));
+    expect(inbox(store, lead)).toContainEqual(expect.stringContaining(`Task ${sub.taskId}`));
   });
 
   it("refuses an agent's cascade that would cancel a subtask the human owns, naming it", async () => {
@@ -235,5 +237,61 @@ describe("Tasks finish", () => {
     tasks.finish(null, taskId, { idempotencyKey: "f", outcome: "cancelled" });
     const req = { idempotencyKey: "s", ...brief, parentTaskId: taskId };
     expect(refusal(() => tasks.create(null, req))).toBe("conflict");
+  });
+});
+
+describe("roles, as their definitions say", () => {
+  it("refuses a worker a second task while it holds one, and takes it once the first is done", async () => {
+    const { tasks, worker } = await taskFleet();
+    const assign = { agentId: worker, role: "worker" as const };
+    const first = tasks.create(null, { idempotencyKey: "c1", ...brief, assign });
+    const second = () => tasks.create(null, { idempotencyKey: "c2", ...brief, assign });
+    expect(refusal(second)).toBe("conflict");
+    tasks.finish(worker, first.taskId, { idempotencyKey: "d", outcome: "done" });
+    expect(refusal(second)).toBe("allowed");
+  });
+
+  it("counts only an agent's tasks in the same role toward that role's limit", async () => {
+    const { tasks, lead } = await taskFleet();
+    const as = (role: string, key: string) => () =>
+      tasks.create(null, { idempotencyKey: key, ...brief, assign: { agentId: lead, role } });
+    as("lead", "c1")();
+    expect(refusal(as("worker", "c2"))).toBe("allowed");
+  });
+
+  it("refuses a role no definition has, naming where the roles are listed", async () => {
+    const { tasks, worker } = await taskFleet();
+    const assign = { agentId: worker, role: "auditor" };
+    expect(() => tasks.create(null, { idempotencyKey: "c", ...brief, assign })).toThrow(
+      new UnknownRole("auditor"),
+    );
+  });
+
+  it("hands on what the user's definition grants, and says so in the brief", async () => {
+    const f = await taskFleet();
+    const lead = {
+      key: "lead",
+      title: "Lead",
+      description: "",
+      grants: ["reviewer"],
+      singlePerTask: true,
+      maxActiveTasks: null,
+      prompt: "Lead.",
+      source: "user" as const,
+    };
+    const custom = resolveRoles(builtinRoles(), [{ file: "lead.md", role: lead }]).book;
+    const tasks = new Tasks(
+      f.store,
+      f.mailbox,
+      () => newId("attn"),
+      f.launcher,
+      () => custom,
+    );
+    const assign = { agentId: f.lead, role: "lead" };
+    const { taskId } = tasks.create(null, { idempotencyKey: "c", ...brief, assign });
+    const give = (role: string) => () =>
+      tasks.assign(f.lead, taskId, { idempotencyKey: role, agentId: f.worker, role });
+    expect([refusal(give("worker")), refusal(give("reviewer"))]).toEqual(["forbidden", "allowed"]);
+    expect(inbox(f.store, f.lead).at(-1)).toContain("as a reviewer");
   });
 });

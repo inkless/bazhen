@@ -4,7 +4,7 @@ import { recordClosed } from "../agents/lifecycle.ts";
 import { Inbox } from "../attention/inbox.ts";
 import { Approvals } from "../mailbox/approvals.ts";
 import type { Store } from "../store/store.ts";
-import { taskFleet, testView } from "../testing/fixtures.ts";
+import { BUILTIN_BOOK, taskFleet, testView } from "../testing/fixtures.ts";
 import { Tasks } from "./tasks.ts";
 
 const brief = { title: "Fix the build", brief: "It fails on Node 26." };
@@ -79,7 +79,13 @@ async function withInbox() {
   const f = await taskFleet();
   const box = new Inbox(f.store, new Approvals(f.store), (to, req) => f.mailbox.send(to, req));
   box.follow();
-  const tasks = new Tasks(f.store, f.mailbox, (r) => box.raise(r), f.launcher);
+  const tasks = new Tasks(
+    f.store,
+    f.mailbox,
+    (r) => box.raise(r),
+    f.launcher,
+    () => BUILTIN_BOOK,
+  );
   const open = () =>
     f.store
       .snapshot(testView)
@@ -120,9 +126,17 @@ describe("escalations in the daemon's inbox", () => {
 
   it("refuses a second open escalation about the same task, but takes one about another", async () => {
     const { tasks, worker } = await withInbox();
-    const assign = { agentId: worker, role: "worker" as const };
-    const first = tasks.create(null, { idempotencyKey: "c1", ...brief, assign });
-    const second = tasks.create(null, { idempotencyKey: "c2", ...brief, assign });
+    const first = tasks.create(null, {
+      idempotencyKey: "c1",
+      ...brief,
+      assign: { agentId: worker, role: "worker" },
+    });
+    // A worker holds one task, so its second is as a reviewer.
+    const second = tasks.create(null, {
+      idempotencyKey: "c2",
+      ...brief,
+      assign: { agentId: worker, role: "reviewer" },
+    });
     tasks.escalate(worker, { idempotencyKey: "e1", summary: "A?", taskId: first.taskId });
     expect([
       refusal(() =>
