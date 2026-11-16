@@ -147,7 +147,13 @@ impl Session {
         #[cfg(test)]
         bazhen_test_signal::require_sandbox().unwrap();
         let mut sweep = Sweep::default();
-        for pid in candidates {
+        // The leader first, so it can't see its jobs end first and act on it: a shell's `wait`
+        // returns, a supervisor starts them again.
+        let mut pids: Vec<Pid> = candidates.into_iter().collect();
+        if let Some(at) = pids.iter().position(|pid| *pid == self.0) {
+            pids.swap(0, at);
+        }
+        for pid in pids {
             match os::visit(pid, self.0, signal) {
                 Member::Outside => {}
                 Member::Reached => sweep.reached.push(pid),
@@ -328,8 +334,6 @@ pub fn supported() -> io::Result<()> {
 mod os {
     use std::io;
 
-    use std::os::fd::AsFd as _;
-
     use rustix::io::Errno;
     use rustix::process::{Pid, PidfdFlags, Signal, getpid, pidfd_open};
 
@@ -337,7 +341,7 @@ mod os {
 
     pub(super) fn supported() -> io::Result<()> {
         match pidfd_open(getpid(), PidfdFlags::empty()) {
-            Ok(own) => crate::linux::may_send_through(own.as_fd()).map_err(|error| {
+            Ok(_) => crate::linux::may_send_through_a_pidfd().map_err(|error| {
                 io::Error::other(format!(
                     "pidfd_send_signal, which the holder needs to end a terminal's processes \
                      without reaching another's, is refused: {error}"
@@ -563,6 +567,18 @@ mod tests {
         assert_eq!(sorted(sweep.reached), sorted(vec![leader.child.pid(), job]));
         leader.wait_exited();
         until("the job is gone", || leader.session().count().is_empty());
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn a_pass_signals_the_leader_before_its_jobs_whatever_order_it_lists_them_in() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let leader = Leader::start(&format!("trap '' HUP; {JOB}"));
+        let job = job_pid(&leader);
+        let sweep = leader
+            .session()
+            .pass_among([job, leader.child.pid()], Some(Signal::KILL));
+        assert_eq!(sweep.reached, vec![leader.child.pid(), job]);
     }
 
     #[test]

@@ -1547,6 +1547,22 @@ describe("tests that signal processes they didn't start", () => {
     ).toEqual(["crates/h/tests/binary/main.rs:2", "crates/h/tests/binary/socket.rs:1"]);
   });
 
+  it("must be marked when its body sweeps a session, ends one, retires one or respawns", () => {
+    const bodies = [
+      "leader.session().count();",
+      "session.pass_among([pid], None);",
+      "holder.retire(child);",
+      "let e = Ending::start(session, now);",
+      "let s = Session::led_by(pid);",
+      "holder.respawn(pty, child, generation);",
+      "signal_group(pid, Signal::CONT);",
+    ];
+    const source = bodies.map((body, i) => `#[test]\nfn t${String(i)}() { ${body} }`).join("\n");
+    expect(unmarked({ "crates/h/src/session.rs": source })).toEqual(
+      bodies.slice(0, -1).map((_, i) => `crates/h/src/session.rs:${String(2 * i + 1)}`),
+    );
+  });
+
   it("must be marked anywhere when its own body closes a child or sweeps the ledger", () => {
     const source = [
       "#[test]\nfn a() { running.child.close(group, now); }",

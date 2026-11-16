@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   GATES,
+  SHIPPED_LINT,
   configFailures,
   gateEnv,
   main,
@@ -107,6 +108,21 @@ describe("GATES", () => {
           '--config build.rustc="rustc"',
       );
     }
+  });
+
+  it("lints the holder again as it ships: its lib and binary, with no feature", () => {
+    expect(SHIPPED_LINT.slice(0, 7)).toEqual([
+      "cargo-clippy",
+      "clippy",
+      "--quiet",
+      "-p",
+      "bazhen-holder",
+      "--lib",
+      "--bins",
+    ]);
+    expect(SHIPPED_LINT).not.toContain("--all-targets");
+    expect(SHIPPED_LINT.join(" ")).not.toMatch(/features/);
+    expect(SHIPPED_LINT.slice(-3)).toEqual(["--", "-D", "warnings"]);
   });
 
   it("lints and tests every feature, so no code hides behind one", () => {

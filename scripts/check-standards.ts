@@ -442,7 +442,8 @@ const CFG_ALLOWED: Record<string, string> = {
   test: "nextest and clippy's --all-targets build the test configuration",
   feature:
     "bazhen-holder's sandbox-tripwire is on in every test build, by its dev-dependency on " +
-    "itself, and off in the holder clippy builds alone; CFG_VALUES holds it to that one",
+    "itself, which the workspace's clippy and nextest build; and off in the holder as it ships, " +
+    "which lint checks too (SHIPPED_LINT in scripts/cargo-gate.ts). CFG_VALUES holds it to that one",
   target_os:
     "`check` builds Linux and `rust-macos` builds macOS, each running clippy and nextest; " +
     "CFG_VALUES holds it to those two",
@@ -1968,13 +1969,14 @@ function closingBrace(code: string, from: number): number {
 }
 
 // What signals processes a test didn't start: a holder, which signals its child's whole
-// session when it closes; a child's close or signal; a session's sweep, made by an ending, a
-// retirement or a pass over a session's processes; and the ledger sweep, which kills holders. A
+// session when it closes; a child's close or signal; a respawn, which retires the old session; a
+// session's sweep, made by an ending, a retirement or a pass over a session's processes; and the
+// ledger sweep, which kills holders. A
 // send through the guard alone isn't one: off a disposable host, a test build's guard sends
 // nothing.
 const HOLDER_BINARY = "CARGO_BIN_EXE_bazhen-holder";
 const SIGNALLING_CALL =
-  /\.\s*(?:close(?:_step)?|signal)\s*\(|\bsweep\s*\(|\bsession\s*\(\s*\)\s*\.|\b(?:pass_among|retire)\s*\(|\bEnding\s*::/;
+  /\.\s*(?:close(?:_step)?|signal|respawn)\s*\(|\bsweep\s*\(|\bsession\s*\(\s*\)\s*\.|\b(?:pass_among|retire)\s*\(|\bEnding\s*::|\bSession\s*::\s*led_by\b/;
 
 /** A Rust test file's test binary: `tests/<name>.rs`, or every file under `tests/<name>/`. */
 const testBinary = (file: string) => /^(crates\/[^/]+\/tests\/[^/.]+)/.exec(file)?.[1];

@@ -141,7 +141,7 @@ const DISPOSABLE_HOST_MARKER: &str = "/etc/bazhen-disposable-host";
 /// Refuses a send off a disposable host, in a test build: the last check before every send. The
 /// host qualifies by the marker, a plain file, not a link, that root owns.
 #[cfg(feature = "sandbox-tripwire")]
-fn tripwire() -> Result<(), Refused> {
+pub(crate) fn tripwire() -> Result<(), Refused> {
     use std::os::unix::fs::MetadataExt as _;
 
     match std::fs::symlink_metadata(DISPOSABLE_HOST_MARKER) {

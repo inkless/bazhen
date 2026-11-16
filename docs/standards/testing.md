@@ -234,7 +234,8 @@ A test owns everything it touches and leaves nothing behind.
   macOS) and refuses 0, ±1 and any number ≤ 1, the holder, its group, its session and its
   ancestors, a leader that isn't the holder's own unreaped child, and any process outside that
   leader's session. In a test build it also refuses to send off a disposable host (its
-  `sandbox-tripwire` feature). The one process
+  `sandbox-tripwire` feature), and a test build of the holder refuses to start there, with exit
+  code 9. The one process
   started to send a signal is `systemctl --user kill` of the cap's own scope
   (`packages/host-guard/src/cap.ts`). The check is defence in depth: it reads text, so the
   chokepoints' own refusals are what stop a stray signal. It fails closed on a command line: a kill

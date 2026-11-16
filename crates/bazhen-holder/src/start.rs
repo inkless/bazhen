@@ -61,6 +61,9 @@ pub enum StartError {
     Bind(#[from] BindError),
     #[error("this system can't end a terminal's processes safely: {0}")]
     Unsupported(#[source] io::Error),
+    /// A test build of the holder, started off a disposable host, where it would send nothing.
+    #[error("this is a test build of the holder, which runs only on a disposable host")]
+    TestBuildOffSandbox,
 }
 
 impl StartError {
@@ -73,6 +76,7 @@ impl StartError {
             Self::Bind(BindError::NotPrivate(_)) => 6,
             Self::Bind(BindError::Taken(_)) => 7,
             Self::Unsupported(_) => 8,
+            Self::TestBuildOffSandbox => 9,
         }
     }
 }
@@ -113,6 +117,8 @@ pub fn run() -> ExitCode {
 }
 
 fn start(stdin: &mut impl Read) -> Result<(Holder<Screen>, Server), StartError> {
+    #[cfg(feature = "sandbox-tripwire")]
+    crate::guard::tripwire().map_err(|_| StartError::TestBuildOffSandbox)?;
     let spec = read_spec(stdin)?;
     become_session_leader()?;
     std::env::set_current_dir("/").map_err(StartError::Setup)?;
@@ -432,7 +438,8 @@ mod tests {
             StartError::Bind(BindError::NotPrivate(String::new())).exit_code(),
             StartError::Bind(BindError::Taken(String::new())).exit_code(),
             StartError::Unsupported(io::Error::other("x")).exit_code(),
+            StartError::TestBuildOffSandbox.exit_code(),
         ];
-        assert_eq!(codes, [1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(codes, [1, 2, 3, 4, 5, 6, 7, 8, 9]);
     }
 }
