@@ -48,6 +48,8 @@ rust_2018_idioms = { level = "deny", priority = -1 }
 pedantic = { level = "deny", priority = -1 }
 # Fires on nearly every pure function. `#[must_use]` goes where ignoring the value is a bug.
 must_use_candidate = "allow"
+# Fires on a wire message with more than three booleans, which are the protocol's own fields.
+struct_excessive_bools = "allow"
 unwrap_used = "forbid"
 expect_used = "forbid"
 panic = "forbid"
