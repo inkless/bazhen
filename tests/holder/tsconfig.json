@@ -17,9 +17,11 @@
     "../support/holder-spawn.ts",
     "../support/osc-probe.ts",
     "../support/ptys.ts",
-    "../support/setup-error.ts"
+    "../support/setup-error.ts",
+    "../support/stand-in-daemon.ts"
   ],
   "references": [
+    { "path": "../../packages/core" },
     { "path": "../../packages/host-guard" },
     { "path": "../../packages/protocol" },
     { "path": "../../packages/runtime-holder" }

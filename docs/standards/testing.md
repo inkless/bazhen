@@ -167,6 +167,14 @@ the branch, since a partial verdict would read as a pass. Inside the sandbox it 
 tests ignored as signalling, which a plain nextest run skips. Stryker-style mutation
 scores are not a gate, because their cost and equivalent mutants make the number meaningless.
 
+The chaos suite, `tests/holder/chaos.test.ts`, deals holders the faults of a daemon's machine
+through a stand-in daemon, a process of its own running `HolderRuntime`
+(`tests/support/stand-in-daemon.ts`): killed with -9 under floods, stopped with SIGSTOP, a holder
+killed, sockets deleted, out of descriptors. Its waits are for events, never for time to pass,
+and each also stops once what it waits for can't happen, so a fault fails on the assertion it
+breaks rather than on a timeout. Its floods are `seq` output, so every byte at every offset is
+known and each attach is checked whole.
+
 ## Memory and time caps
 
 A test that runs away with memory takes more than its own run. Past the machine's memory the

@@ -42,6 +42,7 @@
     "deny": "node scripts/cargo-gate.ts deny"
   },
   "devDependencies": {
+    "@bazhen/core": "workspace:*",
     "@bazhen/host-guard": "workspace:*",
     "@bazhen/protocol": "workspace:*",
     "@bazhen/runtime-holder": "workspace:*",
