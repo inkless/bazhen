@@ -48,7 +48,7 @@ describe("bazhen attach, on a holder terminal", () => {
     const view = await daemon.socketView(terminalId, "interactive");
     await view.drive();
     view.type("printf 'viewed-%s\\n' 7\r");
-    await waitUntil(() => direct.shown().includes("viewed-7"), "the web's command, seen directly");
+    await direct.shows("viewed-7", "the web's command, seen directly");
     direct.type(DETACH);
     const code = await direct.exited;
     view.close();
@@ -100,7 +100,7 @@ describe("bazhen attach, straight to the holder while the daemon is down", () =>
     const direct = attachInScript(daemon, terminalId);
     left.push(direct.leave);
     direct.type("printf 'straight-%s\\n' 5\r");
-    await waitUntil(() => direct.shown().includes("straight-5"), "the command's output");
+    await direct.shows("straight-5", "the command's output");
     await daemon.restart();
     expect([
       await direct.exited,
