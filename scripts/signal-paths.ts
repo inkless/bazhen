@@ -743,10 +743,7 @@ export const ALLOWED_SIGNALS: Readonly<Record<string, readonly AllowedSignal[]>>
     ),
   ],
   "tests/api/daemon.ts": [
-    timedOut(
-      /execFile\(\s*process\.execPath,\s*\[join\(repo, "apps\/cli\/src\/main\.ts"\), \.\.\.args\],\s*\{ env, timeout: 30_000 \}/,
-      "the bazhen CLI",
-    ),
+    timedOut(/execFile\(CLI, args, \{ env, timeout: 30_000 \}/, "the bazhen CLI"),
     timedOut(
       /execFile\(\s*process\.execPath,\s*\[join\(repo, "apps\/daemon\/src\/main\.ts"\)\],\s*\{ env: \{ \.\.\.this\.env, BAZHEN_PORT: String\(this\.port\) \}, timeout: 30_000 \}/,
       "a second daemon, which should refuse to start",
