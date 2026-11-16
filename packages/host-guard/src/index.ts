@@ -80,6 +80,7 @@ export {
   type Mode,
   type Verdict,
 } from "./cap.ts";
+export { parseLsofCwds, processCwds } from "./cwd.ts";
 export {
   hostPtyReader,
   machinePtySource,

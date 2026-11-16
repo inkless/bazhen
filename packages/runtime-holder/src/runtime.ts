@@ -1,4 +1,4 @@
-import { readdir, readlink, rm } from "node:fs/promises";
+import { readdir, rm } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
   assertSameGeneration,
@@ -28,6 +28,7 @@ import {
   holdersDir,
   PasteRefused,
   pasteTextRefusal,
+  processCwds,
   readProcess,
   rebindHolderSocket,
   START_SKEW_S,
@@ -446,18 +447,21 @@ export class HolderRuntime implements RuntimeAdapter {
     const live = (await this.inventory()).filter(
       (e) => e.exit === null && terminalIds.has(e.ref.terminalId),
     );
-    const read = await Promise.all(
-      live.map(async ({ ref }) => {
-        try {
-          const foreground = await this.foreground(ref);
-          const cwd = await readlink(`/proc/${ref.locator.childPid}/cwd`).catch(() => null);
-          return [{ ref, ...foreground, cwd }];
-        } catch {
-          return [];
-        }
-      }),
-    );
-    return read.flat();
+    const [read, cwds] = await Promise.all([
+      Promise.all(
+        live.map(async ({ ref }) => {
+          try {
+            return [{ ref, ...(await this.foreground(ref)) }];
+          } catch {
+            return [];
+          }
+        }),
+      ),
+      processCwds(live.map(({ ref }) => Number(ref.locator.childPid))),
+    ]);
+    return read
+      .flat()
+      .map((f) => ({ ...f, cwd: cwds.get(Number(f.ref.locator.childPid)) ?? null }));
   }
 
   async unlink(ref: RuntimeRef): Promise<void> {
