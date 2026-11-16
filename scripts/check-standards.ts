@@ -691,6 +691,7 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen/src/attach/attachment.rs::Attachment::frame": "attach",
   "crates/bazhen-protocol/src/wire.rs::well_formed": "wire",
   "crates/bazhen-protocol/src/wire.rs::from_slice": "wire",
+  "crates/bazhen-protocol/src/input.rs::has_keystrokes": "input",
   "crates/bazhen-hook/src/pane_title.rs::body": "pane_title",
   "crates/bazhen-hook/src/shell_report.rs::report_body": "shell_report",
   "crates/bazhen-hook/src/shell_report.rs::micros": "shell_report",
@@ -921,6 +922,28 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/server.rs::send": "encodes and queues a reply; reads no bytes",
   "crates/bazhen-holder/src/server.rs::serve":
     "answers requests FrameDecoder decoded, which the proto crate's frame target fuzzes",
+  "crates/bazhen-protocol/src/input.rs::without_replies":
+    "a step of has_keystrokes, which the input target fuzzes",
+  "crates/bazhen-protocol/src/input.rs::strip":
+    "a step of has_keystrokes, which the input target fuzzes",
+  "crates/bazhen-protocol/src/input.rs::find":
+    "a step of has_keystrokes, which the input target fuzzes",
+  "crates/bazhen-protocol/src/input.rs::At::peek":
+    "a step of has_keystrokes, which the input target fuzzes",
+  "crates/bazhen-protocol/src/input.rs::At::byte":
+    "a step of has_keystrokes, which the input target fuzzes",
+  "crates/bazhen-protocol/src/input.rs::At::one_of":
+    "a step of has_keystrokes, which the input target fuzzes",
+  "crates/bazhen-protocol/src/input.rs::At::many":
+    "a step of has_keystrokes, which the input target fuzzes",
+  "crates/bazhen-protocol/src/input.rs::At::digits":
+    "a step of has_keystrokes, which the input target fuzzes",
+  "crates/bazhen-protocol/src/input.rs::At::any":
+    "a step of has_keystrokes, which the input target fuzzes",
+  "crates/bazhen-protocol/src/input.rs::event_report":
+    "a step of has_keystrokes, which the input target fuzzes",
+  "crates/bazhen-protocol/src/input.rs::reply":
+    "a step of has_keystrokes, which the input target fuzzes",
   "crates/bazhen/src/attach/attachment.rs::Attachment::declared":
     "reads whether an epoch was declared; parses nothing",
   "crates/bazhen/src/attach/attachment.rs::Attachment::declare":

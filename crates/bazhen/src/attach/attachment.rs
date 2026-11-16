@@ -2,6 +2,7 @@
 //! typed, a frame the daemon sent, the terminal resized. No I/O: each step returns what to do.
 
 use bazhen_protocol::id::PROTOCOL_ID;
+use bazhen_protocol::input::has_keystrokes;
 use bazhen_protocol::stream::{AttachmentMode, EndedReason, StreamClientFrame, StreamServerFrame};
 
 /// `Ctrl-\`: twice in a row detaches.
@@ -152,7 +153,9 @@ impl Attachment {
             let input = (!typed.is_empty()).then_some(Effect::Input(typed));
             return input.into_iter().chain(end).collect();
         }
-        if typed.is_empty() {
+        // As the daemon reads input from a view that doesn't drive: the terminal's replies and its
+        // focus and mouse reports go nowhere, and only keystrokes ask for the lease.
+        if !has_keystrokes(&typed) {
             return end.into_iter().collect();
         }
         let room = HELD_MAX.saturating_sub(self.held.len());
@@ -239,8 +242,8 @@ impl Attachment {
         let dropped = std::mem::take(&mut self.dropped);
         if dropped > 0 {
             effects.push(Effect::Note(format!(
-                "{dropped} bytes typed before the terminal was attached were dropped: more than a \
-                 paste"
+                "{dropped} bytes typed before this attachment could send them were dropped: more \
+                 than a paste"
             )));
         }
         effects
@@ -362,6 +365,44 @@ mod tests {
         assert_eq!(after, [Effect::Input(b"x".to_vec())]);
         assert_eq!(lost, [Effect::Send(StreamClientFrame::Epoch { epoch: 5 })]);
         assert_eq!(again, [Effect::Send(StreamClientFrame::Engage)]);
+    }
+
+    #[test]
+    fn neither_asks_for_the_lease_nor_holds_reports_and_replies_while_another_view_drives() {
+        let mut s = Attachment::default();
+        s.frame(r#"{"type":"lease","driver":false,"epoch":3}"#);
+        s.frame(ATTACHED);
+        let focus = s.keys(b"\x1b[I\x1b[O");
+        let mouse = s.keys(b"\x1b[<35;10;5M");
+        let device = s.keys(b"\x1b[?62;22c");
+        let key = s.keys(b"q");
+        let taken = s.frame(r#"{"type":"lease","driver":true,"epoch":4}"#);
+        assert_eq!([focus, mouse, device], [vec![], vec![], vec![]]);
+        assert_eq!(key, [Effect::Send(StreamClientFrame::Engage)]);
+        assert_eq!(
+            taken,
+            [
+                Effect::Send(StreamClientFrame::Epoch { epoch: 4 }),
+                Effect::Input(b"q".to_vec())
+            ]
+        );
+    }
+
+    #[test]
+    fn asks_again_when_the_lease_goes_to_another_view_while_it_asks() {
+        let mut s = Attachment::default();
+        s.frame(r#"{"type":"lease","driver":false,"epoch":3}"#);
+        s.frame(ATTACHED);
+        let asked = s.keys(b"q");
+        let other = s.frame(r#"{"type":"lease","driver":false,"epoch":4}"#);
+        assert_eq!(asked, [Effect::Send(StreamClientFrame::Engage)]);
+        assert_eq!(
+            other,
+            [
+                Effect::Send(StreamClientFrame::Epoch { epoch: 4 }),
+                Effect::Send(StreamClientFrame::Engage)
+            ]
+        );
     }
 
     #[test]
