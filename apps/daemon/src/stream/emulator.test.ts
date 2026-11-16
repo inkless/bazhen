@@ -141,11 +141,17 @@ describe("the daemon's attach snapshot", () => {
     expect(lines(browser)[0]).toBe("old 500");
   });
 
-  it("keeps at most the history its terminal keeps", async () => {
-    const history = Array.from({ length: 80 }, (_, i) => `old ${i}`).join("\n");
-    const browser = await replayed("now", history, 50);
-    expect(lines(browser)[0]).toBe("old 30");
-  });
+  it.each([
+    ["less", 80, 50, "old 30"],
+    ["more", HISTORY_LINES + 500, HISTORY_LINES + 500, "old 0"],
+  ])(
+    "keeps the history its terminal keeps, %s than the default",
+    async (_what, scrolled, historyLines, first) => {
+      const history = Array.from({ length: scrolled }, (_, i) => `old ${i}`).join("\n");
+      const browser = await replayed("now", history, historyLines);
+      expect(lines(browser)[0]).toBe(first);
+    },
+  );
 
   it("puts the cursor back where the program left it", async () => {
     expect(cursor(await replayed("ab\r\ncde\x1b[1;2H"))).toEqual([1, 0]);
