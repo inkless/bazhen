@@ -183,8 +183,9 @@ describe("reconcile", () => {
 
   it("marks an agent still waiting on its harness lost when a reachable environment lacks it", async () => {
     const { store } = await withAgent(undefined, { starting: true });
+    const waiting = stateOf(store);
     await reconcile(store, fakeEnvironment(store));
-    expect(stateOf(store)).toBe("lost");
+    expect([waiting, stateOf(store)]).toEqual(["starting", "lost"]);
   });
 
   it("closes an agent left closing once the environment no longer has it, giving up its mail", async () => {

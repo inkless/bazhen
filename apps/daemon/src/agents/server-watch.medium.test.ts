@@ -185,7 +185,7 @@ describe("ServerWatch", () => {
     expect([stateOf(store, agentId), terminalOf(store, agentId)]).toEqual(["starting", "running"]);
   });
 
-  it("leaves a respawn in flight alone, and its terminal runs at the next generation", async () => {
+  it("leaves a respawn in flight alone, whose agent waits on its harness at the next generation", async () => {
     const { store, agentId, environment } = await claudeAgent();
     append(store, agentId, "agent.exited");
     const queue = new AgentQueue();
@@ -206,7 +206,11 @@ describe("ServerWatch", () => {
     starting.resolve();
     await respawning;
     const agent = store.snapshot(testView).agents.find((a) => a.id === agentId);
-    expect([terminalOf(store, agentId), agent?.generation]).toEqual(["running", 1]);
+    expect([agent?.state, terminalOf(store, agentId), agent?.generation]).toEqual([
+      "starting",
+      "running",
+      1,
+    ]);
   });
 
   it("leaves an agent waiting on its harness alone while its terminal runs, and loses it once gone", async () => {

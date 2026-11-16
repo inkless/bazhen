@@ -154,7 +154,7 @@ describe("a Codex agent", () => {
     });
   });
 
-  it("runs once its TUI is up in its terminal, which takes a turn through the fake model", async () => {
+  it("runs its TUI in its terminal, which takes a turn through the fake model", async () => {
     await waitUntil(
       () => daemon.screen(launched.agentId).includes(BANNER.codex),
       "Codex's TUI",

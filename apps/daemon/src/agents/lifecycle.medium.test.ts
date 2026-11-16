@@ -531,6 +531,7 @@ describe("agent lifecycle", () => {
     const ended = await running({ starting: true });
     ended.exit("0");
     const stuck = await running({ starting: true });
+    const waiting = stuck.agent()?.state;
     await stuck.lifecycle.signal(stuck.agentId, {
       idempotencyKey: "s",
       generation: 0,
@@ -539,10 +540,11 @@ describe("agent lifecycle", () => {
     await stuck.lifecycle.close(stuck.agentId, { idempotencyKey: "c", generation: 0 });
     expect([
       ended.agent()?.state,
+      waiting,
       stuck.signalled,
       stuck.closed.length,
       stuck.agent()?.state,
-    ]).toEqual(["exited", ["SIGINT"], 1, "closed"]);
+    ]).toEqual(["exited", "starting", ["SIGINT"], 1, "closed"]);
   });
 
   it("signals a running agent and records it, without changing its state", async () => {

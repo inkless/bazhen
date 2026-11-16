@@ -120,7 +120,7 @@ describe("after the daemon is killed with -9 and started again", () => {
       .toContain("echo: still there, codex?");
   });
 
-  it("launches a new Codex agent through a new connection to the app-server, whose TUI comes up", async () => {
+  it("launches a new Codex agent through a new connection to the app-server", async () => {
     const again = await launch("codex-after-restart", "codex");
     await daemon.running(again.agentId);
     expect((await state()).agents.find((a) => a.id === again.agentId)?.externalRef).toMatchObject({

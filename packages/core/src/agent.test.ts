@@ -31,16 +31,14 @@ describe("agent session lifecycle", () => {
     expect([confirmed, agent.next(confirmed, "harness.ready")]).toEqual(["starting", "running"]);
   });
 
-  it("can end, be lost or be closed while its harness is still starting", () => {
+  // Never unknown: a reconfirm takes unknown to running, which would skip its harness's sign.
+  it("can end, be lost or be closed while its harness is still starting, but not go unknown", () => {
     expect([
       agent.next("starting", "process.exited"),
       agent.next("starting", "target.absent"),
       agent.next("starting", "close.requested"),
-    ]).toEqual(["exited", "lost", "closing"]);
-  });
-
-  it("doesn't go unknown while starting, so a reconfirm can't skip its harness's sign", () => {
-    expect(agent.accepts("starting", "environment.unreachable")).toBe(false);
+      agent.accepts("starting", "environment.unreachable"),
+    ]).toEqual(["exited", "lost", "closing", false]);
   });
 
   it("cannot be respawned while still running", () => {
