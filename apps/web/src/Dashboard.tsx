@@ -126,7 +126,7 @@ export function Dashboard() {
             placeholder="/path/to/project"
           />
         </label>
-        <label>
+        <label className="launch-name">
           Name{" "}
           <input
             value={name}

@@ -50,7 +50,9 @@ export function FleetList({
                             <span className="visually-hidden">needs you</span>
                           </>
                         )}
-                        <span className="name">{agentLabel(agent)}</span>
+                        <span className="name" title={agentLabel(agent)}>
+                          {agentLabel(agent)}
+                        </span>
                         <span className="harness">{agent.harness}</span>
                         <span className={`state state-${agent.state}`}>{agent.state}</span>
                         <ShellChip count={shellCount(shells, agent.id)} />
