@@ -1,7 +1,7 @@
 import { hostname } from "node:os";
 import { basename } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
-import { givePageAgentTranscript, kill, launch, screen, uniqueName } from "./page.ts";
+import { givePageAgentTranscript, kill, launch, patchState, screen, uniqueName } from "./page.ts";
 
 /**
  * Launches an agent from outside the page, as another device would, under `name` if given;
@@ -128,14 +128,11 @@ test("lists the messages an agent sent and was sent with SendMessage, newest fir
   const agentId = await launch(page);
   const peer = "agent_01900000000070008000000000000099";
   // As if the agents' hooks had reported them; the daemon records a send only from a real one.
-  await page.route("**/v1/state", async (route) => {
-    const res = await route.fetch();
-    const observed = [
-      sent(agentId, peer, "Rebased", true, 2),
-      sent(peer, agentId, "Review?", false, 1),
-    ];
-    await route.fulfill({ response: res, json: { ...Object(await res.json()), observed } });
-  });
+  const observed = [
+    sent(agentId, peer, "Rebased", true, 2),
+    sent(peer, agentId, "Review?", false, 1),
+  ];
+  await patchState(page, (state) => ({ ...state, observed }));
   // The page is already on the agent, so only a reload reads the state again.
   await page.reload();
   const messages = workspace(page).getByRole("region", { name: "Messages sent with SendMessage" });

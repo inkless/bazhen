@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { screen } from "./page.ts";
+import { patchState, screen } from "./page.ts";
 
 // The page goes on reading its state as a test ends, and a route still fetching then would fail
 // the test after its assertions passed.
@@ -33,17 +33,9 @@ const item = (agentId: string, kind: string, summary: string, actions: string[])
 
 /** Shows the page the daemon's own state with these items added, as if harnesses had raised them. */
 async function injectItems(page: Page, items: object[]): Promise<void> {
-  await page.route("**/v1/state", async (route) => {
-    const res = await route.fetch();
-    const state: unknown = await res.json();
-    const attention: unknown = Reflect.get(Object(state), "attention");
-    await route.fulfill({
-      response: res,
-      json: {
-        ...Object(state),
-        attention: [...(Array.isArray(attention) ? attention : []), ...items],
-      },
-    });
+  await patchState(page, (state) => {
+    const attention: unknown = Reflect.get(state, "attention");
+    return { ...state, attention: [...(Array.isArray(attention) ? attention : []), ...items] };
   });
 }
 

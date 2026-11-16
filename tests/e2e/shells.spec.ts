@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { launch, screen, status } from "./page.ts";
+import { launch, patchState, screen, status } from "./page.ts";
 
 const workspace = (page: Page) => page.getByRole("article", { name: "agent" });
 const dock = (page: Page) => workspace(page).getByRole("region", { name: "shells" });
@@ -248,14 +248,9 @@ async function showLost(page: Page, shellId: string, retypeable: () => boolean):
           retypeable: retypeable(),
         }
       : s;
-  await page.route("**/v1/state", async (route) => {
-    const res = await route.fetch();
-    const state: unknown = await res.json();
-    const shells: unknown = Reflect.get(Object(state), "shells");
-    await route.fulfill({
-      response: res,
-      json: { ...Object(state), shells: Array.isArray(shells) ? shells.map(lost) : shells },
-    });
+  await patchState(page, (state) => {
+    const shells: unknown = Reflect.get(state, "shells");
+    return { ...state, shells: Array.isArray(shells) ? shells.map(lost) : shells };
   });
 }
 
