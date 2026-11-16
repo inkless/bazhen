@@ -780,6 +780,31 @@ describe("HolderRuntime: watching agents' titles", () => {
   });
 });
 
+describe("HolderRuntime: refreshing the environment", () => {
+  it("starts the next terminal and the next respawn in the environment it was given last", async () => {
+    const exited = { exit: { type: "exited", code: 0 } } as const;
+    const { runtime, started, terminals } = startingFakes(privateRoot(), exited, respawning);
+    const before = await runtime.create(spec());
+    runtime.replaceEnv({ PATH: "/usr/bin", BZ_REFRESHED: "yes" });
+    await runtime.respawn(before, { ...spec(), generation: 1 });
+    await runtime.create(spec());
+    const respawned = terminals
+      .get(before.terminalId)!
+      .connections.flatMap((c) => c.requests)
+      .find((r) => r.type === "respawn");
+    const envs = [started[0]?.spec, respawned?.body, started[1]?.spec].map(
+      (s) => HolderSpawnSpec.pick({ env: true }).parse(s).env,
+    );
+    const refreshed = { PATH: "/usr/bin", BZ_REFRESHED: "yes", BAZHEN_TERMINAL_ID: "t" };
+    expect(envs).toEqual([
+      expect.objectContaining({ PATH: "/bin", LANG: "C" }),
+      expect.objectContaining(refreshed),
+      expect.objectContaining(refreshed),
+    ]);
+    expect(envs.map((env) => "LANG" in env)).toEqual([true, false, false]);
+  });
+});
+
 describe("HolderRuntime: streams", () => {
   it("attaches on the holder's snapshot, and delivers what follows it to callbacks set after", async () => {
     const { runtime, ref, vt } = await attachable(5, (holder) =>
