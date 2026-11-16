@@ -167,9 +167,17 @@ export class CodexThreads {
     this.reused.add(terminal);
   }
 
-  /** No TUI is starting in `terminal` any more: its respawn was refused, or it is closing. */
+  /**
+   * No TUI is starting in `terminal` any more: its respawn was refused, or it is closing. A move
+   * it waited on is dropped, and its agent's held mail let go.
+   */
   left(terminal: TerminalId): void {
     this.reused.delete(terminal);
+    // After any follow in flight, which would otherwise wait again on a move dropped under it.
+    this.queue = this.queue.then(() => {
+      this.gaveUp.delete(terminal);
+      this.settle(terminal);
+    });
   }
 
   /**
