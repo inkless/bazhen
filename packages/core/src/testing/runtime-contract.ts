@@ -22,10 +22,13 @@ export interface ContractHarness {
   make(): { readonly runtime: RuntimeAdapter; dispose(): void };
   /** Leaves what holds `runtime`'s terminals running, but where it can no longer be read. */
   unreadable(runtime: RuntimeAdapter): void;
-  /** Replaces the terminal's process outside Bazhen, under the generation it already has. */
-  replaceProcess(runtime: RuntimeAdapter, ref: RuntimeRef): void;
+  /**
+   * Replaces the terminal's process outside Bazhen, under the generation it already has where the
+   * runtime allows that, and settles once it is replaced.
+   */
+  replaceProcess(runtime: RuntimeAdapter, ref: RuntimeRef): void | Promise<void>;
   /** Ends the terminal outside Bazhen, as a killed session would. */
-  vanish(runtime: RuntimeAdapter, ref: RuntimeRef): void;
+  vanish(runtime: RuntimeAdapter, ref: RuntimeRef): void | Promise<void>;
   /** Ends every terminal and whatever holds them, as a reboot would, before it settles. */
   reboot(runtime: RuntimeAdapter): void | Promise<void>;
   /** The same terminal's ref, as if it had been made on a server other than the one running it. */
@@ -302,7 +305,7 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       dropped.stream.onClose((why) => whys.push(`consumer ${why}`));
       dropped.stream.close();
       await expect.poll(() => whys, { timeout: harness.waitMs }).toEqual(["consumer ended"]);
-      harness.vanish(runtime, ref);
+      await harness.vanish(runtime, ref);
       await expect
         .poll(() => whys, { timeout: harness.waitMs })
         .toEqual(["consumer ended", "terminal ended"]);
@@ -447,7 +450,7 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
     it("refuses to act on a process replaced outside Bazhen, on a server it was made on", async () => {
       const runtime = fresh();
       const ref = await runtime.create(spec(sleeping));
-      harness.replaceProcess(runtime, ref);
+      await harness.replaceProcess(runtime, ref);
       const refused = runtime.signal(ref, "SIGKILL");
       await expect(refused).rejects.toThrow(StaleIncarnation);
       await expect(refused).rejects.toMatchObject({
@@ -496,7 +499,7 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       await runtime.create(spec(sleeping)); // keeps the server up once the others are gone
       const ref = await runtime.create(spec(sleeping));
       const gone = await runtime.create(spec(sleeping));
-      harness.vanish(runtime, gone);
+      await harness.vanish(runtime, gone);
       await runtime.close(ref);
       await runtime.close(gone);
       const left = (await runtime.inventory()).map((e) => e.ref.terminalId);
@@ -673,11 +676,12 @@ export function snapshotContract(name: string, harness: SnapshotHarness): void {
     it.each([
       [
         "its consumer closes it",
-        (_: RuntimeAdapter, client: SnapshotClient) => client.stream.close(),
+        async (_: RuntimeAdapter, client: SnapshotClient) => client.stream.close(),
       ],
       [
         "its terminal ends",
-        (runtime: RuntimeAdapter, client: SnapshotClient) => harness.vanish(runtime, client.ref),
+        async (runtime: RuntimeAdapter, client: SnapshotClient) =>
+          harness.vanish(runtime, client.ref),
       ],
     ])(
       "refuses a snapshot pending when %s, once it has closed, and any asked for after",
@@ -692,7 +696,7 @@ export function snapshotContract(name: string, harness: SnapshotHarness): void {
           order.push("rejected");
           throw err;
         });
-        close(runtime, client);
+        await close(runtime, client);
         await expect(pending).rejects.toBeInstanceOf(Error);
         expect(order).toEqual(["closed", "rejected"]);
         await expect(client.stream.snapshot()).rejects.toBeInstanceOf(Error);
