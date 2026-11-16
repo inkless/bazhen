@@ -6,7 +6,13 @@ import { performance } from "node:perf_hooks";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { newId } from "@bazhen/core";
 import { signalGroup, spawnGroup } from "@bazhen/host-guard";
-import { HOOK_REPLY_TYPE, HookRequest, frameHookReply, isCompatible } from "@bazhen/protocol";
+import {
+  HOOK_PROTOCOL_VERSION,
+  HOOK_REPLY_TYPE,
+  HookRequest,
+  frameHookReply,
+  isCompatible,
+} from "@bazhen/protocol";
 import { HOOK_SCRIPT, hookClient, hookCommand } from "./hook-command.ts";
 
 const clients = [
@@ -234,7 +240,7 @@ describe.each(clients)("hook client (%s)", { timeout: 30_000 }, (_kind, client) 
     const request = HookRequest.parse(JSON.parse(body));
     expect(request).toMatchObject({ agentId, event: "PreToolUse" });
     // The daemon takes any version with its own major, as `/v1/hooks` checks.
-    expect(isCompatible(request.protocolVersion)).toBe(true);
+    expect(isCompatible(request.protocolVersion, HOOK_PROTOCOL_VERSION)).toBe(true);
   });
 
   it("sends a null payload for stdin that is only whitespace", async () => {

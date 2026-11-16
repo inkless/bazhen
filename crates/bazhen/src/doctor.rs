@@ -57,7 +57,8 @@ pub(crate) fn lines(d: &DoctorResponse, macos: bool) -> Vec<String> {
     );
     let mut out = vec![format!(
         "bazhen {} (protocol {})",
-        d.app_version, d.protocol_version
+        d.app_version,
+        d.protocol_id.get(..12).unwrap_or(&d.protocol_id)
     )];
     for r in &reported {
         out.push(runtime_line(r));

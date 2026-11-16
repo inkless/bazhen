@@ -102,8 +102,7 @@ export type Environment = z.infer<typeof Environment>;
 export const Agent = z.object({
   id: Id("agent"),
   /**
-   * Unique, ignoring case, among agents not closed or failed; empty only from a daemon older
-   * than protocol 1.40.
+   * Unique, ignoring case, among agents not closed or failed; empty only from an older daemon.
    */
   name: z.string().default(""),
   environmentId: Id("env"),
@@ -119,17 +118,17 @@ export const Agent = z.object({
   exit: ExitStatus.nullable(),
   /**
    * The theme its TUI was started for, which its terminal is drawn in; dark when none was named,
-   * as the terminal has always told programs that ask (protocol 1.15).
+   * as the terminal has always told programs that ask.
    */
   theme: TuiTheme.default("dark"),
   /** The themes its harness can start its TUI in, so a respawn in another is offered only here. */
   themes: z.array(TuiTheme).default(["dark"]),
   /**
    * What its harness last reported it doing, in this process; absent until the harness reports
-   * anything (protocol 1.7).
+   * anything.
    */
   activity: Activity.optional(),
-  /** The model it runs and its context use, once its harness says (protocol 1.16). */
+  /** The model it runs and its context use, once its harness says. */
   usage: Usage.optional(),
   /**
    * A shell command that attaches a terminal emulator to its terminal, for a human to copy when the
@@ -141,22 +140,21 @@ export const Agent = z.object({
   commands: z.array(AgentCommand).default([]),
   /**
    * Whether starting it again resumes its harness session; a relaunch of one that can't starts a
-   * fresh session only when asked to (protocol 1.27).
+   * fresh session only when asked to.
    */
   resumable: z.boolean().default(false),
-  /** Whether a shell can be opened beside it now: its directory still holds its work (protocol 1.28). */
+  /** Whether a shell can be opened beside it now: its directory still holds its work. */
   canOpenShell: z.boolean().default(false),
-  /** The agent that launched it to delegate to it, or null when the human did. Protocol 1.31. */
+  /** The agent that launched it to delegate to it, or null when the human did. */
   launchedBy: Id("agent").nullable().default(null),
   /**
    * Whether mail sent now reaches it with nothing else happening: a Claude Code agent idle with
    * its wake hook held, or in a turn the mail folds into; a Codex agent bound to a thread that
-   * takes it (protocol 1.44).
+   * takes it.
    */
   listening: z.boolean().default(false),
   /**
-   * Its latest note on any task, open or not, the first line of it, as its line in the fleet
-   * (protocol 1.44).
+   * Its latest note on any task, open or not, the first line of it, as its line in the fleet.
    */
   headline: z
     .object({ text: z.string(), taskId: Id("task"), at: z.iso.datetime() })
@@ -168,7 +166,7 @@ export const Agent = z.object({
   role: Role.nullable().default(null),
   /**
    * Whether the prompt it would start with now differs from the one its last start gave it, as
-   * after an edit to its role's file. It takes the new one at its next start (protocol 1.55).
+   * after an edit to its role's file. It takes the new one at its next start.
    */
   promptChanged: z.boolean().default(false),
 });
@@ -179,7 +177,7 @@ const ageSeconds = z.number().int().nonnegative();
 /**
  * One agent as `bazhen agents --json` prints it for a program: what it is doing and since when,
  * whether mail reaches it now, its headline, its tasks, and the items it has open for the human.
- * Ages are whole seconds, by the clock of the CLI that printed it (protocol 1.44).
+ * Ages are whole seconds, by the clock of the CLI that printed it.
  */
 export const FleetAgent = z.object({
   id: Id("agent"),
@@ -208,11 +206,10 @@ export const LaunchAgentRequest = z.object({
   /** An absolute path, or `~` or `~/…` for the daemon user's home. */
   cwd: z.string().min(1),
   project: z.string().min(1).optional(),
-  /** Protocol 1.13. */
   theme: TuiTheme.optional(),
-  /** Absent, the daemon names it `<project>-<n>` (protocol 1.40). */
+  /** Absent, the daemon names it `<project>-<n>`. */
   name: AgentName.optional(),
-  /** The role whose prompt it starts with; absent for none (protocol 1.55). */
+  /** The role whose prompt it starts with; absent for none. */
   role: Role.optional(),
 });
 export type LaunchAgentRequest = z.infer<typeof LaunchAgentRequest>;
@@ -236,17 +233,17 @@ export const CloseAgentRequest = z.object({
   force: z.boolean().optional(),
   /**
    * Its linked shells to keep running, made standalone; every other one closes with it, whatever
-   * runs in it (protocol 1.19).
+   * runs in it.
    */
   keepShells: z.array(Id("term")).optional(),
   /**
    * Close the shells it takes even though a program other than the shell runs in them. Without
-   * it such a close is refused as `busy`, naming those programs (protocol 1.19).
+   * it such a close is refused as `busy`, naming those programs.
    */
   confirmBusy: z.boolean().optional(),
   /**
    * The programs the user was shown running in the shells it takes, and confirmed: any of those
-   * shells running something else by then is refused as `busy` (protocol 1.28).
+   * shells running something else by then is refused as `busy`.
    */
   confirmedBusy: z.array(BusyShell).optional(),
 });
@@ -256,7 +253,6 @@ export type CloseAgentRequest = z.infer<typeof CloseAgentRequest>;
 export const RespawnAgentRequest = z.object({
   idempotencyKey: IdempotencyKey,
   generation: z.number().int().nonnegative(),
-  /** Protocol 1.13. */
   theme: TuiTheme.optional(),
 });
 export type RespawnAgentRequest = z.infer<typeof RespawnAgentRequest>;
@@ -265,7 +261,6 @@ export type RespawnAgentRequest = z.infer<typeof RespawnAgentRequest>;
  * Starts a lost agent again on a new terminal, at the next generation (foundation-design §4.1,
  * §4.5). It resumes the agent's harness session; one that can't be resumed is refused unless
  * `fresh` asks for a new session, which the old one's conversation doesn't carry into.
- * Protocol 1.27.
  */
 export const RelaunchAgentRequest = z.object({
   idempotencyKey: IdempotencyKey,
@@ -276,7 +271,7 @@ export const RelaunchAgentRequest = z.object({
 export type RelaunchAgentRequest = z.infer<typeof RelaunchAgentRequest>;
 
 /**
- * `POST /v1/agents/:id/rename`: the human renames any agent, an agent only itself (1.40). A retry
+ * `POST /v1/agents/:id/rename`: the human renames any agent, an agent only itself. A retry
  * names the agent by its id: the path is resolved before the key is replayed, and a rename that
  * landed has freed the old name, so a retry by that name finds no agent.
  */
@@ -309,15 +304,12 @@ export const StateSnapshot = z.object({
   agents: z.array(Agent),
   attention: z.array(Attention),
   messages: z.array(Message),
-  /** Protocol 1.17. */
   shells: z.array(Shell).default([]),
-  /** Protocol 1.20. */
   tasks: z.array(Task).default([]),
-  /** Protocol 1.20. */
   assignments: z.array(Assignment).default([]),
-  /** Every open notice, and the latest closed ones. Protocol 1.38. */
+  /** Every open notice, and the latest closed ones. */
   notices: z.array(Notice).default([]),
-  /** The latest messages agents sent each other outside Bazhen's mail, oldest first. Protocol 1.43. */
+  /** The latest messages agents sent each other outside Bazhen's mail, oldest first. */
   observed: z.array(ObservedMessage).default([]),
 });
 export type StateSnapshot = z.infer<typeof StateSnapshot>;
@@ -339,7 +331,7 @@ export const ErrorResponse = z.object({
     "server_unconfirmed",
     /**
      * A close reached a holder this build can't speak to, which can't be closed from here, with or
-     * without `force`: it runs until its process is ended, as the message says (protocol 1.49).
+     * without `force`: it runs until its process is ended, as the message says.
      */
     "needs_restart",
     /** A shell close found a program other than the shell running; `confirmBusy` closes it. */
@@ -355,13 +347,12 @@ export const ErrorResponse = z.object({
     "rate_limited",
     /**
      * A new agent or shell refused: as many terminals are open as the daemon allows, or the
-     * machine is short of PTYs. The message says which; closing a terminal makes room
-     * (protocol 1.37).
+     * machine is short of PTYs. The message says which; closing a terminal makes room.
      */
     "terminal_limit",
   ]),
   message: z.string(),
-  /** With `busy`: each shell, and what runs in it, that the close would end (protocol 1.28). */
+  /** With `busy`: each shell, and what runs in it, that the close would end. */
   busy: z.array(BusyShell).optional(),
 });
 export type ErrorResponse = z.infer<typeof ErrorResponse>;

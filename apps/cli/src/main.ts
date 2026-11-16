@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { currentInputs, resolvePaths } from "@bazhen/daemon/paths";
 import { DaemonError, DaemonUnreachable, answers, call } from "@bazhen/daemon/client";
+import { protocolId } from "@bazhen/protocol/id";
 import {
   DevicesResponse,
   DismissNoticeResponse,
@@ -23,6 +24,7 @@ import {
 } from "@bazhen/protocol";
 import { TASK_USAGE, Usage, isVerb, taskSocket, taskVerb, type Answer } from "./tasks.ts";
 import { lanLines } from "./lan.ts";
+import { buildLines } from "./build.ts";
 import { containmentLines } from "./containment.ts";
 import { holderLines } from "./holder.ts";
 import { terminalLines } from "./terminals.ts";
@@ -79,7 +81,7 @@ async function status(): Promise<number> {
   ]);
   const byState = Map.groupBy(state.agents, (a) => a.state);
   const agents = [...byState].map(([s, list]) => `${list.length} ${s}`).join(", ") || "none";
-  console.log(`bazhen ${health.appVersion} (protocol ${health.protocolVersion}), running`);
+  for (const line of buildLines(health, await protocolId(), ", running")) console.log(line);
   for (const line of runtimeLines(health)) console.log(line);
   console.log(`agents: ${agents}`);
   return 0;
@@ -102,7 +104,7 @@ async function doctor(): Promise<number> {
   const removed = Object.entries(d.env.removed)
     .map(([rule, count]) => `${rule} ${count}`)
     .join(", ");
-  console.log(`bazhen ${d.appVersion} (protocol ${d.protocolVersion})`);
+  for (const line of buildLines(d, await protocolId())) console.log(line);
   for (const line of doctorRuntimeLines(d)) console.log(line);
   console.log(`hook client: ${d.hookClient.path}`);
   if (d.hookClient.fallback) {

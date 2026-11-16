@@ -9,9 +9,8 @@
           "type": "string",
           "const": "hello"
         },
-        "protocolVersion": {
-          "type": "string",
-          "pattern": "^[0-9]+\\.[0-9]+$"
+        "protocolId": {
+          "type": "string"
         },
         "mode": {
           "type": "string",
@@ -50,7 +49,6 @@
       },
       "required": [
         "type",
-        "protocolVersion",
         "mode",
         "cols",
         "rows"

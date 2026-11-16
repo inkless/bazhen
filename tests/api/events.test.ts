@@ -59,21 +59,24 @@ describe("the event stream", () => {
     }
   });
 
-  it("refuses a stream from another origin, a client of another major version, and a bad path", async () => {
+  it("takes a stream that names no protocol version, and refuses another origin and a bad path", async () => {
     const cursor = await state();
-    const refusals = await Promise.all(
+    const outcomes = await Promise.all(
       [
+        daemon.events(cursor),
         daemon.events(cursor, { origin: "http://evil.example" }),
-        daemon.events(cursor, { version: "2.0" }),
         daemon.events(cursor, { path: "/v1/eventz" }),
       ].map((p) =>
         p.then(
-          () => "open",
+          (client) => {
+            client.close();
+            return "open";
+          },
           (err: unknown) => String(err),
         ),
       ),
     );
-    expect(refusals).toEqual(["Error: refused: 403", "Error: refused: 400", "Error: refused: 404"]);
+    expect(outcomes).toEqual(["open", "Error: refused: 403", "Error: refused: 404"]);
   });
 
   it("loses nothing a client saw across a kill -9, and resumes it where it stopped", async () => {

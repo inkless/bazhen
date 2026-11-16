@@ -9,7 +9,7 @@ import { ClaudeCodeHarness } from "@bazhen/harness-claude-code";
 import { CodexHarness, DAEMON_START_ARGS } from "@bazhen/harness-codex";
 import { filterEnv, healthOfEach, RoutedRuntime, UnknownRuntime } from "@bazhen/core";
 import { TmuxServer, findNotifySend, hostPtyReader, probeContainment } from "@bazhen/host-guard";
-import { PROTOCOL_VERSION } from "@bazhen/protocol";
+import { protocolId } from "@bazhen/protocol/id";
 import {
   HolderRuntime,
   installHolder,
@@ -102,6 +102,7 @@ import { waitForMail } from "./mailbox/wait.ts";
 import { Store, UnsafeDatabase, type SnapshotView } from "./store/store.ts";
 
 const APP_VERSION = "0.1.0";
+const PROTOCOL_ID = await protocolId();
 const HOSTNAME = "127.0.0.1";
 const DEFAULT_SIZE = { cols: 120, rows: 40 };
 
@@ -487,7 +488,7 @@ for (const a of store.snapshot(snapshotView).agents) {
 }
 const commands = {
   appVersion: APP_VERSION,
-  schemaVersion: () => store.schemaVersion(),
+  protocolId: PROTOCOL_ID,
   runtime,
   state: (viewer) =>
     store.snapshot({ ...snapshotView, noticeActions: (n) => notices.actions(n, viewer) }),
@@ -537,7 +538,7 @@ const server = serve({ fetch: app.fetch, hostname: HOSTNAME, port }, (info) => {
   console.log(`bazhen daemon listening on http://${HOSTNAME}:${info.port} (data: ${paths.data})`);
 });
 const streams = [
-  streamRoute({ hub, runtimeRef: (id) => store.runtimeRef(id) }),
+  streamRoute({ protocolId: PROTOCOL_ID, hub, runtimeRef: (id) => store.runtimeRef(id) }),
   eventRoute(store, presence),
 ];
 server.on("upgrade", upgrades(allow, streams, gate));
@@ -654,7 +655,7 @@ const socketListener = getRequestListener(
       const tmuxVersion = runtimes.find((r) => r.kind === "tmux")?.version ?? null;
       return {
         appVersion: APP_VERSION,
-        protocolVersion: PROTOCOL_VERSION,
+        protocolId: PROTOCOL_ID,
         runtime: { state: worst.state, version: tmuxVersion },
         runtimes: runtimes.map(({ workarounds, ...report }) => ({
           ...report,

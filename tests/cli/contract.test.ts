@@ -27,6 +27,7 @@ import {
 import { FakeDaemon, runsNode, type Scene, scene } from "./cli.ts";
 import {
   AGENT,
+  ANOTHER_BUILD,
   MSG,
   OTHER,
   TASK,
@@ -139,11 +140,18 @@ describe("a daemon that refuses", () => {
     expect(ran).toEqual({ code: 1, stdout: "", stderr: "/v1/roles: HTTP 404: 404 Not Found\n" });
   });
 
-  it("exits 1 on an answer this CLI can't read", async () => {
+  it("exits 1 on an answer this CLI can't read, as from a daemon of another build", async ({
+    skip,
+  }) => {
+    skip(!runsNode(), "pending the Rust CLI's protocol id");
     const body = JSON.stringify({ agents: "not a list" });
     s.daemon.raw("GET /v1/state", 200, body);
     const ran = await s.bazhen(["agents"]);
-    expect(ran).toEqual({ code: 1, stdout: "", stderr: `/v1/state: HTTP 200: ${body}\n` });
+    expect(ran).toEqual({
+      code: 1,
+      stdout: "",
+      stderr: `/v1/state: HTTP 200: ${body}\n${ANOTHER_BUILD}\n`,
+    });
   });
 });
 

@@ -40,7 +40,7 @@ function daemon(root: string = bundle(), always = true) {
   const devices = new DeviceAuth(store, { log: () => {} });
   const deps: AppDeps = {
     appVersion: "0.1.0",
-    schemaVersion: () => 1,
+    protocolId: "protocol-of-this-build",
     runtime: new FakeRuntime(),
     allow: { hosts: [host], origins: [`http://${host}`] },
     roles: () => ({ roles: [], problems: [] }),

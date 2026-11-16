@@ -5,10 +5,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as Xterm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import {
-  EPOCH_FRAMES_SINCE,
-  isAtLeast,
   parseJson,
-  PROTOCOL_VERSION,
   StreamServerFrame,
   withoutEventReports,
   type StreamClientFrame,
@@ -21,6 +18,7 @@ import { closeNotice, offersInstall, pageNow, thisPlatform } from "../install.ts
 import { isApple, matchKey } from "./keymap.ts";
 import { statusText, type Status } from "./status.ts";
 import { Backoff } from "./reconnect.ts";
+import { PAGE_PROTOCOL, checkBuild } from "../api.ts";
 import { scrollbackFor, startSnapshot, wheelAction, type TerminalKind } from "./scroll.ts";
 import { attachScrollInput } from "./scroll-input.ts";
 import { loadSettings } from "./settings.ts";
@@ -132,9 +130,8 @@ function connect(
   let previous: { attachmentId: string; token: string } | undefined;
   /** Whether this view is coming back from a lost socket. */
   let returning = false;
-  /** The latest lease epoch, and whether the daemon reads `epoch` and `ping` frames. */
+  /** The latest lease epoch. */
   let epoch: number | undefined;
-  let modern = false;
   let wantsToDrive = false;
   /** Whether the program is on its alternate screen, which only the daemon can see. */
   let alternate = false;
@@ -152,7 +149,7 @@ function connect(
   };
   /** What it types from now on counts only under this epoch (§4.3). */
   const declare = () => {
-    if (modern && epoch !== undefined) send({ type: "epoch", epoch });
+    if (attached && epoch !== undefined) send({ type: "epoch", epoch });
   };
   const engage = () => {
     if (attached) send({ type: "engage" });
@@ -197,14 +194,13 @@ function connect(
     );
     ws = socket;
     epoch = undefined;
-    modern = false;
     heartbeat = new Heartbeat();
     socket.binaryType = "arraybuffer";
     socket.addEventListener("open", () => {
       const { cols, rows } = term;
       send({
         type: "hello",
-        protocolVersion: PROTOCOL_VERSION,
+        protocolId: PAGE_PROTOCOL,
         mode: "interactive",
         cols,
         rows,
@@ -229,7 +225,6 @@ function connect(
       else if (f.type === "screen") alternate = f.alternate;
       else if (f.type === "attached") {
         attached = true;
-        modern = isAtLeast(f.protocolVersion ?? "1.0", EPOCH_FRAMES_SINCE);
         declare();
         // A view focused before its socket opened saw no focus event to claim the lease with.
         // One coming back from a lost socket doesn't take the lease from a view that took it
@@ -247,8 +242,12 @@ function connect(
         driverDevice = f.driverDevice;
         report({ status: leaseStatus() });
       } else if (f.type === "notice") report({ notice: f.message });
-      else if (f.type === "error") end(`The daemon refused this view: ${f.message}`);
-      else if (f.type === "exit") end("The terminal has closed.");
+      else if (f.type === "error") {
+        // Refused as another build's page: the app's alert says so at once, rather than at the
+        // event stream's next reconnect.
+        checkBuild().catch(() => undefined);
+        end(`The daemon refused this view: ${f.message}`);
+      } else if (f.type === "exit") end("The terminal has closed.");
       // The daemon closes the socket next; its close is what reattaches.
       else if (f.type === "ended") report({ status: { kind: "reconnecting" } });
     });
@@ -258,7 +257,7 @@ function connect(
   // A dead socket's close can take minutes to fire, so missed pongs reattach without it.
   const beating = setInterval(() => {
     const socket = ws;
-    if (socket?.readyState !== WebSocket.OPEN || !modern) return;
+    if (socket?.readyState !== WebSocket.OPEN || !attached) return;
     const beat = heartbeat.beat();
     if (beat === "dead") {
       lost(socket);

@@ -11,8 +11,11 @@ Never rename, remove or tighten anything that has shipped.
 ## Steps
 
 1. **Schema.** In `packages/protocol/src/index.ts`, add or extend the zod schema and export the
-   inferred type. New fields on existing messages are `.optional()`. Bump the minor version of
-   `PROTOCOL_VERSION` (`"1.0"` becomes `"1.1"`).
+   inferred type. New fields on existing messages are `.optional()`. Run `pnpm schema` and commit
+   `packages/protocol/schema/`. Its hash is the protocol id (`protocolId()`) that clients compare
+   with the daemon's, so there is no version to bump. A change the schema can't show, such as a
+   refinement, a constant like `HISTORY_LINES`, or what the daemon does with a message, bumps
+   `revision` in `packages/protocol/src/semantics.ts` with a one-line `reason` instead.
 2. **Protocol tests** in `packages/protocol/src/index.test.ts`: one test that a valid message
    parses, and one that a malformed message is rejected.
 3. **Route.** In `apps/daemon/src/http/app.ts`, parse the request body with the schema at the
@@ -34,7 +37,7 @@ Never rename, remove or tighten anything that has shipped.
 
 ## Checklist
 
-- [ ] The schema is additive and the minor version is bumped in the same commit.
+- [ ] The schema is additive, and `pnpm schema`'s output is in the same commit.
 - [ ] The request and response are both parsed at the daemon's edge.
 - [ ] Tests cover success, a malformed request, and the expected failure.
 - [ ] `apps/web` imports only `@bazhen/protocol`; lint enforces this.
@@ -53,4 +56,4 @@ Never rename, remove or tighten anything that has shipped.
 | ------------------------------------------------ | ------------------------------------------------------------------------------------------ |
 | "Renaming the field is cleaner"                  | It breaks every client on `/v1`. Add the new field, and deprecate the old one in a comment |
 | "Parsing the response is redundant, we built it" | It is what keeps the daemon from shipping a shape the schema doesn't allow                 |
-| "The version bump can come later"                | Clients negotiate on it; bump it with the change                                           |
+| "The schema export can come later"               | `pnpm check` fails without it, and its hash is what tells a client the daemon changed      |

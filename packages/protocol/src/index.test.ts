@@ -6,8 +6,7 @@ describe("HealthResponse schema", () => {
     const parsed = HealthResponse.safeParse({
       status: "ok",
       appVersion: "0.1.0",
-      protocolVersion: "1.0",
-      schemaVersion: 1,
+      protocolId: "protocol-of-this-build",
       runtime: { kind: "tmux", state: "dead", version: null },
     });
     expect(parsed.success).toBe(false);
@@ -16,7 +15,7 @@ describe("HealthResponse schema", () => {
 
 const doctor = (lan: unknown) => ({
   appVersion: "0.1.0",
-  protocolVersion: "1.36",
+  protocolId: "protocol-of-this-build",
   runtime: { state: "healthy", version: "3.4" },
   hookClient: { path: "/bin/bazhen-hook", fallback: false },
   config: { path: "/c/config.toml", found: true },

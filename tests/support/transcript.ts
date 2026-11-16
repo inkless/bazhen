@@ -5,17 +5,17 @@
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { join } from "node:path";
+import { HOOK_PROTOCOL_VERSION } from "@bazhen/protocol";
 
 export async function giveTranscript(
   home: string,
-  protocolVersion: string,
   agentId: string,
   sessionId: string,
 ): Promise<void> {
   const transcript = join(home, `${sessionId}.jsonl`);
   writeFileSync(transcript, "{}\n");
   const body = JSON.stringify({
-    protocolVersion,
+    protocolVersion: HOOK_PROTOCOL_VERSION,
     agentId,
     event: "UserPromptSubmit",
     pid: process.pid,

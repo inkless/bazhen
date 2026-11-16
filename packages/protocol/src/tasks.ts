@@ -34,7 +34,7 @@ export const TaskBrief = z.string().min(1).max(20_000);
 export const TaskTitle = z.string().trim().min(1).max(200);
 
 /**
- * A title a request gives a task (protocol 1.45). Mail puts it on a line of its own, so it holds
+ * A title a request gives a task. Mail puts it on a line of its own, so it holds
  * no control character, bidirectional override or character that draws as nothing, which could
  * end that line or pass for another. Only requests are held to it: a title stored before keeps
  * loading as `TaskTitle`.
@@ -103,7 +103,7 @@ export const TaskNoteText = z
   .describe(`At most ${TASK_NOTE_MAX_BYTES} UTF-8 bytes.`);
 
 /**
- * What the agent or human who finishes a task says of it (protocol 1.44). It is mailed to whoever
+ * What the agent or human who finishes a task says of it. It is mailed to whoever
  * gave the task out, so it holds what a task note may, at a message's length. Only requests are
  * held to it: a note stored before keeps loading.
  */
@@ -122,7 +122,7 @@ export const quoteNote = (text: string) =>
     .map((line) => (line === "" ? ">" : `> ${line}`))
     .join("\n");
 
-/** A note on a task, from the agent working it or the human: progress, or a handoff (1.44). */
+/** A note on a task, from the agent working it or the human: progress, or a handoff. */
 export const TaskNote = z.object({
   /** The event that recorded it, which orders notes. */
   eventId: z.number().int().positive(),
@@ -144,7 +144,7 @@ export const TaskNote = z.object({
 });
 export type TaskNote = z.infer<typeof TaskNote>;
 
-/** `POST /v1/tasks/:id/notes` (protocol 1.44). */
+/** `POST /v1/tasks/:id/notes`. */
 export const AddTaskNoteRequest = z.object({
   idempotencyKey: IdempotencyKey,
   text: TaskNoteText,
@@ -159,12 +159,12 @@ export const TaskDetail = Task.extend({
   note: z.string().nullable(),
   assignments: z.array(Assignment),
   subtasks: z.array(Task),
-  /** Oldest first (protocol 1.44). */
+  /** Oldest first. */
   notes: z.array(TaskNote).default([]),
 });
 export type TaskDetail = z.infer<typeof TaskDetail>;
 
-/** The agent by id or, from protocol 1.40, by name. */
+/** The agent by id or by name. */
 const Grant = z.object({ agentId: AgentRef, role: Role });
 
 /** `POST /v1/tasks`. Assigning in the same request mails the brief, or refuses the whole create. */
@@ -231,14 +231,13 @@ export const DelegateTaskRequest = z
     /** The agent to give the subtask to, by id or name; or, with `launch`, none yet. */
     agentId: AgentRef.optional(),
     /**
-     * Launches a new agent for the subtask instead (protocol 1.31), in `cwd`, or the delegating
+     * Launches a new agent for the subtask instead, in `cwd`, or the delegating
      * agent's own directory.
      */
     launch: z
       .object({
         harness: HarnessId,
         cwd: z.string().min(1).optional(),
-        /** Protocol 1.40. */
         name: AgentName.optional(),
       })
       .optional(),
@@ -253,7 +252,7 @@ export type DelegateTaskRequest = z.infer<typeof DelegateTaskRequest>;
 
 /**
  * `POST /v1/escalations`, an agent's verb: a question or problem for the human's inbox, about
- * one of its tasks when it names one (protocol 1.26).
+ * one of its tasks when it names one.
  */
 export const EscalateRequest = z.object({
   idempotencyKey: IdempotencyKey,
@@ -267,7 +266,7 @@ export type EscalateResponse = z.infer<typeof EscalateResponse>;
 
 /**
  * `POST /v1/tasks/:id/messages`: one message to each of the task's active assignees but the
- * sender, as the sender's own send to each would be (protocol 1.45).
+ * sender, as the sender's own send to each would be.
  */
 export const BroadcastMessageRequest = SendMessageRequest;
 export type BroadcastMessageRequest = z.infer<typeof BroadcastMessageRequest>;

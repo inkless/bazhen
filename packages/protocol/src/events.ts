@@ -7,15 +7,14 @@ import { ApprovalDecision, AttentionCloseReason, AttentionKind } from "./mail.ts
 import { NoticeCloseReason, NoticeCloser, NoticeDevice } from "./notices.ts";
 import { Role } from "./roles.ts";
 import { TaskBrief, TaskOutcome, TaskTitle } from "./tasks.ts";
-import { ProtocolVersion } from "./version.ts";
 
 const queued = z.object({
   agentId: Id("agent"),
   body: z.string(),
   /**
    * The agent whose own words the body is, after a line naming it that the body starts with;
-   * absent for the human's mail and for mail Bazhen composes, as a task's. Absent before protocol
-   * 1.35.
+   * absent for the human's mail, for mail Bazhen composes, as a task's, and from an older
+   * daemon.
    */
   from: Id("agent").optional(),
 });
@@ -37,7 +36,7 @@ const taskCreated = z.object({
   parentTaskId: Id("task").nullable(),
   /**
    * The assignment an agent delegated it under, whose ending moves the task up to the parent's
-   * owner; null when delegated as the parent's owner. Absent before protocol 1.25.
+   * owner; null when delegated as the parent's owner. Absent from an older daemon.
    */
   delegatedFrom: Id("asgn").nullable().optional(),
 });
@@ -91,17 +90,17 @@ export const EVENTS = {
       project: z.string(),
       cwd: z.string(),
       terminalId: Id("term").nullable(),
-      /** The agent that launched it to delegate to it; absent when the human did (1.31). */
+      /** The agent that launched it to delegate to it; absent when the human did. */
       launchedBy: Id("agent").optional(),
-      /** Absent before protocol 1.40. */
+      /** Absent from an older daemon. */
       name: z.string().optional(),
       /** The `<n>` its default name took, which no later default takes again. */
       nameOrdinal: z.number().int().positive().optional(),
-      /** The runtime its terminal is created on; absent before protocol 1.48, when only tmux ran. */
+      /** The runtime its terminal is created on; tmux, from an older daemon. */
       runtime: z.string().min(1).optional(),
-      /** The role whose prompt it was launched with; absent for none (protocol 1.55). */
+      /** The role whose prompt it was launched with; absent for none. */
       role: Role.optional(),
-      /** The SHA-256 of the system prompt its launch gives it (protocol 1.55). */
+      /** The SHA-256 of the system prompt its launch gives it. */
       promptHash: z.string().optional(),
     }),
   },
@@ -117,7 +116,7 @@ export const EVENTS = {
       runtimeRef: RuntimeRefPayload.nullable(),
       /** The theme the TUI was started for, when one was named. */
       theme: TuiTheme.optional(),
-      /** The name the harness's session was started with, for one that is addressed by it (1.43). */
+      /** The name the harness's session was started with, for one that is addressed by it. */
       harnessName: z.string().optional(),
     }),
   },
@@ -127,7 +126,7 @@ export const EVENTS = {
       /** `daemon_restart`: the daemon died mid-launch, and its terminal never appeared (§7.1). */
       reason: z.enum(["launch_rejected", "daemon_restart"]),
       /**
-       * Protocol 1.34. What went wrong, in the failure's own words with secrets taken out, at most
+       * What went wrong, in the failure's own words with secrets taken out, at most
        * 500 characters counted as a person sees them (grapheme clusters, not UTF-16 units).
        */
       detail: z.string().optional(),
@@ -145,11 +144,11 @@ export const EVENTS = {
       runtimeRef: RuntimeRefPayload,
       /** The theme the TUI was started for, when one was named. */
       theme: TuiTheme.optional(),
-      /** The name the harness's session was started with, for one that is addressed by it (1.43). */
+      /** The name the harness's session was started with, for one that is addressed by it. */
       harnessName: z.string().optional(),
       /**
        * The SHA-256 of the system prompt the start gave it, so a client can tell when its role's
-       * prompt has changed since (protocol 1.55).
+       * prompt has changed since.
        */
       promptHash: z.string().optional(),
     }),
@@ -159,8 +158,8 @@ export const EVENTS = {
     entity: "agent",
     payload: z.object({
       /**
-       * `harness_refused`: the harness's server answered that it won't resume the session (protocol
-       * 1.34). `daemon_restart`: the daemon died mid-respawn, before the new process started (§7.1).
+       * `harness_refused`: the harness's server answered that it won't resume the session.
+       * `daemon_restart`: the daemon died mid-respawn, before the new process started (§7.1).
        */
       reason: z.enum([
         "not_resumable",
@@ -171,7 +170,7 @@ export const EVENTS = {
         "daemon_restart",
       ]),
       /**
-       * Protocol 1.34. What went wrong, in the failure's own words with secrets taken out, at most
+       * What went wrong, in the failure's own words with secrets taken out, at most
        * 500 characters counted as a person sees them (grapheme clusters, not UTF-16 units).
        */
       detail: z.string().optional(),
@@ -188,7 +187,7 @@ export const EVENTS = {
       generation: z.number().int().positive(),
       /** On a new harness session, which the old one's conversation doesn't carry into. */
       fresh: z.boolean(),
-      /** The runtime its terminal is created on; absent before protocol 1.48, when only tmux ran. */
+      /** The runtime its terminal is created on; tmux, from an older daemon. */
       runtime: z.string().min(1).optional(),
     }),
   },
@@ -200,11 +199,11 @@ export const EVENTS = {
       runtimeRef: RuntimeRefPayload,
       /** The theme the TUI was started for, when one was named. */
       theme: TuiTheme.optional(),
-      /** The name the harness's session was started with, for one that is addressed by it (1.43). */
+      /** The name the harness's session was started with, for one that is addressed by it. */
       harnessName: z.string().optional(),
       /**
        * The SHA-256 of the system prompt the start gave it, so a client can tell when its role's
-       * prompt has changed since (protocol 1.55).
+       * prompt has changed since.
        */
       promptHash: z.string().optional(),
     }),
@@ -214,8 +213,8 @@ export const EVENTS = {
     entity: "agent",
     payload: z.object({
       /**
-       * `harness_refused`: the harness's server answered that it won't start the session (protocol
-       * 1.34). `daemon_restart`: the daemon died mid-relaunch, and the new terminal never appeared.
+       * `harness_refused`: the harness's server answered that it won't start the session.
+       * `daemon_restart`: the daemon died mid-relaunch, and the new terminal never appeared.
        */
       reason: z.enum([
         "not_resumable",
@@ -225,7 +224,7 @@ export const EVENTS = {
         "daemon_restart",
       ]),
       /**
-       * Protocol 1.34. What went wrong, in the failure's own words with secrets taken out, at most
+       * What went wrong, in the failure's own words with secrets taken out, at most
        * 500 characters counted as a person sees them (grapheme clusters, not UTF-16 units).
        */
       detail: z.string().optional(),
@@ -273,7 +272,7 @@ export const EVENTS = {
       theme: TuiTheme.optional(),
       /** The lost shell it was opened to restart. */
       restartOf: Id("term").optional(),
-      /** The runtime its terminal is created on; absent before protocol 1.48, when only tmux ran. */
+      /** The runtime its terminal is created on; tmux, from an older daemon. */
       runtime: z.string().min(1).optional(),
     }),
   },
@@ -305,7 +304,7 @@ export const EVENTS = {
   },
   /**
    * The terminal, an agent's or a shell's, runs on a holder this build can't fully serve, which
-   * speaks only `protocol`; a restart onto a new holder serves it in full (protocol 1.49).
+   * speaks only `protocol`; a restart onto a new holder serves it in full.
    */
   "terminal.needs_restart": {
     entity: "terminal",
@@ -368,7 +367,7 @@ export const EVENTS = {
   },
   /**
    * The agent sent another Bazhen agent a message through its harness's own channel (Claude
-   * Code's SendMessage), which Bazhen sees sent but can't follow to delivery (§5.6). Protocol 1.43.
+   * Code's SendMessage), which Bazhen sees sent but can't follow to delivery (§5.6).
    */
   "message.observed": {
     entity: "observed_message",
@@ -418,7 +417,7 @@ export const EVENTS = {
   /** Never the token, its hash or the code it was paired with. */
   "device.paired": { entity: "device", payload: z.object({ name: z.string() }) },
   "device.revoked": { entity: "device", payload: z.object({}) },
-  /** Something for the human that no agent raised, such as a device pairing (protocol 1.38). */
+  /** Something for the human that no agent raised, such as a device pairing. */
   "notice.opened": {
     entity: "notice",
     payload: z.object({
@@ -454,7 +453,7 @@ export const EVENTS = {
   },
   /**
    * The task moved up to its parent's owner: what made its owner the owner ended, as the
-   * assignment it was delegated under (protocol 1.25).
+   * assignment it was delegated under.
    */
   "task.owner_changed": {
     entity: "task",
@@ -463,7 +462,7 @@ export const EVENTS = {
       delegatedFrom: Id("asgn").nullable(),
     }),
   },
-  /** A note on the task from its actor, the human or an agent (protocol 1.44). */
+  /** A note on the task from its actor, the human or an agent. */
   "task.noted": {
     entity: "task",
     payload: taskNoted,
@@ -521,7 +520,6 @@ export type Event = z.infer<typeof Event>;
  * or the last event it saw gave it. The stream resumes after `after`.
  */
 export const EventStreamQuery = z.object({
-  v: ProtocolVersion,
   epoch: z.string().min(1),
   after: z.string().regex(/^\d+$/),
 });
@@ -543,6 +541,9 @@ export type ClientEventFrame = z.infer<typeof ClientEventFrame>;
 
 /** A page in sight says so this often; one silent for twice as long counts as out of sight. */
 export const VISIBILITY_HEARTBEAT_MS = 30_000;
+
+/** The largest frame a client sends on `/v1/events`, which carries only whether its page is seen. */
+export const EVENT_FRAME_MAX_BYTES = 1024;
 
 /** Text frames the daemon sends on `/v1/events`. */
 export const EventFrame = z.discriminatedUnion("type", [

@@ -1,6 +1,7 @@
 import optimizeLocales from "@react-aria/optimize-locales-plugin";
 import react from "@vitejs/plugin-react";
-import { defineConfig, type Plugin } from "vite";
+import { protocolId } from "@bazhen/protocol/id";
+import { defineConfig, type Plugin, type ViteDevServer } from "vite";
 import { answer, refuseUpgrade, servesHere } from "./src/dev/loopback.ts";
 import { isClosedSocketError } from "./src/dev/proxy-log.ts";
 
@@ -62,6 +63,39 @@ const quietClosedSockets = (): Plugin => ({
   },
 });
 
+const PROTOCOL_ID = "virtual:bazhen/protocol-id";
+const isReader = (f: unknown): f is typeof protocolId => typeof f === "function";
+
+/**
+ * `virtual:bazhen/protocol-id`: the protocol id of the schema the page is built against. The dev
+ * server reads it through its own module graph, which drops the protocol's modules when their
+ * source changes; Node's cache would keep the id the server started with, and the page would ask
+ * to reload for ever once the daemon restarted on an edit.
+ */
+const protocolIdentity = (): Plugin => {
+  const resolved = `\0${PROTOCOL_ID}`;
+  let server: ViteDevServer | undefined;
+  return {
+    name: "bazhen:protocol-id",
+    configureServer(dev) {
+      server = dev;
+      dev.watcher.on("change", (file) => {
+        if (!file.includes("/packages/protocol/src/")) return;
+        const page = dev.moduleGraph.getModuleById(resolved);
+        if (page !== undefined) dev.reloadModule(page).catch(() => undefined);
+      });
+    },
+    resolveId: (id) => (id === PROTOCOL_ID ? resolved : undefined),
+    async load(id) {
+      if (id !== resolved) return undefined;
+      const fresh = await server?.ssrLoadModule("@bazhen/protocol/id");
+      const read: unknown = fresh === undefined ? protocolId : fresh["protocolId"];
+      if (!isReader(read)) throw new Error("@bazhen/protocol/id has no protocolId");
+      return `export default ${JSON.stringify(await read())};`;
+    },
+  };
+};
+
 export default defineConfig({
   // The UI is written in English, so React Aria's strings for its other locales (the dialog's
   // hidden dismiss button, among others) would only add weight.
@@ -71,6 +105,7 @@ export default defineConfig({
     closeOnSigint(),
     loopbackOnly(),
     quietClosedSockets(),
+    protocolIdentity(),
   ],
   server: {
     host: "127.0.0.1",

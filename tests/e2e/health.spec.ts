@@ -1,12 +1,135 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page, type WebSocketRoute } from "@playwright/test";
+import { answerPatched } from "../support/state-route.ts";
+import { launch } from "./page.ts";
 
 test("the web client shows the daemon's live health through the dev proxy", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Bazhen" })).toBeVisible();
   await expect(page.getByRole("term").filter({ hasText: "Protocol" })).toBeVisible();
-  await expect(page.getByRole("definition").filter({ hasText: /^\d+\.\d+$/ })).toBeVisible();
+  await expect(page.getByRole("definition").filter({ hasText: /^[0-9a-f]{12}$/ })).toBeVisible();
   await expect(page.getByRole("definition").filter({ hasText: /tmux 3\./ })).toBeVisible();
   await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
+test("asks to reload a page the daemon's protocol has moved past", async ({ page }) => {
+  const health = { status: "ok", appVersion: "0.1.0", protocolId: "0".repeat(64) };
+  await page.route("**/v1/health", (route) =>
+    route.fulfill({
+      json: { ...health, runtime: { kind: "tmux", state: "healthy", version: "3.4" } },
+    }),
+  );
+  await page.goto("/");
+  await expect(page.getByRole("alert")).toContainText(
+    "This page and the daemon are different builds of Bazhen",
+  );
+  await expect(page.getByRole("button", { name: "Reload" })).toBeVisible();
+});
+
+/** Passes each event stream the page opens through the test, which can close it as a restart would. */
+async function passEventStreams(page: Page): Promise<WebSocketRoute[]> {
+  const streams: WebSocketRoute[] = [];
+  await page.routeWebSocket(/\/v1\/events/, (ws) => {
+    streams.push(ws);
+    const server = ws.connectToServer();
+    ws.onMessage((message) => server.send(message));
+    server.onMessage((message) => ws.send(message));
+    ws.onClose(() => server.close());
+    server.onClose(() => ws.close());
+  });
+  return streams;
+}
+
+/** Answers `/v1/health` as the daemon does, but with the protocol id `served()` names, if any. */
+async function answerHealth(page: Page, served: () => string | undefined) {
+  await page.route("**/v1/health", (route) =>
+    answerPatched(route, (health) => ({
+      ...health,
+      protocolId: served() ?? Reflect.get(health, "protocolId"),
+    })),
+  );
+}
+
+test("asks to reload once the event stream comes back to a daemon of another build", async ({
+  page,
+}) => {
+  let served: string | undefined;
+  await answerHealth(page, () => served);
+  const streams = await passEventStreams(page);
+  await page.goto("/");
+  await expect.poll(() => streams.length).toBe(1);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  served = "0".repeat(64);
+  await streams[0]?.close();
+  await expect(page.getByRole("alert")).toContainText(
+    "This page and the daemon are different builds of Bazhen",
+  );
+});
+
+/** Answers `/v1/state` as the daemon does until `broken()`, then with a state no build can read. */
+async function answerState(page: Page, broken: () => boolean) {
+  await page.route("**/v1/state", (route) =>
+    broken() ? route.fulfill({ json: { agents: "not a list" } }) : route.fallback(),
+  );
+}
+
+test("asks to reload when a restarted daemon's state is one this page can't read", async ({
+  page,
+}) => {
+  let served: string | undefined;
+  await answerHealth(page, () => served);
+  await answerState(page, () => served !== undefined);
+  const streams = await passEventStreams(page);
+  await page.goto("/");
+  await expect.poll(() => streams.length).toBe(1);
+  served = "0".repeat(64);
+  await streams[0]?.close();
+  await expect(page.getByRole("alert")).toContainText(
+    "This page and the daemon are different builds of Bazhen",
+  );
+  expect(streams).toHaveLength(1);
+});
+
+/**
+ * Passes each terminal stream the page opens through the test until `refuse()`. Then the open one
+ * drops, and the page's next is refused as the daemon refuses a view of another build.
+ */
+async function routeTerminalStreams(page: Page) {
+  const open: WebSocketRoute[] = [];
+  let refusing = false;
+  await page.routeWebSocket(/\/v1\/terminals\//, (ws) => {
+    if (refusing) {
+      ws.send(JSON.stringify({ type: "error", message: "this page is from another build" }));
+      void ws.close();
+      return;
+    }
+    open.push(ws);
+    const server = ws.connectToServer();
+    ws.onMessage((message) => server.send(message));
+    server.onMessage((message) => ws.send(message));
+    ws.onClose(() => server.close());
+    server.onClose(() => ws.close());
+  });
+  return {
+    refuse: async () => {
+      refusing = true;
+      await Promise.all(open.map((ws) => ws.close()));
+    },
+  };
+}
+
+test("asks to reload as soon as a terminal's view is refused as another build's", async ({
+  page,
+}) => {
+  let served: string | undefined;
+  await answerHealth(page, () => served);
+  const streams = await routeTerminalStreams(page);
+  await launch(page);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  served = "0".repeat(64);
+  await streams.refuse();
+  await expect(page.getByRole("alert")).toContainText(
+    "This page and the daemon are different builds of Bazhen",
+  );
 });
 
 test("a device's pinned theme is set before the app's script runs", async ({ page }) => {

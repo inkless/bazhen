@@ -124,19 +124,15 @@ export async function openSecondView(
  * Its own TUI names a transcript it hasn't written, so only once that TUI has exited.
  */
 export async function givePageAgentTranscript(page: Page, agentId: string): Promise<void> {
-  const { session, protocolVersion } = await page.evaluate(async (id) => {
+  const session = await page.evaluate(async (id) => {
     const state: unknown = await (await fetch("/v1/state")).json();
     const agents: unknown = Reflect.get(Object(state), "agents");
     const agent: unknown = Array.isArray(agents)
       ? agents.find((a: unknown) => Reflect.get(Object(a), "id") === id)
       : undefined;
-    const health: unknown = await (await fetch("/v1/health")).json();
-    return {
-      session: String(Reflect.get(Object(Reflect.get(Object(agent), "externalRef")), "id")),
-      protocolVersion: String(Reflect.get(Object(health), "protocolVersion")),
-    };
+    return String(Reflect.get(Object(Reflect.get(Object(agent), "externalRef")), "id"));
   }, agentId);
-  await giveTranscript(String(process.env["BZ_E2E_HOME"]), protocolVersion, agentId, session);
+  await giveTranscript(String(process.env["BZ_E2E_HOME"]), agentId, session);
 }
 
 /**

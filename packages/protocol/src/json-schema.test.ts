@@ -7,7 +7,7 @@ describe("jsonSchemas", () => {
     const files = Object.keys(jsonSchemas());
     expect(files).toContain("HealthResponse.json");
     expect(files).not.toContain("isCompatible.json");
-    expect(files).not.toContain("PROTOCOL_VERSION.json");
+    expect(files).not.toContain("HOOK_PROTOCOL_VERSION.json");
   });
 
   it("describes a schema's constraints, not just its shape", () => {

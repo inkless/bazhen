@@ -1,12 +1,5 @@
 import { z } from "zod";
 import { AttachmentMode, Id } from "./ids.ts";
-import { ProtocolVersion } from "./version.ts";
-
-/**
- * The version from which a view declares its epoch and asks for pongs, and from which a daemon
- * reads both. Either side sends those frames only to a peer at least this new.
- */
-export const EPOCH_FRAMES_SINCE = "1.30";
 
 /**
  * How much history above its screen a terminal keeps unless `terminals.history_lines` says
@@ -16,6 +9,9 @@ export const HISTORY_LINES = 10_000;
 
 /** The most rows a view or a terminal can have. */
 export const MAX_ROWS = 1000;
+
+/** The largest frame a view may send: a keystroke burst or a paste, nothing a person types. */
+export const STREAM_FRAME_MAX_BYTES = 1 << 20;
 
 const Size = {
   cols: z.number().int().min(2).max(1000),
@@ -29,13 +25,17 @@ const Size = {
 export const StreamClientFrame = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("hello"),
-    protocolVersion: ProtocolVersion,
+    /**
+     * The protocol id of the build the view's page is from. The daemon refuses a view of another
+     * build, before it can misread a frame or send a key the daemon reads otherwise.
+     */
+    protocolId: z.string().optional(),
     mode: AttachmentMode,
     ...Size,
     /**
      * The view's own earlier attachment and the resume token it was given, when it reattaches
      * after losing its socket. That one is ended first, so a lease it still held is free again
-     * rather than held by a socket that is gone (since 1.30). Attachment ids are in the event
+     * rather than held by a socket that is gone. Attachment ids are in the event
      * stream; only the token proves the attachment was this view's.
      */
     resumes: z.object({ attachmentId: Id("att"), token: z.string().max(64) }).optional(),
@@ -60,11 +60,9 @@ export const StreamServerFrame = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("attached"),
     attachmentId: Id("att"),
-    /** The daemon's protocol; absent before 1.30. */
-    protocolVersion: ProtocolVersion.optional(),
     /**
      * What lets this view end this attachment when it reattaches (`hello.resumes`). Sent only
-     * here: never in an event, a snapshot or a log. Absent before 1.30.
+     * here: never in an event, a snapshot or a log. Absent from an older daemon.
      */
     resumeToken: z.string().optional(),
   }),
@@ -73,11 +71,11 @@ export const StreamServerFrame = z.discriminatedUnion("type", [
     type: z.literal("lease"),
     driver: z.boolean(),
     epoch: z.number().int().nonnegative(),
-    /** Whether another view drives; absent from a daemon before 1.30. */
+    /** Whether another view drives; absent from an older daemon. */
     driven: z.boolean().optional(),
     /**
      * The name of the paired device another view drives from; absent when it is on none, or
-     * from a daemon before 1.32.
+     * from an older daemon.
      */
     driverDevice: z.string().optional(),
   }),
@@ -90,7 +88,7 @@ export const StreamServerFrame = z.discriminatedUnion("type", [
     type: z.literal("snapshot_start"),
     /**
      * How much history above its screen the terminal keeps, which the view keeps too as output
-     * scrolls; absent before 1.56, from a daemon whose terminals keep `HISTORY_LINES`.
+     * scrolls; absent from an older daemon, whose terminals keep `HISTORY_LINES`.
      */
     historyLines: z.number().int().nonnegative().optional(),
   }),

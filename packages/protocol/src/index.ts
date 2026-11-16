@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { Id } from "./ids.ts";
-import { ProtocolVersion } from "./version.ts";
 
 export * from "./agents.ts";
 export * from "./devices.ts";
@@ -24,14 +23,14 @@ export * from "./version.ts";
 export const RuntimeHealthState = z.enum(["healthy", "unreachable", "not-running"]);
 export type RuntimeHealthState = z.infer<typeof RuntimeHealthState>;
 
-/** One runtime's health, as `bazhen status` and `bazhen doctor` show it (protocol 1.49). */
+/** One runtime's health, as `bazhen status` and `bazhen doctor` show it. */
 export const RuntimeHealthReport = z.object({
   kind: z.string(),
   state: RuntimeHealthState,
   version: z.string().nullable(),
   /**
    * Defects of this runtime's version that Bazhen works around, each with what it costs, worded
-   * for a person. Absent from a daemon before 1.50.
+   * for a person. Absent from an older daemon.
    */
   workarounds: z.array(z.string()).optional(),
 });
@@ -40,8 +39,8 @@ export type RuntimeHealthReport = z.infer<typeof RuntimeHealthReport>;
 export const HealthResponse = z.object({
   status: z.literal("ok"),
   appVersion: z.string(),
-  protocolVersion: ProtocolVersion,
-  schemaVersion: z.number().int().nonnegative(),
+  /** The protocol the daemon speaks (`protocolId()`): a client of another one should reload. */
+  protocolId: z.string(),
   runtime: z.object({
     kind: z.literal("tmux"),
     state: RuntimeHealthState,
@@ -49,7 +48,7 @@ export const HealthResponse = z.object({
   }),
   /**
    * Every runtime the daemon runs terminals on, each read by itself; `runtime` is the worst of
-   * them, with tmux's version. Absent from a daemon before 1.49.
+   * them, with tmux's version. Absent from an older daemon.
    */
   runtimes: z.array(RuntimeHealthReport).optional(),
 });
@@ -69,15 +68,15 @@ export const memoryCapText = ({ asked, bytes }: MemoryCap) =>
  */
 export const DoctorResponse = z.object({
   appVersion: z.string(),
-  protocolVersion: ProtocolVersion,
+  protocolId: z.string(),
   runtime: z.object({ state: RuntimeHealthState, version: z.string().nullable() }),
-  /** As in `HealthResponse`. Absent from a daemon before 1.49. */
+  /** As in `HealthResponse`. Absent from an older daemon. */
   runtimes: z.array(RuntimeHealthReport).optional(),
   hookClient: z.object({ path: z.string(), fallback: z.boolean() }),
   /**
    * The installed binary that reads which process calls on the socket, so a call from inside an
    * agent's process tree is that agent's; null when none is installed, an incomplete install.
-   * Absent from a daemon before 1.54.
+   * Absent from an older daemon.
    */
   peerReader: z.object({ path: z.string() }).nullable().optional(),
   config: z.object({ path: z.string(), found: z.boolean() }),
@@ -85,7 +84,7 @@ export const DoctorResponse = z.object({
   agents: z.object({ shell: z.enum(["direct", "login"]), loginShell: z.string().nullable() }),
   /**
    * Codex's managed app-server, as last connected to, and the CLI agents run; null for one
-   * not reached. They update apart (foundation-design §5.8). Absent from a daemon before 1.6.
+   * not reached. They update apart (foundation-design §5.8). Absent from an older daemon.
    */
   codex: z.object({ daemon: z.string().nullable(), cli: z.string().nullable() }).optional(),
   /**
@@ -100,14 +99,14 @@ export const DoctorResponse = z.object({
       allowInsecureOrigins: z.boolean(),
       /**
        * `web.pairing`, and whether browsers must pair under it: always with an external origin.
-       * Absent from a daemon before 1.29.
+       * Absent from an older daemon.
        */
       pairing: z.object({ mode: z.enum(["auto", "always"]), required: z.boolean() }).optional(),
-      /** The built web client the daemon serves, or null before `pnpm build`. Absent before 1.33. */
+      /** The built web client the daemon serves, or null before `pnpm build`. Absent from an older daemon. */
       app: z.string().nullable().optional(),
       /**
        * The LAN listener under `web.listen = "lan"`, or null without one. `certificate` is null,
-       * and `error` says why, when it isn't serving. No key material. Absent before 1.36.
+       * and `error` says why, when it isn't serving. No key material. Absent from an older daemon.
        */
       lan: z
         .object({
@@ -127,13 +126,13 @@ export const DoctorResponse = z.object({
   /**
    * Whether desktop notifications are on, and the notifier they go through: Bazhen.app on macOS,
    * notify-send on Linux, or null where there is none (on macOS, `pnpm build:notify` builds it).
-   * Absent from a daemon before 1.24.
+   * Absent from an older daemon.
    */
   notifications: z.object({ desktop: z.boolean(), notifier: z.string().nullable() }).optional(),
   /**
    * Terminals open and `terminals.max_open`, and the machine's PTYs in use and its most, or null
    * where they can't be counted. `exact` is false where `used` is an upper bound, as on macOS.
-   * `refusing` names the limit refusing new terminals now, if one is. Absent before 1.37.
+   * `refusing` names the limit refusing new terminals now, if one is. Absent from an older daemon.
    */
   terminals: z
     .object({
@@ -148,7 +147,7 @@ export const DoctorResponse = z.object({
   /**
    * The holder build new terminals run, named by its hash, or null for none built; and for each
    * holder that answers, the build it runs, null where it can't be told, and the holder/1
-   * versions it speaks (design §4.7). Absent before 1.46.
+   * versions it speaks (design §4.7). Absent from an older daemon.
    */
   holder: z
     .object({
@@ -163,7 +162,7 @@ export const DoctorResponse = z.object({
           protocol: z.array(z.string()),
           /**
            * Whether it runs in a terminal's systemd scope; null where that can't be read. Absent
-           * before 1.53.
+           * from an older daemon.
            */
           contained: z.boolean().nullable().optional(),
         }),
@@ -175,7 +174,7 @@ export const DoctorResponse = z.object({
    * memory cap and swap cap and all terminals' memory together, as configured and as the kernel
    * enforces them (bytes, null for no cap), and whether a process past its cap is killed alone
    * (`OOMPolicy=continue`, systemd 253 or later); if not, why. `unchecked` until a holder terminal
-   * has needed it. tmux terminals are never contained. Absent before 1.53.
+   * has needed it. tmux terminals are never contained. Absent from an older daemon.
    */
   containment: z
     .discriminatedUnion("state", [
