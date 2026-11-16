@@ -3,7 +3,6 @@ import {
   isId,
   LaunchFailed,
   newId,
-  assertRunsOn,
   UnsupportedHarness,
   type EnvironmentAdapter,
   type AgentSessionId,
@@ -208,7 +207,6 @@ export async function launchAgent(
   if (prior !== undefined)
     return replay(store, LaunchRecord.parse(prior), req.idempotencyKey, asked);
   if (!environment.harnesses.includes(req.harness)) throw new UnsupportedHarness(req.harness);
-  assertRunsOn(req.harness, environment.defaultRuntime);
   prompts.check(req.role);
   const cwd = resolveDirectory(req.cwd, home);
   const request = { harness: req.harness, cwd, project: req.project ?? basename(cwd) };

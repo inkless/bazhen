@@ -1,6 +1,5 @@
 import {
   advanceTerminal,
-  assertRunsOn,
   AgentTerminalExists,
   agentCommands,
   HarnessRefused,
@@ -236,7 +235,6 @@ export class Lifecycle {
       this.startAgain.budget.admit();
       // A new terminal, so on the runtime of the moment, wherever the lost one was.
       const on = this.environment.defaultRuntime;
-      assertRunsOn(launch.harness, on);
       const started = this.startOptions(agentId, launched, req.theme);
       const requested = this.record(agentId, "agent.relaunch_requested", {
         terminalId,
