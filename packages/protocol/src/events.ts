@@ -104,7 +104,7 @@ export const EVENTS = {
       runtimeRef: RuntimeRefPayload.nullable(),
       /** The theme the TUI was started for, when one was named. */
       theme: TuiTheme.optional(),
-      /** The name the harness's session was started with, for one that is addressed by it (1.42). */
+      /** The name the harness's session was started with, for one that is addressed by it (1.43). */
       harnessName: z.string().optional(),
     }),
   },
@@ -132,7 +132,7 @@ export const EVENTS = {
       runtimeRef: RuntimeRefPayload,
       /** The theme the TUI was started for, when one was named. */
       theme: TuiTheme.optional(),
-      /** The name the harness's session was started with, for one that is addressed by it (1.42). */
+      /** The name the harness's session was started with, for one that is addressed by it (1.43). */
       harnessName: z.string().optional(),
     }),
   },
@@ -180,7 +180,7 @@ export const EVENTS = {
       runtimeRef: RuntimeRefPayload,
       /** The theme the TUI was started for, when one was named. */
       theme: TuiTheme.optional(),
-      /** The name the harness's session was started with, for one that is addressed by it (1.42). */
+      /** The name the harness's session was started with, for one that is addressed by it (1.43). */
       harnessName: z.string().optional(),
     }),
   },
@@ -331,7 +331,7 @@ export const EVENTS = {
   },
   /**
    * The agent sent another Bazhen agent a message through its harness's own channel (Claude
-   * Code's SendMessage), which Bazhen sees sent but can't follow to delivery (§5.6). Protocol 1.42.
+   * Code's SendMessage), which Bazhen sees sent but can't follow to delivery (§5.6). Protocol 1.43.
    */
   "message.observed": {
     entity: "observed_message",

@@ -263,7 +263,7 @@ export const StateSnapshot = z.object({
   assignments: z.array(Assignment).default([]),
   /** Every open notice, and the latest closed ones. Protocol 1.38. */
   notices: z.array(Notice).default([]),
-  /** The latest messages agents sent each other outside Bazhen's mail, oldest first. Protocol 1.42. */
+  /** The latest messages agents sent each other outside Bazhen's mail, oldest first. Protocol 1.43. */
   observed: z.array(ObservedMessage).default([]),
 });
 export type StateSnapshot = z.infer<typeof StateSnapshot>;

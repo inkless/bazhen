@@ -126,7 +126,16 @@ export class ClaudeCodeHarness implements HarnessAdapter {
  * The bazhen verbs an agent is taught, which run without a permission prompt: the daemon decides
  * what each caller may do with them. Its admin verbs, and answering approvals, still ask.
  */
-const AGENT_VERBS = ["agents", "whoami", "rename", "task", "delegate", "escalate", "send"] as const;
+const AGENT_VERBS = [
+  "agents",
+  "whoami",
+  "roles",
+  "rename",
+  "task",
+  "delegate",
+  "escalate",
+  "send",
+] as const;
 
 /**
  * A verb given a file to read (`--file`, `--brief-file`) asks as before: allowed, it would put

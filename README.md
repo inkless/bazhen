@@ -218,8 +218,8 @@ failed: the one it was launched with (`--name`), or `<project>-<n>`, whose numbe
 twice. Claude Code shows it as its session's name, which keeps the old one after a rename until the
 agent next starts. Mail stays with the agent's id, which a rename doesn't change.
 
-A Claude Code agent runs `bazhen agents`, `whoami`, `rename`, `task`, `delegate`, `escalate` and
-`send` without a permission prompt: the settings it starts with allow them, beside your own, and
+A Claude Code agent runs `bazhen agents`, `whoami`, `roles`, `rename`, `task`, `delegate`,
+`escalate` and `send` without a permission prompt: the settings it starts with allow them, beside your own, and
 the daemon decides what each agent may do with them. Other `bazhen` commands still ask, and so
 does one given a file to read (`--file`, `--brief-file`), which would otherwise put any file the
 agent can read into mail without a prompt. An agent

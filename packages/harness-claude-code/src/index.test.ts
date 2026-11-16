@@ -192,6 +192,7 @@ describe("Claude Code's permissions", () => {
       allow: [
         "Bash(bazhen agents:*)",
         "Bash(bazhen whoami:*)",
+        "Bash(bazhen roles:*)",
         "Bash(bazhen rename:*)",
         "Bash(bazhen task:*)",
         "Bash(bazhen delegate:*)",
