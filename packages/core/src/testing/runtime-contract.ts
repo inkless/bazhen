@@ -257,6 +257,21 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       },
     );
 
+    it.runIf(harness.pastes === false)(
+      "refuses a paste of text it would otherwise take, as it has no gate to check first",
+      async () => {
+        const runtime = fresh();
+        const ref = await runtime.create(spec(["cat"]));
+        // A PasteRefused, by name, as host-guard throws it: core can't import host-guard.
+        await expect(runtime.paste(ref, "make", true)).rejects.toMatchObject({
+          name: "PasteRefused",
+        });
+        await expect(runtime.paste(ref, "make", false)).rejects.toMatchObject({
+          name: "PasteRefused",
+        });
+      },
+    );
+
     it("refuses to paste a key, or into a process that has exited or been replaced", async () => {
       const runtime = fresh();
       const ref = await runtime.create(spec(["cat"]));
@@ -692,7 +707,7 @@ export function snapshotContract(name: string, harness: SnapshotHarness): void {
           harness.vanish(runtime, client.ref),
       ],
     ])(
-      "refuses a snapshot pending when %s, once it has closed, and any asked for after",
+      "settles a snapshot asked for as %s before it closes, rejects one left once it has, and any after",
       async (_how, close) => {
         const runtime = fresh();
         await runtime.create({ ...spec, terminalId: newId("term"), argv: ["sleep", "300"] });
@@ -700,13 +715,24 @@ export function snapshotContract(name: string, harness: SnapshotHarness): void {
         const client = { ...(await snapshotClient(runtime, ref)), ref };
         const order: string[] = [];
         client.stream.onClose(() => order.push("closed"));
-        const pending = client.stream.snapshot().catch((err: unknown) => {
-          order.push("rejected");
-          throw err;
-        });
+        // A runtime may answer the snapshot before the close reaches it, as a holder does: then
+        // it resolved before the stream closed. One still waiting when it closes is rejected.
+        const errors: unknown[] = [];
+        const settled = client.stream.snapshot().then(
+          () => order.push("resolved"),
+          (err: unknown) => {
+            order.push("rejected");
+            errors.push(err);
+          },
+        );
         await close(runtime, client);
-        await expect(pending).rejects.toBeInstanceOf(Error);
-        expect(order).toEqual(["closed", "rejected"]);
+        await expect.poll(() => order.includes("closed"), { timeout: harness.waitMs }).toBe(true);
+        await settled;
+        expect(order).toBeOneOf([
+          ["resolved", "closed"],
+          ["closed", "rejected"],
+        ]);
+        expect(errors.filter((err) => !(err instanceof Error))).toEqual([]);
         await expect(client.stream.snapshot()).rejects.toBeInstanceOf(Error);
       },
     );

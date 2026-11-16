@@ -195,7 +195,12 @@ const PASTE_START = "1b 5b 32 30 30 7e";
 const PASTE_END = "1b 5b 32 30 31 7e";
 
 /** A paste the pane wasn't ready for, which typed nothing: `message` says why. */
-export class PasteRefused extends Error {}
+export class PasteRefused extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PasteRefused";
+  }
+}
 
 /** What a paste's script prints, from inside it, when it types nothing, and why. */
 export const PASTE_REFUSED = {
