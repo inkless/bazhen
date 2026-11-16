@@ -255,13 +255,13 @@ A test owns everything it touches and leaves nothing behind.
   `sandbox-tripwire` feature), and a test build of the holder refuses to start there, with exit
   code 9. The one process
   started to send a signal is `systemctl --user kill` of the cap's own scope
-  (`packages/host-guard/src/cap.ts`). It and the kills Node and node-pty send a child they
-  started, on a start's timeout or a terminal's hang-up, are allowed only at the calls
-  `ALLOWED_SIGNALS` names, each with its reason and how many times it appears. Another signal in
-  the same file still counts, and so does a copy of an allowed call, an entry whose call has gone,
-  and any option but `timeout` at an allowed start. A file listed only for its fixtures, text that
-  names kills and runs none, has every kill on a command line allowed, a real one included, so
-  review is what keeps one out; any other signal in it still counts. The
+  (`packages/host-guard/src/cap.ts`). It and the kill Node sends a child it started on a
+  start's timeout are allowed only at the calls `ALLOWED_SIGNALS` names, each with its reason and
+  how many times it appears. Another signal in the same file still counts, and so does a copy of an
+  allowed call, an entry whose call has gone, and any option but `timeout` at an allowed start. A
+  file listed only for its fixtures, text that names kills and runs none, has every kill on a
+  command line allowed, a real one included, so review is what keeps one out; any other signal in
+  it still counts. The
   check is defence in depth: it reads text, so the
   chokepoints' own refusals are what stop a stray signal. On a command line it is a best-effort
   heuristic that fails closed where it reads one. It takes a literal's own escapes, then reads
@@ -284,8 +284,9 @@ A test owns everything it touches and leaves nothing behind.
   imports of `process`; `require()` of `child_process`, a start renamed by destructuring
   (`const { spawn: s } = cp`) or re-exported, and a start's options built in a variable or
   spread rather than written at the call; `kill` destructured in a parameter (`({ kill }) =>`);
-  node-pty's `destroy()`, which also hangs up; a `/` read as division or a regular expression
-  where only the syntax tree can tell; other unusual Rust `use` forms; and a method that signals by pid, which
+  node-pty's `destroy()`, which also signals its child by pid unless that terminal's `kill` was
+  replaced first, as `apps/daemon/src/pty/node-pty.ts` does; a `/` read as division or a regular
+  expression where only the syntax tree can tell; other unusual Rust `use` forms; and a method that signals by pid, which
   `deny.toml` keeps out only by banning the crates known so far to have one (`rust.md` § Signals).
   It fails closed on a module that is only named `signal`: a glob or rename of tokio's counts, so
   import its items by name. A Rust test that may signal processes it didn't start is

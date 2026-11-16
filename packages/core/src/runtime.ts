@@ -373,6 +373,7 @@ export interface PtyProcess {
   onExit(cb: (code: number) => void): void;
   write(bytes: Uint8Array): void;
   resize(size: Size): void;
+  /** Closes the PTY, as a terminal closing does: never a signal to the child by its pid. */
   hangUp(): void;
 }
 

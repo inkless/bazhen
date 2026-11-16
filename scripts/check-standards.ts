@@ -15,6 +15,7 @@ import {
   SIGNALS_IGNORE,
   SIGNAL_CHOKEPOINTS,
   ALLOWED_SIGNALS,
+  ENDS_WITHOUT_A_CALL,
   allowedSignalFailures,
   chokepointFor,
   rawSignalCalls,
@@ -31,7 +32,6 @@ const COVERED_ELSEWHERE: Record<string, string> = {
     "packages/runtime-holder/src/runtime.medium.test.ts",
   "packages/runtime-holder/src/title-watch.ts":
     "packages/runtime-holder/src/runtime.medium.test.ts",
-  "apps/daemon/src/pty/node-pty.ts": "tests/integration/tmux-runtime.test.ts",
   "apps/daemon/src/main.ts": "tests/e2e/health.spec.ts",
   "apps/cli/src/main.ts": "tests/api/cli.test.ts",
   "apps/daemon/src/start.ts": "tests/api/cli.test.ts",
@@ -2363,11 +2363,17 @@ export function signalChokepointFailures(
   return out;
 }
 
-/** An ALLOWED_SIGNALS file that no longer exists, whose entries would allow a copy put there. */
+/**
+ * A listed file that no longer exists: an ALLOWED_SIGNALS one's entries would allow a copy put
+ * there, and an ENDS_WITHOUT_A_CALL one, moved, would leave its new path unprotected.
+ */
 export function allowedSignalFileFailures(files: readonly string[]): string[] {
-  return Object.keys(ALLOWED_SIGNALS)
-    .filter((file) => !files.includes(file))
-    .map((file) => `scripts/signal-paths.ts: ALLOWED_SIGNALS lists missing ${file}.`);
+  const lists = { ALLOWED_SIGNALS, ENDS_WITHOUT_A_CALL };
+  return Object.entries(lists).flatMap(([name, list]) =>
+    Object.keys(list)
+      .filter((file) => !files.includes(file))
+      .map((file) => `scripts/signal-paths.ts: ${name} lists missing ${file}.`),
+  );
 }
 
 const readRepoFile = (p: string) => readFileSync(join(root, p), "utf8");

@@ -82,9 +82,12 @@ describe("tmux dead-pane focus defect", () => {
     const client = attach(server);
     await expect.poll(() => shown(server), { timeout: 5_000 }).toBe(true);
     await exitPane(server);
-    client.hangUp();
+    // Detached, the client leaves by MSG_EXITING. A hang-up closes its PTY, and the server can
+    // drop the client on its terminal's error before any MSG_EXITING comes.
+    tmux(server, "detach-client", "-s", "f");
     await expect.poll(() => shown(server), { timeout: 5_000 }).toBe(false);
     expect(server.alive()).toBe(!deadPaneFocusCrashes);
+    client.hangUp();
   });
 
   it("kills the server below tmux 3.5 when a client attaches to a dead pane", async () => {
@@ -101,8 +104,9 @@ describe("tmux dead-pane focus defect", () => {
     const first = attach(server);
     await expect.poll(() => shown(server), { timeout: 5_000 }).toBe(true);
     await exitPane(server);
-    first.hangUp();
+    tmux(server, "detach-client", "-s", "f");
     await expect.poll(() => shown(server), { timeout: 5_000 }).toBe(false);
+    first.hangUp();
     const again = attach(server);
     await expect.poll(() => settledAttach(server), { timeout: 5_000 }).toBe(true);
     again.hangUp();

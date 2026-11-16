@@ -36,6 +36,16 @@ export const SIGNAL_CHOKEPOINTS: Readonly<Record<string, string>> = {
     "never 0, ±1, the test, its parent or its own group",
 };
 
+/**
+ * Files that end processes through no call the scan reads, each with how. Each counts as a
+ * signalling source, so a revert or mutant of it runs only in a sandbox.
+ */
+export const ENDS_WITHOUT_A_CALL: Readonly<Record<string, string>> = {
+  "apps/daemon/src/pty/node-pty.ts":
+    "the PTY seam's hang-up, which closes the master for the kernel to hang up the session, " +
+    "and replaces node-pty's kill, which signals by pid, with one that sends nothing",
+};
+
 /** Where a file that wants to send a signal should send it from. */
 export function chokepointFor(file: string, inTest = false): string {
   if (inTest || /^crates\/[^/]+\/tests\//.test(file))
@@ -691,14 +701,6 @@ export const ALLOWED_SIGNALS: Readonly<Record<string, readonly AllowedSignal[]>>
       "tmux, reading a script on stdin in TmuxServer.source",
     ),
   ],
-  "apps/daemon/src/pty/node-pty.ts": [
-    {
-      code: /hangUp: \(\) => proc\.kill\(\)/,
-      why:
-        "node-pty's SIGHUP to the terminal child it spawned, by that child's pid: node-pty " +
-        "exposes no exit state to check before it sends",
-    },
-  ],
   "apps/daemon/src/codex/channel.ts": [
     timedOut(/run\("codex", args, \{ env, timeout: 60_000 \}\)/, "the codex CLI"),
     timedOut(/run\("codex", \["--version"\], \{ env, timeout: 1_000 \}\)/, "codex --version"),
@@ -912,8 +914,8 @@ function signalsIn(
 }
 
 /**
- * The chokepoints' own ways in, and the PTY seam's hang-up: a file calling one sends signals,
- * though not directly.
+ * The chokepoints' own ways in, and the PTY seam's hang-up, which ends its child through the
+ * kernel: a file calling one ends processes, though it sends no signal itself.
  */
 const TS_SENDERS = new RegExp(
   `\\b(?:${[
@@ -945,7 +947,9 @@ const RUST_SENDERS =
  * turn a check of a target into a signal to anything, so it is changed only in a sandbox.
  */
 export function isSignallingSource(file: string, text: string): boolean {
-  if (Object.hasOwn(SIGNAL_CHOKEPOINTS, file)) return true;
+  if (Object.hasOwn(SIGNAL_CHOKEPOINTS, file) || Object.hasOwn(ENDS_WITHOUT_A_CALL, file)) {
+    return true;
+  }
   // Read before the allowed ones are let through: an allowed signal is still a signal.
   const { signals, allowed } = signalsIn(file, text);
   const fixtures = allowed.filter(({ entry }) => entry.fixture === true);

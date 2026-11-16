@@ -360,6 +360,6 @@ describe("tmux runtime on a private server", () => {
       stream.close();
     }
     await expect.poll(ptyHandleCount, { timeout: 3000 }).toBeLessThanOrEqual(baseline);
-    expect(closes).toBe(30);
+    await expect.poll(() => closes, { timeout: 3000 }).toBe(30);
   });
 });

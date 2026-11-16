@@ -43,7 +43,7 @@ import {
   checkMigrations,
   STANDARDS_CHECKS,
 } from "./check-standards.ts";
-import { ALLOWED_SIGNALS } from "./signal-paths.ts";
+import { ALLOWED_SIGNALS, ENDS_WITHOUT_A_CALL } from "./signal-paths.ts";
 
 describe("migrationVersionFailures", () => {
   it("takes migrations numbered 1 to the latest in order", () => {
@@ -1632,7 +1632,15 @@ describe("the signal chokepoints", () => {
     expect(allowedSignalFileFailures(["packages/host-guard/src/scope.ts"])).toContainEqual(
       "scripts/signal-paths.ts: ALLOWED_SIGNALS lists missing packages/host-guard/src/tmux.ts.",
     );
-    expect(allowedSignalFileFailures(Object.keys(ALLOWED_SIGNALS))).toEqual([]);
+    expect(allowedSignalFileFailures(["packages/host-guard/src/scope.ts"])).toContainEqual(
+      "scripts/signal-paths.ts: ENDS_WITHOUT_A_CALL lists missing apps/daemon/src/pty/node-pty.ts.",
+    );
+    expect(
+      allowedSignalFileFailures([
+        ...Object.keys(ALLOWED_SIGNALS),
+        ...Object.keys(ENDS_WITHOUT_A_CALL),
+      ]),
+    ).toEqual([]);
   });
 
   it("names each raw signal call outside them, and where to send it instead", () => {
