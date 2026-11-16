@@ -27,6 +27,7 @@ import {
 import { InvalidDirectory, resolveDirectory } from "../agents/cwd.ts";
 import {
   forceable,
+  stillRunning,
   fromEnvironment as failed,
   StaleGeneration,
   StateConflict,
@@ -368,6 +369,7 @@ export class ShellLifecycle {
     const { store, environment, size, budget, integration } = this.deps;
     const { cwd, linkedAgentId, theme, restartOf, openedBy, retype } = shell;
     const terminalId = newId("term");
+    const runtime = environment.defaultRuntime;
     const reporting = integration && { ...integration, ...newShellToken() };
     const opened = store.transaction(() => {
       budget.admit();
@@ -380,6 +382,7 @@ export class ShellLifecycle {
             linkedAgentId,
             ...(theme && { theme }),
             ...(restartOf && { restartOf }),
+            runtime,
           }),
         ],
       };
@@ -394,6 +397,7 @@ export class ShellLifecycle {
         terminalId,
         cwd,
         size,
+        runtime,
         ...(linkedAgentId !== null && { linkedAgentId }),
         ...(theme && { theme }),
         ...(openedBy && { openedBy }),
@@ -523,10 +527,7 @@ export class ShellLifecycle {
       .close({ runtime: found.runtime, externalRef: null })
       .catch((cause: unknown) => {
         if (!force || !forceable(cause)) fromEnvironment(found.terminalId, cause);
-        this.log(
-          `shell ${found.terminalId} closed by force; its terminal's tmux server ` +
-            `(pid ${found.runtime?.locator.serverPid ?? "unknown"}) may still be running it`,
-        );
+        this.log(`shell ${found.terminalId} closed by force; ${stillRunning(found.runtime)}`);
       });
   }
 

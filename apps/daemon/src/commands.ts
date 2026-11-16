@@ -5,6 +5,7 @@ import {
   ProcessState,
   StaleIncarnation,
   TerminalUnconfirmed,
+  type RuntimeRef,
 } from "@bazhen/core";
 
 // Failures of a command on a terminal's owner, an agent or a shell, named by `subject`
@@ -57,6 +58,14 @@ export class EnvironmentUnavailable extends Error {
       cause,
     });
   }
+}
+
+/** What may still run a terminal a forced close recorded closed, as its log line says it. */
+export function stillRunning(ref: RuntimeRef | null): string {
+  if (ref?.runtime === "holder")
+    return `its holder (pid ${ref.locator.holderPid ?? "unknown"}) may still be running it`;
+  const pid = ref?.locator.serverPid ?? "unknown";
+  return `its terminal's tmux server (pid ${pid}) may still be running it`;
 }
 
 /** A close failure force may record past: unconfirmed, or the environment out of reach. */

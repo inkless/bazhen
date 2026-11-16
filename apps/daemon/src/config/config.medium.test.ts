@@ -73,6 +73,7 @@ describe("readConfigFile", () => {
     ],
     ["a budget of no terminals", "[terminals]\nmax_open = 0", "terminals.max_open:"],
     ["a fraction of a terminal", "[terminals]\nmax_open = 1.5", "terminals.max_open:"],
+    ["a runtime it doesn't run", '[runtime]\ndefault = "screen"', "runtime.default:"],
     ["broken TOML", "[daemon\nport = 1", "config.toml:"],
   ])("refuses %s, naming the file and the key", (_what, text, message) => {
     const file = write(text);

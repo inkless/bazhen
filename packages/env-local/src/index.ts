@@ -32,6 +32,7 @@ import {
   NoTerminal,
   NotResumable,
   ProcessState,
+  RoutedRuntime,
   StaleIncarnation,
   UnsupportedHarness,
 } from "@bazhen/core";
@@ -52,6 +53,7 @@ export function loginArgv(shell: string, argv: readonly string[]): [string, ...s
 
 export interface LocalEnvironmentOptions {
   readonly id: EnvironmentId;
+  /** One runtime, or a routed one over several, whose default new terminals are created on. */
   readonly runtime: RuntimeAdapter;
   readonly harnesses: readonly HarnessAdapter[];
   /** The daemon's Unix socket, handed to every agent as BAZHEN_SOCKET. */
@@ -86,7 +88,10 @@ export class LocalEnvironment implements EnvironmentAdapter {
   readonly harnesses: readonly HarnessId[];
   readonly resumes: Resumes;
   readonly themes: Readonly<Partial<Record<HarnessId, readonly TuiTheme[]>>>;
+  readonly runtimes: readonly string[];
+  readonly defaultRuntime: string;
   private readonly opts: LocalEnvironmentOptions;
+  private readonly runtime: RoutedRuntime;
 
   constructor(opts: LocalEnvironmentOptions) {
     this.id = opts.id;
@@ -98,16 +103,32 @@ export class LocalEnvironment implements EnvironmentAdapter {
     };
     this.themes = Object.fromEntries(opts.harnesses.map((h) => [h.id, h.themes]));
     this.opts = opts;
+    this.runtime =
+      opts.runtime instanceof RoutedRuntime
+        ? opts.runtime
+        : new RoutedRuntime({
+            runtimes: [opts.runtime],
+            defaultKind: opts.runtime.kind,
+            // With one runtime, a failure to read it is thrown, never only reported.
+            onError: () => {},
+          });
+    this.runtimes = this.runtime.kinds;
+    this.defaultRuntime = this.runtime.defaultKind;
   }
 
   /** `known`'s servers, by their pid and start time, tell a dead server from a lost socket (§7.1). */
-  async health(known: readonly RuntimeRef[] = []): Promise<EnvironmentHealth> {
-    const { state, version } = await this.opts.runtime.health(known);
+  async health(known: readonly RuntimeRef[] = [], runtime?: string): Promise<EnvironmentHealth> {
+    const { state, version } = await this.read(runtime).health(known);
     return { state: HEALTH[state], version };
   }
 
-  async inventory(): Promise<AgentInventoryEntry[]> {
-    return (await this.opts.runtime.inventory()).flatMap((e) => {
+  /** Every runtime, or only the one named. */
+  private read(runtime: string | undefined): RuntimeAdapter {
+    return runtime === undefined ? this.runtime : this.runtime.only(runtime);
+  }
+
+  async inventory(runtime?: string): Promise<AgentInventoryEntry[]> {
+    return (await this.read(runtime).inventory()).flatMap((e) => {
       if (e.tags.kind !== "agent") return [];
       const entry = { agentId: e.tags.agentId, ref: e.ref, dead: e.exit !== null };
       const externalRef = harnessSessionOf(e.tags.harnessSession, this.id);
@@ -115,8 +136,8 @@ export class LocalEnvironment implements EnvironmentAdapter {
     });
   }
 
-  async shells(): Promise<ShellInventoryEntry[]> {
-    return (await this.opts.runtime.inventory()).flatMap((e) =>
+  async shells(runtime?: string): Promise<ShellInventoryEntry[]> {
+    return (await this.read(runtime).inventory()).flatMap((e) =>
       e.tags.kind !== "shell"
         ? []
         : [
@@ -142,8 +163,9 @@ export class LocalEnvironment implements EnvironmentAdapter {
     theme,
     openedBy,
     integration,
+    runtime,
   }: ShellOpen): Promise<RuntimeRef> {
-    return this.opts.runtime.create({
+    return this.runtime.create({
       terminalId,
       tags: linkedAgentId === undefined ? { kind: "shell" } : { kind: "shell", linkedAgentId },
       argv: [this.shell, "-l", "-i"],
@@ -161,6 +183,7 @@ export class LocalEnvironment implements EnvironmentAdapter {
       size,
       generation: 0,
       ...(theme && { theme }),
+      ...(runtime && { runtime }),
     });
   }
 
@@ -169,14 +192,14 @@ export class LocalEnvironment implements EnvironmentAdapter {
    * as after an rc file's `exec zsh`, is still the shell.
    */
   async shellBusy(ref: RuntimeRef): Promise<string | null> {
-    const { command, own } = await this.opts.runtime.foreground(ref);
+    const { command, own } = await this.runtime.foreground(ref);
     // A login shell's process may be named with a leading dash, as `-fish`.
     return own ? null : command.replace(/^-/, "");
   }
 
   async shellForegrounds(refs: readonly RuntimeRef[]): Promise<ShellForeground[]> {
     const asked = new Set<string>(refs.map((r) => r.terminalId));
-    return (await this.opts.runtime.foregrounds(asked)).map((f) => ({
+    return (await this.runtime.foregrounds(asked)).map((f) => ({
       ref: f.ref,
       // A login shell's process may be named with a leading dash, as `-fish`.
       command: f.own ? null : f.command.replace(/^-/, ""),
@@ -185,11 +208,11 @@ export class LocalEnvironment implements EnvironmentAdapter {
   }
 
   unlinkShell(ref: RuntimeRef): Promise<void> {
-    return this.opts.runtime.unlink(ref);
+    return this.runtime.unlink(ref);
   }
 
   pasteShell(ref: RuntimeRef, text: string, brackets: boolean): Promise<void> {
-    return this.opts.runtime.paste(ref, text, brackets);
+    return this.runtime.paste(ref, text, brackets);
   }
 
   private get shell(): string {
@@ -199,21 +222,22 @@ export class LocalEnvironment implements EnvironmentAdapter {
   /** Without a recorded terminal there is nothing to prove gone, so it refuses rather than guess. */
   async close(refs: AgentRefs): Promise<void> {
     if (refs.runtime === null) throw new NoTerminal();
-    await this.opts.runtime.close(refs.runtime);
+    await this.runtime.close(refs.runtime);
   }
 
   async gone(refs: AgentRefs): Promise<boolean> {
     if (refs.runtime === null) throw new NoTerminal();
-    return this.opts.runtime.gone(refs.runtime);
+    return this.runtime.gone(refs.runtime);
   }
 
   onExit(cb: (ref: RuntimeRef, status: ExitStatus) => void): () => void {
-    return this.opts.runtime.onExit(cb);
+    return this.runtime.onExit(cb);
   }
 
   /**
    * Refuses an agent a terminal already carries, live or dead: an agent has one terminal at a time.
-   * Only a reachable runtime is read; with no server running its inventory is empty.
+   * Only the runtime it is made on is read, and only while reachable; with no server running its
+   * inventory is empty.
    */
   async launch({
     agentId,
@@ -223,11 +247,13 @@ export class LocalEnvironment implements EnvironmentAdapter {
     request,
     options,
     size,
+    runtime: on,
   }: AgentLaunch): Promise<AgentRefs> {
     const harness = this.harness(request);
     if (resume !== null && harness.resumeSpec === undefined) throw new NotResumable(agentId);
-    if ((await this.health()).state === "reachable") {
-      const carried = (await this.inventory()).some((e) => e.agentId === agentId);
+    const target = on ?? this.defaultRuntime;
+    if ((await this.health([], target)).state === "reachable") {
+      const carried = (await this.inventory(target)).some((e) => e.agentId === agentId);
       if (carried) throw new AgentTerminalExists(agentId);
     }
     const launch =
@@ -235,7 +261,7 @@ export class LocalEnvironment implements EnvironmentAdapter {
         ? await harness.launchSpec(request, options)
         : await harness.resumeSpec(request, resume, options);
     const externalRef = this.located(launch);
-    const runtime = await this.opts.runtime.create({
+    const runtime = await this.runtime.create({
       ...this.process(agentId, request, launch, generation),
       terminalId,
       // Carried on the terminal too: a daemon that dies before recording it can still resume it.
@@ -243,6 +269,7 @@ export class LocalEnvironment implements EnvironmentAdapter {
         ? { kind: "agent", agentId, harnessSession: JSON.stringify(externalRef) }
         : { kind: "agent", agentId },
       size,
+      ...(on && { runtime: on }),
     });
     return { runtime, externalRef, ...(launch.theme && { theme: launch.theme }) };
   }
@@ -262,7 +289,7 @@ export class LocalEnvironment implements EnvironmentAdapter {
     const launch = await harness.resumeSpec(request, refs.externalRef, options);
     const process = this.process(agentId, request, launch, generation);
     return {
-      runtime: await this.opts.runtime.respawn(refs.runtime, process),
+      runtime: await this.runtime.respawn(refs.runtime, process),
       externalRef: this.located(launch),
       ...(launch.theme && { theme: launch.theme }),
     };
@@ -270,7 +297,7 @@ export class LocalEnvironment implements EnvironmentAdapter {
 
   async signal(refs: AgentRefs, signal: Signal): Promise<void> {
     if (refs.runtime === null) throw new NoTerminal();
-    await this.opts.runtime.signal(refs.runtime, signal);
+    await this.runtime.signal(refs.runtime, signal);
   }
 
   /**
@@ -278,7 +305,7 @@ export class LocalEnvironment implements EnvironmentAdapter {
    * a harness's session (a Codex thread, say) is not touched for a respawn that can't happen.
    */
   private async assertExited(ref: RuntimeRef): Promise<void> {
-    const pane = (await this.opts.runtime.inventory()).find(
+    const pane = (await this.runtime.only(ref.runtime).inventory()).find(
       (e) => e.ref.terminalId === ref.terminalId && e.ref.locator.paneId === ref.locator.paneId,
     );
     if (pane === undefined) throw new StaleIncarnation(ref.terminalId, "gone");

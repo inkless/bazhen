@@ -241,6 +241,10 @@
               "type": "integer",
               "exclusiveMinimum": 0,
               "maximum": 9007199254740991
+            },
+            "runtime": {
+              "type": "string",
+              "minLength": 1
             }
           },
           "required": [
@@ -927,6 +931,10 @@
             },
             "fresh": {
               "type": "boolean"
+            },
+            "runtime": {
+              "type": "string",
+              "minLength": 1
             }
           },
           "required": [
@@ -1866,6 +1874,10 @@
             "restartOf": {
               "type": "string",
               "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            },
+            "runtime": {
+              "type": "string",
+              "minLength": 1
             }
           },
           "required": [

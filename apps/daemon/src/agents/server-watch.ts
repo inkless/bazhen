@@ -1,5 +1,6 @@
 import type { AgentInventoryEntry, EnvironmentAdapter } from "@bazhen/core";
 import type { AgentTerminal, Store } from "../store/store.ts";
+import { byRuntime } from "../terminals/runtimes.ts";
 import type { AgentQueue } from "./queue.ts";
 import { provablyGone, settle } from "./reconcile.ts";
 
@@ -19,13 +20,21 @@ export interface ServerWatchOptions {
   readonly log?: (message: string) => void;
 }
 
+/** How one runtime last read, and when it is next read. */
+interface Reading {
+  backoff: number;
+  at: number;
+  health: string;
+}
+
 /**
  * Reconciles the environment's agents while the daemon runs, as boot does, so a tmux server that
- * dies under it leaves its agents lost rather than running (foundation-design §7.1). The store is
- * read before the environment, so an agent it lists had its terminal before the inventory was
- * read, and each agent is settled in its own command slot, after reading it again: a launch,
- * respawn or close in flight is never concluded on. A health reading other than reachable may
- * have signalled the server to recreate its socket, so the next waits a doubling delay.
+ * dies under it leaves its agents lost rather than running (foundation-design §7.1). Each runtime
+ * is read with its own agents, by itself (design §5.4). The store is read before the runtime, so
+ * an agent it lists had its terminal before the inventory was read, and each agent is settled in
+ * its own command slot, after reading it again: a launch, respawn or close in flight is never
+ * concluded on. A health reading other than reachable may have signalled the runtime to recreate
+ * its socket, so that runtime's next read waits a doubling delay, and the others don't.
  */
 export class ServerWatch {
   private readonly opts: ServerWatchOptions;
@@ -35,9 +44,7 @@ export class ServerWatch {
   private timer: ReturnType<typeof setInterval> | undefined;
   private ticking: Promise<void> | undefined;
   private stopped = false;
-  private backoff = 0;
-  private healthAt = 0;
-  private health = "reachable";
+  private readonly readings = new Map<string, Reading>();
   /** The last failure of a whole check, so a persistent one is said once. */
   private fault: string | undefined;
   /** The last thing said of each agent that couldn't be concluded on, so it is said once. */
@@ -82,16 +89,21 @@ export class ServerWatch {
   private async check(): Promise<void> {
     const { store, environment, queue } = this.opts;
     const agents = store.recoverable(environment.id).filter((a) => !queue.busy(a.agentId));
-    if (agents.length === 0 || this.now() < this.healthAt) return;
+    for (const [runtime, on] of byRuntime(environment, agents)) await this.checkOn(runtime, on);
+  }
+
+  private async checkOn(runtime: string, agents: readonly AgentTerminal[]): Promise<void> {
+    const { environment, queue } = this.opts;
+    if (this.now() < this.reading(runtime).at) return;
     let present: Map<string, AgentInventoryEntry>;
     try {
       const known = agents.flatMap((a) => (a.runtime === null ? [] : [a.runtime]));
-      const { state } = await environment.health(known);
-      this.read(state);
+      const { state } = await environment.health(known, runtime);
+      this.read(runtime, state);
       if (state !== "reachable") return;
-      present = new Map((await environment.inventory()).map((e) => [e.agentId, e]));
+      present = new Map((await environment.inventory(runtime)).map((e) => [e.agentId, e]));
     } catch (err) {
-      this.read(`unreadable (${String(err)})`);
+      this.read(runtime, `unreadable (${String(err)})`);
       return;
     }
     for (const agent of agents) {
@@ -128,14 +140,24 @@ export class ServerWatch {
       );
   }
 
-  /** Backs off from a reading that wasn't reachable, and says only what changed. */
-  private read(state: string): void {
-    if (state === "reachable") this.backoff = 0;
-    else this.backoff = Math.min(Math.max(this.backoff * 2, this.intervalMs), MAX_BACKOFF_MS);
-    this.healthAt = this.now() + this.backoff;
-    if (state !== this.health)
-      this.log(`server watch: environment ${this.opts.environment.id} is ${state}`);
-    this.health = state;
+  private reading(runtime: string): Reading {
+    let reading = this.readings.get(runtime);
+    if (reading === undefined) {
+      reading = { backoff: 0, at: 0, health: "reachable" };
+      this.readings.set(runtime, reading);
+    }
+    return reading;
+  }
+
+  /** Backs off from a runtime's reading that wasn't reachable, and says only what changed. */
+  private read(runtime: string, state: string): void {
+    const reading = this.reading(runtime);
+    if (state === "reachable") reading.backoff = 0;
+    else reading.backoff = Math.min(Math.max(reading.backoff * 2, this.intervalMs), MAX_BACKOFF_MS);
+    reading.at = this.now() + reading.backoff;
+    if (state !== reading.health)
+      this.log(`server watch: environment ${this.opts.environment.id}'s ${runtime} is ${state}`);
+    reading.health = state;
   }
 }
 

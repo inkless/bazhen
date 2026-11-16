@@ -1,14 +1,16 @@
 import type { AgentInventoryEntry, EnvironmentAdapter } from "@bazhen/core";
 import { runtimePayload, type AgentTerminal, type Store } from "../store/store.ts";
+import { byRuntime, unrouted } from "../terminals/runtimes.ts";
 import { recordClosed } from "./lifecycle.ts";
 
 /**
- * After a restart, matches the environment's agents against the store's (foundation-design §7.1).
- * Its recorded refs let the environment tell a runtime that died, which is reachable and empty,
- * from one it can't read just now. An environment that can't be read, or fails while being read,
- * concludes nothing, because an unreadable source is not an empty one; boot goes on either way.
- * Runs before any command is taken, so nothing moves under it. A pane that died meanwhile is the
- * exit poller's to record, on its first check.
+ * After a restart, matches the environment's agents against the store's (foundation-design §7.1),
+ * one runtime at a time, each with the agents made on it. Their recorded refs let the runtime tell
+ * one that died, which is reachable and empty, from one it can't read just now. A runtime that
+ * can't be read, or fails while being read, concludes nothing about its agents, because an
+ * unreadable source is not an empty one; the other runtimes and boot go on either way. Runs before
+ * any command is taken, so nothing moves under it. A pane that died meanwhile is the exit poller's
+ * to record, on its first check.
  */
 export async function reconcile(
   store: Store,
@@ -16,13 +18,28 @@ export async function reconcile(
   log: (message: string) => void = console.warn,
 ): Promise<void> {
   const agents = store.recoverable(environment.id);
+  for (const { agentId, runtimeKind } of unrouted(environment, agents))
+    log(
+      `reconcile: agent ${agentId}'s terminal is on ${runtimeKind}, which this daemon doesn't run`,
+    );
+  for (const [runtime, on] of byRuntime(environment, agents))
+    await reconcileOn(store, environment, runtime, on, log);
+}
+
+async function reconcileOn(
+  store: Store,
+  environment: EnvironmentAdapter,
+  runtime: string,
+  agents: readonly AgentTerminal[],
+  log: (message: string) => void,
+): Promise<void> {
   let present: Map<string, AgentInventoryEntry>;
   try {
     const known = agents.flatMap((a) => (a.runtime === null ? [] : [a.runtime]));
-    if ((await environment.health(known)).state !== "reachable") return;
-    present = new Map((await environment.inventory()).map((e) => [e.agentId, e]));
+    if ((await environment.health(known, runtime)).state !== "reachable") return;
+    present = new Map((await environment.inventory(runtime)).map((e) => [e.agentId, e]));
   } catch (err) {
-    log(`reconcile: could not read environment ${environment.id}: ${String(err)}`);
+    log(`reconcile: could not read environment ${environment.id}'s ${runtime}: ${String(err)}`);
     return;
   }
   for (const agent of agents) {

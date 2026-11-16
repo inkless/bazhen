@@ -64,8 +64,13 @@ const ignore = () => {};
 export interface HolderRuntimeOptions {
   /** The daemon's private run directory: holders bind in its `holders` directory. */
   readonly root: string;
-  /** The `bazhen-holder` binary every new terminal's holder runs. */
-  readonly binary: string;
+  /**
+   * The `bazhen-holder` binary every new terminal's holder runs. Null when none is installed: the
+   * holders already running are still found and served, and only a new terminal is refused.
+   */
+  readonly binary: string | null;
+  /** Why there is no binary, which a refused new terminal says. */
+  readonly unavailable?: string;
   /** Where holder builds are installed, each in a directory named by its build. */
   readonly installDir?: string;
   /** The environment every new terminal starts from, already filtered (foundation-design §9.5). */
@@ -309,12 +314,33 @@ export class HolderRuntime implements RuntimeAdapter {
     );
   }
 
+  /**
+   * Every terminal a holder answers for. A socket that can't be read makes it throw: a reader that
+   * concludes from what is missing, as reconciliation does, must not take a holder it couldn't read
+   * for one that isn't there.
+   */
   async inventory(): Promise<RuntimeInventoryEntry[]> {
+    const { entries, unreadable } = await this.listed();
+    if (unreadable.length > 0)
+      throw new Error(`the holders at ${unreadable.join(", ")} can't be read`);
+    return entries;
+  }
+
+  /**
+   * What `inventory` reads, leaving out the sockets that couldn't be read, each reported once until
+   * it reads again: for readers that only act on what they find, as exit polling does.
+   */
+  private async listed(): Promise<{
+    readonly entries: RuntimeInventoryEntry[];
+    readonly unreadable: string[];
+  }> {
     const all = await this.reachAll();
     const listed = new Set(all.map((reached) => reached.socket));
     for (const socket of this.unreadable) if (!listed.has(socket)) this.unreadable.delete(socket);
-    return all.flatMap((reached) => {
+    const unreadable: string[] = [];
+    const entries = all.flatMap((reached): RuntimeInventoryEntry[] => {
       if (reached.is === "unreadable") {
+        unreadable.push(reached.socket);
         if (!this.unreadable.has(reached.socket)) {
           this.unreadable.add(reached.socket);
           this.report(
@@ -333,9 +359,15 @@ export class HolderRuntime implements RuntimeAdapter {
       if (basename(reached.socket) !== `${terminalId}.sock`) return [];
       return [{ ref: this.refOf(terminalId, hello), tags, exit: hello.exit }];
     });
+    return { entries, unreadable };
   }
 
   async create(spec: TerminalSpec): Promise<RuntimeRef> {
+    const { binary } = this.opts;
+    if (binary === null) {
+      const why = this.opts.unavailable ?? "no bazhen-holder is installed";
+      throw new Error(`terminal ${spec.terminalId}: no holder can be started: ${why}`);
+    }
     const socket = this.socketOf(spec.terminalId);
     const holderSpec = {
       protocol: [HOLDER_PROTOCOL_VERSION],
@@ -346,7 +378,7 @@ export class HolderRuntime implements RuntimeAdapter {
       ...this.processSpec(spec),
     };
     const start = this.opts.start ?? startHolder;
-    await start({ binary: this.opts.binary, root: this.opts.root, spec: holderSpec, env: {} });
+    await start({ binary, root: this.opts.root, spec: holderSpec, env: {} });
     const reached = await this.reach(socket);
     if (reached.is !== "holder") {
       // Best effort: one that answers later is told to close, rather than left with no record.
@@ -524,7 +556,7 @@ export class HolderRuntime implements RuntimeAdapter {
 
   async foregrounds(terminalIds: ReadonlySet<string>): Promise<TerminalForeground[]> {
     if (terminalIds.size === 0) return [];
-    const live = (await this.inventory()).filter(
+    const live = (await this.listed()).entries.filter(
       (e) => e.exit === null && terminalIds.has(e.ref.terminalId),
     );
     const groups = (
@@ -591,7 +623,7 @@ export class HolderRuntime implements RuntimeAdapter {
   }
 
   private async deadTerminals(): Promise<DeadTerminal[]> {
-    return (await this.inventory()).flatMap((e) =>
+    return (await this.listed()).entries.flatMap((e) =>
       e.exit === null ? [] : [{ ref: e.ref, status: e.exit }],
     );
   }

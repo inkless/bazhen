@@ -14,6 +14,7 @@ const EnvRule = z.string().regex(ENV_RULE, "must be a variable name, or a prefix
 const Origin = z.string().refine(isOrigin, "must be an origin, such as https://bazhen.example.com");
 const Flag = z.enum(["true", "false"]).transform((value) => value === "true");
 const Listen = z.enum(["loopback", "lan"]);
+const RuntimeKind = z.enum(["tmux", "holder"]);
 const Range = z.string().superRefine((text, ctx) => {
   const parsed = parseRange(text);
   if ("problem" in parsed) ctx.addIssue({ code: "custom", message: `${text} ${parsed.problem}` });
@@ -46,6 +47,8 @@ const ConfigFile = z.strictObject({
       max_open: z.int().min(1).optional(),
     })
     .optional(),
+  /** Where new terminals run; each one already made stays on the runtime it was made on. */
+  runtime: z.strictObject({ default: RuntimeKind.optional() }).optional(),
   web: z
     .strictObject({
       external_origins: z.array(Origin).optional(),
@@ -100,6 +103,8 @@ export interface Config {
   readonly launchLimits: { readonly maxLaunched: number; readonly maxDepth: number };
   /** `terminals.max_open`: past it, a new agent or shell is refused. */
   readonly maxOpenTerminals: number;
+  /** `runtime.default`: the runtime new terminals are created on. */
+  readonly defaultRuntime: z.infer<typeof RuntimeKind>;
 }
 
 export class InvalidConfig extends Error {
@@ -180,6 +185,7 @@ export function resolveConfig(
       maxDepth: file.agents?.max_launch_depth ?? 3,
     },
     maxOpenTerminals: file.terminals?.max_open ?? DEFAULT_MAX_OPEN_TERMINALS,
+    defaultRuntime: file.runtime?.default ?? "tmux",
     lan,
     ...withPairing(
       externalOrigins(file, env),

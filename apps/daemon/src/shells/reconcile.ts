@@ -1,12 +1,14 @@
 import type { EnvironmentAdapter, ShellInventoryEntry } from "@bazhen/core";
 import { runtimePayload, type ShellTerminal, type Store } from "../store/store.ts";
+import { byRuntime, unrouted } from "../terminals/runtimes.ts";
 import type { ShellLifecycle } from "./lifecycle.ts";
 
 /**
  * After a restart, matches the environment's shells against the store's (foundation-design §7.1,
- * §4.8), by the rules agents go by: an unreadable environment concludes nothing, and a shell the
- * inventory lacks is lost only once what ran it is provably gone. A shell whose process exited
- * while the daemon was down is closed, as it would have been at once.
+ * §4.8), one runtime at a time, by the rules agents go by: a runtime that can't be read concludes
+ * nothing about its shells, and a shell the inventory lacks is lost only once what ran it is
+ * provably gone. A shell whose process exited while the daemon was down is closed, as it would
+ * have been at once.
  */
 export async function reconcileShells(
   store: Store,
@@ -15,14 +17,29 @@ export async function reconcileShells(
   log: (message: string) => void = console.warn,
 ): Promise<void> {
   const recorded = store.recoverableShells(environment.id);
-  if (recorded.length === 0) return;
+  for (const { terminalId, runtimeKind } of unrouted(environment, recorded))
+    log(`reconcile: shell ${terminalId} is on ${runtimeKind}, which this daemon doesn't run`);
+  for (const [runtime, on] of byRuntime(environment, recorded))
+    await reconcileOn(store, environment, shells, runtime, on, log);
+}
+
+async function reconcileOn(
+  store: Store,
+  environment: EnvironmentAdapter,
+  shells: Pick<ShellLifecycle, "closeExited">,
+  runtime: string,
+  recorded: readonly ShellTerminal[],
+  log: (message: string) => void,
+): Promise<void> {
   let present: Map<string, ShellInventoryEntry>;
   try {
     const known = recorded.flatMap((s) => (s.runtime === null ? [] : [s.runtime]));
-    if ((await environment.health(known)).state !== "reachable") return;
-    present = new Map((await environment.shells()).map((e) => [e.ref.terminalId, e]));
+    if ((await environment.health(known, runtime)).state !== "reachable") return;
+    present = new Map((await environment.shells(runtime)).map((e) => [e.ref.terminalId, e]));
   } catch (err) {
-    log(`reconcile: could not read environment ${environment.id}'s shells: ${String(err)}`);
+    log(
+      `reconcile: could not read environment ${environment.id}'s ${runtime} shells: ${String(err)}`,
+    );
     return;
   }
   for (const shell of recorded) {

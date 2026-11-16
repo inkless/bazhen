@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  AgentTerminalExists,
   newId,
   NoTerminal,
+  RoutedRuntime,
   NotResumable,
   ProcessState,
   UnsupportedHarness,
@@ -33,6 +35,29 @@ const launch = (harnessId: "claude-code" | "codex" = "claude-code"): AgentLaunch
   request: { harness: harnessId, project: "p", cwd: "/work" },
   options: {},
   size: { cols: 80, rows: 24 },
+});
+
+describe("LocalEnvironment over two runtimes", () => {
+  it("checks for an agent's terminal on the runtime it launches onto, whatever the other's state", async () => {
+    const tmux = new FakeRuntime({ kind: "tmux" });
+    const holder = new FakeRuntime({ kind: "holder" });
+    const env = new LocalEnvironment({
+      id: newId("env"),
+      runtime: new RoutedRuntime({
+        runtimes: [tmux, holder],
+        defaultKind: "tmux",
+        onError: () => {},
+      }),
+      harnesses: [harness],
+      socket: "/run/b.sock",
+    });
+    const first = launch();
+    await env.launch(first);
+    holder.disconnect();
+    await expect(env.launch({ ...first, terminalId: newId("term") })).rejects.toBeInstanceOf(
+      AgentTerminalExists,
+    );
+  });
 });
 
 /** A local environment running only `h`, on a runtime of its own. */

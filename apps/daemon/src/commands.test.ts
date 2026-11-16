@@ -14,6 +14,7 @@ import {
   forceable,
   fromEnvironment,
   ServerUnconfirmed,
+  stillRunning,
   TerminalReplaced,
 } from "./commands.ts";
 
@@ -192,5 +193,25 @@ describe("a failure's detail", () => {
       failureDetail(thumb.repeat(DETAIL_MAX + 10)),
       failureDetail(thumb.repeat(DETAIL_MAX)),
     ]).toEqual([`${thumb.repeat(DETAIL_MAX - 1)}…`, thumb.repeat(DETAIL_MAX)]);
+  });
+});
+
+const ref = (runtime: string, locator: Record<string, string>) => ({
+  terminalId: newId("term"),
+  runtime,
+  locator,
+});
+
+describe("what may still run a terminal closed by force", () => {
+  it("names a holder's pid for a holder terminal, and the tmux server's for a tmux one", () => {
+    expect([
+      stillRunning(ref("holder", { holderPid: "77", serverPid: "x" })),
+      stillRunning(ref("tmux", { serverPid: "5" })),
+      stillRunning(null),
+    ]).toEqual([
+      "its holder (pid 77) may still be running it",
+      "its terminal's tmux server (pid 5) may still be running it",
+      "its terminal's tmux server (pid unknown) may still be running it",
+    ]);
   });
 });

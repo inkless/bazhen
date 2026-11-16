@@ -77,7 +77,12 @@ describe("reconciling shells after a restart", () => {
         type: "terminal.opened",
         entityId: terminalId,
         actor: "user",
-        payload: { environmentId: environment.id, cwd: "/", linkedAgentId: null },
+        payload: {
+          environmentId: environment.id,
+          cwd: "/",
+          linkedAgentId: null,
+          runtime: runtime.kind,
+        },
       });
     const appeared = newId("term");
     const never = newId("term");
@@ -106,7 +111,12 @@ describe("reconciling shells after a restart", () => {
       type: "terminal.opened",
       entityId: terminalId,
       actor: "user",
-      payload: { environmentId: environment.id, cwd: "/", linkedAgentId: null },
+      payload: {
+        environmentId: environment.id,
+        cwd: "/",
+        linkedAgentId: null,
+        runtime: runtime.kind,
+      },
     });
     const ref = await environment.openShell({ terminalId, cwd: "/", size: { cols: 80, rows: 24 } });
     runtime.exitProcess(ref);
@@ -123,7 +133,12 @@ describe("reconciling shells after a restart", () => {
       type: "terminal.opened",
       entityId: terminalId,
       actor: "user",
-      payload: { environmentId: environment.id, cwd: "/", linkedAgentId: null },
+      payload: {
+        environmentId: environment.id,
+        cwd: "/",
+        linkedAgentId: null,
+        runtime: runtime.kind,
+      },
     });
     const size = { cols: 80, rows: 24 };
     const ref = await environment.openShell({ terminalId, cwd: "/", size, linkedAgentId });

@@ -417,6 +417,14 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX task_notes_agent ON task_notes (agent_session_id, event_id);
     `,
   },
+  {
+    version: 27,
+    sql: `
+      -- The runtime a terminal is created on, from the moment it is requested, so a terminal still
+      -- being created is looked for there; every terminal before it ran on tmux.
+      ALTER TABLE terminals ADD COLUMN runtime_kind TEXT NOT NULL DEFAULT 'tmux';
+    `,
+  },
 ];
 
 const trimAt24 = (s: string) => s.replaceAll(/^[-_]+|[-_]+$/g, "");
