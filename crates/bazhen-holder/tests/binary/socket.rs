@@ -756,6 +756,9 @@ fn frees_the_writer_slot_of_a_connection_dropped_by_a_failed_write() {
     let (_holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
     let mut writer = Client::connect(&socket).unwrap();
     assert!(writer.hello(true).unwrap().writer);
+    // Kept open as the writer goes: a reader that may still send must not keep the slot.
+    let mut reader = Client::connect(&socket).unwrap();
+    assert!(!reader.hello(false).unwrap().writer);
     writer.stream.write_all(&refused_requests(4000)).unwrap();
     drop(writer);
     let deadline = Instant::now() + DEADLINE;

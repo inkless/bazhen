@@ -492,8 +492,14 @@ mod tests {
         let socket = Socket::bind(&path).unwrap();
         UnixStream::connect(&path).unwrap();
         socket.remove();
+        // Its lock goes with it, so what refuses the next bind is what is at the path.
+        drop(socket);
         std::fs::write(&path, b"").unwrap();
         assert!(matches!(Socket::bind(&path), Err(BindError::Taken(_))));
+        assert!(
+            std::fs::metadata(&path).unwrap().is_file(),
+            "the file was replaced"
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 
