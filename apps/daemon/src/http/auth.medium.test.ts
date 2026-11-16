@@ -74,6 +74,10 @@ function daemon(always = true) {
     closeShell: unused,
     restartShell: unused,
     renameShell: unused,
+    rename: () => {
+      throw new Error("not used by these tests");
+    },
+    resolveAgent: (ref: string) => ref,
     unlinkShell: unused,
     tasks: {
       create: refuse,

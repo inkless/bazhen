@@ -71,11 +71,10 @@ describe("tasks and delegation, through the CLI", () => {
     ]);
     expect(delegated).toMatchObject({ code: 0, out: expect.stringContaining("delegated task_") });
     const subtaskId = subtaskOf(delegated.out);
+    const name = (await state()).agents.find((a) => a.id === worker.agentId)?.name;
     expect(await asAgent(worker.agentId, ["task", "list"])).toMatchObject({
       code: 0,
-      out: expect.stringContaining(
-        `${subtaskId}  Pin Node  [worker ${worker.agentId}]  (part of ${taskId})`,
-      ),
+      out: expect.stringContaining(`${subtaskId}  Pin Node  [worker ${name}]  (part of ${taskId})`),
     });
 
     const before = await mailTo(coordinator.agentId);
@@ -98,13 +97,16 @@ describe("tasks and delegation, through the CLI", () => {
     );
   });
 
-  it("hands one agent's message to another, saying who sent it", async () => {
-    const out = await asAgent(worker.agentId, ["send", coordinator.agentId, "Is", "it", "green?"]);
+  it("hands one agent's message to another by its name, saying who sent it", async () => {
+    const nameOf = async (agentId: string) =>
+      String((await state()).agents.find((a) => a.id === agentId)?.name);
+    const to = await nameOf(coordinator.agentId);
+    const out = await asAgent(worker.agentId, ["send", to, "Is", "it", "green?"]);
     expect(out).toMatchObject({ code: 0, out: expect.stringContaining("sent msg_") });
     const messageId = /sent (msg_\S+)/.exec(out.out)?.[1];
     const queued = (await state()).messages.find((m) => m.id === messageId);
     expect(queued?.agentId).toBe(coordinator.agentId);
-    const header = `From agent ${worker.agentId} (claude-code, `;
+    const header = `From ${await nameOf(worker.agentId)} (${worker.agentId}, claude-code, `;
     const delivered = () =>
       claudeModel.requests.filter((r) => r.includes(header)).some((r) => r.includes("green?"));
     await expect.poll(delivered, { timeout: 30_000 }).toBe(true);
@@ -139,6 +141,15 @@ describe("tasks and delegation, through the CLI", () => {
     const launched = (await state()).agents.filter((a) => a.launchedBy === coordinator.agentId);
     expect(launched).toHaveLength(1);
     await expect.poll(async () => mailTo(String(launched[0]?.id))).toBe(1);
+  });
+
+  it("tells an agent who it is, and renames it, under which it is then addressed", async () => {
+    const before = await asAgent(worker.agentId, ["whoami"]);
+    expect(before).toMatchObject({ code: 0, out: expect.stringContaining(worker.agentId) });
+    const renamed = await asAgent(worker.agentId, ["rename", worker.agentId, "api-worker"]);
+    expect(renamed).toMatchObject({ code: 0, out: expect.stringContaining("renamed") });
+    const listed = await bazhen(["agents"], daemon.env);
+    expect(listed.out).toContain(`api-worker  ${worker.agentId}`);
   });
 
   it("refuses a worker that delegates, and says why", async () => {

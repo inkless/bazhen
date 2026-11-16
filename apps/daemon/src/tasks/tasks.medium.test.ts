@@ -169,7 +169,9 @@ describe("Tasks finish", () => {
     const { store, tasks, lead, worker, taskId } = await staffed();
     tasks.finish(worker, taskId, { idempotencyKey: "f", outcome: "done", note: "Pinned Node." });
     expect(store.taskView(taskId)?.state).toBe("open");
-    expect(inbox(store, lead).at(-1)).toContain(`Agent ${worker} finished its part`);
+    expect(inbox(store, lead).at(-1)).toContain(
+      `${store.agent(worker)?.name} (${worker}) finished its part`,
+    );
     expect(inbox(store, lead).at(-1)).toContain("Pinned Node.");
   });
 
@@ -182,7 +184,7 @@ describe("Tasks finish", () => {
       inbox(store, worker).at(-1),
       inbox(store, lead).length,
     ]).toEqual([
-      expect.stringContaining(`marked done by agent ${lead}`),
+      expect.stringContaining(`marked done by ${store.agent(lead)?.name} (${lead})`),
       expect.stringContaining("marked done"),
       before,
     ]);

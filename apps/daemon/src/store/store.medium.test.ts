@@ -1112,3 +1112,114 @@ describe("Store relaunch", () => {
     });
   });
 });
+
+function named(store: Store, project: string, name?: string, nameOrdinal?: number) {
+  const agentId = newId("agent");
+  store.append({
+    type: "agent.launched",
+    entityId: agentId,
+    actor: "system",
+    payload: {
+      environmentId: withEnvironment(store),
+      harness: "claude-code",
+      project,
+      cwd: "/work",
+      terminalId: null,
+      ...(name === undefined ? {} : { name }),
+      ...(nameOrdinal === undefined ? {} : { nameOrdinal }),
+    },
+  });
+  return agentId;
+}
+const fail = (store: Store, agentId: string) =>
+  store.append({
+    type: "agent.failed",
+    entityId: agentId,
+    actor: "system",
+    payload: { reason: "launch_rejected" },
+  });
+const names = (store: Store) => store.snapshot(testView).agents.map((a) => a.name);
+
+describe("agent names", () => {
+  it("upgrades a schema-23 database, naming every agent by its project in launch order", () => {
+    const path = dbPath();
+    const v23 = Store.open(path, MIGRATIONS.slice(0, 23));
+    named(v23, "p");
+    fail(v23, named(v23, "p"));
+    named(v23, "my.app");
+    v23.close();
+    const upgraded = Store.open(path);
+    expect([...names(upgraded), upgraded.nextDefaultName("p").name]).toEqual([
+      "p-1",
+      "p-2",
+      "my-app-1",
+      "p-3",
+    ]);
+    upgraded.close();
+  });
+
+  it("upgrades projects that make one base onto one counter, each keeping its own spelling", () => {
+    const path = dbPath();
+    const v23 = Store.open(path, MIGRATIONS.slice(0, 23));
+    for (const project of ["Bazhen", "bazhen", "my.app", "my app", ".agent_tools"])
+      named(v23, project);
+    v23.close();
+    const upgraded = Store.open(path);
+    expect([...names(upgraded), upgraded.nextDefaultName("BAZHEN").name]).toEqual([
+      "Bazhen-1",
+      "bazhen-2",
+      "my-app-1",
+      "my-app-2",
+      "agent_tools-1",
+      "BAZHEN-3",
+    ]);
+    upgraded.close();
+  });
+
+  it("resolves an exact id in any state, and a name only among agents not ended", () => {
+    const store = Store.open(dbPath());
+    const live = named(store, "p", "BZ-127");
+    const ended = named(store, "p", "old");
+    fail(store, ended);
+    const resolved = [store.resolveAgent(ended), store.resolveAgent("bz-127")];
+    expect(resolved).toEqual([ended, live]);
+    expect(() => store.resolveAgent("old")).toThrow(UnknownAgent);
+    store.close();
+  });
+
+  it("never resolves part of a name", () => {
+    const store = Store.open(dbPath());
+    named(store, "p", "coordinator-1");
+    expect(() => store.resolveAgent("coordinator")).toThrow(UnknownAgent);
+    store.close();
+  });
+
+  it("gives a default name no live agent holds, and never a number given before", () => {
+    const store = Store.open(dbPath());
+    fail(store, named(store, "p", "p-1", 1));
+    named(store, "p", "P-2");
+    expect(store.nextDefaultName("p")).toEqual({ name: "p-3", ordinal: 3 });
+    store.close();
+  });
+
+  it("lets a freed name be taken again, and refuses a second live holder past every check", () => {
+    const store = Store.open(dbPath());
+    fail(store, named(store, "p", "lead"));
+    named(store, "p", "lead");
+    expect(() => named(store, "p", "LEAD")).toThrow(/UNIQUE/);
+    store.close();
+  });
+
+  it("shows a rename in the snapshot", () => {
+    const store = Store.open(dbPath());
+    const agentId = named(store, "p", "p-1", 1);
+    store.append({
+      type: "agent.renamed",
+      entityId: agentId,
+      actor: "user",
+      payload: { name: "reviewer", previous: "p-1" },
+    });
+    expect(names(store)).toEqual(["reviewer"]);
+    store.close();
+  });
+});

@@ -25,6 +25,7 @@ import {
   RestartShellRequest,
   UnlinkShellRequest,
   RelaunchAgentRequest,
+  RenameAgentRequest,
   RespawnAgentRequest,
   SignalAgentRequest,
   HealthResponse,
@@ -60,6 +61,7 @@ import {
 } from "@bazhen/core";
 import { z } from "zod";
 import { InvalidDirectory } from "../agents/cwd.ts";
+import { AgentEnded, NameTaken } from "../agents/names.ts";
 import { IdempotencyConflict, UnknownAgent } from "../store/store.ts";
 import {
   EnvironmentUnavailable,
@@ -124,6 +126,16 @@ export interface AppDeps {
   readonly respawn: (agentId: string, req: RespawnAgentRequest) => Promise<AgentCommandResponse>;
   readonly relaunch: (agentId: string, req: RelaunchAgentRequest) => Promise<AgentCommandResponse>;
   readonly signal: (agentId: string, req: SignalAgentRequest) => Promise<AgentCommandResponse>;
+  readonly rename: (
+    caller: Caller,
+    agentId: string,
+    req: RenameAgentRequest,
+  ) => AgentCommandResponse;
+  /**
+   * The id of the agent a request names by id or name (foundation-design §11.4), throwing
+   * `UnknownAgent` for one it doesn't name. Every command below the edge sees only ids.
+   */
+  readonly resolveAgent: (ref: string) => string;
   /** `viewer` is who opens it: a paired device's shell is told which device that was. */
   readonly openShell: (req: OpenShellRequest, viewer: Viewer) => Promise<ShellCommandResponse>;
   readonly closeShell: (
@@ -300,6 +312,10 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     return c.json(await deps.openShell(body.data, viewerOf(c)));
   });
 
+  /** The entity a path's `:id` names: an agent's by its id or name, anything else as it is. */
+  const entity = (path: string, id: string) =>
+    path.startsWith("/v1/agents/") ? deps.resolveAgent(id) : id;
+
   /** A request about one entity: the body is checked against its schema, then handed to `run`. */
   const route = <T, R>(
     path: `/v1/${string}/:id/${string}`,
@@ -309,7 +325,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     app.post(path, async (c) => {
       const body = schema.safeParse(await c.req.json().catch(() => undefined));
       if (!body.success) return invalid(c, body.error);
-      return c.json(await run(c.req.param("id"), body.data, viewerOf(c), c));
+      return c.json(await run(entity(path, c.req.param("id")), body.data, viewerOf(c), c));
     });
   route("/v1/agents/:id/close", CloseAgentRequest, deps.close);
   route("/v1/agents/:id/respawn", RespawnAgentRequest, deps.respawn);
@@ -349,16 +365,30 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     app.post(path, async (c) => {
       const body = schema.safeParse(await c.req.json().catch(() => undefined));
       if (!body.success) return invalid(c, body.error);
-      return c.json(await run(callerOf(c), c.req.param("id") ?? "", body.data));
+      const caller = callerOf(c);
+      return c.json(await run(caller, entity(path, c.req.param("id") ?? ""), body.data));
     });
-  const { tasks } = deps;
-  taskRoute("/v1/tasks", CreateTaskRequest, (caller, _id, req) => tasks.create(caller, req));
+  const { tasks, resolveAgent } = deps;
+  taskRoute("/v1/tasks", CreateTaskRequest, (caller, _id, req) =>
+    tasks.create(
+      caller,
+      req.assign === undefined
+        ? req
+        : { ...req, assign: { ...req.assign, agentId: resolveAgent(req.assign.agentId) } },
+    ),
+  );
   taskRoute("/v1/tasks/delegate", DelegateTaskRequest, (caller, _id, req) =>
-    tasks.delegate(caller, req),
+    tasks.delegate(
+      caller,
+      req.agentId === undefined ? req : { ...req, agentId: resolveAgent(req.agentId) },
+    ),
   );
   taskRoute("/v1/escalations", EscalateRequest, (caller, _id, req) => tasks.escalate(caller, req));
   taskRoute("/v1/agents/:id/messages", SendMessageRequest, (...a) => tasks.send(...a));
-  taskRoute("/v1/tasks/:id/assign", AssignTaskRequest, (...a) => tasks.assign(...a));
+  taskRoute("/v1/agents/:id/rename", RenameAgentRequest, (...a) => deps.rename(...a));
+  taskRoute("/v1/tasks/:id/assign", AssignTaskRequest, (caller, id, req) =>
+    tasks.assign(caller, id, { ...req, agentId: resolveAgent(req.agentId) }),
+  );
   taskRoute("/v1/tasks/:id/unassign", UnassignTaskRequest, (...a) => tasks.unassign(...a));
   taskRoute("/v1/tasks/:id/finish", FinishTaskRequest, (...a) => tasks.finish(...a));
   app.get("/v1/tasks/:id", (c) => {
@@ -378,6 +408,9 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     if (err instanceof LaunchFailed) return fail(c, 502, "launch_failed", err.message);
     if (err instanceof HarnessRefused) return fail(c, 502, "launch_failed", failureDetail(err));
     if (err instanceof IdempotencyConflict) return fail(c, 409, "conflict", err.message);
+    if (err instanceof NameTaken || err instanceof AgentEnded) {
+      return fail(c, 409, "conflict", err.message);
+    }
     if (err instanceof AttentionClosed) return fail(c, 409, "conflict", err.message);
     if (err instanceof AttentionRefused) return fail(c, 409, "conflict", err.message);
     if (err instanceof NoticeClosed || err instanceof NoticeRefused) {

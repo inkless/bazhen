@@ -186,7 +186,7 @@ export class Lifecycle {
         .respawn({
           agentId: found.agentId,
           request: launch,
-          options: launchOptions(req.theme),
+          options: launchOptions(req.theme, launched.name),
           refs: { runtime: found.runtime, externalRef },
           generation: next.generation,
         })
@@ -240,7 +240,7 @@ export class Lifecycle {
           generation,
           resume: fresh ? null : externalRef,
           request: launch,
-          options: launchOptions(req.theme),
+          options: launchOptions(req.theme, launched.name),
           size: this.startAgain.size,
         })
         .then(({ runtime, ...rest }) => {

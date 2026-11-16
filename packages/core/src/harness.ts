@@ -21,6 +21,11 @@ export interface LaunchOptions {
   readonly theme?: TuiTheme;
   /** Text added to the harness's own system instructions for this agent, such as its fleet verbs. */
   readonly instructions?: string;
+  /**
+   * The agent's name as it stands at this start, for a harness that shows or addresses its
+   * session by one. A rename reaches the harness only at its next start.
+   */
+  readonly name?: string;
 }
 
 /**

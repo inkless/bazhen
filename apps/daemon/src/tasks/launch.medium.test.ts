@@ -218,6 +218,16 @@ describe("delegating to a new agent", () => {
     expect([assignmentId !== null, agents().length]).toEqual([true, count]);
   });
 
+  it("launches the agent for a delegation under the name the delegation asks for", async () => {
+    const { tasks, coordinator, agents } = await coordinated();
+    const req = { ...launchRequest("d"), launch: { ...launch, name: "notes" } };
+    const { assignmentId } = await tasks.launchAndDelegate(coordinator, req);
+    expect([assignmentId !== null, agents().filter((a) => a.name === "notes")]).toEqual([
+      true,
+      [expect.objectContaining({ launchedBy: coordinator })],
+    ]);
+  });
+
   it("tells the human of an agent launched for a delegation refused while it started", async () => {
     const f = await coordinated();
     const { store, mailbox, coordinator, parentId } = f;

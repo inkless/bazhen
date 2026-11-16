@@ -306,6 +306,8 @@ async function taskCommand(): Promise<number> {
 async function run(verb: string): Promise<number> {
   switch (verb) {
     case "agents":
+    case "whoami":
+    case "rename":
     case "task":
     case "delegate":
     case "escalate":

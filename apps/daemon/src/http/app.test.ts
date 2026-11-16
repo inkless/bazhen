@@ -17,6 +17,8 @@ import { ShellBusy, UnknownShell } from "../shells/lifecycle.ts";
 import { AttentionRefused } from "../attention/inbox.ts";
 import { NoticeClosed, NoticeRefused, type Viewer } from "../attention/notices.ts";
 import { TerminalLimit } from "../terminals/budget.ts";
+import { NameTaken } from "../agents/names.ts";
+import { UnknownAgent } from "../store/store.ts";
 import { createApp, type AppDeps, type TaskCommands } from "./app.ts";
 
 const runtime = new FakeRuntime();
@@ -24,18 +26,29 @@ const runtime = new FakeRuntime();
 const launched = { agentId: newId("agent"), terminalId: newId("term"), eventIds: [2, 3] };
 const callers: Caller[] = [];
 const target = newId("agent");
+/** The agent each task command was handed, as the body named it once resolved. */
+const addressed: (string | undefined)[] = [];
+/** Who each rename came from, and the agent it was of. */
+const renames: [Caller, string][] = [];
 const tasks: TaskCommands = {
   create: (caller, req) => {
     callers.push(caller);
+    if (req.assign !== undefined) addressed.push(req.assign.agentId);
     if (req.title === "forbidden") throw new TaskRefused("forbidden", "a worker can't");
     if (req.title === "conflict") throw new TaskRefused("conflict", "the task is done");
     return { taskId: newId("task"), assignmentId: null, eventIds: [5] };
   },
   show: () => undefined,
-  assign: () => ({ assignmentId: newId("asgn"), eventIds: [6] }),
+  assign: (_caller, _taskId, req) => {
+    addressed.push(req.agentId);
+    return { assignmentId: newId("asgn"), eventIds: [6] };
+  },
   unassign: () => ({ eventIds: [7] }),
   finish: () => ({ eventIds: [8] }),
-  delegate: async () => ({ taskId: newId("task"), assignmentId: newId("asgn"), eventIds: [9] }),
+  delegate: async (_caller, req) => {
+    addressed.push(req.agentId);
+    return { taskId: newId("task"), assignmentId: newId("asgn"), eventIds: [9] };
+  },
   escalate: () => ({ attentionId: newId("attn") }),
   send: (caller, agentId) => {
     callers.push(caller);
@@ -96,6 +109,16 @@ const deps: AppDeps = {
     throw new AgentTerminalExists(newId("agent"));
   },
   signal: () => Promise.reject(new Error("not used by these tests")),
+  rename: (caller, agentId, req) => {
+    if (req.name === "taken") throw new NameTaken(req.name);
+    renames.push([caller, agentId]);
+    return { agentId, eventIds: [10] };
+  },
+  resolveAgent: (ref) => {
+    if (ref === "BZ-127") return target;
+    if (ref.startsWith("agent_")) return ref;
+    throw new UnknownAgent(ref, "by that name");
+  },
   openShell: async () => ({ terminalId: launched.terminalId, eventIds: [5, 6] }),
   restartShell: () => Promise.reject(new Error("not used by these tests")),
   renameShell: () => Promise.reject(new Error("not used by these tests")),
@@ -409,11 +432,84 @@ describe("HTTP task routes", () => {
     expect(statuses).toEqual([403, 409]);
   });
 
+  it("refuses a socket caller that gives its name in place of its id", async () => {
+    const res = await createTask(socket, "named", { "bazhen-agent-id": "BZ-127" });
+    expect(res.status).toBe(400);
+  });
+
   it("answers a read of a task it doesn't have with not found", async () => {
     const res = await app.request(`/v1/tasks/${newId("task")}`, { headers: { host } });
     expect([res.status, await res.json()]).toEqual([
       404,
       expect.objectContaining({ error: "not_found" }),
     ]);
+  });
+});
+
+const postTo = (on: typeof app, path: string, body: object, headers: Record<string, string> = {}) =>
+  on.request(path, {
+    method: "POST",
+    headers: { host, "content-type": "application/json", ...headers },
+    body: JSON.stringify({ idempotencyKey: "n", ...body }),
+  });
+
+describe("agents addressed by name", () => {
+  it("takes an agent's name in its path as its id", async () => {
+    const res = await postTo(app, "/v1/agents/BZ-127/messages", { body: "hi" });
+    expect((await res.json()).eventIds).toEqual([4]);
+  });
+
+  it("hands a command on an agent named in its path that agent's id", async () => {
+    const res = await postTo(app, "/v1/agents/BZ-127/relaunch", { generation: 0, fresh: true });
+    expect((await res.json()).agentId).toBe(target);
+  });
+
+  it("answers a name no agent holds with not found", async () => {
+    const res = await postTo(app, "/v1/agents/nobody/respawn", { generation: 0 });
+    expect([res.status, (await res.json()).error]).toEqual([404, "not_found"]);
+  });
+
+  it("hands assign, create and delegate the id of the agent their body names", async () => {
+    addressed.length = 0;
+    await postTo(app, `/v1/tasks/${newId("task")}/assign`, { agentId: "BZ-127", role: "worker" });
+    await postTo(app, "/v1/tasks", {
+      title: "t",
+      brief: "b",
+      assign: { agentId: "BZ-127", role: "lead" },
+    });
+    await postTo(
+      socket,
+      "/v1/tasks/delegate",
+      { agentId: "BZ-127", title: "t", brief: "b" },
+      {
+        "bazhen-agent-id": agentId,
+      },
+    );
+    expect(addressed).toEqual([target, target, target]);
+  });
+
+  it("renames as whoever asks: the agent over the socket, the human over HTTP", async () => {
+    renames.length = 0;
+    await postTo(
+      socket,
+      "/v1/agents/BZ-127/rename",
+      { name: "lead" },
+      { "bazhen-agent-id": agentId },
+    );
+    await postTo(app, "/v1/agents/BZ-127/rename", { name: "lead" }, { "bazhen-agent-id": agentId });
+    expect(renames).toEqual([
+      [agentId, target],
+      [null, target],
+    ]);
+  });
+
+  it("answers a rename to a name another agent holds as a conflict", async () => {
+    const res = await postTo(app, `/v1/agents/${target}/rename`, { name: "taken" });
+    expect([res.status, (await res.json()).error]).toEqual([409, "conflict"]);
+  });
+
+  it("refuses a rename to something that isn't a name", async () => {
+    const res = await postTo(app, `/v1/agents/${target}/rename`, { name: "-x" });
+    expect(res.status).toBe(400);
   });
 });

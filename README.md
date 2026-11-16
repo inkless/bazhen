@@ -205,10 +205,17 @@ a task mails it the brief and the commands to answer with:
 | `bazhen task unassign <task> <assignment>`               | Take it back, with everything that agent handed on                                   |
 | `bazhen task done [<task>] [--note …] [--cascade]`       | Finish it; a worker finishes only its own part. `--cascade` cancels subtasks         |
 | `bazhen task cancel <task> [--note …] [--cascade]`       | Cancel it                                                                            |
-| `bazhen agents`                                          | The agents running, by id, to delegate to                                            |
+| `bazhen agents`                                          | The agents running, by name and id, to delegate to                                   |
+| `bazhen whoami`                                          | Inside an agent: its name, id, tasks, and whom it reports to on each                 |
+| `bazhen rename <agent> <name>`                           | Rename an agent; inside an agent, only itself                                        |
 | `bazhen escalate <question> [--task …]`                  | Inside an agent: put a question or problem in the human's inbox                      |
 | `bazhen delegate <agent> --title … --brief … [--task …]` | Inside an agent: hand part of a task it coordinates or leads to another agent        |
 | `bazhen delegate --launch <harness> [--dir …] --title …` | The same, to a new agent it starts for the work, in its own directory unless `--dir` |
+
+`<agent>` is an agent's name or its id. Every agent has a name, unique among those not closed or
+failed: the one it was launched with (`--name`), or `<project>-<n>`, whose number is never given
+twice. Claude Code shows it as its session's name, which keeps the old one after a rename until the
+agent next starts. Mail stays with the agent's id, which a rename doesn't change.
 
 The human assigns any role. A coordinator gives the task to a lead or workers, a lead to workers,
 and a worker to no one. Ending an assignment ends everything granted under it. Every agent
