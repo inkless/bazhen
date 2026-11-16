@@ -103,6 +103,9 @@ describe("keys through the terminal stream", () => {
 
   it("delivers the driver's focus reports to the program", async () => {
     const view = await driver();
+    // tmux counts the pane as focused while any client is, and every client starts focused: until
+    // the last test's client has gone, the driver's focus out and back in change nothing.
+    await expect.poll(() => daemon.clientsOf(terminalId), { timeout: 10_000 }).toHaveLength(1);
     const since = Date.now();
     view.type("\x1b[O");
     view.type("\x1b[I");

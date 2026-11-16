@@ -521,6 +521,15 @@ export class Daemon {
     return this.paneFact(agentId, "session_name");
   }
 
+  /** The tmux clients attached to the terminal's session, one line each. */
+  clientsOf(terminalId: string): string[] {
+    const session = this.paneFact(terminalId, "session_name", "@bazhen_terminal_id");
+    if (session === undefined) return [];
+    return this.tmux("list-clients", "-t", session)
+      .split("\n")
+      .filter((line) => line.trim() !== "");
+  }
+
   /**
    * A tmux format value of the agent's pane, found by the tag Bazhen wrote on it: its agent id,
    * or with `tag`, another of its tags, such as a shell's terminal id.
