@@ -6,6 +6,7 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+bazhen-client = { workspace = true }
 rustix = { workspace = true }
 
 [dev-dependencies]

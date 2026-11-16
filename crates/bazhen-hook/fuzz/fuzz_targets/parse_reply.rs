@@ -1,6 +1,7 @@
 #![no_main]
 
-use bazhen_hook::{Framing, content_length, header, is_truncated, parse_reply, reply_end};
+use bazhen_hook::framing::{Framing, content_length, header, is_truncated, reply_end};
+use bazhen_hook::{LIMITS, parse_reply};
 use libfuzzer_sys::fuzz_target;
 
 // Any bytes at all, as the daemon's socket could send them: no decoder may panic, a reply
@@ -10,19 +11,19 @@ use libfuzzer_sys::fuzz_target;
 // The header parsers are driven on the same bytes read as text, as a head would reach them.
 fuzz_target!(|response: &[u8]| {
     let reply = parse_reply(response);
-    let end = reply_end(response);
-    let truncated = is_truncated(response);
+    let end = reply_end(response, LIMITS);
+    let truncated = is_truncated(response, LIMITS);
     if reply.is_some() {
         assert_eq!(end, Some(response.len()));
         assert!(!truncated);
     }
     if let Some(end) = end {
-        assert_eq!(reply_end(&response[..end]), Some(end));
+        assert_eq!(reply_end(&response[..end], LIMITS), Some(end));
     }
     let split = usize::from(response.first().copied().unwrap_or(0)) * response.len() / 256;
-    let mut framing = Framing::default();
+    let mut framing = Framing::new(LIMITS);
     let first = framing.end_of(&response[..split]);
-    assert_eq!(first, reply_end(&response[..split]));
+    assert_eq!(first, reply_end(&response[..split], LIMITS));
     if first.is_none() {
         assert_eq!(framing.end_of(response), end);
     }

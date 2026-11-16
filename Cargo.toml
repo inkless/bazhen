@@ -11,6 +11,7 @@ publish = false
 # (docs/standards/rust.md § Dependencies).
 [workspace.dependencies]
 alacritty_terminal = { version = "=0.26.0", default-features = false }
+bazhen-client = { path = "crates/bazhen-client" }
 bazhen-holder = { path = "crates/bazhen-holder" }
 bazhen-holder-engine = { path = "crates/bazhen-holder-engine" }
 bazhen-holder-proto = { path = "crates/bazhen-holder-proto" }

@@ -1,0 +1,23 @@
+# The client's fuzz targets. libFuzzer needs nightly, so this crate is a workspace of its own, built
+# only by `cargo +nightly fuzz` (.github/workflows/fuzz.yml).
+[package]
+name = "bazhen-client-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+bazhen-client = { path = ".." }
+libfuzzer-sys = "=0.4.13"
+
+[[bin]]
+name = "framing"
+path = "fuzz_targets/framing.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

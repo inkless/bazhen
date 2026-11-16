@@ -668,12 +668,14 @@ export function macroFailures(
 // outside is listed here by hand, as pane_title's body is: the rule can't tell such text apart. A
 // target is crates/<crate>/fuzz/fuzz_targets/<target>.rs, and must call the function.
 const FUZZED_DECODERS: Record<string, string> = {
+  "crates/bazhen-client/src/framing.rs::reply_end": "framing",
+  "crates/bazhen-client/src/framing.rs::Framing::end_of": "framing",
+  "crates/bazhen-client/src/framing.rs::is_truncated": "framing",
+  "crates/bazhen-client/src/framing.rs::split_head": "framing",
+  "crates/bazhen-client/src/framing.rs::header": "framing",
+  "crates/bazhen-client/src/framing.rs::content_length": "framing",
+  "crates/bazhen-client/src/framing.rs::status": "framing",
   "crates/bazhen-hook/src/lib.rs::parse_reply": "parse_reply",
-  "crates/bazhen-hook/src/lib.rs::reply_end": "parse_reply",
-  "crates/bazhen-hook/src/lib.rs::Framing::end_of": "parse_reply",
-  "crates/bazhen-hook/src/lib.rs::is_truncated": "parse_reply",
-  "crates/bazhen-hook/src/lib.rs::header": "parse_reply",
-  "crates/bazhen-hook/src/lib.rs::content_length": "parse_reply",
   "crates/bazhen-hook/src/pane_title.rs::body": "pane_title",
   "crates/bazhen-hook/src/shell_report.rs::report_body": "shell_report",
   "crates/bazhen-hook/src/shell_report.rs::micros": "shell_report",
@@ -973,13 +975,16 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-hook/src/lib.rs::ask": "sends a request; the reply goes to parse_reply",
   "crates/bazhen-hook/src/lib.rs::post": "writes a request; the reply goes to read_response",
   "crates/bazhen-hook/src/lib.rs::post_as": "writes a request; the reply goes to read_response",
-  "crates/bazhen-hook/src/lib.rs::read_response":
+  "crates/bazhen-client/src/lib.rs::exchange":
+    "writes a request; the reply goes to read_response, then to the caller's decoder",
+  "crates/bazhen-client/src/lib.rs::send": "writes a request; the reply goes to read_response",
+  "crates/bazhen-client/src/framing.rs::read_response":
     "reads the socket until Framing::end_of, fuzzed, says where the frame ends",
-  "crates/bazhen-hook/src/lib.rs::bound_reads": "sets a socket's read timeout; reads nothing",
-  "crates/bazhen-hook/src/lib.rs::bound_or_unblock": "sets a socket's blocking mode; reads nothing",
-  "crates/bazhen-hook/src/lib.rs::end_by_head":
+  "crates/bazhen-client/src/framing.rs::bound_reads": "sets a socket's read timeout; reads nothing",
+  "crates/bazhen-client/src/framing.rs::bound_or_unblock":
+    "sets a socket's blocking mode; reads nothing",
+  "crates/bazhen-client/src/framing.rs::end_by_head":
     "reached only through reply_end and Framing::end_of, both fuzzed",
-  "crates/bazhen-hook/src/lib.rs::split_head": "reached only through parse_reply, fuzzed",
   "crates/bazhen-hook/src/statusline.rs::report":
     "forwards the status line's input to the daemon in a hook request, without parsing it",
   "crates/bazhen-holder-proto/src/frame.rs::frame":
