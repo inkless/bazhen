@@ -471,20 +471,32 @@ pub(super) fn exited_hello(socket: &Path) -> Result<HelloReply> {
     exited_in(socket, None)
 }
 
-/// A `hello` once the exit of `generation`'s child, or of any, is published: a new connection may
-/// be answered before a respawn sent on another reaches the holder.
+/// How long a wait for an exit reads nothing before it gives up: far past any child the tests run,
+/// even a flood on a loaded runner, so only a holder that has stopped reaches it.
+const EXIT_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// A `hello` once the exit of `generation`'s child, or of any, is published. It waits for the
+/// `exited` the holder sends every connection past `hello`, rather than asking again: a
+/// connection asking in a loop takes the holder's turns from the child's output. A new connection
+/// may be answered before a respawn sent on another reaches the holder; the `respawned` and the
+/// new generation's `exited` then follow.
 pub(super) fn exited_in(socket: &Path, generation: Option<u64>) -> Result<HelloReply> {
-    let deadline = Instant::now() + DEADLINE;
-    loop {
-        let hello = Client::connect(socket)?.hello(false)?;
-        if hello.exit.is_some() && generation.is_none_or(|g| g == hello.generation.get()) {
-            return Ok(hello);
-        }
-        if Instant::now() > deadline {
-            return Err("the child never exited".into());
-        }
-        std::thread::sleep(std::time::Duration::from_millis(10));
+    let wanted = |g: u64| generation.is_none_or(|wanted| wanted == g);
+    let mut watcher = Client::connect(socket)?;
+    watcher.stream.set_read_timeout(Some(EXIT_WAIT))?;
+    let hello = watcher.hello(false)?;
+    if hello.exit.is_some() && wanted(hello.generation.get()) {
+        return Ok(hello);
     }
+    loop {
+        match watcher.next() {
+            Ok(Some(Reply::Exited(exited))) if wanted(exited.generation.get()) => break,
+            Ok(Some(_)) => {}
+            Ok(None) => return Err("the child never exited: the holder hung up".into()),
+            Err(e) => return Err(format!("the child never exited: {e}").into()),
+        }
+    }
+    Client::connect(socket)?.hello(false)
 }
 
 /// Kills a straggler a test left, if it is still in the session the test's child led: a pid that
@@ -553,19 +565,15 @@ fn a_storm_of_sigusr1_during_a_flood_loses_no_output() {
     let home = home("storm").unwrap();
     let flood: u64 = 20 << 20;
     let count = format!("-c{flood}");
-    let (holder, socket) = serving_with(&home, &["head", &count, "/dev/zero"], &FLOOD).unwrap();
+    let (mut holder, socket) = serving_with(&home, &["head", &count, "/dev/zero"], &FLOOD).unwrap();
     for _ in 0..500 {
         bazhen_test_signal::signal(holder.pid, Signal::USR1).unwrap();
     }
-    let deadline = Instant::now() + DEADLINE;
-    loop {
-        let hello = Client::connect(&socket).unwrap().hello(false).unwrap();
-        if hello.exit.is_some() {
-            assert_eq!(hello.offset.get(), flood);
-            break;
-        }
-        assert!(Instant::now() < deadline, "the flood never ended");
-    }
+    let hello = match exited_hello(&socket) {
+        Ok(hello) => hello,
+        Err(error) => panic!("{error}; {}", why(&mut holder, &socket)),
+    };
+    assert_eq!(hello.offset.get(), flood);
 }
 
 #[test]
@@ -1048,15 +1056,12 @@ fn a_subscription_from_output_the_ring_dropped_gets_a_gap_then_the_rest() {
     let home = home("dropped").unwrap();
     let flood: u64 = 3_000_000;
     let count = format!("-c{flood}");
-    let (_holder, socket) = serving(&home, &["head", &count, "/dev/zero"]).unwrap();
-    let deadline = Instant::now() + DEADLINE;
-    let mut client = loop {
-        let mut client = Client::connect(&socket).unwrap();
-        if client.hello(false).unwrap().exit.is_some() {
-            break client;
-        }
-        assert!(Instant::now() < deadline, "the flood never ended");
-    };
+    let (mut holder, socket) = serving(&home, &["head", &count, "/dev/zero"]).unwrap();
+    if let Err(error) = exited_hello(&socket) {
+        panic!("{error}; {}", why(&mut holder, &socket));
+    }
+    let mut client = Client::connect(&socket).unwrap();
+    client.hello(false).unwrap();
     assert!(is_ok(&client.subscribe(Some((0, 0))).unwrap()));
     let held = bazhen_holder::ring::RING_BYTES as u64;
     match client.reply().unwrap() {
@@ -1137,15 +1142,14 @@ fn a_subscriber_that_stops_reading_holds_up_neither_the_child_nor_anyone_else() 
     let mut stalled = Client::connect(&socket).unwrap();
     stalled.hello(false).unwrap();
     assert!(is_ok(&stalled.subscribe(Some((0, 0))).unwrap()));
-    let deadline = Instant::now() + DEADLINE;
-    loop {
-        let hello = Client::connect(&socket).unwrap().hello(false).unwrap();
-        if hello.exit.is_some() {
-            assert_eq!(hello.offset.get(), flood);
-            break;
-        }
-        assert!(Instant::now() < deadline, "the child was held up");
-    }
+    let hello = match exited_hello(&socket) {
+        Ok(hello) => hello,
+        Err(error) => panic!(
+            "the child was held up: {error}; {}",
+            why(&mut holder, &socket)
+        ),
+    };
+    assert_eq!(hello.offset.get(), flood);
     let stream = match stalled.stream_to_exit_keeping(false) {
         Ok(stream) => stream,
         Err(error) => panic!("{error}; {}", why(&mut holder, &socket)),
