@@ -268,6 +268,14 @@ function refFrom(
   return { terminalId, runtime: row.runtime, locator };
 }
 
+/** A terminal's restart prompt, with the holder to end, from its row; null when it needs none. */
+function needsRestartOf(flag: SQLOutputValue | undefined, locator: SQLOutputValue | undefined) {
+  if (flag !== 1) return null;
+  const recorded: Record<string, unknown> = typeof locator === "string" ? JSON.parse(locator) : {};
+  const pid = Number(recorded.holderPid);
+  return { holderPid: Number.isSafeInteger(pid) && pid > 1 ? pid : null };
+}
+
 /** Agent states whose directory still holds their work, so a shell can be opened beside them. */
 export const LINKABLE: ReadonlySet<AgentState> = new Set(["running", "exited"]);
 
@@ -575,6 +583,13 @@ export class Store {
   terminalState(terminalId: string): TerminalState | undefined {
     const row = this.prepare("SELECT state FROM terminals WHERE id = ?").get(terminalId);
     return row === undefined ? undefined : TerminalState.parse(row.state);
+  }
+
+  /** Whether a terminal not yet ended still has its "needs restart" to record. */
+  restartUnrecorded(terminalId: string): boolean {
+    const sql = `SELECT 1 AS yes FROM terminals WHERE id = ? AND needs_restart = 0
+                 AND state NOT IN ('closed', 'failed', 'lost')`;
+    return this.prepare(sql).get(terminalId) !== undefined;
   }
 
   /** A terminal's current runtime incarnation, if it is running in one. */
@@ -1219,7 +1234,7 @@ export class Store {
                   a.launched_by AS launchedBy,
                   a.terminal_id AS terminalId, t.generation, a.external_ref AS externalRef, t.exit,
                   coalesce(t.theme, 'dark') AS theme, s.activity, a.usage, t.state AS terminalState,
-                  t.runtime, t.locator, a.transcript,
+                  t.runtime, t.locator, a.transcript, t.needs_restart AS needsRestart,
                   n.text AS headlineText, n.task_id AS headlineTask, ne.ts AS headlineAt
            FROM agent_sessions a LEFT JOIN terminals t ON t.id = a.terminal_id
            LEFT JOIN activity_latest s ON s.agent_session_id = a.id
@@ -1229,51 +1244,63 @@ export class Store {
            ORDER BY a.created_event_id`,
         )
           .all()
-          .map(({ activity, usage, terminalState, runtime, locator, transcript, ...row }) => {
-            const { headlineText, headlineTask, headlineAt, ...r } = row;
-            const ref = ATTACHABLE.has(String(terminalState))
-              ? refFrom(r.terminalId, { runtime: runtime ?? null, locator: locator ?? null })
-              : null;
-            const externalRef =
-              typeof r.externalRef === "string"
-                ? ExternalRef.parse(JSON.parse(r.externalRef))
+          .map(
+            ({
+              activity,
+              usage,
+              terminalState,
+              runtime,
+              locator,
+              transcript,
+              needsRestart,
+              ...row
+            }) => {
+              const { headlineText, headlineTask, headlineAt, ...r } = row;
+              const ref = ATTACHABLE.has(String(terminalState))
+                ? refFrom(r.terminalId, { runtime: runtime ?? null, locator: locator ?? null })
                 : null;
-            const evidence = {
-              harness: HarnessId.parse(r.harness),
-              externalRef,
-              transcript: typeof transcript === "string" ? transcript : null,
-            };
-            return {
-              ...r,
-              externalRef,
-              exit: typeof r.exit === "string" ? JSON.parse(r.exit) : null,
-              ...(activity === null ? {} : { activity: activityOf(activity) }),
-              ...(typeof usage === "string" ? { usage: Usage.parse(JSON.parse(usage)) } : {}),
-              attachCommand: ref === null ? null : view.attachCommand(ref),
-              themes: view.themes(HarnessId.parse(r.harness)),
-              resumable: view.resumes(evidence),
-              canOpenShell: LINKABLE.has(AgentState.parse(r.state)),
-              listening:
-                r.state === "running" &&
-                view.listening({
-                  id: String(r.id),
-                  harness: evidence.harness,
-                  activity: activity === null ? null : activityOf(activity).value,
-                }),
-              headline:
-                typeof headlineText === "string"
-                  ? { text: headline(headlineText), taskId: headlineTask, at: headlineAt }
-                  : null,
-              commands: offeredCommands(
-                {
-                  state: AgentState.parse(r.state),
-                  generation: typeof r.generation === "number" ? r.generation : null,
-                  ...evidence,
-                },
-                view.resumes,
-              ),
-            };
-          }),
+              const externalRef =
+                typeof r.externalRef === "string"
+                  ? ExternalRef.parse(JSON.parse(r.externalRef))
+                  : null;
+              const evidence = {
+                harness: HarnessId.parse(r.harness),
+                externalRef,
+                transcript: typeof transcript === "string" ? transcript : null,
+              };
+              return {
+                ...r,
+                externalRef,
+                exit: typeof r.exit === "string" ? JSON.parse(r.exit) : null,
+                ...(activity === null ? {} : { activity: activityOf(activity) }),
+                ...(typeof usage === "string" ? { usage: Usage.parse(JSON.parse(usage)) } : {}),
+                attachCommand: ref === null ? null : view.attachCommand(ref),
+                needsRestart: needsRestartOf(needsRestart, locator),
+                themes: view.themes(HarnessId.parse(r.harness)),
+                resumable: view.resumes(evidence),
+                canOpenShell: LINKABLE.has(AgentState.parse(r.state)),
+                listening:
+                  r.state === "running" &&
+                  view.listening({
+                    id: String(r.id),
+                    harness: evidence.harness,
+                    activity: activity === null ? null : activityOf(activity).value,
+                  }),
+                headline:
+                  typeof headlineText === "string"
+                    ? { text: headline(headlineText), taskId: headlineTask, at: headlineAt }
+                    : null,
+                commands: offeredCommands(
+                  {
+                    state: AgentState.parse(r.state),
+                    generation: typeof r.generation === "number" ? r.generation : null,
+                    ...evidence,
+                  },
+                  view.resumes,
+                ),
+              };
+            },
+          ),
         attention: this.prepare(
           `SELECT i.id, i.agent_session_id AS agentId, i.state, i.close_reason AS closeReason,
                   i.summary, i.kind, i.task_id AS taskId, i.message_id AS messageId,
@@ -1303,12 +1330,12 @@ export class Store {
         shells: this.prepare(
           `SELECT id, environment_id AS environmentId, state, generation, cwd,
                   linked_agent_id AS linkedAgentId, name, coalesce(theme, 'dark') AS theme,
-                  foreground, runtime, locator,
+                  foreground, runtime, locator, needs_restart AS needsRestart,
                   state = 'lost' AND last_command IS NOT NULL AS retypeable
            FROM terminals WHERE kind = 'shell' AND state NOT IN ('closed', 'failed') ORDER BY created_event_id`,
         )
           .all()
-          .map(({ runtime, locator, foreground, retypeable, ...r }) => {
+          .map(({ runtime, locator, foreground, retypeable, needsRestart, ...r }) => {
             const state = TerminalState.parse(r.state);
             const ref = ATTACHABLE.has(state)
               ? refFrom(r.id, { runtime: runtime ?? null, locator: locator ?? null })
@@ -1319,6 +1346,7 @@ export class Store {
               attachCommand: ref === null ? null : view.attachCommand(ref),
               commands: shellCommands(state, r.linkedAgentId !== null),
               retypeable: view.shellsReport && retypeable === 1,
+              needsRestart: needsRestartOf(needsRestart, locator),
             };
           }),
         tasks: this.prepare(`${TASK} ORDER BY created_event_id`).all(),

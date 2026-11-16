@@ -5,7 +5,7 @@ import { EnvironmentKind, HarnessId, Id, IdempotencyKey } from "./ids.ts";
 export { HarnessId };
 import { Attention, AttentionKind, Message, ObservedMessage } from "./mail.ts";
 import { Notice } from "./notices.ts";
-import { BusyShell, Shell } from "./shells.ts";
+import { BusyShell, NeedsRestart, Shell } from "./shells.ts";
 import { TuiTheme } from "./theme.ts";
 import { Role } from "./roles.ts";
 import { Assignment, Task } from "./tasks.ts";
@@ -162,6 +162,8 @@ export const Agent = z.object({
     .object({ text: z.string(), taskId: Id("task"), at: z.iso.datetime() })
     .nullable()
     .default(null),
+  /** Set while its terminal runs on a holder this build can't fully serve; null otherwise. */
+  needsRestart: NeedsRestart.nullable().default(null),
 });
 export type Agent = z.infer<typeof Agent>;
 

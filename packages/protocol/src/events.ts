@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { Activity, Usage, ExitStatus, ExternalRef, HarnessId, Signal } from "./agents.ts";
+import { HolderVersions } from "./holder.ts";
 import { TuiTheme } from "./theme.ts";
 import { AttachmentMode, EnvironmentKind, Id } from "./ids.ts";
 import { ApprovalDecision, AttentionCloseReason, AttentionKind } from "./mail.ts";
@@ -287,6 +288,14 @@ export const EVENTS = {
   "terminal.foreground_changed": {
     entity: "terminal",
     payload: z.object({ command: z.string().max(200).nullable() }),
+  },
+  /**
+   * The terminal, an agent's or a shell's, runs on a holder this build can't fully serve, which
+   * speaks only `protocol`; a restart onto a new holder serves it in full (protocol 1.49).
+   */
+  "terminal.needs_restart": {
+    entity: "terminal",
+    payload: z.object({ protocol: HolderVersions }),
   },
   /** A linked shell became standalone; its agent's close no longer takes it. */
   "terminal.unlinked": { entity: "terminal", payload: z.object({}) },

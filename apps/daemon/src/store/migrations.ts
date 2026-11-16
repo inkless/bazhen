@@ -425,6 +425,14 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE terminals ADD COLUMN runtime_kind TEXT NOT NULL DEFAULT 'tmux';
     `,
   },
+  {
+    version: 29,
+    sql: `
+      -- Set once a terminal is seen on a holder this build can't fully serve. A holder runs one
+      -- binary for life, so it stays set through respawns; a new terminal starts without it.
+      ALTER TABLE terminals ADD COLUMN needs_restart INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 const trimAt24 = (s: string) => s.replaceAll(/^[-_]+|[-_]+$/g, "");

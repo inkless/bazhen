@@ -4,6 +4,14 @@ import { INVISIBLE, showable } from "./text.ts";
 import { TuiTheme } from "./theme.ts";
 import { Id, IdempotencyKey } from "./ids.ts";
 
+/**
+ * A terminal running on a holder this build can't fully serve (protocol 1.49). That holder keeps
+ * running until it is ended, by its pid when the daemon can't speak to it; a new terminal, by a
+ * relaunch or a restart, then runs on a current holder. `holderPid` is null when unrecorded.
+ */
+export const NeedsRestart = z.object({ holderPid: z.number().int().positive().nullable() });
+export type NeedsRestart = z.infer<typeof NeedsRestart>;
+
 export const TerminalState = z.enum([
   "creating",
   "running",
@@ -50,6 +58,8 @@ export const Shell = z.object({
    * new shell's prompt (`retype`). The line itself is never sent (protocol 1.41).
    */
   retypeable: z.boolean().default(false),
+  /** Set while it runs on a holder this build can't fully serve; null otherwise. */
+  needsRestart: NeedsRestart.nullable().default(null),
 });
 export type Shell = z.infer<typeof Shell>;
 

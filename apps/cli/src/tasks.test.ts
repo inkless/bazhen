@@ -65,6 +65,7 @@ const agent = (id: string, name: string, over: Partial<StateSnapshot["agents"][n
   launchedBy: null,
   listening: false,
   headline: null,
+  needsRestart: null,
   ...over,
 });
 const snapshot = (

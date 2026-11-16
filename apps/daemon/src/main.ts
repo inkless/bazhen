@@ -79,6 +79,7 @@ import {
 import { Roles } from "./roles/roles.ts";
 import { Tasks } from "./tasks/tasks.ts";
 import { TerminalBudget } from "./terminals/budget.ts";
+import { recordOutdated } from "./terminals/needs-restart.ts";
 import { defaultRuntimeRefusal } from "./terminals/runtimes.ts";
 import { nodePtySpawner } from "./pty/node-pty.ts";
 import { listeningOf } from "./mailbox/listening.ts";
@@ -324,6 +325,9 @@ const shellReports = new ShellReports(store, (terminalId, brackets) =>
   shells.prompted(terminalId, brackets),
 );
 await reconcileShells(store, environment, shells);
+await recordOutdated(store, environment).catch((err: unknown) => {
+  console.warn("terminals on holders this build can't fully serve weren't read:", err);
+});
 // After both reconciles, whose health checks have a server whose socket was deleted recreate it.
 await tmux.applyServerSettings().catch((err: unknown) => {
   console.warn("tmux server settings were not applied:", err);
@@ -353,6 +357,7 @@ const serverWatch = new ServerWatch({
   alsoEachTick: async () => {
     await shells.settleOrphans();
     await foreground.refresh();
+    await recordOutdated(store, environment);
   },
 });
 serverWatch.start();

@@ -7,6 +7,7 @@ import {
   defaultNamePreview,
   groupFleet,
   observedRows,
+  restartNote,
   themeRespawn,
 } from "./model.ts";
 
@@ -38,6 +39,7 @@ const agentIn = (project: string, state: AgentState = "running", over: Partial<A
   launchedBy: null,
   listening: false,
   headline: null,
+  needsRestart: null,
   ...over,
 });
 
@@ -64,6 +66,20 @@ const snapshot = (agents: Agent[], waitingOn: Agent[] = []): StateSnapshot => ({
     actions: ["allow" as const, "deny" as const],
   })),
   messages: [],
+});
+
+describe("restartNote", () => {
+  it("names the holder to end, and what to do once it has", () => {
+    expect([
+      restartNote({ holderPid: 4243 }, "relaunch"),
+      restartNote({ holderPid: null }, "restart"),
+    ]).toEqual([
+      "Runs on an older holder this version of Bazhen can't fully serve. That holder, pid 4243, " +
+        "keeps running until you end its process; then relaunch it to run on a current one.",
+      "Runs on an older holder this version of Bazhen can't fully serve. That holder keeps " +
+        "running until you end its process; then restart it to run on a current one.",
+    ]);
+  });
 });
 
 describe("agentActions", () => {

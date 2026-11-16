@@ -568,7 +568,8 @@ body {
   margin-bottom: var(--space-2);
 }
 
-.attach {
+.attach,
+.restart-note {
   margin-top: var(--space-3);
 }
 
