@@ -97,6 +97,25 @@ body {
   margin: var(--space-3) 0;
 }
 
+/* The fields give way before the row wraps, so the form stays one row as wide as an iPad's. */
+.launch label {
+  display: flex;
+  flex: 2 1 14rem;
+  gap: var(--space-1);
+  align-items: center;
+  max-width: 36rem;
+}
+
+.launch label.launch-name {
+  flex: 1 1 11rem;
+  max-width: 18rem;
+}
+
+.launch input {
+  flex: 1;
+  width: 0;
+}
+
 .app-head .segmented {
   margin-left: auto;
 }
@@ -240,6 +259,8 @@ body {
 
 .fleet .kind,
 .fleet .cwd,
+.fleet .harness,
+.workspace-head .meta,
 .id,
 .workspace .cwd {
   color: var(--color-text-muted);
@@ -280,6 +301,33 @@ body {
 
 .fleet.compact .agent {
   font-size: var(--font-size-sm);
+}
+
+.fleet .agent .name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fleet .agent :is(.harness, .state) {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* Where the directory doesn't fit beside the name, it goes under it rather than squeezing it. */
+.fleet:not(.compact) .agent {
+  flex-wrap: wrap;
+}
+
+.fleet .agent .cwd {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The rail is narrow, and the name is what tells its agents apart. */
+.fleet.compact .harness {
+  display: none;
 }
 
 .needs-you {
@@ -464,6 +512,35 @@ body {
 
 .workspace .cwd {
   margin: var(--space-1) 0 var(--space-2);
+}
+
+/* A name is up to 40 characters with nowhere to break, wider than a phone: these break it anywhere. */
+:is(
+  .workspace-head h2,
+  .inbox-line .button-link,
+  .task-holder,
+  .agent-tasks .button-link,
+  .notice li,
+  .tab
+) {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.task-form select {
+  max-width: 100%;
+}
+
+.agent-rename {
+  margin-top: var(--space-2);
+}
+
+.agent-rename .note {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
 }
 
 .workspace form {

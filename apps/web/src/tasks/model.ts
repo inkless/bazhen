@@ -1,11 +1,12 @@
 import type { Agent, Assignment, Role, StateSnapshot, Task } from "@bazhen/protocol";
+import { agentLabelOf, isEnded } from "../fleet/model.ts";
 
-/** Who holds a role on a task, as a row names them: the agent's project and its short id. */
+/** Who holds a role on a task, as a row names them. */
 export interface Holder {
   readonly assignmentId: string;
   readonly agentId: string;
   readonly role: Role;
-  readonly project: string | null;
+  readonly label: string;
 }
 
 /** One task in the tree, with who is on it now and its subtasks beneath it. */
@@ -17,9 +18,8 @@ export interface TaskNode {
 
 const ROLE_ORDER: Readonly<Record<Role, number>> = { coordinator: 0, lead: 1, worker: 2 };
 
-/** A task's active assignments, coordinator first, each with its agent's project. */
+/** A task's active assignments, coordinator first, each with its agent's label. */
 export function holdersOf(state: StateSnapshot, taskId: string): Holder[] {
-  const projects = new Map(state.agents.map((a) => [a.id, a.project]));
   return state.assignments
     .filter((a) => a.taskId === taskId && a.state === "active")
     .toSorted((a, b) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role])
@@ -27,7 +27,7 @@ export function holdersOf(state: StateSnapshot, taskId: string): Holder[] {
       assignmentId: a.id,
       agentId: a.agentId,
       role: a.role,
-      project: projects.get(a.agentId) ?? null,
+      label: agentLabelOf(state.agents, a.agentId),
     }));
 }
 
@@ -60,14 +60,38 @@ export function openSubtasksUnder(state: StateSnapshot, taskId: string): Task[] 
   return under(taskId).filter((t) => t.state === "open");
 }
 
-/** The agent that launched this one, by id and project, or null when the human did. */
+/** The agent that launched this one, by id and label, or null when the human did. */
 export function launcherOf(
-  state: { readonly agents: readonly Pick<Agent, "id" | "project" | "launchedBy">[] },
+  state: {
+    readonly agents: readonly Pick<Agent, "id" | "name" | "project" | "state" | "launchedBy">[];
+  },
   agentId: string,
-): { id: string; project: string | null } | null {
+): { id: string; label: string } | null {
   const by = state.agents.find((a) => a.id === agentId)?.launchedBy ?? null;
   if (by === null) return null;
-  return { id: by, project: state.agents.find((a) => a.id === by)?.project ?? null };
+  return { id: by, label: agentLabelOf(state.agents, by) };
+}
+
+/**
+ * The agents a task can be given to: those not ended. One exited or lost is offered, since it
+ * can be started again to take the work.
+ */
+export const assignableAgents = <A extends Pick<Agent, "state">>(agents: readonly A[]): A[] =>
+  agents.filter((a) => !isEnded(a));
+
+/**
+ * The agent a form gives a task to: the one picked while it is still offered. Otherwise, one that
+ * ended since it was picked, or none picked yet, is the first offered where the form needs an
+ * agent, and no one where it doesn't, so the form never sends an agent its list no longer shows.
+ */
+export function assignee(
+  agents: readonly Pick<Agent, "id" | "state">[],
+  picked: string,
+  needed: boolean,
+): string {
+  const offered = assignableAgents(agents);
+  if (offered.some((a) => a.id === picked)) return picked;
+  return needed ? (offered[0]?.id ?? "") : "";
 }
 
 /** The open tasks an agent is on now, with its role on each. */

@@ -206,9 +206,23 @@ export async function pairDevice(code: string, name: string): Promise<PairRespon
   return PairResponse.parse(JSON.parse(text));
 }
 
-/** `theme` is the background the agent's terminal shows, which its TUI is started for. */
-export const launchAgent = async (harness: HarnessId, cwd: string, theme: TuiTheme) =>
-  LaunchAgentResponse.parse(await act("/v1/agents", { harness, cwd, theme }));
+/**
+ * `theme` is the background the agent's terminal shows, which its TUI is started for. Without a
+ * `name`, the daemon gives the project's next default.
+ */
+export const launchAgent = async (
+  harness: HarnessId,
+  cwd: string,
+  theme: TuiTheme,
+  name?: string,
+) =>
+  LaunchAgentResponse.parse(
+    await act("/v1/agents", { harness, cwd, theme, ...(name === undefined ? {} : { name }) }),
+  );
+
+/** By id, never by name: once a rename lands, a retry by the old name finds no agent. */
+export const renameAgent = async (agentId: string, name: string) =>
+  AgentCommandResponse.parse(await act(`/v1/agents/${agentId}/rename`, { name }));
 
 export const sendMessage = async (agentId: string, body: string) =>
   SendMessageResponse.parse(await act(`/v1/agents/${agentId}/messages`, { body }));

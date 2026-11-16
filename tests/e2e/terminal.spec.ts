@@ -67,6 +67,10 @@ test("draws an agent's terminal in the theme it started in, and respawns it in t
   page.on("websocket", (ws) => streams.push(ws.url()));
   await launchClaude(page);
   const agentId = new URL(page.url()).hash.replace("#/agent/", "");
+  const name = await page
+    .getByRole("article", { name: "agent" })
+    .getByRole("heading", { level: 2 })
+    .textContent();
   const dark = await terminalBackground(page);
   const opened = streams.length;
 
@@ -85,7 +89,8 @@ test("draws an agent's terminal in the theme it started in, and respawns it in t
 
   // It never reaches a model, so it has no conversation to resume: it isn't stopped for a theme.
   const notice = page.getByRole("status", { name: "theme" });
-  const row = notice.getByRole("listitem").filter({ hasText: agentId.slice(-6) });
+  // Its name and then its harness, so `web-1` doesn't also find `web-12`'s row.
+  const row = notice.getByRole("listitem").filter({ hasText: new RegExp(`^${name} \\(`) });
   await expect(row.getByRole("button", { name: "No conversation to resume yet" })).toBeDisabled({
     timeout: 10_000,
   });

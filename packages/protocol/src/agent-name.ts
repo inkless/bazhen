@@ -20,6 +20,9 @@ export const ID_PREFIXES = [
   "lease",
 ] as const;
 
+/** The most characters an agent's name has. */
+export const AGENT_NAME_MAX = 40;
+
 /**
  * An agent's name, the handle a human or another agent addresses it by (foundation-design §11.4):
  * the characters a Claude Code session name takes unquoted. It starts with a letter or digit, so
@@ -30,7 +33,9 @@ export const ID_PREFIXES = [
 export const AgentName = z
   .string()
   .regex(
-    new RegExp(`^(?!(?:${ID_PREFIXES.join("|")})_${ID_BODY}$)[A-Za-z0-9][A-Za-z0-9_-]{0,39}$`),
+    new RegExp(
+      `^(?!(?:${ID_PREFIXES.join("|")})_${ID_BODY}$)[A-Za-z0-9][A-Za-z0-9_-]{0,${AGENT_NAME_MAX - 1}}$`,
+    ),
     {
       message:
         "a name is 1 to 40 letters, digits, - or _, starts with a letter or digit, and isn't an id",

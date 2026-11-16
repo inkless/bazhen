@@ -38,10 +38,17 @@ export async function screen(page: Page, terminalId?: string): Promise<string> {
   return typeof text === "string" ? text : "";
 }
 
-/** Launches Claude Code from the page and waits for its TUI; answers the agent's id. */
-export async function launch(page: Page): Promise<string> {
+/** A name no other agent of this run holds, so a retried test doesn't find its last one's. */
+export const uniqueName = (base: string) => `${base}-${Date.now().toString(36)}`;
+
+/**
+ * Launches Claude Code from the page, under `name` if given, and waits for its TUI; answers the
+ * agent's id.
+ */
+export async function launch(page: Page, name?: string): Promise<string> {
   await page.goto("/");
   await page.getByPlaceholder("/path/to/project").fill(String(process.env["BZ_E2E_WORK"]));
+  if (name !== undefined) await page.locator(".launch").getByLabel("Name").fill(name);
   await page.getByRole("button", { name: "Launch Claude Code" }).click();
   await expect.poll(() => screen(page), { timeout: 20_000 }).toContain("Claude Code");
   return new URL(page.url()).hash.replace("#/agent/", "");

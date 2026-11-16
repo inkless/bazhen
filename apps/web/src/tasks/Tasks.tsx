@@ -8,11 +8,13 @@ import {
   type TaskOutcome,
 } from "@bazhen/protocol";
 import { Refused, assignTask, createTask, fetchTask, finishTask, unassignTask } from "../api.ts";
-import { shortId } from "../fleet/model.ts";
+import { agentLabel, agentLabelOf, shortId } from "../fleet/model.ts";
 import { Button } from "../ui/Button.tsx";
 import { ConfirmDialog } from "../ui/ConfirmDialog.tsx";
 import {
   agentTasks,
+  assignableAgents,
+  assignee,
   holdersOf,
   launcherOf,
   openSubtasksUnder,
@@ -71,9 +73,9 @@ function AssigneeFields({
         Agent{" "}
         <select value={agentId} onChange={(e) => onAgent(e.target.value)}>
           {optional && <option value="">No one yet</option>}
-          {state.agents.map((a) => (
+          {assignableAgents(state.agents).map((a) => (
             <option key={a.id} value={a.id}>
-              {a.project} ({shortId(a.id)})
+              {agentLabel(a)}
             </option>
           ))}
         </select>
@@ -104,9 +106,8 @@ function Holders({
         <span key={h.assignmentId} className="task-holder">
           {h.role}{" "}
           <Button variant="link" onPress={() => onOpenAgent(h.agentId)}>
-            {h.project ?? "an agent"}
-          </Button>{" "}
-          <span className="id">{shortId(h.agentId)}</span>
+            {h.label}
+          </Button>
         </span>
       ))}
     </>
@@ -124,9 +125,10 @@ function NewTask({
   const [agentId, setAgentId] = useState("");
   const [role, setRole] = useState<Role>("coordinator");
   const { busy, run } = useOnce(failed);
+  const chosen = assignee(state.agents, agentId, false);
   const submit = (e: SubmitEvent) => {
     e.preventDefault();
-    const assign = agentId === "" ? undefined : { agentId, role };
+    const assign = chosen === "" ? undefined : { agentId: chosen, role };
     run(
       () => createTask(title.trim(), brief, assign).then((r) => onOpenTask(r.taskId)),
       () => {
@@ -159,7 +161,7 @@ function NewTask({
       <div>
         <AssigneeFields
           state={state}
-          agentId={agentId}
+          agentId={chosen}
           role={role}
           onAgent={setAgentId}
           onRole={setRole}
@@ -257,7 +259,7 @@ export function TaskPage({
   if (detail === "missing") return <p role="status">No such task.</p>;
   const open = detail.state === "open";
   const below = openSubtasksUnder(state, taskId);
-  const pick = agentId || (state.agents[0]?.id ?? "");
+  const pick = assignee(state.agents, agentId, true);
   const finish = (outcome: TaskOutcome) =>
     run(() => finishTask(taskId, outcome, outcome === "cancelled" && below.length > 0));
   const cancelling =
@@ -273,7 +275,9 @@ export function TaskPage({
         <span className="id">{shortId(detail.id)}</span>
       </header>
       <p className="note">
-        {detail.ownerAgentId === null ? "Yours" : `Owned by ${shortId(detail.ownerAgentId)}`}
+        {detail.ownerAgentId === null
+          ? "Yours"
+          : `Owned by ${agentLabelOf(state.agents, detail.ownerAgentId)}`}
         {detail.parentTaskId !== null && (
           <>
             {", part of "}
@@ -305,7 +309,10 @@ export function TaskPage({
         <p className="note">
           Before:{" "}
           {ended
-            .map((a) => `${a.role} ${shortId(a.agentId)} (${a.endReason ?? "ended"})`)
+            .map(
+              (a) =>
+                `${agentLabelOf(state.agents, a.agentId)} as ${a.role} (${a.endReason ?? "ended"})`,
+            )
             .join(", ")}
         </p>
       )}
@@ -391,9 +398,8 @@ export function AgentTasks({
         <p className="note agent-tasks">
           Launched by{" "}
           <Button variant="link" onPress={() => onOpenAgent(launcher.id)}>
-            {launcher.project ?? "an agent"}
-          </Button>{" "}
-          <span className="id">{shortId(launcher.id)}</span>
+            {launcher.label}
+          </Button>
         </p>
       )}
       {tasks.length > 0 && (

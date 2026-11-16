@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Attention, StateSnapshot } from "@bazhen/protocol";
+import type { Agent, Attention, StateSnapshot } from "@bazhen/protocol";
 import {
   freshItems,
   notificationsOn,
@@ -8,9 +8,33 @@ import {
   type NotifyDeps,
 } from "./notify.ts";
 
+const AGENT_ID = "agent_01900000000070008000000000000000";
+const ENV_ID = "env_01900000000070008000000000000000";
+
+const reviewer: Agent = {
+  id: AGENT_ID,
+  name: "reviewer",
+  environmentId: ENV_ID,
+  harness: "claude-code",
+  project: "web",
+  cwd: "/work/web",
+  state: "running",
+  terminalId: null,
+  generation: 0,
+  externalRef: null,
+  exit: null,
+  theme: "dark",
+  themes: ["light", "dark"],
+  attachCommand: null,
+  commands: [],
+  resumable: false,
+  canOpenShell: false,
+  launchedBy: null,
+};
+
 const open = (n: number): Attention => ({
   id: `attn_0190000000007000800000000000${String(n).padStart(4, "0")}`,
-  agentId: "agent_01900000000070008000000000000000",
+  agentId: AGENT_ID,
   state: "open",
   closeReason: null,
   summary: "Bash: curl -H 'token: s3cret'",
@@ -21,11 +45,11 @@ const open = (n: number): Attention => ({
   actions: [],
 });
 
-const snapshot = (attention: Attention[]): StateSnapshot => ({
+const snapshot = (attention: Attention[], agents: Agent[] = [reviewer]): StateSnapshot => ({
   epoch: "e",
   eventId: 1,
   environments: [],
-  agents: [],
+  agents,
   attention,
   messages: [],
   shells: [],
@@ -67,10 +91,10 @@ describe("page notifications", () => {
     expect([first.fresh, second.fresh.map((i) => i.id)]).toEqual([[], [open(2).id]]);
   });
 
-  it("names the kind and the project, never the summary, which a lock screen would show", () => {
+  it("names the kind and the agent, never the summary, which a lock screen would show", () => {
     const { deps, shown } = browser();
     newItem(deps);
-    expect(shown).toEqual([["An agent", "Approval: needs you"]]);
+    expect(shown).toEqual([["reviewer", "Approval: needs you"]]);
   });
 
   it("shows nothing while the page is in sight", () => {

@@ -1,6 +1,6 @@
 import type { Shell } from "@bazhen/protocol";
 import { shellCount } from "../shells/model.ts";
-import { exitText, shortId, type Fleet } from "./model.ts";
+import { agentLabel, exitText, type Fleet } from "./model.ts";
 
 /**
  * The fleet by environment and project. Compact in the rail; in the centre it also shows where
@@ -50,8 +50,10 @@ export function FleetList({
                             <span className="visually-hidden">needs you</span>
                           </>
                         )}
-                        <span>{agent.harness}</span>
-                        <span className="id">{shortId(agent.id)}</span>
+                        <span className="name" title={agentLabel(agent)}>
+                          {agentLabel(agent)}
+                        </span>
+                        <span className="harness">{agent.harness}</span>
                         <span className={`state state-${agent.state}`}>{agent.state}</span>
                         <ShellChip count={shellCount(shells, agent.id)} />
                         {!compact && <span className="cwd">{agent.cwd}</span>}

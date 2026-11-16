@@ -116,7 +116,7 @@ function ItemRow({
         <span className={`badge badge-${kind.tone}`}>{kind.label}</span>
         {showAgent && (
           <Button variant="link" onPress={() => onOpen(item.agentId)}>
-            {row.project ?? "An agent"} <span className="id">{row.agent}</span>
+            {row.agent}
           </Button>
         )}
         <span className="summary">{item.summary}</span>
@@ -344,10 +344,10 @@ export function Inbox({ state, ...acting }: Acting & { state: StateSnapshot }) {
       </Button>
       {showClosed && (
         <ul className="inbox-list closed" aria-label="closed items">
-          {closedRows(state).map(({ item, project, agent }) => (
+          {closedRows(state).map(({ item, agent }) => (
             <li key={item.id}>
-              <span className="badge badge-plain">{KINDS[item.kind].label}</span>{" "}
-              {project ?? "An agent"} <span className="id">{agent}</span> {item.summary}
+              <span className="badge badge-plain">{KINDS[item.kind].label}</span> {agent}{" "}
+              {item.summary}
               {item.closeReason !== null && (
                 <span className="waited"> — {CLOSED[item.closeReason]}</span>
               )}

@@ -5,7 +5,7 @@ import {
   type BrowserContextOptions,
   type Page,
 } from "@playwright/test";
-import { launch, screen, status, viewportTop } from "./page.ts";
+import { launch, screen, status, uniqueName, viewportTop } from "./page.ts";
 
 // The page is an app the size of the screen: the document never scrolls, and the terminal is in
 // view without scrolling anything, on a phone and an iPad either way up and on a desktop.
@@ -38,16 +38,18 @@ interface Screen {
 const share = ({ visible, above, cap, chrome }: Screen) =>
   ((visible - above) * (1 - cap) - chrome) / visible;
 
+// One pane, the TUI and shell as tabs: links 44 + gap 8; the dock's row 45, gap 8, status 30.4.
+const IPHONE: Screen = {
+  name: "an iPhone upright",
+  options: phone(390, 844),
+  visible: 791,
+  above: 76,
+  cap: 0.25,
+  chrome: 101.4,
+};
+
 const SCREENS: readonly Screen[] = [
-  // One pane, the TUI and shell as tabs: links 44 + gap 8; the dock's row 45, gap 8, status 30.4.
-  {
-    name: "an iPhone upright",
-    options: phone(390, 844),
-    visible: 791,
-    above: 76,
-    cap: 0.25,
-    chrome: 101.4,
-  },
+  IPHONE,
   {
     name: "an iPhone on its side",
     options: phone(844, 390),
@@ -251,6 +253,94 @@ for (const device of SCREENS) {
     }
   });
 }
+
+test("keeps the terminals in view on a phone with the agent's rename form open", async ({
+  browser,
+}) => {
+  const page = await open(browser, IPHONE.options, `#/agent/${agentId}`);
+  const agent = page.getByRole("article", { name: "agent" });
+  await agent.getByRole("button", { name: "Rename" }).tap();
+  await expect(agent.getByRole("form", { name: "rename agent" })).toBeVisible();
+  await expect
+    .poll(async () => ({ page: await overflow(page), terminal: await terminalsInView(page) }))
+    .toEqual({ page: { down: 0, across: 0 }, terminal: true });
+  expect(await terminalShare(page)).toBeGreaterThanOrEqual(share(IPHONE));
+  await page.context().close();
+});
+
+/** POSTs to the daemon as the page's own origin would, as a paired browser must; answers the body. */
+async function post(page: Page, path: string, body: object): Promise<unknown> {
+  const res = await page.request.post(path, {
+    headers: { origin: new URL(page.url()).origin },
+    data: { idempotencyKey: crypto.randomUUID(), ...body },
+  });
+  expect(res.ok(), `${path}: ${await res.text()}`).toBe(true);
+  return res.json();
+}
+
+/**
+ * Each element showing `text` that ends past the window's right edge. The app clips what doesn't
+ * fit rather than scrolling the page, so a page that doesn't scroll can still cut a name off. A
+ * picker shows its options' text, so it stands for them.
+ */
+const pastRightEdge = (page: Page, text: string) =>
+  page.evaluate<string[]>(`[...document.querySelectorAll("body *")].flatMap((e) => {
+    const text = ${JSON.stringify(text)};
+    if (![...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.includes(text))) return [];
+    const shown = e.tagName === "OPTION" ? e.closest("select") : e;
+    const box = shown.getBoundingClientRect();
+    return box.width > 0 && box.right > innerWidth + 0.5 ? [shown.tagName + " " + box.right] : [];
+  })`);
+
+/** Closes an agent at the generation the daemon has for it now. */
+async function closeAgent(page: Page, id: string): Promise<void> {
+  const state: unknown = await (await page.request.get("/v1/state")).json();
+  const agents: unknown = Reflect.get(Object(state), "agents");
+  const found: unknown = Array.isArray(agents)
+    ? agents.find((x: unknown) => Reflect.get(Object(x), "id") === id)
+    : undefined;
+  await post(page, `/v1/agents/${id}/close`, {
+    generation: Reflect.get(Object(found), "generation"),
+  });
+}
+
+test("fits a 40-character name on a phone, wherever the agent is shown", async ({ browser }) => {
+  const page = await (await browser.newContext(IPHONE.options)).newPage();
+  await page.goto("/");
+  // Nowhere to break it: 31 letters, `-`, and the eight of a base-36 time.
+  const name = uniqueName("n".repeat(31));
+  expect(name).toHaveLength(40);
+  const launched = await post(page, "/v1/agents", { harness: "claude-code", cwd: WORK, name });
+  const longId = String(Reflect.get(Object(launched), "agentId"));
+  // Later files expect no open task and only their own agents, whatever happens here.
+  try {
+    const made = await post(page, "/v1/tasks", {
+      title: "Long names",
+      brief: "Fit a phone.",
+      assign: { agentId: longId, role: "worker" },
+    });
+    const taskId = String(Reflect.get(Object(made), "taskId"));
+    try {
+      for (const hash of [`#/agent/${longId}`, "", "#/tasks", `#/task/${taskId}`]) {
+        await page.goto(`/${hash}`);
+        // A phone shows one pane, so the name is also in the hidden rail, and in a picker's options.
+        await expect(page.getByText(name).filter({ visible: true }).first()).toBeVisible();
+        await dismissThemeNotice(page);
+        await expect
+          .poll(
+            async () => ({ page: await overflow(page), cut: await pastRightEdge(page, name) }),
+            { message: hash },
+          )
+          .toEqual({ page: { down: 0, across: 0 }, cut: [] });
+      }
+    } finally {
+      await post(page, `/v1/tasks/${taskId}/finish`, { outcome: "cancelled" });
+    }
+  } finally {
+    await closeAgent(page, longId);
+    await page.context().close();
+  }
+});
 
 /**
  * A soft keyboard, as the page sees one: the visual viewport shrinks from the bottom, a frame at a
