@@ -49,7 +49,8 @@ export const agent = machine<AgentState, AgentEvent>("agent session", {
   // An agent is starting until its harness shows a sign of life, not merely until its terminal
   // runs: a TUI stopped at a trust or login dialog is not running. Its terminal tells the two
   // phases apart. Unreachable is left out: unknown returns to running on reconfirm, which would
-  // skip the harness's sign.
+  // skip the harness's sign. Nothing records it yet; whatever comes to must leave a starting
+  // agent starting, as the machine's property test holds.
   // A rejected respawn returns to exited, where the terminal still is: it stays closable, and
   // failed would leave its tmux session with nothing to close it. A rejected relaunch returns to
   // lost the same way, so it can be relaunched again or removed.

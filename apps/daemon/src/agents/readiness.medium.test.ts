@@ -3,7 +3,7 @@ import type { TerminalId } from "@bazhen/core";
 import { Approvals } from "../mailbox/approvals.ts";
 import { Inbox } from "../attention/inbox.ts";
 import type { Store } from "../store/store.ts";
-import { testView, withAgent } from "../testing/fixtures.ts";
+import { testView, withAgent, withStartingCodexAgentsOn } from "../testing/fixtures.ts";
 import { localEnvironmentId } from "./launch.ts";
 import { Readiness } from "./readiness.ts";
 
@@ -19,23 +19,30 @@ afterEach(() => {
  * An agent still waiting on its harness, followed by the daemon's inbox and readiness, whose
  * clock reads `now` and whose deadline is `DEADLINE_MS`.
  */
-async function starting(now: () => number = Date.now) {
+async function starting(
+  now: () => number = Date.now,
+  notStarted?: (box: Inbox) => (id: string, summary: string) => void,
+) {
   const { store, agentId, terminalId } = await withAgent(undefined, { starting: true });
   const box = new Inbox(store, new Approvals(store), () => ({ messageId: "msg_x", eventIds: [] }));
   stops.push(box.follow());
   const up: TerminalId[] = [];
+  const reused: TerminalId[] = [];
   const released: string[] = [];
+  const logged: string[] = [];
   const readiness = new Readiness({
     store,
     environmentId: localEnvironmentId(store),
     deadlineMs: DEADLINE_MS,
-    notStarted: (id, summary) => box.notStarted(id, summary),
+    notStarted: notStarted?.(box) ?? ((id, summary) => box.notStarted(id, summary)),
     terminalUp: (terminal) => up.push(terminal),
+    terminalReused: (terminal) => reused.push(terminal),
     released: (id) => released.push(id),
     now,
+    log: (message) => logged.push(message),
   });
   const follow = () => stops.push(readiness.follow());
-  return { store, agentId, terminalId, box, readiness, follow, up, released };
+  return { store, agentId, terminalId, box, readiness, follow, up, reused, released, logged };
 }
 
 /** The agent's not-started items, as `state:closeReason`. */
@@ -46,6 +53,15 @@ const stuck = (store: Store) =>
     .map((a) => `${a.state}:${a.closeReason ?? ""}`);
 const lifecycle = (store: Store) => store.snapshot(testView).agents[0]?.state;
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Opens the item through the inbox, failing the first `failures` times as a busy store would. */
+const failingFirst = (failures: number) => (box: Inbox) => {
+  let left = failures;
+  return (agentId: string, summary: string) => {
+    if (left-- > 0) throw new Error("the store is busy");
+    box.notStarted(agentId, summary);
+  };
+};
 
 function respawn(store: Store, agentId: string) {
   const system = { entityId: agentId, actor: "system" } as const;
@@ -131,16 +147,47 @@ describe("launch readiness", () => {
     expect(stuck(s.store)).toEqual(["closed:dismissed"]);
   });
 
-  it("times a respawn as a new start, and says when its terminal is up", async () => {
+  it("times a respawn as a new start, says its terminal is reused, and says when it is up", async () => {
     const s = await starting();
     s.follow();
     await expect.poll(() => stuck(s.store)).toEqual(["open:"]);
     respawn(s.store, s.agentId);
     await expect.poll(() => stuck(s.store)).toEqual(["closed:stale", "open:"]);
-    expect([lifecycle(s.store), s.up]).toEqual(["starting", [s.terminalId]]);
+    expect([lifecycle(s.store), s.reused, s.up]).toEqual([
+      "starting",
+      [s.terminalId],
+      [s.terminalId],
+    ]);
   });
 
-  it("takes no sign before the start's terminal runs", async () => {
+  it("tries again, and says so, when telling the human fails", async () => {
+    const s = await starting(Date.now, failingFirst(1));
+    s.follow();
+    await expect.poll(() => stuck(s.store)).toEqual(["open:"]);
+    expect(s.logged).toEqual([expect.stringContaining("trying again")]);
+  });
+
+  it("tells the human what to check of a Codex whose TUI may be up unseen", async () => {
+    const { store, agentOn } = await withStartingCodexAgentsOn("tmux", "thr-1");
+    const box = new Inbox(store, new Approvals(store), () => ({
+      messageId: "msg_x",
+      eventIds: [],
+    }));
+    stops.push(box.follow());
+    const readiness = new Readiness({
+      store,
+      environmentId: localEnvironmentId(store),
+      deadlineMs: DEADLINE_MS,
+      notStarted: (id, summary) => box.notStarted(id, summary),
+    });
+    stops.push(readiness.follow());
+    const summary = async () =>
+      store.snapshot(testView).attention.find((a) => a.agentId === agentOn("thr-1"))?.summary;
+    await expect.poll(summary).toContain("tui.terminal_title");
+  });
+
+  // The hook binding holds a sign that comes early until the start's terminal runs.
+  it("records no sign itself before the start's terminal runs", async () => {
     const s = await starting();
     s.follow();
     const system = { entityId: s.agentId, actor: "system" } as const;

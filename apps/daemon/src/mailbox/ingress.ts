@@ -29,7 +29,7 @@ export interface IngressDeps {
   };
   /** Whether the daemon runs this agent; a hook from any other is ignored, never adopted. */
   readonly knows: (agentId: string) => boolean;
-  /** A hook of the agent's own session: its harness is up (foundation-design §4.5). */
+  /** A hook of the agent's session from the TUI its start launched: its harness is up (§4.5). */
   readonly ready: (agentId: string) => void;
   /** A hook names its agent; its agent token must be that agent's (foundation-design §9.1). */
   readonly credentials: AgentCredentials;
@@ -81,7 +81,7 @@ export function hookApp(deps: IngressDeps): Hono<{ Bindings: HttpBindings }> {
         sessionStarted: read.kind === "wait" && read.sessionStarted,
         ppid,
       });
-      if (owned) deps.ready(agentId);
+      if (owned && (await deps.binding.startedHere(agentId, ppid))) deps.ready(agentId);
       return owned;
     };
     switch (read.kind) {

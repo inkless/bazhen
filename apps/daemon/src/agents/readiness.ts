@@ -29,6 +29,8 @@ export interface ReadinessOptions {
   readonly notStarted: (agentId: string, summary: string) => void;
   /** A start's terminal runs, and may already show a sign of life that came before it did. */
   readonly terminalUp?: (terminalId: TerminalId) => void;
+  /** A start is asked for in the agent's own terminal, which keeps what the last process left. */
+  readonly terminalReused?: (terminalId: TerminalId) => void;
   /** The agent runs now: mail held while it started may go. */
   readonly released?: (agentId: string) => void;
   readonly now?: () => number;
@@ -89,6 +91,12 @@ export class Readiness {
   }
 
   private react(e: Recorded): void {
+    if (e.type === "agent.respawn_requested") {
+      const terminalId = this.opts.store.agentTerminal({ agentId: e.entityId })?.runtime
+        ?.terminalId;
+      if (terminalId !== undefined) this.opts.terminalReused?.(terminalId);
+      return;
+    }
     if (SETTLES.has(e.type)) {
       clearTimeout(this.timers.get(e.entityId));
       this.timers.delete(e.entityId);
@@ -122,14 +130,23 @@ export class Readiness {
       store.transaction(() => {
         if (!waiting(store.agentTerminal({ agentId }))) return;
         if (store.openedSince(agentId, "stuck_starting", startId)) return;
-        const seconds = Math.round(this.opts.deadlineMs / 1000);
-        this.opts.notStarted(
-          agentId,
-          `Its harness hasn't started after ${seconds} s. Look in its terminal for a dialog to answer.`,
-        );
+        this.opts.notStarted(agentId, this.summary(store.agentLaunch(agentId)?.launch.harness));
       });
     } catch (err) {
-      this.log(`readiness: could not tell of agent ${agentId}'s start: ${String(err)}`);
+      this.log(
+        `readiness: could not tell the human agent ${agentId} hasn't started; ` +
+          `trying again in ${this.opts.deadlineMs} ms: ${String(err)}`,
+      );
+      this.arm(agentId, startId, this.now());
     }
+  }
+
+  private summary(harness: string | undefined): string {
+    const seconds = Math.round(this.opts.deadlineMs / 1000);
+    const said = `Its harness hasn't shown it is up after ${seconds} s. Look in its terminal for a dialog to answer.`;
+    // Codex has one sign Bazhen can see; a build that ignores the setting never gives it.
+    return harness === "codex"
+      ? `${said} If Codex is up with no dialog, Bazhen didn't see it title its terminal with its thread: check that this Codex honours tui.terminal_title.`
+      : said;
   }
 }

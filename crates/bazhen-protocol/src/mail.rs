@@ -79,7 +79,7 @@ pub enum AttentionCloseReason {
     Resent,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AttentionKind {
     Approval,
@@ -89,10 +89,10 @@ pub enum AttentionKind {
     Escalation,
     TaskDone,
     StuckStarting,
-    /// A kind added after this build, which reads as a plain item rather than failing the whole
-    /// answer it came in.
-    #[serde(other)]
-    Unknown,
+    /// A kind added after this build, kept as the daemon named it, so the whole answer it came in
+    /// still reads and is written out again unchanged.
+    #[serde(untagged)]
+    Unknown(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -154,9 +154,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_attention_kind_newer_than_this_build_reads_as_unknown() {
+    fn an_attention_kind_newer_than_this_build_reads_and_writes_as_the_daemon_named_it() {
         let kind: AttentionKind = serde_json::from_str(r#""a_kind_from_later""#).unwrap();
-        assert_eq!(kind, AttentionKind::Unknown);
+        assert_eq!(kind, AttentionKind::Unknown("a_kind_from_later".to_owned()));
+        assert_eq!(
+            serde_json::to_string(&kind).unwrap(),
+            r#""a_kind_from_later""#
+        );
         let known: AttentionKind = serde_json::from_str(r#""stuck_starting""#).unwrap();
         assert_eq!(known, AttentionKind::StuckStarting);
     }

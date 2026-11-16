@@ -372,6 +372,7 @@ const readiness = new Readiness({
   deadlineMs: config.startDeadlineMs,
   notStarted: (agentId, summary) => inbox.notStarted(agentId, summary),
   terminalUp: (terminalId) => void codexThreads.titleChanged(terminalId),
+  terminalReused: (terminalId) => codexThreads.reusing(terminalId),
   released: (agentId) => codexMail.deliverQueued(agentId),
 });
 const stopReadiness = readiness.follow();
@@ -648,7 +649,7 @@ const socketListener = getRequestListener(
           },
     paneTitleChanged: (pane) => {
       const terminal = store.codexTerminalInPane(tmux.socket, pane);
-      if (terminal !== undefined) void codexThreads.titleChanged(terminal);
+      if (terminal !== undefined) void codexThreads.heard(terminal);
     },
     shellReport: (terminalId, report) => shellReports.report(terminalId, report),
     shellPrompt: (terminalId, report) => shellReports.prompt(terminalId, report),

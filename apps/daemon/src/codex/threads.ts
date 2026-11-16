@@ -74,6 +74,12 @@ export class CodexThreads {
   private readonly waiting = new Map<TerminalId, string>();
   /** Terminals waiting to resume the thread their title names. */
   private readonly resuming = new Map<TerminalId, Resuming>();
+  /**
+   * Terminals a TUI is started in again, whose title may still be the last TUI's: a respawn
+   * keeps the terminal, and a TUI that was killed never empties its title. Their title says the
+   * new TUI is up only once a change to it has been heard.
+   */
+  private readonly reused = new Set<TerminalId>();
   /** The agents whose titles are being read at start; their mail waits until they are. */
   private starting: Set<string> | undefined;
   /** One title at a time, in the order the runtimes reported them. */
@@ -126,13 +132,19 @@ export class CodexThreads {
   }
 
   /**
-   * A title a runtime heard set in a terminal: followed if a Codex agent runs there, and dropped
-   * at once otherwise, so other agents' titles, however often they change, never wait in the
-   * queue ahead of a Codex agent's.
+   * A title a runtime heard set in a terminal, `title` when it said which: followed if it is a
+   * Codex agent's, and dropped at once otherwise, so other agents' titles, however often they
+   * change, never wait in the queue ahead of a Codex agent's.
    */
-  heard(terminal: TerminalId, title: string): Promise<void> {
-    if (this.opts.store.codexAgentIn(terminal) === undefined) return Promise.resolve();
+  heard(terminal: TerminalId, title?: string): Promise<void> {
+    if (!this.opts.store.isCodexTerminal(terminal)) return Promise.resolve();
+    this.reused.delete(terminal);
     return this.titleChanged(terminal, title);
+  }
+
+  /** A TUI is about to start again in `terminal`, which keeps the last one's title. */
+  reusing(terminal: TerminalId): void {
+    this.reused.add(terminal);
   }
 
   /**
@@ -166,7 +178,7 @@ export class CodexThreads {
     }
     // Still the same thread, as after `/compact`, or back on it.
     if (agent.threadId.startsWith(prefix)) {
-      this.tracked(agent.agentId);
+      this.tracked(agent.agentId, terminal);
       return this.settle(terminal);
     }
     let found = matching(prefix, this.seen);
@@ -197,7 +209,7 @@ export class CodexThreads {
         externalRef: { environmentId: agent.environmentId, kind: "codex-thread", id: threadId },
       },
     });
-    this.tracked(agent.agentId);
+    this.tracked(agent.agentId, terminal);
     // Bound to the new thread now, so held mail goes there.
     this.settle(terminal);
   }
@@ -256,11 +268,11 @@ export class CodexThreads {
   }
 
   /**
-   * The title names the agent's thread: its TUI is up, and switches are followed again, if it said
-   * they weren't.
+   * The title names the agent's thread: its TUI is up, unless the title may be the last TUI's, and
+   * switches are followed again, if it said they weren't.
    */
-  private tracked(agentId: string): void {
-    this.opts.ready?.(agentId);
+  private tracked(agentId: string, terminal: TerminalId): void {
+    if (!this.reused.has(terminal)) this.opts.ready?.(agentId);
     const latest = this.opts.store.latestActivity(agentId);
     if (latest?.detail !== UNTRACKED) return;
     const { detail: _untracked, ...rest } = latest;

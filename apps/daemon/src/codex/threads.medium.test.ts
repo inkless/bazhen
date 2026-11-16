@@ -115,7 +115,46 @@ async function setup(opts: {
   };
 }
 
+/**
+ * The agent's TUI killed and a respawn asked for in the same terminal; the returned function
+ * records the respawn.
+ */
+function respawn(s: Awaited<ReturnType<typeof setup>>) {
+  const system = { entityId: s.agentId, actor: "system" } as const;
+  s.store.append({ ...system, type: "agent.exited", payload: { exit: { type: "unknown" } } });
+  s.store.append({ ...system, type: "agent.respawn_requested", payload: {} });
+  s.threads.reusing(s.terminal);
+  const ref = s.store.agentTerminal({ agentId: s.agentId })?.runtime;
+  const externalRef = s.store.agentLaunch(s.agentId)?.externalRef ?? null;
+  return () =>
+    s.store.append({
+      ...system,
+      type: "agent.respawned",
+      payload: { externalRef, runtimeRef: { runtime: "tmux", locator: { ...ref?.locator } } },
+    });
+}
+
 describe("a Codex agent's TUI coming up", () => {
+  it("takes no title the last TUI left as a respawned TUI up, until a change to it is heard", async () => {
+    const s = await setup({ titles: [shown(A)] });
+    const recorded = respawn(s);
+    recorded();
+    await s.threads.titleChanged(s.terminal);
+    const stale = s.lifecycle();
+    await s.threads.heard(s.terminal);
+    expect([stale, s.lifecycle()]).toEqual(["starting", "running"]);
+  });
+
+  it("takes a change heard before a respawn is recorded as its TUI up, once it is", async () => {
+    const s = await setup({ titles: [shown(A)] });
+    const recorded = respawn(s);
+    await s.threads.heard(s.terminal);
+    const early = s.lifecycle();
+    recorded();
+    await s.threads.titleChanged(s.terminal);
+    expect([early, s.lifecycle()]).toEqual(["starting", "running"]);
+  });
+
   it("runs a starting agent once its title names its thread, and not on a title naming none", async () => {
     const s = await setup({ titles: ["codex", shown(A)], starting: true });
     await s.threads.titleChanged(s.terminal);

@@ -198,6 +198,52 @@ describe("SessionBinding", () => {
     ]).toEqual(["starting", true]);
   });
 
+  it("takes a resumed TUI's hook as its sign of life, though it comes before its respawn is recorded", async () => {
+    const { store, agentId } = await claudeAgent();
+    const binding = new SessionBinding(store, table, 60_000);
+    const system = { entityId: agentId, actor: "system" } as const;
+    store.append({ ...system, type: "agent.exited", payload: { exit: { type: "unknown" } } });
+    store.append({ ...system, type: "agent.respawn_requested", payload: {} });
+    const early = binding.startedHere(agentId, 900);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    store.append({
+      ...system,
+      type: "agent.respawned",
+      payload: {
+        externalRef: null,
+        runtimeRef: { runtime: "tmux", locator: { panePid: String(PANE_PID), generation: "1" } },
+      },
+    });
+    expect(await early).toBe(true);
+  });
+
+  it("takes no hook from outside the agent's terminal as its sign of life, though it names its session", async () => {
+    const { store, agentId } = await claudeAgent({ starting: true });
+    const binding = new SessionBinding(store, table);
+    // 700's nearest TUI is the nested claude 800, as for a hook a dead process's child left behind.
+    expect([
+      await binding.startedHere(agentId, 700),
+      await binding.startedHere(agentId, 900),
+    ]).toEqual([false, true]);
+  });
+
+  it("takes a hook from a holder's child as its sign of life, the holder's terminal's root", async () => {
+    const { store, agentId } = await claudeAgent({ starting: true });
+    const binding = new SessionBinding(store, table);
+    const system = { entityId: agentId, actor: "system" } as const;
+    store.append({ ...system, type: "agent.exited", payload: { exit: { type: "unknown" } } });
+    store.append({ ...system, type: "agent.respawn_requested", payload: {} });
+    store.append({
+      ...system,
+      type: "agent.respawned",
+      payload: {
+        externalRef: null,
+        runtimeRef: { runtime: "holder", locator: { childPid: String(PANE_PID), generation: "1" } },
+      },
+    });
+    expect(await binding.startedHere(agentId, 900)).toBe(true);
+  });
+
   it("refuses a SessionStart whose agent stays starting past the wait, with no pane to check", async () => {
     const { store, agentId } = await claudeAgent();
     const binding = new SessionBinding(store, table, 10);

@@ -1047,8 +1047,9 @@ export class Store {
   }
 
   /**
-   * The Claude Code session an agent is bound to, and the pid of its pane's process, which is
-   * the TUI Bazhen launched (foundation-design §3.1). Either is null when not known.
+   * The Claude Code session an agent is bound to, and the pid of its terminal's root process, a
+   * tmux pane's or a holder's child, which is the TUI Bazhen launched (foundation-design §3.1).
+   * Either is null when not known.
    */
   claudeBinding(agentId: string): { sessionId: string | null; panePid: number | null } {
     const row = this.prepare(
@@ -1059,13 +1060,11 @@ export class Store {
       typeof row?.external_ref === "string"
         ? ExternalRef.parse(JSON.parse(row.external_ref))
         : null;
-    const locator: unknown = typeof row?.locator === "string" ? JSON.parse(row.locator) : null;
-    const pid = Number(
-      typeof locator === "object" && locator !== null ? Reflect.get(locator, "panePid") : NaN,
-    );
+    const at = parseLocator(row?.locator ?? null);
     return {
       sessionId: ref?.kind === "claude-session" ? ref.id : null,
-      panePid: Number.isInteger(pid) && pid > 0 ? pid : null,
+      // A tmux pane's process, or a holder's child: the terminal's root either way.
+      panePid: pidIn(at, "panePid") ?? pidIn(at, "childPid") ?? null,
     };
   }
 
@@ -1112,14 +1111,24 @@ export class Store {
       });
   }
 
-  /** The terminal of the live Codex agent in a tmux pane, on the tmux server at `socket`. */
+  /**
+   * The terminal of the live Codex agent in a tmux pane, on the tmux server at `socket`, whether
+   * or not its process runs: a respawn's TUI may title the pane before its start is recorded.
+   */
   codexTerminalInPane(socket: string, pane: string): TerminalId | undefined {
     const sql = `SELECT t.id FROM agent_sessions a JOIN terminals t ON t.id = a.terminal_id
-                 WHERE ${UP_CODEX}
+                 WHERE a.harness = 'codex' AND a.state IN ('starting', 'running')
                    AND json_extract(t.locator, '$.socket') = ?
                    AND json_extract(t.locator, '$.paneId') = ?`;
     const id = String(this.prepare(sql).get(socket, pane)?.id);
     return isId("term", id) ? id : undefined;
+  }
+
+  /** Whether a terminal is a live Codex agent's, whether or not its process runs now. */
+  isCodexTerminal(terminalId: TerminalId): boolean {
+    const sql = `SELECT 1 AS found FROM agent_sessions
+                 WHERE harness = 'codex' AND state IN ('starting', 'running') AND terminal_id = ?`;
+    return this.prepare(sql).get(terminalId) !== undefined;
   }
 
   /** The thread a live Codex agent is bound to, if it is one. */
