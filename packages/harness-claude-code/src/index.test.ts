@@ -370,13 +370,14 @@ describe("Claude Code hooks", () => {
       ]);
     });
 
-    it("reports no send by a subagent, a structured message, or another tool", () => {
+    it("reports the agent's own send, and none by a subagent, a structured message, or another tool", () => {
       const reads = [
+        readHook("PostToolUse", sent),
         readHook("PostToolUse", { ...sent, agent_id: "sub-1" }),
         readHook("PostToolUse", { ...sent, tool_input: { to: "BZ-127", message: { type: "x" } } }),
         readHook("PostToolUse", { ...sent, tool_name: "Bash" }),
       ];
-      expect(reads.map((r) => "sent" in r)).toEqual([false, false, false]);
+      expect(reads.map((r) => "sent" in r)).toEqual([true, false, false, false]);
     });
   });
 

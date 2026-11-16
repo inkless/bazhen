@@ -136,7 +136,8 @@ test("lists the messages an agent sent and was sent with SendMessage, newest fir
     ];
     await route.fulfill({ response: res, json: { ...Object(await res.json()), observed } });
   });
-  await page.goto(`/#/agent/${agentId}`);
+  // The page is already on the agent, so only a reload reads the state again.
+  await page.reload();
   const messages = workspace(page).getByRole("region", { name: "Messages sent with SendMessage" });
   await expect(messages.getByRole("listitem")).toHaveText([
     /^From agent 000099 Review\? .* SendMessage · not sent$/,

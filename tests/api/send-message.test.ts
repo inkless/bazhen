@@ -60,10 +60,11 @@ describe("the bazhen verbs a Claude Code agent is taught", () => {
     const { messageId } = await mail("whoami", "[[fake:bash:bazhen whoami]]");
     await expect.poll(() => delivered(messageId), { timeout: 30_000 }).toBe(true);
     const name = await nameOf(sender.agentId);
-    expect([
-      (await openFor("bazhen whoami")).length,
-      model.requests.some((r) => r.includes(`${name}  ${sender.agentId}`)),
-    ]).toEqual([0, true]);
+    const ran = model.requests.filter((r) => r.includes("tool_result")).at(-1);
+    expect([(await openFor("bazhen whoami")).length, ran]).toEqual([
+      0,
+      expect.stringContaining(`${name}  ${sender.agentId}`),
+    ]);
 
     await mail("status", "[[fake:bash:bazhen status]]");
     await expect
