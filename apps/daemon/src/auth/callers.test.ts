@@ -60,3 +60,38 @@ describe("identify", () => {
     expect(who(undefined, undefined)).toEqual({ kind: "human" });
   });
 });
+
+/** What reading a caller's process says when it runs under `agentId`'s pane. */
+const under = (agentId: typeof tokened) => ({ kind: "agent" as const, agentId });
+
+/** Who a caller is that presents `token` and `said` from under `of`'s pane. */
+const peer = (token: string | undefined, said: string | undefined, of: typeof tokened) =>
+  identify(credentials, { token, said }, under(of));
+
+describe("identify, with the caller's process read", () => {
+  it("takes a caller under an agent's process as that agent, though it presents nothing", () => {
+    expect(peer(undefined, undefined, tokened)).toEqual({ kind: "agent", agentId: tokened });
+  });
+
+  it("takes a caller under an agent's process with that agent's own token or id", () => {
+    expect([peer(TOKEN, undefined, tokened).kind, peer(undefined, tokened, tokened).kind]).toEqual([
+      "agent",
+      "agent",
+    ]);
+  });
+
+  it("refuses another agent's token or id from under an agent's process", () => {
+    expect([peer(TOKEN, undefined, other).kind, peer(undefined, tokened, other).kind]).toEqual([
+      "refused",
+      "refused",
+    ]);
+  });
+
+  it("refuses a caller whose process the reading refused, whatever it presents", () => {
+    const refusedReading = { kind: "refused" as const, reason: "no terminal" };
+    expect(identify(credentials, { token: TOKEN, said: undefined }, refusedReading)).toEqual({
+      kind: "refused",
+      reason: "no terminal",
+    });
+  });
+});

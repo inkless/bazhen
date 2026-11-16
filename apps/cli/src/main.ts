@@ -108,6 +108,13 @@ async function doctor(): Promise<number> {
   if (d.hookClient.fallback) {
     console.log("  warning: bazhen-hook is not built; hooks use the slower curl script");
   }
+  if (d.peerReader === null) {
+    console.log(
+      "peer reader: none\n  warning: the daemon can't read which process calls on its socket, so " +
+        "a call from inside an agent that presents nothing passes as yours; pnpm build builds " +
+        "bazhen-peer, so this install is incomplete",
+    );
+  } else if (d.peerReader !== undefined) console.log(`peer reader: ${d.peerReader.path}`);
   console.log(`config: ${d.config.path}${d.config.found ? "" : " (none; defaults)"}`);
   console.log(
     `agents.shell: ${d.agents.shell}${d.agents.loginShell ? ` (${d.agents.loginShell})` : ""}`,

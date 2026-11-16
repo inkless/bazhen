@@ -74,6 +74,12 @@ export const DoctorResponse = z.object({
   /** As in `HealthResponse`. Absent from a daemon before 1.49. */
   runtimes: z.array(RuntimeHealthReport).optional(),
   hookClient: z.object({ path: z.string(), fallback: z.boolean() }),
+  /**
+   * The installed binary that reads which process calls on the socket, so a call from inside an
+   * agent's process tree is that agent's; null when none is installed, an incomplete install.
+   * Absent from a daemon before 1.54.
+   */
+  peerReader: z.object({ path: z.string() }).nullable().optional(),
   config: z.object({ path: z.string(), found: z.boolean() }),
   /** `agents.shell`, and the login shell agents start through when it is "login". */
   agents: z.object({ shell: z.enum(["direct", "login"]), loginShell: z.string().nullable() }),

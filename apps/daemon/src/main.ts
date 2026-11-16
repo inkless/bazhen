@@ -10,7 +10,12 @@ import { CodexHarness, DAEMON_START_ARGS } from "@bazhen/harness-codex";
 import { filterEnv, healthOfEach, RoutedRuntime, UnknownRuntime } from "@bazhen/core";
 import { TmuxServer, findNotifySend, hostPtyReader, probeContainment } from "@bazhen/host-guard";
 import { PROTOCOL_VERSION } from "@bazhen/protocol";
-import { HolderRuntime, installHolder, pruneUnusedHolders } from "@bazhen/runtime-holder";
+import {
+  HolderRuntime,
+  installHolder,
+  pruneHolderBuilds,
+  pruneUnusedHolders,
+} from "@bazhen/runtime-holder";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
 import {
   launchAgent,
@@ -19,6 +24,7 @@ import {
   type LaunchDeps,
 } from "./agents/launch.ts";
 import { AgentTokens } from "./auth/callers.ts";
+import { noteAccepted, PEER_COMMAND, PEER_SOURCE, peerReading } from "./auth/peer.ts";
 import { Lifecycle } from "./agents/lifecycle.ts";
 import { renameAgent } from "./agents/names.ts";
 import { AgentQueue } from "./agents/queue.ts";
@@ -182,6 +188,28 @@ approvals.closeAbandoned();
 const hookRunner = hookClient();
 if (hookRunner === HOOK_SCRIPT) console.warn(`bazhen-hook is not built; hooks use ${HOOK_SCRIPT}`);
 const hookPath = stableHookClient(join(paths.state, "hook"), hookRunner, inputs.uid);
+// Run from a copy only this user can write, under its content's hash: a reader anything could
+// replace in place could vouch for any caller.
+const peerInstall = await installHolder({
+  source: PEER_SOURCE,
+  dir: join(paths.state, "peer"),
+  uid: inputs.uid,
+  command: PEER_COMMAND,
+});
+const peerBinary = peerInstall.installed?.binary ?? null;
+if (peerInstall.installed === null)
+  console.warn(
+    `bazhen: no bazhen-peer (${peerInstall.reason}), so the daemon can't read which process ` +
+      "calls on its socket: a call from inside an agent that presents nothing passes as yours. " +
+      "pnpm build builds it, so this install is incomplete",
+  );
+else
+  void pruneHolderBuilds(
+    peerInstall.installed.installDir,
+    inputs.uid,
+    new Set([peerInstall.installed.build]),
+  ).catch((err: unknown) => console.warn(`bazhen-peer builds weren't pruned: ${String(err)}`));
+const peer = peerBinary === null ? undefined : peerReading(peerBinary, () => store.terminalPids());
 // Installed once, at start: a holder built later reaches new terminals from the next start.
 const holderDir = join(paths.state, "holder");
 const holderInstall = await installHolder({
@@ -565,12 +593,14 @@ const socketListener = getRequestListener(
       },
       knows: (agentId) => store.agent(agentId) !== undefined,
       credentials: agentTokens,
+      ...(peer && { peer }),
       binding: new SessionBinding(store, psTable),
       activity,
       recordUsage: (agentId, usage) => store.recordUsage(agentId, usage),
       observeSend: (agentId, toolUseId, sent) => observeSend(store, agentId, toolUseId, sent),
     }),
     credentials: agentTokens,
+    ...(peer && { peer }),
     stop: () => shutdown("requested"),
     pairing,
     devices,
@@ -613,6 +643,7 @@ const socketListener = getRequestListener(
           workarounds: [...(workarounds ?? [])],
         })),
         hookClient: { path: hookRunner, fallback: hookRunner === HOOK_SCRIPT },
+        peerReader: peerBinary === null ? null : { path: peerBinary },
         holder: await holderDoctor(holderInstall, holderRuntime),
         containment: containmentDoctor(containment.decided),
         config: configFile,
@@ -664,6 +695,7 @@ const socketListener = getRequestListener(
   }).fetch,
 );
 const socketServer = createServer((req, res) => void socketListener(req, res));
+socketServer.on("connection", (connection) => noteAccepted(connection));
 socketServer.requestTimeout = 0;
 rmSync(paths.socket, { force: true });
 socketServer.listen(paths.socket, () => chmodSync(paths.socket, 0o600));

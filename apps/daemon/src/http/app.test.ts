@@ -29,8 +29,14 @@ import { TerminalLimit } from "../terminals/budget.ts";
 import { NameTaken } from "../agents/names.ts";
 import { UnknownAgent } from "../store/store.ts";
 import { Hono } from "hono";
-import { AGENT_OPEN, guardCallers, HUMANS_ONLY, type AgentCredentials } from "../auth/callers.ts";
-import { createApp, type AppDeps, type AppEnv, type TaskCommands } from "./app.ts";
+import {
+  AGENT_OPEN,
+  guardCallers,
+  HUMANS_ONLY,
+  type AgentCredentials,
+  type SocketEnv,
+} from "../auth/callers.ts";
+import { createApp, type AppDeps, type TaskCommands } from "./app.ts";
 
 const runtime = new FakeRuntime();
 
@@ -199,7 +205,7 @@ const deps: AppDeps = {
 const restarts: unknown[] = [];
 const app = createApp(deps);
 /** The commands as the socket serves them: behind its guard, which says who called. */
-const socket = new Hono<AppEnv>();
+const socket = new Hono<SocketEnv>();
 guardCallers(socket, credentials);
 socket.route("/", createApp({ ...deps, allow: null }));
 
@@ -211,7 +217,10 @@ const act = (action: string, body: object) =>
     headers: { host, "content-type": "application/json" },
     body: JSON.stringify({ idempotencyKey: "a", ...body }),
   });
-const dismissNotice = (body: unknown, on = app) =>
+/** What a test calls a route through: the TCP app, or the socket's. */
+type Served = { request(path: string, init?: RequestInit): Response | Promise<Response> };
+
+const dismissNotice = (body: unknown, on: Served = app) =>
   on.request("/v1/notices/ntc_x/dismiss", {
     method: "POST",
     headers: { host, "content-type": "application/json", "bazhen-device-id": "dev_x" },
@@ -494,14 +503,13 @@ describe("HTTP app", () => {
 });
 
 const agentId = newId("agent");
-const createTask = (on: typeof app, title: string, headers: Record<string, string> = {}) =>
+const createTask = (on: Served, title: string, headers: Record<string, string> = {}) =>
   on.request("/v1/tasks", {
     method: "POST",
     headers: { host, "content-type": "application/json", ...headers },
     body: JSON.stringify({ idempotencyKey: `t-${title}`, title, brief: "b" }),
   });
 
-/** Every command route the socket serves, once each, with its path's `:id` filled in. */
 /** Every command route the socket serves, once each. */
 function socketRoutes(): { method: string; path: string }[] {
   const routes = new Map<string, { method: string; path: string }>();
@@ -510,6 +518,9 @@ function socketRoutes(): { method: string; path: string }[] {
       routes.set(`${method} ${path}`, { method, path });
   return [...routes.values()];
 }
+/** Whether `AGENT_OPEN` lists the route, by its method and path. */
+const agentOpen = (route: { method: string; path: string }) =>
+  AGENT_OPEN.some(([method, path]) => method === route.method && path === route.path);
 /** One call on a route, its `:id` filled in, with a body unless it is a GET. */
 const call = (route: { method: string; path: string }, headers: Record<string, string>) =>
   socket.request(route.path.replaceAll(":id", "x_1"), {
@@ -536,13 +547,13 @@ describe("socket callers", () => {
     const humans = HUMANS_ONLY.map(([path]) => path);
     const lists = socketRoutes().map((r) => [
       r.path,
-      Number(AGENT_OPEN.includes(r.path)) + Number(humans.includes(r.path)),
+      Number(agentOpen(r)) + Number(humans.includes(r.path)),
     ]);
     expect(lists).toEqual(socketRoutes().map((r) => [r.path, 1]));
   });
 
   it("refuses an agent a route nobody classified, and takes the human's call", async () => {
-    const guarded = new Hono<AppEnv>();
+    const guarded = new Hono<SocketEnv>();
     guardCallers(guarded, credentials);
     guarded.post("/v1/unclassified", (c) => c.json({}));
     const as = (headers: Record<string, string>) =>
@@ -554,8 +565,20 @@ describe("socket callers", () => {
     expect(statuses).toEqual([403, 200]);
   });
 
+  it("refuses an agent a method nobody opened on a path open to agents for another", async () => {
+    const guarded = new Hono<SocketEnv>();
+    guardCallers(guarded, credentials);
+    guarded.on(["GET", "POST"], "/v1/tasks", (c) => c.json({}));
+    const asAgent = { "bazhen-agent-token": AGENT_TOKEN };
+    const statuses = [
+      (await guarded.request("/v1/tasks", { method: "POST", headers: asAgent })).status,
+      (await guarded.request("/v1/tasks", { method: "GET", headers: asAgent })).status,
+    ];
+    expect(statuses).toEqual([200, 403]);
+  });
+
   it("refuses an agent with its token every command route outside the agents' list", async () => {
-    const routes = socketRoutes().filter((r) => !AGENT_OPEN.includes(r.path));
+    const routes = socketRoutes().filter((r) => !agentOpen(r));
     const asAgent = { "bazhen-agent-token": AGENT_TOKEN };
     const replies = await Promise.all(
       routes.map(async (r) => {
@@ -580,7 +603,7 @@ describe("HTTP task routes", () => {
   });
 
   it("sends a socket caller's message as that agent's, and a browser's as the human's", async () => {
-    const send = (on: typeof app) =>
+    const send = (on: Served) =>
       on.request(`/v1/agents/${target}/messages`, {
         method: "POST",
         headers: { host, "content-type": "application/json", "bazhen-agent-id": agentId },
@@ -716,7 +739,7 @@ describe("HTTP task routes", () => {
   });
 });
 
-const postTo = (on: typeof app, path: string, body: object, headers: Record<string, string> = {}) =>
+const postTo = (on: Served, path: string, body: object, headers: Record<string, string> = {}) =>
   on.request(path, {
     method: "POST",
     headers: { host, "content-type": "application/json", ...headers },

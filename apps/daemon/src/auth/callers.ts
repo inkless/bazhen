@@ -1,12 +1,15 @@
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, lstatSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { Socket } from "node:net";
+import type { HttpBindings } from "@hono/node-server";
 import type { Context, Hono, Next } from "hono";
 import { isId, type AgentSessionId, type Caller } from "@bazhen/core";
 import type { ErrorResponse } from "@bazhen/protocol";
 import { ensurePrivateDir } from "../config/private-dir.ts";
 import type { Store } from "../store/store.ts";
 import { AGENT_ID_HEADER, AGENT_TOKEN, AGENT_TOKEN_HEADER } from "./agent-token.ts";
+import type { PeerReading } from "./peer.ts";
 
 const hashOf = (token: string): string => createHash("sha256").update(token).digest("hex");
 
@@ -209,7 +212,10 @@ export type Identity =
 export function identify(
   credentials: AgentCredentials,
   presented: { readonly token: string | undefined; readonly said: string | undefined },
+  peer: PeerReading = { kind: "outside" },
 ): Identity {
+  if (peer.kind === "refused") return refused(peer.reason);
+  if (peer.kind === "agent") return asPeer(credentials, presented, peer.agentId);
   const { token, said } = presented;
   if (token !== undefined) {
     const agentId = credentials.agentOf(token);
@@ -224,36 +230,55 @@ export function identify(
   return { kind: "agent", agentId: said };
 }
 
+/**
+ * A caller whose own process is agent `agentId`'s is that agent, whatever it presents or leaves
+ * out; a token or an id it does present must be that agent's own.
+ */
+function asPeer(
+  credentials: AgentCredentials,
+  { token, said }: { readonly token: string | undefined; readonly said: string | undefined },
+  agentId: AgentSessionId,
+): Identity {
+  if (token !== undefined && credentials.agentOf(token) !== agentId)
+    return refused(`the agent token is not agent ${agentId}'s, whose process calls`);
+  if (said !== undefined && said !== agentId)
+    return refused(`agent ${agentId}'s process names agent ${said}`);
+  return { kind: "agent", agentId };
+}
+
 const refused = (reason: string): Identity => ({ kind: "refused", reason });
 
 /** Who called, as `guardCallers` found it: an agent by its id, or the human as null. */
 export type CallerEnv = { Variables: { caller?: Caller; refusal?: string; agentOpen?: boolean } };
 
+/** The socket's own requests, which carry the connection a peer is read from. */
+export type SocketEnv = { Bindings: HttpBindings } & CallerEnv;
+
 /**
- * The socket routes an agent may use: reading state, its own task and mail verbs, launching
- * through a delegation, its own rename, and the reports a shell or tmux makes. Every other route
- * is the human's, whether or not it is listed below: a route nobody classified refuses agents.
+ * The socket routes an agent may use, each by its method: reading state, its own task and mail
+ * verbs, launching through a delegation, its own rename, and the reports a shell makes.
+ * Every other route and method is the human's, whether or not it is listed below: one nobody
+ * classified refuses agents.
  */
-export const AGENT_OPEN: readonly string[] = [
-  "/v1/health",
-  "/v1/state",
-  "/v1/roles",
-  "/v1/daemon/doctor",
-  "/v1/tasks",
-  "/v1/tasks/delegate",
-  "/v1/tasks/:id",
-  "/v1/tasks/:id/assign",
-  "/v1/tasks/:id/unassign",
-  "/v1/tasks/:id/finish",
-  "/v1/tasks/:id/notes",
-  "/v1/tasks/:id/messages",
-  "/v1/escalations",
-  "/v1/agents/:id/messages",
-  "/v1/agents/:id/rename",
-  "/v1/messages/wait",
-  "/v1/shells/:id/report",
-  "/v1/shells/:id/prompt",
-  "/v1/codex/pane-title",
+export const AGENT_OPEN: readonly (readonly [method: string, path: string])[] = [
+  ["GET", "/v1/health"],
+  ["GET", "/v1/state"],
+  ["GET", "/v1/roles"],
+  ["GET", "/v1/daemon/doctor"],
+  ["POST", "/v1/tasks"],
+  ["POST", "/v1/tasks/delegate"],
+  ["GET", "/v1/tasks/:id"],
+  ["POST", "/v1/tasks/:id/assign"],
+  ["POST", "/v1/tasks/:id/unassign"],
+  ["POST", "/v1/tasks/:id/finish"],
+  ["POST", "/v1/tasks/:id/notes"],
+  ["POST", "/v1/tasks/:id/messages"],
+  ["POST", "/v1/escalations"],
+  ["POST", "/v1/agents/:id/messages"],
+  ["POST", "/v1/agents/:id/rename"],
+  ["POST", "/v1/messages/wait"],
+  ["POST", "/v1/shells/:id/report"],
+  ["POST", "/v1/shells/:id/prompt"],
 ];
 
 /**
@@ -285,8 +310,16 @@ export const HUMANS_ONLY: readonly (readonly [path: string, what: string])[] = [
   ["/v1/shells/:id/unlink", "unlink a shell"],
 ];
 
-/** Hook routes answer in their own framing, and take their agent as `identify` says themselves. */
-export const SELF_IDENTIFIED: readonly string[] = ["/v1/hooks", "/v1/hooks/ack"];
+/**
+ * Routes the guard doesn't identify a caller for. The hooks answer in their own framing, and
+ * identify their agent themselves. tmux's pane-title hook runs under the tmux server in no
+ * terminal, and names only a pane whose title the daemon then reads itself.
+ */
+export const SELF_IDENTIFIED: readonly string[] = [
+  "/v1/hooks",
+  "/v1/hooks/ack",
+  "/v1/codex/pane-title",
+];
 
 const forbidden = (c: Context, message: string) => {
   const body: ErrorResponse = { error: "forbidden", message };
@@ -296,33 +329,41 @@ const forbidden = (c: Context, message: string) => {
 /**
  * Identifies every socket request once, before any route sees it (foundation-design §9.1): a
  * credential that doesn't hold is refused on every route, an agent is refused every route but
- * those in `AGENT_OPEN`, and each route reads who called from `caller`.
+ * those in `AGENT_OPEN`, and each route reads who called from `caller`. With `peer`, every request
+ * is also matched to the process that made it; without, a caller that presents nothing is the
+ * human.
  */
-export function guardCallers<E extends CallerEnv>(app: Hono<E>, credentials: AgentCredentials) {
-  app.use("/v1/*", async (c: Context<CallerEnv>, next: Next) => {
+export function guardCallers(
+  app: Hono<SocketEnv>,
+  credentials: AgentCredentials,
+  peer?: (connection: Socket) => Promise<PeerReading>,
+) {
+  app.use("/v1/*", async (c: Context<SocketEnv>, next: Next) => {
     if (SELF_IDENTIFIED.includes(c.req.path)) return next();
-    const who = identify(credentials, {
+    const reading = peer === undefined ? undefined : await peer(c.env.incoming.socket);
+    const presented = {
       token: c.req.header(AGENT_TOKEN_HEADER),
       said: c.req.header(AGENT_ID_HEADER),
-    });
+    };
+    const who = identify(credentials, presented, reading);
     if (who.kind === "refused") c.set("refusal", who.reason);
     else c.set("caller", who.kind === "agent" ? who.agentId : null);
     return next();
   });
   for (const [path, what] of HUMANS_ONLY) {
-    app.use(path, async (c: Context<CallerEnv>, next: Next) => {
+    app.use(path, async (c: Context<SocketEnv>, next: Next) => {
       if (c.get("caller") === null) return next();
       const refusal = c.get("refusal");
       return forbidden(c, `an agent can't ${what}${refusal === undefined ? "" : `: ${refusal}`}`);
     });
   }
-  for (const path of AGENT_OPEN) {
-    app.use(path, async (c: Context<CallerEnv>, next: Next) => {
-      c.set("agentOpen", true);
+  for (const [method, path] of AGENT_OPEN) {
+    app.use(path, async (c: Context<SocketEnv>, next: Next) => {
+      if (c.req.method === method) c.set("agentOpen", true);
       return next();
     });
   }
-  app.use("/v1/*", async (c: Context<CallerEnv>, next: Next) => {
+  app.use("/v1/*", async (c: Context<SocketEnv>, next: Next) => {
     const refusal = c.get("refusal");
     if (refusal !== undefined) return forbidden(c, refusal);
     const caller = c.get("caller");

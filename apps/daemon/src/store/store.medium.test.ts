@@ -16,13 +16,16 @@ import { InvalidTransition, newId, type ResumeEvidence } from "@bazhen/core";
 import { TerminalState, type ExternalRef } from "@bazhen/protocol";
 import {
   age,
+  claudeAgent,
+  fakeEnvironment,
   loopbackPairing,
+  PANE_PID,
   register,
   resumesClaude,
   settled,
+  testView,
   visit,
   withAgent,
-  testView,
 } from "../testing/fixtures.ts";
 import { MIGRATIONS } from "./migrations.ts";
 import { UnknownEntity } from "./projections.ts";
@@ -1345,5 +1348,28 @@ describe("agent names", () => {
     });
     expect(names(store)).toEqual(["reviewer"]);
     store.close();
+  });
+});
+
+describe("terminalPids", () => {
+  it("names each agent by its tmux pane's process, and the server running it", async () => {
+    const { store, agentId } = await claudeAgent();
+    const pids = store.terminalPids();
+    expect([pids.agents.get(PANE_PID), pids.shells.size]).toEqual([agentId, 0]);
+  });
+
+  it("names an agent on a holder by the holder's child, and the holder as what runs it", async () => {
+    const { store, agentId } = await withAgent((s) =>
+      fakeEnvironment(s, async (l) => ({
+        runtime: {
+          terminalId: l.terminalId,
+          runtime: "holder",
+          locator: { holderPid: "700", childPid: "701" },
+        },
+        externalRef: null,
+      })),
+    );
+    const pids = store.terminalPids();
+    expect([pids.agents.get(701), [...pids.runtimes]]).toEqual([agentId, [700]]);
   });
 });

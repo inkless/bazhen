@@ -1,0 +1,13 @@
+[package]
+name = "bazhen-peer"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+bazhen-holder = { workspace = true }
+rustix = { workspace = true }
+
+[lints]
+workspace = true

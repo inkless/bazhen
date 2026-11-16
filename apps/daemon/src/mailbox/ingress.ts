@@ -1,4 +1,6 @@
-import { Hono } from "hono";
+import type { Socket } from "node:net";
+import type { HttpBindings } from "@hono/node-server";
+import { Hono, type Context } from "hono";
 import {
   HookAck,
   HookRequest,
@@ -10,6 +12,7 @@ import {
 import { hookOrigin, readHook, type SentMessage } from "@bazhen/harness-claude-code";
 import { AGENT_TOKEN_HEADER } from "../auth/agent-token.ts";
 import { identify, type AgentCredentials } from "../auth/callers.ts";
+import type { PeerReading } from "../auth/peer.ts";
 import type { ActivityTracker } from "./activity.ts";
 import type { Approvals } from "./approvals.ts";
 import type { SessionBinding } from "./binding.ts";
@@ -27,6 +30,8 @@ export interface IngressDeps {
   readonly knows: (agentId: string) => boolean;
   /** A hook names its agent; its agent token must be that agent's (foundation-design §9.1). */
   readonly credentials: AgentCredentials;
+  /** Whose process made the hook's call, which must be that agent's too; absent when unread. */
+  readonly peer?: (connection: Socket) => Promise<PeerReading>;
   /** Which hooks are the agent's own session's, the only ones that take or confirm mail. */
   readonly binding: SessionBinding;
   /** What the agent's hooks say it is doing (foundation-design §4.6). */
@@ -42,17 +47,20 @@ export interface IngressDeps {
  * authentication (foundation-design §5.6, §9.1). Every failure answers QUIET, so the hook client
  * exits 0 and the harness carries on as it would without Bazhen.
  */
-export function hookApp(deps: IngressDeps): Hono {
-  const app = new Hono();
+export function hookApp(deps: IngressDeps): Hono<{ Bindings: HttpBindings }> {
+  const app = new Hono<{ Bindings: HttpBindings }>();
+  const peerOf = async (c: Context<{ Bindings: HttpBindings }>) =>
+    deps.peer === undefined ? undefined : deps.peer(c.env.incoming.socket);
 
   app.post("/v1/hooks", async (c) => {
     const hook = HookRequest.safeParse(await c.req.json().catch(() => undefined));
     if (!hook.success || !isCompatible(hook.data.protocolVersion)) return framed(QUIET);
     const { event, payload, ppid } = hook.data;
-    const who = identify(deps.credentials, {
-      token: c.req.header(AGENT_TOKEN_HEADER),
-      said: hook.data.agentId,
-    });
+    const who = identify(
+      deps.credentials,
+      { token: c.req.header(AGENT_TOKEN_HEADER), said: hook.data.agentId },
+      await peerOf(c),
+    );
     if (who.kind !== "agent" || !deps.knows(who.agentId)) return framed(QUIET);
     const { agentId } = who;
     const read = readHook(event, payload);
@@ -133,10 +141,11 @@ export function hookApp(deps: IngressDeps): Hono {
   app.post("/v1/hooks/ack", async (c) => {
     const ack = HookAck.safeParse(await c.req.json().catch(() => undefined));
     if (!ack.success) return c.json({});
-    const who = identify(deps.credentials, {
-      token: c.req.header(AGENT_TOKEN_HEADER),
-      said: ack.data.agentId,
-    });
+    const who = identify(
+      deps.credentials,
+      { token: c.req.header(AGENT_TOKEN_HEADER), said: ack.data.agentId },
+      await peerOf(c),
+    );
     if (who.kind === "agent") deps.mailbox.ack(who.agentId, ack.data.offered);
     return c.json({});
   });

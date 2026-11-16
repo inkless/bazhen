@@ -18,7 +18,7 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { HOLDER_BUILD, HOLDER_COMMAND, holderBuildOf, installedHolder } from "@bazhen/host-guard";
+import { HOLDER_BUILD, HOLDER_COMMAND, holderBuildOf } from "@bazhen/host-guard";
 
 const TEMP = /^\.tmp-[0-9a-f]{8}$/;
 const BAD = /^\.bad-[0-9a-f]{16}-[0-9a-f]{8}$/;
@@ -53,6 +53,8 @@ export type HolderInstall =
 export interface InstallOptions {
   /** The built binary. */
   readonly source: string;
+  /** What the installed binary is named in its build's directory; the holder's by default. */
+  readonly command?: string;
   /** Where builds are installed, each in a directory of its own. */
   readonly dir: string;
   readonly uid: number;
@@ -100,12 +102,12 @@ async function dirRefusal(dir: string, uid: number): Promise<string | undefined>
 }
 
 /** Whether `path` holds `build` as installed: this user's, writable by no one else, its hash. */
-async function holds(path: string, build: string, uid: number): Promise<boolean> {
+async function holds(path: string, build: string, uid: number, command: string): Promise<boolean> {
   const dir = await lstatOrNull(path);
   if (dir === null || !dir.isDirectory() || dir.uid !== uid || writableByOthers(dir.mode)) {
     return false;
   }
-  const binary = join(path, HOLDER_COMMAND);
+  const binary = join(path, command);
   const file = await lstatOrNull(binary);
   if (file === null || !file.isFile() || file.uid !== uid || writableByOthers(file.mode)) {
     return false;
@@ -130,29 +132,29 @@ async function synced(path: string): Promise<void> {
  * kills a signed binary changed under it.
  */
 export async function installHolder(
-  { source, dir, uid }: InstallOptions,
+  { source, dir, uid, command = HOLDER_COMMAND }: InstallOptions,
   seams: InstallSeams = {},
 ): Promise<HolderInstall> {
   const built = await lstatOrNull(source);
   if (built === null) return { installed: null, reason: `${source} isn't built; run pnpm build` };
   const refusal = await dirRefusal(dir, uid);
   if (refusal !== undefined) {
-    return { installed: null, reason: `refusing ${dir} for holder builds: ${refusal}` };
+    return { installed: null, reason: `refusing ${dir} for ${command} builds: ${refusal}` };
   }
   const temp = join(dir, `.tmp-${tag()}`);
   try {
     await mkdir(temp, { mode: 0o700 });
-    const copy = join(temp, HOLDER_COMMAND);
+    const copy = join(temp, command);
     await copyFile(source, copy);
     await chmod(copy, 0o500);
     await synced(copy);
     await seams.afterCopy?.();
     const build = await buildOf(copy);
     const target = join(dir, build);
-    const installed = { binary: installedHolder(dir, build), build, installDir: dir };
+    const installed = { binary: join(dir, build, command), build, installDir: dir };
     // Read once, before the check: an install that renames its copy in meanwhile is whole.
     if ((await lstatOrNull(target)) !== null) {
-      if (await holds(target, build, uid)) return { installed };
+      if (await holds(target, build, uid, command)) return { installed };
       await rename(target, join(dir, `.bad-${build}-${tag()}`)).catch((error: unknown) => {
         if (codeOf(error) !== "ENOENT") throw error;
       });
@@ -163,13 +165,13 @@ export async function installHolder(
     } catch (error) {
       // Another install of the same build got there first.
       const lost = codeOf(error) === "ENOTEMPTY" || codeOf(error) === "EEXIST";
-      if (!(lost && (await holds(target, build, uid)))) throw error;
+      if (!(lost && (await holds(target, build, uid, command)))) throw error;
     }
     // Best effort: the rename stands either way, and some filesystems can't sync a directory.
     await synced(dir).catch(() => {});
     return { installed };
   } catch (error) {
-    return { installed: null, reason: `the holder couldn't be installed: ${String(error)}` };
+    return { installed: null, reason: `${command} couldn't be installed: ${String(error)}` };
   } finally {
     await rm(temp, { recursive: true, force: true });
   }

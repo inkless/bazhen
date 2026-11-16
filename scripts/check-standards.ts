@@ -432,8 +432,9 @@ const UNSAFE_MODULES: Record<string, string> = {
   "crates/bazhen-holder/src/macos.rs":
     "libc's sysctl(KERN_PROC_PID), the one call that says when a macOS process started, a zombie " +
     "included, which ps reads too, and sysctl(KERN_PROC_ALL), which lists every process; and " +
-    "getpeereid, which names a socket peer's user; rustix covers neither. rustix's kevent, which " +
-    "watches a process for its exit before a close signals it, is unsafe",
+    "getpeereid and getsockopt's LOCAL_PEERPID, which name a socket peer's user and process; " +
+    "rustix covers neither. rustix's kevent, which watches a process for its exit before a close " +
+    "signals it, is unsafe",
 };
 
 /** The index just past the `]` that closes the `[` at `open`, or the end of `code`. */

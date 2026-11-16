@@ -1,7 +1,9 @@
 import type { HttpBindings } from "@hono/node-server";
 import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
+import type { Socket } from "node:net";
 import { guardCallers, type AgentCredentials, type CallerEnv } from "../auth/callers.ts";
+import type { PeerReading } from "../auth/peer.ts";
 import type { DeviceAuth } from "../auth/devices.ts";
 import type { AppEnv } from "../http/app.ts";
 import type { PairingCodes } from "../auth/pairing.ts";
@@ -24,9 +26,11 @@ import {
 export interface SocketParts {
   /** The `/v1` command routes, unguarded: the socket's permission is the authentication. */
   readonly commands: Hono<AppEnv>;
-  readonly hooks: Hono;
+  readonly hooks: Hono<{ Bindings: HttpBindings }>;
   /** Agents' tokens, which tell an agent's call from the human's. */
   readonly credentials: AgentCredentials;
+  /** Whose process is at the other end of a connection; absent when it can't be read. */
+  readonly peer?: (connection: Socket) => Promise<PeerReading>;
   /** Stops the daemon; called once the reply to `stop` has been written. */
   readonly stop: () => void;
   readonly doctor: () => Promise<DoctorResponse>;
@@ -71,7 +75,7 @@ const forbidden = (c: Context, message: string) => {
 export function socketApp(parts: SocketParts): Hono<{ Bindings: HttpBindings } & CallerEnv> {
   const app = new Hono<{ Bindings: HttpBindings } & CallerEnv>();
 
-  guardCallers(app, parts.credentials);
+  guardCallers(app, parts.credentials, parts.peer);
 
   // The code is in this reply only, to the person who ran `bazhen pair`; the daemon never logs it.
   app.post("/v1/pairing/codes", (c) => {

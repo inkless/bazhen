@@ -4,7 +4,8 @@
               included, and that lists every process; getpeereid the one that names a socket \
               peer's user; rustix covers neither, and only unsafe can call them; and rustix's \
               kevent, which watches a process for its exit, is unsafe; and proc_pidinfo, the one call
-              that names another process's parent"
+              that names another process's parent; and getsockopt's LOCAL_PEERPID, the one call
+              that names a socket peer's process"
 )]
 
 //! What only macOS's own calls can tell the holder.
@@ -241,4 +242,26 @@ pub(crate) fn peer_uid(socket: BorrowedFd<'_>) -> io::Result<u32> {
     } else {
         Err(io::Error::last_os_error())
     }
+}
+
+/// The process at the other end of a Unix socket, as it was when it connected.
+pub(crate) fn peer_pid(socket: BorrowedFd<'_>) -> io::Result<Pid> {
+    let mut pid: libc::pid_t = 0;
+    let mut len =
+        libc::socklen_t::try_from(std::mem::size_of::<libc::pid_t>()).map_err(io::Error::other)?;
+    // SAFETY: `socket` is an open fd for the whole call, and `pid` is writable for `len` bytes,
+    // which the call writes no more than.
+    let status = unsafe {
+        libc::getsockopt(
+            socket.as_raw_fd(),
+            libc::SOL_LOCAL,
+            libc::LOCAL_PEERPID,
+            (&raw mut pid).cast(),
+            &raw mut len,
+        )
+    };
+    if status != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Pid::from_raw(pid).ok_or_else(|| io::Error::other("the socket's peer has no process"))
 }
