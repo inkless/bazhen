@@ -219,6 +219,24 @@ describe("a Codex agent", () => {
     expect(await closeReasonOf(id)).toBe("answered");
   });
 
+  it("refuses the human's verbs to a command the agent runs, which Codex runs out of its terminal", async () => {
+    // Pins the Codex the suites install: one whose app-server Bazhen no longer knows would let the
+    // command list the devices as the human. The app-server's PATH lacks the test's CLI, which is
+    // in the daemon's home, above the work directory; the prompt must fit one row of the TUI.
+    const command = "cd ..; BAZHEN_HOME=$PWD cli/bazhen devices; echo exit=$?";
+    await daemon.prompt(asker, `[[fake:shell:${command}]]`);
+    const id = await openItemFor("bazhen devices");
+    const answered = await daemon.request(`/v1/attention/${id}/answer`, {
+      method: "POST",
+      body: { idempotencyKey: "allow-devices", decision: "allow" },
+    });
+    expect(answered.status).toBe(200);
+    await expect
+      .poll(() => toolOutputs().filter((o) => o.includes("exit=")), { timeout: 30_000 })
+      .toEqual([expect.stringContaining("a Codex tool call names no agent")]);
+    expect(toolOutputs().filter((o) => o.includes("exit=0"))).toEqual([]);
+  });
+
   it("closes the item when the request is answered in the TUI instead", async () => {
     await daemon.prompt(asker, "[[fake:shell:touch approved-in-tui]]");
     const id = await openItemFor("approved-in-tui");

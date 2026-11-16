@@ -438,7 +438,9 @@ const UNSAFE_MODULES: Record<string, string> = {
     "value owns; rustix covers none of them",
   "crates/bazhen-holder/src/macos.rs":
     "libc's sysctl(KERN_PROC_PID), the one call that says when a macOS process started, a zombie " +
-    "included, which ps reads too, and sysctl(KERN_PROC_ALL), which lists every process; and " +
+    "included, which ps reads too, sysctl(KERN_PROC_ALL), which lists every process, and " +
+    "sysctl(KERN_PROCARGS2), which names a process's arguments; proc_pidinfo, which names " +
+    "another process's parent and user; and " +
     "getpeereid and getsockopt's LOCAL_PEERPID, which name a socket peer's user and process; " +
     "rustix covers neither. rustix's kevent, which watches a process for its exit before a close " +
     "signals it, is unsafe",
@@ -708,8 +710,14 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/rss.rs::resident_pages": "proc_stat",
   "crates/bazhen-holder/src/start_time.rs::stat_field": "proc_stat",
   "crates/bazhen-holder/src/session.rs::member_state": "proc_stat",
+  "crates/bazhen-holder/src/process.rs::status_uid": "proc_args",
+  "crates/bazhen-holder/src/process.rs::cmdline_args": "proc_args",
+  "crates/bazhen-holder/src/process.rs::procargs2_args": "proc_args",
+  "crates/bazhen-holder/src/process.rs::procargs2_env": "proc_args",
 };
 const NOT_DECODERS: Record<string, string> = {
+  "crates/bazhen-holder/src/process.rs::procargs2_split":
+    "reached only through procargs2_args and procargs2_env, which proc_args fuzzes",
   "crates/bazhen-holder/src/holder.rs::Holder::retire_later":
     "starts ending a child the holder spawned; reads no bytes",
   "crates/bazhen-holder/src/holder.rs::Holder::retire":
