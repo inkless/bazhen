@@ -27,7 +27,7 @@ a review asks for something no check covers.
 | Rust components are certified black-box, by the TypeScript suites                                                                       | review                                                |
 | Crates split by dependency weight and I/O boundary, not one per module                                                                  | review                                                |
 | No crate builds an async runtime, HTTP stack or SQLite unless `HEAVY_ALLOWED` lists it                                                  | `pnpm check` (`scripts/check-standards.ts`)           |
-| Rust signals only from the chokepoint for its role; a glob or renamed import of `libc` or nix's `signal` counts as a raw call           | `pnpm check` (`scripts/signal-paths.ts`)              |
+| Rust signals only from the chokepoint for its role; an import that hides a `kill` counts as a raw call                                  | `pnpm check` (`scripts/signal-paths.ts`)              |
 | No dependency that signals any pid through a method (`sysinfo`, `psutil`, `heim`)                                                       | `pnpm deny`                                           |
 | A command line is parsed by clap's builder API: long flags only, nothing inferred                                                       | review; the api suites                                |
 | API message types are hand-written serde, held to the fixtures `packages/protocol` writes                                               | review                                                |
@@ -288,11 +288,19 @@ the chokepoint for its role, which each failure of `pnpm check` names:
   ±1 or any pid ≤ 1, never itself, its parent, its ancestors or its own group, and a holder only
   once its command and start time match.
 
-`Child::kill`, std's or tokio's, on a child the code started and hasn't reaped needs no
-chokepoint: until it is reaped, its pid can't be reused. A glob or renamed import of `libc` or of
-nix's `signal` module counts as a raw call, since it hides the `kill` the scan reads for. Crates
-whose methods signal any pid (`Process::kill` in `sysinfo`, `psutil` and `heim`) are banned in
-`deny.toml`: a method call is text the scan can't tell from a child's own `kill`.
+The host-guard crate's file joins `PRODUCT_CHOKEPOINTS` in `scripts/check-standards.ts` too, which
+`pnpm check` requires of every Rust chokepoint outside the tests' crate: its product code is
+exempt, and its own tests send through `bazhen-test-signal` like any others. A caller names it as
+`bazhen_host_guard`, which `RUST_SENDERS` in `scripts/signal-paths.ts` reads, so falsify changes a
+caller only in a sandbox.
+
+`Child::kill`, std's or tokio's, needs no chokepoint on a child the code started, while that child
+is unreaped and is reaped only through that `Child`: until then its pid can't be reused. A `use`
+that names `libc` or a `signal` module and imports `kill`, a glob or a rename, at any depth of its
+groups, counts as a raw call, since it hides the `kill` the scan reads for. So does any
+`pub use` of either, which would let another file import one through a path of ours. The crates
+known so far whose methods signal any pid, or hold one to signal (`sysinfo`, `psutil`, `heim`,
+`kill_tree`, `pidfd`), are banned in `deny.toml`: a method call is text the scan can't tell from a child's own `kill`.
 
 ## Command-line programs
 
@@ -306,10 +314,12 @@ rules match its command line. So:
   be made to fit. It is smaller, but every usage line and per-verb check is then written by hand.
   Either costs about a tenth of a millisecond a call.
 - **Every spelling is exact.** Long flags only: no `short`, `alias` or `visible_alias`, and none of
-  the `infer_*` settings, which accept a prefix (`--tit` for `--title`). A permission rule that
-  matches `--brief-file` must see `--brief-file`. clap's defaults already refuse a prefix and a
-  positional that starts with `-`, and accept `--opt=value`, options among positionals, and a
-  global option after the verb.
+  the `infer_*` settings, which accept a prefix (`--tit` for `--title`). clap adds `-h`, `--help`,
+  `-V` and `--version` unless told not to (`disable_help_flag`, `disable_version_flag`), so a CLI
+  turns off the short forms always, and the long ones if the CLI it replaces didn't accept them.
+  A permission rule that matches `--brief-file` must see `--brief-file`. clap's defaults already
+  refuse a prefix and a positional that starts with `-`, and accept `--opt=value`, options among
+  positionals, and a global option after the verb.
 - **Exit codes are one enum,** each a contract a caller branches on: 0 done, 1 failed, 2 usage,
   3 the daemon isn't running.
 - **stdout is the answer and stderr the diagnostics,** each through an explicit writer. Output is

@@ -1461,10 +1461,15 @@ export const DENY_CONFIG = [
   'wildcards = "deny"',
   "allow-wildcard-paths = true",
   "deny = [ " +
-    ["sysinfo", "psutil", "heim"]
+    [
+      ["sysinfo", "Process::kill signals any pid"],
+      ["psutil", "Process::kill signals any pid"],
+      ["heim", "Process::kill signals any pid"],
+      ["kill_tree", "kill_tree signals any pid's tree"],
+      ["pidfd", "PidFd::from_pid holds any pid to signal"],
+    ]
       .map(
-        (name) =>
-          `{ crate = "${name}", reason = "Process::kill signals any pid; signal through a chokepoint" }, `,
+        ([name, why]) => `{ crate = "${name}", reason = "${why}; signal through a chokepoint" }, `,
       )
       .join("") +
     "]",
@@ -1792,6 +1797,10 @@ export const HEAVY_CRATES = [
   "rusqlite",
   "libsqlite3-sys",
   "sqlx",
+  "diesel",
+  "ureq",
+  "h2",
+  "tower",
 ];
 
 // The members that may reach a crate in HEAVY_CRATES, each with why. A member that depends on
@@ -1816,7 +1825,7 @@ export function lockGraph(lock: string): Map<string, string[]> {
  * Where a member reaches a crate in HEAVY_CRATES through what it builds, and isn't listed in
  * `allowed`, each with the chain that gets there, and an entry of `allowed` that is stale. A
  * member's own edges come from `cargo metadata`, so dev-dependencies, which only its tests build,
- * don't count; past the first crate that isn't ours, from Cargo.lock.
+ * don't count, and anything else does; past the first crate that isn't ours, from Cargo.lock.
  */
 export function heavyDependencyFailures(
   meta: CargoMetadata,
@@ -1828,7 +1837,7 @@ export function heavyDependencyFailures(
   const members = new Map(
     meta.packages.map((p) => [
       p.name,
-      p.dependencies.filter((d) => d.kind === null).map((d) => d.name),
+      p.dependencies.filter((d) => d.kind !== "dev").map((d) => d.name),
     ]),
   );
   const edges = (name: string) => members.get(name) ?? third.get(name) ?? [];
@@ -2094,7 +2103,9 @@ export function isCargoMetadata(value: unknown): value is CargoMetadata {
             typeof t.test === "boolean",
         ) &&
         Array.isArray(p.dependencies) &&
-        p.dependencies.every((d) => isRecord(d) && str(d.name) && str(d.req)),
+        p.dependencies.every(
+          (d) => isRecord(d) && str(d.name) && str(d.req) && (d.kind === null || str(d.kind)),
+        ),
     )
   );
 }
@@ -2252,6 +2263,33 @@ const PRODUCT_CHOKEPOINTS = new Set([
 const TEST_SIGNAL_MANIFEST = "crates/bazhen-test-signal/Cargo.toml";
 
 /**
+ * A Rust chokepoint outside the tests' own crate that PRODUCT_CHOKEPOINTS doesn't list, and an
+ * entry there that is no chokepoint. Unlisted, a chokepoint is exempt whole, so a test in its
+ * `#[cfg(test)]` module could send a raw signal without bazhen_test_signal's checks.
+ */
+export function productChokepointFailures(
+  chokepoints: readonly string[],
+  product: ReadonlySet<string>,
+): string[] {
+  const unlisted = chokepoints.filter(
+    (f) => f.endsWith(".rs") && !f.startsWith("crates/bazhen-test-signal/") && !product.has(f),
+  );
+  return [
+    ...unlisted.map(
+      (f) =>
+        `scripts/check-standards.ts: ${f} is a Rust chokepoint; list it in PRODUCT_CHOKEPOINTS, ` +
+        "so its tests send through bazhen_test_signal like any others.",
+    ),
+    ...[...product]
+      .filter((f) => !chokepoints.includes(f))
+      .map(
+        (f) =>
+          `scripts/check-standards.ts: PRODUCT_CHOKEPOINTS lists ${f}, which is no chokepoint.`,
+      ),
+  ];
+}
+
+/**
  * Where a member's manifest takes bazhen-test-signal for anything but its tests. It sends
  * signals to whatever a test names, with checks fit for a test, so no product may link it.
  */
@@ -2310,6 +2348,7 @@ const readRepoFile = (p: string) => readFileSync(join(root, p), "utf8");
 
 function checkSignalChokepoints(): void {
   failures.push(...signalChokepointFailures(repoFiles(), readRepoFile));
+  failures.push(...productChokepointFailures(Object.keys(SIGNAL_CHOKEPOINTS), PRODUCT_CHOKEPOINTS));
   failures.push(...unmarkedSignallingTests(repoFiles(), readRepoFile));
 }
 

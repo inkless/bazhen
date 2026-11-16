@@ -29,8 +29,9 @@ boundary a check pins by path. Anything else is a module in an existing crate.
    ```
 
 3. **Record it in `Cargo.lock`:** `cargo update --workspace` adds the new member, and any new
-   dependency, without moving another version. The gates build with `--locked`, so until then
-   each fails with "cannot update the lock file".
+   dependency, without moving another version. It is called directly because no pnpm script
+   writes the lockfile: the gates build with `--locked`, so until then each fails with "cannot
+   update the lock file".
 4. **Take dependencies from `[workspace.dependencies]`.** A new third-party one goes there, pinned
    exactly (`=1.2.3`) with default features off (§ Dependencies). Run `pnpm deny`: a new licence
    or a second version of a crate is fixed now, not later. The new crate itself joins that table,
@@ -44,8 +45,9 @@ boundary a check pins by path. Anything else is a module in an existing crate.
    `NOT_DECODERS` with why. Copy `crates/bazhen-hook/fuzz/`.
 7. **List what the checks pin by path:** an FFI module in `UNSAFE_MODULES` (§ Unsafe); a crate that
    may build an async runtime, an HTTP stack or SQLite in `HEAVY_ALLOWED`, with why; a signal
-   chokepoint in `SIGNAL_CHOKEPOINTS` in `scripts/signal-paths.ts` (§ Signals). Each entry says why
-   in one line.
+   chokepoint in `SIGNAL_CHOKEPOINTS` in `scripts/signal-paths.ts`, in `PRODUCT_CHOKEPOINTS` in
+   `scripts/check-standards.ts`, and its crate's name in `RUST_SENDERS` (§ Signals). Each entry
+   says why in one line.
 8. **Write its first test before its code** (bz-write-rust-test).
 9. **Run the gates:** `pnpm check`, `pnpm lint:rust`, `pnpm test:rust`, `pnpm deny` and
    `pnpm format:check`. Fix each failure in the code.

@@ -23,6 +23,8 @@ import {
   harnessFailures,
   macroFailures,
   metadataFailures,
+  productChokepointFailures,
+  isCargoMetadata,
   heavyDependencyFailures,
   lockGraph,
   type CargoMetadata,
@@ -479,6 +481,11 @@ describe("metadataFailures", () => {
 const local = (name: string) => ({ name, req: "*", kind: null, path: `${ROOT}crates/${name}` });
 const dep = (name: string, kind: string | null = null) => ({ name, req: "=1.0.0", kind });
 
+const report = (dependency: object) => ({
+  workspace_root: ROOT,
+  packages: [{ name: "x", manifest_path: "m", targets: [], dependencies: [dependency] }],
+});
+
 describe("heavyDependencyFailures", () => {
   const lock = [
     "version = 4",
@@ -549,6 +556,15 @@ describe("heavyDependencyFailures", () => {
       "tool: builds tool → daemon → axum",
     ]);
     expect(viaRustChecks([])).toEqual(["Cargo.lock is missing; the gates build with --locked."]);
+  });
+
+  it("counts every dependency but a dev one, and reads no report with a dependency of no kind", () => {
+    const built = meta(pkg("x", [], [dep("tokio", "build"), dep("axum", "normal")]));
+    expect(
+      heavyDependencyFailures(built, lock, {}, ["tokio", "axum"]).map((f) => f.split(". ")[0]),
+    ).toEqual(["x: builds x → tokio", "x: builds x → axum"]);
+    expect(isCargoMetadata(report({ name: "tokio", req: "=1.0.0", kind: null }))).toBe(true);
+    expect(isCargoMetadata(report({ name: "tokio", req: "=1.0.0" }))).toBe(false);
   });
 
   it("names a listed member that reaches no heavy crate, or isn't a member", () => {
@@ -1580,6 +1596,41 @@ describe("the signal chokepoints", () => {
       expect.stringMatching(
         /^crates\/bazhen-holder-engine\/src\/a\.rs:1: .*signal::kill.*bazhen-host-guard/,
       ),
+    ]);
+  });
+
+  it("finds a signal module re-exported through a path of ours, and the import from it", () => {
+    expect(
+      failures({
+        "crates/bazhen-x/src/a.rs": "pub use nix::sys::signal;",
+        "crates/bazhen-x/src/b.rs": "use crate::a::signal::*;",
+      }),
+    ).toEqual([
+      expect.stringMatching(
+        /^crates\/bazhen-x\/src\/a\.rs:1: .*pub use nix::sys::signal.*host-guard/,
+      ),
+      expect.stringMatching(
+        /^crates\/bazhen-x\/src\/b\.rs:1: .*use crate::a::signal::\*.*host-guard/,
+      ),
+    ]);
+  });
+
+  it("holds every Rust chokepoint but the tests' own crate to PRODUCT_CHOKEPOINTS", () => {
+    const listed = new Set(["crates/bazhen-holder/src/guard.rs", "crates/gone/src/x.rs"]);
+    expect(
+      productChokepointFailures(
+        [
+          "packages/host-guard/src/signal.ts",
+          "crates/bazhen-holder/src/guard.rs",
+          "crates/bazhen-host-guard/src/signal.rs",
+          "crates/bazhen-test-signal/src/lib.rs",
+        ],
+        listed,
+      ),
+    ).toEqual([
+      "scripts/check-standards.ts: crates/bazhen-host-guard/src/signal.rs is a Rust chokepoint; " +
+        "list it in PRODUCT_CHOKEPOINTS, so its tests send through bazhen_test_signal like any others.",
+      "scripts/check-standards.ts: PRODUCT_CHOKEPOINTS lists crates/gone/src/x.rs, which is no chokepoint.",
     ]);
   });
 

@@ -47,13 +47,27 @@ export function chokepointFor(file: string, inTest = false): string {
 
 // Named, not only called, so an import or an alias counts too. `test_kill_process`, which sends
 // no signal, doesn't match: `\b` doesn't fall inside an identifier.
-// A `use` of nix's or libc's `kill` inside braces counts as one, and so do the raw syscalls.
+// A `use` of nix's or libc's `kill` inside braces counts as one, and so do the raw syscalls and a
+// renamed `extern crate` of libc or nix.
 const RUST_RAW =
-  /\b(?:kill_process|kill_process_group|kill_current_process_group|pidfd_send_signal|killpg|sigqueue|SYS_kill|SYS_tkill|SYS_tgkill|SYS_pidfd_send_signal|SYS_rt_sigqueueinfo)\b|\b(?:libc|signal)\s*::\s*kill\b|\buse\s+(?:nix\s*::\s*sys\s*::\s*signal|libc)\s*::\s*\{[^}]*\bkill\b[^}]*\}/g;
-// A glob import of libc or nix's signal module brings in a bare `kill`, and a renamed one turns
-// `libc::kill` into `c::kill`; neither then names what RUST_RAW reads, so each counts as a call.
-const RUST_HIDDEN =
-  /\buse\s+(?:::\s*)?(?:libc|nix\s*::\s*sys\s*::\s*signal)\s*::\s*(?:\*|\{[^}]*\*[^}]*\})|\buse\s+(?:::\s*)?(?:libc|nix(?:\s*::\s*sys(?:\s*::\s*signal)?)?)(?:\s+as\b|\s*::\s*\{[^}]*\b(?:self|sys|signal)\s+as\b[^}]*\})|\bextern\s+crate\s+(?:libc|nix)\s+as\b/g;
+  /\b(?:kill_process|kill_process_group|kill_current_process_group|pidfd_send_signal|killpg|tgkill|tkill|sigqueue|SYS_kill|SYS_tkill|SYS_tgkill|SYS_pidfd_send_signal|SYS_rt_sigqueueinfo)\b|\b(?:libc|signal)\s*::\s*(?:r#)?kill\b|\buse\s+(?:nix\s*::\s*sys\s*::\s*signal|libc)\s*::\s*\{[^}]*\bkill\b[^}]*\}|\bextern\s+crate\s+(?:libc|nix)\s+as\b/g;
+// A `use` that names libc or a `signal` module, at any depth of its groups, and imports `kill`, a
+// glob or a rename, brings a kill into scope under a name RUST_RAW doesn't read; a `pub use` of
+// either lets another file do the same through a path of ours. Each counts as a call, read as one
+// statement so no nesting of groups hides it.
+const RUST_USE = /\b(?:(pub)\b(?:\s*\([^)]*\))?\s*)?use\b[^;]*/g;
+
+function signalImports(code: string) {
+  return [...code.matchAll(RUST_USE)].flatMap((m) => {
+    const words = (m[0].match(/(?:r#)?[A-Za-z_]\w*|\*/g) ?? []).map((w) => w.replace(/^r#/, ""));
+    const names = words.includes("libc") || words.includes("signal");
+    const brings = m[1] !== undefined || words.some((w) => w === "kill" || w === "*" || w === "as");
+    if (!names || !brings) return [];
+    const call = m[0].replaceAll(/\s+/g, " ").trim();
+    return [{ index: m.index, end: m.index + m[0].length, line: lineAt(code, m.index), call }];
+  });
+}
+
 const TS_KILL = /\bprocess\s*\??\.\s*kill\b/g;
 const TS_KILL_COMPUTED = /\bprocess\s*\??\.?\s*\[\s*["'`]kill["'`]\s*\]/g;
 const TS_KILL_BOUND = /\{[^}]*\bkill\b[^}]*\}\s*=\s*(?:globalThis\s*\.\s*)?process\b/g;
@@ -493,11 +507,11 @@ export function rawSignalCalls(file: string, text: string): { line: number; call
       cooked: raw[n],
     }));
     const spans = allowedKills(file, code);
-    return [
-      ...found(code, RUST_RAW),
-      ...found(code, RUST_HIDDEN),
-      ...kills(literals, code).filter(outside(spans)),
-    ]
+    const direct = found(code, RUST_RAW);
+    const imports = signalImports(code).filter(
+      (u) => !direct.some((d) => d.index >= u.index && d.index < u.end),
+    );
+    return [...direct, ...imports, ...kills(literals, code).filter(outside(spans))]
       .toSorted((a, b) => a.index - b.index)
       .map(({ line, call }) => ({ line, call }));
   }
@@ -562,7 +576,7 @@ const TS_SENDERS = new RegExp(
 // module, not the bare names: the engine has an `Ending` of its own, which ends a line of output
 // and signals nothing.
 const RUST_SENDERS =
-  /\b(?:bazhen_test_signal|ChildProcess|close_step|pass_among|signal_group|signal_member|guard\s*::)|\bSession\s*::\s*led_by\b|\bEnding\s*::\s*start\b|\bsession\s*::\s*(?:\{[^}]*)?\b(?:Session|Ending)\b|\b(?:child|holder|old)\s*\.\s*(?:close|signal|respawn|retire)\s*\(/;
+  /\b(?:bazhen_test_signal|bazhen_host_guard|ChildProcess|close_step|pass_among|signal_group|signal_member|guard\s*::)|\bSession\s*::\s*led_by\b|\bEnding\s*::\s*start\b|\bsession\s*::\s*(?:\{[^}]*)?\b(?:Session|Ending)\b|\b(?:child|holder|old)\s*\.\s*(?:close|signal|respawn|retire)\s*\(/;
 
 /**
  * Whether a file sends signals, directly or through a chokepoint. Reverting or mutating one can

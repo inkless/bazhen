@@ -225,8 +225,9 @@ A test owns everything it touches and leaves nothing behind.
   user owns. Raw signal calls (`process.kill` however it is reached: directly, by a default or
   namespace import, through a constant bound to `process`, or computed; Rust's `kill_process`,
   `kill_process_group`, `kill_current_process_group`, `pidfd_send_signal`, `libc::kill`,
-  `libc::killpg`, nix's `kill` and `killpg` by path or in a `use` group, a glob or renamed import
-  of `libc` or nix's `signal` module, `sigqueue` and the kill syscalls), and a process started to
+  `libc::killpg`, `tgkill` and `tkill`, nix's `kill` and `killpg` by path, a `use` naming `libc`
+  or a `signal` module that imports `kill`, a glob or a rename at any depth of its groups, any
+  `pub use` of either, `sigqueue` and the kill syscalls), and a process started to
   send one (`kill`, `pkill`, `killall`, `killall5` or `skill` run directly, through a launcher
   such as `env`, `sudo` or `timeout`, or by a shell, `xargs kill`, `systemctl kill`, `loginctl
   terminate-user` and the like, and `fuser -k`), appear only in the chokepoints
@@ -261,9 +262,11 @@ A test owns everything it touches and leaves nothing behind.
   appends; `eval`, whose arguments join into a line the check never reads whole; process
   substitution, `<(…)`; an apostrophe in a heredoc body, which reads as a quote; a literal's
   `\x` and `\u` escapes; in TypeScript, `{ default as p }`, `Reflect.get`, `require` and dynamic
-  imports of `process`; other unusual Rust `use` forms, and a method that signals by pid, which
-  `deny.toml` keeps out by banning the crates that have one (`rust.md` § Signals). A Rust test
-  that may signal processes it didn't start is `#[ignore = "signals processes; runs in pnpm test:real rust"]` and starts with
+  imports of `process`; other unusual Rust `use` forms; and a method that signals by pid, which
+  `deny.toml` keeps out only by banning the crates known so far to have one (`rust.md` § Signals).
+  It fails closed on a module that is only named `signal`: a glob or rename of tokio's counts, so
+  import its items by name. A Rust test that may signal processes it didn't start is
+  `#[ignore = "signals processes; runs in pnpm test:real rust"]` and starts with
   `bazhen_test_signal::require_sandbox().unwrap();`, both of which `pnpm check` requires, so the
   host skips it and `pnpm test:rust:all` runs it only on a host carrying a root-owned
   `/etc/bazhen-disposable-host`: the test container or a CI runner. A PID namespace doesn't count:
