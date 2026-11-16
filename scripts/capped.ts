@@ -19,12 +19,12 @@ import {
   cappedScope,
   chooseMode,
   clampMemory,
+  dieBy,
   runIn,
   type Cap,
   type Ended,
   type Mode,
-} from "../packages/host-guard/src/cap.ts";
-import { dieBy } from "../packages/host-guard/src/signal.ts";
+} from "../packages/host-guard/src/index.ts";
 import { appendFileSync } from "node:fs";
 import { isMain } from "./is-main.ts";
 

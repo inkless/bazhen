@@ -48,23 +48,22 @@ describe("generated oxlint config", () => {
     );
   });
 
-  it("lets host-guard be imported by path only where a module is named, and nowhere for holder.ts", () => {
+  it("lets host-guard be imported by path nowhere outside it, but by its index from the scripts", () => {
     expect([
       deep("apps/daemon/**/*.ts"),
       deep("scripts/**/*.ts"),
-      deep("scripts/capped.ts"),
+      deep("**/*.ts"),
       deep("packages/host-guard/**/*.ts"),
     ]).toEqual([
       ["**/host-guard/src/**"],
-      ["**/host-guard/src/**", "!**/host-guard/src/cap.ts", "!**/host-guard/src/sandbox.ts"],
-      [
-        "**/host-guard/src/**",
-        "!**/host-guard/src/cap.ts",
-        "!**/host-guard/src/sandbox.ts",
-        "!**/host-guard/src/signal.ts",
-      ],
+      ["**/host-guard/src/**", "!**/host-guard/src/index.ts"],
+      ["**/host-guard/src/**"],
       [],
     ]);
+  });
+
+  it("puts the ban for files no area covers first, so each area's own override replaces it", () => {
+    expect(config.overrides[0]?.files).toEqual(["**/*.ts", "**/*.tsx"]);
   });
 
   it("applies the small-test bans to *.test.ts but not *.medium.test.ts", () => {

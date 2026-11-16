@@ -44,6 +44,27 @@
   "overrides": [
     {
       "files": [
+        "**/*.ts",
+        "**/*.tsx"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "this file imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
         "packages/protocol/**/*.ts",
         "packages/protocol/**/*.tsx"
       ],
@@ -4216,8 +4237,7 @@
               {
                 "group": [
                   "**/host-guard/src/**",
-                  "!**/host-guard/src/cap.ts",
-                  "!**/host-guard/src/sandbox.ts"
+                  "!**/host-guard/src/index.ts"
                 ],
                 "message": "scripts (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
               }
@@ -4239,8 +4259,7 @@
               {
                 "group": [
                   "**/host-guard/src/**",
-                  "!**/host-guard/src/cap.ts",
-                  "!**/host-guard/src/sandbox.ts"
+                  "!**/host-guard/src/index.ts"
                 ],
                 "message": "scripts (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
               },
@@ -4291,31 +4310,7 @@
               {
                 "group": [
                   "**/host-guard/src/**",
-                  "!**/host-guard/src/cap.ts",
-                  "!**/host-guard/src/sandbox.ts"
-                ],
-                "message": "scripts (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
-              }
-            ]
-          }
-        ]
-      }
-    },
-    {
-      "files": [
-        "scripts/capped.ts"
-      ],
-      "rules": {
-        "no-restricted-imports": [
-          "error",
-          {
-            "patterns": [
-              {
-                "group": [
-                  "**/host-guard/src/**",
-                  "!**/host-guard/src/cap.ts",
-                  "!**/host-guard/src/sandbox.ts",
-                  "!**/host-guard/src/signal.ts"
+                  "!**/host-guard/src/index.ts"
                 ],
                 "message": "scripts (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
               }

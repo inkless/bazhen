@@ -28,6 +28,7 @@ export {
   holdersDir,
   rebindHolderSocket,
   startHolder,
+  UNKNOWN_START,
   vouchHolder,
   type HolderLimits,
   type StartHolderOptions,

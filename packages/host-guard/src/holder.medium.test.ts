@@ -10,11 +10,12 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type HolderChild,
   HolderStartFailed,
@@ -23,6 +24,7 @@ import {
   rebindHolderWith,
   type StartHolderOptions,
   startHolderWith,
+  UNKNOWN_START,
 } from "./holder.ts";
 import type { HolderProcess } from "./signal.ts";
 import type { PsReading } from "./tmux.ts";
@@ -30,7 +32,11 @@ import type { PsReading } from "./tmux.ts";
 // Above every system's pid limit, so even a broken guard reaches no process.
 const PID = 2 ** 22 + 1;
 const START = 1_794_630_000;
-const BINARY = "/opt/bazhen/bazhen-holder";
+/** A regular file named as the holder is, which nothing here runs: the spawn is a fake. */
+const BINARY_DIR = mkdtempSync(join(tmpdir(), "bz-hg-bin-"));
+const BINARY = join(BINARY_DIR, "bazhen-holder");
+writeFileSync(BINARY, "", { mode: 0o755 });
+afterAll(() => rmSync(BINARY_DIR, { recursive: true, force: true }));
 
 /** A child that does what each test says, and records what it was sent. */
 class FakeChild extends EventEmitter implements HolderChild {
@@ -315,10 +321,35 @@ describe("starting a holder", () => {
     expect(run.kills).toEqual([]);
   });
 
-  it("says a holder ps can't read as it starts may still run, and never calls it silent", async () => {
-    const run = started(always("unreadable"), { readyMs: 50 });
+  it("says a holder ps can't read as it starts may still run, and records it for a person", async () => {
+    const recorded: unknown[] = [];
+    const run = started(always("unreadable"), {
+      readyMs: 50,
+      onStarted: (holder) => void recorded.push(holder),
+    });
     await expect(failureOf(run)).resolves.toMatchObject({ ending: "unchecked", running: true });
-    expect([run.kills, run.child.stdinEnded]).toEqual([[], true]);
+    expect([run.kills, run.child.stdinEnded, run.child.sent, recorded]).toEqual([
+      [],
+      true,
+      "",
+      [{ pid: PID, start: UNKNOWN_START }],
+    ]);
+    expect(run.reads()).toBeGreaterThan(1);
+  });
+
+  it("asks ps again when it fails at first, and starts the holder once it reads", async () => {
+    const recorded: unknown[] = [];
+    const run = started(
+      inTurn(
+        () => "unreadable",
+        () => holderAt(START),
+      ),
+      { onStarted: (holder) => void recorded.push(holder) },
+    );
+    await expect.poll(() => run.child.sent).not.toBe("");
+    run.child.stdout.write("ready\n");
+    await expect(run.start).resolves.toMatchObject({ pid: PID, start: START });
+    expect(recorded).toEqual([{ pid: PID, start: START }]);
   });
 
   it("says one ps can't read but that exits once it finds no spec has ended", async () => {
@@ -326,6 +357,18 @@ describe("starting a holder", () => {
     child.stdin.once("finish", () => queueMicrotask(() => child.exit(2)));
     const run = started(always("unreadable"), { readyMs: 50 }, child);
     await expect(failureOf(run)).resolves.toMatchObject({ ending: { code: 2 }, running: false });
+  });
+
+  it("runs under a CPU limit of 1 second or of a day, the bounds it takes", async () => {
+    const shells: unknown[] = [];
+    for (const cpuSeconds of [1, 86_400]) {
+      const run = started(always(holderAt(START)), { limits: { cpuSeconds } });
+      await expect.poll(() => run.child.sent).not.toBe("");
+      run.child.stdout.write("ready\n");
+      await run.start;
+      shells.push(run.spawned[0]?.args[1]);
+    }
+    expect(shells).toEqual(['ulimit -t 1 && exec "$0" "$@"', 'ulimit -t 86400 && exec "$0" "$@"']);
   });
 });
 
@@ -390,6 +433,10 @@ describe("refusing to start a holder, before anything is spawned", () => {
       await refused({ readyMs: 0 }),
       await refused({ readyMs: Number.NaN }),
       await refused({ limits: { cpuSeconds: 1.5 } }),
+      await refused({ limits: { cpuSeconds: 0 } }),
+      await refused({ limits: { cpuSeconds: -0 } }),
+      await refused({ limits: { cpuSeconds: 86_401 } }),
+      await refused({ limits: { cpuSeconds: Number.NaN } }),
     ];
     expect(results).toEqual([
       { spawned: 0, error: expect.stringMatching(/over the 1048576/) },
@@ -397,7 +444,39 @@ describe("refusing to start a holder, before anything is spawned", () => {
       { spawned: 0, error: expect.stringMatching(/readyMs/) },
       { spawned: 0, error: expect.stringMatching(/readyMs/) },
       { spawned: 0, error: expect.stringMatching(/cpuSeconds/) },
+      { spawned: 0, error: expect.stringMatching(/cpuSeconds/) },
+      { spawned: 0, error: expect.stringMatching(/cpuSeconds/) },
+      { spawned: 0, error: expect.stringMatching(/cpuSeconds/) },
+      { spawned: 0, error: expect.stringMatching(/cpuSeconds/) },
     ]);
+  });
+
+  it("refuses a binary that isn't a regular file named as the holder, or links elsewhere", async () => {
+    const links = privateRoot();
+    const toShell = join(links, "bazhen-holder");
+    symlinkSync("/bin/sh", toShell);
+    const dirNamed = join(privateRoot(), "bazhen-holder");
+    mkdirSync(dirNamed);
+    const results = [
+      await refused({ binary: "/bin/sh" }),
+      await refused({ binary: toShell }),
+      await refused({ binary: dirNamed }),
+      await refused({ binary: join(privateRoot(), "bazhen-holder") }),
+    ];
+    expect(results).toEqual([
+      { spawned: 0, error: expect.stringMatching(/isn't named bazhen-holder/) },
+      { spawned: 0, error: expect.stringMatching(/links to/) },
+      { spawned: 0, error: expect.stringMatching(/isn't a regular file/) },
+      { spawned: 0, error: expect.stringMatching(/doesn't exist/) },
+    ]);
+  });
+
+  it("refuses an environment name that isn't a plain identifier, which a shell could run", async () => {
+    const env = { PATH: "/bin", "BASH_FUNC_ulimit%%": "() { :; }" };
+    expect(await refused({ env })).toEqual({
+      spawned: 0,
+      error: expect.stringMatching(/BASH_FUNC_ulimit%%/),
+    });
   });
 });
 

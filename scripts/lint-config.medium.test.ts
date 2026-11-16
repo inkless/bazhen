@@ -30,6 +30,15 @@ const FIXTURES: Record<string, string> = {
     'export { TmuxServer } from "@bazhen/host-guard";\n' +
     'export { a } from "../../packages/runtime-tmux/src/index.ts";\n' +
     'export { connectHolder } from "@bazhen/runtime-holder";\n',
+  "tests/support/i.ts":
+    'export { startHolderWith } from "../../packages/host-guard/src/holder.ts";\n',
+  "tests/integration/j.ts":
+    'export { killHolderAt } from "../../packages/host-guard/src/signal.ts";\n',
+  "k.ts": 'export { vouchHolderWith } from "./packages/host-guard/src/holder.ts";\n',
+  "scripts/l.ts":
+    'export { dieBy } from "../packages/host-guard/src/index.ts";\n' +
+    'export { killHolderAt } from "../packages/host-guard/src/signal.ts";\n',
+  "packages/host-guard/src/m.ts": 'export { startHolderWith } from "./holder.ts";\n',
   "tests/holder/g.test.ts":
     'export { spawn } from "node:child_process";\nexport { spawn as pty } from "node-pty";\n' +
     'export { createRequire } from "node:module";\nexport { fork } from "cluster";\n' +
@@ -86,6 +95,11 @@ describe("the generated oxlint config, run by oxlint", () => {
       "tests/e2e/h.spec.ts": ["eslint(no-restricted-imports)", "eslint(no-restricted-imports)"],
       "tests/holder/f.test.ts": ["eslint(no-restricted-imports)", "eslint(no-restricted-imports)"],
       "tests/holder/g.test.ts": Array(5).fill("eslint(no-restricted-imports)"),
+      "tests/support/i.ts": ["eslint(no-restricted-imports)"],
+      "tests/integration/j.ts": ["eslint(no-restricted-imports)"],
+      "k.ts": ["eslint(no-restricted-imports)"],
+      "scripts/l.ts": ["eslint(no-restricted-imports)"],
+      "packages/host-guard/src/m.ts": [],
     });
   });
 });

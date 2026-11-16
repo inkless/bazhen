@@ -5,7 +5,7 @@
 // clock, which can vouch for any pid, so they stay in this module and its tests.
 
 import { spawn as spawnChild } from "node:child_process";
-import { lstatSync, mkdirSync } from "node:fs";
+import { lstatSync, mkdirSync, realpathSync, statSync } from "node:fs";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import {
@@ -37,6 +37,37 @@ const VOUCH_POLL_MS = 20;
 const STDERR_MS = 200;
 export const HOLDER_READY_MS = 5_000;
 const READY_MS_MAX = 60_000;
+
+/**
+ * A start no process has, for a holder `ps` couldn't read: recorded under it, it names the pid,
+ * and no vouch ever matches it.
+ */
+export const UNKNOWN_START = 0;
+
+/**
+ * A name the holder's own environment may hold. Anything else, `BASH_FUNC_ulimit%%` say, could
+ * redefine what the limits shell runs.
+ */
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * Why `binary` can't be run as a holder, or undefined when it can: it must be an absolute path to
+ * a regular file named `bazhen-holder`, as `ps` will show it, or a link to one, since the spec it
+ * is sent on stdin would be a script to a shell.
+ */
+function binaryRefusal(binary: string): string | undefined {
+  if (!isAbsolute(binary)) return "it isn't absolute";
+  if (basename(binary) !== HOLDER_COMMAND) return `it isn't named ${HOLDER_COMMAND}`;
+  let real: string;
+  try {
+    real = realpathSync(binary);
+  } catch {
+    return "it doesn't exist";
+  }
+  if (basename(real) !== HOLDER_COMMAND) return `it links to ${real}`;
+  if (!statSync(real).isFile()) return "it isn't a regular file";
+  return undefined;
+}
 
 /** Where `root`'s holders bind: one directory, inside the run root, holding nothing else. */
 export const holdersDir = (root: string) => join(root, "holders");
@@ -143,7 +174,9 @@ export interface StartHolderOptions {
   readonly limits?: HolderLimits;
   /**
    * Called once the holder runs and before it reads its spec, so the caller can record it before
-   * it can outlive the call. One that throws stops the start, and the holder is ended.
+   * it can outlive the call. One that throws stops the start, and the holder is ended. For a
+   * holder `ps` couldn't read, it is called only once it has been given no spec and still runs,
+   * with `UNKNOWN_START`.
    */
   readonly onStarted?: (holder: HolderProcess) => void | Promise<void>;
 }
@@ -218,7 +251,14 @@ export async function startHolderWith(
 ): Promise<StartedHolder> {
   const { binary, root, spec } = options;
   const readyMs = options.readyMs ?? HOLDER_READY_MS;
-  if (!isAbsolute(binary)) throw new RangeError(`the holder binary ${binary} isn't absolute`);
+  const unfitBinary = binaryRefusal(binary);
+  if (unfitBinary !== undefined) {
+    throw new RangeError(`refusing holder binary ${binary}: ${unfitBinary}`);
+  }
+  const badNames = Object.keys(options.env).filter((name) => !ENV_NAME.test(name));
+  if (badNames.length > 0) {
+    throw new RangeError(`refusing the holder's environment names ${badNames.join(", ")}`);
+  }
   if (!Number.isSafeInteger(readyMs) || readyMs <= 0 || readyMs > READY_MS_MAX) {
     throw new RangeError(`readyMs ${readyMs} isn't between 1 and ${READY_MS_MAX}`);
   }
@@ -284,17 +324,29 @@ export async function startHolderWith(
     const running = left?.running ?? false;
     return new HolderStartFailed(how, stderr, { detail: `${detail}${note}`, running, cause });
   };
-  const reading = await read(pid);
+  let reading = await read(pid);
+  // `ps` failing once is often only that: it is asked again, for as long as a vouch would be.
+  const readUntil = Date.now() + VOUCH_MS;
+  const exitedYet = () => ending !== undefined;
+  while (typeof reading === "string" && !exitedYet() && Date.now() < readUntil) {
+    await delay(VOUCH_POLL_MS);
+    reading = await read(pid);
+  }
   if (typeof reading === "string") {
-    // Unread, it can be neither recorded nor vouched for: with no spec it should exit, and one
-    // that doesn't in time may still run.
+    // Unread, it can't be vouched for: given no spec it should exit, and one that doesn't in
+    // time may still run, so it is recorded, under a start no vouch matches, for a person.
     child.stdin?.end();
     await Promise.race([exited, delay(STDERR_MS)]);
+    const running = ending === undefined;
+    let cause: unknown;
+    if (running)
+      await Promise.resolve(options.onStarted?.({ pid, start: UNKNOWN_START })).catch(
+        (e: unknown) => (cause = e),
+      );
     await Promise.race([stderrEnded, delay(STDERR_MS)]);
     letGo();
-    const detail = `, as ps found it ${reading} at once`;
-    const running = ending === undefined;
-    throw new HolderStartFailed(ending ?? "unchecked", stderr, { detail, running });
+    const detail = `, as ps found it ${reading}`;
+    throw new HolderStartFailed(ending ?? "unchecked", stderr, { detail, running, cause });
   }
   const holder = { pid, start: reading.start };
   mine = { start: reading.start, ready: false, exited: ending !== undefined };

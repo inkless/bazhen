@@ -14,7 +14,7 @@ import {
   type SandboxHost,
   inSignalSandbox,
   thisHost,
-} from "../packages/host-guard/src/sandbox.ts";
+} from "../packages/host-guard/src/index.ts";
 import { rustCode } from "./rust-source.ts";
 
 export { DISPOSABLE_HOST_MARKER, SANDBOX_RULE, type SandboxHost, inSignalSandbox, thisHost };
