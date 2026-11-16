@@ -2311,15 +2311,6 @@
               },
               {
                 "group": [
-                  "@bazhen/cli",
-                  "@bazhen/cli/**",
-                  "**/apps/cli/**",
-                  "**/cli/src/**"
-                ],
-                "message": "apps/daemon (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/cli."
-              },
-              {
-                "group": [
                   "**/host-guard/src/**"
                 ],
                 "message": "apps/daemon (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
@@ -2347,15 +2338,6 @@
                   "**/web/src/**"
                 ],
                 "message": "apps/daemon (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
-              },
-              {
-                "group": [
-                  "@bazhen/cli",
-                  "@bazhen/cli/**",
-                  "**/apps/cli/**",
-                  "**/cli/src/**"
-                ],
-                "message": "apps/daemon (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/cli."
               },
               {
                 "group": [
@@ -2418,362 +2400,9 @@
               },
               {
                 "group": [
-                  "@bazhen/cli",
-                  "@bazhen/cli/**",
-                  "**/apps/cli/**",
-                  "**/cli/src/**"
-                ],
-                "message": "apps/daemon (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/cli."
-              },
-              {
-                "group": [
                   "**/host-guard/src/**"
                 ],
                 "message": "apps/daemon (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
-              }
-            ]
-          }
-        ]
-      }
-    },
-    {
-      "files": [
-        "apps/cli/**/*.ts",
-        "apps/cli/**/*.tsx"
-      ],
-      "rules": {
-        "no-restricted-imports": [
-          "error",
-          {
-            "patterns": [
-              {
-                "group": [
-                  "@bazhen/core",
-                  "@bazhen/core/**",
-                  "**/packages/core/**",
-                  "**/core/src/**"
-                ],
-                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/core."
-              },
-              {
-                "group": [
-                  "@bazhen/runtime-tmux",
-                  "@bazhen/runtime-tmux/**",
-                  "**/packages/runtime-tmux/**",
-                  "**/runtime-tmux/src/**"
-                ],
-                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
-              },
-              {
-                "group": [
-                  "@bazhen/runtime-holder",
-                  "@bazhen/runtime-holder/**",
-                  "**/packages/runtime-holder/**",
-                  "**/runtime-holder/src/**"
-                ],
-                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
-              },
-              {
-                "group": [
-                  "@bazhen/env-local",
-                  "@bazhen/env-local/**",
-                  "**/packages/env-local/**",
-                  "**/env-local/src/**"
-                ],
-                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/env-local."
-              },
-              {
-                "group": [
-                  "@bazhen/harness-claude-code",
-                  "@bazhen/harness-claude-code/**",
-                  "**/packages/harness-claude-code/**",
-                  "**/harness-claude-code/src/**"
-                ],
-                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/harness-claude-code."
-              },
-              {
-                "group": [
-                  "@bazhen/harness-codex",
-                  "@bazhen/harness-codex/**",
-                  "**/packages/harness-codex/**",
-                  "**/harness-codex/src/**"
-                ],
-                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/harness-codex."
-              },
-              {
-                "group": [
-                  "@bazhen/host-guard",
-                  "@bazhen/host-guard/**",
-                  "**/packages/host-guard/**",
-                  "**/host-guard/src/**"
-                ],
-                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/host-guard."
-              },
-              {
-                "group": [
-                  "@bazhen/web",
-                  "@bazhen/web/**",
-                  "**/apps/web/**",
-                  "**/web/src/**"
-                ],
-                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
-              },
-              {
-                "group": [
-                  "@bazhen/daemon",
-                  "@bazhen/daemon/**",
-                  "**/apps/daemon/**",
-                  "**/daemon/src/**",
-                  "!@bazhen/daemon/paths",
-                  "!@bazhen/daemon/client",
-                  "!@bazhen/daemon/start"
-                ],
-                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import from @bazhen/daemon only @bazhen/daemon/paths, @bazhen/daemon/client, @bazhen/daemon/start."
-              },
-              {
-                "group": [
-                  "**/host-guard/src/**"
-                ],
-                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
-              }
-            ]
-          }
-        ]
-      }
-    },
-    {
-      "files": [
-        "apps/cli/**/*.test.ts",
-        "apps/cli/**/*.test.tsx"
-      ],
-      "rules": {
-        "no-restricted-imports": [
-          "error",
-          {
-            "patterns": [
-              {
-                "group": [
-                  "@bazhen/core",
-                  "@bazhen/core/**",
-                  "**/packages/core/**",
-                  "**/core/src/**"
-                ],
-                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/core."
-              },
-              {
-                "group": [
-                  "@bazhen/runtime-tmux",
-                  "@bazhen/runtime-tmux/**",
-                  "**/packages/runtime-tmux/**",
-                  "**/runtime-tmux/src/**"
-                ],
-                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
-              },
-              {
-                "group": [
-                  "@bazhen/runtime-holder",
-                  "@bazhen/runtime-holder/**",
-                  "**/packages/runtime-holder/**",
-                  "**/runtime-holder/src/**"
-                ],
-                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
-              },
-              {
-                "group": [
-                  "@bazhen/env-local",
-                  "@bazhen/env-local/**",
-                  "**/packages/env-local/**",
-                  "**/env-local/src/**"
-                ],
-                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/env-local."
-              },
-              {
-                "group": [
-                  "@bazhen/harness-claude-code",
-                  "@bazhen/harness-claude-code/**",
-                  "**/packages/harness-claude-code/**",
-                  "**/harness-claude-code/src/**"
-                ],
-                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/harness-claude-code."
-              },
-              {
-                "group": [
-                  "@bazhen/harness-codex",
-                  "@bazhen/harness-codex/**",
-                  "**/packages/harness-codex/**",
-                  "**/harness-codex/src/**"
-                ],
-                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/harness-codex."
-              },
-              {
-                "group": [
-                  "@bazhen/host-guard",
-                  "@bazhen/host-guard/**",
-                  "**/packages/host-guard/**",
-                  "**/host-guard/src/**"
-                ],
-                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/host-guard."
-              },
-              {
-                "group": [
-                  "@bazhen/web",
-                  "@bazhen/web/**",
-                  "**/apps/web/**",
-                  "**/web/src/**"
-                ],
-                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
-              },
-              {
-                "group": [
-                  "@bazhen/daemon",
-                  "@bazhen/daemon/**",
-                  "**/apps/daemon/**",
-                  "**/daemon/src/**",
-                  "!@bazhen/daemon/paths",
-                  "!@bazhen/daemon/client",
-                  "!@bazhen/daemon/start"
-                ],
-                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import from @bazhen/daemon only @bazhen/daemon/paths, @bazhen/daemon/client, @bazhen/daemon/start."
-              },
-              {
-                "group": [
-                  "**/host-guard/src/**"
-                ],
-                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
-              },
-              {
-                "group": [
-                  "node-pty",
-                  "fs",
-                  "node:fs",
-                  "fs/promises",
-                  "node:fs/promises",
-                  "os",
-                  "node:os",
-                  "net",
-                  "node:net",
-                  "http",
-                  "node:http",
-                  "https",
-                  "node:https",
-                  "http2",
-                  "node:http2",
-                  "dgram",
-                  "node:dgram",
-                  "tls",
-                  "node:tls",
-                  "child_process",
-                  "node:child_process",
-                  "worker_threads",
-                  "node:worker_threads",
-                  "sqlite",
-                  "node:sqlite"
-                ],
-                "message": "A *.test.ts is a small test: no files, sockets, processes or databases. Rename it *.medium.test.ts (docs/standards/testing.md)."
-              }
-            ]
-          }
-        ]
-      }
-    },
-    {
-      "files": [
-        "apps/cli/**/*.medium.test.ts"
-      ],
-      "rules": {
-        "no-restricted-imports": [
-          "error",
-          {
-            "patterns": [
-              {
-                "group": [
-                  "@bazhen/core",
-                  "@bazhen/core/**",
-                  "**/packages/core/**",
-                  "**/core/src/**"
-                ],
-                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/core."
-              },
-              {
-                "group": [
-                  "@bazhen/runtime-tmux",
-                  "@bazhen/runtime-tmux/**",
-                  "**/packages/runtime-tmux/**",
-                  "**/runtime-tmux/src/**"
-                ],
-                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
-              },
-              {
-                "group": [
-                  "@bazhen/runtime-holder",
-                  "@bazhen/runtime-holder/**",
-                  "**/packages/runtime-holder/**",
-                  "**/runtime-holder/src/**"
-                ],
-                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
-              },
-              {
-                "group": [
-                  "@bazhen/env-local",
-                  "@bazhen/env-local/**",
-                  "**/packages/env-local/**",
-                  "**/env-local/src/**"
-                ],
-                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/env-local."
-              },
-              {
-                "group": [
-                  "@bazhen/harness-claude-code",
-                  "@bazhen/harness-claude-code/**",
-                  "**/packages/harness-claude-code/**",
-                  "**/harness-claude-code/src/**"
-                ],
-                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/harness-claude-code."
-              },
-              {
-                "group": [
-                  "@bazhen/harness-codex",
-                  "@bazhen/harness-codex/**",
-                  "**/packages/harness-codex/**",
-                  "**/harness-codex/src/**"
-                ],
-                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/harness-codex."
-              },
-              {
-                "group": [
-                  "@bazhen/host-guard",
-                  "@bazhen/host-guard/**",
-                  "**/packages/host-guard/**",
-                  "**/host-guard/src/**"
-                ],
-                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/host-guard."
-              },
-              {
-                "group": [
-                  "@bazhen/web",
-                  "@bazhen/web/**",
-                  "**/apps/web/**",
-                  "**/web/src/**"
-                ],
-                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
-              },
-              {
-                "group": [
-                  "@bazhen/daemon",
-                  "@bazhen/daemon/**",
-                  "**/apps/daemon/**",
-                  "**/daemon/src/**",
-                  "!@bazhen/daemon/paths",
-                  "!@bazhen/daemon/client",
-                  "!@bazhen/daemon/start"
-                ],
-                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import from @bazhen/daemon only @bazhen/daemon/paths, @bazhen/daemon/client, @bazhen/daemon/start."
-              },
-              {
-                "group": [
-                  "**/host-guard/src/**"
-                ],
-                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
               }
             ]
           }
@@ -3462,15 +3091,6 @@
               },
               {
                 "group": [
-                  "@bazhen/cli",
-                  "@bazhen/cli/**",
-                  "**/apps/cli/**",
-                  "**/cli/src/**"
-                ],
-                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/cli."
-              },
-              {
-                "group": [
                   "@bazhen/core",
                   "@bazhen/core/**",
                   "**/packages/core/**",
@@ -3580,15 +3200,6 @@
               },
               {
                 "group": [
-                  "@bazhen/cli",
-                  "@bazhen/cli/**",
-                  "**/apps/cli/**",
-                  "**/cli/src/**"
-                ],
-                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/cli."
-              },
-              {
-                "group": [
                   "@bazhen/core",
                   "@bazhen/core/**",
                   "**/packages/core/**",
@@ -3694,15 +3305,6 @@
                   "**/web/src/**"
                 ],
                 "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
-              },
-              {
-                "group": [
-                  "@bazhen/cli",
-                  "@bazhen/cli/**",
-                  "**/apps/cli/**",
-                  "**/cli/src/**"
-                ],
-                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/cli."
               },
               {
                 "group": [
@@ -3833,15 +3435,6 @@
               },
               {
                 "group": [
-                  "@bazhen/cli",
-                  "@bazhen/cli/**",
-                  "**/apps/cli/**",
-                  "**/cli/src/**"
-                ],
-                "message": "tests/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/cli."
-              },
-              {
-                "group": [
                   "@bazhen/web",
                   "@bazhen/web/**",
                   "**/apps/web/**",
@@ -3944,15 +3537,6 @@
               },
               {
                 "group": [
-                  "@bazhen/cli",
-                  "@bazhen/cli/**",
-                  "**/apps/cli/**",
-                  "**/cli/src/**"
-                ],
-                "message": "tests/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/cli."
-              },
-              {
-                "group": [
                   "@bazhen/web",
                   "@bazhen/web/**",
                   "**/apps/web/**",
@@ -4051,15 +3635,6 @@
                   "**/daemon/src/**"
                 ],
                 "message": "tests/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
-              },
-              {
-                "group": [
-                  "@bazhen/cli",
-                  "@bazhen/cli/**",
-                  "**/apps/cli/**",
-                  "**/cli/src/**"
-                ],
-                "message": "tests/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/cli."
               },
               {
                 "group": [

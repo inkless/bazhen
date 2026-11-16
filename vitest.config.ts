@@ -57,17 +57,6 @@ export default defineConfig({
         },
       },
       {
-        // The same suite against the Node CLI, until it is deleted.
-        test: {
-          name: "cli-node",
-          include: ["tests/cli/**/*.test.ts"],
-          globalSetup: [CAPPED, "tests/support/medium-setup.ts"],
-          setupFiles: [SEEDED],
-          testTimeout: 30_000,
-          env: { BAZHEN_CLI: "node" },
-        },
-      },
-      {
         // A wall-clock gate, so it runs alone: in parallel with PTY tests it measures them.
         test: {
           name: "bench",

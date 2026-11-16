@@ -8,7 +8,7 @@ import {
   SendMessageResponse,
   WaitMessagesResponse,
 } from "@bazhen/protocol";
-import { runsNode, type Scene, scene } from "./cli.ts";
+import { type Scene, scene } from "./cli.ts";
 import { AGENT, MSG, MSG2, OTHER, TASK, UUID } from "./fixtures.ts";
 
 let s: Scene;
@@ -209,8 +209,7 @@ describe("bazhen send --task", () => {
     ]);
   });
 
-  it("reads the text to send from stdin, given /dev/stdin", async ({ skip }) => {
-    skip(runsNode(), "the Node CLI opens /dev/stdin by path, which a socket for stdin can't be");
+  it("reads the text to send from stdin, given /dev/stdin", async () => {
     s.daemon.answer(toTask, BroadcastMessageResponse, {
       sent: [{ agentId: OTHER, messageId: MSG }],
       skipped: [],
@@ -247,8 +246,7 @@ describe("bazhen send --task", () => {
       },
       "more than 1048576 bytes",
     ],
-  ] as const)("refuses, sending nothing, to send %s", async ([, make, why], { skip }) => {
-    skip(runsNode(), "deliberately different: the Node CLI reads any file to its end");
+  ] as const)("refuses, sending nothing, to send %s", async ([, make, why]) => {
     const path = make();
     const ran = await s.bazhen(["send", "--task", TASK, "--file", path], asAgent);
     expect(ran).toEqual({ code: 1, stdout: "", stderr: `can't read ${path}: ${why}\n` });

@@ -1,8 +1,7 @@
 // The `bazhen` CLI as a process, against a fake daemon on the socket it looks for. The suite
-// holds the CLI's verbs, what it sends, what it prints and how it exits, whatever language the CLI
-// is written in: it runs `target/release/bazhen`, which `pnpm test:medium` builds, unless
-// `BAZHEN_CLI` names another binary, or is `node` for the Node CLI. The api
-// suites, which run the CLI against the real daemon, remain the end-to-end gate.
+// holds the CLI's verbs, what it sends, what it prints and how it exits: it runs
+// `target/release/bazhen`, which `pnpm test:medium` builds, unless `BAZHEN_CLI` names another
+// binary. The api suites, which run the CLI against the real daemon, remain the end-to-end gate.
 
 import { execFile } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
@@ -32,7 +31,6 @@ import {
 } from "@bazhen/protocol";
 
 const repo = fileURLToPath(new URL("../..", import.meta.url));
-const NODE_CLI = join(repo, "apps/cli/src/main.ts");
 const RUST_CLI = join(repo, "target/release/bazhen");
 /** Past any call the CLI makes here, and short of the project's test timeout. */
 export const RUN_MS = 20_000;
@@ -206,9 +204,6 @@ export class FakeDaemon {
   }
 }
 
-/** Whether the suite runs the Node CLI, which differs from the Rust one where a case says so. */
-export const runsNode = () => process.env["BAZHEN_CLI"] === "node";
-
 export interface Ran {
   readonly code: number;
   readonly stdout: string;
@@ -276,11 +271,9 @@ function run(
   input = "",
 ): Promise<Ran> {
   const binary = process.env["BAZHEN_CLI"] ?? "";
-  const [file, argv] = runsNode()
-    ? [process.execPath, [NODE_CLI, ...args]]
-    : [binary === "" ? RUST_CLI : binary, [...args]];
+  const file = binary === "" ? RUST_CLI : binary;
   return new Promise((resolve, reject) => {
-    const child = execFile(file, argv, { env, cwd, timeout: RUN_MS }, (err, stdout, stderr) => {
+    const child = execFile(file, args, { env, cwd, timeout: RUN_MS }, (err, stdout, stderr) => {
       if (err?.killed === true) {
         reject(new Error(`bazhen ${args.join(" ")} ran past ${RUN_MS} ms:\n${stdout}${stderr}`));
         return;

@@ -20,7 +20,7 @@
     "test:e2e": "pnpm run build:hook && pnpm --filter @bazhen/e2e-tests run test",
     "lint:config": "node scripts/lint-config.ts",
     "schema": "node scripts/protocol-schema.ts",
-    "test:medium": "pnpm run build:hook && pnpm run build:cli && pnpm run build:engine && node scripts/capped.ts --memory 8G --time 20m -- vitest run --project medium --project cli --project cli-node",
+    "test:medium": "pnpm run build:hook && pnpm run build:cli && pnpm run build:engine && node scripts/capped.ts --memory 8G --time 20m -- vitest run --project medium --project cli",
     "prepare": "husky",
     "test:falsify": "node scripts/capped.ts --memory 8G --time 120m -- node scripts/falsify.ts",
     "test:falsify:base": "node scripts/capped.ts --memory 8G --time 120m -- node scripts/falsify-base.ts",
