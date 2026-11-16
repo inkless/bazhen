@@ -26,3 +26,5 @@ mod signals;
 pub mod socket;
 pub mod start;
 pub mod start_time;
+#[cfg(test)]
+mod test_log;

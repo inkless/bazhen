@@ -1117,6 +1117,28 @@ mod tests {
     }
 
     #[test]
+    fn a_turn_writes_no_more_than_its_byte_cap_to_a_peer_that_keeps_reading() {
+        let now = Instant::now();
+        let (mut conn, mut peer) = pair(now);
+        // Writes that never fill the buffer, as to a peer reading as fast as it is written to:
+        // a socket's own buffer is far under the cap, so only this lets the cap be what stops.
+        conn.stream.set_nonblocking(false).unwrap();
+        let reader = std::thread::spawn(move || {
+            let mut sink = vec![0; 1 << 16];
+            while peer.read(&mut sink).unwrap() > 0 {}
+        });
+        let frames = 2 * WRITE_PER_TURN / DATA_FRAME;
+        for _ in 0..frames {
+            conn.queue(vec![7; DATA_FRAME]);
+        }
+        conn.flush(now, &no_output());
+        let left = conn.queued();
+        drop(conn);
+        reader.join().unwrap();
+        assert_eq!(left, frames * DATA_FRAME - WRITE_PER_TURN);
+    }
+
+    #[test]
     fn a_hang_up_ends_once_written_or_out_of_time_and_reads_nothing_more() {
         let now = Instant::now();
         let (mut conn, mut peer) = pair(now);

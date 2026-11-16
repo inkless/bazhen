@@ -284,6 +284,8 @@ fn in_private_dir<T>(
         })?;
     let stat = fstat(&opened).map_err(|e| io_error(dir)(e.into()))?;
     let others = Mode::RWXG | Mode::RWXO;
+    // No test tells the owner check's `||` from `&&`: only a directory another user owns with no
+    // group or other bits does, and only root can make one.
     if FileType::from_raw_mode(stat.st_mode) != FileType::Directory
         || stat.st_uid != geteuid().as_raw()
         || Mode::from_raw_mode(stat.st_mode).intersects(others)
@@ -492,8 +494,14 @@ mod tests {
         let socket = Socket::bind(&path).unwrap();
         UnixStream::connect(&path).unwrap();
         socket.remove();
+        // Its lock goes with it, so what refuses the next bind is what is at the path.
+        drop(socket);
         std::fs::write(&path, b"").unwrap();
         assert!(matches!(Socket::bind(&path), Err(BindError::Taken(_))));
+        assert!(
+            std::fs::metadata(&path).unwrap().is_file(),
+            "the file was replaced"
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -567,6 +575,58 @@ mod tests {
             "relocked but not renewed"
         );
         first.remove();
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_recheck_that_finds_its_own_socket_leaves_it_and_warns_of_nothing() {
+        let dir = private_dir("own");
+        let path = dir.join("t1.sock");
+        let mut socket = Socket::bind(&path).unwrap();
+        // As after its lock was taken back: a socket that isn't its own would then be replaced.
+        socket.takeover_pending = true;
+        socket.recheck_with(|_, _| panic!("bound again over its own socket"));
+        assert!(!socket.takeover_pending);
+        socket.recheck_with(|_, _| panic!("bound again over its own socket"));
+        assert!(
+            !socket.replaced_seen,
+            "took its own socket for something else"
+        );
+        socket.remove();
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn says_once_that_something_else_is_at_its_path() {
+        let dir = private_dir("other");
+        let path = dir.join("t1.sock");
+        let mut socket = Socket::bind(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        std::fs::write(&path, "").unwrap();
+        let log = crate::test_log::logged(|| {
+            socket.recheck();
+            socket.recheck();
+        });
+        let said = log
+            .matches("something else is at the socket's path")
+            .count();
+        assert_eq!(said, 1, "{log}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn says_once_that_it_lost_its_lock() {
+        let dir = private_dir("lostlog");
+        let path = dir.join("t1.sock");
+        let mut first = Socket::bind(&path).unwrap();
+        std::fs::remove_file(dir.join("t1.lock")).unwrap();
+        let second = Socket::bind(&path).unwrap();
+        let log = crate::test_log::logged(|| {
+            first.recheck();
+            first.recheck();
+        });
+        assert_eq!(log.matches("lost the terminal's lock").count(), 1, "{log}");
+        drop((first, second));
         std::fs::remove_dir_all(dir).unwrap();
     }
 

@@ -347,6 +347,9 @@ impl Server {
             let longest = self
                 .conns
                 .iter_mut()
+                // No test tells `> 0` from `>= 0` here or in `evicting_at`: that needs a peer stuck
+                // while it owes no snapshot. To try: shrink the accepted connection's SO_SNDBUF in
+                // the test harness, so plain output sticks one.
                 .filter(|conn| conn.owed_snapshot() > 0 && Some(conn.id()) != writer)
                 .filter_map(|conn| conn.stuck_since().map(|since| (since, conn)))
                 .filter(|(since, _)| now.saturating_duration_since(*since) >= stuck_for)
@@ -670,6 +673,7 @@ fn evicting_at(conns: &[Connection], shared: &Shared) -> Option<Instant> {
     }
     conns
         .iter()
+        // `> 0` is untested against `>= 0`, as in `evict_stuck_snapshots`.
         .filter(|conn| conn.owed_snapshot() > 0 && Some(conn.id()) != shared.writer)
         .filter_map(Connection::stuck_since)
         .map(|since| since + shared.stuck_to_evict)
@@ -1592,6 +1596,13 @@ mod tests {
         bazhen_test_signal::require_sandbox().unwrap();
         let mut big = Failing::big("snapshot-evict", 10, NEVER);
         let _writer = big.peer(&[hello_as(true), snapshot_request(10)]);
+        // Stuck a turn before the others, so the eviction deadline's leaving it out is seen.
+        big.until_within("the writer stuck on its snapshot", 30, |b| {
+            b.server
+                .conns
+                .iter()
+                .any(|c| Some(c.id()) == b.server.shared.writer && c.stuck_since().is_some())
+        });
         let _peers: Vec<UnixStream> = (11..14)
             .map(|id| big.peer(&[hello_request(), snapshot_request(id)]))
             .collect();
@@ -1619,6 +1630,20 @@ mod tests {
             .map(|(_, id)| id);
         let _held = big.peer(&[hello_request(), snapshot_request(14)]);
         big.until_within("a snapshot held for room", 30, Failing::holding);
+        // The loop wakes for the drop when the first peer owing a snapshot, the writer aside, has
+        // been stuck long enough, though nothing else happens.
+        let first_stuck = big
+            .server
+            .conns
+            .iter()
+            .filter(|c| c.owed_snapshot() > 0 && Some(c.id()) != writer)
+            .filter_map(Connection::stuck_since)
+            .min()
+            .unwrap();
+        assert_eq!(
+            evicting_at(&big.server.conns, &big.server.shared),
+            Some(first_stuck + big.server.shared.stuck_to_evict)
+        );
         big.until_within("the held snapshot answered", 30, |b| !b.holding());
         let ids: Vec<u64> = big.server.conns.iter().map(Connection::id).collect();
         assert!(
@@ -1630,6 +1655,44 @@ mod tests {
             "the longest stuck was kept"
         );
         assert_eq!(ids.len(), 4, "more were dropped than made room");
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn a_close_ends_once_all_owed_is_written_and_not_before_its_time_if_not() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let mut f = Failing::start("close-done", "exit 0");
+        let _peer = f.peer(&[hello_request()]);
+        f.until_within("the child's exit, and the peer open", 30, |b| {
+            b.holder.exit().is_some() && b.server.conns.iter().any(Connection::is_open)
+        });
+        f.holder.close(Instant::now());
+        f.until_within("the child's session ended", 30, |b| b.holder.ended());
+        let now = Instant::now();
+        f.server.closing = Some(Closing::Ending { since: now });
+        assert!(
+            f.server.close_done(&f.holder, now),
+            "a close owing nothing waited"
+        );
+        f.server.conns[0].queue(vec![0; 8]);
+        f.server.closing = Some(Closing::Ending { since: now });
+        assert!(
+            !f.server.close_done(&f.holder, now),
+            "a close ended with bytes owed"
+        );
+        assert!(
+            f.server.close_done(&f.holder, now + CLOSE_FLUSH_WITHIN),
+            "a close waited past its time"
+        );
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn an_accept_with_no_connection_waiting_goes_on_accepting() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let mut f = Failing::start("accept-idle", "sleep 30");
+        f.server.accept(Instant::now());
+        assert_eq!(f.server.accept_paused_until, None);
     }
 
     #[test]
