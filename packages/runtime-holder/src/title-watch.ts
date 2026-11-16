@@ -103,8 +103,7 @@ export class TitleWatch {
     this.tell(terminalId);
   }
 
-  /** Stops watching the terminal, as when it is closed. */
-  forget(terminalId: TerminalId): void {
+  private forget(terminalId: TerminalId): void {
     const entry = this.watching.get(terminalId);
     this.watching.delete(terminalId);
     entry?.client?.end();
