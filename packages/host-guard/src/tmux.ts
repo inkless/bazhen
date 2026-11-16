@@ -388,6 +388,41 @@ export async function terminalForeground(pid: number): Promise<number | "absent"
   return read.get(pid) ?? "absent";
 }
 
+/** How a `ps` run settled: what it printed, or the error its promise form rejected with. */
+export type PsOutcome = { readonly stdout: string } | { readonly error: unknown };
+
+/**
+ * What a `ps -p` run printed for those of its pids that have a process; undefined if it can't be
+ * read. A pid with no process is no failure of the run: procps prints the others and exits 0, or
+ * exits 1 having found none, and BSD's `ps` exits 1 for any it didn't find while still printing
+ * the rest. So an exit of 1 with nothing on stderr is what it printed. Any other failure (its
+ * timeout, another status, a message on stderr, more output than it may print) says nothing of
+ * any pid.
+ */
+export function psPrinted(outcome: PsOutcome): string | undefined {
+  if ("stdout" in outcome) return outcome.stdout;
+  const { error } = outcome;
+  const field = (key: string) => Reflect.get(Object(error), key);
+  const stdout = field("stdout");
+  if (field("code") !== 1 || typeof stdout !== "string") {
+    return undefined;
+  }
+  return String(field("stderr") ?? "").trim() === "" ? stdout : undefined;
+}
+
+/** One `ps -p` run over `pids`, printing `columns`, within its timeout and `maxBytes`. */
+function psOf(pids: readonly number[], columns: string, maxBytes: number): Promise<PsOutcome> {
+  const args = ["-ww", "-p", pids.join(","), "-o", columns];
+  return run("ps", args, {
+    env: PS_ENV,
+    timeout: TIMEOUT_MS,
+    maxBuffer: maxBytes,
+  }).then(
+    ({ stdout }) => ({ stdout }),
+    (error: unknown) => ({ error }),
+  );
+}
+
 /** The most `terminalGroups` reads back: two short numbers a line, for a few hundred terminals. */
 const GROUPS_MAX_BYTES = 64 * 1024;
 
@@ -401,17 +436,49 @@ export async function terminalGroups(
   maxBytes = GROUPS_MAX_BYTES,
 ): Promise<Map<number, number> | "unreadable"> {
   if (pids.length === 0) return new Map();
-  try {
-    const args = ["-p", pids.join(","), "-o", "pid=,tpgid="];
-    const { stdout } = await run("ps", args, {
-      env: PS_ENV,
-      timeout: TIMEOUT_MS,
-      maxBuffer: maxBytes,
-    });
-    return parseGroups(stdout);
-  } catch (err) {
-    return psFailure(err) === "absent" ? new Map() : "unreadable";
+  const printed = psPrinted(await psOf(pids, "pid=,tpgid=", maxBytes));
+  return printed === undefined ? "unreadable" : parseGroups(printed);
+}
+
+/** What `ps` shows of a process for its command: when it started, and its command's name. */
+export interface ProcessCommand {
+  readonly start: number;
+  readonly comm: string;
+}
+
+/**
+ * The most `processCommands` reads back: a few hundred terminals, each a line of a pid, a start
+ * and a command, which macOS prints as a whole path.
+ */
+const COMMANDS_MAX_BYTES = 1024 * 1024;
+
+/**
+ * The start and command of each of `pids` that has a process, by pid, from one run of `ps`
+ * whatever their number: absent pids are left out. A run that fails otherwise, prints more than
+ * it may, or prints a line that doesn't parse, is unreadable rather than half read.
+ */
+export async function processCommands(
+  pids: readonly number[],
+  maxBytes = COMMANDS_MAX_BYTES,
+): Promise<Map<number, ProcessCommand> | "unreadable"> {
+  const wanted = [...new Set(pids)];
+  if (wanted.length === 0) return new Map();
+  // The command last: macOS cuts any other column to 16 characters.
+  const printed = psPrinted(await psOf(wanted, "pid=,lstart=,comm=", maxBytes));
+  return (printed === undefined ? undefined : parseCommands(printed)) ?? "unreadable";
+}
+
+/** `ps -o pid=,lstart=,comm=` lines, by pid; undefined if any line doesn't parse. */
+export function parseCommands(out: string): Map<number, ProcessCommand> | undefined {
+  const commands = new Map<number, ProcessCommand>();
+  for (const line of out.split("\n")) {
+    if (line.trim() === "") continue;
+    const match = /^\s*(\d+) (.+)$/.exec(line);
+    const read = parsePsLine(match?.[2] ?? "");
+    if (match === null || read === undefined) return undefined;
+    commands.set(Number(match[1]), { start: read.start, comm: read.rest });
   }
+  return commands;
 }
 
 /** `ps -o pid=,tpgid=` lines, by pid. */

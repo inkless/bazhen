@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isAlive } from "./signal.ts";
-import { readProcess, terminalForeground, terminalGroups } from "./tmux.ts";
+import { processCommands, readProcess, terminalForeground, terminalGroups } from "./tmux.ts";
 
 describe("what ps shows of a process", () => {
   it("reads this process's whole command, start and argument line", async () => {
@@ -39,5 +39,34 @@ describe("many processes' foreground groups at once", () => {
 
   it("is unreadable, never half read, when ps prints more than it may", async () => {
     expect(await terminalGroups([process.pid], 4)).toBe("unreadable");
+  });
+});
+
+describe("many processes' commands at once", () => {
+  it("reads the start and command of each live process, and leaves out a pid no process has", async () => {
+    const free = [...Array(1000).keys()].map((i) => 99_999 - i).find((pid) => !isAlive(pid));
+    const started = Date.now() / 1000 - process.uptime();
+    const read = await processCommands([Number(free), process.pid, process.ppid]);
+    expect(read).toEqual(
+      new Map([
+        [
+          process.pid,
+          {
+            start: expect.toSatisfy((start: number) => Math.abs(start - started) <= 2),
+            comm: expect.stringMatching(/\S/),
+          },
+        ],
+        [process.ppid, { start: expect.any(Number), comm: expect.stringMatching(/\S/) }],
+      ]),
+    );
+  });
+
+  it("reads no process for pids none of which has one", async () => {
+    const free = [...Array(1000).keys()].map((i) => 99_999 - i).filter((pid) => !isAlive(pid));
+    expect(await processCommands(free.slice(0, 2))).toEqual(new Map());
+  });
+
+  it("is unreadable, never half read, when ps prints more than it may", async () => {
+    expect(await processCommands([process.pid], 4)).toBe("unreadable");
   });
 });
