@@ -1,13 +1,12 @@
-import type { RuntimeRef } from "@bazhen/core";
+import type { RuntimeRef, TerminalId } from "@bazhen/core";
 import { matching, readThreadList, readThreadStarted, titlePrefix } from "@bazhen/harness-codex";
 import type { Store } from "../store/store.ts";
 import type { ChannelListener } from "./channel.ts";
 
 export interface CodexThreadsOptions {
   readonly store: Store;
-  /** The tmux runtime the agents' panes are on, which reads a pane's title. */
+  /** What reads a terminal's title, on whichever runtime it runs. */
   readonly runtime: {
-    readonly socket: string;
     title(ref: RuntimeRef): Promise<string>;
   };
   /** The app-server, to list threads and to resume (subscribe to) the one an agent moved to. */
@@ -37,7 +36,7 @@ const RESUME_GIVE_UP_MS = 10 * 60_000;
 export const paneTitleCommand = (client: string, socket: string) =>
   [client, "pane-title", socket] as const;
 
-/** A pane waiting to resume the thread its title names: for which agent, since when. */
+/** A terminal waiting to resume the thread its title names: for which agent, since when. */
 interface Resuming {
   readonly agentId: string;
   readonly threadId: string;
@@ -52,8 +51,9 @@ const SEEN = 2000;
 export const UNTRACKED = "thread switches are not being tracked";
 
 /**
- * Follows a Codex TUI from thread to thread (foundation-design §5.8, C6). The TUI keeps its pane's
- * title set to the thread it shows, and tmux tells the daemon when a title changes. The title
+ * Follows a Codex TUI from thread to thread (foundation-design §5.8, C6). The TUI keeps its
+ * terminal's title set to the thread it shows, and the runtime tells the daemon when a title
+ * changes: tmux by a hook, a holder by the frame it sends. The title
  * holds at most the id's first 29 characters, so it is resolved against the threads the
  * app-server has announced, then against its thread list, for one from before Bazhen connected.
  * Only exactly one match moves the agent: none, several, or a title that is no thread id leaves
@@ -68,13 +68,13 @@ export class CodexThreads {
   private readonly opts: CodexThreadsOptions;
   private readonly log: (message: string) => void;
   private readonly seen = new Set<string>();
-  /** Panes whose title named no thread yet, by the prefix it named. */
-  private readonly waiting = new Map<string, string>();
-  /** Panes waiting to resume the thread their title names. */
-  private readonly resuming = new Map<string, Resuming>();
+  /** Terminals whose title named no thread yet, by the prefix it named. */
+  private readonly waiting = new Map<TerminalId, string>();
+  /** Terminals waiting to resume the thread their title names. */
+  private readonly resuming = new Map<TerminalId, Resuming>();
   /** The agents whose titles are being read at start; their mail waits until they are. */
   private starting: Set<string> | undefined;
-  /** One title at a time, in the order tmux reported them. */
+  /** One title at a time, in the order the runtimes reported them. */
   private queue: Promise<void> = Promise.resolve();
 
   constructor(opts: CodexThreadsOptions) {
@@ -92,8 +92,8 @@ export class CodexThreads {
         if (this.seen.size <= SEEN) break;
         this.seen.delete(old);
       }
-      for (const [pane, prefix] of this.waiting) {
-        if (id.startsWith(prefix)) void this.paneTitleChanged(pane);
+      for (const [terminal, prefix] of this.waiting) {
+        if (id.startsWith(prefix)) void this.titleChanged(terminal);
       }
     },
   };
@@ -111,70 +111,69 @@ export class CodexThreads {
    * progress and every title change while it was down.
    */
   followAll(): void {
-    const { store, runtime } = this.opts;
-    const panes = store.codexPanes(runtime.socket);
+    const { store } = this.opts;
+    const terminals = store.codexTerminals();
     // Until each title is read, mail could go to a thread the TUI has left.
-    const starting = new Set(
-      panes.flatMap((pane) => store.codexAgentInPane(runtime.socket, pane)?.agentId ?? []),
-    );
+    const starting = new Set(terminals.flatMap((t) => store.codexAgentIn(t)?.agentId ?? []));
     this.starting = starting;
-    for (const pane of panes) void this.paneTitleChanged(pane);
+    for (const terminal of terminals) void this.titleChanged(terminal);
     void this.queue.then(() => {
       this.starting = undefined;
       for (const agentId of starting) if (!this.held(agentId)) this.opts.released?.(agentId);
     });
   }
 
-  /** A pane's title changed; resolves once it has been acted on. */
-  paneTitleChanged(pane: string): Promise<void> {
+  /** A terminal's title may have changed; resolves once it has been acted on. */
+  titleChanged(terminal: TerminalId): Promise<void> {
     this.queue = this.queue
-      .then(() => this.follow(pane))
+      .then(() => this.follow(terminal))
       .catch((err: unknown) => {
-        this.log(`codex: following pane ${pane} failed: ${String(err)}`);
+        this.log(`codex: following terminal ${terminal} failed: ${String(err)}`);
         // A move it was waiting on is tried again, or given up, rather than left holding mail.
-        const r = this.resuming.get(pane);
-        if (r !== undefined) this.later(pane, r);
+        const r = this.resuming.get(terminal);
+        if (r !== undefined) this.later(terminal, r);
       });
     return this.queue;
   }
 
-  private async follow(pane: string): Promise<void> {
+  private async follow(terminal: TerminalId): Promise<void> {
     const { store, runtime } = this.opts;
-    this.waiting.delete(pane);
-    const agent = store.codexAgentInPane(runtime.socket, pane);
-    if (agent === undefined) return this.settle(pane);
+    this.waiting.delete(terminal);
+    const agent = store.codexAgentIn(terminal);
+    if (agent === undefined) return this.settle(terminal);
     const title = await runtime.title(agent.runtime);
     // The TUI empties its title as it exits, which names no thread to follow.
-    if (title.trim() === "") return this.settle(pane);
+    if (title.trim() === "") return this.settle(terminal);
     const prefix = titlePrefix(title);
     if (prefix === null) {
-      this.settle(pane);
+      this.settle(terminal);
       return this.untracked(agent.agentId, `its title ${JSON.stringify(title)} names no thread`);
     }
     // Still the same thread, as after `/compact`, or back on it.
     if (agent.threadId.startsWith(prefix)) {
       this.tracked(agent.agentId);
-      return this.settle(pane);
+      return this.settle(terminal);
     }
     let found = matching(prefix, this.seen);
     if (found.length === 0) found = matching(prefix, await this.listed());
     const [threadId] = found;
-    if (threadId === undefined) this.waiting.set(pane, prefix);
+    if (threadId === undefined) this.waiting.set(terminal, prefix);
     if (threadId === undefined || found.length > 1) {
-      this.settle(pane);
+      this.settle(terminal);
       const why = found.length > 1 ? `${found.length} threads` : "no thread";
       return this.untracked(agent.agentId, `${why} match ${prefix}`);
     }
     // One thread, one agent: a /resume of another agent's thread is not a move.
     if (store.codexAgentsOn(threadId).some((id) => id !== agent.agentId)) {
-      this.settle(pane);
+      this.settle(terminal);
       return this.untracked(agent.agentId, `thread ${threadId} is another agent's`);
     }
     // Subscribe first, so nothing the thread sends after the move is missed.
-    if (!(await this.resumed(pane, agent.agentId, threadId))) return;
-    const now = store.codexAgentInPane(runtime.socket, pane);
+    if (!(await this.resumed(terminal, agent.agentId, threadId))) return;
+    const now = store.codexAgentIn(terminal);
     // Closed, or moved again by another title, while the thread was being resumed.
-    if (now?.agentId !== agent.agentId || now.threadId !== agent.threadId) return this.settle(pane);
+    if (now?.agentId !== agent.agentId || now.threadId !== agent.threadId)
+      return this.settle(terminal);
     store.append({
       type: "agent.external_ref_updated",
       entityId: agent.agentId,
@@ -185,49 +184,49 @@ export class CodexThreads {
     });
     this.tracked(agent.agentId);
     // Bound to the new thread now, so held mail goes there.
-    this.settle(pane);
+    this.settle(terminal);
   }
 
   /**
-   * Resumes the thread a pane's title names; false while it waits. One the server can't load
+   * Resumes the thread a terminal's title names; false while it waits. One the server can't load
    * yet, as a `/new` before its first prompt, is tried again later until RESUME_GIVE_UP_MS have
    * passed, and the agent then stays where it is.
    */
-  private async resumed(pane: string, agentId: string, threadId: string): Promise<boolean> {
-    const prior = this.resuming.get(pane);
+  private async resumed(terminal: TerminalId, agentId: string, threadId: string): Promise<boolean> {
+    const prior = this.resuming.get(terminal);
     const r =
       prior?.threadId === threadId
         ? prior
         : { agentId, threadId, since: Date.now(), waitMs: this.opts.retryMs ?? 500 };
-    this.resuming.set(pane, r);
+    this.resuming.set(terminal, r);
     try {
       await this.opts.channel.resume(threadId);
       return true;
     } catch (err) {
       this.log(`codex: thread ${threadId} can't be resumed yet: ${String(err)}`);
-      this.later(pane, r);
+      this.later(terminal, r);
       return false;
     }
   }
 
-  /** Follows the pane again after a wait, or, past the give-up time, leaves the agent be. */
-  private later(pane: string, r: Resuming): void {
+  /** Follows the terminal again after a wait, or, past the give-up time, leaves the agent be. */
+  private later(terminal: TerminalId, r: Resuming): void {
     if (Date.now() - r.since >= (this.opts.giveUpMs ?? RESUME_GIVE_UP_MS)) {
-      this.settle(pane);
+      this.settle(terminal);
       return this.untracked(r.agentId, `thread ${r.threadId} could not be resumed`);
     }
     clearTimeout(r.timer);
-    r.timer = setTimeout(() => void this.paneTitleChanged(pane), r.waitMs);
+    r.timer = setTimeout(() => void this.titleChanged(terminal), r.waitMs);
     r.timer.unref();
     r.waitMs = Math.min(r.waitMs * 2, RESUME_MAX_MS);
   }
 
-  /** The pane waits to move no longer: its agent's held mail may go. */
-  private settle(pane: string): void {
-    const r = this.resuming.get(pane);
+  /** The terminal waits to move no longer: its agent's held mail may go. */
+  private settle(terminal: TerminalId): void {
+    const r = this.resuming.get(terminal);
     if (r === undefined) return;
     clearTimeout(r.timer);
-    this.resuming.delete(pane);
+    this.resuming.delete(terminal);
     this.opts.released?.(r.agentId);
   }
 

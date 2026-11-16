@@ -1036,15 +1036,26 @@ export class Store {
     return { agentId: String(row.id), inCodex: row.state === "queued_in_codex" };
   }
 
-  /** The panes of the running Codex agents on the tmux server at `socket`. */
-  codexPanes(socket: string): string[] {
-    const sql = `SELECT json_extract(t.locator, '$.paneId') AS pane
-                 FROM agent_sessions a JOIN terminals t ON t.id = a.terminal_id
-                 WHERE a.harness = 'codex' AND a.state = 'running'
-                   AND json_extract(t.locator, '$.socket') = ?`;
+  /** The terminals of the running Codex agents, on every runtime. */
+  codexTerminals(): TerminalId[] {
+    const sql = `SELECT terminal_id FROM agent_sessions
+                 WHERE harness = 'codex' AND state = 'running' AND terminal_id IS NOT NULL`;
     return this.prepare(sql)
-      .all(socket)
-      .flatMap((r) => (typeof r.pane === "string" ? [r.pane] : []));
+      .all()
+      .flatMap((r) => {
+        const id = String(r.terminal_id);
+        return isId("term", id) ? [id] : [];
+      });
+  }
+
+  /** The terminal of the running Codex agent in a tmux pane, on the tmux server at `socket`. */
+  codexTerminalInPane(socket: string, pane: string): TerminalId | undefined {
+    const sql = `SELECT t.id FROM agent_sessions a JOIN terminals t ON t.id = a.terminal_id
+                 WHERE a.harness = 'codex' AND a.state = 'running'
+                   AND json_extract(t.locator, '$.socket') = ?
+                   AND json_extract(t.locator, '$.paneId') = ?`;
+    const id = String(this.prepare(sql).get(socket, pane)?.id);
+    return isId("term", id) ? id : undefined;
   }
 
   /** The thread a running Codex agent is bound to, if it is one. */
@@ -1054,19 +1065,15 @@ export class Store {
     return row === undefined ? undefined : String(row.thread);
   }
 
-  /**
-   * The running Codex agent in a tmux pane, on the tmux server at `socket`, with its thread and
-   * its terminal's current incarnation.
-   */
-  codexAgentInPane(socket: string, pane: string) {
+  /** The running Codex agent in a terminal, with its thread and the terminal's incarnation. */
+  codexAgentIn(terminalId: TerminalId) {
     const sql = `SELECT a.id, a.environment_id, json_extract(a.external_ref, '$.id') AS thread,
                         t.id AS terminal_id, t.runtime, t.locator
                  FROM agent_sessions a JOIN terminals t ON t.id = a.terminal_id
                  WHERE a.harness = 'codex' AND a.state = 'running'
                    AND json_extract(a.external_ref, '$.kind') = 'codex-thread'
-                   AND json_extract(t.locator, '$.socket') = ?
-                   AND json_extract(t.locator, '$.paneId') = ?`;
-    const row = this.prepare(sql).get(socket, pane);
+                   AND t.id = ?`;
+    const row = this.prepare(sql).get(terminalId);
     const runtime = row === undefined ? null : refFrom(row.terminal_id, row);
     if (row === undefined || runtime === null) return undefined;
     const environmentId = String(row.environment_id);

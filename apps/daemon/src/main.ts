@@ -301,11 +301,10 @@ const runtime = new RoutedRuntime({
   defaultKind: config.defaultRuntime,
   onError: (err: unknown) => console.warn("runtime:", err),
 });
-// Follows Codex TUIs from thread to thread, by their panes' titles (§5.8).
+// Follows Codex TUIs from thread to thread, by their terminals' titles (§5.8).
 const codexThreads = new CodexThreads({
   store,
-  // Only tmux panes carry the titles it follows.
-  runtime: tmux,
+  runtime,
   channel: {
     request: (method, params) => codex.request(method, params),
     resume: (threadId) => codex.resume(threadId),
@@ -402,6 +401,8 @@ const foreground = new ForegroundWatch({ store, environment });
 // A title that changed while the daemon was down, or a move it was waiting on, is read again;
 // until it has been, those agents' mail waits, so none goes to a thread the TUI has left.
 codexThreads.followAll();
+// tmux's titles reach the daemon by its hook, through the socket; a holder's, from the holder.
+const stopTitles = holderRuntime.onTitle((terminal) => void codexThreads.titleChanged(terminal));
 // The Codex agents' threads lost their subscriber with the last daemon (§7 step 4).
 codex.keepConnected();
 const lifecycle = new Lifecycle(store, environment, queue, {
@@ -624,7 +625,10 @@ const socketListener = getRequestListener(
             fingerprint: lanCert.fingerprint,
             expiresAt: lanCert.notAfter.toISOString(),
           },
-    paneTitleChanged: (pane) => void codexThreads.paneTitleChanged(pane),
+    paneTitleChanged: (pane) => {
+      const terminal = store.codexTerminalInPane(tmux.socket, pane);
+      if (terminal !== undefined) void codexThreads.titleChanged(terminal);
+    },
     shellReport: (terminalId, report) => shellReports.report(terminalId, report),
     shellPrompt: (terminalId, report) => shellReports.prompt(terminalId, report),
     refreshEnv: async (env) => {
@@ -724,6 +728,7 @@ function shutdown(reason: NodeJS.Signals | "requested") {
   lanServer?.close();
   socketServer.close();
   codex.close();
+  stopTitles();
   store.close();
   console.log(`bazhen daemon stopped (${reason})`);
   process.exit(0);
