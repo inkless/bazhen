@@ -129,6 +129,9 @@ describe("kills by a process started to send them", () => {
   it("fails closed on a kill program cut by quotes, or an operand in quotes or a substitution", () => {
     const shells = [
       "time kill > x -9 -1",
+      "time pkill node",
+      "coproc killall node",
+      'x pkill "$(pgrep -f y)"',
       "coproc kill > x -9 -1",
       "time -p kill > x -9 -1",
       "kill > x -9 -1",
@@ -171,6 +174,7 @@ describe("kills by a process started to send them", () => {
       'kill $pid "`echo -1"',
       "kill $pid '-1",
       "kill' -9 -1",
+      "echo x'kill -9 -1",
       'echo "x; kill -9 -1',
       "it's a kill -9 -1",
     ];
