@@ -123,7 +123,7 @@ export const EVENTS = {
   /**
    * The agent's harness showed its first sign of life since the agent last started, so the agent
    * is running, not only its terminal: a hook of its own Claude Code session, or the Codex TUI's
-   * title naming its thread (protocol 1.57).
+   * title naming its thread.
    */
   "agent.ready": {
     entity: "agent",

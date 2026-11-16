@@ -60,7 +60,7 @@ export type ObservedMessage = z.infer<typeof ObservedMessage>;
  * What an item is about (foundation-design §4.6): a harness asking to run a tool, a question
  * the agent asked, a turn that failed, mail that could not be delivered, something the agent or
  * a task raised for the human, or an agent whose harness hasn't come up, as when its TUI shows
- * a dialog only the human can answer in its terminal (`stuck_starting`, protocol 1.57).
+ * a dialog only the human can answer in its terminal (`stuck_starting`).
  */
 export const AttentionKind = z.enum([
   "approval",
