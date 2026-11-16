@@ -11,7 +11,7 @@ const Handoff = z.strictObject({
 });
 
 /** What Bazhen sets for each agent: started from inside one, the daemon must not carry it. */
-const PER_AGENT = new Set(["BAZHEN_AGENT_ID", "BAZHEN_SOCKET"]);
+const PER_AGENT = new Set(["BAZHEN_AGENT_ID", "BAZHEN_AGENT_AUTH_FILE", "BAZHEN_SOCKET"]);
 
 export interface Capture {
   /** What every agent starts with (foundation-design §9.5). */

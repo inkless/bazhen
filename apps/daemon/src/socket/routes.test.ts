@@ -4,6 +4,7 @@ import { newId } from "@bazhen/core";
 import { PairingCodeResponse, type Device, type DoctorResponse } from "@bazhen/protocol";
 import type { AppEnv } from "../http/app.ts";
 import { UnknownDevice } from "../store/store.ts";
+import { AGENT_OPEN, HUMANS_ONLY, SELF_IDENTIFIED } from "../auth/callers.ts";
 import { socketApp, type SocketParts } from "./routes.ts";
 
 const report: DoctorResponse = {
@@ -40,6 +41,13 @@ const devices = {
     revoked.push(id);
   },
 };
+/** One agent with a token; any other agent was started before agents had them. */
+const tokened = newId("agent");
+const TOKEN = "t".repeat(43);
+const credentials: SocketParts["credentials"] = {
+  agentOf: (token) => (token === TOKEN ? tokened : undefined),
+  untokened: (agentId) => agentId !== tokened,
+};
 const pairing = {
   issue: () => ({ code: "ABCD2345", expiresAt: new Date("2026-11-12T00:05:00.000Z") }),
 };
@@ -63,6 +71,7 @@ function app(
   return socketApp({
     commands,
     hooks,
+    credentials,
     stop: () => undefined,
     doctor,
     refreshEnv,
@@ -78,6 +87,30 @@ function app(
 
 const act = (action: string, headers: Record<string, string>) =>
   app().request(`/v1/attention/attn_x/${action}`, { method: "POST", headers });
+
+/** Every route `on` serves, once each. */
+function routesOf(on: ReturnType<typeof app>): { method: string; path: string }[] {
+  const routes = new Map<string, { method: string; path: string }>();
+  for (const { method, path } of on.routes)
+    if (method !== "ALL") routes.set(`${method} ${path}`, { method, path });
+  return [...routes.values()];
+}
+
+/** One call on a route of `on`, its `:id` filled in, with an empty environment unless a GET. */
+const callOn = (
+  on: ReturnType<typeof app>,
+  route: { method: string; path: string },
+  headers: Record<string, string>,
+) =>
+  on.request(route.path.replaceAll(":id", "x_1"), {
+    method: route.method,
+    headers,
+    ...(route.method === "GET" ? {} : { body: JSON.stringify({ env: {} }) }),
+  });
+
+/** A route in neither the agents' list nor the hooks': the human's alone. */
+const humansAlone = (route: { path: string }) =>
+  !AGENT_OPEN.includes(route.path) && !SELF_IDENTIFIED.includes(route.path);
 
 const answer = (headers: Record<string, string> = {}) =>
   app().request("/v1/attention/attn_x/answer", { method: "POST", headers });
@@ -207,6 +240,56 @@ describe("socketApp", () => {
   it("refuses an approval answer from a caller that says it is an agent", async () => {
     const res = await answer({ "bazhen-agent-id": "agent_x" });
     expect([res.status, (await res.json()).error]).toEqual([403, "forbidden"]);
+  });
+
+  it("refuses a token that is no live agent's on every route but the hooks, which answer for themselves", async () => {
+    const daemon = app();
+    const routes = routesOf(daemon);
+    const bad = { "bazhen-agent-token": "u".repeat(43) };
+    const refused = await Promise.all(
+      routes.map(async (r) => [r.path, (await callOn(daemon, r, bad)).status === 403]),
+    );
+    expect(routes.length).toBeGreaterThan(10);
+    expect(refused).toEqual(routes.map((r) => [r.path, !r.path.startsWith("/v1/hooks")]));
+  });
+
+  it("puts every route it serves in exactly one of the agents', the human's and the hooks' lists", () => {
+    const humans = HUMANS_ONLY.map(([path]) => path);
+    const routes = routesOf(app());
+    const lists = routes.map((r) => [
+      r.path,
+      [AGENT_OPEN, humans, SELF_IDENTIFIED].filter((list) => list.includes(r.path)).length,
+    ]);
+    expect(lists).toEqual(routes.map((r) => [r.path, 1]));
+  });
+
+  it("refuses an agent with its token every route outside the agents' and the hooks' lists", async () => {
+    const daemon = app();
+    const routes = routesOf(daemon).filter(humansAlone);
+    const asAgent = { "bazhen-agent-token": TOKEN };
+    const statuses = await Promise.all(
+      routes.map(async (r) => [r.path, (await callOn(daemon, r, asAgent)).status]),
+    );
+    expect(routes.map((r) => r.path)).toEqual(
+      expect.arrayContaining(["/v1/pairing/codes", "/v1/devices/:id/revoke", "/v1/daemon/env"]),
+    );
+    expect(statuses).toEqual(routes.map((r) => [r.path, 403]));
+  });
+
+  it("refuses an approval answer from an agent that proves itself with its token", async () => {
+    const res = await answer({ "bazhen-agent-token": TOKEN });
+    expect([res.status, (await res.json()).message]).toEqual([
+      403,
+      "an agent can't answer an attention item",
+    ]);
+  });
+
+  it("refuses an approval answer from a caller whose agent token is no live agent's", async () => {
+    const res = await answer({ "bazhen-agent-token": "u".repeat(43) });
+    expect([res.status, (await res.json()).message]).toEqual([
+      403,
+      "an agent can't answer an attention item: the agent token is no live agent's",
+    ]);
   });
 
   it("issues a pairing code with the addresses to open, to a caller that isn't an agent", async () => {

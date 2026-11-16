@@ -11,7 +11,12 @@ import {
   type Caller,
 } from "@bazhen/core";
 import { FakeRuntime } from "@bazhen/core/testing";
-import { PROTOCOL_VERSION, RolesResponse, type LaunchAgentRequest } from "@bazhen/protocol";
+import {
+  ErrorResponse,
+  PROTOCOL_VERSION,
+  RolesResponse,
+  type LaunchAgentRequest,
+} from "@bazhen/protocol";
 import { EnvironmentUnavailable, ServerUnconfirmed, StaleGeneration } from "../agents/lifecycle.ts";
 import { HolderUnservable } from "../commands.ts";
 import { AttentionClosed } from "../mailbox/approvals.ts";
@@ -23,7 +28,9 @@ import { NoticeClosed, NoticeRefused, type Viewer } from "../attention/notices.t
 import { TerminalLimit } from "../terminals/budget.ts";
 import { NameTaken } from "../agents/names.ts";
 import { UnknownAgent } from "../store/store.ts";
-import { createApp, type AppDeps, type TaskCommands } from "./app.ts";
+import { Hono } from "hono";
+import { AGENT_OPEN, guardCallers, HUMANS_ONLY, type AgentCredentials } from "../auth/callers.ts";
+import { createApp, type AppDeps, type AppEnv, type TaskCommands } from "./app.ts";
 
 const runtime = new FakeRuntime();
 
@@ -73,6 +80,14 @@ const tasks: TaskCommands = {
 };
 /** The viewer and advisory device each notice dismissal reached the handler with. */
 const seenDismissals: [Viewer, string | undefined][] = [];
+
+/** One agent with a token, by it; any other agent was started before agents had them. */
+const tokenedAgent = newId("agent");
+const AGENT_TOKEN = "t".repeat(43);
+const credentials: AgentCredentials = {
+  agentOf: (token) => (token === AGENT_TOKEN ? tokenedAgent : undefined),
+  untokened: (id) => id !== tokenedAgent,
+};
 
 const deps: AppDeps = {
   appVersion: "0.1.0",
@@ -183,7 +198,10 @@ const deps: AppDeps = {
 };
 const restarts: unknown[] = [];
 const app = createApp(deps);
-const socket = createApp({ ...deps, allow: null });
+/** The commands as the socket serves them: behind its guard, which says who called. */
+const socket = new Hono<AppEnv>();
+guardCallers(socket, credentials);
+socket.route("/", createApp({ ...deps, allow: null }));
 
 const host = "127.0.0.1:7900";
 
@@ -483,6 +501,73 @@ const createTask = (on: typeof app, title: string, headers: Record<string, strin
     body: JSON.stringify({ idempotencyKey: `t-${title}`, title, brief: "b" }),
   });
 
+/** Every command route the socket serves, once each, with its path's `:id` filled in. */
+/** Every command route the socket serves, once each. */
+function socketRoutes(): { method: string; path: string }[] {
+  const routes = new Map<string, { method: string; path: string }>();
+  for (const { method, path } of socket.routes)
+    if (method !== "ALL" && path.startsWith("/v1/"))
+      routes.set(`${method} ${path}`, { method, path });
+  return [...routes.values()];
+}
+/** One call on a route, its `:id` filled in, with a body unless it is a GET. */
+const call = (route: { method: string; path: string }, headers: Record<string, string>) =>
+  socket.request(route.path.replaceAll(":id", "x_1"), {
+    method: route.method,
+    headers: { "content-type": "application/json", ...headers },
+    ...(route.method === "GET" ? {} : { body: "{}" }),
+  });
+
+describe("socket callers", () => {
+  it("refuses a caller with a token that is no live agent's on every command route", async () => {
+    const routes = socketRoutes();
+    const bad = { "bazhen-agent-token": "u".repeat(43) };
+    const statuses = await Promise.all(routes.map(async (r) => (await call(r, bad)).status));
+    expect(routes).toEqual(
+      expect.arrayContaining([
+        { method: "POST", path: "/v1/agents" },
+        { method: "GET", path: "/v1/state" },
+      ]),
+    );
+    expect(statuses).toEqual(routes.map(() => 403));
+  });
+
+  it("puts every command route in exactly one of the agents' list and the human's", () => {
+    const humans = HUMANS_ONLY.map(([path]) => path);
+    const lists = socketRoutes().map((r) => [
+      r.path,
+      Number(AGENT_OPEN.includes(r.path)) + Number(humans.includes(r.path)),
+    ]);
+    expect(lists).toEqual(socketRoutes().map((r) => [r.path, 1]));
+  });
+
+  it("refuses an agent a route nobody classified, and takes the human's call", async () => {
+    const guarded = new Hono<AppEnv>();
+    guardCallers(guarded, credentials);
+    guarded.post("/v1/unclassified", (c) => c.json({}));
+    const as = (headers: Record<string, string>) =>
+      guarded.request("/v1/unclassified", { method: "POST", headers });
+    const statuses = [
+      (await as({ "bazhen-agent-token": AGENT_TOKEN })).status,
+      (await as({})).status,
+    ];
+    expect(statuses).toEqual([403, 200]);
+  });
+
+  it("refuses an agent with its token every command route outside the agents' list", async () => {
+    const routes = socketRoutes().filter((r) => !AGENT_OPEN.includes(r.path));
+    const asAgent = { "bazhen-agent-token": AGENT_TOKEN };
+    const replies = await Promise.all(
+      routes.map(async (r) => {
+        const res = await call(r, asAgent);
+        const { message } = ErrorResponse.parse(await res.json());
+        return [r.path, res.status, message.startsWith("an agent can't")];
+      }),
+    );
+    expect(replies).toEqual(routes.map((r) => [r.path, 403, true]));
+  });
+});
+
 describe("HTTP task routes", () => {
   it("takes a socket caller that names its agent as that agent", async () => {
     const res = await createTask(socket, "mine", { "bazhen-agent-id": agentId });
@@ -520,7 +605,43 @@ describe("HTTP task routes", () => {
 
   it("refuses a socket caller whose agent id is malformed", async () => {
     const res = await createTask(socket, "bad", { "bazhen-agent-id": "%3" });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(403);
+  });
+
+  it("takes a socket caller with an agent's token as that agent, naming it or not", async () => {
+    const token = { "bazhen-agent-token": AGENT_TOKEN };
+    const named = { ...token, "bazhen-agent-id": tokenedAgent };
+    const statuses = [
+      (await createTask(socket, "token", token)).status,
+      (await createTask(socket, "token-named", named)).status,
+    ];
+    expect([statuses, callers.slice(-2)]).toEqual([
+      [200, 200],
+      [tokenedAgent, tokenedAgent],
+    ]);
+  });
+
+  it("refuses a socket caller that names an agent with a token and doesn't present it", async () => {
+    const before = callers.length;
+    const res = await createTask(socket, "untokened", { "bazhen-agent-id": tokenedAgent });
+    expect([res.status, (await res.json()).error, callers.length]).toEqual([
+      403,
+      "forbidden",
+      before,
+    ]);
+  });
+
+  it("refuses a socket caller whose agent token is another agent's than the one it names", async () => {
+    const res = await createTask(socket, "other", {
+      "bazhen-agent-token": AGENT_TOKEN,
+      "bazhen-agent-id": agentId,
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("refuses a socket caller whose agent token is no live agent's, naming no agent", async () => {
+    const res = await createTask(socket, "stale", { "bazhen-agent-token": "u".repeat(43) });
+    expect(res.status).toBe(403);
   });
 
   it("tells a command the caller may not give from one nobody may give now", async () => {
@@ -533,7 +654,7 @@ describe("HTTP task routes", () => {
 
   it("refuses a socket caller that gives its name in place of its id", async () => {
     const res = await createTask(socket, "named", { "bazhen-agent-id": "BZ-127" });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(403);
   });
 
   it("lists the roles in force and the role files skipped, to an agent on the socket too", async () => {

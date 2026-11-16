@@ -10,6 +10,7 @@ import {
   quietStartAgain,
   testView,
   unlimited,
+  untokened,
   withAgent,
 } from "../testing/fixtures.ts";
 import { launchAgent, localEnvironmentId } from "./launch.ts";
@@ -46,7 +47,15 @@ const stateOf = (store: Store, agentId: string) =>
 
 const launch = (store: Store, environment: EnvironmentAdapter, queue: AgentQueue, key: string) =>
   launchAgent(
-    { store, environment, size: { cols: 80, rows: 24 }, home: tmpdir(), queue, budget: unlimited },
+    {
+      store,
+      environment,
+      size: { cols: 80, rows: 24 },
+      home: tmpdir(),
+      queue,
+      budget: unlimited,
+      tokens: untokened,
+    },
     { idempotencyKey: key, harness: "claude-code", cwd: "~" },
   );
 

@@ -91,6 +91,8 @@ export interface AgentLaunch {
   readonly size: Size;
   /** The runtime its terminal is created on, as its launch recorded; the default when none. */
   readonly runtime?: string;
+  /** The file holding the token this start of the agent proves itself with. */
+  readonly tokenFile: string;
 }
 
 /** A respawn: the agent as recorded, and the generation its terminal's new incarnation takes. */
@@ -100,6 +102,8 @@ export interface AgentRespawn {
   readonly options: LaunchOptions;
   readonly refs: AgentRefs;
   readonly generation: number;
+  /** As a launch's: the token file this start runs with. */
+  readonly tokenFile: string;
 }
 
 /** What now runs the agent: its terminal's incarnation and its harness session, where known. */

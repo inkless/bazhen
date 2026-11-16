@@ -24,7 +24,7 @@ async function seenInP1() {
   const { store, agentId } = await withAgent();
   const mailbox = new Mailbox(store);
   const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
-  mailbox.ack((await mailbox.wait(agentId, live())).offered);
+  mailbox.ack(agentId, (await mailbox.wait(agentId, live())).offered);
   mailbox.promptStarted(agentId, `Message for you from Bazhen (${messageId}):`, "p-1");
   const requeues = () =>
     store
@@ -68,12 +68,23 @@ describe("mailbox", () => {
     expect(reply.stderr).toContain(`(${messageId}):\nhello`);
   });
 
+  it("confirms nothing for an ack of an offer made to another agent", async () => {
+    const { store, agentId } = await withAgent();
+    const mailbox = new Mailbox(store);
+    const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
+    const { offered } = await mailbox.wait(agentId, live());
+    mailbox.ack(newId("agent"), offered);
+    expect(stateOf(store, messageId)).toBe("offered");
+    mailbox.ack(agentId, offered);
+    expect(stateOf(store, messageId)).toBe("emitted");
+  });
+
   it("confirms a message through its ack, the prompt that carries it, and that prompt's end", async () => {
     const { store, agentId } = await withAgent();
     const mailbox = new Mailbox(store);
     const first = mailbox.send(agentId, { idempotencyKey: "m1", body: "hello" }).messageId;
     const other = mailbox.send(agentId, { idempotencyKey: "m2", body: "later" }).messageId;
-    mailbox.ack((await mailbox.wait(agentId, live())).offered);
+    mailbox.ack(agentId, (await mailbox.wait(agentId, live())).offered);
     mailbox.promptStarted(agentId, `Message for you from Bazhen (${first}):`, "p-1");
     expect([stateOf(store, first), stateOf(store, other)]).toEqual(["seen", "emitted"]);
     mailbox.turnEnded(agentId, "p-1");
@@ -90,10 +101,10 @@ describe("mailbox", () => {
     const { store, agentId } = await withAgent();
     const mailbox = new Mailbox(store);
     const dropped = mailbox.send(agentId, { idempotencyKey: "m1", body: "the real one" }).messageId;
-    mailbox.ack((await mailbox.wait(agentId, live())).offered);
+    mailbox.ack(agentId, (await mailbox.wait(agentId, live())).offered);
     const quoting = mailbox.send(agentId, { idempotencyKey: "m2", body: bodyFor(dropped) });
     const wake = await mailbox.wait(agentId, live());
-    mailbox.ack(wake.offered);
+    mailbox.ack(agentId, wake.offered);
     mailbox.promptStarted(agentId, claudeCodeWake(wake.stderr), "p-1");
     mailbox.turnEnded(agentId, "p-1");
     mailbox.turnEnded(agentId, "p-2");
@@ -153,7 +164,7 @@ describe("mailbox", () => {
     });
     const mailbox = new Mailbox(store);
     const seen = mailbox.send(agentId, { idempotencyKey: "m1", body: "first" }).messageId;
-    mailbox.ack((await mailbox.wait(agentId, live())).offered);
+    mailbox.ack(agentId, (await mailbox.wait(agentId, live())).offered);
     mailbox.promptStarted(agentId, `Message for you from Bazhen (${seen}):`, "p-1");
     const offered = mailbox.send(agentId, { idempotencyKey: "m2", body: "second" }).messageId;
     await mailbox.wait(agentId, live());
@@ -210,7 +221,7 @@ describe("mailbox", () => {
     expect(stateOf(store, messageId)).toBe("queued");
     const fresh = await mailbox.wait(agentId, live());
     expect(idsIn(fresh)).toEqual([messageId]);
-    mailbox.ack(fresh.offered);
+    mailbox.ack(agentId, fresh.offered);
     // The first offer's ack deadline went with it, so it can't requeue the second offer.
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(stateOf(store, messageId)).toBe("emitted");
@@ -225,7 +236,7 @@ describe("mailbox", () => {
     const fresh = await mailbox.wait(agentId, live());
     expect(idsIn(fresh)).toEqual([messageId]);
     // The old session's client acks late; the new offer is still unwritten.
-    mailbox.ack(old.offered);
+    mailbox.ack(agentId, old.offered);
     expect(stateOf(store, messageId)).toBe("offered");
     // Its own deadline still stands: unwritten, it goes back to the queue.
     await expect.poll(() => stateOf(store, messageId)).toBe("queued");
@@ -236,7 +247,7 @@ describe("mailbox", () => {
     const mailbox = new Mailbox(store);
     const woken = mailbox.send(agentId, { idempotencyKey: "m1", body: "hello" }).messageId;
     const lost = mailbox.send(agentId, { idempotencyKey: "m2", body: "lost" }).messageId;
-    mailbox.ack((await mailbox.wait(agentId, live())).offered);
+    mailbox.ack(agentId, (await mailbox.wait(agentId, live())).offered);
     // The turn under way when the wake landed ends first; the wake starts the next one.
     mailbox.turnEnded(agentId, "p-running");
     expect([stateOf(store, woken), stateOf(store, lost)]).toEqual(["emitted", "emitted"]);
@@ -289,10 +300,10 @@ describe("mailbox", () => {
     const { store, agentId } = await withAgent();
     const mailbox = new Mailbox(store);
     const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
-    mailbox.ack((await mailbox.wait(agentId, live())).offered);
+    mailbox.ack(agentId, (await mailbox.wait(agentId, live())).offered);
     mailbox.turnEnded(agentId, "p-1");
     mailbox.sessionStarted(agentId);
-    mailbox.ack((await mailbox.wait(agentId, live())).offered);
+    mailbox.ack(agentId, (await mailbox.wait(agentId, live())).offered);
     // One turn end since it was written again: not yet the second.
     mailbox.turnEnded(agentId, "p-2");
     expect(stateOf(store, messageId)).toBe("emitted");
@@ -306,13 +317,13 @@ describe("mailbox", () => {
     const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
     const failTurn = async (promptId: string) => {
       expect(stateOf(store, messageId)).toBe("queued");
-      mailbox.ack((await mailbox.wait(agentId, live())).offered);
+      mailbox.ack(agentId, (await mailbox.wait(agentId, live())).offered);
       mailbox.promptStarted(agentId, `Message for you from Bazhen (${messageId}):`, promptId);
       mailbox.turnFailed(agentId, promptId);
     };
     for (let attempt = 1; attempt < MAX_FAILURES; attempt++) await failTurn(`p-${attempt}`);
     // A requeue the daemon causes, here a session starting over, never uses up an attempt.
-    mailbox.ack((await mailbox.wait(agentId, live())).offered);
+    mailbox.ack(agentId, (await mailbox.wait(agentId, live())).offered);
     mailbox.sessionStarted(agentId);
     await failTurn("p-last");
     expect(stateOf(store, messageId)).toBe("undeliverable");
@@ -333,7 +344,7 @@ describe("mailbox", () => {
     const { store, agentId } = await withAgent();
     const mailbox = new Mailbox(store, { unseenDeadlineMs: 20 });
     const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
-    mailbox.ack((await mailbox.wait(agentId, live())).offered);
+    mailbox.ack(agentId, (await mailbox.wait(agentId, live())).offered);
     await expect.poll(() => stateOf(store, messageId)).toBe("queued");
   });
 
@@ -342,7 +353,7 @@ describe("mailbox", () => {
     const mailbox = new Mailbox(store, { unseenDeadlineMs: 20 });
     mailbox.promptStarted(agentId, "a long task", "p-1");
     const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
-    mailbox.ack((await mailbox.wait(agentId, live())).offered);
+    mailbox.ack(agentId, (await mailbox.wait(agentId, live())).offered);
     await new Promise((resolve) => setTimeout(resolve, 60));
     expect(stateOf(store, messageId)).toBe("emitted");
     mailbox.turnEnded(agentId, "p-1");
@@ -354,7 +365,7 @@ describe("mailbox", () => {
     const { store, agentId } = await withAgent();
     const mailbox = new Mailbox(store, { unseenDeadlineMs: 20 });
     const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
-    mailbox.ack((await mailbox.wait(agentId, live())).offered);
+    mailbox.ack(agentId, (await mailbox.wait(agentId, live())).offered);
     // A dialog held the wake back; it went back to the queue with no waiter to take it.
     await expect.poll(() => stateOf(store, messageId)).toBe("queued");
     mailbox.promptStarted(agentId, `Message for you from Bazhen (${messageId}):`, "p-1");
@@ -367,7 +378,7 @@ describe("mailbox", () => {
     const { store, agentId } = await withAgent();
     const mailbox = new Mailbox(store, { ackDeadlineMs: 20, unseenDeadlineMs: 20 });
     const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
-    mailbox.ack((await mailbox.wait(agentId, live())).offered);
+    mailbox.ack(agentId, (await mailbox.wait(agentId, live())).offered);
     const waiting = mailbox.wait(agentId, live());
     await waiting;
     expect(stateOf(store, messageId)).toBe("offered");
@@ -382,7 +393,7 @@ describe("mailbox", () => {
     const mailbox = new Mailbox(store);
     const seen = mailbox.send(agentId, { idempotencyKey: "m1", body: "hello" }).messageId;
     const later = mailbox.send(agentId, { idempotencyKey: "m2", body: "later" }).messageId;
-    mailbox.ack((await mailbox.wait(agentId, live())).offered);
+    mailbox.ack(agentId, (await mailbox.wait(agentId, live())).offered);
     mailbox.promptStarted(agentId, `Message for you from Bazhen (${seen}):`, "p-1");
     // The Stop report and the waiter beside it both say p-1 ended.
     mailbox.turnEnded(agentId, "p-1");
@@ -398,7 +409,7 @@ describe("mailbox", () => {
     const mailbox = new Mailbox(store, { unseenDeadlineMs: 20 });
     mailbox.promptStarted(agentId, "a task", "p-1");
     const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
-    mailbox.ack((await mailbox.wait(agentId, live())).offered);
+    mailbox.ack(agentId, (await mailbox.wait(agentId, live())).offered);
     await expect.poll(() => stateOf(store, messageId)).toBe("queued");
   });
 
@@ -418,7 +429,7 @@ describe("mailbox", () => {
         },
       },
     ]);
-    mailbox.ack(folded.offered);
+    mailbox.ack(agentId, folded.offered);
     expect(stateOf(store, messageId)).toBe("emitted");
     mailbox.turnEnded(agentId, "p-1");
     expect(stateOf(store, messageId)).toBe("delivered");
@@ -434,7 +445,7 @@ describe("mailbox", () => {
     const { store, agentId } = await withAgent();
     const mailbox = new Mailbox(store);
     const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
-    mailbox.ack(mailbox.fold(agentId, "p-1").offered);
+    mailbox.ack(agentId, mailbox.fold(agentId, "p-1").offered);
     mailbox.turnFailed(agentId, "p-1");
     expect(stateOf(store, messageId)).toBe("queued");
   });
@@ -467,7 +478,7 @@ describe("mailbox", () => {
     const mailbox = new Mailbox(store, { unseenDeadlineMs: 5 });
     mailbox.promptStarted(agentId, "a long task", "p-1");
     const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
-    mailbox.ack(mailbox.fold(agentId, "p-1").offered);
+    mailbox.ack(agentId, mailbox.fold(agentId, "p-1").offered);
     // Past several deadlines, and their cap.
     await new Promise((resolve) => setTimeout(resolve, 80));
     expect(stateOf(store, messageId)).toBe("emitted");
@@ -480,9 +491,9 @@ describe("mailbox", () => {
     const mailbox = new Mailbox(store);
     mailbox.promptStarted(agentId, "a long task", "p-1");
     const folded = mailbox.send(agentId, { idempotencyKey: "m1", body: "folded" }).messageId;
-    mailbox.ack(mailbox.fold(agentId, "p-1").offered);
+    mailbox.ack(agentId, mailbox.fold(agentId, "p-1").offered);
     const woken = mailbox.send(agentId, { idempotencyKey: "m2", body: "woken" }).messageId;
-    mailbox.ack((await mailbox.wait(agentId, live())).offered);
+    mailbox.ack(agentId, (await mailbox.wait(agentId, live())).offered);
     mailbox.sessionStarted(agentId, true);
     expect([stateOf(store, folded), stateOf(store, woken)]).toEqual(["emitted", "queued"]);
   });
@@ -492,7 +503,7 @@ describe("mailbox", () => {
     const mailbox = new Mailbox(store);
     mailbox.promptStarted(agentId, "do the thing", "p-1");
     const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
-    mailbox.ack(mailbox.fold(agentId, "p-1").offered);
+    mailbox.ack(agentId, mailbox.fold(agentId, "p-1").offered);
     mailbox.promptStarted(agentId, "something else", "p-2");
     expect(stateOf(store, messageId)).toBe("queued");
   });
@@ -501,7 +512,7 @@ describe("mailbox", () => {
     const { store, agentId } = await withAgent();
     const mailbox = new Mailbox(store, { unseenDeadlineMs: 20 });
     const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
-    mailbox.ack((await mailbox.wait(agentId, live())).offered);
+    mailbox.ack(agentId, (await mailbox.wait(agentId, live())).offered);
     await expect.poll(() => stateOf(store, messageId)).toBe("queued");
     mailbox.promptStarted(agentId, `did you get ${messageId}?`, "p-1");
     expect(stateOf(store, messageId)).toBe("queued");
@@ -524,7 +535,7 @@ describe("a closed agent's mail", () => {
     const mailbox = new Mailbox(store);
     mailbox.follow();
     mailbox.send(agentId, { idempotencyKey: "written", body: "hello" });
-    mailbox.ack((await mailbox.wait(agentId, live())).offered);
+    mailbox.ack(agentId, (await mailbox.wait(agentId, live())).offered);
     mailbox.send(agentId, { idempotencyKey: "unwritten", body: "again" });
     await mailbox.wait(agentId, live());
     let released: number | undefined;

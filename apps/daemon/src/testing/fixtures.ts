@@ -1,6 +1,7 @@
 // Shared fixtures for the daemon's medium tests: a store on a temporary file and a fake local
 // environment, so each test states only what it changes.
 
+import type { AgentCredentials, AgentTokenIssuer } from "../auth/callers.ts";
 import type { DeviceGate } from "../auth/devices.ts";
 import { mkdtempSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -65,11 +66,27 @@ export const storeBudget = (store: Store, max: number) =>
     warn: () => {},
   });
 
+/**
+ * Gives agents no token, as they had before agents had tokens, so each is known by the id it
+ * names: for tests where tokens aren't what is tested.
+ */
+export const untokened: AgentTokenIssuer = {
+  mint: () => ({ file: "/nonexistent/agent.token", kept: () => {}, abandoned: () => {} }),
+  forget: () => {},
+};
+
+/** Every agent is one from before agents had tokens, known by the id it names. */
+export const untokenedCredentials: AgentCredentials = {
+  agentOf: () => undefined,
+  untokened: () => true,
+};
+
 /** What starting an agent again needs, for a test that doesn't look at it. */
 export const quietStartAgain = {
   size: { cols: 80, rows: 24 },
   replaced: () => {},
   budget: unlimited,
+  tokens: untokened,
 };
 
 export const tempDb = () => join(mkdtempSync(join(tmpdir(), "bz-store-")), "bazhen.db");
@@ -139,6 +156,7 @@ export async function withAgent(
       home: tmpdir(),
       queue: new AgentQueue(),
       budget: unlimited,
+      tokens: untokened,
     },
     { idempotencyKey: "launch", harness: "claude-code", cwd: "~" },
   );
@@ -279,6 +297,7 @@ export async function withCodexAgents(...threads: (string | null)[]) {
         home: tmpdir(),
         queue: new AgentQueue(),
         budget: unlimited,
+        tokens: untokened,
       },
       { idempotencyKey: `codex-${String(threadId)}`, harness: "codex", cwd: "~" },
     );
@@ -316,6 +335,7 @@ export async function taskFleet(
     home: tmpdir(),
     queue: new AgentQueue(),
     budget: unlimited,
+    tokens: untokened,
   };
   const launch = async (key: string) => {
     const { agentId } = await launchAgent(deps, {
@@ -333,6 +353,7 @@ export async function taskFleet(
   const delegating = {
     ...deps,
     budget: storeBudget(store, maxOpen),
+    tokens: untokened,
     ...(delegated === undefined ? {} : { environment: fakeEnvironment(store, delegated) }),
   };
   const launcher = {

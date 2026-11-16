@@ -12,7 +12,13 @@ import { TmuxServer, findNotifySend, hostPtyReader } from "@bazhen/host-guard";
 import { PROTOCOL_VERSION } from "@bazhen/protocol";
 import { HolderRuntime, installHolder, pruneUnusedHolders } from "@bazhen/runtime-holder";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
-import { launchAgent, launchSettled, localEnvironmentId } from "./agents/launch.ts";
+import {
+  launchAgent,
+  launchSettled,
+  localEnvironmentId,
+  type LaunchDeps,
+} from "./agents/launch.ts";
+import { AgentTokens } from "./auth/callers.ts";
 import { Lifecycle } from "./agents/lifecycle.ts";
 import { renameAgent } from "./agents/names.ts";
 import { AgentQueue } from "./agents/queue.ts";
@@ -107,6 +113,8 @@ if (await answers(paths.socket)) {
 let captured = { ...capture(process.env, config.envRules), source: "start" as "start" | "refresh" };
 const hostEnv = captured.env;
 const store = storeOrExit(join(paths.data, "bazhen.db"));
+const agentTokens = new AgentTokens(store, join(paths.run, "agents"), inputs.uid);
+agentTokens.sweep();
 const budget = new TerminalBudget({
   max: config.maxOpenTerminals,
   open: () => store.openTerminals(),
@@ -139,12 +147,7 @@ const taskService = new Tasks(
   mailbox,
   (raised) => inbox.raise(raised),
   {
-    launch: (req, launchedBy) =>
-      launchSettled(
-        { store, environment, size: DEFAULT_SIZE, home: inputs.home, queue, budget },
-        req,
-        launchedBy,
-      ),
+    launch: (req, launchedBy) => launchSettled(launchDeps, req, launchedBy),
     ...config.launchLimits,
   },
   () => roles.current().book,
@@ -311,6 +314,15 @@ await reconcile(store, environment);
 // What a Claude Code agent was doing went with the last daemon's memory (foundation-design §4.6).
 const activity = new ActivityTracker((agentId, a) => store.recordActivity(agentId, a));
 const queue = new AgentQueue();
+const launchDeps: LaunchDeps = {
+  store,
+  environment,
+  size: DEFAULT_SIZE,
+  home: inputs.home,
+  queue,
+  budget,
+  tokens: agentTokens,
+};
 const integration = shellIntegration();
 const shells = new ShellLifecycle({
   store,
@@ -344,6 +356,7 @@ codex.keepConnected();
 const lifecycle = new Lifecycle(store, environment, queue, {
   size: DEFAULT_SIZE,
   budget,
+  tokens: agentTokens,
   replaced: (agentId) => {
     mailbox.sessionStarted(agentId);
     activity.replaced(agentId);
@@ -425,8 +438,7 @@ const commands = {
     const { book, problems } = roles.current();
     return { roles: [...book.roles], problems: [...problems] };
   },
-  launch: (req) =>
-    launchAgent({ store, environment, size: DEFAULT_SIZE, home: inputs.home, queue, budget }, req),
+  launch: (req) => launchAgent(launchDeps, req),
   answer: (attentionId, req) => approvals.answer(attentionId, req),
   reply: (attentionId, req) => inbox.reply(attentionId, req),
   dismiss: (attentionId, req) => inbox.dismiss(attentionId, req),
@@ -538,11 +550,13 @@ const socketListener = getRequestListener(
         failed: (agentId, error) => inbox.turnFailed(agentId, error),
       },
       knows: (agentId) => store.agent(agentId) !== undefined,
+      credentials: agentTokens,
       binding: new SessionBinding(store, psTable),
       activity,
       recordUsage: (agentId, usage) => store.recordUsage(agentId, usage),
       observeSend: (agentId, toolUseId, sent) => observeSend(store, agentId, toolUseId, sent),
     }),
+    credentials: agentTokens,
     stop: () => shutdown("requested"),
     pairing,
     devices,

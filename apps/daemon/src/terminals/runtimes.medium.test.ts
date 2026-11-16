@@ -14,7 +14,7 @@ import { ServerWatch } from "../agents/server-watch.ts";
 import { ShellLifecycle } from "../shells/lifecycle.ts";
 import { reconcileShells } from "../shells/reconcile.ts";
 import { Store } from "../store/store.ts";
-import { quietStartAgain, tempDb, testView, unlimited } from "../testing/fixtures.ts";
+import { quietStartAgain, tempDb, testView, unlimited, untokened } from "../testing/fixtures.ts";
 
 const claude: HarnessAdapter = {
   id: "claude-code",
@@ -44,7 +44,7 @@ function twoRuntimes() {
   const launch = async (kind: "tmux" | "holder", harness: HarnessId = "claude-code") =>
     (
       await launchAgent(
-        { store, environment: on(kind), size, home, queue, budget: unlimited },
+        { store, environment: on(kind), size, home, queue, budget: unlimited, tokens: untokened },
         { idempotencyKey: newId("att"), harness, cwd: "~" },
       )
     ).agentId;

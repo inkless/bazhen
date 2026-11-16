@@ -5,7 +5,7 @@ import { FLEET_INSTRUCTIONS } from "../tasks/mail.ts";
 import { describe, expect, it } from "vitest";
 import { LaunchFailed, UnsupportedHarness, type AgentLaunch } from "@bazhen/core";
 import { Store } from "../store/store.ts";
-import { fakeEnvironment, storeBudget, tempDb, testView } from "../testing/fixtures.ts";
+import { fakeEnvironment, storeBudget, tempDb, testView, untokened } from "../testing/fixtures.ts";
 import { IdempotencyConflict } from "../store/store.ts";
 import { InvalidDirectory } from "./cwd.ts";
 import { NameTaken } from "./names.ts";
@@ -35,6 +35,7 @@ function setup(fail = false, maxOpen = 100) {
     home,
     queue: new AgentQueue(),
     budget: storeBudget(store, maxOpen),
+    tokens: untokened,
   };
   return { store, deps, launches, home };
 }

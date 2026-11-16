@@ -23,6 +23,7 @@ import {
   storeBudget,
   testView,
   unlimited,
+  untokened,
   withAgent,
 } from "../testing/fixtures.ts";
 import { TerminalLimit } from "../terminals/budget.ts";
@@ -123,6 +124,7 @@ async function running({
     size: { cols: 80, rows: 24 },
     replaced: (id) => replaced.push(id),
     budget,
+    tokens: untokened,
   });
   lifecycle.watch();
   const exit = (generation: string, status: ExitStatus = { type: "exited", code: 1 }) =>
@@ -160,6 +162,7 @@ async function failedLaunch(store: Store): Promise<string> {
       home: tmpdir(),
       queue: new AgentQueue(),
       budget: unlimited,
+      tokens: untokened,
     },
     request,
   )

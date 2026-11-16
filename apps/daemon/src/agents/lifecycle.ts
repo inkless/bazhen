@@ -33,6 +33,7 @@ import {
   StaleGeneration,
   StateConflict,
 } from "../commands.ts";
+import { startWithToken, type AgentTokenIssuer } from "../auth/callers.ts";
 import type { TerminalAdmission } from "../terminals/budget.ts";
 import { launchOptions, startedAs } from "./launch.ts";
 import type { AgentQueue } from "./queue.ts";
@@ -57,6 +58,8 @@ export interface StartAgainDeps {
   readonly replaced: (agentId: string) => void;
   /** A relaunch opens a new terminal, so it asks for a slot; a respawn keeps its terminal's. */
   readonly budget: TerminalAdmission;
+  /** Each start gets a new token, which ends the last one's; a close removes the file. */
+  readonly tokens: AgentTokenIssuer;
 }
 
 /** A message's states before it reaches its agent or can't. */
@@ -150,6 +153,7 @@ export class Lifecycle {
             console.warn(`agent ${agentId} closed by force; ${stillRunning(found.runtime)}`);
           });
       }
+      this.startAgain.tokens.forget(agentId);
       return () => [
         ...(closing === undefined ? [] : [closing]),
         ...recordClosed(this.store, agentId, "user"),
@@ -182,18 +186,19 @@ export class Lifecycle {
       const requested = this.record(agentId, "agent.respawn_requested", {});
       this.startAgain.replaced(agentId);
       const options = launchOptions(req.theme, launched.name);
-      const refs = await this.environment
-        .respawn({
+      const refs = await startWithToken(this.startAgain.tokens, found.agentId, (tokenFile) =>
+        this.environment.respawn({
           agentId: found.agentId,
           request: launch,
           options,
           refs: { runtime: found.runtime, externalRef },
           generation: next.generation,
-        })
-        .catch((cause: unknown) => {
-          this.record(agentId, "agent.respawn_rejected", rejection(cause));
-          return fromEnvironment(agentId, cause);
-        });
+          tokenFile,
+        }),
+      ).catch((cause: unknown) => {
+        this.record(agentId, "agent.respawn_rejected", rejection(cause));
+        return fromEnvironment(agentId, cause);
+      });
       const runtimeRef = runtimePayload(refs.runtime);
       // The new TUI can move its binding while it starts, as a quick /clear does; that rebind is
       // newer than the session it resumed, so it stands.
@@ -239,26 +244,28 @@ export class Lifecycle {
       });
       this.startAgain.replaced(agentId);
       const options = launchOptions(req.theme, launched.name);
-      const refs = await this.environment
-        .launch({
-          agentId: found.agentId,
-          terminalId,
-          generation,
-          resume: fresh ? null : externalRef,
-          request: launch,
-          options,
-          size: this.startAgain.size,
-          runtime: on,
-        })
-        .then(({ runtime, ...rest }) => {
-          if (runtime === null) throw new NoTerminal();
-          return { ...rest, runtime };
-        })
-        .catch((cause: unknown) => {
-          this.record(agentId, "agent.relaunch_rejected", relaunchRejection(cause));
-          if (cause instanceof AgentTerminalExists) throw cause;
-          return fromEnvironment(agentId, cause);
-        });
+      const refs = await startWithToken(this.startAgain.tokens, found.agentId, (tokenFile) =>
+        this.environment
+          .launch({
+            agentId: found.agentId,
+            terminalId,
+            generation,
+            resume: fresh ? null : externalRef,
+            request: launch,
+            options,
+            size: this.startAgain.size,
+            runtime: on,
+            tokenFile,
+          })
+          .then(({ runtime, ...rest }) => {
+            if (runtime === null) throw new NoTerminal();
+            return { ...rest, runtime };
+          }),
+      ).catch((cause: unknown) => {
+        this.record(agentId, "agent.relaunch_rejected", relaunchRejection(cause));
+        if (cause instanceof AgentTerminalExists) throw cause;
+        return fromEnvironment(agentId, cause);
+      });
       const runtimeRef = runtimePayload(refs.runtime);
       // As after a respawn, a binding the new TUI moved to while it started is the newer one.
       const current = this.store.agentLaunch(agentId)?.externalRef ?? null;

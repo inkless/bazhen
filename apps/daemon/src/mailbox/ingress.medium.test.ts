@@ -1,10 +1,17 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
-import { createServer, type Server } from "node:http";
+import { copyFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createServer, request, type Server } from "node:http";
 import { join } from "node:path";
 import { getRequestListener } from "@hono/node-server";
 import { afterEach, describe, expect, it } from "vitest";
-import { CLAUDE_SESSION, PANE_PID, claudeAgent, testView } from "../testing/fixtures.ts";
+import {
+  CLAUDE_SESSION,
+  claudeAgent,
+  PANE_PID,
+  testView,
+  untokenedCredentials,
+} from "../testing/fixtures.ts";
+import { AgentTokens } from "../auth/callers.ts";
 import { ActivityTracker } from "./activity.ts";
 import { Approvals } from "./approvals.ts";
 import { SessionBinding } from "./binding.ts";
@@ -21,9 +28,15 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-/** The daemon's real hook ingress, served on a Unix socket as main.ts serves it. */
-async function daemon() {
+/**
+ * The daemon's real hook ingress, served on a Unix socket as main.ts serves it. A `tokened`
+ * agent is given a token, in `tokenFile`; otherwise it is one started before agents had tokens.
+ */
+async function daemon(tokened = false) {
   const { store, agentId } = await claudeAgent();
+  dir = mkdtempSync("/tmp/bz-ingress-");
+  const tokens = new AgentTokens(store, join(dir, "agents"), process.getuid?.() ?? 0);
+  const tokenFile = tokened ? tokens.mint(agentId).file : "";
   const observed: { id: string; toolUseId: string; sent: SentMessage }[] = [];
   const mailbox = new Mailbox(store);
   const approvals = new Approvals(store);
@@ -40,13 +53,13 @@ async function daemon() {
       failed: (id, error) => inbox.turnFailed(id, error),
     },
     knows: (id) => id === agentId,
+    credentials: tokened ? tokens : untokenedCredentials,
     binding,
     activity: new ActivityTracker((id, activity) => store.recordActivity(id, activity)),
     recordUsage: (id, usage) => store.recordUsage(id, usage),
     observeSend: (id, toolUseId, sent) => observed.push({ id, toolUseId, sent }),
   });
   const listener = getRequestListener(app.fetch);
-  dir = mkdtempSync("/tmp/bz-ingress-");
   const socket = join(dir, "bazhen.sock");
   server = createServer((req, res) => void listener(req, res));
   await new Promise<void>((resolve) => server?.listen(socket, resolve));
@@ -58,7 +71,18 @@ async function daemon() {
       .snapshot(testView)
       .attention.filter((a) => a.kind === "failed")
       .map((a) => `${a.state}:${a.summary}`);
-  return { socket, agentId, mailbox, state, activity, usage, failures, observed };
+  return {
+    socket,
+    agentId,
+    mailbox,
+    state,
+    activity,
+    usage,
+    failures,
+    observed,
+    tokens,
+    tokenFile,
+  };
 }
 
 /** A Stop's payload, from the agent's own session unless another is named. */
@@ -112,6 +136,28 @@ describe.each([
     expect(result.code).toBe(2);
     expect(result.stderr).toContain(`(${messageId}):\nhello ü`);
     await expect.poll(() => state(messageId)).toBe("emitted");
+  });
+
+  it("takes mail for an agent whose hook proves it with its token file", async () => {
+    const { socket, agentId, mailbox, state, tokenFile } = await daemon(true);
+    const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
+    const env = { BAZHEN_AGENT_ID: agentId, BAZHEN_SOCKET: socket };
+    const own = await run(client, "wait", { ...env, BAZHEN_AGENT_AUTH_FILE: tokenFile });
+    expect(own.code).toBe(2);
+    await expect.poll(() => state(messageId)).toBe("emitted");
+  });
+
+  it("gives an agent's mail to no hook that names it without its live token", async () => {
+    const { socket, agentId, mailbox, state, tokens, tokenFile } = await daemon(true);
+    const stale = join(dir, "stale.token");
+    copyFileSync(tokenFile, stale);
+    tokens.mint(agentId).kept();
+    const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
+    const env = { BAZHEN_AGENT_ID: agentId, BAZHEN_SOCKET: socket };
+    const untokened = await run(client, "wait", env);
+    expect([untokened.code, untokened.stderr, state(messageId)]).toEqual([0, "", "queued"]);
+    const revoked = await run(client, "wait", { ...env, BAZHEN_AGENT_AUTH_FILE: stale });
+    expect([revoked.code, revoked.stderr, state(messageId)]).toEqual([0, "", "queued"]);
   });
 
   it("answers another session's waiter at once, and keeps the mail for the agent's own", async () => {
@@ -282,5 +328,35 @@ describe.each([
     expect(usage()).toBeUndefined();
     await line(CLAUDE_SESSION, "Opus 5.5");
     expect(usage()).toEqual({ model: "Opus 5.5" });
+  });
+});
+
+/** One POST to the ingress on `socket`, with `headers`; resolves once the reply has ended. */
+function post(socket: string, path: string, body: unknown, headers: Record<string, string> = {}) {
+  return new Promise<void>((resolve, reject) => {
+    const req = request(
+      {
+        socketPath: socket,
+        method: "POST",
+        path,
+        headers: { "content-type": "application/json", ...headers },
+      },
+      (res) => res.resume().on("end", resolve),
+    );
+    req.on("error", reject);
+    req.end(JSON.stringify(body));
+  });
+}
+
+describe("hook ingress, on an ack", () => {
+  it("confirms an agent's mail only on an ack with its token", async () => {
+    const { socket, agentId, mailbox, state, tokenFile } = await daemon(true);
+    const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
+    const { offered } = await mailbox.wait(agentId, new AbortController().signal);
+    await post(socket, "/v1/hooks/ack", { agentId, offered });
+    expect(state(messageId)).toBe("offered");
+    const token = readFileSync(tokenFile, "utf8");
+    await post(socket, "/v1/hooks/ack", { agentId, offered }, { "bazhen-agent-token": token });
+    expect(state(messageId)).toBe("emitted");
   });
 });

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -11,6 +11,7 @@ afterEach(() => {
   server?.close();
   rmSync(dir, { recursive: true, force: true });
   delete process.env["BAZHEN_AGENT_ID"];
+  delete process.env["BAZHEN_AGENT_AUTH_FILE"];
 });
 
 const health = {
@@ -60,5 +61,19 @@ describe("call", () => {
     process.env["BAZHEN_AGENT_ID"] = "agent_x";
     await call(socket, getHealth);
     expect(seen.map((h) => h["bazhen-agent-id"])).toEqual([undefined, "agent_x"]);
+  });
+
+  it("sends the agent token its file holds, and none for a file that holds no token", async () => {
+    const { socket, seen } = await daemon(JSON.stringify(health));
+    const token = "t".repeat(43);
+    const file = join(dir, "agent.token");
+    process.env["BAZHEN_AGENT_AUTH_FILE"] = file;
+    writeFileSync(file, token);
+    await call(socket, getHealth);
+    writeFileSync(file, "not a token\r\nx-forged: 1");
+    await call(socket, getHealth);
+    rmSync(file);
+    await call(socket, getHealth);
+    expect(seen.map((h) => h["bazhen-agent-token"])).toEqual([token, undefined, undefined]);
   });
 });

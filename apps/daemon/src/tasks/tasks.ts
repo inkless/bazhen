@@ -840,9 +840,9 @@ export class Tasks {
   }
 
   /**
-   * The caller says which agent it is, which is trusted as any local process of the user is
-   * (foundation-design §9.4); it must at least be an agent this daemon runs and that is still
-   * open, so a stale `BAZHEN_AGENT_ID` can't act.
+   * The caller is the agent its token proves, or, for an agent started before agents had tokens,
+   * the one it names (foundation-design §9.1). It must still be an agent this daemon runs and that
+   * is open, so an ended agent's id can't act.
    */
   private checkCaller(caller: Caller): void {
     if (caller === null) return;

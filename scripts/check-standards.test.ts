@@ -38,7 +38,32 @@ import {
   unmarkedSignallingTests,
   skillFailures,
   unsafeModuleFailures,
+  migrationVersionFailures,
+  checkMigrations,
+  STANDARDS_CHECKS,
 } from "./check-standards.ts";
+
+describe("migrationVersionFailures", () => {
+  it("takes migrations numbered 1 to the latest in order", () => {
+    expect(migrationVersionFailures([1, 2, 3])).toEqual([]);
+  });
+
+  it("refuses a gap, a repeat and migrations out of order, naming the first wrong one", () => {
+    expect([
+      migrationVersionFailures([1, 2, 5]),
+      migrationVersionFailures([1, 1, 2]),
+      migrationVersionFailures([2, 1]),
+    ]).toEqual([
+      [expect.stringContaining("migration 3 is numbered 5")],
+      [expect.stringContaining("migration 2 is numbered 1")],
+      [expect.stringContaining("migration 1 is numbered 2")],
+    ]);
+  });
+
+  it("is one of the checks pnpm check runs", () => {
+    expect(STANDARDS_CHECKS).toContain(checkMigrations);
+  });
+});
 
 describe("hasRuntimeCode", () => {
   it("is false for a type-only module", () => {

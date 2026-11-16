@@ -55,7 +55,6 @@ import {
   AgentTerminalExists,
   HarnessRefused,
   healthOfEach,
-  isId,
   LaunchFailed,
   TaskRefused,
   type Caller,
@@ -97,6 +96,7 @@ import {
   type DeviceGate,
 } from "../auth/devices.ts";
 import type { PairingCodes } from "../auth/pairing.ts";
+import type { CallerEnv } from "../auth/callers.ts";
 import { pairingKey, peerKey } from "../config/cidr.ts";
 import { TerminalLimit } from "../terminals/budget.ts";
 
@@ -191,9 +191,6 @@ export interface TaskCommands {
   note(caller: Caller, taskId: string, req: AddTaskNoteRequest): TaskCommandResponse;
 }
 
-/** Thrown for a caller that says it is an agent with something that is no agent's id. */
-class NotAnAgent extends Error {}
-
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const PAIRING_PATH = "/v1/pairing";
 
@@ -212,7 +209,7 @@ function fail(
 }
 
 /** The paired device a request came from, as the gate verified it; unset for the owner. */
-export type AppEnv = { Variables: { device?: DeviceId } };
+export type AppEnv = { Variables: { device?: DeviceId } & CallerEnv["Variables"] };
 
 export function createApp(deps: AppDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -377,14 +374,10 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   route("/v1/shells/:id/rename", RenameShellRequest, deps.renameShell);
   route("/v1/shells/:id/unlink", UnlinkShellRequest, deps.unlinkShell);
 
-  // Only the Unix socket's callers can be agents: a browser over TCP is always the human, so no
-  // page can act as an agent, whatever header it sends (§9.1, §9.4).
-  const callerOf = (c: Context): Caller => {
-    const said = allow === null ? c.req.header("bazhen-agent-id") : undefined;
-    if (said === undefined) return null;
-    if (!isId("agent", said)) throw new NotAnAgent(`not an agent id: ${said}`);
-    return said;
-  };
+  // The socket's guard says who called (`guardCallers`). A browser over TCP is always the human,
+  // so no page can act as an agent, whatever header it sends (§9.1).
+  const callerOf = (c: Context<AppEnv>): Caller =>
+    allow === null ? (c.get("caller") ?? null) : null;
   const taskRoute = <T, R>(
     path: string,
     schema: z.ZodType<T>,
@@ -466,7 +459,6 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     if (err instanceof MailTooLong || err instanceof UnknownRole) {
       return fail(c, 400, "invalid_request", err.message);
     }
-    if (err instanceof NotAnAgent) return fail(c, 400, "invalid_request", err.message);
     if (err instanceof TaskRefused) {
       return err.code === "forbidden"
         ? fail(c, 403, "forbidden", err.message)

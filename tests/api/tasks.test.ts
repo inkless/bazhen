@@ -43,7 +43,11 @@ afterAll(async () => {
 const state = async () => StateSnapshot.parse((await daemon.request("/v1/state")).body);
 /** `bazhen <args>` as the agent would run it, inside its pane. */
 const asAgent = (agentId: string, args: string[]) =>
-  bazhen(args, { ...daemon.env, BAZHEN_AGENT_ID: agentId });
+  bazhen(args, {
+    ...daemon.env,
+    BAZHEN_AGENT_ID: agentId,
+    BAZHEN_AGENT_AUTH_FILE: daemon.agentEnv(agentId)["BAZHEN_AGENT_AUTH_FILE"] ?? "",
+  });
 /** The subtask `bazhen delegate` reports it made. */
 const subtaskOf = (out: string) => String(/delegated (task_\S+)/.exec(out)?.[1]);
 const mailTo = async (agentId: string) =>

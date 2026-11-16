@@ -3,14 +3,26 @@
 # crates/bazhen-hook/src/main.rs, several times slower. Outside a Bazhen agent, or on any failure, it exits
 # 0 with no output, so the harness carries on as it would without Bazhen.
 
+# Writes the header that proves which agent this is into the file $1, from the agent's token
+# file, or leaves it empty for a file that holds no token. The token goes to curl in a file: on
+# its command line every user of the machine could read it.
+agent_header() {
+  : >"$1" || return 1
+  token=$(cat "$BAZHEN_AGENT_AUTH_FILE" 2>/dev/null) || return 0
+  case "$token" in *[!A-Za-z0-9_-]*) return 0 ;; esac
+  [ "${#token}" -eq 43 ] || return 0
+  printf 'Bazhen-Agent-Token: %s\r\n' "$token" >"$1"
+}
+
 # The status line: run the user's own command (the rest of the arguments) on the same input,
 # its output passed through, and hand that input to the daemon in passing (see statusline.rs).
 if [ "$1" = statusline-wrap ]; then
   shift
   input=$(mktemp) || exit 0
-  trap 'rm -f "$input"' EXIT
+  auth=$(mktemp) || { rm -f "$input"; exit 0; }
+  trap 'rm -f "$input" "$auth"' EXIT
   cat >"$input"
-  if [ -n "$BAZHEN_AGENT_ID" ] && [ -n "$BAZHEN_SOCKET" ]; then
+  if [ -n "$BAZHEN_AGENT_ID" ] && [ -n "$BAZHEN_SOCKET" ] && agent_header "$auth"; then
     case "$BAZHEN_AGENT_ID" in *[!A-Za-z0-9_-]*) ;; *)
       {
         printf '{"payload":'
@@ -18,7 +30,8 @@ if [ "$1" = statusline-wrap ]; then
         printf ',"protocolVersion":"1.0","agentId":"%s","event":"statusline","pid":%d,"ppid":%d}' \
           "$BAZHEN_AGENT_ID" "$$" "$PPID"
       } | curl -sS --unix-socket "$BAZHEN_SOCKET" --max-time 0.2 -H 'Content-Type: application/json' \
-        -H 'Expect:' --data-binary @- -o /dev/null http://localhost/v1/hooks 2>/dev/null &
+        -H 'Expect:' -H "@$auth" --data-binary @- -o /dev/null http://localhost/v1/hooks \
+        2>/dev/null &
       ;;
     esac
   fi
@@ -38,6 +51,7 @@ trap 'rm -rf "$dir"' EXIT
 trap 'exit 0' HUP INT TERM
 
 cat >"$dir/payload" || exit 0
+agent_header "$dir/auth" || exit 0
 {
   printf '{"payload":'
   if grep -q '[^[:space:]]' "$dir/payload"; then cat "$dir/payload"; else printf null; fi
@@ -49,7 +63,7 @@ post() { # path, request file, seconds (curl reads 0 as no limit at all)
   [ "$3" -ge 1 ] || set -- "$1" "$2" 1
   rm -f "$dir/head"
   curl -sS --unix-socket "$BAZHEN_SOCKET" --max-time "$3" --max-filesize "$MAX_BODY" \
-    -H 'Content-Type: application/json' -H 'Expect:' \
+    -H 'Content-Type: application/json' -H 'Expect:' -H "@$dir/auth" \
     --data-binary "@$2" -D "$dir/head" -o "$dir/body" "http://localhost$1" 2>/dev/null
 }
 

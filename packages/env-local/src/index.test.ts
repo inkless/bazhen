@@ -35,6 +35,7 @@ const launch = (harnessId: "claude-code" | "codex" = "claude-code"): AgentLaunch
   request: { harness: harnessId, project: "p", cwd: "/work" },
   options: {},
   size: { cols: 80, rows: 24 },
+  tokenFile: "/run/b/agents/a.token",
 });
 
 describe("LocalEnvironment over two runtimes", () => {
@@ -94,7 +95,12 @@ describe("local environment", () => {
       },
       argv: ["claude", "--session-id", "s-1"],
       cwd: "/work",
-      env: { HARNESS_OWN: "1", BAZHEN_AGENT_ID: l.agentId, BAZHEN_SOCKET: "/run/b.sock" },
+      env: {
+        HARNESS_OWN: "1",
+        BAZHEN_AGENT_ID: l.agentId,
+        BAZHEN_AGENT_AUTH_FILE: "/run/b/agents/a.token",
+        BAZHEN_SOCKET: "/run/b.sock",
+      },
       size: { cols: 80, rows: 24 },
       generation: 0,
     });
@@ -132,6 +138,39 @@ describe("local environment", () => {
     const again = await env.respawn({ ...l, options: { theme: "dark" }, refs, generation: 1 });
     expect(seen).toEqual([{ theme: "light" }, { theme: "dark" }]);
     expect([refs.theme, again.theme]).toEqual(["dark", "light"]);
+  });
+
+  it("starts a respawned TUI on the token file of its new start, not its last", async () => {
+    const exits = {
+      argv: ["sh", "-c", "exit 0"] as [string, ...string[]],
+      env: {},
+      externalRef: { kind: "claude-session" as const, id: "s-1" },
+    };
+    const runtime = new FakeRuntime();
+    const env = new LocalEnvironment({
+      id: newId("env"),
+      runtime,
+      harnesses: [
+        {
+          id: "claude-code",
+          themes: [],
+          launchSpec: async () => exits,
+          resumeSpec: async () => exits,
+        },
+      ],
+      socket: "/run/b.sock",
+    });
+    const l = launch();
+    const refs = await env.launch(l);
+    const again = await env.respawn({
+      ...l,
+      refs,
+      generation: 1,
+      tokenFile: "/run/b/agents/b.token",
+    });
+    expect(runtime.specOf(again.runtime).env["BAZHEN_AGENT_AUTH_FILE"]).toBe(
+      "/run/b/agents/b.token",
+    );
   });
 
   it("starts the TUI through the user's login shell, when there is one", async () => {
@@ -324,7 +363,14 @@ describe("local environment", () => {
     const l = launch();
     const refs = await env.launch(l);
     await expect(
-      env.respawn({ agentId: l.agentId, request: l.request, options: {}, refs, generation: 1 }),
+      env.respawn({
+        agentId: l.agentId,
+        request: l.request,
+        options: {},
+        refs,
+        generation: 1,
+        tokenFile: l.tokenFile,
+      }),
     ).rejects.toThrow(ProcessState);
     expect(resumed).toBe(0);
   });
