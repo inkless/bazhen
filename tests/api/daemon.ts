@@ -95,7 +95,7 @@ export function bazhen(
   return new Promise((resolve) => {
     execFile(
       process.execPath,
-      ["--disable-warning=ExperimentalWarning", join(repo, "apps/cli/src/main.ts"), ...args],
+      [join(repo, "apps/cli/src/main.ts"), ...args],
       { env, timeout: 30_000 },
       (err, stdout, stderr) =>
         resolve({ code: err === null ? 0 : Number(err.code ?? 1), out: stdout + stderr }),
@@ -306,11 +306,10 @@ export class Daemon {
 
   private async spawn(): Promise<void> {
     this.port = await freePort();
-    const child = spawn(
-      process.execPath,
-      ["--disable-warning=ExperimentalWarning", join(repo, "apps/daemon/src/main.ts")],
-      { env: { ...this.env, BAZHEN_PORT: String(this.port) }, stdio: ["ignore", "pipe", "pipe"] },
-    );
+    const child = spawn(process.execPath, [join(repo, "apps/daemon/src/main.ts")], {
+      env: { ...this.env, BAZHEN_PORT: String(this.port) },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     this.process = child;
     this.output = "";
     child.stdout.on("data", (d: Buffer) => (this.output += d.toString()));
@@ -513,7 +512,7 @@ export class Daemon {
     return new Promise((resolve) => {
       execFile(
         process.execPath,
-        ["--disable-warning=ExperimentalWarning", join(repo, "apps/daemon/src/main.ts")],
+        [join(repo, "apps/daemon/src/main.ts")],
         { env: { ...this.env, BAZHEN_PORT: String(this.port) }, timeout: 30_000 },
         (err, stdout, stderr) =>
           resolve({ code: err === null ? 0 : Number(err.code ?? 1), out: stdout + stderr }),

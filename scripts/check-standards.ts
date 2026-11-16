@@ -1422,7 +1422,7 @@ export const DENY_CONFIG = [
 
 // The package.json scripts that run the Rust gates, exactly, and `check` runs each of them. The
 // commands themselves are fixed in scripts/cargo-gate.ts; the tests run under a cap like any.
-const GATE = "node --disable-warning=ExperimentalWarning scripts/cargo-gate.ts";
+const GATE = "node scripts/cargo-gate.ts";
 export const RUST_GATE_SCRIPTS: Record<string, string> = {
   "format:check": `${GATE} fmt && oxfmt --check`,
   "lint:rust": `${GATE} lint`,

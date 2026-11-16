@@ -1,4 +1,4 @@
-#!/usr/bin/env -S node --disable-warning=ExperimentalWarning
+#!/usr/bin/env node
 // Runs a test command under a memory cap and a time cap (packages/host-guard/src/cap.ts), so a
 // test that runs away dies alone.
 //
