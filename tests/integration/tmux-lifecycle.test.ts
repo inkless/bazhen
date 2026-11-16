@@ -6,6 +6,7 @@ import { filterEnv, newId, type RuntimeRef, type TerminalSpec } from "@bazhen/co
 import { isAlive } from "@bazhen/host-guard";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
 import { nodePtySpawner } from "@bazhen/daemon/pty";
+import { oscProbe } from "../support/osc-probe.ts";
 import { testServer, tmuxOut } from "./helpers.ts";
 
 // Generous, because a loaded CI runner can take a second or more to reap a pane's process.
@@ -40,22 +41,6 @@ const exitOf = async (ref: RuntimeRef) =>
   (await runtime.inventory()).find(
     (e) => e.ref.terminalId === ref.terminalId && e.ref.locator.paneId === ref.locator.paneId,
   )?.exit ?? null;
-
-// Asks for the background as it starts, in raw mode first as a TUI is, and writes the reply, or
-// nothing after 2 s. Raw mode after the query would flush a reply that came back quickly.
-const oscProbe = (out: string): [string, ...string[]] => [
-  "python3",
-  "-c",
-  `import os, select, sys, time, tty
-tty.setraw(0)
-os.write(1, b"\\x1b]11;?\\x1b\\\\")
-got, end = b"", time.time() + 2
-while time.time() < end and not got.endswith(b"\\x1b\\\\"):
-    if select.select([0], [], [], max(0, end - time.time()))[0]:
-        got += os.read(0, 256)
-open(sys.argv[1], "wb").write(got)`,
-  out,
-];
 
 const oscOut = () => join(dir, `osc-${newId("term")}`);
 

@@ -1,3 +1,4 @@
+export { newId } from "../ids.ts";
 export {
   FakeRuntime,
   fakeContractHarness,

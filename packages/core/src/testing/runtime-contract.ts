@@ -315,6 +315,17 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       expect(alternate).toBe(false);
     });
 
+    it("reads the title its program set last", async () => {
+      const runtime = fresh();
+      const ref = await runtime.create(spec(["cat"]));
+      const { stream } = await runtime.attach(ref, null, 0);
+      onTestFinished(() => stream.close());
+      stream.write(encode("\x1b]2;first\x07\r"));
+      await expect.poll(() => runtime.title(ref), { timeout: harness.waitMs }).toBe("first");
+      stream.write(encode("\x1b]0;the thread\x1b\\\r"));
+      await expect.poll(() => runtime.title(ref), { timeout: harness.waitMs }).toBe("the thread");
+    });
+
     it("says a stream ended when its terminal ends or its consumer closes it", async () => {
       const runtime = fresh();
       await runtime.create(spec(sleeping)); // keeps the server up once the other is gone

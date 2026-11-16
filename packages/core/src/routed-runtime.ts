@@ -163,6 +163,10 @@ export class RoutedRuntime implements RuntimeAdapter {
     return read.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
   }
 
+  async title(ref: RuntimeRef): Promise<string> {
+    return this.of(ref).title(ref);
+  }
+
   async unlink(ref: RuntimeRef): Promise<void> {
     return this.of(ref).unlink(ref);
   }

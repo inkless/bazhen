@@ -9,6 +9,7 @@
   "include": [
     "*.ts",
     "../support/global-setup.ts",
+    "../support/osc-probe.ts",
     "../support/ptys.ts",
     "../support/disposable-host.ts",
     "../support/setup-error.ts"

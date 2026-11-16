@@ -15,6 +15,7 @@
     "../support/holder-home.ts",
     "../support/holder-ledger.ts",
     "../support/holder-spawn.ts",
+    "../support/osc-probe.ts",
     "../support/ptys.ts",
     "../support/setup-error.ts"
   ],

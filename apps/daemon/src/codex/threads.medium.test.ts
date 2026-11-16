@@ -40,7 +40,7 @@ async function setup(opts: {
     store,
     runtime: {
       socket: FIXTURE_TMUX_SOCKET,
-      paneTitle: async (ref) => {
+      title: async (ref) => {
         titled.push(ref);
         const title = (titles.length > 1 ? titles.shift() : titles[0]) ?? "";
         if (title === GONE) throw new Error("can't find pane: %0");
