@@ -73,7 +73,9 @@ describe("Claude Code launched in a folder it hasn't been told to trust", () => 
       "the trusting answer chosen",
     );
     view.type("\r");
-    await daemon.running(launched.agentId);
+    await expect
+      .poll(() => daemon.agentState(launched.agentId), { timeout: 30_000 })
+      .toBe("running");
     const [item] = await stuck(launched.agentId);
     view.close();
     expect([item?.state, item?.closeReason]).toEqual(["closed", "answered_in_tui"]);
@@ -85,7 +87,7 @@ describe("Codex launched in a folder it hasn't been told to trust", () => {
   it("comes up without a trust question, runs, and tells the human nothing", async () => {
     const { agentId } = await launchIn("codex", "codex-elsewhere");
     await waitUntil(async () => (await daemon.shows(agentId)).includes(BANNER.codex), "Codex");
-    await daemon.running(agentId);
+    await expect.poll(() => daemon.agentState(agentId), { timeout: 30_000 }).toBe("running");
     await new Promise((resolve) => setTimeout(resolve, DEADLINE_S * 2000));
     expect([await daemon.shows(agentId), await stuck(agentId)]).toEqual([
       expect.not.stringMatching(/trust/i),
