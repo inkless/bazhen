@@ -2015,10 +2015,12 @@ function closingBrace(code: string, from: number): number {
 // session's sweep, made by an ending, a retirement or a pass over a session's processes; and the
 // ledger sweep, which kills holders. A
 // send through the guard alone isn't one: off a disposable host, a test build's guard sends
-// nothing.
+// nothing. An ending signals only through a `Session` it was given, so what is matched is any
+// mention of `Session`, however one is made or named, and `Ending::start`, which takes one. Not
+// `Ending::new` on its own, which a test gives a stand-in that signals nothing.
 const HOLDER_BINARY = "CARGO_BIN_EXE_bazhen-holder";
 const SIGNALLING_CALL =
-  /\.\s*(?:close(?:_step)?|signal|respawn)\s*\(|\bsweep\s*\(|\bsession\s*\(\s*\)\s*\.|\b(?:pass_among|retire)\s*\(|\bEnding\s*::|\bSession\s*::\s*led_by\b/;
+  /\.\s*(?:close(?:_step)?|signal|respawn)\s*\(|\bsweep\s*\(|\bsession\s*\(\s*\)\s*\.|\b(?:pass_among|retire)\s*\(|\bEnding\s*::\s*start\b|\bSession\b/;
 
 /** A Rust test file's test binary: `tests/<name>.rs`, or every file under `tests/<name>/`. */
 const testBinary = (file: string) => /^(crates\/[^/]+\/tests\/[^/.]+)/.exec(file)?.[1];
@@ -2041,15 +2043,35 @@ export function unmarkedSignallingTests(
     const strings: string[] = [];
     const code = rustCode(read(file), strings);
     const wholeBinary = holderBinaries.has(testBinary(file) ?? "");
-    // A helper in the same file that closes or sweeps makes each test calling it signal too, one
-    // call deep.
+    // A helper in the same file that closes or sweeps makes each test calling it signal too, and
+    // so does a const or static whose value names a session. A test's own helpers count however
+    // many deep; product code one call deep, since methods are matched by name alone and a
+    // generic one, as an ending's `step`, signals only through what it was given.
     // A bodyless function's "body" runs to the `}` closing its trait or extern block: empty.
     const bodyOf = (start: number) => code.slice(start, closingBrace(code, start));
-    const helpers = [...code.matchAll(/\bfn\s+(\w+)/g)].flatMap((m) =>
-      SIGNALLING_CALL.test(bodyOf(fnBodyStart(code, m.index))) ? [m[1] ?? ""] : [],
+    const product = testBinary(file) === undefined ? withoutTests(code) : "";
+    const fns = [...code.matchAll(/\bfn\s+(\w+)/g)].map((m) => ({
+      name: m[1] ?? "",
+      body: bodyOf(fnBodyStart(code, m.index)),
+      test: product[m.index] !== "f",
+    }));
+    const values = [...code.matchAll(/\b(?:const|static)\s+(\w+)\s*:([^;]*);/g)].flatMap((m) =>
+      SIGNALLING_CALL.test(m[2] ?? "") ? [new RegExp(`\\b${m[1] ?? ""}\\b`)] : [],
     );
+    const helpers = new Set<string>();
     const callsHelper = (body: string) =>
-      helpers.some((name) => new RegExp(`\\b${name}\\s*\\(`).test(body));
+      values.some((value) => value.test(body)) ||
+      [...helpers].some((name) => new RegExp(`\\b${name}\\s*\\(`).test(body));
+    for (const { name, body } of fns) if (SIGNALLING_CALL.test(body)) helpers.add(name);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const { name, body, test } of fns) {
+        if (test && !helpers.has(name) && callsHelper(body)) {
+          helpers.add(name);
+          grew = true;
+        }
+      }
+    }
     // A type whose Drop closes or signals, one helper deep, makes each test naming it signal.
     const dropping = [...code.matchAll(/\bimpl\s+Drop\s+for\s+(\w+)[^{]*\{/g)].flatMap((m) => {
       const block = code.slice(m.index, closingBrace(code, m.index + m[0].length));
