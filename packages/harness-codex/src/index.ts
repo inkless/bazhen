@@ -114,7 +114,7 @@ export class CodexHarness implements HarnessAdapter {
         this.remote,
         // Keeps the transcript in the terminal's scrollback.
         "--no-alt-screen",
-        // The TUI keeps its pane's title set to the thread it shows, through /new and /resume.
+        // The TUI keeps its terminal's title set to the thread it shows, through /new and /resume.
         "-c",
         'tui.terminal_title=["thread-id"]',
         ...(theme === undefined ? [] : ["-c", `tui.theme="${SYNTAX_THEME[theme]}"`]),

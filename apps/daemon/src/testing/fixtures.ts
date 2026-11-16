@@ -288,14 +288,25 @@ export const FIXTURE_TMUX_SOCKET = "/run/bazhen/tmux.sock";
  * A store with a running Codex agent bound to each of `threads`, by thread; a null thread gives
  * an agent bound to none. The nth agent's terminal is in pane `%n` on FIXTURE_TMUX_SOCKET.
  */
-export async function withCodexAgents(...threads: (string | null)[]) {
+export function withCodexAgents(...threads: (string | null)[]) {
+  return withCodexAgentsOn("tmux", ...threads);
+}
+
+/** As `withCodexAgents`, its agents' terminals on `runtime`: tmux's panes, or holders. */
+export async function withCodexAgentsOn(runtime: "tmux" | "holder", ...threads: (string | null)[]) {
   const store = Store.open(tempDb());
   const agents = new Map<string | null, string>();
   for (const [i, threadId] of threads.entries()) {
-    const locator = { socket: FIXTURE_TMUX_SOCKET, paneId: `%${i}` };
     const environment: EnvironmentAdapter = {
       ...fakeEnvironment(store, async (l) => ({
-        runtime: { terminalId: l.terminalId, runtime: "tmux", locator },
+        runtime: {
+          terminalId: l.terminalId,
+          runtime,
+          locator:
+            runtime === "tmux"
+              ? { socket: FIXTURE_TMUX_SOCKET, paneId: `%${i}` }
+              : { socket: `/run/holders/${l.terminalId}.sock`, generation: "0" },
+        },
         externalRef:
           threadId === null
             ? null

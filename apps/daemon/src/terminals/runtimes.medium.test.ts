@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { newId, RoutedRuntime, UnsupportedOnRuntime, type HarnessAdapter } from "@bazhen/core";
+import { newId, RoutedRuntime, type HarnessAdapter } from "@bazhen/core";
 import type { HarnessId } from "@bazhen/protocol";
 import { FakeRuntime } from "@bazhen/core/testing";
 import { LocalEnvironment } from "@bazhen/env-local";
@@ -242,27 +242,26 @@ describe("making a new terminal for an old one", () => {
     ]);
   });
 
-  it("refuses a Codex agent the holders would run, recording nothing, and starts one on tmux", async () => {
+  it("starts a Codex agent on the holders once they are the default", async () => {
     const { store, launch, agentState } = twoRuntimes();
-    await expect(launch("holder", "codex")).rejects.toBeInstanceOf(UnsupportedOnRuntime);
-    const onTmux = await launch("tmux", "codex");
-    expect([store.snapshot(testView).agents.length, agentState(onTmux)]).toEqual([1, "running"]);
+    const agentId = await launch("holder", "codex");
+    expect([agentState(agentId), store.agentTerminal({ agentId })?.runtimeKind]).toEqual([
+      "running",
+      "holder",
+    ]);
   });
 
-  it("refuses to relaunch a lost Codex agent onto the holders", async () => {
+  it("relaunches a lost Codex agent onto the holders", async () => {
     const { store, tmux, on, queue, launch, log } = twoRuntimes();
     const agentId = await launch("tmux", "codex");
     tmux.reboot();
     await reconcile(store, on("tmux"), log);
-    const relaunched = new Lifecycle(store, on("holder"), queue, quietStartAgain).relaunch(
-      agentId,
-      {
-        idempotencyKey: newId("att"),
-        generation: 0,
-        fresh: true,
-      },
-    );
-    await expect(relaunched).rejects.toBeInstanceOf(UnsupportedOnRuntime);
-    expect(store.agentTerminal({ agentId })?.state).toBe("lost");
+    await new Lifecycle(store, on("holder"), queue, quietStartAgain).relaunch(agentId, {
+      idempotencyKey: newId("att"),
+      generation: 0,
+      fresh: true,
+    });
+    const now = store.agentTerminal({ agentId });
+    expect([now?.state, now?.runtimeKind]).toEqual(["running", "holder"]);
   });
 });

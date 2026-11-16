@@ -124,28 +124,6 @@ export class UnsupportedHarness extends Error {
   }
 }
 
-/**
- * The harness runs here, but not on the runtime a new terminal would be made on: Codex's TUI is
- * followed from thread to thread by its tmux pane's title, which a holder doesn't report yet.
- */
-export class UnsupportedOnRuntime extends UnsupportedHarness {
-  readonly runtime: string;
-
-  constructor(harness: HarnessId, runtime: string) {
-    super(harness);
-    this.message = `${harness} agents can't run on the ${runtime} runtime yet; set runtime.default = "tmux" to start one`;
-    this.runtime = runtime;
-  }
-}
-
-/** Harnesses that can't run on a runtime yet, by runtime. */
-const UNSUPPORTED_ON: Readonly<Record<string, readonly HarnessId[]>> = { holder: ["codex"] };
-
-/** Refuses a harness the runtime its new terminal goes to can't run yet. */
-export function assertRunsOn(harness: HarnessId, runtime: string): void {
-  if (UNSUPPORTED_ON[runtime]?.includes(harness)) throw new UnsupportedOnRuntime(harness, runtime);
-}
-
 /** The agent has no terminal to act on, though its state says it should. */
 export class NoTerminal extends Error {
   constructor() {
