@@ -120,13 +120,7 @@ impl Session {
     }
 
     fn pass(self, signal: Option<Signal>) -> Sweep {
-        self.pass_listed(os::pids(), signal)
-    }
-
-    /// One pass over `listing`, every process's pid as some moment found them, or why they
-    /// couldn't be listed.
-    fn pass_listed(self, listing: io::Result<Vec<Pid>>, signal: Option<Signal>) -> Sweep {
-        match listing {
+        match os::pids() {
             Ok(pids) => self.pass_among(pids, signal),
             Err(error) => {
                 tracing::error!(%error, "could not list the processes to find a session's");
@@ -170,9 +164,8 @@ impl Session {
 /// or `KILL_SWEEPS` passes have been made. The leader's exit is the caller's to tell, since only
 /// it waits for the leader.
 #[derive(Debug)]
-pub struct Ending<L: Listing = Processes> {
-    session: Session,
-    listing: L,
+pub struct Ending<S: Sweeper = Session> {
+    sweeper: S,
     hung_up: bool,
     kill_at: Instant,
     next_pass: Instant,
@@ -183,40 +176,31 @@ pub struct Ending<L: Listing = Processes> {
     over: bool,
 }
 
-/// Where an ending lists the processes it looks among.
-pub trait Listing {
-    /// Every process's pid.
-    ///
-    /// # Errors
-    ///
-    /// When the processes can't be listed.
-    fn pids(&mut self) -> io::Result<Vec<Pid>>;
+/// What makes an ending's passes over its session.
+pub trait Sweeper {
+    /// One pass: `signal` sent to every live member of the session, or, with `None`, none sent.
+    fn sweep(&mut self, signal: Option<Signal>) -> Sweep;
 }
 
-/// The system's processes, as they are at each listing.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct Processes;
-
-impl Listing for Processes {
-    fn pids(&mut self) -> io::Result<Vec<Pid>> {
-        os::pids()
+impl Sweeper for Session {
+    fn sweep(&mut self, signal: Option<Signal>) -> Sweep {
+        self.pass(signal)
     }
 }
 
 impl Ending {
     /// An ending whose first step, due at once, hangs the session up.
     pub fn start(session: Session, now: Instant) -> Self {
-        Self::new(session, now, Processes)
+        Self::new(session, now)
     }
 }
 
-impl<L: Listing> Ending<L> {
-    /// `start`, listing the processes by `listing`, which only a test, to stand in for a listing
-    /// that raced a process's start, gives as anything but `Processes`.
-    fn new(session: Session, now: Instant, listing: L) -> Self {
+impl<S: Sweeper> Ending<S> {
+    /// `start`, making its passes by `sweeper`, which only a test gives as anything but a
+    /// `Session`: product code can end only a session `Session::led_by` has vetted.
+    fn new(sweeper: S, now: Instant) -> Self {
         Self {
-            session,
-            listing,
+            sweeper,
             hung_up: false,
             kill_at: now + CLOSE_GRACE,
             next_pass: now,
@@ -287,7 +271,7 @@ impl<L: Listing> Ending<L> {
     }
 
     fn pass(&mut self, signal: Option<Signal>) -> Sweep {
-        self.session.pass_listed(self.listing.pids(), signal)
+        self.sweeper.sweep(signal)
     }
 
     fn count_empty(&mut self, sweep: &Sweep) {
@@ -433,12 +417,13 @@ mod os {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, VecDeque};
     use std::io::{BufRead as _, BufReader};
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
 
     use bazhen_holder_proto::body::{Argv, Env, Generation, NonEmpty, ProcessSpec};
+    use proptest::prelude::*;
     use rustix::process::{WaitId, WaitIdOptions, waitid};
 
     use super::*;
@@ -490,14 +475,6 @@ mod tests {
 
         fn session(&self) -> Session {
             Session::led_by(self.child.pid()).unwrap()
-        }
-
-        fn exited(&self) -> bool {
-            waitid(
-                WaitId::Pid(self.child.pid()),
-                WaitIdOptions::EXITED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT,
-            )
-            .is_ok_and(|status| status.is_some())
         }
 
         /// Waits until the leader has exited, leaving it unreaped.
@@ -632,63 +609,79 @@ mod tests {
         supported().unwrap();
     }
 
-    /// Each listing in turn, `None` for the system's own, then the system's: a listing made
-    /// before a process started misses it, as one does when a member starts a job after a pass
-    /// has listed the processes.
-    #[derive(Debug)]
-    struct Stale(std::collections::VecDeque<Option<Vec<Pid>>>);
+    /// A session's passes, stood in for: each records its signal and returns the next sweep the
+    /// script gives, or an empty one once the script has run out. It signals nothing.
+    #[derive(Debug, Default)]
+    struct Scripted {
+        sweeps: VecDeque<Sweep>,
+        passes: Vec<(Option<Signal>, Sweep)>,
+    }
 
-    impl Listing for Stale {
-        fn pids(&mut self) -> io::Result<Vec<Pid>> {
-            match self.0.pop_front().flatten() {
-                Some(pids) => Ok(pids),
-                None => Processes.pids(),
-            }
+    impl Sweeper for Scripted {
+        fn sweep(&mut self, signal: Option<Signal>) -> Sweep {
+            let sweep = self.sweeps.pop_front().unwrap_or_default();
+            self.passes.push((signal, sweep.clone()));
+            sweep
+        }
+    }
+
+    fn scripted(sweeps: impl IntoIterator<Item = Sweep>, now: Instant) -> Ending<Scripted> {
+        Ending::new(
+            Scripted {
+                sweeps: sweeps.into_iter().collect(),
+                passes: Vec::new(),
+            },
+            now,
+        )
+    }
+
+    fn signals(ending: &Ending<Scripted>) -> Vec<Option<Signal>> {
+        ending
+            .sweeper
+            .passes
+            .iter()
+            .map(|(signal, _)| *signal)
+            .collect()
+    }
+
+    fn reaching(pids: &[i32]) -> Sweep {
+        Sweep {
+            reached: pids
+                .iter()
+                .map(|pid| Pid::from_raw(*pid).unwrap())
+                .collect(),
+            ..Sweep::default()
         }
     }
 
     #[test]
-    #[ignore = "signals processes; runs in pnpm test:real rust"]
     fn an_ending_kills_what_a_pass_missed_and_ends_only_after_two_empty_passes() {
-        bazhen_test_signal::require_sandbox().unwrap();
-        let leader = Leader::start(&format!("trap '' HUP; {JOB}"));
-        let job = job_pid(&leader);
-        let alone = Some(vec![leader.child.pid()]);
-        let listings = [None, None, alone, Some(vec![])];
-        let past = Instant::now().checked_sub(CLOSE_GRACE).unwrap();
-        let mut ending = Ending::new(leader.session(), past, Stale(listings.into()));
-        let give_up = Instant::now() + DEADLINE;
-        while !ending.is_over() {
-            assert!(Instant::now() < give_up, "the ending never ended");
-            if ending
-                .deadline(leader.exited())
-                .is_some_and(|at| at > Instant::now())
-            {
-                std::thread::sleep(Duration::from_millis(5));
-                continue;
-            }
-            let exited = leader.exited();
-            ending.step(exited, Instant::now());
-            if !exited && ending.killing() {
-                leader.wait_exited();
-            }
+        let (leader, job) = (101, 102);
+        let now = Instant::now();
+        let hangup = [reaching(&[leader, job]), reaching(&[leader, job])];
+        // The second kill's listing was made before the job started, so it found nothing.
+        let kills = [reaching(&[leader]), Sweep::default(), reaching(&[job])];
+        let mut ending = scripted(hangup.into_iter().chain(kills), now);
+        ending.step(false, now);
+        let mut at = now + CLOSE_GRACE;
+        for _ in 0..4 {
+            ending.step(true, at);
+            assert!(!ending.is_over());
+            at = ending.deadline(true).unwrap();
         }
-        assert!(
-            rustix::process::test_kill_process(job).is_err(),
-            "the job a pass missed outlived the ending"
-        );
+        ending.step(true, at);
+        assert!(ending.is_over());
+        let kill = Some(Signal::KILL);
+        let hup = [Some(Signal::HUP), Some(Signal::CONT)];
+        assert_eq!(signals(&ending), [hup.as_slice(), &[kill; 5]].concat());
     }
 
     #[test]
-    #[ignore = "signals processes; runs in pnpm test:real rust"]
     fn an_ending_ends_without_waiting_out_the_grace_when_the_hangup_leaves_nothing() {
-        bazhen_test_signal::require_sandbox().unwrap();
-        let leader = Leader::start("sleep 30");
         let now = Instant::now();
-        let mut ending = Ending::start(leader.session(), now);
+        let mut ending = scripted([], now);
         assert_eq!(ending.deadline(false), Some(now));
         ending.step(false, now);
-        until("the leader has exited", || leader.exited());
         let mut at = now;
         for _ in 0..EMPTY_PASSES {
             assert!(!ending.is_over());
@@ -698,6 +691,163 @@ mod tests {
         assert!(ending.is_over());
         assert_eq!(at, now + SWEEP_EVERY * EMPTY_PASSES);
         assert!(at < now + CLOSE_GRACE);
+        assert_eq!(ending.deadline(true), None);
+    }
+
+    /// An ending's rules as `docs/holder.md` gives them to users, rather than as the constants
+    /// say: a constant that drifts from what is documented fails the property too.
+    const GRACE: Duration = Duration::from_secs(2);
+    const EVERY: Duration = Duration::from_millis(50);
+    const EMPTY_IN_A_ROW: usize = 2;
+    const KILLS: usize = 10;
+
+    /// A pass an ending made, as the test saw it.
+    #[derive(Debug, Clone)]
+    struct Made {
+        at: Instant,
+        signal: Option<Signal>,
+        sweep: Sweep,
+        leader_exited: bool,
+    }
+
+    /// What an ending that started at `start` and has made `history` must be.
+    struct Rules<'a> {
+        start: Instant,
+        history: &'a [Made],
+    }
+
+    impl Rules<'_> {
+        fn kills(&self) -> usize {
+            self.history
+                .iter()
+                .filter(|made| made.signal == Some(Signal::KILL))
+                .count()
+        }
+
+        /// Counts, and kills once the leader has exited: the passes whose emptiness ends it.
+        fn counted(&self) -> impl Iterator<Item = &Made> {
+            self.history.iter().filter(|made| match made.signal {
+                None => true,
+                Some(signal) => signal == Signal::KILL && made.leader_exited,
+            })
+        }
+
+        fn over(&self) -> bool {
+            let last: Vec<&Made> = self.counted().collect();
+            let empty_run = last
+                .iter()
+                .rev()
+                .take_while(|made| made.sweep.reached.is_empty() && !made.sweep.incomplete)
+                .count();
+            self.kills() >= KILLS || empty_run >= EMPTY_IN_A_ROW
+        }
+
+        fn deadline(&self, leader_exited: bool) -> Option<Instant> {
+            let grace_over = self.start + GRACE;
+            match self.history.last() {
+                _ if self.over() => None,
+                None => Some(self.start),
+                Some(last) if self.kills() > 0 => Some(last.at + EVERY),
+                Some(last) if leader_exited => Some((last.at + EVERY).min(grace_over)),
+                Some(_) => Some(grace_over),
+            }
+        }
+
+        /// The signals of the passes a step at `now` makes, in order.
+        fn step(&self, leader_exited: bool, now: Instant) -> Vec<Option<Signal>> {
+            match self.deadline(leader_exited) {
+                Some(at) if now >= at => {}
+                _ => return Vec::new(),
+            }
+            if self.history.is_empty() {
+                vec![Some(Signal::HUP), Some(Signal::CONT)]
+            } else if self.kills() == 0 && now < self.start + GRACE {
+                vec![None]
+            } else {
+                vec![Some(Signal::KILL)]
+            }
+        }
+    }
+
+    /// When a step is made, against the deadline the ending gave.
+    #[derive(Debug, Clone, Copy)]
+    enum When {
+        AtTheDeadline,
+        Before(Duration),
+        After(Duration),
+    }
+
+    fn sweeps() -> impl Strategy<Value = Sweep> {
+        let pids = |most: usize| {
+            proptest::collection::vec(2i32..1000, 0..=most).prop_map(|pids| {
+                pids.into_iter()
+                    .map(|pid| Pid::from_raw(pid).unwrap())
+                    .collect()
+            })
+        };
+        (
+            prop_oneof![3 => Just(Vec::new()), 1 => pids(3)],
+            pids(2),
+            proptest::bool::weighted(0.15),
+        )
+            .prop_map(|(reached, refused, incomplete)| Sweep {
+                reached,
+                refused,
+                incomplete,
+            })
+    }
+
+    fn whens() -> impl Strategy<Value = When> {
+        prop_oneof![
+            4 => Just(When::AtTheDeadline),
+            2 => (1u64..50_000_000).prop_map(|ns| When::Before(Duration::from_nanos(ns))),
+            2 => (0u64..120).prop_map(|ms| When::After(Duration::from_millis(ms))),
+            1 => (0u64..3_000).prop_map(|ms| When::After(Duration::from_millis(ms))),
+        ]
+    }
+
+    proptest! {
+        /// Whatever each pass finds, whenever the ending is stepped, and whenever the leader
+        /// exits, the ending hangs up first, then counts or kills on time, and is over exactly
+        /// when two counted passes in a row find nothing or ten kills have been sent.
+        #[test]
+        fn an_ending_follows_its_rules_whatever_the_passes_find_and_whenever_it_is_stepped(
+            script in proptest::collection::vec(sweeps(), 0..40),
+            exits_at in proptest::option::weighted(0.75, 0usize..15),
+            steps in proptest::collection::vec(whens(), 1..80),
+        ) {
+            let start = Instant::now();
+            let mut ending = scripted(script, start);
+            let mut history: Vec<Made> = Vec::new();
+            let mut now = start;
+            for (index, when) in steps.into_iter().enumerate() {
+                let exited = exits_at.is_some_and(|at| index >= at);
+                let rules = Rules { start, history: &history };
+                let due = ending.deadline(exited);
+                prop_assert_eq!(due, rules.deadline(exited), "step {}", index);
+                now = match (due, when) {
+                    (None, _) => now + Duration::from_millis(1),
+                    (Some(at), When::AtTheDeadline) => at,
+                    (Some(at), When::Before(by)) => at.checked_sub(by).unwrap(),
+                    (Some(at), When::After(by)) => at + by,
+                }
+                .max(now);
+                let expected = rules.step(exited, now);
+                let before = ending.sweeper.passes.len();
+                ending.step(exited, now);
+                let made = &ending.sweeper.passes[before..];
+                let signals: Vec<Option<Signal>> = made.iter().map(|(signal, _)| *signal).collect();
+                prop_assert_eq!(signals, expected, "step {}", index);
+                history.extend(made.iter().map(|(signal, sweep)| Made {
+                    at: now,
+                    signal: *signal,
+                    sweep: sweep.clone(),
+                    leader_exited: exited,
+                }));
+                let rules = Rules { start, history: &history };
+                prop_assert_eq!(ending.is_over(), rules.over(), "step {}", index);
+            }
+        }
     }
 
     /// A `/proc/<pid>/stat` line, whose name holds `) Z 9 9 9`, as a program can name itself.
