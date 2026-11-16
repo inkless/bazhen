@@ -19,14 +19,16 @@ import {
 } from "node:fs";
 import { request } from "node:http";
 import { DatabaseSync } from "node:sqlite";
-import { createServer } from "node:net";
+import { createConnection, createServer } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { WebSocket } from "ws";
 import { GENERATION_OPTION, signalPane, TmuxServer } from "@bazhen/host-guard";
 import {
+  encodeHolderRequest,
   EventFrame,
+  HOLDER_PROTOCOL_VERSION,
   LaunchAgentResponse,
   PROTOCOL_VERSION,
   StreamServerFrame,
@@ -800,7 +802,17 @@ export class Daemon {
     this.tmux("detach-client", "-s", this.requireSession(agentId));
   }
 
-  /** Stops the daemon, its tmux server and every file under its home. */
+  /** Ends every holder still answering under its home, each by its own protocol. */
+  private async closeHolders(): Promise<void> {
+    await Promise.all(
+      holderSockets(this.home).map((socket) =>
+        // A socket a holder that died left behind has nothing to close.
+        closeHolder(socket).catch(() => {}),
+      ),
+    );
+  }
+
+  /** Stops the daemon, its tmux server, its holders and every file under its home. */
   async stop(): Promise<void> {
     await this.exit("SIGTERM");
     // A daemon `bazhen start` detached is not this process's child.
@@ -810,10 +822,41 @@ export class Daemon {
       ? run("codex", ["app-server", "daemon", "stop"], { env: this.env, timeout: 90_000 })
       : undefined;
     this.tmuxServer.kill();
+    await this.closeHolders();
     await codexStopped;
     // The agents' processes may still be writing their state as the server goes down.
     rmSync(this.home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
+}
+
+/**
+ * The socket of each holder under `home`, as the daemon's holder runtime binds them. A holder runs
+ * on after its daemon, as a terminal should.
+ */
+export function holderSockets(home: string): string[] {
+  const dir = join(home, "run", "holders");
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((name) => name.endsWith(".sock"))
+    .map((name) => join(dir, name));
+}
+
+/**
+ * Ends a terminal by its holder's own protocol, from outside the daemon, and resolves once the
+ * holder hangs up: nothing is signalled. A holder answers one connection's requests in order, so
+ * `close` is sent straight after `hello`, its replies unread.
+ */
+export async function closeHolder(socket: string): Promise<void> {
+  const connection = createConnection(socket);
+  const ended = once(connection, "close");
+  connection.on("error", () => {});
+  connection.write(
+    encodeHolderRequest({ type: "hello", id: 1, body: { protocol: [HOLDER_PROTOCOL_VERSION] } }),
+  );
+  connection.write(encodeHolderRequest({ type: "close", id: 2 }));
+  connection.resume();
+  const timer = setTimeout(() => connection.destroy(new Error(`${socket} didn't close`)), 5_000);
+  await ended.finally(() => clearTimeout(timer));
 }
 
 /** Resolves once the upgrade is accepted; a refusal rejects with its status. */

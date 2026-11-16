@@ -7,7 +7,7 @@ import { getRequestListener, serve } from "@hono/node-server";
 import { LocalEnvironment } from "@bazhen/env-local";
 import { ClaudeCodeHarness } from "@bazhen/harness-claude-code";
 import { CodexHarness, DAEMON_START_ARGS } from "@bazhen/harness-codex";
-import { filterEnv } from "@bazhen/core";
+import { filterEnv, RoutedRuntime, UnknownRuntime } from "@bazhen/core";
 import { TmuxServer, findNotifySend, hostPtyReader } from "@bazhen/host-guard";
 import { PROTOCOL_VERSION } from "@bazhen/protocol";
 import { HolderRuntime, installHolder, pruneUnusedHolders } from "@bazhen/runtime-holder";
@@ -191,15 +191,22 @@ void pruneUnusedHolders(holderDir, inputs.uid, holderInstall).then(
   },
   (err: unknown) => console.warn(`holder builds weren't pruned: ${String(err)}`),
 );
-const holderRuntime =
-  holderInstall.installed === null
-    ? null
-    : new HolderRuntime({
-        root: paths.run,
-        binary: holderInstall.installed.binary,
-        installDir: holderInstall.installed.installDir,
-        env: hostEnv,
-      });
+if (config.defaultRuntime === "holder" && holderInstall.installed === null) {
+  console.error(
+    `bazhen: runtime.default = "holder" (${configFile.path}), but no holder can be started: ` +
+      holderInstall.reason,
+  );
+  process.exit(1);
+}
+// Built with or without an installed build: holders made earlier are served either way, and only
+// a new terminal needs one.
+const holderRuntime = new HolderRuntime({
+  root: paths.run,
+  binary: holderInstall.installed?.binary ?? null,
+  ...(holderInstall.installed === null && { unavailable: holderInstall.reason }),
+  installDir: holderDir,
+  env: hostEnv,
+});
 
 /**
  * With `shells.retype_last_command` on, what new shells report their lines through. Turned off,
@@ -224,7 +231,7 @@ function shellIntegration(): { hook: string; dir: string } | undefined {
     return undefined;
   }
 }
-const runtime = new TmuxRuntime({
+const tmux = new TmuxRuntime({
   server: TmuxServer.at(paths.tmuxSocket, {
     root: paths.run,
     config: join(paths.run, "tmux.conf"),
@@ -235,10 +242,17 @@ const runtime = new TmuxRuntime({
   ...(hookRunner === HOOK_SCRIPT ? {} : { onPaneTitle: paneTitleCommand(hookPath, paths.socket) }),
   ...(hookRunner !== HOOK_SCRIPT && { pasteGate: [hookPath, "pane-ready"] as const }),
 });
+// Each terminal stays on the runtime it was made on; new ones go to `runtime.default`.
+const runtime = new RoutedRuntime({
+  runtimes: [tmux, holderRuntime],
+  defaultKind: config.defaultRuntime,
+  onError: (err: unknown) => console.warn("runtime:", err),
+});
 // Follows Codex TUIs from thread to thread, by their panes' titles (§5.8).
 const codexThreads = new CodexThreads({
   store,
-  runtime,
+  // Only tmux panes carry the titles it follows.
+  runtime: tmux,
   channel: {
     request: (method, params) => codex.request(method, params),
     resume: (threadId) => codex.resume(threadId),
@@ -312,7 +326,7 @@ const shellReports = new ShellReports(store, (terminalId, brackets) =>
 );
 await reconcileShells(store, environment, shells);
 // After both reconciles, whose health checks have a server whose socket was deleted recreate it.
-await runtime.applyServerSettings().catch((err: unknown) => {
+await tmux.applyServerSettings().catch((err: unknown) => {
   console.warn("tmux server settings were not applied:", err);
 });
 await shells.settleOrphans();
@@ -373,7 +387,14 @@ const gate = { devices, always: config.pairingRequired };
 const notices = new Notices(store);
 const snapshotView: SnapshotView = {
   host: (kind) => (kind === "local" ? hostname() : ""),
-  attachCommand: (ref) => runtime.attachCommand(ref),
+  attachCommand: (ref) => {
+    try {
+      return runtime.attachCommand(ref);
+    } catch (err) {
+      if (err instanceof UnknownRuntime) return null;
+      throw err;
+    }
+  },
   resumes: environment.resumes,
   themes: (harness) => environment.themes[harness] ?? [],
   attentionActions: (item) => inbox.actions(item),
@@ -533,7 +554,8 @@ const socketListener = getRequestListener(
     shellPrompt: (terminalId, report) => shellReports.prompt(terminalId, report),
     refreshEnv: async (env) => {
       const next = filterEnv(env, config.envRules);
-      const { refused } = await runtime.replaceEnv(next.env);
+      const { refused } = await tmux.replaceEnv(next.env);
+      holderRuntime.replaceEnv(next.env);
       captured = { ...next, at: new Date().toISOString(), source: "refresh" };
       codexCliRead = codexCliVersion(next.env);
       const running = store.snapshot(snapshotView).agents.filter((a) => a.state === "running");
