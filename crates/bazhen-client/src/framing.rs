@@ -476,13 +476,21 @@ mod tests {
             sent.extend_from_slice(line.as_bytes());
         }
         assert!(sent.len() > read_cap(small));
-        daemon.write_all(&sent).unwrap();
-        // The daemon holds the connection open, as one still sending would.
+        // More than macOS's socket buffer holds, so it is written beside the read, and the
+        // daemon then holds the connection open, as one still sending would.
+        let (done, finished) = std::sync::mpsc::channel::<()>();
+        let writer = std::thread::spawn(move || {
+            // The client stops reading at its cap, and its drop ends a write still waiting.
+            let _ = daemon.write_all(&sent);
+            let _ = finished.recv();
+        });
         let read = read_response(&mut client, small, STALL, soon()).unwrap();
         assert!(read.len() <= read_cap(small), "{}", read.len());
         assert!(!is_truncated(&read, small));
         assert_eq!(body(&read, small), None);
-        drop(daemon);
+        drop(client);
+        drop(done);
+        writer.join().unwrap();
     }
 
     #[test]

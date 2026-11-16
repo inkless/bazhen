@@ -312,21 +312,34 @@ fn send(
             .filter(|d| !d.is_zero())
             .ok_or(io::Error::from(io::ErrorKind::TimedOut))
     };
+    // The writes don't block: a write timeout can't bound them, since BSD's starts again each
+    // time the daemon frees a little room, so a daemon that reads slowly would hold the request
+    // for ever. A request that fits the socket's buffer, as nearly all do, never waits here.
+    stream.set_nonblocking(true)?;
+    let mut pause = Duration::from_millis(1);
     for mut bytes in [head.as_bytes(), body] {
-        // Each write gets only what is left, so a daemon that reads slowly can't stretch the
-        // writes past the deadline a little at a time.
         while !bytes.is_empty() {
-            stream.set_write_timeout(Some(left()?))?;
             match stream.write(bytes) {
                 Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
-                Ok(n) => bytes = bytes.get(n..).unwrap_or_default(),
+                Ok(n) => {
+                    bytes = bytes.get(n..).unwrap_or_default();
+                    pause = Duration::from_millis(1);
+                }
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(pause.min(left()?));
+                    pause = (pause * 2).min(WRITE_PAUSE_MAX);
+                }
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
                 Err(e) => return Err(e),
             }
         }
     }
+    stream.set_nonblocking(false)?;
     read_response(stream, limits, REPLY_STALL, deadline)
 }
+
+/// The longest a write waits before it tries again on a socket with no room.
+const WRITE_PAUSE_MAX: Duration = Duration::from_millis(20);
 
 #[cfg(test)]
 mod tests {
