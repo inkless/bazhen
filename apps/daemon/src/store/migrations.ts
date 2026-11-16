@@ -428,9 +428,10 @@ export const MIGRATIONS: readonly Migration[] = [
   {
     version: 28,
     sql: `
-      -- Set once a terminal is seen on a holder this build can't fully serve. A holder runs one
-      -- binary for life, so it stays set through respawns; a new terminal starts without it.
-      ALTER TABLE terminals ADD COLUMN needs_restart INTEGER NOT NULL DEFAULT 0;
+      -- The versions a terminal's holder speaks, as a JSON array, once it is seen on a holder this
+      -- build can't fully serve; NULL while it needs no restart. A holder runs one binary for life,
+      -- so it stays through respawns until a build that serves it in full reads it.
+      ALTER TABLE terminals ADD COLUMN restart_protocol TEXT;
     `,
   },
 ];

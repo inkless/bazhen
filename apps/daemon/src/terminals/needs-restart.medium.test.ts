@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { newId, type Compatibility, type EnvironmentAdapter, type TerminalId } from "@bazhen/core";
 import type { HolderProcess } from "@bazhen/host-guard";
+import { HOLDER_PROTOCOL_VERSION } from "@bazhen/protocol";
 import type { Store } from "../store/store.ts";
 import { fakeEnvironment, testView, withAgent } from "../testing/fixtures.ts";
 import { RestartWatch } from "./needs-restart.ts";
@@ -29,11 +30,11 @@ async function onHolder() {
     compatibility: async () => read,
   }));
   const terminalId = fixture.terminalId;
-  const serve = (how: "outdated" | "served") => {
+  const serve = (how: "outdated" | "served", protocol: readonly string[] = ["2.0"]) => {
     read =
       how === "outdated"
         ? {
-            outdated: new Map<TerminalId, readonly string[]>([[terminalId, ["2.0"]]]),
+            outdated: new Map<TerminalId, readonly string[]>([[terminalId, protocol]]),
             served: new Set(),
           }
         : { outdated: new Map(), served: new Set([terminalId]) };
@@ -63,7 +64,7 @@ describe("recording the terminals that need a restart", () => {
     await watch.sweep();
     expect([before, agentOf()?.needsRestart, recorded(store, terminalId).length]).toEqual([
       null,
-      { holderPid: HOLDER.pid },
+      { holderPid: HOLDER.pid, served: false },
       1,
     ]);
   });
@@ -74,7 +75,7 @@ describe("recording the terminals that need a restart", () => {
     end();
     await watch.sweep();
     expect([agentOf()?.needsRestart, agentOf()?.attachCommand]).toEqual([
-      { holderPid: null },
+      { holderPid: null, served: false },
       null,
     ]);
   });
@@ -110,6 +111,13 @@ describe("recording the terminals that need a restart", () => {
     expect([lost.agentOf()?.needsRestart, closed.agentOf()?.needsRestart]).toEqual([null, null]);
   });
 
+  it("tells a holder this build still serves, on an older major, from one it can't speak to", async () => {
+    const { serve, watch, agentOf } = await onHolder();
+    serve("outdated", ["0.9", HOLDER_PROTOCOL_VERSION]);
+    await watch.sweep();
+    expect(agentOf()?.needsRestart).toEqual({ holderPid: HOLDER.pid, served: true });
+  });
+
   it("keeps it through a respawn in the same holder", async () => {
     const { store, agentId, serve, watch, agentOf } = await onHolder();
     serve("outdated");
@@ -138,7 +146,7 @@ describe("recording the terminals that need a restart", () => {
         },
       },
     });
-    expect(agentOf()?.needsRestart).toEqual({ holderPid: HOLDER.pid });
+    expect(agentOf()?.needsRestart).toEqual({ holderPid: HOLDER.pid, served: false });
   });
 
   it("starts a relaunched agent's new terminal without it", async () => {

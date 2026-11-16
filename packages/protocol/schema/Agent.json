@@ -328,6 +328,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "served": {
+              "default": false,
+              "type": "boolean"
             }
           },
           "required": [

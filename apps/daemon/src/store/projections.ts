@@ -288,17 +288,19 @@ export function project(db: Statements, e: Recorded): void {
       });
     }
     case "terminal.needs_restart": {
-      EVENTS[e.type].payload.parse(e.payload);
+      const { protocol } = EVENTS[e.type].payload.parse(e.payload);
       const row = db.prepare("SELECT 1 AS present FROM terminals WHERE id = ?").get(e.entityId);
       if (row === undefined) throw new UnknownEntity("terminal", e.entityId);
-      update(db, "terminals", "id", e.entityId, e.id, { needs_restart: 1 });
+      update(db, "terminals", "id", e.entityId, e.id, {
+        restart_protocol: JSON.stringify(protocol),
+      });
       return;
     }
     case "terminal.restart_cleared": {
       EVENTS[e.type].payload.parse(e.payload);
       const row = db.prepare("SELECT 1 AS present FROM terminals WHERE id = ?").get(e.entityId);
       if (row === undefined) throw new UnknownEntity("terminal", e.entityId);
-      update(db, "terminals", "id", e.entityId, e.id, { needs_restart: 0 });
+      update(db, "terminals", "id", e.entityId, e.id, { restart_protocol: null });
       return;
     }
     case "terminal.unlinked":

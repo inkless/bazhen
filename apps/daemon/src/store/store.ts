@@ -33,6 +33,9 @@ import {
   TaskState,
   type AssignmentState,
   EVENTS,
+  HOLDER_PROTOCOL_VERSION,
+  HolderVersions,
+  negotiateHolder,
   ExternalRef,
   HarnessId,
   TuiTheme,
@@ -283,13 +286,17 @@ const RESTARTABLE: ReadonlySet<string> = new Set<TerminalState>(["creating", "ru
  * named only as the view last proved it still runs, so a pid reused since is never named.
  */
 function needsRestartOf(
-  flag: SQLOutputValue | undefined,
+  protocol: SQLOutputValue | undefined,
   state: SQLOutputValue | undefined,
   terminalId: SQLOutputValue | undefined,
   view: SnapshotView,
 ): NeedsRestart | null {
-  if (flag !== 1 || !RESTARTABLE.has(String(state)) || typeof terminalId !== "string") return null;
-  return { holderPid: view.restartHolder?.(terminalId) ?? null };
+  if (typeof protocol !== "string" || !RESTARTABLE.has(String(state))) return null;
+  if (typeof terminalId !== "string") return null;
+  const versions = HolderVersions.safeParse(JSON.parse(protocol));
+  const served =
+    versions.success && negotiateHolder([HOLDER_PROTOCOL_VERSION], versions.data) !== null;
+  return { holderPid: view.restartHolder?.(terminalId) ?? null, served };
 }
 
 /** Agent states whose directory still holds their work, so a shell can be opened beside them. */
@@ -603,14 +610,14 @@ export class Store {
 
   /** Whether a terminal not yet ended still has its "needs restart" to record. */
   restartUnrecorded(terminalId: string): boolean {
-    const sql = `SELECT 1 AS yes FROM terminals WHERE id = ? AND needs_restart = 0
+    const sql = `SELECT 1 AS yes FROM terminals WHERE id = ? AND restart_protocol IS NULL
                  AND state NOT IN ('closed', 'failed', 'lost')`;
     return this.prepare(sql).get(terminalId) !== undefined;
   }
 
   /** The terminals not yet ended that are recorded as needing a restart. */
   restartsRecorded(): TerminalId[] {
-    const sql = `SELECT id FROM terminals WHERE needs_restart = 1
+    const sql = `SELECT id FROM terminals WHERE restart_protocol IS NOT NULL
                  AND state NOT IN ('closed', 'failed', 'lost')`;
     return this.prepare(sql)
       .all()
@@ -1259,7 +1266,7 @@ export class Store {
                   a.launched_by AS launchedBy,
                   a.terminal_id AS terminalId, t.generation, a.external_ref AS externalRef, t.exit,
                   coalesce(t.theme, 'dark') AS theme, s.activity, a.usage, t.state AS terminalState,
-                  t.runtime, t.locator, a.transcript, t.needs_restart AS needsRestart,
+                  t.runtime, t.locator, a.transcript, t.restart_protocol AS needsRestart,
                   n.text AS headlineText, n.task_id AS headlineTask, ne.ts AS headlineAt
            FROM agent_sessions a LEFT JOIN terminals t ON t.id = a.terminal_id
            LEFT JOIN activity_latest s ON s.agent_session_id = a.id
@@ -1358,7 +1365,7 @@ export class Store {
         shells: this.prepare(
           `SELECT id, environment_id AS environmentId, state, generation, cwd,
                   linked_agent_id AS linkedAgentId, name, coalesce(theme, 'dark') AS theme,
-                  foreground, runtime, locator, needs_restart AS needsRestart,
+                  foreground, runtime, locator, restart_protocol AS needsRestart,
                   state = 'lost' AND last_command IS NOT NULL AS retypeable
            FROM terminals WHERE kind = 'shell' AND state NOT IN ('closed', 'failed') ORDER BY created_event_id`,
         )

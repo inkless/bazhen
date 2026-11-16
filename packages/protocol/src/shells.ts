@@ -9,7 +9,14 @@ import { Id, IdempotencyKey } from "./ids.ts";
  * running until it is ended, by its pid when the daemon can't speak to it; a new terminal, by a
  * relaunch or a restart, then runs on a current holder. `holderPid` is null when unrecorded.
  */
-export const NeedsRestart = z.object({ holderPid: z.number().int().positive().nullable() });
+export const NeedsRestart = z.object({
+  holderPid: z.number().int().positive().nullable(),
+  /**
+   * The holder speaks an older major this build still serves, so the terminal works and closes
+   * as usual; otherwise it speaks none this build does, and can be neither served nor closed.
+   */
+  served: z.boolean().default(false),
+});
 export type NeedsRestart = z.infer<typeof NeedsRestart>;
 
 export const TerminalState = z.enum([
