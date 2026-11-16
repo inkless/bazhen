@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import type { ShellReport } from "@bazhen/protocol";
+import type { ShellPrompt, ShellReport } from "@bazhen/protocol";
 import type { Store } from "../store/store.ts";
 
 /** What became of a report: kept, older than the kept line, or not the shell's own. */
@@ -29,22 +29,39 @@ export function newShellToken(random: (size: number) => Buffer = randomBytes): {
  */
 export class ShellReports {
   private readonly store: Store;
+  private readonly prompted: (terminalId: string, brackets: boolean) => void;
   private readonly nowMicros: () => number;
 
-  constructor(store: Store, nowMicros: () => number = () => Date.now() * 1000) {
+  constructor(
+    store: Store,
+    prompted: (terminalId: string, brackets: boolean) => void,
+    nowMicros: () => number = () => Date.now() * 1000,
+  ) {
     this.store = store;
+    this.prompted = prompted;
     this.nowMicros = nowMicros;
   }
 
   report(terminalId: string, report: ShellReport): ReportOutcome {
-    const kept = this.store.shellTokenHash(terminalId);
-    if (kept === null) return "refused";
-    const given = Buffer.from(hashOf(report.token), "hex");
-    const expected = Buffer.from(kept, "hex");
-    if (given.length !== expected.length || !timingSafeEqual(given, expected)) return "refused";
+    if (!this.owns(terminalId, report.token)) return "refused";
     // A shell's clock, or a report forged with a time far ahead, could otherwise keep every later
     // line from counting: a report counts as at most a minute ahead of the daemon's own clock.
     const at = Math.min(report.at, this.nowMicros() + AHEAD_MICROS);
     return this.store.noteShellCommand(terminalId, at, report.command) ? "kept" : "stale";
+  }
+
+  /** The shell reached its first prompt: whether the report was the shell's own. */
+  prompt(terminalId: string, report: ShellPrompt): boolean {
+    if (!this.owns(terminalId, report.token)) return false;
+    this.prompted(terminalId, report.brackets === true);
+    return true;
+  }
+
+  private owns(terminalId: string, token: string): boolean {
+    const kept = this.store.shellTokenHash(terminalId);
+    if (kept === null) return false;
+    const given = Buffer.from(hashOf(token), "hex");
+    const expected = Buffer.from(kept, "hex");
+    return given.length === expected.length && timingSafeEqual(given, expected);
   }
 }

@@ -320,9 +320,12 @@ export const closeShell = (terminalId: string, generation: number, confirmedProg
     ...(confirmedProgram !== undefined && { confirmedProgram }),
   });
 
-/** A new shell in a lost one's directory; the answer names the new one. */
-export const restartShell = (terminalId: string, generation: number) =>
-  shellCommand(terminalId, "restart", { generation });
+/**
+ * A new shell in a lost one's directory; the answer names the new one. With `retype`, the lost
+ * shell's last line is typed at the new one's prompt, without Enter.
+ */
+export const restartShell = (terminalId: string, generation: number, retype = false) =>
+  shellCommand(terminalId, "restart", { generation, ...(retype && { retype: true }) });
 
 export const renameShell = (terminalId: string, name: string | null) =>
   shellCommand(terminalId, "rename", { name });

@@ -34,6 +34,7 @@ import {
 } from "../commands.ts";
 import type { AgentQueue } from "../agents/queue.ts";
 import { newShellToken } from "./reports.ts";
+import { PendingRetypes, afterTimeout, type After } from "./retype.ts";
 import {
   LINKABLE,
   UnknownAgent,
@@ -81,6 +82,11 @@ export class ShellOpenFailed extends Error {
   }
 }
 
+/** How long a restart's line waits for its new shell to hold the terminal's foreground. */
+const FOREGROUND_WAIT_MS = 3_000;
+/** How often it looks while it waits. */
+const FOREGROUND_POLL_MS = 100;
+
 /** Shell states in which a dead pane is still to be ended and recorded closed. */
 const ENDING: ReadonlySet<string> = new Set(["running", "closing"]);
 
@@ -100,6 +106,8 @@ export interface ShellDeps {
    */
   readonly integration?: { readonly hook: string; readonly dir: string };
   readonly log?: (message: string) => void;
+  /** What times a restarted shell's wait for its first prompt; the daemon's clock by default. */
+  readonly retypeAfter?: After;
 }
 
 /**
@@ -116,9 +124,24 @@ export class ShellLifecycle {
    * a dead pane every second until it is ended, so a failure is logged once, not every time.
    */
   private readonly unended = new Set<string>();
+  private readonly retypes: PendingRetypes;
 
   constructor(deps: ShellDeps) {
     this.deps = deps;
+    this.retypes = new PendingRetypes({
+      paste: (ref, line, brackets) => this.paste(ref, line, brackets),
+      log: (message) => this.log(message),
+      ...(deps.retypeAfter && { after: deps.retypeAfter }),
+    });
+  }
+
+  /**
+   * A shell's integration reported its first prompt, with the shell's own token: a line its
+   * restart is to type back is typed now, marked as a paste itself where `brackets` says the
+   * shell's editor reads one so.
+   */
+  prompted(terminalId: string, brackets: boolean): void {
+    this.retypes.prompted(terminalId, brackets);
   }
 
   /** Closes shells whose process the environment reports ended; returns the stop function. */
@@ -181,7 +204,9 @@ export class ShellLifecycle {
 
   /**
    * Starts a new shell in a lost one's directory, beside the same agent if that agent can still
-   * have one, and takes the lost one off the list. The answer names the new shell.
+   * have one, and takes the lost one off the list. The answer names the new shell. With `retype`,
+   * the lost shell's last line is typed at the new one's first prompt, without Enter; it is held
+   * in memory only until then, and the lost shell's row forgets it as it closes.
    */
   restart(
     terminalId: string,
@@ -190,6 +215,7 @@ export class ShellLifecycle {
   ): Promise<ShellCommandResponse> {
     const { store, queue } = this.deps;
     return this.command("restart", terminalId, req, offers("restart"), async (found) => {
+      const retype = req.retype === true ? this.retypeable(found) : undefined;
       const theme = req.theme ?? found.theme ?? undefined;
       const request = { command: "restart", terminalId, ...req };
       const replace = async () => {
@@ -202,6 +228,7 @@ export class ShellLifecycle {
             theme,
             restartOf: found.terminalId,
             openedBy,
+            retype,
           },
           (first) => store.answered(req.idempotencyKey, request, first),
         );
@@ -333,11 +360,13 @@ export class ShellLifecycle {
       restartOf?: TerminalId;
       /** The paired device that asked for it, which its environment names. */
       openedBy?: DeviceId | undefined;
+      /** A line to type at its first prompt. */
+      retype?: string | undefined;
     },
     first: (response: ShellCommandResponse) => void,
   ): Promise<ShellCommandResponse> {
     const { store, environment, size, budget, integration } = this.deps;
-    const { cwd, linkedAgentId, theme, restartOf, openedBy } = shell;
+    const { cwd, linkedAgentId, theme, restartOf, openedBy, retype } = shell;
     const terminalId = newId("term");
     const reporting = integration && { ...integration, ...newShellToken() };
     const opened = store.transaction(() => {
@@ -358,6 +387,8 @@ export class ShellLifecycle {
       first(response);
       return response;
     });
+    // Held before the shell starts, which may reach its prompt before its start returns here.
+    if (retype !== undefined) this.retypes.hold(terminalId, retype);
     const ref = await environment
       .openShell({
         terminalId,
@@ -372,12 +403,14 @@ export class ShellLifecycle {
       })
       .catch((cause: unknown) => {
         console.error(`shell ${terminalId} failed to open:`, cause);
+        this.retypes.drop(terminalId);
         this.record(terminalId, "terminal.failed", { reason: "open_rejected" });
         throw new ShellOpenFailed(terminalId, cause);
       });
     const running = this.record(terminalId, "terminal.running", {
       runtimeRef: runtimePayload(ref),
     });
+    this.retypes.opened(terminalId, ref);
     return { terminalId, eventIds: [...opened.eventIds, running] };
   }
 
@@ -495,6 +528,36 @@ export class ShellLifecycle {
             `(pid ${found.runtime?.locator.serverPid ?? "unknown"}) may still be running it`,
         );
       });
+  }
+
+  /**
+   * The lost shell's last line, for a restart to type back: refused when none is kept, or when
+   * new shells can't report the prompt it waits for.
+   */
+  private retypeable(found: ShellTerminal): string {
+    const line = this.deps.store.lastShellCommand(found.terminalId);
+    if (line === null)
+      throw new StateConflict(`shell ${found.terminalId}`, "lost with no last command kept");
+    if (this.deps.integration === undefined)
+      throw new StateConflict("shell integration", "off, so a new shell can't report its prompt");
+    return line;
+  }
+
+  /**
+   * Types a restart's line at its new shell's prompt, only while the shell itself holds the
+   * terminal's foreground: a program the user started meanwhile, as one typed ahead while the
+   * shell started, or a password prompt, would take the line as its own input. A program the
+   * prompt runs, as `git status` or a zle-line-init widget's, holds it for a moment, so the paste
+   * waits for the shell to have it again, for a while, then gives up.
+   */
+  private async paste(ref: RuntimeRef, line: string, brackets: boolean): Promise<void> {
+    const after = this.deps.retypeAfter ?? afterTimeout;
+    for (let waited = 0; ; waited += FOREGROUND_POLL_MS) {
+      const program = await this.deps.environment.shellBusy(ref);
+      if (program === null) return this.deps.environment.pasteShell(ref, line, brackets);
+      if (waited >= FOREGROUND_WAIT_MS) throw new Error(`${program} kept the shell's foreground`);
+      await new Promise<void>((resolve) => after(FOREGROUND_POLL_MS, resolve));
+    }
   }
 
   /**

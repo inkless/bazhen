@@ -192,6 +192,7 @@ const runtime = new TmuxRuntime({
   env: hostEnv,
   // Codex TUIs title their panes with their thread; the script client has no pane-title command.
   ...(hookRunner === HOOK_SCRIPT ? {} : { onPaneTitle: paneTitleCommand(hookPath, paths.socket) }),
+  ...(hookRunner !== HOOK_SCRIPT && { pasteGate: [hookPath, "pane-ready"] as const }),
 });
 // Follows Codex TUIs from thread to thread, by their panes' titles (§5.8).
 const codexThreads = new CodexThreads({
@@ -265,7 +266,9 @@ const shells = new ShellLifecycle({
   budget,
   ...(integration && { integration }),
 });
-const shellReports = new ShellReports(store);
+const shellReports = new ShellReports(store, (terminalId, brackets) =>
+  shells.prompted(terminalId, brackets),
+);
 await reconcileShells(store, environment, shells);
 // After both reconciles, whose health checks have a server whose socket was deleted recreate it.
 await runtime.applyServerSettings().catch((err: unknown) => {
@@ -334,6 +337,7 @@ const snapshotView: SnapshotView = {
   themes: (harness) => environment.themes[harness] ?? [],
   attentionActions: (item) => inbox.actions(item),
   noticeActions: (n) => notices.actions(n, "owner-socket"),
+  shellsReport: integration !== undefined,
 };
 for (const a of store.snapshot(snapshotView).agents) {
   if (a.harness === "claude-code" && a.state === "running") activity.restarted(a.id);
@@ -474,6 +478,7 @@ const socketListener = getRequestListener(
           },
     paneTitleChanged: (pane) => void codexThreads.paneTitleChanged(pane),
     shellReport: (terminalId, report) => shellReports.report(terminalId, report),
+    shellPrompt: (terminalId, report) => shellReports.prompt(terminalId, report),
     refreshEnv: async (env) => {
       const next = filterEnv(env, config.envRules);
       const { refused } = await runtime.replaceEnv(next.env);

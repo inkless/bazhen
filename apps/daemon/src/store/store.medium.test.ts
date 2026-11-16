@@ -442,6 +442,7 @@ describe("Store snapshot view", () => {
     themes: () => ["light", "dark"] as const,
     attentionActions: () => [],
     noticeActions: () => [],
+    shellsReport: true,
   };
 
   it("names each environment's host as the view says", () => {

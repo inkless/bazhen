@@ -42,7 +42,16 @@ function setup(integration: typeof INTEGRATION | null = INTEGRATION, nowMicros =
     if (ref == null) throw new Error(`shell ${terminalId} has no terminal`);
     return { terminalId, env: runtime.specOf(ref).env };
   };
-  return { path, store, open, reports: new ShellReports(store, () => nowMicros()) };
+  return {
+    path,
+    store,
+    open,
+    reports: new ShellReports(
+      store,
+      () => {},
+      () => nowMicros(),
+    ),
+  };
 }
 
 const line = (token: string | undefined, at: number, command: string | null) => ({

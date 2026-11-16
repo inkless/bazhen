@@ -157,6 +157,96 @@ export function environmentScript(
     .join("");
 }
 
+/**
+ * Whether any character of `text` is a C0 or C1 control or DEL: a key, such as Enter, or the
+ * start of a sequence, not text.
+ */
+const hasControl = (text: string) => {
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code < 0x20 || (code >= 0x7f && code <= 0x9f)) return true;
+  }
+  return false;
+};
+
+/**
+ * Whether any character of `text` is outside printable ASCII. Typed as keys, as an unmarked paste
+ * is wherever the program hasn't asked for bracketed paste, a byte of 0x80 or more is a meta key
+ * to a line editor reading 8-bit input, as readline does in a C locale: `Å` would be M-C-e, which
+ * expands and runs the line's `$(…)`, and `£` M-#, which ends the line.
+ */
+const hasNonAscii = (text: string) => /[^\x20-\x7e]/u.test(text);
+
+/** ESC [ 2 0 0 ~ and ESC [ 2 0 1 ~, which open and close a bracketed paste, as send-keys -H keys. */
+const PASTE_START = "1b 5b 32 30 30 7e";
+const PASTE_END = "1b 5b 32 30 31 7e";
+
+/** A paste the pane wasn't ready for, which typed nothing: `message` says why. */
+export class PasteRefused extends Error {}
+
+/** What a paste's script prints, from inside it, when it types nothing, and why. */
+export const PASTE_REFUSED = {
+  mode: "bazhen-paste-refused: the pane is in a mode other than copy or view mode",
+  gate: "bazhen-paste-refused: the shell isn't reading at its prompt",
+} as const;
+
+/** A word a paste's gate command may hold, given to tmux and its shell unquoted. */
+const GATE_WORD = /^[A-Za-z0-9/._+-]+$/;
+
+/**
+ * The tmux commands that type `text` into the pane `target` without a newline: into a buffer of
+ * its own, then pasted and the buffer deleted, so a line editor inserts it as text. With
+ * `brackets`, the paste is marked with the bracketed-paste sequences whether or not the program
+ * has asked for bracketed paste yet; without, `-p` marks it only if it has, so it may arrive as
+ * keys. The text is only ever a quoted word, and text holding a control character is refused: a
+ * newline would be Enter, and an ESC could end the marked paste early, so that what follows it is
+ * typed as keys. Text that may arrive as keys must be printable ASCII as well.
+ *
+ * All of it runs in one pass of this client's queue, so no other command of the daemon's can come
+ * between its checks and the paste; keys from clients attached to the pane still can, in the few
+ * milliseconds the gate takes. A pane in copy or view mode leaves it first, and one in any other
+ * mode is refused.
+ * Then `gate`, run with the pane's tty and process id, must exit 0: it says whether what the pane
+ * runs would read the paste now, with nothing typed ahead of it. A refusal prints the matching
+ * PASTE_REFUSED line, and types nothing.
+ */
+export function pasteScript(
+  buffer: string,
+  target: string,
+  text: string,
+  brackets: boolean,
+  gate: readonly [string, ...string[]],
+): string {
+  if (!/^[A-Za-z0-9_-]+$/.test(buffer)) throw new RangeError(`not a buffer name: ${buffer}`);
+  if (!/^%[0-9]+$/.test(target)) throw new RangeError(`not a pane id: ${target}`);
+  if (!gate.every((word) => GATE_WORD.test(word)))
+    throw new RangeError("a paste's gate takes only plain words");
+  if (hasControl(text)) throw new RangeError("refusing to paste a control character");
+  if (!brackets && hasNonAscii(text))
+    throw new RangeError("refusing to paste text beyond printable ASCII that may arrive as keys");
+  const at = `-t ${target}`;
+  const paste = brackets
+    ? [
+        `send-keys ${at} -H ${PASTE_START}`,
+        `paste-buffer -d -b ${buffer} ${at}`,
+        `send-keys ${at} -H ${PASTE_END}`,
+      ]
+    : [`paste-buffer -p -d -b ${buffer} ${at}`];
+  return [
+    `if-shell -F ${at} '#{||:#{==:#{pane_mode},copy-mode},#{==:#{pane_mode},view-mode}}' 'send-keys -X ${at} cancel'`,
+    `if-shell -F ${at} '#{pane_in_mode}' 'display-message -p "${PASTE_REFUSED.mode}"' {`,
+    `  if-shell ${at} "${gate.join(" ")} #{pane_tty} #{pane_pid}" {`,
+    `    set-buffer -b ${buffer} -- ${tmuxWord(text)}`,
+    ...paste.map((command) => `    ${command}`),
+    "  } {",
+    `    display-message -p "${PASTE_REFUSED.gate}"`,
+    "  }",
+    "}",
+  ]
+    .map((line) => `${line}\n`)
+    .join("");
+}
+
 /** A tmux server as a runtime ref records it: its `#{pid}` and `#{start_time}` (epoch seconds). */
 export interface ServerIdentity {
   readonly pid: string;
@@ -335,6 +425,8 @@ export class TmuxServer {
   readonly socket: string;
   /** The configuration file the server loads when a command starts it. */
   readonly config: string | undefined;
+  /** Pastes made so far, which name each one's buffer. */
+  private pastes = 0;
 
   private constructor(socket: string, config: string | undefined) {
     this.socket = socket;
@@ -413,8 +505,7 @@ export class TmuxServer {
 
   /**
    * Sets and unsets variables in this server's global environment, which every new pane starts
-   * from. The commands go to tmux's parser on stdin (`source-file -`), so no value ever appears in
-   * argv; this is the only command that reaches tmux on stdin.
+   * from, with no value in argv.
    */
   async setEnvironment(
     set: Readonly<Record<string, string>>,
@@ -422,16 +513,47 @@ export class TmuxServer {
     opts: TmuxOptions = {},
   ): Promise<void> {
     const script = environmentScript(set, unset);
-    if (script === "") return;
+    if (script !== "") await this.source(script, opts);
+  }
+
+  /**
+   * Types `text` into the pane `target` as a paste, without Enter, with no part of it in argv.
+   * A paste that fails leaves no buffer holding it.
+   */
+  async paste(
+    target: string,
+    text: string,
+    brackets: boolean,
+    gate: readonly [string, ...string[]],
+    opts: TmuxOptions = {},
+  ): Promise<void> {
+    const buffer = `bazhen-paste-${process.pid}-${++this.pastes}`;
+    const printed = await this.source(
+      pasteScript(buffer, target, text, brackets, gate),
+      opts,
+    ).catch(async (err: unknown) => {
+      await this.run(["delete-buffer", "-b", buffer], opts).catch(() => undefined);
+      throw err;
+    });
+    const refused = Object.values(PASTE_REFUSED).find((why) => printed.includes(why));
+    if (refused !== undefined)
+      throw new PasteRefused(refused.replace(/^bazhen-paste-refused: /, ""));
+  }
+
+  /**
+   * Runs `script` through tmux's parser on stdin (`source-file -`), so nothing it carries appears
+   * in argv, which any user can read. The only commands that reach tmux on stdin.
+   */
+  private source(script: string, opts: TmuxOptions): Promise<string> {
     const [bin, ...argv] = this.argv("source-file", "-");
-    await new Promise<void>((done, fail) => {
+    return new Promise<string>((done, fail) => {
       const child = execFile(
         bin,
         argv,
         { env: opts.env, timeout: opts.timeout ?? TIMEOUT_MS, encoding: "utf8" },
         (err, stdout, stderr) => {
           const failed = settled(err, child, stdout, stderr);
-          if (failed === null) done();
+          if (failed === null) done(stdout);
           else fail(failed);
         },
       );

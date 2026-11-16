@@ -13,7 +13,14 @@ const servers = new Map<RuntimeAdapter, ConfiguredTmuxServer>();
 let made = 0;
 
 const runtimeOn = (server: ConfiguredTmuxServer) =>
-  new TmuxRuntime({ server, pty: nodePtySpawner, env: filterEnv(process.env).env, exitPollMs: 50 });
+  new TmuxRuntime({
+    server,
+    pty: nodePtySpawner,
+    env: filterEnv(process.env).env,
+    exitPollMs: 50,
+    // Every paste may go: what the daemon's gate reads of a shell is the api suite's to test.
+    pasteGate: ["true"],
+  });
 
 const REBOOT_MS = 10_000;
 

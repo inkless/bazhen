@@ -43,6 +43,7 @@ export const testView: SnapshotView = {
     return item.kind === "question" ? [] : ["reply", "dismiss"];
   },
   noticeActions: () => ["dismiss"],
+  shellsReport: true,
 };
 
 /** A browser paired on loopback, which shows no address: for tests where that isn't what is tested. */
@@ -112,6 +113,7 @@ export function fakeEnvironment(
     openShell: async ({ terminalId }) => ({ terminalId, runtime: "tmux", locator: {} }),
     shellBusy: async () => null,
     unlinkShell: async () => {},
+    pasteShell: async () => {},
     shellForegrounds: async () => [],
     onExit: () => () => {},
   };

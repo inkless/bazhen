@@ -26,6 +26,7 @@ import {
 import {
   GENERATION_OPTION,
   PaneRefused,
+  PasteRefused,
   isSafeEnvEntry,
   signalPane,
   terminalGroups,
@@ -219,6 +220,11 @@ export interface TmuxRuntimeOptions {
    * gets this runtime's hook from `applyServerSettings` and from every terminal created.
    */
   readonly onPaneTitle?: readonly [string, ...string[]];
+  /**
+   * What says whether a paste may go now, run by the server with the pane's tty and process id
+   * appended, as `bazhen-hook pane-ready` does; exit 0 is yes. Without one, nothing is pasted.
+   */
+  readonly pasteGate?: readonly [string, ...string[]];
   /** Where a failure inside exit polling goes, since no caller is waiting on it. */
   readonly onError?: (err: unknown) => void;
 }
@@ -663,6 +669,31 @@ export class TmuxRuntime implements RuntimeAdapter {
   async unlink(ref: RuntimeRef): Promise<void> {
     const pane = await this.paneOf(ref);
     await this.tmux("set-option", "-u", "-t", located(pane.ref, "sessionId"), COLUMN.linkedAgentId);
+  }
+
+  /**
+   * Through host-guard's `paste`, on tmux's stdin: the text never reaches argv, and a failure's
+   * error carries none of what tmux printed, which could quote it.
+   */
+  async paste(ref: RuntimeRef, text: string, brackets: boolean): Promise<void> {
+    const pane = await this.paneOf(ref);
+    if (pane.exit !== null) throw new ProcessState(ref.terminalId, "running");
+    assertSameGeneration(ref, pane.ref.locator.generation);
+    // The process the caller meant, not whichever the pane runs now.
+    if (pane.ref.locator.panePid !== ref.locator.panePid)
+      throw new StaleIncarnation(ref.terminalId, "process-replaced");
+    const target = located(pane.ref, "paneId");
+    const gate = this.opts.pasteGate;
+    if (gate === undefined) throw new PasteRefused("no paste gate is set up");
+    await this.opts.server
+      .paste(target, text, brackets, gate, { env: this.env })
+      .catch((cause: unknown) => {
+        if (cause instanceof RangeError || cause instanceof PasteRefused) throw cause;
+        const of = (key: string): unknown =>
+          typeof cause === "object" && cause !== null ? Reflect.get(cause, key) : undefined;
+        const status = { code: of("code"), killed: of("killed"), signal: of("signal") };
+        throw new TmuxError(["paste-buffer", "-t", target], status);
+      });
   }
 
   async signal(ref: RuntimeRef, signal: Signal): Promise<void> {

@@ -141,12 +141,15 @@ export type IntegratedShell = "zsh" | "bash" | "fish";
 
 /**
  * A `$SHELL` that starts `kind` with an rc file holding only `rcLine`, in a directory of its own
- * that `cleanup` removes: these tests keep the real HOME, and its rc files with it.
+ * that `cleanup` removes: these tests keep the real HOME, and its rc files with it. Given a
+ * function, the rc is what it makes of the path `mark` creates, so a shell started after `mark`
+ * can be told from one started before.
  */
-export function shellWithRc(kind: IntegratedShell, rcLine: string) {
+export function shellWithRc(kind: IntegratedShell, rcLine: string | ((marked: string) => string)) {
   const dir = mkdtempSync("/tmp/bz-rc-");
+  const marked = join(dir, "marked");
   const rc = join(dir, kind === "zsh" ? ".zshrc" : `${kind}rc`);
-  writeFileSync(rc, `${rcLine}\n`);
+  writeFileSync(rc, `${typeof rcLine === "string" ? rcLine : rcLine(marked)}\n`);
   // As bash's --rcfile does, zsh skips the host's global rc files, which can stop a shell to ask
   // something first: a CI runner's runs compinit, which asks about insecure directories and takes
   // the first keys typed as the answer.
@@ -159,7 +162,12 @@ export function shellWithRc(kind: IntegratedShell, rcLine: string) {
   const shell = join(dir, `${kind}-shell`);
   writeFileSync(shell, `#!/bin/sh\n${start[kind]}\n`);
   chmodSync(shell, 0o755);
-  return { shell, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  return {
+    shell,
+    mark: () => writeFileSync(marked, ""),
+    unmark: () => rmSync(marked, { force: true }),
+    cleanup: () => rmSync(dir, { recursive: true, force: true }),
+  };
 }
 
 export interface DaemonOptions {
@@ -502,6 +510,39 @@ export class Daemon {
   /** The environment a shell terminal's process runs with (Linux only). */
   shellEnv(terminalId: string): Record<string, string> {
     return processEnv(Number(this.paneFact(terminalId, "pane_pid", "@bazhen_terminal_id")));
+  }
+
+  /** What a file in the work directory holds, or null when there is none. */
+  workFile(name: string): string | null {
+    const path = join(this.work, name);
+    return existsSync(path) ? readFileSync(path, "utf8") : null;
+  }
+
+  /** A shell terminal's process, as its pane's pid. */
+  shellPid(terminalId: string): number {
+    return Number(this.paneFact(terminalId, "pane_pid", "@bazhen_terminal_id"));
+  }
+
+  /**
+   * The `bazhen-hook shell-prompt` copies still waiting on the shell `pid` for its line editor,
+   * from /proc (Linux only).
+   */
+  static promptWaiters(pid: number): number {
+    return readdirSync("/proc")
+      .filter((name) => /^\d+$/.test(name))
+      .filter((name) => {
+        try {
+          const argv = readFileSync(`/proc/${name}/cmdline`, "utf8").split("\0");
+          const at = argv.indexOf("--shell");
+          return (
+            argv.includes("shell-prompt") &&
+            argv.includes("--detached") &&
+            argv[at + 1] === String(pid)
+          );
+        } catch {
+          return false;
+        }
+      }).length;
   }
 
   /**

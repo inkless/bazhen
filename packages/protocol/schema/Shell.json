@@ -99,6 +99,10 @@
           "unlink"
         ]
       }
+    },
+    "retypeable": {
+      "default": false,
+      "type": "boolean"
     }
   },
   "required": [

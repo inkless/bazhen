@@ -34,6 +34,11 @@ export function ShellPane({
   const [naming, setNaming] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
   const has = (command: Shell["commands"][number]) => shell.commands.includes(command);
+  const restart = (retype: boolean) =>
+    act(
+      () => restartShell(shell.id, shell.generation, retype),
+      (r) => onRestarted(r.terminalId),
+    );
   const seen = shell.foreground?.command ?? null;
   // A refusal stands until the snapshot shows something else running, or nothing.
   const running = refusal !== null && refusal.seen === seen ? refusal.program : seen;
@@ -80,16 +85,13 @@ export function ShellPane({
           </Button>
         )}
         {has("restart") && (
-          <Button
-            isDisabled={pending}
-            onPress={() =>
-              act(
-                () => restartShell(shell.id, shell.generation),
-                (r) => onRestarted(r.terminalId),
-              )
-            }
-          >
+          <Button isDisabled={pending} onPress={() => restart(false)}>
             Restart
+          </Button>
+        )}
+        {has("restart") && shell.retypeable && (
+          <Button isDisabled={pending} onPress={() => restart(true)}>
+            Restart and retype last command
           </Button>
         )}
         {has("close") && shell.state === "lost" && (
@@ -160,6 +162,9 @@ export function ShellPane({
 
 /** Why a shell that isn't running shows no terminal. */
 const NOT_RUNNING: Partial<Record<Shell["state"], string>> = {
-  lost: "Its tmux server is gone, as after a reboot. Restart opens a new shell in the same directory.",
+  lost:
+    "Its tmux server is gone, as after a reboot. Restart opens a new shell in the same directory; " +
+    "with the shell integration on, it can type the last command back at the prompt, without " +
+    "running it.",
   closing: "Closing.",
 };

@@ -16,6 +16,7 @@ const shell = (over: Partial<Shell> = {}): Shell => ({
   theme: "dark",
   attachCommand: "tmux attach",
   commands: ["close", "rename"],
+  retypeable: false,
   ...over,
 });
 const running = (command: string) => ({ command, since: "2026-11-13T00:00:00.000Z" });

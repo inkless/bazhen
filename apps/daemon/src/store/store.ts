@@ -177,6 +177,11 @@ export interface SnapshotView {
   attentionActions(item: OpenAttention): readonly AttentionAction[];
   /** What the viewer can do about an open notice now. */
   noticeActions(notice: OpenNotice): readonly NoticeAction[];
+  /**
+   * Whether new shells report their first prompt, which a restart that retypes a line waits for:
+   * without, no lost shell is offered as retypeable.
+   */
+  readonly shellsReport: boolean;
 }
 
 /** Terminal states whose runtime target still exists, so a human can attach to it. */
@@ -1218,11 +1223,12 @@ export class Store {
         shells: this.prepare(
           `SELECT id, environment_id AS environmentId, state, generation, cwd,
                   linked_agent_id AS linkedAgentId, name, coalesce(theme, 'dark') AS theme,
-                  foreground, runtime, locator
+                  foreground, runtime, locator,
+                  state = 'lost' AND last_command IS NOT NULL AS retypeable
            FROM terminals WHERE kind = 'shell' AND state NOT IN ('closed', 'failed') ORDER BY created_event_id`,
         )
           .all()
-          .map(({ runtime, locator, foreground, ...r }) => {
+          .map(({ runtime, locator, foreground, retypeable, ...r }) => {
             const state = TerminalState.parse(r.state);
             const ref = ATTACHABLE.has(state)
               ? refFrom(r.id, { runtime: runtime ?? null, locator: locator ?? null })
@@ -1232,6 +1238,7 @@ export class Store {
               foreground: typeof foreground === "string" ? JSON.parse(foreground) : null,
               attachCommand: ref === null ? null : view.attachCommand(ref),
               commands: shellCommands(state, r.linkedAgentId !== null),
+              retypeable: view.shellsReport && retypeable === 1,
             };
           }),
         tasks: this.prepare(`${TASK} ORDER BY created_event_id`).all(),

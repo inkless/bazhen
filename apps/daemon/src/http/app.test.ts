@@ -120,7 +120,10 @@ const deps: AppDeps = {
     throw new UnknownAgent(ref, "by that name");
   },
   openShell: async () => ({ terminalId: launched.terminalId, eventIds: [5, 6] }),
-  restartShell: () => Promise.reject(new Error("not used by these tests")),
+  restartShell: async (_terminalId, req) => {
+    restarts.push(req);
+    return { terminalId: launched.terminalId, eventIds: [7] };
+  },
   renameShell: () => Promise.reject(new Error("not used by these tests")),
   unlinkShell: () => Promise.reject(new Error("not used by these tests")),
   closeShell: async (terminalId, req) => {
@@ -139,6 +142,7 @@ const deps: AppDeps = {
   },
   tasks,
 };
+const restarts: unknown[] = [];
 const app = createApp(deps);
 const socket = createApp({ ...deps, allow: null });
 
@@ -184,6 +188,26 @@ const closeShell = (confirmBusy: boolean) =>
   });
 
 describe("HTTP app", () => {
+  it("takes a retype from a client, but never whether to mark the paste, nor a shell's prompt", async () => {
+    const asked = { idempotencyKey: "r", generation: 0, retype: true };
+    const restarted = await app.request(`/v1/shells/${launched.terminalId}/restart`, {
+      method: "POST",
+      headers: { host, "content-type": "application/json" },
+      body: JSON.stringify({ ...asked, brackets: true }),
+    });
+    const prompts = await Promise.all(
+      [app, socket].map(async (on) => {
+        const res = await on.request(`/v1/shells/${launched.terminalId}/prompt`, {
+          method: "POST",
+          headers: { host, "content-type": "application/json" },
+          body: JSON.stringify({ token: "t", brackets: true }),
+        });
+        return res.status;
+      }),
+    );
+    expect([restarted.status, restarts, prompts]).toEqual([200, [asked], [404, 404]]);
+  });
+
   it("reports runtime health and versions", async () => {
     const res = await app.request("/v1/health", { headers: { host } });
     expect(res.status).toBe(200);
