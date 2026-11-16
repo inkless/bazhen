@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { newId } from "@bazhen/core";
 import { guardCallers, type SocketEnv } from "./callers.ts";
 import {
+  codexServerMarked,
   noteAccepted,
   PEER_SOURCE,
   peerReading,
@@ -115,13 +116,14 @@ describe("bazhen-peer, on the socket", () => {
     codex.stdout.setEncoding("utf8");
     codex.stdout.on("data", (chunk: string) => (out += chunk));
     await new Promise((resolve) => codex.stdout.on("end", resolve));
-    expect(out).toMatch(/^403 .*a Codex tool call names no agent/);
+    expect(out).toMatch(/^403 .*a Codex tool call names no thread/);
   });
 
-  it("refuses the human's route to a Codex command left running when its shell and server exit", async () => {
+  it("refuses the human's route to a Codex command left running when its shell and server exit, by its thread alone", async () => {
     const socket = await guarded(peerReading(PEER_SOURCE, () => none));
     // As `bash -c 'bazhen devices &'` leaves one: by the time it calls, its parent has gone, so
-    // no app-server is above it; the environment Codex gave it is all that is left.
+    // no app-server is above it; the environment Codex gave it is all that is left. One left
+    // without the thread reads as anyone's, so the thread is what decides.
     const call = `
       import { request } from "node:http";
       const server = Number(process.argv[1]);
@@ -130,17 +132,21 @@ describe("bazhen-peer, on the socket", () => {
       const post = () => request({ socketPath: ${JSON.stringify(socket)}, method: "POST", path: "/v1/daemon/stop" }, (res) => {
         let text = "";
         res.on("data", (d) => (text += d));
-        res.on("end", () => { clearTimeout(late); process.stdout.write(res.statusCode + " " + text); });
+        res.on("end", () => { clearTimeout(late); process.stdout.write(process.argv[2] + " " + res.statusCode + " " + text + "\\n"); });
       }).end();
       wait();
     `;
     const appServer = `
       import { spawn } from "node:child_process";
-      spawn(process.execPath, ["--input-type=module", "-e", ${JSON.stringify(call)}, String(process.pid)], {
-        stdio: ["ignore", "inherit", "inherit"],
-        detached: true,
-        env: { ...process.env, CODEX_THREAD_ID: "01a1e0f0-593e-7ae1-9d31-769db26227fc" },
-      }).unref();
+      const { CODEX_THREAD_ID: _, ...unmarked } = process.env;
+      const marked = { ...unmarked, CODEX_THREAD_ID: "01a1e0f0-593e-7ae1-9d31-769db26227fc" };
+      for (const [tag, env] of [["marked", marked], ["unmarked", unmarked]]) {
+        spawn(process.execPath, ["--input-type=module", "-e", ${JSON.stringify(call)}, String(process.pid), tag], {
+          stdio: ["ignore", "inherit", "inherit"],
+          detached: true,
+          env,
+        }).unref();
+      }
     `;
     const codex = spawn(process.execPath, ["--input-type=module", "-e", appServer, "app-server"], {
       argv0: join(dir, "codex"),
@@ -150,7 +156,33 @@ describe("bazhen-peer, on the socket", () => {
     codex.stdout.setEncoding("utf8");
     codex.stdout.on("data", (chunk: string) => (out += chunk));
     await new Promise((resolve) => codex.stdout.on("end", resolve));
-    expect(out).toMatch(/^403 .*a Codex tool call names no agent/);
+    expect(out.trim().split("\n").toSorted()).toEqual([
+      expect.stringMatching(/^marked 403 .*a Codex tool call names no thread/),
+      `unmarked 200 ${JSON.stringify({ caller: null })}`,
+    ]);
+  });
+
+  it("takes a caller inside an agent's terminal for that agent, though it names a Codex thread", async () => {
+    const socket = await guarded(peerReading(PEER_SOURCE, () => ours));
+    const call = `
+      import { request } from "node:http";
+      request({ socketPath: ${JSON.stringify(socket)}, method: "POST", path: "/v1/daemon/stop" }, (res) => {
+        let text = "";
+        res.on("data", (d) => (text += d));
+        res.on("end", () => process.stdout.write(res.statusCode + " " + text));
+      }).end();
+    `;
+    const child = spawn(process.execPath, ["--input-type=module", "-e", call], {
+      env: { ...process.env, CODEX_THREAD_ID: "01a1e0f0-593e-7ae1-9d31-769db26227fc" },
+      stdio: ["ignore", "pipe", "inherit"],
+    });
+    let out = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => (out += chunk));
+    await new Promise((resolve) => child.stdout.on("end", resolve));
+    expect(out).toBe(
+      `403 ${JSON.stringify({ error: "forbidden", message: "an agent can't stop the daemon" })}`,
+    );
   });
 
   it("refuses a caller whose process the reader can't name, as when it fails", async () => {
@@ -258,5 +290,35 @@ describe("readPeer", () => {
     ];
     conn.destroy();
     expect(readings).toEqual([undefined, undefined, undefined]);
+  });
+});
+
+/** A process listening on a socket of its own, its argv as `argv0` and `args` give it. */
+async function listening(argv0: string, ...args: string[]) {
+  dir = mkdtempSync("/tmp/bz-peer-");
+  const socket = join(dir, "s.sock");
+  const listen = `
+    import { createServer } from "node:net";
+    createServer().listen(${JSON.stringify(socket)}, () => process.stdout.write("up\\n"));
+    process.stdin.on("end", () => process.exit(0)).resume();
+  `;
+  const child = spawn(process.execPath, ["--input-type=module", "-e", listen, ...args], {
+    argv0,
+    stdio: ["pipe", "pipe", "inherit"],
+  });
+  await new Promise((resolve) => child.stdout.once("data", resolve));
+  return { socket, done: () => child.stdin.end() };
+}
+
+describe("codexServerMarked", () => {
+  it("reads a Codex app-server's socket as one, and another listener's or none as not", async () => {
+    const codex = await listening(join("/opt", "codex"), "app-server");
+    const marked = await codexServerMarked(PEER_SOURCE, codex.socket);
+    codex.done();
+    const other = await listening("node", "server");
+    const unmarked = await codexServerMarked(PEER_SOURCE, other.socket);
+    other.done();
+    const unread = await codexServerMarked(PEER_SOURCE, join(dir, "absent.sock"));
+    expect([marked, unmarked, unread]).toEqual(["marked", "unmarked", "unread"]);
   });
 });

@@ -53,6 +53,15 @@ export class ThreadMismatch extends Error {
 }
 
 /**
+ * What a thread is given so its commands reach this daemon: Codex runs them in the app-server, out
+ * of the agent's terminal and its variables. A thread takes it when it is started or loaded; a
+ * resume of one already loaded leaves what it has, which is the same socket.
+ */
+export function threadConfig(socket: string): Readonly<Record<string, string>> {
+  return { "shell_environment_policy.set.BAZHEN_SOCKET": socket };
+}
+
+/**
  * Codex, reached through its app-server (foundation-design §5.8). Bazhen starts the agent's
  * thread itself, so the agent is bound to it before the TUI starts, and the TUI joins that thread
  * as another client of the same server.
@@ -63,17 +72,23 @@ export class CodexHarness implements HarnessAdapter {
   private readonly channel: HarnessChannelPort;
   /** The same server, as the TUI reaches it with `--remote`. */
   private readonly remote: string;
+  /** What each thread is started or resumed with: this daemon's socket, when there is one. */
+  private readonly config: { readonly config?: Readonly<Record<string, string>> };
 
-  constructor(channel: HarnessChannelPort, remote: string) {
+  constructor(channel: HarnessChannelPort, remote: string, socket?: string) {
     this.channel = channel;
     this.remote = remote;
+    this.config = socket === undefined ? {} : { config: threadConfig(socket) };
   }
 
   async launchSpec(
     request: { readonly cwd: string },
     options: LaunchOptions,
   ): Promise<HarnessLaunch> {
-    const started = await this.channel.request("thread/start", { cwd: request.cwd });
+    const started = await this.channel.request("thread/start", {
+      cwd: request.cwd,
+      ...this.config,
+    });
     const threadId = ThreadStarted.parse(started).thread.id;
     // The thread keeps the item, so the instructions outlive a resume of it, as a launch flag would not.
     const items = [binding(options.instructions)];
@@ -93,6 +108,7 @@ export class CodexHarness implements HarnessAdapter {
     const resumed = await this.channel.request("thread/resume", {
       threadId: session.id,
       excludeTurns: true,
+      ...this.config,
     });
     // The agent stays on its own thread; a server that answered with another would rebind it.
     const threadId = ThreadStarted.parse(resumed).thread.id;

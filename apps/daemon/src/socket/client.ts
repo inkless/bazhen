@@ -1,7 +1,12 @@
 import { readFileSync } from "node:fs";
 import { request } from "node:http";
 import { HealthResponse } from "@bazhen/protocol";
-import { AGENT_ID_HEADER, AGENT_TOKEN, AGENT_TOKEN_HEADER } from "../auth/agent-token.ts";
+import {
+  AGENT_ID_HEADER,
+  AGENT_TOKEN,
+  AGENT_TOKEN_HEADER,
+  CODEX_THREAD_HEADER,
+} from "../auth/agent-token.ts";
 
 /** A daemon that is up answers its health at once; one that doesn't is treated as down. */
 const PROBE_MS = 2000;
@@ -60,6 +65,8 @@ export function call<T>(socket: string, c: Call<T>, timeoutMs?: number): Promise
   const token = agentToken();
   // Advisory, like the agent's: which paired device's shell this runs in, if one opened it.
   const deviceId = process.env["BAZHEN_DEVICE_ID"];
+  // Codex sets it in each command it runs, outside the agent's terminal and its variables.
+  const thread = process.env["CODEX_THREAD_ID"];
   return new Promise((resolve, reject) => {
     const req = request(
       {
@@ -71,6 +78,7 @@ export function call<T>(socket: string, c: Call<T>, timeoutMs?: number): Promise
           ...(agentId === undefined ? {} : { [AGENT_ID_HEADER]: agentId }),
           ...(token === undefined ? {} : { [AGENT_TOKEN_HEADER]: token }),
           ...(deviceId === undefined ? {} : { "bazhen-device-id": deviceId }),
+          ...(thread === undefined ? {} : { [CODEX_THREAD_HEADER]: thread }),
         },
       },
       (res) => {

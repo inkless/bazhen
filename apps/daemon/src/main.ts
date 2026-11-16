@@ -6,7 +6,7 @@ import { hostname, networkInterfaces } from "node:os";
 import { getRequestListener, serve } from "@hono/node-server";
 import { LocalEnvironment } from "@bazhen/env-local";
 import { ClaudeCodeHarness } from "@bazhen/harness-claude-code";
-import { CodexHarness, DAEMON_START_ARGS } from "@bazhen/harness-codex";
+import { CodexHarness, DAEMON_START_ARGS, threadConfig } from "@bazhen/harness-codex";
 import { filterEnv, healthOfEach, RoutedRuntime, UnknownRuntime } from "@bazhen/core";
 import { TmuxServer, findNotifySend, hostPtyReader, probeContainment } from "@bazhen/host-guard";
 import { protocolId } from "@bazhen/protocol/id";
@@ -24,7 +24,13 @@ import {
   type LaunchDeps,
 } from "./agents/launch.ts";
 import { AgentTokens } from "./auth/callers.ts";
-import { noteAccepted, PEER_COMMAND, PEER_SOURCE, peerReading } from "./auth/peer.ts";
+import {
+  codexServerMarked,
+  noteAccepted,
+  PEER_COMMAND,
+  PEER_SOURCE,
+  peerReading,
+} from "./auth/peer.ts";
 import { Lifecycle } from "./agents/lifecycle.ts";
 import { renameAgent } from "./agents/names.ts";
 import { AgentQueue } from "./agents/queue.ts";
@@ -320,6 +326,7 @@ const codex = new CodexChannel({
   codexHome,
   startDaemon: () => codexCommand(DAEMON_START_ARGS),
   boundThreads: () => store.codexThreads(),
+  threadConfig: threadConfig(paths.socket),
   listener: allOf(
     codexApprovals(
       approvals,
@@ -356,7 +363,7 @@ const environment = new LocalEnvironment({
         ? { permissionMode: process.env.BAZHEN_CLAUDE_PERMISSION_MODE }
         : {}),
     }),
-    new CodexHarness(codex, codex.address),
+    new CodexHarness(codex, codex.address, paths.socket),
   ],
   socket: paths.socket,
   ...(config.loginShell === undefined ? {} : { loginShell: config.loginShell }),
@@ -692,7 +699,15 @@ const socketListener = getRequestListener(
           shell: config.loginShell === undefined ? "direct" : "login",
           loginShell: config.loginShell ?? null,
         },
-        codex: { daemon: codex.version, cli: await codexCliRead },
+        codex: {
+          daemon: codex.version,
+          cli: await codexCliRead,
+          // Only while a Codex agent runs: reading it would start no server, and none may be up.
+          toolCalls:
+            peerBinary === null || store.codexThreads().length === 0
+              ? null
+              : await codexServerMarked(peerBinary, codex.socket),
+        },
         web: {
           externalOrigins: [...config.externalOrigins],
           from: config.externalOriginsFrom,

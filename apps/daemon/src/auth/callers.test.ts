@@ -6,10 +6,14 @@ const tokened = newId("agent");
 const other = newId("agent");
 const TOKEN = "t".repeat(43);
 
-/** `tokened` was given TOKEN; `other` runs from before agents had tokens. */
+/** Codex thread `tokened` is bound to. */
+const THREAD = "01a1e0f0-593e-7ae1-9d31-769db26227fc";
+
+/** `tokened` was given TOKEN and is bound to THREAD; `other` runs from before agents had tokens. */
 const credentials: AgentCredentials = {
   agentOf: (token) => (token === TOKEN ? tokened : undefined),
   untokened: (agentId) => agentId === other,
+  codexAgent: (thread) => (thread === THREAD ? tokened : undefined),
 };
 
 const who = (token: string | undefined, said: string | undefined) =>
@@ -96,6 +100,44 @@ describe("identify, with the caller's process read", () => {
       { token: undefined, said: other },
     ];
     expect(presented.map((p) => identify(credentials, p, codex).kind)).toEqual([
+      "refused",
+      "refused",
+      "refused",
+      "refused",
+    ]);
+  });
+
+  it("takes a Codex tool call as the live agent bound to the thread it names, and only it", () => {
+    const named = { token: undefined, said: undefined, thread: THREAD };
+    expect([
+      identify(credentials, named, { kind: "codex" }),
+      identify(credentials, { token: TOKEN, said: tokened, thread: THREAD }, { kind: "codex" }),
+      identify(credentials, named, { kind: "outside" }),
+      identify(credentials, named, under(other)),
+    ]).toEqual([
+      { kind: "agent", agentId: tokened },
+      { kind: "agent", agentId: tokened },
+      { kind: "human" },
+      { kind: "agent", agentId: other },
+    ]);
+  });
+
+  it("refuses a Codex tool call unless its thread is a live agent's with nothing of another beside it", () => {
+    const tokensOnly: AgentCredentials = {
+      agentOf: (token) => credentials.agentOf(token),
+      untokened: (agentId) => credentials.untokened(agentId),
+    };
+    const kinds = [
+      [credentials, { token: undefined, said: undefined, thread: THREAD }],
+      [credentials, { token: undefined, said: undefined, thread: "01a1e0f0-0000-7000-8000-0" }],
+      [credentials, { token: undefined, said: other, thread: THREAD }],
+      [credentials, { token: "u".repeat(43), said: undefined, thread: THREAD }],
+      [credentials, { token: undefined, said: undefined, thread: "not a thread" }],
+      [tokensOnly, { token: undefined, said: undefined, thread: THREAD }],
+    ] as const;
+    expect(kinds.map(([c, p]) => identify(c, p, { kind: "codex" }).kind)).toEqual([
+      "agent",
+      "refused",
       "refused",
       "refused",
       "refused",

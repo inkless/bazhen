@@ -112,6 +112,24 @@ describe("Codex channel", () => {
     channel.close();
   });
 
+  it("gives each thread it resumes the config it was given, on connecting and when asked", async () => {
+    const { codexHome, socket } = home();
+    const requests: [string, unknown][] = [];
+    await fakeServer(socket, codexHome, (method, _connection, params) => {
+      requests.push([method, params]);
+      return { result: "ok" };
+    });
+    const config = { "shell_environment_policy.set.BAZHEN_SOCKET": "/h/run/bazhen.sock" };
+    const channel = channelOn(codexHome, { boundThreads: () => ["thr-1"], threadConfig: config });
+    await channel.request("thread/start", {});
+    await channel.resume("thr-2");
+    expect(requests.filter(([method]) => method === "thread/resume")).toEqual([
+      ["thread/resume", { threadId: "thr-1", excludeTurns: true, config }],
+      ["thread/resume", { threadId: "thr-2", excludeTurns: true, config }],
+    ]);
+    channel.close();
+  });
+
   it("connects again by itself when the server goes away, so its next approval still arrives", async () => {
     const { codexHome, socket } = home();
     const { wss } = await fakeServer(socket, codexHome, approvesOnceResumedAgain);

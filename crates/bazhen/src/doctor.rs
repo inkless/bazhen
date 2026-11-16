@@ -2,7 +2,7 @@
 
 use bazhen_protocol::daemon::{
     AgentShell, Containment, DoctorResponse, EnvSource, Holder, Lan, MemoryCap, OriginsFrom,
-    Refusing, RunningHolder, RuntimeHealthReport, RuntimeHealthState, Terminals, Web,
+    Refusing, RunningHolder, RuntimeHealthReport, RuntimeHealthState, Terminals, ToolCalls, Web,
 };
 use bazhen_protocol::id::PROTOCOL_ID;
 use bazhen_protocol::nullable::Nullable;
@@ -103,6 +103,19 @@ pub(crate) fn lines(d: &DoctorResponse, macos: bool) -> Vec<String> {
         );
         let cli = codex.cli.as_deref().unwrap_or("not found");
         out.push(format!("codex: app-server {server}, cli {cli}"));
+        match codex.tool_calls.value() {
+            Some(ToolCalls::Unmarked) => out.push(
+                "  warning: the peer reader doesn't know this app-server for Codex's, so a live \
+                 Codex agent's commands could pass as yours"
+                    .to_owned(),
+            ),
+            Some(ToolCalls::Unread) => out.push(
+                "  warning: the peer reader can't read Codex's app-server, so whether a live \
+                 Codex agent's commands pass as yours is unknown"
+                    .to_owned(),
+            ),
+            Some(ToolCalls::Marked) | None => {}
+        }
     }
     if let Some(web) = &d.web {
         out.extend(web_lines(web));

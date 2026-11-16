@@ -293,7 +293,7 @@ const fullDoctor = {
   peerReader: { path: "/r/target/release/bazhen-peer" },
   config: { path: "/c.toml", found: true },
   agents: { shell: "login", loginShell: "/bin/zsh" },
-  codex: { daemon: "0.160.0", cli: "0.166.0" },
+  codex: { daemon: "0.160.0", cli: "0.166.0", toolCalls: "unmarked" },
   web: {
     externalOrigins: ["https://box.ts.net"],
     from: "config",
@@ -357,7 +357,7 @@ const bareDoctor = {
 const nullDoctor = {
   ...bareDoctor,
   peerReader: null,
-  codex: { daemon: null, cli: null },
+  codex: { daemon: null, cli: null, toolCalls: null },
   web: {
     externalOrigins: [],
     from: null,
@@ -415,11 +415,12 @@ const certless = {
   },
 };
 
-/** A web with no LAN listener, and containment not checked yet. */
+/** A web with no LAN listener, containment not checked yet, and Codex from before toolCalls. */
 const lanless = {
   ...bareDoctor,
   web: { externalOrigins: [], from: null, allowInsecureOrigins: false },
   containment: { state: "unchecked" },
+  codex: { daemon: "0.166.0", cli: "0.166.0" },
 };
 
 const role = {

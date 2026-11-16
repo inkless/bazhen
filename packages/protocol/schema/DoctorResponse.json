@@ -152,6 +152,21 @@
             "string",
             "null"
           ]
+        },
+        "toolCalls": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "marked",
+                "unmarked",
+                "unread"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [

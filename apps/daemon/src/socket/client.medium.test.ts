@@ -19,6 +19,7 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
   delete process.env["BAZHEN_AGENT_ID"];
   delete process.env["BAZHEN_AGENT_AUTH_FILE"];
+  delete process.env["CODEX_THREAD_ID"];
 });
 
 const health = {
@@ -95,6 +96,17 @@ describe("call", () => {
     process.env["BAZHEN_AGENT_ID"] = "agent_x";
     await call(socket, getHealth);
     expect(seen.map((h) => h["bazhen-agent-id"])).toEqual([undefined, "agent_x"]);
+  });
+
+  it("says the Codex thread its command runs in, which names its agent from under Codex", async () => {
+    const { socket, seen } = await daemon(JSON.stringify(health));
+    await call(socket, getHealth);
+    process.env["CODEX_THREAD_ID"] = "01a1e0f0-593e-7ae1-9d31-769db26227fc";
+    await call(socket, getHealth);
+    expect(seen.map((h) => h["bazhen-codex-thread"])).toEqual([
+      undefined,
+      "01a1e0f0-593e-7ae1-9d31-769db26227fc",
+    ]);
   });
 
   it("sends the agent token its file holds, and none for a file that holds no token", async () => {

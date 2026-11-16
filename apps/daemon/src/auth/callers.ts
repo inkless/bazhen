@@ -8,7 +8,12 @@ import { isId, type AgentSessionId, type Caller } from "@bazhen/core";
 import type { ErrorResponse } from "@bazhen/protocol";
 import { ensurePrivateDir } from "../config/private-dir.ts";
 import type { Store } from "../store/store.ts";
-import { AGENT_ID_HEADER, AGENT_TOKEN, AGENT_TOKEN_HEADER } from "./agent-token.ts";
+import {
+  AGENT_ID_HEADER,
+  AGENT_TOKEN,
+  AGENT_TOKEN_HEADER,
+  CODEX_THREAD_HEADER,
+} from "./agent-token.ts";
 import type { PeerReading } from "./peer.ts";
 
 const hashOf = (token: string): string => createHash("sha256").update(token).digest("hex");
@@ -29,6 +34,8 @@ export interface AgentCredentials {
    * one since: the one kind of agent known by the id it names. An unknown id is no agent.
    */
   untokened(agentId: string): boolean;
+  /** The live Codex agent bound to thread `threadId`; without it, no Codex agent is known. */
+  codexAgent?(threadId: string): AgentSessionId | undefined;
 }
 
 /** A token minted for one start of an agent, until the start goes ahead or is refused. */
@@ -166,6 +173,11 @@ export class AgentTokens implements AgentCredentials, AgentTokenIssuer {
     return this.store.agentUntokened(agentId);
   }
 
+  codexAgent(threadId: string): AgentSessionId | undefined {
+    const agentId = this.store.codexAgent(threadId);
+    return agentId !== undefined && isId("agent", agentId) ? agentId : undefined;
+  }
+
   private filesOf(agentId: string): string[] {
     return this.names()
       .filter((name) => {
@@ -207,16 +219,18 @@ export type Identity =
  *
  * Every token file is this user's, so a process of this user that reads another agent's file can
  * present it, and one that unsets both can pass as the human: telling those apart is the socket
- * peer's job. A Codex tool call is refused: Codex runs it out of the agent's terminal, so nothing
- * it holds says which agent it is.
+ * peer's job. A Codex tool call runs out of the agent's terminal, under the Codex app-server, so
+ * only the thread it names says which agent it is: the live agent bound to that thread, or refused.
+ * Any agent's command can name any thread, so this tells Codex agents apart only as far as they
+ * keep to their own.
  */
 export function identify(
   credentials: AgentCredentials,
-  presented: { readonly token: string | undefined; readonly said: string | undefined },
+  presented: Presented,
   peer: PeerReading = { kind: "outside" },
 ): Identity {
   if (peer.kind === "refused") return refused(peer.reason);
-  if (peer.kind === "codex") return refused("a Codex tool call names no agent");
+  if (peer.kind === "codex") return asCodex(credentials, presented);
   if (peer.kind === "agent") return asPeer(credentials, presented, peer.agentId);
   const { token, said } = presented;
   if (token !== undefined) {
@@ -232,13 +246,33 @@ export function identify(
   return { kind: "agent", agentId: said };
 }
 
+/** What a caller presents: an agent token, an agent id, and the Codex thread it runs in. */
+export interface Presented {
+  readonly token: string | undefined;
+  readonly said: string | undefined;
+  readonly thread?: string | undefined;
+}
+
+/** A Codex thread id as the app-server makes them; anything else names no thread. */
+const CODEX_THREAD = /^[0-9A-Za-z-]{1,64}$/;
+
+/** A Codex tool call is the live agent bound to the thread it names, else refused. */
+function asCodex(credentials: AgentCredentials, presented: Presented): Identity {
+  const { thread } = presented;
+  if (thread === undefined) return refused("a Codex tool call names no thread");
+  if (!CODEX_THREAD.test(thread)) return refused("a Codex tool call names no Codex thread");
+  const agentId = credentials.codexAgent?.(thread);
+  if (agentId === undefined) return refused(`Codex thread ${thread} is no live agent's`);
+  return asPeer(credentials, presented, agentId);
+}
+
 /**
  * A caller whose own process is agent `agentId`'s is that agent, whatever it presents or leaves
  * out; a token or an id it does present must be that agent's own.
  */
 function asPeer(
   credentials: AgentCredentials,
-  { token, said }: { readonly token: string | undefined; readonly said: string | undefined },
+  { token, said }: Presented,
   agentId: AgentSessionId,
 ): Identity {
   if (token !== undefined && credentials.agentOf(token) !== agentId)
@@ -346,6 +380,7 @@ export function guardCallers(
     const presented = {
       token: c.req.header(AGENT_TOKEN_HEADER),
       said: c.req.header(AGENT_ID_HEADER),
+      thread: c.req.header(CODEX_THREAD_HEADER),
     };
     const who = identify(credentials, presented, reading);
     if (who.kind === "refused") c.set("refusal", who.reason);

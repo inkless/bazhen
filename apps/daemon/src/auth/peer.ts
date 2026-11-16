@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import type { Socket } from "node:net";
+import { connect, type Socket } from "node:net";
 import { fileURLToPath } from "node:url";
 import type { AgentSessionId } from "@bazhen/core";
 
@@ -115,16 +115,21 @@ export type PeerReading =
  * A process under a Codex app-server is a Codex tool call, whichever terminals are above the
  * server: Codex runs every agent's tool commands there, out of their terminals. Only an agent's
  * root nearer the caller than the server, as when Bazhen itself runs under one, still names it.
+ * A caller marked only by its own environment (`bazhen-peer` names the caller itself) is a Codex
+ * tool call only where no agent's terminal places it: any agent can set `CODEX_THREAD_ID`, and a
+ * real Codex command runs under the server, outside every terminal.
  */
 export function readingOf(chain: PeerChain, terminals: TerminalPids): PeerReading {
   const line = [chain.pid, ...chain.ancestors];
   const agentAt = line.findIndex((pid) => terminals.agents.has(pid));
-  const serverAt = chain.codexServer === undefined ? -1 : line.indexOf(chain.codexServer);
-  const codex = chain.codexServer !== undefined && (agentAt === -1 || serverAt < agentAt);
-  if (codex) return { kind: "codex" };
   const byAncestry = agentAt === -1 ? undefined : terminals.agents.get(line[agentAt] ?? 0);
   const agentId = byAncestry ?? terminals.agents.get(chain.session);
+  const markedOnly = chain.codexServer === chain.pid;
+  const serverAt =
+    chain.codexServer === undefined || markedOnly ? -1 : line.indexOf(chain.codexServer);
+  if (serverAt !== -1 && (agentAt === -1 || serverAt < agentAt)) return { kind: "codex" };
   if (agentId !== undefined) return { kind: "agent", agentId };
+  if (markedOnly) return { kind: "codex" };
   if (line.some((pid) => terminals.shells.has(pid))) return { kind: "outside" };
   if (line.some((pid) => terminals.runtimes.has(pid)))
     return { kind: "refused", reason: "the caller runs under Bazhen's runtime, in no terminal" };
@@ -146,4 +151,29 @@ export function peerReading(
       ? { kind: "refused", reason: "the caller's process can't be read for sure" }
       : readingOf(chain, terminals());
   };
+}
+
+/**
+ * Whether `bazhen-peer` at `binary` reads the process listening on `socket` as a Codex app-server,
+ * as it must to tell a Codex agent's commands from the human's: a Codex that renamed its binary or
+ * that subcommand would read as no server. On a connection this process made, the peer is the
+ * listener.
+ */
+export async function codexServerMarked(
+  binary: string,
+  socket: string,
+  timeoutMs = READ_MS,
+): Promise<"marked" | "unmarked" | "unread"> {
+  const connection = await new Promise<Socket | undefined>((resolve) => {
+    const made = connect(socket, () => resolve(made));
+    made.on("error", () => resolve(undefined));
+  });
+  if (connection === undefined) return "unread";
+  try {
+    const chain = await readPeer(binary, connection, timeoutMs);
+    if (chain === undefined) return "unread";
+    return chain.codexServer === chain.pid ? "marked" : "unmarked";
+  } finally {
+    connection.destroy();
+  }
 }

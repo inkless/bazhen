@@ -218,6 +218,21 @@ describe("bazhen task list", () => {
     expect(ran.stdout).toBe(`${TASK}  mine  [worker BZ-127]\n`);
   });
 
+  it("lists the tasks of the Codex agent whose thread the command runs in", async () => {
+    const thread = "01a1e0f0-593e-7ae1-9d31-769db26227fc";
+    const mine = agent(AGENT, "BZ-127");
+    const codex = {
+      ...mine,
+      externalRef: { environmentId: mine.environmentId, kind: "codex-thread" as const, id: thread },
+    };
+    s.daemon.answer("GET /v1/state", StateSnapshot, {
+      ...state,
+      agents: [state.agents[0]!, codex],
+    });
+    const ran = await s.bazhen(["task", "list"], { CODEX_THREAD_ID: thread });
+    expect(ran.stdout).toBe(`${TASK}  mine  [worker BZ-127]\n`);
+  });
+
   it("lists every open task with --all, a live assignee by its name and an ended one by its id", async () => {
     s.daemon.answer("GET /v1/state", StateSnapshot, state);
     const ran = await s.bazhen(["task", "list", "--all"], asAgent);
