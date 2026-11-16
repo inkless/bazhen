@@ -55,6 +55,25 @@ describe("Claude Code's own SendMessage between Bazhen agents", () => {
   });
 });
 
+/** Whether `command` asked before it ran; the ask is denied, and the turn left to end. */
+async function asks(key: string, command: string, shownAs: string): Promise<boolean> {
+  const { messageId } = await mail(key, `[[fake:bash:${command}]]`);
+  const opened = await expect
+    .poll(async () => (await openFor(shownAs)).length, { timeout: 30_000 })
+    .toBe(1)
+    .then(
+      () => true,
+      () => false,
+    );
+  for (const item of await openFor(shownAs))
+    await daemon.request(`/v1/attention/${item.id}/answer`, {
+      method: "POST",
+      body: { idempotencyKey: `deny-${key}`, decision: "deny" },
+    });
+  await expect.poll(() => delivered(messageId), { timeout: 60_000 }).toBe(true);
+  return opened;
+}
+
 describe("the bazhen verbs a Claude Code agent is taught", () => {
   it("run without asking, while the daemon's other commands still ask", async () => {
     const { messageId } = await mail("whoami", "[[fake:bash:bazhen whoami]]");
@@ -66,14 +85,16 @@ describe("the bazhen verbs a Claude Code agent is taught", () => {
       expect.stringContaining(`${name}  ${sender.agentId}`),
     ]);
 
-    await mail("status", "[[fake:bash:bazhen status]]");
-    await expect
-      .poll(async () => (await openFor("bazhen status")).length, { timeout: 30_000 })
-      .toBe(1);
-    const [asked] = await openFor("bazhen status");
-    await daemon.request(`/v1/attention/${String(asked?.id)}/answer`, {
-      method: "POST",
-      body: { idempotencyKey: "deny", decision: "deny" },
-    });
+    expect(await asks("status", "bazhen status", "bazhen status")).toBe(true);
+  });
+
+  it("still ask to read a file, to run another command with one, or to run a substitution", async () => {
+    const to = await nameOf(peer.agentId);
+    expect([
+      await asks("file", `bazhen send ${to} --file notes.txt`, "--file notes.txt"),
+      await asks("brief", "bazhen task create --title t --brief-file brief.md", "brief.md"),
+      await asks("compound", "bazhen whoami && touch compound-x", "touch compound-x"),
+      await asks("substitution", `bazhen send ${to} "$(cat secret-x)"`, "cat secret-x"),
+    ]).toEqual([true, true, true, true]);
   });
 });

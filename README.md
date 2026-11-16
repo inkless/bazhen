@@ -220,7 +220,9 @@ agent next starts. Mail stays with the agent's id, which a rename doesn't change
 
 A Claude Code agent runs `bazhen agents`, `whoami`, `rename`, `task`, `delegate`, `escalate` and
 `send` without a permission prompt: the settings it starts with allow them, beside your own, and
-the daemon decides what each agent may do with them. Other `bazhen` commands still ask. An agent
+the daemon decides what each agent may do with them. Other `bazhen` commands still ask, and so
+does one given a file to read (`--file`, `--brief-file`), which would otherwise put any file the
+agent can read into mail without a prompt. An agent
 that messages another with Claude Code's own SendMessage instead of `bazhen send` shows the
 message on both agents' pages, as sent and with delivery not tracked: Bazhen sees it leave, never
 arrive. It is matched to the agent whose session answers to the name it was sent to, the name
@@ -243,6 +245,6 @@ Bazhen launches is told these commands as it starts, beside its harness's own in
 you, it shows in your inbox.
 
 **Who is asking.** Inside an agent, the CLI says which agent it is from `BAZHEN_AGENT_ID`, over the
-daemon's 0600 Unix socket. The daemon takes that at its word, as it must take any process of
+daemon's 0600 Unix socket, the one in `BAZHEN_SOCKET`: the daemon that started it, wherever its home is. The daemon takes that at its word, as it must take any process of
 yours, which could drive the agent's terminal anyway, but refuses an agent that is closed, lost
 or unknown. Over TCP, from the web client, the caller is always you.

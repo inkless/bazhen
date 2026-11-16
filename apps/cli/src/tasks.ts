@@ -43,6 +43,15 @@ export const TASK_USAGE = `usage:
 /** A command line that doesn't say what to do; the message says why. */
 export class Usage extends Error {}
 
+/**
+ * The daemon a task verb talks to: the one that started this process, by the socket it handed
+ * every agent and shell, else the one this user's paths name. An agent's id means something only
+ * to the daemon that started it, and an agent's environment has no `BAZHEN_HOME` to find a
+ * relocated one by (foundation-design §9.5).
+ */
+export const taskSocket = (env: { readonly BAZHEN_SOCKET?: string }, resolved: string) =>
+  env.BAZHEN_SOCKET === undefined || env.BAZHEN_SOCKET === "" ? resolved : env.BAZHEN_SOCKET;
+
 /** What a verb needs from where it runs: who is asking, and the files a brief may come from. */
 export interface Context {
   /** `BAZHEN_AGENT_ID`, set inside every agent Bazhen launches. */

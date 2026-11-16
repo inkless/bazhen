@@ -114,7 +114,7 @@ const sent = (
   accepted: boolean,
   minutesAgo: number,
 ) => ({
-  id: `msg_0190000000007000800000000000${String(minutesAgo).padStart(4, "0")}`,
+  id: `obs_0190000000007000800000000000${String(minutesAgo).padStart(4, "0")}`,
   from,
   to,
   summary,

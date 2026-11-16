@@ -1174,7 +1174,7 @@ describe("agent names", () => {
     const upgraded = Store.open(path);
     upgraded.append({
       type: "message.observed",
-      entityId: newId("msg"),
+      entityId: newId("obs"),
       actor: from,
       payload: { from, to, summary: "hi", text: "hi", accepted: true, toolUseId: "t-1" },
     });

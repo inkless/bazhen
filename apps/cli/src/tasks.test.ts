@@ -4,6 +4,7 @@ import {
   listAgents,
   listTasks,
   showTask,
+  taskSocket,
   taskVerb,
   Usage,
   whoami,
@@ -324,6 +325,17 @@ describe("bazhen task verbs", () => {
       `${TASK}  mine  [worker repo-1]`,
       `${TASK2}  old  [worker ${OTHER}]`,
     ]);
+  });
+});
+
+describe("the daemon a task verb reaches", () => {
+  it("is the one whose socket started the caller, else the one the user's paths name", () => {
+    const resolved = "/run/user/1000/bazhen/bazhen.sock";
+    expect([
+      taskSocket({ BAZHEN_SOCKET: "/tmp/bz-api-x/run/bazhen.sock" }, resolved),
+      taskSocket({}, resolved),
+      taskSocket({ BAZHEN_SOCKET: "" }, resolved),
+    ]).toEqual(["/tmp/bz-api-x/run/bazhen.sock", resolved, resolved]);
   });
 });
 

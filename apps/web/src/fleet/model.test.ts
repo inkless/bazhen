@@ -171,7 +171,7 @@ describe("agentLabelOf", () => {
 
 /** A message `from` sent `to`, as the daemon observed it. */
 const sent = (from: Agent, to: Agent, summary: string, accepted = true) => ({
-  id: newId("msg"),
+  id: newId("obs"),
   from: from.id,
   to: to.id,
   summary,

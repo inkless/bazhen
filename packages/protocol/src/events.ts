@@ -334,7 +334,7 @@ export const EVENTS = {
    * Code's SendMessage), which Bazhen sees sent but can't follow to delivery (§5.6). Protocol 1.42.
    */
   "message.observed": {
-    entity: "message",
+    entity: "observed_message",
     payload: observed,
     /** The text stays in the log, as a mail body does; clients get the summary. */
     streamed: observed.omit({ text: true }),

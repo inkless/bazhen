@@ -45,7 +45,7 @@ export type Message = z.infer<typeof Message>;
  * can't follow further (foundation-design §5.6).
  */
 export const ObservedMessage = z.object({
-  id: Id("msg"),
+  id: Id("obs"),
   from: Id("agent"),
   to: Id("agent"),
   summary: z.string(),

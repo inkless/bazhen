@@ -395,6 +395,8 @@ export const MIGRATIONS: readonly Migration[] = [
         created_event_id INTEGER NOT NULL,
         UNIQUE (from_agent_id, tool_use_id)
       ) STRICT;
+      -- Every state read takes the latest of them.
+      CREATE INDEX observed_messages_created ON observed_messages (created_event_id);
     `,
   },
 ];

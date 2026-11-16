@@ -103,7 +103,10 @@ export class ClaudeCodeHarness implements HarnessAdapter {
         "--settings",
         JSON.stringify({
           ...hooks(this.opts.hookCommand),
-          permissions: { allow: AGENT_VERBS.map((verb) => `Bash(bazhen ${verb}:*)`) },
+          permissions: {
+            allow: AGENT_VERBS.map((verb) => `Bash(bazhen ${verb}:*)`),
+            ask: [READS_A_FILE],
+          },
           ...statusLine,
           ...(theme && { theme }),
         }),
@@ -124,6 +127,12 @@ export class ClaudeCodeHarness implements HarnessAdapter {
  * what each caller may do with them. Its admin verbs, and answering approvals, still ask.
  */
 const AGENT_VERBS = ["agents", "whoami", "rename", "task", "delegate", "escalate", "send"] as const;
+
+/**
+ * A verb given a file to read (`--file`, `--brief-file`) asks as before: allowed, it would put
+ * any file the agent can read into mail and the event log with no prompt. Ask overrides allow.
+ */
+const READS_A_FILE = "Bash(bazhen *-file*)";
 
 /**
  * The waiter runs asynchronously after every turn and at start, and wakes an idle session when

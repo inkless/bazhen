@@ -76,6 +76,19 @@ describe("messages agents send each other outside Bazhen's mail", () => {
     ]);
   });
 
+  it("keeps no control or bidi characters but lines and tabs, and never a blank summary", async () => {
+    const { store, agentId } = await withAgent();
+    await peer(store, "BZ-127");
+    const text = "\u001b[31mred\u001b[0m\tok\r\n\u202Egnp.exe";
+    observeSend(store, agentId, "t-1", sent("BZ-127", { summary: " \u0007 ", text }));
+    const [shown] = store.snapshot(testView).observed;
+    const [logged] = store.events(0).filter((e) => e.type === "message.observed");
+    expect([shown?.summary, Reflect.get(Object(logged?.payload), "text")]).toEqual([
+      "[31mred[0m\tok",
+      "[31mred[0m\tok\ngnp.exe",
+    ]);
+  });
+
   it("matches the name a session was started with, which a rename doesn't change", async () => {
     const { store, agentId } = await withAgent();
     const to = await peer(store, "BZ-127");

@@ -186,7 +186,7 @@ const settingsOf = (argv: readonly string[]): unknown =>
   JSON.parse(String(argv[argv.indexOf("--settings") + 1]));
 
 describe("Claude Code's permissions", () => {
-  it("lets the agent run the bazhen verbs it is taught, and no others, without asking", async () => {
+  it("lets the agent run the bazhen verbs it is taught without asking, unless one reads a file", async () => {
     const { argv } = await claude(() => "s").launchSpec(request, {});
     expect(Reflect.get(Object(settingsOf(argv)), "permissions")).toEqual({
       allow: [
@@ -198,6 +198,7 @@ describe("Claude Code's permissions", () => {
         "Bash(bazhen escalate:*)",
         "Bash(bazhen send:*)",
       ],
+      ask: ["Bash(bazhen *-file*)"],
     });
   });
 });

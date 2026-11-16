@@ -3072,7 +3072,7 @@
         },
         "entityType": {
           "type": "string",
-          "const": "message"
+          "const": "observed_message"
         },
         "entityId": {
           "type": "string"

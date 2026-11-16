@@ -1,6 +1,6 @@
 import { newId } from "@bazhen/core";
 import type { SentMessage } from "@bazhen/harness-claude-code";
-import { graphemes } from "../commands.ts";
+import { graphemes, withoutControls } from "../commands.ts";
 import type { Store } from "../store/store.ts";
 import { MAIL_LIMIT } from "../tasks/mail.ts";
 
@@ -26,13 +26,13 @@ export function observeSend(store: Store, from: string, toolUseId: string, sent:
     if (store.observedSend(from, toolUseId)) return;
     store.append({
       type: "message.observed",
-      entityId: newId("msg"),
+      entityId: newId("obs"),
       actor: from,
       payload: {
         from,
         to: recipient.id,
         summary: summaryOf(sent),
-        text: cut(sent.text, MAIL_LIMIT),
+        text: cut(withoutControls(sent.text), MAIL_LIMIT),
         accepted: sent.accepted,
         toolUseId,
       },
@@ -40,10 +40,11 @@ export function observeSend(store: Store, from: string, toolUseId: string, sent:
   });
 }
 
-function summaryOf({ summary, text }: SentMessage): string {
-  const line = (summary ?? text).trim().split("\n", 1)[0] ?? "";
-  return cut(line, SUMMARY_CHARS);
-}
+/** The agent's own label, else the text's first line: one line either way, never blank. */
+const summaryOf = ({ summary, text }: SentMessage): string =>
+  cut(firstLine(summary ?? "") || firstLine(text), SUMMARY_CHARS);
+
+const firstLine = (text: string) => withoutControls(text).trim().split("\n", 1)[0]?.trim() ?? "";
 
 const cut = (text: string, max: number) =>
   text.length <= max ? text : graphemes(text).slice(0, max).join("");

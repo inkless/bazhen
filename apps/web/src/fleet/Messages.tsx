@@ -2,6 +2,13 @@ import type { StateSnapshot } from "@bazhen/protocol";
 import { observedRows } from "./model.ts";
 
 const clock = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
+const dated = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
+
+/** The time a message was sent, with its date unless that is today. */
+function sentAt(iso: string): string {
+  const at = new Date(iso);
+  return (at.toDateString() === new Date().toDateString() ? clock : dated).format(at);
+}
 
 /**
  * The messages an agent sent or was sent through its harness's own channel, which Bazhen saw
@@ -17,7 +24,7 @@ export function Messages({ state, agentId }: { state: StateSnapshot; agentId: st
         {rows.map((r) => (
           <li key={r.id}>
             <span>{r.with}</span> <span>{r.summary}</span>{" "}
-            <time dateTime={r.at}>{clock.format(new Date(r.at))}</time>{" "}
+            <time dateTime={r.at}>{sentAt(r.at)}</time>{" "}
             <span className="note">
               {r.accepted ? "SendMessage · delivery not tracked" : "SendMessage · not sent"}
             </span>

@@ -33,7 +33,7 @@
             },
             {
               "type": "string",
-              "pattern": "^(?!(?:host|env|agent|task|asgn|attn|ntc|msg|term|dev|att|lease)_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$)[A-Za-z0-9][A-Za-z0-9_-]{0,39}$"
+              "pattern": "^(?!(?:host|env|agent|task|asgn|attn|ntc|msg|term|dev|att|lease|obs)_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$)[A-Za-z0-9][A-Za-z0-9_-]{0,39}$"
             }
           ]
         },

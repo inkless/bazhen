@@ -10,6 +10,7 @@ import {
   DETAIL_MAX,
   EnvironmentUnavailable,
   failureDetail,
+  withoutControls,
   forceable,
   fromEnvironment,
   ServerUnconfirmed,
@@ -66,6 +67,15 @@ describe("an environment's failure as a command's", () => {
  * literal a secret scanner would take for a real key.
  */
 const fake = (prefix: string, length: number) => prefix + "S3cr3tKeyX".repeat(8).slice(0, length);
+
+describe("text an agent wrote, made safe", () => {
+  it("drops control and bidi characters, keeping lines, tabs and joined emoji", () => {
+    const family = "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}";
+    expect(withoutControls(`a\u001b[2Jb\u0000\u007f\u0085\tc\nd\u202E\u2066e ${family}`)).toBe(
+      `a[2Jb\tc\nde ${family}`,
+    );
+  });
+});
 
 describe("a failure's detail", () => {
   it("keeps a harness's own words, ids and prose whole", () => {

@@ -62,7 +62,7 @@ describe("streamed events", () => {
     const event = Event.parse({
       ...recorded,
       type: "message.observed",
-      entityType: "message",
+      entityType: "observed_message",
       payload: { ...sent, text: "the secret plan" },
     });
     expect(event.payload).toEqual(sent);
