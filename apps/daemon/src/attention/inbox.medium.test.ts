@@ -84,7 +84,7 @@ describe("inbox", () => {
     const mailbox = new Mailbox(store);
     const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
     for (let attempt = 1; attempt <= MAX_FAILURES; attempt++) {
-      mailbox.ack((await mailbox.wait(agentId, new AbortController().signal)).offered);
+      mailbox.ack(agentId, (await mailbox.wait(agentId, new AbortController().signal)).offered);
       mailbox.promptStarted(agentId, `Message for you from Bazhen (${messageId}):`, `p-${attempt}`);
       mailbox.turnFailed(agentId, `p-${attempt}`);
     }

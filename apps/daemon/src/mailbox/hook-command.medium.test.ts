@@ -52,6 +52,7 @@ function socketPath() {
 
 interface Exchange {
   readonly path: string;
+  readonly head: string;
   readonly body: string;
 }
 
@@ -68,6 +69,7 @@ function readRequest(conn: Socket): Promise<Exchange> {
       if (data.length < end + 4 + length) return;
       resolve({
         path: head.split(" ")[1] ?? "",
+        head,
         body: data.subarray(end + 4, end + 4 + length).toString(),
       });
     });
@@ -75,6 +77,8 @@ function readRequest(conn: Socket): Promise<Exchange> {
 }
 
 const bodyOf = (seen: readonly Exchange[], i: number) => seen[i]?.body ?? "";
+/** The agent token a request's head carries, if it carries one. */
+const tokenIn = (request: Exchange) => /^bazhen-agent-token: *(\S*)\r?$/im.exec(request.head)?.[1];
 
 const raw = (headers: Record<string, string>, body: Buffer | string, status = "200 OK") =>
   Buffer.concat([
@@ -319,6 +323,27 @@ describe.each(clients)("hook client (%s)", { timeout: 30_000 }, (_kind, client) 
       event: "statusline",
       payload: { model: { display_name: "Opus" } },
     });
+  });
+
+  it("proves the agent with the token its file holds, on a hook and on the status line", async () => {
+    const socket = socketPath();
+    const quiet = framed({ exitCode: 0, stdout: "", stderr: "", offered: [] });
+    const { seen, ready } = listen(socket, [quiet, quiet, quiet]);
+    await ready;
+    const token = "t".repeat(43);
+    const tokenFile = join(dir, "agent.token");
+    const env = {
+      BAZHEN_AGENT_ID: newId("agent"),
+      BAZHEN_SOCKET: socket,
+      BAZHEN_AGENT_AUTH_FILE: tokenFile,
+    };
+    writeFileSync(tokenFile, token);
+    await run(client, "PermissionRequest", env);
+    await run(client, "statusline-wrap", env, "{}", ["true"]);
+    await expect.poll(() => seen.length).toBe(2);
+    writeFileSync(tokenFile, "x\r\nBazhen-Agent-Id: agent_y");
+    await run(client, "PermissionRequest", env);
+    expect(seen.map(tokenIn)).toEqual([token, token, undefined]);
   });
 
   it("exits as a shell would when a signal ends the user's status line command", async () => {

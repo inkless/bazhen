@@ -1,5 +1,4 @@
 import { Hono } from "hono";
-import { isId } from "@bazhen/core";
 import {
   HookAck,
   HookRequest,
@@ -9,6 +8,8 @@ import {
   type HookReply,
 } from "@bazhen/protocol";
 import { hookOrigin, readHook, type SentMessage } from "@bazhen/harness-claude-code";
+import { AGENT_TOKEN_HEADER } from "../auth/agent-token.ts";
+import { identify, type AgentCredentials } from "../auth/callers.ts";
 import type { ActivityTracker } from "./activity.ts";
 import type { Approvals } from "./approvals.ts";
 import type { SessionBinding } from "./binding.ts";
@@ -24,6 +25,8 @@ export interface IngressDeps {
   };
   /** Whether the daemon runs this agent; a hook from any other is ignored, never adopted. */
   readonly knows: (agentId: string) => boolean;
+  /** A hook names its agent; its agent token must be that agent's (foundation-design §9.1). */
+  readonly credentials: AgentCredentials;
   /** Which hooks are the agent's own session's, the only ones that take or confirm mail. */
   readonly binding: SessionBinding;
   /** What the agent's hooks say it is doing (foundation-design §4.6). */
@@ -45,8 +48,13 @@ export function hookApp(deps: IngressDeps): Hono {
   app.post("/v1/hooks", async (c) => {
     const hook = HookRequest.safeParse(await c.req.json().catch(() => undefined));
     if (!hook.success || !isCompatible(hook.data.protocolVersion)) return framed(QUIET);
-    const { agentId, event, payload, ppid } = hook.data;
-    if (!isId("agent", agentId) || !deps.knows(agentId)) return framed(QUIET);
+    const { event, payload, ppid } = hook.data;
+    const who = identify(deps.credentials, {
+      token: c.req.header(AGENT_TOKEN_HEADER),
+      said: hook.data.agentId,
+    });
+    if (who.kind !== "agent" || !deps.knows(who.agentId)) return framed(QUIET);
+    const { agentId } = who;
     const read = readHook(event, payload);
     const origin = hookOrigin(payload);
     // Subagents' hooks say what the agent is doing too; another session's never do.
@@ -124,7 +132,12 @@ export function hookApp(deps: IngressDeps): Hono {
 
   app.post("/v1/hooks/ack", async (c) => {
     const ack = HookAck.safeParse(await c.req.json().catch(() => undefined));
-    if (ack.success) deps.mailbox.ack(ack.data.offered);
+    if (!ack.success) return c.json({});
+    const who = identify(deps.credentials, {
+      token: c.req.header(AGENT_TOKEN_HEADER),
+      said: ack.data.agentId,
+    });
+    if (who.kind === "agent") deps.mailbox.ack(who.agentId, ack.data.offered);
     return c.json({});
   });
 

@@ -1200,6 +1200,42 @@ export class Store {
     );
   }
 
+  /** Records the hash of the token the agent's next process proves itself with. */
+  noteAgentToken(agentId: string, hash: string): void {
+    this.prepare("UPDATE agent_sessions SET token_hash = ? WHERE id = ?").run(hash, agentId);
+  }
+
+  /** A start of the agent's own went ahead on a token: its bare id no longer names it. */
+  keptAgentToken(agentId: string): void {
+    this.prepare("UPDATE agent_sessions SET untokened = 0 WHERE id = ?").run(agentId);
+  }
+
+  /**
+   * Whether the agent ran from before agents had tokens, no start has given it one since, and it
+   * hasn't ended.
+   */
+  agentUntokened(agentId: string): boolean {
+    const row = this.prepare(
+      `SELECT untokened FROM agent_sessions
+       WHERE id = ? AND state NOT IN ('closed', 'failed')`,
+    ).get(agentId);
+    return row?.untokened === 1;
+  }
+
+  /** The agent whose current token hashes to `hash`, unless it has ended. */
+  agentByTokenHash(hash: string): string | undefined {
+    const row = this.prepare(
+      "SELECT id FROM agent_sessions WHERE token_hash = ? AND state NOT IN ('closed', 'failed')",
+    ).get(hash);
+    return typeof row?.id === "string" ? row.id : undefined;
+  }
+
+  /** The hash of the agent's current token; null before its first start with one. */
+  agentTokenHash(agentId: string): string | null {
+    const row = this.prepare("SELECT token_hash FROM agent_sessions WHERE id = ?").get(agentId);
+    return typeof row?.token_hash === "string" ? row.token_hash : null;
+  }
+
   /** The hash of the token a shell reports with, or null for one that can't report. */
   shellTokenHash(terminalId: string): string | null {
     const row = this.prepare(

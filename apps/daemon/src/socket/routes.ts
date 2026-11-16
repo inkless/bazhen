@@ -1,6 +1,7 @@
 import type { HttpBindings } from "@hono/node-server";
 import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
+import { guardCallers, type AgentCredentials, type CallerEnv } from "../auth/callers.ts";
 import type { DeviceAuth } from "../auth/devices.ts";
 import type { AppEnv } from "../http/app.ts";
 import type { PairingCodes } from "../auth/pairing.ts";
@@ -24,6 +25,8 @@ export interface SocketParts {
   /** The `/v1` command routes, unguarded: the socket's permission is the authentication. */
   readonly commands: Hono<AppEnv>;
   readonly hooks: Hono;
+  /** Agents' tokens, which tell an agent's call from the human's. */
+  readonly credentials: AgentCredentials;
   /** Stops the daemon; called once the reply to `stop` has been written. */
   readonly stop: () => void;
   readonly doctor: () => Promise<DoctorResponse>;
@@ -65,22 +68,10 @@ const forbidden = (c: Context, message: string) => {
  * What the daemon's 0600 Unix socket serves: the hook ingress, the full command set, and routes a
  * browser must never reach (foundation-design §5.1, §9.1).
  */
-export function socketApp(parts: SocketParts): Hono<{ Bindings: HttpBindings }> {
-  const app = new Hono<{ Bindings: HttpBindings }>();
+export function socketApp(parts: SocketParts): Hono<{ Bindings: HttpBindings } & CallerEnv> {
+  const app = new Hono<{ Bindings: HttpBindings } & CallerEnv>();
 
-  // Only a human acts on an attention item or a notice, pairs a browser or revokes one: a caller that says it
-  // is an agent is refused (§9.1). Advisory against a hostile process of the same user, which
-  // could just not say (§9.4).
-  const humansOnly = (path: string, message: string) =>
-    app.use(path, async (c, next) =>
-      c.req.header("bazhen-agent-id") === undefined ? next() : forbidden(c, message),
-    );
-  for (const action of ["answer", "reply", "resend", "dismiss"]) {
-    humansOnly(`/v1/attention/:id/${action}`, `an agent can't ${action} an attention item`);
-  }
-  humansOnly("/v1/notices/:id/dismiss", "an agent can't dismiss a notice");
-  humansOnly("/v1/pairing/codes", "an agent can't pair a device");
-  humansOnly("/v1/devices/:id/revoke", "an agent can't revoke a device");
+  guardCallers(app, parts.credentials);
 
   // The code is in this reply only, to the person who ran `bazhen pair`; the daemon never logs it.
   app.post("/v1/pairing/codes", (c) => {

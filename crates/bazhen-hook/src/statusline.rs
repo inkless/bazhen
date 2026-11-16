@@ -5,7 +5,7 @@
 //! from it (foundation-design §11.2). The daemon never holds the status line up: it gets a short
 //! bound, and outside a Bazhen agent, or on any failure, it is skipped.
 
-use crate::{hook_request, is_token, post};
+use crate::{agent_token, hook_request, is_token, post_as};
 use std::env;
 use std::io::{self, Read, Write};
 use std::os::unix::process::{ExitStatusExt, parent_id};
@@ -53,6 +53,13 @@ fn report(input: &[u8]) -> Option<()> {
         return None;
     }
     let request = hook_request(input, &agent, "statusline", id(), parent_id());
-    post(&socket, "/v1/hooks", &request, REPORT_DEADLINE).ok()?;
+    post_as(
+        &socket,
+        "/v1/hooks",
+        &request,
+        REPORT_DEADLINE,
+        agent_token().as_deref(),
+    )
+    .ok()?;
     Some(())
 }

@@ -253,6 +253,7 @@ export class LocalEnvironment implements EnvironmentAdapter {
     options,
     size,
     runtime: on,
+    tokenFile,
   }: AgentLaunch): Promise<AgentRefs> {
     const harness = this.harness(request);
     if (resume !== null && harness.resumeSpec === undefined) throw new NotResumable(agentId);
@@ -267,7 +268,7 @@ export class LocalEnvironment implements EnvironmentAdapter {
         : await harness.resumeSpec(request, resume, options);
     const externalRef = this.located(launch);
     const runtime = await this.runtime.create({
-      ...this.process(agentId, request, launch, generation),
+      ...this.process(agentId, request, launch, { generation, tokenFile }),
       terminalId,
       // Carried on the terminal too: a daemon that dies before recording it can still resume it.
       tags: externalRef
@@ -285,6 +286,7 @@ export class LocalEnvironment implements EnvironmentAdapter {
     options,
     refs,
     generation,
+    tokenFile,
   }: AgentRespawn): Promise<AgentRefs & { readonly runtime: RuntimeRef }> {
     const harness = this.harness(request);
     if (refs.runtime === null) throw new NoTerminal();
@@ -292,7 +294,7 @@ export class LocalEnvironment implements EnvironmentAdapter {
       throw new NotResumable(agentId);
     await this.assertExited(refs.runtime);
     const launch = await harness.resumeSpec(request, refs.externalRef, options);
-    const process = this.process(agentId, request, launch, generation);
+    const process = this.process(agentId, request, launch, { generation, tokenFile });
     return {
       runtime: await this.runtime.respawn(refs.runtime, process),
       externalRef: this.located(launch),
@@ -331,7 +333,7 @@ export class LocalEnvironment implements EnvironmentAdapter {
     agentId: AgentSessionId,
     request: AgentLaunchRequest,
     launch: HarnessLaunch,
-    generation: number,
+    start: { readonly generation: number; readonly tokenFile: string },
   ): ProcessSpec {
     return {
       argv:
@@ -339,8 +341,15 @@ export class LocalEnvironment implements EnvironmentAdapter {
           ? launch.argv
           : loginArgv(this.opts.loginShell, launch.argv),
       cwd: request.cwd,
-      env: { ...launch.env, BAZHEN_AGENT_ID: agentId, BAZHEN_SOCKET: this.opts.socket },
-      generation,
+      env: {
+        ...launch.env,
+        BAZHEN_AGENT_ID: agentId,
+        // Not named for its token: Codex's default shell environment policy strips every
+        // variable whose name holds KEY, SECRET or TOKEN from the commands an agent runs.
+        BAZHEN_AGENT_AUTH_FILE: start.tokenFile,
+        BAZHEN_SOCKET: this.opts.socket,
+      },
+      generation: start.generation,
       ...(launch.theme && { theme: launch.theme }),
     };
   }

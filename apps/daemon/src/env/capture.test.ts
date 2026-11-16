@@ -9,6 +9,7 @@ const shell = {
   TMUX: "/tmp/tmux-1/default,1,0",
   BAZHEN_HOME: "/b",
   BAZHEN_AGENT_ID: "agent_parent",
+  BAZHEN_AGENT_AUTH_FILE: "/run/b/agents/agent_parent.token",
   BAZHEN_SOCKET: "/tmp/parent.sock",
   SECRET_KEY: "s",
   TERM: "xterm-256color",
@@ -42,7 +43,7 @@ describe("capture", () => {
     const later = new Date("2026-11-12T10:00:05.000Z");
     const captured = capture(daemon, {}, later);
     expect(captured.at).toBe(now.toISOString());
-    expect(captured.removed).toEqual({ "BAZHEN_*": 3, CLAUDECODE: 1, TMUX: 1, TERM: 1 });
+    expect(captured.removed).toEqual({ "BAZHEN_*": 4, CLAUDECODE: 1, TMUX: 1, TERM: 1 });
     expect(captured.env).toEqual({ HOME: "/home/u", GH_TOKEN: "t", SECRET_KEY: "s" });
   });
 

@@ -36,6 +36,7 @@ const launch = (agentId: ReturnType<typeof newId<"agent">>, project = "runs") =>
     request: { harness: "claude-code", project, cwd: process.cwd() },
     options: {},
     size: { cols: 80, rows: 24 },
+    tokenFile: "/nonexistent/agent.token",
   });
 
 afterAll(() => server.kill());

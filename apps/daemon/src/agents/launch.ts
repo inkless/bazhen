@@ -19,6 +19,7 @@ import {
   type TuiTheme,
 } from "@bazhen/protocol";
 import { z } from "zod";
+import { startWithToken, type AgentTokenIssuer } from "../auth/callers.ts";
 import { failureDetail } from "../commands.ts";
 import { IdempotencyConflict, runtimePayload, type Store } from "../store/store.ts";
 import { FLEET_INSTRUCTIONS } from "../tasks/mail.ts";
@@ -64,6 +65,7 @@ export interface LaunchDeps {
   /** The agents' command queue: a launch holds its new agent's slot until its last event. */
   readonly queue: AgentQueue;
   readonly budget: TerminalAdmission;
+  readonly tokens: AgentTokenIssuer;
 }
 
 /**
@@ -144,7 +146,7 @@ export const startedAs = ({ name }: LaunchOptions): { harnessName?: string } =>
  * human does.
  */
 export async function launchAgent(
-  { store, environment, size, home, queue, budget }: LaunchDeps,
+  { store, environment, size, home, queue, budget, tokens }: LaunchDeps,
   req: LaunchAgentRequest,
   launchedBy?: AgentSessionId,
 ): Promise<LaunchAgentResponse> {
@@ -201,16 +203,20 @@ export async function launchAgent(
   // same synchronous step as it is recorded: no await may come between the two.
   return queue.run(agentId, async () => {
     const options = launchOptions(req.theme, name);
-    const launching = environment.launch({
-      agentId,
-      terminalId,
-      generation: 0,
-      resume: null,
-      request,
-      options,
-      size,
-      runtime,
-    });
+    // A token that can't be written fails the launch as the environment refusing it would.
+    const launching = startWithToken(tokens, agentId, (tokenFile) =>
+      environment.launch({
+        agentId,
+        terminalId,
+        generation: 0,
+        resume: null,
+        request,
+        options,
+        size,
+        runtime,
+        tokenFile,
+      }),
+    );
     const refs = await launching.catch((cause) => {
       console.error(`agent ${agentId} failed to launch:`, cause);
       const detail = failureDetail(cause);

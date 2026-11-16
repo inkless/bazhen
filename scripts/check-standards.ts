@@ -6,6 +6,7 @@ import { existsSync, readdirSync, readFileSync, readlinkSync, statSync } from "n
 import { stripTypeScriptTypes } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { MIGRATIONS } from "../apps/daemon/src/store/migrations.ts";
 import { cssDeclarations } from "../apps/web/src/ui/token-sheet.ts";
 import { gateEnv } from "./cargo-gate.ts";
 import { isMain } from "./is-main.ts";
@@ -34,6 +35,7 @@ const COVERED_ELSEWHERE: Record<string, string> = {
   "apps/daemon/src/store/migrations.ts": "apps/daemon/src/store/store.medium.test.ts",
   "apps/daemon/src/store/projections.ts": "apps/daemon/src/store/store.medium.test.ts",
   "apps/daemon/src/mailbox/ingress.ts": "tests/api/mail.test.ts",
+  "apps/daemon/src/auth/agent-token.ts": "apps/daemon/src/socket/client.medium.test.ts",
   "apps/daemon/src/testing/fixtures.ts": "apps/daemon/src/mailbox/mailbox.medium.test.ts",
   "apps/daemon/src/testing/browser-terminal.ts": "apps/daemon/src/stream/snapshot-contract.test.ts",
   "apps/daemon/src/stream/screen-source.ts": "apps/daemon/src/stream/hub.test.ts",
@@ -970,6 +972,7 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-hook/src/lib.rs::hook_request": "an encoder: it writes the request",
   "crates/bazhen-hook/src/lib.rs::ask": "sends a request; the reply goes to parse_reply",
   "crates/bazhen-hook/src/lib.rs::post": "writes a request; the reply goes to read_response",
+  "crates/bazhen-hook/src/lib.rs::post_as": "writes a request; the reply goes to read_response",
   "crates/bazhen-hook/src/lib.rs::read_response":
     "reads the socket until Framing::end_of, fuzzed, says where the frame ends",
   "crates/bazhen-hook/src/lib.rs::bound_reads": "sets a socket's read timeout; reads nothing",
@@ -2338,14 +2341,38 @@ export function skillFailures(doc: string, dir: string, text: string): string[] 
   return out;
 }
 
+// The store's migration runner skips every version at or below the database's, so a migration
+// numbered past a gap, and merged first, leaves the one that fills the gap never run.
+const MIGRATIONS_FILE = "apps/daemon/src/store/migrations.ts";
+
+/** What is wrong with the migrations' `versions`: they must be 1, 2, … in order. */
+export function migrationVersionFailures(versions: readonly number[]): string[] {
+  const at = versions.findIndex((version, i) => version !== i + 1);
+  if (at === -1) return [];
+  return [
+    `${MIGRATIONS_FILE}: migration ${at + 1} is numbered ${versions[at]}; versions run 1, 2, … ` +
+      "with no gap, since a database past a gap never runs the migration that fills it.",
+  ];
+}
+
+export function checkMigrations(): void {
+  failures.push(...migrationVersionFailures(MIGRATIONS.map((m) => m.version)));
+}
+
+/** Every check `pnpm check` runs, in order. */
+export const STANDARDS_CHECKS: readonly (() => void)[] = [
+  checkSiblingTests,
+  checkAgentContext,
+  () => checkSkills(scriptNames()),
+  checkWebTokens,
+  checkRust,
+  checkCappedScripts,
+  checkSignalChokepoints,
+  checkMigrations,
+];
+
 if (isMain(import.meta)) {
-  checkSiblingTests();
-  checkAgentContext();
-  checkSkills(scriptNames());
-  checkWebTokens();
-  checkRust();
-  checkCappedScripts();
-  checkSignalChokepoints();
+  for (const check of STANDARDS_CHECKS) check();
 
   if (failures.length > 0) {
     console.error(`Standards check failed:\n${failures.map((f) => `  - ${f}`).join("\n")}`);

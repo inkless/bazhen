@@ -6,7 +6,7 @@ import { launchAgent } from "../agents/launch.ts";
 import { renameAgent } from "../agents/names.ts";
 import { AgentQueue } from "../agents/queue.ts";
 import type { Store } from "../store/store.ts";
-import { fakeEnvironment, testView, unlimited, withAgent } from "../testing/fixtures.ts";
+import { fakeEnvironment, testView, unlimited, untokened, withAgent } from "../testing/fixtures.ts";
 import { observeSend } from "./observed.ts";
 
 let launches = 0;
@@ -20,6 +20,7 @@ async function peer(store: Store, name: string) {
     home: tmpdir(),
     queue: new AgentQueue(),
     budget: unlimited,
+    tokens: untokened,
   };
   const { agentId } = await launchAgent(deps, {
     idempotencyKey: `launch-${++launches}`,

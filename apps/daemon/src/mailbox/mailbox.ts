@@ -177,12 +177,13 @@ export class Mailbox {
   }
 
   /**
-   * The hook client wrote what it was handed. Only the offer it names is confirmed: an ack from a
-   * client whose offer was since taken back and made again confirms nothing.
+   * The hook client wrote what it was handed. Only the offer it names, made to the agent acking,
+   * is confirmed: an ack from a client whose offer was since taken back and made again, or from
+   * another agent, confirms nothing.
    */
-  ack(offered: readonly OfferToken[]): void {
-    for (const [id, { agentId, token, timer, fold }] of this.unacked) {
-      if (!offered.includes(token)) continue;
+  ack(agentId: string, offered: readonly OfferToken[]): void {
+    for (const [id, { agentId: to, token, timer, fold }] of this.unacked) {
+      if (to !== agentId || !offered.includes(token)) continue;
       clearTimeout(timer);
       this.unacked.delete(id);
       this.record("mailbox.emitted", id, {});

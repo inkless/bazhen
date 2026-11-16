@@ -63,6 +63,7 @@ fn run() -> Option<i32> {
     if !is_token(&agent) || !is_token(&event) {
         return None;
     }
+    let token = agent_token();
     let mut payload = Vec::new();
     io::stdin().read_to_end(&mut payload).ok()?;
     let request = hook_request(&payload, &agent, &event, id(), parent_id());
@@ -71,21 +72,46 @@ fn run() -> Option<i32> {
         "PostToolUse" => FOLD_DEADLINE,
         _ => HOOK_DEADLINE,
     };
-    let reply = ask(&socket, &request, event == "wait", deadline)?;
+    let reply = ask(
+        &socket,
+        &request,
+        token.as_deref(),
+        event == "wait",
+        deadline,
+    )?;
     io::stdout().write_all(&reply.stdout).ok()?;
     io::stdout().flush().ok()?;
     io::stderr().write_all(&reply.stderr).ok()?;
     if !reply.offered.is_empty() {
         // The reply is already out; an ack that fails leaves the mail offered, and the daemon
         // offers it again.
-        let _ = post(
+        let _ = post_as(
             &socket,
             "/v1/hooks/ack",
             &hook_ack(&agent, &reply.offered),
             ACK_DEADLINE,
+            token.as_deref(),
         );
     }
     Some(reply.exit_code)
+}
+
+/// The agent token in the file `BAZHEN_AGENT_AUTH_FILE` names, if it holds one. The daemon
+/// refuses an agent that names itself without the token it was given, so one that can't be read
+/// is sent as nothing.
+pub(crate) fn agent_token() -> Option<String> {
+    let file = env::var_os("BAZHEN_AGENT_AUTH_FILE")?;
+    let token = std::fs::read_to_string(file).ok()?;
+    let token = token.trim();
+    is_agent_token(token).then(|| token.to_owned())
+}
+
+/// A token as the daemon mints it: 32 bytes, base64url, so 43 characters that need no escaping
+/// in a header.
+pub fn is_agent_token(s: &str) -> bool {
+    s.len() == 43
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
 /// IDs and event names are plain tokens, so they go into JSON without escaping.
@@ -122,13 +148,19 @@ fn hook_ack(agent: &str, offered: &[String]) -> Vec<u8> {
 
 /// A waiter retries until its deadline when the daemon can't be reached or drops the request,
 /// as it does across a restart; any other hook gives up at once.
-fn ask(socket: &str, request: &[u8], waiting: bool, within: Duration) -> Option<Reply> {
+fn ask(
+    socket: &str,
+    request: &[u8],
+    token: Option<&str>,
+    waiting: bool,
+    within: Duration,
+) -> Option<Reply> {
     let deadline = Instant::now() + within;
     loop {
         let left = deadline
             .checked_duration_since(Instant::now())
             .filter(|d| !d.is_zero())?;
-        match post(socket, "/v1/hooks", request, left) {
+        match post_as(socket, "/v1/hooks", request, left, token) {
             Ok(response) => return parse_reply(&response),
             Err(_) if waiting => sleep(Duration::from_secs(1)),
             Err(_) => return None,
@@ -138,21 +170,38 @@ fn ask(socket: &str, request: &[u8], waiting: bool, within: Duration) -> Option<
 
 /// One HTTP/1.1 exchange; the whole response, or an error if it ended early.
 fn post(socket: &str, path: &str, body: &[u8], timeout: Duration) -> io::Result<Vec<u8>> {
+    post_as(socket, path, body, timeout, None)
+}
+
+/// As `post`, proving the agent the request comes from with its token.
+pub(crate) fn post_as(
+    socket: &str,
+    path: &str,
+    body: &[u8],
+    timeout: Duration,
+    token: Option<&str>,
+) -> io::Result<Vec<u8>> {
     let mut stream = UnixStream::connect(socket)?;
     stream.set_read_timeout(Some(timeout))?;
     stream.set_write_timeout(Some(timeout))?;
-    let head = format!(
-        "POST {path} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n\
-         Content-Length: {}\r\nConnection: close\r\n\r\n",
-        body.len()
-    );
-    stream.write_all(head.as_bytes())?;
+    stream.write_all(request_head(path, body.len(), token).as_bytes())?;
     stream.write_all(body)?;
     let response = read_response(&mut stream, REPLY_STALL.min(timeout))?;
     if is_truncated(&response) {
         return Err(io::ErrorKind::UnexpectedEof.into());
     }
     Ok(response)
+}
+
+/// A request's head, with the agent's token when there is one, and only one that is a token.
+fn request_head(path: &str, length: usize, token: Option<&str>) -> String {
+    let token = token
+        .filter(|t| is_agent_token(t))
+        .map_or_default(|t| format!("Bazhen-Agent-Token: {t}\r\n"));
+    format!(
+        "POST {path} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n\
+         {token}Content-Length: {length}\r\nConnection: close\r\n\r\n"
+    )
 }
 
 /// Reads one response, up to where `reply_end` says it ends, so it never waits on the daemon
@@ -351,6 +400,17 @@ mod tests {
             ],
             body,
         )
+    }
+
+    #[test]
+    fn head_carries_the_agent_token_only_when_it_is_one() {
+        let token = "t".repeat(43);
+        let with = request_head("/v1/hooks", 2, Some(&token));
+        let forged = request_head("/v1/hooks", 2, Some("x\r\nBazhen-Agent-Id: agent_y"));
+        let without = request_head("/v1/hooks", 2, None);
+        assert!(with.contains(&format!("\r\nBazhen-Agent-Token: {token}\r\n")));
+        assert_eq!(forged, without);
+        assert!(!without.contains("Bazhen-Agent-Token"));
     }
 
     #[test]

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { isId, LaunchFailed, newId } from "@bazhen/core";
 import { AgentName, ID_PREFIXES } from "@bazhen/protocol";
 import { IdempotencyConflict, type Store } from "../store/store.ts";
-import { fakeEnvironment, testView, unlimited, withAgent } from "../testing/fixtures.ts";
+import { fakeEnvironment, testView, unlimited, untokened, withAgent } from "../testing/fixtures.ts";
 import { launchAgent } from "./launch.ts";
 import { AgentEnded, NameTaken, renameAgent } from "./names.ts";
 import { AgentQueue } from "./queue.ts";
@@ -17,6 +17,7 @@ async function another(store: Store, name: string, launch?: Parameters<typeof fa
     home: tmpdir(),
     queue: new AgentQueue(),
     budget: unlimited,
+    tokens: untokened,
   };
   const launched = await launchAgent(deps, {
     idempotencyKey: `launch-${name}`,
