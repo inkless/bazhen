@@ -8,6 +8,9 @@ let model: FakeModel;
 let daemon: Daemon;
 let launched: LaunchAgentResponse;
 
+/** A title naming a thread, as the TUI sets it: an id's first characters, perhaps cut with `...`. */
+const THREAD_TITLE = /^[0-9a-f]{8}-[0-9a-f-]{20,27}(\.\.\.|…)?$/;
+
 const state = async () => StateSnapshot.parse((await daemon.request("/v1/state")).body);
 
 /**
@@ -31,6 +34,12 @@ async function mailed(key: string, body: string): Promise<string> {
 }
 const bound = async () =>
   (await state()).agents.find((a) => a.id === launched.agentId)?.externalRef?.id;
+
+/** Whether the agent's TUI is titled with a thread, and one other than `threadId`. */
+async function titledWithAnother(threadId: string) {
+  const title = await daemon.title(launched.agentId);
+  return THREAD_TITLE.test(title) && !showsThread(title, threadId);
+}
 
 /** Whether the agent is bound to the thread its TUI's title names, and which that is. */
 async function following() {
@@ -85,19 +94,21 @@ describe("a Codex agent on a holder", () => {
     expect([carried.includes(now), carried.includes(String(before))]).toEqual([true, false]);
   });
 
-  // Pins that the daemon rebinds: by the titles it reads at start, or by its watch's first word
-  // from the holder, as the medium tests of each pin separately.
+  // The new thread's first prompt waits until the daemon is back: a /new thread is listed only once
+  // that prompt saves it, and its announcement went out while the daemon was down, so the daemon
+  // starts on a title naming a thread it can't find yet, every run.
   it("is bound, once the daemon is back, to the thread its TUI went to while it was down, and holds mail till then", async () => {
-    const before = await bound();
+    const before = String(await bound());
     await daemon.crash();
     const holder = daemon.holderOf(launched.agentId);
     expect(holder).toBeDefined();
     await promptHolder(String(holder), "/new");
-    await promptHolder(String(holder), "hello while the daemon was down");
+    await waitUntil(() => titledWithAnother(before), "the TUI titled with a new thread", 30_000);
     await daemon.restart();
     const carrying = mailed("mail-after-restart", "mail sent as the daemon came back");
     // Awaited below; until then a failure must not count as unhandled.
     carrying.catch(() => {});
+    await daemon.prompt(launched, "hello from the thread made while the daemon was down");
     await expect
       .poll(
         async () => {
@@ -109,6 +120,6 @@ describe("a Codex agent on a holder", () => {
       .toEqual({ moved: true, shown: true });
     const carried = await carrying;
     const now = String(await bound());
-    expect([carried.includes(now), carried.includes(String(before))]).toEqual([true, false]);
+    expect([carried.includes(now), carried.includes(before)]).toEqual([true, false]);
   });
 });

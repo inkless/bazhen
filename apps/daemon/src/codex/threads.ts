@@ -15,9 +15,9 @@ export interface CodexThreadsOptions {
     resume(threadId: string): Promise<void>;
   };
   readonly log?: (message: string) => void;
-  /** The first wait before resuming a thread again; it doubles to RESUME_MAX_MS. */
+  /** The first wait before a waiting move is tried again; it doubles to RESUME_MAX_MS. */
   readonly retryMs?: number;
-  /** How long a thread is resumed again before the agent is left where it is. */
+  /** How long a waiting move is tried again before the agent is left where it is. */
   readonly giveUpMs?: number;
   /** An agent's mail, held while it waits to move, may go again: to its thread as it is now. */
   readonly released?: (agentId: string) => void;
@@ -25,9 +25,9 @@ export interface CodexThreadsOptions {
   readonly ready?: (agentId: string) => void;
 }
 
-/** The longest wait between resumes of a thread the TUI shows but the server can't load yet. */
+/** The longest wait between tries of a move to a thread the server can't list or load yet. */
 const RESUME_MAX_MS = 5000;
-/** How long such a thread is tried, by default, before the agent is left where it is. */
+/** How long such a move is tried, by default, before the agent is left where it is. */
 const RESUME_GIVE_UP_MS = 10 * 60_000;
 
 /**
@@ -38,10 +38,14 @@ const RESUME_GIVE_UP_MS = 10 * 60_000;
 export const paneTitleCommand = (client: string, socket: string) =>
   [client, "pane-title", socket] as const;
 
-/** A terminal waiting to resume the thread its title names: for which agent, since when. */
-interface Resuming {
+/**
+ * A terminal waiting to move its agent to the thread its title names, by the prefix it names: for
+ * which agent, since when, and the thread once one matches it.
+ */
+interface Moving {
   readonly agentId: string;
-  readonly threadId: string;
+  readonly prefix: string;
+  threadId?: string;
   readonly since: number;
   waitMs: number;
   timer?: ReturnType<typeof setTimeout>;
@@ -49,6 +53,13 @@ interface Resuming {
 
 /** How many new thread ids are kept to resolve titles against; the oldest go first. */
 const SEEN = 2000;
+/** The threads `thread/list` answers with in one page. */
+const LIST_PAGE = 50;
+/**
+ * The most pages a move's first try reads, for a thread the TUI resumed from far back; its
+ * retries read only the first, where a thread saved since sorts.
+ */
+const LIST_PAGES = 40;
 
 export const UNTRACKED = "thread switches are not being tracked";
 
@@ -58,28 +69,34 @@ export const UNTRACKED = "thread switches are not being tracked";
  * changes: tmux by a hook, a holder by the frame it sends. The title
  * holds at most the id's first 29 characters, so it is resolved against the threads the
  * app-server has announced, then against its thread list, for one from before Bazhen connected.
- * Only exactly one match moves the agent: none, several, or a title that is no thread id leaves
- * it on its thread. A title can name a thread before the server announces it, so one that matched
- * nothing is tried again when a thread it names is announced. A thread `/new` starts can't be
- * resumed until its first prompt saves it, so the move waits, resuming again with backoff for as
- * long as the title still names it, and holds the agent's new mail meanwhile, which would
- * otherwise go to a thread the user no longer sees. A thread another running agent is bound to is
- * never moved onto. Mail and approvals follow the binding without more work.
+ * Only exactly one match moves the agent: several, or a title that is no thread id, leaves it on
+ * its thread. A thread `/new` starts is listed, and can be resumed, only once its first prompt
+ * saves it, and its announcement reaches only the clients connected then, not a daemon that was
+ * down. So a title that matches nothing, or names a thread that can't be resumed yet, is a move
+ * that waits: tried again with backoff for as long as the title still names it, sooner when a
+ * thread it names is announced, and given up after a while. The agent's new mail is held
+ * meanwhile, since it would otherwise go to a thread the user no longer sees. A thread another
+ * running agent is bound to is never moved onto. Mail and approvals follow the binding without
+ * more work.
  */
 export class CodexThreads {
   private readonly opts: CodexThreadsOptions;
   private readonly log: (message: string) => void;
   private readonly seen = new Set<string>();
-  /** Terminals whose title named no thread yet, by the prefix it named. */
-  private readonly waiting = new Map<TerminalId, string>();
-  /** Terminals waiting to resume the thread their title names. */
-  private readonly resuming = new Map<TerminalId, Resuming>();
+  /** Terminals waiting to move their agent to the thread their title names. */
+  private readonly moving = new Map<TerminalId, Moving>();
   /**
    * Terminals a TUI is started in again, whose title may still be the last TUI's: a respawn
    * keeps the terminal, and a TUI that was killed never empties its title. Their title says the
    * new TUI is up only once a change to it has been heard.
    */
   private readonly reused = new Set<TerminalId>();
+  /**
+   * Terminals whose move was given up on, by the prefix their title named. That title, told again,
+   * gets one try that holds no mail: it moves the agent if a thread it names has been announced or
+   * listed, and can be resumed, by then. Any other title the terminal reports forgets it.
+   */
+  private readonly gaveUp = new Map<TerminalId, string>();
   /** The agents whose titles are being read at start; their mail waits until they are. */
   private starting: Set<string> | undefined;
   /** One title at a time, in the order the runtimes reported them. */
@@ -100,7 +117,10 @@ export class CodexThreads {
         if (this.seen.size <= SEEN) break;
         this.seen.delete(old);
       }
-      for (const [terminal, prefix] of this.waiting) {
+      for (const [terminal, m] of this.moving) {
+        if (id.startsWith(m.prefix)) void this.titleChanged(terminal);
+      }
+      for (const [terminal, prefix] of this.gaveUp) {
         if (id.startsWith(prefix)) void this.titleChanged(terminal);
       }
     },
@@ -110,7 +130,7 @@ export class CodexThreads {
   held(agentId: string): boolean {
     return (
       this.starting?.has(agentId) === true ||
-      [...this.resuming.values()].some((r) => r.agentId === agentId)
+      [...this.moving.values()].some((m) => m.agentId === agentId)
     );
   }
 
@@ -147,9 +167,21 @@ export class CodexThreads {
     this.reused.add(terminal);
   }
 
-  /** No TUI is starting in `terminal` any more: its respawn was refused, or it is closing. */
+  /**
+   * No TUI is starting in `terminal` any more: its respawn was refused, or it is closing. A move
+   * it waited on is dropped, and its agent's held mail let go.
+   */
   left(terminal: TerminalId): void {
     this.reused.delete(terminal);
+    // After any follow in flight, which would otherwise wait again on a move dropped under it.
+    this.queue = this.queue
+      .then(() => {
+        this.gaveUp.delete(terminal);
+        this.settle(terminal);
+      })
+      .catch((err: unknown) => {
+        this.log(`codex: dropping terminal ${terminal}'s move failed: ${String(err)}`);
+      });
   }
 
   /**
@@ -162,18 +194,22 @@ export class CodexThreads {
       .catch((err: unknown) => {
         this.log(`codex: following terminal ${terminal} failed: ${String(err)}`);
         // A move it was waiting on is tried again, or given up, rather than left holding mail.
-        const r = this.resuming.get(terminal);
-        if (r !== undefined) this.later(terminal, r);
+        const m = this.moving.get(terminal);
+        if (m !== undefined) this.later(terminal, m);
       });
     return this.queue;
   }
 
   private async follow(terminal: TerminalId, told?: string): Promise<void> {
     const { store, runtime } = this.opts;
-    this.waiting.delete(terminal);
     const agent = store.codexAgentIn(terminal);
-    if (agent === undefined) return this.settle(terminal);
+    if (agent === undefined) {
+      this.gaveUp.delete(terminal);
+      return this.settle(terminal);
+    }
     const title = told ?? (await runtime.title(agent.runtime));
+    const gaveUpOn = this.gaveUp.get(terminal);
+    this.gaveUp.delete(terminal);
     // The TUI empties its title as it exits, which names no thread to follow.
     if (title.trim() === "") return this.settle(terminal);
     const prefix = titlePrefix(title);
@@ -186,14 +222,25 @@ export class CodexThreads {
       this.tracked(agent.agentId, terminal);
       return this.settle(terminal);
     }
+    const prior = this.moving.get(terminal);
+    const waited = prior?.agentId === agent.agentId && prior.prefix === prefix ? prior : undefined;
     let found = matching(prefix, this.seen);
-    if (found.length === 0) found = matching(prefix, await this.listed());
-    const [threadId] = found;
-    if (threadId === undefined) this.waiting.set(terminal, prefix);
-    if (threadId === undefined || found.length > 1) {
+    if (found.length === 0 && waited?.threadId !== undefined) found = [waited.threadId];
+    if (found.length === 0)
+      found = matching(prefix, await this.listed(waited === undefined ? LIST_PAGES : 1));
+    if (found.length > 1) {
       this.settle(terminal);
-      const why = found.length > 1 ? `${found.length} threads` : "no thread";
-      return this.untracked(agent.agentId, `${why} match ${prefix}`);
+      return this.untracked(agent.agentId, `${found.length} threads match ${prefix}`);
+    }
+    const [threadId] = found;
+    if (threadId === undefined) {
+      if (gaveUpOn === prefix) {
+        this.gaveUp.set(terminal, prefix);
+        return this.settle(terminal);
+      }
+      if (waited === undefined)
+        this.log(`codex: no thread matches ${prefix} yet; agent ${agent.agentId} waits to move`);
+      return this.later(terminal, this.move(terminal, agent.agentId, prefix));
     }
     // One thread, one agent: a /resume of another agent's thread is not a move.
     if (store.codexAgentsOn(threadId).some((id) => id !== agent.agentId)) {
@@ -201,7 +248,11 @@ export class CodexThreads {
       return this.untracked(agent.agentId, `thread ${threadId} is another agent's`);
     }
     // Subscribe first, so nothing the thread sends after the move is missed.
-    if (!(await this.resumed(terminal, agent.agentId, threadId))) return;
+    const subscribed =
+      gaveUpOn === prefix
+        ? await this.resumedOnce(terminal, prefix, threadId)
+        : await this.resumed(this.move(terminal, agent.agentId, prefix), terminal, threadId);
+    if (!subscribed) return;
     const now = store.codexAgentIn(terminal);
     // Closed, or moved again by another title, while the thread was being resumed.
     if (now?.agentId !== agent.agentId || now.threadId !== agent.threadId)
@@ -220,56 +271,98 @@ export class CodexThreads {
   }
 
   /**
-   * Resumes the thread a terminal's title names; false while it waits. One the server can't load
-   * yet, as a `/new` before its first prompt, is tried again later until RESUME_GIVE_UP_MS have
-   * passed, and the agent then stays where it is.
+   * The terminal's move to the thread `prefix` names: the one it was waiting on, if it named the
+   * same, so its backoff and give-up time go on; a new one otherwise, with a give-up time of its
+   * own, as a title naming one unsaved `/new` after another gets.
    */
-  private async resumed(terminal: TerminalId, agentId: string, threadId: string): Promise<boolean> {
-    const prior = this.resuming.get(terminal);
-    const r =
-      prior?.threadId === threadId
-        ? prior
-        : { agentId, threadId, since: Date.now(), waitMs: this.opts.retryMs ?? 500 };
-    this.resuming.set(terminal, r);
+  private move(terminal: TerminalId, agentId: string, prefix: string): Moving {
+    const prior = this.moving.get(terminal);
+    if (prior?.agentId === agentId && prior.prefix === prefix) return prior;
+    const m: Moving = { agentId, prefix, since: Date.now(), waitMs: this.opts.retryMs ?? 500 };
+    this.moving.set(terminal, m);
+    if (prior !== undefined) {
+      clearTimeout(prior.timer);
+      if (prior.agentId !== agentId) this.opts.released?.(prior.agentId);
+    }
+    return m;
+  }
+
+  /**
+   * Resumes the thread a terminal's title names; false while it waits. One the server can't load
+   * yet, as a `/new` before its first prompt, is tried again later.
+   */
+  private async resumed(m: Moving, terminal: TerminalId, threadId: string): Promise<boolean> {
+    m.threadId = threadId;
     try {
       await this.opts.channel.resume(threadId);
       return true;
     } catch (err) {
       this.log(`codex: thread ${threadId} can't be resumed yet: ${String(err)}`);
-      this.later(terminal, r);
+      this.later(terminal, m);
       return false;
     }
   }
 
-  /** Follows the terminal again after a wait, or, past the give-up time, leaves the agent be. */
-  private later(terminal: TerminalId, r: Resuming): void {
-    if (Date.now() - r.since >= (this.opts.giveUpMs ?? RESUME_GIVE_UP_MS)) {
-      this.settle(terminal);
-      return this.untracked(r.agentId, `thread ${r.threadId} could not be resumed`);
+  /** One resume of a thread whose move was given up on; false, holding nothing, if it fails. */
+  private async resumedOnce(terminal: TerminalId, prefix: string, threadId: string) {
+    try {
+      await this.opts.channel.resume(threadId);
+      return true;
+    } catch (err) {
+      this.log(`codex: thread ${threadId} still can't be resumed: ${String(err)}`);
+      this.gaveUp.set(terminal, prefix);
+      return false;
     }
-    clearTimeout(r.timer);
-    r.timer = setTimeout(() => void this.titleChanged(terminal), r.waitMs);
-    r.timer.unref();
-    r.waitMs = Math.min(r.waitMs * 2, RESUME_MAX_MS);
+  }
+
+  /**
+   * Follows the terminal again after a wait, or, past the give-up time, leaves the agent on its
+   * thread and lets its held mail go there.
+   */
+  private later(terminal: TerminalId, m: Moving): void {
+    if (Date.now() - m.since >= (this.opts.giveUpMs ?? RESUME_GIVE_UP_MS)) {
+      this.settle(terminal);
+      this.gaveUp.set(terminal, m.prefix);
+      const why =
+        m.threadId === undefined
+          ? `no thread matches ${m.prefix}`
+          : `thread ${m.threadId} could not be resumed`;
+      return this.untracked(m.agentId, why);
+    }
+    clearTimeout(m.timer);
+    m.timer = setTimeout(() => void this.titleChanged(terminal), m.waitMs);
+    m.timer.unref();
+    m.waitMs = Math.min(m.waitMs * 2, RESUME_MAX_MS);
   }
 
   /** The terminal waits to move no longer: its agent's held mail may go. */
   private settle(terminal: TerminalId): void {
-    const r = this.resuming.get(terminal);
-    if (r === undefined) return;
-    clearTimeout(r.timer);
-    this.resuming.delete(terminal);
-    this.opts.released?.(r.agentId);
+    const m = this.moving.get(terminal);
+    if (m === undefined) return;
+    clearTimeout(m.timer);
+    this.moving.delete(terminal);
+    this.opts.released?.(m.agentId);
   }
 
-  /** The threads the server lists, newest first; none if it can't list them. */
-  private async listed(): Promise<string[]> {
+  /**
+   * The threads the server lists in up to `pages` pages, newest first; those it listed before it
+   * failed, if it does.
+   */
+  private async listed(pages: number): Promise<string[]> {
+    const threads: string[] = [];
+    let cursor: string | null = null;
     try {
-      return readThreadList(await this.opts.channel.request("thread/list", { limit: 50 }));
+      for (let page = 0; page < pages; page++) {
+        const params = { limit: LIST_PAGE, ...(cursor !== null && { cursor }) };
+        const answer = readThreadList(await this.opts.channel.request("thread/list", params));
+        threads.push(...answer.threads);
+        cursor = answer.nextCursor;
+        if (cursor === null) break;
+      }
     } catch (err) {
       this.log(`codex: could not list threads: ${String(err)}`);
-      return [];
     }
+    return threads;
   }
 
   /**

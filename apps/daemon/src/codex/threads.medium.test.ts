@@ -25,11 +25,14 @@ const started = (id: string, extra: object = {}) => ({ thread: { id, ...extra } 
 
 /**
  * Agent on thread A in pane %0, whose title reads as `titles`, one per read and then the last,
- * and a server whose `thread/list` answers `listed`.
+ * and a server whose `thread/list` answers `listed`, as it is at each list, or `pages`, one per
+ * cursor.
  */
 async function setup(opts: {
   titles: string[];
   listed?: unknown[];
+  pages?: unknown[][];
+  retryMs?: number;
   unsaved?: number;
   /** Threads other agents are bound to, in panes %1 on. */
   others?: string[];
@@ -38,6 +41,8 @@ async function setup(opts: {
   runtime?: "tmux" | "holder";
   /** What `thread/list` waits on before it answers, as a server slow to answer. */
   listing?: Promise<unknown>;
+  /** Letting held mail go throws, as a mailbox failing would. */
+  releaseFails?: boolean;
   /** Its agents still starting, their TUIs not yet up. */
   starting?: boolean;
 }) {
@@ -54,7 +59,7 @@ async function setup(opts: {
   const released: string[] = [];
   const agentId = agentOn(A);
   const resumed: string[] = [];
-  const lists: unknown[] = [];
+  const lists: [method: string, params: unknown][] = [];
   const titles = [...opts.titles];
   const titled: RuntimeRef[] = [];
   const logged: string[] = [];
@@ -72,7 +77,10 @@ async function setup(opts: {
       request: async (method, params) => {
         lists.push([method, params]);
         await opts.listing;
-        return { data: opts.listed ?? [] };
+        if (opts.pages === undefined) return { data: opts.listed ?? [] };
+        const at = Number(Object(params).cursor ?? 0);
+        const more = at + 1 < opts.pages.length;
+        return { data: opts.pages[at] ?? [], nextCursor: more ? String(at + 1) : null };
       },
       resume: async (threadId) => {
         resumed.push(threadId);
@@ -80,8 +88,11 @@ async function setup(opts: {
       },
     },
     log: (message) => logged.push(message),
-    retryMs: 5,
-    released: (id) => released.push(id),
+    retryMs: opts.retryMs ?? 5,
+    released: (id) => {
+      released.push(id);
+      if (opts.releaseFails === true) throw new Error("the mailbox is unavailable");
+    },
     ready: (id) => readiness.ready(id, "codex_title"),
     ...(opts.giveUpMs === undefined ? {} : { giveUpMs: opts.giveUpMs }),
   });
@@ -107,6 +118,7 @@ async function setup(opts: {
     resumed,
     lists,
     titled,
+    titles,
     logged,
     released,
     held,
@@ -179,14 +191,112 @@ describe("Codex thread switches", () => {
     expect([s.boundTo(), s.resumed]).toEqual([B, [B]]);
   });
 
-  it("leaves the agent on its thread when no thread matches", async () => {
+  it("holds the agent's mail while its title names a thread not yet listed, and moves once it is", async () => {
+    const listed = [{ id: A }];
+    const s = await setup({ titles: [shown(B)], listed });
+    await s.threads.titleChanged(s.terminal);
+    await expect.poll(() => s.lists.length).toBeGreaterThan(1);
+    expect([s.boundTo(), s.held(), s.released]).toEqual([A, true, []]);
+    listed.push({ id: B });
+    await expect.poll(s.boundTo).toBe(B);
+    expect([s.resumed, s.held(), s.released, s.untracked()]).toEqual([
+      [B],
+      false,
+      [s.agentId],
+      false,
+    ]);
+  });
+
+  it("finds a thread the TUI resumed from far back, past the thread list's first page", async () => {
+    const s = await setup({ titles: [shown(B)], pages: [[{ id: A }], [{ id: C }], [{ id: B }]] });
+    await s.threads.titleChanged(s.terminal);
+    expect([s.boundTo(), s.resumed, s.lists.length]).toEqual([B, [B], 3]);
+  });
+
+  it("reads only the thread list's first page again while it waits", async () => {
+    const s = await setup({ titles: [shown(B)], pages: [[{ id: A }], [{ id: C }]] });
+    await s.threads.titleChanged(s.terminal);
+    await expect.poll(() => s.lists.length).toBeGreaterThan(4);
+    expect(s.lists.filter(([, params]) => Object(params).cursor !== undefined)).toHaveLength(1);
+  });
+
+  it("holds no mail again for a title it gave up on, told again, and moves once its thread is listed", async () => {
+    const listed = [{ id: A }];
+    const s = await setup({ titles: [shown(B)], listed, giveUpMs: 20 });
+    await s.threads.titleChanged(s.terminal);
+    await expect.poll(s.untracked).toBe(true);
+    await s.threads.titleChanged(s.terminal);
+    expect([s.boundTo(), s.held(), s.released]).toEqual([A, false, [s.agentId]]);
+    listed.push({ id: B });
+    await s.threads.titleChanged(s.terminal);
+    expect([s.boundTo(), s.untracked()]).toEqual([B, false]);
+  });
+
+  it("holds no mail again for a title told again after a thread it found could not be resumed in time", async () => {
+    const s = await setup({ titles: [shown(B)], unsaved: 99, giveUpMs: 20 });
+    s.announce(B);
+    await s.threads.titleChanged(s.terminal);
+    await expect.poll(s.untracked).toBe(true);
+    const tries = s.resumed.length;
+    await s.threads.titleChanged(s.terminal);
+    expect([s.boundTo(), s.held(), s.released, s.resumed.length]).toEqual([
+      A,
+      false,
+      [s.agentId],
+      tries + 1,
+    ]);
+  });
+
+  it("still holds no mail for a title it gave up on after a read of the title fails", async () => {
+    const s = await setup({ titles: [shown(B)], listed: [{ id: A }], giveUpMs: 20 });
+    await s.threads.titleChanged(s.terminal);
+    await expect.poll(s.untracked).toBe(true);
+    s.titles.splice(0, s.titles.length, GONE, shown(B));
+    await s.threads.titleChanged(s.terminal);
+    await s.threads.titleChanged(s.terminal);
+    expect([s.boundTo(), s.held(), s.released]).toEqual([A, false, [s.agentId]]);
+  });
+
+  it("lets mail go at give-up, and moves the agent once the thread its title names is announced", async () => {
+    const s = await setup({ titles: [shown(B)], listed: [{ id: A }], giveUpMs: 20 });
+    await s.threads.titleChanged(s.terminal);
+    await expect.poll(s.untracked).toBe(true);
+    expect([s.boundTo(), s.held(), s.released]).toEqual([A, false, [s.agentId]]);
+    s.announce(B);
+    await expect.poll(s.boundTo).toBe(B);
+  });
+
+  it("drops a waiting move, and lets its mail go, once nothing will start in its terminal", async () => {
     const s = await setup({ titles: [shown(B)], listed: [{ id: A }] });
     await s.threads.titleChanged(s.terminal);
-    expect([s.boundTo(), s.resumed, s.untracked()]).toEqual([A, [], true]);
+    expect(s.held()).toBe(true);
+    s.threads.left(s.terminal);
+    await expect.poll(s.held).toBe(false);
+    const lists = s.lists.length;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect([s.boundTo(), s.released, s.lists.length]).toEqual([A, [s.agentId], lists]);
+  });
+
+  it("follows the next title though letting a left terminal's mail go throws", async () => {
+    const s = await setup({ titles: [shown(B)], listed: [{ id: A }], releaseFails: true });
+    await s.threads.titleChanged(s.terminal);
+    s.threads.left(s.terminal);
+    const read = s.titled.length;
+    await s.threads.titleChanged(s.terminal);
+    expect([s.released, s.titled.length]).toEqual([[s.agentId], read + 1]);
+  });
+
+  it("leaves the agent on its thread when no thread is listed in time, and says so", async () => {
+    const s = await setup({ titles: [shown(B)], listed: [{ id: A }], giveUpMs: 20 });
+    await s.threads.titleChanged(s.terminal);
+    expect(s.held()).toBe(true);
+    await expect.poll(s.untracked).toBe(true);
+    expect([s.boundTo(), s.resumed, s.held(), s.released]).toEqual([A, [], false, [s.agentId]]);
+    expect(s.logged.at(-1)).toContain(`no thread matches ${shown(B).slice(0, 29)}`);
   });
 
   it("moves the agent once the thread its title named first is announced", async () => {
-    const s = await setup({ titles: [shown(B)] });
+    const s = await setup({ titles: [shown(B)], retryMs: 60_000 });
     await s.threads.titleChanged(s.terminal);
     expect(s.boundTo()).toBe(A);
     s.announce(B);
@@ -298,7 +408,7 @@ describe("Codex thread switches", () => {
     const s = await setup({ titles: [shown(B)] });
     s.announce(B, { ephemeral: true, threadSource: "thread_title" });
     await s.threads.titleChanged(s.terminal);
-    expect([s.boundTo(), s.untracked()]).toEqual([A, true]);
+    expect([s.boundTo(), s.resumed]).toEqual([A, []]);
   });
 
   it("leaves the agent on its thread when its title is no thread id, and names the title", async () => {
@@ -331,7 +441,7 @@ describe("Codex thread switches", () => {
   });
 
   it("says switches are followed again once the title is back on the agent's thread", async () => {
-    const s = await setup({ titles: [shown(B), shown(A)], listed: [{ id: A }] });
+    const s = await setup({ titles: [shown(B), shown(A)], listed: [{ id: A }], giveUpMs: 0 });
     await s.threads.titleChanged(s.terminal);
     expect(s.untracked()).toBe(true);
     await s.threads.titleChanged(s.terminal);
@@ -370,6 +480,17 @@ describe("Codex thread switches", () => {
     s.announce(B);
     await s.threads.titleChanged(s.terminal, shown(B));
     expect([s.boundTo(), s.titled]).toEqual([B, []]);
+  });
+
+  it("moves an agent, after a restart, to a thread the server lists only later and never announces", async () => {
+    const listed = [{ id: A }];
+    const s = await setup({ titles: [shown(B)], runtime: "holder", listed });
+    s.threads.followAll();
+    await expect.poll(() => s.lists.length).toBeGreaterThan(1);
+    expect([s.boundTo(), s.held(), s.released]).toEqual([A, true, []]);
+    listed.push({ id: B });
+    await expect.poll(s.boundTo).toBe(B);
+    expect([s.held(), s.released]).toEqual([false, [s.agentId]]);
   });
 
   it("reads every Codex agent's title after a restart, whichever runtime it is on", async () => {

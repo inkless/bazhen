@@ -343,8 +343,16 @@ describe("Codex thread titles", () => {
     ]).toEqual(["thr-1", null, null, null]);
   });
 
-  it("lists the shown threads of a thread/list answer, and none of one it can't read", () => {
-    const listed = { data: [{ id: "a" }, { id: "b", ephemeral: true }, { name: "no id" }] };
-    expect([readThreadList(listed), readThreadList({ threads: [] })]).toEqual([["a"], []]);
+  it("lists the shown threads of a thread/list page and its next cursor, and none of one it can't read", () => {
+    const page = { data: [{ id: "a" }, { id: "b", ephemeral: true }, { name: "no id" }] };
+    expect([
+      readThreadList({ ...page, nextCursor: "c2" }),
+      readThreadList(page),
+      readThreadList({ threads: [] }),
+    ]).toEqual([
+      { threads: ["a"], nextCursor: "c2" },
+      { threads: ["a"], nextCursor: null },
+      { threads: [], nextCursor: null },
+    ]);
   });
 });
