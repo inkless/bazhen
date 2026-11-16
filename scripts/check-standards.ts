@@ -1377,7 +1377,6 @@ export const WORKSPACE_LINTS = [
   "[workspace.lints.clippy]",
   'pedantic = { level = "deny", priority = -1 }',
   'must_use_candidate = "allow"',
-  'struct_excessive_bools = "allow"',
   'unwrap_used = "forbid"',
   'expect_used = "forbid"',
   'panic = "forbid"',
@@ -1418,6 +1417,7 @@ export const CLIPPY_CONFIG = [
   "allow-expect-in-tests = true",
   "allow-panic-in-tests = true",
   "allow-indexing-slicing-in-tests = true",
+  "max-struct-bools = 4",
   // One line: an entry the formatter wraps is read joined (tomlLines).
   [
     "disallowed-methods = [",

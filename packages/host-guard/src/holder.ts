@@ -363,8 +363,13 @@ export async function startHolderWith(
   const pid = child.pid;
   if (pid === undefined) throw new HolderStartFailed("unstarted", (await failed).message);
   let stderr = "";
+  // Once cut, nothing more is kept: a later chunk would join text that no longer follows on.
+  let full = false;
   child.stderr?.setEncoding("utf8").on("data", (chunk: string) => {
-    if (stderr.length < STDERR_MAX) stderr = whole(stderr + chunk, STDERR_MAX);
+    if (full) return;
+    const kept = whole(stderr + chunk, STDERR_MAX);
+    full = kept.length < stderr.length + chunk.length;
+    stderr = kept;
   });
   const stderrEnded = new Promise<void>((done) => {
     child.stderr?.once("end", done).once("close", done);

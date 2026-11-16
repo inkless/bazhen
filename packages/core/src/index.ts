@@ -15,3 +15,4 @@ export * from "./runtime.ts";
 export * from "./shell.ts";
 export * from "./task.ts";
 export * from "./terminal.ts";
+export * from "./text.ts";

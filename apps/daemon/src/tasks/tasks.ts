@@ -13,6 +13,7 @@ import {
   type Caller,
   type RoleBook,
   type TaskView,
+  whole,
 } from "@bazhen/core";
 import {
   AssignTaskResponse,
@@ -35,7 +36,6 @@ import {
   type SendMessageRequest,
   type TaskOutcome,
   type UnassignTaskRequest,
-  whole,
 } from "@bazhen/protocol";
 import type { Raised } from "../attention/inbox.ts";
 import { failureDetail } from "../commands.ts";

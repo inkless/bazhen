@@ -1,7 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import { parse } from "hono/utils/cookie";
 import type { DeviceId } from "@bazhen/core";
-import { DEVICE_NAME_MAX, type Device, whole } from "@bazhen/protocol";
+import { whole } from "@bazhen/core";
+import { DEVICE_NAME_MAX, type Device } from "@bazhen/protocol";
 import type { PairedFrom, Store, StoredDevice } from "../store/store.ts";
 import { forwardedFromElsewhere } from "./forwarded.ts";
 

@@ -7,8 +7,8 @@ import {
   TerminalUnconfirmed,
   TerminalUnservable,
   type RuntimeRef,
+  whole as cutWhole,
 } from "@bazhen/core";
-import { whole as cutWhole } from "@bazhen/protocol";
 
 // Failures of a command on a terminal's owner, an agent or a shell, named by `subject`
 // ("agent agent_…", "shell term_…"), as the API reports them.

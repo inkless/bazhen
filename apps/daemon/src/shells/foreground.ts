@@ -1,5 +1,4 @@
-import type { EnvironmentAdapter, ShellForeground } from "@bazhen/core";
-import { whole } from "@bazhen/protocol";
+import { type EnvironmentAdapter, type ShellForeground, whole } from "@bazhen/core";
 import type { Store } from "../store/store.ts";
 
 export interface ForegroundDeps {
