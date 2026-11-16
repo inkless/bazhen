@@ -146,6 +146,19 @@ describe("RoutedRuntime", () => {
     await expect(routed.foregrounds(new Set())).rejects.toThrow("can't be read");
   });
 
+  it("unions every runtime's compatibility, a runtime without one adding nothing", async () => {
+    const { holder, routed } = pair();
+    const [old, current] = [newId("term"), newId("term")];
+    Object.assign(holder, {
+      compatibility: async () => ({
+        outdated: new Map([[old, ["2.0"]]]),
+        served: new Set([current]),
+      }),
+    });
+    const { outdated, served } = await routed.compatibility();
+    expect([[...outdated], [...served]]).toEqual([[[old, ["2.0"]]], [current]]);
+  });
+
   it("hears every runtime's exits until unsubscribed from all of them", async () => {
     const { routed } = pair();
     const a = await routed.create(spec(["sh", "-c", "exit 3"]));

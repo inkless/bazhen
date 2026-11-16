@@ -287,6 +287,22 @@ export function project(db: Statements, e: Recorded): void {
         foreground: command === null ? null : JSON.stringify({ command, since: e.ts }),
       });
     }
+    case "terminal.needs_restart": {
+      const { protocol } = EVENTS[e.type].payload.parse(e.payload);
+      const row = db.prepare("SELECT 1 AS present FROM terminals WHERE id = ?").get(e.entityId);
+      if (row === undefined) throw new UnknownEntity("terminal", e.entityId);
+      update(db, "terminals", "id", e.entityId, e.id, {
+        restart_protocol: JSON.stringify(protocol),
+      });
+      return;
+    }
+    case "terminal.restart_cleared": {
+      EVENTS[e.type].payload.parse(e.payload);
+      const row = db.prepare("SELECT 1 AS present FROM terminals WHERE id = ?").get(e.entityId);
+      if (row === undefined) throw new UnknownEntity("terminal", e.entityId);
+      update(db, "terminals", "id", e.entityId, e.id, { restart_protocol: null });
+      return;
+    }
     case "terminal.unlinked":
       return setShell(db, e, { linked_agent_id: null });
     case "terminal.renamed":

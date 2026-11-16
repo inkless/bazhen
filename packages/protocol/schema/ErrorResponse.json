@@ -14,6 +14,7 @@
         "not_resumable",
         "unavailable",
         "server_unconfirmed",
+        "needs_restart",
         "busy",
         "not_found",
         "origin_not_allowed",

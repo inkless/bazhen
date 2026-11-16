@@ -1,0 +1,29 @@
+{
+  "$id": "RuntimeHealthReport",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "kind": {
+      "type": "string"
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "healthy",
+        "unreachable",
+        "not-running"
+      ]
+    },
+    "version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "kind",
+    "state",
+    "version"
+  ]
+}

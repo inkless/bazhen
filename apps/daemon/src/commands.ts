@@ -5,6 +5,7 @@ import {
   ProcessState,
   StaleIncarnation,
   TerminalUnconfirmed,
+  TerminalUnservable,
   type RuntimeRef,
 } from "@bazhen/core";
 
@@ -51,6 +52,22 @@ export class ServerUnconfirmed extends Error {
   }
 }
 
+/**
+ * The terminal runs on a holder this build can't speak to, so it can't be closed from here, with
+ * force or without; recording it closed would leave that holder running unseen (design §4.7).
+ */
+export class HolderUnservable extends Error {
+  constructor(subject: string, cause: TerminalUnservable) {
+    const holder = cause.holderPid === null ? "its holder" : `its holder, pid ${cause.holderPid},`;
+    super(
+      `${subject}'s terminal runs on a holder that speaks only ${cause.protocol.join(", ")}, ` +
+        `which this version of Bazhen doesn't, so it can't be closed from here: ${holder} keeps ` +
+        "running until its process is ended. Once it has, close it again, or relaunch it.",
+      { cause },
+    );
+  }
+}
+
 /** The environment could not act just now; the command can be repeated. */
 export class EnvironmentUnavailable extends Error {
   constructor(subject: string, cause: unknown) {
@@ -70,12 +87,15 @@ export function stillRunning(ref: RuntimeRef | null): string {
 
 /** A close failure force may record past: unconfirmed, or the environment out of reach. */
 export const forceable = (cause: unknown) =>
-  cause instanceof TerminalUnconfirmed ||
-  ![StaleIncarnation, NoTerminal, NotResumable, ProcessState].some((e) => cause instanceof e);
+  (cause instanceof TerminalUnconfirmed && !(cause instanceof TerminalUnservable)) ||
+  ![StaleIncarnation, NoTerminal, NotResumable, ProcessState, TerminalUnservable].some(
+    (e) => cause instanceof e,
+  );
 
 /** An environment's failure as the command's: typed where the caller can act on it. */
 export function fromEnvironment(subject: string, cause: unknown): never {
   if (cause instanceof StaleIncarnation) throw new TerminalReplaced(subject, cause);
+  if (cause instanceof TerminalUnservable) throw new HolderUnservable(subject, cause);
   if (cause instanceof TerminalUnconfirmed) throw new ServerUnconfirmed(subject, cause);
   const typed = [NoTerminal, NotResumable, ProcessState, HarnessRefused];
   if (typed.some((e) => cause instanceof e)) throw cause;

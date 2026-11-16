@@ -25,6 +25,7 @@ import { TASK_USAGE, Usage, isVerb, taskSocket, taskVerb, type Answer } from "./
 import { lanLines } from "./lan.ts";
 import { holderLines } from "./holder.ts";
 import { terminalLines } from "./terminals.ts";
+import { anyUnreachable, runtimeLines } from "./runtimes.ts";
 
 /** The exit status when the daemon isn't running. */
 const NOT_RUNNING = 3;
@@ -78,16 +79,14 @@ async function status(): Promise<number> {
   const byState = Map.groupBy(state.agents, (a) => a.state);
   const agents = [...byState].map(([s, list]) => `${list.length} ${s}`).join(", ") || "none";
   console.log(`bazhen ${health.appVersion} (protocol ${health.protocolVersion}), running`);
-  console.log(
-    `tmux: ${health.runtime.state}${health.runtime.version ? ` ${health.runtime.version}` : ""}`,
-  );
+  for (const line of runtimeLines(health)) console.log(line);
   console.log(`agents: ${agents}`);
   return 0;
 }
 
 /**
- * What the daemon runs with, for diagnosing it. Fails when the daemon or its tmux server can't be
- * reached; a missing hook binary is a warning, since hooks still work through the slower script.
+ * What the daemon runs with, for diagnosing it. Fails when the daemon or any of its runtimes can't
+ * be reached; a missing hook binary is a warning, since hooks still work through the slower script.
  */
 async function doctor(): Promise<number> {
   if (!(await answers(socket))) {
@@ -103,7 +102,7 @@ async function doctor(): Promise<number> {
     .map(([rule, count]) => `${rule} ${count}`)
     .join(", ");
   console.log(`bazhen ${d.appVersion} (protocol ${d.protocolVersion})`);
-  console.log(`tmux: ${d.runtime.state}${d.runtime.version ? ` ${d.runtime.version}` : ""}`);
+  for (const line of runtimeLines(d)) console.log(line);
   console.log(`hook client: ${d.hookClient.path}`);
   if (d.hookClient.fallback) {
     console.log("  warning: bazhen-hook is not built; hooks use the slower curl script");
@@ -131,7 +130,7 @@ async function doctor(): Promise<number> {
   const source = d.env.source === "start" ? "at start" : "by bazhen env refresh";
   console.log(`environment: captured ${d.env.capturedAt} ${source}, ${d.env.kept} variables kept`);
   console.log(`  removed: ${removed || "none"}`);
-  return d.runtime.state === "unreachable" ? 1 : 0;
+  return anyUnreachable(d) ? 1 : 0;
 }
 
 /** The origins the daemon admits besides loopback, whether browsers must pair, and the risks. */

@@ -46,6 +46,36 @@
         "state",
         "version"
       ]
+    },
+    "runtimes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "healthy",
+              "unreachable",
+              "not-running"
+            ]
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "state",
+          "version"
+        ]
+      }
     }
   },
   "required": [

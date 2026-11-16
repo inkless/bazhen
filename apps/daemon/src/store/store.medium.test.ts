@@ -204,6 +204,24 @@ describe("Store", () => {
     upgraded.close();
   });
 
+  it("upgrades a database from the schema before 28, its terminals needing no restart", () => {
+    const path = dbPath();
+    const old = Store.open(
+      path,
+      MIGRATIONS.filter((m) => m.version < 28),
+    );
+    const { agentId, terminalId } = launch(old, withEnvironment(old));
+    old.append(running(agentId));
+    old.close();
+    const upgraded = Store.open(path);
+    expect([
+      upgraded.snapshot(testView).agents[0]?.needsRestart,
+      upgraded.restartUnrecorded(terminalId),
+      upgraded.restartsRecorded(),
+    ]).toEqual([null, true, []]);
+    upgraded.close();
+  });
+
   it("upgrades a database from the schema before 27, every terminal it had made on tmux", () => {
     const path = dbPath();
     const old = Store.open(

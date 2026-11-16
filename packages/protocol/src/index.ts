@@ -24,6 +24,14 @@ export * from "./version.ts";
 export const RuntimeHealthState = z.enum(["healthy", "unreachable", "not-running"]);
 export type RuntimeHealthState = z.infer<typeof RuntimeHealthState>;
 
+/** One runtime's health, as `bazhen status` and `bazhen doctor` show it (protocol 1.49). */
+export const RuntimeHealthReport = z.object({
+  kind: z.string(),
+  state: RuntimeHealthState,
+  version: z.string().nullable(),
+});
+export type RuntimeHealthReport = z.infer<typeof RuntimeHealthReport>;
+
 export const HealthResponse = z.object({
   status: z.literal("ok"),
   appVersion: z.string(),
@@ -34,6 +42,11 @@ export const HealthResponse = z.object({
     state: RuntimeHealthState,
     version: z.string().nullable(),
   }),
+  /**
+   * Every runtime the daemon runs terminals on, each read by itself; `runtime` is the worst of
+   * them, with tmux's version. Absent from a daemon before 1.49.
+   */
+  runtimes: z.array(RuntimeHealthReport).optional(),
 });
 export type HealthResponse = z.infer<typeof HealthResponse>;
 
@@ -45,6 +58,8 @@ export const DoctorResponse = z.object({
   appVersion: z.string(),
   protocolVersion: ProtocolVersion,
   runtime: z.object({ state: RuntimeHealthState, version: z.string().nullable() }),
+  /** As in `HealthResponse`. Absent from a daemon before 1.49. */
+  runtimes: z.array(RuntimeHealthReport).optional(),
   hookClient: z.object({ path: z.string(), fallback: z.boolean() }),
   config: z.object({ path: z.string(), found: z.boolean() }),
   /** `agents.shell`, and the login shell agents start through when it is "login". */

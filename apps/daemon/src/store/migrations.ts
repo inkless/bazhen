@@ -425,6 +425,15 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE terminals ADD COLUMN runtime_kind TEXT NOT NULL DEFAULT 'tmux';
     `,
   },
+  {
+    version: 28,
+    sql: `
+      -- The versions a terminal's holder speaks, as a JSON array, once it is seen on a holder this
+      -- build can't fully serve; NULL while it needs no restart. A holder runs one binary for life,
+      -- so it stays through respawns until a build that serves it in full reads it.
+      ALTER TABLE terminals ADD COLUMN restart_protocol TEXT;
+    `,
+  },
 ];
 
 const trimAt24 = (s: string) => s.replaceAll(/^[-_]+|[-_]+$/g, "");

@@ -3,6 +3,8 @@ import {
   AgentTerminalExists,
   HarnessRefused,
   newId,
+  RoutedRuntime,
+  TerminalUnservable,
   NotResumable,
   TaskRefused,
   UnsupportedHarness,
@@ -11,6 +13,7 @@ import {
 import { FakeRuntime } from "@bazhen/core/testing";
 import { PROTOCOL_VERSION, RolesResponse, type LaunchAgentRequest } from "@bazhen/protocol";
 import { EnvironmentUnavailable, ServerUnconfirmed, StaleGeneration } from "../agents/lifecycle.ts";
+import { HolderUnservable } from "../commands.ts";
 import { AttentionClosed } from "../mailbox/approvals.ts";
 import { AgentGone } from "../mailbox/mailbox.ts";
 import { UnknownMessage } from "../mailbox/wait.ts";
@@ -124,6 +127,8 @@ const deps: AppDeps = {
   },
   close: async (agentId, req) => {
     if (req.generation === 3) throw new ServerUnconfirmed(agentId, new Error("no server running"));
+    if (req.generation === 4)
+      throw new HolderUnservable(agentId, new TerminalUnservable(newId("term"), ["2.0"], 4243));
     if (req.generation !== 2) throw new StaleGeneration(agentId, 2);
     throw new EnvironmentUnavailable(agentId, new Error("tmux unreachable"));
   },
@@ -252,6 +257,27 @@ describe("HTTP app", () => {
     });
   });
 
+  it("reports each runtime of a routed one by itself, and the worst of them as the runtime", async () => {
+    const tmux = new FakeRuntime({ kind: "tmux" });
+    const holder = new FakeRuntime({ kind: "holder" });
+    const routed = new RoutedRuntime({
+      runtimes: [tmux, holder],
+      defaultKind: "tmux",
+      onError: () => {},
+    });
+    holder.disconnect();
+    const res = await createApp({ ...deps, runtime: routed }).request("/v1/health", {
+      headers: { host },
+    });
+    expect(await res.json()).toMatchObject({
+      runtime: { kind: "tmux", state: "unreachable", version: "fake" },
+      runtimes: [
+        { kind: "tmux", state: "not-running", version: "fake" },
+        { kind: "holder", state: "unreachable", version: null },
+      ],
+    });
+  });
+
   it("refuses a request whose Host header is not on the allowlist", async () => {
     const res = await app.request("/v1/health", { headers: { host: "evil.example:7900" } });
     expect(res.status).toBe(421);
@@ -364,6 +390,11 @@ describe("HTTP app", () => {
     const [stale, unavailable] = await Promise.all([close(1), close(2)]);
     expect([stale.status, (await stale.json()).error]).toEqual([409, "stale_generation"]);
     expect([unavailable.status, (await unavailable.json()).error]).toEqual([503, "unavailable"]);
+  });
+
+  it("says a close reached a holder it can't speak to, which no forced close passes", async () => {
+    const res = await close(4);
+    expect([res.status, (await res.json()).error]).toEqual([409, "needs_restart"]);
   });
 
   it("says a close found its terminal's old server may still run it, so a forced close can follow", async () => {

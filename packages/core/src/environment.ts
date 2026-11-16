@@ -9,7 +9,7 @@ import type {
   TuiTheme,
 } from "@bazhen/protocol";
 import type { AgentSessionId, DeviceId, EnvironmentId, TerminalId } from "./ids.ts";
-import type { RuntimeRef, Size } from "./runtime.ts";
+import type { Compatibility, RuntimeRef, Size } from "./runtime.ts";
 
 export type EnvironmentHealthState =
   | "unknown"
@@ -215,6 +215,8 @@ export interface EnvironmentAdapter {
   health(known?: readonly RuntimeRef[], runtime?: string): Promise<EnvironmentHealth>;
   /** Given `runtime`, only the agents on that runtime. */
   inventory(runtime?: string): Promise<AgentInventoryEntry[]>;
+  /** Which terminals, agents' and shells', are served in full and which need a restart. */
+  compatibility?(): Promise<Compatibility>;
   launch(launch: AgentLaunch): Promise<AgentRefs>;
   /** Starts the agent's exited terminal again, on its existing harness session. */
   respawn(respawn: AgentRespawn): Promise<AgentRefs & { readonly runtime: RuntimeRef }>;

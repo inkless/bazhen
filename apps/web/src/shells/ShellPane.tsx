@@ -5,6 +5,7 @@ import { TerminalView } from "../terminal/TerminalView.tsx";
 import { Button } from "../ui/Button.tsx";
 import { ConfirmDialog } from "../ui/ConfirmDialog.tsx";
 import { AttachCommand } from "../fleet/AttachCommand.tsx";
+import { restartNote } from "../fleet/model.ts";
 import { useAction } from "./action.ts";
 import { shellLabel } from "./model.ts";
 
@@ -154,6 +155,11 @@ export function ShellPane({
         />
       ) : (
         <p>{NOT_RUNNING[shell.state] ?? "Starting…"}</p>
+      )}
+      {shell.needsRestart !== null && (
+        <p role="note" className="restart-note">
+          {restartNote(shell.needsRestart, "restart")}
+        </p>
       )}
       {shell.attachCommand !== null && <AttachCommand command={shell.attachCommand} />}
     </article>

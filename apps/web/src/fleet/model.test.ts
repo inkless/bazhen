@@ -7,6 +7,7 @@ import {
   defaultNamePreview,
   groupFleet,
   observedRows,
+  restartNote,
   themeRespawn,
 } from "./model.ts";
 
@@ -38,6 +39,7 @@ const agentIn = (project: string, state: AgentState = "running", over: Partial<A
   launchedBy: null,
   listening: false,
   headline: null,
+  needsRestart: null,
   ...over,
 });
 
@@ -64,6 +66,31 @@ const snapshot = (agents: Agent[], waitingOn: Agent[] = []): StateSnapshot => ({
     actions: ["allow" as const, "deny" as const],
   })),
   messages: [],
+});
+
+describe("restartNote", () => {
+  it("names the holder to end, how to tell it is that holder, and what to do once it has", () => {
+    expect([
+      restartNote({ holderPid: 4243, served: false }, "relaunch"),
+      restartNote({ holderPid: null, served: false }, "restart"),
+    ]).toEqual([
+      "Runs on a holder whose protocol this version of Bazhen doesn't speak, older or newer, so " +
+        "it can't be served here. That holder keeps running until its process is ended: check " +
+        "that `ps -o comm=,lstart= -p 4243` shows a command ending in bazhen-holder, started no " +
+        "later than this terminal, then end that process. Then relaunch it to run on a current " +
+        "holder.",
+      "Runs on a holder whose protocol this version of Bazhen doesn't speak, older or newer, so " +
+        "it can't be served here. That holder keeps running until its process is ended. Then " +
+        "restart it to run on a current holder.",
+    ]);
+  });
+
+  it("says a holder this build still serves works, and only asks for a restart", () => {
+    expect(restartNote({ holderPid: 4243, served: true }, "relaunch")).toBe(
+      "Runs on a holder of an older protocol, which this version of Bazhen still serves, though " +
+        "not in full. Close it and relaunch it to run on a current holder.",
+    );
+  });
 });
 
 describe("agentActions", () => {

@@ -7,6 +7,8 @@ import {
   shellCommand,
   StaleIncarnation,
   TerminalUnconfirmed,
+  TerminalUnservable,
+  type Compatibility,
   type DeadTerminal,
   type Foreground,
   type ProcessSpec,
@@ -40,6 +42,7 @@ import {
 } from "@bazhen/host-guard";
 import {
   HOLDER_PROTOCOL_VERSION,
+  isOlderHolderMajor,
   type ExitStatus,
   type HolderHelloReply,
   type HolderProcessSpec,
@@ -99,7 +102,12 @@ type Reached =
   /** No holder listens there: no file, or one a holder that died left behind. */
   | { readonly is: "none"; readonly stale: boolean; readonly cause: unknown }
   /** Something may listen there, but couldn't be read: refused access, or no answer in time. */
-  | { readonly is: "unreadable"; readonly cause: unknown };
+  | { readonly is: "unreadable"; readonly cause: unknown }
+  /**
+   * A holder answers there, but shares no protocol major with this build: it runs, and can't be
+   * spoken to, so it is never called gone and never signalled.
+   */
+  | { readonly is: "outdated"; readonly protocol: readonly string[] };
 
 const codeOf = (error: unknown) =>
   error instanceof HolderDisconnected && error.cause instanceof Error && "code" in error.cause
@@ -107,10 +115,18 @@ const codeOf = (error: unknown) =>
     : undefined;
 
 function reachedBy(error: unknown): Exclude<Reached, { is: "holder" }> {
+  if (error instanceof HolderRequestError && error.code === "no-shared-version")
+    return { is: "outdated", protocol: error.protocol ?? [] };
   const code = codeOf(error);
   if (code === "ENOENT") return { is: "none", stale: false, cause: error };
   if (code === "ECONNREFUSED") return { is: "none", stale: true, cause: error };
   return { is: "unreadable", cause: error };
+}
+
+/** The terminal whose holder binds `socket`, by its name; null for one no holder of ours binds. */
+function terminalAt(socket: string): TerminalId | null {
+  const name = basename(socket, ".sock");
+  return isId("term", name) ? name : null;
 }
 
 /** The holder a ref recorded, or null for a ref that names none. */
@@ -210,6 +226,10 @@ export class HolderRuntime implements RuntimeAdapter {
       if (reached.is === "none" && (await this.gone(ref))) {
         throw new StaleIncarnation(ref.terminalId, "gone");
       }
+      if (reached.is === "outdated") {
+        const pid = recordedHolder(ref)?.pid ?? null;
+        throw new TerminalUnservable(ref.terminalId, reached.protocol, pid);
+      }
       throw new TerminalUnconfirmed(ref.terminalId, error);
     }
     const { hello } = client;
@@ -264,15 +284,20 @@ export class HolderRuntime implements RuntimeAdapter {
    */
   async health(recorded: readonly RuntimeRef[] = []): Promise<RuntimeHealth> {
     const version = `holder/${HOLDER_PROTOCOL_VERSION}`;
-    let reached: Reached[];
+    let reached: (Reached & { readonly socket: string })[];
     try {
       reached = await this.reachAll();
     } catch {
       return { state: "unreachable", version };
     }
     if (reached.some((r) => r.is === "unreadable")) return { state: "unreachable", version };
+    // One that can't be spoken to still runs, so it is never told to rebind.
     const answering = new Set(
-      reached.flatMap((r) => (r.is === "holder" ? [r.hello.terminalId] : [])),
+      reached.flatMap((r) => {
+        if (r.is === "holder") return [r.hello.terminalId];
+        const at = r.is === "outdated" ? terminalAt(r.socket) : null;
+        return at === null ? [] : [at];
+      }),
     );
     let socketless = false;
     for (const ref of recorded) {
@@ -312,6 +337,26 @@ export class HolderRuntime implements RuntimeAdapter {
         return { terminalId: hello.terminalId, build, protocol: hello.protocol };
       }),
     );
+  }
+
+  /**
+   * The terminals whose holders this build can't fully serve, with the versions each speaks: one
+   * sharing no major with it, and one it serves only on an older major. Each needs a restart onto
+   * a new holder to be served in full (design §4.7). Beside them, the terminals it serves in full.
+   * Holders that can't be listed throw.
+   */
+  async compatibility(): Promise<Compatibility> {
+    const outdated = new Map<TerminalId, readonly string[]>();
+    const served = new Set<TerminalId>();
+    for (const reached of await this.reachAll()) {
+      const at = terminalAt(reached.socket);
+      if (at === null) continue;
+      if (reached.is === "outdated") outdated.set(at, reached.protocol);
+      else if (reached.is !== "holder" || reached.hello.terminalId !== at) continue;
+      else if (isOlderHolderMajor(reached.hello.version)) outdated.set(at, reached.hello.protocol);
+      else served.add(at);
+    }
+    return { outdated, served };
   }
 
   /**
@@ -384,7 +429,7 @@ export class HolderRuntime implements RuntimeAdapter {
       // Best effort: one that answers later is told to close, rather than left with no record.
       void this.closeAt(socket);
       throw new Error(`terminal ${spec.terminalId}: its holder started but doesn't answer`, {
-        cause: reached.cause,
+        cause: reached.is === "outdated" ? reached.protocol : reached.cause,
       });
     }
     return this.refOf(spec.terminalId, reached.hello);

@@ -3,8 +3,32 @@ import {
   type Agent,
   type Environment,
   type ExitStatus,
+  type NeedsRestart,
   type StateSnapshot,
 } from "@bazhen/protocol";
+
+/**
+ * What to tell the user of a terminal on a holder this Bazhen can't fully serve, or null for one
+ * that needs no restart. The daemon never ends that holder itself, so the user is told how to.
+ */
+export function restartNote(needs: NeedsRestart, then: "relaunch" | "restart"): string {
+  if (needs.served) {
+    return (
+      "Runs on a holder of an older protocol, which this version of Bazhen still serves, though " +
+      `not in full. Close it and ${then} it to run on a current holder.`
+    );
+  }
+  const how =
+    needs.holderPid === null
+      ? "That holder keeps running until its process is ended."
+      : "That holder keeps running until its process is ended: check that " +
+        `\`ps -o comm=,lstart= -p ${needs.holderPid}\` shows a command ending in bazhen-holder, ` +
+        "started no later than this terminal, then end that process.";
+  return (
+    "Runs on a holder whose protocol this version of Bazhen doesn't speak, older or newer, so " +
+    `it can't be served here. ${how} Then ${then} it to run on a current holder.`
+  );
+}
 
 /** A button the workspace shows; `remove` is close, said of an agent whose terminal is gone. */
 export type AgentButton = "respawn" | "relaunch" | "close" | "remove";

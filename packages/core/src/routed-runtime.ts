@@ -1,6 +1,7 @@
 import type { ExitStatus, RuntimeHealthState, Signal } from "@bazhen/protocol";
 import type {
   Attached,
+  Compatibility,
   Foreground,
   ProcessSpec,
   RuntimeAdapter,
@@ -34,6 +35,15 @@ export interface RoutedRuntimeOptions {
   readonly defaultKind: string;
   /** Where a runtime's failure goes when the others still answer for it. */
   readonly onError: (err: unknown) => void;
+}
+
+/** Each runtime of `runtime`'s, by kind, with its own health: one, unless it is routed. */
+export async function healthOfEach(
+  runtime: RuntimeAdapter,
+): Promise<(RuntimeHealth & { readonly kind: string })[]> {
+  const each =
+    runtime instanceof RoutedRuntime ? runtime.kinds.map((k) => runtime.only(k)) : [runtime];
+  return Promise.all(each.map(async (r) => ({ kind: r.kind, ...(await r.health()) })));
 }
 
 /** Worst first: one runtime that can't be read is what a reader of all of them must know. */
@@ -100,6 +110,17 @@ export class RoutedRuntime implements RuntimeAdapter {
   async inventory(): Promise<RuntimeInventoryEntry[]> {
     const all = await Promise.all([...this.runtimes.values()].map((r) => r.inventory()));
     return all.flat();
+  }
+
+  /** Every runtime's compatibility; one that can't be read throws, as its inventory does. */
+  async compatibility(): Promise<Compatibility> {
+    const all = await Promise.all(
+      [...this.runtimes.values()].map((r) => r.compatibility?.() ?? Promise.resolve(undefined)),
+    );
+    return {
+      outdated: new Map(all.flatMap((c) => [...(c?.outdated ?? [])])),
+      served: new Set(all.flatMap((c) => [...(c?.served ?? [])])),
+    };
   }
 
   async create(spec: TerminalSpec): Promise<RuntimeRef> {

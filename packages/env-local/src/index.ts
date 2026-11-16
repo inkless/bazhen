@@ -18,6 +18,7 @@ import type {
   ShellForeground,
   ShellInventoryEntry,
   ShellOpen,
+  Compatibility,
 } from "@bazhen/core";
 import type {
   ExitStatus,
@@ -125,6 +126,10 @@ export class LocalEnvironment implements EnvironmentAdapter {
   /** Every runtime, or only the one named. */
   private read(runtime: string | undefined): RuntimeAdapter {
     return runtime === undefined ? this.runtime : this.runtime.only(runtime);
+  }
+
+  compatibility(): Promise<Compatibility> {
+    return this.runtime.compatibility();
   }
 
   async inventory(runtime?: string): Promise<AgentInventoryEntry[]> {

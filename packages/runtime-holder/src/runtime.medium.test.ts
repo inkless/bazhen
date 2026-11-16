@@ -15,7 +15,9 @@ import {
   ProcessState,
   StaleIncarnation,
   TerminalUnconfirmed,
+  TerminalUnservable,
   type RuntimeRef,
+  type TerminalId,
   type TerminalSpec,
 } from "@bazhen/core";
 import {
@@ -328,6 +330,64 @@ describe("HolderRuntime: creating and finding terminals", () => {
     await expect.poll(() => seen.length).toBeGreaterThanOrEqual(2);
     stop();
     expect(seen[0]).toEqual(["3", { type: "signalled", signal: "SIGTERM" }]);
+  });
+});
+
+/** A holder at `terminalId`'s socket that shares no protocol major with this build. */
+async function outdatedHolder(root: string, terminalId: TerminalId): Promise<RuntimeRef> {
+  const server = await listenFakeHolder(holderSocket(root, terminalId), { hello: false });
+  servers.push(server);
+  void (async () => {
+    for (;;) {
+      const holder = await server.connection();
+      const hello = await holder.request();
+      holder.send({
+        type: "error",
+        id: hello.id,
+        body: { request: "hello", code: "no-shared-version", message: "", protocol: ["2.0"] },
+      });
+    }
+  })();
+  return {
+    terminalId,
+    runtime: "holder",
+    locator: {
+      socket: holderSocket(root, terminalId),
+      holderPid: String(FAKE_PID),
+      holderStart: String(FAKE_START),
+      childPid: String(FAKE_PID),
+      childStart: String(FAKE_START),
+      generation: "0",
+    },
+  };
+}
+
+describe("HolderRuntime: a holder this build can't speak to", () => {
+  it("counts it as running, leaves it out of the inventory, and names it outdated", async () => {
+    const root = privateRoot();
+    const { runtime } = runtimeAt(root);
+    const ref = await outdatedHolder(root, newId("term"));
+    const current = newId("term");
+    await fakeTerminal(root, current);
+    const { outdated, served } = await runtime.compatibility();
+    expect([
+      (await runtime.health([ref])).state,
+      (await runtime.inventory()).map((e) => e.ref.terminalId),
+      [...outdated],
+      [...served],
+    ]).toEqual(["healthy", [current], [[ref.terminalId, ["2.0"]]], [current]]);
+  });
+
+  it("never calls it gone, and refuses to close it, naming its holder", async () => {
+    const root = privateRoot();
+    const { runtime } = runtimeAt(root);
+    const ref = await outdatedHolder(root, newId("term"));
+    expect(await runtime.gone(ref)).toBe(false);
+    await expect(runtime.close(ref)).rejects.toMatchObject({
+      constructor: TerminalUnservable,
+      protocol: ["2.0"],
+      holderPid: FAKE_PID,
+    });
   });
 });
 

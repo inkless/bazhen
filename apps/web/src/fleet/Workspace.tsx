@@ -17,7 +17,7 @@ import { Dock } from "../shells/Dock.tsx";
 import { useDockLayout, useTabbedDock } from "../shells/layout.ts";
 import { linkedShells, shellLabel } from "../shells/model.ts";
 import { AgentRename } from "./AgentRename.tsx";
-import { agentActions, agentLabel, exitText, isEnded } from "./model.ts";
+import { agentActions, agentLabel, exitText, isEnded, restartNote } from "./model.ts";
 
 /** Why an agent that can't be opened shows no terminal. */
 const NO_TERMINAL: Partial<Record<AgentState, string>> = {
@@ -236,6 +236,11 @@ export function Workspace({
             </>
           )}
         </div>
+      )}
+      {agent.needsRestart !== null && (
+        <p role="note" className="restart-note">
+          {restartNote(agent.needsRestart, "relaunch")}
+        </p>
       )}
       {agent.attachCommand !== null && <AttachCommand command={agent.attachCommand} />}
     </article>
