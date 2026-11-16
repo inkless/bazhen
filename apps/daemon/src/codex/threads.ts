@@ -92,9 +92,9 @@ export class CodexThreads {
    */
   private readonly reused = new Set<TerminalId>();
   /**
-   * Terminals whose move was given up on, by the prefix their title named: that title, told
-   * again, moves the agent only if a thread it names is announced or listed by then, and holds no
-   * mail meanwhile.
+   * Terminals whose move was given up on, by the prefix their title named. That title, told again,
+   * gets one try that holds no mail: it moves the agent if a thread it names has been announced or
+   * listed, and can be resumed, by then. Any other title the terminal reports forgets it.
    */
   private readonly gaveUp = new Map<TerminalId, string>();
   /** The agents whose titles are being read at start; their mail waits until they are. */
@@ -233,8 +233,11 @@ export class CodexThreads {
       return this.untracked(agent.agentId, `thread ${threadId} is another agent's`);
     }
     // Subscribe first, so nothing the thread sends after the move is missed.
-    if (!(await this.resumed(this.move(terminal, agent.agentId, prefix), terminal, threadId)))
-      return;
+    const subscribed =
+      gaveUpOn === prefix
+        ? await this.resumedOnce(terminal, prefix, threadId)
+        : await this.resumed(this.move(terminal, agent.agentId, prefix), terminal, threadId);
+    if (!subscribed) return;
     const now = store.codexAgentIn(terminal);
     // Closed, or moved again by another title, while the thread was being resumed.
     if (now?.agentId !== agent.agentId || now.threadId !== agent.threadId)
@@ -254,7 +257,8 @@ export class CodexThreads {
 
   /**
    * The terminal's move to the thread `prefix` names: the one it was waiting on, if it named the
-   * same, so its backoff and give-up time go on; a new one otherwise.
+   * same, so its backoff and give-up time go on; a new one otherwise, with a give-up time of its
+   * own, as a title naming one unsaved `/new` after another gets.
    */
   private move(terminal: TerminalId, agentId: string, prefix: string): Moving {
     const prior = this.moving.get(terminal);
@@ -280,6 +284,18 @@ export class CodexThreads {
     } catch (err) {
       this.log(`codex: thread ${threadId} can't be resumed yet: ${String(err)}`);
       this.later(terminal, m);
+      return false;
+    }
+  }
+
+  /** One resume of a thread whose move was given up on; false, holding nothing, if it fails. */
+  private async resumedOnce(terminal: TerminalId, prefix: string, threadId: string) {
+    try {
+      await this.opts.channel.resume(threadId);
+      return true;
+    } catch (err) {
+      this.log(`codex: thread ${threadId} still can't be resumed: ${String(err)}`);
+      this.gaveUp.set(terminal, prefix);
       return false;
     }
   }
