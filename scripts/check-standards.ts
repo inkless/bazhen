@@ -1982,10 +1982,12 @@ function closingBrace(code: string, from: number): number {
 // session's sweep, made by an ending, a retirement or a pass over a session's processes; and the
 // ledger sweep, which kills holders. A
 // send through the guard alone isn't one: off a disposable host, a test build's guard sends
-// nothing.
+// nothing. An ending signals only through a `Session` it was given, so what is matched is the
+// session: `Ending::start`, which takes one, and a `Session` made by `led_by` or by its tuple
+// constructor. Not `Ending::new` on its own, which a test gives a stand-in that signals nothing.
 const HOLDER_BINARY = "CARGO_BIN_EXE_bazhen-holder";
 const SIGNALLING_CALL =
-  /\.\s*(?:close(?:_step)?|signal|respawn)\s*\(|\bsweep\s*\(|\bsession\s*\(\s*\)\s*\.|\b(?:pass_among|retire)\s*\(|\bEnding\s*::|\bSession\s*::\s*led_by\b/;
+  /\.\s*(?:close(?:_step)?|signal|respawn)\s*\(|\bsweep\s*\(|\bsession\s*\(\s*\)\s*\.|\b(?:pass_among|retire)\s*\(|\bEnding\s*::\s*start\b|\bSession\s*(?:::\s*led_by\b|\()/;
 
 /** A Rust test file's test binary: `tests/<name>.rs`, or every file under `tests/<name>/`. */
 const testBinary = (file: string) => /^(crates\/[^/]+\/tests\/[^/.]+)/.exec(file)?.[1];

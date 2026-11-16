@@ -1563,6 +1563,18 @@ describe("tests that signal processes they didn't start", () => {
     );
   });
 
+  it("must be marked when an ending is given a real session, and needn't when given a stand-in", () => {
+    const source = [
+      "#[test]\nfn a() { let e = Ending::new(Session(pid), now); }",
+      "#[test]\nfn b() { let e = Ending::new(Session::led_by(pid).unwrap(), now); }",
+      "#[test]\nfn c() { let e = Ending::new(Scripted::default(), now); e.step(true, now); }",
+    ].join("\n");
+    expect(unmarked({ "crates/h/src/session.rs": source })).toEqual([
+      "crates/h/src/session.rs:1",
+      "crates/h/src/session.rs:3",
+    ]);
+  });
+
   it("must be marked anywhere when its own body closes a child or sweeps the ledger", () => {
     const source = [
       "#[test]\nfn a() { running.child.close(group, now); }",
