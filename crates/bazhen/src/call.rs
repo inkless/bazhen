@@ -5,9 +5,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use bazhen_client::{Caller, Error, Method, exchange};
-use bazhen_protocol::daemon::HealthResponse;
-use serde::Serialize;
+use bazhen_protocol::daemon::HealthStatus;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 
 use crate::reply::{LIMITS, Unread, decode};
 
@@ -17,6 +17,16 @@ pub(crate) const CALL: Duration = Duration::from_secs(5);
 const PROBE: Duration = Duration::from_secs(2);
 /// How much longer than the daemon may hold a wait the call is given to come back.
 pub(crate) const WAIT_MARGIN: Duration = Duration::from_secs(5);
+
+/// What a reply this build can't read means, when the daemon gave it as a success.
+pub(crate) const ANOTHER_BUILD: &str =
+    "the daemon runs another build of Bazhen: restart it with `bazhen stop`, then `bazhen start`";
+
+/// All a probe reads of `/v1/health`, so a daemon of another build still answers it.
+#[derive(Deserialize)]
+struct Answering {
+    status: HealthStatus,
+}
 
 /// Why a call came to nothing.
 #[derive(Debug)]
@@ -100,16 +110,23 @@ impl Daemon {
         })?;
         decode(&response, LIMITS).map_err(|e| match e {
             Unread::Garbled => Failed::NotRunning,
+            // A refusal is read by its caller; a success this build can't read came from another.
+            Unread::Refused { status, body } if status < 300 => {
+                Failed::Refused(format!("{path}: HTTP {status}: {body}\n{ANOTHER_BUILD}"))
+            }
             Unread::Refused { status, body } => {
                 Failed::Refused(format!("{path}: HTTP {status}: {body}"))
             }
         })
     }
 
-    /// Whether a daemon answers on the socket at all.
+    /// Whether a daemon answers on the socket at all. Only its status is read, so `stop` still
+    /// stops a daemon of another build.
     pub(crate) fn answers(&self) -> Result<bool, Failed> {
-        match self.get::<HealthResponse>("/v1/health", PROBE) {
-            Ok(_) => Ok(true),
+        match self.get::<Answering>("/v1/health", PROBE) {
+            Ok(Answering {
+                status: HealthStatus::Ok,
+            }) => Ok(true),
             Err(Failed::NotRunning) => Ok(false),
             Err(e) => Err(e),
         }

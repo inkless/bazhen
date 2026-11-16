@@ -4,9 +4,11 @@ use bazhen_protocol::daemon::{
     AgentShell, Containment, DoctorResponse, EnvSource, Holder, Lan, MemoryCap, OriginsFrom,
     Refusing, RunningHolder, RuntimeHealthReport, RuntimeHealthState, Terminals, Web,
 };
+use bazhen_protocol::id::PROTOCOL_ID;
 use bazhen_protocol::nullable::Nullable;
 use bazhen_protocol::text::is_plain_remote;
 
+use crate::call::ANOTHER_BUILD;
 use crate::fmt::gib;
 
 fn state(s: RuntimeHealthState) -> &'static str {
@@ -48,6 +50,30 @@ pub(crate) fn any_unreachable(reports: &[RuntimeHealthReport]) -> bool {
         .any(|r| r.state == RuntimeHealthState::Unreachable)
 }
 
+/// As much of a protocol id as a person compares by eye.
+fn short_id(id: &str) -> &str {
+    id.get(..12).unwrap_or(id)
+}
+
+/// What `bazhen status` and `doctor` first say of the daemon: its version and protocol, and, when
+/// that protocol isn't this build's, that the daemon is another build to restart.
+pub(crate) fn build_lines(app_version: &str, protocol_id: &str, state: &str) -> Vec<String> {
+    let head = format!(
+        "bazhen {app_version} (protocol {}){state}",
+        short_id(protocol_id)
+    );
+    if protocol_id == PROTOCOL_ID {
+        return vec![head];
+    }
+    vec![
+        head,
+        format!(
+            "  warning: this CLI speaks protocol {}; {ANOTHER_BUILD}",
+            short_id(PROTOCOL_ID)
+        ),
+    ]
+}
+
 /// Everything `bazhen doctor` prints of `d`.
 pub(crate) fn lines(d: &DoctorResponse, macos: bool) -> Vec<String> {
     let reported = reports(
@@ -55,11 +81,7 @@ pub(crate) fn lines(d: &DoctorResponse, macos: bool) -> Vec<String> {
         d.runtime.state,
         d.runtime.version.as_ref(),
     );
-    let mut out = vec![format!(
-        "bazhen {} (protocol {})",
-        d.app_version,
-        d.protocol_id.get(..12).unwrap_or(&d.protocol_id)
-    )];
+    let mut out = build_lines(&d.app_version, &d.protocol_id, "");
     for r in &reported {
         out.push(runtime_line(r));
         for w in r.workarounds.iter().flatten() {
@@ -387,4 +409,60 @@ fn containment_lines(c: &Containment, holders: &[RunningHolder], tmux: bool) -> 
         out.push("  tmux terminals are not contained".to_owned());
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sha256::{hex, sha256};
+    use std::path::PathBuf;
+
+    /// The id is what `protocolId()` makes of the committed schema, hashed here by the Rust side's
+    /// own reading of the contract: each `name\0content\0`, in name order.
+    #[test]
+    fn speaks_the_protocol_the_committed_schema_hashes_to() {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/protocol/schema");
+        let mut names: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .filter(|n| {
+                std::path::Path::new(n)
+                    .extension()
+                    .is_some_and(|e| e == "json")
+            })
+            .collect();
+        names.sort();
+        let mut text = Vec::new();
+        for name in &names {
+            text.extend_from_slice(name.as_bytes());
+            text.push(0);
+            text.extend_from_slice(&std::fs::read(dir.join(name)).unwrap());
+            text.push(0);
+        }
+        assert!(names.iter().any(|n| n == "semantics.json"), "{names:?}");
+        assert_eq!(hex(&sha256(&text)), PROTOCOL_ID);
+    }
+
+    #[test]
+    fn warns_of_a_daemon_that_speaks_another_protocol() {
+        let ours = build_lines("0.1.0", PROTOCOL_ID, ", running");
+        let theirs = build_lines("0.1.0", &"f".repeat(64), "");
+        assert_eq!(
+            ours,
+            [format!(
+                "bazhen 0.1.0 (protocol {}), running",
+                short_id(PROTOCOL_ID)
+            )]
+        );
+        assert_eq!(
+            theirs,
+            [
+                "bazhen 0.1.0 (protocol ffffffffffff)".to_owned(),
+                format!(
+                    "  warning: this CLI speaks protocol {}; {ANOTHER_BUILD}",
+                    short_id(PROTOCOL_ID)
+                ),
+            ]
+        );
+    }
 }

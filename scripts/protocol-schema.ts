@@ -6,6 +6,8 @@
 // files git tracks count as committed: a generated file left unstaged would pass here and fail in
 // CI. An older version's fixtures are never written: they are what its peers really sent, so
 // each is pinned by its hash in FROZEN_HOLDER_FIXTURES, and both modes fail when one changes.
+// It also writes the protocol id the Rust crates speak, crates/bazhen-protocol/src/id.rs, held
+// to the same check.
 
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -14,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { apiFixtures } from "../packages/protocol/src/api-fixtures.ts";
 import { HOLDER_PROTOCOL_VERSION } from "../packages/protocol/src/holder.ts";
 import { holderFixtures } from "../packages/protocol/src/holder-fixtures.ts";
-import { filesHash, protocolFiles } from "../packages/protocol/src/id.ts";
+import { filesHash, protocolFiles, protocolId } from "../packages/protocol/src/id.ts";
 import { isMain } from "./is-main.ts";
 
 /** The files that are missing, stale or extra in `actual`, compared with `expected`. */
@@ -76,6 +78,29 @@ const outputs = (): Record<string, Record<string, string>> => ({
   "fixtures/api/": apiFixtures(),
 });
 
+/** Where the Rust crates' protocol id is written, relative to the repository. */
+const RUST_ID = "crates/bazhen-protocol/src/id.rs";
+
+/** The Rust source that names `id` as the protocol the Rust crates speak. */
+export function rustProtocolId(id: string): string {
+  return [
+    "//! The protocol this build speaks, as `protocolId()` in packages/protocol/src/id.ts hashes it.",
+    "//! Written by `pnpm schema`, and held to it by `pnpm schema --check`: don't edit it by hand.",
+    "",
+    "/// The SHA-256, in hex, of every file in packages/protocol/schema/, each `name\\0content\\0` in",
+    "/// name order. A daemon that answers with another is another build, to restart.",
+    `pub const PROTOCOL_ID: &str = "${id}";`,
+    "",
+  ].join("\n");
+}
+
+/** A file as git tracks it, or undefined when git doesn't: an unstaged one would pass in CI. */
+function trackedFile(path: string): string | undefined {
+  const repo = join(root, "../..");
+  const tracked = execFileSync("git", ["ls-files", "--", path], { cwd: repo, encoding: "utf8" });
+  return tracked.trim() === "" ? undefined : readFileSync(join(repo, path), "utf8");
+}
+
 function committed(dir: string): Record<string, string> {
   if (!existsSync(dir)) return {};
   const tracked = execFileSync("git", ["ls-files", "--", "*.json"], { cwd: dir, encoding: "utf8" });
@@ -107,6 +132,15 @@ if (isMain(import.meta)) {
       const content = expected[name];
       if (content === undefined) rmSync(join(dir, name));
       else writeFileSync(join(dir, name), content);
+    }
+  }
+  const rust = rustProtocolId(await protocolId());
+  if (trackedFile(RUST_ID) !== rust) {
+    if (check) {
+      console.error(`${RUST_ID} is stale: run \`pnpm schema\` and commit the result.`);
+      failed = true;
+    } else {
+      writeFileSync(join(root, "../..", RUST_ID), rust);
     }
   }
   const versions = existsSync(holderRoot) ? readdirSync(holderRoot) : [];
