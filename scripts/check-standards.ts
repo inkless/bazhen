@@ -925,6 +925,8 @@ const NOT_DECODERS: Record<string, string> = {
     "reads whether an epoch was declared; parses nothing",
   "crates/bazhen/src/attach/attachment.rs::Attachment::declare":
     "hands the keys Attachment::keys held over, whole; parses nothing",
+  "crates/bazhen/src/attach/attachment.rs::Attachment::engage":
+    "asks for the lease when keys are held for it; reads no bytes",
   "crates/bazhen/src/attach/attachment.rs::Attachment::resized":
     "records the terminal's size and frames it; reads no bytes",
   "crates/bazhen/src/attach/link.rs::drain":

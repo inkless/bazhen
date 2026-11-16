@@ -290,12 +290,13 @@ mod tests {
             let (mut stream, _) = listener.accept().unwrap();
             read_head(&mut stream);
             let body = r#"{"error":"forbidden","message":"an agent can't attach to a terminal"}"#;
-            write!(
-                stream,
+            // In one write, as the daemon answers: a reader that sees the head without the body
+            // has no reason to give.
+            let refusal = format!(
                 "HTTP/1.1 403 Forbidden\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                 body.len()
-            )
-            .unwrap();
+            );
+            stream.write_all(refusal.as_bytes()).unwrap();
         });
         let hello = Attachment::hello(Size { cols: 80, rows: 24 });
         let refused = open(&dir.socket(), "term_x", &Caller::default(), &hello).unwrap_err();

@@ -61,6 +61,18 @@ pub enum Effect {
     End(Ending),
 }
 
+/// Where an attachment stands with the terminal's lease.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum Standing {
+    /// Another view drives, or none does.
+    #[default]
+    Watching,
+    /// It has asked for the lease since the latest one named another driver.
+    Asked,
+    /// The latest lease names it the driver.
+    Driving,
+}
+
 /// One attachment's state between steps.
 #[derive(Debug, Default)]
 pub struct Attachment {
@@ -69,7 +81,10 @@ pub struct Attachment {
     attached: bool,
     /// The epoch of the latest lease, sent once attached.
     epoch: Option<u64>,
-    /// Keys typed before any epoch was declared, which the daemon would drop: sent once it is.
+    /// Where this attachment stands with the lease: only the driver's keys reach the terminal.
+    lease: Standing,
+    /// Keys the daemon would drop if sent now: before an epoch is declared, or while another view
+    /// drives. Sent once this attachment drives under a declared epoch.
     held: Vec<u8>,
     /// How many bytes of keys past what `held` keeps were dropped.
     dropped: usize,
@@ -133,14 +148,28 @@ impl Attachment {
             }
         }
         let end = detached.then_some(Effect::End(Ending::Detached));
-        if !self.declared() {
-            let room = HELD_MAX.saturating_sub(self.held.len());
-            self.dropped += typed.len().saturating_sub(room);
-            self.held.extend(typed.into_iter().take(room));
+        if self.declared() && self.lease == Standing::Driving {
+            let input = (!typed.is_empty()).then_some(Effect::Input(typed));
+            return input.into_iter().chain(end).collect();
+        }
+        if typed.is_empty() {
             return end.into_iter().collect();
         }
-        let input = (!typed.is_empty()).then_some(Effect::Input(typed));
-        input.into_iter().chain(end).collect()
+        let room = HELD_MAX.saturating_sub(self.held.len());
+        self.dropped += typed.len().saturating_sub(room);
+        self.held.extend(typed.into_iter().take(room));
+        self.engage().into_iter().chain(end).collect()
+    }
+
+    /// Asks for the lease, once, when there are keys to send and another view drives. The daemon
+    /// spends a keystroke from a view that doesn't drive on taking the lease and drops it, so the
+    /// attachment asks first and sends its keys once the lease is its own.
+    fn engage(&mut self) -> Option<Effect> {
+        let wanted = self.declared() && self.lease == Standing::Watching && !self.held.is_empty();
+        wanted.then(|| {
+            self.lease = Standing::Asked;
+            Effect::Send(StreamClientFrame::Engage)
+        })
     }
 
     fn declared(&self) -> bool {
@@ -157,8 +186,13 @@ impl Attachment {
             )))];
         };
         match frame {
-            StreamServerFrame::Lease { epoch, .. } => {
+            StreamServerFrame::Lease { epoch, driver, .. } => {
                 self.epoch = Some(epoch);
+                self.lease = if driver {
+                    Standing::Driving
+                } else {
+                    Standing::Watching
+                };
                 self.declare()
             }
             StreamServerFrame::Attached { .. } => {
@@ -194,9 +228,13 @@ impl Attachment {
                 rows: size.rows,
             }));
         }
-        let held = std::mem::take(&mut self.held);
-        if !held.is_empty() {
-            effects.push(Effect::Input(held));
+        if self.lease == Standing::Driving {
+            let held = std::mem::take(&mut self.held);
+            if !held.is_empty() {
+                effects.push(Effect::Input(held));
+            }
+        } else {
+            effects.extend(self.engage());
         }
         let dropped = std::mem::take(&mut self.dropped);
         if dropped > 0 {
@@ -217,10 +255,10 @@ mod tests {
     const ATTACHED: &str =
         r#"{"type":"attached","attachmentId":"att_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"}"#;
 
-    /// An attachment the daemon has attached, under epoch 1.
+    /// An attachment the daemon has attached, driving under epoch 1.
     fn declared() -> Attachment {
         let mut a = Attachment::default();
-        a.frame(r#"{"type":"lease","driver":false,"epoch":1}"#);
+        a.frame(r#"{"type":"lease","driver":true,"epoch":1}"#);
         a.frame(ATTACHED);
         a
     }
@@ -282,7 +320,7 @@ mod tests {
     fn holds_keys_typed_before_the_epoch_is_declared_and_sends_them_after_it() {
         let mut s = Attachment::default();
         let early = s.keys(b"ls");
-        s.frame(r#"{"type":"lease","driver":false,"epoch":5}"#);
+        s.frame(r#"{"type":"lease","driver":true,"epoch":5}"#);
         let more = s.keys(b" -l");
         let attached = s.frame(ATTACHED);
         let after = s.keys(b"\r");
@@ -298,11 +336,55 @@ mod tests {
     }
 
     #[test]
+    fn asks_for_the_lease_before_its_keys_and_sends_them_once_it_drives() {
+        let mut s = Attachment::default();
+        s.frame(r#"{"type":"lease","driver":false,"epoch":3}"#);
+        let attached = s.frame(ATTACHED);
+        let first = s.keys(b"exit");
+        let more = s.keys(b"\r");
+        let taken = s.frame(r#"{"type":"lease","driver":true,"epoch":4}"#);
+        let after = s.keys(b"x");
+        let lost = s.frame(r#"{"type":"lease","driver":false,"epoch":5}"#);
+        let again = s.keys(b"y");
+        assert_eq!(
+            attached,
+            [Effect::Send(StreamClientFrame::Epoch { epoch: 3 })]
+        );
+        assert_eq!(first, [Effect::Send(StreamClientFrame::Engage)]);
+        assert_eq!(more, []);
+        assert_eq!(
+            taken,
+            [
+                Effect::Send(StreamClientFrame::Epoch { epoch: 4 }),
+                Effect::Input(b"exit\r".to_vec())
+            ]
+        );
+        assert_eq!(after, [Effect::Input(b"x".to_vec())]);
+        assert_eq!(lost, [Effect::Send(StreamClientFrame::Epoch { epoch: 5 })]);
+        assert_eq!(again, [Effect::Send(StreamClientFrame::Engage)]);
+    }
+
+    #[test]
+    fn asks_for_the_lease_once_attached_for_keys_typed_while_another_view_drives() {
+        let mut s = Attachment::default();
+        s.keys(b"ls\r");
+        s.frame(r#"{"type":"lease","driver":false,"epoch":2}"#);
+        let attached = s.frame(ATTACHED);
+        assert_eq!(
+            attached,
+            [
+                Effect::Send(StreamClientFrame::Epoch { epoch: 2 }),
+                Effect::Send(StreamClientFrame::Engage)
+            ]
+        );
+    }
+
+    #[test]
     fn holds_no_more_than_a_paste_and_still_detaches_while_holding() {
         let mut s = Attachment::default();
         s.keys(&vec![b'x'; HELD_MAX + 10]);
         let detach = s.keys(&[DETACH, DETACH]);
-        s.frame(r#"{"type":"lease","driver":false,"epoch":1}"#);
+        s.frame(r#"{"type":"lease","driver":true,"epoch":1}"#);
         let attached = s.frame(ATTACHED);
         assert_eq!(detach, [Effect::End(Ending::Detached)]);
         assert_eq!(typed(&attached).len(), HELD_MAX);
