@@ -83,12 +83,6 @@ const tail = async (over: Partial<DoctorResponse>) => {
 
 const on = (build: string | null, protocol = ["1.2"]) => ({ terminalId: "t", build, protocol });
 
-it("says why no holder is installed", async () => {
-  expect(
-    await tail({ holder: { binary: null, build: null, reason: "x isn't built", holders: [] } }),
-  ).toEqual(["holder: none installed (x isn't built)"]);
-});
-
 describe("bazhen doctor", () => {
   it("shows what the daemon runs with, and passes when every runtime answers", async () => {
     s.daemon.answer("GET /v1/health", HealthResponse, health()).answer(
@@ -309,6 +303,12 @@ describe("bazhen doctor", () => {
     const NEW = "3f9a0c1d2e4b5a67";
     const OLD = "81ce22d09b7f4410";
 
+    it("says why no holder is installed", async () => {
+      expect(
+        await tail({ holder: { binary: null, build: null, reason: "x isn't built", holders: [] } }),
+      ).toEqual(["holder: none installed (x isn't built)"]);
+    });
+
     it("counts terminals by the holder build they run, marking older and unknown builds", async () => {
       const binary = `/s/holder/${NEW}/bazhen-holder`;
       const holders = [on(NEW), on(OLD), on(NEW), on(null), on(OLD, ["1.3", "1.2"])];
@@ -318,6 +318,108 @@ describe("bazhen doctor", () => {
         `  1 terminal on ${OLD} (older build; restart to upgrade), protocol 1.2`,
         "  1 terminal on an unknown build, protocol 1.2",
         `  1 terminal on ${OLD} (older build; restart to upgrade), protocol 1.3, 1.2`,
+      ]);
+    });
+
+    it("warns under a runtime of each defect Bazhen works around there", async () => {
+      const runtimes = [
+        {
+          kind: "tmux",
+          state: "healthy" as const,
+          version: "3.4",
+          workarounds: [
+            "tmux 3.4 crashes when a dead pane's focus changes; Bazhen keeps focus off dead panes",
+          ],
+        },
+        { kind: "holder", state: "healthy" as const, version: "holder/1.2", workarounds: [] },
+      ];
+      s.daemon
+        .answer("GET /v1/health", HealthResponse, health())
+        .answer("GET /v1/daemon/doctor", DoctorResponse, doctor({ runtimes }));
+      expect(lines((await s.bazhen(["doctor"])).stdout).slice(1, 4)).toEqual([
+        "tmux: healthy 3.4",
+        "  warning: tmux 3.4 crashes when a dead pane's focus changes; Bazhen keeps focus off dead panes",
+        "holder: healthy holder/1.2",
+      ]);
+    });
+
+    const GIB = 1024 ** 3;
+    const scoped = {
+      state: "scoped" as const,
+      systemd: 255,
+      oomPolicy: true,
+      terminal: { asked: "50%", bytes: 31 * GIB },
+      total: { asked: "infinity", bytes: null },
+      swap: { asked: "0", bytes: 0 },
+    };
+
+    it("says each holder terminal runs in a scope of its own, with its caps", async () => {
+      expect(await tail({ containment: scoped })).toEqual([
+        "containment: each holder terminal in a systemd scope of its own, at most 50% (31.0 GiB) each with 0 (none) of swap, and infinity (no cap) together",
+        "  tmux terminals are not contained",
+      ]);
+    });
+
+    it("rounds a cap's GiB half up, as it is said, and notes a systemd too old for OOMPolicy", async () => {
+      const quarter = {
+        ...scoped,
+        oomPolicy: false,
+        systemd: 249,
+        terminal: { asked: "256M", bytes: GIB / 4 },
+        total: { asked: "1.15G", bytes: Math.round(1.15 * GIB) },
+      };
+      expect(
+        await tail({
+          containment: quarter,
+          runtimes: [{ kind: "holder", state: "healthy", version: null }],
+        }),
+      ).toEqual([
+        "containment: each holder terminal in a systemd scope of its own, at most 256M (0.3 GiB) each with 0 (none) of swap, and 1.15G (1.2 GiB) together",
+        "  note: systemd 249 predates OOMPolicy for scopes (253), so the kernel alone decides what dies past a cap",
+      ]);
+    });
+
+    it("counts holder terminals running outside a scope, and says to restart them only when scopes are made", async () => {
+      const holders = [
+        { ...on("b"), contained: false },
+        { ...on("b"), contained: false },
+        { ...on("b"), contained: true },
+        { ...on("b"), contained: null },
+        on("b"),
+      ];
+      const holder = { binary: "/h", build: "b", reason: null, holders };
+      const one = {
+        binary: "/h",
+        build: "b",
+        reason: null,
+        holders: [{ ...on("b"), contained: false }],
+      };
+      const runtimes = [{ kind: "holder", state: "healthy" as const, version: null }];
+      expect(await tail({ containment: scoped, holder, runtimes })).toContain(
+        "  2 holder terminals run outside a scope; restart them to contain them",
+      );
+      expect(await tail({ containment: scoped, holder: one, runtimes })).toContain(
+        "  1 holder terminal runs outside a scope; restart it to contain it",
+      );
+      expect(
+        await tail({
+          containment: { state: "uncontained", why: "no systemd user manager" },
+          holder: one,
+          runtimes,
+        }),
+      ).toEqual([
+        "holder: build b (/h)",
+        "  1 terminal on b, protocol 1.2",
+        "containment: none (no systemd user manager)",
+        "  warning: one terminal's runaway memory can end every other terminal",
+        "  1 holder terminal runs outside a scope",
+      ]);
+    });
+
+    it("says containment hasn't been checked before a holder terminal starts", async () => {
+      expect(await tail({ containment: { state: "unchecked" } })).toEqual([
+        "containment: not checked yet (no holder terminal has started since the daemon did)",
+        "  tmux terminals are not contained",
       ]);
     });
   });
