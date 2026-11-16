@@ -112,7 +112,13 @@ function stripComments(js: string): string {
   return out;
 }
 
-/** True when the TypeScript source has code that runs, not just types and re-exports. */
+/**
+ * True when the TypeScript source has code that runs, not just types and re-exports.
+ *
+ * `stripTypeScriptTypes` warns as experimental on Node 26, so the `check` script runs this file
+ * with `--disable-warning=ExperimentalWarning`. Drop that flag once this call is replaced or the
+ * API is stable.
+ */
 export function hasRuntimeCode(source: string): boolean {
   const code = stripComments(stripTypeScriptTypes(source))
     .replace(/^\s*export\s+(\*|\{[^}]*\})\s+from\s+["'][^"']+["'];?/gm, "")
