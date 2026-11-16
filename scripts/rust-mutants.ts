@@ -33,19 +33,23 @@ export function mutantListing(stdout: string): unknown {
 }
 
 /**
- * The mutants of `cargo mutants --list --json --diff`, each with a patch `git apply` takes: the
- * listing's own diff names the mutant where a file name belongs.
+ * A patch `git apply` takes from a diff cargo-mutants wrote of the mutant `name` of `file`, or
+ * null for one that isn't such a diff: cargo-mutants names the mutant where a file name belongs.
  */
+export function patchOf(file: string, diff: unknown): string | null {
+  const body =
+    typeof diff === "string" ? /^--- [^\n]*\n\+\+\+ [^\n]*\n(@@[\s\S]*)$/.exec(diff) : null;
+  return body?.[1] === undefined ? null : `--- a/${file}\n+++ b/${file}\n${body[1]}`;
+}
+
+/** The mutants of `cargo mutants --list --json --diff`, each with a patch `git apply` takes. */
 export function parseMutants(listing: unknown): Mutant[] {
   return entries(listing).map((entry) => {
     const name = String(entry["name"]);
     const file = String(entry["file"]);
-    const diff = entry["diff"];
-    const body =
-      typeof diff === "string" ? /^--- [^\n]*\n\+\+\+ [^\n]*\n(@@[\s\S]*)$/.exec(diff) : null;
-    if (body?.[1] === undefined)
-      throw new Error(`not a cargo-mutants listing: ${name} has no diff`);
-    return { name, file, patch: `--- a/${file}\n+++ b/${file}\n${body[1]}` };
+    const patch = patchOf(file, entry["diff"]);
+    if (patch === null) throw new Error(`not a cargo-mutants listing: ${name} has no diff`);
+    return { name, file, patch };
   });
 }
 

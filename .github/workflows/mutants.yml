@@ -1,0 +1,63 @@
+name: Holder mutants
+
+# cargo-mutants over the holder, one group of its code at a time, each mutant its Rust tests miss
+# judged again by the holder suite (scripts/holder-mutants.ts). Hours of runner time and no gate,
+# so it runs only when someone starts it, never on a push or a pull request. A mutant of the
+# holder can signal any pid it computes, so it runs only on a runner marked disposable.
+on:
+  workflow_dispatch:
+    inputs:
+      group:
+        description: Which of the holder's code to mutate
+        type: choice
+        options: [signal, lifecycle, rest]
+        default: signal
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.group }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  HUSKY: 0
+
+jobs:
+  mutants:
+    name: mutants (${{ inputs.group }}, shard ${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      # Two runners at a time, whatever the shard count, so one dispatch can't take every runner.
+      max-parallel: 2
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - name: Mark the runner disposable
+        run: sudo touch /etc/bazhen-disposable-host
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26.13.0
+          cache: pnpm
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-nextest@0.9.152,cargo-mutants@27.1.0
+      - run: pnpm install --frozen-lockfile
+      - name: Mutate
+        env:
+          GROUP: ${{ inputs.group }}
+          SHARD: ${{ matrix.shard }}
+        run: |
+          set -o pipefail
+          pnpm test:mutants:holder --group "$GROUP" --shard "$SHARD/4" | tee holder-mutants.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: holder-mutants-${{ inputs.group }}-${{ matrix.shard }}
+          path: holder-mutants.txt

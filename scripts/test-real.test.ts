@@ -1,7 +1,9 @@
 import { SLICE } from "@bazhen/host-guard";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RUST_TOOLS } from "./cargo-gate.ts";
+import { GROUPS } from "./holder-mutants.ts";
 import {
+  MUTANT_GROUPS,
   suiteCommand,
   looksSecret,
   ownerOf,
@@ -37,6 +39,34 @@ describe("pnpm test:real", () => {
       suites: ["falsify"],
       base: "gz/below",
     });
+  });
+
+  it("runs the holder's mutants by the group it is given, and a shard of it", () => {
+    expect(parseArgs(["mutants", "--group", "signal", "--shard", "1/3"])).toEqual({
+      suites: ["mutants"],
+      base: "origin/main",
+      mutants: { group: "signal", shard: "1/3" },
+    });
+    expect(suiteCommand("mutants", { group: "signal", shard: "1/3" })).toEqual([
+      "pnpm",
+      "test:mutants:holder",
+      "--group",
+      "signal",
+      "--shard",
+      "1/3",
+    ]);
+  });
+
+  it("refuses a mutant group the sweep doesn't have, before building anything", () => {
+    expect(() => parseArgs(["mutants", "--group", "everything"])).toThrow("no mutant group");
+    expect(MUTANT_GROUPS).toEqual(Object.keys(GROUPS));
+  });
+
+  it("refuses the mutants suite without a group, and a group or shard without the mutants suite", () => {
+    expect(() => parseArgs(["mutants"])).toThrow("needs a group");
+    expect(() => parseArgs(["holder", "--group", "signal"])).toThrow("needs a group");
+    expect(() => parseArgs(["mutants", "--shard", "1/3"])).toThrow("needs a group");
+    expect(() => parseArgs(["mutants", "--group"])).toThrow("usage");
   });
 
   it("refuses a suite it does not know, or a --base without a ref, rather than running none", () => {

@@ -26,6 +26,7 @@
     "test:falsify:base": "node scripts/capped.ts --memory 8G --time 120m -- node scripts/falsify-base.ts",
     "test:file": "node scripts/capped.ts --memory 8G --time 20m -- vitest run",
     "test:real": "node scripts/capped.ts --memory 16G --time 120m -- node scripts/test-real.ts",
+    "test:mutants:holder": "node scripts/capped.ts --memory 12G --time 115m -- node scripts/holder-mutants.ts",
     "build:cli": "cargo build --release --quiet --locked -p bazhen",
     "build:engine": "cargo build --release --quiet --locked -p bazhen-holder-engine",
     "build:hook": "cargo build --release --quiet --locked -p bazhen-hook -p bazhen-peer",
