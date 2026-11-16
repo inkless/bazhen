@@ -24,6 +24,8 @@ const failures: string[] = [];
 // entry names that test, and the check fails if it disappears.
 const COVERED_ELSEWHERE: Record<string, string> = {
   "packages/runtime-tmux/src/index.ts": "tests/integration/tmux-runtime.test.ts",
+  "packages/runtime-holder/src/runtime-stream.ts":
+    "packages/runtime-holder/src/runtime.medium.test.ts",
   "apps/daemon/src/pty/node-pty.ts": "tests/integration/tmux-runtime.test.ts",
   "apps/daemon/src/main.ts": "tests/e2e/health.spec.ts",
   "apps/cli/src/main.ts": "tests/api/cli.test.ts",

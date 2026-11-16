@@ -373,6 +373,12 @@ importers:
 
   packages/runtime-holder:
     dependencies:
+      '@bazhen/core':
+        specifier: workspace:*
+        version: link:../core
+      '@bazhen/host-guard':
+        specifier: workspace:*
+        version: link:../host-guard
       '@bazhen/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -435,6 +441,12 @@ importers:
 
   tests/holder:
     dependencies:
+      '@bazhen/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@bazhen/daemon':
+        specifier: workspace:*
+        version: link:../../apps/daemon
       '@bazhen/runtime-holder':
         specifier: workspace:*
         version: link:../../packages/runtime-holder

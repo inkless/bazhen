@@ -182,20 +182,20 @@ export const MATRIX: Area[] = [
       "@bazhen/web",
     ],
   },
-  // Holder tests run on the host, so they reach no tmux and no daemon: the holder client, and
-  // tests/support's home and teardown, are all they use. Teardown uses host-guard for them.
+  // Holder tests reach no tmux and no daemon: the holder client and runtime, the shared runtime
+  // contract and a browser terminal's replay, and tests/support's home and teardown, are all they
+  // use. Teardown uses host-guard for them.
   {
     dir: "tests/holder",
     medium: true,
     startsProcessesVia: "tests/support/holder-spawn.ts",
+    onlySubpaths: { "@bazhen/core": ["testing"], "@bazhen/daemon": ["testing"] },
     banned: [
-      "@bazhen/core",
       "@bazhen/host-guard",
       "@bazhen/runtime-tmux",
       "@bazhen/env-local",
       "@bazhen/harness-claude-code",
       "@bazhen/harness-codex",
-      "@bazhen/daemon",
       "@bazhen/web",
       "@bazhen/cli",
     ],

@@ -51,12 +51,15 @@ export interface FakeHolderOptions {
 export class FakeHolder {
   /** Each chunk read, as the client wrote it. */
   readonly chunks: Uint8Array[] = [];
+  /** Resolves once the connection's socket has closed at this end. */
+  readonly closed: Promise<void>;
   private readonly stream: Duplex;
   private readonly queued: FakeRequest[] = [];
   private readonly waiting: ((request: FakeRequest) => void)[] = [];
 
   constructor(stream: Duplex, options: FakeHolderOptions = {}) {
     this.stream = stream;
+    this.closed = new Promise((resolve) => stream.once("close", () => resolve()));
     const decoder = holderRequestDecoder();
     stream.on("data", (chunk: Uint8Array) => {
       this.chunks.push(chunk);
