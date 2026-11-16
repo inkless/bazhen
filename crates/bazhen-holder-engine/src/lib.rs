@@ -412,8 +412,9 @@ impl Engine {
         }
         // RIS, past the stretch that would clear the history with it. The parser takes it, so
         // whatever the old program left half written ends, as its `CSI 2 J` ended it in the
-        // read-ahead.
-        self.parse(b"\x1bc");
+        // read-ahead. alacritty's RIS keeps the colours a program set, which a mirror's reset
+        // (`RESPAWN_RESET`) drops, so OSC 104, 110, 111 and 112 drop them here too.
+        self.parse(b"\x1bc\x1b]104\x07\x1b]110\x07\x1b]111\x07\x1b]112\x07");
         self.kept = None;
         self.primary = Primary::default();
         self.drain();
@@ -949,6 +950,23 @@ mod tests {
         engine.advance(b"new\x1b[6n");
         assert_eq!(screen(&engine)[0], "new");
         assert_eq!(engine.take_replies(), b"\x1b[1;4R");
+    }
+
+    #[test]
+    fn a_respawn_drops_the_colours_the_old_program_set() {
+        let fresh = |engine: &mut Engine| {
+            let mut out = String::new();
+            engine.snapshot(usize::MAX, &mut out).unwrap();
+            out
+        };
+        let mut engine = Engine::new(SIZE, HistoryRows(1000));
+        engine.advance(
+            b"\x1b]4;1;#00ff00\x07\x1b]10;#a0b0c0\x07\x1b]11;#ff0000\x07\x1b]12;#0000ff\x07",
+        );
+        engine.respawned();
+        let mut blank = Engine::new(SIZE, HistoryRows(1000));
+        blank.respawned();
+        assert_eq!(fresh(&mut engine), fresh(&mut blank));
     }
 
     #[test]
