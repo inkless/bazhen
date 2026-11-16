@@ -691,14 +691,6 @@ export const ALLOWED_SIGNALS: Readonly<Record<string, readonly AllowedSignal[]>>
       "tmux, reading a script on stdin in TmuxServer.source",
     ),
   ],
-  "apps/daemon/src/pty/node-pty.ts": [
-    {
-      code: /hangUp: \(\) => proc\.kill\(\)/,
-      why:
-        "node-pty's SIGHUP to the terminal child it spawned, by that child's pid: node-pty " +
-        "exposes no exit state to check before it sends",
-    },
-  ],
   "apps/daemon/src/codex/channel.ts": [
     timedOut(/run\("codex", args, \{ env, timeout: 60_000 \}\)/, "the codex CLI"),
     timedOut(/run\("codex", \["--version"\], \{ env, timeout: 1_000 \}\)/, "codex --version"),

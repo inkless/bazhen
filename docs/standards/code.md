@@ -44,8 +44,10 @@ Each layer has one job:
   when its refs recorded (`recreateSocket`, `signalServer`), and never 0, ±1, this process, its
   parent or its group. It depends on nothing of Bazhen's, so anything may use it. A child this
   process spawned and still holds is signalled through `signalOwnChild`, which sends through the
-  child's own handle, so it reaches nothing once the child is reaped. A start's `timeout` and
-  node-pty's hang-up are allowed only where `scripts/signal-paths.ts` lists them. Rust sends through
+  child's own handle, so it reaches nothing once the child is reaped. A start's `timeout` is
+  allowed only where `scripts/signal-paths.ts` lists it. The PTY seam hangs up by closing the PTY,
+  and the kernel hangs up whichever session holds the terminal then: node-pty reaps its child before
+  anyone hears it exit, so nothing signals that child by its pid. Rust sends through
   `bazhen-test-signal` in tests and `crates/bazhen-holder/src/guard.rs` in the holder, which sends
   only to the holder's own unreaped child's group or a process in the session that child leads
   (`testing.md` § Hermeticity).
