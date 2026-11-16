@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { Attention, AttentionKind, Notice, StateSnapshot } from "@bazhen/protocol";
+import type {
+  Agent,
+  AgentState,
+  Attention,
+  AttentionKind,
+  Notice,
+  StateSnapshot,
+} from "@bazhen/protocol";
 import {
   closedNotices,
   closedRows,
@@ -34,11 +41,32 @@ const item = (kind: AttentionKind, openedAt: string, over: Partial<Attention> = 
 const closed = (openedAt: string) =>
   item("failed", openedAt, { state: "closed", closeReason: "dismissed" });
 
-const snapshot = (attention: Attention[]): StateSnapshot => ({
+const agentNamed = (agent: Agent["id"], name: string, state: AgentState): Agent => ({
+  id: agent,
+  name,
+  environmentId: "env_01900000000070008000000000000001",
+  harness: "claude-code",
+  project: "web",
+  cwd: "/work/web",
+  state,
+  terminalId: null,
+  generation: 0,
+  externalRef: null,
+  exit: null,
+  theme: "dark",
+  themes: ["dark"],
+  attachCommand: null,
+  commands: [],
+  resumable: false,
+  canOpenShell: false,
+  launchedBy: null,
+});
+
+const snapshot = (attention: Attention[], agents: Agent[] = []): StateSnapshot => ({
   epoch: "e",
   eventId: 1,
   environments: [],
-  agents: [],
+  agents,
   attention,
   messages: [],
   shells: [],
@@ -65,6 +93,27 @@ describe("inbox rows", () => {
     const mine = item("approval", "2026-11-12T08:00:00.000Z");
     const theirs = item("approval", "2026-11-12T08:00:00.000Z", { agentId: id("agent") });
     expect(openRows(snapshot([mine, theirs]), agentId).map((r) => r.item.id)).toEqual([mine.id]);
+  });
+
+  it("names each item's agent, open or closed, as the page names it anywhere", () => {
+    const ended = id("agent");
+    const gone = id("agent");
+    const state = snapshot(
+      [
+        item("approval", "2026-11-12T08:00:00.000Z"),
+        item("failed", "2026-11-12T07:00:00.000Z", { agentId: gone }),
+        item("failed", "2026-11-12T09:00:00.000Z", {
+          agentId: ended,
+          state: "closed",
+          closeReason: "dismissed",
+        }),
+      ],
+      [agentNamed(agentId, "reviewer", "running"), agentNamed(ended, "web-1", "closed")],
+    );
+    expect([openRows(state).map((r) => r.agent), closedRows(state).map((r) => r.agent)]).toEqual([
+      ["reviewer", `agent ${gone.slice(-6)}`],
+      [`web-1 (${ended.slice(-6)})`],
+    ]);
   });
 
   it("lists closed items newest first, up to the limit", () => {

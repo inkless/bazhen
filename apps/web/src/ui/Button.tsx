@@ -1,7 +1,9 @@
+import type { Ref } from "react";
 import { Button as AriaButton, type ButtonProps as AriaButtonProps } from "react-aria-components";
 
 export type ButtonProps = Omit<AriaButtonProps, "className" | "style"> & {
   variant?: "primary" | "secondary" | "quiet" | "link";
+  ref?: Ref<HTMLButtonElement>;
 };
 
 /** Every action button. Press handling is React Aria's: one press for mouse, touch, pen and keys. */

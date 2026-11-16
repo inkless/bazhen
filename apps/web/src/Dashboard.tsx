@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { AgentName, type HarnessId, type StateSnapshot } from "@bazhen/protocol";
+import { AGENT_NAME_MAX, AgentName, type HarnessId, type StateSnapshot } from "@bazhen/protocol";
 import { launchAgent, watchState } from "./api.ts";
 import { AgentAttention, Inbox } from "./inbox/Inbox.tsx";
 import { openNotices } from "./inbox/model.ts";
@@ -62,6 +62,7 @@ export function Dashboard() {
   const [showEnded, setShowEnded] = useState(false);
   const [cwd, setCwd] = useState("");
   const [name, setName] = useState("");
+  const [nameInvalid, setNameInvalid] = useState(false);
   // Kept apart: every state read clears a stream error, and a refusal must outlast them.
   const [streamError, setStreamError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -86,6 +87,7 @@ export function Dashboard() {
     const asked = name.trim();
     const parsed = asked === "" ? undefined : AgentName.safeParse(asked);
     if (parsed?.success === false) {
+      setNameInvalid(true);
       setActionError(parsed.error.issues[0]?.message ?? "not a name");
       return;
     }
@@ -130,7 +132,12 @@ export function Dashboard() {
           Name{" "}
           <input
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            maxLength={AGENT_NAME_MAX}
+            aria-invalid={nameInvalid}
+            onChange={(e) => {
+              setName(e.target.value);
+              setNameInvalid(false);
+            }}
             placeholder={defaultNamePreview(cwd)}
             autoCapitalize="off"
             autoCorrect="off"

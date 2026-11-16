@@ -14,6 +14,7 @@ import { ConfirmDialog } from "../ui/ConfirmDialog.tsx";
 import {
   agentTasks,
   assignableAgents,
+  assignee,
   holdersOf,
   launcherOf,
   openSubtasksUnder,
@@ -124,7 +125,7 @@ function NewTask({
   const [agentId, setAgentId] = useState("");
   const [role, setRole] = useState<Role>("coordinator");
   const { busy, run } = useOnce(failed);
-  const chosen = assignableAgents(state.agents).some((a) => a.id === agentId) ? agentId : "";
+  const chosen = assignee(state.agents, agentId, false);
   const submit = (e: SubmitEvent) => {
     e.preventDefault();
     const assign = chosen === "" ? undefined : { agentId: chosen, role };
@@ -258,9 +259,7 @@ export function TaskPage({
   if (detail === "missing") return <p role="status">No such task.</p>;
   const open = detail.state === "open";
   const below = openSubtasksUnder(state, taskId);
-  const assignable = assignableAgents(state.agents);
-  // One that ended since it was picked is no longer listed, so it isn't what the form shows.
-  const pick = assignable.some((a) => a.id === agentId) ? agentId : (assignable[0]?.id ?? "");
+  const pick = assignee(state.agents, agentId, true);
   const finish = (outcome: TaskOutcome) =>
     run(() => finishTask(taskId, outcome, outcome === "cancelled" && below.length > 0));
   const cancelling =

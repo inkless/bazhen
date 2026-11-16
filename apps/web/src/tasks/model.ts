@@ -79,6 +79,21 @@ export function launcherOf(
 export const assignableAgents = <A extends Pick<Agent, "state">>(agents: readonly A[]): A[] =>
   agents.filter((a) => !isEnded(a));
 
+/**
+ * The agent a form gives a task to: the one picked while it is still offered. Otherwise, one that
+ * ended since it was picked, or none picked yet, is the first offered where the form needs an
+ * agent, and no one where it doesn't, so the form never sends an agent its list no longer shows.
+ */
+export function assignee(
+  agents: readonly Pick<Agent, "id" | "state">[],
+  picked: string,
+  needed: boolean,
+): string {
+  const offered = assignableAgents(agents);
+  if (offered.some((a) => a.id === picked)) return picked;
+  return needed ? (offered[0]?.id ?? "") : "";
+}
+
 /** The open tasks an agent is on now, with its role on each. */
 export function agentTasks(state: StateSnapshot, agentId: string): { task: Task; role: Role }[] {
   const tasks = new Map(state.tasks.map((t) => [t.id, t]));

@@ -1,5 +1,5 @@
-import { useState, type SubmitEvent } from "react";
-import { AgentName, type Agent } from "@bazhen/protocol";
+import { useEffect, useId, useRef, useState, type SubmitEvent } from "react";
+import { AGENT_NAME_MAX, AgentName, type Agent } from "@bazhen/protocol";
 import { Refused, renameAgent } from "../api.ts";
 import { Button } from "../ui/Button.tsx";
 import { useAction } from "../shells/action.ts";
@@ -20,6 +20,9 @@ export function AgentRename({
   const { pending, act } = useAction(failed);
   const [name, setName] = useState(agent.name);
   const [problem, setProblem] = useState<string | null>(null);
+  const field = useRef<HTMLInputElement>(null);
+  const problemId = useId();
+  useEffect(() => field.current?.focus(), []);
   const save = (e: SubmitEvent) => {
     e.preventDefault();
     const asked = name.trim();
@@ -50,8 +53,11 @@ export function AgentRename({
       <label>
         Name{" "}
         <input
+          ref={field}
           value={name}
+          maxLength={AGENT_NAME_MAX}
           aria-invalid={problem !== null}
+          aria-describedby={problem === null ? undefined : problemId}
           autoCapitalize="off"
           autoCorrect="off"
           spellCheck={false}
@@ -67,7 +73,11 @@ export function AgentRename({
       <Button variant="quiet" onPress={onDone}>
         Cancel
       </Button>
-      {problem !== null && <span role="alert">{problem}</span>}
+      {problem !== null && (
+        <span id={problemId} role="alert">
+          {problem}
+        </span>
+      )}
       {agent.harness === "claude-code" && (
         <p className="note">Its Claude Code session keeps the old name until it next starts.</p>
       )}

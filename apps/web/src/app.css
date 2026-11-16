@@ -514,6 +514,24 @@ body {
   margin: var(--space-1) 0 var(--space-2);
 }
 
+/* A name is up to 40 characters with nowhere to break, wider than a phone: these break it anywhere. */
+:is(
+  .workspace-head h2,
+  .inbox-line .button-link,
+  .task-holder,
+  .agent-tasks .button-link,
+  .notice li,
+  .tab
+) {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.task-form select {
+  max-width: 100%;
+}
+
 .agent-rename {
   margin-top: var(--space-2);
 }

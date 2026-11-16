@@ -174,7 +174,16 @@ describe("defaultNamePreview", () => {
       defaultNamePreview("/work/playground/"),
       defaultNamePreview("/work/my app (old)"),
       defaultNamePreview("/"),
-    ]).toEqual(["playground-<n>", "playground-<n>", "my-app-old-<n>", "agent-<n>"]);
+      defaultNamePreview("/work/playground/.."),
+      defaultNamePreview("/work/../web"),
+    ]).toEqual([
+      "playground-<n>",
+      "playground-<n>",
+      "my-app-old-<n>",
+      "agent-<n>",
+      "agent-<n>",
+      "web-<n>",
+    ]);
   });
 
   it("can't say the project of a directory the daemon resolves, so it doesn't guess", () => {

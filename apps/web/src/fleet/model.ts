@@ -98,8 +98,9 @@ export function agentLabel(a: Pick<Agent, "id" | "name" | "project" | "state">):
 
 /**
  * The name a launch in `cwd` would be given by default. The daemon takes the project from the
- * directory's last part once it has resolved `~` and the like, so only an absolute directory's
- * can be said here; the number is the daemon's counter, which the page doesn't have.
+ * directory's last part as it was asked, `.` and `..` included, once it has resolved `~`, so only
+ * an absolute directory's can be said here; the number is the daemon's counter, which the page
+ * doesn't have.
  */
 export function defaultNamePreview(cwd: string): string {
   if (!cwd.startsWith("/")) return "<project>-<n>";

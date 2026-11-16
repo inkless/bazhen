@@ -9,6 +9,7 @@ import {
 import {
   agentTasks,
   assignableAgents,
+  assignee,
   holdersOf,
   launcherOf,
   openSubtasksUnder,
@@ -127,6 +128,31 @@ describe("who a task can be given to", () => {
       "unknown",
       "lost",
       "closing",
+    ]);
+  });
+});
+
+describe("whom a form gives a task to", () => {
+  const live = { id: AGENT, state: "running" as const };
+  const closed = { id: OTHER, state: "closed" as const };
+
+  it("keeps the agent picked while it is offered", () => {
+    expect([assignee([closed, live], AGENT, true), assignee([closed, live], AGENT, false)]).toEqual(
+      [AGENT, AGENT],
+    );
+  });
+
+  it("drops one that ended since, or none picked yet, to the first offered where one is needed", () => {
+    expect([assignee([closed, live], OTHER, true), assignee([closed, live], "", true)]).toEqual([
+      AGENT,
+      AGENT,
+    ]);
+  });
+
+  it("drops it to no one where the form can do without, and where none is offered", () => {
+    expect([assignee([closed, live], OTHER, false), assignee([closed], OTHER, true)]).toEqual([
+      "",
+      "",
     ]);
   });
 });

@@ -1,4 +1,4 @@
-import { useState, type ReactNode, type SubmitEvent } from "react";
+import { useEffect, useRef, useState, type ReactNode, type SubmitEvent } from "react";
 import type { Agent, AgentState, Shell } from "@bazhen/protocol";
 import {
   closeAgent,
@@ -79,6 +79,16 @@ export function Workspace({
   const [sentAt, setSentAt] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [renaming, setRenaming] = useState(false);
+  const renameButton = useRef<HTMLButtonElement>(null);
+  // Set when the form closes, so focus goes back to the button that opened it once it is shown.
+  const refocusRename = useRef(false);
+  useEffect(() => {
+    if (renaming || !refocusRename.current) return;
+    refocusRename.current = false;
+    renameButton.current?.focus();
+  }, [renaming]);
+  // A daemon before protocol 1.40 gives no name, and has no rename to send it to.
+  const renamable = !isEnded(agent) && agent.name !== "";
   // A close refused because the terminal's old server may still run it: only then is force offered.
   const [unconfirmed, setUnconfirmed] = useState(false);
   const removing = buttons.includes("remove");
@@ -114,8 +124,8 @@ export function Workspace({
           <span className={`state state-${agent.state}`}>{agent.state}</span>
           {agent.exit !== null && <span>{exitText(agent.exit)}</span>}
           <span className="spacer" />
-          {!isEnded(agent) && !renaming && (
-            <Button variant="quiet" onPress={() => setRenaming(true)}>
+          {renamable && !renaming && (
+            <Button ref={renameButton} variant="quiet" onPress={() => setRenaming(true)}>
               Rename
             </Button>
           )}
@@ -189,8 +199,15 @@ export function Workspace({
             />
           )}
         </header>
-        {renaming && !isEnded(agent) && (
-          <AgentRename agent={agent} onDone={() => setRenaming(false)} failed={failed} />
+        {renaming && renamable && (
+          <AgentRename
+            agent={agent}
+            onDone={() => {
+              refocusRename.current = true;
+              setRenaming(false);
+            }}
+            failed={failed}
+          />
         )}
         <p className="cwd">{agent.cwd}</p>
         {open ? (
