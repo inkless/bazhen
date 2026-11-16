@@ -15,6 +15,9 @@ import {
 } from "../support/holder-spawn.ts";
 
 type Runtime = ReturnType<SnapshotHarness["make"]>["runtime"];
+
+/** How long a child killed from outside has to be seen to exit. */
+const EXIT_MS = 10_000;
 type Ref = Parameters<SnapshotHarness["forge"]>[0];
 
 interface Made {
@@ -52,7 +55,13 @@ async function replaceFromOutside(socket: string): Promise<void> {
   const client = await connectHolder(socket, { onEvent });
   try {
     await client.signal("SIGKILL");
-    await exited;
+    const deadline = new Promise<never>((_, refuse) =>
+      setTimeout(
+        () => refuse(new Error(`${socket}'s child outlived its SIGKILL`)),
+        EXIT_MS,
+      ).unref(),
+    );
+    await Promise.race([exited, deadline]);
     const next = { ...holderProcessSpec(["sleep", "300"]), generation: client.generation + 1 };
     await client.respawn(next);
   } finally {

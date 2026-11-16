@@ -116,6 +116,10 @@ export class HolderRuntime implements RuntimeAdapter {
   private env: Readonly<Record<string, string>>;
   private readonly exits: ExitWatch;
   private readonly controls = new Map<string, Control>();
+  /** For each terminal, what settles once its last control connection has closed. */
+  private readonly retiring = new Map<string, Promise<void>>();
+  /** The sockets reported unreadable, each reported again only once it has been readable. */
+  private readonly unreadable = new Set<string>();
 
   constructor(opts: HolderRuntimeOptions) {
     this.opts = opts;
@@ -278,11 +282,15 @@ export class HolderRuntime implements RuntimeAdapter {
   async inventory(): Promise<RuntimeInventoryEntry[]> {
     return (await this.reachAll()).flatMap((reached) => {
       if (reached.is === "unreadable") {
-        this.report(
-          new Error(`the holder at ${reached.socket} can't be read`, { cause: reached.cause }),
-        );
+        if (!this.unreadable.has(reached.socket)) {
+          this.unreadable.add(reached.socket);
+          this.report(
+            new Error(`the holder at ${reached.socket} can't be read`, { cause: reached.cause }),
+          );
+        }
         return [];
       }
+      this.unreadable.delete(reached.socket);
       if (reached.is !== "holder") return [];
       const { hello } = reached;
       const { terminalId } = hello;
@@ -308,11 +316,23 @@ export class HolderRuntime implements RuntimeAdapter {
     await start({ binary: this.opts.binary, root: this.opts.root, spec: holderSpec, env: {} });
     const reached = await this.reach(socket);
     if (reached.is !== "holder") {
+      // Best effort: one that answers later is told to close, rather than left with no record.
+      void this.closeAt(socket);
       throw new Error(`terminal ${spec.terminalId}: its holder started but doesn't answer`, {
         cause: reached.cause,
       });
     }
     return this.refOf(spec.terminalId, reached.hello);
+  }
+
+  /** Closes whatever holder answers at `socket`, ignoring every failure. */
+  private async closeAt(socket: string): Promise<void> {
+    try {
+      const client = await this.connect(socket, false, ignore);
+      await client.close().finally(() => client.end());
+    } catch {
+      // Nothing answers, or it won't close: there is nothing more to do from here.
+    }
   }
 
   /** What the holder runs: the runtime's environment, then the terminal's own variables. */
@@ -336,13 +356,7 @@ export class HolderRuntime implements RuntimeAdapter {
     size: Size | null,
     _historyLines: number,
   ): Promise<SnapshotAttached> {
-    let control = this.controls.get(ref.terminalId);
-    if (control === undefined) {
-      const socket = this.socketOf(ref.terminalId);
-      control = new Control((writer, onEvent) => this.connect(socket, writer, onEvent));
-      this.controls.set(ref.terminalId, control);
-    }
-    const stream = new HolderStream(control, size ?? { cols: 80, rows: 24 });
+    const stream = new HolderStream(this.controlFor(ref), size ?? { cols: 80, rows: 24 });
     try {
       const reader = await this.holderOf(ref, (event) => stream.event(event));
       if (size === null) stream.size = reader.hello.size;
@@ -380,9 +394,36 @@ export class HolderRuntime implements RuntimeAdapter {
     }
   }
 
+  /**
+   * The control connection for the holder `ref` names, made if no stream of it has one. One made
+   * for another holder of the terminal is left to its streams, and never reaches this one.
+   */
+  private controlFor(ref: RuntimeRef): Control {
+    const id = ref.terminalId;
+    const holder = { pid: Number(ref.locator.holderPid), start: Number(ref.locator.holderStart) };
+    const current = this.controls.get(id);
+    if (current?.serves(holder) === true) return current;
+    const socket = this.socketOf(id);
+    const control: Control = new Control({
+      open: (writer, onEvent) => this.connect(socket, writer, onEvent),
+      holder,
+      after: this.retiring.get(id),
+      onIdle: (closed) => {
+        if (this.controls.get(id) === control) this.controls.delete(id);
+        this.retiring.set(id, closed);
+        void closed.then(() => {
+          if (this.retiring.get(id) === closed) this.retiring.delete(id);
+        });
+      },
+    });
+    this.controls.set(id, control);
+    return control;
+  }
+
   private forget(terminalId: string): void {
-    this.controls.get(terminalId)?.end();
+    const control = this.controls.get(terminalId);
     this.controls.delete(terminalId);
+    if (control !== undefined) this.retiring.set(terminalId, control.end());
   }
 
   /**
@@ -431,6 +472,12 @@ export class HolderRuntime implements RuntimeAdapter {
    * leader's command, checked against the start the holder read so a reused pid is refused.
    */
   async foreground(ref: RuntimeRef): Promise<Foreground> {
+    const { command, own } = await this.foregroundGroup(ref);
+    return { command, own };
+  }
+
+  /** `foreground`, with the group the holder named and when its leader started. */
+  private async foregroundGroup(ref: RuntimeRef) {
     const read = await this.withProcess(ref, async (client) => {
       if (client.hello.exit !== null) throw new ProcessState(ref.terminalId, "running");
       return client.foreground().catch((error: unknown) => {
@@ -439,7 +486,7 @@ export class HolderRuntime implements RuntimeAdapter {
     });
     const command = await commandOf(read.pgid, read.pgidStart);
     if (command === null) throw new Error(`can't read terminal ${ref.terminalId}'s foreground`);
-    return { command, own: read.pgid === read.childPid };
+    return { command, own: read.pgid === read.childPid, pgid: read.pgid, start: read.pgidStart };
   }
 
   async foregrounds(terminalIds: ReadonlySet<string>): Promise<TerminalForeground[]> {
@@ -447,21 +494,27 @@ export class HolderRuntime implements RuntimeAdapter {
     const live = (await this.inventory()).filter(
       (e) => e.exit === null && terminalIds.has(e.ref.terminalId),
     );
-    const [read, cwds] = await Promise.all([
-      Promise.all(
+    const groups = (
+      await Promise.all(
         live.map(async ({ ref }) => {
           try {
-            return [{ ref, ...(await this.foreground(ref)) }];
+            return [{ ref, ...(await this.foregroundGroup(ref)) }];
           } catch {
             return [];
           }
         }),
-      ),
-      processCwds(live.map(({ ref }) => Number(ref.locator.childPid))),
-    ]);
-    return read
-      .flat()
-      .map((f) => ({ ...f, cwd: cwds.get(Number(f.ref.locator.childPid)) ?? null }));
+      )
+    ).flat();
+    // The foreground's own directory, as tmux reports a pane's: read once for them all, and kept
+    // only for a leader that is still the one that started when the holder said.
+    const cwds = await processCwds(groups.map((g) => g.pgid));
+    return Promise.all(
+      groups.map(async ({ ref, command, own, pgid, start }) => {
+        const cwd = cwds.get(pgid);
+        const still = cwd !== undefined && (await commandOf(pgid, start)) !== null;
+        return { ref, command, own, cwd: still ? cwd : null };
+      }),
+    );
   }
 
   async unlink(ref: RuntimeRef): Promise<void> {

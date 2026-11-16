@@ -25,8 +25,11 @@ import {
   type StartHolderOptions,
 } from "@bazhen/host-guard";
 import type { HolderHelloReply } from "@bazhen/protocol";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { dirname } from "node:path";
+import { HOLDER_MAX_UNSENT_BYTES } from "./client.ts";
 import { HolderRuntime } from "./runtime.ts";
+import { WRITER_RETRY_MS } from "./runtime-stream.ts";
 import { encodeTags } from "./tags.ts";
 import {
   type FakeHolder,
@@ -55,11 +58,19 @@ beforeAll(() => {
   }
 });
 
+// Nothing here may reach a real signal: a call that got past every fake throws instead.
+beforeEach(() => {
+  vi.spyOn(process, "kill").mockImplementation((pid) => {
+    throw new Error(`a test reached process.kill(${pid})`);
+  });
+});
+
 const roots: string[] = [];
 const servers: FakeHolderServer[] = [];
 const runtimes: HolderRuntime[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(servers.splice(0).map((server) => server.close()));
   for (const root of roots.splice(0)) {
     if (existsSync(holdersDir(root))) chmodSync(holdersDir(root), 0o700);
@@ -104,6 +115,7 @@ async function fakeTerminal(
   terminalId: string,
   hello: Partial<HolderHelloReply> = {},
   handle: Handler = answerAll(),
+  listen: { readonly halfOpen?: boolean } = {},
 ): Promise<FakeTerminal> {
   const fields = {
     terminalId,
@@ -117,7 +129,10 @@ async function fakeTerminal(
   if (fields.holderPid <= pidLimit() || fields.childPid <= pidLimit()) {
     throw new Error("a fake holder must name only pids above the system's limit");
   }
-  const server = await listenFakeHolder(holderSocket(root, terminalId), { hello: fields });
+  const server = await listenFakeHolder(holderSocket(root, terminalId), {
+    hello: fields,
+    ...listen,
+  });
   servers.push(server);
   const connections: FakeTerminal["connections"][number][] = [];
   void (async () => {
@@ -166,14 +181,19 @@ const spec = (overrides: Partial<TerminalSpec> = {}): TerminalSpec => ({
 });
 
 /** A runtime whose `start` puts a fake holder where the real one would bind. */
-function startingFakes(root: string, hello: Partial<HolderHelloReply> = {}, handle?: Handler) {
+function startingFakes(
+  root: string,
+  hello: Partial<HolderHelloReply> = {},
+  handle?: Handler,
+  listen: { readonly halfOpen?: boolean } = {},
+) {
   const started: StartHolderOptions[] = [];
   const terminals = new Map<string, FakeTerminal>();
   const built = runtimeAt(root, {
     start: async (options) => {
       started.push(options);
       const { terminalId } = options.spec;
-      terminals.set(terminalId, await fakeTerminal(root, terminalId, hello, handle));
+      terminals.set(terminalId, await fakeTerminal(root, terminalId, hello, handle, listen));
       return { pid: FAKE_PID, start: FAKE_START, exited: new Promise(() => {}) };
     },
   });
@@ -240,6 +260,8 @@ describe("HolderRuntime: creating and finding terminals", () => {
     expect((await runtime.inventory()).map((e) => [e.ref.terminalId, e.tags])).toEqual([
       [ours, { kind: "agent", agentId }],
     ]);
+    // Reported once, however often it is read while it stays unreadable.
+    await runtime.inventory();
     expect(errors).toEqual([
       expect.objectContaining({ message: expect.stringContaining("can't be read") }),
     ]);
@@ -411,12 +433,23 @@ describe("HolderRuntime: closing", () => {
  * A terminal whose holder answers an attach with `vt` at `offset`, then sends `after`; each
  * snapshot after the first is `later` bytes on, as output the reader hasn't had yet would be.
  */
-async function attachable(offset = 5, after: (holder: FakeHolder) => void = () => {}, later = 0) {
+async function attachable(
+  offset = 5,
+  after: (holder: FakeHolder) => void = () => {},
+  later = 0,
+  options: {
+    readonly halfOpen?: boolean;
+    readonly hello?: Partial<HolderHelloReply>;
+    /** Sent ahead of the attach's snapshot, as events the holder had queued first. */
+    readonly beforeSnapshot?: (holder: FakeHolder) => void;
+  } = {},
+) {
   const root = privateRoot();
   const vt = Uint8Array.of(0x41);
   let snapshots = 0;
   const handle: Handler = (holder, request) => {
     if (request.type === "snapshot") {
+      if (snapshots === 0) options.beforeSnapshot?.(holder);
       const at = offset + (snapshots++ === 0 ? 0 : later);
       holder.send({ type: "snapshot", id: request.id, offset: at, droppedLines: 0, bytes: vt });
     } else if (request.type === "subscribe") {
@@ -424,7 +457,12 @@ async function attachable(offset = 5, after: (holder: FakeHolder) => void = () =
       after(holder);
     } else if (request.type !== "input") ok(holder, request);
   };
-  const { runtime, terminals } = startingFakes(root, { offset }, handle);
+  const { runtime, terminals } = startingFakes(
+    root,
+    { offset, ...options.hello },
+    handle,
+    options.halfOpen === true ? { halfOpen: true } : {},
+  );
   const ref = await runtime.create(spec());
   return { runtime, ref, fake: terminals.get(ref.terminalId)!, vt };
 }
@@ -498,19 +536,100 @@ describe("HolderRuntime: streams", () => {
     second.stream.close();
   });
 
-  it("opens a new writer connection only once the old one has closed", async () => {
+  it("opens a new writer connection only once the old one has hung up", async () => {
     const { runtime, ref, fake } = await attachable();
+    const writers = () => fake.connections.filter((c) => c.holder.hello?.writer === true);
     const first = await runtime.attach(ref, { cols: 90, rows: 30 }, 0);
-    const control = () =>
-      fake.connections.filter((c) => c.requests.some((r) => r.type === "resize"));
-    await expect.poll(() => control()).toHaveLength(1);
+    await expect.poll(() => writers()).toHaveLength(1);
+    const old = writers()[0]!.holder;
+    const order: string[] = [];
+    void old.ended.then(() => order.push("old hung up"));
+    // A holder that has stopped reading holds the old connection's hang-up behind its input.
+    old.stopReading();
+    first.stream.write(new Uint8Array(4 * 1024 * 1024));
+    await new Promise((wait) => setTimeout(wait, 50));
     first.stream.close();
-    let oldClosed = false;
-    void control()[0]!.holder.closed.then(() => (oldClosed = true));
-    const second = await runtime.attach(ref, { cols: 91, rows: 30 }, 0);
-    await expect.poll(() => control()).toHaveLength(2);
-    expect(oldClosed).toBe(true);
-    second.stream.close();
+    const second = runtime.attach(ref, { cols: 91, rows: 30 }, 0);
+    await new Promise((wait) => setTimeout(wait, 200));
+    expect([writers().length, order]).toEqual([1, []]);
+    old.startReading();
+    await expect.poll(() => writers()).toHaveLength(2);
+    order.push("new writer");
+    expect(order).toEqual(["old hung up", "new writer"]);
+    (await second).stream.close();
+  });
+
+  it("asks again for a writer slot another connection holds, then says so, to streams come later too", async () => {
+    const { runtime, ref, fake } = await attachable(5, () => {}, 0, { hello: { writer: false } });
+    const { stream } = await runtime.attach(ref, null, 0);
+    const told: string[] = [];
+    stream.onFailure((failure) => told.push(failure.what));
+    stream.write(Buffer.from("a"));
+    await expect.poll(() => told, { timeout: 5_000 }).toEqual(["input"]);
+    const asked = fake.connections.filter((c) => c.holder.hello?.writer === true);
+    expect(asked).toHaveLength(1 + WRITER_RETRY_MS.length);
+    await Promise.all(asked.map((c) => c.holder.closed));
+    expect(asked.flatMap((c) => c.requests).filter((r) => r.type === "input")).toEqual([]);
+    const late = await runtime.attach(ref, null, 0);
+    const lateTold: string[] = [];
+    late.stream.onFailure((failure) => lateTold.push(failure.what));
+    expect(lateTold).toEqual(["input"]);
+    stream.close();
+    late.stream.close();
+  });
+
+  it("takes alternate and a respawn sent before the attach's snapshot as what it shows", async () => {
+    const respawned = { generation: 1, childPid: FAKE_PID, childStart: FAKE_START };
+    const { runtime, ref } = await attachable(0, (holder) => holder.send(data(0, "new")), 0, {
+      beforeSnapshot: (holder) =>
+        holder.send(
+          { type: "alternate", body: { offset: 0, on: true } },
+          { type: "respawned", body: respawned },
+        ),
+    });
+    const attached = await runtime.attach(ref, null, 0);
+    const seen: unknown[] = [];
+    attached.stream.onData((bytes) => seen.push(Buffer.from(bytes).toString()));
+    attached.stream.onRespawn((generation) => seen.push(generation));
+    attached.stream.onAlternate((on) => seen.push(on));
+    await expect.poll(() => seen).toEqual(["new"]);
+    expect([attached.generation, attached.alternate]).toEqual([1, true]);
+    attached.stream.close();
+  });
+
+  it("refuses input past what a terminal holds unsent, and sends none of it", async () => {
+    const { runtime, ref, fake } = await attachable();
+    const { stream } = await runtime.attach(ref, null, 0);
+    const failures: unknown[] = [];
+    stream.onFailure((failure) => failures.push(failure));
+    stream.write(new Uint8Array(HOLDER_MAX_UNSENT_BYTES + 1));
+    expect(failures).toEqual([
+      {
+        what: "input",
+        cause: expect.objectContaining({ message: expect.stringContaining("over the") }),
+      },
+    ]);
+    await new Promise((wait) => setTimeout(wait, 50));
+    expect(fake.connections.flatMap((c) => c.requests).filter((r) => r.type === "input")).toEqual(
+      [],
+    );
+    stream.close();
+  });
+
+  it("sends a stream's input to no other holder that takes the terminal's socket", async () => {
+    const { runtime, ref, fake } = await attachable();
+    const { stream } = await runtime.attach(ref, null, 0);
+    const failures: string[] = [];
+    stream.onFailure((failure) => failures.push(String(failure.cause)));
+    // The reader stays on the first; a second holder takes the socket's name.
+    rmSync(fake.server.path);
+    const other = await fakeTerminal(dirname(dirname(fake.server.path)), ref.terminalId, {
+      holderStart: FAKE_START + 9,
+    });
+    stream.write(Buffer.from("a"));
+    await expect.poll(() => failures).toEqual([expect.stringContaining("another holder")]);
+    expect(other.connections.flatMap((c) => c.requests)).toEqual([]);
+    stream.close();
   });
 
   it("holds a stream's snapshot until the stream has delivered every byte before it", async () => {
@@ -524,6 +643,18 @@ describe("HolderRuntime: streams", () => {
     expect(taken).toBe(false);
     reader!.send(data(0, "abcd"));
     await expect(snapshot).resolves.toMatchObject({ offset: 4, generation: 0 });
+    stream.close();
+  });
+
+  it("settles a held snapshot once a respawn carries the stream past it", async () => {
+    let reader: FakeHolder | undefined;
+    const { runtime, ref } = await attachable(0, (holder) => (reader = holder), 4);
+    const { stream } = await runtime.attach(ref, null, 0);
+    const snapshot = stream.snapshot();
+    await new Promise((wait) => setTimeout(wait, 50));
+    const respawned = { generation: 1, childPid: FAKE_PID, childStart: FAKE_START };
+    reader!.send({ type: "respawned", body: respawned });
+    await expect(snapshot).resolves.toMatchObject({ generation: 0, offset: 4 });
     stream.close();
   });
 
