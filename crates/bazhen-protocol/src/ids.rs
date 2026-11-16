@@ -180,6 +180,14 @@ pub mod kind {
     impl Kind for Observed {
         const PREFIX: &'static str = "obs";
     }
+
+    /// Ids that start `att_`.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub enum Attachment {}
+
+    impl Kind for Attachment {
+        const PREFIX: &'static str = "att";
+    }
 }
 
 pub type AgentId = Id<kind::Agent>;
@@ -192,3 +200,4 @@ pub type MessageId = Id<kind::Message>;
 pub type NoticeId = Id<kind::Notice>;
 pub type DeviceId = Id<kind::Device>;
 pub type ObservedId = Id<kind::Observed>;
+pub type AttachmentId = Id<kind::Attachment>;

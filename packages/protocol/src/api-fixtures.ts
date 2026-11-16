@@ -21,6 +21,7 @@ import {
 import { DismissNoticeRequest, DismissNoticeResponse } from "./notices.ts";
 import { isPlainRemote } from "./origins.ts";
 import { Role, RolesResponse } from "./roles.ts";
+import { STREAM_FRAME_MAX_BYTES, StreamClientFrame, StreamServerFrame } from "./stream.ts";
 import {
   AddTaskNoteRequest,
   AssignTaskRequest,
@@ -69,6 +70,7 @@ const MSG = "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
 const NTC = "ntc_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
 const DEV = "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
 const OBS = "obs_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
+const ATT = "att_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
 const AT = "2026-11-16T12:00:00.000Z";
 const KEY = "0b8f8a52-58a3-4c49-9e2f-5d0f8c1c2a10";
 
@@ -644,6 +646,43 @@ const MESSAGES: Readonly<Record<string, Example>> = {
   SendMessageResponse: { schema: SendMessageResponse, wire: [{ messageId: MSG, eventIds: [1] }] },
   StateSnapshot: { schema: StateSnapshot, wire: [fullState, oldState, ...loneStates] },
   StopResponse: { schema: StopResponse, wire: [{}] },
+  StreamClientFrame: {
+    schema: StreamClientFrame,
+    wire: [
+      { type: "hello", protocolId: "f".repeat(64), mode: "interactive", cols: 120, rows: 40 },
+      {
+        type: "hello",
+        mode: "observe",
+        cols: 2,
+        rows: 1000,
+        resumes: { attachmentId: ATT, token: "r".repeat(43) },
+      },
+      { type: "resize", cols: 1000, rows: 2 },
+      { type: "engage" },
+      { type: "epoch", epoch: 0 },
+      { type: "epoch", epoch: 7 },
+      { type: "ping" },
+    ],
+  },
+  StreamServerFrame: {
+    schema: StreamServerFrame,
+    wire: [
+      { type: "attached", attachmentId: ATT, resumeToken: "r".repeat(43) },
+      { type: "attached", attachmentId: ATT },
+      { type: "lease", driver: true, epoch: 3 },
+      { type: "lease", driver: false, epoch: 4, driven: true, driverDevice: "Phone" },
+      { type: "pong" },
+      { type: "snapshot_start", historyLines: 10_000 },
+      { type: "snapshot_start" },
+      { type: "snapshot_end" },
+      { type: "input_dropped" },
+      { type: "screen", alternate: true },
+      { type: "exit" },
+      { type: "ended", reason: "evicted_slow" },
+      { type: "error", message: "no such terminal" },
+      { type: "notice", message: "the runtime refused the resize" },
+    ],
+  },
   TaskCommandResponse: { schema: TaskCommandResponse, wire: [{ eventIds: [2] }] },
   TaskDetail: {
     schema: TaskDetail,
@@ -857,6 +896,7 @@ export function checkFixtures() {
       messageWaitMaxMs: MESSAGE_WAIT_MAX_MS,
       taskNoteMaxBytes: TASK_NOTE_MAX_BYTES,
       agentNameMax: AGENT_NAME_MAX,
+      streamFrameMaxBytes: STREAM_FRAME_MAX_BYTES,
       settled: [...SETTLED].toSorted(),
       harnesses: HarnessId.options,
     },

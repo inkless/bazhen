@@ -1,0 +1,262 @@
+[
+  {
+    "name": "example 1",
+    "wire": {
+      "type": "hello",
+      "protocolId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "mode": "interactive",
+      "cols": 120,
+      "rows": 40
+    },
+    "parsed": {
+      "type": "hello",
+      "protocolId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "mode": "interactive",
+      "cols": 120,
+      "rows": 40
+    }
+  },
+  {
+    "name": "example 2",
+    "wire": {
+      "type": "hello",
+      "mode": "observe",
+      "cols": 2,
+      "rows": 1000,
+      "resumes": {
+        "attachmentId": "att_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "token": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+      }
+    },
+    "parsed": {
+      "type": "hello",
+      "mode": "observe",
+      "cols": 2,
+      "rows": 1000,
+      "resumes": {
+        "attachmentId": "att_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "token": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+      }
+    }
+  },
+  {
+    "name": "example 3",
+    "wire": {
+      "type": "resize",
+      "cols": 1000,
+      "rows": 2
+    },
+    "parsed": {
+      "type": "resize",
+      "cols": 1000,
+      "rows": 2
+    }
+  },
+  {
+    "name": "example 4",
+    "wire": {
+      "type": "engage"
+    },
+    "parsed": {
+      "type": "engage"
+    }
+  },
+  {
+    "name": "example 5",
+    "wire": {
+      "type": "epoch",
+      "epoch": 0
+    },
+    "parsed": {
+      "type": "epoch",
+      "epoch": 0
+    }
+  },
+  {
+    "name": "example 6",
+    "wire": {
+      "type": "epoch",
+      "epoch": 7
+    },
+    "parsed": {
+      "type": "epoch",
+      "epoch": 7
+    }
+  },
+  {
+    "name": "example 7",
+    "wire": {
+      "type": "ping"
+    },
+    "parsed": {
+      "type": "ping"
+    }
+  },
+  {
+    "name": ".(type=hello).mode = \"observe\"",
+    "wire": {
+      "type": "hello",
+      "protocolId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "mode": "observe",
+      "cols": 120,
+      "rows": 40
+    },
+    "parsed": {
+      "type": "hello",
+      "protocolId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "mode": "observe",
+      "cols": 120,
+      "rows": 40
+    }
+  },
+  {
+    "name": ".(type=hello).mode = \"interactive\"",
+    "wire": {
+      "type": "hello",
+      "protocolId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "mode": "interactive",
+      "cols": 120,
+      "rows": 40
+    },
+    "parsed": {
+      "type": "hello",
+      "protocolId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "mode": "interactive",
+      "cols": 120,
+      "rows": 40
+    }
+  },
+  {
+    "name": "example 1, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "hello",
+      "protocolId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "mode": "interactive",
+      "cols": 120,
+      "rows": 40,
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "hello",
+      "protocolId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "mode": "interactive",
+      "cols": 120,
+      "rows": 40
+    }
+  },
+  {
+    "name": "example 2, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "hello",
+      "mode": "observe",
+      "cols": 2,
+      "rows": 1000,
+      "resumes": {
+        "attachmentId": "att_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "token": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "hello",
+      "mode": "observe",
+      "cols": 2,
+      "rows": 1000,
+      "resumes": {
+        "attachmentId": "att_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "token": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+      }
+    }
+  },
+  {
+    "name": "example 3, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "resize",
+      "cols": 1000,
+      "rows": 2,
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "resize",
+      "cols": 1000,
+      "rows": 2
+    }
+  },
+  {
+    "name": "example 4, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "engage",
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "engage"
+    }
+  },
+  {
+    "name": "example 5, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "epoch",
+      "epoch": 0,
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "epoch",
+      "epoch": 0
+    }
+  },
+  {
+    "name": "example 6, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "epoch",
+      "epoch": 7,
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "epoch",
+      "epoch": 7
+    }
+  },
+  {
+    "name": "example 7, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "ping",
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "ping"
+    }
+  }
+]

@@ -3,6 +3,7 @@
     "messageWaitMaxMs": 600000,
     "taskNoteMaxBytes": 4000,
     "agentNameMax": 40,
+    "streamFrameMaxBytes": 1048576,
     "settled": [
       "delivered",
       "seen",

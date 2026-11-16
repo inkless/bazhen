@@ -13,6 +13,7 @@ pub mod nullable;
 pub mod record;
 pub mod roles;
 pub mod shells;
+pub mod stream;
 pub mod tasks;
 pub mod text;
 pub mod time;

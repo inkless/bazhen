@@ -23,6 +23,7 @@ use bazhen_protocol::notices::{
     RevokeDeviceResponse,
 };
 use bazhen_protocol::roles::RolesResponse;
+use bazhen_protocol::stream::{STREAM_FRAME_MAX_BYTES, StreamClientFrame, StreamServerFrame};
 use bazhen_protocol::tasks::{
     AddTaskNoteRequest, AssignTaskRequest, AssignTaskResponse, BroadcastMessageResponse,
     CreateTaskRequest, CreateTaskResponse, DelegateTaskRequest, EscalateRequest, EscalateResponse,
@@ -129,6 +130,8 @@ const MESSAGES: &[(&str, RoundTrip)] = &[
     ("SendMessageResponse", round_trips::<SendMessageResponse>),
     ("StateSnapshot", round_trips::<StateSnapshot>),
     ("StopResponse", round_trips::<StopResponse>),
+    ("StreamClientFrame", round_trips::<StreamClientFrame>),
+    ("StreamServerFrame", round_trips::<StreamServerFrame>),
     ("TaskCommandResponse", round_trips::<TaskCommandResponse>),
     ("TaskDetail", round_trips::<TaskDetail>),
     ("UnassignTaskRequest", round_trips::<UnassignTaskRequest>),
@@ -280,6 +283,7 @@ fn the_constants_are_the_protocols() {
     assert_eq!(constants["messageWaitMaxMs"], MESSAGE_WAIT_MAX_MS);
     assert_eq!(constants["taskNoteMaxBytes"], TASK_NOTE_MAX_BYTES);
     assert_eq!(constants["agentNameMax"], AGENT_NAME_MAX);
+    assert_eq!(constants["streamFrameMaxBytes"], STREAM_FRAME_MAX_BYTES);
     let harnesses: Vec<&str> = HarnessId::ALL.iter().map(|h| h.as_str()).collect();
     assert_eq!(constants["harnesses"], serde_json::json!(harnesses));
     let all = [
