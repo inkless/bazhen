@@ -226,6 +226,21 @@ describe("Codex thread switches", () => {
     expect([s.boundTo(), s.untracked()]).toEqual([B, false]);
   });
 
+  it("holds no mail again for a title told again after a thread it found could not be resumed in time", async () => {
+    const s = await setup({ titles: [shown(B)], unsaved: 99, giveUpMs: 20 });
+    s.announce(B);
+    await s.threads.titleChanged(s.terminal);
+    await expect.poll(s.untracked).toBe(true);
+    const tries = s.resumed.length;
+    await s.threads.titleChanged(s.terminal);
+    expect([s.boundTo(), s.held(), s.released, s.resumed.length]).toEqual([
+      A,
+      false,
+      [s.agentId],
+      tries + 1,
+    ]);
+  });
+
   it("moves an agent it gave up on once the thread its title names is announced", async () => {
     const s = await setup({ titles: [shown(B)], listed: [{ id: A }], giveUpMs: 20 });
     await s.threads.titleChanged(s.terminal);
