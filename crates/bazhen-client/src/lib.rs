@@ -38,24 +38,27 @@ impl Method {
 }
 
 /// Who a request comes from, as the daemon's rules need it said: the agent the caller runs inside,
-/// with the token that proves it, and the paired device whose shell it runs in. All advisory but
-/// the token.
+/// with the token that proves it, the paired device whose shell it runs in, and the Codex thread
+/// whose command it is. All advisory but the token.
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct Caller {
     agent_id: Option<String>,
     token: Option<String>,
     device_id: Option<String>,
+    codex_thread: Option<String>,
 }
 
 impl Caller {
     /// The caller this process's environment says it is: `BAZHEN_AGENT_ID`, the token in the file
-    /// `BAZHEN_AGENT_AUTH_FILE` names, and `BAZHEN_DEVICE_ID`. A variable set but empty is said as
-    /// it is; a token that can't be read, or isn't one, is not sent at all.
+    /// `BAZHEN_AGENT_AUTH_FILE` names, `BAZHEN_DEVICE_ID`, and `CODEX_THREAD_ID`, which Codex sets
+    /// in each command it runs. A variable set but empty is said as it is; a token that can't be
+    /// read, or isn't one, is not sent at all.
     pub fn from_env() -> Self {
         Self {
             agent_id: env_text("BAZHEN_AGENT_ID"),
             token: agent_token(),
             device_id: env_text("BAZHEN_DEVICE_ID"),
+            codex_thread: env_text("CODEX_THREAD_ID"),
         }
     }
 
@@ -87,7 +90,11 @@ impl Caller {
             .filter(|t| is_agent_token(t))
             .map(|t| ("Bazhen-Agent-Token", t.to_owned()));
         let device = checked("Bazhen-Device-Id", self.device_id.as_deref())?;
-        Ok([agent, token, device].into_iter().flatten().collect())
+        let thread = checked("Bazhen-Codex-Thread", self.codex_thread.as_deref())?;
+        Ok([agent, token, device, thread]
+            .into_iter()
+            .flatten()
+            .collect())
     }
 }
 
@@ -108,6 +115,7 @@ impl std::fmt::Debug for Caller {
             .field("agent_id", &self.agent_id)
             .field("token", &self.token.as_ref().map(|_| "<redacted>"))
             .field("device_id", &self.device_id)
+            .field("codex_thread", &self.codex_thread)
             .finish()
     }
 }
@@ -376,7 +384,39 @@ mod tests {
             agent_id: agent.map(str::to_owned),
             token: token.map(str::to_owned),
             device_id: device.map(str::to_owned),
+            codex_thread: None,
         }
+    }
+
+    #[test]
+    fn head_names_the_codex_thread_the_command_runs_in_last() {
+        let thread = "01a1e0f0-593e-7ae1-9d31-769db26227fc";
+        let codex = Caller {
+            codex_thread: Some(thread.to_owned()),
+            ..caller(None, None, Some("dev_y"))
+        };
+        assert_eq!(
+            request_head(Method::Get, "/v1/state", 0, &codex).unwrap(),
+            format!(
+                "GET /v1/state HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n\
+                 Bazhen-Device-Id: dev_y\r\nBazhen-Codex-Thread: {thread}\r\n\
+                 Content-Length: 0\r\nConnection: close\r\n\r\n"
+            )
+        );
+    }
+
+    #[test]
+    fn refuses_a_codex_thread_that_would_end_its_header_line() {
+        let codex = Caller {
+            codex_thread: Some("t\r\nBazhen-Agent-Id: agent_y".to_owned()),
+            ..Caller::default()
+        };
+        assert!(matches!(
+            request_head(Method::Get, "/", 0, &codex),
+            Err(Error::Header {
+                name: "Bazhen-Codex-Thread"
+            })
+        ));
     }
 
     #[test]

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import type { Socket } from "node:net";
+import { connect, type Socket } from "node:net";
 import { fileURLToPath } from "node:url";
 import type { AgentSessionId } from "@bazhen/core";
 
@@ -146,4 +146,29 @@ export function peerReading(
       ? { kind: "refused", reason: "the caller's process can't be read for sure" }
       : readingOf(chain, terminals());
   };
+}
+
+/**
+ * Whether `bazhen-peer` at `binary` reads the process listening on `socket` as a Codex app-server,
+ * as it must to tell a Codex agent's commands from the human's: a Codex that renamed its binary or
+ * that subcommand would read as no server. On a connection this process made, the peer is the
+ * listener.
+ */
+export async function codexServerMarked(
+  binary: string,
+  socket: string,
+  timeoutMs = READ_MS,
+): Promise<"marked" | "unmarked" | "unread"> {
+  const connection = await new Promise<Socket | undefined>((resolve) => {
+    const made = connect(socket, () => resolve(made));
+    made.on("error", () => resolve(undefined));
+  });
+  if (connection === undefined) return "unread";
+  try {
+    const chain = await readPeer(binary, connection, timeoutMs);
+    if (chain === undefined) return "unread";
+    return chain.codexServer === chain.pid ? "marked" : "unmarked";
+  } finally {
+    connection.destroy();
+  }
 }

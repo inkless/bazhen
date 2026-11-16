@@ -29,7 +29,9 @@ use crate::call::{CALL, Daemon, Failed, WAIT_MARGIN};
 use crate::fmt::{encode_uri_component, uuid};
 use crate::out::Out;
 use crate::paths::normalize;
-use crate::printers::{active_for, fleet, list_agents, list_roles, list_tasks, show_task, whoami};
+use crate::printers::{
+    active_for, agent_on_thread, fleet, list_agents, list_roles, list_tasks, show_task, whoami,
+};
 use crate::{Exit, TASK_USAGE};
 
 /// Why a task verb stopped before it was done.
@@ -37,6 +39,8 @@ use crate::{Exit, TASK_USAGE};
 pub(crate) enum Stop {
     /// The command line doesn't say what to do; the message says why.
     Usage(String),
+    /// The verb runs only somewhere else, as whoami inside an agent; the message says where.
+    NotHere(String),
     /// A file the command line names can't be read.
     Unreadable(String),
     Call(Failed),
@@ -82,6 +86,7 @@ pub(crate) fn run(p: &Parsed, daemon: &Daemon, now_ms: i64, out: &mut Out) -> Re
         daemon,
         now_ms,
         agent: env_text("BAZHEN_AGENT_ID"),
+        codex_thread: env_text("CODEX_THREAD_ID"),
     };
     match verb.run(out) {
         Ok(answer) => {
@@ -90,6 +95,10 @@ pub(crate) fn run(p: &Parsed, daemon: &Daemon, now_ms: i64, out: &mut Out) -> Re
         }
         Err(Stop::Usage(message)) => {
             out.err(&format!("{message}\n{TASK_USAGE}"));
+            Ok(Exit::Usage)
+        }
+        Err(Stop::NotHere(message)) => {
+            out.err(&message);
             Ok(Exit::Usage)
         }
         Err(Stop::Unreadable(message)) => {
@@ -104,8 +113,10 @@ struct Verb<'a> {
     p: &'a Parsed,
     daemon: &'a Daemon,
     now_ms: i64,
-    /// `BAZHEN_AGENT_ID`, set inside every agent Bazhen launches.
+    /// `BAZHEN_AGENT_ID`, set inside every agent Bazhen launches but in a Codex agent's commands.
     agent: Option<String>,
+    /// `CODEX_THREAD_ID`, which Codex sets in each command it runs, outside the agent's terminal.
+    codex_thread: Option<String>,
 }
 
 /// `value`, refused as missing when absent or empty.
@@ -196,6 +207,19 @@ impl Verb<'_> {
         Ok(self.daemon.get("/v1/state", CALL)?)
     }
 
+    /// The agent this command runs inside: `BAZHEN_AGENT_ID`, or else the live Codex agent bound
+    /// to the thread `CODEX_THREAD_ID` names, which the daemon tells it by too.
+    fn me(&self) -> Step<Option<String>> {
+        if let Some(agent) = &self.agent {
+            return Ok(Some(agent.clone()));
+        }
+        let Some(thread) = &self.codex_thread else {
+            return Ok(None);
+        };
+        let s = self.state()?;
+        Ok(agent_on_thread(&s, thread).map(ToString::to_string))
+    }
+
     /// The role `--role` names, else `fallback`.
     fn role(&self, fallback: &str) -> Step<Role> {
         let given = self.value("role");
@@ -263,11 +287,13 @@ impl Verb<'_> {
                 Ok(list_roles(&r).into())
             }
             "whoami" => {
-                let Some(me) = self.agent.as_deref() else {
-                    return usage("whoami runs inside an agent Bazhen launched");
+                let Some(me) = self.me()? else {
+                    return Err(Stop::NotHere(
+                        "whoami runs inside an agent Bazhen launched".to_owned(),
+                    ));
                 };
                 let s = self.state()?;
-                whoami(&s, me)
+                whoami(&s, &me)
                     .map(Answer::from)
                     .or_else(|e| usage(format!("the daemon has no agent {}", e.0)))
             }
@@ -586,13 +612,9 @@ impl Verb<'_> {
     fn task(&self) -> Step<Answer> {
         match self.word(1) {
             Some("list") => {
+                let me = if self.has("all") { None } else { self.me()? };
                 let s = self.state()?;
-                let me = if self.has("all") {
-                    None
-                } else {
-                    self.agent.as_deref()
-                };
-                Ok(list_tasks(&s, me).into())
+                Ok(list_tasks(&s, me.as_deref()).into())
             }
             Some("show") => {
                 let id = need(self.word(2), "the task")?;
@@ -694,11 +716,11 @@ impl Verb<'_> {
 
     /// The one task the asking agent is assigned, read from the state.
     fn own_task(&self) -> Step<String> {
-        let Some(me) = self.agent.as_deref() else {
+        let Some(me) = self.me()? else {
             return usage("missing the task (outside an agent, name it)");
         };
         let s = self.state()?;
-        let mine = active_for(&s, me);
+        let mine = active_for(&s, &me);
         match mine.as_slice() {
             [only] => Ok(only.task_id.to_string()),
             [] => usage("you are assigned no task"),

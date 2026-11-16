@@ -137,6 +137,20 @@ const doctorWith = (peerReader: DoctorResponse["peerReader"]) => {
   return s.bazhen(["doctor"]);
 };
 
+/** The doctor's codex line and the one after it, from a daemon whose Codex reads as `toolCalls`. */
+const codexLines = async (toolCalls: "marked" | "unmarked" | "unread" | null) => {
+  s.daemon
+    .answer("GET /v1/health", HealthResponse, health())
+    .answer(
+      "GET /v1/daemon/doctor",
+      DoctorResponse,
+      doctor({ codex: { daemon: "0.169.0", cli: "0.169.0", toolCalls } }),
+    );
+  const out = lines((await s.bazhen(["doctor"])).stdout);
+  const at = out.indexOf("codex: app-server 0.169.0 (as last connected), cli 0.169.0");
+  return out.slice(at, at + 2);
+};
+
 describe("bazhen doctor", () => {
   it("shows what the daemon runs with, and passes when every runtime answers", async () => {
     s.daemon.answer("GET /v1/health", HealthResponse, health()).answer(
@@ -194,6 +208,27 @@ describe("bazhen doctor", () => {
         "  removed: none",
       ]),
     );
+  });
+
+  it("warns when Codex's app-server can't be told for one, so a Codex agent's commands could pass as yours", async () => {
+    const codex = "codex: app-server 0.169.0 (as last connected), cli 0.169.0";
+    expect([
+      await codexLines("marked"),
+      await codexLines(null),
+      await codexLines("unmarked"),
+      await codexLines("unread"),
+    ]).toEqual([
+      [codex, expect.not.stringContaining("warning")],
+      [codex, expect.not.stringContaining("warning")],
+      [
+        codex,
+        "  warning: the peer reader doesn't know this app-server for Codex's, so a live Codex agent's commands could pass as yours",
+      ],
+      [
+        codex,
+        "  warning: the peer reader can't read Codex's app-server, so whether a live Codex agent's commands pass as yours is unknown",
+      ],
+    ]);
   });
 
   it("says which program reads who calls on its socket, and warns when none is installed", async () => {

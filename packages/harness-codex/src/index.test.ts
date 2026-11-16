@@ -52,6 +52,22 @@ describe("Codex harness", () => {
     ]);
   });
 
+  it("gives the agent's thread this daemon's socket on its start and each resume, for its commands", async () => {
+    const { port, requests } = channel();
+    const harness = new CodexHarness(port, REMOTE, "/h/run/bazhen.sock");
+    await harness.launchSpec({ cwd: "/work" }, {});
+    await harness.resumeSpec(
+      { harness: "codex", project: "p", cwd: "/work" },
+      { kind: "codex-thread", id: "thr-1" },
+      {},
+    );
+    const config = { "shell_environment_policy.set.BAZHEN_SOCKET": "/h/run/bazhen.sock" };
+    expect(requests.filter(([method]) => method !== "thread/inject_items")).toEqual([
+      ["thread/start", { cwd: "/work", config }],
+      ["thread/resume", { threadId: "thr-1", excludeTurns: true, config }],
+    ]);
+  });
+
   it("tells the agent's thread Bazhen's instructions once, in its first item, and not again on a resume", async () => {
     const { port, requests } = channel();
     const harness = new CodexHarness(port, REMOTE);

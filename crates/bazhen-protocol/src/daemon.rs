@@ -103,6 +103,27 @@ pub struct AgentsSettings {
 pub struct Codex {
     pub daemon: Option<String>,
     pub cli: Option<String>,
+    /// Whether the peer reader knows the app-server for Codex's, read while a Codex agent is live;
+    /// null otherwise, and absent from an older daemon.
+    #[serde(
+        rename = "toolCalls",
+        default,
+        skip_serializing_if = "Nullable::is_absent",
+        deserialize_with = "Nullable::present"
+    )]
+    pub tool_calls: Nullable<ToolCalls>,
+}
+
+/// What the peer reader made of Codex's app-server, whose commands it must tell from the human's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ToolCalls {
+    /// It reads the server as Codex's.
+    Marked,
+    /// It reads the server as no Codex app-server: a Codex agent's commands could read as yours.
+    Unmarked,
+    /// It couldn't read the server.
+    Unread,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

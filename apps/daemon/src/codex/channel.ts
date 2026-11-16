@@ -53,6 +53,8 @@ export interface CodexChannelOptions {
   readonly startDaemon: () => Promise<void>;
   /** The threads of the agents Bazhen runs, each resumed on every new connection. */
   readonly boundThreads: () => readonly string[];
+  /** What each thread is resumed with, as the harness starts it with (`threadConfig`). */
+  readonly threadConfig?: Readonly<Record<string, string>>;
   readonly listener?: ChannelListener;
   /** The version the server answered on, told on every new connection that names one. */
   readonly connectedTo?: (version: string) => void;
@@ -96,7 +98,8 @@ export class CodexChannel implements HarnessChannelPort {
   readonly address: string;
   private readonly opts: CodexChannelOptions;
   private readonly codexHome: string;
-  private readonly socket: string;
+  /** The managed app-server's control socket. */
+  readonly socket: string;
   private readonly log: (message: string) => void;
   private connection: Promise<AppServer> | undefined;
   private current: AppServer | undefined;
@@ -160,8 +163,13 @@ export class CodexChannel implements HarnessChannelPort {
    * subscriber must be, and tells the listener its status.
    */
   async resume(threadId: string): Promise<void> {
-    const result = await this.request("thread/resume", { threadId, excludeTurns: true });
+    const result = await this.request("thread/resume", this.resumeParams(threadId));
     this.opts.listener?.threadResumed?.(threadId, result);
+  }
+
+  private resumeParams(threadId: string) {
+    const config = this.opts.threadConfig;
+    return { threadId, excludeTurns: true, ...(config === undefined ? {} : { config }) };
   }
 
   close(): void {
@@ -229,7 +237,7 @@ export class CodexChannel implements HarnessChannelPort {
     // thread with no subscriber unloads; after any reconnect, every bound thread is resumed.
     const resumed: string[] = [];
     for (const threadId of this.opts.boundThreads()) {
-      await server.request("thread/resume", { threadId, excludeTurns: true }).then(
+      await server.request("thread/resume", this.resumeParams(threadId)).then(
         (result) => {
           resumed.push(threadId);
           listener?.threadResumed?.(threadId, result);

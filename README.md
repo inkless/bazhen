@@ -289,9 +289,19 @@ its environment. Only a call made outside every agent's terminal is yours.
 Codex runs an agent's commands in its app-server, outside the agent's terminal. So a call from a
 process under a Codex app-server (`codex app-server`, the managed one included), or from one whose
 environment Codex gave a `CODEX_THREAD_ID`, as a command left running after its shell exits, is
-never yours: the daemon refuses it. It knows the server by its command line (`codex` or
-`codex-<platform>`, run as `app-server`), so a Codex that renames its binary or that subcommand
-would be missed; `pnpm test:real api` checks the Codex the tests install.
+never yours. It is the agent whose thread `CODEX_THREAD_ID` names, which `bazhen` sends, and is
+refused when that thread is no live agent's, such as your own Codex session's. Bazhen gives each
+agent's thread `BAZHEN_SOCKET`, so its commands reach the daemon that launched it. The daemon knows
+the server by its command line (`codex` or `codex-<platform>`, run as `app-server`), so a Codex
+that renames its binary or that subcommand would be missed; `pnpm test:real api` checks the Codex
+the tests install, and `bazhen doctor` warns when a live Codex agent's server doesn't match.
+
+Every Codex agent's commands run under the same server, so only the thread a call names tells one
+Codex agent from another, and any of them can name another's. A command in Codex's
+`workspace-write` sandbox can't reach the daemon's socket at all; run `bazhen` outside it. On
+macOS, the kernel hides the environment of a process it restricts (`cs_restricted`, unless SIP is
+off), so a command left running after its shell exits is marked only when it isn't one; the
+`bazhen` CLI isn't.
 
 These checks catch an agent's ordinary and accidental calls, not a determined agent's. Agents run
 as you, the same user, so an agent that does any of these looks like you to Bazhen:

@@ -1,6 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { LaunchAgentResponse, SendMessageResponse, StateSnapshot } from "@bazhen/protocol";
-import { BANNER, Daemon, showsThread, waitUntil } from "./daemon.ts";
+import {
+  DoctorResponse,
+  LaunchAgentResponse,
+  SendMessageResponse,
+  StateSnapshot,
+} from "@bazhen/protocol";
+import { BANNER, Daemon, overSocket, showsThread, waitUntil } from "./daemon.ts";
 import { FAKE_CODEX_QUESTION, startFakeResponses } from "./fake-responses.ts";
 import type { FakeModel } from "./fake-model.ts";
 
@@ -56,6 +61,24 @@ const offered = () =>
   });
 
 const state = async () => StateSnapshot.parse((await daemon.request("/v1/state")).body);
+
+/**
+ * Has the asker run `command` outside the sandbox, allowed from the inbox, then `echo <tag>=$?`
+ * after it; the call's output, once it has one. The prompt must fit one row of the TUI.
+ */
+async function ranAllowed(command: string, tag: string): Promise<string> {
+  await daemon.prompt(asker, `[[fake:shell:${command}; echo ${tag}=$?]]`);
+  const id = await openItemFor(`echo ${tag}=`);
+  const answered = await daemon.request(`/v1/attention/${id}/answer`, {
+    method: "POST",
+    body: { idempotencyKey: `allow-${tag}`, decision: "allow" },
+  });
+  expect(answered.status).toBe(200);
+  let output: string | undefined;
+  const ran = () => (output = toolOutputs().find((o) => o.includes(`${tag}=`))) !== undefined;
+  await waitUntil(ran, `the output of ${command}`, 30_000);
+  return String(output);
+}
 /** The id of the open item whose summary names this command, once there is one. */
 async function openItemFor(command: string): Promise<string> {
   let id: string | undefined;
@@ -219,22 +242,25 @@ describe("a Codex agent", () => {
     expect(await closeReasonOf(id)).toBe("answered");
   });
 
-  it("refuses the human's verbs to a command the agent runs, which Codex runs out of its terminal", async () => {
-    // Pins the Codex the suites install: one whose app-server Bazhen no longer knows would let the
-    // command list the devices as the human. The app-server's PATH lacks the test's CLI, which is
-    // in the daemon's home, above the work directory; the prompt must fit one row of the TUI.
-    const command = "cd ..; BAZHEN_HOME=$PWD cli/bazhen devices; echo exit=$?";
-    await daemon.prompt(asker, `[[fake:shell:${command}]]`);
-    const id = await openItemFor("bazhen devices");
-    const answered = await daemon.request(`/v1/attention/${id}/answer`, {
-      method: "POST",
-      body: { idempotencyKey: "allow-devices", decision: "allow" },
-    });
-    expect(answered.status).toBe(200);
-    await expect
-      .poll(() => toolOutputs().filter((o) => o.includes("exit=")), { timeout: 30_000 })
-      .toEqual([expect.stringContaining("a Codex tool call names no agent")]);
-    expect(toolOutputs().filter((o) => o.includes("exit=0"))).toEqual([]);
+  // These pin the Codex the suites install: one whose app-server Bazhen no longer knows would let
+  // the agent's commands pass as the human's. The app-server's PATH lacks the test's CLI, which is
+  // in the daemon's home, above the work directory.
+  it("refuses the human's verbs to a command the agent runs, as that agent's own call", async () => {
+    const output = await ranAllowed("cd ..; BAZHEN_HOME=$PWD cli/bazhen devices", "devices");
+    expect(output).toContain("an agent can't list paired devices");
+    expect(output).not.toContain("devices=0");
+  });
+
+  it("tells a command the agent runs which agent it is, at the daemon that launched it", async () => {
+    const output = await ranAllowed("../cli/bazhen whoami", "whoami");
+    expect(output).toContain(asker.agentId);
+    expect(output).toContain("whoami=0");
+  });
+
+  it("knows Codex's app-server for one in doctor while a Codex agent runs", async () => {
+    const asked = await overSocket(daemon.socket, "GET", "/v1/daemon/doctor");
+    const doctor = DoctorResponse.parse(asked.body);
+    expect(doctor.codex?.toolCalls).toBe("marked");
   });
 
   it("closes the item when the request is answered in the TUI instead", async () => {

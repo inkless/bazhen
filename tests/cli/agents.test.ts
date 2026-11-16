@@ -274,6 +274,43 @@ describe("bazhen whoami", () => {
     expect((await s.bazhen(["whoami"], asAgent)).stdout).toMatch(/\nno tasks\n$/);
   });
 
+  it("names the Codex agent whose thread the command runs in, as Codex runs it outside the agent", async () => {
+    const thread = "01a1e0f0-593e-7ae1-9d31-769db26227fc";
+    const codexAgent = (id: string, name: string, over = {}) => {
+      const a = agent(id, name, over);
+      return {
+        ...a,
+        externalRef: { environmentId: a.environmentId, kind: "codex-thread" as const, id: thread },
+      };
+    };
+    s.daemon.answer(
+      "GET /v1/state",
+      StateSnapshot,
+      snapshot({
+        agents: [codexAgent(OTHER, "before", { state: "closed" }), codexAgent(AGENT, "BZ-127")],
+      }),
+    );
+    const ran = await s.bazhen(["whoami"], { CODEX_THREAD_ID: thread });
+    expect(ran.stdout.split("\n")[0]).toBe(`BZ-127  ${AGENT}`);
+  });
+
+  it("names no agent for a Codex thread no live agent is bound to", async () => {
+    s.daemon.answer("GET /v1/state", StateSnapshot, snapshot({ agents: [agent(AGENT, "BZ-127")] }));
+    const ran = await s.bazhen(["whoami"], {
+      CODEX_THREAD_ID: "01a1e0f0-0000-7000-8000-000000000000",
+    });
+    expect([ran.code, ran.stdout, ran.stderr]).toEqual([
+      2,
+      "",
+      expect.stringContaining("inside an agent"),
+    ]);
+  });
+
+  it("says only why it can't answer outside an agent, not every verb's usage", async () => {
+    const outside = await s.bazhen(["whoami"]);
+    expect(outside.stderr).not.toContain("bazhen agents");
+  });
+
   it("wants to run inside an agent the daemon knows", async () => {
     s.daemon.answer("GET /v1/state", StateSnapshot, snapshot());
     const outside = await s.bazhen(["whoami"]);

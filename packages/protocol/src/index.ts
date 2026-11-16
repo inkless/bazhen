@@ -87,7 +87,17 @@ export const DoctorResponse = z.object({
    * Codex's managed app-server, as last connected to, and the CLI agents run; null for one
    * not reached. They update apart (foundation-design §5.8). Absent from an older daemon.
    */
-  codex: z.object({ daemon: z.string().nullable(), cli: z.string().nullable() }).optional(),
+  codex: z
+    .object({
+      daemon: z.string().nullable(),
+      cli: z.string().nullable(),
+      /**
+       * Whether the peer reader knows the app-server for Codex's, read while a Codex agent is
+       * live and the reader is installed; null otherwise.
+       */
+      toolCalls: z.enum(["marked", "unmarked", "unread"]).nullable().optional(),
+    })
+    .optional(),
   /**
    * The external origins the daemon admits besides loopback, where they came from, and whether
    * plain HTTP to another host may be among them (foundation-design §9.2). Absent from a daemon
