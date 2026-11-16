@@ -1,9 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { HealthResponse } from "@bazhen/protocol";
 import { type FakeHolder, fakeHolder, type Scene, scene } from "./cli.ts";
-import { health } from "./fixtures.ts";
 
 let s: Scene;
 let holder: FakeHolder | undefined;
@@ -29,36 +27,33 @@ async function holding(): Promise<FakeHolder> {
 }
 
 describe("bazhen attach --direct", () => {
-  it("asks the holder for no input while the daemon answers", async () => {
-    s.daemon.answer("GET /v1/health", HealthResponse, health());
-    const fake = await holding();
-    const ran = await s.bazhen(["attach", TERM, "--direct"]);
-    expect([ran.code, ran.stderr.trim(), fake.hellos.map((h) => h.writer)]).toEqual([
-      1,
-      NOT_A_TERMINAL,
-      [false],
-    ]);
-  });
-
-  it("asks the holder for its input when no daemon answers", async () => {
+  it("wants a terminal before it says a word to the holder, so a pipe never holds its input", async () => {
     await s.daemon.close();
     const fake = await holding();
     const ran = await s.bazhen(["attach", TERM, "--direct"]);
-    expect([ran.code, ran.stderr.trim(), fake.hellos.map((h) => h.writer)]).toEqual([
-      1,
-      NOT_A_TERMINAL,
-      [true],
-    ]);
+    expect([ran.code, ran.stderr.trim(), fake.hellos]).toEqual([1, NOT_A_TERMINAL, []]);
   });
 
-  it("goes straight to the holder of a terminal id when no daemon answers, without --direct", async () => {
+  it("goes straight to the holder of a terminal id when no daemon is there, without --direct", async () => {
     await s.daemon.close();
     const fake = await holding();
     const ran = await s.bazhen(["attach", TERM]);
-    expect([ran.code, ran.stderr.trim().split("\n"), fake.hellos.map((h) => h.writer)]).toEqual([
+    expect([ran.code, ran.stderr.trim().split("\n"), fake.hellos]).toEqual([
       1,
       ["bazhen is not running: attaching straight to the terminal's holder", NOT_A_TERMINAL],
-      [true],
+      [],
+    ]);
+  });
+
+  it("won't go around a daemon that listens but doesn't answer, saying --direct can view", async () => {
+    s.daemon.hang("GET /v1/health");
+    const fake = await holding();
+    const ran = await s.bazhen(["attach", TERM]);
+    expect([ran.code, ran.stderr.trim(), fake.hellos]).toEqual([
+      3,
+      "the daemon doesn't answer, but may be running (something listens on its socket), so " +
+        `attach won't go around it: \`bazhen attach --direct ${TERM}\` can view the terminal`,
+      [],
     ]);
   });
 
@@ -76,17 +71,6 @@ describe("bazhen attach --direct", () => {
     expect([ran.code, ran.stderr.trim()]).toEqual([
       2,
       "bazhen attach --direct takes a terminal id: names are the daemon's to resolve",
-    ]);
-  });
-
-  it("says no holder answers for a terminal that has none", async () => {
-    s.daemon.answer("GET /v1/health", HealthResponse, health());
-    const ran = await s.bazhen(["attach", TERM, "--direct"]);
-    expect([ran.code, ran.stderr]).toEqual([
-      1,
-      expect.stringContaining(
-        `no holder answers for ${TERM} at ${s.home}/run/holders/${TERM}.sock`,
-      ),
     ]);
   });
 });

@@ -74,22 +74,38 @@ describe("bazhen attach, on a holder terminal", () => {
       true,
     ]);
   });
+});
 
-  it("goes straight to the holder with the daemon down, and types there", async () => {
-    const terminalId = await shell("straight");
+describe("bazhen attach, straight to the holder while the daemon is down", () => {
+  let daemon: Daemon;
+  let left: (() => void)[] = [];
+  beforeAll(async () => {
+    daemon = await Daemon.start({ config: '[runtime]\ndefault = "holder"\n' });
+  });
+  afterEach(() => {
+    for (const leave of left) leave();
+    left = [];
+  });
+  afterAll(async () => {
+    await daemon?.stop();
+  });
+
+  it("types there, and lets go of the input once the daemon is back", async () => {
+    const opened = await daemon.request("/v1/shells", {
+      method: "POST",
+      body: { idempotencyKey: "straight", cwd: daemon.work },
+    });
+    const terminalId = ShellCommandResponse.parse(opened.body).terminalId;
     await daemon.crash();
-    try {
-      const direct = attachInScript(daemon, terminalId);
-      left.push(direct.leave);
-      direct.type("printf 'straight-%s\\n' 5\r");
-      await waitUntil(() => direct.shown().includes("straight-5"), "the command's output");
-      direct.type(DETACH);
-      expect([
-        await direct.exited,
-        direct.shown().includes("bazhen is not running: attaching straight"),
-      ]).toEqual([0, true]);
-    } finally {
-      await daemon.restart();
-    }
+    const direct = attachInScript(daemon, terminalId);
+    left.push(direct.leave);
+    direct.type("printf 'straight-%s\\n' 5\r");
+    await waitUntil(() => direct.shown().includes("straight-5"), "the command's output");
+    await daemon.restart();
+    expect([
+      await direct.exited,
+      direct.shown().includes("bazhen is not running: attaching straight"),
+      direct.shown().includes("the daemon is back, so this attachment let go"),
+    ]).toEqual([0, true, true]);
   });
 });

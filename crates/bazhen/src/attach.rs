@@ -67,7 +67,7 @@ pub(crate) fn run(
     };
     let holders = socket.parent().unwrap_or(socket).join("holders");
     if p.has("direct") {
-        return straight(&holders, target, daemon, out);
+        return straight(&holders, socket, target, out);
     }
     match daemon.get::<Answering>("/v1/health", CALL) {
         Ok(health) if health.protocol_id != PROTOCOL_ID => {
@@ -76,8 +76,15 @@ pub(crate) fn run(
         }
         Ok(_) => {}
         Err(Failed::NotRunning) if is_id("term", target) => {
+            if let Err(why) = direct::daemon_absent(socket) {
+                out.err(&format!(
+                    "the daemon doesn't answer, but may be running ({why}), so attach won't go \
+                     around it: `bazhen attach --direct {target}` can view the terminal"
+                ));
+                return Ok(Exit::NotRunning);
+            }
             out.err("bazhen is not running: attaching straight to the terminal's holder");
-            return straight(&holders, target, daemon, out);
+            return straight(&holders, socket, target, out);
         }
         Err(e) => return Err(e),
     }
@@ -130,24 +137,26 @@ pub(crate) fn run(
 
 /// Attaches straight to `target`'s holder, in `holders`. It asks to type only when no daemon
 /// answers, and says so when it can't.
-fn straight(holders: &Path, target: &str, daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
+fn straight(holders: &Path, socket: &Path, target: &str, out: &mut Out) -> Result<Exit, Failed> {
     if !is_id("term", target) {
         out.err("bazhen attach --direct takes a terminal id: names are the daemon's to resolve");
         return Ok(Exit::Usage);
     }
-    // A daemon that answers, even oddly, may hold the terminal's input: never type behind it.
-    let asks = matches!(daemon.answers(), Ok(false));
-    let (mut stream, hello, mut decoder) = direct::open(holders, target, asks)?;
     if !tty::interactive() {
         out.err(NOT_A_TERMINAL);
         return Ok(Exit::Failed);
     }
+    // Only a daemon that is surely not there can't be holding the terminal's input: one that is
+    // slow, or whose socket can't be read, may be, so the attachment never types behind it.
+    let absent = direct::daemon_absent(socket);
+    let asks = absent.is_ok();
+    let (mut stream, hello, mut decoder) = direct::open(holders, target, asks)?;
     let mut notes = Vec::new();
-    if !asks {
-        notes.push(
-            "the daemon is running, so --direct only viewed the terminal: attach without it to type"
-                .to_owned(),
-        );
+    if let Err(why) = absent {
+        notes.push(format!(
+            "a daemon may be running ({why}), so --direct only viewed the terminal: attach \
+             without it to type"
+        ));
     } else if !hello.writer {
         notes.push(
             "another connection holds the terminal's input, so this attachment only viewed it"
@@ -160,8 +169,11 @@ fn straight(holders: &Path, target: &str, daemon: &Daemon, out: &mut Out) -> Res
         &mut stream,
         &mut decoder,
         &mut direct,
-        &resizes,
-        &stops,
+        direct::Watched {
+            resizes: &resizes,
+            stops: &stops,
+            daemon: socket,
+        },
         &mut notes,
     );
     drop(raw);
@@ -191,6 +203,13 @@ fn report(done: Done, target: &str, notes: &[String], out: &mut Out) -> Exit {
     }
     let (said, exit) = match done {
         Done::Ended(Ending::Detached) => (format!("detached from {target}"), Exit::Done),
+        Done::Ended(Ending::Yielded) => (
+            format!(
+                "the daemon is back, so this attachment let go of {target}'s input: \
+                 `bazhen attach {target}` goes on through it"
+            ),
+            Exit::Done,
+        ),
         Done::Ended(Ending::Stopped) => (
             format!("stopped by a signal; {target} goes on"),
             Exit::Failed,

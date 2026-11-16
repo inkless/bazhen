@@ -40,6 +40,8 @@ pub enum Ending {
     Detached,
     /// A signal asked this process to stop.
     Stopped,
+    /// A direct attachment let go of the terminal's input for a daemon that came back.
+    Yielded,
     /// The terminal closed.
     Exited,
     /// The daemon ended the view for falling behind; a new one starts from a fresh snapshot.

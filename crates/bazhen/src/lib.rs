@@ -86,6 +86,7 @@ pub(crate) const USAGE: &str = concat!(
     "[--home <dir>] [--port <port>]\n",
     "usage: bazhen attach <agent|shell|terminal> [--direct] [--home <dir>]\n",
     "  Ctrl-\\ Ctrl-\\ detaches; a second kill ends it at once, after which `reset` repairs the terminal\n",
+    "  --direct types only while no daemon is there, and lets go of the input once one is back\n",
     "usage:
   bazhen agents [--json]
   bazhen whoami

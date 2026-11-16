@@ -1,8 +1,8 @@
 //! `bazhen attach --direct`: straight to a terminal's holder, over its own socket, for when the
-//! daemon is down or broken. It types only while no daemon answers: the holder frees its one
-//! writer slot only when the connection holding it hangs up, so a direct attach left open while the
-//! daemon runs would keep the web app's keys from the terminal. It never closes or signals the
-//! terminal.
+//! daemon is down or broken. It types only while the daemon is surely not there, and lets go of
+//! the terminal's input as soon as one is: the holder frees its one writer slot only when the
+//! connection holding it hangs up, so a direct attach left open while the daemon runs would keep
+//! the web app's keys from the terminal. It never closes or signals the terminal.
 
 use std::io::{self, ErrorKind, Read as _, Write as _};
 use std::os::unix::net::UnixStream;
@@ -22,6 +22,8 @@ use crate::call::Failed;
 
 /// How long a holder has to answer `hello`, as the daemon gives it.
 const HELLO: Duration = Duration::from_secs(2);
+/// How often an attachment that types looks again for a daemon that came back.
+const RECHECK: Duration = Duration::from_secs(2);
 /// The most read from the person's terminal, or the holder, at once.
 const READ_AT_ONCE: usize = 64 << 10;
 
@@ -97,6 +99,20 @@ impl Direct {
         steps
     }
 
+    /// Whether this attachment types into the terminal.
+    #[must_use]
+    pub fn writes(&self) -> bool {
+        self.writer
+    }
+
+    /// A daemon came back: an attachment that types lets go, so the daemon can.
+    pub fn daemon_back(&mut self) -> Vec<Step> {
+        if !self.writer {
+            return vec![];
+        }
+        vec![Step::End(Ending::Yielded)]
+    }
+
     /// The person's terminal resized: the holder's too, while this attachment holds the slot.
     pub fn resized(&mut self, size: Size) -> Vec<Step> {
         if !self.writer {
@@ -149,6 +165,26 @@ impl Direct {
                 .to_owned(),
         )]
     }
+}
+
+/// Whether the daemon at `socket` is surely not there: nothing at the path, or a socket nothing
+/// listens on, as a daemon that ended leaves. Anything else may be a daemon, slow or one this
+/// process can't reach, which could be holding the terminal's input; the reason says which.
+pub(crate) fn daemon_absent(socket: &Path) -> Result<(), String> {
+    match UnixStream::connect(socket) {
+        Err(e) if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::ConnectionRefused) => Ok(()),
+        Err(e) => Err(format!("its socket can't be reached: {e}")),
+        Ok(_) => Err("something listens on its socket".to_owned()),
+    }
+}
+
+/// What an attachment's loop watches besides the terminal and the holder.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Watched<'a> {
+    pub(crate) resizes: &'a Wakeups,
+    pub(crate) stops: &'a Stops,
+    /// The daemon's socket, looked at again every RECHECK while the attachment types.
+    pub(crate) daemon: &'a Path,
 }
 
 /// The holder of `terminal`, beside the daemon's socket, said hello to as a writer when `writer`.
@@ -232,10 +268,19 @@ pub(crate) fn pump(
     stream: &mut UnixStream,
     decoder: &mut FrameDecoder<Reply>,
     direct: &mut Direct,
-    resizes: &Wakeups,
-    stops: &Stops,
+    watched: Watched<'_>,
     notes: &mut Vec<String>,
 ) -> io::Result<Option<Ending>> {
+    let Watched {
+        resizes,
+        stops,
+        daemon,
+    } = watched;
+    let recheck = rustix::event::Timespec {
+        tv_sec: i64::try_from(RECHECK.as_secs()).unwrap_or(i64::MAX),
+        tv_nsec: 0,
+    };
+    let mut checked = Instant::now();
     let stdin = io::stdin();
     let mut stdout = io::stdout().lock();
     let mut chunk = vec![0u8; READ_AT_ONCE];
@@ -262,12 +307,20 @@ pub(crate) fn pump(
             PollFd::from_borrowed_fd(resizes.fd(), PollFlags::IN),
             PollFd::from_borrowed_fd(stops.fd(), PollFlags::IN),
         ];
-        match poll(&mut fds, None) {
+        let wait = direct.writes().then_some(&recheck);
+        match poll(&mut fds, wait) {
             Ok(_) => {}
             Err(Errno::INTR) => continue,
             Err(e) => return Err(e.into()),
         }
         let [typed, holder, winch, stop] = fds.map(|fd| fd.revents());
+        if direct.writes() && checked.elapsed() >= RECHECK {
+            checked = Instant::now();
+            if daemon_absent(daemon).is_err() {
+                todo.extend(direct.daemon_back());
+                continue;
+            }
+        }
         if !stop.is_empty() {
             return Ok(Some(Ending::Stopped));
         }
@@ -509,6 +562,34 @@ mod tests {
                 if m == "the holder of term_x refused to attach: no major in common (it speaks 2.0)"),
             "{refused:?}"
         );
+    }
+
+    #[test]
+    fn lets_go_of_the_input_for_a_daemon_that_came_back_only_while_typing() {
+        let mut writer = Direct::new(true);
+        let mut viewer = Direct::new(false);
+        assert_eq!(writer.daemon_back(), [Step::End(Ending::Yielded)]);
+        assert_eq!(viewer.daemon_back(), []);
+    }
+
+    #[test]
+    fn takes_the_daemon_for_gone_only_where_nothing_is_or_nothing_listens() {
+        let dir = Dir::new("absent");
+        let nothing = dir.0.join("nothing.sock");
+        let stale = dir.0.join("stale.sock");
+        drop(UnixListener::bind(&stale).unwrap());
+        let slow = dir.0.join("slow.sock");
+        let _listening = UnixListener::bind(&slow).unwrap();
+        let sealed = dir.0.join("sealed");
+        std::fs::create_dir(&sealed).unwrap();
+        let unreachable = sealed.join("bazhen.sock");
+        let _behind = UnixListener::bind(&unreachable).unwrap();
+        std::fs::set_permissions(&sealed, std::os::unix::fs::PermissionsExt::from_mode(0o000))
+            .unwrap();
+        let absent = [&nothing, &stale, &slow, &unreachable].map(|s| daemon_absent(s).is_ok());
+        std::fs::set_permissions(&sealed, std::os::unix::fs::PermissionsExt::from_mode(0o700))
+            .unwrap();
+        assert_eq!(absent, [true, true, false, false]);
     }
 
     #[test]
