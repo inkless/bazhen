@@ -104,8 +104,9 @@ describe("tmux dead-pane focus defect", () => {
     const first = attach(server);
     await expect.poll(() => shown(server), { timeout: 5_000 }).toBe(true);
     await exitPane(server);
-    first.hangUp();
+    tmux(server, "detach-client", "-s", "f");
     await expect.poll(() => shown(server), { timeout: 5_000 }).toBe(false);
+    first.hangUp();
     const again = attach(server);
     await expect.poll(() => settledAttach(server), { timeout: 5_000 }).toBe(true);
     again.hangUp();
