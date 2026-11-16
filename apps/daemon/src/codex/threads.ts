@@ -53,6 +53,13 @@ interface Moving {
 
 /** How many new thread ids are kept to resolve titles against; the oldest go first. */
 const SEEN = 2000;
+/** The threads `thread/list` answers with in one page. */
+const LIST_PAGE = 50;
+/**
+ * The most pages a move's first try reads, for a thread the TUI resumed from far back; its
+ * retries read only the first, where a thread saved since sorts.
+ */
+const LIST_PAGES = 40;
 
 export const UNTRACKED = "thread switches are not being tracked";
 
@@ -84,6 +91,12 @@ export class CodexThreads {
    * new TUI is up only once a change to it has been heard.
    */
   private readonly reused = new Set<TerminalId>();
+  /**
+   * Terminals whose move was given up on, by the prefix their title named: that title, told
+   * again, moves the agent only if a thread it names is announced or listed by then, and holds no
+   * mail meanwhile.
+   */
+  private readonly gaveUp = new Map<TerminalId, string>();
   /** The agents whose titles are being read at start; their mail waits until they are. */
   private starting: Set<string> | undefined;
   /** One title at a time, in the order the runtimes reported them. */
@@ -106,6 +119,9 @@ export class CodexThreads {
       }
       for (const [terminal, m] of this.moving) {
         if (id.startsWith(m.prefix)) void this.titleChanged(terminal);
+      }
+      for (const [terminal, prefix] of this.gaveUp) {
+        if (id.startsWith(prefix)) void this.titleChanged(terminal);
       }
     },
   };
@@ -174,6 +190,8 @@ export class CodexThreads {
 
   private async follow(terminal: TerminalId, told?: string): Promise<void> {
     const { store, runtime } = this.opts;
+    const gaveUpOn = this.gaveUp.get(terminal);
+    this.gaveUp.delete(terminal);
     const agent = store.codexAgentIn(terminal);
     if (agent === undefined) return this.settle(terminal);
     const title = told ?? (await runtime.title(agent.runtime));
@@ -189,15 +207,23 @@ export class CodexThreads {
       this.tracked(agent.agentId, terminal);
       return this.settle(terminal);
     }
+    const prior = this.moving.get(terminal);
+    const waited = prior?.agentId === agent.agentId && prior.prefix === prefix ? prior : undefined;
     let found = matching(prefix, this.seen);
-    if (found.length === 0) found = matching(prefix, await this.listed());
+    if (found.length === 0 && waited?.threadId !== undefined) found = [waited.threadId];
+    if (found.length === 0)
+      found = matching(prefix, await this.listed(waited === undefined ? LIST_PAGES : 1));
     if (found.length > 1) {
       this.settle(terminal);
       return this.untracked(agent.agentId, `${found.length} threads match ${prefix}`);
     }
     const [threadId] = found;
     if (threadId === undefined) {
-      if (this.moving.get(terminal)?.prefix !== prefix)
+      if (gaveUpOn === prefix) {
+        this.gaveUp.set(terminal, prefix);
+        return this.settle(terminal);
+      }
+      if (waited === undefined)
         this.log(`codex: no thread matches ${prefix} yet; agent ${agent.agentId} waits to move`);
       return this.later(terminal, this.move(terminal, agent.agentId, prefix));
     }
@@ -265,6 +291,7 @@ export class CodexThreads {
   private later(terminal: TerminalId, m: Moving): void {
     if (Date.now() - m.since >= (this.opts.giveUpMs ?? RESUME_GIVE_UP_MS)) {
       this.settle(terminal);
+      this.gaveUp.set(terminal, m.prefix);
       const why =
         m.threadId === undefined
           ? `no thread matches ${m.prefix}`
@@ -286,14 +313,25 @@ export class CodexThreads {
     this.opts.released?.(m.agentId);
   }
 
-  /** The threads the server lists, newest first; none if it can't list them. */
-  private async listed(): Promise<string[]> {
+  /**
+   * The threads the server lists in up to `pages` pages, newest first; those it listed before it
+   * failed, if it does.
+   */
+  private async listed(pages: number): Promise<string[]> {
+    const threads: string[] = [];
+    let cursor: string | null = null;
     try {
-      return readThreadList(await this.opts.channel.request("thread/list", { limit: 50 }));
+      for (let page = 0; page < pages; page++) {
+        const params = { limit: LIST_PAGE, ...(cursor !== null && { cursor }) };
+        const answer = readThreadList(await this.opts.channel.request("thread/list", params));
+        threads.push(...answer.threads);
+        cursor = answer.nextCursor;
+        if (cursor === null) break;
+      }
     } catch (err) {
       this.log(`codex: could not list threads: ${String(err)}`);
-      return [];
     }
+    return threads;
   }
 
   /**

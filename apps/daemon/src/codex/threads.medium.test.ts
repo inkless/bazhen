@@ -25,11 +25,14 @@ const started = (id: string, extra: object = {}) => ({ thread: { id, ...extra } 
 
 /**
  * Agent on thread A in pane %0, whose title reads as `titles`, one per read and then the last,
- * and a server whose `thread/list` answers `listed`, as it is at each list.
+ * and a server whose `thread/list` answers `listed`, as it is at each list, or `pages`, one per
+ * cursor.
  */
 async function setup(opts: {
   titles: string[];
   listed?: unknown[];
+  pages?: unknown[][];
+  retryMs?: number;
   unsaved?: number;
   /** Threads other agents are bound to, in panes %1 on. */
   others?: string[];
@@ -54,7 +57,7 @@ async function setup(opts: {
   const released: string[] = [];
   const agentId = agentOn(A);
   const resumed: string[] = [];
-  const lists: unknown[] = [];
+  const lists: [method: string, params: unknown][] = [];
   const titles = [...opts.titles];
   const titled: RuntimeRef[] = [];
   const logged: string[] = [];
@@ -72,7 +75,10 @@ async function setup(opts: {
       request: async (method, params) => {
         lists.push([method, params]);
         await opts.listing;
-        return { data: opts.listed ?? [] };
+        if (opts.pages === undefined) return { data: opts.listed ?? [] };
+        const at = Number(Object(params).cursor ?? 0);
+        const more = at + 1 < opts.pages.length;
+        return { data: opts.pages[at] ?? [], nextCursor: more ? String(at + 1) : null };
       },
       resume: async (threadId) => {
         resumed.push(threadId);
@@ -80,7 +86,7 @@ async function setup(opts: {
       },
     },
     log: (message) => logged.push(message),
-    retryMs: 5,
+    retryMs: opts.retryMs ?? 5,
     released: (id) => released.push(id),
     ready: (id) => readiness.ready(id, "codex_title"),
     ...(opts.giveUpMs === undefined ? {} : { giveUpMs: opts.giveUpMs }),
@@ -195,6 +201,39 @@ describe("Codex thread switches", () => {
     ]);
   });
 
+  it("finds a thread the TUI resumed from far back, past the thread list's first page", async () => {
+    const s = await setup({ titles: [shown(B)], pages: [[{ id: A }], [{ id: C }], [{ id: B }]] });
+    await s.threads.titleChanged(s.terminal);
+    expect([s.boundTo(), s.resumed, s.lists.length]).toEqual([B, [B], 3]);
+  });
+
+  it("reads only the thread list's first page again while it waits", async () => {
+    const s = await setup({ titles: [shown(B)], pages: [[{ id: A }], [{ id: C }]] });
+    await s.threads.titleChanged(s.terminal);
+    await expect.poll(() => s.lists.length).toBeGreaterThan(4);
+    expect(s.lists.filter(([, params]) => Object(params).cursor !== undefined)).toHaveLength(1);
+  });
+
+  it("holds no mail again for a title it gave up on, told again, and moves once its thread is listed", async () => {
+    const listed = [{ id: A }];
+    const s = await setup({ titles: [shown(B)], listed, giveUpMs: 20 });
+    await s.threads.titleChanged(s.terminal);
+    await expect.poll(s.untracked).toBe(true);
+    await s.threads.titleChanged(s.terminal);
+    expect([s.boundTo(), s.held(), s.released]).toEqual([A, false, [s.agentId]]);
+    listed.push({ id: B });
+    await s.threads.titleChanged(s.terminal);
+    expect([s.boundTo(), s.untracked()]).toEqual([B, false]);
+  });
+
+  it("moves an agent it gave up on once the thread its title names is announced", async () => {
+    const s = await setup({ titles: [shown(B)], listed: [{ id: A }], giveUpMs: 20 });
+    await s.threads.titleChanged(s.terminal);
+    await expect.poll(s.untracked).toBe(true);
+    s.announce(B);
+    await expect.poll(s.boundTo).toBe(B);
+  });
+
   it("leaves the agent on its thread when no thread is listed in time, and says so", async () => {
     const s = await setup({ titles: [shown(B)], listed: [{ id: A }], giveUpMs: 20 });
     await s.threads.titleChanged(s.terminal);
@@ -205,7 +244,7 @@ describe("Codex thread switches", () => {
   });
 
   it("moves the agent once the thread its title named first is announced", async () => {
-    const s = await setup({ titles: [shown(B)] });
+    const s = await setup({ titles: [shown(B)], retryMs: 60_000 });
     await s.threads.titleChanged(s.terminal);
     expect(s.boundTo()).toBe(A);
     s.announce(B);

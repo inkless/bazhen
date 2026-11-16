@@ -450,14 +450,20 @@ export function readThreadStarted(method: string, params: unknown): string | nul
   return p.success && shown(p.data.thread) ? p.data.thread.id : null;
 }
 
-/** The shown threads in a `thread/list` answer, newest first as the server sorts them. */
-export function readThreadList(result: unknown): string[] {
-  const p = z.object({ data: z.array(z.unknown()) }).safeParse(result);
-  if (!p.success) return [];
-  return p.data.data.flatMap((t) => {
+/**
+ * The shown threads in one page of a `thread/list` answer, newest first as the server sorts them,
+ * and the cursor of the next page; null when it is the last, or an answer it can't read.
+ */
+export function readThreadList(result: unknown): { threads: string[]; nextCursor: string | null } {
+  const p = z
+    .object({ data: z.array(z.unknown()), nextCursor: z.string().nullish() })
+    .safeParse(result);
+  if (!p.success) return { threads: [], nextCursor: null };
+  const threads = p.data.data.flatMap((t) => {
     const thread = StartedThread.safeParse(t);
     return thread.success && shown(thread.data) ? [thread.data.id] : [];
   });
+  return { threads, nextCursor: p.data.nextCursor ?? null };
 }
 
 /** A thread id, whole or cut short with `...` or `…`, as the TUI's terminal title shows it. */
