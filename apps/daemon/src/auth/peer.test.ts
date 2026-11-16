@@ -79,17 +79,11 @@ describe("readingOf", () => {
     ]);
   });
 
-  it("reads a Codex app-server started inside an agent's terminal as a Codex tool call", () => {
-    expect(readingOf(via(900, chain(950, 950, 900, 100, 10, 1)), terminals)).toEqual({
-      kind: "codex",
-    });
-  });
-
-  it("names the agent whose process is nearer the caller than a Codex app-server", () => {
-    expect(readingOf(via(900, chain(150, 150, 100, 10, 900, 1)), terminals)).toEqual({
-      kind: "agent",
-      agentId: agent,
-    });
+  it("reads whichever is nearer the caller, a Codex app-server or an agent's process", () => {
+    expect([
+      readingOf(via(900, chain(950, 950, 900, 100, 10, 1)), terminals),
+      readingOf(via(900, chain(150, 150, 100, 10, 900, 1)), terminals),
+    ]).toEqual([{ kind: "codex" }, { kind: "agent", agentId: agent }]);
   });
 
   it("refuses a caller the runtime runs in no terminal, as tmux run-shell starts one", () => {
