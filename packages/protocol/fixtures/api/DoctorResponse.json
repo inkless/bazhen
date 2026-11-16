@@ -97,7 +97,16 @@
             "protocol": [
               "1.2"
             ],
-            "contained": true
+            "contained": true,
+            "socket": "/run/bazhen/holders/term.sock",
+            "holderPid": 4242,
+            "stats": {
+              "engineBytes": 2097152,
+              "rss": 9437184,
+              "ringBytes": 1048576,
+              "historyLines": 812,
+              "engineResets": 0
+            }
           },
           {
             "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
@@ -231,7 +240,16 @@
             "protocol": [
               "1.2"
             ],
-            "contained": true
+            "contained": true,
+            "socket": "/run/bazhen/holders/term.sock",
+            "holderPid": 4242,
+            "stats": {
+              "engineBytes": 2097152,
+              "rss": 9437184,
+              "ringBytes": 1048576,
+              "historyLines": 812,
+              "engineResets": 0
+            }
           },
           {
             "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
@@ -386,8 +404,29 @@
           {
             "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
             "build": null,
-            "protocol": [],
-            "contained": null
+            "protocol": [
+              "0.9"
+            ],
+            "contained": null,
+            "socket": "/run/bazhen/holders/term.sock",
+            "holderPid": null,
+            "stats": null
+          },
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": "3f9a",
+            "protocol": [
+              "1.2"
+            ],
+            "contained": false,
+            "socket": "/run/bazhen/holders/term.sock",
+            "holderPid": 4242,
+            "stats": {
+              "engineBytes": 1,
+              "rss": null,
+              "ringBytes": 0,
+              "historyLines": 0
+            }
           }
         ]
       },
@@ -449,8 +488,29 @@
           {
             "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
             "build": null,
-            "protocol": [],
-            "contained": null
+            "protocol": [
+              "0.9"
+            ],
+            "contained": null,
+            "socket": "/run/bazhen/holders/term.sock",
+            "holderPid": null,
+            "stats": null
+          },
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": "3f9a",
+            "protocol": [
+              "1.2"
+            ],
+            "contained": false,
+            "socket": "/run/bazhen/holders/term.sock",
+            "holderPid": 4242,
+            "stats": {
+              "engineBytes": 1,
+              "rss": null,
+              "ringBytes": 0,
+              "historyLines": 0
+            }
           }
         ]
       },
@@ -937,7 +997,16 @@
             "protocol": [
               "1.2"
             ],
-            "contained": true
+            "contained": true,
+            "socket": "/run/bazhen/holders/term.sock",
+            "holderPid": 4242,
+            "stats": {
+              "engineBytes": 2097152,
+              "rss": 9437184,
+              "ringBytes": 1048576,
+              "historyLines": 812,
+              "engineResets": 0
+            }
           },
           {
             "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
@@ -1071,7 +1140,16 @@
             "protocol": [
               "1.2"
             ],
-            "contained": true
+            "contained": true,
+            "socket": "/run/bazhen/holders/term.sock",
+            "holderPid": 4242,
+            "stats": {
+              "engineBytes": 2097152,
+              "rss": 9437184,
+              "ringBytes": 1048576,
+              "historyLines": 812,
+              "engineResets": 0
+            }
           },
           {
             "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
@@ -1208,7 +1286,16 @@
             "protocol": [
               "1.2"
             ],
-            "contained": true
+            "contained": true,
+            "socket": "/run/bazhen/holders/term.sock",
+            "holderPid": 4242,
+            "stats": {
+              "engineBytes": 2097152,
+              "rss": 9437184,
+              "ringBytes": 1048576,
+              "historyLines": 812,
+              "engineResets": 0
+            }
           },
           {
             "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
@@ -1342,7 +1429,16 @@
             "protocol": [
               "1.2"
             ],
-            "contained": true
+            "contained": true,
+            "socket": "/run/bazhen/holders/term.sock",
+            "holderPid": 4242,
+            "stats": {
+              "engineBytes": 2097152,
+              "rss": 9437184,
+              "ringBytes": 1048576,
+              "historyLines": 812,
+              "engineResets": 0
+            }
           },
           {
             "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
@@ -1479,7 +1575,16 @@
             "protocol": [
               "1.2"
             ],
-            "contained": true
+            "contained": true,
+            "socket": "/run/bazhen/holders/term.sock",
+            "holderPid": 4242,
+            "stats": {
+              "engineBytes": 2097152,
+              "rss": 9437184,
+              "ringBytes": 1048576,
+              "historyLines": 812,
+              "engineResets": 0
+            }
           },
           {
             "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
@@ -1613,7 +1718,16 @@
             "protocol": [
               "1.2"
             ],
-            "contained": true
+            "contained": true,
+            "socket": "/run/bazhen/holders/term.sock",
+            "holderPid": 4242,
+            "stats": {
+              "engineBytes": 2097152,
+              "rss": 9437184,
+              "ringBytes": 1048576,
+              "historyLines": 812,
+              "engineResets": 0
+            }
           },
           {
             "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
@@ -2097,8 +2211,29 @@
           {
             "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
             "build": null,
-            "protocol": [],
-            "contained": null
+            "protocol": [
+              "0.9"
+            ],
+            "contained": null,
+            "socket": "/run/bazhen/holders/term.sock",
+            "holderPid": null,
+            "stats": null
+          },
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": "3f9a",
+            "protocol": [
+              "1.2"
+            ],
+            "contained": false,
+            "socket": "/run/bazhen/holders/term.sock",
+            "holderPid": 4242,
+            "stats": {
+              "engineBytes": 1,
+              "rss": null,
+              "ringBytes": 0,
+              "historyLines": 0
+            }
           }
         ]
       },
@@ -2160,8 +2295,29 @@
           {
             "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
             "build": null,
-            "protocol": [],
-            "contained": null
+            "protocol": [
+              "0.9"
+            ],
+            "contained": null,
+            "socket": "/run/bazhen/holders/term.sock",
+            "holderPid": null,
+            "stats": null
+          },
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": "3f9a",
+            "protocol": [
+              "1.2"
+            ],
+            "contained": false,
+            "socket": "/run/bazhen/holders/term.sock",
+            "holderPid": 4242,
+            "stats": {
+              "engineBytes": 1,
+              "rss": null,
+              "ringBytes": 0,
+              "historyLines": 0
+            }
           }
         ]
       },
@@ -2238,8 +2394,29 @@
           {
             "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
             "build": null,
-            "protocol": [],
-            "contained": null
+            "protocol": [
+              "0.9"
+            ],
+            "contained": null,
+            "socket": "/run/bazhen/holders/term.sock",
+            "holderPid": null,
+            "stats": null
+          },
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": "3f9a",
+            "protocol": [
+              "1.2"
+            ],
+            "contained": false,
+            "socket": "/run/bazhen/holders/term.sock",
+            "holderPid": 4242,
+            "stats": {
+              "engineBytes": 1,
+              "rss": null,
+              "ringBytes": 0,
+              "historyLines": 0
+            }
           }
         ]
       },
@@ -2301,8 +2478,29 @@
           {
             "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
             "build": null,
-            "protocol": [],
-            "contained": null
+            "protocol": [
+              "0.9"
+            ],
+            "contained": null,
+            "socket": "/run/bazhen/holders/term.sock",
+            "holderPid": null,
+            "stats": null
+          },
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": "3f9a",
+            "protocol": [
+              "1.2"
+            ],
+            "contained": false,
+            "socket": "/run/bazhen/holders/term.sock",
+            "holderPid": 4242,
+            "stats": {
+              "engineBytes": 1,
+              "rss": null,
+              "ringBytes": 0,
+              "historyLines": 0
+            }
           }
         ]
       },
@@ -2881,6 +3079,20 @@
               "1.2"
             ],
             "contained": true,
+            "socket": "/run/bazhen/holders/term.sock",
+            "holderPid": 4242,
+            "stats": {
+              "engineBytes": 2097152,
+              "rss": 9437184,
+              "ringBytes": 1048576,
+              "historyLines": 812,
+              "engineResets": 0,
+              "fieldFromANewerDaemon": {
+                "any": [
+                  1
+                ]
+              }
+            },
             "fieldFromANewerDaemon": {
               "any": [
                 1
@@ -3059,7 +3271,16 @@
             "protocol": [
               "1.2"
             ],
-            "contained": true
+            "contained": true,
+            "socket": "/run/bazhen/holders/term.sock",
+            "holderPid": 4242,
+            "stats": {
+              "engineBytes": 2097152,
+              "rss": 9437184,
+              "ringBytes": 1048576,
+              "historyLines": 812,
+              "engineResets": 0
+            }
           },
           {
             "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
@@ -3294,8 +3515,39 @@
           {
             "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
             "build": null,
-            "protocol": [],
+            "protocol": [
+              "0.9"
+            ],
             "contained": null,
+            "socket": "/run/bazhen/holders/term.sock",
+            "holderPid": null,
+            "stats": null,
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
+          },
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": "3f9a",
+            "protocol": [
+              "1.2"
+            ],
+            "contained": false,
+            "socket": "/run/bazhen/holders/term.sock",
+            "holderPid": 4242,
+            "stats": {
+              "engineBytes": 1,
+              "rss": null,
+              "ringBytes": 0,
+              "historyLines": 0,
+              "fieldFromANewerDaemon": {
+                "any": [
+                  1
+                ]
+              }
+            },
             "fieldFromANewerDaemon": {
               "any": [
                 1
@@ -3377,8 +3629,29 @@
           {
             "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
             "build": null,
-            "protocol": [],
-            "contained": null
+            "protocol": [
+              "0.9"
+            ],
+            "contained": null,
+            "socket": "/run/bazhen/holders/term.sock",
+            "holderPid": null,
+            "stats": null
+          },
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": "3f9a",
+            "protocol": [
+              "1.2"
+            ],
+            "contained": false,
+            "socket": "/run/bazhen/holders/term.sock",
+            "holderPid": 4242,
+            "stats": {
+              "engineBytes": 1,
+              "rss": null,
+              "ringBytes": 0,
+              "historyLines": 0
+            }
           }
         ]
       },

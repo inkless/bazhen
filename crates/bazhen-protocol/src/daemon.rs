@@ -216,6 +216,38 @@ pub struct RunningHolder {
         deserialize_with = "Nullable::present"
     )]
     pub contained: Nullable<bool>,
+    /// The socket it answers on; absent from an older daemon.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub socket: Option<String>,
+    /// Its process: null for one that shares no protocol with this build, which names none;
+    /// absent from an older daemon.
+    #[serde(
+        default,
+        skip_serializing_if = "Nullable::is_absent",
+        deserialize_with = "Nullable::present"
+    )]
+    pub holder_pid: Nullable<u64>,
+    /// Its memory, as it reports it: null where it didn't; absent from an older daemon.
+    #[serde(
+        default,
+        skip_serializing_if = "Nullable::is_absent",
+        deserialize_with = "Nullable::present"
+    )]
+    pub stats: Nullable<HolderStats>,
+}
+
+/// A holder's memory, in bytes, and the lines of history it holds.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HolderStats {
+    pub engine_bytes: u64,
+    /// Null where the OS won't say.
+    pub rss: Option<u64>,
+    pub ring_bytes: u64,
+    pub history_lines: u64,
+    /// Attempts to replace a failed engine; absent from a holder before 1.2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine_resets: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

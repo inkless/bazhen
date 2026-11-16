@@ -49,6 +49,7 @@ import {
   type ExitStatus,
   type HolderHelloReply,
   type HolderProcessSpec,
+  type HolderStats,
   type Signal,
 } from "@bazhen/protocol";
 import {
@@ -110,11 +111,21 @@ export interface HolderBuild {
   readonly protocol: readonly string[];
   /** Whether it runs in a terminal's scope; null where that can't be read. */
   readonly contained: boolean | null;
+  readonly socket: string;
+  /** Null for a holder that shares no protocol with this build, which names no pid. */
+  readonly holderPid: number | null;
+  /** Its memory, as it reports it; null where it didn't. */
+  readonly stats: HolderStats | null;
 }
 
 /** What saying `hello` at a socket found. */
 type Reached =
-  | { readonly is: "holder"; readonly hello: HolderHelloReply }
+  | {
+      readonly is: "holder";
+      readonly hello: HolderHelloReply;
+      /** Its memory, when the caller asked for it and the holder said. */
+      readonly stats: HolderStats | null;
+    }
   /** No holder listens there: no file, or one a holder that died left behind. */
   | { readonly is: "none"; readonly stale: boolean; readonly cause: unknown }
   /** Something may listen there, but couldn't be read: refused access, or no answer in time. */
@@ -209,14 +220,21 @@ export class HolderRuntime implements RuntimeAdapter {
     return connectHolder(socket, { writer, onEvent, signal });
   }
 
-  /** Says `hello` at `socket` and hangs up. */
-  private async reach(socket: string): Promise<Reached> {
+  /** Says `hello` at `socket`, asks for its `stats` too `withStats`, and hangs up. */
+  private async reach(socket: string, withStats = false): Promise<Reached> {
+    let client: HolderClient;
     try {
-      const client = await this.connect(socket, false, ignore);
-      client.end();
-      return { is: "holder", hello: client.hello };
+      client = await this.connect(socket, false, ignore);
     } catch (error) {
       return reachedBy(error);
+    }
+    try {
+      const signal = AbortSignal.timeout(this.opts.helloMs ?? HELLO_MS);
+      // A holder that won't say still answered: it is listed, without its memory.
+      const stats = withStats ? await client.stats({ signal }).catch(() => null) : null;
+      return { is: "holder", hello: client.hello, stats };
+    } finally {
+      client.end();
     }
   }
 
@@ -335,37 +353,66 @@ export class HolderRuntime implements RuntimeAdapter {
     return { state: answering.size > 0 ? "healthy" : "not-running", version };
   }
 
-  /** `hello` to every socket in the holders' directory; one that can't be listed throws. */
-  private async reachAll(): Promise<(Reached & { readonly socket: string })[]> {
+  /**
+   * `hello` to every socket in the holders' directory, and `stats` too `withStats`; one that
+   * can't be listed throws.
+   */
+  private async reachAll(withStats = false): Promise<(Reached & { readonly socket: string })[]> {
     const dir = holdersDir(this.opts.root);
     const names = await readdir(dir).catch((error: unknown) => {
       if (error instanceof Error && "code" in error && error.code === "ENOENT") return [];
       throw error;
     });
     const sockets = names.filter((name) => name.endsWith(".sock")).map((name) => join(dir, name));
-    return Promise.all(sockets.map(async (socket) => ({ ...(await this.reach(socket)), socket })));
+    return Promise.all(
+      sockets.map(async (socket) => ({ ...(await this.reach(socket, withStats)), socket })),
+    );
   }
 
   /**
-   * The build each holder that answers runs, as its argv[0] names it: what `ps` shows of the pid
-   * that answered, if it started when the holder says it did. Reads only.
+   * Each holder that answers, with the build it runs, as its argv[0] names it: what `ps` shows of
+   * the pid that answered, if it started when the holder says it did. A holder that shares no
+   * protocol with this build is listed by its socket, with no pid or build. Reads only.
    */
   async builds(): Promise<HolderBuild[]> {
     const installDir = this.opts.installDir ?? null;
     const inScope = this.opts.inScope ?? inTerminalScope;
-    const answering = (await this.reachAll()).flatMap((r) => (r.is === "holder" ? [r.hello] : []));
-    return Promise.all(
-      answering.map(async (hello) => {
+    const listed = await Promise.all(
+      (await this.reachAll(true)).map(async (r): Promise<HolderBuild | null> => {
+        if (r.is === "outdated") {
+          const terminalId = terminalAt(r.socket);
+          if (terminalId === null) return null;
+          const { socket, protocol } = r;
+          return {
+            terminalId,
+            build: null,
+            protocol,
+            contained: null,
+            socket,
+            holderPid: null,
+            stats: null,
+          };
+        }
+        if (r.is !== "holder") return null;
+        const { hello } = r;
         const reading = installDir === null ? "unread" : await readProcess(hello.holderPid);
         const same =
           typeof reading !== "string" &&
           Math.abs(reading.start - hello.holderStart) <= START_SKEW_S;
         const build = same && installDir !== null ? holderBuildOf(reading.args, installDir) : null;
-        // The pid is the one that just answered, so it can't have been reused.
-        const contained = inScope(hello.holderPid);
-        return { terminalId: hello.terminalId, build, protocol: hello.protocol, contained };
+        return {
+          terminalId: hello.terminalId,
+          build,
+          protocol: hello.protocol,
+          // The pid is the one that just answered, so it can't have been reused.
+          contained: inScope(hello.holderPid),
+          socket: r.socket,
+          holderPid: hello.holderPid,
+          stats: r.stats,
+        };
       }),
     );
+    return listed.filter((h) => h !== null);
   }
 
   /**

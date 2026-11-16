@@ -118,6 +118,19 @@ describe("recording the terminals that need a restart", () => {
     expect(agentOf()?.needsRestart).toEqual({ holderPid: HOLDER.pid, served: true });
   });
 
+  it("offers the attach command of a holder this build serves, but not of one it can't speak to", async () => {
+    const served = await onHolder();
+    served.serve("outdated", ["0.9", HOLDER_PROTOCOL_VERSION]);
+    await served.watch.sweep();
+    const unserved = await onHolder();
+    unserved.serve("outdated");
+    await unserved.watch.sweep();
+    expect([served.agentOf()?.attachCommand, unserved.agentOf()?.attachCommand]).toEqual([
+      `attach ${served.terminalId}`,
+      null,
+    ]);
+  });
+
   it("keeps it through a respawn in the same holder", async () => {
     const { store, agentId, serve, watch, agentOf } = await onHolder();
     serve("outdated");

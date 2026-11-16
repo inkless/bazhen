@@ -7,7 +7,10 @@ export const HOLDER_SOURCE = fileURLToPath(
   new URL("../../../../target/release-holder/bazhen-holder", import.meta.url),
 );
 
-/** What doctor says of holders: the installed build, and the build each answering holder runs. */
+/**
+ * What doctor says of holders: the installed build, and each holder that answers, with the build
+ * it runs, its socket, its pid and its memory.
+ */
 export async function holderDoctor(
   install: HolderInstall,
   runtime: Pick<HolderRuntime, "builds"> | null,

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { Id } from "./ids.ts";
+import { HolderStats } from "./holder.ts";
 
 export * from "./agents.ts";
 export * from "./devices.ts";
@@ -165,6 +166,15 @@ export const DoctorResponse = z.object({
            * from an older daemon.
            */
           contained: z.boolean().nullable().optional(),
+          /** The socket it answers on. Absent from an older daemon. */
+          socket: z.string().optional(),
+          /**
+           * Its process; null for one that shares no protocol with this build, which names none.
+           * Absent from an older daemon.
+           */
+          holderPid: z.number().int().positive().nullable().optional(),
+          /** Its memory, as it reports it; null where it didn't. Absent from an older daemon. */
+          stats: HolderStats.nullable().optional(),
         }),
       ),
     })

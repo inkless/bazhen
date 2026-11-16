@@ -98,13 +98,26 @@ type Handler = (holder: FakeHolder, request: FakeRequest) => void;
 const ok = (holder: FakeHolder, request: FakeRequest) =>
   holder.send({ type: "ok", id: request.id, body: { request: request.type } });
 
-/** Answers `ok` to everything, and `snapshot` with one of nothing at the holder's offset. */
+/** What every fake holder says of its memory. */
+const FAKE_STATS = { engineBytes: 2048, rss: 8192, ringBytes: 1024, historyLines: 7 };
+
+/** Answers `ok` to everything but `stats`, which it leaves unanswered. */
+const silentOnStats: Handler = (holder, request) => {
+  if (request.type !== "stats") ok(holder, request);
+};
+
+/**
+ * Answers `ok` to everything, `snapshot` with one of nothing at the holder's offset, and `stats`
+ * with FAKE_STATS.
+ */
 const answerAll =
   (offset = 0): Handler =>
   (holder, request) => {
     if (request.type === "snapshot") {
       const bytes = new Uint8Array();
       holder.send({ type: "snapshot", id: request.id, offset, droppedLines: 0, bytes });
+    } else if (request.type === "stats") {
+      holder.send({ type: "stats", id: request.id, body: FAKE_STATS });
     } else ok(holder, request);
   };
 
@@ -485,6 +498,53 @@ describe("HolderRuntime: containing each terminal", () => {
       expect.objectContaining({ terminalId: s.terminalId, contained: true }),
     ]);
     expect(asked).toEqual([FAKE_PID]);
+  });
+});
+
+describe("HolderRuntime: what doctor lists of holders", () => {
+  it("lists each holder with its socket, pid and memory", async () => {
+    const root = privateRoot();
+    const { runtime } = runtimeAt(root);
+    const terminalId = newId("term");
+    await fakeTerminal(root, terminalId);
+    expect(await runtime.builds()).toEqual([
+      expect.objectContaining({
+        terminalId,
+        socket: holderSocket(root, terminalId),
+        holderPid: FAKE_PID,
+        stats: FAKE_STATS,
+      }),
+    ]);
+  });
+
+  it("lists a holder that won't give its memory, without it, in good time", async () => {
+    const root = privateRoot();
+    const { runtime } = runtimeAt(root);
+    const terminalId = newId("term");
+    await fakeTerminal(root, terminalId, {}, silentOnStats);
+    const started = Date.now();
+    const listed = await runtime.builds();
+    expect([listed.map((h) => [h.terminalId, h.stats]), Date.now() - started < 2_000]).toEqual([
+      [[terminalId, null]],
+      true,
+    ]);
+  });
+
+  it("lists a holder this build can't speak to by its socket, with the versions it speaks", async () => {
+    const root = privateRoot();
+    const { runtime } = runtimeAt(root);
+    const ref = await outdatedHolder(root, newId("term"));
+    expect(await runtime.builds()).toEqual([
+      {
+        terminalId: ref.terminalId,
+        build: null,
+        protocol: ["2.0"],
+        contained: null,
+        socket: holderSocket(root, ref.terminalId),
+        holderPid: null,
+        stats: null,
+      },
+    ]);
   });
 });
 
