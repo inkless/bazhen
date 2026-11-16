@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { ShellCommandResponse, StateSnapshot } from "@bazhen/protocol";
-import { attachInScript, Daemon, DETACH, waitUntil } from "./daemon.ts";
+import { attachInScript, Daemon, DETACH } from "./daemon.ts";
 
 const state = async (daemon: Daemon) =>
   StateSnapshot.parse((await daemon.request("/v1/state")).body);
@@ -32,7 +32,7 @@ describe("bazhen attach, on a holder terminal", () => {
     const attached = attachInScript(daemon, terminalId);
     left.push(attached.leave);
     attached.type("printf 'attached-%s\\n' 42\r");
-    await waitUntil(() => attached.shown().includes("attached-42"), "the command's output");
+    await attached.shows("attached-42", "the command's output");
     attached.type(DETACH);
     const code = await attached.exited;
     const shells = (await state(daemon)).shells;
@@ -45,6 +45,10 @@ describe("bazhen attach, on a holder terminal", () => {
     const attached = attachInScript(daemon, terminalId);
     left.push(attached.leave);
     attached.type("exit\r");
+    await attached.shows(
+      `${terminalId}: the terminal exited`,
+      "the attach saying the terminal exited",
+    );
     const code = await attached.exited;
     expect([code, attached.shown().includes(`${terminalId}: the terminal exited`)]).toEqual([
       0,

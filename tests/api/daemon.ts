@@ -1203,6 +1203,11 @@ export function attachInScript(daemon: Daemon, target: string) {
   const exited = new Promise<number | null>((resolve) => child.once("exit", resolve));
   return {
     shown: () => shown,
+    /** Waits until it has shown `text`, saying what it showed instead if it never does. */
+    shows: (text: string, what: string) =>
+      waitUntil(() => shown.includes(text), what).catch((err: unknown) => {
+        throw new Error(`${String(err)}; it showed ${JSON.stringify(shown)}`);
+      }),
     type: (keys: string) => child.stdin.write(keys),
     exited,
     /** Detaches, should a test have left it attached. */

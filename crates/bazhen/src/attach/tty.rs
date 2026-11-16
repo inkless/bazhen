@@ -60,7 +60,8 @@ impl Raw {
         let before = tcgetattr(io::stdin())?;
         let mut raw = before.clone();
         raw.make_raw();
-        tcsetattr(io::stdin(), OptionalActions::Flush, &raw)?;
+        // Now, not Flush: keys typed before the terminal went raw are the attachment's to send.
+        tcsetattr(io::stdin(), OptionalActions::Now, &raw)?;
         let saved = before.clone();
         let previous: Arc<PanicHook> = Arc::new(std::panic::take_hook());
         let chained = Arc::clone(&previous);
