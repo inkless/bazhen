@@ -36,7 +36,6 @@ import {
   SignalAgentRequest,
   HealthResponse,
   LaunchAgentRequest,
-  PROTOCOL_VERSION,
   PairRequest,
   SendMessageRequest,
   type AnswerAttentionResponse,
@@ -103,7 +102,7 @@ import { TerminalLimit } from "../terminals/budget.ts";
 
 export interface AppDeps {
   readonly appVersion: string;
-  readonly schemaVersion: () => number;
+  readonly protocolId: string;
   readonly runtime: RuntimeAdapter;
   /** Null on the Unix socket, whose 0600 permission is the authentication (§9.1). */
   readonly allow: Allowlists | null;
@@ -314,8 +313,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     const body = HealthResponse.parse({
       status: "ok",
       appVersion: deps.appVersion,
-      protocolVersion: PROTOCOL_VERSION,
-      schemaVersion: deps.schemaVersion(),
+      protocolId: deps.protocolId,
       runtime: { kind: "tmux", state: runtime.state, version: runtime.version },
       runtimes,
     });

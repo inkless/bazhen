@@ -14,7 +14,6 @@ import {
   type TerminalId,
 } from "@bazhen/core";
 import {
-  PROTOCOL_VERSION,
   TERMINAL_COLOURS,
   type AttachmentMode,
   type EventPayload,
@@ -29,11 +28,6 @@ import { seam, type Held, type Position } from "./seam.ts";
 /** One browser view of a terminal, as the hub sees it. */
 export interface Viewer {
   readonly mode: AttachmentMode;
-  /**
-   * Whether the view declares the epoch its input is typed under. One that doesn't, from before
-   * protocol 1.30, is held to the epoch of its own grant.
-   */
-  readonly declaresEpoch: boolean;
   /** The name of the paired device the view is on, if it is on one. */
   readonly deviceName?: string | undefined;
   /** `written` runs once the bytes are written to the view's socket, or the socket has failed. */
@@ -145,8 +139,6 @@ interface Entry {
   /** The digest of the token that lets this view end this attachment when it reattaches. */
   readonly resumeDigest: Buffer;
   size: Size;
-  /** The epoch this view was granted the lease at, for a view that declares none. */
-  grantedEpoch?: number;
   /** The epoch the view says its input is typed under; a grant never changes it. */
   declaredEpoch?: number;
   /** Live output held while the view's snapshot is on its way, and how many bytes of it. */
@@ -294,7 +286,6 @@ export class TerminalHub {
     viewer.notify({
       type: "attached",
       attachmentId: id,
-      protocolVersion: PROTOCOL_VERSION,
       resumeToken,
     });
     return {
@@ -522,15 +513,14 @@ export class TerminalHub {
     const entry = watched.viewers.get(id);
     if (entry === undefined) return;
     const input = classifyInput(bytes);
-    const { declaresEpoch } = entry.viewer;
-    const epoch = declaresEpoch ? entry.declaredEpoch : entry.grantedEpoch;
+    const epoch = entry.declaredEpoch;
     if (acceptsInput(watched.lease, id, epoch ?? -1)) {
       if (input.bytes.length > 0) watched.stream.write(input.bytes);
       return;
     }
     if (!input.keystrokes) return;
     if (entry.viewer.mode === "interactive") {
-      if (!declaresEpoch || epoch === watched.lease.epoch) this.engage(watched, id);
+      if (epoch === watched.lease.epoch) this.engage(watched, id);
       return;
     }
     if (entry.toldDropped) return;
@@ -544,7 +534,6 @@ export class TerminalHub {
     const next = engage(watched.lease, id, entry.viewer.mode);
     if (next === watched.lease) return;
     watched.lease = next;
-    entry.grantedEpoch = next.epoch;
     this.log.granted(watched.terminal, id, next.epoch);
     this.announceLease(watched);
     this.fitTo(watched);

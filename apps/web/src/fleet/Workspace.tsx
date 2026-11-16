@@ -90,7 +90,7 @@ export function Workspace({
     refocusRename.current = false;
     renameButton.current?.focus();
   }, [renaming]);
-  // A daemon before protocol 1.40 gives no name, and has no rename to send it to.
+  // An older daemon gives no name, and has no rename to send it to.
   const renamable = !isEnded(agent) && agent.name !== "";
   // A close refused because the terminal's old server may still run it: only then is force offered.
   const [unconfirmed, setUnconfirmed] = useState(false);

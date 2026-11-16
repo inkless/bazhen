@@ -11,6 +11,10 @@ export class DaemonUnreachable extends Error {
   override readonly name = "DaemonUnreachable";
 }
 
+/** What a reply this build can't read, though the daemon gave it as a success, means. */
+export const ANOTHER_BUILD =
+  "the daemon runs another build of Bazhen: restart it with `bazhen stop`, then `bazhen start`";
+
 /** The daemon answered, but not with what this command expects. */
 export class DaemonError extends Error {
   override readonly name = "DaemonError";
@@ -82,8 +86,14 @@ export function call<T>(socket: string, c: Call<T>, timeoutMs?: number): Promise
             return;
           }
           const parsed = c.reply.safeParse(json);
-          if (parsed.success) resolve(parsed.data);
-          else reject(new DaemonError(`${c.path}: HTTP ${res.statusCode}: ${text}`));
+          if (parsed.success) {
+            resolve(parsed.data);
+            return;
+          }
+          // A refusal is read by its caller; a success this build can't read came from another.
+          const succeeded = (res.statusCode ?? 0) < 300;
+          const hint = succeeded ? `\n${ANOTHER_BUILD}` : "";
+          reject(new DaemonError(`${c.path}: HTTP ${res.statusCode}: ${text}${hint}`));
         });
       },
     );
@@ -93,10 +103,26 @@ export function call<T>(socket: string, c: Call<T>, timeoutMs?: number): Promise
   });
 }
 
-/** Whether a daemon answers on the socket at all, as `bazhen start` and `stop` ask. */
+/**
+ * The protocol id a running daemon speaks, or null for one that names none, from before ids.
+ * Throws `DaemonUnreachable` when nothing answers.
+ */
+export async function spokenProtocol(socket: string): Promise<string | null> {
+  const reply = HealthResponse.pick({ status: true, protocolId: true }).partial({
+    protocolId: true,
+  });
+  const health = await call(socket, { method: "GET", path: "/v1/health", reply }, PROBE_MS);
+  return health.protocolId ?? null;
+}
+
+/**
+ * Whether a daemon answers on the socket at all, as `bazhen start` and `stop` ask. Only `status`
+ * is read, so `stop` still stops a daemon of another build.
+ */
 export async function answers(socket: string): Promise<boolean> {
+  const reply = HealthResponse.pick({ status: true });
   try {
-    await call(socket, { method: "GET", path: "/v1/health", reply: HealthResponse }, PROBE_MS);
+    await call(socket, { method: "GET", path: "/v1/health", reply }, PROBE_MS);
     return true;
   } catch (err) {
     if (err instanceof DaemonUnreachable) return false;

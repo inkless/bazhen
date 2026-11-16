@@ -2,6 +2,15 @@
 // route answers it, so a fixture the protocol no longer accepts fails its test at once.
 
 import type { DoctorResponse, HealthResponse, StateSnapshot, TaskDetail } from "@bazhen/protocol";
+import { protocolId } from "@bazhen/protocol/id";
+
+/** The protocol the CLI under test speaks, and as much of it as the CLI prints. */
+export const PROTOCOL_ID = await protocolId();
+export const SHORT_ID = PROTOCOL_ID.slice(0, 12);
+
+/** What the CLI says of a daemon whose replies it can't read: another build, to restart. */
+export const ANOTHER_BUILD =
+  "the daemon runs another build of Bazhen: restart it with `bazhen stop`, then `bazhen start`";
 
 export const AGENT = "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
 export const OTHER = "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d";
@@ -101,15 +110,14 @@ export const detail = (over: Partial<TaskDetail> = {}): TaskDetail => ({
 export const health = (over: Partial<HealthResponse> = {}): HealthResponse => ({
   status: "ok",
   appVersion: "0.1.0",
-  protocolVersion: "1.49",
-  schemaVersion: 1,
+  protocolId: PROTOCOL_ID,
   runtime: { kind: "tmux", state: "healthy", version: "3.4" },
   ...over,
 });
 
 export const doctor = (over: Partial<DoctorResponse> = {}): DoctorResponse => ({
   appVersion: "0.1.0",
-  protocolVersion: "1.49",
+  protocolId: PROTOCOL_ID,
   runtime: { state: "healthy", version: "3.4" },
   hookClient: { path: "/repo/target/release/bazhen-hook", fallback: false },
   config: { path: "/home/u/.config/bazhen/config.toml", found: true },

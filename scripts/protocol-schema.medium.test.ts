@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   HOLDER_ERROR_CODES,
@@ -16,6 +17,7 @@ import {
   readSpawnSpec,
   SpawnSpecFixtures,
 } from "../packages/protocol/src/holder-fixtures.ts";
+import { protocolId } from "../packages/protocol/src/id.ts";
 
 const root = fileURLToPath(new URL("../packages/protocol/fixtures/holder/", import.meta.url));
 const versions = readdirSync(root).toSorted((a, b) => a.localeCompare(b));
@@ -103,5 +105,22 @@ describe("holder fixtures", () => {
     it("hold every error code", () => {
       expect(errorCodes()).toEqual(expect.arrayContaining([...HOLDER_ERROR_CODES]));
     });
+  });
+});
+
+describe("the protocol id", () => {
+  it("is what a client in another language gets hashing the committed schema directory", async () => {
+    const dir = fileURLToPath(new URL("../packages/protocol/schema/", import.meta.url));
+    const hash = createHash("sha256");
+    for (const name of readdirSync(dir)
+      .filter((n) => n.endsWith(".json"))
+      .toSorted()) {
+      hash
+        .update(name)
+        .update("\0")
+        .update(readFileSync(join(dir, name)))
+        .update("\0");
+    }
+    expect(await protocolId()).toBe(hash.digest("hex"));
   });
 });

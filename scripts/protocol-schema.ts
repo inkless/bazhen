@@ -8,14 +8,13 @@
 // each is pinned by its hash in FROZEN_HOLDER_FIXTURES, and both modes fail when one changes.
 
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { apiFixtures } from "../packages/protocol/src/api-fixtures.ts";
 import { HOLDER_PROTOCOL_VERSION } from "../packages/protocol/src/holder.ts";
 import { holderFixtures } from "../packages/protocol/src/holder-fixtures.ts";
-import { jsonSchemas } from "../packages/protocol/src/json-schema.ts";
+import { filesHash, protocolFiles } from "../packages/protocol/src/id.ts";
 import { isMain } from "./is-main.ts";
 
 /** The files that are missing, stale or extra in `actual`, compared with `expected`. */
@@ -37,33 +36,29 @@ export const FROZEN_HOLDER_FIXTURES: Readonly<Record<string, string>> = {
   "1.1": "ee44ec4937861b11b86e3224ca37ed6067982e2e03d51b438a39a0208216ef1d",
 };
 
-/** A directory's files, by name and content, as one hash. */
-export function fixtureHash(files: Readonly<Record<string, string>>): string {
-  const hash = createHash("sha256");
-  for (const name of Object.keys(files).toSorted()) hash.update(`${name}\0${files[name]}\0`);
-  return hash.digest("hex");
-}
-
 /**
  * Why the older versions' fixtures, keyed by version, don't match their pins: one unpinned,
  * edited since it was pinned, or gone.
  */
-export function frozenFailures(
+export async function frozenFailures(
   versions: Readonly<Record<string, Readonly<Record<string, string>>>>,
   current: string,
   pinned: Readonly<Record<string, string>> = FROZEN_HOLDER_FIXTURES,
-): string[] {
+): Promise<string[]> {
   const older = Object.entries(versions).filter(([version]) => version !== current);
-  const failures = older.flatMap(([version, files]) => {
-    const hash = fixtureHash(files);
-    const pin = pinned[version];
-    if (pin === undefined) {
-      return [
-        `fixtures/holder/${version}/ is frozen: pin "${version}": "${hash}" in FROZEN_HOLDER_FIXTURES.`,
-      ];
-    }
-    return pin === hash ? [] : [`fixtures/holder/${version}/ was changed after it froze.`];
-  });
+  const judged = await Promise.all(
+    older.map(async ([version, files]) => {
+      const hash = await filesHash(files);
+      const pin = pinned[version];
+      if (pin === undefined) {
+        return [
+          `fixtures/holder/${version}/ is frozen: pin "${version}": "${hash}" in FROZEN_HOLDER_FIXTURES.`,
+        ];
+      }
+      return pin === hash ? [] : [`fixtures/holder/${version}/ was changed after it froze.`];
+    }),
+  );
+  const failures = judged.flat();
   const missing = Object.keys(pinned).filter((version) => !(version in versions));
   return [
     ...failures,
@@ -76,7 +71,7 @@ const holderRoot = join(root, "fixtures/holder");
 
 /** Each generated directory, relative to the package, with the files it should hold. */
 const outputs = (): Record<string, Record<string, string>> => ({
-  "schema/": jsonSchemas(),
+  "schema/": protocolFiles(),
   [`fixtures/holder/${HOLDER_PROTOCOL_VERSION}/`]: holderFixtures(),
   "fixtures/api/": apiFixtures(),
 });
@@ -115,7 +110,7 @@ if (isMain(import.meta)) {
     }
   }
   const versions = existsSync(holderRoot) ? readdirSync(holderRoot) : [];
-  const frozen = frozenFailures(
+  const frozen = await frozenFailures(
     Object.fromEntries(versions.map((version) => [version, committed(join(holderRoot, version))])),
     HOLDER_PROTOCOL_VERSION,
   );

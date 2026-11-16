@@ -49,7 +49,7 @@ afterEach(() => {
 
 const commands: LanParts["commands"] = {
   appVersion: "0.1.0",
-  schemaVersion: () => 1,
+  protocolId: "protocol-of-this-build",
   runtime: new FakeRuntime(),
   roles: () => ({ roles: [], problems: [] }),
   state: () => ({

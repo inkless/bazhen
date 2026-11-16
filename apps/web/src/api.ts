@@ -15,7 +15,6 @@ import {
   EventFrame,
   LaunchAgentResponse,
   PairResponse,
-  PROTOCOL_VERSION,
   VISIBILITY_HEARTBEAT_MS,
   type ClientEventFrame,
   SendMessageResponse,
@@ -27,8 +26,14 @@ import {
   type Signal,
   type TuiTheme,
 } from "@bazhen/protocol";
+import pageProtocol from "virtual:bazhen/protocol-id";
+import { isAnotherBuild } from "./build.ts";
+
+/** The protocol this page was built for. */
+export const PAGE_PROTOCOL: string = pageProtocol;
 
 const unpairedListeners = new Set<() => void>();
+const anotherBuildListeners = new Set<() => void>();
 
 /**
  * Calls `listener` whenever the daemon answers that this browser isn't paired: never was, or was
@@ -43,6 +48,24 @@ export function onUnpaired(listener: () => void): () => void {
 export function noticeUnpaired(res: Response): Response {
   if (res.status === 401) for (const listener of unpairedListeners) listener();
   return res;
+}
+
+/**
+ * Calls `listener` whenever the daemon turns out to be another build than this page's, as after an
+ * upgrade restarts it while the page stays open. Answers a function that stops it.
+ */
+export function onAnotherBuild(listener: () => void): () => void {
+  anotherBuildListeners.add(listener);
+  return () => anotherBuildListeners.delete(listener);
+}
+
+/** Asks the daemon which protocol it speaks, and tells the listeners when it isn't this page's. */
+export async function checkBuild(): Promise<void> {
+  const res = noticeUnpaired(await fetch("/v1/health"));
+  if (!res.ok) return;
+  if (isAnotherBuild(await res.json(), PAGE_PROTOCOL)) {
+    for (const listener of anotherBuildListeners) listener();
+  }
 }
 
 /** The daemon's state, validated as it arrives. */
@@ -99,7 +122,6 @@ export function watchState(
   const open = (latest: StateSnapshot) => {
     if (stopped) return;
     const query = new URLSearchParams({
-      v: PROTOCOL_VERSION,
       epoch: latest.epoch,
       after: String(latest.eventId),
     });
@@ -121,6 +143,8 @@ export function watchState(
     ws.addEventListener("open", () => {
       state = "open";
       sendVisibility();
+      // A daemon restarted since the last stream may be an upgrade this page can't talk to.
+      checkBuild().catch(failed);
     });
     ws.addEventListener("message", (message) => {
       const frame = EventFrame.safeParse(JSON.parse(String(message.data)));
@@ -141,6 +165,8 @@ export function watchState(
   };
   const start = () =>
     read().then(open, (err: unknown) => {
+      // A state this page can't read may come from a daemon of another build.
+      checkBuild().catch(() => undefined);
       failed(err);
       retry();
     });

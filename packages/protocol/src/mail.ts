@@ -124,7 +124,7 @@ export const MESSAGE_WAIT_MAX_MESSAGES = 100;
 
 /**
  * `POST /v1/messages/wait`: answered once every message is settled, or at `timeoutMs` with the
- * states then (protocol 1.45).
+ * states then.
  */
 export const WaitMessagesRequest = z.object({
   messageIds: z.array(Id("msg")).min(1).max(MESSAGE_WAIT_MAX_MESSAGES),
@@ -182,6 +182,14 @@ export const ResendAttentionResponse = z.object({
 export type ResendAttentionResponse = z.infer<typeof ResendAttentionResponse>;
 
 /**
+ * The hook client's own contract, apart from the build's protocol: a hook already running in an
+ * agent's session outlives a daemon upgrade, so it keeps working while the major is the same.
+ * Within a major, `HookRequest` and the hook's reply change only by addition, never renaming,
+ * removing or tightening what has shipped, and the minor is bumped with each addition.
+ */
+export const HOOK_PROTOCOL_VERSION = "1.0";
+
+/**
  * What the hook client sends for every hook a harness runs, over the daemon's Unix socket
  * (foundation-design §5.6). `payload` is the harness's own hook input, passed through.
  */
@@ -222,7 +230,7 @@ export const HookReply = z.object({
   /**
    * One token per message this reply hands to the harness, which the client acks once it has
    * written: the message's id and this offer's own, so an ack names the offer it confirms and a
-   * late one for an earlier offer of the same message confirms nothing (protocol 1.9).
+   * late one for an earlier offer of the same message confirms nothing.
    */
   offered: z.array(OfferToken),
 });

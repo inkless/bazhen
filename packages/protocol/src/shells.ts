@@ -5,7 +5,7 @@ import { TuiTheme } from "./theme.ts";
 import { Id, IdempotencyKey } from "./ids.ts";
 
 /**
- * A terminal running on a holder this build can't fully serve (protocol 1.49). That holder keeps
+ * A terminal running on a holder this build can't fully serve. That holder keeps
  * running until it is ended, by its pid when the daemon can't speak to it; a new terminal, by a
  * relaunch or a restart, then runs on a current holder. `holderPid` is null when unrecorded.
  */
@@ -31,7 +31,7 @@ export const TerminalState = z.enum([
 ]);
 export type TerminalState = z.infer<typeof TerminalState>;
 
-/** A command on a shell: each is a `POST /v1/shells/:id/<command>` (protocol 1.17). */
+/** A command on a shell: each is a `POST /v1/shells/:id/<command>`. */
 export const ShellCommand = z.enum(["close", "restart", "rename", "unlink"]);
 export type ShellCommand = z.infer<typeof ShellCommand>;
 
@@ -52,7 +52,7 @@ export const Shell = z.object({
   name: z.string().nullable().default(null),
   /**
    * What runs in its foreground when that isn't the shell, by name, and since when, as the
-   * daemon last saw it; null at the shell's prompt (protocol 1.23).
+   * daemon last saw it; null at the shell's prompt.
    */
   foreground: z.object({ command: z.string(), since: z.iso.datetime() }).nullable().default(null),
   /** The theme it was opened for, which it is drawn in and tells programs that ask. */
@@ -62,7 +62,7 @@ export const Shell = z.object({
   commands: z.array(ShellCommand),
   /**
    * A lost shell whose last line its shell integration kept: a restart can type it back at the
-   * new shell's prompt (`retype`). The line itself is never sent (protocol 1.41).
+   * new shell's prompt (`retype`). The line itself is never sent.
    */
   retypeable: z.boolean().default(false),
   /** Set while it runs on a holder this build can't fully serve; null otherwise. */
@@ -101,7 +101,7 @@ export const CloseShellRequest = z.object({
   confirmBusy: z.boolean().optional(),
   /**
    * The program the user was shown running, and confirmed: the close ends that one, and is still
-   * refused as `busy` if another runs by then (protocol 1.28).
+   * refused as `busy` if another runs by then.
    */
   confirmedProgram: z.string().max(200).optional(),
   /** As an agent's close: records closed a shell whose old server can't be shown gone. */
@@ -116,7 +116,7 @@ export const RestartShellRequest = z.object({
   theme: TuiTheme.optional(),
   /**
    * Type the lost shell's last line at the new shell's first prompt, without Enter; refused for
-   * a shell that isn't `retypeable` (protocol 1.41).
+   * a shell that isn't `retypeable`.
    */
   retype: z.literal(true).optional(),
 });
@@ -180,7 +180,7 @@ export type ShellReport = z.infer<typeof ShellReport>;
 
 /**
  * What a shell's integration reports over the daemon's socket once, at the shell's first prompt:
- * its line editor is reading, so a line can be typed back (protocol 1.41). `brackets` says the
+ * its line editor is reading, so a line can be typed back. `brackets` says the
  * editor reads a paste marked with the bracketed-paste sequences even before it has asked for
  * bracketed paste, so the daemon marks it itself. Only a shell's own integration says so: no
  * request from a client carries it.

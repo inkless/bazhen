@@ -53,10 +53,10 @@ pub struct TmuxHealth {
 pub struct HealthResponse {
     pub status: HealthStatus,
     pub app_version: String,
-    pub protocol_version: String,
-    pub schema_version: u64,
+    /// The protocol the daemon speaks: a client of another is another build, to restart.
+    pub protocol_id: String,
     pub runtime: TmuxHealth,
-    /// Every runtime, each read by itself; absent from a daemon before 1.49.
+    /// Every runtime, each read by itself; absent from an older daemon.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtimes: Option<Vec<RuntimeHealthReport>>,
 }
@@ -158,14 +158,14 @@ pub struct Web {
     pub allow_insecure_origins: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pairing: Option<Pairing>,
-    /// The built web client, null before `pnpm build`; absent from a daemon before 1.33.
+    /// The built web client, null before `pnpm build`; absent from an older daemon.
     #[serde(
         default,
         skip_serializing_if = "Nullable::is_absent",
         deserialize_with = "Nullable::present"
     )]
     pub app: Nullable<String>,
-    /// The LAN listener, null without one; absent from a daemon before 1.36.
+    /// The LAN listener, null without one; absent from an older daemon.
     #[serde(
         default,
         skip_serializing_if = "Nullable::is_absent",
@@ -209,7 +209,7 @@ pub struct RunningHolder {
     pub terminal_id: String,
     pub build: Option<String>,
     pub protocol: Vec<String>,
-    /// Whether it runs in a scope of its own: null where that can't be told, absent before 1.53.
+    /// Whether it runs in a scope of its own: null where that can't be told, absent from an older daemon.
     #[serde(
         default,
         skip_serializing_if = "Nullable::is_absent",
@@ -274,12 +274,12 @@ pub struct CapturedEnv {
 #[serde(rename_all = "camelCase")]
 pub struct DoctorResponse {
     pub app_version: String,
-    pub protocol_version: String,
+    pub protocol_id: String,
     pub runtime: DoctorRuntime,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtimes: Option<Vec<RuntimeHealthReport>>,
     pub hook_client: HookClient,
-    /// Null when none is installed, an incomplete install; absent from a daemon before 1.54.
+    /// Null when none is installed, an incomplete install; absent from an older daemon.
     #[serde(
         default,
         skip_serializing_if = "Nullable::is_absent",

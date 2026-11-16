@@ -3,7 +3,8 @@ import { closeSync, openSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { EnvRules } from "@bazhen/core";
 import { handOff } from "./env/capture.ts";
-import { answers } from "./socket/client.ts";
+import { protocolId } from "@bazhen/protocol/id";
+import { ANOTHER_BUILD, answers, spokenProtocol } from "./socket/client.ts";
 
 export interface DetachOptions {
   /** The daemon's own entry point, run again without `--detach`. */
@@ -25,6 +26,11 @@ const LOG_TAIL_LINES = 20;
 export async function detach(o: DetachOptions): Promise<number> {
   if (await answers(o.socket)) {
     console.log(`bazhen is already running at ${o.url}`);
+    // A daemon that answers health with nothing readable is no build this one can talk to.
+    const theirs = await spokenProtocol(o.socket).catch(() => null);
+    if (theirs !== (await protocolId())) {
+      console.log(`  warning: ${ANOTHER_BUILD}`);
+    }
     return 0;
   }
   const logFile = join(o.stateDir, "daemon.log");

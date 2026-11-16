@@ -6,9 +6,8 @@
     "appVersion": {
       "type": "string"
     },
-    "protocolVersion": {
-      "type": "string",
-      "pattern": "^[0-9]+\\.[0-9]+$"
+    "protocolId": {
+      "type": "string"
     },
     "runtime": {
       "type": "object",
@@ -613,7 +612,7 @@
   },
   "required": [
     "appVersion",
-    "protocolVersion",
+    "protocolId",
     "runtime",
     "hookClient",
     "config",

@@ -38,7 +38,7 @@ export const NoticeDevice = z.object({
 export type NoticeDevice = z.infer<typeof NoticeDevice>;
 
 /**
- * Something the human should know that no agent raised (protocol 1.38). `kind`, `closeReason`
+ * Something the human should know that no agent raised. `kind`, `closeReason`
  * and `actions` are strings, not enums: `/v1/state` can't tell which version a client speaks,
  * so a value added later must not fail an older client's whole snapshot. A client shows a kind
  * it doesn't know by its `summary`, which the daemon writes and which carries nothing a device

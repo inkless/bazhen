@@ -33,6 +33,7 @@ const COVERED_ELSEWHERE: Record<string, string> = {
   "packages/runtime-holder/src/title-watch.ts":
     "packages/runtime-holder/src/runtime.medium.test.ts",
   "apps/daemon/src/main.ts": "tests/e2e/health.spec.ts",
+  "packages/protocol/src/semantics.ts": "scripts/protocol-schema.medium.test.ts",
   "apps/cli/src/main.ts": "tests/api/cli.test.ts",
   "apps/daemon/src/start.ts": "tests/api/cli.test.ts",
   "apps/daemon/src/detach.ts": "tests/api/cli.test.ts",

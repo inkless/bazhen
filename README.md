@@ -43,7 +43,7 @@ Contributing, for people and agents: [AGENTS.md](AGENTS.md) and [docs/standards/
 - `crates/bazhen-holder` — `bazhen-holder`, the process that holds one terminal's PTY and child (Rust)
 - `crates/bazhen-holder-engine` — a terminal's screen and compact history, for the PTY holder (Rust)
 - `apps/web` — React + Vite client, with React Aria Components for its widgets (`docs/standards/ui.md`)
-- `packages/protocol` — shared types, schemas, and the protocol version
+- `packages/protocol` — shared types, schemas, and the protocol id clients compare with the daemon's
 - `packages/core` — domain model and state machines; no platform imports
 - `packages/runtime-tmux` — the tmux runtime adapter
 - `tests/integration` — tests against a private tmux server (container or CI only)

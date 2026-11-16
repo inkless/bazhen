@@ -3,7 +3,7 @@
     "name": "example 1",
     "wire": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.49",
+      "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "runtime": {
         "state": "healthy",
         "version": "3.4"
@@ -137,7 +137,7 @@
     },
     "parsed": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.49",
+      "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "runtime": {
         "state": "healthy",
         "version": "3.4"
@@ -274,7 +274,7 @@
     "name": "example 2",
     "wire": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -300,7 +300,7 @@
     },
     "parsed": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -329,7 +329,7 @@
     "name": "example 3",
     "wire": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -398,7 +398,7 @@
     },
     "parsed": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -470,7 +470,7 @@
     "name": "example 4",
     "wire": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -537,7 +537,7 @@
     },
     "parsed": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -607,7 +607,7 @@
     "name": "example 5",
     "wire": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -641,7 +641,7 @@
     },
     "parsed": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -678,7 +678,7 @@
     "name": "runtime.state = \"healthy\"",
     "wire": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "healthy",
         "version": null
@@ -704,7 +704,7 @@
     },
     "parsed": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "healthy",
         "version": null
@@ -733,7 +733,7 @@
     "name": "runtime.state = \"unreachable\"",
     "wire": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "unreachable",
         "version": null
@@ -759,7 +759,7 @@
     },
     "parsed": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "unreachable",
         "version": null
@@ -788,7 +788,7 @@
     "name": "runtime.state = \"not-running\"",
     "wire": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -814,7 +814,7 @@
     },
     "parsed": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -843,7 +843,7 @@
     "name": "runtimes[].state = \"healthy\"",
     "wire": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.49",
+      "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "runtime": {
         "state": "healthy",
         "version": "3.4"
@@ -977,7 +977,7 @@
     },
     "parsed": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.49",
+      "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "runtime": {
         "state": "healthy",
         "version": "3.4"
@@ -1114,7 +1114,7 @@
     "name": "runtimes[].state = \"unreachable\"",
     "wire": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.49",
+      "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "runtime": {
         "state": "healthy",
         "version": "3.4"
@@ -1248,7 +1248,7 @@
     },
     "parsed": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.49",
+      "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "runtime": {
         "state": "healthy",
         "version": "3.4"
@@ -1385,7 +1385,7 @@
     "name": "runtimes[].state = \"not-running\"",
     "wire": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.49",
+      "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "runtime": {
         "state": "healthy",
         "version": "3.4"
@@ -1519,7 +1519,7 @@
     },
     "parsed": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.49",
+      "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "runtime": {
         "state": "healthy",
         "version": "3.4"
@@ -1656,7 +1656,7 @@
     "name": "agents.shell = \"direct\"",
     "wire": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -1682,7 +1682,7 @@
     },
     "parsed": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -1711,7 +1711,7 @@
     "name": "agents.shell = \"login\"",
     "wire": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -1737,7 +1737,7 @@
     },
     "parsed": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -1766,7 +1766,7 @@
     "name": "web.from = \"BAZHEN_EXTERNAL_ORIGINS\"",
     "wire": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -1833,7 +1833,7 @@
     },
     "parsed": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -1903,7 +1903,7 @@
     "name": "web.from = \"config\"",
     "wire": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -1970,7 +1970,7 @@
     },
     "parsed": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -2040,7 +2040,7 @@
     "name": "web.pairing.mode = \"auto\"",
     "wire": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -2109,7 +2109,7 @@
     },
     "parsed": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -2181,7 +2181,7 @@
     "name": "web.pairing.mode = \"always\"",
     "wire": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -2250,7 +2250,7 @@
     },
     "parsed": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -2322,7 +2322,7 @@
     "name": "terminals.refusing = \"budget\"",
     "wire": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -2389,7 +2389,7 @@
     },
     "parsed": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -2459,7 +2459,7 @@
     "name": "terminals.refusing = \"host\"",
     "wire": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -2526,7 +2526,7 @@
     },
     "parsed": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -2596,7 +2596,7 @@
     "name": "env.source = \"start\"",
     "wire": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -2622,7 +2622,7 @@
     },
     "parsed": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -2651,7 +2651,7 @@
     "name": "env.source = \"refresh\"",
     "wire": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -2677,7 +2677,7 @@
     },
     "parsed": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -2706,7 +2706,7 @@
     "name": "example 1, with a field no version defines in each of its objects",
     "wire": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.49",
+      "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "runtime": {
         "state": "healthy",
         "version": "3.4",
@@ -2965,7 +2965,7 @@
     },
     "parsed": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.49",
+      "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "runtime": {
         "state": "healthy",
         "version": "3.4"
@@ -3102,7 +3102,7 @@
     "name": "example 2, with a field no version defines in each of its objects",
     "wire": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null,
@@ -3158,7 +3158,7 @@
     },
     "parsed": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -3187,7 +3187,7 @@
     "name": "example 3, with a field no version defines in each of its objects",
     "wire": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null,
@@ -3326,7 +3326,7 @@
     },
     "parsed": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -3398,7 +3398,7 @@
     "name": "example 4, with a field no version defines in each of its objects",
     "wire": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null,
@@ -3535,7 +3535,7 @@
     },
     "parsed": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null
@@ -3605,7 +3605,7 @@
     "name": "example 5, with a field no version defines in each of its objects",
     "wire": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null,
@@ -3679,7 +3679,7 @@
     },
     "parsed": {
       "appVersion": "0.1.0",
-      "protocolVersion": "1.30",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtime": {
         "state": "not-running",
         "version": null

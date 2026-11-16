@@ -101,7 +101,8 @@ pub(crate) fn status(daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
     };
     out.line(&format!(
         "bazhen {} (protocol {}), running",
-        health.app_version, health.protocol_version
+        health.app_version,
+        health.protocol_id.get(..12).unwrap_or(&health.protocol_id)
     ));
     let reports = doctor::reports(
         health.runtimes.as_ref(),

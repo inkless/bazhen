@@ -32,11 +32,11 @@ import {
   holderReplyDecoder,
   type HolderReply,
   LaunchAgentResponse,
-  PROTOCOL_VERSION,
   StreamServerFrame,
   PairingCodeResponse,
   StateSnapshot,
 } from "@bazhen/protocol";
+import { protocolId } from "@bazhen/protocol/id";
 import { agentHomes, codexDaemonStarted, loginEnv } from "../support/agent-env.ts";
 import { giveTranscript } from "../support/transcript.ts";
 import { replay } from "./fixtures/browser.ts";
@@ -458,17 +458,16 @@ export class Daemon {
     );
     const view = new View(ws);
     await opened(ws);
-    view.frame({ type: "hello", protocolVersion: PROTOCOL_VERSION, mode, ...size });
+    view.frame({ type: "hello", protocolId: await protocolId(), mode, ...size });
     return view;
   }
 
   /** Opens the event stream as a browser would, resuming after `cursor`. */
   async events(
     cursor: { epoch: string; eventId: number },
-    opts: { origin?: string; host?: string; version?: string; path?: string; cookie?: string } = {},
+    opts: { origin?: string; host?: string; path?: string; cookie?: string } = {},
   ): Promise<EventClient> {
     const query = new URLSearchParams({
-      v: opts.version ?? PROTOCOL_VERSION,
       epoch: cursor.epoch,
       after: String(cursor.eventId),
     });
@@ -686,7 +685,7 @@ export class Daemon {
 
   /** Gives the agent's bound Claude Code session a conversation to resume (`giveTranscript`). */
   giveTranscript(agentId: string, sessionId: string): Promise<void> {
-    return giveTranscript(this.home, PROTOCOL_VERSION, agentId, sessionId);
+    return giveTranscript(this.home, agentId, sessionId);
   }
 
   /** What the agent's terminal shows, or nothing while it has no terminal yet. */

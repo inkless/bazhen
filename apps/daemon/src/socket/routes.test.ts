@@ -10,7 +10,7 @@ import { socketApp, type SocketParts } from "./routes.ts";
 
 const report: DoctorResponse = {
   appVersion: "0.1.0",
-  protocolVersion: "1.4",
+  protocolId: "protocol-of-this-build",
   runtime: { state: "healthy", version: "3.5a" },
   hookClient: { path: "/bin/bazhen-hook", fallback: false },
   config: { path: "/c/config.toml", found: false },

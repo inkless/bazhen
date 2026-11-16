@@ -45,7 +45,7 @@ function daemon(always = true) {
   const codes = new PairingCodes({ now: () => clock.now, log: () => {} });
   const deps: AppDeps = {
     appVersion: "0.1.0",
-    schemaVersion: () => 1,
+    protocolId: "protocol-of-this-build",
     runtime: new FakeRuntime(),
     allow: { hosts: [host, new URL(external).host], origins: [origin, external] },
     roles: () => ({ roles: [], problems: [] }),

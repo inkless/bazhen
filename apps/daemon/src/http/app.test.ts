@@ -11,12 +11,7 @@ import {
   type Caller,
 } from "@bazhen/core";
 import { FakeRuntime } from "@bazhen/core/testing";
-import {
-  ErrorResponse,
-  PROTOCOL_VERSION,
-  RolesResponse,
-  type LaunchAgentRequest,
-} from "@bazhen/protocol";
+import { ErrorResponse, RolesResponse, type LaunchAgentRequest } from "@bazhen/protocol";
 import { EnvironmentUnavailable, ServerUnconfirmed, StaleGeneration } from "../agents/lifecycle.ts";
 import { HolderUnservable } from "../commands.ts";
 import { AttentionClosed } from "../mailbox/approvals.ts";
@@ -97,7 +92,7 @@ const credentials: AgentCredentials = {
 
 const deps: AppDeps = {
   appVersion: "0.1.0",
-  schemaVersion: () => 1,
+  protocolId: "protocol-of-this-build",
   runtime,
   allow: { hosts: ["127.0.0.1:7900"], origins: ["http://127.0.0.1:7900"] },
   roles: () => ({
@@ -278,8 +273,7 @@ describe("HTTP app", () => {
     const res = await app.request("/v1/health", { headers: { host } });
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({
-      protocolVersion: PROTOCOL_VERSION,
-      schemaVersion: 1,
+      protocolId: "protocol-of-this-build",
       runtime: { state: "not-running", version: "fake" },
     });
   });

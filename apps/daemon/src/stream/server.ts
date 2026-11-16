@@ -1,10 +1,8 @@
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import { isId, type RuntimeRef } from "@bazhen/core";
 import {
-  EPOCH_FRAMES_SINCE,
-  isAtLeast,
-  isCompatible,
   parseJson,
+  STREAM_FRAME_MAX_BYTES,
   StreamClientFrame,
   type StreamServerFrame,
 } from "@bazhen/protocol";
@@ -13,8 +11,7 @@ import type { UpgradeRoute } from "../http/upgrades.ts";
 import { ViewHeartbeat } from "./heartbeat.ts";
 import { ViewRefused, type Attachment, type LeaveReason, type TerminalHub } from "./hub.ts";
 
-/** A frame is a keystroke burst or a paste; nothing a person types comes near this. */
-const MAX_FRAME_BYTES = 1 << 20;
+export const ANOTHER_PAGE = "this page is from another build of Bazhen than the daemon: reload it";
 
 /**
  * How often each view is pinged. One that is gone by `ViewHeartbeat`'s account is ended, so a
@@ -30,6 +27,8 @@ export const HEARTBEAT_MS = 15_000;
 export const DRAIN_PATIENCE = 8;
 
 export interface StreamDeps {
+  /** The daemon's protocol id: a view whose hello names another is refused. */
+  readonly protocolId: string;
   readonly hub: Pick<TerminalHub, "join">;
   readonly runtimeRef: (terminalId: string) => RuntimeRef | undefined;
   readonly heartbeatMs?: number;
@@ -38,7 +37,7 @@ export interface StreamDeps {
 
 /** The terminal stream's WebSocket endpoint (foundation-design §5.3). */
 export function streamRoute(deps: StreamDeps): UpgradeRoute {
-  const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: STREAM_FRAME_MAX_BYTES });
   return {
     path: /^\/v1\/terminals\/([^/]+)\/stream$/,
     upgrade: (req, socket, head, _url, [, terminalId = ""], device) =>
@@ -87,14 +86,12 @@ function serve(
     if (f.type === "hello") {
       if (joining) return;
       joining = true;
-      if (!isCompatible(f.protocolVersion))
-        return refuse(`protocol ${f.protocolVersion} is unsupported`);
+      if (f.protocolId !== deps.protocolId) return refuse(ANOTHER_PAGE);
       const ref = deps.runtimeRef(terminalId);
       if (ref === undefined) return refuse(`no running terminal ${terminalId}`);
       const viewer = {
         mode: f.mode,
         deviceName,
-        declaresEpoch: isAtLeast(f.protocolVersion, EPOCH_FRAMES_SINCE),
         send: (out: Uint8Array, written?: () => void) => ws.send(out, { binary: true }, written),
         notify,
         unsent: () => ws.bufferedAmount,

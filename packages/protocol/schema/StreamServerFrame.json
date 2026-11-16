@@ -13,10 +13,6 @@
           "type": "string",
           "pattern": "^att_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
         },
-        "protocolVersion": {
-          "type": "string",
-          "pattern": "^[0-9]+\\.[0-9]+$"
-        },
         "resumeToken": {
           "type": "string"
         }

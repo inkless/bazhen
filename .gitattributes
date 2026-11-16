@@ -1,2 +1,5 @@
 # Terminal recordings: replayed byte for byte, so never converted.
 scripts/engine-snapshot/*.bin binary
+
+# Hashed byte for byte into the protocol id, by clients in other languages too: LF on every checkout.
+packages/protocol/schema/*.json text eol=lf

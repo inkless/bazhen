@@ -17,7 +17,7 @@ export const PairingCodeResponse = z.object({
   origins: z.array(z.string()),
   /**
    * The LAN listener, when it is serving: the address to open, and the certificate's fingerprint
-   * to compare in the browser before trusting it. Absent otherwise, and from a daemon before 1.36.
+   * to compare in the browser before trusting it. Absent otherwise, and from an older daemon.
    */
   lan: z
     .object({ url: z.string(), fingerprint: z.string(), expiresAt: z.iso.datetime() })

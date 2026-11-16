@@ -3,12 +3,11 @@ import { connect, createServer } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { newId } from "@bazhen/core";
-import { EPOCH_FRAMES_SINCE, PROTOCOL_VERSION } from "@bazhen/protocol";
 import { DeviceAuth } from "../auth/devices.ts";
 import { Store } from "../store/store.ts";
 import { loopbackPairing, serveUpgrades, tempDb } from "../testing/fixtures.ts";
 import { ViewRefused, type Attachment, type LeaveReason, type Viewer } from "./hub.ts";
-import { streamRoute, type StreamDeps } from "./server.ts";
+import { ANOTHER_PAGE, streamRoute, type StreamDeps } from "./server.ts";
 
 let server: Server | undefined;
 afterEach(() => {
@@ -28,7 +27,11 @@ async function endpoint() {
     },
   };
   const served = await serveUpgrades([
-    streamRoute({ hub, runtimeRef: (id) => ({ terminalId, runtime: "fake", locator: { id } }) }),
+    streamRoute({
+      protocolId: PROTOCOL,
+      hub,
+      runtimeRef: (id) => ({ terminalId, runtime: "fake", locator: { id } }),
+    }),
   ]);
   server = served.server;
   return { url: `ws://${served.host}/v1/terminals/${terminalId}/stream`, joins: () => joins };
@@ -54,6 +57,7 @@ async function beating(drainPatience = 1) {
   };
   const served = await serveUpgrades([
     streamRoute({
+      protocolId: PROTOCOL,
       hub,
       runtimeRef: (id) => ({ terminalId, runtime: "fake", locator: { id } }),
       heartbeatMs: 100,
@@ -98,9 +102,12 @@ async function slowLink(host: string): Promise<string> {
 
 const opened = (ws: WebSocket) => new Promise((resolve) => ws.once("open", resolve));
 
+/** The protocol id the daemon under test speaks. */
+const PROTOCOL = "a".repeat(64);
+
 const hello = {
   type: "hello",
-  protocolVersion: PROTOCOL_VERSION,
+  protocolId: PROTOCOL,
   mode: "interactive",
   cols: 80,
   rows: 24,
@@ -132,12 +139,41 @@ describe("stream endpoint", () => {
     expect([await refusal, joins()]).toEqual(['{"type":"error","message":"unreadable frame"}', 0]);
   });
 
+  it("tells a page of another build, or from before protocol ids, to reload, and joins it nowhere", async () => {
+    const { url, joins } = await endpoint();
+    const refusal = async (frame: object) => {
+      const ws = new WebSocket(url);
+      await opened(ws);
+      const answer = new Promise((resolve) =>
+        ws.once("message", (data: Buffer) => resolve(JSON.parse(data.toString()))),
+      );
+      ws.send(JSON.stringify(frame));
+      // Answered with a pong if the hello was taken.
+      ws.send(JSON.stringify({ type: "ping" }));
+      return answer;
+    };
+    const { protocolId: _, ...unnamed } = hello;
+    expect([
+      await refusal({ ...hello, protocolId: "b".repeat(64) }),
+      await refusal({ ...unnamed, protocolVersion: "1.55" }),
+      joins(),
+    ]).toEqual([
+      { type: "error", message: ANOTHER_PAGE },
+      { type: "error", message: ANOTHER_PAGE },
+      0,
+    ]);
+  });
+
   it("tells a view the hub turns away why, in the hub's own words", async () => {
     const hub: StreamDeps["hub"] = {
       join: () => Promise.reject(new ViewRefused("this terminal already has 16 views open")),
     };
     const served = await serveUpgrades([
-      streamRoute({ hub, runtimeRef: (id) => ({ terminalId, runtime: "fake", locator: { id } }) }),
+      streamRoute({
+        protocolId: PROTOCOL,
+        hub,
+        runtimeRef: (id) => ({ terminalId, runtime: "fake", locator: { id } }),
+      }),
     ]);
     server = served.server;
     const ws = new WebSocket(`ws://${served.host}/v1/terminals/${terminalId}/stream`);
@@ -158,7 +194,11 @@ describe("stream endpoint", () => {
       join: () => Promise.reject(new Error('tmux gone; api_key = "s3cr3t"')),
     };
     const served = await serveUpgrades([
-      streamRoute({ hub, runtimeRef: (id) => ({ terminalId, runtime: "fake", locator: { id } }) }),
+      streamRoute({
+        protocolId: PROTOCOL,
+        hub,
+        runtimeRef: (id) => ({ terminalId, runtime: "fake", locator: { id } }),
+      }),
     ]);
     server = served.server;
     const ws = new WebSocket(`ws://${served.host}/v1/terminals/${terminalId}/stream`);
@@ -216,6 +256,7 @@ describe("stream endpoint", () => {
       const served = await serveUpgrades(
         [
           streamRoute({
+            protocolId: PROTOCOL,
             hub,
             runtimeRef: (id) => ({ terminalId, runtime: "fake", locator: { id } }),
           }),
@@ -300,20 +341,6 @@ describe("stream endpoint", () => {
     ws.off("ping", answer);
     await expect.poll(() => left, { timeout: 2_000 }).toEqual(["timed_out"]);
     expect(drained).toEqual([true, []]);
-  });
-
-  it("holds a view from before epoch declarations to its grant, and one since to what it declares", async () => {
-    const { url, viewer } = await beating();
-    const declares = async (protocolVersion: string) => {
-      const ws = new WebSocket(url);
-      await opened(ws);
-      const before = viewer();
-      ws.send(JSON.stringify({ ...hello, protocolVersion }));
-      await expect.poll(viewer).not.toBe(before);
-      ws.close();
-      return viewer()?.declaresEpoch;
-    };
-    expect([await declares("1.24"), await declares(EPOCH_FRAMES_SINCE)]).toEqual([false, true]);
   });
 
   it("stops pinging a view once it has closed, or the hub has dismissed it", async () => {

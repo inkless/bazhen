@@ -43,7 +43,7 @@ export const AgentName = z
     },
   );
 
-/** An agent as a request names it: by its id, or by the name of one not ended (protocol 1.40). */
+/** An agent as a request names it: by its id, or by the name of one not ended. */
 export const AgentRef = z.union([Id("agent"), AgentName]);
 
 /**

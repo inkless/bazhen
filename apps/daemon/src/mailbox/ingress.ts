@@ -6,6 +6,7 @@ import {
   HookRequest,
   type Usage,
   frameHookReply,
+  HOOK_PROTOCOL_VERSION,
   isCompatible,
   type HookReply,
 } from "@bazhen/protocol";
@@ -54,7 +55,8 @@ export function hookApp(deps: IngressDeps): Hono<{ Bindings: HttpBindings }> {
 
   app.post("/v1/hooks", async (c) => {
     const hook = HookRequest.safeParse(await c.req.json().catch(() => undefined));
-    if (!hook.success || !isCompatible(hook.data.protocolVersion)) return framed(QUIET);
+    if (!hook.success || !isCompatible(hook.data.protocolVersion, HOOK_PROTOCOL_VERSION))
+      return framed(QUIET);
     const { event, payload, ppid } = hook.data;
     const who = identify(
       deps.credentials,

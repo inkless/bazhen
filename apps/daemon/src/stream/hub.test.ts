@@ -85,11 +85,10 @@ async function fakeRuntime(
 }
 
 /**
- * How a view declares its epoch: as a browser does, on every lease frame and once attached;
- * only when a test says (`manual`), so it can hold a declaration back as the network would; or
- * never, as a view from before protocol 1.30.
+ * How a view declares its epoch: as a browser does, on every lease frame and once attached; or
+ * only when a test says (`manual`), so it can hold a declaration back as the network would.
  */
-type Declares = "auto" | "manual" | "never";
+type Declares = "auto" | "manual";
 
 /** What each view does once it has its handle, for views that declare as a browser does. */
 const onJoined = new WeakMap<Viewer, (attachment: Attachment) => void>();
@@ -125,7 +124,6 @@ function viewer(
   const declare = () => (declares === "auto" ? handle?.declareEpoch(epoch) : undefined);
   const v: Viewer = {
     mode,
-    declaresEpoch: declares !== "never",
     send: (bytes, written) => {
       seen.push(Buffer.from(bytes).toString());
       written?.();
@@ -332,7 +330,6 @@ describe("terminal hub", () => {
       notify: (frame) => order.push(frame.type),
       unsent: () => 0,
       close: () => {},
-      declaresEpoch: true,
     };
     await hub.join(rt.ref, late, size);
     expect(order).toEqual([
@@ -426,19 +423,15 @@ describe("terminal hub", () => {
     ]);
   });
 
-  it("drops a declaring view's input until it declares its epoch, unlike one from before declarations", async () => {
+  it("drops a view's input until it declares its epoch", async () => {
     const rt = await fakeRuntime();
     const hub = new Hub(rt.runtime, memoryLog().log);
     const declaring = await hub.join(rt.ref, viewer("interactive", () => 0, "manual").v, size);
-    const legacy = await hub.join(rt.ref, viewer("interactive", () => 0, "never").v, size);
     declaring.engage();
     declaring.input(Buffer.from("x"));
     declaring.declareEpoch(5);
     declaring.input(Buffer.from("y"));
-    // Held to its own grant's epoch, and its stray key takes the lease over.
-    legacy.input(Buffer.from("a"));
-    legacy.input(Buffer.from("b"));
-    expect(rt.written).toEqual(["y", "b"]);
+    expect(rt.written).toEqual(["y"]);
   });
 
   it("drops input declared under an epoch the view was never granted", async () => {
