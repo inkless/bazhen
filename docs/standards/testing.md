@@ -57,12 +57,13 @@ worker each. Each run's containers have no network and get a CPU quota of half t
 take every core from the agents working on the same machine. They run in `bazhen-tests.slice`, so
 the slice's cap holds every run's containers together, and each gets a memory cap of half the
 machine, with no swap beyond it (`BZ_TEST_MEMORY`, in GiB, overrides it), so a runaway dies in its
-container. A probe container checks they land there first. Where they can't, as under rootful
-Docker or Docker Desktop, the run refuses to start, except on a disposable host, which no other run
-shares: there each container gets a quarter of the machine. A run removes its containers, image
-and build context on every exit it sees, Ctrl-C, SIGTERM and SIGHUP included, and gives each
-cleanup command 30 seconds; a second signal abandons the cleanup. What a run killed outright or abandoned left, the next run on the same machine
-removes: it sweeps the stopped containers, images and contexts whose owning process is gone, and an
+container. A probe container checks they land there first, which they do under rootless Podman,
+or rootless Docker with the systemd cgroup driver, under a user systemd. Where they can't, as under
+rootful Docker or Docker Desktop, the run refuses to start, except on a disposable host, which no
+other run shares: there each container gets a quarter of the machine. A run removes its
+containers, image and build context on every exit it sees, Ctrl-C, SIGTERM and SIGHUP included,
+and gives each cleanup command 30 seconds; a second signal abandons the cleanup. What a run killed
+outright or abandoned left, the next run on the same machine removes: it sweeps the stopped containers, images and contexts whose owning process is gone, and an
 image only once no container uses it.
 Docker's build cache keeps the layers, so repeat runs are fast; BuildKit's garbage collection
 bounds it, and `docker builder prune` reclaims it on a machine of your own. Under Podman, where

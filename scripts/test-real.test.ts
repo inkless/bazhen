@@ -121,6 +121,10 @@ const OWN_PID = 4242;
 const HOST = "this-host";
 const RUN = `bz-real-${OWN_PID}-AbC123`;
 const IMAGE = `bazhen-test-real:${RUN}`;
+const PROBES = [`${RUN}-slice-probe-0`, `${RUN}-slice-probe-1`];
+/** The probe's container id, as `docker inspect` prints it and its cgroup names it. */
+const PROBE_ID = "8308b241d5e554f9f53cb7d564ac0d4005e37119f15c6cb6bbd630ea6d859ded";
+const GIB = 1024 ** 3;
 
 const result = (code: number | null, out = "", err = ""): DockerResult => ({ code, out, err });
 
@@ -147,6 +151,7 @@ function fakeHost(
     cgroup?: string;
     sliceCap?: number;
     disposable?: boolean;
+    cgroupThrows?: boolean;
   } = {},
 ) {
   const calls: string[][] = [];
@@ -159,6 +164,7 @@ function fakeHost(
     pid: OWN_PID,
     id: HOST,
     disposable: more.disposable ?? true,
+    totalMemory: 64 * GIB,
     docker(args): DockerCall {
       calls.push([...args]);
       if (verb(args) === "run --detach") probeRuns = true;
@@ -183,7 +189,10 @@ function fakeHost(
       return () => handlers.delete(handler);
     },
     after: () => (more.timeouts === true ? Promise.resolve() : never),
-    cgroupOf: () => (probeRuns ? more.cgroup : undefined),
+    cgroupOf: () => {
+      if (more.cgroupThrows === true && probeRuns) throw new Error("cgroupOf threw");
+      return probeRuns ? more.cgroup : undefined;
+    },
     memoryMax: (cgroup) => (cgroup.endsWith(`/${SLICE}`) ? more.sliceCap : undefined),
   };
   const signal = (s: NodeJS.Signals) => {
@@ -211,7 +220,7 @@ async function memoryOf(cgroup: string): Promise<number> {
 }
 
 const probeHasPid = (args: readonly string[]): Answer =>
-  verb(args) === "inspect --format" ? result(0, "4343\n") : passing();
+  verb(args) === "inspect --format" ? result(0, `4343 ${PROBE_ID}\n`) : passing();
 const isIntegration = (args: readonly string[]) =>
   args[0] === "run" && args.includes("test:integration");
 const buildFails = (args: readonly string[]) => (args[0] === "build" ? result(1) : passing());
@@ -244,6 +253,11 @@ const isRemoval = (c: string[]) => c[0] === "rm" || verb(c) === "image rm";
 const cleanup = (calls: string[][]) => calls.filter(isRemoval);
 const quietly = () => vi.spyOn(console, "warn").mockImplementation(() => {});
 afterEach(() => vi.restoreAllMocks());
+/** The first probe hangs until stopped, and any other won't start. */
+const firstProbeHangs = (args: readonly string[]): Answer => {
+  if (verb(args) !== "run --detach") return passing();
+  return args.includes(`${RUN}-slice-probe-0`) ? "pending" : result(125);
+};
 const probeWontStart = (args: readonly string[]): Answer =>
   verb(args) === "run --detach" ? result(125) : probeHasPid(args);
 /** A run on a machine people work on, where the probe answers `answer` and lands in `cgroup`. */
@@ -293,7 +307,7 @@ describe("pnpm test:real cleans up after itself", () => {
 
   it("puts each suite's container in the slice every capped run shares, where a probe lands", async () => {
     const fake = fakeHost(probeHasPid, {
-      cgroup: `${userSlice}/libpod-x.scope`,
+      cgroup: `${userSlice}/libpod-${PROBE_ID}.scope`,
       sliceCap: 2 ** 34,
       disposable: false,
     });
@@ -303,8 +317,8 @@ describe("pnpm test:real cleans up after itself", () => {
 
   it("gives a container in the slice twice the memory of one outside it", async () => {
     quietly();
-    const inSlice = await memoryOf(`${userSlice}/libpod-x.scope`);
-    const outside = await memoryOf(`/bazhen.slice/${SLICE}/docker-x.scope`);
+    const inSlice = await memoryOf(`${userSlice}/libpod-${PROBE_ID}.scope`);
+    const outside = await memoryOf(`/bazhen.slice/${SLICE}/docker-${PROBE_ID}.scope`);
     expect(Math.abs(inSlice - 2 * outside)).toBeLessThan(4);
   });
 
@@ -321,7 +335,7 @@ describe("pnpm test:real cleans up after itself", () => {
 
   it("reads the slice's own cap, however deep a runtime puts its containers below it", async () => {
     const fake = fakeHost(probeHasPid, {
-      cgroup: `${userSlice}/libpod-x.scope/container`,
+      cgroup: `${userSlice}/libpod-${PROBE_ID}.scope/container`,
       sliceCap: 2 ** 34,
       disposable: false,
     });
@@ -331,7 +345,10 @@ describe("pnpm test:real cleans up after itself", () => {
 
   it("on a disposable host, keeps the containers out of a slice with no cap, which holds nothing together", async () => {
     const warn = quietly();
-    const fake = fakeHost(probeHasPid, { cgroup: `${userSlice}/libpod-x.scope`, disposable: true });
+    const fake = fakeHost(probeHasPid, {
+      cgroup: `${userSlice}/libpod-${PROBE_ID}.scope`,
+      disposable: true,
+    });
     expect(await run(["api"], fake.host)).toBe(0);
     expect(fake.calls.find(isSuiteRun)).not.toContain("--cgroup-parent");
     expect(warn).toHaveBeenCalledWith(expect.stringContaining(`${SLICE} has no memory cap`));
@@ -341,7 +358,7 @@ describe("pnpm test:real cleans up after itself", () => {
     const warn = quietly();
     // Rootful Docker under systemd makes a system slice of the same name, without the cap.
     const fake = fakeHost(probeHasPid, {
-      cgroup: `/bazhen.slice/${SLICE}/docker-x.scope`,
+      cgroup: `/bazhen.slice/${SLICE}/docker-${PROBE_ID}.scope`,
       disposable: true,
     });
     expect(await run(["api"], fake.host)).toBe(0);
@@ -355,12 +372,12 @@ describe("pnpm test:real cleans up after itself", () => {
   });
 
   it("refuses to run outside the slice on a machine people work on, where the probe lands elsewhere", async () => {
-    const elsewhere = `/bazhen.slice/${SLICE}/docker-x.scope`;
+    const elsewhere = `/bazhen.slice/${SLICE}/docker-${PROBE_ID}.scope`;
     expect(await onAWorkstation(probeHasPid, elsewhere)).toEqual(refusal(`lands in ${elsewhere}`));
   });
 
   it("refuses to run outside the slice on a machine people work on, where the slice has no cap", async () => {
-    const uncapped = `${userSlice}/libpod-x.scope`;
+    const uncapped = `${userSlice}/libpod-${PROBE_ID}.scope`;
     expect(await onAWorkstation(probeHasPid, uncapped)).toEqual(
       refusal(`${SLICE} has no memory cap`),
     );
@@ -368,6 +385,49 @@ describe("pnpm test:real cleans up after itself", () => {
 
   it("refuses to run outside the slice on a machine people work on, where the probe won't start", async () => {
     expect(await onAWorkstation(probeWontStart)).toEqual(refusal("wouldn't start"));
+  });
+
+  it("refuses where the probe's pid names a process of this host's that isn't the probe, though it is in the slice", async () => {
+    // A runtime in a pid namespace of its own hands back a pid that means another process here.
+    const ours = `${userSlice}/bazhen-capped-1.scope`;
+    expect(await onAWorkstation(probeHasPid, ours)).toEqual(refusal(`names a process in ${ours}`));
+  });
+
+  it("refuses where the slice's cap is the whole machine, which holds nothing together", async () => {
+    const said = vi.spyOn(console, "error").mockImplementation(() => {});
+    const fake = fakeHost(probeHasPid, {
+      cgroup: `${userSlice}/libpod-${PROBE_ID}.scope`,
+      sliceCap: 64 * GIB,
+      disposable: false,
+    });
+    expect(await run(["api"], fake.host)).toBe(1);
+    expect(said).toHaveBeenCalledWith(expect.stringContaining(`${SLICE} has no memory cap`));
+  });
+
+  it("stops the probe even when reading where it landed throws", async () => {
+    const fake = fakeHost(probeHasPid, { cgroupThrows: true });
+    await expect(run(["api"], fake.host)).rejects.toThrow("cgroupOf threw");
+    expect(fake.calls).toContainEqual(["stop", "--time", "0", PROBES[0]]);
+  });
+
+  it("removes both probes on the way out, should a probe's own stop have left one", async () => {
+    const fake = fakeHost(probeHasPid, {
+      cgroup: `${userSlice}/libpod-${PROBE_ID}.scope`,
+      sliceCap: 2 ** 34,
+    });
+    expect(await run(["api"], fake.host)).toBe(0);
+    expect(cleanup(fake.calls)[0]).toEqual(["rm", "--force", ...PROBES, `${RUN}-api`]);
+  });
+
+  it("starts no second probe once interrupted, and doesn't call the interruption a refusal", async () => {
+    const said = vi.spyOn(console, "error").mockImplementation(() => {});
+    const fake = fakeHost(firstProbeHangs, { disposable: false });
+    const exit = run(["api"], fake.host);
+    await expect.poll(fake.waitingOn).toBe("run --detach");
+    fake.signal("SIGINT");
+    expect(await exit).toBe(130);
+    expect(fake.calls.filter((c) => verb(c) === "run --detach")).toHaveLength(1);
+    expect(said).not.toHaveBeenCalledWith(expect.stringContaining("Refusing to start"));
   });
 
   it("gives each suite's container a memory cap with no swap beyond it", async () => {
@@ -392,7 +452,7 @@ describe("pnpm test:real cleans up after itself", () => {
     expect(await run(["integration", "api"], fake.host)).toBe(1);
     expect(fake.calls.filter(isSuiteRun)).toHaveLength(2);
     expect(cleanup(fake.calls)).toEqual([
-      ["rm", "--force", `${RUN}-integration`, `${RUN}-api`],
+      ["rm", "--force", ...PROBES, `${RUN}-integration`, `${RUN}-api`],
       ["image", "rm", IMAGE],
     ]);
     expect(fake.removed).toEqual([`/tmp/${RUN}`]);
@@ -407,7 +467,7 @@ describe("pnpm test:real cleans up after itself", () => {
     expect(fake.stopped).toEqual(["SIGTERM"]);
     expect(fake.calls.filter(isSuiteRun)).toHaveLength(1);
     expect(cleanup(fake.calls)).toEqual([
-      ["rm", "--force", `${RUN}-integration`],
+      ["rm", "--force", ...PROBES, `${RUN}-integration`],
       ["image", "rm", IMAGE],
     ]);
     expect(fake.removed).toEqual([`/tmp/${RUN}`]);
@@ -467,7 +527,9 @@ describe("pnpm test:real cleans up after itself", () => {
     expect(await run(["api"], conflict.host)).toBe(0);
     expect(cleanup(conflict.calls).map(verb)).toEqual(["rm --force", "image rm"]);
     expect(conflict.removed).toEqual([`/tmp/${RUN}`]);
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`left ${RUN}-api;`));
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining(`left ${PROBES.join(", ")}, ${RUN}-api;`),
+    );
     warn.mockClear();
     expect(await run(["api"], fakeHost(rmFindsNothing).host)).toBe(0);
     expect(await run(["api"], fakeHost(imageNotKnown).host)).toBe(0);

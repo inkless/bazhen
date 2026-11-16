@@ -164,49 +164,76 @@ export type Placement = { readonly parent: string[] } | { readonly why: string }
 export async function sliceParent(
   host: Host,
   quiet: Quiet,
-  names: { image: string; probe: string; labels: readonly string[] },
+  probe: { image: string; names: readonly string[]; labels: readonly string[] },
+  interrupted: () => boolean = () => false,
 ): Promise<Placement> {
-  const parent = ["--cgroup-parent", SLICE];
   const ours = `/user@${process.getuid?.() ?? -1}.service/bazhen.slice/${SLICE}`;
   let why = `a probe container wouldn't start in ${SLICE}`;
-  for (let tries = 0; tries < 2; tries += 1) {
-    const probe = `${names.probe}-${tries}`;
+  for (const name of probe.names) {
+    if (interrupted()) break;
     const started = await quiet([
       "run",
       "--detach",
       "--rm",
       "--name",
-      probe,
-      ...names.labels,
+      name,
+      ...probe.labels,
       "--network",
       "none",
-      ...parent,
+      "--cgroup-parent",
+      SLICE,
       "--entrypoint",
       "sleep",
-      names.image,
+      probe.image,
       // `--rm` removes it once stopped, or once it ends by itself, should this run be killed.
       "60",
     ]);
     if (started.code !== 0) continue;
-    const inspected = await quiet(["inspect", "--format", "{{.State.Pid}}", probe]);
-    const pid = Number(inspected.out.trim());
-    // Read while the probe runs: once it is stopped and reaped, its /proc entry is gone.
-    const cgroup = pid > 1 ? host.cgroupOf(pid) : undefined;
-    const at = cgroup?.indexOf(`${ours}/`) ?? -1;
-    // The slice itself, however deep a runtime puts its containers below it.
-    const cap =
-      cgroup !== undefined && at >= 0
-        ? host.memoryMax(cgroup.slice(0, at + ours.length))
-        : undefined;
-    await quiet(["stop", "--time", "0", probe]);
-    if (cgroup === undefined) {
-      why = "a probe container's cgroup couldn't be read";
-      continue;
+    let placement: Placement | undefined;
+    try {
+      const inspected = await quiet(["inspect", "--format", "{{.State.Pid}} {{.Id}}", name]);
+      // Read while the probe runs: once it is stopped and reaped, its /proc entry is gone.
+      placement = landing(host, inspected.out, ours);
+    } finally {
+      await quiet(["stop", "--time", "0", name]);
     }
-    if (at < 0) return { why: `a container lands in ${cgroup}, not ${ours}` };
-    return cap === undefined ? { why: `${SLICE} has no memory cap` } : { parent };
+    if (placement !== undefined) return placement;
+    why = "a probe container's cgroup couldn't be read";
   }
   return { why };
+}
+
+/**
+ * Where a probe landed, from its `inspect` pid and id, or undefined where its cgroup can't be read.
+ * The pid is the runtime's, and in a pid namespace of the runtime's own it can name one of this
+ * host's processes, even one in the slice, so the cgroup must also be the container's own.
+ */
+function landing(host: Host, inspected: string, ours: string): Placement | undefined {
+  const [pidText = "", id = ""] = inspected.trim().split(/\s+/);
+  const pid = Number(pidText);
+  const cgroup = pid > 1 && /^[0-9a-f]{64}$/.test(id) ? host.cgroupOf(pid) : undefined;
+  if (cgroup === undefined) return undefined;
+  if (!cgroup.includes(id)) {
+    return { why: `the probe's pid ${pid} names a process in ${cgroup}, not the probe` };
+  }
+  const at = cgroup.indexOf(`${ours}/`);
+  if (at < 0) return { why: `a container lands in ${cgroup}, not ${ours}` };
+  // The slice itself, however deep a runtime puts its containers below it.
+  const cap = host.memoryMax(cgroup.slice(0, at + ours.length));
+  // A cap of the whole machine holds nothing together.
+  return cap === undefined || cap >= host.totalMemory
+    ? { why: `${SLICE} has no memory cap` }
+    : { parent: ["--cgroup-parent", SLICE] };
+}
+
+/** A cgroup's `memory.max` in bytes, or undefined where it is unset (`max`) or can't be read. */
+export function readMemoryMax(cgroup: string, root = "/sys/fs/cgroup"): number | undefined {
+  try {
+    const max = Number(readFileSync(`${root}${cgroup}/memory.max`, "utf8").trim());
+    return Number.isSafeInteger(max) && max > 0 ? max : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 const SECRET_NAME =
@@ -366,6 +393,8 @@ export interface Host {
    * containers may run outside the shared slice there, and nowhere else.
    */
   readonly disposable: boolean;
+  /** This machine's memory, in bytes. */
+  readonly totalMemory: number;
   /** The cgroup a process on this host is in, from its `/proc/<pid>/cgroup`. */
   cgroupOf(pid: number): string | undefined;
   /** A cgroup's `memory.max` in bytes, or undefined where it is unset or can't be read. */
@@ -554,15 +583,24 @@ export async function run(args: readonly string[], host: Host): Promise<number> 
         dir,
       ]);
       if (!built) return 1;
-      const probe = `${name}-slice-probe`;
-      const placement = await sliceParent(host, quiet, { image, probe, labels });
+      const probes = [`${name}-slice-probe-0`, `${name}-slice-probe-1`];
+      // A probe whose stop timed out may outlive the run, but for the removal on the way out.
+      containers.push(...probes);
+      const placement = await sliceParent(
+        host,
+        quiet,
+        { image, names: probes, labels },
+        () => interrupted !== undefined,
+      );
+      if (interrupted !== undefined) return 1;
       const inSlice = "parent" in placement;
       if (!inSlice && !host.disposable) {
         console.error(
           `test:real: ${placement.why}, so its containers would run outside the memory cap ` +
             `every capped run shares. Refusing to start: run it where containers join ${SLICE} ` +
-            "(rootless Podman under a user systemd), or on a disposable host. Rootful Docker " +
-            "and Docker Desktop put containers outside it, so a workstation can't run it on them",
+            "(rootless Podman, or rootless Docker with the systemd cgroup driver, under a user " +
+            "systemd), or on a disposable host. Rootful Docker and Docker Desktop put " +
+            "containers outside it, so a workstation can't run it on them",
         );
         return 1;
       }
@@ -573,7 +611,7 @@ export async function run(args: readonly string[], host: Host): Promise<number> 
         );
       }
       const parent = inSlice ? placement.parent : [];
-      const memory = memoryBudget(process.env, totalmem(), inSlice);
+      const memory = memoryBudget(process.env, host.totalMemory, inSlice);
       const failedSuites: Suite[] = [];
       for (const suite of suites) {
         const container = `${name}-${suite}`;
@@ -690,6 +728,7 @@ const host: Host = {
   pid: process.pid,
   id: hostname(),
   disposable: inSignalSandbox(),
+  totalMemory: totalmem(),
   docker,
   prepare(base, prefix) {
     const dir = buildContext(git(process.cwd(), "rev-parse", "--show-toplevel"), base, prefix);
@@ -703,14 +742,7 @@ const host: Host = {
     };
   },
   removeDir: (dir) => rmSync(dir, { recursive: true, force: true }),
-  memoryMax(cgroup) {
-    try {
-      const max = Number(readFileSync(`/sys/fs/cgroup${cgroup}/memory.max`, "utf8").trim());
-      return Number.isSafeInteger(max) && max > 0 ? max : undefined;
-    } catch {
-      return undefined;
-    }
-  },
+  memoryMax: (cgroup) => readMemoryMax(cgroup),
   cgroupOf(pid) {
     try {
       return /^0::(\S*)$/m.exec(readFileSync(`/proc/${pid}/cgroup`, "utf8"))?.[1];
