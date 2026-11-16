@@ -1568,10 +1568,33 @@ describe("tests that signal processes they didn't start", () => {
       "#[test]\nfn a() { let e = Ending::new(Session(pid), now); }",
       "#[test]\nfn b() { let e = Ending::new(Session::led_by(pid).unwrap(), now); }",
       "#[test]\nfn c() { let e = Ending::new(Scripted::default(), now); e.step(true, now); }",
+      "#[test]\nfn d() { let e = Ending::new(Session { 0: pid }, now); }",
+      "#[test]\nfn e() { let e = Ending::new(pid.map(Session).unwrap(), now); }",
+      "#[test]\nfn f() { let e = Ending::<Session>::new(made(), now); }",
+    ].join("\n");
+    expect(unmarked({ "crates/h/src/session.rs": source })).toEqual(
+      [1, 3, 7, 9, 11].map((line) => `crates/h/src/session.rs:${String(line)}`),
+    );
+  });
+
+  it("must be marked when a test's helper, however deep, or a const it names makes a real session", () => {
+    const source = [
+      "fn step(&mut self) { self.pass(); }",
+      "fn pass(&mut self) -> Sweep { self.sweeper.sweep(None) }",
+      "#[cfg(test)]",
+      "mod tests {",
+      "fn leader(pid: Pid) -> Pid { session_of(pid) }",
+      "fn session_of(pid: Pid) -> Pid { inner(pid) }",
+      "fn inner(pid: Pid) -> Pid { Session::led_by(pid).unwrap().0 }",
+      "const LEADER: Session = Session(PID);",
+      "#[test]\nfn a() { let e = Ending::new(leader(pid), now); }",
+      "#[test]\nfn b() { let e = Ending::new(LEADER, now); }",
+      "#[test]\nfn c() { let mut e = Ending::new(Scripted::default(), now); e.step(); }",
+      "}",
     ].join("\n");
     expect(unmarked({ "crates/h/src/session.rs": source })).toEqual([
-      "crates/h/src/session.rs:1",
-      "crates/h/src/session.rs:3",
+      "crates/h/src/session.rs:9",
+      "crates/h/src/session.rs:11",
     ]);
   });
 
