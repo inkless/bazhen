@@ -949,6 +949,8 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/pty.rs::Pty::master": "borrows the master fd; reads nothing",
   "crates/bazhen-holder/src/pty.rs::Slave::as_fd": "borrows the slave fd; reads nothing",
   "crates/bazhen-holder/src/pty.rs::Pty::set_size": "sets the window size; reads nothing",
+  "crates/bazhen-holder/src/ptmx.rs::open_master":
+    "returns the master fd its opener makes, again on ENXIO; reads nothing",
   "crates/bazhen-holder/src/pty.rs::Pty::foreground_group":
     "asks the terminal for its foreground group; reads no bytes",
   "crates/bazhen-holder/src/pty.rs::spawn":

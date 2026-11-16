@@ -27,6 +27,7 @@ use rustix::termios::{
 use thiserror::Error;
 
 use crate::child::{ChildProcess, Reaper};
+use crate::ptmx::open_master;
 use crate::signals;
 
 /// The terminal type the holder presents: the one its engine emulates and browsers render.
@@ -125,22 +126,30 @@ impl Pty {
     ///
     /// When the system has no PTY to give, or refuses one of the calls that set it up.
     pub fn open(size: WindowSize) -> io::Result<(Self, Slave)> {
-        let master = openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY)?;
-        fcntl_setfd(&master, FdFlags::CLOEXEC)?;
-        grantpt(&master)?;
-        unlockpt(&master)?;
-        let name = ptsname(&master, Vec::new())?;
-        let slave = OwnedFd::from(open_terminal(&name)?);
-        let mut termios = tcgetattr(&slave)?;
+        let master = open_master(|| openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY))
+            .map_err(|e| failed("opening the master", e))?;
+        fcntl_setfd(&master, FdFlags::CLOEXEC)
+            .map_err(|e| failed("making the master close-on-exec", e))?;
+        grantpt(&master).map_err(|e| failed("granting the slave", e))?;
+        unlockpt(&master).map_err(|e| failed("unlocking the slave", e))?;
+        let name = ptsname(&master, Vec::new()).map_err(|e| failed("naming the slave", e))?;
+        let slave = open_terminal(&name)
+            .map_err(|e| failed(&format!("opening the slave {}", name.to_string_lossy()), e))?;
+        let slave = OwnedFd::from(slave);
+        let mut termios = tcgetattr(&slave).map_err(|e| failed("reading the slave's modes", e))?;
         termios.input_modes.insert(InputModes::IUTF8);
-        tcsetattr(&slave, OptionalActions::Now, &termios)?;
-        ioctl_fionbio(&master, true)?;
+        tcsetattr(&slave, OptionalActions::Now, &termios)
+            .map_err(|e| failed("setting the slave's modes", e))?;
+        ioctl_fionbio(&master, true).map_err(|e| failed("making the master non-blocking", e))?;
         let pty = Self {
             master,
             #[cfg(target_os = "macos")]
-            _slave: slave.try_clone()?,
+            _slave: slave
+                .try_clone()
+                .map_err(|e| failed("keeping a slave of the holder's own", e))?,
         };
-        pty.set_size(size)?;
+        pty.set_size(size)
+            .map_err(|e| failed("sizing the PTY", e))?;
         Ok((pty, Slave(slave)))
     }
 
@@ -161,6 +170,12 @@ impl Pty {
     pub fn foreground_group(&self) -> Option<Pid> {
         tcgetpgrp(&self.master).ok()
     }
+}
+
+/// `error`, with the step of `Pty::open` that failed before it, and its kind kept.
+fn failed(step: &str, error: impl Into<io::Error>) -> io::Error {
+    let error = error.into();
+    io::Error::new(error.kind(), format!("{step}: {error}"))
 }
 
 /// Starts `process` on `slave` as the leader of a new session, whose controlling terminal the PTY
