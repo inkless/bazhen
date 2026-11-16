@@ -189,15 +189,17 @@ pub fn codex_of(
     args: impl Fn(Pid) -> io::Result<Option<Vec<OsString>>>,
     environ: impl Fn(Pid) -> io::Result<Vec<OsString>>,
 ) -> Result<Option<Pid>, Refused> {
-    if let Some(server) = codex_server(line, args)? {
-        return Ok(Some(server));
-    }
     let Some(&caller) = line.first() else {
         return Ok(None);
     };
+    // First: a caller that exits after it is read leaves a zombie whose environment is empty and
+    // whose arguments are too, which the walk then refuses.
     let marked = environ(caller)?
         .iter()
         .any(|var| var.as_encoded_bytes().starts_with(b"CODEX_THREAD_ID="));
+    if let Some(server) = codex_server(line, args)? {
+        return Ok(Some(server));
+    }
     Ok(marked.then_some(caller))
 }
 
@@ -448,6 +450,26 @@ mod tests {
         assert_eq!(
             codex_of(&line, table(), env(&["HOME=/h", "CODEX_HOME=/c"])).unwrap(),
             None
+        );
+    }
+
+    #[test]
+    fn reads_the_caller_s_environment_before_its_arguments_which_an_exit_between_would_empty() {
+        let exited = std::cell::Cell::new(false);
+        let args = |p: Pid| {
+            exited.set(true);
+            argv(&[(50, Some(&["bazhen", "devices"])), (1, None)])(p)
+        };
+        let environ = |_: Pid| {
+            Ok(if exited.get() {
+                Vec::new()
+            } else {
+                os(&["CODEX_THREAD_ID=thr-1"])
+            })
+        };
+        assert_eq!(
+            codex_of(&[pid(50), pid(1)], args, environ).unwrap(),
+            Some(pid(50))
         );
     }
 
