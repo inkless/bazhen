@@ -110,7 +110,7 @@ const LAUNCHER =
   /^(?:\S*\/)?(?:env|sudo|doas|timeout|setsid|nohup|nice|ionice|xargs|stdbuf|chrt|taskset|flock|unshare|chroot|runuser|su|busybox|toybox|exec|command|builtin)$/;
 // What a command line may open with before the program it runs: a launcher, an assignment, or
 // a shell keyword.
-const STARTER = /^(?:\w+=\S*|then|do|else|elif|if|while|until|!|\{|\})$/;
+const STARTER = /^(?:\w+=\S*|then|do|else|elif|if|while|until|time|coproc|!|\{|\})$/;
 // A word that reads as a program's argument, not prose: an option, a number, a variable, a job,
 // a brace or a path. Prose punctuation ends no shell argument, so "after a kill -9, with" is a
 // sentence.
@@ -126,13 +126,120 @@ const SIGNAL_SPEC = /^-(?:SIG)?[A-Z]+[0-9+]*$|^-\d+$|^--signal=\S+$/;
 const SIGNAL_SPEC_WITH_VALUE = /^(?:-s|-n|--signal)$/;
 const OWN_TARGET = /^(?:\$\$|\$!|\$[A-Za-z_]\w*|\$\{[A-Za-z_]\w*\})$/;
 
-/** A shell command's words, unescaped, less its redirections and any comment. */
-function shellWords(segment: string): string[] {
-  return segment
-    .replace(/(?:^|\s)#.*$/, "")
-    .trim()
-    .split(/\s+/)
-    .filter((w) => w !== "" && !/^\d*[<>]&?\S*$/.test(w));
+// A word that opens a redirection, and one that is the operator alone, whose target is the next
+// word. `>&-` closes a descriptor and takes no target.
+const REDIRECTION = /^\d*(?:[<>]|&>)/;
+const REDIRECTION_OPERATOR = /^\d*(?:<<-|[<>&][<>&|]*)$/;
+// A substitution's place in a word: an argument, and never a target the shell owns.
+const SUBSTITUTION = "$()";
+
+/** A quote or a substitution the line opens and never closes, at `quote` if a quote. */
+class Unclosed {
+  readonly quote: number | undefined;
+  constructor(quote?: number) {
+    this.quote = quote;
+  }
+}
+
+/** The index of the `"` that closes a double quote whose content starts at `from`. */
+function doubleQuoteEnd(line: string, from: number): number {
+  for (let i = from; i < line.length; i++) {
+    if (line[i] === '"') return i;
+    if (line[i] === "`") i = backtickEnd(line, i);
+    else if (line.startsWith("$(", i)) i = substitutionEnd(line, i + 2);
+  }
+  throw new Unclosed(from - 1);
+}
+
+function backtickEnd(line: string, at: number): number {
+  const end = line.indexOf("`", at + 1);
+  if (end < 0) throw new Unclosed();
+  return end;
+}
+
+/** The index of the `)` that closes a `$(` whose content starts at `from`. */
+function substitutionEnd(line: string, from: number): number {
+  let depth = 1;
+  for (let i = from; i < line.length; i++) {
+    const c = line[i];
+    if (c === "'") {
+      const open = i;
+      i = line.indexOf("'", open + 1);
+      if (i < 0) throw new Unclosed(open);
+    } else if (c === '"') i = doubleQuoteEnd(line, i + 1);
+    else if (c === "`") i = backtickEnd(line, i);
+    else if (c === "(") depth++;
+    else if (c === ")" && --depth === 0) return i;
+  }
+  throw new Unclosed();
+}
+
+/**
+ * A shell line's commands, each as its words with their quotes removed, and the text inside each
+ * quote and substitution, which may be a command line of its own. A substitution stands in its
+ * word as `$()`. A word is `bare` when no part of it was quoted or substituted. Throws `Unclosed`.
+ */
+function shellCommands(line: string) {
+  const commands: { text: string; bare: boolean }[][] = [[]];
+  const inner: string[] = [];
+  let word: { text: string; bare: boolean } | undefined;
+  const end = () => {
+    if (word !== undefined) commands.at(-1)?.push(word);
+    word = undefined;
+  };
+  const add = (text: string, bare: boolean) => {
+    word ??= { text: "", bare: true };
+    word.text += text;
+    word.bare &&= bare;
+  };
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i] ?? "";
+    let close: number;
+    if (c === "#" && word === undefined) {
+      const newline = line.indexOf("\n", i);
+      i = (newline < 0 ? line.length : newline) - 1;
+    } else if (c === "'") {
+      close = line.indexOf("'", i + 1);
+      if (close < 0) throw new Unclosed(i);
+      inner.push(line.slice(i + 1, close));
+      add(line.slice(i + 1, close), false);
+      i = close;
+    } else if (c === '"') {
+      close = doubleQuoteEnd(line, i + 1);
+      const body = line.slice(i + 1, close);
+      inner.push(body);
+      add(body.replace(/(?:\$\(|`)[\s\S]*/, SUBSTITUTION), false);
+      i = close;
+    } else if (c === "`" || line.startsWith("$(", i)) {
+      close = c === "`" ? backtickEnd(line, i) : substitutionEnd(line, i + 2);
+      inner.push(line.slice(i + (c === "`" ? 1 : 2), close));
+      add(SUBSTITUTION, false);
+      i = close;
+    } else if (
+      (c === "&" || c === "|") &&
+      (/[<>]$/.test(word?.text ?? "") || (c === "&" && line[i + 1] === ">"))
+    ) {
+      add(c, true);
+    } else if (/[;&|\n()]/.test(c)) {
+      end();
+      commands.push([]);
+      if ((c === "&" || c === "|") && line[i + 1] === c) i++;
+    } else if (/\s/.test(c)) end();
+    else add(c, true);
+  }
+  end();
+  return { commands: commands.map(withoutRedirections), inner };
+}
+
+/** A command's words less its redirections and their targets. */
+function withoutRedirections(words: { text: string; bare: boolean }[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < words.length; i++) {
+    const { text, bare } = words[i] ?? { text: "", bare: true };
+    if (bare && REDIRECTION.test(text)) i += REDIRECTION_OPERATOR.test(text) ? 1 : 0;
+    else out.push(text);
+  }
+  return out;
 }
 
 /** Whether a `kill`'s words, past the program, name only its own targets. */
@@ -146,37 +253,64 @@ function killsOnlyItsOwn(words: string[]): boolean {
 }
 
 /**
- * Whether a string literal is a shell command line that sends a signal. It fails closed. Each
- * command is read, the line split at the shell's operators and its quotes, so `sh -c "kill -9
- * -1"` is read as its inner command; and any word of it that names a kill program starts a
- * kill wherever it sits after a launcher, whatever options that launcher takes, or wherever an
- * argument follows it. A `kill` passes only when, past
- * one signal spec and a `--`, each operand is the shell itself, its last job or a plain
- * variable; every other kill program, `systemctl kill`, `loginctl terminate-user` and the like,
- * and `fuser -k`, count. A literal holding no whitespace, escaped whitespace aside, is a
+ * Whether a string literal is a shell command line that sends a signal. It fails closed. The
+ * line is read into commands at the shell's operators, and each command into words, with quoted
+ * parts joined to the text they touch, so `k''ill` is `kill`; the text inside each quote and
+ * substitution is read again as a command line, so `sh -c "kill -9 -1"` counts. Any word that
+ * names a kill program starts a kill wherever it sits after a launcher, whatever options that
+ * launcher takes, or wherever an argument follows it. A `kill` passes only when, past one signal
+ * spec and a `--`, and less its redirections with their targets, each operand is the shell
+ * itself, its last job or a plain variable; a substitution is none of them. Every other kill
+ * program, `systemctl kill`, `loginctl terminate-user` and the like, and `fuser -k`, count. A line
+ * naming a kill program that leaves a substitution open counts. One that leaves a quote open, as
+ * an apostrophe in prose does, counts if it is a kill read either with the quote running to the
+ * end of the line or with it as a plain character. A literal holding no whitespace, escaped whitespace aside, is a
  * program's name rather than a command line: a process started with it is caught where the
  * literal is passed (`kills`).
  */
 export function startsKill(literal: string): boolean {
   const unescaped = literal.replaceAll(/\\[tnrfv]/g, " ");
-  if (!/\s/.test(unescaped)) return false;
-  // A quoted variable is one word, not a nested command: unquote it before splitting at quotes.
-  const line = unescaped.replaceAll("\\", "").replaceAll(/(["'])(\$\{?\w+\}?|\$\$|\$!)\1/g, "$2");
-  for (const segment of line.split(/&&|\|\||[;&|\n()`"']|\$\(/)) {
-    const words = shellWords(segment);
-    const launched = LAUNCHER.test(words[0] ?? "") || STARTER.test(words[0] ?? "");
-    for (const [i, word] of words.entries()) {
-      const rest = words.slice(i + 1);
-      // A word names the program a command runs when it opens the command, follows a launcher
-      // and its options however many there are, or takes an argument; elsewhere it is prose.
-      if (i > 0 && !launched && !ARGUMENT.test(rest[0] ?? "")) continue;
-      if (word === "kill" || word.endsWith("/kill")) {
-        if (!killsOnlyItsOwn(rest)) return true;
-      } else if (KILL_PROGRAM.test(word)) return true;
-      else if (SYSTEMCTL.test(word) && rest.includes("kill")) return true;
-      else if (LOGINCTL.test(word) && rest.some((w) => LOGINCTL_KILL.test(w))) return true;
-      else if (FUSER.test(word) && rest.some((w) => FUSER_KILL.test(w))) return true;
-    }
+  return /\s/.test(unescaped) && readsAsKill(unescaped.replaceAll("\\", ""), 0);
+}
+
+// How many open quotes a line is read both ways for before it counts as a kill unread.
+const OPEN_QUOTE_READINGS = 4;
+// What a line must hold, its quotes taken out, to send a signal at all.
+const NAMES_A_KILL = /kill|systemctl|loginctl|fuser/;
+
+function readsAsKill(line: string, openQuotes: number): boolean {
+  let read: ReturnType<typeof shellCommands>;
+  try {
+    read = shellCommands(line);
+  } catch (error) {
+    if (!(error instanceof Unclosed)) throw error;
+    if (!NAMES_A_KILL.test(line.replaceAll(/["'`]/g, ""))) return false;
+    const at = error.quote;
+    if (at === undefined || openQuotes >= OPEN_QUOTE_READINGS) return true;
+    return (
+      readsAsKill(line + line[at], openQuotes + 1) ||
+      readsAsKill(line.slice(0, at) + line.slice(at + 1), openQuotes + 1)
+    );
+  }
+  return (
+    read.commands.some(commandKills) || read.inner.some((inner) => readsAsKill(inner, openQuotes))
+  );
+}
+
+/** Whether one command's words send a signal. */
+function commandKills(words: string[]): boolean {
+  const launched = LAUNCHER.test(words[0] ?? "") || STARTER.test(words[0] ?? "");
+  for (const [i, word] of words.entries()) {
+    const rest = words.slice(i + 1);
+    // A word names the program a command runs when it opens the command, follows a launcher
+    // and its options however many there are, or takes an argument; elsewhere it is prose.
+    if (i > 0 && !launched && !ARGUMENT.test(rest[0] ?? "")) continue;
+    if (word === "kill" || word.endsWith("/kill")) {
+      if (!killsOnlyItsOwn(rest)) return true;
+    } else if (KILL_PROGRAM.test(word)) return true;
+    else if (SYSTEMCTL.test(word) && rest.includes("kill")) return true;
+    else if (LOGINCTL.test(word) && rest.some((w) => LOGINCTL_KILL.test(w))) return true;
+    else if (FUSER.test(word) && rest.some((w) => FUSER_KILL.test(w))) return true;
   }
   return false;
 }

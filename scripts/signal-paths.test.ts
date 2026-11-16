@@ -105,6 +105,82 @@ describe("kills by a process started to send them", () => {
     expect(calls("a.ts", 'vi.spyOn(process, "kill");')).toEqual([]);
   });
 
+  it("lets through a quoted own target, a redirection with its target, and prose with an apostrophe", () => {
+    const shells = [
+      'for s in INT HUP TERM USR1; do sh -c "kill -s $s \\$\\$"; echo "$s=$?"; done > "$0"',
+      'kill -TERM "$pid" 2>&1',
+      "kill $pid > /dev/null",
+      "kill -s TERM -- '$pid' 2> /dev/null",
+      "kill -0 ${child} >&2; kill $! &> /dev/null",
+      "time kill -TERM $pid",
+      "the terminal's processes outlived their kill; exiting without them",
+      "resumes the agent's thread itself after a kill -9, with no TUI to do it",
+      "the holder kill guard",
+      'a word that starts with "`" and ends the line',
+      "echo $(date and an open substitution",
+    ];
+    expect(
+      shells.filter(
+        (shell) => calls("a.ts", `spawn("sh", ["-c", ${JSON.stringify(shell)}]);`).length,
+      ),
+    ).toEqual([]);
+  });
+
+  it("fails closed on a kill program cut by quotes, or an operand in quotes or a substitution", () => {
+    const shells = [
+      "time kill > x -9 -1",
+      "coproc kill > x -9 -1",
+      "time -p kill > x -9 -1",
+      "kill > x -9 -1",
+      "kill $pid >| x -1",
+      "kill $pid >& x -1",
+      "kill $pid &> x -1",
+      "kill $pid 2> x -1",
+      "kill $pid '>' -1",
+      "kill $pid '#' -1",
+      "time kill $((-1))",
+      "time kill $(printf -- -1)",
+      "time kill '-1'",
+      'coproc kill "-1"',
+      "kill $pid '-1'",
+      "kill $pid $(echo -1)",
+      'kill $pid "$(echo -1)"',
+      "kill $pid `echo -1`",
+      "kill -9 $e'-1'",
+      "k''ill -9 -1",
+      '"k"ill -9 -1',
+      "pk''ill node",
+      "'kill' -9 -1",
+      'x; "env" kill -9 -1',
+      "echo $(kill -9 -1)",
+      'echo "$(kill -9 -1)"',
+      "echo `kill -9 -1`",
+    ];
+    expect(
+      shells.filter(
+        (shell) => !calls("a.ts", `spawn("sh", ["-c", ${JSON.stringify(shell)}]);`).length,
+      ),
+    ).toEqual([]);
+  });
+
+  it("fails closed on a line it can't parse: an unterminated substitution, or an unclosed quote either way", () => {
+    const shells = [
+      "kill $pid $(echo -1",
+      "kill $pid $((1",
+      "kill $pid `echo -1",
+      'kill $pid "`echo -1"',
+      "kill $pid '-1",
+      "kill' -9 -1",
+      'echo "x; kill -9 -1',
+      "it's a kill -9 -1",
+    ];
+    expect(
+      shells.filter(
+        (shell) => !calls("a.ts", `spawn("sh", ["-c", ${JSON.stringify(shell)}]);`).length,
+      ),
+    ).toEqual([]);
+  });
+
   it("allows host-guard's cap its own scope's systemctl kill, and nothing else there", () => {
     const cap = "packages/host-guard/src/cap.ts";
     const own = 'output("systemctl", ["--user", "kill", `--signal=${signal}`, unit]);';
