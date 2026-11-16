@@ -157,7 +157,7 @@ export const DoctorResponse = z.object({
           protocol: z.array(z.string()),
           /**
            * Whether it runs in a terminal's systemd scope; null where that can't be read. Absent
-           * before 1.50.
+           * before 1.53.
            */
           contained: z.boolean().nullable().optional(),
         }),
@@ -168,7 +168,7 @@ export const DoctorResponse = z.object({
    * Whether each new holder terminal starts in a systemd scope of its own: if so, each terminal's
    * memory cap and all terminals' together, as configured and as the kernel enforces them (bytes,
    * null for no cap), and whether a process past its cap is killed alone (`OOMPolicy=continue`,
-   * systemd 253 or later); if not, why. tmux terminals are never contained. Absent before 1.50.
+   * systemd 253 or later); if not, why. tmux terminals are never contained. Absent before 1.53.
    */
   containment: z
     .discriminatedUnion("state", [
