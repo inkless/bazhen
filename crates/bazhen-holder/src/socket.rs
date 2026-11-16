@@ -571,6 +571,24 @@ mod tests {
     }
 
     #[test]
+    fn a_recheck_that_finds_its_own_socket_leaves_it_and_warns_of_nothing() {
+        let dir = private_dir("own");
+        let path = dir.join("t1.sock");
+        let mut socket = Socket::bind(&path).unwrap();
+        // As after its lock was taken back: a socket that isn't its own would then be replaced.
+        socket.takeover_pending = true;
+        socket.recheck_with(|_, _| panic!("bound again over its own socket"));
+        assert!(!socket.takeover_pending);
+        socket.recheck_with(|_, _| panic!("bound again over its own socket"));
+        assert!(
+            !socket.replaced_seen,
+            "took its own socket for something else"
+        );
+        socket.remove();
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn keeps_trying_to_take_the_terminal_back_after_a_bind_that_failed() {
         let dir = private_dir("retry");
         let path = dir.join("t1.sock");
