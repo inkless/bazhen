@@ -93,11 +93,21 @@ pub enum SpawnError {
 /// process of the session: ending those is `session::Ending`'s.
 #[derive(Debug)]
 pub struct Pty {
+    /// Declared, and so dropped, before `_slave`: the master's close disconnects the terminal, so
+    /// the held slave's close, then the last, doesn't wait for output no one will read.
     master: OwnedFd,
+    /// The slave, held open for the PTY's life. When a child's exit closes the slave's last open,
+    /// macOS discards the output the master hasn't read, after waiting for it at most about
+    /// 600 ms; while this one is open, a session leader's exit waits until the master has read it.
+    /// Linux keeps unread output, and holding the slave there would keep the master from reading
+    /// EIO.
+    #[cfg(target_os = "macos")]
+    _slave: OwnedFd,
 }
 
-/// The slave side, until a child takes it as its terminal. The holder keeps no slave of its own,
-/// so the master reads EIO (Linux) or end of file (macOS) once every process on it has closed it.
+/// The slave side, until a child takes it as its terminal. On Linux the holder keeps no slave of
+/// its own, so the master reads EIO once every process on it has closed it. On macOS the master
+/// reads end of file once the session leader's exit has revoked the terminal.
 #[derive(Debug)]
 pub struct Slave(OwnedFd);
 
@@ -125,7 +135,11 @@ impl Pty {
         termios.input_modes.insert(InputModes::IUTF8);
         tcsetattr(&slave, OptionalActions::Now, &termios)?;
         ioctl_fionbio(&master, true)?;
-        let pty = Self { master };
+        let pty = Self {
+            master,
+            #[cfg(target_os = "macos")]
+            _slave: slave.try_clone()?,
+        };
         pty.set_size(size)?;
         Ok((pty, Slave(slave)))
     }

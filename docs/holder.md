@@ -82,6 +82,18 @@ signals it, which leaves a window of microseconds in which a process could exit 
 reused. macOS hands out ids in increasing order, so that would need the whole id range to come
 round within that window.
 
+## A program's last output
+
+A program's exit is reported only after everything it wrote before it exited, however soon it
+exits. A viewer subscribed from before that output sees it before the exit. One that falls more
+than the ring behind is told what it missed, as for any output.
+
+On macOS, the holder keeps its own open of the terminal. Without it, the system discards what the
+holder hasn't read yet once the program closes the terminal. With it, the program's exit waits
+until the holder has read that output. The holder never stops reading, whatever its viewers do,
+so the exit waits no longer than that. Linux keeps what the holder hasn't read, so there the
+holder doesn't hold the terminal open.
+
 ## Reconnecting as the writer
 
 One connection at a time holds the writer slot, whose `input` and `resize` the holder takes. A
