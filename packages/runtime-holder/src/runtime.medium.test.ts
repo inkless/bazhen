@@ -21,6 +21,7 @@ import {
   type TerminalSpec,
 } from "@bazhen/core";
 import {
+  type Containment,
   holderSocket,
   holdersDir,
   PasteRefused,
@@ -30,7 +31,7 @@ import type { HolderHelloReply } from "@bazhen/protocol";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { dirname } from "node:path";
 import { HOLDER_MAX_UNSENT_BYTES } from "./client.ts";
-import { HolderRuntime } from "./runtime.ts";
+import { HolderRuntime, type HolderRuntimeOptions } from "./runtime.ts";
 import { WRITER_RETRY_MS } from "./runtime-stream.ts";
 import { encodeTags } from "./tags.ts";
 import {
@@ -188,10 +189,12 @@ function startingFakes(
   hello: Partial<HolderHelloReply> = {},
   handle?: Handler,
   listen: { readonly halfOpen?: boolean } = {},
+  extra: Partial<HolderRuntimeOptions> = {},
 ) {
   const started: StartHolderOptions[] = [];
   const terminals = new Map<string, FakeTerminal>();
   const built = runtimeAt(root, {
+    ...extra,
     start: async (options) => {
       started.push(options);
       const { terminalId } = options.spec;
@@ -361,6 +364,89 @@ async function outdatedHolder(root: string, terminalId: TerminalId): Promise<Run
     },
   };
 }
+
+describe("HolderRuntime: containing each terminal", () => {
+  const scoped: Containment = {
+    kind: "scoped",
+    systemd: 255,
+    oomPolicy: true,
+    caps: { terminal: "50%", total: "80%" },
+    terminalBytes: 1 << 30,
+    totalBytes: 2 << 30,
+    systemdRun: "/usr/bin/systemd-run",
+    runtimeDir: "/run/user/1000",
+  };
+
+  it("starts each holder in a scope of its own, the bus in the holder's env alone", async () => {
+    const { runtime, started } = startingFakes(
+      privateRoot(),
+      {},
+      undefined,
+      {},
+      {
+        containment: scoped,
+      },
+    );
+    const s = spec();
+    await runtime.create(s);
+    const [options] = started;
+    expect(options?.scope?.argv).toEqual(
+      expect.arrayContaining([
+        "/usr/bin/systemd-run",
+        expect.stringMatching(
+          new RegExp(`^--unit=bazhen-terminal-${s.terminalId}-[0-9a-f]+\\.scope$`),
+        ),
+        "MemoryMax=50%",
+      ]),
+    );
+    expect(options?.scope?.env).toEqual({ XDG_RUNTIME_DIR: "/run/user/1000" });
+    expect(options?.env).toEqual({});
+    expect(options?.spec).toMatchObject({ env: { PATH: "/bin" } });
+    expect(options?.spec).not.toHaveProperty(["env", "XDG_RUNTIME_DIR"]);
+  });
+
+  it("gives each holder a scope no other launch has, a respawn's included", async () => {
+    const { runtime, started } = startingFakes(
+      privateRoot(),
+      {},
+      undefined,
+      {},
+      {
+        containment: scoped,
+      },
+    );
+    await runtime.create(spec());
+    await runtime.create(spec());
+    const units = started.map((o) => o.scope?.argv.find((a) => a.startsWith("--unit=")));
+    expect(new Set(units).size).toBe(2);
+  });
+
+  it("starts holders where the daemon runs when terminals can't be contained", async () => {
+    const containment: Containment = { kind: "uncontained", why: "darwin has no cgroups" };
+    const { runtime, started } = startingFakes(privateRoot(), {}, undefined, {}, { containment });
+    await runtime.create(spec());
+    expect(started[0]).not.toHaveProperty("scope");
+  });
+
+  it("says of each answering holder whether its pid runs in a terminal's scope", async () => {
+    const asked: number[] = [];
+    const { runtime } = startingFakes(
+      privateRoot(),
+      {},
+      undefined,
+      {},
+      {
+        inScope: (pid) => (asked.push(pid), true),
+      },
+    );
+    const s = spec();
+    await runtime.create(s);
+    expect(await runtime.builds()).toEqual([
+      expect.objectContaining({ terminalId: s.terminalId, contained: true }),
+    ]);
+    expect(asked).toEqual([FAKE_PID]);
+  });
+});
 
 describe("HolderRuntime: a holder this build can't speak to", () => {
   it("counts it as running, leaves it out of the inventory, and names it outdated", async () => {

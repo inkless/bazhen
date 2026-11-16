@@ -24,11 +24,13 @@ import {
   type TerminalSpec,
 } from "@bazhen/core";
 import {
+  type Containment,
   type HolderProcess,
   holderBuildOf,
   holderSocket,
   holderSocketRefusal,
   holdersDir,
+  inTerminalScope,
   PasteRefused,
   pasteTextRefusal,
   processCwds,
@@ -38,6 +40,7 @@ import {
   startHolder,
   type StartedHolder,
   type StartHolderOptions,
+  terminalScope,
   vouchHolder,
 } from "@bazhen/host-guard";
 import {
@@ -86,6 +89,13 @@ export interface HolderRuntimeOptions {
   readonly onError?: (err: unknown) => void;
   /** Starts a holder: host-guard's `startHolder`, unless a test records what it starts. */
   readonly start?: (options: StartHolderOptions) => Promise<StartedHolder>;
+  /**
+   * Whether each new terminal's holder starts in a scope of its own. Without one, holders start
+   * where the daemon runs.
+   */
+  readonly containment?: Containment;
+  /** Whether a holder's pid runs in a terminal's scope: host-guard's, unless a test says. */
+  readonly inScope?: (pid: number) => boolean | null;
 }
 
 /** A holder that answered, the build it runs and the protocol versions it speaks. */
@@ -94,6 +104,8 @@ export interface HolderBuild {
   /** Null for a holder not run from an install, or that `ps` no longer shows. */
   readonly build: string | null;
   readonly protocol: readonly string[];
+  /** Whether it runs in a terminal's scope; null where that can't be read. */
+  readonly contained: boolean | null;
 }
 
 /** What saying `hello` at a socket found. */
@@ -326,6 +338,7 @@ export class HolderRuntime implements RuntimeAdapter {
    */
   async builds(): Promise<HolderBuild[]> {
     const installDir = this.opts.installDir ?? null;
+    const inScope = this.opts.inScope ?? inTerminalScope;
     const answering = (await this.reachAll()).flatMap((r) => (r.is === "holder" ? [r.hello] : []));
     return Promise.all(
       answering.map(async (hello) => {
@@ -334,7 +347,9 @@ export class HolderRuntime implements RuntimeAdapter {
           typeof reading !== "string" &&
           Math.abs(reading.start - hello.holderStart) <= START_SKEW_S;
         const build = same && installDir !== null ? holderBuildOf(reading.args, installDir) : null;
-        return { terminalId: hello.terminalId, build, protocol: hello.protocol };
+        // The pid is the one that just answered, so it can't have been reused.
+        const contained = inScope(hello.holderPid);
+        return { terminalId: hello.terminalId, build, protocol: hello.protocol, contained };
       }),
     );
   }
@@ -423,7 +438,10 @@ export class HolderRuntime implements RuntimeAdapter {
       ...this.processSpec(spec),
     };
     const start = this.opts.start ?? startHolder;
-    await start({ binary, root: this.opts.root, spec: holderSpec, env: {} });
+    const { containment } = this.opts;
+    const scope =
+      containment?.kind === "scoped" ? { scope: terminalScope(containment, spec.terminalId) } : {};
+    await start({ binary, root: this.opts.root, spec: holderSpec, env: {}, ...scope });
     const reached = await this.reach(socket);
     if (reached.is !== "holder") {
       // Best effort: one that answers later is told to close, rather than left with no record.
