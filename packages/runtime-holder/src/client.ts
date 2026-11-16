@@ -22,7 +22,8 @@ import { nextRequestId } from "./request-ids.ts";
 
 type ReplyOf<K extends HolderReply["type"]> = Extract<HolderReply, { type: K }>;
 
-export type HolderSnapshot = ReplyOf<"snapshot">;
+/** A snapshot, with the generation it is of: the one current as the holder answered. */
+export type HolderSnapshot = ReplyOf<"snapshot"> & { readonly generation: number };
 
 /**
  * What the holder sends unasked, in the order it sent it. `snapshot` is an `attach`'s, in its
@@ -167,6 +168,8 @@ class Connection {
   private readonly pending = new Map<number, Pending>();
   private lastId = 0;
   private end: HolderEnd | null = null;
+  /** The generation of what the holder sends now: `hello`'s, then each `respawned`'s. */
+  generation = 0;
   private settleEnded: (end: HolderEnd) => void = () => {};
   private readonly hangUpMs: number;
   /** Writes the stream hasn't yet passed on, and who waits for there to be none. */
@@ -361,6 +364,8 @@ class Connection {
   }
 
   private dispatch(frame: HolderReply | UnknownHolderReply): void {
+    if (frame.type === "hello") this.generation = frame.body.generation;
+    if (frame.type === "respawned") this.generation = frame.body.generation;
     if (frame.type === "unknown") {
       // This build sends only requests it knows, whose answers it knows too.
       if (frame.id !== undefined && this.pending.has(frame.id)) {
@@ -490,9 +495,29 @@ export class HolderClient {
     return this.connection.drained(options.signal);
   }
 
+  /**
+   * The generation of what the holder sends now: `hello`'s, then that of each `respawned` read.
+   * Every reply read after a `respawned` is of its generation.
+   */
+  get generation(): number {
+    return this.connection.generation;
+  }
+
   /** The terminal as of the holder's offset, resolved here rather than sent to `onEvent`. */
-  snapshot(options?: RequestOptions): Promise<HolderSnapshot> {
-    return this.connection.ask((id) => ({ type: "snapshot", id }), "snapshot", options);
+  async snapshot(options?: RequestOptions): Promise<HolderSnapshot> {
+    let generation = this.connection.generation;
+    const reply = await this.connection.ask(
+      (id) => ({ type: "snapshot", id }),
+      "snapshot",
+      options,
+      {
+        // Read as the answer is, before any `respawned` behind it in the same chunk.
+        onAnswer: () => {
+          generation = this.connection.generation;
+        },
+      },
+    );
+    return { ...reply, generation };
   }
 
   /**
@@ -504,9 +529,9 @@ export class HolderClient {
   async attach(options?: RequestOptions): Promise<void> {
     const batch: Uint8Array[] = [];
     let snapshotIn = false;
-    const onAnswer = (snapshot: HolderSnapshot) => {
+    const onAnswer = (snapshot: ReplyOf<"snapshot">) => {
       snapshotIn = true;
-      this.connection.emit(snapshot);
+      this.connection.emit({ ...snapshot, generation: this.connection.generation });
     };
     const answers = [
       this.connection.ask((id) => ({ type: "snapshot", id }), "snapshot", options, {
