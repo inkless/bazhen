@@ -66,6 +66,25 @@ function endOfFile(terminal: IPty) {
   call(terminal, "emit", "close");
 }
 
+/**
+ * What happens when the seam is built over a terminal whose prototype lacks `name`: the error it
+ * refuses with, and how many children it started first.
+ */
+function startsWithout(name: string) {
+  let started = 0;
+  const spawn: PtySpawn = () => {
+    started++;
+    return standIn().terminal;
+  };
+  const terminal: object = Object.create(unixTerminal(), { [name]: own(undefined) });
+  try {
+    ptySpawner(spawn, terminal).spawn(["sh"], { cols: 80, rows: 24 }, {});
+    return { refused: null, started };
+  } catch (error) {
+    return { refused: error instanceof Error ? error.message : String(error), started };
+  }
+}
+
 function spawned(terminal: IPty) {
   const spawn: PtySpawn = () => terminal;
   return ptySpawner(spawn, unixTerminal()).spawn(["sh"], { cols: 80, rows: 24 }, {});
@@ -139,17 +158,20 @@ describe("the PTY seam over node-pty", () => {
     expect(resized).toEqual([[100, 30]]);
   });
 
-  it.each(["destroy", "kill", "on"])(
-    "refuses a terminal with no %s before it starts a child",
-    (name) => {
-      const spawn = vi.fn<PtySpawn>(() => standIn().terminal);
-      const terminal = Object.create(unixTerminal(), { [name]: own(undefined) });
-      expect(() => ptySpawner(spawn, terminal).spawn(["sh"], { cols: 80, rows: 24 }, {})).toThrow(
-        name,
-      );
-      expect(spawn).not.toHaveBeenCalled();
-    },
-  );
+  it("refuses a terminal with no destroy before it starts a child", () => {
+    expect(startsWithout("destroy")).toEqual({
+      refused: expect.stringMatching(/destroy/),
+      started: 0,
+    });
+  });
+
+  it("refuses a terminal with no kill before it starts a child", () => {
+    expect(startsWithout("kill")).toEqual({ refused: expect.stringMatching(/kill/), started: 0 });
+  });
+
+  it("refuses a terminal with no on before it starts a child", () => {
+    expect(startsWithout("on")).toEqual({ refused: expect.stringMatching(/\bon\b/), started: 0 });
+  });
 
   it("refuses a terminal whose kill it can't replace", () => {
     const { terminal } = standIn();
