@@ -13,7 +13,11 @@ describe("fastCheckSeed", () => {
   });
 
   it("refuses an FC_SEED that isn't an integer", () => {
-    expect(() => fastCheckSeed({ FC_SEED: "random" })).toThrow("FC_SEED is not an integer: random");
+    for (const given of ["random", "1e3", " 7", "0x10", "9007199254740993"]) {
+      expect(() => fastCheckSeed({ FC_SEED: given })).toThrow(
+        `FC_SEED is not an integer: ${given}`,
+      );
+    }
   });
 
   it("seeds fast-check before a test file runs", () => {

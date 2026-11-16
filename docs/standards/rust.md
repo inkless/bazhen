@@ -260,13 +260,15 @@ What differs:
   the encoder, and the decoder's answer for every malformed input, such as every truncation
   (`crates/bazhen-hook/src/lib.rs`, `mod properties`).
   - **A pull request tests the change, not the draw.** `gateEnv` in `scripts/cargo-gate.ts` fixes
-    `PROPTEST_RNG_SEED` for every gate and for falsify, and each `proptest!` block fixes its case
-    count, so a run sees the cases the last one saw. A property that fails on a pull request
-    failed because of what changed. Changing the seed changes every property's cases at once: do
-    it on purpose, never to get past a failure.
+    `PROPTEST_RNG_SEED` for every gate and for falsify, and drops `PROPTEST_CASES`, so each
+    `proptest!` block runs the case count its code gives (proptest's 256 where it gives none). A
+    run sees the cases the last one saw, so a property that fails on a pull request failed
+    because of what changed. Changing the seed changes every property's cases at once: do it on
+    purpose, never to get past a failure.
   - **New cases are drawn nightly**, by the `properties` job in `.github/workflows/fuzz.yml`,
-    round after round on random seeds that it prints. Run `PROPTEST_RNG_SEED=<n> pnpm test:rust`
-    to replay a round. A failure comes back with its fix as a named test of the shrunk case, plus
+    round after round on random seeds that it prints. A red run fails with the commit and the
+    command that replay it, and GitHub emails it to whoever last edited the job's `cron` line.
+    No issue is filed. A failure comes back with its fix as a named test of the shrunk case, plus
     the `cc` line proptest wrote, committed to the crate's `proptest-regressions/<file>.txt`.
     proptest replays every line in that file for every property in the source file, before its
     own cases. Don't commit a line a mutant produced.
@@ -312,8 +314,9 @@ What differs:
     library. The decoder is `pub` there; the binary, if any, is a `main` that calls the
     library, as `crates/bazhen-hook/src/main.rs` is.
   - `.github/workflows/fuzz.yml` runs every target nightly, and for a minute on a pull request that
-    changes the Rust. It alone uses nightly, pinned there as `NIGHTLY`, because libFuzzer's
-    instrumentation needs it; everything else builds on the pinned toolchain. To run one locally,
+    changes the Rust. Its `fuzz` job alone builds on nightly, pinned there as `NIGHTLY`, because
+    libFuzzer's instrumentation needs it; everything else builds on the pinned toolchain. Its
+    `properties` job runs the property tests (above), not the targets. To run a target locally,
     install that nightly and `cargo install --locked cargo-fuzz@0.13.2` once, then run
     `pnpm capped -- cargo +nightly-2026-11-01 fuzz run <target> -- -rss_limit_mb=2048
     -max_total_time=600` from the crate's directory. cargo-fuzz starts its target without cargo's

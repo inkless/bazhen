@@ -279,9 +279,10 @@ A test owns everything it touches and leaves nothing behind.
 - **Write property tests for state tables.** Generate random event sequences with fast-check and
   assert invariants (`packages/core/src/machine.property.test.ts`). Keep the walk and the
   predicates at module scope, and only `fc.assert` inside the test. Every run draws from one fixed
-  seed (`tests/support/fast-check-seed.ts`), so a failure on a pull request is the change's.
-  The nightly `properties` job in `.github/workflows/fuzz.yml` draws new cases with a random
-  `FC_SEED` it prints. A failure it finds comes back as a test of fast-check's counterexample.
+  seed (`tests/support/fast-check-seed.ts`), which every vitest project loads, so a failure on a
+  pull request is the change's. The nightly `properties` job in `.github/workflows/fuzz.yml` draws
+  new cases with a random `FC_SEED` it prints, and a red run names the commit and the command that
+  replay it. A failure it finds comes back as a test of fast-check's counterexample.
 - **Test HTTP routes through `app.request`,** with a `Host` header from the allowlist
   (`apps/daemon/src/http/app.test.ts`).
 - **Migrations.** A shipped migration is never edited. A new migration gets a medium test that

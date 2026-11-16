@@ -8,6 +8,8 @@ export function fastCheckSeed(env: NodeJS.ProcessEnv): number {
   const given = env.FC_SEED;
   if (given === undefined || given === "") return FAST_CHECK_SEED;
   const seed = Number(given);
-  if (!Number.isSafeInteger(seed)) throw new Error(`FC_SEED is not an integer: ${given}`);
+  if (!/^-?\d+$/.test(given) || !Number.isSafeInteger(seed)) {
+    throw new Error(`FC_SEED is not an integer: ${given}`);
+  }
   return seed;
 }
