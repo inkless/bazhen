@@ -12,8 +12,8 @@ const NO_SUCH_PID = 0x7fff_ffff;
 const own = (value: unknown) => ({ value, writable: true, configurable: true });
 
 /**
- * A node-pty terminal with no PTY behind it: node-pty's own `destroy`, `kill`, `_close`, `on` and
- * `emit`, over a read socket that closes when destroyed. `write` and `resize`, which would reach a
+ * A node-pty terminal with no PTY behind it: node-pty's own `destroy`, `kill`, `_close`, `on`,
+ * `emit` and `ptsName`, over a read socket that closes when destroyed. `write` and `resize`, which would reach a
  * real fd, only record.
  */
 function standIn() {
@@ -30,6 +30,7 @@ function standIn() {
   const resized: unknown[] = [];
   const terminal: unknown = Object.create(unixTerminal(), {
     _pid: own(NO_SUCH_PID),
+    _pty: own("/dev/pts/999"),
     _socket: own(socket),
     _writeStream: own({ dispose() {} }),
     _internalee: own(new EventEmitter()),
@@ -171,6 +172,46 @@ describe("the PTY seam over node-pty", () => {
 
   it("refuses a terminal with no on before it starts a child", () => {
     expect(startsWithout("on")).toEqual({ refused: expect.stringMatching(/\bon\b/), started: 0 });
+  });
+
+  it("refuses a terminal with no ptsName before it starts a child", () => {
+    expect(startsWithout("ptsName")).toEqual({
+      refused: expect.stringMatching(/ptsName/),
+      started: 0,
+    });
+  });
+
+  it("names its terminal device while the master is open, and none once hung up", () => {
+    signals();
+    const pty = spawned(standIn().terminal);
+    expect(pty.tty).toBe("/dev/pts/999");
+    pty.hangUp();
+    expect(pty.tty).toBeUndefined();
+  });
+
+  it("names its terminal device until node-pty closes the master, before the exit is heard", () => {
+    const { terminal } = standIn();
+    const pty = spawned(terminal);
+    expect(pty.tty).toBe("/dev/pts/999");
+    endOfFile(terminal);
+    expect(pty.tty).toBeUndefined();
+  });
+
+  it("names its terminal device until its child exits", () => {
+    const { terminal, exit } = standIn();
+    const pty = spawned(terminal);
+    expect(pty.tty).toBe("/dev/pts/999");
+    exit(0);
+    expect(pty.tty).toBeUndefined();
+  });
+
+  it("hangs up a terminal that names no device, and refuses it", () => {
+    const sent = signals();
+    const { terminal, socket } = standIn();
+    Object.defineProperty(terminal, "_pty", { value: undefined });
+    expect(() => spawned(terminal)).toThrow(/terminal device/);
+    expect(socket.destroyed).toBe(true);
+    expect(sent).not.toHaveBeenCalled();
   });
 
   it("refuses a terminal whose kill it can't replace", () => {

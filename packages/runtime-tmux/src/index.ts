@@ -449,14 +449,20 @@ export class TmuxRuntime implements RuntimeAdapter {
     this.settingsPending = false;
   }
 
+  private async resetIfDead(paneId: string): Promise<void> {
+    const reset = this.deadPaneReset(paneId);
+    if (reset.length > 0) await this.tmux(...sequence(reset));
+  }
+
   /**
    * `DEAD_PANE_RESET` for one pane, when this tmux needs it, as a client is about to attach to it
    * or leave it. The hook alone isn't enough: a tmux built with utempter can lose a pane's SIGCHLD
    * before 3.6, leaving it dead with no status, and then `pane-died` never fires.
    */
-  private async resetIfDead(paneId: string): Promise<void> {
-    if (!this.resetDeadPanes) return;
-    await this.tmux("if-shell", "-F", "-t", paneId, "#{pane_dead}", `send-keys -R -t ${paneId}`);
+  private deadPaneReset(paneId: string): string[][] {
+    return this.resetDeadPanes
+      ? [["if-shell", "-F", "-t", paneId, "#{pane_dead}", `send-keys -R -t ${paneId}`]]
+      : [];
   }
 
   private paneTitleHook(): string[] {
@@ -572,7 +578,17 @@ export class TmuxRuntime implements RuntimeAdapter {
       onRespawn: () => {},
       close: () => {
         screen.dispose();
-        void this.resetIfDead(paneId)
+        // Closing the master alone hangs the client up only once every copy of it is closed, and
+        // a later attach client can inherit one. tmux detaches the client by its terminal
+        // device, which names no other PTY while this master is open, and only then: `tty` is
+        // undefined once it has closed. The reset runs first, in the same list, so the client
+        // never leaves a dead pane that asked for focus reports.
+        const { tty } = proc;
+        const leaving = [
+          ...this.deadPaneReset(paneId),
+          ...(tty === undefined ? [] : [["detach-client", "-t", tty]]),
+        ];
+        void (leaving.length === 0 ? Promise.resolve("") : this.tmux(...sequence(leaving)))
           .catch(() => undefined)
           .finally(() => proc.hangUp());
       },
