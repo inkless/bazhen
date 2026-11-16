@@ -28,6 +28,7 @@ const claude: HarnessAdapter = {
 
 const local = (store: Store, runtime: FakeRuntime) =>
   new LocalEnvironment({
+    historyLines: 10_000,
     id: localEnvironmentId(store),
     runtime,
     harnesses: [claude],

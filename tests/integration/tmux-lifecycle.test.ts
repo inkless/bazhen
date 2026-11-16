@@ -27,6 +27,7 @@ const spec = (argv: [string, ...string[]]): TerminalSpec => ({
   env: {},
   size: { cols: 80, rows: 24 },
   generation: 0,
+  historyLines: 10_000,
 });
 
 afterAll(() => server.kill());

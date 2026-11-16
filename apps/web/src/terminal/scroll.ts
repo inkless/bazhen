@@ -1,3 +1,5 @@
+import { HISTORY_LINES, MAX_ROWS } from "@bazhen/protocol";
+
 export type TerminalKind = "agent" | "shell";
 
 export interface WheelContext {
@@ -23,3 +25,12 @@ export function wheelAction({ mouseTracking, alternate, kind }: WheelContext): W
   if (!alternate) return "local";
   return kind === "shell" ? "arrows" : "swallow";
 }
+
+/**
+ * The scrollback a view keeps for a terminal that keeps `historyLines`, with room for a screen
+ * more: a snapshot taken at more rows than the page has pushes its extra screen lines into the
+ * scrollback, which would otherwise evict the oldest history. A daemon that doesn't say keeps
+ * `HISTORY_LINES`.
+ */
+export const scrollbackFor = (historyLines: number = HISTORY_LINES): number =>
+  historyLines + MAX_ROWS;

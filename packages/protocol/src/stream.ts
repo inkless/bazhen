@@ -9,9 +9,8 @@ import { ProtocolVersion } from "./version.ts";
 export const EPOCH_FRAMES_SINCE = "1.30";
 
 /**
- * How much history above the screen a terminal keeps, everywhere it is kept: tmux's history, the
- * daemon's copy, and each view's scrollback. A view gets this much when it opens, and keeps this
- * much as output scrolls (foundation-design §12 item 2).
+ * How much history above its screen a terminal keeps unless `terminals.history_lines` says
+ * otherwise, and what a view keeps when its daemon doesn't say (foundation-design §12 item 2).
  */
 export const HISTORY_LINES = 10_000;
 
@@ -87,7 +86,14 @@ export const StreamServerFrame = z.discriminatedUnion("type", [
    * The binary frames between these two are the terminal's history and screen as the daemon
    * holds them; live output follows, with no gap and no repeat (§5.3, §5.9).
    */
-  z.object({ type: z.literal("snapshot_start") }),
+  z.object({
+    type: z.literal("snapshot_start"),
+    /**
+     * How much history above its screen the terminal keeps, which the view keeps too as output
+     * scrolls; absent from an older daemon, whose terminals keep `HISTORY_LINES`.
+     */
+    historyLines: z.number().int().nonnegative().optional(),
+  }),
   z.object({ type: z.literal("snapshot_end") }),
   /** Input from a view that wasn't the driver was dropped, never queued. */
   z.object({ type: z.literal("input_dropped") }),

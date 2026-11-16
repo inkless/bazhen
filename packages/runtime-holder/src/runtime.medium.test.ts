@@ -196,6 +196,7 @@ const spec = (overrides: Partial<TerminalSpec> = {}): TerminalSpec => ({
   env: { BAZHEN_TERMINAL_ID: "t" },
   size: { cols: 80, rows: 24 },
   generation: 0,
+  historyLines: 10_000,
   ...overrides,
 });
 
@@ -259,6 +260,12 @@ describe("HolderRuntime: creating and finding terminals", () => {
         generation: "0",
       },
     });
+  });
+
+  it("starts a holder that keeps the terminal's history depth", async () => {
+    const { runtime, started } = startingFakes(privateRoot());
+    await runtime.create(spec({ historyLines: 1234 }));
+    expect(started[0]?.spec).toMatchObject({ historyLines: 1234 });
   });
 
   it("refuses a new terminal with no binary installed, saying why, and starts nothing", async () => {
@@ -524,7 +531,7 @@ describe("HolderRuntime: refusing a ref that isn't the holder's process", () => 
     for (const act of [
       () => runtime.signal(forged, "SIGKILL"),
       () => runtime.close(forged),
-      () => runtime.attach(forged, null, 0),
+      () => runtime.attach(forged, null),
       () => runtime.respawn(forged, spec()),
     ]) {
       await expect(act()).rejects.toMatchObject({ reason: "server-replaced" });
@@ -912,7 +919,7 @@ describe("HolderRuntime: streams", () => {
     const { runtime, ref, vt } = await attachable(5, (holder) =>
       holder.send(data(5, "ab"), { type: "alternate", body: { offset: 7, on: true } }),
     );
-    const attached = await runtime.attach(ref, null, 0);
+    const attached = await runtime.attach(ref, null);
     const seen: unknown[] = [];
     attached.stream.onData((bytes) => seen.push(Buffer.from(bytes).toString()));
     attached.stream.onAlternate((on) => seen.push(on));
@@ -926,6 +933,13 @@ describe("HolderRuntime: streams", () => {
     attached.stream.close();
   });
 
+  it("attaches with the history depth its holder says it keeps, not the runtime's default", async () => {
+    const { runtime, ref } = await attachable(5, () => {}, 0, { hello: { historyLines: 321 } });
+    const attached = await runtime.attach(ref, null);
+    expect(attached.historyLines).toBe(321);
+    attached.stream.close();
+  });
+
   it("tells a respawn before the next process's bytes, and pushes each switch of screen once", async () => {
     const { runtime, ref } = await attachable(0, (holder) =>
       holder.send(
@@ -935,7 +949,7 @@ describe("HolderRuntime: streams", () => {
         data(0, "new"),
       ),
     );
-    const { stream } = await runtime.attach(ref, null, 0);
+    const { stream } = await runtime.attach(ref, null);
     const seen: unknown[] = [];
     stream.onData((bytes) => seen.push(Buffer.from(bytes).toString()));
     stream.onRespawn((generation) => seen.push(generation));
@@ -951,7 +965,7 @@ describe("HolderRuntime: streams", () => {
     const ended = await attachable(0, (holder) => holder.hangUp());
     const whys: string[] = [];
     for (const { runtime, ref } of [behind, ended]) {
-      const { stream } = await runtime.attach(ref, null, 0);
+      const { stream } = await runtime.attach(ref, null);
       stream.onClose((why) => whys.push(why));
     }
     await expect.poll(() => whys.toSorted()).toEqual(["behind", "ended"]);
@@ -959,8 +973,8 @@ describe("HolderRuntime: streams", () => {
 
   it("sends every stream's input and resize on one writer connection, apart from its reader", async () => {
     const { runtime, ref, fake } = await attachable();
-    const first = await runtime.attach(ref, { cols: 90, rows: 30 }, 0);
-    const second = await runtime.attach(ref, null, 0);
+    const first = await runtime.attach(ref, { cols: 90, rows: 30 });
+    const second = await runtime.attach(ref, null);
     first.stream.write(Buffer.from("a"));
     second.stream.write(Buffer.from("b"));
     const writers = () =>
@@ -976,7 +990,7 @@ describe("HolderRuntime: streams", () => {
   it("opens a new writer connection only once the old one has hung up", async () => {
     const { runtime, ref, fake } = await attachable();
     const writers = () => fake.connections.filter((c) => c.holder.hello?.writer === true);
-    const first = await runtime.attach(ref, { cols: 90, rows: 30 }, 0);
+    const first = await runtime.attach(ref, { cols: 90, rows: 30 });
     await expect.poll(() => writers()).toHaveLength(1);
     const old = writers()[0]!.holder;
     const order: string[] = [];
@@ -986,7 +1000,7 @@ describe("HolderRuntime: streams", () => {
     first.stream.write(new Uint8Array(4 * 1024 * 1024));
     await new Promise((wait) => setTimeout(wait, 50));
     first.stream.close();
-    const second = runtime.attach(ref, { cols: 91, rows: 30 }, 0);
+    const second = runtime.attach(ref, { cols: 91, rows: 30 });
     await new Promise((wait) => setTimeout(wait, 200));
     expect([writers().length, order]).toEqual([1, []]);
     old.startReading();
@@ -998,7 +1012,7 @@ describe("HolderRuntime: streams", () => {
 
   it("asks again for a writer slot another connection holds, then says so, to streams come later too", async () => {
     const { runtime, ref, fake } = await attachable(5, () => {}, 0, { hello: { writer: false } });
-    const { stream } = await runtime.attach(ref, null, 0);
+    const { stream } = await runtime.attach(ref, null);
     const told: string[] = [];
     stream.onFailure((failure) => told.push(failure.what));
     stream.write(Buffer.from("a"));
@@ -1007,7 +1021,7 @@ describe("HolderRuntime: streams", () => {
     expect(asked).toHaveLength(1 + WRITER_RETRY_MS.length);
     await Promise.all(asked.map((c) => c.holder.closed));
     expect(asked.flatMap((c) => c.requests).filter((r) => r.type === "input")).toEqual([]);
-    const late = await runtime.attach(ref, null, 0);
+    const late = await runtime.attach(ref, null);
     const lateTold: string[] = [];
     late.stream.onFailure((failure) => lateTold.push(failure.what));
     expect(lateTold).toEqual(["input"]);
@@ -1024,7 +1038,7 @@ describe("HolderRuntime: streams", () => {
           { type: "respawned", body: respawned },
         ),
     });
-    const attached = await runtime.attach(ref, null, 0);
+    const attached = await runtime.attach(ref, null);
     const seen: unknown[] = [];
     attached.stream.onData((bytes) => seen.push(Buffer.from(bytes).toString()));
     attached.stream.onRespawn((generation) => seen.push(generation));
@@ -1044,7 +1058,7 @@ describe("HolderRuntime: streams", () => {
           .holder.send({ type: "alternate", body: { offset: 0, on: true } }),
     });
     terminal = fake;
-    const attached = await runtime.attach(ref, { cols: 90, rows: 30 }, 0);
+    const attached = await runtime.attach(ref, { cols: 90, rows: 30 });
     const pushed: boolean[] = [];
     attached.stream.onAlternate((on) => pushed.push(on));
     readers()
@@ -1057,7 +1071,7 @@ describe("HolderRuntime: streams", () => {
 
   it("refuses input past what a terminal holds unsent, and sends none of it", async () => {
     const { runtime, ref, fake } = await attachable();
-    const { stream } = await runtime.attach(ref, null, 0);
+    const { stream } = await runtime.attach(ref, null);
     const failures: unknown[] = [];
     stream.onFailure((failure) => failures.push(failure));
     stream.write(new Uint8Array(HOLDER_MAX_UNSENT_BYTES + 1));
@@ -1076,7 +1090,7 @@ describe("HolderRuntime: streams", () => {
 
   it("sends a stream's input to no other holder that takes the terminal's socket", async () => {
     const { runtime, ref, fake } = await attachable();
-    const { stream } = await runtime.attach(ref, null, 0);
+    const { stream } = await runtime.attach(ref, null);
     const failures: string[] = [];
     stream.onFailure((failure) => failures.push(String(failure.cause)));
     // The reader stays on the first; a second holder takes the socket's name.
@@ -1093,7 +1107,7 @@ describe("HolderRuntime: streams", () => {
   it("holds a stream's snapshot until the stream has delivered every byte before it", async () => {
     let reader: FakeHolder | undefined;
     const { runtime, ref } = await attachable(0, (holder) => (reader = holder), 4);
-    const { stream } = await runtime.attach(ref, null, 0);
+    const { stream } = await runtime.attach(ref, null);
     let taken = false;
     // The control connection's snapshot is at 4, the reader still at 0.
     const snapshot = stream.snapshot().then((s) => ((taken = true), s));
@@ -1107,7 +1121,7 @@ describe("HolderRuntime: streams", () => {
   it("settles a held snapshot once a respawn carries the stream past it", async () => {
     let reader: FakeHolder | undefined;
     const { runtime, ref } = await attachable(0, (holder) => (reader = holder), 4);
-    const { stream } = await runtime.attach(ref, null, 0);
+    const { stream } = await runtime.attach(ref, null);
     const snapshot = stream.snapshot();
     await new Promise((wait) => setTimeout(wait, 50));
     const respawned = { generation: 1, childPid: FAKE_PID, childStart: FAKE_START };
@@ -1119,7 +1133,7 @@ describe("HolderRuntime: streams", () => {
   it("rejects a pending snapshot once the stream has closed, after its close callbacks", async () => {
     let reader: FakeHolder | undefined;
     const { runtime, ref } = await attachable(3, (holder) => (reader = holder), 10);
-    const { stream } = await runtime.attach(ref, null, 0);
+    const { stream } = await runtime.attach(ref, null);
     const order: string[] = [];
     stream.onClose(() => order.push("closed"));
     const pending = stream.snapshot().catch(() => order.push("rejected"));

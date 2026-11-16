@@ -66,6 +66,8 @@ export interface LocalEnvironmentOptions {
   readonly loginShell?: string;
   /** The user's shell, by absolute path, which shell terminals run; `/bin/sh` without one. */
   readonly shell?: string;
+  /** How many lines of history above its screen each terminal it creates keeps. */
+  readonly historyLines: number;
 }
 
 /**
@@ -187,6 +189,7 @@ export class LocalEnvironment implements EnvironmentAdapter {
       },
       size,
       generation: 0,
+      historyLines: this.opts.historyLines,
       ...(theme && { theme }),
       ...(runtime && { runtime }),
     });
@@ -275,6 +278,7 @@ export class LocalEnvironment implements EnvironmentAdapter {
         ? { kind: "agent", agentId, harnessSession: JSON.stringify(externalRef) }
         : { kind: "agent", agentId },
       size,
+      historyLines: this.opts.historyLines,
       ...(on && { runtime: on }),
     });
     return { runtime, externalRef, ...(launch.theme && { theme: launch.theme }) };

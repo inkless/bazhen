@@ -93,11 +93,16 @@ function browserTerminal(dimensions = size): headless.Terminal {
 }
 
 /** A fresh terminal, as a browser joining late would be, with the emulator's snapshot written. */
-async function replayed(output: string, history = ""): Promise<headless.Terminal> {
+async function replayed(
+  output: string,
+  history = "",
+  historyLines = HISTORY_LINES,
+): Promise<headless.Terminal> {
   const emulator = new ScreenEmulator(
     size,
     () => {},
     () => TERMINAL_COLOURS.dark,
+    historyLines,
   );
   emulator.seed(history);
   emulator.write(Buffer.from(output));
@@ -134,6 +139,12 @@ describe("the daemon's attach snapshot", () => {
     const history = Array.from({ length: HISTORY_LINES + 500 }, (_, i) => `old ${i}`).join("\n");
     const browser = await replayed("now", history);
     expect(lines(browser)[0]).toBe("old 500");
+  });
+
+  it("keeps at most the history its terminal keeps", async () => {
+    const history = Array.from({ length: 80 }, (_, i) => `old ${i}`).join("\n");
+    const browser = await replayed("now", history, 50);
+    expect(lines(browser)[0]).toBe("old 30");
   });
 
   it("puts the cursor back where the program left it", async () => {

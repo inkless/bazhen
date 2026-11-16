@@ -4,7 +4,13 @@ import { parse } from "smol-toml";
 import { z } from "zod";
 import { ENV_RULE, type EnvRules } from "@bazhen/core";
 import { memoryMaxRefusal, swapMaxRefusal, type TerminalCaps } from "@bazhen/host-guard";
-import { isOrigin, originList, originsProblem } from "@bazhen/protocol";
+import {
+  HISTORY_LINES,
+  HOLDER_MAX_HISTORY_LINES,
+  isOrigin,
+  originList,
+  originsProblem,
+} from "@bazhen/protocol";
 import { networkInterfaces } from "node:os";
 import { localSubnets, parseRange, type Cidr } from "./cidr.ts";
 import { resolvePaths, type PathInputs } from "./paths.ts";
@@ -60,6 +66,8 @@ const ConfigFile = z.strictObject({
       total_memory_max: MemoryMax.optional(),
       /** The swap each terminal's processes may use together, where they can be contained. */
       swap_max: SwapMax.optional(),
+      /** How many lines of history above its screen each new terminal keeps. */
+      history_lines: z.int().min(0).max(HOLDER_MAX_HISTORY_LINES).optional(),
     })
     .optional(),
   /** Where new terminals run; each one already made stays on the runtime it was made on. */
@@ -118,6 +126,8 @@ export interface Config {
   readonly launchLimits: { readonly maxLaunched: number; readonly maxDepth: number };
   /** `terminals.max_open`: past it, a new agent or shell is refused. */
   readonly maxOpenTerminals: number;
+  /** `terminals.history_lines`: the history each new terminal keeps, for as long as it runs. */
+  readonly historyLines: number;
   /** `runtime.default`: the runtime new terminals are created on. */
   readonly defaultRuntime: z.infer<typeof RuntimeKind>;
   /** `terminals.memory_max`, `terminals.total_memory_max` and `terminals.swap_max`. */
@@ -208,6 +218,7 @@ export function resolveConfig(
       maxDepth: file.agents?.max_launch_depth ?? 3,
     },
     maxOpenTerminals: file.terminals?.max_open ?? DEFAULT_MAX_OPEN_TERMINALS,
+    historyLines: file.terminals?.history_lines ?? HISTORY_LINES,
     defaultRuntime: file.runtime?.default ?? "tmux",
     terminalCaps: {
       terminal: file.terminals?.memory_max ?? DEFAULT_TERMINAL_MEMORY,

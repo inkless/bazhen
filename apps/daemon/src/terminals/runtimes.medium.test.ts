@@ -40,6 +40,7 @@ function twoRuntimes() {
   const holder = new FakeRuntime({ kind: "holder", attach: "snapshot" });
   const on = (defaultKind: "tmux" | "holder") =>
     new LocalEnvironment({
+      historyLines: 10_000,
       id: localEnvironmentId(store),
       runtime: new RoutedRuntime({ runtimes: [tmux, holder], defaultKind, onError: () => {} }),
       harnesses: [claude, codex],

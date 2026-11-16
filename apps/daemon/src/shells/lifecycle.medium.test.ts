@@ -39,6 +39,7 @@ async function setup({ maxOpen = 100 } = {}) {
   const { store, agentId, environment } = await withAgent(
     (s) =>
       new LocalEnvironment({
+        historyLines: 10_000,
         id: localEnvironmentId(s),
         runtime,
         harnesses: [claude],

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { wheelAction, type WheelContext, type WheelAction } from "./scroll.ts";
+import { HISTORY_LINES, MAX_ROWS } from "@bazhen/protocol";
+import { scrollbackFor, wheelAction, type WheelContext, type WheelAction } from "./scroll.ts";
 
 const table: ReadonlyArray<readonly [string, WheelContext, WheelAction]> = [
   ["an agent with mouse reporting", { mouseTracking: true, alternate: true, kind: "agent" }, "app"],
@@ -33,5 +34,15 @@ const table: ReadonlyArray<readonly [string, WheelContext, WheelAction]> = [
 describe("wheel routing", () => {
   it.each(table)("routes the wheel for %s", (_name, context, action) => {
     expect(wheelAction(context)).toBe(action);
+  });
+});
+
+describe("a view's scrollback", () => {
+  it("keeps the history its terminal keeps, and a screen more", () => {
+    expect(scrollbackFor(250)).toBe(250 + MAX_ROWS);
+  });
+
+  it("keeps the default history when the daemon doesn't say how much its terminal keeps", () => {
+    expect(scrollbackFor(undefined)).toBe(HISTORY_LINES + MAX_ROWS);
   });
 });

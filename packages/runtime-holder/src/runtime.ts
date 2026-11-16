@@ -449,6 +449,7 @@ export class HolderRuntime implements RuntimeAdapter {
       socket,
       tags: encodeTags(spec.tags),
       size: spec.size,
+      historyLines: spec.historyLines,
       ...this.processSpec(spec),
     };
     const start = this.opts.start ?? startHolder;
@@ -505,11 +506,7 @@ export class HolderRuntime implements RuntimeAdapter {
     };
   }
 
-  async attach(
-    ref: RuntimeRef,
-    size: Size | null,
-    _historyLines: number,
-  ): Promise<SnapshotAttached> {
+  async attach(ref: RuntimeRef, size: Size | null): Promise<SnapshotAttached> {
     const stream = new HolderStream(this.controlFor(ref), size ?? { cols: 80, rows: 24 });
     try {
       const reader = await this.holderOf(ref, (event) => stream.event(event));

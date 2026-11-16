@@ -340,6 +340,7 @@ const codex = new CodexChannel({
 const environment = new LocalEnvironment({
   id: localId,
   runtime,
+  historyLines: config.historyLines,
   harnesses: [
     new ClaudeCodeHarness({
       newSessionId: randomUUID,

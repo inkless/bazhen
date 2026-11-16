@@ -8,6 +8,7 @@ import { testServer } from "./helpers.ts";
 const server = testServer("guard");
 const runtime = new TmuxRuntime({ server, pty: nodePtySpawner, env: filterEnv(process.env).env });
 const environment = new LocalEnvironment({
+  historyLines: 10_000,
   id: newId("env"),
   runtime,
   socket: "/run/b.sock",

@@ -24,6 +24,7 @@ describe("resolveConfig", () => {
       lan: null,
       launchLimits: { maxLaunched: 5, maxDepth: 3 },
       maxOpenTerminals: 100,
+      historyLines: 10_000,
       defaultRuntime: "tmux",
       terminalCaps: { terminal: "50%", total: "80%", swap: "0" },
     });
@@ -45,6 +46,7 @@ describe("resolveConfig", () => {
       lan: null,
       launchLimits: { maxLaunched: 5, maxDepth: 3 },
       maxOpenTerminals: 100,
+      historyLines: 10_000,
       defaultRuntime: "tmux",
       terminalCaps: { terminal: "50%", total: "80%", swap: "0" },
     });
@@ -57,6 +59,10 @@ describe("resolveConfig", () => {
 
   it("takes how many terminals may be open at once from the file", () => {
     expect(resolveConfig({ terminals: { max_open: 12 } }, {}).maxOpenTerminals).toBe(12);
+  });
+
+  it("takes how many lines of history each new terminal keeps from the file", () => {
+    expect(resolveConfig({ terminals: { history_lines: 50_000 } }, {}).historyLines).toBe(50_000);
   });
 
   it("takes each terminal's memory and swap caps and all terminals' from the file", () => {

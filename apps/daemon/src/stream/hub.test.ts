@@ -45,7 +45,11 @@ async function rowsOf(sent: readonly string[]): Promise<{ all: string[]; top: nu
 }
 
 /** A runtime with one terminal, whose program echoes nothing, and what reaches it. */
-async function fakeRuntime(history = "earlier output", opts: FakeRuntimeOptions = {}) {
+async function fakeRuntime(
+  history = "earlier output",
+  opts: FakeRuntimeOptions = {},
+  historyLines = 10_000,
+) {
   const runtime = new FakeRuntime(opts);
   const terminal = async (text = history) => {
     const created = await runtime.create({
@@ -56,6 +60,7 @@ async function fakeRuntime(history = "earlier output", opts: FakeRuntimeOptions 
       env: {},
       size,
       generation: 0,
+      historyLines,
     });
     runtime.scroll(created, text);
     return created;
@@ -219,6 +224,31 @@ describe("terminal hub", () => {
       ["earlier output", "one two three"],
       ["earlier output", "one two three"],
     ]);
+  });
+
+  it.each(["history", "snapshot"] as const)(
+    "tells a view, as its snapshot starts, how much history its terminal keeps (%s)",
+    async (attach) => {
+      const rt = await fakeRuntime("earlier output", { attach }, 250);
+      const view = viewer();
+      await new Hub(rt.runtime, memoryLog().log).join(rt.ref, view.v, size);
+      expect(view.frames.find((f) => f.type === "snapshot_start")).toEqual({
+        type: "snapshot_start",
+        historyLines: 250,
+      });
+    },
+  );
+
+  it("opens a view on no more history than its terminal keeps, however much has scrolled", async () => {
+    const rt = await fakeRuntime("", {}, 20);
+    const hub = new Hub(rt.runtime, memoryLog().log);
+    const first = viewer();
+    await hub.join(rt.ref, first.v, size);
+    rt.emit(Array.from({ length: 100 }, (_, i) => `line ${i}\r\n`).join(""));
+    const late = viewer();
+    await hub.join(rt.ref, late.v, size);
+    const shown = await screenOf(late.seen);
+    expect(shown[0]).toBe(`line ${100 - 20 - (size.rows - 1)}`);
   });
 
   it("opens every view on a runtime's snapshot, then live output, with nothing missed or repeated", async () => {
@@ -1180,6 +1210,7 @@ async function snapshotTerminal(
     env: {},
     size,
     generation: 0,
+    historyLines: 10_000,
   });
   runtime.scroll(ref, "earlier output");
   const { log, events } = memoryLog();
@@ -1273,6 +1304,7 @@ describe("terminal hub: snapshot streams", () => {
       env: {},
       size,
       generation: 0,
+      historyLines: 10_000,
     });
     runtime.output(ref, "before");
     const hold = runtime.holdSnapshots(ref);

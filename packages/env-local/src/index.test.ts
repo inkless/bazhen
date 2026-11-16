@@ -24,8 +24,14 @@ const harness: HarnessAdapter = {
   }),
 };
 
-const environment = (runtime: RuntimeAdapter) =>
-  new LocalEnvironment({ id: newId("env"), runtime, harnesses: [harness], socket: "/run/b.sock" });
+const environment = (runtime: RuntimeAdapter, historyLines = 10_000) =>
+  new LocalEnvironment({
+    id: newId("env"),
+    runtime,
+    harnesses: [harness],
+    socket: "/run/b.sock",
+    historyLines,
+  });
 
 const launch = (harnessId: "claude-code" | "codex" = "claude-code"): AgentLaunch => ({
   agentId: newId("agent"),
@@ -43,6 +49,7 @@ describe("LocalEnvironment over two runtimes", () => {
     const tmux = new FakeRuntime({ kind: "tmux" });
     const holder = new FakeRuntime({ kind: "holder" });
     const env = new LocalEnvironment({
+      historyLines: 10_000,
       id: newId("env"),
       runtime: new RoutedRuntime({
         runtimes: [tmux, holder],
@@ -64,6 +71,7 @@ describe("LocalEnvironment over two runtimes", () => {
 /** A local environment running only `h`, on a runtime of its own. */
 const runningOnly = (h: HarnessAdapter) =>
   new LocalEnvironment({
+    historyLines: 10_000,
     id: newId("env"),
     runtime: new FakeRuntime(),
     harnesses: [h],
@@ -103,7 +111,22 @@ describe("local environment", () => {
       },
       size: { cols: 80, rows: 24 },
       generation: 0,
+      historyLines: 10_000,
     });
+  });
+
+  it("makes an agent's terminal and a shell keep the history depth it was given", async () => {
+    const runtime = new FakeRuntime();
+    const env = environment(runtime, 250);
+    const shell = await env.openShell({
+      terminalId: newId("term"),
+      cwd: "/work",
+      size: { cols: 80, rows: 24 },
+    });
+    const agent = await terminalOf(env, launch());
+    expect([runtime.specOf(shell).historyLines, runtime.specOf(agent).historyLines]).toEqual([
+      250, 250,
+    ]);
   });
 
   it("hands the harness the options a launch and a respawn name, and reports the theme each started in", async () => {
@@ -128,6 +151,7 @@ describe("local environment", () => {
     };
     const runtime = new FakeRuntime();
     const env = new LocalEnvironment({
+      historyLines: 10_000,
       id: newId("env"),
       runtime,
       harnesses: [recording],
@@ -148,6 +172,7 @@ describe("local environment", () => {
     };
     const runtime = new FakeRuntime();
     const env = new LocalEnvironment({
+      historyLines: 10_000,
       id: newId("env"),
       runtime,
       harnesses: [
@@ -176,6 +201,7 @@ describe("local environment", () => {
   it("starts the TUI through the user's login shell, when there is one", async () => {
     const runtime = new FakeRuntime();
     const env = new LocalEnvironment({
+      historyLines: 10_000,
       id: newId("env"),
       runtime,
       harnesses: [harness],
@@ -274,6 +300,7 @@ describe("local environment", () => {
         env: {},
         size: { cols: 80, rows: 24 },
         generation: 0,
+        historyLines: 10_000,
       });
     expect((await env.inventory()).map((e) => e.externalRef)).toEqual([
       own,
@@ -355,6 +382,7 @@ describe("local environment", () => {
       },
     };
     const env = new LocalEnvironment({
+      historyLines: 10_000,
       id: newId("env"),
       runtime,
       harnesses: [resumable],
@@ -386,6 +414,7 @@ describe("local environment", () => {
       },
     };
     const env = new LocalEnvironment({
+      historyLines: 10_000,
       id: newId("env"),
       runtime,
       harnesses: [resumable],

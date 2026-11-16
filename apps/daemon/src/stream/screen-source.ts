@@ -22,7 +22,12 @@ export function emulatorScreen(
   colours: () => { readonly text: string; readonly background: string },
 ): ScreenSource {
   const { stream } = attached;
-  const emulator = new ScreenEmulator(stream.size, (reply) => stream.write(reply), colours);
+  const emulator = new ScreenEmulator(
+    stream.size,
+    (reply) => stream.write(reply),
+    colours,
+    attached.historyLines,
+  );
   // Before any of the client's output, whose first redraw paints the screen below it.
   emulator.seed(attached.history);
   return {

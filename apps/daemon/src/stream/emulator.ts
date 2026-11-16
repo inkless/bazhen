@@ -36,6 +36,7 @@ export class TerminalClosed extends Error {
 export class ScreenEmulator {
   private readonly term: headless.Terminal;
   private readonly serializer = new SerializeAddon();
+  private readonly historyLines: number;
   private modes = new Map(TRACKED_MODES);
   /** The scroll region tmux set, or null for the whole screen. */
   private region: readonly [number, number] | null = null;
@@ -45,16 +46,19 @@ export class ScreenEmulator {
 
   /**
    * `colours` says what a program that asks is told the terminal's text and background are, read
-   * at each query: a respawn can start the terminal's next process in another theme.
+   * at each query: a respawn can start the terminal's next process in another theme. It keeps as
+   * much history as its terminal does, `historyLines`.
    */
   constructor(
     size: Size,
     reply: (bytes: Uint8Array) => void,
     colours: () => { readonly text: string; readonly background: string },
+    historyLines = HISTORY_LINES,
   ) {
+    this.historyLines = historyLines;
     this.term = new headless.Terminal({
       ...size,
-      scrollback: HISTORY_LINES,
+      scrollback: historyLines,
       allowProposedApi: true,
       // xterm.js drops a window-size query before any handler sees it unless this is on.
       windowOptions: { getWinSizePixels: true },
@@ -145,7 +149,7 @@ export class ScreenEmulator {
       this.term.write("", () => {
         this.pending.delete(reject);
         if (this.disposed) return;
-        resolve(this.serializer.serialize({ scrollback: HISTORY_LINES }) + this.state());
+        resolve(this.serializer.serialize({ scrollback: this.historyLines }) + this.state());
       });
     });
   }

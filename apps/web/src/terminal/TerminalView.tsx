@@ -5,8 +5,6 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as Xterm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import {
-  HISTORY_LINES,
-  MAX_ROWS,
   EPOCH_FRAMES_SINCE,
   isAtLeast,
   parseJson,
@@ -23,7 +21,7 @@ import { closeNotice, offersInstall, pageNow, thisPlatform } from "../install.ts
 import { isApple, matchKey } from "./keymap.ts";
 import { statusText, type Status } from "./status.ts";
 import { Backoff } from "./reconnect.ts";
-import { wheelAction, type TerminalKind } from "./scroll.ts";
+import { scrollbackFor, wheelAction, type TerminalKind } from "./scroll.ts";
 import { attachScrollInput } from "./scroll-input.ts";
 import { loadSettings } from "./settings.ts";
 import { attachTakeover } from "./takeover.ts";
@@ -100,10 +98,7 @@ function connect(
     allowProposedApi: true,
     cursorBlink: true,
     macOptionIsMeta: settings.optionIsMeta,
-    // As much history as tmux and the daemon keep, so a reopened view shows all it is sent, and
-    // room for a screen more: a snapshot taken at more rows than this page has pushes its extra
-    // screen lines into the scrollback, which would otherwise evict the oldest history.
-    scrollback: HISTORY_LINES + MAX_ROWS,
+    scrollback: scrollbackFor(),
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
@@ -229,6 +224,8 @@ function connect(
       if (f.type === "snapshot_start") {
         // The view is redrawn from the top: a glide would carry on through the new screen.
         scroll.stopGlide();
+        // Before the snapshot's history is written, or the lines past the old depth are lost.
+        term.options.scrollback = scrollbackFor(f.historyLines);
         term.reset();
       } else if (f.type === "snapshot_end") backoff.reset();
       else if (f.type === "screen") alternate = f.alternate;

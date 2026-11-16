@@ -36,6 +36,7 @@ const claude: HarnessAdapter = {
 /** The daemon's local environment, on `runtime`. */
 const local = (store: Store, runtime: FakeRuntime) =>
   new LocalEnvironment({
+    historyLines: 10_000,
     id: localEnvironmentId(store),
     runtime,
     harnesses: [claude],

@@ -148,8 +148,8 @@ const MODE_EXIT_BINDINGS = ["copy-mode", "copy-mode-vi"].flatMap((table) =>
  * and `C-b d` would detach Bazhen's own client, so no key reaches tmux itself outside a mode.
  * `window-size manual` is deliberately absent: set globally, tmux before 3.8 crashes on the next
  * window creation. An empty `update-environment` stops an attaching client from copying its own
- * variables into a session. `history-limit` keeps as much history as the daemon and each view
- * do. Without the smcup override, the client switches the browser's terminal to its alternate
+ * variables into a session. `history-limit` is only the default: `create` sets each terminal's
+ * own. Without the smcup override, the client switches the browser's terminal to its alternate
  * buffer, which keeps no scrollback and turns the wheel into arrow keys. `resetDeadPanes` is
  * whether this tmux needs `DEAD_PANE_RESET`.
  */
@@ -388,10 +388,11 @@ export class TmuxRuntime implements RuntimeAdapter {
     const { cols, rows } = spec.size;
     await this.tmux(
       ...sequence([
-        // The config's history-limit reaches only a server it starts, and tmux applies the limit
-        // to a pane as the pane is made: on a server an older daemon left running, set it again
-        // first. Terminals already open keep the limit they were made with.
-        ["set-option", "-g", "history-limit", String(HISTORY_LINES)],
+        // tmux applies the server-wide limit to a pane as the pane is made, so it is set for each
+        // terminal in the same command as its new-session: split in two, a concurrent create of
+        // another depth could land between them. Terminals already open keep the limit they were
+        // made with.
+        ["set-option", "-g", "history-limit", String(spec.historyLines)],
         [
           "new-session",
           "-d",
@@ -506,7 +507,7 @@ export class TmuxRuntime implements RuntimeAdapter {
       .map(({ ref, tags, exit }) => ({ ref, tags, exit }));
   }
 
-  async attach(ref: RuntimeRef, size: Size | null, historyLines: number): Promise<HistoryAttached> {
+  async attach(ref: RuntimeRef, size: Size | null): Promise<HistoryAttached> {
     // Found by its tag on the server it was made on: a session name or number alone could, after a
     // restart, name another terminal.
     const [pane] = await this.panesOf(ref);
@@ -514,20 +515,20 @@ export class TmuxRuntime implements RuntimeAdapter {
     const session = located(pane.ref, "sessionId");
     const resizeWindow = (next: Size) => this.tmux(...resizeArgs(session, next));
     if (size !== null) await resizeWindow(size);
-    const [cols = 80, rows = 24, held = 0, alternate = 0] = (
+    const [cols = 80, rows = 24, held = 0, alternate = 0, historyLines = 0] = (
       await this.tmux(
         "display-message",
         "-p",
         "-t",
         windowOf(session),
-        "#{window_width} #{window_height} #{history_size} #{alternate_on}",
+        "#{window_width} #{window_height} #{history_size} #{alternate_on} #{history_limit}",
       )
     )
       .split(" ")
       .map(Number);
     // A program on its alternate screen has no history of its own: tmux's is the main screen's,
     // behind it. With no history, `-E -1` would capture the screen's first line instead.
-    const lines = alternate === 1 ? 0 : Math.min(historyLines, held);
+    const lines = alternate === 1 ? 0 : held;
     const history = lines > 0 ? await this.historyOf(session, lines) : "";
     const paneId = located(pane.ref, "paneId");
     await this.resetIfDead(paneId);
@@ -575,7 +576,7 @@ export class TmuxRuntime implements RuntimeAdapter {
           .finally(() => proc.kill());
       },
     };
-    return { kind: "history", stream, history, alternate: alternate === 1 };
+    return { kind: "history", stream, history, alternate: alternate === 1, historyLines };
   }
 
   /**

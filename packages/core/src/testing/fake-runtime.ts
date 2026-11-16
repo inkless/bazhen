@@ -203,7 +203,7 @@ export class FakeRuntime implements RuntimeAdapter {
     return this.refOf(t);
   }
 
-  async attach(ref: RuntimeRef, size: Size | null, historyLines: number): Promise<Attached> {
+  async attach(ref: RuntimeRef, size: Size | null): Promise<Attached> {
     const t = this.onServer(ref);
     if (t === undefined) throw new StaleIncarnation(ref.terminalId, "gone");
     t.clients.attaches.push(size);
@@ -267,11 +267,21 @@ export class FakeRuntime implements RuntimeAdapter {
           } else t.held.asked.push(settle);
         });
       const snapshotStream: SnapshotStream = { ...stream, snapshot };
-      return { ...this.snapshotOf(t), stream: snapshotStream, alternate: t.alternate };
+      return {
+        ...this.snapshotOf(t),
+        stream: snapshotStream,
+        alternate: t.alternate,
+        historyLines: t.spec.historyLines,
+      };
     }
-    const lines =
-      historyLines > 0 && !t.alternate ? t.history.split("\n").slice(-historyLines).join("\n") : "";
-    return { kind: "history", stream, history: lines, alternate: t.alternate };
+    const history = t.alternate ? "" : t.history;
+    return {
+      kind: "history",
+      stream,
+      history,
+      alternate: t.alternate,
+      historyLines: t.spec.historyLines,
+    };
   }
 
   /** A fake server that is replaced is gone, so a terminal no server carries is closed. */
@@ -399,9 +409,14 @@ export class FakeRuntime implements RuntimeAdapter {
     for (const client of this.terminalOf(ref).streams) client.fail(failure);
   }
 
-  /** Lines that have scrolled off the terminal's screen, oldest first, which attach returns. */
+  /**
+   * Lines that have scrolled off the terminal's screen, oldest first, of which it keeps the last
+   * of its depth, as attach returns them.
+   */
   scroll(ref: RuntimeRef, history: string): void {
-    this.terminalOf(ref).history = history;
+    const t = this.terminalOf(ref);
+    t.history =
+      t.spec.historyLines === 0 ? "" : history.split("\n").slice(-t.spec.historyLines).join("\n");
   }
 
   async title(ref: RuntimeRef): Promise<string> {
@@ -528,7 +543,7 @@ export class FakeRuntime implements RuntimeAdapter {
   }
 
   /** The history scrolled above a clear screen, then everything printed since from its top. */
-  private snapshotOf(t: Terminal): Omit<SnapshotAttached, "stream" | "alternate"> {
+  private snapshotOf(t: Terminal): Omit<SnapshotAttached, "stream" | "alternate" | "historyLines"> {
     const above = `${"\r\n".repeat(t.size.rows)}\x1b[0m\x1b[H`;
     const history = t.history === "" ? "" : `${t.history.replaceAll("\n", "\r\n")}${above}`;
     return {
