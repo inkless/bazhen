@@ -198,6 +198,8 @@ export interface AgentTerminal {
   readonly terminalState: TerminalState | null;
   readonly generation: number | null;
   readonly runtime: RuntimeRef | null;
+  /** The runtime its terminal was created on, whether or not it is running there yet. */
+  readonly runtimeKind: string | null;
 }
 
 const TASK = `SELECT id, title, state, owner_agent_id AS ownerAgentId,
@@ -240,7 +242,7 @@ const LIVE_NAME = "state NOT IN ('closed', 'failed')";
 const OBSERVED_KEPT = 200;
 
 const AGENT_TERMINAL = `SELECT a.id, a.state AS agent_state, t.id AS terminal_id,
-         t.state AS terminal_state, t.generation, t.runtime, t.locator
+         t.state AS terminal_state, t.generation, t.runtime, t.locator, t.runtime_kind
   FROM agent_sessions a LEFT JOIN terminals t ON t.id = a.terminal_id`;
 
 function agentTerminalFrom(row: Record<string, SQLOutputValue>): AgentTerminal | undefined {
@@ -251,6 +253,7 @@ function agentTerminalFrom(row: Record<string, SQLOutputValue>): AgentTerminal |
     terminalState: row.terminal_state === null ? null : TerminalState.parse(row.terminal_state),
     generation: typeof row.generation === "number" ? row.generation : null,
     runtime: refFrom(row.terminal_id, row),
+    runtimeKind: typeof row.runtime_kind === "string" ? row.runtime_kind : null,
   };
 }
 
@@ -326,6 +329,8 @@ export interface ShellTerminal {
   readonly state: TerminalState;
   readonly generation: number;
   readonly runtime: RuntimeRef | null;
+  /** The runtime it was created on, whether or not it is running there yet. */
+  readonly runtimeKind: string;
   readonly cwd: string;
   readonly linkedAgentId: string | null;
   readonly theme: TuiTheme | null;
@@ -335,7 +340,7 @@ export interface ShellTerminal {
   readonly currentCwd: string;
 }
 
-const SHELL_TERMINAL = `SELECT id, environment_id, state, generation, runtime, locator, cwd,
+const SHELL_TERMINAL = `SELECT id, environment_id, state, generation, runtime, locator, runtime_kind, cwd,
     linked_agent_id, theme, json_extract(foreground, '$.command') AS foreground,
     current_cwd
   FROM terminals WHERE kind = 'shell'`;
@@ -350,6 +355,7 @@ function shellFrom(row: Record<string, SQLOutputValue>): ShellTerminal | undefin
     state: TerminalState.parse(row.state),
     generation: Number(row.generation),
     runtime: refFrom(id, row),
+    runtimeKind: String(row.runtime_kind),
     cwd: String(row.cwd),
     linkedAgentId: typeof row.linked_agent_id === "string" ? row.linked_agent_id : null,
     theme: row.theme === null ? null : TuiTheme.parse(row.theme),

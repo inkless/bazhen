@@ -90,6 +90,7 @@ export function project(db: Statements, e: Recorded): void {
         launchedBy,
         name,
         nameOrdinal,
+        runtime,
       } = EVENTS[e.type].payload.parse(e.payload);
       db.prepare(
         `INSERT INTO agent_sessions
@@ -119,6 +120,7 @@ export function project(db: Statements, e: Recorded): void {
             created_event_id, updated_event_id)
          VALUES (?, ?, 'creating', 0, NULL, NULL, ?, 'agent', ?, ?, ?)`,
       ).run(terminalId, e.hostId, environmentId, e.entityId, e.id, e.id);
+      createdOn(db, terminalId, runtime);
       return;
     }
     case "agent.running": {
@@ -160,7 +162,7 @@ export function project(db: Statements, e: Recorded): void {
       return;
     }
     case "agent.relaunch_requested": {
-      const { terminalId, generation } = EVENTS[e.type].payload.parse(e.payload);
+      const { terminalId, generation, runtime } = EVENTS[e.type].payload.parse(e.payload);
       const environmentId = db
         .prepare("SELECT environment_id FROM agent_sessions WHERE id = ?")
         .get(e.entityId)?.environment_id;
@@ -174,6 +176,7 @@ export function project(db: Statements, e: Recorded): void {
             created_event_id, updated_event_id)
          VALUES (?, ?, 'creating', ?, NULL, NULL, ?, 'agent', ?, ?, ?)`,
       ).run(terminalId, e.hostId, generation, environmentId ?? null, e.entityId, e.id, e.id);
+      createdOn(db, terminalId, runtime);
       forgetActivity(db, e.entityId);
       return;
     }
@@ -251,13 +254,16 @@ export function project(db: Statements, e: Recorded): void {
       endDescendants(db, e.id);
       return;
     case "terminal.opened": {
-      const { environmentId, cwd, linkedAgentId, theme } = EVENTS[e.type].payload.parse(e.payload);
+      const { environmentId, cwd, linkedAgentId, theme, runtime } = EVENTS[e.type].payload.parse(
+        e.payload,
+      );
       db.prepare(
         `INSERT INTO terminals
            (id, host_id, state, generation, runtime, locator, environment_id, kind, cwd,
             linked_agent_id, theme, created_event_id, updated_event_id)
          VALUES (?, ?, 'creating', 0, NULL, NULL, ?, 'shell', ?, ?, ?, ?, ?)`,
       ).run(e.entityId, e.hostId, environmentId, cwd, linkedAgentId, theme ?? null, e.id, e.id);
+      createdOn(db, e.entityId, runtime);
       return;
     }
     case "terminal.running": {
@@ -541,6 +547,16 @@ function endDescendants(db: Statements, eventId: number): void {
 }
 
 type Columns = Readonly<Record<string, SQLInputValue>>;
+
+/**
+ * Records the runtime a new terminal is created on. Apart from its insert, which older schemas,
+ * read back by upgrade, must still take; an event without one was made on tmux, the column's
+ * default.
+ */
+function createdOn(db: Statements, terminalId: string, runtime: string | undefined): void {
+  if (runtime === undefined) return;
+  db.prepare("UPDATE terminals SET runtime_kind = ? WHERE id = ?").run(runtime, terminalId);
+}
 
 /** The columns that record which runtime incarnation a terminal is in. */
 const incarnation = (ref: { runtime: string; locator: Record<string, string> }): Columns => ({

@@ -204,6 +204,69 @@ describe("Store", () => {
     upgraded.close();
   });
 
+  it("upgrades a schema-24 database, every terminal it had made on tmux", () => {
+    const path = dbPath();
+    const old = Store.open(
+      path,
+      MIGRATIONS.filter((m) => m.version <= 24),
+    );
+    const { agentId } = launch(old, withEnvironment(old));
+    const shellId = runningShell(old);
+    old.close();
+    const upgraded = Store.open(path);
+    expect([
+      upgraded.agentTerminal({ agentId })?.runtimeKind,
+      upgraded.shell(shellId)?.runtimeKind,
+    ]).toEqual(["tmux", "tmux"]);
+    upgraded.close();
+  });
+
+  it("keeps the runtime a terminal was requested on from creating, through running, to lost", () => {
+    const store = Store.open(dbPath());
+    const environmentId = withEnvironment(store);
+    const agentId = newId("agent");
+    store.append({
+      type: "agent.launched",
+      entityId: agentId,
+      actor: "system",
+      payload: {
+        environmentId,
+        harness: "claude-code",
+        project: "p",
+        cwd: "/work",
+        terminalId: newId("term"),
+        runtime: "holder",
+      },
+    });
+    const shellId = newId("term");
+    store.append({
+      ...shellOpened(shellId, environmentId, null),
+      payload: { ...shellOpened(shellId, environmentId, null).payload, runtime: "holder" },
+    });
+    const kinds = () => [
+      store.agentTerminal({ agentId })?.runtimeKind,
+      store.shell(shellId)?.runtimeKind,
+    ];
+    const creating = [...kinds(), store.agentTerminal({ agentId })?.runtime];
+    const ref = { runtime: "holder", locator: { generation: "0" } };
+    store.append({ ...running(agentId), payload: { externalRef: null, runtimeRef: ref } });
+    store.append({
+      type: "terminal.running",
+      entityId: shellId,
+      actor: "system",
+      payload: { runtimeRef: ref },
+    });
+    const confirmed = kinds();
+    store.append({ type: "agent.lost", entityId: agentId, actor: "system", payload: {} });
+    store.append(shellEvent(shellId, "terminal.lost"));
+    expect([creating, confirmed, kinds()]).toEqual([
+      ["holder", "holder", null],
+      ["holder", "holder"],
+      ["holder", "holder"],
+    ]);
+    store.close();
+  });
+
   it("moves a shell through its own events, and never an agent's terminal by them", () => {
     const store = Store.open(dbPath());
     const environmentId = withEnvironment(store);
@@ -923,6 +986,21 @@ describe("Store relaunch", () => {
       store.terminalState(lostTerminal),
     ]).toEqual(["running", terminalId, 1, undefined, "lost"]);
     store.close();
+  });
+
+  it("relaunches onto the runtime the request names, leaving the lost terminal on its own", () => {
+    const path = dbPath();
+    const store = Store.open(path);
+    const { agentId, lostTerminal } = lostAgent(store);
+    const terminalId = newId("term");
+    const request = requested(agentId, terminalId);
+    store.append({ ...request, payload: { ...request.payload, runtime: "holder" } });
+    const relaunched = store.agentTerminal({ agentId })?.runtimeKind;
+    store.close();
+    const raw = new DatabaseSync(path);
+    const lost = raw.prepare("SELECT runtime_kind FROM terminals WHERE id = ?").get(lostTerminal);
+    raw.close();
+    expect([relaunched, lost?.runtime_kind]).toEqual(["holder", "tmux"]);
   });
 
   it("returns a rejected relaunch to the terminal it was lost on, which close still ends", () => {
