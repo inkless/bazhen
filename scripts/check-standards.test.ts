@@ -39,26 +39,260 @@ import {
   unmarkedSignallingTests,
   skillFailures,
   unsafeModuleFailures,
-  migrationVersionFailures,
+  migrationListFailures,
+  migrationImportFailures,
+  migrationIdentityFailures,
+  migrationFrozenFailures,
+  migrationExportFailures,
+  listedNumbered,
+  numberedHistoryFailures,
+  parseNameStatus,
+  migrationBase,
+  baseListFailures,
+  numberedFailures,
+  migrationHistoryFailures,
+  listedMigrations,
   checkMigrations,
   STANDARDS_CHECKS,
 } from "./check-standards.ts";
 import { ALLOWED_SIGNALS, ENDS_WITHOUT_A_CALL } from "./signal-paths.ts";
 
-describe("migrationVersionFailures", () => {
-  it("takes migrations numbered 1 to the latest in order", () => {
-    expect(migrationVersionFailures([1, 2, 3])).toEqual([]);
+const A = "2026-11-01-first";
+const B = "2026-11-02-second";
+const C = "2026-11-02-third";
+
+describe("migrationListFailures", () => {
+  it("takes migrations each named once, for a file of that name", () => {
+    expect(migrationListFailures([A, B], [`${B}.ts`, `${A}.ts`])).toEqual([]);
   });
 
-  it("refuses a gap, a repeat and migrations out of order, naming the first wrong one", () => {
+  it("refuses a name listed twice, a name not dated, a name with no file and a file not listed", () => {
     expect([
-      migrationVersionFailures([1, 2, 5]),
-      migrationVersionFailures([1, 1, 2]),
-      migrationVersionFailures([2, 1]),
+      migrationListFailures([A, A], [`${A}.ts`]),
+      migrationListFailures(["second"], ["second.ts"]),
+      migrationListFailures([A, B], [`${A}.ts`]),
+      migrationListFailures([A], [`${A}.ts`, `${B}.ts`]),
     ]).toEqual([
-      [expect.stringContaining("migration 3 is numbered 5")],
-      [expect.stringContaining("migration 2 is numbered 1")],
-      [expect.stringContaining("migration 1 is numbered 2")],
+      [expect.stringContaining(`lists ${A} twice`)],
+      [expect.stringContaining("second isn't named YYYY-MM-DD-slug")],
+      [expect.stringContaining(`${B} is named for no file`)],
+      [expect.stringContaining(`${B}.ts: no migration in MIGRATIONS is named for it`)],
+    ]);
+  });
+});
+
+describe("migrationImportFailures", () => {
+  it("takes type imports", () => {
+    const source =
+      'import type { DatabaseSync } from "node:sqlite";\n' +
+      'import type { Migration } from "../migrations.ts";\n';
+    expect(migrationImportFailures("m.ts", source)).toEqual([]);
+  });
+
+  it("refuses a value from Node's own modules too, as readFileSync would bring another file in", () => {
+    expect(migrationImportFailures("m.ts", 'import { readFileSync } from "node:fs";\n')).toEqual([
+      expect.stringContaining("imports node:fs"),
+    ]);
+  });
+
+  it("refuses a value imported from the code base, and an import at run time", () => {
+    expect([
+      migrationImportFailures("m.ts", 'import { nameBase } from "../names.ts";\n'),
+      migrationImportFailures("m.ts", 'const m = await import("../names.ts");\n'),
+    ]).toEqual([
+      [expect.stringContaining("imports ../names.ts")],
+      [expect.stringContaining("imports at run time")],
+    ]);
+  });
+
+  it("refuses a re-export, a value import after a type import on one line, and a value named type", () => {
+    expect([
+      migrationImportFailures("m.ts", 'export { default } from "../impl.ts";\n'),
+      migrationImportFailures("m.ts", 'export * from "../impl.ts";\n'),
+      migrationImportFailures(
+        "m.ts",
+        'import type { A } from "node:sqlite"; import { nameBase } from "../names.ts";\n',
+      ),
+      migrationImportFailures("m.ts", 'import type from "../names.ts";\n'),
+    ]).toEqual([
+      [expect.stringContaining("imports ../impl.ts")],
+      [expect.stringContaining("imports ../impl.ts")],
+      [expect.stringContaining("imports ../names.ts")],
+      [expect.stringContaining("imports ../names.ts")],
+    ]);
+  });
+});
+
+describe("migrationIdentityFailures", () => {
+  const shipped = { name: A, sql: "CREATE TABLE a (x)" };
+
+  it("takes a list of each file's own default export", () => {
+    expect(migrationIdentityFailures([shipped], { [A]: shipped })).toEqual([]);
+  });
+
+  it("refuses a copy of a shipped migration with its SQL changed", () => {
+    const changed = { ...shipped, sql: "CREATE TABLE a (x, y)" };
+    expect(migrationIdentityFailures([changed], { [A]: shipped })).toEqual([
+      expect.stringContaining(`lists ${A} as something other than its file's default export`),
+    ]);
+  });
+});
+
+describe("migrationExportFailures", () => {
+  it("takes the default export alone, and refuses any other", () => {
+    expect([
+      migrationExportFailures("m.ts", "export default Object.freeze({ name: 'a' });\n"),
+      migrationExportFailures("m.ts", "export const extra = { sql: '' };\nexport default x;\n"),
+      migrationExportFailures("m.ts", "const y = 1;\nexport { y };\n"),
+    ]).toEqual([
+      [],
+      [expect.stringContaining("exports const as well")],
+      [expect.stringContaining("exports { as well")],
+    ]);
+  });
+});
+
+describe("migrationFrozenFailures", () => {
+  it("takes frozen exports, and names one that could change in place", () => {
+    expect(migrationFrozenFailures({ [A]: Object.freeze({ name: A }), [B]: { name: B } })).toEqual([
+      expect.stringContaining(`${B}.ts: export it frozen`),
+    ]);
+  });
+});
+
+/** `MIGRATIONS_FILE`'s text with `NUMBERED_MIGRATIONS` listing `names`. */
+const listing = (names: string[]) =>
+  `export const NUMBERED_MIGRATIONS: readonly string[] = [\n${names.map((n) => `  "${n}",\n`).join("")}];\n`;
+
+describe("numberedHistoryFailures", () => {
+  it("reads the base's numbered names, and none from a base without them", () => {
+    expect([
+      listedNumbered(listing([A, B])),
+      listedNumbered("export const MIGRATIONS = [];"),
+    ]).toEqual([[A, B], []]);
+  });
+
+  it("takes the same names, or a base from before named migrations, and refuses any change", () => {
+    expect([
+      numberedHistoryFailures([A, B], [A, B], true),
+      numberedHistoryFailures([], [A, B], false),
+      numberedHistoryFailures([A, B], [B, A], true),
+    ]).toEqual([[], [], [expect.stringContaining("NUMBERED_MIGRATIONS changed from main's")]]);
+  });
+
+  it("refuses a base list read empty when the base has migration files", () => {
+    expect(numberedHistoryFailures([], [A, B], true)).toEqual([
+      expect.stringContaining("read no NUMBERED_MIGRATIONS from main's list"),
+    ]);
+  });
+
+  it("reads past comments in the base's list, whatever they hold", () => {
+    const text = `export const NUMBERED_MIGRATIONS: readonly string[] = [\n  "${A}",\n  // ["${C}"] once\n  "${B}",\n];\n`;
+    expect(listedNumbered(text)).toEqual([A, B]);
+  });
+});
+
+describe("the git half of checkMigrations", () => {
+  it("reads each change's status and the path it ends at, a rename's new one", () => {
+    expect(
+      parseNameStatus(`A\tdir/${C}.ts\nM\tdir/${A}.ts\nR087\tdir/${B}.ts\tdir/x.ts\n`),
+    ).toEqual([
+      { status: "A", path: `dir/${C}.ts` },
+      { status: "M", path: `dir/${A}.ts` },
+      { status: "R087", path: "dir/x.ts" },
+    ]);
+  });
+
+  it("fails, rather than checks nothing, without a merge base", () => {
+    const missing = migrationBase(() => {
+      throw new Error("fatal: Not a valid object name origin/main");
+    });
+    expect([migrationBase(() => "abc"), missing]).toEqual([
+      { base: "abc" },
+      { failure: expect.stringContaining("no merge base with main") },
+    ]);
+  });
+
+  it("refuses a base list read short of the base's files", () => {
+    expect([baseListFailures([A, B], 2), baseListFailures([A], 2)]).toEqual([
+      [],
+      [expect.stringContaining("read 1 migrations from main's list, which has 2 files")],
+    ]);
+  });
+});
+
+describe("numberedFailures", () => {
+  it("takes migrations that start with the numbered ones, in order, and more after", () => {
+    expect(numberedFailures([A, B, C], [A, B])).toEqual([]);
+  });
+
+  it("refuses numbered migrations swapped, or one missing", () => {
+    expect([numberedFailures([B, A, C], [A, B]), numberedFailures([A], [A, B])]).toEqual([
+      [expect.stringContaining("doesn't start with NUMBERED_MIGRATIONS")],
+      [expect.stringContaining("doesn't start with NUMBERED_MIGRATIONS")],
+    ]);
+  });
+});
+
+describe("listedMigrations", () => {
+  it("reads the list's order, not the imports'", () => {
+    const source =
+      `import second from "./migrations/${B}.ts";\n` +
+      `import first from "./migrations/${A}.ts";\n\n` +
+      "export const MIGRATIONS: readonly Migration[] = [\n  first,\n  second,\n];\n";
+    expect(listedMigrations(source)).toEqual([A, B]);
+  });
+
+  it("reads past comments in the list, whatever they hold", () => {
+    const source =
+      `import first from "./migrations/${A}.ts";\n` +
+      `import second from "./migrations/${B}.ts";\n\n` +
+      "export const MIGRATIONS: readonly Migration[] = [\n" +
+      "  // see [docs]: second, then first,\n  first,\n  /* second, */ second,\n];\n";
+    expect(listedMigrations(source)).toEqual([A, B]);
+  });
+
+  it("reads nothing from a list of numbered migrations", () => {
+    const source =
+      "export const MIGRATIONS: readonly Migration[] = [\n  {\n    version: 1,\n  },\n];\n";
+    expect(listedMigrations(source)).toEqual([]);
+  });
+});
+
+describe("migrationHistoryFailures", () => {
+  const added = { status: "A", path: `dir/${C}.ts` };
+
+  it("takes migrations added after the ones on main", () => {
+    expect(migrationHistoryFailures([added], [A, B], [A, B, C])).toEqual([]);
+  });
+
+  it("refuses a migration on main edited, removed or renamed", () => {
+    expect(
+      migrationHistoryFailures(
+        [
+          { status: "M", path: `dir/${A}.ts` },
+          { status: "D", path: `dir/${B}.ts` },
+          { status: "R100", path: `dir/${C}.ts` },
+        ],
+        [],
+        [],
+      ),
+    ).toEqual([
+      expect.stringContaining(`${A}.ts: edited after it was on main`),
+      expect.stringContaining(`${B}.ts: removed after it was on main`),
+      expect.stringContaining(`${C}.ts: renamed after it was on main`),
+    ]);
+  });
+
+  it("refuses a list that drops, reorders or puts a new one before migrations on main", () => {
+    expect([
+      migrationHistoryFailures([], [A, B], [A]),
+      migrationHistoryFailures([], [A, B], [B, A]),
+      migrationHistoryFailures([added], [A, B], [A, C, B]),
+    ]).toEqual([
+      [expect.stringContaining(`no longer lists ${B}`)],
+      [expect.stringContaining("changes the order")],
+      [expect.stringContaining("changes the order")],
     ]);
   });
 

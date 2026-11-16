@@ -27,10 +27,10 @@ import {
   visit,
   withAgent,
 } from "../testing/fixtures.ts";
-import { MIGRATIONS } from "./migrations.ts";
+import { MIGRATIONS, NUMBERED_MIGRATIONS, type Migration } from "./migrations.ts";
 import { UnknownEntity } from "./projections.ts";
 import {
-  LATEST_SCHEMA_VERSION,
+  NAMED_MIGRATIONS_VERSION,
   SchemaTooNew,
   Store,
   UnknownAgent,
@@ -99,22 +99,333 @@ function runningShell(store: Store) {
 const shellEvent = (terminalId: string, type: "terminal.closing" | "terminal.lost") =>
   ({ type, entityId: terminalId, actor: "system", payload: {} }) as const;
 
+const EVERY_MIGRATION = new Set(MIGRATIONS.map((m) => m.name));
+
+/**
+ * A database as the runner that numbered migrations left it at `version`: the first `version`
+ * run, and each recorded by its number in `schema_version`.
+ */
+function numberedAt(path: string, version: number): void {
+  const db = new DatabaseSync(path);
+  db.exec("PRAGMA foreign_keys = ON");
+  db.exec("CREATE TABLE schema_version (version INTEGER NOT NULL) STRICT");
+  for (const [i, m] of MIGRATIONS.slice(0, version).entries()) {
+    db.exec("BEGIN");
+    db.exec(m.sql);
+    m.run?.(db);
+    db.prepare("INSERT INTO schema_version (version) VALUES (?)").run(i + 1);
+    db.exec("COMMIT");
+  }
+  db.close();
+}
+
+function read<T>(path: string, query: (db: DatabaseSync) => T): T {
+  const db = new DatabaseSync(path);
+  try {
+    return query(db);
+  } finally {
+    db.close();
+  }
+}
+
+const schemaOf = (path: string) =>
+  read(path, (db) =>
+    db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_schema ORDER BY name").all(),
+  );
+
+/** SQL as SQLite keeps it, without comments, and with each run of whitespace one space. */
+const squeezed = (sql: unknown) =>
+  (typeof sql === "string" ? sql : "")
+    .replaceAll(/--[^\n]*/g, "")
+    .replaceAll(/\s+/g, " ")
+    .trim();
+
+/** The CHECK constraints in a table's `CREATE TABLE`, each as written, in order. */
+function checksOf(sql: unknown): string[] {
+  const text = squeezed(sql);
+  return [...text.matchAll(/\bCHECK\s*\(/gi)]
+    .map((m) => {
+      let depth = 0;
+      const from = m.index + m[0].length - 1;
+      for (let i = from; i < text.length; i += 1) {
+        if (text[i] === "(") depth += 1;
+        if (text[i] === ")") depth -= 1;
+        if (depth === 0) return text.slice(from, i + 1);
+      }
+      return text.slice(from);
+    })
+    .toSorted();
+}
+
+/**
+ * What a database's schema means, whatever order its columns were added in: each table's columns
+ * with their keys, its foreign keys and checks; each index's table, uniqueness, keys and condition;
+ * and each trigger and view as written.
+ */
+const shapeOf = (path: string) =>
+  read(path, (db) =>
+    db
+      .prepare("SELECT type, name, tbl_name, sql FROM sqlite_schema ORDER BY name")
+      .all()
+      .map(({ type, name, tbl_name, sql }) => {
+        const id = String(name);
+        if (type === "table") {
+          return {
+            type,
+            name,
+            columns: db
+              .prepare(
+                `SELECT name, type, "notnull", dflt_value, pk FROM pragma_table_info(?) ORDER BY name`,
+              )
+              .all(id),
+            foreignKeys: db
+              .prepare(
+                `SELECT "table", "from", "to", on_update, on_delete, "match"
+                   FROM pragma_foreign_key_list(?) ORDER BY "from", "table", "to"`,
+              )
+              .all(id),
+            checks: checksOf(sql),
+          };
+        }
+        if (type === "index") {
+          return {
+            type,
+            name,
+            table: tbl_name,
+            listed: db
+              .prepare(`SELECT "unique", origin, partial FROM pragma_index_list(?) WHERE name = ?`)
+              .all(String(tbl_name), id),
+            keys: db
+              .prepare(
+                `SELECT seqno, name, "desc", coll, "key" FROM pragma_index_xinfo(?) ORDER BY seqno`,
+              )
+              .all(id),
+            sql: squeezed(sql),
+          };
+        }
+        return { type, name, table: tbl_name, sql: squeezed(sql) };
+      }),
+  );
+
+/** The shape of a database made by running `sql` on an empty one. */
+function shapeOfSql(sql: string) {
+  const path = dbPath();
+  read(path, (db) => db.exec(sql));
+  return shapeOf(path);
+}
+
+/**
+ * The shape of a database that ran `migrations`, with `last`, if given, run after all the others,
+ * as a database that missed it runs it.
+ */
+function shapeWithLast(migrations: readonly Migration[], last?: Migration) {
+  const path = dbPath();
+  if (last !== undefined)
+    Store.open(
+      path,
+      migrations.filter((m) => m !== last),
+    ).close();
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  try {
+    Store.open(path, migrations).close();
+  } finally {
+    warn.mockRestore();
+  }
+  return shapeOf(path);
+}
+
+describe("Store migrations", () => {
+  it.each(Array.from({ length: NUMBERED_MIGRATIONS.length + 1 }, (_, v) => v))(
+    "upgrades a database the numbering runner left at version %i to a fresh one's schema",
+    (version) => {
+      const fresh = dbPath();
+      Store.open(fresh).close();
+      const path = dbPath();
+      numberedAt(path, version);
+      const store = Store.open(path);
+      expect(store.appliedMigrations()).toEqual(EVERY_MIGRATION);
+      store.close();
+      expect(schemaOf(path)).toEqual(schemaOf(fresh));
+      expect(read(path, (db) => db.prepare("SELECT version FROM schema_version").all())).toEqual([
+        { version: NAMED_MIGRATIONS_VERSION },
+      ]);
+    },
+  );
+
+  it("converts a numbered database in one transaction, or not at all", () => {
+    const path = dbPath();
+    numberedAt(path, 3);
+    // The sentinel's insert, the conversion's last step, fails.
+    read(path, (db) =>
+      db.exec(`CREATE TRIGGER no_sentinel BEFORE INSERT ON schema_version
+                 WHEN NEW.version = ${NAMED_MIGRATIONS_VERSION} BEGIN SELECT RAISE(ABORT, 'no'); END`),
+    );
+    expect(() => Store.open(path)).toThrow(/no/);
+    expect(
+      read(path, (db) => [
+        db.prepare("SELECT max(version) AS v FROM schema_version").get()?.v,
+        db.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE name = 'migrations'").get()?.n,
+      ]),
+    ).toEqual([3, 0]);
+  });
+
+  it("keeps nothing of a migration that fails partway, and records nothing of it", () => {
+    const path = dbPath();
+    const half = {
+      name: "2099-01-01-half",
+      sql: "CREATE TABLE half (x INTEGER) STRICT; SELECT * FROM no_such_table;",
+    };
+    expect(() => Store.open(path, [...MIGRATIONS, half])).toThrow(/no_such_table/);
+    expect(
+      read(path, (db) => [
+        db.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE name = 'half'").get()?.n,
+        db.prepare("SELECT count(*) AS n FROM migrations WHERE name = ?").get(half.name)?.n,
+      ]),
+    ).toEqual([0, 0]);
+  });
+
+  it("keeps nothing of a migration whose record can't be written", () => {
+    const path = dbPath();
+    Store.open(path).close();
+    const kept = { name: "2099-01-01-kept", sql: "CREATE TABLE kept (x INTEGER) STRICT;" };
+    read(path, (db) =>
+      db.exec(`CREATE TRIGGER no_record BEFORE INSERT ON migrations
+                 WHEN NEW.name = '${kept.name}' BEGIN SELECT RAISE(ABORT, 'no'); END`),
+    );
+    expect(() => Store.open(path, [...MIGRATIONS, kept])).toThrow(/no/);
+    expect(
+      read(
+        path,
+        (db) => db.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE name = 'kept'").get()?.n,
+      ),
+    ).toBe(0);
+  });
+
+  it("refuses a database the numbering runner left past the last numbered migration", () => {
+    const path = dbPath();
+    const past = NUMBERED_MIGRATIONS.length + 1;
+    numberedAt(path, NUMBERED_MIGRATIONS.length);
+    read(path, (db) => db.prepare("INSERT INTO schema_version (version) VALUES (?)").run(past));
+    expect(() => Store.open(path)).toThrow(SchemaTooNew);
+    // Refused before anything is recorded: a build that knows that version still finds it.
+    expect(
+      read(path, (db) => [
+        db.prepare("SELECT max(version) AS v FROM schema_version").get()?.v,
+        db.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE name = 'migrations'").get()?.n,
+      ]),
+    ).toEqual([past, 0]);
+  });
+
+  it("leaves a database where the runner that numbered migrations refuses it", () => {
+    const path = dbPath();
+    Store.open(path).close();
+    const version = read(
+      path,
+      (db) => db.prepare("SELECT max(version) AS v FROM schema_version").get()?.v,
+    );
+    expect(version).toBeGreaterThan(NUMBERED_MIGRATIONS.length);
+  });
+
+  it("runs a migration the database missed, though later ones have run", () => {
+    const fresh = dbPath();
+    Store.open(fresh).close();
+    const path = dbPath();
+    const missed = "2026-11-15-terminal-runtime-kind";
+    Store.open(
+      path,
+      MIGRATIONS.filter((m) => m.name !== missed),
+    ).close();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const store = Store.open(path);
+    expect(store.appliedMigrations()).toEqual(EVERY_MIGRATION);
+    store.close();
+    expect(shapeOf(path)).toEqual(shapeOf(fresh));
+    expect(warn.mock.calls).toEqual([[expect.stringContaining(missed)]]);
+    warn.mockRestore();
+  });
+
+  it("says nothing of missed migrations when there are none", () => {
+    const path = dbPath();
+    Store.open(path, MIGRATIONS.slice(0, 10)).close();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    Store.open(path).close();
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  // Every named migration, run as a database that missed it would: after all the others. It must
+  // leave the schema a fresh database has, or one that ran a later migration first loses its work.
+  // The newest one's own case is trivial, as it runs last anyway: what this holds starts with the
+  // second named migration, run after the first.
+  for (const m of MIGRATIONS.slice(NUMBERED_MIGRATIONS.length)) {
+    it(`gives the same schema run after every other migration: ${m.name}`, () => {
+      expect(shapeWithLast(MIGRATIONS, m)).toEqual(shapeWithLast(MIGRATIONS));
+    });
+  }
+
+  it("tells schemas apart by each key, check, index, trigger and view, not by column order", () => {
+    const parent = "CREATE TABLE p (id INTEGER PRIMARY KEY, k TEXT);";
+    const table = (columns: string) => `${parent} CREATE TABLE t (${columns});`;
+    const whole = "a INTEGER, b INTEGER REFERENCES p (id), CHECK (a > 0)";
+    const rest =
+      "CREATE INDEX t_a ON t (a) WHERE a > 1; " +
+      "CREATE TRIGGER t_ins AFTER INSERT ON t BEGIN SELECT 1; END; " +
+      "CREATE VIEW v AS SELECT a FROM t;";
+    const shape = shapeOfSql(`${table(whole)} ${rest}`);
+    expect(
+      shapeOfSql(`${table("b INTEGER REFERENCES p (id), a INTEGER, CHECK (a > 0)")} ${rest}`),
+    ).toEqual(shape);
+    expect(
+      [
+        `${table("a INTEGER, b INTEGER, CHECK (a > 0)")} ${rest}`,
+        `${table("a INTEGER, b INTEGER REFERENCES p (id)")} ${rest}`,
+        `${table("a INTEGER PRIMARY KEY, b INTEGER REFERENCES p (id), CHECK (a > 0)")} ${rest}`,
+        `${table(whole)} ${rest.replace("CREATE INDEX", "CREATE UNIQUE INDEX")}`,
+        `${table(whole)} ${rest.replace(" WHERE a > 1", "")}`,
+        `${table(whole)} ${rest.replace("SELECT 1;", "SELECT 2;")}`,
+        `${table(whole)} ${rest.replace("SELECT a FROM t", "SELECT b FROM t")}`,
+      ].map(shapeOfSql),
+    ).not.toContainEqual(shape);
+  });
+
+  it("finds a migration that undoes a later one when it runs after it", () => {
+    // Written apart: the older rebuilds a table with the columns it knew, the newer adds one.
+    const rebuild = {
+      name: "2099-01-01-rebuild",
+      sql: `CREATE TABLE devices_new (
+              id TEXT PRIMARY KEY, name TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE,
+              paired_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, revoked_at TEXT,
+              secure INTEGER NOT NULL
+            ) STRICT;
+            INSERT INTO devices_new SELECT id, name, token_hash, paired_at, last_seen_at,
+              revoked_at, secure FROM devices;
+            DROP TABLE devices;
+            ALTER TABLE devices_new RENAME TO devices;`,
+    };
+    const added = { name: "2099-01-02-added", sql: "ALTER TABLE devices ADD COLUMN color TEXT;" };
+    const list = [...MIGRATIONS, rebuild, added];
+    const fresh = shapeWithLast(list);
+    expect(shapeWithLast(list, added)).toEqual(fresh);
+    expect(shapeWithLast(list, rebuild)).not.toEqual(fresh);
+  });
+});
+
 describe("Store", () => {
   it("migrates a fresh database to the latest schema, and reopening is a no-op", () => {
     const path = dbPath();
     Store.open(path).close();
     const again = Store.open(path);
-    expect(again.schemaVersion()).toBe(LATEST_SCHEMA_VERSION);
+    expect(again.appliedMigrations()).toEqual(EVERY_MIGRATION);
     again.close();
   });
 
   it("refuses a database written by a newer build", () => {
     const path = dbPath();
     Store.open(path, [
-      { version: 1, sql: "SELECT 1" },
-      { version: LATEST_SCHEMA_VERSION + 1, sql: "SELECT 1" },
+      ...MIGRATIONS,
+      { name: "2099-01-01-from-a-newer-build", sql: "SELECT 1" },
     ]).close();
-    expect(() => Store.open(path)).toThrow(SchemaTooNew);
+    expect(() => Store.open(path)).toThrow(/2099-01-01-from-a-newer-build/);
   });
 
   it("upgrades a schema-1 database through every migration, keeping its terminals", () => {
@@ -130,7 +441,7 @@ describe("Store", () => {
     );
     raw.close();
     const upgraded = Store.open(path);
-    expect(upgraded.schemaVersion()).toBe(LATEST_SCHEMA_VERSION);
+    expect(upgraded.appliedMigrations()).toEqual(EVERY_MIGRATION);
     upgraded.close();
     const check = new DatabaseSync(path);
     expect(check.prepare("SELECT kind FROM terminals").get()).toEqual({ kind: "agent" });
@@ -209,10 +520,7 @@ describe("Store", () => {
 
   it("upgrades a database from the schema before 28, its terminals needing no restart", () => {
     const path = dbPath();
-    const old = Store.open(
-      path,
-      MIGRATIONS.filter((m) => m.version < 28),
-    );
+    const old = Store.open(path, MIGRATIONS.slice(0, 27));
     const { agentId, terminalId } = launch(old, withEnvironment(old));
     old.append(running(agentId));
     old.close();
@@ -227,10 +535,7 @@ describe("Store", () => {
 
   it("upgrades a database from the schema before 27, every terminal it had made on tmux", () => {
     const path = dbPath();
-    const old = Store.open(
-      path,
-      MIGRATIONS.filter((m) => m.version < 27),
-    );
+    const old = Store.open(path, MIGRATIONS.slice(0, 26));
     const { agentId } = launch(old, withEnvironment(old));
     const shellId = runningShell(old);
     old.close();

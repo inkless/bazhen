@@ -31,6 +31,9 @@ jobs:
         node: ["24", "26.13.0"]
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The standards check holds the migrations that were on the target branch at the merge base.
+          fetch-depth: 0
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:

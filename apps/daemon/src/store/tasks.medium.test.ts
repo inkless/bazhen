@@ -3,7 +3,7 @@ import { InvalidTransition, newId, type AgentSessionId } from "@bazhen/core";
 import type { Role } from "@bazhen/protocol";
 import { register, settled, tempDb, testView, withAgent } from "../testing/fixtures.ts";
 import { MIGRATIONS } from "./migrations.ts";
-import { LATEST_SCHEMA_VERSION, Store } from "./store.ts";
+import { Store } from "./store.ts";
 
 function create(store: Store, ownerAgentId: AgentSessionId | null = null) {
   const taskId = newId("task");
@@ -61,10 +61,7 @@ const finish = (taskId: string, outcome: "done" | "cancelled") => ({
 describe("Store tasks", () => {
   it("upgrades a schema-15 database with agents to one that gives them tasks", async () => {
     const path = tempDb();
-    const old = Store.open(
-      path,
-      MIGRATIONS.filter((m) => m.version <= 15),
-    );
+    const old = Store.open(path, MIGRATIONS.slice(0, 15));
     const { environmentId } = register(old);
     const agentId = newId("agent");
     old.append({
@@ -75,7 +72,7 @@ describe("Store tasks", () => {
     });
     old.close();
     const store = Store.open(path);
-    expect(store.schemaVersion()).toBe(LATEST_SCHEMA_VERSION);
+    expect(store.appliedMigrations()).toEqual(new Set(MIGRATIONS.map((m) => m.name)));
     const taskId = create(store);
     grant(store, taskId, agentId);
     expect(store.assignments({ agentId }).map((a) => a.taskId)).toEqual([taskId]);

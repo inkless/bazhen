@@ -41,10 +41,7 @@ const tokenDir = () => join(mkdtempSync(join(tmpdir(), "bz-tokens-")), "agents")
  */
 function upgraded() {
   const path = tempDb();
-  const before = Store.open(
-    path,
-    MIGRATIONS.filter((m) => m.version < 29),
-  );
+  const before = Store.open(path, MIGRATIONS.slice(0, 28));
   const agentId = newId("agent");
   const terminalId = newId("term");
   const entity = { entityId: agentId, actor: "system" };

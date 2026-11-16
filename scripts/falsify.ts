@@ -1001,7 +1001,7 @@ const resolves = (ref: string) => {
  * The commit the branch is judged against: its merge base with `ref`, so commits that landed on
  * the base after the branch forked never count as the branch's change.
  */
-function mergeBase(ref: string | undefined): string {
+export function mergeBase(ref?: string): string {
   const target = ref ?? (resolves("origin/main") ? "origin/main" : "main");
   return git(["merge-base", target, "HEAD"]).trim();
 }
