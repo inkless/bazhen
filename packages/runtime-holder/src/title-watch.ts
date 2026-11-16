@@ -1,9 +1,17 @@
 import type { TerminalId } from "@bazhen/core";
 import type { HolderClient, HolderEvent } from "./client.ts";
 
+/** A terminal to watch: the holder that runs it, by its pid and start, and its socket. */
+export interface Watched {
+  readonly terminalId: TerminalId;
+  readonly socket: string;
+  readonly holderPid: number;
+  readonly holderStart: number;
+}
+
 export interface TitleWatchOptions {
-  /** The terminals to watch, each with its holder's socket; throws when they can't be listed. */
-  readonly list: () => Promise<readonly { terminalId: TerminalId; socket: string }[]>;
+  /** The terminals to watch now; throws when they can't be listed. */
+  readonly list: () => Promise<readonly Watched[]>;
   /** A connection to the holder at `socket` that only reads: no writer slot, no subscription. */
   readonly connect: (
     socket: string,
@@ -14,17 +22,24 @@ export interface TitleWatchOptions {
   readonly onError: (err: unknown) => void;
 }
 
-type Listener = (terminalId: TerminalId) => void;
+type Listener = (terminalId: TerminalId, title: string) => void;
 
-/** A connection being opened, or open; `client` is set once it is. */
+/** A connection being opened, or open, to one holder; `client` is set once it is. */
 interface Watching {
+  readonly holderPid: number;
+  readonly holderStart: number;
   client: HolderClient | null;
 }
 
+const sameHolder = (a: Pick<Watching, "holderPid" | "holderStart">, b: Watching) =>
+  a.holderPid === b.holderPid && a.holderStart === b.holderStart;
+
 /**
- * Tells its listeners of each listed terminal whose title may have changed: once as its connection
- * opens, then on each `title` its holder reports, which a holder sends to every connection, not
- * only a subscribed one. One connection per terminal while anyone listens, none after.
+ * Tells its listeners each listed terminal's title: as its connection opens, then each `title` its
+ * holder reports, which a holder sends to every connection, not only a subscribed one. One
+ * connection per terminal, to the holder that runs it now, while anyone listens, none after. A
+ * holder that goes away ends its connection, so a terminal a listing leaves out, as one whose
+ * holder was slow to answer, keeps its watch.
  */
 export class TitleWatch {
   private readonly opts: TitleWatchOptions;
@@ -37,10 +52,12 @@ export class TitleWatch {
     this.opts = opts;
   }
 
+  /** Returns the unsubscribe function; once the last listener goes, every watch ends. */
   subscribe(listener: Listener): () => void {
     this.listeners.add(listener);
     if (this.timer === undefined) {
       this.timer = setInterval(() => void this.sync(), this.opts.syncMs);
+      this.timer.unref();
       void this.sync();
     }
     return () => {
@@ -52,7 +69,7 @@ export class TitleWatch {
     };
   }
 
-  /** Lists the terminals, opens a connection to each not yet watched, and drops those not listed. */
+  /** Lists the terminals and watches each one not yet watched on the holder that runs it now. */
   sync(): Promise<void> {
     this.syncing ??= this.list().finally(() => {
       this.syncing = null;
@@ -62,45 +79,54 @@ export class TitleWatch {
 
   private async list(): Promise<void> {
     if (this.listeners.size === 0) return;
-    let listed: Awaited<ReturnType<TitleWatchOptions["list"]>>;
+    let listed: readonly Watched[];
     try {
       listed = await this.opts.list();
     } catch (err) {
       this.opts.onError(err);
       return;
     }
-    if (this.listeners.size === 0) return;
-    const ids = new Set(listed.map((t) => t.terminalId));
-    for (const terminalId of this.watching.keys())
-      if (!ids.has(terminalId)) this.forget(terminalId);
-    await Promise.all(listed.map(({ terminalId, socket }) => this.watch(terminalId, socket)));
+    await Promise.all(listed.map((terminal) => this.watch(terminal)));
   }
 
-  /** Watches the terminal at `socket`, unless it is already watched or nobody listens. */
-  async watch(terminalId: TerminalId, socket: string): Promise<void> {
-    if (this.listeners.size === 0 || this.watching.has(terminalId)) return;
-    const entry: Watching = { client: null };
+  /**
+   * Watches the terminal on the holder named, in place of a watch on any other holder of it;
+   * nothing while nobody listens, or while that holder is already watched.
+   */
+  async watch(terminal: Watched): Promise<void> {
+    const { terminalId, socket } = terminal;
+    if (this.listeners.size === 0) return;
+    const current = this.watching.get(terminalId);
+    if (current !== undefined && sameHolder(terminal, current)) return;
+    if (current !== undefined) this.forget(terminalId);
+    const entry: Watching = {
+      holderPid: terminal.holderPid,
+      holderStart: terminal.holderStart,
+      client: null,
+    };
     this.watching.set(terminalId, entry);
+    const ours = () => this.watching.get(terminalId) === entry;
     let client: HolderClient;
     try {
       client = await this.opts.connect(socket, (event) => {
-        if (event.type === "title") this.tell(terminalId);
+        if (event.type === "title" && ours()) this.tell(terminalId, event.body.text);
       });
     } catch {
       // Watched again at the next sync, if it is still listed.
-      if (this.watching.get(terminalId) === entry) this.watching.delete(terminalId);
+      if (ours()) this.watching.delete(terminalId);
       return;
     }
-    if (this.watching.get(terminalId) !== entry || client.hello.terminalId !== terminalId) {
-      if (this.watching.get(terminalId) === entry) this.watching.delete(terminalId);
+    const { hello } = client;
+    if (!ours() || hello.terminalId !== terminalId || !sameHolder(hello, entry)) {
+      if (ours()) this.watching.delete(terminalId);
       client.end();
       return;
     }
     entry.client = client;
     void client.ended.then(() => {
-      if (this.watching.get(terminalId) === entry) this.watching.delete(terminalId);
+      if (ours()) this.watching.delete(terminalId);
     });
-    this.tell(terminalId);
+    this.tell(terminalId, hello.title);
   }
 
   private forget(terminalId: TerminalId): void {
@@ -109,10 +135,10 @@ export class TitleWatch {
     entry?.client?.end();
   }
 
-  private tell(terminalId: TerminalId): void {
+  private tell(terminalId: TerminalId, title: string): void {
     for (const listener of this.listeners) {
       try {
-        listener(terminalId);
+        listener(terminalId, title);
       } catch (err) {
         this.opts.onError(err);
       }

@@ -38,6 +38,7 @@ import { encodeTags } from "./tags.ts";
 import {
   type FakeHolder,
   type FakeHolderServer,
+  fakeHello,
   type FakeRequest,
   listenFakeHolder,
 } from "./testing/fake-holder.ts";
@@ -690,37 +691,80 @@ const respawning: Handler = (holder, request) => {
   ok(holder, request);
 };
 
-/** Fake holders, and a runtime listing them every 20 ms, whose title reports go to `told`. */
+/**
+ * Fake holders, and a runtime listing them every 20 ms, whose title reports go to `told` by
+ * terminal and to `heard` as `terminal: title`.
+ */
 function watched(root: string, handle?: Handler, hello: Partial<HolderHelloReply> = {}) {
   const fakes = startingFakes(root, hello, handle, {}, { titleSyncMs: 20 });
   const told: string[] = [];
-  const stop = fakes.runtime.onTitle((terminalId) => told.push(terminalId));
+  const heard: string[] = [];
+  const stop = fakes.runtime.onTitle((terminalId, title) => {
+    told.push(terminalId);
+    heard.push(`${terminalId}: ${title}`);
+  });
   onTestFinished(stop);
-  return { ...fakes, told, stop };
+  return { ...fakes, told, heard, stop };
+}
+
+/** Waits for the runtime to list the holders `n` more times, by the `hello`s `fake` answered. */
+async function listings(fake: FakeTerminal, n: number) {
+  const before = fake.connections.length;
+  await expect.poll(() => fake.connections.length).toBeGreaterThanOrEqual(before + n);
+}
+
+/**
+ * A fake holder of an agent's terminal, under `root`, whose `hello`s the test answers: the nth
+ * connection's, as the holder it names, or with `other` fields in its place.
+ */
+async function handAnswered(root: string) {
+  const terminalId = newId("term");
+  const server = await listenFakeHolder(holderSocket(root, terminalId), { hello: false });
+  servers.push(server);
+  const opened: FakeHolder[] = [];
+  void (async () => {
+    for (;;) {
+      const holder = await server.connection();
+      void holder.closed.then(() => hungUp.add(holder));
+      opened.push(holder);
+    }
+  })();
+  const fields = {
+    terminalId,
+    holderPid: FAKE_PID,
+    holderStart: FAKE_START,
+    childPid: FAKE_PID,
+    childStart: FAKE_START,
+    tags: encodeTags({ kind: "agent", agentId: newId("agent") }),
+  };
+  const answer = async (n: number, other: Partial<HolderHelloReply> = {}) => {
+    await expect.poll(() => opened.length).toBeGreaterThan(n);
+    const holder = opened[n]!;
+    const request = await holder.request();
+    holder.send({ type: "hello", id: request.id, body: fakeHello({ ...fields, ...other }) });
+  };
+  return { opened, answer };
 }
 
 describe("HolderRuntime: watching agents' titles", () => {
-  it("tells of an agent's terminal as its watch opens and at each title its holder reports", async () => {
-    const { runtime, terminals, told } = watched(privateRoot());
+  it("tells an agent's title as its watch opens and at each title its holder reports", async () => {
+    const { runtime, terminals, heard } = watched(privateRoot(), undefined, { title: "first" });
     const ref = await runtime.create(agentSpec());
     const fake = terminals.get(ref.terminalId)!;
-    await expect.poll(() => told).toEqual([ref.terminalId]);
+    await expect.poll(() => heard).toEqual([`${ref.terminalId}: first`]);
     const [watch, ...more] = await lasting(fake);
     expect(more).toEqual([]);
     watch!.holder.send({ type: "title", body: { offset: 3, text: "the thread" } });
-    await expect.poll(() => told).toEqual([ref.terminalId, ref.terminalId]);
+    await expect
+      .poll(() => heard)
+      .toEqual([`${ref.terminalId}: first`, `${ref.terminalId}: the thread`]);
     expect(watch!.requests).toEqual([]);
     expect(watch!.holder.hello).toEqual(expect.objectContaining({ writer: false }));
   });
 
   it("watches an agent's terminal as it is created, not at the next listing", async () => {
-    const { runtime, terminals } = startingFakes(
-      privateRoot(),
-      {},
-      undefined,
-      {},
-      { titleSyncMs: 60_000 },
-    );
+    const root = privateRoot();
+    const { runtime, terminals } = startingFakes(root, {}, undefined, {}, { titleSyncMs: 60_000 });
     const told: string[] = [];
     onTestFinished(runtime.onTitle((terminalId) => told.push(terminalId)));
     const ref = await runtime.create(agentSpec());
@@ -739,21 +783,55 @@ describe("HolderRuntime: watching agents' titles", () => {
     expect(await lasting(terminals.get(shell.terminalId)!)).toEqual([]);
   });
 
-  it("keeps one connection to an agent's holder across syncs and respawns, and none once it closes", async () => {
+  it("keeps one connection to an agent's holder across listings and respawns, and none once it closes", async () => {
     const exited = { exit: { type: "exited", code: 0 } } as const;
     const { runtime, terminals, told } = watched(privateRoot(), respawning, exited);
     const ref = await runtime.create(agentSpec());
     const fake = terminals.get(ref.terminalId)!;
     await expect.poll(() => told).toEqual([ref.terminalId]);
     await runtime.respawn(ref, { ...agentSpec(), generation: 1 });
-    await sleep(150);
-    expect((await lasting(fake)).length).toBe(1);
-    expect(told).toEqual([ref.terminalId]);
+    await listings(fake, 3);
+    expect([(await lasting(fake)).length, told]).toEqual([1, [ref.terminalId]]);
     await runtime.close(ref);
     await expect.poll(() => openTo(fake).length).toBe(0);
   });
 
-  it("watches again, at the next sync, a holder that hung up on its watch", async () => {
+  it("keeps watching a terminal a listing leaves out, as one whose holder couldn't be read", async () => {
+    const root = privateRoot();
+    const { runtime, terminals, told, errors } = watched(root);
+    const ref = await runtime.create(agentSpec());
+    const fake = terminals.get(ref.terminalId)!;
+    await expect.poll(() => told).toEqual([ref.terminalId]);
+    const [watch] = await lasting(fake);
+    chmodSync(holderSocket(root, ref.terminalId), 0o000);
+    await expect.poll(() => errors.length).toBeGreaterThan(0);
+    await sleep(100);
+    watch!.holder.send({ type: "title", body: { offset: 0, text: "still heard" } });
+    await expect.poll(() => told).toEqual([ref.terminalId, ref.terminalId]);
+  });
+
+  it("watches the holder that runs a terminal now, not an older one that kept its connection", async () => {
+    const root = privateRoot();
+    const { runtime, terminals, heard } = watched(root);
+    const ref = await runtime.create(agentSpec());
+    const old = terminals.get(ref.terminalId)!;
+    await expect.poll(() => heard).toEqual([`${ref.terminalId}: `]);
+    // The old holder keeps its connections; a new one binds the terminal's socket.
+    rmSync(holderSocket(root, ref.terminalId));
+    const tags = encodeTags({ kind: "agent", agentId: newId("agent") });
+    const now = await fakeTerminal(root, ref.terminalId, {
+      tags,
+      holderStart: FAKE_START + 1,
+      title: "the new holder's",
+    });
+    await expect
+      .poll(() => heard)
+      .toEqual([`${ref.terminalId}: `, `${ref.terminalId}: the new holder's`]);
+    await expect.poll(() => openTo(old).length).toBe(0);
+    expect((await lasting(now)).length).toBe(1);
+  });
+
+  it("watches again, at the next listing, a holder that hung up on its watch", async () => {
     const { runtime, terminals, told } = watched(privateRoot());
     const ref = await runtime.create(agentSpec());
     const fake = terminals.get(ref.terminalId)!;
@@ -762,6 +840,36 @@ describe("HolderRuntime: watching agents' titles", () => {
     watch!.holder.hangUp();
     await expect.poll(() => told).toEqual([ref.terminalId, ref.terminalId]);
     expect((await lasting(fake)).length).toBe(1);
+  });
+
+  it("ends a watch whose connection was still opening when the last listener went", async () => {
+    const root = privateRoot();
+    const held = await handAnswered(root);
+    const { runtime } = runtimeAt(root, { titleSyncMs: 60_000 });
+    const told: string[] = [];
+    const stop = runtime.onTitle((id) => told.push(id));
+    onTestFinished(stop);
+    await held.answer(0);
+    await expect.poll(() => held.opened.length).toBe(2);
+    stop();
+    await held.answer(1);
+    await expect.poll(() => hungUp.has(held.opened[1]!)).toBe(true);
+    expect(told).toEqual([]);
+  });
+
+  it.each([
+    ["another holder", { holderStart: FAKE_START + 1 }],
+    ["another terminal", { terminalId: newId("term") }],
+  ])("refuses a watch answered by %s than the listing named", async (_, other) => {
+    const root = privateRoot();
+    const held = await handAnswered(root);
+    const { runtime } = runtimeAt(root, { titleSyncMs: 60_000 });
+    const told: string[] = [];
+    onTestFinished(runtime.onTitle((id) => told.push(id)));
+    await held.answer(0);
+    await held.answer(1, other);
+    await expect.poll(() => hungUp.has(held.opened[1]!)).toBe(true);
+    expect(told).toEqual([]);
   });
 
   it("ends every watch once the last listener goes, and opens none after", async () => {

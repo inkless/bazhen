@@ -181,9 +181,7 @@ export class HolderRuntime implements RuntimeAdapter {
     this.titles = new TitleWatch({
       list: async () =>
         (await this.listed()).entries.flatMap(({ ref, tags }) =>
-          tags.kind === "agent"
-            ? [{ terminalId: ref.terminalId, socket: this.socketOf(ref.terminalId) }]
-            : [],
+          tags.kind === "agent" ? [this.watched(ref)] : [],
         ),
       connect: (socket, onEvent) => this.connect(socket, false, onEvent),
       syncMs: opts.titleSyncMs ?? TITLE_SYNC_MS,
@@ -466,8 +464,19 @@ export class HolderRuntime implements RuntimeAdapter {
         cause: reached.is === "outdated" ? reached.protocol : reached.cause,
       });
     }
-    if (spec.tags.kind === "agent") void this.titles.watch(spec.terminalId, socket);
-    return this.refOf(spec.terminalId, reached.hello);
+    const ref = this.refOf(spec.terminalId, reached.hello);
+    if (spec.tags.kind === "agent") void this.titles.watch(this.watched(ref));
+    return ref;
+  }
+
+  /** What the title watch watches of a terminal: its socket, and the holder its ref names. */
+  private watched(ref: RuntimeRef) {
+    return {
+      terminalId: ref.terminalId,
+      socket: this.socketOf(ref.terminalId),
+      holderPid: Number(ref.locator.holderPid),
+      holderStart: Number(ref.locator.holderStart),
+    };
   }
 
   /** Closes whatever holder answers at `socket`, ignoring every failure. */
@@ -706,11 +715,11 @@ export class HolderRuntime implements RuntimeAdapter {
   }
 
   /**
-   * Calls `cb` with an agent terminal whose title may have changed, which `title` then reads: as
-   * the runtime starts watching it, and each time its program sets one. Returns the unsubscribe
-   * function.
+   * Calls `cb` with an agent terminal's title: as the runtime starts watching it, and each time
+   * its program sets one. Returns the unsubscribe function, which ends every watch once no
+   * listener is left.
    */
-  onTitle(cb: (terminalId: TerminalId) => void): () => void {
+  onTitle(cb: (terminalId: TerminalId, title: string) => void): () => void {
     return this.titles.subscribe(cb);
   }
 

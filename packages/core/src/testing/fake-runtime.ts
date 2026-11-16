@@ -303,6 +303,7 @@ export class FakeRuntime implements RuntimeAdapter {
     t.pane = { ...this.pane(t.spec), id: t.pane.id };
     t.printed = concat(t.printed, encode(RESPAWN_RESET));
     t.offset = 0;
+    t.title = "";
     if (this.attachKind === "snapshot") {
       for (const client of t.streams) client.respawned(spec.generation);
     }

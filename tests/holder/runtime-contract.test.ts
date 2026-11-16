@@ -126,27 +126,37 @@ runtimeContract("HolderRuntime", harness);
 snapshotContract("HolderRuntime", harness);
 
 describe("HolderRuntime: watching an agent's title", () => {
-  it("hears a title its program sets after the watch opened, which never subscribed", async () => {
+  it("hears each title its program sets, though it never subscribed, and a respawn's reset", async () => {
     const holders = holderRuntime();
     onTestFinished(() => holders.dispose());
     const { runtime } = holders;
-    const told: string[] = [];
-    onTestFinished(runtime.onTitle((terminalId) => told.push(terminalId)));
-    const ref = await runtime.create({
+    const heard: string[] = [];
+    onTestFinished(runtime.onTitle((_, title) => heard.push(title)));
+    const spec = {
       terminalId: newId("term"),
       tags: { kind: "agent", agentId: newId("agent") },
-      argv: ["sh", "-c", "sleep 1; printf '\\033]2;the thread\\007'; exec sleep 300"],
+      // Titles itself with the line it reads, once the test has seen its watch open.
+      argv: ["sh", "-c", "read -r line; printf '\\033]2;%s\\007' \"$line\"; exit 0"],
       cwd: harness.cwd,
       env: {},
       size: { cols: 80, rows: 24 },
       generation: 0,
-    });
-    await expect.poll(() => told, { timeout: harness.waitMs }).toEqual([ref.terminalId]);
-    expect(await runtime.title(ref)).toBe("");
-    await expect
-      .poll(() => told, { timeout: harness.waitMs })
-      .toEqual([ref.terminalId, ref.terminalId]);
+    } as const;
+    const ref = await runtime.create(spec);
+    await expect.poll(() => heard, { timeout: harness.waitMs }).toEqual([""]);
+    const { stream } = await runtime.attach(ref, null, 0);
+    onTestFinished(() => stream.close());
+    stream.write(new TextEncoder().encode("the thread\r"));
+    await expect.poll(() => heard, { timeout: harness.waitMs }).toEqual(["", "the thread"]);
     expect(await runtime.title(ref)).toBe("the thread");
+    await expect.poll(() => exitOf(runtime, ref), { timeout: harness.waitMs }).not.toBeNull();
+    const respawned = await runtime.respawn(ref, {
+      ...spec,
+      generation: 1,
+      argv: ["sleep", "300"],
+    });
+    await expect.poll(() => heard, { timeout: harness.waitMs }).toEqual(["", "the thread", ""]);
+    expect(await runtime.title(respawned)).toBe("");
   });
 });
 
