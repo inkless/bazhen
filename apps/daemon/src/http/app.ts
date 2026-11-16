@@ -14,6 +14,7 @@ import {
   type EscalateResponse,
   FinishTaskRequest,
   UnassignTaskRequest,
+  AddTaskNoteRequest,
   type AssignTaskResponse,
   type CreateTaskResponse,
   type TaskCommandResponse,
@@ -173,6 +174,7 @@ export interface TaskCommands {
   escalate(caller: Caller, req: EscalateRequest): EscalateResponse;
   /** A message to the agent: the human's, or another agent's own words. */
   send(caller: Caller, agentId: string, req: SendMessageRequest): SendMessageResponse;
+  note(caller: Caller, taskId: string, req: AddTaskNoteRequest): TaskCommandResponse;
 }
 
 /** Thrown for a caller that says it is an agent with something that is no agent's id. */
@@ -396,6 +398,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   );
   taskRoute("/v1/tasks/:id/unassign", UnassignTaskRequest, (...a) => tasks.unassign(...a));
   taskRoute("/v1/tasks/:id/finish", FinishTaskRequest, (...a) => tasks.finish(...a));
+  taskRoute("/v1/tasks/:id/notes", AddTaskNoteRequest, (...a) => tasks.note(...a));
   app.get("/v1/tasks/:id", (c) => {
     const detail = tasks.show(c.req.param("id"));
     if (detail === undefined) throw new UnknownTask(c.req.param("id"));

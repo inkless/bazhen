@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { hasLoneSurrogate } from "./holder.ts";
+import { INVISIBLE, showable } from "./text.ts";
 import { TuiTheme } from "./theme.ts";
 import { Id, IdempotencyKey } from "./ids.ts";
 
@@ -104,26 +105,15 @@ export const RestartShellRequest = z.object({
 });
 export type RestartShellRequest = z.infer<typeof RestartShellRequest>;
 
-/** C0 and C1 control characters, and the bidirectional embeddings, overrides and isolates. */
-const unshowable = (code: number) =>
-  code < 0x20 ||
-  (code >= 0x7f && code <= 0x9f) ||
-  (code >= 0x202a && code <= 0x202e) ||
-  (code >= 0x2066 && code <= 0x2069);
-
-/** Every one of them is in the Basic Multilingual Plane, so UTF-16 units find them all. */
-function showable(name: string): boolean {
-  for (let i = 0; i < name.length; i++) if (unshowable(name.charCodeAt(i))) return false;
-  return true;
-}
-
-/**
- * A shell's name, as a person gives it. A client draws it, so it can't carry a control character
- * (an escape sequence, a newline) or a bidirectional override that reorders the text around it.
- */
-export const ShellName = z.string().trim().min(1).max(80).refine(showable, {
-  message: "a shell's name can't hold control characters or bidirectional overrides",
-});
+/** A shell's name, as a person gives it, which a client draws. */
+export const ShellName = z
+  .string()
+  .trim()
+  .min(1)
+  .max(80)
+  .refine((name) => showable(name), {
+    message: "a shell's name can't hold control characters or bidirectional overrides",
+  });
 
 /**
  * The most UTF-8 bytes of a command line kept to type back. A longer one is dropped, never cut:
@@ -132,13 +122,6 @@ export const ShellName = z.string().trim().min(1).max(80).refine(showable, {
 export const COMMAND_LINE_MAX_BYTES = 2048;
 
 const encoder = new TextEncoder();
-
-/**
- * Characters that draw as nothing, or as a line break, so a line holding one types back other
- * than it looks: zero-width spaces and joiners, the directional marks, the word joiner and
- * invisible operators, the byte-order mark, and the line and paragraph separators.
- */
-const INVISIBLE = /[\u061c\u200b-\u200f\u2028\u2029\u2060-\u2064\ufeff]/u;
 
 /**
  * A line the user ran at a shell's prompt, as their shell reported it, kept to type back into

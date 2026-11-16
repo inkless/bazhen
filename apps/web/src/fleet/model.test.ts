@@ -36,6 +36,8 @@ const agentIn = (project: string, state: AgentState = "running", over: Partial<A
   resumable: true,
   canOpenShell: false,
   launchedBy: null,
+  listening: false,
+  headline: null,
   ...over,
 });
 

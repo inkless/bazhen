@@ -60,6 +60,8 @@ const agentNamed = (agent: Agent["id"], name: string, state: AgentState): Agent 
   resumable: false,
   canOpenShell: false,
   launchedBy: null,
+  listening: false,
+  headline: null,
 });
 
 const snapshot = (attention: Attention[], agents: Agent[] = []): StateSnapshot => ({

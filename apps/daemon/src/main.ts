@@ -78,6 +78,7 @@ import { Roles } from "./roles/roles.ts";
 import { Tasks } from "./tasks/tasks.ts";
 import { TerminalBudget } from "./terminals/budget.ts";
 import { nodePtySpawner } from "./pty/node-pty.ts";
+import { listeningOf } from "./mailbox/listening.ts";
 import { Store, UnsafeDatabase, type SnapshotView } from "./store/store.ts";
 
 const APP_VERSION = "0.1.0";
@@ -153,6 +154,7 @@ const tasks: TaskCommands = {
   delegate: async (caller, req) => taskService.launchAndDelegate(caller, req),
   escalate: (caller, req) => taskService.escalate(caller, req),
   send: (caller, agentId, req) => taskService.send(caller, agentId, req),
+  note: (caller, taskId, req) => taskService.note(caller, taskId, req),
 };
 const presence = new Presence();
 // Found once, at start: a notifier installed or built later is picked up by a restart.
@@ -349,6 +351,11 @@ const snapshotView: SnapshotView = {
   attentionActions: (item) => inbox.actions(item),
   noticeActions: (n) => notices.actions(n, "owner-socket"),
   shellsReport: integration !== undefined,
+  listening: listeningOf({
+    mailbox,
+    codexBound: (id) => store.codexThread(id) !== undefined,
+    codexHeld: (id) => codexThreads.held(id),
+  }),
 };
 for (const a of store.snapshot(snapshotView).agents) {
   if (a.harness === "claude-code" && a.state === "running") activity.restarted(a.id);

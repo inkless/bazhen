@@ -168,6 +168,15 @@ export class Mailbox {
   }
 
   /**
+   * How mail queued now would reach the agent: its waiter is held to wake it, or a turn is under
+   * way, as last heard, that mail folds into at its next tool call; null for neither.
+   */
+  listening(agentId: string): "waiter" | "turn" | null {
+    if (this.waiters.has(agentId)) return "waiter";
+    return this.turns.has(agentId) ? "turn" : null;
+  }
+
+  /**
    * The hook client wrote what it was handed. Only the offer it names is confirmed: an ack from a
    * client whose offer was since taken back and made again confirms nothing.
    */

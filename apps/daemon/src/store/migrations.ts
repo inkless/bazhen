@@ -399,6 +399,24 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX observed_messages_created ON observed_messages (created_event_id);
     `,
   },
+  {
+    version: 26,
+    sql: `
+      -- Notes on a task from the agent working it or the human; the latest of an agent's is its
+      -- headline, and the latest handoff on a task goes into the next assignee's brief.
+      CREATE TABLE task_notes (
+        event_id INTEGER PRIMARY KEY REFERENCES events (id),
+        task_id TEXT NOT NULL REFERENCES tasks (id),
+        -- NULL when the human wrote it, with its role.
+        agent_session_id TEXT REFERENCES agent_sessions (id),
+        author_role TEXT,
+        text TEXT NOT NULL,
+        handoff INTEGER NOT NULL
+      ) STRICT;
+      CREATE INDEX task_notes_task ON task_notes (task_id, handoff, event_id);
+      CREATE INDEX task_notes_agent ON task_notes (agent_session_id, event_id);
+    `,
+  },
 ];
 
 const trimAt24 = (s: string) => s.replaceAll(/^[-_]+|[-_]+$/g, "");

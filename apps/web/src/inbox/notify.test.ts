@@ -30,6 +30,8 @@ const reviewer: Agent = {
   resumable: false,
   canOpenShell: false,
   launchedBy: null,
+  listening: false,
+  headline: null,
 };
 
 const open = (n: number): Attention => ({

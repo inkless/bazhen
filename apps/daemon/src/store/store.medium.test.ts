@@ -443,6 +443,7 @@ describe("Store snapshot view", () => {
     attentionActions: () => [],
     noticeActions: () => [],
     shellsReport: true,
+    listening: () => false,
   };
 
   it("names each environment's host as the view says", () => {

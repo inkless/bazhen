@@ -1,7 +1,9 @@
 import { z } from "zod";
 import { AgentName, AgentRef } from "./agent-name.ts";
+import { hasLoneSurrogate } from "./holder.ts";
 import { HarnessId, Id, IdempotencyKey } from "./ids.ts";
 import { Role } from "./roles.ts";
+import { INVISIBLE, showable, TAG_CHARACTERS } from "./text.ts";
 
 export const TaskState = z.enum(["open", "done", "cancelled"]);
 export type TaskState = z.infer<typeof TaskState>;
@@ -53,6 +55,87 @@ export const Assignment = z.object({
 });
 export type Assignment = z.infer<typeof Assignment>;
 
+export const TASK_NOTE_MAX_BYTES = 4000;
+
+const encoder = new TextEncoder();
+
+/** Newline and tab, the only controls a note may hold. */
+const NOTE_CONTROLS: ReadonlySet<number> = new Set([0x0a, 0x09]);
+
+/** Whether text is fit for a note: only newline and tab of the controls, and nothing invisible. */
+const noteSafe = (text: string) =>
+  showable(text, NOTE_CONTROLS) &&
+  !hasLoneSurrogate(text) &&
+  !INVISIBLE.test(text) &&
+  !TAG_CHARACTERS.test(text);
+
+/**
+ * What a note says. It is drawn as an agent's headline in a terminal, the web and mail, and read
+ * by the next assignee's model, so it holds no control character but newline and tab, no
+ * bidirectional override, and nothing that draws as nothing.
+ */
+export const TaskNoteText = z
+  .string()
+  .trim()
+  .min(1)
+  .refine((text) => encoder.encode(text).length <= TASK_NOTE_MAX_BYTES, {
+    message: `a note is at most ${TASK_NOTE_MAX_BYTES} UTF-8 bytes`,
+  })
+  .refine(noteSafe, {
+    message: "a note can't hold control characters but newline and tab, or invisible characters",
+  })
+  .describe(`At most ${TASK_NOTE_MAX_BYTES} UTF-8 bytes.`);
+
+/**
+ * What the agent or human who finishes a task says of it (protocol 1.44). It is mailed to whoever
+ * gave the task out, so it holds what a task note may, at a message's length. Only requests are
+ * held to it: a note stored before keeps loading.
+ */
+export const FinishNoteText = z.string().max(20_000).refine(noteSafe, {
+  message: "a note can't hold control characters but newline and tab, or invisible characters",
+});
+
+/**
+ * Every line of a note marked as quoted, as a brief and `task show` print it, so no line of it
+ * can pass for Bazhen's own text around it: not a header, not the line that ends the note, not a
+ * command to run.
+ */
+export const quoteNote = (text: string) =>
+  text
+    .split("\n")
+    .map((line) => (line === "" ? ">" : `> ${line}`))
+    .join("\n");
+
+/** A note on a task, from the agent working it or the human: progress, or a handoff (1.44). */
+export const TaskNote = z.object({
+  /** The event that recorded it, which orders notes. */
+  eventId: z.number().int().positive(),
+  taskId: Id("task"),
+  /** Null when the human wrote it. */
+  agentId: Id("agent").nullable(),
+  /**
+   * The role its agent held on the task when it wrote it; null for the human, and for an agent
+   * that held none there, which writes as the task's owner.
+   */
+  role: Role.nullable(),
+  text: z.string(),
+  /**
+   * For whoever is assigned the task next: the brief of the next grant carries the latest one
+   * written since the grant before it.
+   */
+  handoff: z.boolean(),
+  at: z.iso.datetime(),
+});
+export type TaskNote = z.infer<typeof TaskNote>;
+
+/** `POST /v1/tasks/:id/notes` (protocol 1.44). */
+export const AddTaskNoteRequest = z.object({
+  idempotencyKey: IdempotencyKey,
+  text: TaskNoteText,
+  handoff: z.boolean().optional(),
+});
+export type AddTaskNoteRequest = z.infer<typeof AddTaskNoteRequest>;
+
 /** `GET /v1/tasks/:id`: the task in full, with its assignments and subtasks. */
 export const TaskDetail = Task.extend({
   brief: z.string(),
@@ -60,6 +143,8 @@ export const TaskDetail = Task.extend({
   note: z.string().nullable(),
   assignments: z.array(Assignment),
   subtasks: z.array(Task),
+  /** Oldest first (protocol 1.44). */
+  notes: z.array(TaskNote).default([]),
 });
 export type TaskDetail = z.infer<typeof TaskDetail>;
 
@@ -109,7 +194,7 @@ export type UnassignTaskRequest = z.infer<typeof UnassignTaskRequest>;
 export const FinishTaskRequest = z.object({
   idempotencyKey: IdempotencyKey,
   outcome: TaskOutcome,
-  note: z.string().max(20_000).optional(),
+  note: FinishNoteText.optional(),
   cascade: z.boolean().optional(),
 });
 export type FinishTaskRequest = z.infer<typeof FinishTaskRequest>;

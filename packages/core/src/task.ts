@@ -212,4 +212,13 @@ export function checkFinish(
   return { kind: "task" };
 }
 
+/** Checks that `caller` may note the open task: the human, its owner, or an agent on it. */
+export function checkNote(view: TaskView, caller: Caller): void {
+  if (view.state !== "open") throw new TaskRefused("conflict", `the task is ${view.state}`);
+  if (caller === null || owns(view, caller) || view.active.some((a) => a.agentId === caller)) {
+    return;
+  }
+  throw new TaskRefused("forbidden", "only an agent on the task, its owner or the human notes it");
+}
+
 const callerName = (caller: Caller) => (caller === null ? "the human" : `agent ${caller}`);

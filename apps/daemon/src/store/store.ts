@@ -1,5 +1,6 @@
 import { closeSync, constants, fchmodSync, fstatSync, openSync } from "node:fs";
 import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqlite";
+import type { Listener } from "../mailbox/listening.ts";
 import {
   isId,
   offeredCommands,
@@ -27,6 +28,7 @@ import {
   AgentState,
   Assignment,
   TaskDetail,
+  TaskNote,
   TaskState,
   type AssignmentState,
   EVENTS,
@@ -182,6 +184,8 @@ export interface SnapshotView {
    * without, no lost shell is offered as retypeable.
    */
   readonly shellsReport: boolean;
+  /** Whether mail sent to a running agent now reaches it with nothing else happening. */
+  listening(agent: Listener): boolean;
 }
 
 /** Terminal states whose runtime target still exists, so a human can attach to it. */
@@ -197,6 +201,22 @@ export interface AgentTerminal {
 
 const TASK = `SELECT id, title, state, owner_agent_id AS ownerAgentId,
     parent_task_id AS parentTaskId FROM tasks`;
+const NOTE = `SELECT n.event_id AS eventId, n.task_id AS taskId, n.agent_session_id AS agentId,
+    n.author_role AS role, n.text, n.handoff, e.ts AS at
+    FROM task_notes n JOIN events e ON e.id = n.event_id`;
+const noteOf = (row: Record<string, SQLOutputValue>): TaskNote =>
+  TaskNote.parse({ ...row, handoff: row["handoff"] === 1 });
+
+/** How long an agent's headline may be: one line of a fleet list. */
+const HEADLINE_MAX = 200;
+
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/** A note as a headline: its first line, cut to one line of a list between two characters. */
+const headline = (text: string) =>
+  Array.from(graphemes.segment(text.split("\n", 1)[0] ?? ""), (g) => g.segment)
+    .slice(0, HEADLINE_MAX)
+    .join("");
 /**
  * An open subtask whose agent owner no longer holds what made it the owner: the assignment it was
  * delegated under ended, or, delegated as the parent's owner, the parent is no longer its.
@@ -1182,13 +1202,18 @@ export class Store {
                   a.launched_by AS launchedBy,
                   a.terminal_id AS terminalId, t.generation, a.external_ref AS externalRef, t.exit,
                   coalesce(t.theme, 'dark') AS theme, s.activity, a.usage, t.state AS terminalState,
-                  t.runtime, t.locator, a.transcript
+                  t.runtime, t.locator, a.transcript,
+                  n.text AS headlineText, n.task_id AS headlineTask, ne.ts AS headlineAt
            FROM agent_sessions a LEFT JOIN terminals t ON t.id = a.terminal_id
            LEFT JOIN activity_latest s ON s.agent_session_id = a.id
+           LEFT JOIN task_notes n ON n.event_id = (
+             SELECT max(event_id) FROM task_notes WHERE agent_session_id = a.id)
+           LEFT JOIN events ne ON ne.id = n.event_id
            ORDER BY a.created_event_id`,
         )
           .all()
-          .map(({ activity, usage, terminalState, runtime, locator, transcript, ...r }) => {
+          .map(({ activity, usage, terminalState, runtime, locator, transcript, ...row }) => {
+            const { headlineText, headlineTask, headlineAt, ...r } = row;
             const ref = ATTACHABLE.has(String(terminalState))
               ? refFrom(r.terminalId, { runtime: runtime ?? null, locator: locator ?? null })
               : null;
@@ -1211,6 +1236,17 @@ export class Store {
               themes: view.themes(HarnessId.parse(r.harness)),
               resumable: view.resumes(evidence),
               canOpenShell: LINKABLE.has(AgentState.parse(r.state)),
+              listening:
+                r.state === "running" &&
+                view.listening({
+                  id: String(r.id),
+                  harness: evidence.harness,
+                  activity: activity === null ? null : activityOf(activity).value,
+                }),
+              headline:
+                typeof headlineText === "string"
+                  ? { text: headline(headlineText), taskId: headlineTask, at: headlineAt }
+                  : null,
               commands: offeredCommands(
                 {
                   state: AgentState.parse(r.state),
@@ -1371,7 +1407,24 @@ export class Store {
       subtasks: this.prepare(`${TASK} WHERE parent_task_id = ? ORDER BY created_event_id`).all(
         taskId,
       ),
+      notes: this.prepare(`${NOTE} WHERE n.task_id = ? ORDER BY n.event_id`)
+        .all(taskId)
+        .map(noteOf),
     });
+  }
+
+  /**
+   * The latest handoff note on the task written since it was last granted, which the brief of the
+   * next grant carries. One written before that grant was for that assignee, and is not handed on
+   * to every later one.
+   */
+  pendingHandoff(taskId: string): TaskNote | undefined {
+    const row = this.prepare(
+      `${NOTE} WHERE n.task_id = ? AND n.handoff = 1 AND n.event_id > coalesce(
+         (SELECT max(created_event_id) FROM assignments WHERE task_id = ?), 0)
+       ORDER BY n.event_id DESC LIMIT 1`,
+    ).get(taskId, taskId);
+    return row === undefined ? undefined : noteOf(row);
   }
 
   /**
