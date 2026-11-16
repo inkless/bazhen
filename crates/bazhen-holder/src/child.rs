@@ -266,7 +266,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
     fn a_close_of_a_reaped_child_signals_nothing() {
+        bazhen_test_signal::require_sandbox().unwrap();
         let (status, seen) = signals_seen_by_a_stand_in(|pid| {
             let mut child = ChildProcess {
                 pid,
@@ -282,7 +284,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
     fn a_signal_to_a_reaped_child_is_refused_and_sends_nothing() {
+        bazhen_test_signal::require_sandbox().unwrap();
         let (status, seen) = signals_seen_by_a_stand_in(|pid| {
             let child = ChildProcess {
                 pid,
@@ -299,7 +303,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
     fn a_signal_to_a_live_child_reaches_its_group() {
+        bazhen_test_signal::require_sandbox().unwrap();
         let (_, seen) = signals_seen_by_a_stand_in(|pid| {
             let child = ChildProcess::new(pid);
             child.signal(body::Signal::Sighup).unwrap();
@@ -308,7 +314,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
     fn a_child_reaped_during_the_grace_is_not_killed() {
+        bazhen_test_signal::require_sandbox().unwrap();
         let (status, seen) = signals_seen_by_a_stand_in(|pid| {
             let now = Instant::now();
             let mut child = ChildProcess {

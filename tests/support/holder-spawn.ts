@@ -6,7 +6,7 @@
 import { spawn, spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { killHolder, readProcess, vouchHolder } from "@bazhen/host-guard";
+import { inSignalSandbox, killHolder, readProcess, vouchHolder } from "@bazhen/host-guard";
 import { HOLDER_PROTOCOL_VERSION, type HolderTheme } from "@bazhen/protocol";
 import { connectHolder, type HolderClient } from "@bazhen/runtime-holder";
 import {
@@ -17,6 +17,7 @@ import {
   testHome,
   userDir,
 } from "./holder-home.ts";
+import { requireSignalSandbox } from "./disposable-host.ts";
 import { record } from "./holder-ledger.ts";
 
 /** Runs `argv` to its end in the run's HOME, with `env`, which `requireHolderEnv` must pass. */
@@ -105,8 +106,12 @@ export interface SpawnedHolder {
 export async function spawnHolder(
   terminalId: string,
   argv: readonly [string, ...string[]],
-  { theme }: { readonly theme?: HolderTheme } = {},
+  {
+    theme,
+    sandboxed = inSignalSandbox(),
+  }: { readonly theme?: HolderTheme; readonly sandboxed?: boolean } = {},
 ): Promise<SpawnedHolder> {
+  requireSignalSandbox(sandboxed);
   const socket = holderSocket(terminalId);
   const spec = {
     protocol: [HOLDER_PROTOCOL_VERSION],

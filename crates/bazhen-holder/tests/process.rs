@@ -309,7 +309,9 @@ fn the_child_leads_a_session_whose_controlling_terminal_is_the_pty() {
 }
 
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn the_child_gets_no_fd_the_holder_opened() {
+    bazhen_test_signal::require_sandbox().unwrap();
     let before = own_fds().unwrap();
     let mut running = start(&["sh", "-c", "echo started; read _"]).unwrap();
     let opened: BTreeSet<_> = own_fds().unwrap().difference(&before).copied().collect();
@@ -367,7 +369,9 @@ fn an_exit_status_is_exact() {
 }
 
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn a_close_hangs_up_the_foreground_group_as_well_as_the_childs() {
+    bazhen_test_signal::require_sandbox().unwrap();
     let script = "trap : HUP; set -m; sleep 30; exit 4";
     let mut running = start(&["sh", "-c", script]).unwrap();
     let pid = running.child.pid();
@@ -382,7 +386,9 @@ fn a_close_hangs_up_the_foreground_group_as_well_as_the_childs() {
 }
 
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn a_close_continues_a_stopped_child_so_it_acts_on_the_hangup() {
+    bazhen_test_signal::require_sandbox().unwrap();
     let mut running = start(&["sh", "-c", "kill -s STOP $$; exit 5"]).unwrap();
     let pid = running.child.pid().as_raw_nonzero().to_string();
     wait_for(&mut running, |_| {
@@ -399,7 +405,9 @@ fn a_close_continues_a_stopped_child_so_it_acts_on_the_hangup() {
 }
 
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn a_close_kills_a_child_that_ignores_the_hangup_once_the_grace_is_over() {
+    bazhen_test_signal::require_sandbox().unwrap();
     let file = scratch("ignores-hup").unwrap();
     let script = r#"trap '' HUP; echo armed > "$0"; exec sleep 30"#;
     let mut running = start(&["sh", "-c", script, file.arg()]).unwrap();
@@ -464,7 +472,9 @@ fn fifty_spawns_leave_no_fd_behind() {
 }
 
 #[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn a_close_kills_the_childs_whole_group_once_the_grace_is_over() {
+    bazhen_test_signal::require_sandbox().unwrap();
     let file = scratch("group").unwrap();
     let script = format!("trap '' HUP; {HUP_IGNORING_GRANDCHILD} wait");
     let mut running = start(&["sh", "-c", &script, file.arg()]).unwrap();

@@ -15,8 +15,10 @@ import {
 } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
+import { requireSignalSandbox } from "./disposable-host.ts";
 import {
   type HolderProcess,
+  inSignalSandbox,
   killHolder,
   readProcess,
   START_SKEW_S,
@@ -114,6 +116,8 @@ export interface SweepDeps {
   readonly vouch: (holder: HolderProcess) => Promise<HolderProcess | null>;
   readonly kill: (proof: HolderProcess) => boolean;
   readonly now: () => number;
+  /** Whether this host may kill a holder it didn't start: a disposable one. */
+  readonly sandboxed: () => boolean;
 }
 
 const DEPS: SweepDeps = {
@@ -122,6 +126,7 @@ const DEPS: SweepDeps = {
   vouch: (holder) => vouchHolder(holder),
   kill: (proof) => killHolder(proof),
   now: Date.now,
+  sandboxed: () => inSignalSandbox(),
 };
 
 /** The entry's text, or undefined once a concurrent sweep or its test has removed it. */
@@ -140,6 +145,7 @@ function readEntry(path: string): string | undefined {
  * show as the entry's own holder, so a reused pid is left alone. Returns how many it killed.
  */
 export async function sweep(dir: string = ledgerDir(), deps: SweepDeps = DEPS): Promise<number> {
+  requireSignalSandbox(deps.sandboxed());
   let killed = 0;
   for (const name of deps.list(dir)) {
     const path = join(dir, name);

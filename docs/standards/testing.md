@@ -39,25 +39,28 @@ Engineering at Google_.
 | medium | `src/**/x.medium.test.ts`     | temporary files, SQLite              | `pnpm test:medium`                     |
 | medium | `scripts/*.medium.test.ts`    | temporary files, git, subprocesses   | `pnpm test:medium`                     |
 | medium | `tests/integration/*.test.ts` | a private tmux server, real PTYs     | `pnpm test:real integration`           |
-| medium | `tests/holder/*.test.ts`      | holders and real PTYs, no tmux       | `pnpm test:holder`                     |
+| medium | `tests/holder/*.test.ts`      | holders and real PTYs, no tmux       | `pnpm test:real holder`                |
 | large  | `tests/api/*.test.ts`         | the daemon as a process, tmux, CLIs  | `pnpm test:real api`                   |
 | large  | `tests/e2e/*.spec.ts`         | daemon, web client and browser       | `pnpm test:real e2e`                   |
 
-`pnpm check` runs the small and medium tests on the host, the holder tests included; none of
-them runs tmux or an agent. The integration, api and e2e tests run real tmux, so they run only on
-a disposable host: the test container (`pnpm test:real`, which builds it from the worktree
-without mounting it) or a CI runner.
-A disposable host is Linux with `/etc/bazhen-disposable-host`; their setup refuses to start
-anywhere else. Never create that file on a machine you work on. Inside a container or CI they
-are the `pnpm test:integration`, `test:api` and `test:e2e` scripts, one worker each. Each run's
-containers have no network and get a CPU quota of half the machine (`BZ_TEST_CPUS` overrides it),
-because a suite that starts a busy process per core would otherwise take every core from the
-agents working on the same machine. They also get a memory cap of a quarter of the machine, with
-no swap beyond it (`BZ_TEST_MEMORY`, in GiB, overrides it), so a runaway dies in its container. A run removes its containers, image and build context on every exit
-it sees, Ctrl-C, SIGTERM and SIGHUP included, and gives each cleanup command 30 seconds; a second
-signal abandons the cleanup. What a run killed outright or abandoned left, the next run on the
-same machine removes: it sweeps the stopped containers, images and contexts whose owning process
-is gone, and an image only once no container uses it.
+`pnpm check` runs the small and medium tests on the host; none of them runs tmux or an agent, or
+signals a process it didn't start. The holder tests and the Rust tests that start a holder, close a
+child or sweep the ledger do signal such processes, as a closing holder signals its child's session,
+so they run only on a disposable host: `pnpm test:real holder` and `pnpm test:real rust`, or CI. The
+integration, api and e2e tests run real tmux, so they run only on a disposable host too: the test
+container (`pnpm test:real`, which builds it from the worktree without mounting it) or a CI runner.
+A disposable host carries a root-owned `/etc/bazhen-disposable-host`, and for real tmux is Linux;
+their setup refuses to start anywhere else. Never create that file on a machine you work on. Inside
+a container or CI they are the `pnpm test:integration`, `test:api` and `test:e2e` scripts, one
+worker each. Each run's containers have no network and get a CPU quota of half the machine
+(`BZ_TEST_CPUS` overrides it), because a suite that starts a busy process per core would otherwise
+take every core from the agents working on the same machine. They also get a memory cap of a quarter
+of the machine, with no swap beyond it (`BZ_TEST_MEMORY`, in GiB, overrides it), so a runaway dies
+in its container. A run removes its containers, image and build context on every exit it sees,
+Ctrl-C, SIGTERM and SIGHUP included, and gives each cleanup command 30 seconds; a second signal
+abandons the cleanup. What a run killed outright or abandoned left, the next run on the same machine
+removes: it sweeps the stopped containers, images and contexts whose owning process is gone, and an
+image only once no container uses it.
 Docker's build cache keeps the layers, so repeat runs are fast; BuildKit's garbage collection
 bounds it, and `docker builder prune` reclaims it on a machine of your own. Under Podman, where
 `docker` is the podman-docker shim, nothing bounds the cache; `podman image prune` reclaims it on
@@ -200,20 +203,20 @@ A test owns everything it touches and leaves nothing behind.
   user's own servers share. Get a server with `testServer(label)`, so a leak says which test
   caused it, and kill it in `afterAll`. Each run also gets its own `TMUX_TMPDIR` and runs outside
   any tmux client (`TMUX` unset). Teardown fails the run on any server still alive.
-- **Holders.** Holder tests run on the host, under a temporary `BAZHEN_HOME` in `/tmp`, so the
-  longest holder socket path fits the 103 bytes a Unix socket allows on macOS. Take paths from
-  `tests/support/holder-home.ts`, whose `testHome()` and `holderSocket()` refuse any home but
-  the run's. Close every holder a test starts in `afterAll`: teardown closes any still answering,
-  through the protocol, and fails the run naming each. It counts a holder closed only once its
-  pid is gone too, and otherwise keeps the home for whatever it ran. `tmux` on their `PATH`
-  refuses to run, and teardown fails the run if anything appears in their `TMUX_TMPDIR`. A
-  holder's child gets only its spec's environment: build it with `holderEnv()` or
-  `holderProcessSpec()`, which put `HOME`, `XDG_*` and `TMUX_TMPDIR` in the run's home and the
-  refusal first on `PATH`. `requireHolderEnv()` refuses any other, and any variable but those,
-  terminal and locale settings and a test's own `BZ_TEST_*`. A holder test starts processes
-  only through `tests/support/holder-spawn.ts`, which passes their env through it; lint bans
-  `tests/holder` everything else that starts one: `child_process`, `node-pty`, `module`'s
-  `createRequire`, `cluster` and `worker_threads`.
+- **Holders.** Holder tests run on a disposable host, under a temporary `BAZHEN_HOME` in `/tmp`, so
+  the longest holder socket path fits the 103 bytes a Unix socket allows on macOS. Take paths from
+  `tests/support/holder-home.ts`, whose `testHome()` and `holderSocket()` refuse any home but the
+  run's. Close every holder a test starts in `afterAll`: teardown closes any still answering,
+  through the protocol, and fails the run naming each. It counts a holder closed only once its pid
+  is gone too, and otherwise keeps the home for whatever it ran. `tmux` on their `PATH` refuses to
+  run, and teardown fails the run if anything appears in their `TMUX_TMPDIR`. A holder's child gets
+  only its spec's environment: build it with `holderEnv()` or `holderProcessSpec()`, which put
+  `HOME`, `XDG_*` and `TMUX_TMPDIR` in the run's home and the refusal first on `PATH`.
+  `requireHolderEnv()` refuses any other, and any variable but those, terminal and locale settings
+  and a test's own `BZ_TEST_*`. A holder test starts processes only through
+  `tests/support/holder-spawn.ts`, which passes their env through it; lint bans `tests/holder`
+  everything else that starts one: `child_process`, `node-pty`, `module`'s `createRequire`,
+  `cluster` and `worker_threads`.
 - **Signals.** A signal to a wrong pid ends someone else's work, and one to -1 every process the
   user owns. Raw signal calls (`process.kill` however it is reached: directly, by a default or
   namespace import, through a constant bound to `process`, or computed; Rust's `kill_process`,

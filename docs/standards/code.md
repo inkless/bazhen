@@ -49,8 +49,9 @@ Each layer has one job:
   § Hermeticity).
 - `apps/daemon` is the composition root: it wires the adapters and implementations into core.
 - `apps/web` is the client: it talks to the daemon only through the protocol.
-- `tests/holder` runs on the host, so it imports the holder client and nothing that reaches tmux
-  or a daemon, host-guard included; teardown in `tests/support` uses host-guard on its behalf.
+- `tests/holder` runs only on a disposable host, and imports the holder client and nothing that
+  reaches tmux or a daemon, host-guard included; teardown in `tests/support` uses host-guard on
+  its behalf.
   It starts processes only through `tests/support/holder-spawn.ts`, never `child_process`,
   `node-pty`, `module`, `cluster` or `worker_threads` itself.
 

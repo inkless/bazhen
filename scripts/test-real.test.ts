@@ -26,8 +26,8 @@ const repo: Record<string, string> = {
 const read = (files: Record<string, string>) => (path: string) => files[path] ?? "";
 
 describe("pnpm test:real", () => {
-  it("runs the suites it is given, once each and in order, or integration, api and e2e", () => {
-    expect(parseArgs([]).suites).toEqual(["integration", "api", "e2e"]);
+  it("runs the suites it is given, once each and in order, or all but falsify", () => {
+    expect(parseArgs([]).suites).toEqual(["integration", "api", "e2e", "holder", "rust"]);
     expect(parseArgs(["falsify", "api", "falsify"]).suites).toEqual(["falsify", "api"]);
   });
 

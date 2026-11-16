@@ -31,6 +31,7 @@ import {
   rustFailures,
   signalChokepointFailures,
   testSignalDependencyFailures,
+  unmarkedSignallingTests,
   skillFailures,
   unsafeModuleFailures,
 } from "./check-standards.ts";
@@ -1521,6 +1522,108 @@ describe("the signal chokepoints", () => {
   it("names a chokepoint that no longer exists", () => {
     expect(signalChokepointFailures(CHOKEPOINTS.slice(1), () => "")).toEqual([
       "scripts/signal-paths.ts: SIGNAL_CHOKEPOINTS lists missing packages/host-guard/src/signal.ts.",
+    ]);
+  });
+});
+
+const unmarked = (sources: Record<string, string>) =>
+  unmarkedSignallingTests(Object.keys(sources), (f) => sources[f] ?? "").map(
+    (f) => f.split(": ")[0],
+  );
+
+describe("tests that signal processes they didn't start", () => {
+  const MARK = '#[ignore = "signals processes; runs in pnpm test:real rust"]';
+  const marked = `#[test]\n${MARK}\nfn m() {\n    bazhen_test_signal::require_sandbox().unwrap();\n}`;
+
+  it("must be marked in a binary that runs the holder, in any of its files", () => {
+    expect(
+      unmarked({
+        "crates/h/tests/binary/main.rs":
+          'const BIN: &str = env!("CARGO_BIN_EXE_bazhen-holder");\n#[test]\nfn a() {}',
+        "crates/h/tests/binary/socket.rs": `#[test]\nfn b() {}\n${marked}`,
+        "crates/h/tests/other.rs": "#[test]\nfn c() {}",
+      }),
+    ).toEqual(["crates/h/tests/binary/main.rs:2", "crates/h/tests/binary/socket.rs:1"]);
+  });
+
+  it("must be marked anywhere when its own body closes a child or sweeps the ledger", () => {
+    const source = [
+      "#[test]\nfn a() { running.child.close(group, now); }",
+      "#[test]\nfn b() { child.close_step(group, now); }",
+      "#[test]\nfn c() { sweep().unwrap(); }",
+      "#[test]\nfn d() { let x = 1; }",
+      marked.replace("fn m() {", "fn e() {\n    child.close(group, now);"),
+    ].join("\n");
+    expect(unmarked({ "crates/h/src/child.rs": source })).toEqual([
+      "crates/h/src/child.rs:1",
+      "crates/h/src/child.rs:3",
+      "crates/h/src/child.rs:5",
+    ]);
+  });
+
+  it("must be marked when it calls a same-file helper that closes or sweeps", () => {
+    const source = [
+      "fn end(r: &mut Running) { r.child.close(group, now); }",
+      "#[test]\nfn a() { end(&mut running); }",
+      "#[test]\nfn b() { let x = 1; }",
+    ].join("\n");
+    expect(unmarked({ "crates/h/tests/x.rs": source })).toEqual(["crates/h/tests/x.rs:2"]);
+  });
+
+  it("must be marked inside a macro that generates tests that close or sweep", () => {
+    const source = [
+      "macro_rules! closes {",
+      "    ($name:ident, $body:expr) => {",
+      "        #[test]",
+      "        fn $name() { $body; }",
+      "    };",
+      "}",
+      "closes!(a, running.child.close(group, now));",
+    ].join("\n");
+    expect(unmarked({ "crates/h/tests/x.rs": source })).toEqual(["crates/h/tests/x.rs:3"]);
+  });
+
+  it("must be marked when it names a type whose Drop closes, or signals a child itself", () => {
+    const source = [
+      "struct Failing;",
+      "impl Drop for Failing {\n    fn drop(&mut self) { self.holder.close(now); }\n}",
+      "#[test]\nfn a() { let f = Failing::start(); }",
+      "#[test]\nfn b() { child.signal(Sigint).unwrap(); }",
+      "#[test]\nfn c() { let x = 1; }",
+    ].join("\n");
+    expect(unmarked({ "crates/h/src/server.rs": source })).toEqual([
+      "crates/h/src/server.rs:5",
+      "crates/h/src/server.rs:7",
+    ]);
+  });
+
+  it("must be marked when it names a type whose Drop only calls a helper that closes", () => {
+    const source = [
+      "struct Guard;",
+      "fn end(h: &mut Holder) { h.close(now); }",
+      "impl Drop for Guard {\n    fn drop(&mut self) { end(&mut self.holder); }\n}",
+      "#[test]\nfn a() { let g = Guard; }",
+    ].join("\n");
+    expect(unmarked({ "crates/h/src/server.rs": source })).toEqual(["crates/h/src/server.rs:6"]);
+  });
+
+  it("doesn't take a bodyless function for one with the next function's body", () => {
+    const source = [
+      "trait Tidy { fn tidy(&self); }",
+      "fn other() { x.close(now); }",
+      "#[test]\nfn a() { t.tidy(); }",
+    ].join("\n");
+    expect(unmarked({ "crates/h/tests/x.rs": source })).toEqual([]);
+  });
+
+  it("isn't marked by another ignore, or by the reason in a string", () => {
+    const source = [
+      '#[test]\n#[ignore = "slow"]\nfn a() { sweep(); }',
+      `#[test]\nfn b() { let s = "${MARK.replaceAll('"', '\\"')}"; sweep(); }`,
+    ].join("\n");
+    expect(unmarked({ "crates/h/tests/x.rs": source })).toEqual([
+      "crates/h/tests/x.rs:1",
+      "crates/h/tests/x.rs:4",
     ]);
   });
 });

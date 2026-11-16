@@ -57,7 +57,7 @@ export default defineConfig({
         },
       },
       {
-        // Real PTYs and holders, on the host: no disposable-host check, and no tmux reachable.
+        // Real PTYs and holders, on a disposable host only (its setup checks), and no tmux reachable.
         test: {
           name: "holder",
           include: ["tests/holder/**/*.test.ts"],

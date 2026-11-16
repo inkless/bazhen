@@ -1,4 +1,4 @@
-import { accessSync, constants, readdirSync, readFileSync } from "node:fs";
+import { accessSync, constants, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { holderEnv, testHome } from "../support/holder-home.ts";
@@ -44,7 +44,8 @@ describe("the holder tests' tmux isolation", () => {
   it("starts a process in the run's HOME, with nothing of the user's environment", () => {
     const run = runInHome(["sh", "-c", 'echo "$PWD $HOME ${SSH_AUTH_SOCK-none} ${TMUX-none}"']);
     const home = `${testHome()}/home`;
-    expect(run.stdout.trim()).toBe(`${home} ${home} none none`);
+    // A shell sets PWD from the directory it resolves, and macOS's /tmp is a link to /private/tmp.
+    expect(run.stdout.trim()).toBe(`${realpathSync(home)} ${home} none none`);
   });
 
   it("refuses to start a process whose environment reaches outside the run's home", () => {

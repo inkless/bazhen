@@ -9,6 +9,7 @@
   "include": [
     "*.ts",
     "../support/agent-stream.ts",
+    "../support/disposable-host.ts",
     "../support/holder-setup.ts",
     "../support/holder-home.ts",
     "../support/holder-ledger.ts",

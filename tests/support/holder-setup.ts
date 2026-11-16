@@ -1,6 +1,8 @@
-// Vitest globalSetup for the holder project, which runs real PTYs and holders on the host
+// Vitest globalSetup for the holder project, which runs real PTYs and holders
 // (docs/standards/testing.md).
-// - It refuses to start when the machine is close to running out of PTYs, before anything else.
+// - It refuses to start outside a signal sandbox, before it sweeps anything: a holder signals
+//   every process in its session when it closes, and the sweep kills holders.
+// - Then it refuses to start when the machine is close to running out of PTYs.
 // - Every run gets a temporary BAZHEN_HOME under /tmp, so a holder's socket path stays inside
 //   the 103 bytes a Unix socket allows on macOS too, and tests find it only through
 //   ./holder-home.ts, which refuses any home but this one.
@@ -42,6 +44,7 @@ import {
 } from "./holder-home.ts";
 import { sweep as sweepLedger } from "./holder-ledger.ts";
 import { requirePtyHeadroom } from "./ptys.ts";
+import { requireSignalSandbox } from "./disposable-host.ts";
 import { failSetup } from "./setup-error.ts";
 
 /** What `tmux` on the holder tests' PATH is: a script that refuses. */
@@ -69,10 +72,30 @@ export function scrubBazhenEnv(env: NodeJS.ProcessEnv): void {
   for (const name of Object.keys(env)) if (name.startsWith("BAZHEN_")) delete env[name];
 }
 
-/** Sweeps holders an earlier run left, then makes this run's home. */
+/** What the holder suite's setup does, in order: refuse off a sandbox, sweep, make the home. */
+export interface SetupSteps {
+  readonly requireSandbox: () => void;
+  readonly sweep: () => Promise<unknown>;
+  readonly prepare: () => void;
+}
+
+/** Runs `steps` in order; the sandbox check first, so a refusal sweeps and starts nothing. */
+export async function start(steps: SetupSteps): Promise<void> {
+  steps.requireSandbox();
+  await steps.sweep();
+  steps.prepare();
+}
+
+/**
+ * Sweeps holders an earlier run left, then makes this run's home. It takes nothing: vitest
+ * passes the project, which a default parameter would mistake for steps.
+ */
 export async function setup(): Promise<void> {
-  await sweepLedger();
-  prepareRun();
+  await start({
+    requireSandbox: () => requireSignalSandbox(),
+    sweep: sweepLedger,
+    prepare: prepareRun,
+  });
 }
 
 /** Makes a run's home and points the environment at it. */

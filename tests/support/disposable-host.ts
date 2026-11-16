@@ -2,10 +2,12 @@
 // on, one wrong socket ends every tmux session they have, so those suites run only on a host that
 // exists to be thrown away: the test container, or a CI runner. A host qualifies by a root-owned
 // marker file, never by an environment variable, which any agent sets out of habit
-// (packages/host-guard/src/sandbox.ts).
+// (packages/host-guard/src/sandbox.ts). The holder suite runs only there too: a holder that
+// closes signals every process in its session.
 
 import {
   DISPOSABLE_HOST_MARKER,
+  SANDBOX_RULE,
   type SandboxHost,
   inSignalSandbox,
   thisHost,
@@ -29,4 +31,16 @@ export function requireDisposableHost(host = onDisposableHost()): void {
     `in the test container (pnpm test:real) or CI, on a Linux host carrying a root-owned ` +
     `${DISPOSABLE_HOST_MARKER}. Never create that file on a machine you work on.`;
   failSetup(message);
+}
+
+/**
+ * Throws unless this is a disposable host, on any platform; first wherever the holder suite
+ * could start or end a holder: its setup, its ledger sweep and its process starts.
+ */
+export function requireSignalSandbox(sandboxed = inSignalSandbox()): void {
+  if (sandboxed) return;
+  failSetup(
+    "Refusing to run: the holder tests start holders, which signal every process in their " +
+      `sessions when they close, and ${SANDBOX_RULE}. Run them with pnpm test:real holder.`,
+  );
 }
