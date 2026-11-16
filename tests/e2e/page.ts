@@ -119,6 +119,18 @@ export async function openSecondView(
   return page;
 }
 
+/** The agent's terminal's generation, as the daemon's state says. */
+export function generationOf(page: Page, agentId: string): Promise<unknown> {
+  return page.evaluate(async (id) => {
+    const state: unknown = await (await fetch("/v1/state")).json();
+    const agents: unknown = Reflect.get(Object(state), "agents");
+    const agent: unknown = Array.isArray(agents)
+      ? agents.find((a: unknown) => Reflect.get(Object(a), "id") === id)
+      : undefined;
+    return Reflect.get(Object(agent), "generation");
+  }, agentId);
+}
+
 /**
  * Gives an agent's Claude Code session a conversation to resume, as its hooks would report it.
  * Its own TUI names a transcript it hasn't written, so only once that TUI has exited.

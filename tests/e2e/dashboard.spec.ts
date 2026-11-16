@@ -1,7 +1,15 @@
 import { hostname } from "node:os";
 import { basename } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
-import { givePageAgentTranscript, kill, launch, patchState, screen, uniqueName } from "./page.ts";
+import {
+  generationOf,
+  givePageAgentTranscript,
+  kill,
+  launch,
+  patchState,
+  screen,
+  uniqueName,
+} from "./page.ts";
 
 /**
  * Launches an agent from outside the page, as another device would, under `name` if given;
@@ -207,7 +215,9 @@ test("respawns an agent whose process ended, onto a fresh terminal", async ({ pa
   await givePageAgentTranscript(page, agentId);
 
   await workspace(page).getByRole("button", { name: "Respawn" }).click();
-  await expect(stateOf(page, "running")).toBeVisible({ timeout: 20_000 });
+  // The conversation it was given is no real one, so the new TUI gives up on it and ends, never
+  // running: what is tested here is the new process in the terminal, not the resume.
+  await expect.poll(() => generationOf(page, agentId), { timeout: 20_000 }).toBe(1);
   await expect.poll(() => screen(page), { timeout: 20_000 }).toContain("Claude Code");
 });
 
