@@ -306,11 +306,6 @@ describe("bazhen whoami", () => {
     ]);
   });
 
-  it("says only why it can't answer outside an agent, not every verb's usage", async () => {
-    const outside = await s.bazhen(["whoami"]);
-    expect(outside.stderr).not.toContain("bazhen agents");
-  });
-
   it("wants to run inside an agent the daemon knows", async () => {
     s.daemon.answer("GET /v1/state", StateSnapshot, snapshot());
     const outside = await s.bazhen(["whoami"]);
@@ -320,6 +315,7 @@ describe("bazhen whoami", () => {
       "",
       expect.stringContaining("inside an agent"),
     ]);
+    expect(outside.stderr).not.toContain("usage:");
     expect([unknown.code, unknown.stdout, unknown.stderr]).toEqual([
       2,
       "",
