@@ -41,10 +41,10 @@ export interface UserRole {
 
 /**
  * The roles in force: the built-ins, each replaced whole by a user file of its key, and the user
- * files of new keys. A user role is skipped when it grants itself, since no agent promotes
- * another to its own standing, or grants a key nothing defines. Skipping one can leave another
- * granting it, so the check repeats until nothing changes. A skipped file's built-in, if any,
- * stands.
+ * files of new keys. A user role is skipped when it grants a key nothing defines, or when it can
+ * be granted back through the roles it grants, which would let an agent promote another to its
+ * own standing. Skipping one can change what another reaches, so the check repeats until nothing
+ * changes. A skipped file's built-in, if any, stands.
  */
 export function resolveRoles(
   builtins: readonly RoleDefinition[],
@@ -53,26 +53,64 @@ export function resolveRoles(
   const problems: RoleProblem[] = [];
   let kept = [...user];
   for (;;) {
-    const keys = new Set([...builtins.map((b) => b.key), ...kept.map((u) => u.role.key)]);
+    const book = merged(builtins, kept);
     const refused = kept.flatMap((u) => {
-      const problem = grantProblem(u.role, keys);
+      const problem = grantProblem(u.role, book);
       return problem === null ? [] : [{ file: u.file, problem }];
     });
-    if (refused.length === 0) break;
+    if (refused.length === 0) return { book, problems };
     problems.push(...refused);
     const files = new Set(refused.map((r) => r.file));
     kept = kept.filter((u) => !files.has(u.file));
   }
-  const replaced = new Map(kept.map((u) => [u.role.key, u.role]));
-  const roles = [
-    ...builtins.map((b) => replaced.get(b.key) ?? b),
-    ...kept.map((u) => u.role).filter((r) => !builtins.some((b) => b.key === r.key)),
-  ];
-  return { book: new RoleBook(roles), problems };
 }
 
-function grantProblem(role: RoleDefinition, keys: ReadonlySet<Role>): string | null {
-  if (role.grants.includes(role.key)) return `a ${role.key} can't grant its own role`;
-  const unknown = role.grants.filter((g) => !keys.has(g));
-  return unknown.length === 0 ? null : `grants ${unknown.join(", ")}, which no role defines`;
+function merged(builtins: readonly RoleDefinition[], user: readonly UserRole[]): RoleBook {
+  const replaced = new Map(user.map((u) => [u.role.key, u.role]));
+  return new RoleBook([
+    ...builtins.map((b) => replaced.get(b.key) ?? b),
+    ...user.map((u) => u.role).filter((r) => !builtins.some((b) => b.key === r.key)),
+  ]);
+}
+
+function grantProblem(role: RoleDefinition, book: RoleBook): string | null {
+  const unknown = role.grants.filter((g) => book.get(g) === undefined);
+  if (unknown.length > 0) return `grants ${unknown.join(", ")}, which no role defines`;
+  const cycle = pathBack(role.key, book);
+  if (cycle === null) return null;
+  return cycle.length === 2
+    ? `a ${role.key} can't grant its own role`
+    : `a ${role.key} could be granted again by a role it grants (${cycle.join(" → ")})`;
+}
+
+/** The shortest path of grants from `key` back to itself, both ends included, or null for none. */
+function pathBack(key: Role, book: RoleBook): Role[] | null {
+  const parent = new Map<Role, Role>();
+  let frontier: Role[] = [key];
+  while (frontier.length > 0) {
+    const next: Role[] = [];
+    for (const at of frontier) {
+      for (const granted of book.rules(at).grants) {
+        if (granted === key) return [...trail(parent, at, key), key];
+        if (!parent.has(granted)) {
+          parent.set(granted, at);
+          next.push(granted);
+        }
+      }
+    }
+    frontier = next;
+  }
+  return null;
+}
+
+/** The path from `key` to `at`, following each role back to the one that granted it first. */
+function trail(parent: ReadonlyMap<Role, Role>, at: Role, key: Role): Role[] {
+  const path = [at];
+  for (let step = at; step !== key;) {
+    const up = parent.get(step);
+    if (up === undefined) break;
+    path.unshift(up);
+    step = up;
+  }
+  return path;
 }

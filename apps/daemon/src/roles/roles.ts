@@ -1,5 +1,13 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  openSync,
+  readdirSync,
+  readSync,
+  statSync,
+} from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 import { z } from "zod";
@@ -54,7 +62,8 @@ export function parseRole(
   if (parts === null) return { problem: "it must start with front matter between --- lines" };
   let front: unknown;
   try {
-    front = parse(parts.front) ?? {};
+    // Warnings would go to the process's warning output, which could quote the file.
+    front = parse(parts.front, { logLevel: "error" }) ?? {};
   } catch (error) {
     // The first line only: the rest quotes the file.
     const first = error instanceof Error ? error.message.split("\n")[0] : "unreadable";
@@ -76,7 +85,11 @@ export function parseRole(
   return { key, ...settings.data, prompt, source };
 }
 
-const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
+/** Why a file system call failed, by its code, since its message names the absolute path. */
+const reasonOf = (error: unknown) =>
+  error instanceof Error && "code" in error && typeof error.code === "string"
+    ? error.code
+    : "an unexpected error";
 
 /** The role files in a directory, by name, with what tells a changed one apart. */
 function listing(dir: string): { files: string[]; signature: string } | { error: string } {
@@ -87,7 +100,7 @@ function listing(dir: string): { files: string[]; signature: string } | { error:
     if (error instanceof Error && "code" in error && error.code === "ENOENT") {
       return { files: [], signature: "" };
     }
-    return { error: `can't list ${dir}: ${messageOf(error)}` };
+    return { error: `can't list it: ${reasonOf(error)}` };
   }
   const files = names.toSorted();
   const signature = files
@@ -103,18 +116,42 @@ function listing(dir: string): { files: string[]; signature: string } | { error:
   return { files, signature };
 }
 
-function readRole(dir: string, file: string, source: RoleSource) {
-  const key = file.slice(0, -".md".length);
-  let text: string;
+/**
+ * A role file's text, or why it can't be one. It is opened without waiting, so a FIFO can't hold
+ * the daemon up, and checked through the open file, so what is read is what was checked: only a
+ * regular file, a symlink's target included, and no more of it than a role file may be.
+ */
+function readText(path: string): { readonly text: string } | { readonly problem: string } {
+  let fd: number;
   try {
-    if (statSync(join(dir, file)).size > FILE_MAX) {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  } catch (error) {
+    return { problem: `can't read it: ${reasonOf(error)}` };
+  }
+  try {
+    if (!fstatSync(fd).isFile()) return { problem: "it isn't a regular file" };
+    const buffer = Buffer.alloc(FILE_MAX + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const n = readSync(fd, buffer, length, buffer.length - length, null);
+      if (n === 0) break;
+      length += n;
+    }
+    if (length > FILE_MAX) {
       return { problem: `it is over ${FILE_MAX} bytes, longer than a role file is` };
     }
-    text = readFileSync(join(dir, file), "utf8");
+    return { text: buffer.toString("utf8", 0, length) };
   } catch (error) {
-    return { problem: `can't read it: ${messageOf(error)}` };
+    return { problem: `can't read it: ${reasonOf(error)}` };
+  } finally {
+    closeSync(fd);
   }
-  return parseRole(key, text, source);
+}
+
+function readRole(dir: string, file: string, source: RoleSource) {
+  const read = readText(join(dir, file));
+  if ("problem" in read) return read;
+  return parseRole(file.slice(0, -".md".length), read.text, source);
 }
 
 /** The roles Bazhen ships. A built-in that doesn't parse is a bug in Bazhen, so it throws. */
@@ -134,7 +171,9 @@ export interface RolesNow {
 /**
  * The roles in force: the built-ins, and the user's files in `dir`, read again whenever the
  * directory's listing or a file's modification time or size changes, so an edit takes effect at
- * the next use without a restart. A bad file is reported, once for each change, and skipped.
+ * the next use without a restart. A bad file is reported, once for each change, and skipped. A
+ * problem names its file from the config directory (`roles/lead.md`), since it is shown to
+ * agents, which have no need of the user's home; only the daemon's log names the whole path.
  */
 export class Roles {
   private readonly dir: string;
@@ -147,7 +186,7 @@ export class Roles {
     dir: string,
     builtins: readonly RoleDefinition[] = builtinRoles(),
     report: (problem: RoleProblem) => void = ({ file, problem }) =>
-      console.error(`bazhen: role file ${file} skipped: ${problem}`),
+      console.error(`bazhen: role file ${join(dirname(dir), file)} skipped: ${problem}`),
   ) {
     this.dir = dir;
     this.builtins = builtins;
@@ -162,10 +201,11 @@ export class Roles {
     const user: UserRole[] = [];
     for (const file of "error" in listed ? [] : listed.files) {
       const role = readRole(this.dir, file, "user");
-      if ("problem" in role) unread.push({ file: join(this.dir, file), problem: role.problem });
-      else user.push({ file: join(this.dir, file), role });
+      const shown = join(basename(this.dir), file);
+      if ("problem" in role) unread.push({ file: shown, problem: role.problem });
+      else user.push({ file: shown, role });
     }
-    if ("error" in listed) unread.push({ file: this.dir, problem: listed.error });
+    if ("error" in listed) unread.push({ file: basename(this.dir), problem: listed.error });
     const resolved = resolveRoles(this.builtins, user);
     const problems = [...unread, ...resolved.problems];
     for (const problem of problems) this.report(problem);

@@ -47,6 +47,30 @@ describe("the roles in force", () => {
     ]);
   });
 
+  it("skips a user role that two roles' grants lead back to, naming the cycle", () => {
+    const { book, problems } = resolveRoles(BUILTINS, [user("worker", ["coordinator"])]);
+    expect(book.get("worker")?.source).toBe("builtin");
+    expect(problems).toEqual([
+      {
+        file: "worker.md",
+        problem:
+          "a worker could be granted again by a role it grants (worker → coordinator → worker)",
+      },
+    ]);
+  });
+
+  it("skips every user role on a cycle among user roles alone", () => {
+    const { book, problems } = resolveRoles(BUILTINS, [
+      user("alpha", ["beta"]),
+      user("beta", ["gamma"]),
+      user("gamma", ["alpha"]),
+    ]);
+    expect([book.roles.map((r) => r.key), problems.map((p) => p.file)]).toEqual([
+      ["coordinator", "worker"],
+      ["alpha.md", "beta.md", "gamma.md"],
+    ]);
+  });
+
   it("skips a role whose grant names a role that was itself skipped", () => {
     const { book, problems } = resolveRoles(BUILTINS, [
       user("tester", ["ghost"]),

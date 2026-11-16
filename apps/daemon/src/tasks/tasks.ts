@@ -164,9 +164,11 @@ export class Tasks {
     this.roles = roles;
   }
 
-  /** The roles in force, with `role` among them, or a refusal naming it. */
-  private defined(role: Role): RoleBook {
-    const book = this.roles();
+  /**
+   * The roles in force, with `role` among them, or a refusal naming it. A command reads them once,
+   * so every check it makes sees the same definitions, an edit to a role file meanwhile included.
+   */
+  private defined(role: Role, book: RoleBook = this.roles()): RoleBook {
     if (book.get(role) === undefined) throw new UnknownRole(role);
     return book;
   }
@@ -179,6 +181,7 @@ export class Tasks {
       (r) => CreateTaskResponse.parse(r),
       () => {
         this.checkCaller(caller);
+        const book = this.roles();
         const parentTaskId = req.parentTaskId ?? null;
         let delegatedFrom: AssignmentId | null = null;
         if (parentTaskId !== null) {
@@ -187,8 +190,7 @@ export class Tasks {
             throw new TaskRefused("conflict", `the parent task is ${parent.state}`);
           }
           // An agent's subtask is a delegation: it needs the authority delegating would.
-          if (caller !== null)
-            delegatedFrom = grantingAssignment(parent, caller, this.roles())?.id ?? null;
+          if (caller !== null) delegatedFrom = grantingAssignment(parent, caller, book)?.id ?? null;
         }
         const taskId = newId("task");
         const created = this.store.append({
@@ -205,7 +207,8 @@ export class Tasks {
         });
         if (req.assign === undefined) return { taskId, assignmentId: null, eventIds: [created] };
         const from = parentTaskId === null || caller === null ? undefined : delegatedFrom;
-        const granted = this.grant(caller, taskId, req.assign, idempotencyKey, from);
+        const assigned = this.defined(req.assign.role, book);
+        const granted = this.grant(caller, taskId, req.assign, idempotencyKey, assigned, from);
         return { taskId, ...granted, eventIds: [created, ...granted.eventIds] };
       },
     );
@@ -219,7 +222,7 @@ export class Tasks {
       (r) => AssignTaskResponse.parse(r),
       () => {
         this.checkCaller(caller);
-        return this.grant(caller, taskId, req, idempotencyKey);
+        return this.grant(caller, taskId, req, idempotencyKey, this.defined(req.role));
       },
     );
   }
@@ -463,10 +466,11 @@ export class Tasks {
     const prior = this.store.replay(idempotencyKey, asked, (r) => CreateTaskResponse.parse(r));
     if (prior !== undefined) return prior;
     // Everything that would refuse the delegation is checked before an agent is started for it.
-    const { parentTaskId } = this.checkDelegation(caller, req);
+    const book = this.defined(req.role);
+    const { parentTaskId } = this.checkDelegation(caller, req, book);
     const by = this.agentCaller(caller);
     const task = { id: newId("task"), title: req.title, brief: req.brief, parentTaskId };
-    const grants = this.defined(req.role).rules(req.role).grants;
+    const grants = book.rules(req.role).grants;
     checkLength(assignedMail(task, req.role, grants, this.who(by)));
     const key = `${idempotencyKey}:launch:${by}`;
     // A launch this command already made is replayed, not counted again against the limits.
@@ -512,7 +516,8 @@ export class Tasks {
       asked,
       (r) => CreateTaskResponse.parse(r),
       () => {
-        const { parentTaskId, from } = this.checkDelegation(caller, req);
+        const book = this.defined(req.role);
+        const { parentTaskId, from } = this.checkDelegation(caller, req, book);
         if (agentId === caller) {
           throw new TaskRefused("forbidden", "an agent can't delegate to itself");
         }
@@ -540,18 +545,17 @@ export class Tasks {
           },
         });
         const grant = { agentId, role: req.role };
-        const granted = this.grant(caller, taskId, grant, req.idempotencyKey, from);
+        const granted = this.grant(caller, taskId, grant, req.idempotencyKey, book, from);
         return { taskId, ...granted, eventIds: [created, ...granted.eventIds] };
       },
     );
   }
 
   /** The parent a delegation is part of, and the assignment it hands on from, or a refusal. */
-  private checkDelegation(caller: Caller, req: DelegateTaskRequest) {
+  private checkDelegation(caller: Caller, req: DelegateTaskRequest, book: RoleBook) {
     if (caller === null) throw new TaskRefused("forbidden", "only an agent delegates");
     this.checkCaller(caller);
-    const parentTaskId = req.fromTaskId ?? this.delegatingTask(caller);
-    const book = this.defined(req.role);
+    const parentTaskId = req.fromTaskId ?? this.delegatingTask(caller, book);
     return { parentTaskId, from: checkDelegate(this.view(parentTaskId), caller, req.role, book) };
   }
 
@@ -584,8 +588,7 @@ export class Tasks {
   }
 
   /** The one task the agent coordinates or leads, which an unqualified delegate is part of. */
-  private delegatingTask(agentId: string): string {
-    const book = this.roles();
+  private delegatingTask(agentId: string, book: RoleBook): string {
     const held = this.store
       .assignments({ agentId }, "active")
       .filter((a) => book.rules(a.role).grants.length > 0)
@@ -605,10 +608,10 @@ export class Tasks {
     taskId: string,
     req: { readonly agentId: string; readonly role: Role },
     key: string,
+    book: RoleBook,
     delegatedFrom?: AssignmentId | null,
   ): AssignTaskResponse {
     const agentId = req.agentId;
-    const book = this.defined(req.role);
     if (!this.reachable(agentId)) throw new UnknownAgent(agentId, "that can take a task");
     const view = this.view(taskId);
     const detail = this.store.taskDetail(taskId);

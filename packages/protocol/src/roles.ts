@@ -3,6 +3,8 @@ import { z } from "zod";
 /**
  * A role's key: the name of its definition's file, and what an assignment or a launch names it
  * by. Which keys are defined is the daemon's to check, against the role files it has read.
+ * Protocol 1.42 widened it from `coordinator | lead | worker`, so a client older than that refuses
+ * a snapshot or event naming any other role, `reviewer` included.
  */
 export const Role = z.string().regex(/^[a-z][a-z0-9-]{0,31}$/, {
   message: "a role is 1 to 32 lowercase letters, digits or -, starting with a letter",

@@ -251,6 +251,17 @@ describe("roles, as their definitions say", () => {
     expect(refusal(second)).toBe("allowed");
   });
 
+  it("frees a worker's one task when it is unassigned, so it can take another", async () => {
+    const { store, tasks, worker } = await taskFleet();
+    const assign = { agentId: worker, role: "worker" as const };
+    const first = tasks.create(null, { idempotencyKey: "c1", ...brief, assign });
+    const second = () => tasks.create(null, { idempotencyKey: "c2", ...brief, assign });
+    expect(refusal(second)).toBe("conflict");
+    const assignmentId = assignmentOf(store, worker);
+    tasks.unassign(null, first.taskId, { idempotencyKey: "u", assignmentId });
+    expect(refusal(second)).toBe("allowed");
+  });
+
   it("counts only an agent's tasks in the same role toward that role's limit", async () => {
     const { tasks, lead } = await taskFleet();
     const as = (role: string, key: string) => () =>

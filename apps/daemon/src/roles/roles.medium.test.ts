@@ -1,6 +1,7 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { RoleProblem } from "@bazhen/protocol";
 import { describe, expect, it } from "vitest";
 import { builtinRoles, Roles } from "./roles.ts";
@@ -46,8 +47,32 @@ describe("the roles in force", () => {
     roles.current();
     expect(first.book.get("lead")?.source).toBe("builtin");
     expect(reported).toEqual([
-      { file: join(dir, "lead.md"), problem: "grants ghost, which no role defines" },
+      { file: join(basename(dir), "lead.md"), problem: "grants ghost, which no role defines" },
     ]);
     expect(first.problems).toEqual(reported);
+  });
+
+  it("refuses what isn't a regular file without waiting on it, and reads a symlinked one", () => {
+    const dir = tempDir();
+    const target = join(tempDir(), "mine.md");
+    writeFileSync(target, "---\ntitle: Mine\n---\nMine.\n");
+    symlinkSync(target, join(dir, "mine.md"));
+    symlinkSync("/dev/zero", join(dir, "zero.md"));
+    execFileSync("mkfifo", [join(dir, "fifo.md")]);
+    const { book, problems } = new Roles(dir, builtinRoles(), () => {}).current();
+    expect(book.get("mine")?.title).toBe("Mine");
+    expect(problems.map((p) => [p.file, p.problem])).toEqual([
+      [join(basename(dir), "fifo.md"), "it isn't a regular file"],
+      [join(basename(dir), "zero.md"), "it isn't a regular file"],
+    ]);
+  });
+
+  it("refuses a file longer than a role file is", () => {
+    const dir = tempDir();
+    writeFileSync(join(dir, "big.md"), `---\ntitle: Big\n---\n${"x".repeat(70 * 1024)}\n`);
+    const { problems } = new Roles(dir, builtinRoles(), () => {}).current();
+    expect(problems.map((p) => p.problem)).toEqual([
+      "it is over 65536 bytes, longer than a role file is",
+    ]);
   });
 });

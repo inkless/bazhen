@@ -228,7 +228,9 @@ stands; `bazhen roles` lists both.
 
 The human assigns any role. As shipped, a coordinator gives the task to a lead, workers or
 reviewers, a lead to workers or reviewers, and a worker or reviewer to no one; a worker holds one
-task at a time. Ending an assignment ends everything granted under it. Every agent
+task at a time. An agent whose role grants something runs the task: its `done` finishes it. One
+whose role grants nothing finishes only its own part, so a role file that drops a role's grants
+also takes away its say over the task. Ending an assignment ends everything granted under it. Every agent
 Bazhen launches is told these commands as it starts, beside its harness's own instructions. When an agent finishes a task you own, or a subtask falls to
 you, it shows in your inbox.
 
