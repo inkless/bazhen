@@ -284,6 +284,8 @@ fn in_private_dir<T>(
         })?;
     let stat = fstat(&opened).map_err(|e| io_error(dir)(e.into()))?;
     let others = Mode::RWXG | Mode::RWXO;
+    // No test tells the owner check's `||` from `&&`: only a directory another user owns with no
+    // group or other bits does, and only root can make one.
     if FileType::from_raw_mode(stat.st_mode) != FileType::Directory
         || stat.st_uid != geteuid().as_raw()
         || Mode::from_raw_mode(stat.st_mode).intersects(others)

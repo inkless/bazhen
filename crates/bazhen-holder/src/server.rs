@@ -347,6 +347,9 @@ impl Server {
             let longest = self
                 .conns
                 .iter_mut()
+                // No test tells `> 0` from `>= 0` here or in `evicting_at`: that needs a peer stuck
+                // while it owes no snapshot. To try: shrink the accepted connection's SO_SNDBUF in
+                // the test harness, so plain output sticks one.
                 .filter(|conn| conn.owed_snapshot() > 0 && Some(conn.id()) != writer)
                 .filter_map(|conn| conn.stuck_since().map(|since| (since, conn)))
                 .filter(|(since, _)| now.saturating_duration_since(*since) >= stuck_for)
@@ -670,6 +673,7 @@ fn evicting_at(conns: &[Connection], shared: &Shared) -> Option<Instant> {
     }
     conns
         .iter()
+        // `> 0` is untested against `>= 0`, as in `evict_stuck_snapshots`.
         .filter(|conn| conn.owed_snapshot() > 0 && Some(conn.id()) != shared.writer)
         .filter_map(Connection::stuck_since)
         .map(|since| since + shared.stuck_to_evict)
