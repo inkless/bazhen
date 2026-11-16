@@ -37,6 +37,8 @@ impl Size {
 pub enum Ending {
     /// The person detached.
     Detached,
+    /// A signal asked this process to stop.
+    Stopped,
     /// The terminal closed.
     Exited,
     /// The daemon ended the view for falling behind; a new one starts from a fresh snapshot.
@@ -69,6 +71,11 @@ pub struct Attachment {
     epoch: Option<u64>,
     /// Keys typed before any epoch was declared, which the daemon would drop: sent once it is.
     held: Vec<u8>,
+    /// How many keys past what `held` keeps were dropped.
+    dropped: usize,
+    /// The person's terminal's size, sent once attached: the daemon ignores one sent before.
+    size: Option<Size>,
+    sized: bool,
 }
 
 impl Attachment {
@@ -84,13 +91,25 @@ impl Attachment {
         }
     }
 
-    /// What the terminal resized to means for the daemon.
+    /// An attachment from a terminal of `size`.
     #[must_use]
-    pub fn resized(size: Size) -> Effect {
-        Effect::Send(StreamClientFrame::Resize {
+    pub fn sized(size: Size) -> Self {
+        Self {
+            size: Some(size),
+            ..Self::default()
+        }
+    }
+
+    /// The person's terminal resized: the daemon is told once the attachment can tell it.
+    pub fn resized(&mut self, size: Size) -> Vec<Effect> {
+        self.size = Some(size);
+        if !self.declared() {
+            return vec![];
+        }
+        vec![Effect::Send(StreamClientFrame::Resize {
             cols: size.cols,
             rows: size.rows,
-        })
+        })]
     }
 
     /// The keys typed: sent as typed, but for two `Ctrl-\` in a row, which detach. A `Ctrl-\`
@@ -116,6 +135,7 @@ impl Attachment {
         let end = detached.then_some(Effect::End(Ending::Detached));
         if !self.declared() {
             let room = HELD_MAX.saturating_sub(self.held.len());
+            self.dropped += typed.len().saturating_sub(room);
             self.held.extend(typed.into_iter().take(room));
             return end.into_iter().collect();
         }
@@ -161,17 +181,31 @@ impl Attachment {
     }
 
     /// The epoch keys are typed under, once the attachment exists to take it, so a key takes the
-    /// lease as a click in the web app does; then the keys held until it could.
+    /// lease as a click in the web app does; then the terminal's size, and the keys held until
+    /// they could be sent.
     fn declare(&mut self) -> Vec<Effect> {
         let (true, Some(epoch)) = (self.attached, self.epoch) else {
             return vec![];
         };
+        let mut effects = vec![Effect::Send(StreamClientFrame::Epoch { epoch })];
+        if let (false, Some(size)) = (std::mem::replace(&mut self.sized, true), self.size) {
+            effects.push(Effect::Send(StreamClientFrame::Resize {
+                cols: size.cols,
+                rows: size.rows,
+            }));
+        }
         let held = std::mem::take(&mut self.held);
-        let input = (!held.is_empty()).then_some(Effect::Input(held));
-        [Effect::Send(StreamClientFrame::Epoch { epoch })]
-            .into_iter()
-            .chain(input)
-            .collect()
+        if !held.is_empty() {
+            effects.push(Effect::Input(held));
+        }
+        let dropped = std::mem::take(&mut self.dropped);
+        if dropped > 0 {
+            effects.push(Effect::Note(format!(
+                "{dropped} keys typed before the terminal was attached were dropped: more than a \
+                 paste"
+            )));
+        }
+        effects
     }
 }
 
@@ -272,6 +306,34 @@ mod tests {
         let attached = s.frame(ATTACHED);
         assert_eq!(detach, [Effect::End(Ending::Detached)]);
         assert_eq!(typed(&attached).len(), HELD_MAX);
+        assert!(
+            attached
+                .iter()
+                .any(|e| matches!(e, Effect::Note(n) if n.starts_with("10 keys"))),
+            "{attached:?}"
+        );
+    }
+
+    #[test]
+    fn sends_the_size_once_attached_and_each_resize_after() {
+        let size = |cols, rows| Size { cols, rows };
+        let resize = |cols, rows| Effect::Send(StreamClientFrame::Resize { cols, rows });
+        let mut s = Attachment::sized(size(80, 24));
+        let early = s.resized(size(100, 30));
+        s.frame(r#"{"type":"lease","driver":false,"epoch":1}"#);
+        let attached = s.frame(ATTACHED);
+        let lease = s.frame(r#"{"type":"lease","driver":true,"epoch":2}"#);
+        let later = s.resized(size(120, 40));
+        assert_eq!(early, []);
+        assert_eq!(
+            attached,
+            [
+                Effect::Send(StreamClientFrame::Epoch { epoch: 1 }),
+                resize(100, 30)
+            ]
+        );
+        assert_eq!(lease, [Effect::Send(StreamClientFrame::Epoch { epoch: 2 })]);
+        assert_eq!(later, [resize(120, 40)]);
     }
 
     #[test]

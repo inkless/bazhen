@@ -11,13 +11,22 @@ use std::path::Path;
 
 use bazhen_client::Caller;
 use bazhen_protocol::agents::StateSnapshot;
+use bazhen_protocol::id::PROTOCOL_ID;
+use serde::Deserialize;
 
 use self::attachment::{Attachment, Ending};
 use self::link::Outcome;
 use crate::args::Parsed;
-use crate::call::{CALL, Daemon, Failed};
+use crate::call::{ANOTHER_BUILD, CALL, Daemon, Failed};
 use crate::out::Out;
 use crate::{Exit, USAGE};
+
+/// All attaching reads of `/v1/health`, so a daemon of another build still answers it.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Answering {
+    protocol_id: String,
+}
 
 /// Attaches to the terminal `p` names, through the daemon at `socket`.
 pub(crate) fn run(
@@ -33,6 +42,11 @@ pub(crate) fn run(
         ));
         return Ok(Exit::Usage);
     };
+    let health: Answering = daemon.get("/v1/health", CALL)?;
+    if health.protocol_id != PROTOCOL_ID {
+        out.err(ANOTHER_BUILD);
+        return Ok(Exit::Failed);
+    }
     let state: StateSnapshot = daemon.get("/v1/state", CALL)?;
     let terminal = match terminal_of(&state, target) {
         Ok(terminal) => terminal,
@@ -49,15 +63,16 @@ pub(crate) fn run(
     let size =
         tty::size().map_err(|e| Failed::Refused(format!("can't read the terminal's size: {e}")))?;
     let mut ws = link::open(socket, &terminal, &caller, &Attachment::hello(size))?;
-    let resizes = tty::Resizes::watch()
-        .map_err(|e| Failed::Refused(format!("can't watch the terminal's size: {e}")))?;
+    let watching = |e: std::io::Error| Failed::Refused(format!("can't watch for signals: {e}"));
+    let resizes = tty::Wakeups::resizes().map_err(watching)?;
+    let stops = tty::Wakeups::stops().map_err(watching)?;
     let raw = tty::Raw::enter()
         .map_err(|e| Failed::Refused(format!("can't take over the terminal: {e}")))?;
     let mut notes = Vec::new();
     let mut rejoined = false;
     let outcome = loop {
-        let mut attachment = Attachment::default();
-        let outcome = link::pump(&mut ws, &mut attachment, &resizes, &mut notes);
+        let mut attachment = Attachment::sized(tty::size().unwrap_or(size));
+        let outcome = link::pump(&mut ws, &mut attachment, &resizes, &stops, &mut notes);
         if !matches!(outcome, Ok(Outcome::Ended(Ending::Evicted))) || rejoined {
             break outcome;
         }
@@ -65,7 +80,10 @@ pub(crate) fn run(
         let size = tty::size().unwrap_or(size);
         match link::open(socket, &terminal, &caller, &Attachment::hello(size)) {
             Ok(again) => ws = again,
-            Err(_) => break Ok(Outcome::Gone),
+            Err(Failed::NotRunning) => break Ok(Outcome::Gone),
+            Err(Failed::Refused(why) | Failed::Unsendable(why)) => {
+                break Ok(Outcome::Ended(Ending::Failed(why)));
+            }
         }
         if let Err(e) = tty::clear() {
             break Err(e);
@@ -79,6 +97,10 @@ pub(crate) fn run(
         Ok(Outcome::Ended(Ending::Detached)) => {
             out.err(&format!("detached from {target}"));
             Exit::Done
+        }
+        Ok(Outcome::Ended(Ending::Stopped)) => {
+            out.err(&format!("stopped by a signal; {target} goes on"));
+            Exit::Failed
         }
         Ok(Outcome::Ended(Ending::Exited)) => {
             out.err(&format!("{target}: the terminal exited"));

@@ -1,5 +1,5 @@
-//! The person's own terminal while `bazhen attach` holds it: raw, its size, and a wake-up when
-//! the size changes.
+//! The person's own terminal while `bazhen attach` holds it: raw, its size, and wake-ups when the
+//! size changes or the process is asked to stop.
 
 use std::io::{self, ErrorKind, Read as _, Write as _};
 use std::os::fd::{AsFd as _, BorrowedFd};
@@ -35,7 +35,8 @@ pub(crate) fn size() -> io::Result<Size> {
     Ok(Size::clamped(ws.ws_col, ws.ws_row))
 }
 
-/// The person's terminal in raw mode, as it was before once this drops.
+/// The person's terminal in raw mode, as it was before once this drops, or once the process
+/// panics: a release build aborts on a panic, which runs no `Drop`.
 #[derive(Debug)]
 pub(crate) struct Raw {
     before: Termios,
@@ -47,6 +48,12 @@ impl Raw {
         let mut raw = before.clone();
         raw.make_raw();
         tcsetattr(io::stdin(), OptionalActions::Flush, &raw)?;
+        let saved = before.clone();
+        let panicked = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            restore(&saved);
+            panicked(info);
+        }));
         let raw = Self { before };
         clear()?;
         Ok(raw)
@@ -59,37 +66,64 @@ pub(crate) fn clear() -> io::Result<()> {
     io::stdout().flush()
 }
 
+/// Puts the person's terminal back as `before` had it, as well as it can be: nothing is left to
+/// report a failure to, and a terminal that's gone needs none of it.
+fn restore(before: &Termios) {
+    let _ = io::stdout().write_all(LEAVE.as_bytes());
+    let _ = io::stdout().flush();
+    let _ = tcsetattr(io::stdin(), OptionalActions::Flush, before);
+}
+
 impl Drop for Raw {
     fn drop(&mut self) {
-        // Nothing is left to report a failure to: these put the person's terminal back as well
-        // as it can be, and a terminal that's gone needs neither.
-        let _ = io::stdout().write_all(LEAVE.as_bytes());
-        let _ = io::stdout().flush();
-        let _ = tcsetattr(io::stdin(), OptionalActions::Flush, &self.before);
+        restore(&self.before);
+        // The default hook again, as there is no raw terminal left to put back; a hook can't be
+        // changed while unwinding.
+        if !std::thread::panicking() {
+            drop(std::panic::take_hook());
+        }
     }
 }
 
-/// `SIGWINCH` as a readable fd, for the attachment's `poll`; the handler goes when it drops.
+/// Signals as a readable fd, for the attachment's `poll`; the handlers go when it drops. Each
+/// signal it watches no longer does what it would by default: the loop acts on it.
 #[derive(Debug)]
-pub(crate) struct Resizes {
+pub(crate) struct Wakeups {
     wakeups: UnixStream,
-    handler: SigId,
+    handlers: Vec<SigId>,
 }
 
-impl Resizes {
-    pub(crate) fn watch() -> io::Result<Self> {
+impl Wakeups {
+    /// The terminal's size changing.
+    pub(crate) fn resizes() -> io::Result<Self> {
+        Self::watch(&[signal_hook::consts::SIGWINCH])
+    }
+
+    /// Being asked to stop: by `kill`, the terminal hanging up, or an interrupt from outside it,
+    /// as a raw terminal sends none of its own.
+    pub(crate) fn stops() -> io::Result<Self> {
+        use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM};
+        Self::watch(&[SIGTERM, SIGHUP, SIGINT])
+    }
+
+    fn watch(signals: &[std::ffi::c_int]) -> io::Result<Self> {
         let (wakeups, sender) = UnixStream::pair()?;
         wakeups.set_nonblocking(true)?;
-        let handler =
-            signal_hook::low_level::pipe::register(signal_hook::consts::SIGWINCH, sender)?;
-        Ok(Self { wakeups, handler })
+        let mut handlers = Vec::with_capacity(signals.len());
+        for &signal in signals {
+            handlers.push(signal_hook::low_level::pipe::register(
+                signal,
+                sender.try_clone()?,
+            )?);
+        }
+        Ok(Self { wakeups, handlers })
     }
 
     pub(crate) fn fd(&self) -> BorrowedFd<'_> {
         self.wakeups.as_fd()
     }
 
-    /// Empties the wake-ups, so `fd` waits for the next resize.
+    /// Empties the wake-ups, so `fd` waits for the next signal.
     pub(crate) fn clear(&self) {
         let mut drained = [0u8; 64];
         loop {
@@ -102,8 +136,10 @@ impl Resizes {
     }
 }
 
-impl Drop for Resizes {
+impl Drop for Wakeups {
     fn drop(&mut self) {
-        signal_hook::low_level::unregister(self.handler);
+        for &handler in &self.handlers {
+            signal_hook::low_level::unregister(handler);
+        }
     }
 }

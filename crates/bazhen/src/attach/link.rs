@@ -1,7 +1,7 @@
 //! One attachment through the daemon's socket: the terminal's stream as a WebSocket, and the loop
 //! that moves keys, output and frames between it and the person's terminal.
 
-use std::io::{self, ErrorKind, Write as _};
+use std::io::{self, ErrorKind};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 
@@ -14,7 +14,7 @@ use tungstenite::handshake::client::Request;
 use tungstenite::{HandshakeError, Message, WebSocket};
 
 use super::attachment::{Attachment, Effect, Ending};
-use super::tty::{self, Resizes};
+use super::tty::{self, Wakeups};
 use crate::call::{ANOTHER_BUILD, CALL, Failed};
 use crate::fmt::encode_uri_component;
 
@@ -101,7 +101,8 @@ pub(crate) fn open(
 pub(crate) fn pump(
     ws: &mut WebSocket<UnixStream>,
     attachment: &mut Attachment,
-    resizes: &Resizes,
+    resizes: &Wakeups,
+    stops: &Wakeups,
     notes: &mut Vec<String>,
 ) -> io::Result<Outcome> {
     let stdin = io::stdin();
@@ -118,17 +119,21 @@ pub(crate) fn pump(
             PollFd::new(&stdin, PollFlags::IN),
             PollFd::new(ws.get_ref(), wanted),
             PollFd::from_borrowed_fd(resizes.fd(), PollFlags::IN),
+            PollFd::from_borrowed_fd(stops.fd(), PollFlags::IN),
         ];
         match poll(&mut fds, None) {
             Ok(_) => {}
             Err(Errno::INTR) => continue,
             Err(e) => return Err(e.into()),
         }
-        let [typed, daemon, winch] = fds.map(|fd| fd.revents());
+        let [typed, daemon, winch, stop] = fds.map(|fd| fd.revents());
+        if !stop.is_empty() {
+            return Ok(Outcome::Ended(Ending::Stopped));
+        }
         let mut effects = Vec::new();
         if !winch.is_empty() {
             resizes.clear();
-            effects.push(Attachment::resized(tty::size()?));
+            effects.extend(attachment.resized(tty::size()?));
         }
         if !typed.is_empty() {
             match rustix::io::read(&stdin, &mut keys) {
@@ -139,38 +144,12 @@ pub(crate) fn pump(
                 Err(_) => return Ok(Outcome::Ended(Ending::Detached)),
             }
         }
-        if !daemon.is_empty() {
-            loop {
-                match ws.read() {
-                    Ok(Message::Binary(output)) => stdout.write_all(&output)?,
-                    Ok(Message::Text(text)) => effects.extend(attachment.frame(text.as_str())),
-                    Ok(Message::Close(_)) => return Ok(Outcome::Gone),
-                    Ok(_) => {}
-                    Err(tungstenite::Error::Io(e)) if e.kind() == ErrorKind::WouldBlock => break,
-                    Err(_) => return Ok(Outcome::Gone),
-                }
-            }
-            stdout.flush()?;
+        let closed = !daemon.is_empty() && drain(ws, attachment, &mut stdout, &mut effects)?;
+        if let Some(outcome) = act(ws, effects, notes)? {
+            return Ok(outcome);
         }
-        for effect in effects {
-            let message = match effect {
-                Effect::Send(frame) => Message::text(serde_json::to_string(&frame)?),
-                Effect::Input(keys) => Message::binary(keys),
-                Effect::Note(note) => {
-                    notes.push(note);
-                    continue;
-                }
-                Effect::End(ending) => {
-                    // A goodbye the daemon may not hear: it ends the view on the hang-up anyway.
-                    let _ = ws.close(None).and_then(|()| ws.flush());
-                    return Ok(Outcome::Ended(ending));
-                }
-            };
-            match ws.write(message) {
-                Ok(()) => {}
-                Err(tungstenite::Error::Io(e)) if e.kind() == ErrorKind::WouldBlock => {}
-                Err(_) => return Ok(Outcome::Gone),
-            }
+        if closed {
+            return Ok(Outcome::Gone);
         }
         match ws.flush() {
             Ok(()) => unsent = false,
@@ -180,11 +159,64 @@ pub(crate) fn pump(
     }
 }
 
+/// Reads all the daemon has sent so far: output to `shown`, and what its frames mean to
+/// `effects`. True once the daemon has closed the stream, which it does straight after a frame
+/// that ends the attachment, so the caller acts on `effects` before it takes that for gone.
+fn drain(
+    ws: &mut WebSocket<UnixStream>,
+    attachment: &mut Attachment,
+    shown: &mut impl io::Write,
+    effects: &mut Vec<Effect>,
+) -> io::Result<bool> {
+    let closed = loop {
+        match ws.read() {
+            Ok(Message::Binary(output)) => shown.write_all(&output)?,
+            Ok(Message::Text(text)) => effects.extend(attachment.frame(text.as_str())),
+            Ok(Message::Close(_)) => break true,
+            Ok(_) => {}
+            Err(tungstenite::Error::Io(e)) if e.kind() == ErrorKind::WouldBlock => break false,
+            Err(_) => break true,
+        }
+    };
+    shown.flush()?;
+    Ok(closed)
+}
+
+/// Does what `effects` say, in order: frames and keys to the daemon, notices to `notes`. The
+/// outcome, once one of them ends the attachment.
+fn act(
+    ws: &mut WebSocket<UnixStream>,
+    effects: Vec<Effect>,
+    notes: &mut Vec<String>,
+) -> io::Result<Option<Outcome>> {
+    for effect in effects {
+        let message = match effect {
+            Effect::Send(frame) => Message::text(serde_json::to_string(&frame)?),
+            Effect::Input(keys) => Message::binary(keys),
+            Effect::Note(note) => {
+                notes.push(note);
+                continue;
+            }
+            Effect::End(ending) => {
+                // A goodbye the daemon may not hear: it ends the view on the hang-up anyway.
+                let _ = ws.write(Message::Close(None)).and_then(|()| ws.flush());
+                return Ok(Some(Outcome::Ended(ending)));
+            }
+        };
+        match ws.write(message) {
+            Ok(()) => {}
+            Err(tungstenite::Error::Io(e)) if e.kind() == ErrorKind::WouldBlock => {}
+            Err(_) => return Ok(Some(Outcome::Gone)),
+        }
+    }
+    Ok(None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::attach::attachment::{Attachment, Size};
-    use std::io::Read as _;
+    use std::io::{Read as _, Write as _};
     use std::os::unix::net::UnixListener;
     use std::path::PathBuf;
     use std::thread;
@@ -256,8 +288,7 @@ mod tests {
         let listener = UnixListener::bind(dir.socket()).unwrap();
         let server = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
-            let mut head = [0u8; 4096];
-            let _ = stream.read(&mut head).unwrap();
+            read_head(&mut stream);
             let body = r#"{"error":"forbidden","message":"an agent can't attach to a terminal"}"#;
             write!(
                 stream,
@@ -281,8 +312,7 @@ mod tests {
         let listener = UnixListener::bind(dir.socket()).unwrap();
         let server = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
-            let mut head = [0u8; 4096];
-            let _ = stream.read(&mut head).unwrap();
+            read_head(&mut stream);
             stream
                 .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
                 .unwrap();
@@ -294,6 +324,75 @@ mod tests {
             matches!(&older, Failed::Refused(m) if m == ANOTHER_BUILD),
             "{older:?}"
         );
+    }
+
+    /// Reads a request up to the end of its head, so an answer can't race the rest of it.
+    fn read_head(stream: &mut UnixStream) {
+        let mut head = Vec::new();
+        let mut byte = [0u8; 1];
+        while !head.ends_with(b"\r\n\r\n") {
+            assert_eq!(
+                stream.read(&mut byte).unwrap(),
+                1,
+                "the request ended early"
+            );
+            head.push(byte[0]);
+        }
+    }
+
+    /// A client and a server end of one stream, as the daemon sends on it: frames written in one
+    /// go, then its close.
+    fn sent_then_closed(frames: &[&str]) -> WebSocket<UnixStream> {
+        let (client, server) = UnixStream::pair().unwrap();
+        let mut daemon =
+            WebSocket::from_raw_socket(server, tungstenite::protocol::Role::Server, None);
+        for frame in frames {
+            daemon.write(Message::text(*frame)).unwrap();
+        }
+        daemon.write(Message::Close(None)).unwrap();
+        daemon.flush().unwrap();
+        client.set_nonblocking(true).unwrap();
+        WebSocket::from_raw_socket(client, tungstenite::protocol::Role::Client, None)
+    }
+
+    /// What one wake-up makes of what the daemon sent: drained, then acted on, as `pump` does.
+    fn outcome_of(ws: &mut WebSocket<UnixStream>) -> (bool, Option<Outcome>, Vec<String>) {
+        let mut attachment = Attachment::default();
+        let mut effects = Vec::new();
+        let mut shown = Vec::new();
+        let closed = drain(ws, &mut attachment, &mut shown, &mut effects).unwrap();
+        let mut notes = Vec::new();
+        let outcome = act(ws, effects, &mut notes).unwrap();
+        (closed, outcome, notes)
+    }
+
+    #[test]
+    fn acts_on_the_frame_the_daemon_closed_the_stream_after() {
+        let mut exited = sent_then_closed(&[r#"{"type":"exit"}"#]);
+        let mut refused = sent_then_closed(&[
+            r#"{"type":"notice","message":"resize refused"}"#,
+            r#"{"type":"error","message":"no such terminal"}"#,
+        ]);
+        let (closed, outcome, _) = outcome_of(&mut exited);
+        assert!(closed);
+        assert!(
+            matches!(outcome, Some(Outcome::Ended(Ending::Exited))),
+            "{outcome:?}"
+        );
+        let (_, outcome, notes) = outcome_of(&mut refused);
+        assert!(
+            matches!(&outcome, Some(Outcome::Ended(Ending::Failed(m))) if m == "no such terminal"),
+            "{outcome:?}"
+        );
+        assert_eq!(notes, ["resize refused"]);
+    }
+
+    #[test]
+    fn takes_a_close_with_nothing_before_it_for_the_daemon_gone() {
+        let mut ws = sent_then_closed(&[]);
+        let (closed, outcome, _) = outcome_of(&mut ws);
+        assert!(closed);
+        assert!(outcome.is_none(), "{outcome:?}");
     }
 
     #[test]

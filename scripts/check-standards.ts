@@ -925,12 +925,17 @@ const NOT_DECODERS: Record<string, string> = {
     "reads whether an epoch was declared; parses nothing",
   "crates/bazhen/src/attach/attachment.rs::Attachment::declare":
     "hands the keys Attachment::keys held over, whole; parses nothing",
+  "crates/bazhen/src/attach/attachment.rs::Attachment::resized":
+    "records the terminal's size and frames it; reads no bytes",
+  "crates/bazhen/src/attach/link.rs::drain":
+    "reads the daemon's frames through tungstenite, and their text through Attachment::frame, which the attach target fuzzes",
+  "crates/bazhen/src/attach/link.rs::act": "writes frames and keys this build made; reads nothing",
   "crates/bazhen/src/attach/link.rs::pump":
     "moves bytes between the daemon's socket and the person's terminal; tungstenite frames them, and Attachment::keys and frame, which the attach target fuzzes, read them",
-  "crates/bazhen/src/attach/tty.rs::Resizes::clear":
-    "discards resize wake-ups, whose bytes the handler wrote and which carry no content",
-  "crates/bazhen/src/attach/tty.rs::Resizes::drop": "removes the signal handler; reads nothing",
-  "crates/bazhen/src/attach/tty.rs::Resizes::fd":
+  "crates/bazhen/src/attach/tty.rs::Wakeups::clear":
+    "discards signal wake-ups, whose bytes the handler wrote and which carry no content",
+  "crates/bazhen/src/attach/tty.rs::Wakeups::drop": "removes the signal handlers; reads nothing",
+  "crates/bazhen/src/attach/tty.rs::Wakeups::fd":
     "borrows the wake-up socket for poll; reads nothing",
   "crates/bazhen-holder/src/signals.rs::Wakeups::clear":
     "discards signal wake-ups, whose bytes the handler wrote and which carry no content",

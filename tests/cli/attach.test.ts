@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { StateSnapshot } from "@bazhen/protocol";
+import { HealthResponse, StateSnapshot } from "@bazhen/protocol";
 import { type Scene, scene } from "./cli.ts";
-import { AGENT, OTHER, THIRD, agent, snapshot } from "./fixtures.ts";
+import { AGENT, ANOTHER_BUILD, OTHER, THIRD, agent, health, snapshot } from "./fixtures.ts";
 
 let s: Scene;
 beforeEach(async () => {
@@ -28,6 +28,7 @@ const fleet = () =>
 
 /** `bazhen attach` with `args`, against the fleet above. */
 const attach = (...args: string[]) => {
+  s.daemon.answer("GET /v1/health", HealthResponse, health());
   s.daemon.answer("GET /v1/state", StateSnapshot, fleet());
   return s.bazhen(["attach", ...args]);
 };
@@ -76,6 +77,12 @@ describe("bazhen attach", () => {
       [2, "bazhen attach takes one agent, shell or terminal, and no option but --home"],
       [2, "bazhen attach takes one agent, shell or terminal, and no option but --home"],
     ]);
+  });
+
+  it("refuses to attach through a daemon of another build, saying to restart it", async () => {
+    s.daemon.answer("GET /v1/health", HealthResponse, health({ protocolId: "f".repeat(64) }));
+    const ran = await s.bazhen(["attach", "worker"]);
+    expect([ran.code, ran.stderr.trim()]).toEqual([1, ANOTHER_BUILD]);
   });
 
   it("says the daemon isn't running when nothing answers", async () => {
