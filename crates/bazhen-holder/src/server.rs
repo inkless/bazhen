@@ -182,11 +182,14 @@ impl Server {
             {
                 self.respawn(i, id, &spec, holder);
             }
-            // Freed here as well as after the writes, so a writer's `hello` later in this turn
-            // can take the slot of one that hung up earlier in it.
+            // Freed here as well as after the writes, so a writer's `hello` later in this turn can
+            // take the slot of one that can send no more. A writer that hangs up and then
+            // reconnects finds it free: its end of input is read no later than the turn that
+            // reads the new connection's `hello`, and before it, since older connections are
+            // served first.
             if let Some(conn) = self.conns.get(i)
                 && self.shared.writer == Some(conn.id())
-                && !conn.is_open()
+                && !conn.may_send()
             {
                 self.shared.writer = None;
             }
@@ -348,11 +351,11 @@ impl Server {
         }
     }
 
-    /// Frees the writer slot once no open connection holds it: one hanging up, dropped or
-    /// replaced sends no more input.
+    /// Frees the writer slot once no connection that may send holds it: one whose peer ended its
+    /// side, hung up, dropped or replaced sends no more input.
     fn release_writer(&mut self) {
         if let Some(id) = self.shared.writer
-            && !self.conns.iter().any(|c| c.id() == id && c.is_open())
+            && !self.conns.iter().any(|c| c.id() == id && c.may_send())
         {
             self.shared.writer = None;
         }
@@ -1108,5 +1111,54 @@ mod tests {
             Some(u64::from(crate::engine::MOST_ENGINE_RESETS))
         );
         assert_eq!(stats.history_lines.get(), 0);
+    }
+
+    /// A connection to `failing`'s socket that has sent a `hello` asking for the writer slot.
+    fn asks_to_write(failing: &Failing) -> UnixStream {
+        let mut peer = UnixStream::connect(failing.dir.join("t.sock")).unwrap();
+        peer.set_nonblocking(true).unwrap();
+        let hello = Request::Hello {
+            id: RequestId(1),
+            body: HelloRequest {
+                protocol: Versions::spoken(),
+                writer: Some(true),
+            },
+        };
+        peer.write_all(&hello.encode().unwrap()).unwrap();
+        peer
+    }
+
+    /// Turns the loop until `peer`'s `hello` is answered.
+    fn hello_answer(failing: &mut Failing, peer: &mut UnixStream) -> HelloReply {
+        let mut decoder = bazhen_holder_proto::reply_decoder();
+        let mut chunk = vec![0; 1 << 16];
+        let give_up = Instant::now() + Duration::from_secs(5);
+        loop {
+            assert!(Instant::now() < give_up, "the hello was never answered");
+            assert!(!failing.server.turn(&mut failing.holder).unwrap());
+            if let Ok(n) = peer.read(&mut chunk) {
+                decoder.push(&chunk[..n]);
+            }
+            match decoder.next_frame().unwrap() {
+                Some(Reply::Hello { body, .. }) => return body,
+                Some(other) => panic!("hello was answered {other:?}"),
+                None => {}
+            }
+        }
+    }
+
+    /// The old writer's end of input and the newcomer's connect reach the holder in one turn, as
+    /// they do when a writer hangs up and reconnects at once: the newcomer's `hello`, read in a
+    /// later turn, finds the slot free.
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn a_writers_hang_up_frees_the_slot_for_a_hello_in_the_next_turn() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let mut failing = Failing::start("writer-hands-over", "exec sleep 30");
+        let mut old = asks_to_write(&failing);
+        assert!(hello_answer(&mut failing, &mut old).writer);
+        drop(old);
+        let mut new = asks_to_write(&failing);
+        assert!(hello_answer(&mut failing, &mut new).writer);
     }
 }

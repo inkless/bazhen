@@ -54,3 +54,13 @@ macOS has no equivalent. There, the holder watches each process for its exit jus
 signals it, which leaves a window of microseconds in which a process could exit and its id be
 reused. macOS hands out ids in increasing order, so that would need the whole id range to come
 round within that window.
+
+## Reconnecting as the writer
+
+One connection at a time holds the writer slot, whose `input` and `resize` the holder takes. A
+client that hangs up and reconnects to take the slot again must wait for its old connection's
+socket to close before it connects: with `HolderClient`, `end()` the old one and await its
+`closed`. The holder then frees the slot before it reads the new connection's `hello`, unless
+requests the old one sent are still waiting to be answered. A connection opened before the old
+one has closed may be answered `writer: false`, which is true at that moment, as the old one
+still holds the slot.

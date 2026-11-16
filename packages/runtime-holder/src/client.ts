@@ -88,7 +88,9 @@ export interface HolderClientOptions {
   readonly onEvent: (event: HolderEvent) => void;
   /**
    * Ask for the slot whose `input` and `resize` the holder takes; `hello.writer` says whether it
-   * was given.
+   * was given. To take it over from a connection of this process, `end()` that one and await its
+   * `closed` before connecting: a connection opened before the holder has seen the old one end is
+   * told `writer: false`, which is then true.
    */
   readonly writer?: boolean;
   /** Abandons the handshake: a holder that never answers `hello` can't hold the caller. */
@@ -158,6 +160,7 @@ export const HOLDER_HANG_UP_MS = 5_000;
 /** One connection's requests, answers and events. `HolderClient` is its face after `hello`. */
 class Connection {
   readonly ended: Promise<HolderEnd>;
+  readonly closed: Promise<void>;
   private readonly stream: Duplex;
   private readonly onEvent: (event: HolderEvent) => void;
   private readonly decoder = holderReplyDecoder();
@@ -177,6 +180,7 @@ class Connection {
     this.ended = new Promise((resolve) => {
       this.settleEnded = resolve;
     });
+    this.closed = new Promise((resolve) => stream.once("close", () => resolve()));
     stream.on("data", (chunk: Uint8Array) => this.read(chunk));
     // The holder hung up: end this side too, whether or not the stream allows half-open.
     stream.on("end", () => this.fail({ reason: "eof" }));
@@ -424,12 +428,19 @@ export class HolderClient {
   /** The holder's answer to `hello`. */
   readonly hello: HolderHelloReply;
   readonly ended: Promise<HolderEnd>;
+  /**
+   * Resolves once the socket itself has closed, so the holder can see this side has ended.
+   * `ended` comes sooner, as soon as `end()` is called, while what is unsent may still be going
+   * out.
+   */
+  readonly closed: Promise<void>;
   private readonly connection: Connection;
 
   private constructor(connection: Connection, hello: HolderHelloReply) {
     this.connection = connection;
     this.hello = hello;
     this.ended = connection.ended;
+    this.closed = connection.closed;
   }
 
   /**
@@ -575,7 +586,9 @@ export class HolderClient {
 
   /**
    * Hangs up this connection, leaving the holder running. What is still unsent gets the
-   * `hangUpMs` it was opened with to reach the holder before the stream is destroyed.
+   * `hangUpMs` it was opened with to reach the holder before the stream is destroyed. The socket
+   * shuts down a turn of the event loop later, at the soonest: await `closed` before a new
+   * connection that should come after it.
    */
   end(): void {
     this.connection.hangUp();

@@ -355,6 +355,21 @@ describe("HolderClient", () => {
     await expect.poll(() => near.destroyed).toBe(true);
   });
 
+  it("says closed once the socket has closed, which a hang-up still sending comes after ended", async () => {
+    const { client, near, holder } = await connected({ hangUpMs: 20 });
+    holder.stopReading();
+    client.input(new Uint8Array(HOLDER_MAX_REQUEST_BYTES));
+    let closed = false;
+    void client.closed.then(() => {
+      closed = true;
+    });
+    client.end();
+    await client.ended;
+    expect([closed, near.destroyed]).toEqual([false, false]);
+    await client.closed;
+    expect(near.destroyed).toBe(true);
+  });
+
   it("ends its own side when the holder only half-closes", async () => {
     const { client, near, far } = await connected();
     far.end();
