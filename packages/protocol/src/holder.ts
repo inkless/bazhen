@@ -246,14 +246,19 @@ export const HolderHelloFrozen = HolderHelloRequest.pick({ protocol: true });
 export type HolderHelloRequest = z.infer<typeof HolderHelloRequest>;
 
 /**
- * Output from `from` on. Without it, from the holder's offset as it reads the request, which is
- * the offset of a `snapshot` sent just before it in the same write. An offset means something
- * only in its generation, so `from` names both: one that crossed a respawn is refused
- * `stale-generation` rather than resuming at that offset of the new child's output. A `from` the
- * ring no longer holds is answered `ok`, then `gap` up to what it holds, then output; one past
- * the holder's offset is refused `out-of-range`. A connection has one subscription: subscribing
- * again moves it, once the output and events owed under the old one have gone. A subscription
- * ends with its connection's input.
+ * Output from `from` on. A `snapshot` sent while subscribed moves the subscription to its offset
+ * as it goes out, so the output after it never runs from before it, and a `subscribe` without
+ * `from` straight after such a snapshot is only answered `ok`. Without `from`, from the offset of
+ * a `snapshot` the connection was answered just before, even when the snapshot's size held this
+ * request back while output went on; with no snapshot just before, from the holder's offset as
+ * it reads the request. One after a snapshot that a respawn has since overtaken is refused
+ * `stale-generation`: the old child's output after the snapshot is gone, so the client snapshots
+ * again. An offset means something only in its generation, so `from` names both: one that
+ * crossed a respawn is refused `stale-generation` rather than resuming at that offset of the new
+ * child's output. A `from` the ring no longer holds is answered `ok`, then `gap` up to what it
+ * holds, then output; one past the holder's offset is refused `out-of-range`. A connection has
+ * one subscription: subscribing again moves it, once the output and events owed under the old
+ * one have gone. A subscription ends with its connection's input.
  */
 export const HolderSubscribeRequest = z.object({
   from: z.object({ generation: Count, offset: Offset }).optional(),
@@ -329,7 +334,10 @@ export const HolderForeground = z.object({
 });
 export type HolderForeground = z.infer<typeof HolderForeground>;
 
-/** The ring no longer holds `[from, to)`: a subscriber that fell that far behind resnapshots. */
+/**
+ * The subscriber isn't sent `[from, to)`: the ring no longer holds it, or the subscriber was owed
+ * more `resized` than the holder keeps for one that lags. Either way it snapshots again.
+ */
 export const HolderGap = z.object({ from: Offset, to: Offset });
 export type HolderGap = z.infer<typeof HolderGap>;
 
@@ -342,7 +350,12 @@ export type HolderTitle = z.infer<typeof HolderTitle>;
 export const HolderAlternate = z.object({ offset: Offset, on: z.boolean() });
 export type HolderAlternate = z.infer<typeof HolderAlternate>;
 
-/** The child of `generation` ended. */
+/**
+ * The child of `generation` ended. A subscription ends with it, after the last of the output: a
+ * connection sent it before subscribing, as every open one is when the exit is published, is sent
+ * it again after its subscription's `ok`, and output can follow the first. A consumer takes the
+ * first of a generation's and ignores the rest.
+ */
 export const HolderExited = z.object({ generation: Count, status: HolderExitStatus });
 export type HolderExited = z.infer<typeof HolderExited>;
 
@@ -352,6 +365,11 @@ export type HolderExited = z.infer<typeof HolderExited>;
  * offset 0, where a subscription goes on; no `data` or `gap` spans it. Output can follow the old
  * child's `exited`, from what its session left running, until this. A reply sent after this one,
  * the respawn's `ok` included, is of the new generation.
+ *
+ * The holder's screen starts the new generation as a mirror of it must: it leaves the alternate
+ * screen, pushes the main screen's rows into history as `CSI 2 J` does, and resets as RIS does but
+ * keeps its history. A mirror whose reset clears its history, as xterm.js's RIS and `reset()` do,
+ * snapshots again instead of resetting, so it keeps the old child's last screen.
  */
 export const HolderRespawned = z.object({
   generation: Count,

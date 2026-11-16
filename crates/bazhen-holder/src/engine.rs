@@ -24,6 +24,7 @@ pub trait Vt: fmt::Debug {
     fn take_replies(&mut self) -> Vec<u8>;
     fn resize(&mut self, size: Size);
     fn set_colours(&mut self, colours: Option<Colours>);
+    fn respawned(&mut self);
     /// # Errors
     ///
     /// As [`Engine::snapshot`].
@@ -48,6 +49,10 @@ impl Vt for Engine {
 
     fn set_colours(&mut self, colours: Option<Colours>) {
         Self::set_colours(self, colours);
+    }
+
+    fn respawned(&mut self) {
+        Self::respawned(self);
     }
 
     fn snapshot(&mut self, most: usize, out: &mut String) -> Result<usize, TooLarge> {
@@ -143,6 +148,12 @@ impl Walled {
     pub fn resize(&mut self, size: Size) {
         self.size = size;
         self.call("resize", |vt| vt.resize(size));
+    }
+
+    /// Starts a new generation's output (`Engine::respawned`), drawn in `theme`'s colours.
+    pub fn respawned(&mut self, theme: Option<Theme>) {
+        self.call("respawned", |vt| vt.respawned());
+        self.set_theme(theme);
     }
 
     /// Tells programs that ask they are drawn in `theme`'s colours, dark with none.
@@ -279,6 +290,13 @@ pub(crate) mod tests {
         static FED: RefCell<Vec<Vec<u8>>> = const { RefCell::new(Vec::new()) };
         /// Builds to fail from here on, on this thread.
         static FAIL_BUILDS: RefCell<u32> = const { RefCell::new(0) };
+        /// Snapshots to fail from here on, on this thread.
+        static FAIL_SNAPSHOTS: RefCell<u32> = const { RefCell::new(0) };
+    }
+
+    /// Makes the next `count` snapshots on this thread panic.
+    pub(crate) fn fail_snapshots(count: u32) {
+        FAIL_SNAPSHOTS.with_borrow_mut(|left| *left = count);
     }
 
     fn fed() -> Vec<Vec<u8>> {
@@ -326,9 +344,24 @@ pub(crate) mod tests {
             self.engine.set_colours(colours);
         }
 
+        fn respawned(&mut self) {
+            self.check();
+            self.engine.respawned();
+        }
+
         fn snapshot(&mut self, most: usize, out: &mut String) -> Result<usize, TooLarge> {
             self.check();
-            self.engine.snapshot(most, out)
+            let fail = FAIL_SNAPSHOTS.with_borrow_mut(|left| {
+                let fail = *left > 0;
+                *left = left.saturating_sub(1);
+                fail
+            });
+            let written = self.engine.snapshot(most, out);
+            if fail {
+                self.failed = true;
+                panic!("a snapshot failing on cue");
+            }
+            written
         }
 
         fn stats(&self) -> Stats {

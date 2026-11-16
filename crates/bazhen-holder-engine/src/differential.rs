@@ -812,6 +812,25 @@ proptest! {
     }
 
     #[test]
+    fn a_respawn_keeps_what_alacritty_with_all_its_history_keeps_once_it_clears_the_main_screen(
+        size in size(),
+        actions in prop::collection::vec(output(), 0..80),
+        cuts in cuts(),
+    ) {
+        let (mut engine, mut full) = run(size, &actions, &cuts);
+        engine.respawned();
+        full.advance(b"\x1b[?1049l\x1b[2J");
+        let mut history = String::new();
+        engine.write_history(&mut history);
+        let mut kept = String::new();
+        let mut lines = Lines::new(&mut kept);
+        write_scrollback(full.term.grid(), &mut lines);
+        lines.finish();
+        prop_assert_eq!(history, kept);
+        prop_assert!(screen(&engine.term).iter().flatten().all(|cell| *cell == Cell::default()));
+    }
+
+    #[test]
     fn a_resize_keeps_every_cell_that_draws_something_in_order(
         size in size(),
         actions in prop::collection::vec(output_and_resizes(), 0..80),

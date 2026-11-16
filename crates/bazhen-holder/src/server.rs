@@ -6,22 +6,27 @@
 //! child is reaped and its exit published; and the socket is looked for. Answers go out in the
 //! order their requests were read.
 
+use std::collections::VecDeque;
 use std::io;
 use std::time::{Duration, Instant};
 
+use bazhen_holder_engine::TooLarge;
 use bazhen_holder_proto::body::{
-    self, Count, ErrorBody, ErrorCode, Exited, Foreground, HelloReply, HelloRequest, Offset,
-    OkBody, ProcessSpec, ProtocolVersion, Respawned, Size, StartTime, Stats, SubscribeFrom, Tags,
-    TerminalId, Versions,
+    self, Alternate, Count, ErrorBody, ErrorCode, Exited, Foreground, HelloReply, HelloRequest,
+    Offset, OkBody, ProcessSpec, ProtocolVersion, Resized, Respawned, Size, StartTime, Stats,
+    SubscribeFrom, Tags, TerminalId, Title, Versions,
 };
-use bazhen_holder_proto::{PROTOCOL_VERSION, Reply, Request, RequestId, negotiate, request_name};
+use bazhen_holder_proto::{
+    MOST_SNAPSHOT_TEXT, PROTOCOL_VERSION, Reply, Request, RequestId, SNAPSHOT_HEAD, SnapshotFrame,
+    negotiate, request_name,
+};
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
 use rustix::process::Pid;
 
 use crate::child::{CLOSE_GRACE, SignalRefused};
-use crate::conn::{Connection, READ_CHUNK};
+use crate::conn::{AfterSnapshot, Connection, READ_CHUNK, State};
 use crate::engine::Screen;
-use crate::holder::{Holder, InputRefused, readiness};
+use crate::holder::{Exit, Holder, InputRefused, readiness};
 use crate::pty::{self, Pty, WindowSize};
 use crate::rss;
 use crate::signals::Wakeups;
@@ -49,6 +54,39 @@ pub const NEW_GRACE: Duration = Duration::from_millis(250);
 pub const STUCK_TO_EVICT: Duration = Duration::from_secs(1);
 /// How many times `foreground` reads the group again when it changed while its start was read.
 const FOREGROUND_TRIES: usize = 3;
+/// The largest snapshot frame, header and all.
+pub const LARGEST_SNAPSHOT: usize = SNAPSHOT_HEAD + MOST_SNAPSHOT_TEXT;
+/// The most bytes of snapshots owed at once across a holder's connections: two of the largest,
+/// 128 MiB. Each connection owes one at most, as its queue stops taking requests past
+/// `QUEUE_MARK`, so without this sixteen could owe a gigabyte. The bound is per holder, so a host
+/// with many terminals whose viewers all stop reading owes that much for each.
+pub const SNAPSHOTS_IN_FLIGHT: usize = 2 * LARGEST_SNAPSHOT;
+
+/// When a snapshot may be answered: alone always, and beside others only if the largest one
+/// could be still fits under the bound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SnapshotRoom {
+    in_flight: usize,
+    most: usize,
+}
+
+impl SnapshotRoom {
+    const HOLDER: Self = Self {
+        in_flight: SNAPSHOTS_IN_FLIGHT,
+        most: LARGEST_SNAPSHOT,
+    };
+
+    const fn takes(self, owed: usize) -> bool {
+        owed == 0 || owed.saturating_add(self.most) <= self.in_flight
+    }
+}
+
+/// The states last reported to the connections, which a change is reported against.
+#[derive(Debug, Default)]
+struct Published {
+    title: String,
+    alternate: bool,
+}
 
 /// What `hello` says of the terminal that doesn't change while it runs.
 #[derive(Debug, Clone)]
@@ -77,6 +115,16 @@ struct Shared {
     base: u64,
     /// Whether the child's exit has been sent to the connections open when it was published.
     exit_sent: bool,
+    /// The bytes of snapshots the connections are owed, as of the last count.
+    owed_snapshots: usize,
+    snapshot_room: SnapshotRoom,
+    /// The connections whose snapshots wait for room, in the order they are answered: the
+    /// writer's first, as the daemon holds it and its input waits behind its snapshot, then the
+    /// longest waiting, so a stream of newcomers can't keep one waiting.
+    line: VecDeque<u64>,
+    /// How long a peer that owes snapshot bytes must have left them unread before it may be
+    /// dropped for one that waits: `STUCK_TO_EVICT`.
+    stuck_to_evict: Duration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,6 +146,7 @@ pub struct Server {
     next_id: u64,
     closing: Option<Closing>,
     buffer: Box<[u8]>,
+    published: Published,
 }
 
 /// What one `poll` found ready.
@@ -106,7 +155,8 @@ struct Ready {
     master: bool,
     rebind: bool,
     listener: bool,
-    conns: Vec<bool>,
+    /// What `poll` found for each connection, in order.
+    conns: Vec<PollFlags>,
 }
 
 impl Server {
@@ -122,7 +172,12 @@ impl Server {
                 close_requested: false,
                 base: 0,
                 exit_sent: false,
+                owed_snapshots: 0,
+                snapshot_room: SnapshotRoom::HOLDER,
+                line: VecDeque::new(),
+                stuck_to_evict: STUCK_TO_EVICT,
             },
+            published: Published::default(),
             rebind_wakeups: rebind,
             recheck_at: now + RECHECK_EVERY,
             accept_paused_until: None,
@@ -159,6 +214,7 @@ impl Server {
         let ready = self.poll(holder, timeout.as_ref())?;
         let now = Instant::now();
         holder.after_poll(ready.master, now);
+        self.publish(holder);
         self.send_exit(holder);
         if ready.rebind {
             self.rebind_wakeups.clear();
@@ -167,13 +223,14 @@ impl Server {
         if self.accept_paused_until.is_some_and(|until| now >= until) {
             self.accept_paused_until = None;
         }
+        self.shared.owed_snapshots = owed_snapshots(&self.conns);
+        self.shared.line = snapshot_line(&self.conns, self.shared.writer);
         // Connections already open first, so one whose `hello` is waiting is read before a
         // newcomer can take its place.
         for i in 0..self.conns.len() {
-            if ready.conns.get(i).copied().unwrap_or(false)
-                && let Some(conn) = self.conns.get_mut(i)
-            {
-                conn.receive(&mut self.buffer);
+            if let Some(conn) = self.conns.get_mut(i) {
+                let revents = ready.conns.get(i).copied().unwrap_or_else(PollFlags::empty);
+                conn.polled(revents, &mut self.buffer);
             }
             // A respawn is answered here, with every connection at hand, and the connection's
             // requests after it then go on being answered.
@@ -195,6 +252,8 @@ impl Server {
             }
         }
         self.apply_resize(holder);
+        // A respawn resets the title and the screen.
+        self.publish(holder);
         holder.flush_input();
         if ready.listener {
             self.accept(now);
@@ -212,6 +271,7 @@ impl Server {
         for conn in &mut self.conns {
             conn.flush(now, holder.output().ring());
         }
+        self.evict_stuck_snapshots(now);
         self.release_writer();
         self.conns.retain(|conn| !conn.is_finished(now));
         if self.close_done(holder, now) {
@@ -226,6 +286,79 @@ impl Server {
         Ok(false)
     }
 
+    /// Reports the title and the screen, where they changed since last reported, to every
+    /// connection past `hello`, as of the output's end: the end of this turn's reads, not the byte
+    /// that changed them, so a change and its reverse within a turn report nothing, and a
+    /// snapshot gives the exact state.
+    fn publish(&mut self, holder: &mut Holder<Screen>) {
+        let at = holder.output().ring().end();
+        let walled = holder.output_mut().engine_mut();
+        let (title, alternate) = (walled.title(), walled.alternate());
+        let Some(offset) = self.offset_of(at) else {
+            return;
+        };
+        if title != self.published.title {
+            self.published.title.clone_from(&title);
+            let title = Reply::Title(Title {
+                offset,
+                text: title,
+            });
+            self.broadcast(State::Title, at, &title);
+        }
+        if alternate != self.published.alternate {
+            self.published.alternate = alternate;
+            let alternate = Reply::Alternate(Alternate {
+                offset,
+                on: alternate,
+            });
+            self.broadcast(State::Alternate, at, &alternate);
+        }
+    }
+
+    /// `at` as the current generation's peers count it.
+    fn offset_of(&self, at: u64) -> Option<Offset> {
+        Offset::new(at.checked_sub(self.shared.base)?).ok()
+    }
+
+    /// Queues `reply`, a report of `state` as of `at`, to every connection past `hello`.
+    fn broadcast(&mut self, state: State, at: u64, reply: &Reply) {
+        let frame = match reply.encode() {
+            Ok(frame) => frame,
+            Err(error) => {
+                tracing::warn!(%error, "could not encode a report");
+                return;
+            }
+        };
+        for conn in self.conns.iter_mut().filter(|conn| conn.is_open()) {
+            conn.queue_state(state, at, frame.clone());
+        }
+    }
+
+    /// While a snapshot waits for room, drops the connections whose peers have left a snapshot
+    /// unread longest, for `stuck_to_evict` at least, until there is room: a peer that stopped
+    /// reading can't keep the daemon from its snapshot. Never the writer's: the daemon holds it,
+    /// and the room is for it.
+    fn evict_stuck_snapshots(&mut self, now: Instant) {
+        if !self.conns.iter().any(Connection::holds_a_snapshot) {
+            return;
+        }
+        let (writer, stuck_for) = (self.shared.writer, self.shared.stuck_to_evict);
+        while !self.shared.snapshot_room.takes(owed_snapshots(&self.conns)) {
+            let longest = self
+                .conns
+                .iter_mut()
+                .filter(|conn| conn.owed_snapshot() > 0 && Some(conn.id()) != writer)
+                .filter_map(|conn| conn.stuck_since().map(|since| (since, conn)))
+                .filter(|(since, _)| now.saturating_duration_since(*since) >= stuck_for)
+                .min_by_key(|(since, _)| *since);
+            let Some((_, conn)) = longest else {
+                return;
+            };
+            tracing::info!("dropped a connection that left its snapshot unread");
+            conn.drop_now();
+        }
+    }
+
     /// Sends the child's exit, once it is published, to every connection past `hello`, at the
     /// offset it came at, so a subscriber gets it after every byte the child wrote before it. A
     /// connection that says `hello` later finds it in the hello reply.
@@ -234,20 +367,12 @@ impl Server {
             return;
         };
         self.shared.exit_sent = true;
-        let exited = Reply::Exited(Exited {
-            generation: exit.generation,
-            status: exit.status.clone(),
-        });
-        let frame = match exited.encode() {
-            Ok(frame) => frame,
-            Err(error) => {
-                tracing::warn!(%error, "could not encode the exit");
-                return;
-            }
+        let Some(frame) = exited_frame(exit) else {
+            return;
         };
         let at = holder.output().ring().end();
         for conn in self.conns.iter_mut().filter(|conn| conn.is_open()) {
-            conn.queue_event(at, frame.clone());
+            conn.queue_exited(at, frame.clone());
         }
     }
 
@@ -315,7 +440,7 @@ impl Server {
         };
         let at = holder.output().ring().end();
         holder.respawn(pty, child, spec.generation);
-        holder.output_mut().engine_mut().set_theme(spec.theme);
+        holder.output_mut().engine_mut().respawned(spec.theme);
         tracing::info!(generation = spec.generation.get(), "child respawned");
         self.shared.base = at;
         self.shared.terminal.child_start = started;
@@ -346,6 +471,15 @@ impl Server {
                     rows: window.rows(),
                 };
                 holder.output_mut().engine_mut().resize(size);
+                let at = holder.output().ring().end();
+                if let Some(offset) = self.offset_of(at) {
+                    let resized = Reply::Resized(Resized {
+                        offset,
+                        cols: self.shared.terminal.size.cols,
+                        rows: self.shared.terminal.size.rows,
+                    });
+                    self.broadcast(State::Resized, at, &resized);
+                }
             }
             Err(error) => tracing::warn!(%error, "could not resize the terminal"),
         }
@@ -399,7 +533,7 @@ impl Server {
             Some(Closing::Flushing { until }) => Some(until),
             None => None,
         };
-        let waiting = waiting_now(&self.conns, now);
+        let waiting = waiting_now(&self.conns, self.shared.snapshot_room, now);
         [
             self.socket
                 .as_ref()
@@ -408,6 +542,7 @@ impl Server {
             self.accept_paused_until,
             closing,
             waiting,
+            evicting_at(&self.conns, &self.shared),
         ]
         .into_iter()
         .chain(self.conns.iter().map(Connection::deadline))
@@ -440,12 +575,13 @@ impl Server {
         if !readiness(poll(&mut fds, timeout))? {
             return Ok(Ready::default());
         }
-        let ready = |i: usize| fds.get(i).is_some_and(|fd| !fd.revents().is_empty());
+        let revents = |i: usize| fds.get(i).map_or_else(PollFlags::empty, PollFd::revents);
+        let ready = |i: usize| !revents(i).is_empty();
         Ok(Ready {
             master: master.is_some_and(ready),
             rebind: ready(1),
             listener: listener.is_some_and(ready),
-            conns: (first_conn..fds.len()).map(ready).collect(),
+            conns: (first_conn..fds.len()).map(revents).collect(),
         })
     }
 
@@ -517,10 +653,27 @@ impl Server {
     }
 }
 
-/// Now, if any connection has a whole request waiting: its peer may say nothing more until it is
-/// answered, and with nothing to read or write its socket wakes nothing.
-fn waiting_now(conns: &[Connection], now: Instant) -> Option<Instant> {
-    conns.iter().any(Connection::has_request).then_some(now)
+/// Now, if any connection has a whole request waiting, or a snapshot that waited for room and
+/// now has it: its peer may say nothing more until it is answered, and with nothing to read or
+/// write its socket wakes nothing.
+fn waiting_now(conns: &[Connection], room: SnapshotRoom, now: Instant) -> Option<Instant> {
+    let snapshot_answerable =
+        || conns.iter().any(Connection::holds_a_snapshot) && room.takes(owed_snapshots(conns));
+    (conns.iter().any(Connection::has_request) || snapshot_answerable()).then_some(now)
+}
+
+/// While a snapshot waits for room, when a connection that owes snapshot bytes, the writer's
+/// aside, will have been stuck long enough to drop.
+fn evicting_at(conns: &[Connection], shared: &Shared) -> Option<Instant> {
+    if !conns.iter().any(Connection::holds_a_snapshot) {
+        return None;
+    }
+    conns
+        .iter()
+        .filter(|conn| conn.owed_snapshot() > 0 && Some(conn.id()) != shared.writer)
+        .filter_map(Connection::stuck_since)
+        .map(|since| since + shared.stuck_to_evict)
+        .min()
 }
 
 /// Why `spec` can't replace the child now, if it can't.
@@ -551,9 +704,15 @@ fn serve(
     now: Instant,
 ) -> Option<(RequestId, ProcessSpec)> {
     while let Some(next) = conn.next_request() {
+        let after_snapshot = conn.take_after_snapshot();
         match next {
             Ok(Request::Respawn { id, body }) if conn.is_open() => return Some((id, body)),
-            Ok(request) => answer(conn, shared, holder, request, now),
+            Ok(request) => {
+                answer(conn, shared, holder, request, now, after_snapshot);
+                if conn.holds_a_snapshot() {
+                    return None;
+                }
+            }
             Err(refused) => {
                 if let Some((code, id)) = refused.invalid_request() {
                     let name = request_name(code);
@@ -570,12 +729,15 @@ fn serve(
     None
 }
 
+/// Answers `request`. `after_snapshot` is where the output stood at a snapshot this connection
+/// was answered just before it, which a `subscribe` without `from` starts at.
 fn answer(
     conn: &mut Connection,
     shared: &mut Shared,
     holder: &mut Holder<Screen>,
     request: Request,
     now: Instant,
+    after_snapshot: Option<AfterSnapshot>,
 ) {
     let id = request.id();
     if !conn.is_open() {
@@ -594,7 +756,16 @@ fn answer(
             refuse(conn, id, "hello", ErrorCode::Invalid, why);
             conn.hang_up(now);
         }
-        Request::Subscribe { id, body } => subscribe(conn, holder, shared.base, id, body.from),
+        Request::Subscribe { id, body } => {
+            subscribe(
+                conn,
+                holder,
+                shared.base,
+                id,
+                body.from.ok_or(after_snapshot),
+            );
+        }
+        Request::Snapshot { id } => snapshot(conn, shared, holder, id, now),
         Request::Input { id, bytes } => input(conn, shared, holder, id, &bytes),
         Request::Resize { id, body } => {
             if shared.writer == Some(conn.id()) {
@@ -661,11 +832,116 @@ fn answer(
                 why,
             );
         }
-        other => {
+        // Answered by `serve`, as it needs every connection.
+        other @ Request::Respawn { .. } => {
             let why = "this holder doesn't serve that request";
             refuse(conn, id, &other.name(), ErrorCode::UnknownRequest, why);
         }
     }
+}
+
+/// Answers a snapshot of the terminal as of the output's end, once the holder has room for it
+/// (`SnapshotRoom`) and no other has waited longer, the writer's aside: until then it waits as
+/// the connection's next request.
+fn snapshot(
+    conn: &mut Connection,
+    shared: &mut Shared,
+    holder: &mut Holder<Screen>,
+    id: RequestId,
+    now: Instant,
+) {
+    let writer = shared.writer == Some(conn.id());
+    // The writer goes ahead of the line only while it owes nothing, so a writer that snapshots
+    // in a loop can't keep the rest waiting.
+    let ahead = writer && conn.owed_snapshot() == 0;
+    let behind = !ahead && shared.line.front().is_some_and(|&first| first != conn.id());
+    if behind || !shared.snapshot_room.takes(shared.owed_snapshots) {
+        conn.hold(Request::Snapshot { id }, now);
+        return;
+    }
+    shared.line.retain(|&waiting| waiting != conn.id());
+    let at = holder.output().ring().end();
+    let Some(offset) = at
+        .checked_sub(shared.base)
+        .and_then(|o| Offset::new(o).ok())
+    else {
+        let why = "the holder's offset is past what the protocol can say";
+        refuse(conn, id, "snapshot", ErrorCode::Failed, why);
+        return;
+    };
+    let walled = holder.output_mut().engine_mut();
+    let mut frame = SnapshotFrame::default();
+    // An engine that fails as it writes is replaced by an empty one, which the snapshot is then
+    // of: the screen is lost.
+    let mut written = walled.snapshot(MOST_SNAPSHOT_TEXT, frame.text());
+    if written.is_none() && walled.alive() {
+        written = walled.snapshot(MOST_SNAPSHOT_TEXT, frame.text());
+    }
+    if written.is_none() && walled.alive() {
+        let why = "the terminal engine failed writing it, twice";
+        refuse(conn, id, "snapshot", ErrorCode::Failed, why);
+        return;
+    }
+    let dropped = match written {
+        Some(Ok(dropped)) => u32::try_from(dropped).unwrap_or(u32::MAX),
+        Some(Err(TooLarge)) => {
+            let why = "the screens alone are over the snapshot's cap";
+            refuse(conn, id, "snapshot", ErrorCode::SnapshotTooLarge, why);
+            return;
+        }
+        None => {
+            let why = "the terminal engine has failed for good";
+            refuse(conn, id, "snapshot", ErrorCode::Unavailable, why);
+            return;
+        }
+    };
+    match frame.finish(id, offset, dropped) {
+        Ok(bytes) => {
+            shared.owed_snapshots = shared.owed_snapshots.saturating_add(bytes.len());
+            conn.queue_snapshot(bytes, at);
+        }
+        Err(error) => {
+            tracing::warn!(%error, "could not encode a snapshot");
+            refuse(
+                conn,
+                id,
+                "snapshot",
+                ErrorCode::Failed,
+                "the holder can't say it",
+            );
+        }
+    }
+}
+
+/// The child's `exited`, as it is sent.
+fn exited_frame(exit: &Exit) -> Option<Vec<u8>> {
+    let exited = Reply::Exited(Exited {
+        generation: exit.generation,
+        status: exit.status.clone(),
+    });
+    exited
+        .encode()
+        .inspect_err(|error| tracing::warn!(%error, "could not encode the exit"))
+        .ok()
+}
+
+/// The connections whose snapshots wait, in the order they are answered: the writer's, then the
+/// longest waiting first.
+fn snapshot_line(conns: &[Connection], writer: Option<u64>) -> VecDeque<u64> {
+    let mut waiting: Vec<(bool, Instant, u64)> = conns
+        .iter()
+        .filter_map(|conn| {
+            let since = conn.held_since()?;
+            Some((Some(conn.id()) != writer, since, conn.id()))
+        })
+        .collect();
+    waiting.sort_unstable();
+    waiting.into_iter().map(|(_, _, id)| id).collect()
+}
+
+/// The bytes of snapshots every connection is owed.
+fn owed_snapshots(conns: &[Connection]) -> usize {
+    conns.iter().map(Connection::owed_snapshot).sum()
 }
 
 /// Queues the writer's input for the child; anyone else's is refused.
@@ -695,29 +971,41 @@ fn input(
     }
 }
 
-/// Moves the connection's subscription to `from`, or to the holder's offset now without one.
-/// `base` is where the current generation starts in the output, which its offsets count from.
+/// Moves the connection's subscription to `from`. Without one, it starts where the snapshot the
+/// connection was answered just before stood, so a snapshot and a `subscribe` sent together
+/// lose no output between them even when the snapshot's size holds the `subscribe` a turn;
+/// with neither, at the holder's offset now. A snapshot from before a respawn starts it at the
+/// new generation's 0. `base` is where the current generation starts in the output, which its
+/// offsets count from.
 fn subscribe(
     conn: &mut Connection,
     holder: &Holder<Screen>,
     base: u64,
     id: RequestId,
-    from: Option<SubscribeFrom>,
+    from: Result<SubscribeFrom, Option<AfterSnapshot>>,
 ) {
     let end = holder.output().ring().end();
+    // A snapshot that moved the subscription there itself has its output under way already.
+    let moved = matches!(from, Err(Some(AfterSnapshot { moved: true, .. })));
     let offset = match from {
-        Some(from) if from.generation != holder.generation() => {
+        Ok(from) if from.generation != holder.generation() => {
             let why = "that offset is of another generation's output";
             refuse(conn, id, "subscribe", ErrorCode::StaleGeneration, why);
             return;
         }
-        Some(from) if from.offset.get() > end.saturating_sub(base) => {
+        Ok(from) if from.offset.get() > end.saturating_sub(base) => {
             let why = "that offset is past the holder's";
             refuse(conn, id, "subscribe", ErrorCode::OutOfRange, why);
             return;
         }
-        Some(from) => base + from.offset.get(),
-        None => end,
+        Ok(from) => base + from.offset.get(),
+        Err(Some(snapshot)) if snapshot.at < base => {
+            let why = "a respawn came between the snapshot and this subscription: snapshot again";
+            refuse(conn, id, "subscribe", ErrorCode::StaleGeneration, why);
+            return;
+        }
+        Err(Some(snapshot)) => snapshot.at,
+        Err(None) => end,
     };
     let request = "subscribe".to_owned();
     match (Reply::Ok {
@@ -726,7 +1014,16 @@ fn subscribe(
     })
     .encode()
     {
-        Ok(frame) => conn.queue_subscribed(frame, offset),
+        Ok(frame) => {
+            if moved {
+                conn.queue(frame);
+            } else {
+                conn.queue_subscribed(frame, offset);
+            }
+            if let Some(frame) = holder.exit().and_then(exited_frame) {
+                conn.requeue_exited(end, frame);
+            }
+        }
         Err(error) => {
             tracing::warn!(%error, "could not encode a reply");
             conn.drop_now();
@@ -961,10 +1258,16 @@ mod tests {
 
     impl Failing {
         fn start(name: &str, script: &str) -> Self {
+            Self::with(name, script, crate::engine::tests::failing, 100)
+        }
+
+        /// A holder serving `script` under `sh -c`, with engines `make` makes, keeping `history`
+        /// rows.
+        fn with(name: &str, script: &str, make: crate::engine::MakeVt, history: usize) -> Self {
             use bazhen_holder_proto::body::{Argv, Env, Generation, NonEmpty};
 
             use crate::child::Reaper;
-            use crate::engine::{Walled, tests::failing};
+            use crate::engine::Walled;
 
             let dir = std::env::temp_dir().join(format!("bz-{name}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
@@ -987,8 +1290,8 @@ mod tests {
             let (pty, slave) = Pty::open(WindowSize::from(size)).unwrap();
             let child = pty::spawn(slave, &process, &reaper).unwrap();
             let engine_size = bazhen_holder_engine::Size { cols: 80, rows: 24 };
-            let history = bazhen_holder_engine::HistoryRows(100);
-            let engine = Walled::new(failing, engine_size, history, None);
+            let history = bazhen_holder_engine::HistoryRows(history);
+            let engine = Walled::new(make, engine_size, history, None);
             let screen = Screen::new(Ring::new(1 << 16), engine);
             let holder = Holder::new(pty, reaper, child, process.generation, screen);
             let terminal = Terminal {
@@ -1040,17 +1343,11 @@ mod tests {
                 .unwrap();
             let mut decoder = bazhen_holder_proto::reply_decoder();
             let mut replies = Vec::new();
-            let mut chunk = vec![0; 1 << 16];
-            let give_up = Instant::now() + Duration::from_secs(5);
+            let give_up = Instant::now() + Duration::from_secs(10);
             while replies.len() < 2 {
                 assert!(Instant::now() < give_up, "no answer to {request:?}");
                 assert!(!self.server.turn(&mut self.holder).unwrap());
-                if let Ok(n) = peer.read(&mut chunk) {
-                    decoder.push(&chunk[..n]);
-                }
-                while let Some(reply) = decoder.next_frame().unwrap() {
-                    replies.push(reply);
-                }
+                read_into(&mut peer, &mut decoder, &mut replies);
             }
             replies
         }
@@ -1111,6 +1408,555 @@ mod tests {
             Some(u64::from(crate::engine::MOST_ENGINE_RESETS))
         );
         assert_eq!(stats.history_lines.get(), 0);
+        match failing
+            .ask(&Request::Snapshot { id: RequestId(3) })
+            .as_slice()
+        {
+            [_, Reply::Error { body, .. }] => assert_eq!(body.code, "unavailable"),
+            other => panic!("answered {other:?}"),
+        }
+    }
+
+    /// 100,000 rows of 79 columns: a snapshot of eight megabytes, several times what a peer's
+    /// socket takes unread.
+    const BIG: &str = "yes 0123456789012345678901234567890123456789012345678901234567890123456789012345678 \
+                       | head -n 100000";
+    /// All of `BIG` as the terminal passes it on: each row and its `\r\n`.
+    const BIG_BYTES: u64 = 100_000 * 81;
+
+    fn hello_request() -> Request {
+        hello_as(false)
+    }
+
+    fn hello_as(writer: bool) -> Request {
+        Request::Hello {
+            id: RequestId(1),
+            body: HelloRequest {
+                protocol: Versions::spoken(),
+                writer: Some(writer),
+            },
+        }
+    }
+
+    /// Reads what `peer` has been sent so far into `replies`.
+    fn read_into(
+        peer: &mut UnixStream,
+        decoder: &mut bazhen_holder_proto::FrameDecoder<Reply>,
+        replies: &mut Vec<Reply>,
+    ) {
+        let mut chunk = vec![0; 1 << 20];
+        while let Ok(n) = peer.read(&mut chunk) {
+            if n == 0 {
+                break;
+            }
+            decoder.push(&chunk[..n]);
+        }
+        while let Some(reply) = decoder.next_frame().unwrap() {
+            replies.push(reply);
+        }
+    }
+
+    fn snapshot_request(id: u32) -> Request {
+        Request::Snapshot { id: RequestId(id) }
+    }
+
+    fn subscribe_request(id: u32) -> Request {
+        Request::Subscribe {
+            id: RequestId(id),
+            body: body::SubscribeRequest { from: None },
+        }
+    }
+
+    impl Failing {
+        /// A connection that has sent `requests` in one write and reads nothing yet.
+        fn peer(&self, requests: &[Request]) -> UnixStream {
+            let peer = UnixStream::connect(self.dir.join("t.sock")).unwrap();
+            peer.set_nonblocking(true).unwrap();
+            let bytes: Vec<u8> = requests.iter().flat_map(|r| r.encode().unwrap()).collect();
+            (&peer).write_all(&bytes).unwrap();
+            peer
+        }
+
+        fn owed(&self) -> usize {
+            owed_snapshots(&self.server.conns)
+        }
+
+        fn holding(&self) -> bool {
+            self.server.conns.iter().any(Connection::holds_a_snapshot)
+        }
+
+        fn holders(&self) -> usize {
+            self.server
+                .conns
+                .iter()
+                .filter(|c| c.holds_a_snapshot())
+                .count()
+        }
+
+        fn owing(&self) -> usize {
+            self.server
+                .conns
+                .iter()
+                .filter(|c| c.owed_snapshot() > 0)
+                .count()
+        }
+
+        /// A holder that has read all of `BIG`, with room for `fit` of its snapshots at once,
+        /// whose stuck peers may be dropped after `stuck`.
+        fn big(name: &str, fit: usize, stuck: Duration) -> Self {
+            let mut big = Self::with(name, BIG, crate::engine::engine, 100_000);
+            big.until_within("the output read", 60, |b| b.holder.exit().is_some());
+            let size = match big.ask(&snapshot_request(2)).as_slice() {
+                [_, Reply::Snapshot { bytes, .. }] => {
+                    bytes.len() + bazhen_holder_proto::SNAPSHOT_HEAD
+                }
+                other => panic!("answered {other:?}"),
+            };
+            big.server.shared.snapshot_room = SnapshotRoom {
+                in_flight: fit * size,
+                most: size,
+            };
+            big.server.shared.stuck_to_evict = stuck;
+            big
+        }
+
+        /// As `until`, for `seconds` at most, checking after each turn that the bound holds.
+        fn until_within(&mut self, what: &str, seconds: u64, done: impl Fn(&Self) -> bool) {
+            let give_up = Instant::now() + Duration::from_secs(seconds);
+            while !done(self) {
+                assert!(Instant::now() < give_up, "{what} never happened");
+                assert!(!self.server.turn(&mut self.holder).unwrap());
+                let room = self.server.shared.snapshot_room;
+                assert!(
+                    self.owed() <= room.in_flight.max(room.most),
+                    "{} owed",
+                    self.owed()
+                );
+            }
+        }
+    }
+
+    /// Long enough that no peer is dropped for being stuck however slow the host.
+    const NEVER: Duration = Duration::from_secs(3600);
+
+    #[test]
+    fn the_holders_bound_fits_two_of_the_largest_snapshots_and_no_more() {
+        let mut largest = bazhen_holder_proto::SnapshotFrame::default();
+        largest
+            .text()
+            .push_str(&"x".repeat(bazhen_holder_proto::MOST_SNAPSHOT_TEXT));
+        let frame = largest
+            .finish(RequestId(1), Offset::new(0).unwrap(), 0)
+            .unwrap();
+        assert_eq!(frame.len(), LARGEST_SNAPSHOT);
+        let room = SnapshotRoom::HOLDER;
+        assert!(room.takes(0) && room.takes(LARGEST_SNAPSHOT));
+        assert!(!room.takes(LARGEST_SNAPSHOT + 1));
+        assert_eq!(SNAPSHOTS_IN_FLIGHT, 128 << 20 | 8);
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn snapshots_owed_across_connections_stay_under_the_bound_and_one_held_is_served_once_read() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let mut big = Failing::big("snapshot-bound", 2, NEVER);
+        let mut peers: Vec<UnixStream> = (0..3)
+            .map(|i| big.peer(&[hello_request(), snapshot_request(10 + i)]))
+            .collect();
+        big.until_within("a snapshot held for room", 30, Failing::holding);
+        assert_eq!((big.holders(), big.owing()), (1, 2));
+        let (mut decoder, mut first) = (bazhen_holder_proto::reply_decoder(), Vec::new());
+        // Reading the first frees what it is owed as it reads, and the held one is answered
+        // once that makes room.
+        let give_up = Instant::now() + Duration::from_secs(30);
+        let room = big.server.shared.snapshot_room;
+        while big.holding() {
+            assert!(
+                Instant::now() < give_up,
+                "the held snapshot was never answered"
+            );
+            read_into(&mut peers[0], &mut decoder, &mut first);
+            assert!(!big.server.turn(&mut big.holder).unwrap());
+            assert!(big.owed() <= room.in_flight, "{} owed", big.owed());
+        }
+        assert!(
+            big.server.conns.iter().all(|c| !c.is_gone()),
+            "one was evicted"
+        );
+        assert!(big.owing() >= 2, "the held snapshot was not answered");
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn a_peer_that_leaves_its_snapshot_unread_is_dropped_for_one_that_waits_but_never_the_writer() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let mut big = Failing::big("snapshot-evict", 10, NEVER);
+        let _writer = big.peer(&[hello_as(true), snapshot_request(10)]);
+        let _peers: Vec<UnixStream> = (11..14)
+            .map(|id| big.peer(&[hello_request(), snapshot_request(id)]))
+            .collect();
+        big.until_within("four unread snapshots", 30, |b| {
+            b.server
+                .conns
+                .iter()
+                .filter(|c| c.owed_snapshot() > 0 && c.stuck_since().is_some())
+                .count()
+                == 4
+        });
+        // Room for what is owed now, less a byte, beside the largest: dropping any one peer makes
+        // room for the one held, and dropping a second is more than room needs.
+        let most = big.server.shared.snapshot_room.most;
+        big.server.shared.snapshot_room.in_flight = big.owed() + most - 1;
+        big.server.shared.stuck_to_evict = Duration::from_millis(200);
+        let writer = big.server.shared.writer;
+        let longest = big
+            .server
+            .conns
+            .iter()
+            .filter(|c| Some(c.id()) != writer)
+            .filter_map(|c| c.stuck_since().map(|since| (since, c.id())))
+            .min()
+            .map(|(_, id)| id);
+        let _held = big.peer(&[hello_request(), snapshot_request(14)]);
+        big.until_within("a snapshot held for room", 30, Failing::holding);
+        big.until_within("the held snapshot answered", 30, |b| !b.holding());
+        let ids: Vec<u64> = big.server.conns.iter().map(Connection::id).collect();
+        assert!(
+            ids.iter().any(|&id| Some(id) == writer),
+            "the writer was dropped"
+        );
+        assert!(
+            !ids.iter().any(|&id| Some(id) == longest),
+            "the longest stuck was kept"
+        );
+        assert_eq!(ids.len(), 4, "more were dropped than made room");
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn the_writers_snapshot_is_answered_before_older_ones() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let mut big = Failing::big("snapshot-writer-first", 1, NEVER);
+        let mut first = big.peer(&[hello_request(), snapshot_request(10)]);
+        let _older = big.peer(&[hello_request(), snapshot_request(11)]);
+        big.until_within("the older held", 30, |b| b.holders() == 1);
+        let writer = big.peer(&[hello_as(true)]);
+        big.until_within("the writer's hello", 30, |b| {
+            b.server.shared.writer.is_some()
+        });
+        (&writer)
+            .write_all(&snapshot_request(12).encode().unwrap())
+            .unwrap();
+        big.until_within("the writer held", 30, |b| b.holders() == 2);
+        let (mut decoder, mut replies) = (bazhen_holder_proto::reply_decoder(), Vec::new());
+        let give_up = Instant::now() + Duration::from_secs(30);
+        while big.holders() == 2 {
+            assert!(Instant::now() < give_up, "the first was never read");
+            read_into(&mut first, &mut decoder, &mut replies);
+            assert!(!big.server.turn(&mut big.holder).unwrap());
+        }
+        let writer = big.server.shared.writer;
+        let held: Vec<bool> = big
+            .server
+            .conns
+            .iter()
+            .filter(|c| c.holds_a_snapshot())
+            .map(|c| Some(c.id()) == writer)
+            .collect();
+        assert_eq!(
+            held,
+            [false],
+            "an older snapshot went ahead of the writer's"
+        );
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn a_snapshot_that_waited_longest_is_answered_before_a_newer_one() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let mut big = Failing::big("snapshot-order", 1, NEVER);
+        let mut first = big.peer(&[hello_request(), snapshot_request(10)]);
+        let newer = big.peer(&[hello_request()]);
+        let _older = big.peer(&[hello_request(), snapshot_request(12)]);
+        big.until_within("the second held", 30, |b| b.holders() == 1);
+        (&newer)
+            .write_all(&snapshot_request(11).encode().unwrap())
+            .unwrap();
+        big.until_within("the newer held", 30, |b| b.holders() == 2);
+        let (mut decoder, mut replies) = (bazhen_holder_proto::reply_decoder(), Vec::new());
+        let give_up = Instant::now() + Duration::from_secs(30);
+        while big.holders() == 2 {
+            assert!(Instant::now() < give_up, "the first was never read");
+            read_into(&mut first, &mut decoder, &mut replies);
+            assert!(!big.server.turn(&mut big.holder).unwrap());
+        }
+        let ids: Vec<u64> = big.server.conns.iter().map(Connection::id).collect();
+        let holding: Vec<u64> = big
+            .server
+            .conns
+            .iter()
+            .filter(|c| c.holds_a_snapshot())
+            .map(Connection::id)
+            .collect();
+        // The newer asks from the connection opened earlier, so order of connections alone would
+        // answer it first.
+        assert_eq!(
+            holding,
+            [ids[1]],
+            "the newer was answered ahead of the older"
+        );
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn a_subscribe_sent_with_a_snapshot_starts_at_its_offset_though_the_snapshot_holds_it_a_turn() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let script = format!("{BIG}; while :; do echo tick; sleep 0.005; done");
+        let mut big = Failing::with("seam", &script, crate::engine::engine, 100_000);
+        big.until_within("the output read", 60, |b| {
+            b.holder.output().ring().end() >= BIG_BYTES
+        });
+        let mut peer = big.peer(&[hello_request(), snapshot_request(2), subscribe_request(3)]);
+        // Unread, the snapshot holds the subscribe back, and the child's output moves on.
+        big.until_within("the snapshot past the mark", 30, |b| {
+            b.server
+                .conns
+                .iter()
+                .any(|c| c.queued() >= crate::conn::QUEUE_MARK)
+        });
+        let at = big.holder.output().ring().end();
+        big.until_within("more output", 30, |b| b.holder.output().ring().end() > at);
+        let (mut decoder, mut replies) = (bazhen_holder_proto::reply_decoder(), Vec::new());
+        let give_up = Instant::now() + Duration::from_secs(30);
+        while !replies.iter().any(|r| matches!(r, Reply::Data { .. })) {
+            assert!(Instant::now() < give_up, "no output after the snapshot");
+            read_into(&mut peer, &mut decoder, &mut replies);
+            assert!(!big.server.turn(&mut big.holder).unwrap());
+        }
+        let snapshot = replies.iter().find_map(|r| match r {
+            Reply::Snapshot { offset, .. } => Some(offset.get()),
+            _ => None,
+        });
+        let first = replies.iter().find_map(|r| match r {
+            Reply::Data { offset, .. } => Some(offset.get()),
+            _ => None,
+        });
+        assert_eq!(snapshot, Some(at));
+        // A gap would mean the ring lapped the subscription, and the seam went untested.
+        assert!(
+            !replies.iter().any(|r| matches!(r, Reply::Gap(_))),
+            "the ring lapped the subscription"
+        );
+        assert_eq!(
+            first, snapshot,
+            "output between the snapshot and the subscription was lost"
+        );
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn a_subscriber_that_snapshots_again_while_output_goes_on_is_sent_no_byte_twice() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let script = format!("{BIG}; while :; do echo tick; sleep 0.005; done");
+        let mut big = Failing::with("resnapshot", &script, crate::engine::engine, 100_000);
+        big.until_within("the output read", 60, |b| {
+            b.holder.output().ring().end() >= BIG_BYTES
+        });
+        let mut peer = big.peer(&[hello_request(), subscribe_request(2)]);
+        let (mut decoder, mut replies) = (bazhen_holder_proto::reply_decoder(), Vec::new());
+        let give_up = Instant::now() + Duration::from_secs(30);
+        while !replies.iter().any(|r| matches!(r, Reply::Data { .. })) {
+            assert!(Instant::now() < give_up, "no output to the subscriber");
+            assert!(!big.server.turn(&mut big.holder).unwrap());
+            read_into(&mut peer, &mut decoder, &mut replies);
+        }
+        let attach = [snapshot_request(3), subscribe_request(4)];
+        let bytes: Vec<u8> = attach.iter().flat_map(|r| r.encode().unwrap()).collect();
+        (&peer).write_all(&bytes).unwrap();
+        // Unread, the snapshot holds the subscribe back, and the child's output moves on.
+        big.until_within("the snapshot past the mark", 30, |b| {
+            b.server
+                .conns
+                .iter()
+                .any(|c| c.queued() >= crate::conn::QUEUE_MARK)
+        });
+        let at = big.holder.output().ring().end();
+        big.until_within("more output", 30, |b| b.holder.output().ring().end() > at);
+        let answered = |replies: &[Reply]| {
+            replies.iter().position(|r| {
+                matches!(
+                    r,
+                    Reply::Ok {
+                        id: RequestId(4),
+                        ..
+                    }
+                )
+            })
+        };
+        let give_up = Instant::now() + Duration::from_secs(30);
+        while answered(&replies).is_none_or(|i| replies.len() < i + 3) {
+            assert!(Instant::now() < give_up, "the subscribe was never answered");
+            read_into(&mut peer, &mut decoder, &mut replies);
+            assert!(!big.server.turn(&mut big.holder).unwrap());
+        }
+        let mut end = 0;
+        for reply in &replies {
+            match reply {
+                Reply::Data { offset, bytes } => {
+                    assert!(
+                        offset.get() >= end,
+                        "{} sent again, after {end}",
+                        offset.get()
+                    );
+                    end = offset.get() + bytes.len() as u64;
+                }
+                Reply::Gap(gap) => end = gap.to.get(),
+                Reply::Snapshot { offset, .. } => {
+                    assert!(offset.get() >= end);
+                    end = offset.get();
+                }
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn a_subscribe_after_a_snapshot_a_respawn_overtook_is_refused() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        // Output after the snapshot, which the respawn then overtakes.
+        let script = "stty -echo; printf before; read _; printf after";
+        let mut failing = Failing::with("respawn-seam", script, crate::engine::engine, 100);
+        failing.until("the output", |f| f.output().contains("before"));
+        let writer = failing.peer(&[hello_as(true)]);
+        let mut viewer = failing.peer(&[hello_request(), snapshot_request(2)]);
+        let (mut decoder, mut replies) = (bazhen_holder_proto::reply_decoder(), Vec::new());
+        let give_up = Instant::now() + Duration::from_secs(10);
+        while !replies.iter().any(|r| matches!(r, Reply::Snapshot { .. })) {
+            assert!(Instant::now() < give_up, "no snapshot");
+            assert!(!failing.server.turn(&mut failing.holder).unwrap());
+            read_into(&mut viewer, &mut decoder, &mut replies);
+        }
+        let input = Request::Input {
+            id: RequestId(3),
+            bytes: b"\n".to_vec(),
+        };
+        (&writer).write_all(&input.encode().unwrap()).unwrap();
+        failing.until("the exit", |f| f.holder.exit().is_some());
+        assert!(failing.output().contains("after"));
+        let mut env = std::collections::BTreeMap::new();
+        env.insert("PATH".to_owned(), std::env::var("PATH").unwrap());
+        let spec = ProcessSpec {
+            argv: body::Argv::new(vec!["sleep".into(), "30".into()]).unwrap(),
+            cwd: body::NonEmpty::new("/").unwrap(),
+            env: body::Env::new(env).unwrap(),
+            generation: body::Generation::new(1).unwrap(),
+            theme: None,
+        };
+        let respawn = Request::Respawn {
+            id: RequestId(2),
+            body: spec,
+        };
+        let mut respawner = failing.peer(&[hello_request(), respawn]);
+        let (mut respawner_decoder, mut answers) =
+            (bazhen_holder_proto::reply_decoder(), Vec::new());
+        let give_up = Instant::now() + Duration::from_secs(10);
+        while !answers.iter().any(|r| {
+            matches!(
+                r,
+                Reply::Ok {
+                    id: RequestId(2),
+                    ..
+                }
+            )
+        }) {
+            assert!(
+                Instant::now() < give_up,
+                "the respawn was never answered: {answers:?}"
+            );
+            assert!(!failing.server.turn(&mut failing.holder).unwrap());
+            read_into(&mut respawner, &mut respawner_decoder, &mut answers);
+        }
+        (&viewer)
+            .write_all(&subscribe_request(3).encode().unwrap())
+            .unwrap();
+        let give_up = Instant::now() + Duration::from_secs(10);
+        let refused = loop {
+            assert!(Instant::now() < give_up, "the subscribe was never answered");
+            assert!(!failing.server.turn(&mut failing.holder).unwrap());
+            read_into(&mut viewer, &mut decoder, &mut replies);
+            if let Some(answer) = replies.iter().find_map(|r| match r {
+                Reply::Error { body, .. } => Some(body.code.clone()),
+                Reply::Ok { body, .. } if body.request == "subscribe" => Some("ok".to_owned()),
+                _ => None,
+            }) {
+                break answer;
+            }
+        };
+        assert_eq!(refused, "stale-generation");
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn a_snapshot_whose_engine_fails_once_comes_from_the_empty_engine_after_it() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let mut failing = Failing::start("snapshot-fails-once", "printf before; exec sleep 30");
+        failing.until("the output", |f| f.output().contains("before"));
+        crate::engine::tests::fail_snapshots(1);
+        match failing.ask(&snapshot_request(2)).as_slice() {
+            [_, Reply::Snapshot { bytes, .. }] => {
+                let text = String::from_utf8_lossy(bytes);
+                assert!(
+                    !text.contains("before"),
+                    "the failed engine's screen came back"
+                );
+            }
+            other => panic!("answered {other:?}"),
+        }
+        let (hello, stats) = failing.hello_and_stats();
+        assert_eq!(hello.engine, Some(true));
+        assert_eq!(stats.engine_resets.map(Count::get), Some(1));
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn a_snapshot_whose_engine_fails_twice_is_refused_failed() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let mut failing = Failing::start("snapshot-fails-twice", "exec sleep 30");
+        crate::engine::tests::fail_snapshots(2);
+        match failing.ask(&snapshot_request(2)).as_slice() {
+            [_, Reply::Error { body, .. }] => assert_eq!(body.code, "failed"),
+            other => panic!("answered {other:?}"),
+        }
+        assert_eq!(failing.hello_and_stats().0.engine, Some(true));
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn a_writer_that_still_owes_a_snapshot_waits_its_turn_for_the_next() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let mut failing = Failing::with("writer-loop", "exec sleep 30", crate::engine::engine, 100);
+        let (ours, _peer) = UnixStream::pair().unwrap();
+        ours.set_nonblocking(true).unwrap();
+        let now = Instant::now();
+        let mut writer = Connection::new(100, ours, now);
+        writer.open(0);
+        failing.server.shared.writer = Some(100);
+        let waiting = 7;
+        failing.server.shared.line = VecDeque::from([waiting]);
+        let shared = &mut failing.server.shared;
+        snapshot(&mut writer, shared, &mut failing.holder, RequestId(1), now);
+        assert!(
+            !writer.holds_a_snapshot(),
+            "the writer waited though it owed nothing"
+        );
+        assert!(writer.owed_snapshot() > 0);
+        let shared = &mut failing.server.shared;
+        snapshot(&mut writer, shared, &mut failing.holder, RequestId(2), now);
+        assert!(
+            writer.holds_a_snapshot(),
+            "a writer still owing one went ahead again"
+        );
     }
 
     /// A connection to `failing`'s socket that has sent a `hello` asking for the writer slot.

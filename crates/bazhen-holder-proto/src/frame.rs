@@ -245,6 +245,69 @@ pub enum EncodeError {
     Unknown(u8),
     #[error("JSON: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("a snapshot frame lost the room kept for its header")]
+    NoRoom,
+}
+
+/// What a snapshot's frame holds in front of its VT text: the frame's header and type, the id,
+/// the offset and the dropped lines.
+pub const SNAPSHOT_HEAD: usize = HEADER + 1 + 4 + 8 + 4;
+/// The most VT text one snapshot carries, under `MAX_REPLY_BYTES`.
+pub const MOST_SNAPSHOT_TEXT: usize = MAX_REPLY_BYTES - (SNAPSHOT_HEAD - HEADER);
+
+/// A snapshot's frame, built in place: the VT text is written after room for the header, which
+/// [`SnapshotFrame::finish`] fills, so a snapshot as large as a frame may be is never copied into
+/// a frame of its own.
+#[derive(Debug)]
+pub struct SnapshotFrame(String);
+
+impl Default for SnapshotFrame {
+    fn default() -> Self {
+        Self("\0".repeat(SNAPSHOT_HEAD))
+    }
+}
+
+impl SnapshotFrame {
+    /// Where the VT text goes: append to it, after the room already in it.
+    pub const fn text(&mut self) -> &mut String {
+        &mut self.0
+    }
+
+    /// The frame of `Reply::Snapshot` with this text.
+    ///
+    /// # Errors
+    ///
+    /// When the text is over `MOST_SNAPSHOT_TEXT`, or was cut into the room for the header.
+    pub fn finish(
+        self,
+        id: RequestId,
+        offset: Offset,
+        dropped_lines: u32,
+    ) -> Result<Vec<u8>, EncodeError> {
+        let mut bytes = self.0.into_bytes();
+        let length = bytes.len().checked_sub(HEADER).ok_or(EncodeError::NoRoom)?;
+        if bytes.len() < SNAPSHOT_HEAD {
+            return Err(EncodeError::NoRoom);
+        }
+        let max = MAX_REPLY_BYTES;
+        let header = u32::try_from(length)
+            .ok()
+            .filter(|_| length <= max)
+            .ok_or(EncodeError::OverCap { length, max })?;
+        let head = [
+            header.to_be_bytes().as_slice(),
+            &[reply_code::SNAPSHOT],
+            &id.0.to_be_bytes(),
+            &offset.get().to_be_bytes(),
+            &dropped_lines.to_be_bytes(),
+        ]
+        .concat();
+        bytes
+            .get_mut(..SNAPSHOT_HEAD)
+            .ok_or(EncodeError::NoRoom)?
+            .copy_from_slice(&head);
+        Ok(bytes)
+    }
 }
 
 /// One frame's bytes: the header for `payload`, then `payload`.
@@ -951,7 +1014,42 @@ mod tests {
         chunks
     }
 
+    #[test]
+    fn a_snapshot_frame_refuses_text_past_its_cap_and_a_cut_into_its_room() {
+        let mut full = SnapshotFrame::default();
+        full.text().push_str(&"x".repeat(MOST_SNAPSHOT_TEXT));
+        let over = |mut frame: SnapshotFrame| {
+            frame.text().push('x');
+            frame
+        };
+        let mut cut = SnapshotFrame::default();
+        cut.text().truncate(SNAPSHOT_HEAD - 1);
+        let finish = |frame: SnapshotFrame| frame.finish(RequestId(1), Offset::new(0).unwrap(), 0);
+        assert!(finish(SnapshotFrame::default()).is_ok());
+        let mut fits = SnapshotFrame::default();
+        fits.text().push_str(&"x".repeat(MOST_SNAPSHOT_TEXT));
+        assert!(finish(fits).is_ok());
+        assert!(matches!(
+            finish(over(full)),
+            Err(EncodeError::OverCap { .. })
+        ));
+        assert!(matches!(finish(cut), Err(EncodeError::NoRoom)));
+    }
+
     proptest! {
+        #[test]
+        fn a_snapshot_built_in_place_is_the_frame_its_reply_encodes(
+            id in id(),
+            offset in count(),
+            dropped_lines in any::<u32>(),
+            text in "\\PC{0,64}",
+        ) {
+            let mut frame = SnapshotFrame::default();
+            frame.text().push_str(&text);
+            let reply = Reply::Snapshot { id, offset, dropped_lines, bytes: text.into_bytes() };
+            prop_assert_eq!(frame.finish(id, offset, dropped_lines).unwrap(), reply.encode().unwrap());
+        }
+
         #[test]
         fn decodes_the_requests_encoded_however_the_stream_is_cut(
             frames in prop::collection::vec(request(), 1..6),

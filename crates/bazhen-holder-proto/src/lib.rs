@@ -13,8 +13,9 @@ mod json;
 mod version;
 
 pub use frame::{
-    EncodeError, FrameDecoder, MAX_REPLY_BYTES, MAX_REQUEST_BYTES, Malformed, Reply, Request,
-    RequestId, reply_code, reply_decoder, request_code, request_decoder, request_name,
+    EncodeError, FrameDecoder, MAX_REPLY_BYTES, MAX_REQUEST_BYTES, MOST_SNAPSHOT_TEXT, Malformed,
+    Reply, Request, RequestId, SNAPSHOT_HEAD, SnapshotFrame, reply_code, reply_decoder,
+    request_code, request_decoder, request_name,
 };
 pub use version::{PROTOCOL_VERSION, Version, negotiate};
 

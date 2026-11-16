@@ -6,6 +6,8 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { connect, createServer, type Socket } from "node:net";
 import { dirname, join } from "node:path";
 import { oscColour, TERMINAL_COLOURS, type TuiTheme } from "@bazhen/protocol";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
+import headless from "@xterm/headless";
 import {
   connectHolder,
   type HolderClient,
@@ -385,7 +387,131 @@ const colourAnswers = (theme: TuiTheme) => ({
   background: `${ESC}]11;${oscColour(TERMINAL_COLOURS[theme].background)}\x07`,
 });
 
+/** A viewer as the web client is one: xterm's parser, with the width table the client loads. */
+function viewer() {
+  const term = new headless.Terminal({
+    cols: 80,
+    rows: 24,
+    scrollback: 20_000,
+    allowProposedApi: true,
+  });
+  term.loadAddon(new Unicode11Addon());
+  term.unicode.activeVersion = "11";
+  return term;
+}
+
+/** What `bytes` draw in a viewer: every row of its history and screen, as text. */
+async function drawn(bytes: readonly Uint8Array[]): Promise<string[]> {
+  const term = viewer();
+  for (const chunk of bytes) await new Promise<void>((done) => term.write(chunk, done));
+  const buffer = term.buffer.active;
+  return Array.from({ length: buffer.length }, (_, i) =>
+    buffer.getLine(i)!.translateToString(true),
+  );
+}
+
+const dataOf = (events: readonly HolderEvent[]) =>
+  events.flatMap((event) => (event.type === "data" ? [event.bytes] : []));
+
+/** A child that, once its terminal no longer echoes, prints R and waits for a line, then runs `then`. */
+const gated = (then: string) => ["sh", "-c", `stty -echo; echo R; read _; ${then}`] as const;
+
+/** A writer subscribed from 0 to a `gated` child, and the child let go. */
+async function letGo(holder: SpawnedHolder) {
+  const writer = await listen(holder, true);
+  await writer.client.subscribe({ generation: 0, offset: 0 });
+  await until(() => output(writer.events).includes("R\r\n"), "the child ready");
+  writer.client.input(encode("\n"));
+  return writer;
+}
+
+/** The attach's snapshot, which comes first, and the events after it. */
+function attachedTo(events: readonly HolderEvent[]) {
+  const [snapshot, ...after] = events;
+  if (snapshot?.type !== "snapshot") throw new Error(`the attach began with ${snapshot?.type}`);
+  return { snapshot, after };
+}
+
+/** The title and alternate-screen reports in `events`. */
+const reportsIn = (events: readonly HolderEvent[]) =>
+  events.flatMap((event) =>
+    event.type === "title" || event.type === "alternate" ? [event.body] : [],
+  );
+
+/** The events before the first of `type`, and that one. */
+function upTo(events: readonly HolderEvent[], type: HolderEvent["type"]) {
+  const at = events.findIndex((event) => event.type === type);
+  return { before: events.slice(0, at), event: events[at] };
+}
+
 describe("a holder's terminal engine", () => {
+  it("attaches mid-stream to a snapshot that, with the output after it, draws what all of it does", async () => {
+    const lines = "i=0; while [ $i -lt 4000 ]; do i=$((i+1)); echo line $i; done";
+    const holder = await started("attach", gated(lines));
+    const live = await letGo(holder);
+    await until(() => outputEnd(live.events) > 4000, "some of the output");
+    const attached = await listen(holder);
+    await attached.client.attach();
+    await live.exit;
+    await attached.exit;
+    const { snapshot, after } = attachedTo(attached.events);
+    expect(snapshot.offset).toBeGreaterThan(4000);
+    const data = after.filter((event) => event.type === "data");
+    expect(output(data, snapshot.offset)).toBe(output(live.events).slice(snapshot.offset));
+    const restored = await drawn([snapshot.bytes, ...dataOf(data)]);
+    expect(restored).toEqual(await drawn(dataOf(live.events)));
+  });
+
+  it("ends a subscription to an exited child with its exit, after the last of its output", async () => {
+    const holder = await started("ended", ["printf", "abc"]);
+    await exitedHello(holder);
+    const { client, events } = await listen(holder);
+    await client.subscribe({ generation: 0, offset: 0 });
+    await until(() => events.some((event) => event.type === "exited"), "the exit after its output");
+    expect(events.map((event) => event.type)).toEqual(["data", "exited"]);
+    expect(output(events)).toBe("abc");
+  });
+
+  it("reports the title and the alternate screen as of the output they came in, once each", async () => {
+    const script = "printf 'ab\\033]2;one\\007\\033]2;the title\\007cd\\033[?1049h'; exec sleep 30";
+    const holder = await started("reports", gated(script));
+    const writer = await letGo(holder);
+    await until(
+      () => writer.events.some((event) => event.type === "alternate"),
+      "the alternate screen",
+    );
+    for (const type of ["title", "alternate"] as const) {
+      const { before, event } = upTo(writer.events, type);
+      expect(event).toMatchObject({ body: { offset: outputEnd(before) } });
+      expect(outputEnd(before)).toBeGreaterThanOrEqual(
+        output(writer.events).lastIndexOf("\x1b[?1049h"),
+      );
+    }
+    expect(reportsIn(writer.events)).toEqual([
+      { offset: expect.any(Number), text: "the title" },
+      { offset: expect.any(Number), on: true },
+    ]);
+  });
+
+  it("starts a respawned child on a reset screen: no title, the main screen", async () => {
+    const holder = await started("respawn-reset", ["printf", "\\033]2;old\\007\\033[?1049h"]);
+    const { client } = await listen(holder, true);
+    await until(async () => (await listen(holder)).client.hello.exit !== null, "the exit");
+    expect((await listen(holder)).client.hello).toMatchObject({ title: "old", alternate: true });
+    await client.respawn({ ...holderProcessSpec(["sleep", "30"]), generation: 1 });
+    const { hello } = (await listen(holder)).client;
+    expect(hello).toMatchObject({ generation: 1, title: "", alternate: false });
+  });
+
+  it("reports a resize as of the output read when it was applied", async () => {
+    const holder = await started("resize-report", gated("exec sleep 30"));
+    const writer = await letGo(holder);
+    await writer.client.resize({ cols: 100, rows: 30 });
+    await until(() => writer.events.some((event) => event.type === "resized"), "the resize");
+    const { before, event } = upTo(writer.events, "resized");
+    expect(event).toMatchObject({ body: { offset: outputEnd(before), cols: 100, rows: 30 } });
+  });
+
   it("answers every query with no connection subscribed, at once, in its theme", async () => {
     const queries = [
       ["cpr", `${ESC}[3;5H${ESC}[6n`, `${ESC}\\[\\d+;\\d+R`],

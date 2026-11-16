@@ -392,6 +392,33 @@ impl Engine {
         }
     }
 
+    /// Starts a new generation's output on this terminal, as a holder does when it respawns the
+    /// terminal's child: the main screen, the default modes, no title, the colours the holder
+    /// gives, and the history kept. The old main screen's rows go into history first, as `CSI 2 J`
+    /// pushes them in alacritty, so a crashed program's last screen stays scrollable: tmux's
+    /// `respawn-pane` keeps the history but drops that screen. A sequence the old program left
+    /// half written ends here, and never swallows the new one's output.
+    pub fn respawned(&mut self) {
+        if self.alternate() {
+            self.advance(b"\x1b[?1049l");
+        }
+        self.advance(b"\x1b[2J");
+        let grid = self.term.grid_mut();
+        let scrolled = grid.history_size();
+        for n in 0..scrolled {
+            self.encoded.clear();
+            let wrapped = encode_row(&grid[scrollback_line(scrolled, n)], &mut self.encoded);
+            self.history.push(&self.encoded, wrapped);
+        }
+        // RIS, past the stretch that would clear the history with it. The parser takes it, so
+        // whatever the old program left half written ends, as its `CSI 2 J` ended it in the
+        // read-ahead.
+        self.parse(b"\x1bc");
+        self.kept = None;
+        self.primary = Primary::default();
+        self.drain();
+    }
+
     /// Gives alacritty back the newest lines of the store a resize to `size` may pull from
     /// history: a row-grow fills the new rows from it, and a reflow that rejoins wrapped rows
     /// pulls rows down to keep the cursor's line, or drops rows below the cursor if history runs
@@ -907,6 +934,53 @@ mod tests {
         engine.advance(lines(0..200).as_bytes());
         assert_eq!(engine.stats().history_rows, 30);
         assert_eq!(history(&mut engine), lines(196 - 30..196));
+    }
+
+    #[test]
+    fn a_respawn_keeps_the_history_and_the_screen_it_ends_and_starts_on_a_reset_terminal() {
+        let mut engine = Engine::new(SIZE, HistoryRows(1000));
+        engine.advance(lines(0..50).as_bytes());
+        engine.advance(b"\x1b]2;old\x07\x1b[?2004h\x1b[?1000h\x1b[3;4r\x1b[?25l");
+        engine.respawned();
+        assert_eq!(history(&mut engine), lines(0..50));
+        assert!(screen(&engine).iter().all(String::is_empty));
+        assert_eq!(engine.title(), None);
+        assert_eq!(engine.modes(), Engine::new(SIZE, HistoryRows(1000)).modes());
+        engine.advance(b"new\x1b[6n");
+        assert_eq!(screen(&engine)[0], "new");
+        assert_eq!(engine.take_replies(), b"\x1b[1;4R");
+    }
+
+    #[test]
+    fn a_respawn_from_the_alternate_screen_keeps_the_main_screen_not_the_alternate_one() {
+        let mut engine = Engine::new(SIZE, HistoryRows(1000));
+        engine.advance(lines(0..50).as_bytes());
+        engine.advance(b"\x1b[?1049hon the alternate screen");
+        engine.respawned();
+        assert!(!engine.alternate());
+        assert_eq!(history(&mut engine), lines(0..50));
+        assert!(screen(&engine).iter().all(String::is_empty));
+    }
+
+    #[test]
+    fn a_sequence_the_old_program_left_half_written_never_swallows_the_new_ones_output() {
+        let mut engine = Engine::new(SIZE, HistoryRows(1000));
+        engine.advance(b"x\x1b]2;never ended");
+        engine.respawned();
+        engine.advance(b"hi");
+        assert_eq!(screen(&engine)[0], "hi");
+        assert_eq!(engine.title(), None);
+    }
+
+    #[test]
+    fn a_respawn_keeps_the_newest_rows_within_the_limit() {
+        let mut engine = Engine::new(SIZE, HistoryRows(30));
+        engine.advance(lines(0..200).as_bytes());
+        engine.respawned();
+        // The store holds a row fewer than the limit, for the one a drain leaves alacritty,
+        // which the reset takes.
+        assert_eq!(engine.stats().history_rows, 30 - KEPT_ROWS);
+        assert_eq!(history(&mut engine), lines(170 + KEPT_ROWS..200));
     }
 
     #[test]

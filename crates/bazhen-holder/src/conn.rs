@@ -31,6 +31,9 @@ pub const DATA_FRAME: usize = 64 << 10;
 pub const HELLO_WITHIN: Duration = Duration::from_secs(5);
 /// How long a connection being hung up has to read what it is owed.
 pub const HANG_UP_WITHIN: Duration = Duration::from_secs(1);
+/// The most `resized` a subscriber that lags is owed: past them, it is sent a `gap` to the
+/// newest, and the older go, so a writer that resizes endlessly can't grow its queue.
+pub const MOST_QUEUED_RESIZES: usize = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Phase {
@@ -58,6 +61,42 @@ struct Queued {
     frame: Vec<u8>,
     subscribes: Option<u64>,
     rebases: Option<u64>,
+    /// A snapshot, whose bytes count as owed until written.
+    snapshot: bool,
+    /// The child's `exited`.
+    exit: bool,
+    /// A state the connection is owed only the latest of.
+    state: Option<State>,
+    /// With `subscribes`, output the new subscription is sent a `gap` over, up to here: it was
+    /// owed more `resized` than are kept.
+    skip_to: Option<u64>,
+}
+
+/// Where the output stood at the snapshot a connection was answered just before, and whether the
+/// snapshot moved the connection's subscription there itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AfterSnapshot {
+    pub at: u64,
+    pub moved: bool,
+}
+
+/// Where the frame being written came from: the queue, whose bytes count against the mark until
+/// written, and a snapshot's as owed too; output and gaps from the ring count against neither.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Origin {
+    Ring,
+    Queue,
+    Snapshot,
+}
+
+/// A state the holder reports each time it changes, true as of the offset it comes at: a
+/// connection is owed only the latest of each, so however often a program changes them, it is
+/// never owed more than one of each.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum State {
+    Title,
+    Alternate,
+    Resized,
 }
 
 #[derive(Debug)]
@@ -77,11 +116,10 @@ pub struct Connection {
     phase: Phase,
     queue: VecDeque<Queued>,
     queued: usize,
-    /// The frame being written, how much of it is, and whether it came from the queue, whose
-    /// bytes count against the mark until written; output from the ring doesn't.
+    /// The frame being written, how much of it is, and where it came from.
     out: Vec<u8>,
     written: usize,
-    out_queued: bool,
+    out_from: Origin,
     /// The offset of the next output this connection is sent, while it is subscribed.
     cursor: Option<u64>,
     /// Where in the output the generation this connection was last told of starts: offsets it is
@@ -90,6 +128,20 @@ pub struct Connection {
     /// Since when a write has found the peer's buffer full, with nothing written since.
     stuck_since: Option<Instant>,
     accepted: Instant,
+    /// The bytes of snapshots queued or being written, not yet written.
+    owed_snapshot: usize,
+    /// Where the output stood at the snapshot this connection was answered last, until its next
+    /// request takes it.
+    after_snapshot: Option<AfterSnapshot>,
+    /// A snapshot asked for while the holder had no room for it, answered once it has, and since
+    /// when it has waited: the requests after it wait behind it.
+    held: Option<(Request, Instant)>,
+    /// Since when the snapshot just handed back over had waited, for it to keep its place if it
+    /// waits again.
+    held_from: Option<Instant>,
+    /// Output the subscriber is sent a `gap` over rather than the output: it was owed more
+    /// `resized` than it is kept.
+    skip_to: Option<u64>,
 }
 
 impl Connection {
@@ -107,13 +159,18 @@ impl Connection {
             },
             queue: VecDeque::new(),
             out: Vec::new(),
-            out_queued: false,
+            out_from: Origin::Ring,
             cursor: None,
             base: 0,
             queued: 0,
             written: 0,
             stuck_since: None,
             accepted: now,
+            owed_snapshot: 0,
+            after_snapshot: None,
+            held: None,
+            held_from: None,
+            skip_to: None,
         }
     }
 
@@ -156,6 +213,112 @@ impl Connection {
         self.queued
     }
 
+    /// The bytes of snapshots it is owed and hasn't been written yet: none once it is gone.
+    pub fn owed_snapshot(&self) -> usize {
+        if self.is_gone() {
+            0
+        } else {
+            self.owed_snapshot
+        }
+    }
+
+    /// Whether a snapshot it asked for waits for the holder to have room, and would be answered
+    /// once there is.
+    pub fn holds_a_snapshot(&self) -> bool {
+        self.held_since().is_some()
+    }
+
+    /// Since when the snapshot it holds has waited, while it would be answered.
+    pub fn held_since(&self) -> Option<Instant> {
+        self.held
+            .as_ref()
+            .filter(|_| self.answering())
+            .map(|(_, since)| *since)
+    }
+
+    /// Puts back `snapshot`, which the holder has no room to answer: it is the connection's next
+    /// request again, and nothing after it is answered first. One that waited before keeps the
+    /// time it began waiting.
+    pub fn hold(&mut self, snapshot: Request, now: Instant) {
+        let since = self.held_from.take().unwrap_or(now);
+        self.held = Some((snapshot, since));
+    }
+
+    /// The offset of the snapshot this connection was answered last, if its last request was
+    /// that snapshot: whatever request comes next takes it.
+    pub const fn take_after_snapshot(&mut self) -> Option<AfterSnapshot> {
+        self.after_snapshot.take()
+    }
+
+    /// Queues a snapshot of the output as of `at`: its bytes are owed until written. One sent
+    /// to a subscriber, its subscription in force or queued, moves the subscription to `at` as
+    /// it goes out: a subscriber is never sent output from before its snapshot after it, as a
+    /// lagging one that snapshots again, as `gap` tells it to, would be.
+    pub fn queue_snapshot(&mut self, frame: Vec<u8>, at: u64) {
+        if self.is_gone() || frame.is_empty() {
+            return;
+        }
+        let moved = self.subscribed();
+        self.owed_snapshot = self.owed_snapshot.saturating_add(frame.len());
+        self.queued = self.queued.saturating_add(frame.len());
+        self.after_snapshot = Some(AfterSnapshot { at, moved });
+        self.queue.push_back(Queued {
+            at: None,
+            frame,
+            subscribes: moved.then_some(at),
+            rebases: None,
+            snapshot: true,
+            exit: false,
+            state: None,
+            skip_to: None,
+        });
+    }
+
+    /// Queues `state` as of offset `at`, in place of one of its kind still queued: it goes after
+    /// everything queued, so it never comes before an `exited` or `respawned` queued earlier. A
+    /// subscriber draws the output between two sizes at the first, so it keeps every `resized`
+    /// queued since the latest subscription but one at the same offset, up to
+    /// `MOST_QUEUED_RESIZES`, past which it is sent a `gap` to the newest.
+    pub fn queue_state(&mut self, state: State, at: u64, frame: Vec<u8>) {
+        if self.is_gone() || frame.is_empty() {
+            return;
+        }
+        // Only what the latest subscription is owed: what is queued before it moves goes to the
+        // subscription before.
+        let since = self.latest_subscription();
+        let drawn_at = state == State::Resized && self.subscribed();
+        let replaced = |q: &Queued| q.state == Some(state) && (!drawn_at || q.at == Some(at));
+        if let Some(i) = self.queue.iter().skip(since).position(replaced)
+            && let Some(old) = self.queue.remove(since + i)
+        {
+            self.queued = self.queued.saturating_sub(old.frame.len());
+        }
+        let ours = |q: &Queued| q.state == Some(state);
+        let resizes = self.queue.iter().skip(since).filter(|q| ours(q)).count();
+        if drawn_at && resizes >= MOST_QUEUED_RESIZES {
+            let (dropped, kept): (Vec<Queued>, Vec<Queued>) =
+                self.queue.drain(since..).partition(|q| ours(q));
+            let freed: usize = dropped.iter().map(|q| q.frame.len()).sum();
+            self.queue.extend(kept);
+            self.queued = self.queued.saturating_sub(freed);
+            match since.checked_sub(1).and_then(|i| self.queue.get_mut(i)) {
+                Some(subscription) => subscription.skip_to = Some(at),
+                None => self.skip_to = Some(at),
+            }
+        }
+        self.queued = self.queued.saturating_add(frame.len());
+        self.queue.push_back(Queued {
+            at: Some(at),
+            frame,
+            subscribes: None,
+            rebases: None,
+            snapshot: false,
+            exit: false,
+            state: Some(state),
+            skip_to: None,
+        });
+    }
+
     /// `hello` is answered, in the generation that starts at `base`: the connection takes any
     /// request from here.
     pub fn open(&mut self, base: u64) {
@@ -185,16 +348,49 @@ impl Connection {
         matches!(self.phase, Phase::Opening { .. } | Phase::Open) && self.queued < QUEUE_MARK
     }
 
+    /// Whether a subscription draws the output queued from here: one in force, or one queued.
+    fn subscribed(&self) -> bool {
+        self.live_cursor().is_some()
+            || (!self.input_ended && self.queue.iter().any(|q| q.subscribes.is_some()))
+    }
+
+    /// Where in the queue what the latest subscription is owed starts: after the last frame that
+    /// moves the subscription, or at the front.
+    fn latest_subscription(&self) -> usize {
+        self.queue
+            .iter()
+            .rposition(|q| q.subscribes.is_some())
+            .map_or(0, |i| i + 1)
+    }
+
+    /// Does what `poll` found for it, `revents`: reads while it reads. One that no longer reads
+    /// and whose peer has gone is dropped: its socket would report the hang-up every turn.
+    pub fn polled(&mut self, revents: PollFlags, buffer: &mut [u8]) {
+        if revents.is_empty() {
+            return;
+        }
+        if !self.reading() && revents.intersects(PollFlags::HUP | PollFlags::ERR) {
+            tracing::info!("a peer hung up while it wasn't read; dropping its connection");
+            self.drop_now();
+            return;
+        }
+        self.receive(buffer);
+    }
+
     /// Whether its socket is read now: while it is answered, has more to say, and has no whole
     /// request waiting.
     fn reading(&self) -> bool {
-        self.answering() && !self.input_ended && !self.refused && self.next.is_none()
+        self.answering()
+            && !self.input_ended
+            && !self.refused
+            && self.next.is_none()
+            && self.held.is_none()
     }
 
     /// Whether a whole request waits to be answered now. The loop must serve such a connection
     /// without waiting on `poll`: its socket may have nothing more to say until it is answered.
     pub fn has_request(&self) -> bool {
-        self.answering() && self.next.is_some()
+        self.answering() && self.next.is_some() && self.held.is_none()
     }
 
     /// What `poll` should wait for: to read while the socket is read, and to write while anything
@@ -233,6 +429,10 @@ impl Connection {
             frame,
             subscribes: Some(from),
             rebases: None,
+            snapshot: false,
+            exit: false,
+            state: None,
+            skip_to: None,
         });
     }
 
@@ -279,6 +479,11 @@ impl Connection {
         if !self.answering() {
             return None;
         }
+        if let Some((held, since)) = self.held.take() {
+            self.held_from = Some(since);
+            return Some(Ok(held));
+        }
+        self.held_from = None;
         let next = self.next.take();
         if matches!(next, Some(Err(_))) {
             self.refused = true;
@@ -302,22 +507,49 @@ impl Connection {
             frame,
             subscribes: None,
             rebases: None,
+            snapshot: false,
+            exit: false,
+            state: None,
+            skip_to: None,
         });
     }
 
-    /// Queues an event that happened at offset `at` of the output: a subscriber gets it once it has
-    /// been sent the output before it, and any other connection as soon as the frames before it.
-    pub fn queue_event(&mut self, at: u64, frame: Vec<u8>) {
-        self.push_event(at, frame, None);
+    /// Queues the child's `exited`, at `at`, the output's end when it was published: a subscriber
+    /// gets it once it has been sent the output before it, and any other connection as soon as
+    /// the frames before it.
+    pub fn queue_exited(&mut self, at: u64, frame: Vec<u8>) {
+        self.push_event(at, frame, None, true);
+    }
+
+    /// Queues `exited` again, at `at`, after a subscription's `ok`, in place of one still queued
+    /// for the same generation (none is queued after a `respawned` but its own): a subscription
+    /// to an exited child ends with its `exited`, after the last of its output.
+    pub fn requeue_exited(&mut self, at: u64, frame: Vec<u8>) {
+        let generation = self
+            .queue
+            .iter()
+            .rposition(|queued| queued.rebases.is_some())
+            .map_or(0, |i| i + 1);
+        let queued = self
+            .queue
+            .iter()
+            .skip(generation)
+            .position(|queued| queued.exit);
+        if let Some(i) = queued
+            && let Some(old) = self.queue.remove(generation + i)
+        {
+            self.queued = self.queued.saturating_sub(old.frame.len());
+        }
+        self.queue_exited(at, frame);
     }
 
     /// Queues `respawned`, an event at `at` where the new generation's output starts: once it is
     /// sent, offsets count from there.
     pub fn queue_respawned(&mut self, at: u64, frame: Vec<u8>) {
-        self.push_event(at, frame, Some(at));
+        self.push_event(at, frame, Some(at), false);
     }
 
-    fn push_event(&mut self, at: u64, frame: Vec<u8>, rebases: Option<u64>) {
+    fn push_event(&mut self, at: u64, frame: Vec<u8>, rebases: Option<u64>, exit: bool) {
         if self.is_gone() || frame.is_empty() {
             return;
         }
@@ -327,6 +559,10 @@ impl Connection {
             frame,
             subscribes: None,
             rebases,
+            snapshot: false,
+            exit,
+            state: None,
+            skip_to: None,
         });
     }
 
@@ -335,7 +571,7 @@ impl Connection {
     /// output from the cursor up to the first queued event. An event waiting on output never
     /// blocks the output that frees it, and neither output nor a gap crosses one, so none spans a
     /// respawn.
-    fn next_frame(&mut self, ring: &Ring) -> Option<(Vec<u8>, bool)> {
+    fn next_frame(&mut self, ring: &Ring) -> Option<(Vec<u8>, Origin)> {
         let live = self.live_cursor();
         let gate = match self.queue.front() {
             Some(front)
@@ -346,11 +582,17 @@ impl Connection {
                 let front = self.queue.pop_front()?;
                 if let Some(from) = front.subscribes {
                     self.cursor = Some(from);
+                    self.skip_to = front.skip_to;
                 }
                 if let Some(base) = front.rebases {
                     self.base = base;
                 }
-                return Some((front.frame, true));
+                let from = if front.snapshot {
+                    Origin::Snapshot
+                } else {
+                    Origin::Queue
+                };
+                return Some((front.frame, from));
             }
             Some(front) => front.at,
             None => None,
@@ -364,14 +606,18 @@ impl Connection {
             }
         };
         let limit = gate.unwrap_or(u64::MAX).min(ring.end());
-        if cursor < ring.start() {
-            let to = ring.start().min(limit);
+        let skip = self.skip_to.map_or(ring.start(), |to| to.max(ring.start()));
+        if self.skip_to.is_some_and(|to| cursor >= to) {
+            self.skip_to = None;
+        }
+        if cursor < skip {
+            let to = skip.min(limit);
             let gap = Gap {
                 from: self.offset(cursor)?,
                 to: self.offset(to)?,
             };
             self.cursor = Some(to);
-            return encoded(Reply::Gap(gap)).map(|frame| (frame, false));
+            return encoded(Reply::Gap(gap)).map(|frame| (frame, Origin::Ring));
         }
         let room = usize::try_from(limit.checked_sub(cursor)?).unwrap_or(usize::MAX);
         let bytes = ring.read(cursor, room.min(DATA_FRAME))?;
@@ -384,7 +630,7 @@ impl Connection {
             bytes: bytes.to_vec(),
         })?;
         self.cursor = Some(cursor.saturating_add(u64::try_from(bytes.len()).unwrap_or(u64::MAX)));
-        Some((frame, false))
+        Some((frame, Origin::Ring))
     }
 
     /// `offset` as the protocol carries it, counted from the start of the connection's generation.
@@ -411,12 +657,12 @@ impl Connection {
                 return;
             }
             if self.out.is_empty() {
-                let Some((frame, queued)) = self.next_frame(ring) else {
+                let Some((frame, from)) = self.next_frame(ring) else {
                     self.stuck_since = None;
                     return;
                 };
                 self.out = frame;
-                self.out_queued = queued;
+                self.out_from = from;
                 self.written = 0;
             }
             let pending = self.out.get(self.written..).unwrap_or_default();
@@ -427,8 +673,11 @@ impl Connection {
                     self.stuck_since = None;
                     budget -= n;
                     self.written += n;
+                    if self.out_from == Origin::Snapshot {
+                        self.owed_snapshot = self.owed_snapshot.saturating_sub(n);
+                    }
                     if self.written == self.out.len() {
-                        if self.out_queued {
+                        if self.out_from != Origin::Ring {
                             self.queued = self.queued.saturating_sub(self.out.len());
                         }
                         self.out.clear();
@@ -463,7 +712,7 @@ impl Connection {
     pub fn is_finished(&self, now: Instant) -> bool {
         // The end of input is read only once no whole request waits, and nothing is read after it.
         let written = self.queue.is_empty() && self.out.is_empty();
-        let answered = self.input_ended && written;
+        let answered = self.input_ended && written && self.held.is_none();
         match self.phase {
             Phase::Gone => true,
             Phase::Opening { until } => answered || now >= until,
@@ -571,7 +820,7 @@ mod tests {
         let now = Instant::now();
         let (mut conn, mut peer) = subscribed(now, 0);
         let ring = ring_of(64, b"0123456789");
-        conn.queue_event(6, exited_frame());
+        conn.queue_exited(6, exited_frame());
         conn.queue(ok_frame(2));
         conn.flush(now, &ring);
         let replies = peer.sent();
@@ -589,7 +838,7 @@ mod tests {
         let now = Instant::now();
         for (from, after) in [(2, &b"23456789ab"[..]), (12, &b""[..])] {
             let (mut conn, mut peer) = subscribed(now, 0);
-            conn.queue_event(10, exited_frame());
+            conn.queue_exited(10, exited_frame());
             conn.flush(now, &ring_of(64, b"012345"));
             let first = peer.sent();
             assert_eq!(data(&first[1]), Some((0, &b"012345"[..])), "{from}");
@@ -623,7 +872,7 @@ mod tests {
     fn output_after_a_respawn_counts_from_zero_and_no_frame_spans_it() {
         let now = Instant::now();
         let (mut conn, mut peer) = subscribed(now, 0);
-        conn.queue_event(4, exited_frame());
+        conn.queue_exited(4, exited_frame());
         conn.queue_respawned(6, respawned_frame());
         conn.flush(now, &ring_of(64, b"0123ab456789"));
         let replies = peer.sent();
@@ -681,7 +930,7 @@ mod tests {
         let now = Instant::now();
         let (mut conn, peer) = pair(now);
         let mut peer = Peer::of(peer);
-        conn.queue_event(1_000, exited_frame());
+        conn.queue_exited(1_000, exited_frame());
         conn.flush(now, &ring_of(64, b"0123"));
         assert!(matches!(peer.sent().as_slice(), [Reply::Exited(_)]));
     }
@@ -749,7 +998,7 @@ mod tests {
         let (mut conn, peer) = pair(now);
         conn.open(0);
         conn.queue_subscribed(ok_frame(1), 0);
-        conn.queue_event(10, exited_frame());
+        conn.queue_exited(10, exited_frame());
         let mut peer = Peer::of(peer);
         peer.stream.shutdown(std::net::Shutdown::Write).unwrap();
         conn.receive(&mut vec![0; READ_CHUNK]);
@@ -990,5 +1239,320 @@ mod tests {
         assert!(!conn.has_request(), "read while a request waited");
         conn.receive(&mut vec![0; READ_CHUNK]);
         assert_eq!(conn.next_request().unwrap().unwrap().id(), RequestId(2));
+    }
+
+    fn title_frame(offset: u64, text: &str) -> Vec<u8> {
+        let title = bazhen_holder_proto::body::Title {
+            offset: Offset::new(offset).unwrap(),
+            text: text.to_owned(),
+        };
+        Reply::Title(title).encode().unwrap()
+    }
+
+    fn names(replies: &[Reply]) -> Vec<String> {
+        replies
+            .iter()
+            .map(|reply| match reply {
+                Reply::Title(title) => format!("title {}", title.text),
+                Reply::Exited(_) => "exited".to_owned(),
+                Reply::Respawned(_) => "respawned".to_owned(),
+                Reply::Ok { .. } => "ok".to_owned(),
+                other => format!("{other:?}"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_state_queued_again_replaces_the_one_still_queued_and_goes_behind_what_came_since() {
+        let now = Instant::now();
+        let (mut conn, peer) = pair(now);
+        let mut peer = Peer::of(peer);
+        conn.open(0);
+        conn.queue_state(State::Title, 0, title_frame(0, "first"));
+        conn.queue_exited(0, exited_frame());
+        conn.queue_state(State::Title, 0, title_frame(0, "second"));
+        let queued = conn.queued();
+        conn.flush(now, &no_output());
+        assert_eq!(names(&peer.sent()), ["exited", "title second"]);
+        assert_eq!(
+            queued,
+            exited_frame().len() + title_frame(0, "second").len(),
+            "the replaced one still counted"
+        );
+    }
+
+    #[test]
+    fn a_snapshots_bytes_are_owed_until_written_and_not_once_its_connection_is_gone() {
+        let now = Instant::now();
+        let (mut conn, mut peer) = pair(now);
+        conn.open(0);
+        let frame = vec![1; 4 << 20];
+        conn.queue_snapshot(frame.clone(), 7);
+        assert_eq!(conn.owed_snapshot(), frame.len());
+        conn.flush(now, &no_output());
+        let left = conn.owed_snapshot();
+        assert!(0 < left && left < frame.len(), "{left} of a snapshot owed");
+        let mut chunk = vec![0; 1 << 20];
+        while conn.owed_snapshot() > 0 {
+            let _ = peer.read(&mut chunk).unwrap();
+            conn.flush(now, &no_output());
+        }
+        conn.queue_snapshot(frame, 9);
+        conn.drop_now();
+        assert_eq!(conn.owed_snapshot(), 0);
+    }
+
+    #[test]
+    fn a_held_snapshot_comes_back_before_the_requests_after_it_and_keeps_its_connection() {
+        let now = Instant::now();
+        let (mut conn, mut peer) = pair(now);
+        conn.open(0);
+        peer.write_all(&Request::Snapshot { id: RequestId(1) }.encode().unwrap())
+            .unwrap();
+        peer.write_all(&close_request(2)).unwrap();
+        peer.shutdown(std::net::Shutdown::Write).unwrap();
+        conn.receive(&mut vec![0; READ_CHUNK]);
+        let snapshot = conn.next_request().unwrap().unwrap();
+        conn.hold(snapshot, now);
+        assert!(
+            !conn.has_request(),
+            "a held snapshot counts as a request to answer now"
+        );
+        conn.receive(&mut vec![0; READ_CHUNK]);
+        assert!(
+            !conn.is_finished(now),
+            "it ended with its snapshot unanswered"
+        );
+        assert_eq!(conn.next_request().unwrap().unwrap().id(), RequestId(1));
+        assert_eq!(conn.next_request().unwrap().unwrap().id(), RequestId(2));
+    }
+
+    #[test]
+    fn exited_queued_again_replaces_its_generations_but_not_one_before_a_respawn() {
+        let now = Instant::now();
+        let (mut conn, peer) = pair(now);
+        let mut peer = Peer::of(peer);
+        conn.open(0);
+        conn.queue_exited(0, exited_frame());
+        conn.queue_respawned(0, respawned_frame());
+        conn.queue_exited(0, exited_frame());
+        conn.queue_subscribed(ok_frame(1), 0);
+        conn.requeue_exited(0, exited_frame());
+        conn.flush(now, &no_output());
+        assert_eq!(names(&peer.sent()), ["exited", "respawned", "ok", "exited"]);
+    }
+
+    fn snapshot_frame(text_bytes: usize) -> Vec<u8> {
+        let mut frame = bazhen_holder_proto::SnapshotFrame::default();
+        frame.text().push_str(&"s".repeat(text_bytes));
+        frame
+            .finish(RequestId(2), Offset::new(0).unwrap(), 0)
+            .unwrap()
+    }
+
+    fn resized_frame(offset: u64) -> Vec<u8> {
+        let resized = bazhen_holder_proto::body::Resized {
+            offset: Offset::new(offset).unwrap(),
+            cols: bazhen_holder_proto::body::Cols::new(100).unwrap(),
+            rows: bazhen_holder_proto::body::Rows::new(30).unwrap(),
+        };
+        Reply::Resized(resized).encode().unwrap()
+    }
+
+    /// Flushes and reads until the peer has been sent everything owed and the ring's output.
+    fn drain(conn: &mut Connection, peer: &mut Peer, ring: &Ring) -> Vec<Reply> {
+        let now = Instant::now();
+        let mut sent = Vec::new();
+        for _ in 0..1000 {
+            conn.flush(now, ring);
+            sent.extend(peer.sent());
+            if conn.interest(ring.end()).is_empty()
+                || !conn.interest(ring.end()).contains(PollFlags::OUT)
+            {
+                break;
+            }
+        }
+        sent
+    }
+
+    #[test]
+    fn a_subscriber_that_snapshots_again_is_sent_no_output_from_before_the_snapshot_after_it() {
+        let now = Instant::now();
+        let (mut conn, mut peer) = subscribed(now, 0);
+        conn.open(0);
+        let mut ring = ring_of(1 << 20, &[b'a'; 100]);
+        let _ = drain(&mut conn, &mut peer, &ring);
+        // Output it lags behind, then a snapshot past the mark as of the end, its subscribe unread.
+        ring.push(&[b'b'; 100]);
+        conn.queue_snapshot(snapshot_frame(QUEUE_MARK), 200);
+        let mut sent = drain(&mut conn, &mut peer, &ring);
+        ring.push(&[b'c'; 50]);
+        sent.extend(drain(&mut conn, &mut peer, &ring));
+        let snapshot = sent
+            .iter()
+            .position(|reply| matches!(reply, Reply::Snapshot { .. }))
+            .unwrap();
+        let after: Vec<u64> = sent[snapshot..]
+            .iter()
+            .filter_map(|r| data(r).map(|(at, _)| at))
+            .collect();
+        assert_eq!(
+            after.first(),
+            Some(&200),
+            "output from before the snapshot followed it"
+        );
+        assert!(
+            sent[..snapshot]
+                .iter()
+                .filter_map(data)
+                .all(|(at, _)| at < 200)
+        );
+    }
+
+    #[test]
+    fn a_connection_whose_snapshot_waits_ends_once_its_peer_hangs_up() {
+        let now = Instant::now();
+        let (mut conn, peer) = pair(now);
+        conn.open(0);
+        conn.hold(Request::Snapshot { id: RequestId(1) }, now);
+        drop(peer);
+        // Linux reports the hang-up on a socket polled for nothing, which is what spun the loop;
+        // macOS registers nothing for it, so there the loop only ever sees the hang-up below.
+        #[cfg(target_os = "linux")]
+        {
+            let mut fds = [rustix::event::PollFd::from_borrowed_fd(
+                conn.fd(),
+                conn.interest(0),
+            )];
+            let timeout = rustix::event::Timespec {
+                tv_sec: 5,
+                tv_nsec: 0,
+            };
+            rustix::event::poll(&mut fds, Some(&timeout)).unwrap();
+            let revents = fds[0].revents();
+            assert!(revents.contains(PollFlags::HUP), "{revents:?}");
+        }
+        conn.polled(PollFlags::HUP, &mut vec![0; READ_CHUNK]);
+        assert!(conn.is_finished(now), "it would spin on the hang-up");
+    }
+
+    #[test]
+    fn a_subscriber_that_lags_is_sent_each_resize_at_its_offset() {
+        let now = Instant::now();
+        let (mut conn, mut peer) = subscribed(now, 0);
+        conn.open(0);
+        conn.queue_state(State::Resized, 10, resized_frame(10));
+        conn.queue_state(State::Resized, 20, resized_frame(20));
+        let ring = ring_of(1 << 10, &[b'x'; 30]);
+        let sent = drain(&mut conn, &mut peer, &ring);
+        let order: Vec<String> = sent
+            .iter()
+            .map(|reply| match reply {
+                Reply::Data { offset, bytes } => format!("data {}+{}", offset.get(), bytes.len()),
+                Reply::Resized(resized) => format!("resized {}", resized.offset.get()),
+                other => names(std::slice::from_ref(other)).concat(),
+            })
+            .collect();
+        assert_eq!(
+            order,
+            [
+                "ok",
+                "data 0+10",
+                "resized 10",
+                "data 10+10",
+                "resized 20",
+                "data 20+10"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_subscriber_owed_more_resizes_than_are_kept_gets_a_gap_to_the_newest() {
+        let now = Instant::now();
+        let (mut conn, mut peer) = subscribed(now, 0);
+        conn.open(0);
+        let newest = 10 * (MOST_QUEUED_RESIZES as u64 + 1);
+        for n in 1..=MOST_QUEUED_RESIZES as u64 + 1 {
+            conn.queue_state(State::Resized, 10 * n, resized_frame(10 * n));
+        }
+        let ring = ring_of(1 << 10, &[b'x'; 200]);
+        let sent = drain(&mut conn, &mut peer, &ring);
+        let resizes: Vec<u64> = sent
+            .iter()
+            .filter_map(|r| match r {
+                Reply::Resized(resized) => Some(resized.offset.get()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(resizes, [newest]);
+        assert!(
+            sent.iter().any(
+                |r| matches!(r, Reply::Gap(gap) if gap.from.get() == 0 && gap.to.get() == newest)
+            ),
+            "{sent:?}"
+        );
+        assert_eq!(
+            sent.iter().filter_map(data).map(|(at, _)| at).next(),
+            Some(newest)
+        );
+    }
+
+    #[test]
+    fn a_snapshot_after_a_subscription_still_queued_moves_it_to_the_snapshot() {
+        let now = Instant::now();
+        let (mut conn, mut peer) = subscribed(now, 0);
+        conn.open(0);
+        conn.queue_snapshot(snapshot_frame(10), 200);
+        let ring = ring_of(1 << 20, &[b'a'; 250]);
+        let sent = drain(&mut conn, &mut peer, &ring);
+        let offsets: Vec<u64> = sent
+            .iter()
+            .filter_map(|r| data(r).map(|(at, _)| at))
+            .collect();
+        assert_eq!(offsets, [200], "output from before the snapshot was sent");
+        assert_eq!(
+            conn.take_after_snapshot(),
+            Some(AfterSnapshot {
+                at: 200,
+                moved: true
+            })
+        );
+    }
+
+    #[test]
+    fn resizes_owed_to_a_subscription_being_replaced_are_kept_past_the_new_ones_cap() {
+        let now = Instant::now();
+        let (mut conn, mut peer) = subscribed(now, 0);
+        conn.open(0);
+        conn.queue_state(State::Resized, 10, resized_frame(10));
+        conn.queue_subscribed(ok_frame(2), 0);
+        let newest = 10 * (MOST_QUEUED_RESIZES as u64 + 2);
+        for n in 2..=MOST_QUEUED_RESIZES as u64 + 2 {
+            conn.queue_state(State::Resized, 10 * n, resized_frame(10 * n));
+        }
+        let ring = ring_of(1 << 10, &[b'x'; 200]);
+        let sent = drain(&mut conn, &mut peer, &ring);
+        let resizes: Vec<u64> = sent
+            .iter()
+            .filter_map(|r| match r {
+                Reply::Resized(resized) => Some(resized.offset.get()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(resizes, [10, newest], "the old subscription's resize went");
+        let gap = sent.iter().position(|r| matches!(r, Reply::Gap(_)));
+        let second_ok = sent.iter().rposition(|r| {
+            matches!(
+                r,
+                Reply::Ok {
+                    id: RequestId(2),
+                    ..
+                }
+            )
+        });
+        assert!(
+            gap > second_ok,
+            "the gap came before its subscription: {sent:?}"
+        );
     }
 }

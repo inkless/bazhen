@@ -28,6 +28,7 @@ impl Client {
         loop {
             match self.reply()? {
                 Reply::Data { bytes, .. } => seen.extend_from_slice(&bytes),
+                reply if is_report(&reply) => {}
                 Reply::Ok { id, .. } | Reply::Error { id, .. } | Reply::Foreground { id, .. }
                     if id != request.id() =>
                 {
@@ -49,6 +50,7 @@ impl Client {
             }
             match self.reply()? {
                 Reply::Data { bytes, .. } => seen.extend_from_slice(&bytes),
+                reply if is_report(&reply) => {}
                 other => return Err(format!("sent {other:?}").into()),
             }
         }
@@ -127,6 +129,14 @@ impl Client {
         self.output_until(&mut seen, marker)?;
         Ok(seen)
     }
+}
+
+/// A report of the title, the screen or the size, which comes whenever they change.
+fn is_report(reply: &Reply) -> bool {
+    matches!(
+        reply,
+        Reply::Resized(_) | Reply::Title(_) | Reply::Alternate(_)
+    )
 }
 
 fn code(reply: &Reply) -> Option<&str> {
@@ -305,6 +315,7 @@ fn a_storm_of_resizes_costs_one_sigwinch_and_a_zero_size_is_clamped() {
     while answered < 101 {
         match writer.reply().unwrap() {
             Reply::Data { bytes, .. } => seen.extend_from_slice(&bytes),
+            reply if is_report(&reply) => {}
             reply if code(&reply).is_none() => answered += 1,
             other => panic!("answered {other:?}"),
         }
