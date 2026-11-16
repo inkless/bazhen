@@ -435,6 +435,33 @@ fn close_answers_ok_ends_the_child_removes_the_socket_and_exits_0() {
     assert!(home.join("t1.lock").exists());
 }
 
+#[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
+fn a_closing_holder_binds_no_socket_again_though_told_to() {
+    bazhen_test_signal::require_sandbox().unwrap();
+    sweep().unwrap();
+    let home = home("closing-rebind").unwrap();
+    // A child that ignores the hang-up keeps the close going until its kill, a grace later.
+    let (mut holder, socket) = serving(&home, &["sh", "-c", "trap '' HUP; exec sleep 30"]).unwrap();
+    let mut client = Client::connect(&socket).unwrap();
+    client.hello(false).unwrap();
+    client.send(&Request::Close { id: RequestId(3) }).unwrap();
+    assert!(matches!(
+        client.reply().unwrap(),
+        Reply::Ok {
+            id: RequestId(3),
+            ..
+        }
+    ));
+    bazhen_test_signal::signal(holder.pid, Signal::USR1).unwrap();
+    holder.exit().unwrap();
+    // Nothing removes a socket bound after the close began, so one would outlive the holder.
+    assert!(
+        !socket.exists(),
+        "the socket was bound again while the holder closed"
+    );
+}
+
 /// A child that leaves a job behind in a group of its own, which ignores `SIGHUP` and writes its
 /// pid to the file named by `$0`, then exits.
 const LEAVES_A_STRAGGLER: &str =
@@ -703,12 +730,14 @@ fn a_failed_accept_pauses_accepting_and_leaves_the_holder_idle() {
     let crowd: Vec<UnixStream> = (0..15)
         .map(|_| UnixStream::connect(&socket).unwrap())
         .collect();
-    drop(crowd);
+    // Kept open meanwhile, so the holder stays out of descriptors with connections waiting: one
+    // that retried at once instead of pausing would spin.
     let window = Instant::now() + std::time::Duration::from_secs(4);
     while Instant::now() < window {
         // The holder is only being watched here; there is nothing to wait on.
         std::thread::sleep(std::time::Duration::from_millis(200));
     }
+    drop(crowd);
     assert!(
         start_time::of(holder.pid().unwrap()).is_ok(),
         "the holder died, of SIGXCPU if it spun"
