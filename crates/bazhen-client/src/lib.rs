@@ -254,6 +254,7 @@ mod tests {
     const LIMITS: Limits = Limits {
         head: 16 << 10,
         body: 1 << 20,
+        chunked: false,
     };
 
     fn caller(agent: Option<&str>, token: Option<&str>, device: Option<&str>) -> Caller {

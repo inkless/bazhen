@@ -11,6 +11,9 @@ use std::time::Duration;
 pub struct Limits {
     pub head: usize,
     pub body: usize,
+    /// Whether a body sent in chunks (`Transfer-Encoding: chunked`) is read, as an HTTP client
+    /// reads one; without it, a response with no length ends at its head and is refused.
+    pub chunked: bool,
 }
 
 /// Reads one response, up to where `Framing` says it ends, so it never waits on the daemon closing
@@ -82,6 +85,8 @@ pub struct Framing {
     limits: Limits,
     searched: usize,
     end: Option<usize>,
+    /// Where a body sent in chunks begins, once a head saying so is in.
+    chunks_from: Option<usize>,
 }
 
 impl Framing {
@@ -90,11 +95,15 @@ impl Framing {
             limits,
             searched: 0,
             end: None,
+            chunks_from: None,
         }
     }
 
     /// `reply_end(response)`, where `response` extends every response this was given before.
     pub fn end_of(&mut self, response: &[u8]) -> Option<usize> {
+        if let Some(start) = self.chunks_from {
+            return chunks_end(response, start, self.limits.body);
+        }
         if self.end.is_none() {
             let from = self.searched;
             // The next end of head can begin in the last 3 bytes already searched.
@@ -106,7 +115,13 @@ impl Framing {
                 let over = self.limits.head.saturating_add(4);
                 return (response.len() >= over).then_some(response.len());
             };
-            self.end = Some(end_by_head(response, from + at, self.limits));
+            let head_end = from + at;
+            if self.limits.chunked && head_end <= self.limits.head && in_chunks(response, head_end)
+            {
+                self.chunks_from = Some(head_end + 4);
+                return chunks_end(response, head_end + 4, self.limits.body);
+            }
+            self.end = Some(end_by_head(response, head_end, self.limits));
         }
         self.end.filter(|&end| response.len() >= end)
     }
@@ -122,6 +137,117 @@ fn end_by_head(response: &[u8], head_end: usize, limits: Limits) -> usize {
         .and_then(content_length)
         .filter(|&n| head_end <= limits.head && n <= limits.body);
     length.map_or(head_len, |n| head_len.saturating_add(n))
+}
+
+/// Whether the head ending at `head_end` sends its body in chunks, and gives it no length.
+fn in_chunks(response: &[u8], head_end: usize) -> bool {
+    let Some(head) = response
+        .get(..head_end)
+        .and_then(|h| std::str::from_utf8(h).ok())
+    else {
+        return false;
+    };
+    let chunked =
+        header(head, "Transfer-Encoding").is_some_and(|v| v.eq_ignore_ascii_case("chunked"));
+    chunked && headers(head, "Content-Length").next().is_none()
+}
+
+/// How a body sent in chunks stands.
+enum Chunks {
+    /// It ends here; the bytes before are the response.
+    Done(usize),
+    /// More is to come.
+    More,
+    /// It isn't chunks, or holds more than the limit.
+    Bad,
+}
+
+/// The chunks of a body starting at `start`, each chunk's data handed to `data` as it is read.
+fn scan_chunks(response: &[u8], start: usize, limit: usize, mut data: impl FnMut(&[u8])) -> Chunks {
+    let line_end = |from: usize| {
+        response
+            .get(from..)
+            .and_then(|rest| rest.windows(2).position(|w| w == b"\r\n"))
+            .map(|at| from + at)
+    };
+    let mut at = start;
+    let mut total = 0usize;
+    loop {
+        let Some(end) = line_end(at) else {
+            return if response.len().saturating_sub(at) > 64 {
+                Chunks::Bad
+            } else {
+                Chunks::More
+            };
+        };
+        let size = response
+            .get(at..end)
+            .and_then(|line| std::str::from_utf8(line).ok())
+            .and_then(|line| line.split(';').next())
+            .map(str::trim)
+            .filter(|hex| {
+                !hex.is_empty() && hex.len() <= 16 && hex.bytes().all(|b| b.is_ascii_hexdigit())
+            })
+            .and_then(|hex| usize::from_str_radix(hex, 16).ok());
+        let Some(size) = size else {
+            return Chunks::Bad;
+        };
+        at = end + 2;
+        if size == 0 {
+            loop {
+                let Some(trailer) = line_end(at) else {
+                    return Chunks::More;
+                };
+                if trailer == at {
+                    return Chunks::Done(at + 2);
+                }
+                at = trailer + 2;
+                if at - start > limit.saturating_add(4096) {
+                    return Chunks::Bad;
+                }
+            }
+        }
+        total = total.saturating_add(size);
+        if total > limit {
+            return Chunks::Bad;
+        }
+        let data_end = at.saturating_add(size);
+        match response.get(data_end..data_end.saturating_add(2)) {
+            None => return Chunks::More,
+            Some(b"\r\n") => {}
+            Some(_) => return Chunks::Bad,
+        }
+        data(response.get(at..data_end).unwrap_or_default());
+        at = data_end + 2;
+    }
+}
+
+/// Where a body sent in chunks from `start` ends: after its last chunk and trailers; or at once,
+/// when it isn't chunks, so a reader never waits on what it will refuse.
+fn chunks_end(response: &[u8], start: usize, limit: usize) -> Option<usize> {
+    match scan_chunks(response, start, limit, |_| {}) {
+        Chunks::Done(end) => Some(end),
+        Chunks::More => None,
+        Chunks::Bad => Some(response.len()),
+    }
+}
+
+/// A whole response's body: the bytes after its head, or the data of its chunks joined, when
+/// `limits` read chunks and the head says it sends them. None when it isn't a response, or its
+/// chunks are malformed or cut short.
+pub fn body(response: &[u8], limits: Limits) -> Option<Vec<u8>> {
+    let head_end = response.windows(4).position(|w| w == b"\r\n\r\n")?;
+    let rest = response.get(head_end + 4..)?;
+    if !(limits.chunked && in_chunks(response, head_end)) {
+        return Some(rest.to_vec());
+    }
+    let mut out = Vec::new();
+    match scan_chunks(response, head_end + 4, limits.body, |d| {
+        out.extend_from_slice(d);
+    }) {
+        Chunks::Done(_) => Some(out),
+        Chunks::More | Chunks::Bad => None,
+    }
 }
 
 /// Whether the response ended early, before `reply_end` could say where it ends. Anything else is
@@ -183,7 +309,44 @@ mod tests {
     const LIMITS: Limits = Limits {
         head: 16 << 10,
         body: 1 << 20,
+        chunked: false,
     };
+    const CHUNKED: Limits = Limits {
+        chunked: true,
+        ..LIMITS
+    };
+
+    fn chunked(body: &[u8]) -> Vec<u8> {
+        [
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n",
+            body,
+        ]
+        .concat()
+    }
+
+    #[test]
+    fn reads_a_body_sent_in_chunks_to_its_last_chunk_and_joins_them() {
+        let whole = chunked(b"4\r\n{\"a\"\r\n3;x=y\r\n:1}\r\n0\r\nT: v\r\n\r\n");
+        let (mut client, _open) = daemon_wrote(&[&whole[..], b"junk"].concat(), false);
+        assert_eq!(reply_end(&whole, CHUNKED), Some(whole.len()));
+        assert_eq!(read_response(&mut client, CHUNKED, STALL).unwrap(), whole);
+        assert_eq!(body(&whole, CHUNKED), Some(b"{\"a\":1}".to_vec()));
+        assert_eq!(reply_end(&whole[..whole.len() - 1], CHUNKED), None);
+    }
+
+    #[test]
+    fn ends_at_once_on_chunks_it_refuses_and_reads_none_without_the_limit() {
+        let bad = chunked(b"zz\r\nabc\r\n");
+        let over = chunked(b"8\r\n12345678\r\n0\r\n\r\n");
+        let small = Limits { body: 4, ..CHUNKED };
+        assert_eq!(reply_end(&bad, CHUNKED), Some(bad.len()));
+        assert_eq!(body(&bad, CHUNKED), None);
+        assert_eq!(reply_end(&over, small), Some(over.len()));
+        assert_eq!(body(&over, small), None);
+        let whole = chunked(b"2\r\nhi\r\n0\r\n\r\n");
+        let head_only = whole.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
+        assert_eq!(reply_end(&whole, LIMITS), Some(head_only));
+    }
 
     fn response(headers: &[(&str, &str)], body: &[u8]) -> Vec<u8> {
         let mut out = b"HTTP/1.1 200 OK\r\n".to_vec();
@@ -329,6 +492,7 @@ mod tests {
         let most = Limits {
             head: usize::MAX,
             body: usize::MAX,
+            chunked: true,
         };
         let (mut client, _open) = daemon_wrote(&ok(), false);
         assert_eq!(reply_end(&ok(), most), Some(ok().len()));

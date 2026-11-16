@@ -2,7 +2,7 @@
 
 use bazhen_client::Limits;
 use bazhen_client::framing::{
-    Framing, content_length, header, headers, is_truncated, reply_end, split_head, status,
+    Framing, body, content_length, header, headers, is_truncated, reply_end, split_head, status,
 };
 use libfuzzer_sys::fuzz_target;
 
@@ -10,6 +10,7 @@ use libfuzzer_sys::fuzz_target;
 const LIMITS: Limits = Limits {
     head: 256,
     body: 1024,
+    chunked: true,
 };
 
 // Any bytes at all, as the daemon's socket could send them: no decoder may panic, what the reader
@@ -30,6 +31,9 @@ fuzz_target!(|response: &[u8]| {
     assert_eq!(first, reply_end(&response[..split], LIMITS));
     if first.is_none() {
         assert_eq!(framing.end_of(response), end);
+    }
+    if let Some(end) = end {
+        let _ = body(&response[..end], LIMITS);
     }
     if let Some((head, body)) = split_head(response) {
         assert!(head.len() + 4 + body.len() == response.len());
