@@ -1,20 +1,34 @@
-// Starts `bazhen-holder` processes, and checks that a pid is still a holder this process knows,
-// by its command and start time, before signal.ts may signal it: a pid reused since by anything
-// else is left alone.
+// Starts `bazhen-holder` processes, and checks that a pid is still a holder, by its command and
+// start time, before signal.ts may signal it: a pid reused since by anything else is left alone.
+//
+// The package exports only the forms without seams. The seamed ones take a `ps` reading and a
+// clock, which can vouch for any pid, so they stay in this module and its tests.
 
 import { spawn as spawnChild } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { lstatSync, mkdirSync } from "node:fs";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import type { Readable, Writable } from "node:stream";
-import { type HolderProcess, killHolder, vouchHolderProcess } from "./signal.ts";
-import { type PsReading, readProcess, rootRefusal, socketRefusal, START_SKEW_S } from "./tmux.ts";
+import {
+  type HolderProcess,
+  type HolderUse,
+  killHolder,
+  rebindHolder,
+  vouchHolderProcess,
+} from "./signal.ts";
+import { type PsReading, readProcess, rootRefusal, START_SKEW_S } from "./tmux.ts";
 
 export const HOLDER_COMMAND = "bazhen-holder";
 
 /** What a holder writes on stdout once it serves its socket, and nothing before. */
 const READY = "ready\n";
+/** The most of a holder's first stdout line read: anything longer isn't `ready`. */
+const FIRST_LINE_MAX = 64;
+/** The most of a holder's stderr kept for its failure. */
+const STDERR_MAX = 8 * 1024;
 /** The longest socket path a holder binds: macOS's `sun_path` less its NUL. */
 export const HOLDER_SOCKET_MAX_BYTES = 103;
+/** The longest spawn spec a holder reads: holder/1's request cap, `HOLDER_MAX_REQUEST_BYTES`. */
+export const HOLDER_SPEC_MAX_BYTES = 1 << 20;
 const TERMINAL_ID = /^[A-Za-z0-9_-]{1,64}$/;
 /** How long a holder that never said `ready` has to show as the holder, to be killed. */
 const VOUCH_MS = 1_000;
@@ -22,6 +36,7 @@ const VOUCH_POLL_MS = 20;
 /** How long the stderr of a holder that exited has to arrive, after its exit. */
 const STDERR_MS = 200;
 export const HOLDER_READY_MS = 5_000;
+const READY_MS_MAX = 60_000;
 
 /** Where `root`'s holders bind: one directory, inside the run root, holding nothing else. */
 export const holdersDir = (root: string) => join(root, "holders");
@@ -33,7 +48,7 @@ export const holderSocket = (root: string, terminalId: string) =>
 /**
  * Why a holder for `terminalId` may not bind `socket` under the run root `root`, by path alone,
  * or undefined when it may: it must be exactly `holderSocket(root, terminalId)`, short enough for
- * every OS to bind.
+ * every OS to bind. A terminal id of the form Bazhen makes, 37 bytes, leaves the root 52.
  */
 export function holderSocketRefusal(
   socket: string,
@@ -44,8 +59,6 @@ export function holderSocketRefusal(
   if (!isAbsolute(root) || resolve(root) !== root) {
     return `its root ${root} is not an absolute, normalized path`;
   }
-  const outside = socketRefusal(socket, holdersDir(root), [], false);
-  if (outside !== undefined) return outside;
   if (socket !== holderSocket(root, terminalId)) {
     return `it is not ${holderSocket(root, terminalId)}`;
   }
@@ -67,7 +80,15 @@ export class HolderStartFailed extends Error {
   /** Whether it may still run: one `ps` didn't show as the holder is never killed. */
   readonly running: boolean;
 
-  constructor(ending: HolderStartFailed["ending"], stderr: string, detail = "", running = false) {
+  constructor(
+    ending: HolderStartFailed["ending"],
+    stderr: string,
+    {
+      detail = "",
+      running = false,
+      cause,
+    }: { detail?: string; running?: boolean; cause?: unknown } = {},
+  ) {
     const how =
       ending === "silent"
         ? "it said nothing in time"
@@ -76,7 +97,9 @@ export class HolderStartFailed extends Error {
           : "code" in ending
             ? `it exited ${ending.code}`
             : `${ending.signal} ended it`;
-    super(`the holder didn't start: ${how}${detail}: ${stderr.trim() || "(no stderr)"}`);
+    super(`the holder didn't start: ${how}${detail}: ${stderr.trim() || "(no stderr)"}`, {
+      cause,
+    });
     this.name = "HolderStartFailed";
     this.ending = ending;
     this.stderr = stderr;
@@ -96,6 +119,7 @@ export interface HolderChild {
 }
 
 export interface StartHolderOptions {
+  /** The binary, by absolute path. */
   readonly binary: string;
   /** The private run root, whose `holders` directory the spec's socket must be in. */
   readonly root: string;
@@ -105,6 +129,7 @@ export interface StartHolderOptions {
   readonly env: Readonly<Record<string, string>>;
   /** Where the holder is started from; it moves to `/` before it starts anything. */
   readonly cwd?: string;
+  /** How long it has to say `ready`, in ms: up to a minute. */
   readonly readyMs?: number;
   /** An argv run in place of the binary, which then gets the binary as its last argument. */
   readonly launcher?: readonly [string, ...string[]];
@@ -120,6 +145,7 @@ export interface StartedHolder extends HolderProcess {
   readonly exited: Promise<number | null>;
 }
 
+/** The OS calls `startHolder` makes, replaced in its tests so no real process is reached. */
 export interface StartSeams {
   readonly spawn?: (
     file: string,
@@ -127,76 +153,120 @@ export interface StartSeams {
     options: { env: Record<string, string>; cwd: string },
   ) => HolderChild;
   readonly read?: (pid: number) => Promise<PsReading>;
-  readonly now?: () => number;
+  readonly kill?: (proof: HolderProcess) => boolean;
 }
 
 const realSpawn: NonNullable<StartSeams["spawn"]> = (file, args, options) =>
   spawnChild(file, args, { ...options, stdio: ["pipe", "pipe", "pipe"] });
+
+/** What this process knows of each holder it started, by pid. */
+interface Own {
+  readonly start: number;
+  ready: boolean;
+  exited: boolean;
+}
+
+/**
+ * The holders this process started. One that hasn't said `ready`, or has exited, is never sent a
+ * rebind, whatever `ps` says of its pid. Kept until another holder this process starts takes the
+ * pid, so an exit is never forgotten.
+ */
+const own = new Map<number, Own>();
 
 /**
  * Starts a holder, as a plain child, since it starts a session of its own and a group leader
  * can't, and resolves once it says `ready`, when its socket takes connections. Anything else
  * rejects with `HolderStartFailed`, and a holder still running then is killed, if `ps` shows it is
  * the holder; one it can't vouch for is left alone and named in the error.
+ *
+ * A holder killed after it started its program leaves that program to the hangup its terminal's
+ * closing sends, as after any holder's SIGKILL: one that ignores SIGHUP runs on, orphaned.
  */
-export async function startHolder(
+export function startHolder(options: StartHolderOptions): Promise<StartedHolder> {
+  return startHolderWith(options, {});
+}
+
+/** `startHolder`, with its OS calls replaced. Not exported from the package. */
+export async function startHolderWith(
   options: StartHolderOptions,
-  seams: StartSeams = {},
+  seams: StartSeams,
 ): Promise<StartedHolder> {
   const { binary, root, spec } = options;
+  const readyMs = options.readyMs ?? HOLDER_READY_MS;
+  if (!isAbsolute(binary)) throw new RangeError(`the holder binary ${binary} isn't absolute`);
+  if (!Number.isSafeInteger(readyMs) || readyMs <= 0 || readyMs > READY_MS_MAX) {
+    throw new RangeError(`readyMs ${readyMs} isn't between 1 and ${READY_MS_MAX}`);
+  }
   const refusal = holderSocketRefusal(spec.socket, root, spec.terminalId);
-  if (refusal !== undefined)
+  if (refusal !== undefined) {
     throw new RangeError(`refusing holder socket ${spec.socket}: ${refusal}`);
+  }
+  const payload = JSON.stringify(spec);
+  const size = Buffer.byteLength(payload);
+  if (size > HOLDER_SPEC_MAX_BYTES) {
+    throw new RangeError(
+      `the spawn spec is ${size} bytes, over the ${HOLDER_SPEC_MAX_BYTES} a holder reads`,
+    );
+  }
   privateHoldersDir(root, spec.socket);
   const read = seams.read ?? readProcess;
+  const kill = seams.kill ?? killHolder;
   const [file, ...args] = options.launcher === undefined ? [binary] : [...options.launcher, binary];
   const child = (seams.spawn ?? realSpawn)(file, args, {
     env: { ...options.env },
     cwd: options.cwd ?? "/",
   });
   let ending: { code: number } | { signal: string } | undefined;
+  let mine: Own | undefined;
   const exited = new Promise<number | null>((done) =>
     child.once("exit", (code, signal) => {
       ending = code !== null ? { code } : { signal: signal ?? "a signal" };
+      if (mine !== undefined) mine.exited = true;
       done(code);
     }),
   );
   const failed = new Promise<Error>((done) => child.once("error", done));
+  // A holder that exits before it reads its spec breaks the pipe; its exit says why.
+  child.stdin?.on("error", () => {});
   const pid = child.pid;
   if (pid === undefined) throw new HolderStartFailed("unstarted", (await failed).message);
   let stderr = "";
-  child.stderr?.setEncoding("utf8").on("data", (chunk: string) => (stderr += chunk));
+  child.stderr?.setEncoding("utf8").on("data", (chunk: string) => {
+    if (stderr.length < STDERR_MAX) stderr = (stderr + chunk).slice(0, STDERR_MAX);
+  });
   const stderrEnded = new Promise<void>((done) => {
     child.stderr?.once("end", done).once("error", () => done());
     if (child.stderr === null) done();
   });
-  const fail = async (detail: string, holder: HolderProcess | null): Promise<never> => {
+  const failure = async (detail: string, holder: HolderProcess | null, cause?: unknown) => {
     child.stdin?.end();
     // Before the kill, whose end would read as the holder's own.
     const how = ending ?? "silent";
     const left =
-      holder === null
-        ? null
-        : await endUnready(holder, () => ending !== undefined, read, seams.now);
+      holder === null ? null : await endUnready(holder, () => ending !== undefined, read, kill);
     await Promise.race([stderrEnded, delay(STDERR_MS)]);
     const note = left?.note ? `; ${left.note}` : "";
-    throw new HolderStartFailed(how, stderr, `${detail}${note}`, left?.running ?? false);
+    const running = left?.running ?? false;
+    return new HolderStartFailed(how, stderr, { detail: `${detail}${note}`, running, cause });
   };
   const reading = await read(pid);
-  if (typeof reading === "string") return fail(`, and ps found it ${reading} at once`, null);
+  if (typeof reading === "string")
+    throw await failure(`, and ps found it ${reading} at once`, null);
   const holder = { pid, start: reading.start };
+  mine = { start: reading.start, ready: false, exited: ending !== undefined };
+  own.set(pid, mine);
   try {
     await options.onStarted?.(holder);
   } catch (error) {
-    await fail("", holder).catch(() => {});
-    throw error;
+    throw await failure(", as recording it failed", holder, error);
   }
-  const line = firstLine(child, exited, options.readyMs ?? HOLDER_READY_MS);
-  child.stdin?.end(JSON.stringify(spec));
+  const line = firstLine(child, exited, readyMs);
+  child.stdin?.end(payload);
   const said = await line;
   if (said !== READY) {
-    return fail(said === null ? "" : `, saying ${JSON.stringify(said)}`, holder);
+    throw await failure(said === null ? "" : `, saying ${JSON.stringify(said)}`, holder);
   }
+  mine.ready = true;
   child.stdout?.destroy();
   child.stderr?.destroy();
   child.unref();
@@ -204,8 +274,8 @@ export async function startHolder(
 }
 
 /**
- * Makes `root`'s holders directory if it isn't there, and throws unless it and `root` are
- * directories of this user's that no one else can enter, as a holder checks of its own too.
+ * Makes `root`'s holders directory if it isn't there, and throws unless `root` is a directory of
+ * this user's that no one else can enter, and the holders directory one too, not a link to one.
  */
 function privateHoldersDir(root: string, socket: string): void {
   const uid = process.getuid?.() ?? -1;
@@ -218,8 +288,10 @@ function privateHoldersDir(root: string, socket: string): void {
   } catch (error) {
     if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
   }
-  const unsafeDir = rootRefusal(dir, uid);
-  if (unsafeDir !== undefined) throw refuse(unsafeDir);
+  const stat = lstatSync(dir);
+  if (!stat.isDirectory()) throw refuse(`${dir} is not a directory`);
+  if (stat.uid !== uid) throw refuse(`${dir} belongs to another user`);
+  if ((stat.mode & 0o077) !== 0) throw refuse(`${dir} is open to other users`);
 }
 
 /** The child's first line, or null for none: it ended first, or said none within `ms`. */
@@ -230,6 +302,7 @@ function firstLine(child: HolderChild, exited: Promise<unknown>, ms: number) {
       out += chunk;
       const end = out.indexOf("\n");
       if (end !== -1) done(out.slice(0, end + 1));
+      else if (out.length > FIRST_LINE_MAX) done(out.slice(0, FIRST_LINE_MAX));
     });
     void exited.then(() => done(null));
     setTimeout(() => done(null), ms).unref();
@@ -246,12 +319,12 @@ async function endUnready(
   holder: HolderProcess,
   gone: () => boolean,
   read: (pid: number) => Promise<PsReading>,
-  now: () => number = Date.now,
+  kill: (proof: HolderProcess) => boolean,
 ): Promise<{ readonly running: boolean; readonly note: string }> {
-  const deadline = now() + VOUCH_MS;
+  const deadline = Date.now() + VOUCH_MS;
   let proof: HolderProcess | null = null;
-  while (!gone() && proof === null && now() < deadline) {
-    proof = await vouchHolder(holder, read, now);
+  while (!gone() && proof === null && Date.now() < deadline) {
+    proof = await vouchHolderWith(holder, "kill", read);
     if (proof === null) await delay(VOUCH_POLL_MS);
   }
   if (gone()) return { running: false, note: "" };
@@ -259,22 +332,58 @@ async function endUnready(
     const note = `pid ${holder.pid} is left running, as ps doesn't show it is the holder`;
     return { running: true, note };
   }
-  return { running: false, note: killHolder(proof, now()) ? "it was killed" : "" };
+  return { running: false, note: kill(proof) ? "it was killed" : "" };
 }
+
+/** Whether `reading` is a `bazhen-holder` that started within `START_SKEW_S` of `holder.start`. */
+const isHolder = (reading: PsReading, holder: HolderProcess) =>
+  typeof reading !== "string" &&
+  basename(reading.comm) === HOLDER_COMMAND &&
+  Math.abs(reading.start - holder.start) <= START_SKEW_S;
 
 /**
  * A proof `killHolder` takes, if `ps` shows `holder.pid` as a `bazhen-holder` that started within
  * `START_SKEW_S` of `holder.start`; null for a pid with no process, an unreadable one, or one that
  * is something else now.
  */
-export async function vouchHolder(
+export function vouchHolder(holder: HolderProcess): Promise<HolderProcess | null> {
+  return vouchHolderWith(holder, "kill");
+}
+
+/** `vouchHolder`, for either use, with `ps` and the clock replaced. Not exported from the package. */
+export async function vouchHolderWith(
   holder: HolderProcess,
+  use: HolderUse,
   read: (pid: number) => Promise<PsReading> = readProcess,
   now: () => number = Date.now,
 ): Promise<HolderProcess | null> {
   const reading = await read(holder.pid);
-  if (typeof reading === "string") return null;
-  if (basename(reading.comm) !== HOLDER_COMMAND) return null;
-  if (Math.abs(reading.start - holder.start) > START_SKEW_S) return null;
-  return vouchHolderProcess(holder, now());
+  return isHolder(reading, holder) ? vouchHolderProcess(holder, use, now()) : null;
+}
+
+/**
+ * Tells a holder to bind its socket again, as one whose socket file was deleted needs (design
+ * §5.4): `SIGUSR1`, once `ps` shows `holder.pid` is that holder. One this process started is sent
+ * nothing unless it has said `ready` and not exited. Whether it was sent.
+ */
+export function rebindHolderSocket(holder: HolderProcess): Promise<boolean> {
+  return rebindHolderWith(holder, readProcess, rebindHolder);
+}
+
+/** `rebindHolderSocket`, with `ps` and the send replaced. Not exported from the package. */
+export async function rebindHolderWith(
+  holder: HolderProcess,
+  read: (pid: number) => Promise<PsReading>,
+  send: (proof: HolderProcess) => boolean,
+): Promise<boolean> {
+  const unfit = () => {
+    const mine = own.get(holder.pid);
+    if (mine === undefined) return false;
+    return !mine.ready || mine.exited || Math.abs(mine.start - holder.start) > START_SKEW_S;
+  };
+  if (unfit()) return false;
+  const reading = await read(holder.pid);
+  // Checked again after `ps`, and then sent with no wait between: an exit seen meanwhile counts.
+  if (!isHolder(reading, holder) || unfit()) return false;
+  return send(vouchHolderProcess(holder, "rebind"));
 }

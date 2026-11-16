@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { holderSocket, holderSocketRefusal, vouchHolder } from "./holder.ts";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { holderSocket, holderSocketRefusal, rebindHolderWith, vouchHolderWith } from "./holder.ts";
 import { killHolder, rebindHolder } from "./signal.ts";
 import type { PsReading } from "./tmux.ts";
 
@@ -7,10 +7,20 @@ import type { PsReading } from "./tmux.ts";
 const holder = { pid: 2 ** 22 + 1, start: 1_794_630_000 };
 const reads = (reading: PsReading) => async (): Promise<PsReading> => reading;
 const facts = (comm: string, start: number): PsReading => ({ comm, start, args: comm });
+const theHolder = reads(facts("/x/bazhen-holder", holder.start));
+
+afterEach(() => vi.restoreAllMocks());
+
+/** Whatever would be sent, recorded instead. */
+const stubKill = () => vi.spyOn(process, "kill").mockImplementation(() => true);
 
 describe("the holder kill guard", () => {
   it("vouches for a bazhen-holder that started when the ledger says", async () => {
-    const proof = await vouchHolder(holder, reads(facts("/x/bazhen-holder", holder.start + 2)));
+    const proof = await vouchHolderWith(
+      holder,
+      "kill",
+      reads(facts("/x/bazhen-holder", holder.start + 2)),
+    );
     expect(proof).toEqual(holder);
   });
 
@@ -23,36 +33,56 @@ describe("the holder kill guard", () => {
       "absent",
       "unreadable",
     ];
-    for (const reading of others) {
-      expect(await vouchHolder(holder, reads(reading))).toBeNull();
-    }
+    const vouched = await Promise.all(others.map((r) => vouchHolderWith(holder, "kill", reads(r))));
+    expect(vouched).toEqual(others.map(() => null));
   });
 
   it("kills only a holder vouched for in the last second, and only once", async () => {
+    const kill = stubKill();
     expect(() => killHolder(holder)).toThrow("unvouched");
-    const stale = await vouchHolder(holder, reads(facts("bazhen-holder", holder.start)), () => 0);
+    const stale = await vouchHolderWith(holder, "kill", theHolder, () => 0);
     expect(() => killHolder(stale!, 1_001)).toThrow("stale proof");
-    const proof = await vouchHolder(holder, reads(facts("bazhen-holder", holder.start)));
-    expect(killHolder(proof!)).toBe(false);
+    const proof = await vouchHolderWith(holder, "kill", theHolder);
+    expect(killHolder(proof!)).toBe(true);
     expect(() => killHolder(proof!)).toThrow("unvouched");
+    expect(kill.mock.calls).toEqual([[holder.pid, "SIGKILL"]]);
   });
 });
 
 describe("the holder rebind guard", () => {
-  it("signals only a holder vouched for in the last second, and only once", async () => {
+  it("sends SIGUSR1 only to a holder vouched for a rebind in the last second, and only once", async () => {
+    const kill = stubKill();
     expect(() => rebindHolder(holder)).toThrow("unvouched");
-    const stale = await vouchHolder(holder, reads(facts("bazhen-holder", holder.start)), () => 0);
+    const stale = await vouchHolderWith(holder, "rebind", theHolder, () => 0);
     expect(() => rebindHolder(stale!, 1_001)).toThrow("stale proof");
-    expect(await vouchHolder(holder, reads(facts("sleep", holder.start)))).toBeNull();
-    const proof = await vouchHolder(holder, reads(facts("bazhen-holder", holder.start)));
-    expect(rebindHolder(proof!)).toBe(false);
+    const proof = await vouchHolderWith(holder, "rebind", theHolder);
+    expect(rebindHolder(proof!)).toBe(true);
     expect(() => rebindHolder(proof!)).toThrow("unvouched");
+    expect(kill.mock.calls).toEqual([[holder.pid, "SIGUSR1"]]);
   });
 
-  it("takes no proof made for a kill twice: one proof, one signal", async () => {
-    const proof = await vouchHolder(holder, reads(facts("bazhen-holder", holder.start)));
-    expect(killHolder(proof!)).toBe(false);
-    expect(() => rebindHolder(proof!)).toThrow("unvouched");
+  it("never takes a proof made for the other kind of signal", async () => {
+    const kill = stubKill();
+    const forKill = await vouchHolderWith(holder, "kill", theHolder);
+    expect(() => rebindHolder(forKill!)).toThrow("unvouched");
+    const forRebind = await vouchHolderWith(holder, "rebind", theHolder);
+    expect(() => killHolder(forRebind!)).toThrow("unvouched");
+    expect(kill).not.toHaveBeenCalled();
+  });
+
+  it("rebinds a holder ps shows, and nothing else at its pid", async () => {
+    const sent: unknown[] = [];
+    const send = (proof: unknown) => (sent.push(proof), true);
+    const others = [
+      facts("sleep", holder.start),
+      facts("bazhen-holder", holder.start + 9),
+      "absent" as const,
+    ];
+    for (const reading of others) {
+      expect(await rebindHolderWith(holder, reads(reading), send)).toBe(false);
+    }
+    expect(await rebindHolderWith(holder, theHolder, send)).toBe(true);
+    expect(sent).toEqual([holder]);
   });
 });
 

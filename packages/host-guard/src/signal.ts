@@ -69,14 +69,31 @@ export interface HolderProcess {
   readonly start: number;
 }
 
-const holders = new WeakMap<HolderProcess, number>();
+/** What a holder proof lets its holder be sent: one kind never serves for the other. */
+export type HolderUse = "kill" | "rebind";
 
-/** A checked holder process, as one `killHolder` or `rebindHolder` may reach once. Only holder.ts calls this. */
-export function vouchHolderProcess(holder: HolderProcess, now = Date.now()): HolderProcess {
+const holders: Record<HolderUse, WeakMap<HolderProcess, number>> = {
+  kill: new WeakMap(),
+  rebind: new WeakMap(),
+};
+
+/** A checked holder process, as one signal of `use` may reach once. Only holder.ts calls this. */
+export function vouchHolderProcess(
+  holder: HolderProcess,
+  use: HolderUse,
+  now = Date.now(),
+): HolderProcess {
   if (!isPid(holder.pid)) throw new RangeError(`refusing to vouch for pid ${holder.pid}`);
   const proof = Object.freeze({ ...holder });
-  holders.set(proof, now + PROOF_MS);
+  holders[use].set(proof, now + PROOF_MS);
   return proof;
+}
+
+function spend(holder: HolderProcess, use: HolderUse, now: number): void {
+  const expiry = holders[use].get(holder);
+  holders[use].delete(holder);
+  if (expiry === undefined) throw new RangeError(`refusing to signal ${holder.pid}: unvouched`);
+  if (now > expiry) throw new RangeError(`refusing to signal ${holder.pid}: stale proof`);
 }
 
 /**
@@ -84,10 +101,7 @@ export function vouchHolderProcess(holder: HolderProcess, now = Date.now()): Hol
  * is gone is the kernel's hang-up to its session. Whether the holder was still there.
  */
 export function killHolder(holder: HolderProcess, now = Date.now()): boolean {
-  const expiry = holders.get(holder);
-  holders.delete(holder);
-  if (expiry === undefined) throw new RangeError(`refusing to kill ${holder.pid}: unvouched`);
-  if (now > expiry) throw new RangeError(`refusing to kill ${holder.pid}: stale proof`);
+  spend(holder, "kill", now);
   return send(holder.pid, "SIGKILL");
 }
 
@@ -96,10 +110,7 @@ export function killHolder(holder: HolderProcess, now = Date.now()): boolean {
  * Only that signal, and only to the pid itself. Whether the holder was still there.
  */
 export function rebindHolder(holder: HolderProcess, now = Date.now()): boolean {
-  const expiry = holders.get(holder);
-  holders.delete(holder);
-  if (expiry === undefined) throw new RangeError(`refusing to signal ${holder.pid}: unvouched`);
-  if (now > expiry) throw new RangeError(`refusing to signal ${holder.pid}: stale proof`);
+  spend(holder, "rebind", now);
   return send(holder.pid, "SIGUSR1");
 }
 
