@@ -37,7 +37,9 @@ Contributing, for people and agents: [AGENTS.md](AGENTS.md) and [docs/standards/
 ## Layout
 
 - `apps/daemon` — the service: configuration and paths, HTTP API, SQLite store, PTY seam
-- `apps/cli` — the `bazhen` command, a client of the daemon's Unix socket
+- `crates/bazhen` — `bazhen`, the command agents and people run, a client of the daemon's Unix
+  socket (Rust); `pnpm build` builds it at `target/release/bazhen`
+- `apps/cli` — the Node CLI `crates/bazhen` replaces
 - `crates/bazhen-hook` — `bazhen-hook`, the hook client harnesses run (Rust, standard library only)
 - `crates/bazhen-holder-proto` — `holder/1`, what the daemon and a PTY holder say (Rust)
 - `crates/bazhen-holder` — `bazhen-holder`, the process that holds one terminal's PTY and child (Rust)
