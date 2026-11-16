@@ -10,9 +10,10 @@ export const newlinesIn = (text: string) => text.replaceAll(/[^\n]/g, "");
  * `//` in a string nor an attribute quoted in one changes what the attributes are. Newlines are
  * kept, so a line in the result is the same line in the source. Each string literal becomes
  * `""`, and its contents, a raw string's included, are pushed to `strings` in order, so the nth
- * `""` in the result is `strings[n]`.
+ * `""` in the result is `strings[n]`; `raw[n]` says whether it was a raw string, whose contents
+ * are its text, with no escapes to take.
  */
-export function rustCode(source: string, strings: string[] = []): string {
+export function rustCode(source: string, strings: string[] = [], raw: boolean[] = []): string {
   let out = "";
   let i = 0;
   while (i < source.length) {
@@ -36,21 +37,23 @@ export function rustCode(source: string, strings: string[] = []): string {
       !isIdent(/[bc]/.test(source[i - 1] ?? "") ? source[i - 2] : source[i - 1])
     ) {
       RAW_STRING.lastIndex = i;
-      const raw = RAW_STRING.exec(source);
-      if (raw === null) {
+      const opener = RAW_STRING.exec(source);
+      if (opener === null) {
         out += c;
         i++;
         continue;
       }
-      const close = `"${raw[1] ?? ""}`;
-      const end = source.indexOf(close, i + raw[0].length);
+      const close = `"${opener[1] ?? ""}`;
+      const end = source.indexOf(close, i + opener[0].length);
       i = end === -1 ? source.length : end + close.length;
-      strings.push(source.slice(start + raw[0].length, end === -1 ? source.length : end));
+      strings.push(source.slice(start + opener[0].length, end === -1 ? source.length : end));
+      raw.push(true);
       out += `""${newlinesIn(source.slice(start, i))}`;
     } else if (c === '"') {
       i++;
       while (i < source.length && source[i] !== '"') i += source[i] === "\\" ? 2 : 1;
       strings.push(source.slice(start + 1, i));
+      raw.push(false);
       i++;
       out += `""${newlinesIn(source.slice(start, i))}`;
     } else if (c === "'" && (next === "\\" || source[i + 2] === "'")) {

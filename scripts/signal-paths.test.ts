@@ -118,6 +118,12 @@ describe("kills by a process started to send them", () => {
       "the holder kill guard",
       'a word that starts with "`" and ends the line',
       "echo $(date and an open substitution",
+      "pid=$(cat /tmp/pid); kill $pid",
+      "`date` checkSkills and skillFailures",
+      'if [ -n "$(pgrep x)" ]; then kill $pid; fi',
+      'sh -c "echo \\"done\\"; kill -s TERM \\$\\$"',
+      "PROMPT_COMMAND+=$'\\n''__after=$?'",
+      "kill $pid \\\n  2> /dev/null",
     ];
     expect(
       shells.filter(
@@ -237,6 +243,44 @@ describe("kills by a process started to send them", () => {
     expect(
       shells.map((shell) => calls("a.ts", `spawn("sh", ["-c", ${JSON.stringify(shell)}]);`).length),
     ).toEqual(shells.map(() => 1));
+  });
+
+  it("fails closed on an escape, a here-string, a joined word, an ANSI-C quote or a substituted program", () => {
+    const shells = [
+      "sh <<< kill\\ -9\\ -1",
+      "sh <<<kill",
+      'bash <<< "kill -9 -1"',
+      "/bin/kill $pid \\> -1",
+      "kill $pid \\# -1",
+      "kill $pid \\; -1",
+      "kill $pid \\| -1",
+      "kill $pid \\& -1",
+      "# setup\nkill -9 -1",
+      "kill $pid \\\n-1",
+      "ki\\\nll -9 -1",
+      'sh -c "kill $pid "-1',
+      "sh -c 'kill $PPID '-1",
+      "$'k'ill -9 -1",
+      '$"k"ill -9 -1',
+      "$'\\x6bill' -9 -1",
+      "$'\\153ill' -9 -1",
+      "kill $pid $'\\x2d1'",
+      "ki`:`ll -9 -1",
+      "ki$(:)ll -9 -1",
+      "$(printf kill) -9 -1",
+      '"$(echo kill)" -9 -1',
+      "time $(printf pkill) node",
+    ];
+    expect(
+      shells.filter(
+        (shell) => !calls("a.ts", `spawn("sh", ["-c", ${JSON.stringify(shell)}]);`).length,
+      ),
+    ).toEqual([]);
+  });
+
+  it("reads a Rust raw string as written, and an escaped one with its escapes", () => {
+    expect(calls("a.rs", 'let s = r#"# x\\nkill -9 -1"#;')).toEqual([]);
+    expect(calls("a.rs", 'let s = "# x\\nkill -9 -1";')).toHaveLength(1);
   });
 
   it("reads a Rust raw string as a command line too", () => {

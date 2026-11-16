@@ -127,9 +127,11 @@ const SIGNAL_SPEC_WITH_VALUE = /^(?:-s|-n|--signal)$/;
 const OWN_TARGET = /^(?:\$\$|\$!|\$[A-Za-z_]\w*|\$\{[A-Za-z_]\w*\})$/;
 
 // A word that opens a redirection, and one that is the operator alone, whose target is the next
-// word. `>&-` closes a descriptor and takes no target.
+// word. `>&-` closes a descriptor and takes no target. A here-string's target is the input the
+// command reads, which may be a command line for a shell.
 const REDIRECTION = /^\d*(?:[<>]|&>)/;
 const REDIRECTION_OPERATOR = /^\d*(?:<<-|[<>&][<>&|]*)$/;
+const HERE_STRING = /^\d*<<</;
 // A substitution's place in a word: an argument, and never a target the shell owns.
 const SUBSTITUTION = "$()";
 
@@ -144,17 +146,29 @@ class Unclosed {
 /** The index of the `"` that closes a double quote whose content starts at `from`. */
 function doubleQuoteEnd(line: string, from: number): number {
   for (let i = from; i < line.length; i++) {
-    if (line[i] === '"') return i;
-    if (line[i] === "`") i = backtickEnd(line, i);
+    if (line[i] === "\\") i++;
+    else if (line[i] === '"') return i;
+    else if (line[i] === "`") i = backtickEnd(line, i);
     else if (line.startsWith("$(", i)) i = substitutionEnd(line, i + 2);
   }
   throw new Unclosed(from - 1);
 }
 
 function backtickEnd(line: string, at: number): number {
-  const end = line.indexOf("`", at + 1);
-  if (end < 0) throw new Unclosed();
-  return end;
+  for (let i = at + 1; i < line.length; i++) {
+    if (line[i] === "\\") i++;
+    else if (line[i] === "`") return i;
+  }
+  throw new Unclosed();
+}
+
+/** The index of the `'` that closes an ANSI-C quote, `$'…'`, whose content starts at `from`. */
+function ansiQuoteEnd(line: string, from: number): number {
+  for (let i = from; i < line.length; i++) {
+    if (line[i] === "\\") i++;
+    else if (line[i] === "'") return i;
+  }
+  throw new Unclosed(from - 1);
 }
 
 /** The index of the `)` that closes a `$(` whose content starts at `from`. */
@@ -162,7 +176,8 @@ function substitutionEnd(line: string, from: number): number {
   let depth = 1;
   for (let i = from; i < line.length; i++) {
     const c = line[i];
-    if (c === "'") {
+    if (c === "\\") i++;
+    else if (c === "'") {
       const open = i;
       i = line.indexOf("'", open + 1);
       if (i < 0) throw new Unclosed(open);
@@ -174,70 +189,127 @@ function substitutionEnd(line: string, from: number): number {
   throw new Unclosed();
 }
 
+const ANSI_C: Readonly<Record<string, string>> = {
+  a: "\x07",
+  b: "\b",
+  e: "\x1b",
+  E: "\x1b",
+  f: "\f",
+  n: "\n",
+  r: "\r",
+  t: "\t",
+  v: "\v",
+};
+
+/** What an ANSI-C quote's content means, its escapes, a letter spelled by its code included. */
+function ansiC(body: string): string {
+  return body.replaceAll(
+    /\\(?:([0-7]{1,3})|x([\da-fA-F]{1,2})|u([\da-fA-F]{1,4})|U([\da-fA-F]{1,8})|([\s\S]))/g,
+    (escape, octal?: string, hex?: string, u4?: string, u8?: string, c?: string) => {
+      if (c !== undefined) return ANSI_C[c] ?? (/["'\\?]/.test(c) ? c : escape);
+      const code =
+        octal === undefined
+          ? Number.parseInt(hex ?? u4 ?? u8 ?? "", 16)
+          : Number.parseInt(octal, 8);
+      return code <= 0x10ffff ? String.fromCodePoint(code) : "";
+    },
+  );
+}
+
 /**
- * A shell line's commands, each as its words with their quotes removed, and the text inside each
- * quote and substitution, which may be a command line of its own. A substitution stands in its
- * word as `$()`. A word is `bare` when no part of it was quoted or substituted. Throws `Unclosed`.
+ * What a double quote's content means: a backslash there escapes only `$`, a backtick, `"`,
+ * `\` and a newline.
+ */
+const doubleQuoted = (body: string) =>
+  body.replaceAll(/\\([$`"\\\n])/g, (_, c: string) => (c === "\n" ? "" : c));
+
+type Word = { text: string; bare: boolean; quoted: boolean };
+
+/**
+ * A shell line's commands, each as its words with their quotes and escapes removed, and the text
+ * that may be a command line of its own: inside each quote and substitution, each word with a
+ * quoted part, and each here-string. A substitution stands in its word as `$()`. A word is `bare`
+ * when no part of it was quoted, escaped or substituted. Throws `Unclosed`.
  */
 function shellCommands(line: string) {
-  const commands: { text: string; bare: boolean }[][] = [[]];
+  const commands: Word[][] = [[]];
   const inner: string[] = [];
-  let word: { text: string; bare: boolean } | undefined;
+  let word: Word | undefined;
   const end = () => {
-    if (word !== undefined) commands.at(-1)?.push(word);
+    if (word === undefined) return;
+    commands.at(-1)?.push(word);
+    if (word.quoted) inner.push(word.text);
     word = undefined;
   };
-  const add = (text: string, bare: boolean) => {
-    word ??= { text: "", bare: true };
+  const add = (text: string, kind: "bare" | "quoted" | "substituted") => {
+    word ??= { text: "", bare: true, quoted: false };
     word.text += text;
-    word.bare &&= bare;
+    word.bare &&= kind === "bare";
+    word.quoted ||= kind === "quoted";
   };
   for (let i = 0; i < line.length; i++) {
     const c = line[i] ?? "";
     let close: number;
-    if (c === "#" && word === undefined) {
+    if (c === "\\") {
+      if (line[i + 1] !== "\n") add(line[i + 1] ?? "", "quoted");
+      i++;
+    } else if (c === "#" && word === undefined) {
       const newline = line.indexOf("\n", i);
       i = (newline < 0 ? line.length : newline) - 1;
+    } else if (c === "$" && line[i + 1] === "'") {
+      close = ansiQuoteEnd(line, i + 2);
+      const body = ansiC(line.slice(i + 2, close));
+      inner.push(body);
+      add(body, "quoted");
+      i = close;
+    } else if (c === "$" && line[i + 1] === '"') {
+      continue;
     } else if (c === "'") {
       close = line.indexOf("'", i + 1);
       if (close < 0) throw new Unclosed(i);
       inner.push(line.slice(i + 1, close));
-      add(line.slice(i + 1, close), false);
+      add(line.slice(i + 1, close), "quoted");
       i = close;
     } else if (c === '"') {
       close = doubleQuoteEnd(line, i + 1);
-      const body = line.slice(i + 1, close);
+      const body = doubleQuoted(line.slice(i + 1, close));
       inner.push(body);
-      add(body.replace(/(?:\$\(|`)[\s\S]*/, SUBSTITUTION), false);
+      add(body.replace(/(?:\$\(|`)[\s\S]*/, SUBSTITUTION), "quoted");
       i = close;
     } else if (c === "`" || line.startsWith("$(", i)) {
       close = c === "`" ? backtickEnd(line, i) : substitutionEnd(line, i + 2);
       inner.push(line.slice(i + (c === "`" ? 1 : 2), close));
-      add(SUBSTITUTION, false);
+      add(SUBSTITUTION, "substituted");
       i = close;
     } else if (
       (c === "&" || c === "|") &&
       (/[<>]$/.test(word?.text ?? "") || (c === "&" && line[i + 1] === ">"))
     ) {
-      add(c, true);
+      add(c, "bare");
     } else if (/[;&|\n()]/.test(c)) {
       end();
       commands.push([]);
       if ((c === "&" || c === "|") && line[i + 1] === c) i++;
     } else if (/\s/.test(c)) end();
-    else add(c, true);
+    else add(c, "bare");
   }
   end();
-  return { commands: commands.map(withoutRedirections), inner };
+  return { commands: commands.map((words) => withoutRedirections(words, inner)), inner };
 }
 
-/** A command's words less its redirections and their targets. */
-function withoutRedirections(words: { text: string; bare: boolean }[]): string[] {
+/** A command's words less its redirections and their targets, a here-string's kept in `inner`. */
+function withoutRedirections(words: Word[], inner: string[]): string[] {
   const out: string[] = [];
   for (let i = 0; i < words.length; i++) {
     const { text, bare } = words[i] ?? { text: "", bare: true };
-    if (bare && REDIRECTION.test(text)) i += REDIRECTION_OPERATOR.test(text) ? 1 : 0;
-    else out.push(text);
+    if (!bare || !REDIRECTION.test(text)) {
+      out.push(text);
+      continue;
+    }
+    const target = REDIRECTION_OPERATOR.test(text)
+      ? words[++i]?.text
+      : text.replace(HERE_STRING, "");
+    if (HERE_STRING.test(text) && target !== undefined) inner.push(target);
   }
   return out;
 }
@@ -252,53 +324,78 @@ function killsOnlyItsOwn(words: string[]): boolean {
   return operands.length > 0 && operands.every((w) => OWN_TARGET.test(w));
 }
 
+const COOKED: Readonly<Record<string, string>> = { n: "\n", t: "\t", r: "\r", f: "\f", v: "\v" };
+
 /**
- * Whether a string literal is a shell command line that sends a signal. It fails closed. The
- * line is read into commands at the shell's operators, and each command into words, with quoted
- * parts joined to the text they touch, so `k''ill` is `kill`; the text inside each quote and
- * substitution is read again as a command line, so `sh -c "kill -9 -1"` counts. Any word that
+ * A string literal's text as the program sees it: its language's escapes taken, and a line
+ * continuation dropped.
+ */
+const cook = (literal: string) =>
+  literal.replaceAll(/\\(\r?\n|[\s\S])/g, (_, c: string) =>
+    c.endsWith("\n") ? "" : (COOKED[c] ?? c),
+  );
+
+/**
+ * Whether a string literal is a shell command line that sends a signal: a best-effort reading
+ * that fails closed. `cooked` says the literal is its text as written, a raw string; otherwise
+ * its escapes are taken first. The line is read into commands at the shell's operators, and each
+ * command into words, with quoted and escaped parts joined to the text they touch, so `k''ill` is
+ * `kill`. The text inside each quote and substitution, each word with a quoted part and each
+ * here-string is read again as a command line, so `sh -c "kill -9 -1"` counts. Any word that
  * names a kill program starts a kill wherever it sits after a launcher, whatever options that
  * launcher takes, or wherever an argument follows it. A `kill` passes only when, past one signal
  * spec and a `--`, and less its redirections with their targets, each operand is the shell
  * itself, its last job or a plain variable; a substitution is none of them. Every other kill
- * program, `systemctl kill`, `loginctl terminate-user` and the like, and `fuser -k`, count. A line
- * naming a kill program that leaves a substitution open counts. One that leaves a quote open, as
- * an apostrophe in prose does, counts if it is a kill read either with the quote running to the
- * end of the line or with it as a plain character. A literal holding no whitespace, escaped whitespace aside, is a
- * program's name rather than a command line: a process started with it is caught where the
- * literal is passed (`kills`).
+ * program, `systemctl kill`, `loginctl terminate-user` and the like, and `fuser -k`, count, and so
+ * does a program word built by a substitution where the line names a kill. A line naming a kill
+ * that leaves a substitution open counts. One that leaves a quote open, as an apostrophe in prose
+ * does, counts if it is a kill read either with the quote running to the end of the line or with
+ * it as a plain character. A literal holding no whitespace is a program's name rather than a
+ * command line: a process started with it is caught where the literal is passed (`kills`).
  */
-export function startsKill(literal: string): boolean {
-  const unescaped = literal.replaceAll(/\\[tnrfv]/g, " ");
-  return /\s/.test(unescaped) && readsAsKill(unescaped.replaceAll("\\", ""), 0);
+export function startsKill(literal: string, cooked = false): boolean {
+  const line = cooked ? literal : cook(literal);
+  return /\s/.test(line) && readsAsKill(line, 0, 0);
 }
 
-// How many open quotes a line is read both ways for before it counts as a kill unread.
+// How many open quotes a line is read both ways for, and how deep text inside text is read again,
+// before a line naming a kill counts as one unread.
 const OPEN_QUOTE_READINGS = 4;
-// What a line must hold, its quotes taken out, to send a signal at all.
-const NAMES_A_KILL = /kill|systemctl|loginctl|fuser/;
+const NESTED_READINGS = 8;
+// What a line must hold, its quotes and escapes taken out, to send a signal at all: a word, not
+// part of a name like `skillFailures`.
+const NAMES_A_KILL = /\b(?:kill|pkill|killall5?|skill|systemctl|loginctl|fuser)\b/;
+const namesAKill = (text: string) =>
+  NAMES_A_KILL.test(text.replaceAll(/["'`\\]/g, "")) ||
+  NAMES_A_KILL.test(text.replaceAll(/["'`\\]/g, " "));
 
-function readsAsKill(line: string, openQuotes: number): boolean {
+function readsAsKill(line: string, openQuotes: number, depth: number): boolean {
+  if (depth > NESTED_READINGS) return namesAKill(line);
   let read: ReturnType<typeof shellCommands>;
   try {
     read = shellCommands(line);
   } catch (error) {
     if (!(error instanceof Unclosed)) throw error;
-    if (!NAMES_A_KILL.test(line.replaceAll(/["'`]/g, ""))) return false;
+    if (!namesAKill(line)) return false;
     const at = error.quote;
     if (at === undefined || openQuotes >= OPEN_QUOTE_READINGS) return true;
     return (
-      readsAsKill(line + line[at], openQuotes + 1) ||
-      readsAsKill(line.slice(0, at) + line.slice(at + 1), openQuotes + 1)
+      readsAsKill(line + line[at], openQuotes + 1, depth) ||
+      readsAsKill(line.slice(0, at) + line.slice(at + 1), openQuotes + 1, depth)
     );
   }
+  const named = namesAKill(line);
   return (
-    read.commands.some(commandKills) || read.inner.some((inner) => readsAsKill(inner, openQuotes))
+    read.commands.some((words) => commandKills(words, named)) ||
+    read.inner.some((inner) => readsAsKill(inner, openQuotes, depth + 1))
   );
 }
 
-/** Whether one command's words send a signal. */
-function commandKills(words: string[]): boolean {
+/** Whether one command's words send a signal, `named` saying whether its line names a kill. */
+function commandKills(words: string[], named: boolean): boolean {
+  const program = words.find((w) => !LAUNCHER.test(w) && !STARTER.test(w)) ?? "";
+  if (program.includes(SUBSTITUTION) && (named || namesAKill(program.replaceAll(SUBSTITUTION, ""))))
+    return true;
   const launched = LAUNCHER.test(words[0] ?? "") || STARTER.test(words[0] ?? "");
   for (const [i, word] of words.entries()) {
     const rest = words.slice(i + 1);
@@ -341,11 +438,14 @@ export const CLI_KILLS: Readonly<Record<string, { code: RegExp; why: string }>> 
 };
 
 /** The literals that start a kill: a program sending one, or a shell or systemctl doing so. */
-function kills(literals: { index: number; body: string }[], code: string) {
+function kills(
+  literals: { index: number; body: string; cooked?: boolean | undefined }[],
+  code: string,
+) {
   const out = literals
     .filter(
       (l) =>
-        startsKill(l.body) ||
+        startsKill(l.body, l.cooked) ||
         (KILL_PROGRAM.test(l.body) &&
           STARTS_PROGRAM.test(code.slice(Math.max(0, l.index - 40), l.index))),
     )
@@ -379,10 +479,12 @@ const outside = (spans: [number, number][]) => (m: { index: number }) =>
 export function rawSignalCalls(file: string, text: string): { line: number; call: string }[] {
   if (file.endsWith(".rs")) {
     const strings: string[] = [];
-    const code = rustCode(text, strings);
+    const raw: boolean[] = [];
+    const code = rustCode(text, strings, raw);
     const literals = [...code.matchAll(/""/g)].map((m, n) => ({
       index: m.index,
       body: strings[n] ?? "",
+      cooked: raw[n],
     }));
     const spans = allowedKills(file, code);
     return [...found(code, RUST_RAW), ...kills(literals, code).filter(outside(spans))]
