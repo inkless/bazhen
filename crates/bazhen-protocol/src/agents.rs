@@ -232,6 +232,12 @@ pub struct Agent {
     pub headline: Option<Headline>,
     #[serde(default)]
     pub needs_restart: Option<NeedsRestart>,
+    /// The role whose prompt it was launched with.
+    #[serde(default)]
+    pub role: Option<Role>,
+    /// Whether the prompt it would start with now differs from the one its last start gave it.
+    #[serde(default)]
+    pub prompt_changed: bool,
 }
 
 /// Everything the daemon holds, consistent as of `event_id` in store `epoch`. A list is missing

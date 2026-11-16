@@ -73,6 +73,12 @@ pub struct HookClient {
     pub fallback: bool,
 }
 
+/// The program the daemon reads which process calls on its socket with.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PeerReader {
+    pub path: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConfigFile {
     pub path: String,
@@ -273,6 +279,13 @@ pub struct DoctorResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtimes: Option<Vec<RuntimeHealthReport>>,
     pub hook_client: HookClient,
+    /// Null when none is installed, an incomplete install; absent from a daemon before 1.54.
+    #[serde(
+        default,
+        skip_serializing_if = "Nullable::is_absent",
+        deserialize_with = "Nullable::present"
+    )]
+    pub peer_reader: Nullable<PeerReader>,
     pub config: ConfigFile,
     pub agents: AgentsSettings,
     #[serde(default, skip_serializing_if = "Option::is_none")]

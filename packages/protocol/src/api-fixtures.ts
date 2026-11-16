@@ -102,6 +102,8 @@ const fullAgent = {
   listening: true,
   headline: { text: "Halfway.", taskId: TASK, at: AT },
   needsRestart: { holderPid: 4242, served: true },
+  role: "reviewer",
+  promptChanged: true,
 };
 
 /** An agent from an older daemon: every defaulted field missing, every nullable null. */
@@ -127,6 +129,8 @@ const nullAgent = {
   launchedBy: null,
   headline: null,
   needsRestart: { holderPid: null },
+  role: null,
+  promptChanged: false,
 };
 
 const fullShell = {
@@ -283,6 +287,7 @@ const fullDoctor = {
     { kind: "holder", state: "unreachable", version: null, workarounds: ["w"] },
   ],
   hookClient: { path: "/r/target/release/bazhen-hook", fallback: false },
+  peerReader: { path: "/r/target/release/bazhen-peer" },
   config: { path: "/c.toml", found: true },
   agents: { shell: "login", loginShell: "/bin/zsh" },
   codex: { daemon: "0.160.0", cli: "0.166.0" },
@@ -334,6 +339,7 @@ const bareDoctor = {
 
 const nullDoctor = {
   ...bareDoctor,
+  peerReader: null,
   codex: { daemon: null, cli: null },
   web: {
     externalOrigins: [],

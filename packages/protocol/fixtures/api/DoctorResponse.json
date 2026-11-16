@@ -27,6 +27,9 @@
         "path": "/r/target/release/bazhen-hook",
         "fallback": false
       },
+      "peerReader": {
+        "path": "/r/target/release/bazhen-peer"
+      },
       "config": {
         "path": "/c.toml",
         "found": true
@@ -157,6 +160,9 @@
       "hookClient": {
         "path": "/r/target/release/bazhen-hook",
         "fallback": false
+      },
+      "peerReader": {
+        "path": "/r/target/release/bazhen-peer"
       },
       "config": {
         "path": "/c.toml",
@@ -346,6 +352,7 @@
         "kept": 3,
         "removed": {}
       },
+      "peerReader": null,
       "codex": {
         "daemon": null,
         "cli": null
@@ -400,6 +407,7 @@
         "path": "/r/hook.sh",
         "fallback": true
       },
+      "peerReader": null,
       "config": {
         "path": "/c.toml",
         "found": false
@@ -859,6 +867,9 @@
         "path": "/r/target/release/bazhen-hook",
         "fallback": false
       },
+      "peerReader": {
+        "path": "/r/target/release/bazhen-peer"
+      },
       "config": {
         "path": "/c.toml",
         "found": true
@@ -989,6 +1000,9 @@
       "hookClient": {
         "path": "/r/target/release/bazhen-hook",
         "fallback": false
+      },
+      "peerReader": {
+        "path": "/r/target/release/bazhen-peer"
       },
       "config": {
         "path": "/c.toml",
@@ -1124,6 +1138,9 @@
         "path": "/r/target/release/bazhen-hook",
         "fallback": false
       },
+      "peerReader": {
+        "path": "/r/target/release/bazhen-peer"
+      },
       "config": {
         "path": "/c.toml",
         "found": true
@@ -1254,6 +1271,9 @@
       "hookClient": {
         "path": "/r/target/release/bazhen-hook",
         "fallback": false
+      },
+      "peerReader": {
+        "path": "/r/target/release/bazhen-peer"
       },
       "config": {
         "path": "/c.toml",
@@ -1389,6 +1409,9 @@
         "path": "/r/target/release/bazhen-hook",
         "fallback": false
       },
+      "peerReader": {
+        "path": "/r/target/release/bazhen-peer"
+      },
       "config": {
         "path": "/c.toml",
         "found": true
@@ -1519,6 +1542,9 @@
       "hookClient": {
         "path": "/r/target/release/bazhen-hook",
         "fallback": false
+      },
+      "peerReader": {
+        "path": "/r/target/release/bazhen-peer"
       },
       "config": {
         "path": "/c.toml",
@@ -2037,6 +2063,7 @@
         "kept": 3,
         "removed": {}
       },
+      "peerReader": null,
       "codex": {
         "daemon": null,
         "cli": null
@@ -2091,6 +2118,7 @@
         "path": "/r/hook.sh",
         "fallback": true
       },
+      "peerReader": null,
       "config": {
         "path": "/c.toml",
         "found": false
@@ -2176,6 +2204,7 @@
         "kept": 3,
         "removed": {}
       },
+      "peerReader": null,
       "codex": {
         "daemon": null,
         "cli": null
@@ -2230,6 +2259,7 @@
         "path": "/r/hook.sh",
         "fallback": true
       },
+      "peerReader": null,
       "config": {
         "path": "/c.toml",
         "found": false
@@ -2720,6 +2750,14 @@
           ]
         }
       },
+      "peerReader": {
+        "path": "/r/target/release/bazhen-peer",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
       "config": {
         "path": "/c.toml",
         "found": true,
@@ -2950,6 +2988,9 @@
       "hookClient": {
         "path": "/r/target/release/bazhen-hook",
         "fallback": false
+      },
+      "peerReader": {
+        "path": "/r/target/release/bazhen-peer"
       },
       "config": {
         "path": "/c.toml",
@@ -3194,6 +3235,7 @@
           ]
         }
       },
+      "peerReader": null,
       "codex": {
         "daemon": null,
         "cli": null,
@@ -3293,6 +3335,7 @@
         "path": "/r/hook.sh",
         "fallback": true
       },
+      "peerReader": null,
       "config": {
         "path": "/c.toml",
         "found": false

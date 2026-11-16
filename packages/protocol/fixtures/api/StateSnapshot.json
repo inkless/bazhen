@@ -67,7 +67,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         },
         {
           "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
@@ -107,7 +109,9 @@
           "headline": null,
           "needsRestart": {
             "holderPid": null
-          }
+          },
+          "role": null,
+          "promptChanged": false
         }
       ],
       "attention": [
@@ -386,7 +390,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         },
         {
           "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
@@ -414,7 +420,9 @@
           "launchedBy": null,
           "listening": false,
           "headline": null,
-          "needsRestart": null
+          "needsRestart": null,
+          "role": null,
+          "promptChanged": false
         },
         {
           "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
@@ -449,7 +457,9 @@
           "needsRestart": {
             "holderPid": null,
             "served": false
-          }
+          },
+          "role": null,
+          "promptChanged": false
         }
       ],
       "attention": [
@@ -739,7 +749,9 @@
           "launchedBy": null,
           "listening": false,
           "headline": null,
-          "needsRestart": null
+          "needsRestart": null,
+          "role": null,
+          "promptChanged": false
         }
       ],
       "attention": [],
@@ -848,7 +860,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -914,7 +928,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -1447,7 +1463,9 @@
           "launchedBy": null,
           "listening": false,
           "headline": null,
-          "needsRestart": null
+          "needsRestart": null,
+          "role": null,
+          "promptChanged": false
         }
       ],
       "attention": [],
@@ -1526,7 +1544,9 @@
           "launchedBy": null,
           "listening": false,
           "headline": null,
-          "needsRestart": null
+          "needsRestart": null,
+          "role": null,
+          "promptChanged": false
         }
       ],
       "attention": [],
@@ -1605,7 +1625,9 @@
           "launchedBy": null,
           "listening": false,
           "headline": null,
-          "needsRestart": null
+          "needsRestart": null,
+          "role": null,
+          "promptChanged": false
         }
       ],
       "attention": [],
@@ -1684,7 +1706,9 @@
           "launchedBy": null,
           "listening": false,
           "headline": null,
-          "needsRestart": null
+          "needsRestart": null,
+          "role": null,
+          "promptChanged": false
         }
       ],
       "attention": [],
@@ -1763,7 +1787,9 @@
           "launchedBy": null,
           "listening": false,
           "headline": null,
-          "needsRestart": null
+          "needsRestart": null,
+          "role": null,
+          "promptChanged": false
         }
       ],
       "attention": [],
@@ -1842,7 +1868,9 @@
           "launchedBy": null,
           "listening": false,
           "headline": null,
-          "needsRestart": null
+          "needsRestart": null,
+          "role": null,
+          "promptChanged": false
         }
       ],
       "attention": [],
@@ -1921,7 +1949,9 @@
           "launchedBy": null,
           "listening": false,
           "headline": null,
-          "needsRestart": null
+          "needsRestart": null,
+          "role": null,
+          "promptChanged": false
         }
       ],
       "attention": [],
@@ -2000,7 +2030,9 @@
           "launchedBy": null,
           "listening": false,
           "headline": null,
-          "needsRestart": null
+          "needsRestart": null,
+          "role": null,
+          "promptChanged": false
         }
       ],
       "attention": [],
@@ -2079,7 +2111,9 @@
           "launchedBy": null,
           "listening": false,
           "headline": null,
-          "needsRestart": null
+          "needsRestart": null,
+          "role": null,
+          "promptChanged": false
         }
       ],
       "attention": [],
@@ -2158,7 +2192,9 @@
           "launchedBy": null,
           "listening": false,
           "headline": null,
-          "needsRestart": null
+          "needsRestart": null,
+          "role": null,
+          "promptChanged": false
         }
       ],
       "attention": [],
@@ -2232,7 +2268,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -2298,7 +2336,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -2372,7 +2412,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -2438,7 +2480,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -2512,7 +2556,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -2578,7 +2624,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -2652,7 +2700,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -2718,7 +2768,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -2792,7 +2844,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -2858,7 +2912,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -2932,7 +2988,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -2998,7 +3056,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -3072,7 +3132,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -3138,7 +3200,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -3212,7 +3276,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -3278,7 +3344,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -3352,7 +3420,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -3418,7 +3488,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -3492,7 +3564,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -3558,7 +3632,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -3632,7 +3708,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -3698,7 +3776,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -3772,7 +3852,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -3838,7 +3920,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -3912,7 +3996,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -3978,7 +4064,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -4052,7 +4140,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -4118,7 +4208,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -4192,7 +4284,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -4258,7 +4352,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -4332,7 +4428,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -4398,7 +4496,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -4472,7 +4572,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -4538,7 +4640,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -4612,7 +4716,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -4678,7 +4784,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -4752,7 +4860,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -4818,7 +4928,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
@@ -8140,6 +8252,8 @@
               ]
             }
           },
+          "role": "reviewer",
+          "promptChanged": true,
           "fieldFromANewerDaemon": {
             "any": [
               1
@@ -8211,6 +8325,8 @@
               ]
             }
           },
+          "role": null,
+          "promptChanged": false,
           "fieldFromANewerDaemon": {
             "any": [
               1
@@ -8604,7 +8720,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         },
         {
           "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
@@ -8632,7 +8750,9 @@
           "launchedBy": null,
           "listening": false,
           "headline": null,
-          "needsRestart": null
+          "needsRestart": null,
+          "role": null,
+          "promptChanged": false
         },
         {
           "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
@@ -8667,7 +8787,9 @@
           "needsRestart": {
             "holderPid": null,
             "served": false
-          }
+          },
+          "role": null,
+          "promptChanged": false
         }
       ],
       "attention": [
@@ -8977,7 +9099,9 @@
           "launchedBy": null,
           "listening": false,
           "headline": null,
-          "needsRestart": null
+          "needsRestart": null,
+          "role": null,
+          "promptChanged": false
         }
       ],
       "attention": [],
@@ -9127,6 +9251,8 @@
               ]
             }
           },
+          "role": "reviewer",
+          "promptChanged": true,
           "fieldFromANewerDaemon": {
             "any": [
               1
@@ -9202,7 +9328,9 @@
           "needsRestart": {
             "holderPid": 4242,
             "served": true
-          }
+          },
+          "role": "reviewer",
+          "promptChanged": true
         }
       ],
       "attention": [],
