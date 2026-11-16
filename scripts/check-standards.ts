@@ -713,8 +713,11 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/process.rs::status_uid": "proc_args",
   "crates/bazhen-holder/src/process.rs::cmdline_args": "proc_args",
   "crates/bazhen-holder/src/process.rs::procargs2_args": "proc_args",
+  "crates/bazhen-holder/src/process.rs::procargs2_env": "proc_args",
 };
 const NOT_DECODERS: Record<string, string> = {
+  "crates/bazhen-holder/src/process.rs::procargs2_split":
+    "reached only through procargs2_args and procargs2_env, which proc_args fuzzes",
   "crates/bazhen-holder/src/holder.rs::Holder::retire_later":
     "starts ending a child the holder spawned; reads no bytes",
   "crates/bazhen-holder/src/holder.rs::Holder::retire":

@@ -85,6 +85,25 @@ pub fn args(pid: Pid) -> io::Result<Vec<OsString>> {
     }
 }
 
+/// The environment `pid` was started with, each `NAME=value` as it was passed.
+///
+/// # Errors
+///
+/// When `pid` has gone, or its environment can't be read: another user's.
+pub fn environ(pid: Pid) -> io::Result<Vec<OsString>> {
+    #[cfg(target_os = "linux")]
+    {
+        Ok(cmdline_args(&std::fs::read(format!(
+            "/proc/{}/environ",
+            pid.as_raw_pid()
+        ))?))
+    }
+    #[cfg(target_os = "macos")]
+    {
+        crate::macos::environ(pid)
+    }
+}
+
 /// The effective uid in a `/proc/<pid>/status`: the second number on its `Uid:` line.
 pub fn status_uid(status: &[u8]) -> Option<u32> {
     let line = status
@@ -97,7 +116,8 @@ pub fn status_uid(status: &[u8]) -> Option<u32> {
     std::str::from_utf8(effective).ok()?.parse().ok()
 }
 
-/// The arguments in a `/proc/<pid>/cmdline`: each ends in a NUL, the last one maybe not.
+/// The arguments in a `/proc/<pid>/cmdline`, or the variables in a `/proc/<pid>/environ`: each
+/// ends in a NUL, the last one maybe not.
 pub fn cmdline_args(cmdline: &[u8]) -> Vec<OsString> {
     if cmdline.is_empty() {
         return Vec::new();
@@ -115,23 +135,45 @@ pub fn cmdline_args(cmdline: &[u8]) -> Vec<OsString> {
 /// environment. `None` when it holds fewer arguments than it says. An empty first argument can't
 /// be told from the padding, as `ps` can't tell it either, and is skipped with it.
 pub fn procargs2_args(procargs: &[u8]) -> Option<Vec<OsString>> {
+    let (args, _) = procargs2_split(procargs)?;
+    Some(
+        args.into_iter()
+            .map(|arg| OsString::from_vec(arg.to_vec()))
+            .collect(),
+    )
+}
+
+/// A `KERN_PROCARGS2` answer's arguments, and what follows them.
+fn procargs2_split(procargs: &[u8]) -> Option<(Vec<&[u8]>, &[u8])> {
     let (count, rest) = procargs.split_first_chunk::<4>()?;
     let count = usize::try_from(i32::from_ne_bytes(*count)).ok()?;
     let path_end = rest.iter().position(|&b| b == 0)?;
-    if count == 0 {
-        return Some(Vec::new());
-    }
     let (_, padded) = rest.split_at_checked(path_end)?;
-    let first = padded.iter().position(|&b| b != 0)?;
+    let first = padded.iter().position(|&b| b != 0).unwrap_or(padded.len());
     let (_, mut rest) = padded.split_at_checked(first)?;
     let mut args = Vec::with_capacity(count.min(rest.len()));
     for _ in 0..count {
         let end = rest.iter().position(|&b| b == 0)?;
         let (arg, after) = rest.split_at_checked(end)?;
-        args.push(OsString::from_vec(arg.to_vec()));
+        args.push(arg);
         rest = after.get(1..)?;
     }
-    Some(args)
+    Some((args, rest))
+}
+
+/// The environment in macOS's `KERN_PROCARGS2` answer: each string after the arguments that
+/// ends in a NUL, the empty ones left out. `None` when it holds fewer arguments than it says.
+pub fn procargs2_env(procargs: &[u8]) -> Option<Vec<OsString>> {
+    let (_, rest) = procargs2_split(procargs)?;
+    let mut strings: Vec<&[u8]> = rest.split(|&b| b == 0).collect();
+    strings.pop();
+    Some(
+        strings
+            .into_iter()
+            .filter(|var| !var.is_empty())
+            .map(|var| OsString::from_vec(var.to_vec()))
+            .collect(),
+    )
 }
 
 /// The effective uid of the process at the other end of a Unix socket, as it was when it
@@ -203,10 +245,47 @@ mod tests {
     }
 
     #[test]
+    fn reads_the_environment_this_process_started_with() {
+        let path = std::env::var_os("PATH").unwrap();
+        let mut entry = OsString::from("PATH=");
+        entry.push(path);
+        assert!(environ(getpid()).unwrap().contains(&entry));
+    }
+
+    #[test]
+    fn reads_the_environment_of_a_procargs2_answer_after_its_arguments() {
+        let answer = procargs(
+            2,
+            b"/r/bin/bazhen",
+            3,
+            &[b"bazhen", b"devices"],
+            &[
+                b"HOME=/h",
+                b"CODEX_THREAD_ID=thr-1",
+                b"",
+                b"executable_path=/r/bin/bazhen",
+            ],
+        );
+        assert_eq!(
+            procargs2_env(&answer),
+            Some(os(&[
+                "HOME=/h",
+                "CODEX_THREAD_ID=thr-1",
+                "executable_path=/r/bin/bazhen"
+            ])),
+        );
+        let unended = [answer.as_slice(), b"PART"].concat();
+        assert_eq!(procargs2_env(&unended), procargs2_env(&answer));
+        let short = procargs(3, b"/r/bin/bazhen", 1, &[b"bazhen"], &[b"HOME=/h"]);
+        assert_eq!(procargs2_env(&short), None);
+    }
+
+    #[test]
     fn reads_no_uid_or_arguments_of_a_process_that_isn_t_there() {
         let absent = Pid::from_raw(i32::MAX).unwrap();
         assert!(uid(absent).is_err());
         assert!(args(absent).is_err());
+        assert!(environ(absent).is_err());
     }
 
     #[test]
@@ -290,14 +369,16 @@ mod tests {
             path in proptest::collection::vec(1u8..=255, 1..32),
             pad in 0usize..8,
             args in proptest::collection::vec(proptest::collection::vec(1u8..=255, 1..16), 0..8),
-            env in proptest::collection::vec(proptest::collection::vec(1u8..=255, 0..16), 0..4),
+            env in proptest::collection::vec(proptest::collection::vec(1u8..=255, 1..16), 0..4),
         ) {
             let count = i32::try_from(args.len()).unwrap();
             let refs: Vec<&[u8]> = args.iter().map(Vec::as_slice).collect();
             let env: Vec<&[u8]> = env.iter().map(Vec::as_slice).collect();
             let answer = procargs(count, &path, pad, &refs, &env);
             let expected: Vec<OsString> = args.iter().cloned().map(OsString::from_vec).collect();
+            let expected_env: Vec<OsString> = env.iter().map(|e| OsString::from_vec(e.to_vec())).collect();
             prop_assert_eq!(procargs2_args(&answer), Some(expected.clone()));
+            prop_assert_eq!(procargs2_env(&answer), Some(expected_env));
             for cut in 0..answer.len() {
                 let read = procargs2_args(answer.get(..cut).unwrap());
                 prop_assert!(read.is_none() || read == Some(expected.clone()), "{read:?} at {cut}");

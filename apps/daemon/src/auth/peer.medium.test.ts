@@ -118,6 +118,41 @@ describe("bazhen-peer, on the socket", () => {
     expect(out).toMatch(/^403 .*a Codex tool call names no agent/);
   });
 
+  it("refuses the human's route to a Codex command left running when its shell and server exit", async () => {
+    const socket = await guarded(peerReading(PEER_SOURCE, () => none));
+    // As `bash -c 'bazhen devices &'` leaves one: by the time it calls, its parent has gone, so
+    // no app-server is above it; the environment Codex gave it is all that is left.
+    const call = `
+      import { request } from "node:http";
+      const server = Number(process.argv[1]);
+      const late = setTimeout(() => { process.stdout.write("its parent never exited"); process.exit(1); }, 10000);
+      const wait = () => (process.ppid === server ? setTimeout(wait, 20) : post());
+      const post = () => request({ socketPath: ${JSON.stringify(socket)}, method: "POST", path: "/v1/daemon/stop" }, (res) => {
+        let text = "";
+        res.on("data", (d) => (text += d));
+        res.on("end", () => { clearTimeout(late); process.stdout.write(res.statusCode + " " + text); });
+      }).end();
+      wait();
+    `;
+    const appServer = `
+      import { spawn } from "node:child_process";
+      spawn(process.execPath, ["--input-type=module", "-e", ${JSON.stringify(call)}, String(process.pid)], {
+        stdio: ["ignore", "inherit", "inherit"],
+        detached: true,
+        env: { ...process.env, CODEX_THREAD_ID: "01a1e0f0-593e-7ae1-9d31-769db26227fc" },
+      }).unref();
+    `;
+    const codex = spawn(process.execPath, ["--input-type=module", "-e", appServer, "app-server"], {
+      argv0: join(dir, "codex"),
+      stdio: ["ignore", "pipe", "inherit"],
+    });
+    let out = "";
+    codex.stdout.setEncoding("utf8");
+    codex.stdout.on("data", (chunk: string) => (out += chunk));
+    await new Promise((resolve) => codex.stdout.on("end", resolve));
+    expect(out).toMatch(/^403 .*a Codex tool call names no agent/);
+  });
+
   it("refuses a caller whose process the reader can't name, as when it fails", async () => {
     const socket = await guarded(peerReading("/bin/false", () => none));
     const [status, body] = await post(socket);

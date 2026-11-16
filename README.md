@@ -286,17 +286,19 @@ daemon, change the environment later agents get, launch agents outside a delegat
 other agents' terminals or the shells, or pass as another agent. That holds even when it unsets
 its environment. Only a call made outside every agent's terminal is yours.
 
-Codex runs an agent's commands in its app-server, outside the agent's terminal. So any call from
-a process under a Codex app-server (`codex app-server`, the managed one included) is never yours:
-the daemon refuses it. It knows the server by its command line, so a Codex that renames its binary
-or that subcommand would be missed; `pnpm test:real api` checks the Codex the tests install.
+Codex runs an agent's commands in its app-server, outside the agent's terminal. So a call from a
+process under a Codex app-server (`codex app-server`, the managed one included), or from one whose
+environment Codex gave a `CODEX_THREAD_ID`, as a command left running after its shell exits, is
+never yours: the daemon refuses it. It knows the server by its command line (`codex` or
+`codex-<platform>`, run as `app-server`), so a Codex that renames its binary or that subcommand
+would be missed; `pnpm test:real api` checks the Codex the tests install.
 
-That holds against an agent working inside its terminal, not one set on getting out of it.
-Everything runs as you, so an agent that does any of these looks like you to Bazhen:
+These checks catch an agent's ordinary and accidental calls, not a determined agent's. Agents run
+as you, the same user, so an agent that does any of these looks like you to Bazhen:
 
 - leaves its terminal's process tree
   (`setsid -f env -u BAZHEN_AGENT_ID -u BAZHEN_AGENT_AUTH_FILE bazhen pair`, `systemd-run --user`,
-  `at`);
+  `at`), or, from Codex, leaves the app-server's tree with `CODEX_THREAD_ID` unset;
 - types into one of your shells (`tmux -S <socket> send-keys -t <shell pane>`);
 - reaches the web port on loopback where pairing isn't required (trusted by design under
   `web.pairing = "auto"`);

@@ -94,7 +94,7 @@ pub fn of(socket: BorrowedFd<'_>, accepted: u64) -> Result<Peer, Refused> {
     let peer = Peer {
         pid,
         session: process::session(pid)?,
-        codex_server: codex_server(&line, own_args)?,
+        codex_server: codex_of(&line, own_args, process::environ)?,
         ancestors,
     };
     if self::started(pid, accepted)? != started {
@@ -146,8 +146,10 @@ pub fn is_codex_app_server(args: &[OsString]) -> bool {
     let Some((binary, rest)) = args.split_first() else {
         return false;
     };
-    Path::new(binary).file_name() == Some(OsStr::new("codex"))
-        && rest.iter().any(|arg| arg == "app-server")
+    let named = Path::new(binary).file_name().is_some_and(|name| {
+        name == OsStr::new("codex") || name.as_encoded_bytes().starts_with(b"codex-")
+    });
+    named && rest.iter().any(|arg| arg == "app-server")
 }
 
 /// The first of `line` that is a Codex app-server, as `args` reads each one's arguments: `None`
@@ -161,11 +163,42 @@ pub fn codex_server(
     args: impl Fn(Pid) -> io::Result<Option<Vec<OsString>>>,
 ) -> Result<Option<Pid>, Refused> {
     for &pid in line {
-        if args(pid)?.is_some_and(|args| is_codex_app_server(&args)) {
-            return Ok(Some(pid));
+        match args(pid)? {
+            Some(args) if args.is_empty() => {
+                return Err(Refused::Unreadable(io::Error::other(format!(
+                    "process {pid:?} shows no arguments"
+                ))));
+            }
+            Some(args) if is_codex_app_server(&args) => return Ok(Some(pid)),
+            _ => {}
         }
     }
     Ok(None)
+}
+
+/// The Codex app-server nearest the caller on `line` (`codex_server`), or else the caller itself
+/// when the environment it started with, as `environ` reads it, names a Codex thread: a command
+/// Codex ran that left the server's tree, as one backgrounded by a shell that has exited.
+///
+/// # Errors
+///
+/// `Unreadable` when a process of this user on the line, or the caller's environment, can't be
+/// read.
+pub fn codex_of(
+    line: &[Pid],
+    args: impl Fn(Pid) -> io::Result<Option<Vec<OsString>>>,
+    environ: impl Fn(Pid) -> io::Result<Vec<OsString>>,
+) -> Result<Option<Pid>, Refused> {
+    if let Some(server) = codex_server(line, args)? {
+        return Ok(Some(server));
+    }
+    let Some(&caller) = line.first() else {
+        return Ok(None);
+    };
+    let marked = environ(caller)?
+        .iter()
+        .any(|var| var.as_encoded_bytes().starts_with(b"CODEX_THREAD_ID="));
+    Ok(marked.then_some(caller))
 }
 
 /// `pid`'s arguments when it runs as this user, else `None`.
@@ -290,6 +323,13 @@ mod tests {
             &["codex", "app-server"],
             &["codex", "-c", "x=1", "app-server", "--listen", "stdio://"],
             &[
+                "/opt/codex-x86_64-unknown-linux-musl",
+                "app-server",
+                "--listen",
+                "unix://",
+            ],
+            &["codex-aarch64-apple-darwin", "app-server"],
+            &[
                 "/h/.codex/packages/app-server-daemon/releases/0.169.0/bin/codex",
                 "app-server",
                 "daemon",
@@ -318,6 +358,8 @@ mod tests {
             ],
             &["/bin/codex-app-server", "app-server2"],
             &["/bin/notcodex", "app-server"],
+            &["/bin/codexx", "app-server"],
+            &["/bin/codex-x86_64", "app-server-control"],
             &["bash", "-lc", "codex app-server"],
             &["app-server"],
             &[],
@@ -381,6 +423,48 @@ mod tests {
             codex_server(&[pid(50), pid(40), pid(1)], table).unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn refuses_a_line_through_a_process_of_this_user_with_no_arguments() {
+        let table = argv(&[
+            (50, Some(&["bazhen", "devices"])),
+            (40, Some(&[])),
+            (1, None),
+        ]);
+        let read = codex_server(&[pid(50), pid(40), pid(1)], table);
+        assert!(matches!(read, Err(Refused::Unreadable(_))));
+    }
+
+    #[test]
+    fn marks_a_caller_whose_environment_names_a_codex_thread_though_no_server_is_above_it() {
+        let line = [pid(50), pid(1)];
+        let table = || argv(&[(50, Some(&["bazhen", "devices"])), (1, None)]);
+        let env = |vars: &'static [&'static str]| move |_: Pid| Ok(os(vars));
+        assert_eq!(
+            codex_of(&line, table(), env(&["HOME=/h", "CODEX_THREAD_ID=thr-1"])).unwrap(),
+            Some(pid(50)),
+        );
+        assert_eq!(
+            codex_of(&line, table(), env(&["HOME=/h", "CODEX_HOME=/c"])).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn names_the_server_over_the_caller_s_own_environment() {
+        let line = [pid(50), pid(40), pid(1)];
+        let table = argv(&[(50, Some(&["bazhen"])), (40, Some(SERVER)), (1, None)]);
+        let marked = |_: Pid| Ok(os(&["CODEX_THREAD_ID=thr-1"]));
+        assert_eq!(codex_of(&line, table, marked).unwrap(), Some(pid(40)));
+    }
+
+    #[test]
+    fn refuses_a_caller_whose_environment_it_can_t_read() {
+        let table = argv(&[(50, Some(&["bazhen"])), (1, None)]);
+        let unreadable = |_: Pid| Err(io::Error::other("gone"));
+        let read = codex_of(&[pid(50), pid(1)], table, unreadable);
+        assert!(matches!(read, Err(Refused::Unreadable(_))));
     }
 
     #[test]
