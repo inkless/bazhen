@@ -2,6 +2,8 @@ import { defineConfig } from "vitest/config";
 
 // First in every project: the tests start only inside a capped run.
 const CAPPED = "tests/support/capped-setup.ts";
+// The holder suite's part that needs a systemd user manager.
+const CONTAINMENT = "tests/holder/containment.test.ts";
 // In every project: any test may be a property test.
 const SEEDED = "tests/support/fast-check-setup.ts";
 
@@ -67,11 +69,24 @@ export default defineConfig({
         test: {
           name: "holder",
           include: ["tests/holder/**/*.test.ts"],
+          exclude: [CONTAINMENT, "**/node_modules/**"],
           globalSetup: [CAPPED, "tests/support/holder-setup.ts"],
           setupFiles: [SEEDED],
           fileParallelism: false,
           maxWorkers: 1,
           testTimeout: 30_000,
+        },
+      },
+      {
+        // Holders in real systemd scopes: only where a user manager runs, as CI's containment job.
+        test: {
+          name: "containment",
+          include: [CONTAINMENT],
+          globalSetup: [CAPPED, "tests/support/holder-setup.ts"],
+          setupFiles: [SEEDED],
+          fileParallelism: false,
+          maxWorkers: 1,
+          testTimeout: 60_000,
         },
       },
       {
