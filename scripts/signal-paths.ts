@@ -268,7 +268,6 @@ export function tsCode(
       i++;
     }
   }
-  literals.sort((x, y) => x.index - y.index);
   return out;
 }
 

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { isSignallingSource, isSignallingTest, rawSignalCalls } from "./signal-paths.ts";
+import {
+  allowedSignalFailures,
+  isSignallingSource,
+  isSignallingTest,
+  rawSignalCalls,
+} from "./signal-paths.ts";
 
 const calls = (file: string, text: string) => rawSignalCalls(file, text).map((c) => c.call);
 
@@ -100,16 +105,16 @@ describe("raw signal calls in TypeScript", () => {
     expect(calls("a.ts", source)).toHaveLength(5);
   });
 
-  it("ignores one in a comment, a string or a template", () => {
+  it("ignores one in a comment, a string or a template, but not a child's kill beside them", () => {
     const source = [
       "// process.kill(-1)",
       "/* process.kill(-1) */",
       "const a = 'process.kill(-1, \"SIGKILL\");';",
       "const b = `process.kill(${pid})`;",
       "// child.kill('SIGTERM')",
-      "const c = 'pty.kill()';",
+      "const c = 'pty.kill()'; child.kill();",
     ].join("\n");
-    expect(calls("a.ts", source)).toEqual([]);
+    expect(calls("a.ts", source)).toEqual(["child.kill"]);
   });
 
   it("reads a template's substitutions as code, nested ones included", () => {
@@ -118,8 +123,9 @@ describe("raw signal calls in TypeScript", () => {
       "const b = `x ${`y ${proc.kill()}`} z`;",
       "const c = `${{ timeout: 1 }.timeout} ${spawn(cmd, [], { timeout: 1 })}`;",
       "const d = `${'}'}`; process.kill(pid);",
+      "const e = `${ { a: 1 }.a + child.kill() }`;",
     ].join("\n");
-    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([1, 2, 3, 4]);
+    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([1, 2, 3, 4, 5]);
   });
 
   it("reads past a regular expression holding a quote, and not a division as one", () => {
@@ -172,11 +178,10 @@ describe("raw signal calls in TypeScript", () => {
     expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
   });
 
-  it("counts process.kill once, not again as a member named kill", () => {
-    expect(calls("a.ts", "process.kill(pid);\nglobalThis.process?.kill(1);")).toEqual([
-      "process.kill",
-      "process?.kill",
-    ]);
+  it("counts process.kill once, not again as a member named kill, as it does a child's", () => {
+    expect(
+      calls("a.ts", "process.kill(pid);\nglobalThis.process?.kill(1);\nchild.kill();"),
+    ).toEqual(["process.kill", "process?.kill", "child.kill"]);
   });
 
   it("ignores what only names kill: a definition, a key, a function, a longer name", () => {
@@ -189,8 +194,9 @@ describe("raw signal calls in TypeScript", () => {
       "server.killServer();",
       "const names = ['kill'];",
       "return ['kill'];",
+      "child.kill();",
     ].join("\n");
-    expect(calls("a.ts", source)).toEqual([]);
+    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([9]);
   });
 
   it("reads no other kind of file", () => {
@@ -258,8 +264,9 @@ describe("kills Node sends for a process start's options", () => {
       'const s = "spawn(cmd, [], { timeout: 1 })";',
       "// execFile(cmd, [], { timeout: 1 })",
       "await once(ws, 'open', { signal: AbortSignal.timeout(1) });",
+      "execFile(cmd, [], { timeout: 1 });",
     ].join("\n");
-    expect(calls("a.ts", source)).toEqual([]);
+    expect(calls("a.ts", source)).toEqual(["timeout option of execFile"]);
   });
 
   it("reads a start's arguments to its own closing paren, past parens in strings", () => {
@@ -392,6 +399,10 @@ describe("kills by a process started to send them", () => {
         (shell) => !calls("a.ts", `spawn("sh", ["-c", ${JSON.stringify(shell)}]);`).length,
       ),
     ).toEqual([]);
+  });
+
+  it("counts a whole-file entry once, so its own count holds", () => {
+    expect(allowedSignalFailures("scripts/signal-paths.test.ts", "const a = 1;\n")).toEqual([]);
   });
 
   it("lets a fixture file name command-line kills, but not send a signal itself", () => {
