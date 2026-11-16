@@ -15,6 +15,10 @@ const patterns = (glob: string) => {
 
 const banned = (glob: string) => patterns(glob).flatMap((p) => p.group);
 
+/** The group of the pattern that bans host-guard by module path, empty where there is none. */
+const deep = (glob: string) =>
+  patterns(glob).find((p) => p.group[0] === "**/host-guard/src/**")?.group ?? [];
+
 describe("generated oxlint config", () => {
   it("bans every form of a core import from apps/web", () => {
     expect(banned("apps/web/**/*.ts")).toEqual(
@@ -42,6 +46,25 @@ describe("generated oxlint config", () => {
         allowTypeImports: true,
       }),
     );
+  });
+
+  it("lets host-guard be imported by path only where a module is named, and nowhere for holder.ts", () => {
+    expect([
+      deep("apps/daemon/**/*.ts"),
+      deep("scripts/**/*.ts"),
+      deep("scripts/capped.ts"),
+      deep("packages/host-guard/**/*.ts"),
+    ]).toEqual([
+      ["**/host-guard/src/**"],
+      ["**/host-guard/src/**", "!**/host-guard/src/cap.ts", "!**/host-guard/src/sandbox.ts"],
+      [
+        "**/host-guard/src/**",
+        "!**/host-guard/src/cap.ts",
+        "!**/host-guard/src/sandbox.ts",
+        "!**/host-guard/src/signal.ts",
+      ],
+      [],
+    ]);
   });
 
   it("applies the small-test bans to *.test.ts but not *.medium.test.ts", () => {

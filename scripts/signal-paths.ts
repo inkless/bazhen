@@ -531,8 +531,22 @@ export function rawSignalCalls(file: string, text: string): { line: number; call
 }
 
 /** The chokepoints' own ways in: a file calling one sends signals, though not directly. */
-const TS_SENDERS =
-  /\b(?:signalGroup|signalPane|signalServer|killHolder|rebindHolder|rebindHolderSocket|startHolder|runBounded)\b/;
+const TS_SENDERS = new RegExp(
+  `\\b(?:${[
+    "signalGroup",
+    "signalPane",
+    "signalServer",
+    "killHolder",
+    "rebindHolder",
+    "rebindHolderSocket",
+    "startHolder",
+    "runBounded",
+    "killHolderAt",
+    "rebindHolderAt",
+    "rebindHolderWith",
+    "startHolderWith",
+  ].join("|")})\\b`,
+);
 // The holder's own: its child's close and signal, which reach its group and the terminal's
 // foreground group, and the guard module that floors them.
 // A session's and an ending's constructors, or an import of either from the holder's session

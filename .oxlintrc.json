@@ -100,6 +100,12 @@
               },
               {
                 "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
+              },
+              {
+                "group": [
                   "node-pty",
                   "hono",
                   "@hono/*",
@@ -168,6 +174,12 @@
                   "**/web/src/**"
                 ],
                 "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
               },
               {
                 "group": [
@@ -271,6 +283,12 @@
               },
               {
                 "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "packages/protocol (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
+              },
+              {
+                "group": [
                   "node-pty",
                   "hono",
                   "@hono/*",
@@ -343,6 +361,12 @@
               },
               {
                 "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
+              },
+              {
+                "group": [
                   "node-pty",
                   "hono",
                   "@hono/*",
@@ -412,6 +436,12 @@
                 ],
                 "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import only types from @bazhen/protocol.",
                 "allowTypeImports": true
+              },
+              {
+                "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
               },
               {
                 "group": [
@@ -513,6 +543,12 @@
                 ],
                 "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import only types from @bazhen/protocol.",
                 "allowTypeImports": true
+              },
+              {
+                "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "packages/core (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
               },
               {
                 "group": [
@@ -915,6 +951,12 @@
               },
               {
                 "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "packages/runtime-tmux (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
+              },
+              {
+                "group": [
                   "node-pty",
                   "hono",
                   "@hono/*",
@@ -964,6 +1006,12 @@
                   "**/web/src/**"
                 ],
                 "message": "packages/runtime-tmux (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "packages/runtime-tmux (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
               },
               {
                 "group": [
@@ -1048,6 +1096,12 @@
               },
               {
                 "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "packages/runtime-tmux (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
+              },
+              {
+                "group": [
                   "node-pty",
                   "hono",
                   "@hono/*",
@@ -1100,6 +1154,12 @@
               },
               {
                 "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "packages/runtime-holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
+              },
+              {
+                "group": [
                   "node-pty",
                   "hono",
                   "@hono/*",
@@ -1149,6 +1209,12 @@
                   "**/web/src/**"
                 ],
                 "message": "packages/runtime-holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "packages/runtime-holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
               },
               {
                 "group": [
@@ -1230,6 +1296,12 @@
                   "**/web/src/**"
                 ],
                 "message": "packages/runtime-holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "packages/runtime-holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
               },
               {
                 "group": [
@@ -1323,6 +1395,12 @@
               },
               {
                 "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "packages/env-local (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
+              },
+              {
+                "group": [
                   "node-pty",
                   "hono",
                   "@hono/*",
@@ -1410,6 +1488,12 @@
                 ],
                 "message": "packages/env-local (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import only types from @bazhen/protocol.",
                 "allowTypeImports": true
+              },
+              {
+                "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "packages/env-local (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
               },
               {
                 "group": [
@@ -1532,6 +1616,12 @@
               },
               {
                 "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "packages/env-local (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
+              },
+              {
+                "group": [
                   "node-pty",
                   "hono",
                   "@hono/*",
@@ -1622,6 +1712,12 @@
               },
               {
                 "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "packages/harness-claude-code (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
+              },
+              {
+                "group": [
                   "node-pty",
                   "hono",
                   "@hono/*",
@@ -1709,6 +1805,12 @@
                 ],
                 "message": "packages/harness-claude-code (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import only types from @bazhen/protocol.",
                 "allowTypeImports": true
+              },
+              {
+                "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "packages/harness-claude-code (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
               },
               {
                 "group": [
@@ -1831,6 +1933,12 @@
               },
               {
                 "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "packages/harness-claude-code (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
+              },
+              {
+                "group": [
                   "node-pty",
                   "hono",
                   "@hono/*",
@@ -1921,6 +2029,12 @@
               },
               {
                 "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "packages/harness-codex (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
+              },
+              {
+                "group": [
                   "node-pty",
                   "hono",
                   "@hono/*",
@@ -2008,6 +2122,12 @@
                 ],
                 "message": "packages/harness-codex (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import only types from @bazhen/protocol.",
                 "allowTypeImports": true
+              },
+              {
+                "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "packages/harness-codex (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
               },
               {
                 "group": [
@@ -2130,6 +2250,12 @@
               },
               {
                 "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "packages/harness-codex (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
+              },
+              {
+                "group": [
                   "node-pty",
                   "hono",
                   "@hono/*",
@@ -2170,6 +2296,12 @@
                   "**/cli/src/**"
                 ],
                 "message": "apps/daemon (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/cli."
+              },
+              {
+                "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "apps/daemon (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
               }
             ]
           }
@@ -2203,6 +2335,12 @@
                   "**/cli/src/**"
                 ],
                 "message": "apps/daemon (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/cli."
+              },
+              {
+                "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "apps/daemon (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
               },
               {
                 "group": [
@@ -2265,6 +2403,12 @@
                   "**/cli/src/**"
                 ],
                 "message": "apps/daemon (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/cli."
+              },
+              {
+                "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "apps/daemon (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
               }
             ]
           }
@@ -2364,6 +2508,12 @@
                   "!@bazhen/daemon/start"
                 ],
                 "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import from @bazhen/daemon only @bazhen/daemon/paths, @bazhen/daemon/client, @bazhen/daemon/start."
+              },
+              {
+                "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
               }
             ]
           }
@@ -2463,6 +2613,12 @@
                   "!@bazhen/daemon/start"
                 ],
                 "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import from @bazhen/daemon only @bazhen/daemon/paths, @bazhen/daemon/client, @bazhen/daemon/start."
+              },
+              {
+                "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
               },
               {
                 "group": [
@@ -2591,6 +2747,12 @@
                   "!@bazhen/daemon/start"
                 ],
                 "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import from @bazhen/daemon only @bazhen/daemon/paths, @bazhen/daemon/client, @bazhen/daemon/start."
+              },
+              {
+                "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "apps/cli (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
               }
             ]
           }
@@ -2678,6 +2840,12 @@
                   "**/web/src/**"
                 ],
                 "message": "tests/api (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "tests/api (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
               }
             ]
           }
@@ -2765,6 +2933,12 @@
                   "**/web/src/**"
                 ],
                 "message": "tests/api (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "tests/api (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
               },
               {
                 "group": [
@@ -2881,6 +3055,12 @@
                   "**/web/src/**"
                 ],
                 "message": "tests/api (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "tests/api (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
               }
             ]
           }
@@ -2968,6 +3148,12 @@
                   "**/web/src/**"
                 ],
                 "message": "tests/e2e (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "tests/e2e (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
               }
             ]
           }
@@ -3055,6 +3241,12 @@
                   "**/web/src/**"
                 ],
                 "message": "tests/e2e (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "tests/e2e (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
               },
               {
                 "group": [
@@ -3171,6 +3363,12 @@
                   "**/web/src/**"
                 ],
                 "message": "tests/e2e (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "tests/e2e (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
               }
             ]
           }
@@ -3267,6 +3465,12 @@
                   "**/cli/src/**"
                 ],
                 "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/cli."
+              },
+              {
+                "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
               },
               {
                 "group": [
@@ -3380,6 +3584,12 @@
               },
               {
                 "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
+              },
+              {
+                "group": [
                   "node-pty",
                   "child_process",
                   "node:child_process",
@@ -3489,6 +3699,12 @@
               },
               {
                 "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
+              },
+              {
+                "group": [
                   "node-pty",
                   "child_process",
                   "node:child_process",
@@ -3552,6 +3768,12 @@
                   "**/daemon/src/**"
                 ],
                 "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
               },
               {
                 "group": [
@@ -3620,6 +3842,12 @@
                   "**/daemon/src/**"
                 ],
                 "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
               },
               {
                 "group": [
@@ -3720,6 +3948,12 @@
               },
               {
                 "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
+              },
+              {
+                "group": [
                   "node-pty",
                   "hono",
                   "@hono/*",
@@ -3788,6 +4022,12 @@
               },
               {
                 "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "apps/web/src/ui (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
+              },
+              {
+                "group": [
                   "node-pty",
                   "hono",
                   "@hono/*",
@@ -3846,6 +4086,12 @@
                   "**/daemon/src/**"
                 ],
                 "message": "apps/web/src/ui (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "apps/web/src/ui (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
               },
               {
                 "group": [
@@ -3939,6 +4185,12 @@
               },
               {
                 "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "apps/web/src/ui (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
+              },
+              {
+                "group": [
                   "node-pty",
                   "hono",
                   "@hono/*",
@@ -3960,7 +4212,16 @@
         "no-restricted-imports": [
           "error",
           {
-            "patterns": []
+            "patterns": [
+              {
+                "group": [
+                  "**/host-guard/src/**",
+                  "!**/host-guard/src/cap.ts",
+                  "!**/host-guard/src/sandbox.ts"
+                ],
+                "message": "scripts (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
+              }
+            ]
           }
         ]
       }
@@ -3975,6 +4236,14 @@
           "error",
           {
             "patterns": [
+              {
+                "group": [
+                  "**/host-guard/src/**",
+                  "!**/host-guard/src/cap.ts",
+                  "!**/host-guard/src/sandbox.ts"
+                ],
+                "message": "scripts (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
+              },
               {
                 "group": [
                   "node-pty",
@@ -4018,7 +4287,39 @@
         "no-restricted-imports": [
           "error",
           {
-            "patterns": []
+            "patterns": [
+              {
+                "group": [
+                  "**/host-guard/src/**",
+                  "!**/host-guard/src/cap.ts",
+                  "!**/host-guard/src/sandbox.ts"
+                ],
+                "message": "scripts (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "scripts/capped.ts"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "**/host-guard/src/**",
+                  "!**/host-guard/src/cap.ts",
+                  "!**/host-guard/src/sandbox.ts",
+                  "!**/host-guard/src/signal.ts"
+                ],
+                "message": "scripts (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
+              }
+            ]
           }
         ]
       }

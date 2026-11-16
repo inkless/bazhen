@@ -97,6 +97,11 @@ function privateRoot(): string {
 const holderAt = (start: number): PsReading => ({ comm: BINARY, start, args: "bazhen-holder" });
 const stranger: PsReading = { comm: "sleep", start: START, args: "sleep 300" };
 const always = (reading: PsReading) => async () => reading;
+/** `ps` read by each of `steps` in turn, the last of them again from then on. */
+const inTurn = (...steps: [() => PsReading, ...(() => PsReading)[]]) => {
+  let at = 0;
+  return async () => steps[Math.min(at++, steps.length - 1)]!();
+};
 /** `ps` showing `first`, then `then` from the next read on, as a pid reused meanwhile would. */
 const readsThen = (first: PsReading, then: PsReading) => {
   const readings = [first];
@@ -179,6 +184,7 @@ describe("starting a holder", () => {
     expect(failure).toMatchObject({
       ending: { code: 2 },
       stderr: expect.stringContaining("no argv"),
+      running: false,
     });
     expect([run.kills, run.reads()]).toEqual([[], 1]);
   });
@@ -191,7 +197,7 @@ describe("starting a holder", () => {
       return child.stdin;
     };
     const run = started(always(holderAt(START)), {}, child);
-    await expect(failureOf(run)).resolves.toMatchObject({ ending: { code: 9 } });
+    await expect(failureOf(run)).resolves.toMatchObject({ ending: { code: 9 }, running: false });
     expect(run.kills).toEqual([]);
   });
 
@@ -281,17 +287,45 @@ describe("starting a holder", () => {
     ]);
   });
 
-  it("runs a launcher with the binary as its last argument", async () => {
+  it("runs the binary under its CPU limit through a fixed shell that execs it", async () => {
     const run = started(always(holderAt(START)), {
       env: { PATH: "/bin" },
-      launcher: ["sh", "-c", 'exec "$0"'],
+      limits: { cpuSeconds: 10 },
     });
     await expect.poll(() => run.child.sent).not.toBe("");
     run.child.stdout.write("ready\n");
     await run.start;
     expect(run.spawned).toEqual([
-      { file: "sh", args: ["-c", 'exec "$0"', BINARY], env: { PATH: "/bin" } },
+      {
+        file: "/bin/sh",
+        args: ["-c", 'ulimit -t 10 && exec "$0" "$@"', BINARY],
+        env: { PATH: "/bin" },
+      },
     ]);
+  });
+
+  it("kills nothing when the holder exits while ps is read to vouch for it", async () => {
+    const child = new FakeChild();
+    const read = inTurn(
+      () => holderAt(START),
+      () => (child.exit(137), holderAt(START)),
+    );
+    const run = started(read, { readyMs: 50 }, child);
+    await expect(failureOf(run)).resolves.toMatchObject({ running: false });
+    expect(run.kills).toEqual([]);
+  });
+
+  it("says a holder ps can't read as it starts may still run, and never calls it silent", async () => {
+    const run = started(always("unreadable"), { readyMs: 50 });
+    await expect(failureOf(run)).resolves.toMatchObject({ ending: "unchecked", running: true });
+    expect([run.kills, run.child.stdinEnded]).toEqual([[], true]);
+  });
+
+  it("says one ps can't read but that exits once it finds no spec has ended", async () => {
+    const child = new FakeChild();
+    child.stdin.once("finish", () => queueMicrotask(() => child.exit(2)));
+    const run = started(always("unreadable"), { readyMs: 50 }, child);
+    await expect(failureOf(run)).resolves.toMatchObject({ ending: { code: 2 }, running: false });
   });
 });
 
@@ -355,12 +389,14 @@ describe("refusing to start a holder, before anything is spawned", () => {
       await refused({ binary: "bazhen-holder" }),
       await refused({ readyMs: 0 }),
       await refused({ readyMs: Number.NaN }),
+      await refused({ limits: { cpuSeconds: 1.5 } }),
     ];
     expect(results).toEqual([
       { spawned: 0, error: expect.stringMatching(/over the 1048576/) },
       { spawned: 0, error: expect.stringMatching(/isn't absolute/) },
       { spawned: 0, error: expect.stringMatching(/readyMs/) },
       { spawned: 0, error: expect.stringMatching(/readyMs/) },
+      { spawned: 0, error: expect.stringMatching(/cpuSeconds/) },
     ]);
   });
 });

@@ -25,6 +25,8 @@ export type Area = {
   startsProcessesVia?: string;
   /** Libraries it may use only through the wrappers in `via`, which is an area of its own. */
   onlyThrough?: { packages: string[]; via: string };
+  /** host-guard modules it may import by path, where the rest go only through the package. */
+  hostGuardModules?: string[];
 };
 
 const PACKAGE_DIR: Record<string, string> = {
@@ -213,8 +215,20 @@ export const MATRIX: Area[] = [
     thirdParty: ["node-pty", "hono", "@hono/*", "ws"],
   },
   // Repository scripts: Node tools with no package bans, listed so their small tests get the
-  // small-test bans.
-  { dir: "scripts", banned: [] },
+  // small-test bans. The capped runner and the signal-path rules read host-guard's cap and sandbox
+  // modules by path, as they run before the workspace's packages resolve.
+  { dir: "scripts", banned: [], hostGuardModules: ["cap.ts", "sandbox.ts"] },
+];
+
+/**
+ * Single files whose area's rules they keep, with more of host-guard by path. scripts/capped.ts
+ * ends itself the way the test it ran ended, which only signal.ts's `dieBy` may do.
+ */
+const FILE_EXCEPTIONS: { readonly file: string; readonly area: Area }[] = [
+  {
+    file: "scripts/capped.ts",
+    area: { dir: "scripts", banned: [], hostGuardModules: ["cap.ts", "sandbox.ts", "signal.ts"] },
+  },
 ];
 
 // Small tests (`*.test.ts`) run in process with no I/O; anything that needs a file, a database or
@@ -274,6 +288,13 @@ function restrictions(area: Area, smallTest: boolean): Restriction {
       return { ...pattern, group: [...pattern.group, ...allowed.map((a) => `!${p}/${a}`)] };
     }),
   ];
+  if (area.dir !== "packages/host-guard") {
+    const allowed = (area.hostGuardModules ?? []).map((m) => `!**/host-guard/src/${m}`);
+    patterns.push({
+      group: ["**/host-guard/src/**", ...allowed],
+      message: `${where} imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid.`,
+    });
+  }
   if (area.thirdParty?.length) {
     patterns.push({
       group: area.thirdParty,
@@ -328,9 +349,14 @@ function overrides(): Override[] {
       },
     ];
   });
+  const files = FILE_EXCEPTIONS.map(({ file, area }) => ({
+    files: [file],
+    rules: { "no-restricted-imports": restrictions(area, false) },
+  }));
   // The one package allowed to run tmux, and within it the one module allowed to send signals.
   return [
     ...areas,
+    ...files,
     { files: ["packages/host-guard/src/**"], rules: { "bazhen/host-guard": "off" } },
     { files: ["packages/host-guard/src/signal.ts"], rules: { "bazhen/signal-guard": "off" } },
   ];

@@ -345,6 +345,11 @@ describe("signalling sources", () => {
     expect(isSignallingSource("a.ts", "signalGroup(child, 'SIGTERM');")).toBe(true);
     expect(isSignallingSource("a.ts", "rebindHolder(proof);")).toBe(true);
     expect(isSignallingSource("a.ts", "await rebindHolderSocket(holder);")).toBe(true);
+    expect(
+      ["startHolderWith", "rebindHolderWith", "killHolderAt", "rebindHolderAt"].filter(
+        (name) => !isSignallingSource("a.ts", `${name}(x);`),
+      ),
+    ).toEqual([]);
     // Its never-ready path kills, so a caller of it is changed only in a sandbox too.
     expect(isSignallingSource("a.ts", "await startHolder({ binary, root, spec, env });")).toBe(
       true,

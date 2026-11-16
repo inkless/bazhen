@@ -29,6 +29,7 @@ export {
   rebindHolderSocket,
   startHolder,
   vouchHolder,
+  type HolderLimits,
   type StartHolderOptions,
   type StartedHolder,
 } from "./holder.ts";

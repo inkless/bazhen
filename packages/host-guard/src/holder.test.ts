@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { holderSocket, holderSocketRefusal, rebindHolderWith, vouchHolderWith } from "./holder.ts";
-import { killHolder, rebindHolder } from "./signal.ts";
+import { killHolder, killHolderAt, rebindHolder, rebindHolderAt } from "./signal.ts";
 import type { PsReading } from "./tmux.ts";
 
 // Above every system's pid limit, so even a broken guard reaches no process.
@@ -41,7 +41,7 @@ describe("the holder kill guard", () => {
     const kill = stubKill();
     expect(() => killHolder(holder)).toThrow("unvouched");
     const stale = await vouchHolderWith(holder, "kill", theHolder, () => 0);
-    expect(() => killHolder(stale!, 1_001)).toThrow("stale proof");
+    expect(() => killHolderAt(stale!, 1_001)).toThrow("stale proof");
     const proof = await vouchHolderWith(holder, "kill", theHolder);
     expect(killHolder(proof!)).toBe(true);
     expect(() => killHolder(proof!)).toThrow("unvouched");
@@ -54,7 +54,7 @@ describe("the holder rebind guard", () => {
     const kill = stubKill();
     expect(() => rebindHolder(holder)).toThrow("unvouched");
     const stale = await vouchHolderWith(holder, "rebind", theHolder, () => 0);
-    expect(() => rebindHolder(stale!, 1_001)).toThrow("stale proof");
+    expect(() => rebindHolderAt(stale!, 1_001)).toThrow("stale proof");
     const proof = await vouchHolderWith(holder, "rebind", theHolder);
     expect(rebindHolder(proof!)).toBe(true);
     expect(() => rebindHolder(proof!)).toThrow("unvouched");

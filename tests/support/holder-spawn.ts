@@ -135,7 +135,7 @@ export async function spawnHolder(
       spec,
       env: bareHolder ? {} : requireHolderEnv(holderEnv()),
       cwd: userDir(testHome()),
-      launcher: ["/bin/sh", "-c", `ulimit -t ${CPU_SECONDS} && exec "$0" "$@"`],
+      limits: { cpuSeconds: CPU_SECONDS },
       onStarted: async ({ pid, start }) => {
         entry = await record(pid, start, socket);
       },

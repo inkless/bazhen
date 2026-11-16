@@ -100,7 +100,12 @@ function spend(holder: HolderProcess, use: HolderUse, now: number): void {
  * Sends a checked holder `SIGKILL`, to the pid alone: what its child's group does once the holder
  * is gone is the kernel's hang-up to its session. Whether the holder was still there.
  */
-export function killHolder(holder: HolderProcess, now = Date.now()): boolean {
+export function killHolder(holder: HolderProcess): boolean {
+  return killHolderAt(holder, Date.now());
+}
+
+/** `killHolder` at the time `now`, for the expiry's tests. Not exported from the package. */
+export function killHolderAt(holder: HolderProcess, now: number): boolean {
   spend(holder, "kill", now);
   return send(holder.pid, "SIGKILL");
 }
@@ -109,7 +114,12 @@ export function killHolder(holder: HolderProcess, now = Date.now()): boolean {
  * Sends a checked holder `SIGUSR1`, which makes it bind its socket again where the file has gone.
  * Only that signal, and only to the pid itself. Whether the holder was still there.
  */
-export function rebindHolder(holder: HolderProcess, now = Date.now()): boolean {
+export function rebindHolder(holder: HolderProcess): boolean {
+  return rebindHolderAt(holder, Date.now());
+}
+
+/** `rebindHolder` at the time `now`, for the expiry's tests. Not exported from the package. */
+export function rebindHolderAt(holder: HolderProcess, now: number): boolean {
   spend(holder, "rebind", now);
   return send(holder.pid, "SIGUSR1");
 }

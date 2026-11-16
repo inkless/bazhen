@@ -72,10 +72,16 @@ export function holderSocketRefusal(
 /** The holder didn't say `ready`: how it ended, if it did, and what it wrote on stderr. */
 export class HolderStartFailed extends Error {
   /**
-   * Its exit code, the signal that ended it, `silent` for one that said nothing in time, or
-   * `unstarted` for a binary that couldn't be run at all.
+   * Its exit code, the signal that ended it, `silent` for one that said nothing in time,
+   * `unstarted` for a binary that couldn't be run at all, or `unchecked` for one `ps` couldn't
+   * read as it started, which may still run.
    */
-  readonly ending: { readonly code: number } | { readonly signal: string } | "silent" | "unstarted";
+  readonly ending:
+    | { readonly code: number }
+    | { readonly signal: string }
+    | "silent"
+    | "unstarted"
+    | "unchecked";
   readonly stderr: string;
   /** Whether it may still run: one `ps` didn't show as the holder is never killed. */
   readonly running: boolean;
@@ -94,9 +100,11 @@ export class HolderStartFailed extends Error {
         ? "it said nothing in time"
         : ending === "unstarted"
           ? "it couldn't be run"
-          : "code" in ending
-            ? `it exited ${ending.code}`
-            : `${ending.signal} ended it`;
+          : ending === "unchecked"
+            ? "ps couldn't say what it is"
+            : "code" in ending
+              ? `it exited ${ending.code}`
+              : `${ending.signal} ended it`;
     super(`the holder didn't start: ${how}${detail}: ${stderr.trim() || "(no stderr)"}`, {
       cause,
     });
@@ -131,13 +139,30 @@ export interface StartHolderOptions {
   readonly cwd?: string;
   /** How long it has to say `ready`, in ms: up to a minute. */
   readonly readyMs?: number;
-  /** An argv run in place of the binary, which then gets the binary as its last argument. */
-  readonly launcher?: readonly [string, ...string[]];
+  /** Limits it runs under, set by a fixed `/bin/sh` that then execs it. */
+  readonly limits?: HolderLimits;
   /**
    * Called once the holder runs and before it reads its spec, so the caller can record it before
    * it can outlive the call. One that throws stops the start, and the holder is ended.
    */
   readonly onStarted?: (holder: HolderProcess) => void | Promise<void>;
+}
+
+export interface HolderLimits {
+  /** The CPU-seconds it may use, as `ulimit -t`: one that spins dies of SIGXCPU instead. */
+  readonly cpuSeconds?: number;
+}
+
+const CPU_SECONDS_MAX = 24 * 60 * 60;
+
+/** The argv that runs `binary` under `limits`: the binary alone, or a fixed shell that execs it. */
+function holderArgv(binary: string, limits: HolderLimits | undefined): [string, ...string[]] {
+  const cpu = limits?.cpuSeconds;
+  if (cpu === undefined) return [binary];
+  if (!Number.isSafeInteger(cpu) || cpu <= 0 || cpu > CPU_SECONDS_MAX) {
+    throw new RangeError(`cpuSeconds ${cpu} isn't between 1 and ${CPU_SECONDS_MAX}`);
+  }
+  return ["/bin/sh", "-c", `ulimit -t ${cpu} && exec "$0" "$@"`, binary];
 }
 
 export interface StartedHolder extends HolderProcess {
@@ -211,7 +236,7 @@ export async function startHolderWith(
   privateHoldersDir(root, spec.socket);
   const read = seams.read ?? readProcess;
   const kill = seams.kill ?? killHolder;
-  const [file, ...args] = options.launcher === undefined ? [binary] : [...options.launcher, binary];
+  const [file, ...args] = holderArgv(binary, options.limits);
   const child = (seams.spawn ?? realSpawn)(file, args, {
     env: { ...options.env },
     cwd: options.cwd ?? "/",
@@ -226,8 +251,11 @@ export async function startHolderWith(
     }),
   );
   const failed = new Promise<Error>((done) => child.once("error", done));
-  // A holder that exits before it reads its spec breaks the pipe; its exit says why.
+  // A holder that exits before it reads its spec breaks the pipe, and a pipe can fail at any
+  // time after: its exit says why, and none of them may throw.
   child.stdin?.on("error", () => {});
+  child.stdout?.on("error", () => {});
+  child.stderr?.on("error", () => {});
   const pid = child.pid;
   if (pid === undefined) throw new HolderStartFailed("unstarted", (await failed).message);
   let stderr = "";
@@ -235,9 +263,15 @@ export async function startHolderWith(
     if (stderr.length < STDERR_MAX) stderr = (stderr + chunk).slice(0, STDERR_MAX);
   });
   const stderrEnded = new Promise<void>((done) => {
-    child.stderr?.once("end", done).once("error", () => done());
+    child.stderr?.once("end", done).once("close", done);
     if (child.stderr === null) done();
   });
+  /** Leaves a holder that didn't start to itself: nothing here reads it or waits for it. */
+  const letGo = () => {
+    child.stdout?.destroy();
+    child.stderr?.destroy();
+    child.unref();
+  };
   const failure = async (detail: string, holder: HolderProcess | null, cause?: unknown) => {
     child.stdin?.end();
     // Before the kill, whose end would read as the holder's own.
@@ -245,13 +279,23 @@ export async function startHolderWith(
     const left =
       holder === null ? null : await endUnready(holder, () => ending !== undefined, read, kill);
     await Promise.race([stderrEnded, delay(STDERR_MS)]);
+    letGo();
     const note = left?.note ? `; ${left.note}` : "";
     const running = left?.running ?? false;
     return new HolderStartFailed(how, stderr, { detail: `${detail}${note}`, running, cause });
   };
   const reading = await read(pid);
-  if (typeof reading === "string")
-    throw await failure(`, and ps found it ${reading} at once`, null);
+  if (typeof reading === "string") {
+    // Unread, it can be neither recorded nor vouched for: with no spec it should exit, and one
+    // that doesn't in time may still run.
+    child.stdin?.end();
+    await Promise.race([exited, delay(STDERR_MS)]);
+    await Promise.race([stderrEnded, delay(STDERR_MS)]);
+    letGo();
+    const detail = `, as ps found it ${reading} at once`;
+    const running = ending === undefined;
+    throw new HolderStartFailed(ending ?? "unchecked", stderr, { detail, running });
+  }
   const holder = { pid, start: reading.start };
   mine = { start: reading.start, ready: false, exited: ending !== undefined };
   own.set(pid, mine);
@@ -267,9 +311,7 @@ export async function startHolderWith(
     throw await failure(said === null ? "" : `, saying ${JSON.stringify(said)}`, holder);
   }
   mine.ready = true;
-  child.stdout?.destroy();
-  child.stderr?.destroy();
-  child.unref();
+  letGo();
   return { ...holder, exited };
 }
 
@@ -294,18 +336,28 @@ function privateHoldersDir(root: string, socket: string): void {
   if ((stat.mode & 0o077) !== 0) throw refuse(`${dir} is open to other users`);
 }
 
-/** The child's first line, or null for none: it ended first, or said none within `ms`. */
+/**
+ * The child's first line, or null for none: it ended first, or said none within `ms`. It stops
+ * reading once it has decided.
+ */
 function firstLine(child: HolderChild, exited: Promise<unknown>, ms: number) {
-  return new Promise<string | null>((done) => {
+  return new Promise<string | null>((settle) => {
     let out = "";
-    child.stdout?.setEncoding("utf8").on("data", (chunk: string) => {
+    const take = (chunk: string) => {
       out += chunk;
       const end = out.indexOf("\n");
       if (end !== -1) done(out.slice(0, end + 1));
       else if (out.length > FIRST_LINE_MAX) done(out.slice(0, FIRST_LINE_MAX));
-    });
+    };
+    const timer = setTimeout(() => done(null), ms);
+    timer.unref();
+    function done(line: string | null) {
+      clearTimeout(timer);
+      child.stdout?.off("data", take);
+      settle(line);
+    }
+    child.stdout?.setEncoding("utf8").on("data", take);
     void exited.then(() => done(null));
-    setTimeout(() => done(null), ms).unref();
   });
 }
 
