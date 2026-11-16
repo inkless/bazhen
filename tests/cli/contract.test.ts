@@ -501,6 +501,8 @@ describe("who is asking", () => {
     ["a file holding no token", "not a token\n"],
     ["a token one character short", TOKEN.slice(1)],
     ["a token with a header after it", `${TOKEN}\r\nbazhen-agent-id: agent_x`],
+    ["a file far larger than any token", "t".repeat(1 << 20)],
+    ["a token followed by more of the file", `${TOKEN}\n${"x".repeat(100)}`],
   ])("sends no token from %s", async (_name, content) => {
     state();
     const file = join(s.dir, "token");
