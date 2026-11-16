@@ -106,6 +106,34 @@ Two parts are fixed: the output ring, 1 MiB, from which a viewer that reconnects
 engine's screens. History is counted in rows, as tmux's `history-limit` counts them, and stored as
 text, so it costs what the rows hold.
 
+## Containment
+
+On Linux with a systemd user manager, each holder starts in a transient scope of its own,
+`bazhen-terminal-<terminal>-<random>.scope`, in `bazhen-terminals.slice` (under `bazhen.slice`).
+Everything the terminal runs is in that scope, outside the cgroup of the app that ran
+`bazhen start` and of the daemon. So closing that app, or an OOM in it, leaves terminals running,
+and a runaway in one terminal can't take memory from the rest.
+
+- **Caps.** `terminals.memory_max` caps each terminal's scope (default `50%` of RAM), and
+  `terminals.total_memory_max` caps the slice they share (default `80%`). Both take what systemd's
+  `MemoryMax=` does: bytes with an optional `K`, `M`, `G` or `T`, a percentage, or `infinity`.
+  Swap isn't capped.
+- **Past a cap**, the kernel kills the biggest process in that scope, which is the runaway rather
+  than its holder. With systemd 253 or later each scope has `OOMPolicy=continue`, so systemd leaves
+  the rest of the scope alone, and the holder reports its child's exit by SIGKILL. Older systemd
+  takes no `OOMPolicy` on a scope, and doctor says the kernel alone decides what dies.
+- **Decided at start.** The daemon probes once as it starts. It sets the slice's cap, starts a
+  throwaway scope, and reads both caps back from the kernel, since a manager without the memory
+  controller accepts a cap and enforces nothing. If the probe fails, holders start where the daemon
+  runs, and the daemon and doctor say why. If it succeeds and a terminal's scope then can't be made,
+  that terminal's create fails rather than run uncontained.
+- **Not contained**: terminals on macOS, which has no cgroups; tmux terminals; and holders started
+  before containment, or by a daemon that couldn't contain them. Doctor counts the holders outside
+  a scope; restarting a terminal starts its new holder in one.
+
+A process can still leave its terminal's scope by asking systemd for another, as `systemd-run`
+does. Containment bounds runaways, not a process that means to escape.
+
 ## While viewers fall behind
 
 What a holder owes the daemon and other viewers is bounded however they behave:

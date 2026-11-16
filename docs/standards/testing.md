@@ -32,16 +32,17 @@ trailer naming each test it can't judge.
 Size is about what a test touches, and the file name declares it. The sizes follow _Software
 Engineering at Google_.
 
-| Size   | File                          | May touch                            | Runs in                                |
-| ------ | ----------------------------- | ------------------------------------ | -------------------------------------- |
-| small  | `src/**/x.test.ts`            | memory only, including `app.request` | `pnpm test`, in parallel, milliseconds |
-| small  | `scripts/*.test.ts`           | memory only                          | `pnpm test`                            |
-| medium | `src/**/x.medium.test.ts`     | temporary files, SQLite              | `pnpm test:medium`                     |
-| medium | `scripts/*.medium.test.ts`    | temporary files, git, subprocesses   | `pnpm test:medium`                     |
-| medium | `tests/integration/*.test.ts` | a private tmux server, real PTYs     | `pnpm test:real integration`           |
-| medium | `tests/holder/*.test.ts`      | holders and real PTYs, no tmux       | `pnpm test:real holder`                |
-| large  | `tests/api/*.test.ts`         | the daemon as a process, tmux, CLIs  | `pnpm test:real api`                   |
-| large  | `tests/e2e/*.spec.ts`         | daemon, web client and browser       | `pnpm test:real e2e`                   |
+| Size   | File                               | May touch                            | Runs in                                |
+| ------ | ---------------------------------- | ------------------------------------ | -------------------------------------- |
+| small  | `src/**/x.test.ts`                 | memory only, including `app.request` | `pnpm test`, in parallel, milliseconds |
+| small  | `scripts/*.test.ts`                | memory only                          | `pnpm test`                            |
+| medium | `src/**/x.medium.test.ts`          | temporary files, SQLite              | `pnpm test:medium`                     |
+| medium | `scripts/*.medium.test.ts`         | temporary files, git, subprocesses   | `pnpm test:medium`                     |
+| medium | `tests/integration/*.test.ts`      | a private tmux server, real PTYs     | `pnpm test:real integration`           |
+| medium | `tests/holder/*.test.ts`           | holders and real PTYs, no tmux       | `pnpm test:real holder`                |
+| medium | `tests/holder/containment.test.ts` | holders in real systemd scopes       | CI's containment job only              |
+| large  | `tests/api/*.test.ts`              | the daemon as a process, tmux, CLIs  | `pnpm test:real api`                   |
+| large  | `tests/e2e/*.spec.ts`              | daemon, web client and browser       | `pnpm test:real e2e`                   |
 
 `pnpm check` runs the small and medium tests on the host; none of them runs tmux or an agent, or
 signals a process it didn't start. The holder tests and the Rust tests that start a holder, close a
