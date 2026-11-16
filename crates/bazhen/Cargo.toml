@@ -17,6 +17,7 @@ signal-hook = { workspace = true }
 tungstenite = { workspace = true }
 
 [dev-dependencies]
+bazhen-test-signal = { workspace = true }
 proptest = { workspace = true }
 
 [lints]

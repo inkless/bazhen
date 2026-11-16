@@ -71,6 +71,7 @@ version = "0.1.0"
 dependencies = [
  "bazhen-client",
  "bazhen-protocol",
+ "bazhen-test-signal",
  "clap",
  "jiff",
  "proptest",
