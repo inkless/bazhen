@@ -115,7 +115,7 @@ fn token_in(path: &Path) -> Option<String> {
 }
 
 /// `O_NONBLOCK` on the systems Bazhen is built for (`deny.toml`'s targets: Linux and macOS, on
-/// x86_64 and aarch64), which std doesn't name. Linux uses 0o4000 on x86 and arm only: alpha,
+/// `x86_64` and `aarch64`), which std doesn't name. Linux uses 0o4000 on x86 and arm only: alpha,
 /// mips, parisc and sparc each use another value, so a port to one of them changes this. A
 /// regular file reads the same with it.
 fn o_nonblock() -> i32 {
