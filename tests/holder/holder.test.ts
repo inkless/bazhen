@@ -103,8 +103,8 @@ async function startSkew(pid: number, start: number): Promise<number> {
 
 const encode = (text: string) => new TextEncoder().encode(text);
 
-/** What `seq 1 n` prints through a terminal, which turns each newline into `\r\n`. */
-const seqOutput = (n: number) => Array.from({ length: n }, (_, i) => `${i + 1}\r\n`).join("");
+/** What `seq 1 n` prints through a terminal with `-onlcr`, which passes each newline on as is. */
+const seqOutput = (n: number) => Array.from({ length: n }, (_, i) => `${i + 1}\n`).join("");
 
 async function exitedHello(holder: SpawnedHolder) {
   let hello: HolderClient["hello"] | undefined;
@@ -134,15 +134,17 @@ describe("a holder", () => {
 
   it("streams every byte of its child's output in order, then its exit, from any offset it holds", async () => {
     // It waits to be told, once its terminal no longer echoes, so it can't exit before the
-    // subscription.
-    const script = "stty -echo; echo R; read _; exec seq 1 20000";
+    // subscription. With `-onlcr` the terminal passes each newline on as it is: a BSD one whose
+    // output queue fills between the carriage return it adds and the newline writes the carriage
+    // return again.
+    const script = "stty -onlcr -echo; echo R; read _; exec seq 1 20000";
     const holder = await started("seq", ["sh", "-c", script]);
     const { client, events, exit } = await listen(holder, true);
     await client.subscribe({ generation: 0, offset: 0 });
-    await until(() => output(events).includes("R\r\n"), "the child ready");
+    await until(() => output(events).includes("R\n"), "the child ready");
     client.input(encode("\n"));
     await exit;
-    const expected = `R\r\n${seqOutput(20000)}`;
+    const expected = `R\n${seqOutput(20000)}`;
     expect(events.some((event) => event.type === "gap")).toBe(false);
     expect(
       output(

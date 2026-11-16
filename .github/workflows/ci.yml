@@ -88,8 +88,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint:rust
       - run: pnpm test:rust:all
-      # No test:holder here: on macOS the holder's byte-stream test reads different output, a
-      # holder defect. Add it back with that fix.
+      - run: pnpm test:holder
 
   # The black-box suite runs the real harness CLIs, pinned in tests/api. No agent is let reach a
   # model, so it needs no credentials. It is slower than `pnpm check`, so it is a job of its own.
