@@ -18,6 +18,7 @@ import {
   vouchHolderProcess,
 } from "./signal.ts";
 import type { ScopeLaunch } from "./scope.ts";
+import { whole } from "./text.ts";
 import { type PsReading, readProcess, rootRefusal, START_SKEW_S } from "./tmux.ts";
 
 export const HOLDER_COMMAND = "bazhen-holder";
@@ -363,7 +364,7 @@ export async function startHolderWith(
   if (pid === undefined) throw new HolderStartFailed("unstarted", (await failed).message);
   let stderr = "";
   child.stderr?.setEncoding("utf8").on("data", (chunk: string) => {
-    if (stderr.length < STDERR_MAX) stderr = (stderr + chunk).slice(0, STDERR_MAX);
+    if (stderr.length < STDERR_MAX) stderr = whole(stderr + chunk, STDERR_MAX);
   });
   const stderrEnded = new Promise<void>((done) => {
     child.stderr?.once("end", done).once("close", done);

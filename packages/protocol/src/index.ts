@@ -18,6 +18,7 @@ export * from "./roles.ts";
 export * from "./shells.ts";
 export * from "./stream.ts";
 export * from "./theme.ts";
+export { whole } from "./text.ts";
 export * from "./tasks.ts";
 export * from "./version.ts";
 

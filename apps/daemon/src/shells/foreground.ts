@@ -1,4 +1,5 @@
 import type { EnvironmentAdapter, ShellForeground } from "@bazhen/core";
+import { whole } from "@bazhen/protocol";
 import type { Store } from "../store/store.ts";
 
 export interface ForegroundDeps {
@@ -57,7 +58,7 @@ export class ForegroundWatch {
       store.transaction(() => {
         if (found.cwd !== null && found.cwd !== shell.currentCwd)
           store.noteShellCwd(shell.terminalId, found.cwd);
-        const command = found.command?.slice(0, COMMAND_MAX) ?? null;
+        const command = found.command === null ? null : whole(found.command, COMMAND_MAX);
         if (command === shell.foreground) return;
         store.append({
           type: "terminal.foreground_changed",

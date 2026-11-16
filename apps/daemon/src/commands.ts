@@ -8,6 +8,7 @@ import {
   TerminalUnservable,
   type RuntimeRef,
 } from "@bazhen/core";
+import { whole as cutWhole } from "@bazhen/protocol";
 
 // Failures of a command on a terminal's owner, an agent or a shell, named by `subject`
 // ("agent agent_…", "shell term_…"), as the API reports them.
@@ -163,7 +164,7 @@ const SEARCHED_MAX = 16 * DETAIL_MAX;
  */
 function searched(text: string): string {
   if (text.length <= SEARCHED_MAX) return text;
-  const head = text.slice(0, SEARCHED_MAX);
+  const head = cutWhole(text, SEARCHED_MAX);
   const end = Math.max(...[" ", "\n", "\t"].map((d) => head.lastIndexOf(d)), 0);
   return `${head.slice(0, end)}…`;
 }

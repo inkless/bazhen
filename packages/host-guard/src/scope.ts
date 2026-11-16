@@ -6,6 +6,7 @@
 // the kernel kills, inside the scope, past its cap.
 
 import { execFile } from "node:child_process";
+import { whole } from "./text.ts";
 import { randomBytes } from "node:crypto";
 import { accessSync, constants, readFileSync } from "node:fs";
 import { totalmem } from "node:os";
@@ -227,7 +228,7 @@ const realProbeDeps = (): ProbeDeps => ({
   totalMemory: totalmem(),
 });
 
-const said = (ran: Ran) => ran.stderr.trim().slice(0, STDERR_MAX) || `exit ${String(ran.code)}`;
+const said = (ran: Ran) => whole(ran.stderr.trim(), STDERR_MAX) || `exit ${String(ran.code)}`;
 
 /** A cap as the kernel shows it: bytes, null for `max`, undefined for no reading. */
 function kernelBytes(text: string | undefined): number | null | undefined {

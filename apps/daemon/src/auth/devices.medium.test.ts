@@ -90,6 +90,11 @@ describe("DeviceAuth", () => {
     expect(devices.pair("x".repeat(100), true, loopbackPairing).name).toHaveLength(64);
   });
 
+  it("cuts a long name before a character it would split, never through a surrogate pair", () => {
+    const { devices } = auth();
+    expect(devices.pair(`${"x".repeat(63)}👍`, true, loopbackPairing).name).toBe("x".repeat(63));
+  });
+
   it("drops control and bidi characters from a name, which could disguise it", () => {
     const { devices } = auth();
     expect(devices.pair("Ph\u0000o‮ne\n\u001b[2J", true, loopbackPairing).name).toBe("Phone[2J");
