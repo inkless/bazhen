@@ -113,6 +113,7 @@ async function setup(opts: {
     resumed,
     lists,
     titled,
+    titles,
     logged,
     released,
     held,
@@ -239,6 +240,16 @@ describe("Codex thread switches", () => {
       [s.agentId],
       tries + 1,
     ]);
+  });
+
+  it("still holds no mail for a title it gave up on after a read of the title fails", async () => {
+    const s = await setup({ titles: [shown(B)], listed: [{ id: A }], giveUpMs: 20 });
+    await s.threads.titleChanged(s.terminal);
+    await expect.poll(s.untracked).toBe(true);
+    s.titles.splice(0, s.titles.length, GONE, shown(B));
+    await s.threads.titleChanged(s.terminal);
+    await s.threads.titleChanged(s.terminal);
+    expect([s.boundTo(), s.held(), s.released]).toEqual([A, false, [s.agentId]]);
   });
 
   it("moves an agent it gave up on once the thread its title names is announced", async () => {
