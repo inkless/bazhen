@@ -87,6 +87,22 @@ describe("identify, with the caller's process read", () => {
     ]);
   });
 
+  it("refuses a Codex tool call, whatever it presents, and never takes it for the human", () => {
+    const codex = { kind: "codex" as const };
+    const presented = [
+      { token: undefined, said: undefined },
+      { token: TOKEN, said: undefined },
+      { token: TOKEN, said: tokened },
+      { token: undefined, said: other },
+    ];
+    expect(presented.map((p) => identify(credentials, p, codex).kind)).toEqual([
+      "refused",
+      "refused",
+      "refused",
+      "refused",
+    ]);
+  });
+
   it("refuses a caller whose process the reading refused, whatever it presents", () => {
     const refusedReading = { kind: "refused" as const, reason: "no terminal" };
     expect(identify(credentials, { token: TOKEN, said: undefined }, refusedReading)).toEqual({

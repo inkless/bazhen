@@ -286,6 +286,11 @@ daemon, change the environment later agents get, launch agents outside a delegat
 other agents' terminals or the shells, or pass as another agent. That holds even when it unsets
 its environment. Only a call made outside every agent's terminal is yours.
 
+Codex runs an agent's commands in its app-server, outside the agent's terminal. So any call from
+a process under a Codex app-server (`codex app-server`, the managed one included) is never yours:
+the daemon refuses it. It knows the server by its command line, so a Codex that renames its binary
+or that subcommand would be missed; `pnpm test:real api` checks the Codex the tests install.
+
 That holds against an agent working inside its terminal, not one set on getting out of it.
 Everything runs as you, so an agent that does any of these looks like you to Bazhen:
 

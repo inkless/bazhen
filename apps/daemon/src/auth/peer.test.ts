@@ -18,21 +18,26 @@ const terminals: TerminalPids = {
 const chain = (pid: number, session: number, ...ancestors: number[]) => ({
   pid,
   session,
+  codexServer: undefined as number | undefined,
   ancestors,
 });
 
+/** `line` with a Codex app-server at `server`, as `bazhen-peer` marks one. */
+const via = (server: number, line: ReturnType<typeof chain>) => ({ ...line, codexServer: server });
+
 describe("parsePeer", () => {
   it("reads the pid, the session and each ancestor bazhen-peer prints", () => {
-    expect(parsePeer("50 40 40 1\n")).toEqual(chain(50, 40, 40, 1));
+    expect(parsePeer("50 40 0 40 1\n")).toEqual(chain(50, 40, 40, 1));
+  });
+
+  it("reads the Codex app-server bazhen-peer names before the ancestors", () => {
+    expect(parsePeer("50 50 40 40 1\n")).toEqual(via(40, chain(50, 50, 40, 1)));
   });
 
   it("reads nothing from a line that isn't one", () => {
-    expect([parsePeer(""), parsePeer("50"), parsePeer("50 x 1"), parsePeer("-5 1")]).toEqual([
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-    ]);
+    expect(
+      ["", "50", "50 40", "50 x 0 1", "-5 1 0", "50 40 0 1 x"].map((line) => parsePeer(line)),
+    ).toEqual([undefined, undefined, undefined, undefined, undefined, undefined]);
   });
 });
 
@@ -56,6 +61,35 @@ describe("readingOf", () => {
       readingOf(chain(350, 300, 300, 10, 1), terminals),
       readingOf(chain(950, 900, 900, 1), terminals),
     ]).toEqual([{ kind: "outside" }, { kind: "outside" }]);
+  });
+
+  it("reads a caller under a Codex app-server as a Codex tool call, never as outside", () => {
+    expect([
+      readingOf(via(900, chain(950, 950, 900, 1)), terminals),
+      readingOf(via(900, chain(900, 900, 1)), terminals),
+      readingOf(via(900, chain(950, 950, 900, 300, 10, 1)), terminals),
+      readingOf(via(900, chain(950, 950, 900, 15, 10, 1)), terminals),
+      readingOf(via(900, chain(950, 100, 900, 1)), terminals),
+    ]).toEqual([
+      { kind: "codex" },
+      { kind: "codex" },
+      { kind: "codex" },
+      { kind: "codex" },
+      { kind: "codex" },
+    ]);
+  });
+
+  it("reads a Codex app-server started inside an agent's terminal as a Codex tool call", () => {
+    expect(readingOf(via(900, chain(950, 950, 900, 100, 10, 1)), terminals)).toEqual({
+      kind: "codex",
+    });
+  });
+
+  it("names the agent whose process is nearer the caller than a Codex app-server", () => {
+    expect(readingOf(via(900, chain(150, 150, 100, 10, 900, 1)), terminals)).toEqual({
+      kind: "agent",
+      agentId: agent,
+    });
   });
 
   it("refuses a caller the runtime runs in no terminal, as tmux run-shell starts one", () => {

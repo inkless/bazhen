@@ -10,19 +10,23 @@ export const PEER_SOURCE = fileURLToPath(
 /** The installed binary's name in its build's directory. */
 export const PEER_COMMAND = "bazhen-peer";
 
-/** A socket peer as `bazhen-peer` names it: its pid, its session, its ancestors to the root. */
+/**
+ * A socket peer as `bazhen-peer` names it: its pid, its session, the nearest Codex app-server
+ * among it and its ancestors, and its ancestors to the root.
+ */
 export interface PeerChain {
   readonly pid: number;
   readonly session: number;
+  readonly codexServer: number | undefined;
   readonly ancestors: readonly number[];
 }
 
-/** The line `bazhen-peer` prints, or undefined for anything else. */
+/** The line `bazhen-peer` prints, its Codex app-server 0 for none, or undefined for anything else. */
 export function parsePeer(line: string): PeerChain | undefined {
   const fields = line.trim().split(" ");
-  if (fields.length < 2 || !fields.every((f) => /^[0-9]{1,10}$/.test(f))) return undefined;
-  const [pid = 0, session = 0, ...ancestors] = fields.map(Number);
-  return { pid, session, ancestors };
+  if (fields.length < 3 || !fields.every((f) => /^[0-9]{1,10}$/.test(f))) return undefined;
+  const [pid = 0, session = 0, codexServer = 0, ...ancestors] = fields.map(Number);
+  return { pid, session, codexServer: codexServer === 0 ? undefined : codexServer, ancestors };
 }
 
 /** When each connection to the socket was accepted, which a peer's process must have started by. */
@@ -97,6 +101,7 @@ export interface TerminalPids {
 /** What a socket peer's process says of the caller. */
 export type PeerReading =
   | { readonly kind: "agent"; readonly agentId: AgentSessionId }
+  | { readonly kind: "codex" }
   | { readonly kind: "outside" }
   | { readonly kind: "refused"; readonly reason: string };
 
@@ -106,10 +111,18 @@ export type PeerReading =
  * keeps; nobody's, from a shell's, or from outside every terminal. A process under a runtime
  * that is in no terminal at all, as `tmux run-shell` starts one, is refused rather than taken
  * for the human.
+ *
+ * A process under a Codex app-server is a Codex tool call, whichever terminals are above the
+ * server: Codex runs every agent's tool commands there, out of their terminals. Only an agent's
+ * root nearer the caller than the server, as when Bazhen itself runs under one, still names it.
  */
 export function readingOf(chain: PeerChain, terminals: TerminalPids): PeerReading {
   const line = [chain.pid, ...chain.ancestors];
-  const byAncestry = line.map((pid) => terminals.agents.get(pid)).find((a) => a !== undefined);
+  const agentAt = line.findIndex((pid) => terminals.agents.has(pid));
+  const serverAt = chain.codexServer === undefined ? -1 : line.indexOf(chain.codexServer);
+  const codex = chain.codexServer !== undefined && (agentAt === -1 || serverAt < agentAt);
+  if (codex) return { kind: "codex" };
+  const byAncestry = agentAt === -1 ? undefined : terminals.agents.get(line[agentAt] ?? 0);
   const agentId = byAncestry ?? terminals.agents.get(chain.session);
   if (agentId !== undefined) return { kind: "agent", agentId };
   if (line.some((pid) => terminals.shells.has(pid))) return { kind: "outside" };

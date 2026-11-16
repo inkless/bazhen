@@ -92,6 +92,32 @@ describe("bazhen-peer, on the socket", () => {
     expect([status, body]).toEqual([403, expect.stringContaining("an agent can't")]);
   });
 
+  it("refuses the human's route to a Codex tool call that presents nothing", async () => {
+    const socket = await guarded(peerReading(PEER_SOURCE, () => none));
+    // A process whose arguments read as a Codex app-server's, and a command it runs that calls.
+    const call = `
+      import { request } from "node:http";
+      request({ socketPath: ${JSON.stringify(socket)}, method: "POST", path: "/v1/daemon/stop" }, (res) => {
+        let text = "";
+        res.on("data", (d) => (text += d));
+        res.on("end", () => process.stdout.write(res.statusCode + " " + text));
+      }).end();
+    `;
+    const appServer = `
+      import { spawn } from "node:child_process";
+      spawn(process.execPath, ["--input-type=module", "-e", ${JSON.stringify(call)}], { stdio: "inherit" });
+    `;
+    const codex = spawn(process.execPath, ["--input-type=module", "-e", appServer, "app-server"], {
+      argv0: join(dir, "codex"),
+      stdio: ["ignore", "pipe", "inherit"],
+    });
+    let out = "";
+    codex.stdout.setEncoding("utf8");
+    codex.stdout.on("data", (chunk: string) => (out += chunk));
+    await new Promise((resolve) => codex.stdout.on("end", resolve));
+    expect(out).toMatch(/^403 .*a Codex tool call names no agent/);
+  });
+
   it("refuses a caller whose process the reader can't name, as when it fails", async () => {
     const socket = await guarded(peerReading("/bin/false", () => none));
     const [status, body] = await post(socket);

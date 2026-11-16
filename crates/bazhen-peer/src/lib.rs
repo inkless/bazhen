@@ -7,10 +7,17 @@
 //! passed an agent's terminal, and a peer that has gone, or whose pid another process now holds,
 //! isn't the one the kernel named at accept: either would read as no agent's, so neither is
 //! answered.
+//!
+//! It also names the Codex app-server above the caller, if there is one. Codex runs an agent's tool
+//! commands in that server, which is in no terminal, so without it the daemon would take them for
+//! the human's.
 
+use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::io;
+use std::iter;
 use std::os::fd::BorrowedFd;
+use std::path::Path;
 
 use bazhen_holder::{process, start_time};
 use rustix::process::{Pid, geteuid};
@@ -18,19 +25,29 @@ use rustix::process::{Pid, geteuid};
 /// Past any real process tree's depth: a walk this long is a cycle, and is refused.
 pub const MAX_ANCESTORS: usize = 256;
 
-/// The process at the other end of a connection, the session it is in, and every ancestor it has,
-/// nearest first, through init or the first process of its PID namespace.
+/// The process at the other end of a connection, the session it is in, the nearest Codex
+/// app-server among it and its ancestors, and every ancestor it has, nearest first, through init or
+/// the first process of its PID namespace.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Peer {
     pub pid: Pid,
     pub session: Pid,
+    pub codex_server: Option<Pid>,
     pub ancestors: Vec<Pid>,
 }
 
-/// One line of decimals: the pid, the session, then each ancestor.
+/// One line of decimals: the pid, the session, the Codex app-server or 0, then each ancestor. The
+/// app-server comes before the ancestors, so a reader that expects no such field reads one of them
+/// as it, which refuses the call rather than passing it as the human's.
 impl fmt::Display for Peer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} {}", self.pid.as_raw_pid(), self.session.as_raw_pid())?;
+        let codex_server = self.codex_server.map_or(0, Pid::as_raw_pid);
+        write!(
+            f,
+            "{} {} {codex_server}",
+            self.pid.as_raw_pid(),
+            self.session.as_raw_pid()
+        )?;
         for ancestor in &self.ancestors {
             write!(f, " {}", ancestor.as_raw_pid())?;
         }
@@ -72,10 +89,13 @@ pub fn of(socket: BorrowedFd<'_>, accepted: u64) -> Result<Peer, Refused> {
     }
     let pid = process::peer_pid(socket)?;
     let started = started(pid, accepted)?;
+    let ancestors = ancestors(pid, process::parent)?;
+    let line: Vec<Pid> = iter::once(pid).chain(ancestors.iter().copied()).collect();
     let peer = Peer {
         pid,
         session: process::session(pid)?,
-        ancestors: ancestors(pid, process::parent)?,
+        codex_server: codex_server(&line, own_args)?,
+        ancestors,
     };
     if self::started(pid, accepted)? != started {
         return Err(Refused::Replaced { started, accepted });
@@ -116,6 +136,44 @@ pub fn ancestors(
         at = next;
     }
     Ok(found)
+}
+
+/// Whether `args` are a Codex app-server's: `codex`, by the file name of `argv[0]`, with
+/// `app-server` as one of its arguments, whole. The TUI's `--remote unix:///…/app-server-control.sock`
+/// only contains it.
+#[must_use]
+pub fn is_codex_app_server(args: &[OsString]) -> bool {
+    let Some((binary, rest)) = args.split_first() else {
+        return false;
+    };
+    Path::new(binary).file_name() == Some(OsStr::new("codex"))
+        && rest.iter().any(|arg| arg == "app-server")
+}
+
+/// The first of `line` that is a Codex app-server, as `args` reads each one's arguments: `None`
+/// for another user's process, which this user's Codex never is.
+///
+/// # Errors
+///
+/// `Unreadable` when a process of this user can't be read: it might have been the server.
+pub fn codex_server(
+    line: &[Pid],
+    args: impl Fn(Pid) -> io::Result<Option<Vec<OsString>>>,
+) -> Result<Option<Pid>, Refused> {
+    for &pid in line {
+        if args(pid)?.is_some_and(|args| is_codex_app_server(&args)) {
+            return Ok(Some(pid));
+        }
+    }
+    Ok(None)
+}
+
+/// `pid`'s arguments when it runs as this user, else `None`.
+fn own_args(pid: Pid) -> io::Result<Option<Vec<OsString>>> {
+    if process::uid(pid)? != geteuid().as_raw() {
+        return Ok(None);
+    }
+    process::args(pid).map(Some)
 }
 
 #[cfg(test)]
@@ -194,12 +252,147 @@ mod tests {
     }
 
     #[test]
-    fn prints_one_line_of_the_pid_the_session_and_each_ancestor() {
+    fn prints_one_line_of_the_pid_the_session_no_codex_server_and_each_ancestor() {
         let peer = Peer {
             pid: pid(50),
             session: pid(45),
+            codex_server: None,
             ancestors: vec![pid(40), pid(1)],
         };
-        assert_eq!(peer.to_string(), "50 45 40 1");
+        assert_eq!(peer.to_string(), "50 45 0 40 1");
+    }
+
+    #[test]
+    fn prints_the_codex_server_before_the_ancestors() {
+        let peer = Peer {
+            pid: pid(50),
+            session: pid(50),
+            codex_server: Some(pid(40)),
+            ancestors: vec![pid(40), pid(1)],
+        };
+        assert_eq!(peer.to_string(), "50 50 40 40 1");
+    }
+
+    fn os(args: &[&str]) -> Vec<OsString> {
+        args.iter().map(OsString::from).collect()
+    }
+
+    #[test]
+    fn knows_a_codex_app_server_by_its_binary_and_its_whole_subcommand() {
+        for args in [
+            &[
+                "/h/.codex/packages/app-server-daemon/releases/0.169.0/bin/codex",
+                "app-server",
+                "--listen",
+                "unix://",
+                "--managed-daemon",
+            ][..],
+            &["codex", "app-server"],
+            &["codex", "-c", "x=1", "app-server", "--listen", "stdio://"],
+            &[
+                "/h/.codex/packages/app-server-daemon/releases/0.169.0/bin/codex",
+                "app-server",
+                "daemon",
+                "pid-update-loop",
+            ],
+        ] {
+            assert!(is_codex_app_server(&os(args)), "{args:?}");
+        }
+    }
+
+    #[test]
+    fn takes_no_other_process_for_a_codex_app_server() {
+        for args in [
+            &[
+                "codex",
+                "resume",
+                "t",
+                "--remote",
+                "unix:///h/.codex/app-server-control/app-server-control.sock",
+            ][..],
+            &["codex"],
+            &[
+                "node",
+                "/usr/lib/node_modules/@openai/codex/bin/codex.js",
+                "app-server",
+            ],
+            &["/bin/codex-app-server", "app-server2"],
+            &["/bin/notcodex", "app-server"],
+            &["bash", "-lc", "codex app-server"],
+            &["app-server"],
+            &[],
+        ] {
+            assert!(!is_codex_app_server(&os(args)), "{args:?}");
+        }
+    }
+
+    /// Arguments by pid: a pid not in it can't be read, and one mapped to `None` is another user's.
+    fn argv(
+        table: &[(i32, Option<&[&str]>)],
+    ) -> impl Fn(Pid) -> io::Result<Option<Vec<OsString>>> + use<> {
+        let table: HashMap<i32, Option<Vec<OsString>>> =
+            table.iter().map(|(p, a)| (*p, a.map(os))).collect();
+        move |p| match table.get(&p.as_raw_pid()) {
+            Some(args) => Ok(args.clone()),
+            None => Err(io::Error::other("gone")),
+        }
+    }
+
+    const SERVER: &[&str] = &["/r/bin/codex", "app-server", "--listen", "unix://"];
+
+    #[test]
+    fn names_the_nearest_codex_app_server_on_the_line() {
+        let table = argv(&[
+            (50, Some(&["bash", "-lc", "bazhen devices"])),
+            (40, Some(SERVER)),
+            (30, Some(SERVER)),
+            (1, None),
+        ]);
+        let line = [pid(50), pid(40), pid(30), pid(1)];
+        assert_eq!(codex_server(&line, table).unwrap(), Some(pid(40)));
+    }
+
+    #[test]
+    fn names_the_caller_itself_when_it_is_the_server() {
+        let table = argv(&[(40, Some(SERVER)), (1, None)]);
+        assert_eq!(
+            codex_server(&[pid(40), pid(1)], table).unwrap(),
+            Some(pid(40))
+        );
+    }
+
+    #[test]
+    fn names_no_server_on_a_line_without_one() {
+        let table = argv(&[
+            (50, Some(&["bazhen", "devices"])),
+            (40, Some(&["fish"])),
+            (1, None),
+        ]);
+        assert_eq!(
+            codex_server(&[pid(50), pid(40), pid(1)], table).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn skips_another_user_s_process_without_reading_it() {
+        let table = argv(&[(50, Some(&["bazhen", "devices"])), (40, None), (1, None)]);
+        assert_eq!(
+            codex_server(&[pid(50), pid(40), pid(1)], table).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn refuses_a_line_through_a_process_of_this_user_it_can_t_read() {
+        let table = argv(&[(50, Some(&["bazhen", "devices"])), (1, None)]);
+        let read = codex_server(&[pid(50), pid(40), pid(1)], table);
+        assert!(matches!(read, Err(Refused::Unreadable(_))));
+    }
+
+    #[test]
+    fn reads_this_process_s_own_arguments_as_its_user_s() {
+        let ours: Vec<OsString> = std::env::args_os().collect();
+        assert_eq!(own_args(getpid()).unwrap(), Some(ours));
     }
 }

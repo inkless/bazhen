@@ -1,15 +1,17 @@
 #![expect(
     unsafe_code,
     reason = "libc's sysctl is the one call that says when a macOS process started, a zombie \
-              included, and that lists every process; getpeereid the one that names a socket \
-              peer's user; rustix covers neither, and only unsafe can call them; and rustix's \
-              kevent, which watches a process for its exit, is unsafe; and proc_pidinfo, the one call
-              that names another process's parent; and getsockopt's LOCAL_PEERPID, the one call
-              that names a socket peer's process"
+              included, that lists every process, and that names a process's arguments \
+              (KERN_PROCARGS2); getpeereid the one that names a socket peer's user; rustix covers \
+              neither, and only unsafe can call them; and rustix's kevent, which watches a process \
+              for its exit, is unsafe; and proc_pidinfo, the one call that names another \
+              process's parent and user; and getsockopt's LOCAL_PEERPID, the one call that names \
+              a socket peer's process"
 )]
 
 //! What only macOS's own calls can tell the holder.
 
+use std::ffi::OsString;
 use std::io;
 use std::mem::MaybeUninit;
 use std::os::fd::{AsRawFd as _, BorrowedFd, OwnedFd};
@@ -20,6 +22,7 @@ use rustix::event::kqueue::{Event, EventFilter, EventFlags, ProcessEvents, keven
 use rustix::io::Errno;
 use rustix::process::{Pid, Signal, getsid};
 
+use crate::process::procargs2_args;
 use crate::session::Member;
 use crate::start_time::StartTimeError;
 
@@ -209,6 +212,18 @@ impl ExitWatch {
 /// `pid`'s parent, from `proc_pidinfo`'s `proc_bsdshortinfo`, which, unlike `proc_bsdinfo`, it
 /// gives for another user's process too.
 pub(crate) fn parent(pid: Pid) -> Option<Pid> {
+    Pid::from_raw(i32::try_from(short_info(pid)?.pbsi_ppid).ok()?)
+}
+
+/// The effective uid `pid` runs as, from its `proc_bsdshortinfo`.
+pub(crate) fn uid(pid: Pid) -> io::Result<u32> {
+    short_info(pid)
+        .map(|info| info.pbsi_uid)
+        .ok_or_else(|| io::Error::other(format!("process {pid:?} can't be read")))
+}
+
+/// `pid`'s `proc_bsdshortinfo`, which `proc_pidinfo` gives for another user's process too.
+fn short_info(pid: Pid) -> Option<libc::proc_bsdshortinfo> {
     let mut info = MaybeUninit::<libc::proc_bsdshortinfo>::uninit();
     let size = libc::c_int::try_from(std::mem::size_of::<libc::proc_bsdshortinfo>()).ok()?;
     // SAFETY: `info` is writable for `size` bytes, which the call writes no more than, and it
@@ -226,8 +241,49 @@ pub(crate) fn parent(pid: Pid) -> Option<Pid> {
         return None;
     }
     // SAFETY: the call wrote the whole struct, which is plain integers and bytes.
-    let info = unsafe { info.assume_init() };
-    Pid::from_raw(i32::try_from(info.pbsi_ppid).ok()?)
+    Some(unsafe { info.assume_init() })
+}
+
+/// The arguments `pid` runs with, from `sysctl(KERN_PROCARGS2)`, which `ps` reads too. The kernel
+/// answers it only for a process of this user.
+pub(crate) fn args(pid: Pid) -> io::Result<Vec<OsString>> {
+    let mut name = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid.as_raw_pid()];
+    let name_len = libc::c_uint::try_from(name.len()).map_err(io::Error::other)?;
+    let mut len: libc::size_t = 0;
+    // SAFETY: `name` holds `name_len` ints; with no buffer (null) the kernel only writes the size
+    // it needs to `len`; no new value is set (null, 0).
+    let sized = unsafe {
+        libc::sysctl(
+            name.as_mut_ptr(),
+            name_len,
+            ptr::null_mut(),
+            &raw mut len,
+            ptr::null_mut(),
+            0,
+        )
+    };
+    if sized != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let mut buffer = vec![0u8; len];
+    // SAFETY: `name` holds `name_len` ints; `buffer` is writable for `len` bytes, which the kernel
+    // writes no more than and updates to what it wrote; no new value is set (null, 0).
+    let read = unsafe {
+        libc::sysctl(
+            name.as_mut_ptr(),
+            name_len,
+            buffer.as_mut_ptr().cast(),
+            &raw mut len,
+            ptr::null_mut(),
+            0,
+        )
+    };
+    if read != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    buffer.truncate(len);
+    procargs2_args(&buffer)
+        .ok_or_else(|| io::Error::other(format!("process {pid:?}'s arguments can't be read")))
 }
 
 /// The effective uid of the process at the other end of a Unix socket, as it was when it

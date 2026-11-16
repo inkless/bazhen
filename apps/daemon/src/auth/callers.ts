@@ -207,7 +207,8 @@ export type Identity =
  *
  * Every token file is this user's, so a process of this user that reads another agent's file can
  * present it, and one that unsets both can pass as the human: telling those apart is the socket
- * peer's job.
+ * peer's job. A Codex tool call is refused: Codex runs it out of the agent's terminal, so nothing
+ * it holds says which agent it is.
  */
 export function identify(
   credentials: AgentCredentials,
@@ -215,6 +216,7 @@ export function identify(
   peer: PeerReading = { kind: "outside" },
 ): Identity {
   if (peer.kind === "refused") return refused(peer.reason);
+  if (peer.kind === "codex") return refused("a Codex tool call names no agent");
   if (peer.kind === "agent") return asPeer(credentials, presented, peer.agentId);
   const { token, said } = presented;
   if (token !== undefined) {
