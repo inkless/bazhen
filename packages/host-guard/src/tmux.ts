@@ -202,8 +202,10 @@ const GATE_WORD = /^[A-Za-z0-9/._+-]+$/;
  * newline would be Enter, and an ESC could end the marked paste early, so that what follows it is
  * typed as keys. Text that may arrive as keys must be printable ASCII as well.
  *
- * All of it runs in one pass of tmux's queue, so nothing typed can come between its checks and
- * the paste. A pane in copy or view mode leaves it first, and one in any other mode is refused.
+ * All of it runs in one pass of this client's queue, so no other command of the daemon's can come
+ * between its checks and the paste; keys from clients attached to the pane still can, in the few
+ * milliseconds the gate takes. A pane in copy or view mode leaves it first, and one in any other
+ * mode is refused.
  * Then `gate`, run with the pane's tty and process id, must exit 0: it says whether what the pane
  * runs would read the paste now, with nothing typed ahead of it. A refusal prints the matching
  * PASTE_REFUSED line, and types nothing.

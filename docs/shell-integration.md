@@ -60,10 +60,9 @@ and the line waits a few seconds for the shell to have it again.
 
 Bazhen types it as a paste, marked with the bracketed-paste sequences, so the line editor inserts
 it as text rather than taking it as keys, however long your prompt takes to draw. That holds
-wherever the editor takes those sequences as a paste: fish 3.7 and 4.0, which are the versions
-tested; zsh unless you unbound them; and bash when `enable-bracketed-paste` is on, as it is by
-default from bash 5.1. Elsewhere (other fish versions, bash 4.4 and 5.0, or bracketed paste
-turned off), Bazhen marks the paste only if the editor has asked for bracketed paste by the time
+wherever the editor takes those sequences as a paste: fish 3.7 and 4.0; zsh unless you unbound
+them; and bash when `enable-bracketed-paste` is on, as it is by
+default from bash 5.1. Elsewhere (bash 4.4 and 5.0, or bracketed paste turned off), Bazhen marks the paste only if the editor has asked for bracketed paste by the time
 it types it, and otherwise the line arrives as keys: a key you bound to something else, as
 `magic-space`, does that instead. A line that may arrive as keys is typed back only if it is
 printable ASCII, since a byte beyond it is a meta key to an editor reading 8-bit input, as bash
@@ -71,7 +70,9 @@ does in a C locale. Either way the line holds no newline, escape or other contro
 it is never Enter and can't end the paste early.
 
 The new shell must load the integration too, since it tells Bazhen when its line editor is
-reading. A prompt that takes more than 10 seconds to draw gets no line typed back. If no prompt is
+reading. In fish, that is only fish 3.7 and 4.0, the versions tested: from 4.1, fish reads keys
+you typed while it started into a queue of its own, where Bazhen can't see them before it
+pastes, so a later fish gets no line typed back. A prompt that takes more than 10 seconds to draw gets no line typed back. If no prompt is
 reported within 30 seconds, the line is dropped and the daemon logs that it wasn't retyped,
 naming the shell but not the line. Until then it is held only in the daemon's memory, so
 a daemon restart in between loses it.
