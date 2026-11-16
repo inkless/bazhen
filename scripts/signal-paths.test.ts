@@ -575,6 +575,11 @@ describe("kills by a process started to send them", () => {
 });
 
 describe("signalling sources", () => {
+  it("counts a file that ends processes through no call the scan reads", () => {
+    expect(isSignallingSource("apps/daemon/src/pty/node-pty.ts", "export {};")).toBe(true);
+    expect(isSignallingSource("apps/daemon/src/pty/other.ts", "export {};")).toBe(false);
+  });
+
   it("counts a chokepoint, a raw call and a call through a chokepoint", () => {
     expect(isSignallingSource("packages/host-guard/src/signal.ts", "")).toBe(true);
     expect(isSignallingSource("a.rs", "kill_process(p, s);")).toBe(true);
