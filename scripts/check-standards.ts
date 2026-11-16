@@ -753,6 +753,8 @@ const NOT_DECODERS: Record<string, string> = {
     "returns a field or a state; reads no bytes",
   "crates/bazhen-holder/src/conn.rs::Connection::is_opening":
     "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/conn.rs::Connection::may_send":
+    "returns a field or a state; reads no bytes",
   "crates/bazhen-holder/src/conn.rs::Connection::new": "wraps an accepted socket; reads nothing",
   "crates/bazhen-holder/src/conn.rs::Connection::next_request":
     "hands over FrameDecoder::next_frame's result, which the proto crate's frame target fuzzes",

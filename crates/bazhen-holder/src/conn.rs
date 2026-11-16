@@ -130,6 +130,12 @@ impl Connection {
         self.phase == Phase::Open
     }
 
+    /// Whether more requests may come: open, and its peer hasn't ended its side. One that has
+    /// is still answered, but can send no input.
+    pub fn may_send(&self) -> bool {
+        self.is_open() && !self.input_ended
+    }
+
     pub fn is_opening(&self) -> bool {
         matches!(self.phase, Phase::Opening { .. })
     }
