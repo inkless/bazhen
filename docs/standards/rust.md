@@ -25,6 +25,13 @@ a review asks for something no check covers.
 | Library errors are typed with thiserror; long-running processes log with tracing                                                        | review                                                |
 | Every function that takes bytes from outside is fuzzed, or listed with why it is no decoder                                             | `pnpm check` (`scripts/check-standards.ts`)           |
 | Rust components are certified black-box, by the TypeScript suites                                                                       | review                                                |
+| Crates split by dependency weight and I/O boundary, not one per module                                                                  | review                                                |
+| No crate builds an async runtime, HTTP stack or SQLite unless `HEAVY_ALLOWED` lists it                                                  | `pnpm check` (`scripts/check-standards.ts`)           |
+| Rust signals only from the chokepoint for its role; an import that hides a `kill` counts as a raw call                                  | `pnpm check` (`scripts/signal-paths.ts`)              |
+| No dependency that signals any pid through a method (`sysinfo`, `psutil`, `heim`)                                                       | `pnpm deny`                                           |
+| A command line is parsed by clap's builder API: long flags only, nothing inferred                                                       | review; the api suites                                |
+| API message types are hand-written serde, held to the fixtures `packages/protocol` writes                                               | review                                                |
+| Async code owns every task, cancels through one token tree and never blocks the runtime                                                 | review                                                |
 
 ## Layout
 
@@ -43,11 +50,53 @@ toolchain is a commit of its own: new lints arrive with it, and the commit fixes
 Protocol types that more than one program speaks live in a crate of their own, not inside the
 binary that first uses them, so every other speaker can depend on them directly.
 
+## Crates
+
+Split crates by dependency weight and I/O boundary, not one per module. Code gets a crate of its
+own when:
+
+- it takes a heavy dependency (an async runtime, an HTTP server, SQLite) that another program using
+  its neighbours must not build;
+- it separates logic from I/O, so the logic is tested with no socket, file or process;
+- a second program uses it, as the CLI and the daemon both speak the API's messages;
+- it is a boundary a check pins by path, as a signal chokepoint is.
+
+Otherwise it is a module. Each crate costs a public API at its seam (`unreachable_pub` leaves no
+half-way), with `# Errors` docs and a typed error; a manifest the checks read; a fuzz crate if it
+decodes; the orphan rule between it and its neighbours; and link time under `lto` with one codegen
+unit.
+
+**What starts on every call stays light.** The CLI and the hook start on every call an agent
+makes, and a crate they share with the daemon passes on whatever it takes. So no member builds a
+crate in `HEAVY_CRATES` (tokio, hyper, axum, rusqlite and the like) unless `HEAVY_ALLOWED` in
+`scripts/check-standards.ts` lists it, with why. `pnpm check` follows each member's dependencies,
+but not its dev-dependencies, which only its tests build, through `Cargo.lock`, and names the chain
+that reaches one. A member that depends on a listed one reaches what that one reaches, so it needs
+an entry of its own: the daemon's crates go there, and the CLI never does.
+
+The split this gives, with the TypeScript each takes over:
+
+- a protocol crate: serde types for `packages/protocol`'s API messages, and no I/O. The holder's
+  wire stays `bazhen-holder-proto`;
+- a client crate, std only: HTTP/1.1 over the daemon's Unix socket, finding the socket, deadlines.
+  It has no serde, so the hook, which forwards bytes it never parses, can share it;
+- the CLI, a thin binary over those two;
+- for the daemon: a pure core (`packages/core`), a store (SQLite), a host guard (signals, process
+  identity and sandbox detection, as `packages/host-guard`), a crate per runtime, the harness
+  adapters (one crate until their dependencies differ), and the daemon binary, which wires them
+  together under tokio.
+
+wezterm's `wezterm cli` and zellij's client are thin clients of a server over a Unix socket, and
+atuin splits its client, server, shared types and daemon the same way.
+
 ## API Guidelines
 
 Follow the [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/checklist.html). The
 crates are not published, but they are read by agents that know the guidelines, and a crate that
-follows them is cheap to split out later. The items reviews check most:
+follows them is cheap to split out later. Microsoft's
+[Pragmatic Rust Guidelines](https://microsoft.github.io/rust-guidelines) are a second reference
+where those are silent; where either differs from this page, this page holds. The items reviews
+check most:
 
 - **Naming** (C-CASE, C-CONV, C-GETTER): `as_`, `to_` and `into_` say what a conversion costs;
   getters have no `get_` prefix.
@@ -133,10 +182,14 @@ no feature, with a target for every file at such a place. A build script (`build
 the compiler flags and environment no gate sees. Every dependency is an exact version or a crate
 of ours in `crates/`.
 
-**When a dependency's macro trips a forbidden lint.** An attribute macro from another crate that
-emits an allow of a forbidden lint (`#[tokio::main]` allows `clippy::expect_used`) fails with
-E0453. Lower that one lint to `deny` in `Cargo.toml` and in `WORKSPACE_LINTS`, in a commit that
-names the macro; the scan still guards it.
+**When a dependency's macro trips a forbidden lint.** An attribute or derive macro from another
+crate that emits an allow of a forbidden lint fails with E0453. `#[tokio::main]` and
+`#[tokio::test]` allow `clippy::expect_used`; clap's derive allows the whole `clippy::restriction`
+group, which fails once for every forbidden lint in it. Use the crate's macro-free form instead:
+clap's builder API, and a runtime built with `tokio::runtime::Builder` in `main` and in a test
+helper. Only when a crate has none, lower the one lint it trips to `deny` in `Cargo.toml` and in
+`WORKSPACE_LINTS`, in a commit that names the macro; the scan still guards it. Try a new macro
+under the workspace lints before taking its crate on.
 
 **The configuration is pinned too.** `scripts/check-standards.ts` holds `[workspace.lints]`, the
 root manifest's other tables, `rust-toolchain.toml`, `clippy.toml` and `deny.toml` as
@@ -221,6 +274,106 @@ Long-running processes log with `tracing`: structured fields (`terminal_id = %id
 formatted strings, and spans around each connection or terminal. Never `println!` or `eprintln!`
 for diagnostics: stdout and stderr may be the protocol. A short-lived client such as the hook,
 whose output the harness reads, logs nothing.
+
+## Signals
+
+`testing.md` § Hermeticity holds the rule and what the scan reads. In Rust, a signal goes through
+the chokepoint for its role, which each failure of `pnpm check` names:
+
+- the holder's: `crates/bazhen-holder/src/guard.rs`;
+- tests': the `bazhen-test-signal` crate, a dev-dependency only;
+- everything else's: the `bazhen-host-guard` crate. The first code outside the holder that signals a
+  process it didn't start creates it, and lists it in `SIGNAL_CHOKEPOINTS` in
+  `scripts/signal-paths.ts`. It checks what `packages/host-guard/src/signal.ts` checks: never 0,
+  ±1 or any pid ≤ 1, never itself, its parent, its ancestors or its own group, and a holder only
+  once its command and start time match.
+
+The host-guard crate's file joins `PRODUCT_CHOKEPOINTS` in `scripts/check-standards.ts` too, which
+`pnpm check` requires of every Rust chokepoint outside the tests' crate: its product code is
+exempt, and its own tests send through `bazhen-test-signal` like any others. A caller names it as
+`bazhen_host_guard`, which `RUST_SENDERS` in `scripts/signal-paths.ts` reads, so falsify changes a
+caller only in a sandbox.
+
+`Child::kill`, std's or tokio's, needs no chokepoint on a child the code started, while that child
+is unreaped and is reaped only through that `Child`: until then its pid can't be reused. A `use`
+that names `libc` or a `signal` module and imports `kill`, a glob or a rename, at any depth of its
+groups, counts as a raw call, since it hides the `kill` the scan reads for. So does any
+`pub use` of either, which would let another file import one through a path of ours. The crates
+known so far whose methods signal any pid, or hold one to signal (`sysinfo`, `psutil`, `heim`,
+`kill_tree`, `pidfd`), are banned in `deny.toml`: a method call is text the scan can't tell from a child's own `kill`.
+
+## Command-line programs
+
+A program agents run, as the `bazhen` CLI is, starts on every call, and the agents' permission
+rules match its command line. So:
+
+- **Parse with clap's builder API** (`clap::Command` and `Arg`), with default features off and
+  `std`, `help`, `usage` and `error-context` on. Not clap's derive, which no crate here can compile
+  (§ Lints), and not a parser of our own: each verb declares its options once, so its usage and
+  what it refuses can't drift from what it parses. lexopt is the fallback if clap's output can't
+  be made to fit. It is smaller, but every usage line and per-verb check is then written by hand.
+  Either costs about a tenth of a millisecond a call.
+- **Every spelling is exact.** Long flags only: no `short`, `alias` or `visible_alias`, and none of
+  the `infer_*` settings, which accept a prefix (`--tit` for `--title`). clap adds `-h`, `--help`,
+  `-V` and `--version` unless told not to (`disable_help_flag`, `disable_version_flag`), so a CLI
+  turns off the short forms always, and the long ones if the CLI it replaces didn't accept them.
+  A permission rule that matches `--brief-file` must see `--brief-file`. clap's defaults already
+  refuse a prefix and a positional that starts with `-`, and accept `--opt=value`, options among
+  positionals, and a global option after the verb.
+- **Exit codes are one enum,** each a contract a caller branches on: 0 done, 1 failed, 2 usage,
+  3 the daemon isn't running.
+- **stdout is the answer and stderr the diagnostics,** each through an explicit writer. Output is
+  plain lines a model reads, with no colour and nothing that changes when stdout isn't a terminal.
+  A closed stdout (a pipe into `head`) ends the program quietly, not with an error.
+- **No async runtime and no daemon dependency** (§ Crates). A call is one blocking exchange over
+  the socket.
+
+The TypeScript api suites are the CLI's gate (§ Tests, Black-box first): they hold its verbs,
+output and exit codes, so they keep certifying them whatever the CLI is written in. Where jj, uv
+and ruff snapshot a CLI's output, those suites do it here.
+
+## Protocol types
+
+The daemon's API is defined by the zod schemas in `packages/protocol`, and `pnpm schema` writes
+their JSON Schema to `packages/protocol/schema/`. While the daemon is TypeScript, a Rust crate that
+speaks the API holds hand-written serde types for the messages it uses. They are held to the
+TypeScript by fixtures `pnpm schema` writes for each of those messages, as it writes the holder's
+for `crates/bazhen-holder-proto/tests/fixtures.rs`: the crate decodes each fixture and encodes it
+back to equal JSON. An object zod doesn't make strict accepts fields it doesn't know, so only a
+strict one gets `#[serde(deny_unknown_fields)]`, and a field with a default may be missing.
+
+The types aren't generated from the JSON Schema. typify, tried on every schema, fails on the event
+and agent-reference unions, names each nested type by where it sits because the schemas inline
+them, and writes `#![allow]`s the scan refuses. Once the daemon is Rust, the direction turns: the
+Rust types are the source, and the schema and the web's types are generated from them, as Oxide's
+dropshot and progenitor do.
+
+## Async and the daemon
+
+Only code that serves many connections at once is async, and only the daemon's crates take an
+async runtime (§ Crates). A crate the CLI or the hook shares stays blocking.
+
+- **tokio, multi-threaded, built in `main`** with `tokio::runtime::Builder`, and in tests by a
+  helper (§ Lints says why not its macros).
+- **Every task has an owner.** A `TaskTracker` or a `JoinSet` holds each spawned task, and
+  shutdown waits for them: a task nothing awaits loses its error. Once tokio is a dependency,
+  `clippy.toml` disallows `tokio::spawn` and `tokio::task::spawn`, so a spawn goes through one.
+- **Cancellation is one tree.** One `CancellationToken` from shutdown, a child per connection,
+  terminal and agent, and every loop selects on its own. A `select!` branch holds only a
+  cancel-safe future; one that isn't (a read into a buffer it owns) runs in a task of its own.
+- **Every external wait has a deadline,** as the hook's do: `tokio::time::timeout` around a
+  socket, a child or a peer.
+- **Nothing blocks the runtime.** SQLite, file reads and anything else that blocks run on a thread
+  of their own or in `spawn_blocking`, and no std lock is held across an `.await` (clippy's
+  `await_holding_lock`).
+- **HTTP:** axum on hyper, on a tokio `UnixListener` for the socket and a TCP listener for the
+  web. Every route has a body limit, the protocol's error shape is made in one place, and
+  WebSockets go through axum's.
+- **SQLite:** rusqlite with SQLite bundled, so the version is the lockfile's, not the host's. WAL,
+  `STRICT` tables, and a database file of mode 0600. One thread owns the connection that writes;
+  readers open their own. Migrations are a named set the database records as applied.
+- **Logging:** § Logging, with a span per connection, terminal and agent, and no token, device
+  secret or brief in a field.
 
 ## Dependencies
 

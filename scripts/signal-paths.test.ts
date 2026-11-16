@@ -12,6 +12,9 @@ describe("raw signal calls in Rust", () => {
       "unsafe { libc::kill(pid, libc::SIGKILL) };",
       "unsafe { libc::killpg(pgid, libc::SIGKILL) };",
       "nix::sys::signal::kill(pid, None);",
+      "unsafe { libc::tgkill(tgid, tid, libc::SIGKILL) };",
+      "unsafe { libc::syscall(libc::SYS_tkill, tid, 9) };",
+      "unsafe { nix::libc::r#kill(pid, 9) };",
     ].join("\n");
     expect(calls("a.rs", source)).toEqual([
       "kill_process",
@@ -21,7 +24,49 @@ describe("raw signal calls in Rust", () => {
       "libc::kill",
       "killpg",
       "signal::kill",
+      "tgkill",
+      "SYS_tkill",
+      "libc::r#kill",
     ]);
+  });
+
+  it("finds an import of a kill, a glob or a rename from libc or a signal module, however nested", () => {
+    const source = [
+      "use libc::*;",
+      "use std::io::*;",
+      "use nix::{sys::signal::{kill, Signal}, unistd::Pid};",
+      "use nix::unistd::*;",
+      "use nix::sys::{signal::*, wait::*};",
+      "use rustix::process as p;",
+      "use nix::{sys::signal::*};",
+      "use libc_print::*;",
+      "use nix::{",
+      "    sys::{signal::{self as s}, wait},",
+      "};",
+      "use libc::{c_int, pid_t};",
+      "use nix::libc as c;",
+      "use nix::sys::signal::{Signal, SigSet};",
+      "use nix::libc::*;",
+      "use tokio::signal::unix::{signal, SignalKind};",
+      "use crate::a::signal::*;",
+      "use nix::sys::{signal::{r#kill}};",
+      "extern crate libc as c2;",
+      "use tokio::signal as ts;",
+    ].join("\n");
+    expect(rawSignalCalls("a.rs", source).map((c) => c.line)).toEqual([
+      1, 3, 5, 7, 9, 13, 15, 17, 18, 19, 20,
+    ]);
+  });
+
+  it("finds a re-export of libc or a signal module, which another file could import from", () => {
+    const source = [
+      "pub use nix::sys::signal;",
+      "pub(crate) use libc;",
+      "pub(in crate::a) use nix::sys::signal::Signal;",
+      "pub use std::io;",
+      "use nix::sys::signal;",
+    ].join("\n");
+    expect(rawSignalCalls("a.rs", source).map((c) => c.line)).toEqual([1, 2, 3]);
   });
 
   it("gives the line each is on", () => {
@@ -361,6 +406,7 @@ describe("signalling sources", () => {
       true,
     );
     expect(isSignallingSource("a.rs", "use crate::child::{ChildProcess, Reaper};")).toBe(true);
+    expect(isSignallingSource("a.rs", "bazhen_host_guard::kill_holder(&proof)?;")).toBe(true);
     expect(isSignallingSource("a.rs", "if let Some(at) = self.child.close_step(now) {}")).toBe(
       true,
     );
