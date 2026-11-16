@@ -1,19 +1,7 @@
 import { EventEmitter } from "node:events";
-import { createRequire } from "node:module";
 import type { IPty } from "node-pty";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ptySpawner, type PtySpawn } from "./node-pty.ts";
-
-/** node-pty's own terminal class's prototype, whose `destroy` and `kill` these tests run. */
-function unixTerminal(): object {
-  const lib: unknown = createRequire(import.meta.url)("node-pty/lib/unixTerminal.js");
-  const proto: unknown =
-    typeof lib === "object" && lib !== null && "UnixTerminal" in lib
-      ? Reflect.get(Object(lib.UnixTerminal), "prototype")
-      : undefined;
-  if (typeof proto !== "object" || proto === null) throw new TypeError("no UnixTerminal");
-  return proto;
-}
+import { ptySpawner, unixTerminal, type PtySpawn } from "./node-pty.ts";
 
 const isPty = (value: unknown): value is IPty =>
   typeof value === "object" && value !== null && "onExit" in value && "kill" in value;
@@ -24,9 +12,9 @@ const NO_SUCH_PID = 0x7fff_ffff;
 const own = (value: unknown) => ({ value, writable: true, configurable: true });
 
 /**
- * A node-pty terminal with no PTY behind it: node-pty's own `destroy`, `kill` and `_close`, over a
- * read socket that closes when destroyed. `write` and `resize`, which would reach a real fd, only
- * record.
+ * A node-pty terminal with no PTY behind it: node-pty's own `destroy`, `kill`, `_close`, `on` and
+ * `emit`, over a read socket that closes when destroyed. `write` and `resize`, which would reach a
+ * real fd, only record.
  */
 function standIn() {
   const socket = Object.assign(new EventEmitter(), {
@@ -44,6 +32,7 @@ function standIn() {
     _pid: own(NO_SUCH_PID),
     _socket: own(socket),
     _writeStream: own({ dispose() {} }),
+    _internalee: own(new EventEmitter()),
     onData: own(() => ({ dispose() {} })),
     onExit: own((cb: (e: { exitCode: number }) => void) => {
       exits.push(cb);
@@ -64,16 +53,22 @@ function standIn() {
   };
 }
 
-/** node-pty's `destroy`, called on `terminal` as node-pty ships it. */
-function destroy(terminal: IPty) {
-  const shipped: unknown = Reflect.get(terminal, "destroy");
-  if (typeof shipped !== "function") throw new TypeError("no destroy");
-  Reflect.apply(shipped, terminal, []);
+/** One of node-pty's own methods, called on `terminal` as node-pty ships it. */
+function call(terminal: IPty, name: string, ...args: unknown[]) {
+  const shipped: unknown = Reflect.get(terminal, name);
+  if (typeof shipped !== "function") throw new TypeError(`no ${name}`);
+  Reflect.apply(shipped, terminal, args);
+}
+
+/** What node-pty does at its child's end of file: it closes the master, before the exit is heard. */
+function endOfFile(terminal: IPty) {
+  call(terminal, "_close");
+  call(terminal, "emit", "close");
 }
 
 function spawned(terminal: IPty) {
   const spawn: PtySpawn = () => terminal;
-  return ptySpawner(spawn).spawn(["sh"], { cols: 80, rows: 24 }, {});
+  return ptySpawner(spawn, unixTerminal()).spawn(["sh"], { cols: 80, rows: 24 }, {});
 }
 
 const signals = () => vi.spyOn(process, "kill").mockImplementation(() => true);
@@ -85,7 +80,7 @@ afterEach(() => {
 describe("the PTY seam over node-pty", () => {
   it("hangs up by closing the master, and signals no pid, though node-pty's destroy alone would", () => {
     const sent = signals();
-    destroy(standIn().terminal);
+    call(standIn().terminal, "destroy");
     expect(sent).toHaveBeenCalledWith(NO_SUCH_PID, "SIGHUP");
     sent.mockClear();
     const { terminal, socket } = standIn();
@@ -125,6 +120,16 @@ describe("the PTY seam over node-pty", () => {
     expect(resized).toEqual([]);
   });
 
+  it("neither writes nor resizes once node-pty has closed the master, before the exit is heard", () => {
+    const { terminal, written, resized } = standIn();
+    const pty = spawned(terminal);
+    endOfFile(terminal);
+    pty.write(new Uint8Array([0x61]));
+    pty.resize({ cols: 100, rows: 30 });
+    expect(written).toEqual([]);
+    expect(resized).toEqual([]);
+  });
+
   it("writes and resizes a live terminal", () => {
     const { terminal, written, resized } = standIn();
     const pty = spawned(terminal);
@@ -134,11 +139,17 @@ describe("the PTY seam over node-pty", () => {
     expect(resized).toEqual([[100, 30]]);
   });
 
-  it("refuses a terminal with no destroy, which it can't hang up without a signal", () => {
-    const { terminal } = standIn();
-    Object.defineProperty(terminal, "destroy", { value: undefined });
-    expect(() => spawned(terminal)).toThrow(/destroy/);
-  });
+  it.each(["destroy", "kill", "on"])(
+    "refuses a terminal with no %s before it starts a child",
+    (name) => {
+      const spawn = vi.fn<PtySpawn>(() => standIn().terminal);
+      const terminal = Object.create(unixTerminal(), { [name]: own(undefined) });
+      expect(() => ptySpawner(spawn, terminal).spawn(["sh"], { cols: 80, rows: 24 }, {})).toThrow(
+        name,
+      );
+      expect(spawn).not.toHaveBeenCalled();
+    },
+  );
 
   it("refuses a terminal whose kill it can't replace", () => {
     const { terminal } = standIn();
