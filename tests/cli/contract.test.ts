@@ -1,10 +1,17 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  AgentCommandResponse,
   AssignTaskResponse,
+  BroadcastMessageResponse,
+  CreateTaskResponse,
+  EscalateResponse,
+  RolesResponse,
+  TaskCommandResponse,
+  TaskDetail,
   DevicesResponse,
   DismissNoticeResponse,
   DoctorResponse,
@@ -18,7 +25,19 @@ import {
   WaitMessagesResponse,
 } from "@bazhen/protocol";
 import { FakeDaemon, type Scene, scene } from "./cli.ts";
-import { AGENT, MSG, OTHER, TASK, doctor, health, snapshot } from "./fixtures.ts";
+import {
+  AGENT,
+  MSG,
+  OTHER,
+  TASK,
+  agent,
+  assigned,
+  detail,
+  doctor,
+  health,
+  snapshot,
+  task,
+} from "./fixtures.ts";
 
 let s: Scene;
 beforeEach(async () => {
@@ -352,8 +371,97 @@ const VERBS: readonly (readonly [string, readonly string[], (d: FakeDaemon) => u
           messages: [{ id: MSG, agentId: OTHER, state: "seen" }],
         }),
   ],
+  ["agents", ["agents", "--json"], (d) => d.answer("GET /v1/state", StateSnapshot, snapshot())],
+  [
+    "roles",
+    ["roles"],
+    (d) => d.answer("GET /v1/roles", RolesResponse, { roles: [], problems: [] }),
+  ],
+  [
+    "rename",
+    ["rename", OTHER, "reviewer"],
+    (d) =>
+      d.answer(`POST /v1/agents/${OTHER}/rename`, AgentCommandResponse, {
+        agentId: OTHER,
+        eventIds: [1],
+      }),
+  ],
+  [
+    "task create",
+    ["task", "create", "--title", "t", "--brief", "b"],
+    (d) =>
+      d.answer("POST /v1/tasks", CreateTaskResponse, {
+        taskId: TASK,
+        assignmentId: null,
+        eventIds: [1],
+      }),
+  ],
+  [
+    "task show",
+    ["task", "show", TASK],
+    (d) =>
+      d
+        .answer(`GET /v1/tasks/${TASK}`, TaskDetail, detail())
+        .answer("GET /v1/state", StateSnapshot, snapshot()),
+  ],
+  [
+    "task unassign",
+    ["task", "unassign", TASK, "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"],
+    (d) => d.answer(`POST /v1/tasks/${TASK}/unassign`, TaskCommandResponse, { eventIds: [1] }),
+  ],
+  [
+    "task done",
+    ["task", "done", TASK],
+    (d) => d.answer(`POST /v1/tasks/${TASK}/finish`, TaskCommandResponse, { eventIds: [1] }),
+  ],
+  [
+    "task cancel",
+    ["task", "cancel", TASK],
+    (d) => d.answer(`POST /v1/tasks/${TASK}/finish`, TaskCommandResponse, { eventIds: [1] }),
+  ],
+  [
+    "task note",
+    ["task", "note", TASK, "Tests pass."],
+    (d) => d.answer(`POST /v1/tasks/${TASK}/notes`, TaskCommandResponse, { eventIds: [1] }),
+  ],
+  [
+    "escalate",
+    ["escalate", "Pin it?"],
+    (d) =>
+      d.answer("POST /v1/escalations", EscalateResponse, {
+        attentionId: "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      }),
+  ],
+  [
+    "delegate",
+    ["delegate", OTHER, "--title", "t", "--brief", "b"],
+    (d) =>
+      d.answer("POST /v1/tasks/delegate", CreateTaskResponse, {
+        taskId: TASK,
+        assignmentId: null,
+        eventIds: [1],
+      }),
+  ],
+  [
+    "send",
+    ["send", OTHER, "hi"],
+    (d) =>
+      d.answer(`POST /v1/agents/${OTHER}/messages`, SendMessageResponse, {
+        messageId: MSG,
+        eventIds: [1],
+      }),
+  ],
+  [
+    "send --task",
+    ["send", "--task", TASK, "hi"],
+    (d) =>
+      d.answer(`POST /v1/tasks/${TASK}/messages`, BroadcastMessageResponse, {
+        sent: [{ agentId: OTHER, messageId: MSG }],
+        skipped: [],
+        eventIds: [1],
+      }),
+  ],
 ];
-
 const asking = () =>
   s.daemon.received.map((r) => [
     r.headers["bazhen-agent-id"],
@@ -414,5 +522,38 @@ describe("who is asking", () => {
     state();
     await s.bazhen(["task", "list", "--all"], { BAZHEN_AGENT_ID: "" });
     expect(asking()).toEqual([["", undefined, undefined]]);
+  });
+
+  it("names the agent, proves it with its token, and names the paired device, on whoami's call", async () => {
+    s.daemon.answer(
+      "GET /v1/state",
+      StateSnapshot,
+      snapshot({
+        agents: [agent(AGENT, "BZ-127")],
+        tasks: [task(TASK, "t")],
+        assignments: [assigned(TASK, AGENT)],
+      }),
+    );
+    const file = join(s.dir, "token");
+    writeFileSync(file, TOKEN);
+    const ran = await s.bazhen(["whoami"], {
+      BAZHEN_AGENT_ID: AGENT,
+      BAZHEN_DEVICE_ID: DEV,
+      BAZHEN_AGENT_AUTH_FILE: file,
+    });
+    expect([ran.code, asking()]).toEqual([0, [[AGENT, TOKEN, DEV]]]);
+  });
+
+  it("sends no token from a file it may not read, and still runs", async ({ skip }) => {
+    skip(process.getuid?.() === 0, "root reads a file of mode 000");
+    state();
+    const file = join(s.dir, "token");
+    writeFileSync(file, TOKEN);
+    chmodSync(file, 0o000);
+    const ran = await s.bazhen(["task", "list", "--all"], {
+      BAZHEN_AGENT_ID: AGENT,
+      BAZHEN_AGENT_AUTH_FILE: file,
+    });
+    expect([ran.code, asking()]).toEqual([0, [[AGENT, undefined, undefined]]]);
   });
 });
