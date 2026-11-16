@@ -69,9 +69,9 @@ describe("the task list", () => {
       [task(1)],
       [on(1, OTHER, "worker"), on(1, AGENT, "coordinator"), on(1, OTHER, "lead", "ended")],
     );
-    expect(holdersOf(state, id(1)).map((h) => [h.agentId, h.role])).toEqual([
-      [AGENT, "coordinator"],
-      [OTHER, "worker"],
+    expect(holdersOf(state, id(1)).map((h) => [h.agentId, h.role, h.label])).toEqual([
+      [AGENT, "coordinator", `agent ${AGENT.slice(-6)}`],
+      [OTHER, "worker", `agent ${OTHER.slice(-6)}`],
     ]);
   });
 });
