@@ -403,7 +403,7 @@ const foreground = new ForegroundWatch({ store, environment });
 codexThreads.followAll();
 // tmux's titles reach the daemon by its hook, through the socket; a holder's, from the holder.
 const stopTitles = holderRuntime.onTitle(
-  (terminal, title) => void codexThreads.titleChanged(terminal, title),
+  (terminal, title) => void codexThreads.heard(terminal, title),
 );
 // The Codex agents' threads lost their subscriber with the last daemon (§7 step 4).
 codex.keepConnected();

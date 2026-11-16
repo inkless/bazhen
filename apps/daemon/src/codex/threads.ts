@@ -124,6 +124,16 @@ export class CodexThreads {
   }
 
   /**
+   * A title a runtime heard set in a terminal: followed if a Codex agent runs there, and dropped
+   * at once otherwise, so other agents' titles, however often they change, never wait in the
+   * queue ahead of a Codex agent's.
+   */
+  heard(terminal: TerminalId, title: string): Promise<void> {
+    if (this.opts.store.codexAgentIn(terminal) === undefined) return Promise.resolve();
+    return this.titleChanged(terminal, title);
+  }
+
+  /**
    * A terminal's title may have changed: to `title`, when the runtime said which, or else to what
    * reading it finds. Resolves once it has been acted on.
    */

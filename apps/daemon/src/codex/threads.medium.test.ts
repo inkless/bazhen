@@ -28,6 +28,8 @@ async function setup(opts: {
   giveUpMs?: number;
   /** Where the agents' terminals run: tmux's panes by default. */
   runtime?: "tmux" | "holder";
+  /** What `thread/list` waits on before it answers, as a server slow to answer. */
+  listing?: Promise<unknown>;
 }) {
   let unsaved = opts.unsaved ?? 0;
   const runtime = opts.runtime ?? "tmux";
@@ -52,6 +54,7 @@ async function setup(opts: {
     channel: {
       request: async (method, params) => {
         lists.push([method, params]);
+        await opts.listing;
         return { data: opts.listed ?? [] };
       },
       resume: async (threadId) => {
@@ -281,6 +284,16 @@ describe("Codex thread switches", () => {
       [B],
       ["holder"],
     ]);
+  });
+
+  it("drops at once a title heard where no Codex agent runs, while a Codex agent's follow waits", async () => {
+    const { promise: listing } = Promise.withResolvers<unknown>();
+    const s = await setup({ titles: [shown(A)], runtime: "holder", listing });
+    void s.threads.heard(s.terminal, shown(C));
+    await expect.poll(() => s.lists.length).toBe(1);
+    const other = s.threads.heard(newId("term"), "⠋ thinking").then(() => "dropped");
+    const queued = new Promise((resolve) => setTimeout(() => resolve("queued"), 200));
+    await expect(Promise.race([other, queued])).resolves.toBe("dropped");
   });
 
   it("acts on the title a runtime told it, without reading it again", async () => {

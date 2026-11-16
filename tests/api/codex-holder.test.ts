@@ -9,6 +9,26 @@ let daemon: Daemon;
 let launched: LaunchAgentResponse;
 
 const state = async () => StateSnapshot.parse((await daemon.request("/v1/state")).body);
+
+/**
+ * Sends the agent `body` as mail and resolves, once the model has been asked with it, with the
+ * request that carried it: Codex keys each request's prompt cache by its thread, so the request
+ * names the thread the mail went to.
+ */
+async function mailed(key: string, body: string): Promise<string> {
+  const sent = await daemon.request(`/v1/agents/${launched.agentId}/messages`, {
+    method: "POST",
+    body: { idempotencyKey: key, body },
+  });
+  SendMessageResponse.parse(sent.body);
+  let carried: string | undefined;
+  await waitUntil(
+    () => (carried = model.requests.find((r) => r.includes(body))) !== undefined,
+    `the model asked with ${body}`,
+    30_000,
+  );
+  return String(carried);
+}
 const bound = async () =>
   (await state()).agents.find((a) => a.id === launched.agentId)?.externalRef?.id;
 
@@ -60,24 +80,14 @@ describe("a Codex agent on a holder", () => {
         { timeout: 30_000 },
       )
       .toEqual({ moved: true, shown: true });
-    const sent = await daemon.request(`/v1/agents/${launched.agentId}/messages`, {
-      method: "POST",
-      body: { idempotencyKey: "mail-after-new", body: "mail for the new thread" },
-    });
-    const { messageId } = SendMessageResponse.parse(sent.body);
-    await expect
-      .poll(async () => (await state()).messages.find((m) => m.id === messageId)?.state, {
-        timeout: 30_000,
-      })
-      .toBe("delivered");
-    await expect
-      .poll(() => model.requests.some((r) => r.includes("mail for the new thread")), {
-        timeout: 30_000,
-      })
-      .toBe(true);
+    const carried = await mailed("mail-after-new", "mail for the new thread");
+    const now = String(await bound());
+    expect([carried.includes(now), carried.includes(String(before))]).toEqual([true, false]);
   });
 
-  it("moves to the thread its TUI went to while the daemon was down, once it is back", async () => {
+  // Pins that the daemon rebinds: by the titles it reads at start, or by its watch's first word
+  // from the holder, as the medium tests of each pin separately.
+  it("is bound, once the daemon is back, to the thread its TUI went to while it was down, and holds mail till then", async () => {
     const before = await bound();
     await daemon.kill();
     const holder = daemon.holderOf(launched.agentId);
@@ -85,6 +95,9 @@ describe("a Codex agent on a holder", () => {
     await promptHolder(String(holder), "/new");
     await promptHolder(String(holder), "hello while the daemon was down");
     await daemon.restart();
+    const carrying = mailed("mail-after-restart", "mail sent as the daemon came back");
+    // Awaited below; until then a failure must not count as unhandled.
+    carrying.catch(() => {});
     await expect
       .poll(
         async () => {
@@ -94,5 +107,8 @@ describe("a Codex agent on a holder", () => {
         { timeout: 30_000 },
       )
       .toEqual({ moved: true, shown: true });
+    const carried = await carrying;
+    const now = String(await bound());
+    expect([carried.includes(now), carried.includes(String(before))]).toEqual([true, false]);
   });
 });
