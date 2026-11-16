@@ -69,6 +69,8 @@ interface Terminal {
   readonly streams: Set<Client>;
   readonly clients: ClientRecord;
   readonly pasted: Pasted[];
+  /** Input waiting at the terminal, typed ahead of anything pasted. */
+  typedAhead: string;
   /** Snapshots a test is holding back, while it holds them. */
   held?: HeldSnapshots;
 }
@@ -185,6 +187,7 @@ export class FakeRuntime implements RuntimeAdapter {
       streams: new Set(),
       clients: { attaches: [], written: [], resizes: [], closes: 0 },
       pasted: [],
+      typedAhead: "",
     };
     this.terminals.set(spec.terminalId, t);
     this.reportIfExited(t);
@@ -328,6 +331,8 @@ export class FakeRuntime implements RuntimeAdapter {
     const t = this.paneOf(ref);
     if (t.pane.exit !== null) throw new ProcessState(ref.terminalId, "running");
     assertSameGeneration(ref, String(t.pane.generation));
+    // As tmux's gate: input already waiting would be read before the paste, by whatever it starts.
+    if (t.typedAhead !== "") throw new Error("the shell isn't reading at its prompt");
     t.pasted.push({ text, brackets });
     // A program here never asks for bracketed paste, so only a paste asked to be is marked.
     const marked = brackets ? `\x1b[200~${text}\x1b[201~` : text;
@@ -357,6 +362,11 @@ export class FakeRuntime implements RuntimeAdapter {
   /** What the terminal was created or last respawned with. */
   specOf(ref: RuntimeRef): TerminalSpec {
     return this.terminalOf(ref).spec;
+  }
+
+  /** Input reaches the terminal before its program reads it, as keys typed while a shell starts. */
+  typeAhead(ref: RuntimeRef, text: string): void {
+    this.terminalOf(ref).typedAhead += text;
   }
 
   /** What was pasted into the terminal, oldest first. */

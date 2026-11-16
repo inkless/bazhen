@@ -6,6 +6,7 @@
 //! The reply's framing is documented beside `HookReply` in packages/protocol/src/mail.ts. Its
 //! decoders are public so the fuzz targets in `fuzz/` can reach them.
 
+pub mod pane_ready;
 pub mod pane_title;
 pub mod shell_report;
 mod statusline;
@@ -48,6 +49,7 @@ pub fn exit_code() -> i32 {
         Some("pane-title") => pane_title::run(env::args().skip(2)),
         Some("shell-report") => shell_report::run(env::args().skip(2)),
         Some("shell-prompt") => shell_report::run_prompt(env::args().skip(2)),
+        Some("pane-ready") => Some(pane_ready::run(env::args().skip(2))),
         Some("statusline-wrap") => statusline::run(env::args().skip(2)),
         _ => run(),
     };

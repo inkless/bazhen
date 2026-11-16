@@ -512,6 +512,12 @@ export class Daemon {
     return processEnv(Number(this.paneFact(terminalId, "pane_pid", "@bazhen_terminal_id")));
   }
 
+  /** What a file in the work directory holds, or null when there is none. */
+  workFile(name: string): string | null {
+    const path = join(this.work, name);
+    return existsSync(path) ? readFileSync(path, "utf8") : null;
+  }
+
   /** A shell terminal's process, as its pane's pid. */
   shellPid(terminalId: string): number {
     return Number(this.paneFact(terminalId, "pane_pid", "@bazhen_terminal_id"));

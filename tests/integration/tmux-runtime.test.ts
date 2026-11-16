@@ -14,6 +14,14 @@ const runtime = new TmuxRuntime({
   server,
   pty: nodePtySpawner,
   env: filterEnv(launchedFrom).env,
+  pasteGate: ["true"],
+});
+/** The same server, with a gate that never lets a paste go. */
+const gated = new TmuxRuntime({
+  server,
+  pty: nodePtySpawner,
+  env: filterEnv(launchedFrom).env,
+  pasteGate: ["false"],
 });
 const size = { cols: 100, rows: 30 };
 const spec = (
@@ -31,10 +39,33 @@ const spec = (
 
 afterAll(() => server.kill());
 
+/** The buffers a paste made and left behind; one that typed nothing never set one. */
+const pasteBuffers = () =>
+  tmuxOut(server, "list-buffers", "-F", "#{buffer_name}")
+    .split("\n")
+    .filter((name) => name.startsWith("bazhen-paste-"));
+
 const screen = (session: string | undefined) =>
   tmuxOut(server, "capture-pane", "-p", "-t", `${String(session)}:0`);
 
 describe("tmux runtime on a private server", () => {
+  it("types nothing that its gate, run inside the paste's own script, doesn't let go", async () => {
+    const ref = await runtime.create(spec(["cat"]));
+    await expect(gated.paste(ref, "echo gated", false)).rejects.toThrow(
+      "the shell isn't reading at its prompt",
+    );
+    expect(pasteBuffers()).toEqual([]);
+  });
+
+  it("types nothing into a pane in a mode it can't leave for the paste, as clock mode", async () => {
+    const ref = await runtime.create(spec(["cat"]));
+    tmuxOut(server, "clock-mode", "-t", String(ref.locator.paneId));
+    await expect(runtime.paste(ref, "echo clocked", true)).rejects.toThrow(
+      "the pane is in a mode other than copy or view mode",
+    );
+    expect(pasteBuffers()).toEqual([]);
+  });
+
   it("pastes into a pane left in copy mode as into its program, leaving the mode", async () => {
     const ref = await runtime.create(spec(["cat"]));
     const pane = String(ref.locator.paneId);

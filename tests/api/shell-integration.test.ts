@@ -213,7 +213,9 @@ const SLOW_RC: Record<IntegratedShell, (marker: string) => string> = {
       RC_LINE.zsh,
       "setopt PROMPT_SUBST",
       "PS1='$(sleep 0.3)[st=%?] '",
-      "zle-line-init() { sleep 0.3 }",
+      // In the shell's own process, as most widgets run: its process group keeps the foreground.
+      "zmodload zsh/zselect",
+      "zle-line-init() { zselect -t 30 }",
       "zle -N zle-line-init",
       `if [[ -e '${marker}' ]]; then __bz_z() { LBUFFER+=X }; zle -N __bz_z; bindkey Z __bz_z; fi`,
     ].join("\n"),
@@ -260,6 +262,15 @@ async function retypedAfterReboot(daemon: Daemon, line: string, before = () => {
   return ShellCommandResponse.parse(restarted.body).terminalId;
 }
 
+/**
+ * Whether a restarted shell's line was dropped, or is held back by the hook's copy still waiting
+ * for the shell's editor, as it is while what a line typed ahead started reads: an editor that
+ * read that line at once never left canonical mode for it.
+ */
+const heldBack = (daemon: Daemon, terminalId: string) => () =>
+  daemon.log().includes(`shell ${terminalId}: last command not retyped`) ||
+  Daemon.promptWaiters(daemon.shellPid(terminalId)) === 1;
+
 const lastLine = (daemon: Daemon, terminalId: string) => () =>
   daemon.shellScreen(terminalId).trimEnd().split("\n").at(-1);
 
@@ -280,7 +291,26 @@ describe.each<IntegratedShell>(["zsh", "bash", "fish"])(
       shell?.cleanup();
     });
 
+    it("types nothing behind a line typed ahead as the shell starts, which what it runs would read", async () => {
+      shell?.unmark();
+      const next = await retypedAfterReboot(daemon, "echo typed-back");
+      // Typed straight into the new terminal as its shell starts, well before its slow prompt is
+      // drawn, so it is read before anything pasted could be.
+      const session = String(daemon.paneFact(next, "session_name", "@bazhen_terminal_id"));
+      daemon.tmux("send-keys", "-t", session, "-l", "cat > typed-ahead.out");
+      daemon.tmux("send-keys", "-t", session, "Enter");
+      const running = () => daemon.paneFact(next, "pane_current_command", "@bazhen_terminal_id");
+      await expect.poll(running, { timeout: 20_000 }).toBe("cat");
+      await expect.poll(heldBack(daemon, next), { timeout: 20_000 }).toBe(true);
+      daemon.tmux("send-keys", "-t", session, "C-d");
+      await expect
+        .poll(lastLine(daemon, next), { timeout: 20_000 })
+        .toMatch(/^\[st=0\]( echo typed-back)?$/);
+      expect(daemon.workFile("typed-ahead.out")).toBe("");
+    });
+
     it("types the line once the editor reads, once, and as a paste rather than as keys", async () => {
+      shell?.unmark();
       const next = await retypedAfterReboot(daemon, SLOW_TYPED, () => shell?.mark());
       await expect.poll(lastLine(daemon, next), { timeout: 20_000 }).toBe(`[st=0] ${SLOW_TYPED}`);
       const screen = daemon.shellScreen(next);

@@ -5,6 +5,7 @@ import {
   parseLstart,
   parsePsLine,
   pasteScript,
+  PASTE_REFUSED,
   psFailure,
   serverVerdict,
   socketRefusal,
@@ -81,54 +82,73 @@ describe("environmentScript", () => {
   });
 });
 
-describe("pasteScript", () => {
-  const hostile = `echo "$HOME" 'a  b'; #{pane_id}`;
-  const set =
-    `set-buffer -b b-1 -- 'echo "$HOME" '\\''a  b'\\''; #{pane_id}'\n` +
-    "if-shell -F -t %7 '#{pane_in_mode}' 'send-keys -X -t %7 cancel'\n";
+/** A paste's whole script into %7, with `paste` as what it runs once the pane is ready. */
+const script = (paste: string[]) =>
+  [
+    "if-shell -F -t %7 '#{||:#{==:#{pane_mode},copy-mode},#{==:#{pane_mode},view-mode}}' 'send-keys -X -t %7 cancel'",
+    `if-shell -F -t %7 '#{pane_in_mode}' 'display-message -p "${PASTE_REFUSED.mode}"' {`,
+    '  if-shell -t %7 "/state/hook/bazhen-hook pane-ready #{pane_tty} #{pane_pid}" {',
+    `    set-buffer -b b-1 -- 'echo "$HOME" '\\''a  b'\\''; #{pane_id} } {'`,
+    ...paste.map((line) => `    ${line}`),
+    "  } {",
+    `    display-message -p "${PASTE_REFUSED.gate}"`,
+    "  }",
+    "}",
+  ]
+    .map((line) => `${line}\n`)
+    .join("");
 
-  it("pastes the text as one single-quoted word, bracketed as the program asks, and deletes its buffer", () => {
-    expect(pasteScript("b-1", "%7", hostile, false)).toBe(
-      `${set}paste-buffer -p -d -b b-1 -t %7\n`,
+describe("pasteScript", () => {
+  const hostile = `echo "$HOME" 'a  b'; #{pane_id} } {`;
+  const gate = ["/state/hook/bazhen-hook", "pane-ready"] as const;
+  it("pastes the text as one single-quoted word, bracketed as the program asks, once the pane is ready", () => {
+    expect(pasteScript("b-1", "%7", hostile, false, gate)).toBe(
+      script(["paste-buffer -p -d -b b-1 -t %7"]),
     );
   });
 
   it("marks the paste with the bracketed-paste sequences itself when asked to", () => {
-    expect(pasteScript("b-1", "%7", hostile, true)).toBe(
-      set +
-        "send-keys -t %7 -H 1b 5b 32 30 30 7e\n" +
-        "paste-buffer -d -b b-1 -t %7\n" +
-        "send-keys -t %7 -H 1b 5b 32 30 31 7e\n",
+    expect(pasteScript("b-1", "%7", hostile, true, gate)).toBe(
+      script([
+        "send-keys -t %7 -H 1b 5b 32 30 30 7e",
+        "paste-buffer -d -b b-1 -t %7",
+        "send-keys -t %7 -H 1b 5b 32 30 31 7e",
+      ]),
     );
   });
 
   it.each(["make\n", "make\r", "a\tb", "\u001b[D", "\u007f", "\0", "\u009b2J", "\u0085"])(
     "refuses text holding a key rather than text: %j",
     (text) => {
-      expect(() => pasteScript("b", "%1", text, false)).toThrow(/control character$/);
-      expect(() => pasteScript("b", "%1", text, true)).toThrow(/control character$/);
+      expect(() => pasteScript("b", "%1", text, false, gate)).toThrow(/control character$/);
+      expect(() => pasteScript("b", "%1", text, true, gate)).toThrow(/control character$/);
     },
   );
 
   it("refuses unmarked text beyond printable ASCII, which as keys would be meta keys, and marks it", () => {
     for (const text of ["echo Å", "echo £", "echo 你好", "a\u00a0b"])
-      expect(() => pasteScript("b", "%1", text, false)).toThrow(/beyond printable ASCII/);
-    expect(pasteScript("b", "%1", "echo Å 你好", true)).toContain("'echo Å 你好'");
+      expect(() => pasteScript("b", "%1", text, false, gate)).toThrow(/beyond printable ASCII/);
+    expect(pasteScript("b", "%1", "echo Å 你好", true, gate)).toContain("'echo Å 你好'");
   });
 
   it("refuses text that would end a marked paste early, so what follows is typed as keys", () => {
-    expect(() => pasteScript("b", "%1", "a\u001b[201~rm -rf ~", true)).toThrow(
+    expect(() => pasteScript("b", "%1", "a\u001b[201~rm -rf ~", true, gate)).toThrow(
       /control character$/,
     );
   });
 
   it.each([
-    ["b c", "%1"],
-    ["b", "%1; kill-server"],
-    ["b", "main"],
-  ])("refuses a buffer or pane that isn't a plain name or id: %j %j", (buffer, target) => {
-    expect(() => pasteScript(buffer, target, "make", false)).toThrow(RangeError);
-  });
+    ["b c", "%1", gate],
+    ["b", "%1; kill-server", gate],
+    ["b", "main", gate],
+    ["b", "%1", ["/hook; rm -rf ~", "pane-ready"]],
+    ["b", "%1", ["/my hook", "pane-ready"]],
+  ] as const)(
+    "refuses a buffer, pane or gate that isn't plain names and ids: %j %j %j",
+    (buffer, target, gated) => {
+      expect(() => pasteScript(buffer, target, "make", false, gated)).toThrow(RangeError);
+    },
+  );
 });
 
 describe("the recorded tmux server, by what ps shows of it", () => {

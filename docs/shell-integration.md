@@ -51,9 +51,12 @@ line appears there as the old shell reported it, `$VARIABLES` unexpanded: zsh an
 the line you typed, and bash the line as its history recorded it. What the line editor does with
 a paste can still change it as it lands, as zsh's `url-quote-magic` quotes a URL, or fish escapes
 a pasted quote inside quotes. Enter is never pressed: you read the line, edit it if you like, and
-run it yourself. Nothing is typed while a program other than the shell holds the terminal, as one
-you typed ahead while the shell started, or a password prompt: the line is dropped, and the
-daemon logs that it wasn't retyped.
+run it yourself. It is typed only when the shell's line editor is reading at its prompt with
+nothing typed ahead of it, checked in the same step as the paste: keys you typed while the shell
+started, as `vim notes` and Enter, or a program that holds the terminal, as a password prompt,
+would take the line as their own input. Then it waits until the shell is back at its prompt,
+for a few seconds, or else is dropped, and the daemon logs that it wasn't retyped. A program your prompt runs, as `git status`, holds the terminal for a moment,
+and the line waits a few seconds for the shell to have it again.
 
 Bazhen types it as a paste, marked with the bracketed-paste sequences, so the line editor inserts
 it as text rather than taking it as keys, however long your prompt takes to draw. That holds

@@ -196,8 +196,21 @@ describe("restarting a lost shell with its last line typed back", () => {
     expect([early, pasted, logs]).toEqual([
       [],
       [],
-      [`shell ${terminalId}: last command not retyped: vim held the shell's foreground for 3 s`],
+      [`shell ${terminalId}: last command not retyped: vim kept the shell's foreground`],
     ]);
+  });
+
+  it("types nothing behind input typed ahead of it, which whatever it starts would read", async () => {
+    const { runtime, restart, prompt, refOf, logs } = await lostShell();
+    const { terminalId } = await restart();
+    runtime.typeAhead(refOf(terminalId), "cat > notes\r");
+    prompt(terminalId);
+    await expect
+      .poll(() => logs)
+      .toEqual([
+        `shell ${terminalId}: last command not retyped: the shell isn't reading at its prompt`,
+      ]);
+    expect(runtime.pasted(refOf(terminalId))).toEqual([]);
   });
 
   it("waits for the shell to hold its foreground again, as after a program its prompt runs", async () => {

@@ -192,6 +192,7 @@ const runtime = new TmuxRuntime({
   env: hostEnv,
   // Codex TUIs title their panes with their thread; the script client has no pane-title command.
   ...(hookRunner === HOOK_SCRIPT ? {} : { onPaneTitle: paneTitleCommand(hookPath, paths.socket) }),
+  ...(hookRunner !== HOOK_SCRIPT && { pasteGate: [hookPath, "pane-ready"] as const }),
 });
 // Follows Codex TUIs from thread to thread, by their panes' titles (§5.8).
 const codexThreads = new CodexThreads({

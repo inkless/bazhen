@@ -555,10 +555,7 @@ export class ShellLifecycle {
     for (let waited = 0; ; waited += FOREGROUND_POLL_MS) {
       const program = await this.deps.environment.shellBusy(ref);
       if (program === null) return this.deps.environment.pasteShell(ref, line, brackets);
-      if (waited >= FOREGROUND_WAIT_MS)
-        throw new Error(
-          `${program} held the shell's foreground for ${FOREGROUND_WAIT_MS / 1000} s`,
-        );
+      if (waited >= FOREGROUND_WAIT_MS) throw new Error(`${program} kept the shell's foreground`);
       await new Promise<void>((resolve) => after(FOREGROUND_POLL_MS, resolve));
     }
   }
