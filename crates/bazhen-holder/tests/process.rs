@@ -341,6 +341,66 @@ fn a_child_that_exits_at_once_is_still_seen_to_exit() {
     assert_eq!(wait_exit(&mut running).unwrap(), exited(0).unwrap());
 }
 
+/// Longer than macOS lets a session leader's exit wait for the master to read what it wrote, about
+/// 600 ms, before it discards that output and lets the exit go ahead.
+const UNREAD_FOR: Duration = Duration::from_millis(1500);
+
+/// How long `read_to_end` waits for more output before it takes what it has as all there is.
+const QUIET: Duration = Duration::from_millis(500);
+
+/// Waits until `deadline` without reading the master, looking for the child's exit, and says
+/// whether it was seen.
+fn exit_seen_unread(running: &mut Running, deadline: Instant) -> Result<bool> {
+    loop {
+        if running.child.poll_exit().is_some() || running.child.exit().is_some() {
+            return Ok(true);
+        }
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Ok(false);
+        }
+        let wakeups = running.reaper.fd();
+        let mut fds = [PollFd::new(&wakeups, PollFlags::IN)];
+        match poll(
+            &mut fds,
+            Some(&Timespec::try_from(left.min(Duration::from_millis(50)))?),
+        ) {
+            Ok(_) | Err(rustix::io::Errno::INTR) => {}
+            Err(e) => return Err(e.into()),
+        }
+        running.reaper.clear();
+    }
+}
+
+/// Reads the master until its output ends, or until it has been quiet for `QUIET`.
+fn read_to_end(running: &mut Running) -> Result<()> {
+    let deadline = Instant::now() + DEADLINE;
+    loop {
+        read_master(running);
+        if !running.master_open || Instant::now() >= deadline {
+            return Ok(());
+        }
+        let master: BorrowedFd<'_> = running.pty.master();
+        let mut fds = [PollFd::new(&master, PollFlags::IN)];
+        match poll(&mut fds, Some(&Timespec::try_from(QUIET)?)) {
+            Ok(0) => return Ok(()),
+            Ok(_) | Err(rustix::io::Errno::INTR) => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
+}
+
+#[test]
+fn output_a_child_wrote_survives_until_the_master_is_read() {
+    let mut running = start(&["printf", "abc"]).unwrap();
+    exit_seen_unread(&mut running, Instant::now() + UNREAD_FOR).unwrap();
+    read_to_end(&mut running).unwrap();
+    let seen = exit_seen_unread(&mut running, Instant::now() + DEADLINE).unwrap();
+    assert_eq!(String::from_utf8_lossy(&running.output), "abc");
+    assert!(seen, "the exit was never seen");
+    assert_eq!(running.child.exit(), Some(&exited(0).unwrap()));
+}
+
 #[test]
 fn the_exit_is_seen_while_a_grandchild_still_holds_the_terminal() {
     let file = scratch("grandchild").unwrap();
