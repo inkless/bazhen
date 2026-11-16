@@ -238,13 +238,25 @@ A test owns everything it touches and leaves nothing behind.
   code 9. The one process
   started to send a signal is `systemctl --user kill` of the cap's own scope
   (`packages/host-guard/src/cap.ts`). The check is defence in depth: it reads text, so the
-  chokepoints' own refusals are what stop a stray signal. It fails closed on a command line: a kill
-  program there counts wherever it follows a launcher, whatever that launcher's options, or wherever
-  an argument follows it, and a `kill` passes only when, past at most one signal spec and a `--`,
-  and less its redirections and any comment, each operand is `$$`, `$!` or a plain `$var`. It
-  accepts these gaps: a kill program held in a constant; in TypeScript, `{ default as p }`,
-  `Reflect.get`, `require` and dynamic imports of `process`; unusual Rust `use` forms; a kill
-  program more than four arguments after its launcher. A Rust test that may signal processes it
+  chokepoints' own refusals are what stop a stray signal. On a command line it is a best-effort
+  heuristic that fails closed where it reads one. It takes a literal's own escapes, then reads
+  words as the shell does: a quoted or escaped part joins the text it touches (`k''ill` is
+  `kill`), `$'…'` means what its escapes spell, and a backslash-newline continues the line. It
+  reads as a command line too the text inside each quote and substitution, each word with a
+  quoted part, and each here-string. A kill program counts wherever it follows a launcher,
+  whatever that launcher's options, or `time` or `coproc`, or wherever an argument follows it,
+  and so does a program word built by a substitution where the line names a kill. A `kill`
+  passes only when, past at most one signal spec and a `--`, and less its redirections with
+  their targets and any comment, each operand is `$$`, `$!` or a plain `$var`, never a
+  substitution. A line naming a kill that leaves a substitution open counts. One that leaves a
+  quote open, as a prose apostrophe does, counts if either reading of that quote is a kill. It
+  accepts these gaps: a kill program held in a constant or a shell variable, or printed by a
+  substitution whose line doesn't name it; a plain `$var` operand, whatever it holds; a launcher
+  not on its list, or a kill program more than four arguments after one; operands `xargs`
+  appends; `eval`, whose arguments join into a line the check never reads whole; process
+  substitution, `<(…)`; an apostrophe in a heredoc body, which reads as a quote; a literal's
+  `\x` and `\u` escapes; in TypeScript, `{ default as p }`, `Reflect.get`, `require` and dynamic
+  imports of `process`; unusual Rust `use` forms. A Rust test that may signal processes it
   didn't start is `#[ignore = "signals processes; runs in pnpm test:real rust"]` and starts with
   `bazhen_test_signal::require_sandbox().unwrap();`, both of which `pnpm check` requires, so the
   host skips it and `pnpm test:rust:all` runs it only on a host carrying a root-owned
