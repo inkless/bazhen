@@ -24,6 +24,7 @@ describe("resolveConfig", () => {
       lan: null,
       launchLimits: { maxLaunched: 5, maxDepth: 3 },
       maxOpenTerminals: 100,
+      defaultRuntime: "tmux",
     });
   });
 
@@ -43,6 +44,7 @@ describe("resolveConfig", () => {
       lan: null,
       launchLimits: { maxLaunched: 5, maxDepth: 3 },
       maxOpenTerminals: 100,
+      defaultRuntime: "tmux",
     });
   });
 
@@ -53,6 +55,10 @@ describe("resolveConfig", () => {
 
   it("takes how many terminals may be open at once from the file", () => {
     expect(resolveConfig({ terminals: { max_open: 12 } }, {}).maxOpenTerminals).toBe(12);
+  });
+
+  it("takes the runtime new terminals are made on from the file", () => {
+    expect(resolveConfig({ runtime: { default: "holder" } }, {}).defaultRuntime).toBe("holder");
   });
 
   it("lists the origins the user's own route to the daemon presents, and where they came from", () => {

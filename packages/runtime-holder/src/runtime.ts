@@ -64,8 +64,13 @@ const ignore = () => {};
 export interface HolderRuntimeOptions {
   /** The daemon's private run directory: holders bind in its `holders` directory. */
   readonly root: string;
-  /** The `bazhen-holder` binary every new terminal's holder runs. */
-  readonly binary: string;
+  /**
+   * The `bazhen-holder` binary every new terminal's holder runs. Null when none is installed: the
+   * holders already running are still found and served, and only a new terminal is refused.
+   */
+  readonly binary: string | null;
+  /** Why there is no binary, which a refused new terminal says. */
+  readonly unavailable?: string;
   /** Where holder builds are installed, each in a directory named by its build. */
   readonly installDir?: string;
   /** The environment every new terminal starts from, already filtered (foundation-design §9.5). */
@@ -336,6 +341,11 @@ export class HolderRuntime implements RuntimeAdapter {
   }
 
   async create(spec: TerminalSpec): Promise<RuntimeRef> {
+    const { binary } = this.opts;
+    if (binary === null) {
+      const why = this.opts.unavailable ?? "no bazhen-holder is installed";
+      throw new Error(`terminal ${spec.terminalId}: no holder can be started: ${why}`);
+    }
     const socket = this.socketOf(spec.terminalId);
     const holderSpec = {
       protocol: [HOLDER_PROTOCOL_VERSION],
@@ -346,7 +356,7 @@ export class HolderRuntime implements RuntimeAdapter {
       ...this.processSpec(spec),
     };
     const start = this.opts.start ?? startHolder;
-    await start({ binary: this.opts.binary, root: this.opts.root, spec: holderSpec, env: {} });
+    await start({ binary, root: this.opts.root, spec: holderSpec, env: {} });
     const reached = await this.reach(socket);
     if (reached.is !== "holder") {
       // Best effort: one that answers later is told to close, rather than left with no record.

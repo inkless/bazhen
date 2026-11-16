@@ -6,13 +6,14 @@ import { newId, RoutedRuntime, type HarnessAdapter } from "@bazhen/core";
 import { FakeRuntime } from "@bazhen/core/testing";
 import { LocalEnvironment } from "@bazhen/env-local";
 import { launchAgent, localEnvironmentId } from "../agents/launch.ts";
+import { Lifecycle } from "../agents/lifecycle.ts";
 import { AgentQueue } from "../agents/queue.ts";
 import { reconcile } from "../agents/reconcile.ts";
 import { ServerWatch } from "../agents/server-watch.ts";
 import { ShellLifecycle } from "../shells/lifecycle.ts";
 import { reconcileShells } from "../shells/reconcile.ts";
 import { Store } from "../store/store.ts";
-import { tempDb, testView, unlimited } from "../testing/fixtures.ts";
+import { quietStartAgain, tempDb, testView, unlimited } from "../testing/fixtures.ts";
 
 const claude: HarnessAdapter = {
   id: "claude-code",
@@ -152,5 +153,43 @@ describe("reconciling each runtime by itself", () => {
     await watch.tick();
     expect([agentState(onTmux), agentState(onHolder)]).toEqual(["running", "lost"]);
     expect(logged.filter((m) => m.includes("tmux is unreachable"))).toHaveLength(1);
+  });
+});
+
+describe("making a new terminal for an old one", () => {
+  it("relaunches a lost tmux agent onto the holders once they are the default", async () => {
+    const { store, tmux, holder, on, queue, launch, log } = twoRuntimes();
+    const agentId = await launch("tmux");
+    tmux.reboot();
+    await reconcile(store, on("tmux"), log);
+    await new Lifecycle(store, on("holder"), queue, quietStartAgain).relaunch(agentId, {
+      idempotencyKey: newId("att"),
+      generation: 0,
+      fresh: true,
+    });
+    const now = store.agentTerminal({ agentId });
+    expect([
+      now?.state,
+      now?.runtimeKind,
+      now?.runtime?.runtime,
+      (await holder.inventory()).length,
+    ]).toEqual(["running", "holder", "holder", 1]);
+  });
+
+  it("restarts a lost tmux shell onto the holders once they are the default", async () => {
+    const { store, tmux, on, shellsOn, openShell, log } = twoRuntimes();
+    const lost = await openShell("tmux");
+    tmux.reboot();
+    await reconcileShells(store, on("tmux"), shellsOn("tmux"), log);
+    const { terminalId } = await shellsOn("holder").restart(lost, {
+      idempotencyKey: newId("att"),
+      generation: 0,
+    });
+    const restarted = store.shell(terminalId);
+    expect([restarted?.state, restarted?.runtimeKind, restarted?.runtime?.runtime]).toEqual([
+      "running",
+      "holder",
+      "holder",
+    ]);
   });
 });

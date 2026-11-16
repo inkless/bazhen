@@ -238,6 +238,20 @@ describe("HolderRuntime: creating and finding terminals", () => {
     });
   });
 
+  it("refuses a new terminal with no binary installed, saying why, and starts nothing", async () => {
+    const started: StartHolderOptions[] = [];
+    const { runtime } = runtimeAt(privateRoot(), {
+      binary: null,
+      unavailable: "the build failed",
+      start: async (options) => {
+        started.push(options);
+        throw new Error("started");
+      },
+    });
+    await expect(runtime.create(spec())).rejects.toThrow("the build failed");
+    expect([started, await runtime.inventory()]).toEqual([[], []]);
+  });
+
   it("defaults COLORTERM over the runtime's own, as every terminal starts truecolor", async () => {
     const { runtime, started } = startingFakes(privateRoot());
     await runtime.create(spec());

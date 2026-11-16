@@ -96,7 +96,7 @@ export const EVENTS = {
       name: z.string().optional(),
       /** The `<n>` its default name took, which no later default takes again. */
       nameOrdinal: z.number().int().positive().optional(),
-      /** The runtime its terminal is created on; absent before protocol 1.47, when only tmux ran. */
+      /** The runtime its terminal is created on; absent before protocol 1.48, when only tmux ran. */
       runtime: z.string().min(1).optional(),
     }),
   },
@@ -178,7 +178,7 @@ export const EVENTS = {
       generation: z.number().int().positive(),
       /** On a new harness session, which the old one's conversation doesn't carry into. */
       fresh: z.boolean(),
-      /** The runtime its terminal is created on; absent before protocol 1.47, when only tmux ran. */
+      /** The runtime its terminal is created on; absent before protocol 1.48, when only tmux ran. */
       runtime: z.string().min(1).optional(),
     }),
   },
@@ -258,7 +258,7 @@ export const EVENTS = {
       theme: TuiTheme.optional(),
       /** The lost shell it was opened to restart. */
       restartOf: Id("term").optional(),
-      /** The runtime its terminal is created on; absent before protocol 1.47, when only tmux ran. */
+      /** The runtime its terminal is created on; absent before protocol 1.48, when only tmux ran. */
       runtime: z.string().min(1).optional(),
     }),
   },
