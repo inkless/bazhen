@@ -124,6 +124,40 @@ describe("the pane-title hook on a server an older daemon started", () => {
   });
 });
 
+/** Whether a client is attached to the server: false once none is, or the server is gone. */
+const attached = (server: ConfiguredTmuxServer) =>
+  server.alive() && tmuxOut(server, "list-clients").trim() !== "";
+
+describe("a dead terminal that had asked for focus reports", () => {
+  it("leaves the server running when its view closes and opens again, its last output kept", async () => {
+    const server = newServer();
+    const runtime = runtimeOn(server);
+    const ref = await runtime.create({
+      ...titler(),
+      argv: ["sh", "-c", "printf 'last words\\033[?1004h'; read x"],
+    });
+    const pane = String(ref.locator.paneId);
+    const exit = async () =>
+      (await runtime.inventory()).find((e) => e.ref.terminalId === ref.terminalId)?.exit;
+
+    const first = await runtime.attach(ref, null, 0);
+    await expect.poll(() => attached(server), { timeout: 5_000 }).toBe(true);
+    tmuxOut(server, "send-keys", "-t", pane, "Enter");
+    await expect.poll(exit, { timeout: 5_000 }).toMatchObject({ type: "exited", code: 0 });
+    first.stream.close();
+    await expect.poll(() => attached(server), { timeout: 5_000 }).toBe(false);
+    expect(server.alive()).toBe(true);
+
+    const second = await runtime.attach(ref, null, 0);
+    await expect.poll(() => attached(server), { timeout: 5_000 }).toBe(true);
+    second.stream.close();
+    await expect.poll(() => attached(server), { timeout: 5_000 }).toBe(false);
+    expect(server.alive()).toBe(true);
+    expect(await exit()).toMatchObject({ type: "exited", code: 0 });
+    expect(tmuxOut(server, "capture-pane", "-p", "-S", "-", "-t", pane)).toContain("last words");
+  });
+});
+
 /** What Node said of a command that failed, as far as telling a timeout from tmux's answer goes. */
 const failure = (err: unknown) => ({
   code: Reflect.get(Object(err), "code"),

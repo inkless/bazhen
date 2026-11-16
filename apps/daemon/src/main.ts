@@ -594,7 +594,10 @@ const socketListener = getRequestListener(
         appVersion: APP_VERSION,
         protocolVersion: PROTOCOL_VERSION,
         runtime: { state: worst.state, version: tmuxVersion },
-        runtimes,
+        runtimes: runtimes.map(({ workarounds, ...report }) => ({
+          ...report,
+          workarounds: [...(workarounds ?? [])],
+        })),
         hookClient: { path: hookRunner, fallback: hookRunner === HOOK_SCRIPT },
         holder: await holderDoctor(holderInstall, holderRuntime),
         config: configFile,

@@ -10,7 +10,8 @@ client. Agents, tasks, and orchestration come later.
 
 - Node.js 24 or newer (development uses 26.13.0; see `.nvmrc` / `.tool-versions`)
 - pnpm 12 (pinned through `packageManager`)
-- tmux 3.x
+- tmux 3.x; 3.5 or later avoids a crash Bazhen can only work around before it
+  ([docs/tmux.md](docs/tmux.md))
 - Rust through rustup, which installs the toolchain `rust-toolchain.toml` pins on first use, and
   once per machine the cargo tools `pnpm check` and `pnpm test:falsify` run:
   `cargo install --locked cargo-nextest@0.9.152 cargo-deny@0.20.2 cargo-mutants@27.1.0`

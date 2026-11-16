@@ -150,9 +150,11 @@ const MODE_EXIT_BINDINGS = ["copy-mode", "copy-mode-vi"].flatMap((table) =>
  * window creation. An empty `update-environment` stops an attaching client from copying its own
  * variables into a session. `history-limit` keeps as much history as the daemon and each view
  * do. Without the smcup override, the client switches the browser's terminal to its alternate
- * buffer, which keeps no scrollback and turns the wheel into arrow keys.
+ * buffer, which keeps no scrollback and turns the wheel into arrow keys. `resetDeadPanes` is
+ * whether this tmux needs `DEAD_PANE_RESET`.
  */
-export const TMUX_CONFIG = `set -g prefix None
+export function tmuxConfig(resetDeadPanes: boolean): string {
+  return `set -g prefix None
 set -g prefix2 None
 unbind-key -a -T prefix
 unbind-key -a -T root
@@ -170,7 +172,48 @@ set -g set-clipboard on
 set -g update-environment ""
 set -as terminal-features ",xterm-256color:RGB:extkeys:clipboard:hyperlinks:focus"
 set -ga terminal-overrides ",xterm-256color:smcup@:rmcup@"
+${resetDeadPanes ? `set-hook -g pane-died '${DEAD_PANE_RESET}'` : "set-hook -gu pane-died"}
 `;
+}
+
+/**
+ * Before 3.5, tmux writes a focus report to a dead pane's freed output whenever the pane's focus
+ * changes, if its program had turned focus reports on (`\e[?1004h`), and the server crashes with
+ * every terminal on it (tmux issue 3776). A TUI killed by a signal never turns them off, and
+ * attaching to its pane or leaving it changes its focus. Resetting the pane as it dies turns them
+ * off, and costs the dead pane its screen, which scrolls into history with the "Pane is dead"
+ * line. The hook runs on the server's next pass, so a focus change in the same pass as the death
+ * still crashes it. No `-t`: tmux before 3.5 doesn't expand a format there, and a hook's own
+ * pane is the one that died. A live pane is never reset, should that ever not hold.
+ */
+const DEAD_PANE_RESET = 'if-shell -F "#{pane_dead}" "send-keys -R"';
+
+/** Whether a tmux of this `[major, minor]` needs `DEAD_PANE_RESET`. */
+export const resetsDeadPanes = ([major, minor]: readonly [number, number]) =>
+  major < 3 || (major === 3 && minor < 5);
+
+/** What `bazhen doctor` says of a tmux that needs `DEAD_PANE_RESET`. */
+export const DEAD_PANE_WORKAROUND =
+  "tmux before 3.5 crashes, ending every terminal, when a dead pane that asked for focus " +
+  "reports gains or loses focus (fixed in tmux 3.5). Bazhen resets each pane as it dies, so a " +
+  "dead terminal shows an empty screen with its last output scrolled into history. A focus " +
+  "change at the very moment a terminal dies can still crash the server: upgrade to tmux 3.5.";
+
+/**
+ * Whether what `-V` (`tmux 3.6b`) or `#{version}` (`3.4`, `next-3.9`) printed names a tmux that
+ * needs `DEAD_PANE_RESET`. One that can't be read is taken to, since the reset costs only a dead
+ * pane's screen.
+ */
+function needsReset(version: string): boolean {
+  const match = /^(?:tmux )?(?:next-)?(\d+)\.(\d+)/.exec(version.trim());
+  return match === null || resetsDeadPanes([Number(match[1]), Number(match[2])]);
+}
+
+function deadPaneHook(reset: boolean): string[] {
+  return reset
+    ? ["set-hook", "-g", "pane-died", DEAD_PANE_RESET]
+    : ["set-hook", "-gu", "pane-died"];
+}
 
 export class TmuxError extends Error {
   /** The command as a log may show it: values the user's own text could be in are redacted. */
@@ -202,7 +245,7 @@ export class TmuxError extends Error {
 }
 
 export interface TmuxRuntimeOptions {
-  /** Bazhen's private server, whose `config` is where TMUX_CONFIG is written before it starts. */
+  /** Bazhen's private server, whose `config` is where `tmuxConfig` is written before it starts. */
   readonly server: ConfiguredTmuxServer;
   readonly pty: PtySpawner;
   /**
@@ -247,7 +290,14 @@ export class TmuxRuntime implements RuntimeAdapter {
       intervalMs: opts.exitPollMs ?? EXIT_POLL_MS,
       onError: opts.onError ?? ((err) => console.warn("tmux exit polling failed:", err)),
     });
-    writeFileSync(opts.server.config, TMUX_CONFIG, { mode: 0o600 });
+    const installed = (() => {
+      try {
+        return opts.server.runSync(["-V"], { env: opts.env });
+      } catch {
+        return "";
+      }
+    })();
+    writeFileSync(opts.server.config, tmuxConfig(needsReset(installed)), { mode: 0o600 });
   }
 
   /**
@@ -310,23 +360,24 @@ export class TmuxRuntime implements RuntimeAdapter {
     } catch {
       return { state: "unreachable", version: null };
     }
+    const workarounds = needsReset(version) ? [DEAD_PANE_WORKAROUND] : [];
     try {
       await this.tmux("list-sessions", "-F", "#{session_id}");
       // Settings that found no server, as when one is still recreating a deleted socket, go on here.
       if (this.settingsPending)
         await this.applyServerSettings().catch(this.opts.onError ?? reportSettings);
-      return { state: "healthy", version };
+      return { state: "healthy", version, workarounds };
     } catch (err) {
       if (!(err instanceof TmuxError)) throw err;
-      if (!noServer(err)) return { state: "unreachable", version };
+      if (!noServer(err)) return { state: "unreachable", version, workarounds };
     }
     // Only once every recorded server is provably gone: one that serves, or can't be told apart,
     // concludes nothing.
     for (const identity of identities(recorded)) {
       const verdict = await this.opts.server.recreateSocket(identity);
-      if (verdict.is !== "gone") return { state: "unreachable", version };
+      if (verdict.is !== "gone") return { state: "unreachable", version, workarounds };
     }
-    return { state: "not-running", version };
+    return { state: "not-running", version, workarounds };
   }
 
   async create(spec: TerminalSpec): Promise<RuntimeRef> {
@@ -334,7 +385,7 @@ export class TmuxRuntime implements RuntimeAdapter {
     const { cols, rows } = spec.size;
     await this.tmux(
       ...sequence([
-        // TMUX_CONFIG's history-limit reaches only a server it starts, and tmux applies the limit
+        // The config's history-limit reaches only a server it starts, and tmux applies the limit
         // to a pane as the pane is made: on a server an older daemon left running, set it again
         // first. Terminals already open keep the limit they were made with.
         ["set-option", "-g", "history-limit", String(HISTORY_LINES)],
@@ -371,14 +422,21 @@ export class TmuxRuntime implements RuntimeAdapter {
 
   /**
    * Puts this runtime's server-wide settings on a server that is already running, which read its
-   * configuration from whichever daemon started it: the pane-title hook, and the keys that leave
-   * a mode. With no server running it does nothing, and starts none; the next `health` that
+   * configuration from whichever daemon started it: the pane-title hook, the dead-pane reset the
+   * server's own version needs, and the keys that leave a mode. With no server running it does nothing, and starts none; the next `health` that
    * reaches one applies them, as it does after a server too slow to answer. A server that answers
    * and refuses them is not asked again.
    */
   async applyServerSettings(): Promise<void> {
     try {
-      await this.tmux(...sequence([this.paneTitleHook(), ...MODE_EXIT_BINDINGS]));
+      const version = await this.tmux("display-message", "-p", "#{version}");
+      await this.tmux(
+        ...sequence([
+          this.paneTitleHook(),
+          deadPaneHook(needsReset(version)),
+          ...MODE_EXIT_BINDINGS,
+        ]),
+      );
     } catch (err) {
       if (err instanceof TmuxError && noServer(err)) return;
       if (err instanceof TmuxError && err.answered) this.settingsPending = false;
@@ -764,9 +822,16 @@ export class TmuxRuntime implements RuntimeAdapter {
     return { serverPid: row("serverPid"), serverStart: row("serverStart") };
   }
 
-  /** The pane `ref` recorded: respawn and signal act on it and on nothing else. */
+  /**
+   * The pane `ref` recorded: respawn and signal act on it and on nothing else. A terminal that
+   * ended with its server is gone, not out of reach, since no repeat of the command can find it.
+   */
   private async paneOf(ref: RuntimeRef): Promise<RuntimeInventoryEntry> {
-    const panes = await this.panesOf(ref);
+    const panes = await this.panesOf(ref).catch(async (err: unknown) => {
+      if (err instanceof TmuxError && noServer(err) && (await this.gone(ref)))
+        throw new StaleIncarnation(ref.terminalId, "gone");
+      throw err;
+    });
     const pane = panes.find((e) => e.ref.locator.paneId === ref.locator.paneId);
     if (pane === undefined)
       throw new StaleIncarnation(ref.terminalId, panes.length > 0 ? "pane-replaced" : "gone");

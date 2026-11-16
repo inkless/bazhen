@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   filterEnv,
   newId,
+  StaleIncarnation,
   TerminalUnconfirmed,
   type RuntimeRef,
   type TerminalSpec,
@@ -81,6 +82,20 @@ describe("a tmux server that is gone", () => {
       "not-running",
       [],
     ]);
+  });
+
+  it("takes its terminals with it: a respawn or a read on one finds it gone, not out of reach", async () => {
+    const { server, runtime, ref } = await started();
+    server.kill();
+    const failures = await Promise.all([
+      runtime.respawn(ref, { ...spec(), generation: 1 }).catch((err: unknown) => err),
+      runtime.foreground(ref).catch((err: unknown) => err),
+    ]);
+    expect(failures).toEqual([
+      new StaleIncarnation(ref.terminalId, "gone"),
+      new StaleIncarnation(ref.terminalId, "gone"),
+    ]);
+    for (const failure of failures) expect(failure).toBeInstanceOf(StaleIncarnation);
   });
 });
 
