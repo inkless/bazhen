@@ -114,7 +114,7 @@ export const DoctorResponse = z.object({
   /**
    * The holder build new terminals run, named by its hash, or null for none built; and for each
    * holder that answers, the build it runs, null where it can't be told, and the holder/1
-   * versions it speaks (design §4.7). Absent before 1.47.
+   * versions it speaks (design §4.7). Absent before 1.46.
    */
   holder: z
     .object({
