@@ -228,8 +228,12 @@ A test owns everything it touches and leaves nothing behind.
   everything else that starts one: `child_process`, `node-pty`, `module`'s `createRequire`,
   `cluster` and `worker_threads`.
 - **Signals.** A signal to a wrong pid ends someone else's work, and one to -1 every process the
-  user owns. Raw signal calls (`process.kill` however it is reached: directly, by a default or
-  namespace import, through a constant bound to `process`, or computed; Rust's `kill_process`,
+  user owns. Raw signal calls (`process.kill`, `process._kill` or `process.abort` however it is
+  reached: directly, by a default or namespace import or a re-export, through a constant bound to
+  `process`, or computed, in code or in a template's `${…}`; a member
+  named `kill` on anything, as text can't tell a `ChildProcess` or a node-pty terminal from
+  another object; a `timeout`, `killSignal` or `signal` option to a `child_process` start, which
+  Node enforces with a kill; Rust's `kill_process`,
   `kill_process_group`, `kill_current_process_group`, `pidfd_send_signal`, `libc::kill`,
   `libc::killpg`, `tgkill` and `tkill`, nix's `kill` and `killpg` by path, a `use` naming `libc`
   or a `signal` module that imports `kill`, a glob or a rename at any depth of its groups, any
@@ -239,7 +243,9 @@ A test owns everything it touches and leaves nothing behind.
   terminate-user` and the like, and `fuser -k`), appear only in the chokepoints
   `scripts/signal-paths.ts` lists, and `pnpm check` names any other. For TypeScript that
   is `packages/host-guard/src/signal.ts`, which refuses 0, ±1, this process, its parent and its
-  group before it sends, and signals itself only in `dieBy`, on purpose. Rust tests use the
+  group before it sends, and signals itself only in `dieBy`, on purpose. A child this process
+  spawned and still holds is signalled through its `signalOwnChild`, and an API whose `kill`
+  sends no signal of its own is named for what it does (`TmuxServer.killServer`). Rust tests use the
   `bazhen-test-signal` crate, a dev-dependency only, which refuses the same and checks a holder's
   start time and command once a pidfd pins it. The holder itself sends only from
   `crates/bazhen-holder/src/guard.rs`, which holds each process by a pidfd (an exit watch on
@@ -249,7 +255,14 @@ A test owns everything it touches and leaves nothing behind.
   `sandbox-tripwire` feature), and a test build of the holder refuses to start there, with exit
   code 9. The one process
   started to send a signal is `systemctl --user kill` of the cap's own scope
-  (`packages/host-guard/src/cap.ts`). The check is defence in depth: it reads text, so the
+  (`packages/host-guard/src/cap.ts`). It and the kills Node and node-pty send a child they
+  started, on a start's timeout or a terminal's hang-up, are allowed only at the calls
+  `ALLOWED_SIGNALS` names, each with its reason and how many times it appears. Another signal in
+  the same file still counts, and so does a copy of an allowed call, an entry whose call has gone,
+  and any option but `timeout` at an allowed start. A file listed only for its fixtures, text that
+  names kills and runs none, has every kill on a command line allowed, a real one included, so
+  review is what keeps one out; any other signal in it still counts. The
+  check is defence in depth: it reads text, so the
   chokepoints' own refusals are what stop a stray signal. On a command line it is a best-effort
   heuristic that fails closed where it reads one. It takes a literal's own escapes, then reads
   words as the shell does: a quoted or escaped part joins the text it touches (`k''ill` is
@@ -268,7 +281,11 @@ A test owns everything it touches and leaves nothing behind.
   appends; `eval`, whose arguments join into a line the check never reads whole; process
   substitution, `<(…)`; an apostrophe in a heredoc body, which reads as a quote; a literal's
   `\x` and `\u` escapes; in TypeScript, `{ default as p }`, `Reflect.get`, `require` and dynamic
-  imports of `process`; other unusual Rust `use` forms; and a method that signals by pid, which
+  imports of `process`; `require()` of `child_process`, a start renamed by destructuring
+  (`const { spawn: s } = cp`) or re-exported, and a start's options built in a variable or
+  spread rather than written at the call; `kill` destructured in a parameter (`({ kill }) =>`);
+  node-pty's `destroy()`, which also hangs up; a `/` read as division or a regular expression
+  where only the syntax tree can tell; other unusual Rust `use` forms; and a method that signals by pid, which
   `deny.toml` keeps out only by banning the crates known so far to have one (`rust.md` § Signals).
   It fails closed on a module that is only named `signal`: a glob or rename of tokio's counts, so
   import its items by name. A Rust test that may signal processes it didn't start is

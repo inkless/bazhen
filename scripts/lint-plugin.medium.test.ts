@@ -75,12 +75,21 @@ const FIXTURE = [
   'import * as nproc from "node:process";',
   'proc.kill(-1, "SIGKILL");',
   'nproc.kill(1, "SIGTERM");',
+  "process.abort();",
+  'proc["abort"]();',
+  "const { abort } = process;",
+  'import { abort as die } from "node:process";',
+  "const controller = new AbortController(); controller.abort(); void [abort, die];",
+  "process._kill(1, 9);",
+  'export { kill as end } from "node:process";',
+  'export { readFileSync } from "node:fs";',
 ].join("\n");
 
 describe("the host-guard lint rule", () => {
   it("flags every tmux command and signal outside host-guard, a notifier or a process group pointed at tmux included, and nothing that only names tmux", () => {
     expect(flagged(FIXTURE)).toEqual([
-      4, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 36, 39, 42, 43,
+      4, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 36, 39, 42, 43, 44, 45,
+      46, 47, 49, 50,
     ]);
   });
 });

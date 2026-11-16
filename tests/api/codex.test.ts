@@ -278,7 +278,7 @@ describe("a Codex agent", () => {
     // With nothing but Bazhen to subscribe, a restarted Codex has the thread loaded only if
     // Bazhen resumed it.
     daemon.runInTerminal(launched.agentId, ["sleep", "600"]);
-    await daemon.kill();
+    await daemon.crash();
     // A stop and a start, not a restart: a restarted server reloads its threads by itself.
     await daemon.codex("app-server", "daemon", "stop");
     await daemon.codex("app-server", "daemon", "start");

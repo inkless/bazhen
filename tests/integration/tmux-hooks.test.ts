@@ -16,7 +16,7 @@ const dir = mkdtempSync(join(tmpdir(), "bz-hooks-"));
 const servers: ConfiguredTmuxServer[] = [];
 let made = 0;
 afterAll(() => {
-  for (const server of servers) if (server.alive()) server.kill();
+  for (const server of servers) if (server.alive()) server.killServer();
   rmSync(dir, { recursive: true, force: true });
 });
 

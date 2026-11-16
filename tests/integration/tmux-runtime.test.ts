@@ -39,7 +39,7 @@ const spec = (
   historyLines,
 });
 
-afterAll(() => server.kill());
+afterAll(() => server.killServer());
 
 /** The buffers a paste made and left behind; one that typed nothing never set one. */
 const pasteBuffers = () =>
@@ -149,7 +149,7 @@ describe("tmux runtime on a private server", () => {
       const found = (await plain.inventory()).find((e) => e.ref.terminalId === s.terminalId);
       expect(found?.ref.locator).toEqual(ref.locator);
     } finally {
-      bare.kill();
+      bare.killServer();
     }
   });
 

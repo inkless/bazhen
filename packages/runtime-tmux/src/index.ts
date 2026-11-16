@@ -574,7 +574,7 @@ export class TmuxRuntime implements RuntimeAdapter {
         screen.dispose();
         void this.resetIfDead(paneId)
           .catch(() => undefined)
-          .finally(() => proc.kill());
+          .finally(() => proc.hangUp());
       },
     };
     return { kind: "history", stream, history, alternate: alternate === 1, historyLines };

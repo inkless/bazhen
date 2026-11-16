@@ -16,7 +16,7 @@ terminal on the machine, not just Bazhen's.
    `tmux-runtime.test.ts`, and tmux's own behaviour in `tmux-defects.test.ts`. Start a new file
    only for a new area.
 2. Get a server with `const server = testServer("<label>")`, then add
-   `afterAll(() => server.kill())`. Run tmux only through it (`tmuxOut(server, …)`); helpers are
+   `afterAll(() => server.killServer())`. Run tmux only through it (`tmuxOut(server, …)`); helpers are
    in `tests/integration/helpers.ts`.
 3. Build inputs with a builder like `spec()` in `tmux-runtime.test.ts`.
 4. **Assert first, wait second.** Use `await expect.poll(() => seen).toContain("…")`, which fails

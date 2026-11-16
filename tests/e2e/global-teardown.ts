@@ -10,7 +10,7 @@ export default function teardown(): void {
   if (!onDisposableHost()) return;
   const home = process.env["BZ_E2E_HOME"];
   // The daemon's server, by its socket in the run's own home: run/tmux.sock, for a home this short.
-  if (home) TmuxServer.at(join(home, "run", "tmux.sock"), { root: home }).kill();
+  if (home) TmuxServer.at(join(home, "run", "tmux.sock"), { root: home }).killServer();
   const tmuxDir = process.env["BZ_E2E_TMUX_TMPDIR"];
   if (tmuxDir) rmSync(tmuxDir, { recursive: true, force: true });
   // An agent's process may still be writing its state as the tmux server goes down.

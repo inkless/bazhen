@@ -170,7 +170,7 @@ export class DevRun {
       "every process of pnpm dev to exit",
       20_000,
     );
-    TmuxServer.at(join(this.home, "run", "tmux.sock"), { root: this.home }).kill();
+    TmuxServer.at(join(this.home, "run", "tmux.sock"), { root: this.home }).killServer();
     rmSync(this.home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 }

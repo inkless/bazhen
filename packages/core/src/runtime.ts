@@ -373,7 +373,7 @@ export interface PtyProcess {
   onExit(cb: (code: number) => void): void;
   write(bytes: Uint8Array): void;
   resize(size: Size): void;
-  kill(): void;
+  hangUp(): void;
 }
 
 export interface PtySpawner {

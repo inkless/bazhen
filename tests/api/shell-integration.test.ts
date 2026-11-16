@@ -159,8 +159,8 @@ describe.each<IntegratedShell>(["zsh", "bash", "fish"])(
       await expect.poll(() => daemon.keptShellLine(terminalId), { timeout: 15_000 }).toBe(TYPED);
       const ran = `${daemon.shellEnv(terminalId).HOME} a  b`;
       view.close();
-      await daemon.kill();
-      daemon.tmuxServer.kill();
+      await daemon.crash();
+      daemon.tmuxServer.killServer();
       await daemon.restart();
 
       const lost = StateSnapshot.parse((await daemon.request("/v1/state")).body).shells.find(
@@ -251,8 +251,8 @@ async function retypedAfterReboot(daemon: Daemon, line: string, before = () => {
   view.type(`${line}\r`);
   await expect.poll(() => daemon.keptShellLine(terminalId), { timeout: 15_000 }).toBe(line);
   view.close();
-  await daemon.kill();
-  daemon.tmuxServer.kill();
+  await daemon.crash();
+  daemon.tmuxServer.killServer();
   before();
   await daemon.restart();
   const restarted = await daemon.request(`/v1/shells/${terminalId}/restart`, {

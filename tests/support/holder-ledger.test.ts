@@ -42,7 +42,7 @@ function fakes(owner: Start, overrides: Partial<SweepDeps> = {}) {
     list: (dir) => readdirSync(dir),
     startOf: async () => owner,
     vouch: async (holder) => holder,
-    kill: (proof) => {
+    killHolder: (proof) => {
       killed.push(proof.pid);
       return true;
     },
@@ -136,7 +136,7 @@ describe("the holder ledger", () => {
       holderStart: ENTRY.holderStart + 60,
     });
     const { deps } = fakes("absent", {
-      kill: () => {
+      killHolder: () => {
         writeFileSync(join(dir, "4242"), renewed);
         return true;
       },

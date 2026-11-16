@@ -50,7 +50,7 @@ beforeAll(async () => {
   // A message mid-turn when the daemon dies: seen, with the turn that would deliver it still running.
   held = await send(survivor.agentId, "held", "[[fake:slow:8000]] Hold on to this.");
   await waitUntil(async () => (await messageState(held)) === "seen", "the held message seen");
-  await daemon.kill();
+  await daemon.crash();
   // While the daemon is down, one agent's terminal ends; the other keeps the tmux server up.
   daemon.endTerminal(victim.agentId);
   await daemon.restart();

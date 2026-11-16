@@ -9,7 +9,7 @@ import { testServer } from "./helpers.ts";
 
 const server = testServer("foreground");
 const runtime = new TmuxRuntime({ server, pty: nodePtySpawner, env: filterEnv(process.env).env });
-afterAll(() => server.kill());
+afterAll(() => server.killServer());
 
 /** A terminal running `sleep` in `cwd`, and what one read of its foreground says of it. */
 async function readIn(cwd: string) {

@@ -24,7 +24,7 @@ const budget = (on: Daemon, max: number) => on.writeConfig(`[terminals]\nmax_ope
 async function budgeted(max: number): Promise<Daemon> {
   const daemon = await Daemon.start();
   daemons.push(daemon);
-  await daemon.kill();
+  await daemon.crash();
   budget(daemon, max);
   await daemon.restart();
   return daemon;
@@ -68,7 +68,7 @@ describe("the terminal budget", () => {
       async () => (await shellStates(daemon)).every((s) => s === "running"),
       "both shells running",
     );
-    await daemon.kill();
+    await daemon.crash();
     budget(daemon, 1);
     await daemon.restart();
     expect(await shellStates(daemon)).toEqual(["running", "running"]);

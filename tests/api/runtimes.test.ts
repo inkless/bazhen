@@ -44,7 +44,7 @@ describe("a daemon running terminals on both runtimes", () => {
   beforeAll(async () => {
     daemon = await Daemon.start({ modelUrl: model.url });
     onTmux = await openShell(daemon, "tmux-shell");
-    await daemon.kill();
+    await daemon.crash();
     daemon.writeConfig('[runtime]\ndefault = "holder"\n');
     await daemon.restart();
     holderShell = await openShell(daemon, "holder-shell");
@@ -66,7 +66,7 @@ describe("a daemon running terminals on both runtimes", () => {
   });
 
   it("finds each one on its own runtime after a crash", async () => {
-    await daemon.kill();
+    await daemon.crash();
     await daemon.restart();
     expect(await terminals(daemon)).toEqual({
       [onTmux]: "running on tmux",

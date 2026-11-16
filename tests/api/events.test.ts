@@ -82,7 +82,7 @@ describe("the event stream", () => {
     await daemon.caughtUp(client);
     const seen = client.ids();
     const stopped = client.last();
-    await daemon.kill();
+    await daemon.crash();
     await waitUntil(() => client.ended(), "the stream to drop");
     await daemon.restart();
     await launch("after the restart");

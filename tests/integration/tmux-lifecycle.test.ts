@@ -30,7 +30,7 @@ const spec = (argv: [string, ...string[]]): TerminalSpec => ({
   historyLines: 10_000,
 });
 
-afterAll(() => server.kill());
+afterAll(() => server.killServer());
 
 const names = (file: string) =>
   readFileSync(file, "utf8")

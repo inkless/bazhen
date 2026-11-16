@@ -8,7 +8,7 @@ const saved = { ...process.env };
 let outer = "";
 let own: TmuxServer | undefined;
 afterEach(() => {
-  own?.kill();
+  own?.killServer();
   rmSync(outer, { recursive: true, force: true });
   process.env = { ...saved };
 });

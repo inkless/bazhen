@@ -8,7 +8,7 @@ import { attachClient, testServer, tmuxOut } from "./helpers.ts";
 // the defect's boundary has moved: re-verify it, move the boundary, and say so in the commit.
 const servers: TmuxServer[] = [];
 afterEach(() => {
-  for (const server of servers.splice(0)) server.kill();
+  for (const server of servers.splice(0)) server.killServer();
 });
 
 function freshServer(label: string): TmuxServer {
@@ -82,7 +82,7 @@ describe("tmux dead-pane focus defect", () => {
     const client = attach(server);
     await expect.poll(() => shown(server), { timeout: 5_000 }).toBe(true);
     await exitPane(server);
-    client.kill();
+    client.hangUp();
     await expect.poll(() => shown(server), { timeout: 5_000 }).toBe(false);
     expect(server.alive()).toBe(!deadPaneFocusCrashes);
   });
@@ -92,7 +92,7 @@ describe("tmux dead-pane focus defect", () => {
     await exitPane(server);
     const client = attach(server);
     await expect.poll(() => settledAttach(server), { timeout: 5_000 }).toBe(true);
-    client.kill();
+    client.hangUp();
     expect(server.alive()).toBe(!deadPaneFocusCrashes);
   });
 
@@ -101,11 +101,11 @@ describe("tmux dead-pane focus defect", () => {
     const first = attach(server);
     await expect.poll(() => shown(server), { timeout: 5_000 }).toBe(true);
     await exitPane(server);
-    first.kill();
+    first.hangUp();
     await expect.poll(() => shown(server), { timeout: 5_000 }).toBe(false);
     const again = attach(server);
     await expect.poll(() => settledAttach(server), { timeout: 5_000 }).toBe(true);
-    again.kill();
+    again.hangUp();
     await expect.poll(() => shown(server), { timeout: 5_000 }).toBe(false);
     expect(server.alive()).toBe(true);
   });

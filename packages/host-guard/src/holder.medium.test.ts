@@ -156,7 +156,7 @@ function started(
         reads += 1;
         return read(pid);
       },
-      kill: (proof) => {
+      killHolder: (proof) => {
         kills.push(proof);
         return true;
       },

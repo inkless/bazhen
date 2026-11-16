@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { signalOwnChild } from "@bazhen/host-guard";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { stableHookClient } from "./hook-link.ts";
 
@@ -41,7 +42,7 @@ async function missesWhile(path: string, act: () => void): Promise<string[]> {
   await expect.poll(() => out).toContain("ready");
   act();
   const closed = new Promise((done) => probe.on("close", done));
-  probe.kill("SIGKILL");
+  signalOwnChild(probe, "SIGKILL");
   await closed;
   return out.split("\n").filter((line) => line === "missing");
 }
