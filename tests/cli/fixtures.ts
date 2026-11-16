@@ -68,6 +68,8 @@ export const agent = (id: string, name: string, over: Partial<Agent> = {}): Agen
   listening: false,
   headline: null,
   needsRestart: null,
+  role: null,
+  promptChanged: false,
   ...over,
 });
 
