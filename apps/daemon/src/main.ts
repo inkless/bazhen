@@ -402,7 +402,9 @@ const foreground = new ForegroundWatch({ store, environment });
 // until it has been, those agents' mail waits, so none goes to a thread the TUI has left.
 codexThreads.followAll();
 // tmux's titles reach the daemon by its hook, through the socket; a holder's, from the holder.
-const stopTitles = holderRuntime.onTitle((terminal) => void codexThreads.titleChanged(terminal));
+const stopTitles = holderRuntime.onTitle(
+  (terminal, title) => void codexThreads.titleChanged(terminal, title),
+);
 // The Codex agents' threads lost their subscriber with the last daemon (§7 step 4).
 codex.keepConnected();
 const lifecycle = new Lifecycle(store, environment, queue, {

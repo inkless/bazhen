@@ -123,10 +123,13 @@ export class CodexThreads {
     });
   }
 
-  /** A terminal's title may have changed; resolves once it has been acted on. */
-  titleChanged(terminal: TerminalId): Promise<void> {
+  /**
+   * A terminal's title may have changed: to `title`, when the runtime said which, or else to what
+   * reading it finds. Resolves once it has been acted on.
+   */
+  titleChanged(terminal: TerminalId, title?: string): Promise<void> {
     this.queue = this.queue
-      .then(() => this.follow(terminal))
+      .then(() => this.follow(terminal, title))
       .catch((err: unknown) => {
         this.log(`codex: following terminal ${terminal} failed: ${String(err)}`);
         // A move it was waiting on is tried again, or given up, rather than left holding mail.
@@ -136,12 +139,12 @@ export class CodexThreads {
     return this.queue;
   }
 
-  private async follow(terminal: TerminalId): Promise<void> {
+  private async follow(terminal: TerminalId, told?: string): Promise<void> {
     const { store, runtime } = this.opts;
     this.waiting.delete(terminal);
     const agent = store.codexAgentIn(terminal);
     if (agent === undefined) return this.settle(terminal);
-    const title = await runtime.title(agent.runtime);
+    const title = told ?? (await runtime.title(agent.runtime));
     // The TUI empties its title as it exits, which names no thread to follow.
     if (title.trim() === "") return this.settle(terminal);
     const prefix = titlePrefix(title);

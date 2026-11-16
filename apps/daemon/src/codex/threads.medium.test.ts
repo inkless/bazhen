@@ -283,6 +283,13 @@ describe("Codex thread switches", () => {
     ]);
   });
 
+  it("acts on the title a runtime told it, without reading it again", async () => {
+    const s = await setup({ titles: [shown(A)], runtime: "holder" });
+    s.announce(B);
+    await s.threads.titleChanged(s.terminal, shown(B));
+    expect([s.boundTo(), s.titled]).toEqual([B, []]);
+  });
+
   it("reads every Codex agent's title after a restart, whichever runtime it is on", async () => {
     const s = await setup({ titles: [shown(B)], runtime: "holder" });
     s.announce(B);
