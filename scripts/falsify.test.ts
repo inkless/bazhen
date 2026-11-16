@@ -405,7 +405,7 @@ describe("depInfoSources", () => {
 });
 
 describe("binaryInputs", () => {
-  it("adds the workspace's manifest and lockfile, and the manifest of each crate built from", () => {
+  it("adds the manifest of each crate built from, and not the workspace's or its lockfile", () => {
     expect(
       binaryInputs([
         "crates/bazhen/src/main.rs",
@@ -416,8 +416,6 @@ describe("binaryInputs", () => {
       "crates/bazhen/src/main.rs",
       "crates/bazhen/src/args.rs",
       "crates/p/src/id.rs",
-      "Cargo.toml",
-      "Cargo.lock",
       "crates/bazhen/Cargo.toml",
       "crates/p/Cargo.toml",
     ]);

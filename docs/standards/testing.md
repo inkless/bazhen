@@ -113,9 +113,11 @@ Every new test must be shown to fail without the code it covers.
   `scripts/lint-config.ts`; the protocol's schema and fixtures with their sources), listed in
   `GENERATED` in `scripts/falsify.ts`, and the protocol id the Rust crates speak with them.
   A `tests/cli` test runs the CLI rather than importing it, so when one is judged the branch's
-  Rust changes are reverted too and the CLI is built there (`pnpm build:cli`): it runs the base's
-  CLI. It is related to a reverted file the CLI was built from, as cargo lists them, and a CLI
-  that won't build fails the check, naming cargo's error. A branch that changes falsify,
+  Rust changes are reverted too and the CLI is built there with `pnpm run build:cli`: it runs the
+  base's CLI, built with HEAD's script, toolchain and `.cargo` config. It is related to a
+  reverted file the CLI was built from, as cargo lists them, or to its crates' manifests; a change
+  to the workspace's manifest or lockfile alone needs a control. A CLI that won't build fails the
+  check, naming cargo's error. A branch that changes falsify,
   anything it imports, or how it is run is judged by the base's falsify too, in CI and in
   `pnpm test:real falsify` (`pnpm test:falsify:base`, `scripts/falsify-base.ts`, which runs only
   in a sandbox), so its new tests also need what that falsify asks for, usually a `Control:`

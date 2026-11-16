@@ -18,9 +18,10 @@
 //
 // A test under tests/cli runs the `bazhen` binary BAZHEN_CLI names, not code it imports. When
 // one is judged, the branch's Rust changes are reverted in the worktree too, and the CLI is built
-// there with `pnpm run build:cli`, so the test runs the base's CLI. It is related to a reverted
-// file the CLI was built from, as cargo's dep-info for it lists. A CLI that won't build is no
-// verdict: falsify fails, naming cargo's error.
+// there with `pnpm run build:cli`, so the test runs the base's CLI, built with HEAD's script,
+// toolchain and .cargo config. It is related to a reverted file the CLI was built from, as cargo's
+// dep-info for it lists, or to its crates' manifests. A CLI that won't build is no verdict:
+// falsify fails, naming cargo's error.
 //
 // A Rust test under crates/ lives in the file it tests, so reverting the source would revert the
 // test with it. When the branch touches the Rust workspace, nextest lists the tests at the base and
@@ -91,6 +92,8 @@ const REVERTIBLE = /^(?:(?:apps|packages)\/[^/]+\/src\/|scripts\/.+\.tsx?$)/;
 const RUST_INPUT = /^(?:crates\/|Cargo\.(?:toml|lock)$)/;
 // Tests that run the `bazhen` binary BAZHEN_CLI names, rather than importing what they test.
 const CLI_TESTS = "tests/cli/";
+// The CLI's own source, which cargo's record of what built it must list.
+const CLI_MAIN = "crates/bazhen/src/main.rs";
 const TITLE = /(?<![.\w])(?:it|test)(?:\.\w+(?:\([^()]*\))?)*\(\s*(["'`])((?:\\.|(?!\1).)+)\1/g;
 const TEST_CALL = /(?<![.\w])(?:it|test)(?:\.\w+)*\s*\(/;
 const CONTROL_TRAILER = /^Control: .+ -> .+$/m;
@@ -458,12 +461,14 @@ export function depInfoSources(text: string, root: string): string[] {
 }
 
 /**
- * What a binary built from `sources` was built from, manifests included: the workspace's, its
- * lockfile, and that of each crate a source sits in. Cargo's dep-info lists none of them.
+ * What a binary built from `sources` was built from: those files and the manifest of each crate
+ * they sit in, which cargo's dep-info doesn't list. The workspace's manifest and lockfile aren't
+ * counted: they pin every crate's dependencies, so a change to them alone can't be told from one
+ * for another crate, and a CLI test that passes on it needs a control rather than failing.
  */
 export function binaryInputs(sources: string[]): string[] {
   const crates = new Set(sources.flatMap((s) => /^crates\/[^/]+\//.exec(s) ?? []));
-  return [...sources, "Cargo.toml", "Cargo.lock", ...[...crates].map((c) => `${c}Cargo.toml`)];
+  return [...sources, ...[...crates].map((c) => `${c}Cargo.toml`)];
 }
 
 /** The lines of a cargo build's stderr that state an error, as `error[E0425]: …`. */
@@ -740,7 +745,17 @@ async function buildCli(
     );
     return undefined;
   }
-  const sources = depInfoSources(readFileSync(depInfo, "utf8"), realpathSync(dir));
+  const root = realpathSync(dir);
+  const sources = depInfoSources(readFileSync(depInfo, "utf8"), root);
+  if (!sources.includes(CLI_MAIN)) {
+    // As when a cargo config sets build.dep-info-basedir, which makes the paths relative.
+    console.error(
+      `falsify: cargo's record of what the base's CLI was built from, ${depInfo}, doesn't name ` +
+        `${CLI_MAIN} under ${root}, so the reverts it covers are unknown and no CLI test can be ` +
+        "judged.",
+    );
+    return undefined;
+  }
   return { binary, inputs: binaryInputs(sources) };
 }
 
@@ -1241,10 +1256,13 @@ async function main(args: string[]): Promise<number> {
     process.on("SIGHUP", handleSignal);
     try {
       addWorktree(dir, head, top);
+      // `git rm` also removes the folders it empties: cargo takes an empty folder left under
+      // crates/ for a workspace member without a manifest, and refuses to build.
+      const remove = (path: string) => git(["rm", "--quiet", "--force", "--", path], dir);
       for (const c of reverts) {
-        if (c.status === "A" || c.status === "C") rmSync(join(dir, c.path), { force: true });
+        if (c.status === "A" || c.status === "C") remove(c.path);
         else if (c.status === "R" && c.oldPath) {
-          rmSync(join(dir, c.path), { force: true });
+          remove(c.path);
           git(["checkout", base, "--", c.oldPath], dir);
         } else git(["checkout", base, "--", c.path], dir);
       }
