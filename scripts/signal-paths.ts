@@ -23,7 +23,8 @@ export { DISPOSABLE_HOST_MARKER, SANDBOX_RULE, type SandboxHost, inSignalSandbox
 export const SIGNAL_CHOKEPOINTS: Readonly<Record<string, string>> = {
   "packages/host-guard/src/signal.ts":
     "every TypeScript signal: a group this process started, or a target checked to be one of " +
-    "Bazhen's own, never 0, ±1, this process or its parent",
+    "Bazhen's own, a holder by its command and start time, never 0, ±1, this process or its " +
+    "parent",
   "crates/bazhen-holder/src/linux.rs":
     "signal 0, which sends nothing, through the holder's own pidfd, to learn at start whether " +
     "it may send through one",
@@ -530,7 +531,7 @@ export function rawSignalCalls(file: string, text: string): { line: number; call
 }
 
 /** The chokepoints' own ways in: a file calling one sends signals, though not directly. */
-const TS_SENDERS = /\b(?:signalGroup|signalPane|signalServer|killHolder|runBounded)\b/;
+const TS_SENDERS = /\b(?:signalGroup|signalPane|signalServer|killHolder|rebindHolder|runBounded)\b/;
 // The holder's own: its child's close and signal, which reach its group and the terminal's
 // foreground group, and the guard module that floors them.
 // A session's and an ending's constructors, or an import of either from the holder's session

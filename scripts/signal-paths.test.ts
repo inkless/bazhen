@@ -343,6 +343,7 @@ describe("signalling sources", () => {
     expect(isSignallingSource("packages/host-guard/src/signal.ts", "")).toBe(true);
     expect(isSignallingSource("a.rs", "kill_process(p, s);")).toBe(true);
     expect(isSignallingSource("a.ts", "signalGroup(child, 'SIGTERM');")).toBe(true);
+    expect(isSignallingSource("a.ts", "rebindHolder(proof);")).toBe(true);
     expect(isSignallingSource("a.rs", "bazhen_test_signal::signal(pid, Signal::USR1)?;")).toBe(
       true,
     );

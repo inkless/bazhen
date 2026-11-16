@@ -74,7 +74,7 @@ export function socketRefusal(
 }
 
 /** Why `root` can't hold a server: it must be a directory only this user can enter. */
-function rootRefusal(root: string, uid: number): string | undefined {
+export function rootRefusal(root: string, uid: number): string | undefined {
   if (!existsSync(root)) return `its root ${root} does not exist`;
   const stat = statSync(root);
   if (!stat.isDirectory()) return `its root ${root} is not a directory`;

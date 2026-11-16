@@ -13,10 +13,25 @@ export {
   tmuxVersion,
   type ConfiguredTmuxServer,
   type PaneProcess,
+  type PsReading,
   type ServerIdentity,
   type ServerVerdict,
 } from "./tmux.ts";
-export { HOLDER_COMMAND, vouchHolder } from "./holder.ts";
+export {
+  HOLDER_COMMAND,
+  HOLDER_READY_MS,
+  HOLDER_SOCKET_MAX_BYTES,
+  HolderStartFailed,
+  holderSocket,
+  holderSocketRefusal,
+  holdersDir,
+  startHolder,
+  vouchHolder,
+  type HolderChild,
+  type StartHolderOptions,
+  type StartSeams,
+  type StartedHolder,
+} from "./holder.ts";
 export {
   DISPOSABLE_HOST_MARKER,
   SANDBOX_RULE,
@@ -28,6 +43,7 @@ export {
   dieBy,
   isAlive,
   killHolder,
+  rebindHolder,
   rethrowUnsafe,
   signalGroup,
   signalPane,
