@@ -106,10 +106,15 @@ export class TitleWatch {
     };
     this.watching.set(terminalId, entry);
     const ours = () => this.watching.get(terminalId) === entry;
+    // A title read with `hello`, in the same chunk, reaches here before `hello` is checked: the
+    // latest is kept until then, and told in place of the one `hello` named.
+    let early: string | undefined;
     let client: HolderClient;
     try {
       client = await this.opts.connect(socket, (event) => {
-        if (event.type === "title" && ours()) this.tell(terminalId, event.body.text);
+        if (event.type !== "title") return;
+        if (entry.client === null) early = event.body.text;
+        else if (ours()) this.tell(terminalId, event.body.text);
       });
     } catch {
       // Watched again at the next sync, if it is still listed.
@@ -126,7 +131,7 @@ export class TitleWatch {
     void client.ended.then(() => {
       if (ours()) this.watching.delete(terminalId);
     });
-    this.tell(terminalId, hello.title);
+    this.tell(terminalId, early ?? hello.title);
   }
 
   private forget(terminalId: TerminalId): void {

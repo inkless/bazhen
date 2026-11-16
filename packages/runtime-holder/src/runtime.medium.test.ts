@@ -28,7 +28,7 @@ import {
   PasteRefused,
   type StartHolderOptions,
 } from "@bazhen/host-guard";
-import { type HolderHelloReply, HolderSpawnSpec } from "@bazhen/protocol";
+import { type HolderHelloReply, type HolderReply, HolderSpawnSpec } from "@bazhen/protocol";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { dirname } from "node:path";
 import { HOLDER_MAX_UNSENT_BYTES } from "./client.ts";
@@ -713,6 +713,8 @@ async function listings(fake: FakeTerminal, n: number) {
   await expect.poll(() => fake.connections.length).toBeGreaterThanOrEqual(before + n);
 }
 
+const titleFrame = (text: string) => ({ type: "title", body: { offset: 0, text } }) as const;
+
 /**
  * A fake holder of an agent's terminal, under `root`, whose `hello`s the test answers: the nth
  * connection's, as the holder it names, or with `other` fields in its place.
@@ -737,11 +739,17 @@ async function handAnswered(root: string) {
     childStart: FAKE_START,
     tags: encodeTags({ kind: "agent", agentId: newId("agent") }),
   };
-  const answer = async (n: number, other: Partial<HolderHelloReply> = {}) => {
+  /** Answers the nth `hello`, with `after` in the same write. */
+  const answer = async (
+    n: number,
+    other: Partial<HolderHelloReply> = {},
+    ...after: HolderReply[]
+  ) => {
     await expect.poll(() => opened.length).toBeGreaterThan(n);
     const holder = opened[n]!;
     const request = await holder.request();
-    holder.send({ type: "hello", id: request.id, body: fakeHello({ ...fields, ...other }) });
+    const body = fakeHello({ ...fields, ...other });
+    holder.send({ type: "hello", id: request.id, body }, ...after);
   };
   return { opened, answer };
 }
@@ -867,9 +875,20 @@ describe("HolderRuntime: watching agents' titles", () => {
     const told: string[] = [];
     onTestFinished(runtime.onTitle((id) => told.push(id)));
     await held.answer(0);
-    await held.answer(1, other);
+    await held.answer(1, other, titleFrame("not its"));
     await expect.poll(() => hungUp.has(held.opened[1]!)).toBe(true);
     expect(told).toEqual([]);
+  });
+
+  it("tells a title its holder sent with its hello, once the hello has been checked", async () => {
+    const root = privateRoot();
+    const held = await handAnswered(root);
+    const { runtime } = runtimeAt(root, { titleSyncMs: 60_000 });
+    const heard: string[] = [];
+    onTestFinished(runtime.onTitle((_, title) => heard.push(title)));
+    await held.answer(0);
+    await held.answer(1, { title: "in hello" }, titleFrame("first"), titleFrame("latest"));
+    await expect.poll(() => heard).toEqual(["latest"]);
   });
 
   it("ends every watch once the last listener goes, and opens none after", async () => {
