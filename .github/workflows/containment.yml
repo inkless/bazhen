@@ -14,6 +14,7 @@ on:
       - "crates/bazhen-holder/**"
       - "apps/daemon/src/terminals/**"
       - "apps/daemon/src/main.ts"
+      - "apps/daemon/src/config/config.ts"
       - "tests/holder/containment.test.ts"
       - "tests/support/holder-containment.ts"
       - "tests/support/holder-spawn.ts"
