@@ -8,7 +8,7 @@ export interface CodexThreadsOptions {
   /** The tmux runtime the agents' panes are on, which reads a pane's title. */
   readonly runtime: {
     readonly socket: string;
-    paneTitle(ref: RuntimeRef): Promise<string>;
+    title(ref: RuntimeRef): Promise<string>;
   };
   /** The app-server, to list threads and to resume (subscribe to) the one an agent moved to. */
   readonly channel: {
@@ -143,7 +143,7 @@ export class CodexThreads {
     this.waiting.delete(pane);
     const agent = store.codexAgentInPane(runtime.socket, pane);
     if (agent === undefined) return this.settle(pane);
-    const title = await runtime.paneTitle(agent.runtime);
+    const title = await runtime.title(agent.runtime);
     // The TUI empties its title as it exits, which names no thread to follow.
     if (title.trim() === "") return this.settle(pane);
     const prefix = titlePrefix(title);

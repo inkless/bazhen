@@ -66,6 +66,8 @@ interface Terminal {
   offset: number;
   /** Whether the program is on its alternate screen, as its last switch in its output says. */
   alternate: boolean;
+  /** The title its output last set. */
+  title: string;
   readonly streams: Set<Client>;
   readonly clients: ClientRecord;
   readonly pasted: Pasted[];
@@ -121,6 +123,9 @@ const QUERY = new RegExp(
   ].join("|"),
   "g",
 );
+
+/** A title set by OSC 0 or 2, ended by BEL or ST. */
+const TITLE = new RegExp(`${ESC}\\][02];([^\\x07\\x1b]*)(?:\\x07|${ESC}\\\\)`, "g");
 
 /** Where the program is after `text`: on its alternate screen if its last switch went there. */
 function screenAfter(text: string, alternate: boolean): boolean {
@@ -187,6 +192,7 @@ export class FakeRuntime implements RuntimeAdapter {
       printed: new Uint8Array(),
       offset: 0,
       alternate: false,
+      title: "",
       streams: new Set(),
       clients: { attaches: [], written: [], resizes: [], closes: 0 },
       pasted: [],
@@ -397,6 +403,10 @@ export class FakeRuntime implements RuntimeAdapter {
     this.terminalOf(ref).history = history;
   }
 
+  async title(ref: RuntimeRef): Promise<string> {
+    return this.paneOf(ref).title;
+  }
+
   async foregrounds(terminalIds: ReadonlySet<string>): Promise<TerminalForeground[]> {
     this.read();
     return [...this.terminals.values()].flatMap((t) => {
@@ -509,7 +519,9 @@ export class FakeRuntime implements RuntimeAdapter {
     t.printed = concat(t.printed, bytes);
     t.offset += bytes.length;
     const was = t.alternate;
-    t.alternate = screenAfter(decode(bytes), was);
+    const text = decode(bytes);
+    t.alternate = screenAfter(text, was);
+    t.title = [...text.matchAll(TITLE)].at(-1)?.[1] ?? t.title;
     for (const client of t.streams) client.emit(bytes);
     if (t.alternate !== was) for (const client of t.streams) client.switched(t.alternate);
   }

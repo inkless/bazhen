@@ -470,8 +470,7 @@ export class TmuxRuntime implements RuntimeAdapter {
     return this.opts.server.socket;
   }
 
-  /** A terminal's pane title, which the program in it sets, as a Codex TUI does to its thread. */
-  async paneTitle(ref: RuntimeRef): Promise<string> {
+  async title(ref: RuntimeRef): Promise<string> {
     return this.tmux("display-message", "-p", "-t", located(ref, "paneId"), "#{pane_title}");
   }
 

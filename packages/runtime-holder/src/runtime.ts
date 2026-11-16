@@ -645,6 +645,13 @@ export class HolderRuntime implements RuntimeAdapter {
     );
   }
 
+  /** The title in the holder's `hello`: its current process's, whichever generation that is. */
+  async title(ref: RuntimeRef): Promise<string> {
+    const client = await this.holderOf(ref);
+    client.end();
+    return client.hello.title;
+  }
+
   async unlink(ref: RuntimeRef): Promise<void> {
     const client = await this.holderOf(ref);
     try {
