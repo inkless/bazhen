@@ -55,6 +55,14 @@ export const HealthResponse = z.object({
 });
 export type HealthResponse = z.infer<typeof HealthResponse>;
 
+/** A memory cap as configured, and as the kernel enforces it: bytes, or null for none. */
+export const MemoryCap = z.object({ asked: z.string(), bytes: z.int().nonnegative().nullable() });
+export type MemoryCap = z.infer<typeof MemoryCap>;
+
+/** A cap as people read it: `50% (31.0 GiB)`, or `infinity (no cap)`. */
+export const memoryCapText = ({ asked, bytes }: MemoryCap) =>
+  `${asked} (${bytes === null ? "no cap" : `${(bytes / 1024 ** 3).toFixed(1)} GiB`})`;
+
 /**
  * `GET /v1/daemon/doctor`, on the Unix socket only: what `bazhen doctor` shows. The environment
  * the daemon captured is counted, never listed, so no value of the user's leaves the daemon.
@@ -147,9 +155,32 @@ export const DoctorResponse = z.object({
           terminalId: z.string(),
           build: z.string().nullable(),
           protocol: z.array(z.string()),
+          /**
+           * Whether it runs in a terminal's systemd scope; null where that can't be read. Absent
+           * before 1.50.
+           */
+          contained: z.boolean().nullable().optional(),
         }),
       ),
     })
+    .optional(),
+  /**
+   * Whether each new holder terminal starts in a systemd scope of its own: if so, each terminal's
+   * memory cap and all terminals' together, as configured and as the kernel enforces them (bytes,
+   * null for no cap), and whether a process past its cap is killed alone (`OOMPolicy=continue`,
+   * systemd 253 or later); if not, why. tmux terminals are never contained. Absent before 1.50.
+   */
+  containment: z
+    .discriminatedUnion("state", [
+      z.object({
+        state: z.literal("scoped"),
+        systemd: z.int().positive(),
+        oomPolicy: z.boolean(),
+        terminal: MemoryCap,
+        total: MemoryCap,
+      }),
+      z.object({ state: z.literal("uncontained"), why: z.string() }),
+    ])
     .optional(),
   env: z.object({
     capturedAt: z.string(),

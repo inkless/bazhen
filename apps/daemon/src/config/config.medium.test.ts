@@ -73,6 +73,13 @@ describe("readConfigFile", () => {
     ],
     ["a budget of no terminals", "[terminals]\nmax_open = 0", "terminals.max_open:"],
     ["a fraction of a terminal", "[terminals]\nmax_open = 1.5", "terminals.max_open:"],
+    ["a cap systemd wouldn't take", '[terminals]\nmemory_max = "8GB"', "terminals.memory_max:"],
+    [
+      "a cap over all memory",
+      '[terminals]\ntotal_memory_max = "120%"',
+      "terminals.total_memory_max:",
+    ],
+    ["a cap given as a number", "[terminals]\nmemory_max = 8", "terminals.memory_max:"],
     ["a runtime it doesn't run", '[runtime]\ndefault = "screen"', "runtime.default:"],
     ["broken TOML", "[daemon\nport = 1", "config.toml:"],
   ])("refuses %s, naming the file and the key", (_what, text, message) => {

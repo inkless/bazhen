@@ -8,7 +8,7 @@ import { LocalEnvironment } from "@bazhen/env-local";
 import { ClaudeCodeHarness } from "@bazhen/harness-claude-code";
 import { CodexHarness, DAEMON_START_ARGS } from "@bazhen/harness-codex";
 import { filterEnv, healthOfEach, RoutedRuntime, UnknownRuntime } from "@bazhen/core";
-import { TmuxServer, findNotifySend, hostPtyReader } from "@bazhen/host-guard";
+import { TmuxServer, findNotifySend, hostPtyReader, probeContainment } from "@bazhen/host-guard";
 import { PROTOCOL_VERSION } from "@bazhen/protocol";
 import { HolderRuntime, installHolder, pruneUnusedHolders } from "@bazhen/runtime-holder";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
@@ -42,6 +42,7 @@ import { retire } from "./events/retention.ts";
 import { eventRoute } from "./events/server.ts";
 import { TerminalHub } from "./stream/hub.ts";
 import { HOLDER_SOURCE, holderDoctor } from "./terminals/holder.ts";
+import { containmentDoctor, containmentLog } from "./terminals/containment.ts";
 import { endOpenAttachments, storeLog } from "./stream/log.ts";
 import { ShellLifecycle } from "./shells/lifecycle.ts";
 import { reconcileShells } from "./shells/reconcile.ts";
@@ -201,6 +202,12 @@ if (noDefault !== null) {
   console.error(`bazhen: ${noDefault}`);
   process.exit(1);
 }
+// Decided once: a manager that can't contain terminals now can't contain the next one either, and
+// one that could and then fails a scope fails that terminal's create.
+const containment = await probeContainment(config.terminalCaps);
+const contained = containmentLog(containment);
+if (contained.warn) console.warn(`bazhen: ${contained.message}`);
+else console.log(`bazhen: ${contained.message}`);
 // Built with or without an installed build: holders made earlier are served either way, and only
 // a new terminal needs one.
 const holderRuntime = new HolderRuntime({
@@ -209,6 +216,7 @@ const holderRuntime = new HolderRuntime({
   ...(holderInstall.installed === null && { unavailable: holderInstall.reason }),
   installDir: holderDir,
   env: hostEnv,
+  containment,
 });
 
 /**
@@ -600,6 +608,7 @@ const socketListener = getRequestListener(
         })),
         hookClient: { path: hookRunner, fallback: hookRunner === HOOK_SCRIPT },
         holder: await holderDoctor(holderInstall, holderRuntime),
+        containment: containmentDoctor(containment),
         config: configFile,
         agents: {
           shell: config.loginShell === undefined ? "direct" : "login",
