@@ -4,7 +4,7 @@ import { respawnAgent, signalAgent } from "../api.ts";
 import { inOtherTheme } from "../terminal/theme.ts";
 import { Button } from "../ui/Button.tsx";
 import { ConfirmDialog } from "../ui/ConfirmDialog.tsx";
-import { shortId, themeRespawn } from "./model.ts";
+import { agentLabel, themeRespawn } from "./model.ts";
 
 /**
  * The open agents whose terminal is in the other theme than the page, each with a respawn in the
@@ -59,7 +59,7 @@ export function ThemeNotice({
     if (a.generation === null || stopping.current.has(a.id)) return;
     const blocked = themeRespawn(a);
     if (blocked !== null || a.generation !== listed.generation) {
-      failed(new Error(`${a.project} wasn't respawned: ${blocked ?? "it changed meanwhile"}.`));
+      failed(new Error(`${agentLabel(a)} wasn't respawned: ${blocked ?? "it changed meanwhile"}.`));
       return;
     }
     const generation = a.generation;
@@ -70,7 +70,7 @@ export function ThemeNotice({
     const timer = setTimeout(() => {
       if (stopping.current.get(a.id)?.generation !== generation) return;
       stopping.current.delete(a.id);
-      failed(new Error(`${a.project} didn't stop; close it or try again.`));
+      failed(new Error(`${agentLabel(a)} didn't stop; close it or try again.`));
     }, STOP_WAIT_MS);
     stopping.current.set(a.id, { theme: scheme, generation, timer });
     signalAgent(a.id, generation, "SIGTERM").catch((e: unknown) => {
@@ -93,10 +93,10 @@ export function ThemeNotice({
           const blocked = themeRespawn(a);
           return (
             <li key={a.id}>
-              {a.project} <span className="id">{shortId(a.id)}</span> ({a.harness}, {a.theme}){" "}
+              {agentLabel(a)} ({a.harness}, {a.theme}){" "}
               <ConfirmDialog
                 trigger={blocked ?? `Respawn in ${scheme}`}
-                title={`Respawn ${a.project} in ${scheme}?`}
+                title={`Respawn ${agentLabel(a)} in ${scheme}?`}
                 message={
                   (a.state === "running" ? "Its process is stopped, then started" : "It starts") +
                   ` again on its own session, drawn for a ${scheme} background.` +

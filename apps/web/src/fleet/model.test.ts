@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Agent, AgentState, StateSnapshot } from "@bazhen/protocol";
-import { agentActions, groupFleet, themeRespawn } from "./model.ts";
+import { agentActions, agentLabel, agentLabelOf, groupFleet, themeRespawn } from "./model.ts";
 
 let serial = 0;
 /** An id of the protocol's shape: a prefix and 32 hex digits, version 7. */
@@ -123,6 +123,41 @@ const activity = (value: "idle" | "waiting_input" | "working" | "needs_approval"
   source: "native" as const,
   confidence: 1,
   observedAt: "2026-11-13T00:00:00.000Z",
+});
+
+describe("agentLabel", () => {
+  it("names a live agent by its name alone, which no other live agent holds", () => {
+    const a = agentIn("web", "running", { name: "reviewer" });
+    expect([
+      agentLabel(a),
+      agentLabel({ ...a, state: "lost" }),
+      agentLabel({ ...a, state: "exited" }),
+    ]).toEqual(["reviewer", "reviewer", "reviewer"]);
+  });
+
+  it("adds an ended agent's short id, since a live agent may hold its name now", () => {
+    const a = agentIn("web", "closed", { name: "reviewer" });
+    expect([agentLabel(a), agentLabel({ ...a, state: "failed" })]).toEqual([
+      `reviewer (${a.id.slice(-6)})`,
+      `reviewer (${a.id.slice(-6)})`,
+    ]);
+  });
+
+  it("names an agent from a daemon that gave it no name by its project and short id", () => {
+    const a = agentIn("web", "running", { name: "" });
+    expect(agentLabel(a)).toBe(`web (${a.id.slice(-6)})`);
+  });
+});
+
+describe("agentLabelOf", () => {
+  it("labels the agent an id names, and an id the snapshot doesn't hold by its short id", () => {
+    const a = agentIn("web", "running", { name: "reviewer" });
+    const gone = newId("agent");
+    expect([agentLabelOf([a], a.id), agentLabelOf([a], gone)]).toEqual([
+      "reviewer",
+      `agent ${gone.slice(-6)}`,
+    ]);
+  });
 });
 
 describe("themeRespawn", () => {

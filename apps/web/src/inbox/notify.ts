@@ -1,5 +1,6 @@
 import type { Attention, StateSnapshot } from "@bazhen/protocol";
 import { KINDS } from "./model.ts";
+import { agentLabelOf } from "../fleet/model.ts";
 
 /**
  * The items opened since the last snapshot, and the ids now open. The first snapshot a page
@@ -89,7 +90,7 @@ export function disableNotifications(deps: NotifyDeps = browser): void {
 /**
  * Notifies of each item opened since the last call while the page is hidden; a page in sight
  * already shows it. A lock screen shows a notification to anyone, so it names the kind and the
- * project, never the summary, which can carry a command or a token. Clicking one brings the
+ * agent, never the summary, which can carry a command or a token. Clicking one brings the
  * page back on the inbox. It never throws: a browser that won't notify leaves the page as it is.
  */
 export function pageNotifier(deps: NotifyDeps = browser) {
@@ -99,9 +100,9 @@ export function pageNotifier(deps: NotifyDeps = browser) {
     seen = open;
     if (fresh.length === 0 || !notificationsOn(deps) || !guarded(false, deps.hidden)) return;
     for (const item of fresh) {
-      const project = state.agents.find((a) => a.id === item.agentId)?.project ?? "An agent";
+      const agent = agentLabelOf(state.agents, item.agentId);
       guarded(undefined, () =>
-        deps.show(project, `${KINDS[item.kind].label}: needs you`, item.id, () => {
+        deps.show(agent, `${KINDS[item.kind].label}: needs you`, item.id, () => {
           focus();
           location.hash = "#/inbox";
         }),

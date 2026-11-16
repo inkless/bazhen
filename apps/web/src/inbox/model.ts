@@ -5,12 +5,11 @@ import type {
   NoticeDevice,
   StateSnapshot,
 } from "@bazhen/protocol";
-import { shortId } from "../fleet/model.ts";
+import { agentLabelOf } from "../fleet/model.ts";
 
 export interface InboxRow {
   readonly item: Attention;
-  /** The project of the agent it is about, or null for an agent the snapshot doesn't hold. */
-  readonly project: string | null;
+  /** The agent it is about, as the page names it. */
   readonly agent: string;
 }
 
@@ -36,8 +35,7 @@ const URGENCY: Record<AttentionKind, number> = {
 
 const rowOf = (state: StateSnapshot) => (item: Attention) => ({
   item,
-  project: state.agents.find((a) => a.id === item.agentId)?.project ?? null,
-  agent: shortId(item.agentId),
+  agent: agentLabelOf(state.agents, item.agentId),
 });
 
 const newestFirst = (x: Attention, y: Attention) => y.openedAt.localeCompare(x.openedAt);

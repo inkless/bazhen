@@ -7,6 +7,7 @@ import { Tabs } from "../ui/Tabs.tsx";
 import { useAction } from "./action.ts";
 import { dockLayout, useDockLayout } from "./layout.ts";
 import { isBusy, linkedShells, shellLabel } from "./model.ts";
+import { agentLabel } from "../fleet/model.ts";
 import { ShellPane } from "./ShellPane.tsx";
 
 /** The tab that holds the agent's own TUI where the screen is too narrow for both. */
@@ -40,7 +41,7 @@ export function Dock({
   const shown = selected ?? (agentView === undefined ? mine[0] : undefined);
   const lost = mine.filter((s) => s.state === "lost" && s.commands.includes("close"));
   const tabs = [
-    ...(agentView === undefined ? [] : [{ id: AGENT_TAB, label: agent.project }]),
+    ...(agentView === undefined ? [] : [{ id: AGENT_TAB, label: agentLabel(agent) }]),
     ...mine.map((shell) => ({ id: shell.id, label: <ShellTab shell={shell} /> })),
   ];
   // With no shell to switch to, the agent's TUI needs no tab of its own.
@@ -100,7 +101,7 @@ export function Dock({
       {showing && alone && agentView}
       {showing && !alone && tabs.length > 0 && (
         <Tabs
-          label={`${agent.project} shells`}
+          label={`${agentLabel(agent)} shells`}
           items={tabs}
           selected={shown?.id ?? AGENT_TAB}
           onSelect={setPicked}

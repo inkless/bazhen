@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
-import type { Assignment, Role, StateSnapshot, Task } from "@bazhen/protocol";
+import {
+  AgentState,
+  type Assignment,
+  type Role,
+  type StateSnapshot,
+  type Task,
+} from "@bazhen/protocol";
 import {
   agentTasks,
+  assignableAgents,
   holdersOf,
   launcherOf,
   openSubtasksUnder,
@@ -90,20 +97,36 @@ describe("an agent's tasks", () => {
 });
 
 /** An agent with only what `launcherOf` reads. */
-const launchedAgent = (agentId: string, project: string, launchedBy: string | null) => ({
+const launchedAgent = (agentId: string, name: string, launchedBy: string | null) => ({
   id: agentId,
-  project,
+  name,
+  project: "web",
+  state: "running" as const,
   launchedBy,
 });
 
 describe("who launched an agent", () => {
   it("names the agent that launched it, and no one for an agent the human launched", () => {
     const state = {
-      agents: [launchedAgent(AGENT, "web", null), launchedAgent(OTHER, "api", AGENT)],
+      agents: [launchedAgent(AGENT, "coordinator", null), launchedAgent(OTHER, "web-2", AGENT)],
     };
     expect([launcherOf(state, OTHER), launcherOf(state, AGENT)]).toEqual([
-      { id: AGENT, project: "web" },
+      { id: AGENT, label: "coordinator" },
       null,
+    ]);
+  });
+});
+
+describe("who a task can be given to", () => {
+  it("offers every agent not ended, one exited or lost too, and no closed or failed one", () => {
+    const all = AgentState.options.map((state) => ({ state }));
+    expect(assignableAgents(all).map((a) => a.state)).toEqual([
+      "starting",
+      "running",
+      "exited",
+      "unknown",
+      "lost",
+      "closing",
     ]);
   });
 });

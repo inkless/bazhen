@@ -16,7 +16,7 @@ import { AttachCommand } from "./AttachCommand.tsx";
 import { Dock } from "../shells/Dock.tsx";
 import { useDockLayout, useTabbedDock } from "../shells/layout.ts";
 import { linkedShells, shellLabel } from "../shells/model.ts";
-import { agentActions, exitText, shortId } from "./model.ts";
+import { agentActions, agentLabel, exitText } from "./model.ts";
 
 /** Why an agent that can't be opened shows no terminal. */
 const NO_TERMINAL: Partial<Record<AgentState, string>> = {
@@ -99,15 +99,16 @@ export function Workspace({
   };
 
   const terminalId = open ? agent.terminalId : null;
+  const label = agentLabel(agent);
 
   return (
     <article className="workspace" aria-label="agent">
       <div className={terminalId === null ? "workspace-info" : "workspace-info capped"}>
         {about}
         <header className="workspace-head">
-          <h2>{agent.project}</h2>
-          <span>{agent.harness}</span>
-          <span className="id">{shortId(agent.id)}</span>
+          <h2>{label}</h2>
+          <span className="meta">{agent.project}</span>
+          <span className="meta">{agent.harness}</span>
           <span className={`state state-${agent.state}`}>{agent.state}</span>
           {agent.exit !== null && <span>{exitText(agent.exit)}</span>}
           <span className="spacer" />
@@ -127,8 +128,8 @@ export function Workspace({
               title="Relaunch agent"
               message={
                 agent.resumable
-                  ? `Relaunch ${agent.project}? Its ${agent.harness} session starts again in a new terminal.`
-                  : `Relaunch ${agent.project} on a new ${agent.harness} session? Its last session ` +
+                  ? `Relaunch ${label}? Its ${agent.harness} session starts again in a new terminal.`
+                  : `Relaunch ${label} on a new ${agent.harness} session? Its last session ` +
                     "can't be resumed, so its conversation isn't carried over."
               }
               confirm={agent.resumable ? "Relaunch" : "Relaunch fresh"}
@@ -173,7 +174,7 @@ export function Workspace({
               trigger="Force close…"
               title="Force close agent"
               message={
-                `Force close ${agent.project}? Bazhen can't show its old tmux server has ended; ` +
+                `Force close ${label}? Bazhen can't show its old tmux server has ended; ` +
                 "it is recorded closed, and that server may still be running it."
               }
               confirm="Force close"
@@ -231,6 +232,7 @@ function CloseMessage({
   keep: ReadonlySet<string>;
   onKeep: (keep: ReadonlySet<string>) => void;
 }) {
+  const label = agentLabel(agent);
   const toggle = (id: string, kept: boolean) => {
     const next = new Set(keep);
     if (kept) next.add(id);
@@ -241,8 +243,8 @@ function CloseMessage({
     <>
       <p>
         {removing
-          ? `Remove ${agent.project}? Its terminal is already gone; this takes it off the fleet.`
-          : `Close ${agent.project}? Its ${agent.harness} process and terminal end, and mail still on its way is dropped.`}
+          ? `Remove ${label}? Its terminal is already gone; this takes it off the fleet.`
+          : `Close ${label}? Its ${agent.harness} process and terminal end, and mail still on its way is dropped.`}
       </p>
       {shells.length > 0 && (
         <fieldset className="close-shells">

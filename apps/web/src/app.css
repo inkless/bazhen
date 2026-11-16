@@ -240,6 +240,8 @@ body {
 
 .fleet .kind,
 .fleet .cwd,
+.fleet .harness,
+.workspace-head .meta,
 .id,
 .workspace .cwd {
   color: var(--color-text-muted);
@@ -280,6 +282,13 @@ body {
 
 .fleet.compact .agent {
   font-size: var(--font-size-sm);
+}
+
+.fleet .agent .name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .needs-you {

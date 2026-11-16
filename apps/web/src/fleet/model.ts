@@ -19,7 +19,7 @@ export function agentActions(a: Agent): AgentActions {
 }
 
 /** Agents that have finished for good, hidden from the fleet unless asked for. */
-export const isEnded = (a: Agent) => a.state === "closed" || a.state === "failed";
+export const isEnded = (a: Pick<Agent, "state">) => a.state === "closed" || a.state === "failed";
 
 export interface FleetRow {
   readonly agent: Agent;
@@ -78,8 +78,26 @@ export function exitText(exit: ExitStatus): string {
   return "ended";
 }
 
-/** Enough of an id to tell two agents in one project apart at a glance. */
+/** Enough of an id to tell two agents apart at a glance. */
 export const shortId = (id: string) => id.slice(-6);
+
+/**
+ * How the page names an agent. A live agent's name is unique among live agents, so it is enough.
+ * Closing frees a name for another agent to take, so an ended agent's carries its short id.
+ */
+export function agentLabel(a: Pick<Agent, "id" | "name" | "project" | "state">): string {
+  if (a.name === "") return `${a.project} (${shortId(a.id)})`;
+  return isEnded(a) ? `${a.name} (${shortId(a.id)})` : a.name;
+}
+
+/** The label of the agent `id` names, for a site that holds only the id. */
+export function agentLabelOf(
+  agents: readonly Pick<Agent, "id" | "name" | "project" | "state">[],
+  id: string,
+): string {
+  const a = agents.find((x) => x.id === id);
+  return a === undefined ? `agent ${shortId(id)}` : agentLabel(a);
+}
 
 /**
  * Whether an agent can be respawned in another theme now, and why not: only on the session it
