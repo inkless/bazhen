@@ -589,6 +589,40 @@ mod tests {
     }
 
     #[test]
+    fn says_once_that_something_else_is_at_its_path() {
+        let dir = private_dir("other");
+        let path = dir.join("t1.sock");
+        let mut socket = Socket::bind(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        std::fs::write(&path, "").unwrap();
+        let log = crate::test_log::logged(|| {
+            socket.recheck();
+            socket.recheck();
+        });
+        let said = log
+            .matches("something else is at the socket's path")
+            .count();
+        assert_eq!(said, 1, "{log}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn says_once_that_it_lost_its_lock() {
+        let dir = private_dir("lostlog");
+        let path = dir.join("t1.sock");
+        let mut first = Socket::bind(&path).unwrap();
+        std::fs::remove_file(dir.join("t1.lock")).unwrap();
+        let second = Socket::bind(&path).unwrap();
+        let log = crate::test_log::logged(|| {
+            first.recheck();
+            first.recheck();
+        });
+        assert_eq!(log.matches("lost the terminal's lock").count(), 1, "{log}");
+        drop((first, second));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn keeps_trying_to_take_the_terminal_back_after_a_bind_that_failed() {
         let dir = private_dir("retry");
         let path = dir.join("t1.sock");

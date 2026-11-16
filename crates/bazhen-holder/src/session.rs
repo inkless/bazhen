@@ -658,30 +658,6 @@ mod tests {
         assert!(!sweep.is_empty());
     }
 
-    /// What `tracing` wrote while `body` ran.
-    fn logged(body: impl FnOnce()) -> String {
-        #[derive(Clone, Default)]
-        struct Capture(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
-        impl std::io::Write for Capture {
-            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-                self.0.lock().unwrap().extend_from_slice(bytes);
-                Ok(bytes.len())
-            }
-            fn flush(&mut self) -> std::io::Result<()> {
-                Ok(())
-            }
-        }
-        let capture = Capture::default();
-        let writer = capture.clone();
-        let subscriber = tracing_subscriber::fmt()
-            .with_writer(move || writer.clone())
-            .with_ansi(false)
-            .finish();
-        tracing::subscriber::with_default(subscriber, body);
-        let bytes = capture.0.lock().unwrap().clone();
-        String::from_utf8(bytes).unwrap()
-    }
-
     #[test]
     fn a_member_that_refuses_the_close_is_logged_once_with_its_pid() {
         let refusing = Sweep {
@@ -690,7 +666,9 @@ mod tests {
         };
         let now = Instant::now();
         // The hangup is two passes, SIGHUP then SIGCONT, and the pid refuses both.
-        let log = logged(|| scripted([refusing.clone(), refusing], now).step(false, now));
+        let log = crate::test_log::logged(|| {
+            scripted([refusing.clone(), refusing], now).step(false, now);
+        });
         assert_eq!(log.matches("another user's").count(), 1, "{log}");
         assert!(log.contains(&format!("pid={NO_PROCESS}")), "{log}");
     }
