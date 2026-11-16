@@ -98,6 +98,15 @@ const article = (role: Role) => (/^[aeiou]/.test(role) ? `an ${role}` : `a ${rol
 const orList = (items: readonly string[]) =>
   items.length <= 1 ? items.join("") : `${items.slice(0, -1).join(", ")} or ${items.at(-1)}`;
 
+/**
+ * To an agent given a role it wasn't launched in, the first time it holds it: what the role asks
+ * of it, sent just before the brief. It is a message of its own, so a brief may be as long as one
+ * given to an agent launched in the role.
+ */
+export function roleMail(task: Named, role: { readonly title: string; readonly prompt: string }) {
+  return `## Your role on task ${task.id}: ${role.title}\n\n${role.prompt}`;
+}
+
 export function unassignedMail(task: Named, from: Who) {
   return `You are no longer assigned to task ${task.id} (${task.title}); ${by(from)} took it away. Stop working on it.`;
 }

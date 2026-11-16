@@ -19,17 +19,23 @@ const ThreadStarted = z.object({ thread: z.object({ id: z.string() }) });
  */
 const binding = (instructions: string | undefined) => {
   const text = "This thread belongs to an agent that Bazhen runs.";
-  return {
-    type: "message",
-    role: "developer",
-    content: [
-      {
-        type: "input_text",
-        text: instructions === undefined ? text : `${text}\n\n${instructions}`,
-      },
-    ],
-  };
+  return developer(instructions === undefined ? text : `${text}\n\n${instructions}`);
 };
+
+const developer = (text: string) => ({
+  type: "message",
+  role: "developer",
+  content: [{ type: "input_text", text }],
+});
+
+/**
+ * What a resumed thread is given when its agent's instructions changed since its last start. The
+ * thread keeps the earlier ones, so these say that they replace them.
+ */
+const superseding = (instructions: string) =>
+  developer(
+    `Your instructions have changed. These replace the ones this thread was given earlier:\n\n${instructions}`,
+  );
 
 /**
  * Codex has no light or dark of its own: `tui.theme` picks only its syntax highlighting, from the
@@ -90,6 +96,10 @@ export class CodexHarness implements HarnessAdapter {
     // The agent stays on its own thread; a server that answered with another would rebind it.
     const threadId = ThreadStarted.parse(resumed).thread.id;
     if (threadId !== session.id) throw new ThreadMismatch(session.id, threadId);
+    if (options.instructionsChanged === true && options.instructions !== undefined) {
+      const items = [superseding(options.instructions)];
+      await this.channel.request("thread/inject_items", { threadId, items });
+    }
     return this.tui(threadId, options);
   }
 

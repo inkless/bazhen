@@ -257,6 +257,12 @@ export class Daemon {
     return daemon;
   }
 
+  /** Writes a role file of the user's, which the daemon reads at its next use of the roles. */
+  writeRole(key: string, text: string): void {
+    mkdirSync(join(this.home, "config", "roles"), { recursive: true });
+    writeFileSync(join(this.home, "config", "roles", `${key}.md`), text);
+  }
+
   /** Replaces its config.toml, which the daemon reads when it next starts. */
   writeConfig(toml: string): void {
     mkdirSync(join(this.home, "config"), { recursive: true });
@@ -292,10 +298,16 @@ export class Daemon {
   async launch(
     key: string,
     harness: "claude-code" | "codex" = "claude-code",
+    role?: string,
   ): Promise<LaunchAgentResponse> {
     const res = await this.request("/v1/agents", {
       method: "POST",
-      body: { idempotencyKey: key, harness, cwd: this.work },
+      body: {
+        idempotencyKey: key,
+        harness,
+        cwd: this.work,
+        ...(role === undefined ? {} : { role }),
+      },
     });
     return LaunchAgentResponse.parse(res.body);
   }

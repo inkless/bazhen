@@ -342,6 +342,22 @@
           "type": "null"
         }
       ]
+    },
+    "role": {
+      "default": null,
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,31}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "promptChanged": {
+      "default": false,
+      "type": "boolean"
     }
   },
   "required": [

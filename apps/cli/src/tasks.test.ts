@@ -66,6 +66,8 @@ const agent = (id: string, name: string, over: Partial<StateSnapshot["agents"][n
   listening: false,
   headline: null,
   needsRestart: null,
+  role: null,
+  promptChanged: false,
   ...over,
 });
 const snapshot = (
@@ -396,6 +398,11 @@ describe("bazhen agents and whoami", () => {
       "tasks:",
       `  ${TASK}  Write the notes  as worker, reporting to coordinator-1`,
     ]);
+  });
+
+  it("says the role an agent was launched in, beside who launched it", () => {
+    const state = snapshot([], [], [agent(AGENT, "BZ-127", { role: "reviewer" })]);
+    expect(whoami(state, AGENT).split("\n")[2]).toBe("launched by the human, as a reviewer");
   });
 
   it("says a task an agent owns, given with no assignment above, reports to its owner", () => {

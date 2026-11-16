@@ -16,15 +16,16 @@ import {
   HarnessId,
   LaunchAgentResponse,
   type LaunchAgentRequest,
+  type Role,
   type TuiTheme,
 } from "@bazhen/protocol";
 import { z } from "zod";
 import { startWithToken, type AgentTokenIssuer } from "../auth/callers.ts";
 import { failureDetail } from "../commands.ts";
 import { IdempotencyConflict, runtimePayload, type Store } from "../store/store.ts";
-import { FLEET_INSTRUCTIONS } from "../tasks/mail.ts";
 import { resolveDirectory } from "./cwd.ts";
 import { launchName } from "./names.ts";
+import type { Prompts } from "./prompts.ts";
 import type { TerminalAdmission } from "../terminals/budget.ts";
 import type { AgentQueue } from "./queue.ts";
 
@@ -49,6 +50,7 @@ const LaunchRecord = z.object({
     cwd: z.string(),
     project: z.string(),
     name: z.string().optional(),
+    role: z.string().optional(),
   }),
   response: LaunchAgentResponse,
   failed: z.boolean(),
@@ -66,6 +68,7 @@ export interface LaunchDeps {
   readonly queue: AgentQueue;
   readonly budget: TerminalAdmission;
   readonly tokens: AgentTokenIssuer;
+  readonly prompts: Prompts;
 }
 
 /**
@@ -83,7 +86,8 @@ function replay(
     prior.request.harness === request.harness &&
     prior.request.cwd === request.cwd &&
     prior.request.project === request.project &&
-    prior.request.name === request.name;
+    prior.request.name === request.name &&
+    prior.request.role === request.role;
   if (!same) throw new IdempotencyConflict(key);
   const settled = store.agentTerminal({ agentId: prior.response.agentId })?.state;
   if (prior.failed || settled === "failed") {
@@ -124,15 +128,57 @@ export async function launchSettled(
   return launchAgent(deps, req, launchedBy);
 }
 
+/** The prompt one start of an agent gives it, written where its harness reads it. */
+export interface Prepared {
+  readonly text: string;
+  /** What the start records as delivered. */
+  readonly hash: string;
+  readonly file: string;
+  /** Whether it differs from the one the agent's last start gave it. */
+  readonly changed: boolean;
+}
+
 /**
- * The options one start of an agent takes: the theme a request names, which, absent, leaves it
- * to the harness, and the agent's name as it stands now. Never stored.
+ * The agent's prompt as its launch role's file says it now, written for its harness. It is
+ * prepared before the start is recorded, so a write that fails records nothing. `delivered` is
+ * the hash its last start recorded: null before its first, or from before prompts were hashed.
  */
-export const launchOptions = (theme: TuiTheme | undefined, name: string): LaunchOptions => ({
-  instructions: FLEET_INSTRUCTIONS,
+export function preparePrompt(
+  prompts: Prompts,
+  agentId: string,
+  role: Role | null,
+  delivered: string | null,
+): Prepared {
+  const { text, hash } = prompts.compose(role);
+  const file = prompts.write(agentId, text);
+  return { text, hash, file, changed: delivered !== null && delivered !== hash };
+}
+
+/**
+ * The options one start of an agent takes: its prompt, the theme a request names, which,
+ * absent, leaves it to the harness, and its name as it stands now. Never stored.
+ */
+export const startOptions = (
+  prompt: Prepared,
+  name: string,
+  theme: TuiTheme | undefined,
+): LaunchOptions => ({
+  instructions: prompt.text,
+  instructionsFile: prompt.file,
+  instructionsChanged: prompt.changed,
   ...(theme === undefined ? {} : { theme }),
   ...(name === "" ? {} : { name }),
 });
+
+/** What `record` returns, or, when it refuses, `undo` run first and then its refusal. */
+function recordedOr<T>(undo: () => void, record: () => T): T {
+  try {
+    return record();
+  } catch (error) {
+    undo();
+    throw error;
+  }
+}
 
 /** What a start event records of the name its harness was given, which a rename doesn't reach. */
 export const startedAs = ({ name }: LaunchOptions): { harnessName?: string } =>
@@ -146,7 +192,7 @@ export const startedAs = ({ name }: LaunchOptions): { harnessName?: string } =>
  * human does.
  */
 export async function launchAgent(
-  { store, environment, size, home, queue, budget, tokens }: LaunchDeps,
+  { store, environment, size, home, queue, budget, tokens, prompts }: LaunchDeps,
   req: LaunchAgentRequest,
   launchedBy?: AgentSessionId,
 ): Promise<LaunchAgentResponse> {
@@ -155,6 +201,7 @@ export async function launchAgent(
     cwd: req.cwd,
     project: req.project ?? basename(req.cwd),
     ...(req.name === undefined ? {} : { name: req.name }),
+    ...(req.role === undefined ? {} : { role: req.role }),
   };
   const prior = store.recall(req.idempotencyKey);
   // A retry gets the first answer, whatever has happened to the directory since.
@@ -162,6 +209,7 @@ export async function launchAgent(
     return replay(store, LaunchRecord.parse(prior), req.idempotencyKey, asked);
   if (!environment.harnesses.includes(req.harness)) throw new UnsupportedHarness(req.harness);
   assertRunsOn(req.harness, environment.defaultRuntime);
+  prompts.check(req.role);
   const cwd = resolveDirectory(req.cwd, home);
   const request = { harness: req.harness, cwd, project: req.project ?? basename(cwd) };
 
@@ -178,31 +226,38 @@ export async function launchAgent(
       return response;
     });
 
+  const prompt = preparePrompt(prompts, agentId, req.role ?? null, null);
   // Recorded before this call first yields, so a repeat in the same tick finds the key answered.
   // The name is chosen in the same transaction, so two launches can't take one name.
   let name = "";
   const runtime = environment.defaultRuntime;
-  const launched = record(() => {
-    const named = launchName(store, req.name, request.project);
-    budget.admit();
-    name = named.name;
-    return store.append({
-      ...event,
-      type: "agent.launched",
-      payload: {
-        environmentId: environment.id,
-        ...request,
-        terminalId,
-        ...(launchedBy === undefined ? {} : { launchedBy }),
-        ...named,
-        runtime,
-      },
-    });
-  }, []);
+  const launched = recordedOr(
+    () => prompts.remove(agentId),
+    () =>
+      record(() => {
+        const named = launchName(store, req.name, request.project);
+        budget.admit();
+        name = named.name;
+        return store.append({
+          ...event,
+          type: "agent.launched",
+          payload: {
+            environmentId: environment.id,
+            ...request,
+            terminalId,
+            ...(launchedBy === undefined ? {} : { launchedBy }),
+            ...named,
+            runtime,
+            ...(req.role === undefined ? {} : { role: req.role }),
+            promptHash: prompt.hash,
+          },
+        });
+      }, []),
+  );
   // Nothing else may settle the agent while its launch is in flight, so it takes its slot in the
   // same synchronous step as it is recorded: no await may come between the two.
   return queue.run(agentId, async () => {
-    const options = launchOptions(req.theme, name);
+    const options = startOptions(prompt, name, req.theme);
     // A token that can't be written fails the launch as the environment refusing it would.
     const launching = startWithToken(tokens, agentId, (tokenFile) =>
       environment.launch({
@@ -219,6 +274,7 @@ export async function launchAgent(
     );
     const refs = await launching.catch((cause) => {
       console.error(`agent ${agentId} failed to launch:`, cause);
+      prompts.remove(agentId);
       const detail = failureDetail(cause);
       record(
         () =>

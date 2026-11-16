@@ -39,6 +39,7 @@ import {
 import type { Raised } from "../attention/inbox.ts";
 import { failureDetail } from "../commands.ts";
 import { AgentGone, type Mailbox } from "../mailbox/mailbox.ts";
+import { UnknownRole } from "../roles/roles.ts";
 import { UnknownAgent, type Store } from "../store/store.ts";
 import {
   assignedMail,
@@ -50,6 +51,7 @@ import {
   ownedMail,
   MAIL_LIMIT,
   peerMail,
+  roleMail,
   unassignedMail,
   type Named,
   type Who,
@@ -67,16 +69,6 @@ export interface Launcher {
   readonly maxLaunched: number;
   /** How many launches down an agent may still launch another. */
   readonly maxDepth: number;
-}
-
-/** A role no definition has: `bazhen roles` lists those that do. */
-export class UnknownRole extends Error {
-  readonly role: string;
-
-  constructor(role: string) {
-    super(`no role is defined as ${role}: bazhen roles lists them`);
-    this.role = role;
-  }
 }
 
 export class UnknownTask extends Error {
@@ -567,6 +559,7 @@ export class Tasks {
       idempotencyKey: key,
       harness: req.launch.harness,
       cwd,
+      role: req.role,
       ...(name === undefined ? {} : { name }),
     };
     const { agentId } = await this.launcher.launch(launch, by);
@@ -707,6 +700,8 @@ export class Tasks {
         ? undefined
         : { ...handoff, by: handoff.agentId === null ? null : this.agentNamed(handoff.agentId) };
     const body = checkLength(assignedMail(detail, req.role, grants, this.who(caller), note));
+    // Read before the grant is recorded, which would count as having held the role.
+    const role = this.newRole(agentId, req.role, book);
     const held = this.store
       .assignments({ agentId }, "active")
       .filter((a) => a.role === req.role).length;
@@ -719,8 +714,33 @@ export class Tasks {
       actor: actor(caller),
       payload: { taskId, agentId, role: req.role, parentAssignmentId },
     });
+    const told =
+      role === undefined
+        ? []
+        : this.mailbox.send(agentId, {
+            idempotencyKey: `${key}:role`,
+            body: roleMail(detail, role),
+          }).eventIds;
     const sent = this.mailbox.send(agentId, { idempotencyKey: `${key}:assigned`, body });
-    return { assignmentId, eventIds: [granted, ...sent.eventIds] };
+    return { assignmentId, eventIds: [granted, ...told, ...sent.eventIds] };
+  }
+
+  /**
+   * The role's definition, when the agent wasn't launched in it and holds it for the first time:
+   * it is then sent the role's prompt, once. Whether it has held the role is read from its
+   * assignments, ended ones too.
+   */
+  private newRole(
+    agentId: string,
+    role: Role,
+    book: RoleBook,
+  ): { title: string; prompt: string } | undefined {
+    if (this.store.agentLaunch(agentId)?.role === role) return undefined;
+    const held = this.store
+      .assignments({ agentId }, "active")
+      .concat(this.store.assignments({ agentId }, "ended"));
+    if (held.some((a) => a.role === role)) return undefined;
+    return book.get(role);
   }
 
   /**

@@ -99,6 +99,10 @@ export const EVENTS = {
       nameOrdinal: z.number().int().positive().optional(),
       /** The runtime its terminal is created on; absent before protocol 1.48, when only tmux ran. */
       runtime: z.string().min(1).optional(),
+      /** The role whose prompt it was launched with; absent for none (protocol 1.55). */
+      role: Role.optional(),
+      /** The SHA-256 of the system prompt its launch gives it (protocol 1.55). */
+      promptHash: z.string().optional(),
     }),
   },
   "agent.renamed": {
@@ -143,6 +147,11 @@ export const EVENTS = {
       theme: TuiTheme.optional(),
       /** The name the harness's session was started with, for one that is addressed by it (1.43). */
       harnessName: z.string().optional(),
+      /**
+       * The SHA-256 of the system prompt the start gave it, so a client can tell when its role's
+       * prompt has changed since (protocol 1.55).
+       */
+      promptHash: z.string().optional(),
     }),
   },
   /** The respawn failed; the agent is exited again, with its terminal, and still closable. */
@@ -193,6 +202,11 @@ export const EVENTS = {
       theme: TuiTheme.optional(),
       /** The name the harness's session was started with, for one that is addressed by it (1.43). */
       harnessName: z.string().optional(),
+      /**
+       * The SHA-256 of the system prompt the start gave it, so a client can tell when its role's
+       * prompt has changed since (protocol 1.55).
+       */
+      promptHash: z.string().optional(),
     }),
   },
   /** The relaunch failed: its new terminal failed, and the agent is lost on its old one again. */

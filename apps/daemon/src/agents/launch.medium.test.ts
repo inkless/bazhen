@@ -1,15 +1,24 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FLEET_INSTRUCTIONS } from "../tasks/mail.ts";
 import { describe, expect, it } from "vitest";
-import { LaunchFailed, UnsupportedHarness, type AgentLaunch } from "@bazhen/core";
+import { LaunchFailed, RoleBook, UnsupportedHarness, type AgentLaunch } from "@bazhen/core";
 import { Store } from "../store/store.ts";
-import { fakeEnvironment, storeBudget, tempDb, testView, untokened } from "../testing/fixtures.ts";
+import {
+  fakeEnvironment,
+  storeBudget,
+  tempDb,
+  testView,
+  testPrompts,
+  untokened,
+} from "../testing/fixtures.ts";
 import { IdempotencyConflict } from "../store/store.ts";
 import { InvalidDirectory } from "./cwd.ts";
 import { NameTaken } from "./names.ts";
-import { launchAgent, launchSettled, localEnvironmentId } from "./launch.ts";
+import { builtinRoles, UnknownRole } from "../roles/roles.ts";
+import { launchAgent, launchSettled, localEnvironmentId, preparePrompt } from "./launch.ts";
+import { Prompts } from "./prompts.ts";
 import { AgentQueue } from "./queue.ts";
 import { TerminalLimit } from "../terminals/budget.ts";
 
@@ -36,6 +45,7 @@ function setup(fail = false, maxOpen = 100) {
     queue: new AgentQueue(),
     budget: storeBudget(store, maxOpen),
     tokens: untokened,
+    prompts: testPrompts(),
   };
   return { store, deps, launches, home };
 }
@@ -123,9 +133,9 @@ describe("launchAgent", () => {
     const { store, deps, launches } = setup();
     await launchAgent(deps, { ...request, theme: "light" });
     await launchAgent(deps, { ...request, idempotencyKey: "k-2" });
-    expect(launches.map((l) => l.options)).toEqual([
-      { theme: "light", instructions: FLEET_INSTRUCTIONS, name: "repo-1" },
-      { instructions: FLEET_INSTRUCTIONS, name: "repo-2" },
+    expect(launches.map(({ options: { theme, name } }) => ({ theme, name }))).toEqual([
+      { theme: "light", name: "repo-1" },
+      { theme: undefined, name: "repo-2" },
     ]);
     expect(store.snapshot(testView).agents.map((a) => a.theme)).toEqual(["light", "dark"]);
   });
@@ -260,5 +270,96 @@ describe("launchAgent, against the terminal budget", () => {
     const { deps } = setup(false, 1);
     const first = await launchAgent(deps, request);
     expect(await launchAgent(deps, request)).toEqual(first);
+  });
+});
+
+const reviewerBook = (prompt: string) =>
+  new RoleBook(builtinRoles().map((r) => (r.key === "reviewer" ? { ...r, prompt } : r)));
+
+describe("launchAgent, in a role", () => {
+  it("starts the agent with the fleet's instructions then its role's prompt, from a private file", async () => {
+    const { store, deps, launches } = setup();
+    await launchAgent(deps, { ...request, role: "reviewer" });
+    const instructions = launches[0]?.options.instructions;
+    const instructionsFile = launches[0]?.options.instructionsFile;
+    const opening = `${FLEET_INSTRUCTIONS}\n\n## Your role: Reviewer\n\nYou review.`;
+    expect(instructions?.startsWith(opening)).toBe(true);
+    expect([
+      readFileSync(String(instructionsFile), "utf8"),
+      statSync(String(instructionsFile)).mode & 0o777,
+      store.snapshot(testView).agents[0]?.role,
+    ]).toEqual([instructions, 0o600, "reviewer"]);
+  });
+
+  it("refuses a role no definition has, starting and recording nothing", async () => {
+    const { store, deps, launches } = setup();
+    await expect(launchAgent(deps, { ...request, role: "auditor" })).rejects.toThrow(UnknownRole);
+    expect([store.snapshot(testView).agents, launches]).toEqual([[], []]);
+  });
+
+  it("refuses a repeat of the launch's key that asks for another role", async () => {
+    const { deps } = setup();
+    await launchAgent(deps, { ...request, role: "reviewer" });
+    await expect(launchAgent(deps, { ...request, role: "worker" })).rejects.toThrow(
+      IdempotencyConflict,
+    );
+  });
+
+  it("says the agent's prompt changed once its role's file does, and not before", async () => {
+    const { store, deps } = setup();
+    let book = reviewerBook("Review it.");
+    const prompts = new Prompts(
+      mkdtempSync(join(tmpdir(), "bz-prompts-")),
+      FLEET_INSTRUCTIONS,
+      () => book,
+      () => {},
+    );
+    await launchAgent({ ...deps, prompts }, { ...request, role: "reviewer" });
+    const view = { ...testView, promptHash: (role: string | null) => prompts.compose(role).hash };
+    const changed = () => store.snapshot(view).agents[0]?.promptChanged;
+    const before = changed();
+    book = reviewerBook("Review it twice.");
+    expect([before, changed()]).toEqual([false, true]);
+  });
+
+  it("refuses a launch whose prompt can't be written, recording and starting nothing", async () => {
+    const { store, deps, launches } = setup();
+    const full = Object.assign(testPrompts(), {
+      write: () => {
+        throw new Error("ENOSPC: no space left on device");
+      },
+    });
+    await expect(launchAgent({ ...deps, prompts: full }, request)).rejects.toThrow("ENOSPC");
+    expect([store.snapshot(testView).agents, launches]).toEqual([[], []]);
+  });
+
+  it("removes the prompt it wrote when the launch is then refused", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "bz-prompts-"));
+    const { deps } = setup();
+    const prompts = testPrompts(dir);
+    await launchAgent({ ...deps, prompts }, { ...request, name: "taken" });
+    const again = { ...request, idempotencyKey: "k-2", name: "taken" };
+    await expect(launchAgent({ ...deps, prompts }, again)).rejects.toThrow(NameTaken);
+    expect(readdirSync(dir)).toHaveLength(1);
+  });
+
+  it("leaves no prompt file behind for a launch the environment refused", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "bz-prompts-"));
+    const { deps } = setup(true);
+    await expect(
+      launchAgent({ ...deps, prompts: testPrompts(dir) }, { ...request, role: "worker" }),
+    ).rejects.toThrow(LaunchFailed);
+    expect(readdirSync(dir)).toEqual([]);
+  });
+});
+
+describe("preparePrompt", () => {
+  it("tells the harness the prompt changed only when it differs from the one last delivered", () => {
+    const prompts = testPrompts();
+    const agentId = "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
+    const now = prompts.compose("worker").hash;
+    const changed = (delivered: string | null) =>
+      preparePrompt(prompts, agentId, "worker", delivered).changed;
+    expect([changed(null), changed(now), changed("an older hash")]).toEqual([false, false, true]);
   });
 });

@@ -1,4 +1,6 @@
+import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { FLEET_INSTRUCTIONS } from "../tasks/mail.ts";
 import { describe, expect, it } from "vitest";
 import {
@@ -25,7 +27,10 @@ import {
   unlimited,
   untokened,
   withAgent,
+  BUILTIN_BOOK,
+  testPrompts,
 } from "../testing/fixtures.ts";
+import { Prompts } from "./prompts.ts";
 import { TerminalLimit } from "../terminals/budget.ts";
 import { launchAgent, localEnvironmentId } from "./launch.ts";
 import { renameAgent } from "./names.ts";
@@ -71,6 +76,8 @@ async function running({
   session = true,
   duringRespawn = (_store: Store, _agentId: string) => {},
   maxOpen = 100,
+  /** What a start tells every agent; the agent was launched with the daemon's own. */
+  fleet = FLEET_INSTRUCTIONS,
 } = {}) {
   const closed: AgentRefs[] = [];
   const launches: AgentLaunch[] = [];
@@ -120,11 +127,19 @@ async function running({
     };
   });
   const budget = storeBudget(store, maxOpen);
+  const promptDir = mkdtempSync(join(tmpdir(), "bz-prompts-"));
+  const prompts = new Prompts(
+    promptDir,
+    fleet,
+    () => BUILTIN_BOOK,
+    () => {},
+  );
   const lifecycle = new Lifecycle(store, environment, new AgentQueue(), {
     size: { cols: 80, rows: 24 },
     replaced: (id) => replaced.push(id),
     budget,
     tokens: untokened,
+    prompts,
   });
   lifecycle.watch();
   const exit = (generation: string, status: ExitStatus = { type: "exited", code: 1 }) =>
@@ -135,6 +150,8 @@ async function running({
   return {
     store,
     budget,
+    prompts,
+    promptDir,
     lifecycle,
     agentId,
     closed,
@@ -163,6 +180,7 @@ async function failedLaunch(store: Store): Promise<string> {
       queue: new AgentQueue(),
       budget: unlimited,
       tokens: untokened,
+      prompts: testPrompts(),
     },
     request,
   )
@@ -337,12 +355,38 @@ describe("agent lifecycle", () => {
     expect(replaced).toEqual([agentId]);
   });
 
+  it("tells a respawn the prompt changed since the launch, and records the one it gave", async () => {
+    const fleet = "What every agent is told, since changed.";
+    const { store, lifecycle, agentId, exit, respawned, prompts } = await running({ fleet });
+    exit("0");
+    await lifecycle.respawn(agentId, { idempotencyKey: "r", generation: 0 });
+    const options = respawned[0]?.options;
+    expect([
+      options?.instructionsChanged,
+      readFileSync(String(options?.instructionsFile), "utf8"),
+      store.agentLaunch(agentId)?.promptHash,
+    ]).toEqual([true, fleet, prompts.compose(null).hash]);
+  });
+
+  it("removes the agent's prompt file when it closes", async () => {
+    const { lifecycle, agentId, exit, promptDir } = await running();
+    exit("0");
+    await lifecycle.respawn(agentId, { idempotencyKey: "r", generation: 0 });
+    const written = readdirSync(promptDir);
+    await lifecycle.close(agentId, { idempotencyKey: "c", generation: 1 });
+    expect([written, readdirSync(promptDir)]).toEqual([[`${agentId}.md`], []]);
+  });
+
   it("respawns in the theme the respawn names, and shows the one its TUI started in", async () => {
     const { lifecycle, agentId, exit, agent, respawned } = await running();
     exit("0");
     await lifecycle.respawn(agentId, { idempotencyKey: "r", generation: 0, theme: "light" });
     expect([respawned[0]?.options, agent()?.theme]).toEqual([
-      { theme: "light", instructions: FLEET_INSTRUCTIONS, name: agent()?.name },
+      expect.objectContaining({
+        theme: "light",
+        instructions: FLEET_INSTRUCTIONS,
+        name: agent()?.name,
+      }),
       "light",
     ]);
     exit("1");

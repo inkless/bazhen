@@ -89,7 +89,9 @@ import {
   localName,
   type LanCertificate,
 } from "./tls/material.ts";
+import { daemonPrompts } from "./agents/prompts.ts";
 import { Roles } from "./roles/roles.ts";
+import { FLEET_INSTRUCTIONS } from "./tasks/mail.ts";
 import { Tasks } from "./tasks/tasks.ts";
 import { TerminalBudget } from "./terminals/budget.ts";
 import { RestartWatch } from "./terminals/needs-restart.ts";
@@ -149,6 +151,12 @@ mailbox.follow();
 // Read now, so a bad role file is reported at start, not first at a launch.
 const roles = new Roles(join(paths.config, "roles"));
 roles.current();
+const prompts = daemonPrompts(
+  paths.run,
+  inputs.uid,
+  FLEET_INSTRUCTIONS,
+  () => roles.current().book,
+);
 const taskService = new Tasks(
   store,
   mailbox,
@@ -364,6 +372,7 @@ const launchDeps: LaunchDeps = {
   queue,
   budget,
   tokens: agentTokens,
+  prompts,
 };
 const integration = shellIntegration();
 const shells = new ShellLifecycle({
@@ -399,6 +408,7 @@ const lifecycle = new Lifecycle(store, environment, queue, {
   size: DEFAULT_SIZE,
   budget,
   tokens: agentTokens,
+  prompts,
   replaced: (agentId) => {
     mailbox.sessionStarted(agentId);
     activity.replaced(agentId);
@@ -466,6 +476,7 @@ const snapshotView: SnapshotView = {
     codexBound: (id) => store.codexThread(id) !== undefined,
     codexHeld: (id) => codexThreads.held(id),
   }),
+  promptHash: (role) => prompts.compose(role).hash,
 };
 for (const a of store.snapshot(snapshotView).agents) {
   if (a.harness === "claude-code" && a.state === "running") activity.restarted(a.id);

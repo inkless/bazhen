@@ -640,7 +640,7 @@ export function whoami(s: StateSnapshot, agentId: string): string {
   return [
     `${self.name}  ${self.id}`,
     `${self.harness}  ${self.state}  ${self.project}  ${self.cwd}`,
-    `launched by ${launcher}`,
+    `launched by ${launcher}${self.role === null ? "" : `, as a ${self.role}`}`,
     ...(tasks.length === 0 ? ["no tasks"] : ["tasks:", ...tasks]),
   ].join("\n");
 }

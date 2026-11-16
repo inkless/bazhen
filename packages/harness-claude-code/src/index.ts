@@ -88,7 +88,7 @@ export class ClaudeCodeHarness implements HarnessAdapter {
     session: string[],
     id: string,
     request: AgentLaunchRequest,
-    { theme, instructions, name }: LaunchOptions,
+    { theme, instructions, instructionsFile, name }: LaunchOptions,
   ): HarnessLaunch {
     const choice = this.opts.statusLine?.(request.cwd) ?? { wrap: null };
     const statusLine =
@@ -113,7 +113,7 @@ export class ClaudeCodeHarness implements HarnessAdapter {
         ...(this.opts.permissionMode === undefined
           ? []
           : ["--permission-mode", this.opts.permissionMode]),
-        ...(instructions === undefined ? [] : ["--append-system-prompt", instructions]),
+        ...appendedPrompt(instructions, instructionsFile),
       ],
       env: {},
       ...(theme && { theme }),
@@ -149,6 +149,15 @@ const READS_A_FILE = "Bash(bazhen *-file*)";
  * waiter gives up first. A permission request waits for an inbox answer, bounded below
  * Claude Code's own wait.
  */
+/**
+ * The flag that appends the agent's instructions to Claude Code's own system prompt: from their
+ * file when there is one, which keeps a user's role prompt out of the process's arguments.
+ */
+function appendedPrompt(text: string | undefined, file: string | undefined): string[] {
+  if (file !== undefined) return ["--append-system-prompt-file", file];
+  return text === undefined ? [] : ["--append-system-prompt", text];
+}
+
 /** One shell word, whatever the string holds. */
 const shellWord = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
 

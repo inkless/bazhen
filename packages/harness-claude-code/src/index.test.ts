@@ -91,6 +91,22 @@ describe("Claude Code harness", () => {
     ]);
   });
 
+  it("reads the instructions from their file when given one, keeping them out of the arguments", async () => {
+    const harness = new ClaudeCodeHarness({
+      newSessionId: () => "s",
+      hookCommand: "bazhen-hook",
+      exists: () => false,
+    });
+    const options = { instructions: "Review it.", instructionsFile: "/run/bazhen/prompts/a.md" };
+    const launched = await harness.launchSpec(request, options);
+    const resumed = await harness.resumeSpec(request, { kind: "claude-session", id: "s" }, options);
+    expect([launched.argv, resumed.argv].map((argv) => argv.join(" "))).toEqual([
+      expect.stringContaining("--append-system-prompt-file /run/bazhen/prompts/a.md"),
+      expect.stringContaining("--append-system-prompt-file /run/bazhen/prompts/a.md"),
+    ]);
+    expect([...launched.argv, ...resumed.argv]).not.toContain("Review it.");
+  });
+
   it("names the session as the agent is named, on a resume too", async () => {
     const harness = new ClaudeCodeHarness({
       newSessionId: () => "s",

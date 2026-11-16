@@ -24,6 +24,7 @@ import {
   type RelaunchAgentRequest,
   type RespawnAgentRequest,
   type SignalAgentRequest,
+  type TuiTheme,
 } from "@bazhen/protocol";
 import {
   failureDetail,
@@ -35,7 +36,8 @@ import {
 } from "../commands.ts";
 import { startWithToken, type AgentTokenIssuer } from "../auth/callers.ts";
 import type { TerminalAdmission } from "../terminals/budget.ts";
-import { launchOptions, startedAs } from "./launch.ts";
+import { preparePrompt, startOptions, startedAs } from "./launch.ts";
+import type { Prompts } from "./prompts.ts";
 import type { AgentQueue } from "./queue.ts";
 import { runtimePayload, UnknownAgent, type AgentTerminal, type Store } from "../store/store.ts";
 
@@ -60,6 +62,7 @@ export interface StartAgainDeps {
   readonly budget: TerminalAdmission;
   /** Each start gets a new token, which ends the last one's; a close removes the file. */
   readonly tokens: AgentTokenIssuer;
+  readonly prompts: Prompts;
 }
 
 /** A message's states before it reaches its agent or can't. */
@@ -154,10 +157,7 @@ export class Lifecycle {
           });
       }
       this.startAgain.tokens.forget(agentId);
-      return () => [
-        ...(closing === undefined ? [] : [closing]),
-        ...recordClosed(this.store, agentId, "user"),
-      ];
+      return () => [...(closing === undefined ? [] : [closing]), ...this.closed(agentId)];
     });
   }
 
@@ -183,14 +183,14 @@ export class Lifecycle {
         { state: found.terminalState, generation: found.generation },
         "respawned",
       );
+      const started = this.startOptions(agentId, launched, req.theme);
       const requested = this.record(agentId, "agent.respawn_requested", {});
       this.startAgain.replaced(agentId);
-      const options = launchOptions(req.theme, launched.name);
       const refs = await startWithToken(this.startAgain.tokens, found.agentId, (tokenFile) =>
         this.environment.respawn({
           agentId: found.agentId,
           request: launch,
-          options,
+          options: started.options,
           refs: { runtime: found.runtime, externalRef },
           generation: next.generation,
           tokenFile,
@@ -210,7 +210,8 @@ export class Lifecycle {
           externalRef: rebound ? current : refs.externalRef,
           runtimeRef,
           ...(refs.theme && { theme: refs.theme }),
-          ...startedAs(options),
+          ...startedAs(started.options),
+          promptHash: started.promptHash,
         }),
       ];
     });
@@ -236,6 +237,7 @@ export class Lifecycle {
       // A new terminal, so on the runtime of the moment, wherever the lost one was.
       const on = this.environment.defaultRuntime;
       assertRunsOn(launch.harness, on);
+      const started = this.startOptions(agentId, launched, req.theme);
       const requested = this.record(agentId, "agent.relaunch_requested", {
         terminalId,
         generation,
@@ -243,7 +245,6 @@ export class Lifecycle {
         runtime: on,
       });
       this.startAgain.replaced(agentId);
-      const options = launchOptions(req.theme, launched.name);
       const refs = await startWithToken(this.startAgain.tokens, found.agentId, (tokenFile) =>
         this.environment
           .launch({
@@ -252,7 +253,7 @@ export class Lifecycle {
             generation,
             resume: fresh ? null : externalRef,
             request: launch,
-            options,
+            options: started.options,
             size: this.startAgain.size,
             runtime: on,
             tokenFile,
@@ -276,10 +277,37 @@ export class Lifecycle {
           externalRef: rebound ? current : refs.externalRef,
           runtimeRef,
           ...(refs.theme && { theme: refs.theme }),
-          ...startedAs(options),
+          ...startedAs(started.options),
+          promptHash: started.promptHash,
         }),
       ];
     });
+  }
+
+  /** One more start of the agent, with its prompt as its role's file says it now. */
+  private startOptions(
+    agentId: string,
+    launched: {
+      readonly name: string;
+      readonly role: string | null;
+      readonly promptHash: string | null;
+    },
+    theme: TuiTheme | undefined,
+  ) {
+    const prompt = preparePrompt(
+      this.startAgain.prompts,
+      agentId,
+      launched.role,
+      launched.promptHash,
+    );
+    return { options: startOptions(prompt, launched.name, theme), promptHash: prompt.hash };
+  }
+
+  /** Records the agent closed, and removes the prompt file its starts read. */
+  private closed(agentId: string): number[] {
+    const ids = recordClosed(this.store, agentId, "user");
+    this.startAgain.prompts.remove(agentId);
+    return ids;
   }
 
   /** Signals a running agent's process; an exit it causes is recorded when the runtime sees it. */

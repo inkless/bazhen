@@ -68,6 +68,36 @@ describe("Codex harness", () => {
     expect(told.map(([method]) => method)).toEqual(["thread/inject_items"]);
   });
 
+  it("tells a resumed thread instructions that changed since its last start, as replacing the first", async () => {
+    const { port, requests } = channel();
+    const harness = new CodexHarness(port, REMOTE);
+    const resume = (instructionsChanged: boolean) =>
+      harness.resumeSpec(
+        { harness: "codex", project: "p", cwd: "/work" },
+        { kind: "codex-thread", id: "thr-1" },
+        { instructions: "Review it.", instructionsChanged },
+      );
+    await resume(false);
+    await resume(true);
+    const told = requests.filter(([method]) => method === "thread/inject_items");
+    expect(told).toEqual([
+      [
+        "thread/inject_items",
+        {
+          threadId: "thr-1",
+          items: [
+            expect.objectContaining({
+              role: "developer",
+              content: [
+                { type: "input_text", text: expect.stringMatching(/replace[\s\S]*Review it\.$/) },
+              ],
+            }),
+          ],
+        },
+      ],
+    ]);
+  });
+
   it("launches the TUI on that thread, on the same server, and binds the agent to it", async () => {
     const launch = await new CodexHarness(channel().port, REMOTE).launchSpec({ cwd: "/work" }, {});
     expect(launch).toMatchObject({
