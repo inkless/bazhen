@@ -34,7 +34,7 @@ import {
 } from "../commands.ts";
 import type { AgentQueue } from "../agents/queue.ts";
 import { newShellToken } from "./reports.ts";
-import { PendingRetypes, type After } from "./retype.ts";
+import { PendingRetypes, afterTimeout, type After } from "./retype.ts";
 import {
   LINKABLE,
   UnknownAgent,
@@ -82,6 +82,11 @@ export class ShellOpenFailed extends Error {
   }
 }
 
+/** How long a restart's line waits for its new shell to hold the terminal's foreground. */
+const FOREGROUND_WAIT_MS = 3_000;
+/** How often it looks while it waits. */
+const FOREGROUND_POLL_MS = 100;
+
 /** Shell states in which a dead pane is still to be ended and recorded closed. */
 const ENDING: ReadonlySet<string> = new Set(["running", "closing"]);
 
@@ -124,7 +129,7 @@ export class ShellLifecycle {
   constructor(deps: ShellDeps) {
     this.deps = deps;
     this.retypes = new PendingRetypes({
-      paste: (ref, line, brackets) => deps.environment.pasteShell(ref, line, brackets),
+      paste: (ref, line, brackets) => this.paste(ref, line, brackets),
       log: (message) => this.log(message),
       ...(deps.retypeAfter && { after: deps.retypeAfter }),
     });
@@ -536,6 +541,26 @@ export class ShellLifecycle {
     if (this.deps.integration === undefined)
       throw new StateConflict("shell integration", "off, so a new shell can't report its prompt");
     return line;
+  }
+
+  /**
+   * Types a restart's line at its new shell's prompt, only while the shell itself holds the
+   * terminal's foreground: a program the user started meanwhile, as one typed ahead while the
+   * shell started, or a password prompt, would take the line as its own input. A program the
+   * prompt runs, as `git status` or a zle-line-init widget's, holds it for a moment, so the paste
+   * waits for the shell to have it again, for a while, then gives up.
+   */
+  private async paste(ref: RuntimeRef, line: string, brackets: boolean): Promise<void> {
+    const after = this.deps.retypeAfter ?? afterTimeout;
+    for (let waited = 0; ; waited += FOREGROUND_POLL_MS) {
+      const program = await this.deps.environment.shellBusy(ref);
+      if (program === null) return this.deps.environment.pasteShell(ref, line, brackets);
+      if (waited >= FOREGROUND_WAIT_MS)
+        throw new Error(
+          `${program} held the shell's foreground for ${FOREGROUND_WAIT_MS / 1000} s`,
+        );
+      await new Promise<void>((resolve) => after(FOREGROUND_POLL_MS, resolve));
+    }
   }
 
   /**

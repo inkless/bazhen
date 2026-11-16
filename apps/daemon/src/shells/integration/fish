@@ -20,11 +20,14 @@ if set -q BAZHEN_SHELL_TOKEN; and test -x "$BAZHEN_HOOK"; and not set -q __bazhe
         return 0
     end
 
-    # Once, at the first prompt: a restart's line is typed back from then on. fish takes a paste
-    # marked with the bracketed-paste sequences as one even before it asks for bracketed paste,
-    # which it does only once its prompts are drawn, so the paste is marked by Bazhen.
+    # Once, at the first prompt: a restart's line is typed back from then on. fish 3.7 and 4.0 take
+    # a paste marked with the bracketed-paste sequences as one even before they ask for bracketed
+    # paste, which 4.0 does only once its prompts are drawn, so there the paste is marked by Bazhen.
+    # Other versions are untested, and get a paste marked only if they have asked by then.
     function __bazhen_prompt --on-event fish_prompt
         functions -e __bazhen_prompt
-        $BAZHEN_HOOK shell-prompt --brackets --shell $fish_pid </dev/null >/dev/null 2>&1
+        set -l brackets
+        string match -qr '^(3\.7|4\.0)\.' -- $version; and set brackets --brackets
+        $BAZHEN_HOOK shell-prompt $brackets --shell $fish_pid </dev/null >/dev/null 2>&1
     end
 end

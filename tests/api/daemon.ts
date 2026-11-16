@@ -165,6 +165,7 @@ export function shellWithRc(kind: IntegratedShell, rcLine: string | ((marked: st
   return {
     shell,
     mark: () => writeFileSync(marked, ""),
+    unmark: () => rmSync(marked, { force: true }),
     cleanup: () => rmSync(dir, { recursive: true, force: true }),
   };
 }
@@ -509,6 +510,33 @@ export class Daemon {
   /** The environment a shell terminal's process runs with (Linux only). */
   shellEnv(terminalId: string): Record<string, string> {
     return processEnv(Number(this.paneFact(terminalId, "pane_pid", "@bazhen_terminal_id")));
+  }
+
+  /** A shell terminal's process, as its pane's pid. */
+  shellPid(terminalId: string): number {
+    return Number(this.paneFact(terminalId, "pane_pid", "@bazhen_terminal_id"));
+  }
+
+  /**
+   * The `bazhen-hook shell-prompt` copies still waiting on the shell `pid` for its line editor,
+   * from /proc (Linux only).
+   */
+  static promptWaiters(pid: number): number {
+    return readdirSync("/proc")
+      .filter((name) => /^\d+$/.test(name))
+      .filter((name) => {
+        try {
+          const argv = readFileSync(`/proc/${name}/cmdline`, "utf8").split("\0");
+          const at = argv.indexOf("--shell");
+          return (
+            argv.includes("shell-prompt") &&
+            argv.includes("--detached") &&
+            argv[at + 1] === String(pid)
+          );
+        } catch {
+          return false;
+        }
+      }).length;
   }
 
   /**

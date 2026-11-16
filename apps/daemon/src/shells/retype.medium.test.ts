@@ -17,20 +17,32 @@ import { PendingRetypes, RETYPE_WITHIN_MS, type After } from "./retype.ts";
 const INTEGRATION = { hook: "/state/hook/bazhen-hook", dir: "/state/shell-integration" };
 const LINE = `echo "$HOME" 'a  b' TOKEN=s3cret`;
 
-/** A clock that runs what is scheduled on it only when told to, as if that much time had passed. */
+/** A clock that runs what is scheduled on it only as a test lets time pass. */
 function testClock() {
-  const due: { ms: number; run: () => void; cancelled: boolean }[] = [];
+  let now = 0;
+  const due: { at: number; run: () => void; cancelled: boolean }[] = [];
   const after: After = (ms, run) => {
-    const timer = { ms, run, cancelled: false };
+    const timer = { at: now + ms, run, cancelled: false };
     due.push(timer);
     return () => (timer.cancelled = true);
   };
-  /** Runs everything scheduled at most `ms` ahead and not cancelled. */
-  const pass = (ms: number) => {
-    for (const timer of due.filter((t) => !t.cancelled && t.ms <= ms)) {
-      timer.cancelled = true;
-      timer.run();
+  /**
+   * Lets `ms` pass, running what falls due in that time in order, each once what was running has
+   * settled, so a wait that schedules the next one sees it come due too.
+   */
+  const pass = async (ms: number) => {
+    const end = now + ms;
+    for (;;) {
+      await new Promise((settled) => setImmediate(settled));
+      const next = due
+        .filter((t) => !t.cancelled && t.at <= end)
+        .toSorted((x, y) => x.at - y.at)[0];
+      if (next === undefined) break;
+      now = next.at;
+      next.cancelled = true;
+      next.run();
     }
+    now = end;
   };
   return { after, pass };
 }
@@ -168,10 +180,36 @@ describe("restarting a lost shell with its last line typed back", () => {
     const b = await unmarked.restart();
     marked.prompt(a.terminalId, marked.tokenOf(a.terminalId), true);
     unmarked.prompt(b.terminalId, unmarked.tokenOf(b.terminalId), false);
-    expect([marked.pasted, unmarked.pasted]).toEqual([
-      [{ text: LINE, brackets: true }],
-      [{ text: LINE, brackets: false }],
+    await expect
+      .poll(() => [marked.pasted, unmarked.pasted])
+      .toEqual([[{ text: LINE, brackets: true }], [{ text: LINE, brackets: false }]]);
+  });
+
+  it("types nothing while a program other than the shell keeps its foreground, and says so", async () => {
+    const { runtime, restart, prompt, refOf, pasted, logs, clock } = await lostShell();
+    const { terminalId } = await restart();
+    runtime.runInForeground(refOf(terminalId), "vim");
+    prompt(terminalId);
+    await clock.pass(2_900);
+    const early = [...logs];
+    await clock.pass(200);
+    expect([early, pasted, logs]).toEqual([
+      [],
+      [],
+      [`shell ${terminalId}: last command not retyped: vim held the shell's foreground for 3 s`],
     ]);
+  });
+
+  it("waits for the shell to hold its foreground again, as after a program its prompt runs", async () => {
+    const { runtime, restart, prompt, refOf, pasted, clock } = await lostShell();
+    const { terminalId } = await restart();
+    runtime.runInForeground(refOf(terminalId), "git");
+    prompt(terminalId);
+    await clock.pass(500);
+    const waiting = [...pasted];
+    runtime.runInForeground(refOf(terminalId), null);
+    await clock.pass(100);
+    expect([waiting, pasted]).toEqual([[], [{ text: LINE, brackets: false }]]);
   });
 
   it("types nothing into a shell restarted without asking to retype", async () => {
@@ -196,9 +234,9 @@ describe("restarting a lost shell with its last line typed back", () => {
   it("types nothing once its time to report a prompt has passed, and logs that without the line", async () => {
     const { restart, prompt, pasted, logs, clock } = await lostShell();
     const { terminalId } = await restart();
-    clock.pass(RETYPE_WITHIN_MS - 1);
+    await clock.pass(RETYPE_WITHIN_MS - 1);
     const early = [...logs];
-    clock.pass(RETYPE_WITHIN_MS);
+    await clock.pass(1);
     prompt(terminalId);
     expect([early, pasted, logs]).toEqual([
       [],
@@ -259,13 +297,17 @@ describe("restarting a lost shell with its last line typed back", () => {
 /** Lines held for restarted shells, with what they pasted and logged. */
 function held() {
   const pasted: string[] = [];
+  const marked: boolean[] = [];
   const logs: string[] = [];
   const retypes = new PendingRetypes({
-    paste: async (_ref, line) => void pasted.push(line),
+    paste: async (_ref, line, brackets) => {
+      pasted.push(line);
+      marked.push(brackets);
+    },
     log: (message) => logs.push(message),
     after: testClock().after,
   });
-  return { retypes, pasted, logs };
+  return { retypes, pasted, marked, logs };
 }
 
 describe("the lines held for restarted shells", () => {
@@ -278,6 +320,15 @@ describe("the lines held for restarted shells", () => {
     const early = [...pasted];
     retypes.opened(id, ref);
     expect([early, pasted]).toEqual([[], ["make"]]);
+  });
+
+  it("marks the paste as its shell's first prompt report asked, not a later one", () => {
+    const { retypes, marked } = held();
+    retypes.hold(id, "make");
+    retypes.prompted(id, true);
+    retypes.prompted(id, false);
+    retypes.opened(id, ref);
+    expect(marked).toEqual([true]);
   });
 
   it.each(["make\n", "make\r", "make\u001b[D"])("never types a line holding a key: %j", (line) => {

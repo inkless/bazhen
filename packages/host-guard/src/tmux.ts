@@ -169,6 +169,14 @@ const hasControl = (text: string) => {
   return false;
 };
 
+/**
+ * Whether any character of `text` is outside printable ASCII. Typed as keys, as an unmarked paste
+ * is wherever the program hasn't asked for bracketed paste, a byte of 0x80 or more is a meta key
+ * to a line editor reading 8-bit input, as readline does in a C locale: `Å` would be M-C-e, which
+ * expands and runs the line's `$(…)`, and `£` M-#, which ends the line.
+ */
+const hasNonAscii = (text: string) => /[^\x20-\x7e]/u.test(text);
+
 /** ESC [ 2 0 0 ~ and ESC [ 2 0 1 ~, which open and close a bracketed paste, as send-keys -H keys. */
 const PASTE_START = "1b 5b 32 30 30 7e";
 const PASTE_END = "1b 5b 32 30 31 7e";
@@ -177,9 +185,11 @@ const PASTE_END = "1b 5b 32 30 31 7e";
  * The tmux commands that type `text` into the pane `target` without a newline: into a buffer of
  * its own, then pasted and the buffer deleted, so a line editor inserts it as text. With
  * `brackets`, the paste is marked with the bracketed-paste sequences whether or not the program
- * has asked for bracketed paste yet; without, `-p` marks it only if it has. The text is only ever a
- * quoted word, and text holding a control character is refused: a newline would be Enter, and an
- * ESC could end the marked paste early, so that what follows it is typed as keys.
+ * has asked for bracketed paste yet; without, `-p` marks it only if it has, so it may arrive as
+ * keys. The text is only ever a quoted word, and text holding a control character is refused: a
+ * newline would be Enter, and an ESC could end the marked paste early, so that what follows it is
+ * typed as keys. Text that may arrive as keys must be printable ASCII as well. A pane in copy or
+ * view mode would take the paste's keys as its own, so it leaves the mode first, in the same pass.
  */
 export function pasteScript(
   buffer: string,
@@ -190,7 +200,11 @@ export function pasteScript(
   if (!/^[A-Za-z0-9_-]+$/.test(buffer)) throw new RangeError(`not a buffer name: ${buffer}`);
   if (!/^%[0-9]+$/.test(target)) throw new RangeError(`not a pane id: ${target}`);
   if (hasControl(text)) throw new RangeError("refusing to paste a control character");
-  const set = `set-buffer -b ${buffer} -- ${tmuxWord(text)}\n`;
+  if (!brackets && hasNonAscii(text))
+    throw new RangeError("refusing to paste text beyond printable ASCII that may arrive as keys");
+  const set =
+    `set-buffer -b ${buffer} -- ${tmuxWord(text)}\n` +
+    `if-shell -F -t ${target} '#{pane_in_mode}' 'send-keys -X -t ${target} cancel'\n`;
   if (!brackets) return `${set}paste-buffer -p -d -b ${buffer} -t ${target}\n`;
   return (
     set +

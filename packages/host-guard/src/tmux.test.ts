@@ -83,7 +83,9 @@ describe("environmentScript", () => {
 
 describe("pasteScript", () => {
   const hostile = `echo "$HOME" 'a  b'; #{pane_id}`;
-  const set = `set-buffer -b b-1 -- 'echo "$HOME" '\\''a  b'\\''; #{pane_id}'\n`;
+  const set =
+    `set-buffer -b b-1 -- 'echo "$HOME" '\\''a  b'\\''; #{pane_id}'\n` +
+    "if-shell -F -t %7 '#{pane_in_mode}' 'send-keys -X -t %7 cancel'\n";
 
   it("pastes the text as one single-quoted word, bracketed as the program asks, and deletes its buffer", () => {
     expect(pasteScript("b-1", "%7", hostile, false)).toBe(
@@ -107,6 +109,12 @@ describe("pasteScript", () => {
       expect(() => pasteScript("b", "%1", text, true)).toThrow(/control character$/);
     },
   );
+
+  it("refuses unmarked text beyond printable ASCII, which as keys would be meta keys, and marks it", () => {
+    for (const text of ["echo Å", "echo £", "echo 你好", "a\u00a0b"])
+      expect(() => pasteScript("b", "%1", text, false)).toThrow(/beyond printable ASCII/);
+    expect(pasteScript("b", "%1", "echo Å 你好", true)).toContain("'echo Å 你好'");
+  });
 
   it("refuses text that would end a marked paste early, so what follows is typed as keys", () => {
     expect(() => pasteScript("b", "%1", "a\u001b[201~rm -rf ~", true)).toThrow(

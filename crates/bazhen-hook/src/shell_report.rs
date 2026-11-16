@@ -29,7 +29,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use rustix::process::{Pid, getpgid};
+use rustix::process::{Pid, getsid};
 use rustix::termios::{LocalModes, tcgetattr};
 
 use crate::{is_token, post};
@@ -119,10 +119,12 @@ pub(crate) fn run_prompt(args: impl Iterator<Item = String>) -> Option<i32> {
     let body = prompt_body(&token, asked.brackets)?;
     // Without a terminal to read, the editor can't be told ready: no report, and no line typed.
     let tty = File::open("/dev/tty").ok()?;
+    let session = getsid(None).ok()?;
     let canonical = || {
-        // A shell gone is one whose editor will never read: the wait ends, and its terminal with it.
+        // A shell gone is one whose editor will never read: the wait ends, and its terminal with
+        // it. A terminal its runtime closes as the shell exits ends the wait as well, as tmux does.
         if let Some(shell) = asked.shell {
-            getpgid(Some(shell)).ok()?;
+            in_session(shell, session, |pid| getsid(Some(pid)).ok()).then_some(())?;
         }
         tcgetattr(&tty)
             .ok()
@@ -138,6 +140,12 @@ pub(crate) fn run_prompt(args: impl Iterator<Item = String>) -> Option<i32> {
         let _ = post(&socket, &path, &body, DEADLINE);
     });
     Some(0)
+}
+
+/// Whether `shell` is still a process in the terminal's session `session`, as `sid_of` reads a
+/// pid's session: false for one gone, and for its pid taken since by a process elsewhere.
+fn in_session(shell: Pid, session: Pid, sid_of: impl Fn(Pid) -> Option<Pid>) -> bool {
+    sid_of(shell) == Some(session)
 }
 
 /// Whether the terminal left canonical mode within `deadline`, looking every `poll`. `canonical`
@@ -403,6 +411,21 @@ mod tests {
         ] {
             assert_eq!(args(refused), None, "{refused:?}");
         }
+    }
+
+    #[test]
+    fn waits_on_a_shell_only_while_it_is_in_the_terminals_session() {
+        let pid = |raw| Pid::from_raw(raw).expect("a pid");
+        let (shell, session, elsewhere) = (pid(4242), pid(4000), pid(5000));
+        let sid = |of: Option<Pid>| move |_| of;
+        assert_eq!(
+            [
+                in_session(shell, session, sid(Some(session))),
+                in_session(shell, session, sid(Some(elsewhere))),
+                in_session(shell, session, sid(None)),
+            ],
+            [true, false, false]
+        );
     }
 
     #[test]

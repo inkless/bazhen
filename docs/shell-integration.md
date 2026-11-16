@@ -47,18 +47,25 @@ so at start and shells report nothing.
 
 A lost shell whose last line was kept offers **Restart and retype last command** beside
 **Restart**. The new shell opens in the same directory and, once it shows its first prompt, the
-line appears there exactly as you typed it, `$VARIABLES` and quoting untouched. Enter is never
-pressed: you read the line, edit it if you like, and run it yourself.
+line appears there as the old shell reported it, `$VARIABLES` unexpanded: zsh and fish report
+the line you typed, and bash the line as its history recorded it. What the line editor does with
+a paste can still change it as it lands, as zsh's `url-quote-magic` quotes a URL, or fish escapes
+a pasted quote inside quotes. Enter is never pressed: you read the line, edit it if you like, and
+run it yourself. Nothing is typed while a program other than the shell holds the terminal, as one
+you typed ahead while the shell started, or a password prompt: the line is dropped, and the
+daemon logs that it wasn't retyped.
 
 Bazhen types it as a paste, marked with the bracketed-paste sequences, so the line editor inserts
 it as text rather than taking it as keys, however long your prompt takes to draw. That holds
-wherever the editor takes those sequences as a paste: fish always does, zsh unless you rebound
-them, and bash when `enable-bracketed-paste` is on, as it is by default from bash 5.1. Elsewhere
-(bash 4.4 and 5.0, or bracketed paste turned off in `~/.inputrc`), Bazhen marks the paste only if
-the editor has asked for bracketed paste by the time it types it, and otherwise the line arrives
-as keys: a key you bound to something else, as `magic-space`, does that instead. Either way the
-line holds no newline, escape or other control character, so it is never Enter and can't end the
-paste early.
+wherever the editor takes those sequences as a paste: fish 3.7 and 4.0, which are the versions
+tested; zsh unless you unbound them; and bash when `enable-bracketed-paste` is on, as it is by
+default from bash 5.1. Elsewhere (other fish versions, bash 4.4 and 5.0, or bracketed paste
+turned off), Bazhen marks the paste only if the editor has asked for bracketed paste by the time
+it types it, and otherwise the line arrives as keys: a key you bound to something else, as
+`magic-space`, does that instead. A line that may arrive as keys is typed back only if it is
+printable ASCII, since a byte beyond it is a meta key to an editor reading 8-bit input, as bash
+does in a C locale. Either way the line holds no newline, escape or other control character, so
+it is never Enter and can't end the paste early.
 
 The new shell must load the integration too, since it tells Bazhen when its line editor is
 reading. A prompt that takes more than 10 seconds to draw gets no line typed back. If no prompt is

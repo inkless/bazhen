@@ -223,7 +223,7 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       onTestFinished(() => stream.close());
       let seen = "";
       stream.onData((bytes) => (seen += decode(bytes)));
-      const text = `echo "$HOME" 'a  b'; #{pane_id} ~ \\ 你好`;
+      const text = `echo "$HOME" 'a  b'; #{pane_id} ~ \\`;
       await runtime.paste(ref, text, false);
       await expect.poll(() => seen, { timeout: harness.waitMs }).toContain(text);
       // `cat` prints a line back once it ends: with no Enter, it is only ever seen echoed, once.
@@ -239,10 +239,10 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       onTestFinished(() => stream.close());
       let seen = "";
       stream.onData((bytes) => (seen += decode(bytes)));
-      await runtime.paste(ref, "echo marked", true);
+      await runtime.paste(ref, "echo marked 你好", true);
       // As the terminal echoes them: ESC is shown as ^[ where the terminal echoes controls so.
       const marked = () =>
-        ["\u001b", "^["].some((esc) => seen.includes(`[200~echo marked${esc}[201~`));
+        ["\u001b", "^["].some((esc) => seen.includes(`[200~echo marked 你好${esc}[201~`));
       await expect.poll(marked, { timeout: harness.waitMs }).toBe(true);
     });
 
@@ -253,6 +253,7 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       await expect(runtime.paste(ref, "make\n", true)).rejects.toThrow(RangeError);
       await expect(runtime.paste(ref, "\u001b[D", true)).rejects.toThrow(RangeError);
       await expect(runtime.paste(ref, "\u009b2J", true)).rejects.toThrow(RangeError);
+      await expect(runtime.paste(ref, "echo Å", false)).rejects.toThrow(RangeError);
       harness.replaceProcess(runtime, ref);
       await expect(runtime.paste(ref, "make", false)).rejects.toThrow(StaleIncarnation);
       const dead = await runtime.create(spec(exiting(0)));

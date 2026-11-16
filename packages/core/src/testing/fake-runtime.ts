@@ -323,6 +323,8 @@ export class FakeRuntime implements RuntimeAdapter {
       if (code < 0x20 || (code >= 0x7f && code <= 0x9f))
         throw new RangeError("refusing to paste a control character");
     }
+    if (!brackets && /[^\x20-\x7e]/u.test(text))
+      throw new RangeError("refusing to paste text beyond printable ASCII that may arrive as keys");
     const t = this.paneOf(ref);
     if (t.pane.exit !== null) throw new ProcessState(ref.terminalId, "running");
     assertSameGeneration(ref, String(t.pane.generation));

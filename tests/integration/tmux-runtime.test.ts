@@ -35,6 +35,17 @@ const screen = (session: string | undefined) =>
   tmuxOut(server, "capture-pane", "-p", "-t", `${String(session)}:0`);
 
 describe("tmux runtime on a private server", () => {
+  it("pastes into a pane left in copy mode as into its program, leaving the mode", async () => {
+    const ref = await runtime.create(spec(["cat"]));
+    const pane = String(ref.locator.paneId);
+    tmuxOut(server, "copy-mode", "-t", pane);
+    const inMode = () => tmuxOut(server, "display-message", "-p", "-t", pane, "#{pane_in_mode}");
+    const before = inMode();
+    await runtime.paste(ref, "echo from-copy-mode", false);
+    await expect.poll(() => screen(ref.locator.sessionId)).toContain("echo from-copy-mode");
+    expect([before.trim(), inMode().trim()]).toEqual(["1", "0"]);
+  });
+
   it("gives a new terminal its full history, on a server an older daemon started with less", async () => {
     await runtime.create(spec(["sleep", "30"]));
     tmuxOut(server, "set-option", "-g", "history-limit", "50");

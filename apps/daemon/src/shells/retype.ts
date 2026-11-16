@@ -8,7 +8,7 @@ export const RETYPE_WITHIN_MS = 30_000;
 export type After = (ms: number, run: () => void) => () => void;
 
 /** On the daemon's clock, never keeping the daemon running for it. */
-const afterTimeout: After = (ms, run) => {
+export const afterTimeout: After = (ms, run) => {
   const timer = setTimeout(run, ms);
   timer.unref();
   return () => clearTimeout(timer);
@@ -64,10 +64,13 @@ export class PendingRetypes {
     if (held.brackets !== null) this.type(terminalId, held);
   }
 
-  /** The shell reported its first prompt: its line is typed, once it is known where. */
+  /**
+   * The shell reported its first prompt: its line is typed, once it is known where. A later
+   * report changes nothing: the first is the shell's integration's own, at its first prompt.
+   */
   prompted(terminalId: string, brackets: boolean): void {
     const held = this.pending.get(terminalId);
-    if (held === undefined) return;
+    if (held === undefined || held.brackets !== null) return;
     held.brackets = brackets;
     if (held.ref !== null) this.type(terminalId, held);
   }
