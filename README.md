@@ -145,7 +145,8 @@ matcher, which also keeps strangers away from the pairing form.
 
 With no external origin (`web.pairing = "auto"`, the default), Bazhen serves loopback only and
 asks no browser to pair: any process or user on this machine that can reach the daemon's port
-can drive your agents, as `bazhen doctor` says. A request a proxy forwarded from another
+can drive your agents, as `bazhen doctor` says. Your agents' own processes are among them, since
+the daemon tells an agent from you only on its socket. A request a proxy forwarded from another
 machine (its `X-Forwarded-For` or `Forwarded` header names one) must pair whatever the setting.
 A forwarder that adds no such header, such as `ssh -R` or `socat` onto the daemon's or the dev
 server's port, isn't noticed: with one, set `web.pairing = "always"`. On a machine other people log in to, set
@@ -251,7 +252,43 @@ also takes away its say over the task. Ending an assignment ends everything gran
 Bazhen launches is told these commands as it starts, beside its harness's own instructions. When an agent finishes a task you own, or a subtask falls to
 you, it shows in your inbox.
 
-**Who is asking.** Inside an agent, the CLI says which agent it is from `BAZHEN_AGENT_ID`, over the
-daemon's 0600 Unix socket, the one in `BAZHEN_SOCKET`: the daemon that started it, wherever its home is. The daemon takes that at its word, as it must take any process of
-yours, which could drive the agent's terminal anyway, but refuses an agent that is closed, lost
-or unknown. Over TCP, from the web client, the caller is always you.
+**Who is asking.** Inside an agent, the CLI says which agent it is, by `BAZHEN_AGENT_ID` and the
+token in `BAZHEN_AGENT_AUTH_FILE`, over the daemon's 0600 Unix socket, the one in `BAZHEN_SOCKET`:
+the daemon that started it, wherever its home is. The daemon checks that against the process that
+calls (see below). Without a peer reading, it takes that at its word, but refuses an agent that is
+closed, lost or unknown. Over TCP, from the web client, the caller is always you.
+
+## What Bazhen knows about who is calling
+
+With the peer reader running, a call on the daemon's socket from inside an agent is that agent's.
+Each start of an agent gets a token, in a file only you can read, which its `bazhen` commands and
+hooks present. A token shows only that the call is yours: any of your processes, other agents
+included, can read the file. The daemon also reads which process made the call. A process running
+in an agent's terminal is that agent's, whether or not it presents a token. Any token it presents
+must be that agent's own. So an agent can't answer approvals, pair or revoke a browser, stop the
+daemon, change the environment later agents get, launch agents outside a delegation's limits, run
+other agents' terminals or the shells, or pass as another agent. That holds even when it unsets
+its environment. Only a call made outside every agent's terminal is yours.
+
+That holds against an agent working inside its terminal, not one set on getting out of it.
+Everything runs as you, so an agent that does any of these looks like you to Bazhen:
+
+- leaves its terminal's process tree
+  (`setsid -f env -u BAZHEN_AGENT_ID -u BAZHEN_AGENT_AUTH_FILE bazhen pair`, `systemd-run --user`,
+  `at`);
+- types into one of your shells (`tmux -S <socket> send-keys -t <shell pane>`);
+- reaches the web port on loopback where pairing isn't required (trusted by design under
+  `web.pairing = "auto"`);
+- rewrites Bazhen's files.
+
+Run agents inside their harness's sandbox to stop those.
+
+A process that takes a caller's pid after it exits is told apart by its start time. Within about 3
+seconds of the connection, it can still pass as that caller. On macOS the socket may name the last
+process to use it rather than the one that connected, as XNU's source reads, though that hasn't
+been checked on a Mac; how far the start time and session checks cover that there is untested.
+
+Without the peer reader, the daemon can't read which process calls. Then a call from inside an
+agent that presents nothing passes as yours, and one that presents another agent's token, which
+it can read, passes as that agent. The daemon warns at start, and `bazhen doctor` shows
+`peer reader: none`. `pnpm build` builds `bazhen-peer`, which the daemon installs at start.

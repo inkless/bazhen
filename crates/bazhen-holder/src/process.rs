@@ -62,7 +62,9 @@ pub fn peer_uid(socket: BorrowedFd<'_>) -> io::Result<u32> {
     }
 }
 
-/// The process at the other end of a Unix socket, as it was when it connected.
+/// The process at the other end of a Unix socket: on Linux the one that connected
+/// (`SO_PEERCRED`), on macOS its last user (`LOCAL_PEERPID`). Either may since have exited, or its
+/// pid gone to another process, so a caller checks its start time.
 ///
 /// # Errors
 ///
