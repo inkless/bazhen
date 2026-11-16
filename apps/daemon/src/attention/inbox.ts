@@ -46,6 +46,9 @@ const HARNESS_HELD: ReadonlySet<AttentionKind> = new Set(["approval", "question"
  */
 const HUMAN_HELD: ReadonlySet<AttentionKind> = new Set(["escalation", "task_done"]);
 
+/** What leaves a starting agent other than its harness coming up. */
+const ENDS_A_START: ReadonlySet<string> = new Set(["agent.exited", "agent.lost", "agent.closing"]);
+
 const parseReply = (r: unknown) => ReplyAttentionResponse.parse(r);
 const parseResend = (r: unknown) => ResendAttentionResponse.parse(r);
 
@@ -92,6 +95,8 @@ export class Inbox {
       return this.approvals.canAnswer(item.id) ? ["allow", "deny"] : [];
     }
     if (item.kind === "question") return this.approvals.canReplyText(item.id) ? ["reply"] : [];
+    // Only its terminal answers it; mail would wait behind the very dialog it is about.
+    if (item.kind === "stuck_starting") return ["dismiss"];
     const state = this.store.agent(item.agentId)?.state;
     if (state === undefined || GONE.has(state)) return ["dismiss"];
     return item.kind === "undeliverable" ? ["reply", "resend", "dismiss"] : ["reply", "dismiss"];
@@ -101,6 +106,12 @@ export class Inbox {
   turnFailed(agentId: string, error: string | null): void {
     if (this.openOf(agentId, "failed").length > 0) return;
     this.open(agentId, "failed", error ?? "A turn failed", {});
+  }
+
+  /** The agent's harness hasn't come up: one item per start, which only its terminal answers. */
+  notStarted(agentId: string, summary: string): void {
+    if (this.openOf(agentId, "stuck_starting").length > 0) return;
+    this.open(agentId, "stuck_starting", summary, {});
   }
 
   /** The agent started a turn of its own, so the failure before it no longer holds it up. */
@@ -176,7 +187,16 @@ export class Inbox {
       this.open(agentId, "undeliverable", "A message could not be delivered", {
         messageId: e.entityId,
       });
-    } else if (e.type === "agent.closed") {
+    } else if (e.type === "agent.ready") {
+      // The human answered whatever held it, in its terminal.
+      for (const item of this.openOf(e.entityId, "stuck_starting"))
+        this.close(item.id, "answered_in_tui", "system");
+    } else if (ENDS_A_START.has(e.type)) {
+      // It ended, was lost or is closing before its harness came up: nothing is waiting any more.
+      for (const item of this.openOf(e.entityId, "stuck_starting"))
+        this.close(item.id, "stale", "system");
+    }
+    if (e.type === "agent.closed") {
       for (const item of this.store.openAttention(e.entityId)) {
         if (!HARNESS_HELD.has(item.kind) && !HUMAN_HELD.has(item.kind)) {
           this.close(item.id, "agent_closed", "system");

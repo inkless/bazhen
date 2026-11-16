@@ -8,12 +8,17 @@ const LATER_SESSION = "33333333-3333-4333-8333-333333333333";
 
 afterEach(() => vi.restoreAllMocks());
 
+/** The process a respawn starts in the agent's pane, which is a new one. */
+const RESPAWNED_PANE_PID = 4343;
+
 /** The pane's TUI runs hooks through `sh` 900; a nested claude 800 runs its own through 700. */
 const procs: Record<number, ProcessEntry> = {
   900: { ppid: PANE_PID, command: "/bin/sh" },
   // A second shell of the pane's, which `ps` is slow to answer for.
   950: { ppid: PANE_PID, command: "/bin/sh" },
   800: { ppid: 600, command: "claude" },
+  // A shell of the TUI a respawn started, in a pane process of its own.
+  905: { ppid: RESPAWNED_PANE_PID, command: "/bin/sh" },
   700: { ppid: 800, command: "sh" },
   600: { ppid: PANE_PID, command: "bash" },
 };
@@ -164,6 +169,87 @@ describe("SessionBinding", () => {
       },
     });
     expect(await owned).toBe(true);
+  });
+
+  // The SessionStart is the agent's sign of life, so it can't wait for the agent to run.
+  it("judges at once a new session's SessionStart once its relaunch is recorded, though the agent still starts", async () => {
+    const { store, agentId } = await claudeAgent();
+    const binding = new SessionBinding(store, table, 60_000);
+    const system = { entityId: agentId, actor: "system" } as const;
+    const environmentId = String(store.agentEnvironment(agentId));
+    store.append({ ...system, type: "agent.lost", payload: {} });
+    store.append({
+      ...system,
+      type: "agent.relaunch_requested",
+      payload: { terminalId: newId("term"), generation: 1, fresh: true },
+    });
+    store.append({
+      ...system,
+      type: "agent.relaunched",
+      payload: {
+        externalRef: { environmentId, kind: "claude-session", id: LATER_SESSION },
+        runtimeRef: { runtime: "tmux", locator: { panePid: String(PANE_PID) } },
+      },
+    });
+    const owned = binding.owns(
+      agentId,
+      { sessionId: NEW_SESSION, transcriptPath: null, subagent: false, subagentId: null },
+      { sessionStarted: true, ppid: 900 },
+    );
+    const waited = new Promise((resolve) => setTimeout(() => resolve("waited"), 1000));
+    expect([
+      store.snapshot(testView).agents[0]?.state,
+      await Promise.race([owned, waited]),
+    ]).toEqual(["starting", true]);
+  });
+
+  it("takes a resumed TUI's hook as its sign of life, though it comes before its respawn is recorded", async () => {
+    const { store, agentId } = await claudeAgent();
+    const binding = new SessionBinding(store, table, 60_000);
+    const system = { entityId: agentId, actor: "system" } as const;
+    store.append({ ...system, type: "agent.exited", payload: { exit: { type: "unknown" } } });
+    store.append({ ...system, type: "agent.respawn_requested", payload: {} });
+    const early = binding.startedHere(agentId, 905);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    store.append({
+      ...system,
+      type: "agent.respawned",
+      payload: {
+        externalRef: null,
+        runtimeRef: {
+          runtime: "tmux",
+          locator: { panePid: String(RESPAWNED_PANE_PID), generation: "1" },
+        },
+      },
+    });
+    expect(await early).toBe(true);
+  });
+
+  it("takes no hook from outside the agent's terminal as its sign of life, though it names its session", async () => {
+    const { store, agentId } = await claudeAgent({ starting: true });
+    const binding = new SessionBinding(store, table);
+    // 700's nearest TUI is the nested claude 800, as for a hook a dead process's child left behind.
+    expect([
+      await binding.startedHere(agentId, 700),
+      await binding.startedHere(agentId, 900),
+    ]).toEqual([false, true]);
+  });
+
+  it("takes a hook from a holder's child as its sign of life, the holder's terminal's root", async () => {
+    const { store, agentId } = await claudeAgent({ starting: true });
+    const binding = new SessionBinding(store, table);
+    const system = { entityId: agentId, actor: "system" } as const;
+    store.append({ ...system, type: "agent.exited", payload: { exit: { type: "unknown" } } });
+    store.append({ ...system, type: "agent.respawn_requested", payload: {} });
+    store.append({
+      ...system,
+      type: "agent.respawned",
+      payload: {
+        externalRef: null,
+        runtimeRef: { runtime: "holder", locator: { childPid: String(PANE_PID), generation: "1" } },
+      },
+    });
+    expect(await binding.startedHere(agentId, 900)).toBe(true);
   });
 
   it("refuses a SessionStart whose agent stays starting past the wait, with no pane to check", async () => {

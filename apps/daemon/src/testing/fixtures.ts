@@ -24,6 +24,7 @@ import {
 } from "@bazhen/core";
 import { launchAgent, launchSettled, localEnvironmentId } from "../agents/launch.ts";
 import { AgentQueue } from "../agents/queue.ts";
+import type { Sign } from "../agents/readiness.ts";
 import { upgrades, type UpgradeRoute } from "../http/upgrades.ts";
 import { Mailbox } from "../mailbox/mailbox.ts";
 import type { Raised } from "../attention/inbox.ts";
@@ -154,9 +155,17 @@ export function fakeEnvironment(
   };
 }
 
-/** A store with one running Claude Code agent and its terminal, in `environment`. */
+/** Records the harness's first sign of life since the agent last started: it is running. */
+export const ready = (store: Store, agentId: string, sign: Sign = "claude_hook") =>
+  store.append({ type: "agent.ready", entityId: agentId, actor: "system", payload: { sign } });
+
+/**
+ * A store with one Claude Code agent and its terminal, in `environment`: running, or with
+ * `starting`, still waiting on its harness's first sign of life.
+ */
 export async function withAgent(
   environment: (store: Store) => EnvironmentAdapter = (store) => fakeEnvironment(store),
+  { starting = false }: { readonly starting?: boolean } = {},
 ) {
   const path = tempDb();
   const store = Store.open(path);
@@ -178,6 +187,7 @@ export async function withAgent(
   if (!isId("agent", agentId) || terminalId === null || !isId("term", terminalId)) {
     throw new Error("launched no agent");
   }
+  if (!starting) ready(store, agentId);
   return { path, store, agentId, terminalId, environment: env };
 }
 
@@ -185,21 +195,26 @@ export async function withAgent(
 export const CLAUDE_SESSION = "11111111-1111-4111-8111-111111111111";
 export const PANE_PID = 4242;
 
-/** A store with one running Claude Code agent bound to `CLAUDE_SESSION` in pane `PANE_PID`. */
-export const claudeAgent = () =>
-  withAgent((store) =>
-    fakeEnvironment(store, async (l) => ({
-      runtime: {
-        terminalId: l.terminalId,
-        runtime: "tmux",
-        locator: { panePid: String(PANE_PID) },
-      },
-      externalRef: {
-        environmentId: localEnvironmentId(store),
-        kind: "claude-session",
-        id: CLAUDE_SESSION,
-      },
-    })),
+/**
+ * A store with one Claude Code agent bound to `CLAUDE_SESSION` in pane `PANE_PID`: running, or
+ * with `starting`, waiting on its harness.
+ */
+export const claudeAgent = (opts: { readonly starting?: boolean } = {}) =>
+  withAgent(
+    (store) =>
+      fakeEnvironment(store, async (l) => ({
+        runtime: {
+          terminalId: l.terminalId,
+          runtime: "tmux",
+          locator: { panePid: String(PANE_PID) },
+        },
+        externalRef: {
+          environmentId: localEnvironmentId(store),
+          kind: "claude-session",
+          id: CLAUDE_SESSION,
+        },
+      })),
+    opts,
   );
 
 /** A view that came and went: two events no projection points at once it has ended. */
@@ -293,7 +308,20 @@ export function withCodexAgents(...threads: (string | null)[]) {
 }
 
 /** As `withCodexAgents`, its agents' terminals on `runtime`: tmux's panes, or holders. */
-export async function withCodexAgentsOn(runtime: "tmux" | "holder", ...threads: (string | null)[]) {
+export const withCodexAgentsOn = (runtime: "tmux" | "holder", ...threads: (string | null)[]) =>
+  codexAgents(runtime, false, threads);
+
+/** As `withCodexAgentsOn`, with every agent still starting, its TUI not yet up. */
+export const withStartingCodexAgentsOn = (
+  runtime: "tmux" | "holder",
+  ...threads: (string | null)[]
+) => codexAgents(runtime, true, threads);
+
+async function codexAgents(
+  runtime: "tmux" | "holder",
+  starting: boolean,
+  threads: readonly (string | null)[],
+) {
   const store = Store.open(tempDb());
   const agents = new Map<string | null, string>();
   for (const [i, threadId] of threads.entries()) {
@@ -327,6 +355,7 @@ export async function withCodexAgentsOn(runtime: "tmux" | "holder", ...threads: 
       },
       { idempotencyKey: `codex-${String(threadId)}`, harness: "codex", cwd: "~" },
     );
+    if (!starting) ready(store, agentId, "codex_title");
     agents.set(threadId, agentId);
   }
   /** The agent on `threadId`; a thread the fixture didn't make fails the test outright. */
@@ -371,6 +400,7 @@ export async function taskFleet(
       cwd: "~",
     });
     if (!isId("agent", agentId)) throw new Error("launched no agent");
+    ready(store, agentId);
     return agentId;
   };
   const [lead, worker] = [await launch("launch-lead"), await launch("launch-worker")];

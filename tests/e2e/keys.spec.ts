@@ -33,6 +33,18 @@ function newestAgentId(state: unknown): string {
   return id;
 }
 
+/** The agent's lifecycle state, as the daemon's state says. */
+async function agentState(page: Page, agentId: string): Promise<unknown> {
+  const agents: unknown = Reflect.get(
+    Object(await (await page.request.get("/v1/state")).json()),
+    "agents",
+  );
+  const agent: unknown = Array.isArray(agents)
+    ? agents.find((a: unknown) => Reflect.get(Object(a), "id") === agentId)
+    : undefined;
+  return Reflect.get(Object(agent), "state");
+}
+
 /**
  * The tmux session an agent's terminal runs in, once tmux lists it. It polls, and shows why
  * it hasn't found one: `expect.poll` stops at the first error its function throws, so a tmux
@@ -99,6 +111,9 @@ async function launchProbe(page: Page, ...options: string[]): Promise<Probe> {
   await expect(page.getByRole("region", { name: "terminal" })).toBeVisible();
   const agentId = newestAgentId(await (await page.request.get("/v1/state")).json());
   const session = await sessionOf(agentId);
+  // Claude Code comes up first: replaced before it does, the agent would stay starting, and past
+  // the daemon's deadline its item would wait in every later spec's inbox.
+  await expect.poll(() => agentState(page, agentId), { timeout: 20_000 }).toBe("running");
   const log = join(work, `keys-${agentId}.log`);
   await tmux("respawn-pane", "-k", "-t", `${session}:0`, process.execPath, probe, log, ...options);
   await expect.poll(() => screen(page), { timeout: 10_000 }).toContain("key-probe ready");

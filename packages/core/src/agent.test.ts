@@ -20,7 +20,25 @@ describe("agent session lifecycle", () => {
 
   it("returns to lost, still closable and relaunchable, when a relaunch is rejected", () => {
     const rejected = agent.next(agent.next("lost", "relaunch.requested"), "relaunch.rejected");
-    expect([rejected, agentCommands(rejected)]).toEqual(["lost", ["close", "relaunch"]]);
+    expect([rejected, agentCommands({ state: rejected, terminalState: "lost" })]).toEqual([
+      "lost",
+      ["close", "relaunch"],
+    ]);
+  });
+
+  it("stays starting when its terminal runs, until its harness shows a sign of life", () => {
+    const confirmed = agent.next("starting", "launch.confirmed");
+    expect([confirmed, agent.next(confirmed, "harness.ready")]).toEqual(["starting", "running"]);
+  });
+
+  // Never unknown: a reconfirm takes unknown to running, which would skip its harness's sign.
+  it("can end, be lost or be closed while its harness is still starting, but not go unknown", () => {
+    expect([
+      agent.next("starting", "process.exited"),
+      agent.next("starting", "target.absent"),
+      agent.next("starting", "close.requested"),
+      agent.accepts("starting", "environment.unreachable"),
+    ]).toEqual(["exited", "lost", "closing", false]);
   });
 
   it("cannot be respawned while still running", () => {
@@ -32,7 +50,7 @@ describe("agentCommands", () => {
   it("offers exactly the commands the lifecycle takes, in every state", () => {
     // A Record, so a state added to the protocol fails to compile here until it is listed.
     const expected: Record<AgentState, AgentCommand[]> = {
-      starting: [],
+      starting: ["close", "signal"],
       running: ["close", "signal"],
       unknown: ["close"],
       exited: ["close", "respawn"],
@@ -43,7 +61,18 @@ describe("agentCommands", () => {
     };
     const isState = (s: string): s is AgentState => Object.hasOwn(expected, s);
     const states = Object.keys(expected).filter(isState);
-    expect(Object.fromEntries(states.map((s) => [s, agentCommands(s)]))).toEqual(expected);
+    expect(
+      Object.fromEntries(
+        states.map((s) => [s, agentCommands({ state: s, terminalState: "running" })]),
+      ),
+    ).toEqual(expected);
+  });
+
+  it("offers a starting agent nothing until its terminal runs", () => {
+    expect([
+      agentCommands({ state: "starting", terminalState: "creating" }),
+      agentCommands({ state: "starting", terminalState: "exited" }),
+    ]).toEqual([[], []]);
   });
 });
 
@@ -53,6 +82,7 @@ const no = () => false;
 describe("offeredCommands", () => {
   const exited = {
     state: "exited" as const,
+    terminalState: "exited" as const,
     generation: 1,
     harness: "codex" as const,
     externalRef: { environmentId: "env_1", kind: "codex-thread" as const, id: "thr" },
@@ -67,7 +97,7 @@ describe("offeredCommands", () => {
   });
 
   it("offers relaunch to a lost agent whether or not it can resume, since fresh is asked for", () => {
-    const lost = { ...exited, state: "lost" as const };
+    const lost = { ...exited, state: "lost" as const, terminalState: "lost" as const };
     expect([
       offeredCommands(lost, yes),
       offeredCommands({ ...lost, externalRef: null }, no),

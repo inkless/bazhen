@@ -171,6 +171,23 @@ describe("reconcile", () => {
     expect(stateOf(store)).toBe("lost");
   });
 
+  it("leaves an agent still waiting on its harness starting while the environment runs it", async () => {
+    const { store, agentId, terminalId } = await withAgent(undefined, { starting: true });
+    const ref = { terminalId, runtime: "tmux", locator: {} };
+    await reconcile(
+      store,
+      fakeEnvironment(store, undefined, () => [{ agentId, ref, dead: false }]),
+    );
+    expect(stateOf(store)).toBe("starting");
+  });
+
+  it("marks an agent still waiting on its harness lost when a reachable environment lacks it", async () => {
+    const { store } = await withAgent(undefined, { starting: true });
+    const waiting = stateOf(store);
+    await reconcile(store, fakeEnvironment(store));
+    expect([waiting, stateOf(store)]).toEqual(["starting", "lost"]);
+  });
+
   it("closes an agent left closing once the environment no longer has it, giving up its mail", async () => {
     const { store, agentId, terminalId } = await withAgent();
     const { messageId } = new Mailbox(store).send(agentId, { idempotencyKey: "m", body: "hi" });
@@ -186,7 +203,7 @@ describe("reconcile", () => {
     expect([kept, stateOf(store), mail]).toEqual(["closing", "closed", "undeliverable"]);
   });
 
-  it("settles an agent the daemon died launching as running, on the harness session its terminal carries", async () => {
+  it("settles an agent the daemon died launching as started, on the harness session its terminal carries, still waiting on its harness", async () => {
     const { store } = await withAgent();
     const { agentId, terminalId, retry } = launchCut(store);
     const externalRef = {
@@ -203,7 +220,7 @@ describe("reconcile", () => {
     const settled = store.snapshot(testView).agents.find((a) => a.id === agentId);
     const again = await retry();
     expect([settled?.state, settled?.externalRef, again.agentId]).toEqual([
-      "running",
+      "starting",
       externalRef,
       agentId,
     ]);
@@ -222,14 +239,14 @@ describe("reconcile", () => {
     ]).toEqual(["failed", [{ reason: "daemon_restart" }], true]);
   });
 
-  it("settles an agent the daemon died respawning as respawned, once its pane runs the next generation", async () => {
+  it("settles an agent the daemon died respawning as respawned, once its pane runs the next generation, still waiting on its harness", async () => {
     const { store, agentId, terminalId } = await midRespawn();
     const ref = atGeneration(terminalId, "1");
     await reconcile(
       store,
       fakeEnvironment(store, undefined, () => [{ agentId, ref, dead: false }]),
     );
-    expect([agentOf(store)?.state, agentOf(store)?.generation]).toEqual(["running", 1]);
+    expect([agentOf(store)?.state, agentOf(store)?.generation]).toEqual(["starting", 1]);
   });
 
   it("settles an agent the daemon died respawning as exited, when its pane is still the old one", async () => {
@@ -252,7 +269,7 @@ describe("reconcile", () => {
     expect(agentOf(store)?.state).toBe("lost");
   });
 
-  it("settles an agent the daemon died relaunching as running on its new terminal, once it is there", async () => {
+  it("settles an agent the daemon died relaunching on its new terminal, once it is there, still waiting on its harness", async () => {
     const { store, agentId, terminalId } = await midRelaunch();
     const ref = atGeneration(terminalId, "1");
     await reconcile(
@@ -261,7 +278,7 @@ describe("reconcile", () => {
     );
     const agent = agentOf(store);
     expect([agent?.state, agent?.terminalId, agent?.generation]).toEqual([
-      "running",
+      "starting",
       terminalId,
       1,
     ]);

@@ -16,6 +16,7 @@ import { reconcileShells } from "../shells/reconcile.ts";
 import { Store } from "../store/store.ts";
 import {
   quietStartAgain,
+  ready,
   tempDb,
   testPrompts,
   testView,
@@ -49,22 +50,24 @@ function twoRuntimes() {
   const queue = new AgentQueue();
   const size = { cols: 80, rows: 24 };
   const home = mkdtempSync(join(tmpdir(), "bz-home-"));
-  const launch = async (kind: "tmux" | "holder", harness: HarnessId = "claude-code") =>
-    (
-      await launchAgent(
-        {
-          store,
-          environment: on(kind),
-          size,
-          home,
-          queue,
-          budget: unlimited,
-          tokens: untokened,
-          prompts: testPrompts(),
-        },
-        { idempotencyKey: newId("att"), harness, cwd: "~" },
-      )
-    ).agentId;
+  /** A running agent, its harness up, on `kind`. */
+  const launch = async (kind: "tmux" | "holder", harness: HarnessId = "claude-code") => {
+    const { agentId } = await launchAgent(
+      {
+        store,
+        environment: on(kind),
+        size,
+        home,
+        queue,
+        budget: unlimited,
+        tokens: untokened,
+        prompts: testPrompts(),
+      },
+      { idempotencyKey: newId("att"), harness, cwd: "~" },
+    );
+    ready(store, agentId);
+    return agentId;
+  };
   const shellsOn = (kind: "tmux" | "holder") =>
     new ShellLifecycle({ store, environment: on(kind), queue, budget: unlimited, size, home });
   const openShell = async (kind: "tmux" | "holder") =>
@@ -219,7 +222,7 @@ describe("making a new terminal for an old one", () => {
     });
     const now = store.agentTerminal({ agentId });
     expect([
-      now?.state,
+      now?.terminalState,
       now?.runtimeKind,
       now?.runtime?.runtime,
       (await holder.inventory()).length,
@@ -263,6 +266,6 @@ describe("making a new terminal for an old one", () => {
       fresh: true,
     });
     const now = store.agentTerminal({ agentId });
-    expect([now?.state, now?.runtimeKind]).toEqual(["running", "holder"]);
+    expect([now?.terminalState, now?.runtimeKind]).toEqual(["running", "holder"]);
   });
 });

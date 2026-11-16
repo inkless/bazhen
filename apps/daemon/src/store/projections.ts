@@ -139,6 +139,10 @@ export function project(db: Statements, e: Recorded): void {
       });
       return;
     }
+    case "agent.ready":
+      EVENTS[e.type].payload.parse(e.payload);
+      advance(db, e.id, e.entityId, ["harness.ready", null]);
+      return;
     case "agent.failed":
       advance(db, e.id, e.entityId, ["launch.rejected", "runtime.rejected"]);
       return;

@@ -150,6 +150,19 @@ export class SessionBinding {
     }
   }
 
+  /**
+   * Whether an owned hook of a starting agent came from the TUI its start launched: its sign of
+   * life (foundation-design §4.5). A resumed TUI keeps the session, so the session alone can't
+   * tell it from a hook the last process left behind, and it can report before its start is
+   * recorded, so this waits for that first, as a rebind does.
+   */
+  async startedHere(agentId: string, ppid: number): Promise<boolean> {
+    if (this.store.agentTerminal({ agentId })?.state !== "starting") return false;
+    await this.started(agentId);
+    const { panePid } = this.store.claudeBinding(agentId);
+    return panePid !== null && (await ranByPane(this.table, ppid, panePid));
+  }
+
   private async rebindIfPane(agentId: string, sessionId: string, ppid: number): Promise<boolean> {
     // A TUI started again can report its new session before its start is recorded, while there
     // is no pane to check it against; the start, once recorded, may have bound it already.
@@ -166,9 +179,15 @@ export class SessionBinding {
     return true;
   }
 
-  /** Resolves once the agent is no longer starting, or after `startWaitMs` if it stays so. */
+  /**
+   * Resolves once the agent's start is recorded, or after `startWaitMs` if it isn't. That is its
+   * terminal confirmed, not the agent running: a SessionStart is what makes it run.
+   */
   private started(agentId: string): Promise<void> {
-    const starting = () => this.store.agentTerminal({ agentId })?.state === "starting";
+    const starting = () => {
+      const found = this.store.agentTerminal({ agentId });
+      return found?.state === "starting" && found.terminalState !== "running";
+    };
     if (!starting()) return Promise.resolve();
     return new Promise((resolve) => {
       const done = () => {

@@ -81,6 +81,7 @@ const SAYS: Record<AttentionKind, string> = {
   undeliverable: "A message could not be delivered",
   escalation: "The agent needs you",
   task_done: "A task is done",
+  stuck_starting: "An agent hasn't started: look for a dialog in its terminal",
 };
 
 /**

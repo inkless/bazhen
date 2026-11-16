@@ -21,7 +21,7 @@ const signalsBefore = (agent: Agent | undefined, ts: string) =>
 const messageOf = async (daemon: Daemon, messageId: string) =>
   (await snapshot(daemon)).messages.find((m) => m.id === messageId);
 
-/** A daemon with one Claude Code agent up and showing its banner. */
+/** A daemon with one Claude Code agent up, running and showing its banner. */
 async function withLiveAgent(): Promise<{ daemon: Daemon; agent: LaunchAgentResponse }> {
   const daemon = await Daemon.start({ modelUrl: model.url });
   const agent = await daemon.launch("agent", "claude-code");
@@ -30,6 +30,7 @@ async function withLiveAgent(): Promise<{ daemon: Daemon; agent: LaunchAgentResp
     "the agent's banner",
     30_000,
   );
+  await daemon.running(agent.agentId);
   return { daemon, agent };
 }
 
@@ -109,6 +110,7 @@ describe("a running daemon whose tmux server dies", () => {
       });
     const resumed = await relaunch("resume", false);
     const fresh = await relaunch("fresh", true);
+    await daemon.running(agent.agentId);
     const after = await agentOf(daemon, agent.agentId);
     expect([
       lost?.resumable,
@@ -178,6 +180,7 @@ describe("an agent lost with its tmux server, relaunched", () => {
       method: "POST",
       body: { idempotencyKey: "relaunch", generation: lost?.generation, theme: "light" },
     });
+    await daemon.running(agent.agentId);
     const relaunched = await agentOf(daemon, agent.agentId);
     expect([
       res.status,

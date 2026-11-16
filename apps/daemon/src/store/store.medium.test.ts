@@ -22,6 +22,7 @@ import {
   PANE_PID,
   register,
   resumesClaude,
+  ready,
   settled,
   testView,
   visit,
@@ -623,7 +624,7 @@ describe("Store", () => {
     store.close();
   });
 
-  it("moves a launched agent and its terminal to running together, once", () => {
+  it("moves a launched agent's terminal to running, and the agent once its harness is up, each once", () => {
     const path = dbPath();
     const store = Store.open(path);
     const { agentId, terminalId } = launch(store, withEnvironment(store));
@@ -631,8 +632,14 @@ describe("Store", () => {
       { id: agentId, state: "starting", terminalId },
     ]);
     store.append(running(agentId));
-    expect(store.snapshot(testView).agents).toMatchObject([{ id: agentId, state: "running" }]);
+    const up = [store.snapshot(testView).agents[0]?.state, store.terminalState(terminalId)];
     expect(() => store.append(running(agentId))).toThrow(InvalidTransition);
+    ready(store, agentId);
+    expect([up, store.snapshot(testView).agents[0]?.state]).toEqual([
+      ["starting", "running"],
+      "running",
+    ]);
+    expect(() => ready(store, agentId)).toThrow(InvalidTransition);
     store.close();
     const raw = new DatabaseSync(path);
     expect(
@@ -1029,10 +1036,10 @@ describe("Store event log", () => {
     const [, newest] = visit(store, terminalId);
     age(path);
     const epoch = store.epoch();
-    // Nine events, two per batch: the first visit's end (id 5) falls behind in the third.
+    // Ten events, two per batch: the first visit's end (id 6) falls behind in the fourth.
     const faults: (string | null)[] = [];
     while (store.pruneBatch(CUTOFF, 2)) faults.push(store.cursorFault(epoch, firstEnd));
-    expect(faults).toEqual([null, null, "stale", "stale"]);
+    expect(faults).toEqual([null, null, null, "stale", "stale"]);
     expect(store.cursorFault(epoch, newest)).toBeNull();
     store.close();
   });
@@ -1311,7 +1318,7 @@ describe("Store relaunch", () => {
       agent?.generation,
       agent?.usage,
       store.terminalState(lostTerminal),
-    ]).toEqual(["running", terminalId, 1, undefined, "lost"]);
+    ]).toEqual(["starting", terminalId, 1, undefined, "lost"]);
     store.close();
   });
 

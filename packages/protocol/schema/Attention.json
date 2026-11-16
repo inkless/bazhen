@@ -50,7 +50,8 @@
         "failed",
         "undeliverable",
         "escalation",
-        "task_done"
+        "task_done",
+        "stuck_starting"
       ]
     },
     "taskId": {

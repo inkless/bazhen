@@ -69,10 +69,11 @@ async function unreachableThenForced(recovered: boolean) {
 }
 
 /**
- * A running agent whose environment records closes, respawns and signals, fails them on demand,
- * and reports exits.
+ * A running agent, or with `starting` one whose harness hasn't come up, whose environment records
+ * closes, respawns and signals, fails them on demand, and reports exits.
  */
 async function running({
+  starting = false,
   session = true,
   duringRespawn = (_store: Store, _agentId: string) => {},
   maxOpen = 100,
@@ -87,45 +88,52 @@ async function running({
   let failure: Error | undefined;
   const statesAtClose: (string | undefined)[] = [];
   let report: ((ref: RuntimeRef, status: ExitStatus) => void) | undefined;
-  const { store, agentId, terminalId, environment } = await withAgent((s) => {
-    const environmentId = localEnvironmentId(s);
-    const base = fakeEnvironment(s, async (l) => {
-      if (failure !== undefined) throw failure;
-      launches.push(l);
-      const fresh = { environmentId, kind: "claude-session" as const, id: `s-${launches.length}` };
+  const { store, agentId, terminalId, environment } = await withAgent(
+    (s) => {
+      const environmentId = localEnvironmentId(s);
+      const base = fakeEnvironment(s, async (l) => {
+        if (failure !== undefined) throw failure;
+        launches.push(l);
+        const fresh = {
+          environmentId,
+          kind: "claude-session" as const,
+          id: `s-${launches.length}`,
+        };
+        return {
+          runtime: {
+            terminalId: l.terminalId,
+            runtime: "tmux",
+            locator: { generation: String(l.generation) },
+          },
+          externalRef: l.resume ?? (session ? fresh : null),
+          ...(l.options.theme && { theme: l.options.theme }),
+        };
+      });
       return {
-        runtime: {
-          terminalId: l.terminalId,
-          runtime: "tmux",
-          locator: { generation: String(l.generation) },
+        ...base,
+        respawn: async (r) => {
+          if (failure !== undefined) throw failure;
+          respawned.push(r);
+          duringRespawn(s, r.agentId);
+          return base.respawn(r);
         },
-        externalRef: l.resume ?? (session ? fresh : null),
-        ...(l.options.theme && { theme: l.options.theme }),
+        signal: async (_refs, signal) => {
+          if (failure !== undefined) throw failure;
+          signalled.push(signal);
+        },
+        close: async (refs) => {
+          statesAtClose.push(s.snapshot(testView).agents[0]?.state);
+          if (failure !== undefined) throw failure;
+          closed.push(refs);
+        },
+        onExit: (cb) => {
+          report = cb;
+          return () => (report = undefined);
+        },
       };
-    });
-    return {
-      ...base,
-      respawn: async (r) => {
-        if (failure !== undefined) throw failure;
-        respawned.push(r);
-        duringRespawn(s, r.agentId);
-        return base.respawn(r);
-      },
-      signal: async (_refs, signal) => {
-        if (failure !== undefined) throw failure;
-        signalled.push(signal);
-      },
-      close: async (refs) => {
-        statesAtClose.push(s.snapshot(testView).agents[0]?.state);
-        if (failure !== undefined) throw failure;
-        closed.push(refs);
-      },
-      onExit: (cb) => {
-        report = cb;
-        return () => (report = undefined);
-      },
-    };
-  });
+    },
+    { starting },
+  );
   const budget = storeBudget(store, maxOpen);
   const promptDir = mkdtempSync(join(tmpdir(), "bz-prompts-"));
   const prompts = new Prompts(
@@ -345,7 +353,7 @@ describe("agent lifecycle", () => {
     exit("0");
     const res = await lifecycle.respawn(agentId, { idempotencyKey: "r", generation: 0 });
     expect([res.eventIds.length, respawned[0]?.generation]).toEqual([2, 1]);
-    expect(agent()).toMatchObject({ id: agentId, state: "running", generation: 1, exit: null });
+    expect(agent()).toMatchObject({ id: agentId, state: "starting", generation: 1, exit: null });
   });
 
   it("settles what the exited process held before a respawn starts the next one", async () => {
@@ -444,7 +452,7 @@ describe("agent lifecycle", () => {
     exit("0");
     const afterStale = agent()?.state;
     exit("1", { type: "exited", code: 4 });
-    expect([afterStale, agent()?.exit]).toEqual(["running", { type: "exited", code: 4 }]);
+    expect([afterStale, agent()?.exit]).toEqual(["starting", { type: "exited", code: 4 }]);
   });
 
   it("returns a rejected respawn to exited, still closable, and says why", async () => {
@@ -490,7 +498,7 @@ describe("agent lifecycle", () => {
     ).rejects.toThrow(EnvironmentUnavailable);
     fail();
     const again = await lifecycle.respawn(agentId, { idempotencyKey: "r", generation: 0 });
-    expect([again.eventIds.length, agent()?.state]).toEqual([2, "running"]);
+    expect([again.eventIds.length, agent()?.state]).toEqual([2, "starting"]);
   });
 
   it("records a respawn the harness refuses as refused, in its own words, and passes it on", async () => {
@@ -517,6 +525,26 @@ describe("agent lifecycle", () => {
     expect(payloads(store, agentId, "agent.respawn_rejected")).toEqual([
       { reason: "unavailable", detail: "tmux unreachable; api_key = [redacted]" },
     ]);
+  });
+
+  it("ends, signals and closes an agent whose harness never came up", async () => {
+    const ended = await running({ starting: true });
+    ended.exit("0");
+    const stuck = await running({ starting: true });
+    const waiting = stuck.agent()?.state;
+    await stuck.lifecycle.signal(stuck.agentId, {
+      idempotencyKey: "s",
+      generation: 0,
+      signal: "SIGINT",
+    });
+    await stuck.lifecycle.close(stuck.agentId, { idempotencyKey: "c", generation: 0 });
+    expect([
+      ended.agent()?.state,
+      waiting,
+      stuck.signalled,
+      stuck.closed.length,
+      stuck.agent()?.state,
+    ]).toEqual(["exited", "starting", ["SIGINT"], 1, "closed"]);
   });
 
   it("signals a running agent and records it, without changing its state", async () => {
@@ -568,7 +596,7 @@ describe("relaunching a lost agent", () => {
       after?.externalRef?.id,
       launches[1]?.resume?.id,
       replaced,
-    ]).toEqual(["running", false, 1, "light", "s-1", "s-1", [agentId]]);
+    ]).toEqual(["starting", false, 1, "light", "s-1", "s-1", [agentId]]);
   });
 
   it("starts a relaunched agent's session under the name the agent has now", async () => {
@@ -589,7 +617,7 @@ describe("relaunching a lost agent", () => {
     expect([events(), launches.length, replaced]).toEqual([before, 1, []]);
     await lifecycle.relaunch(agentId, { idempotencyKey: "f", generation: 0, fresh: true });
     expect([agent()?.state, launches[1]?.resume, agent()?.externalRef]).toEqual([
-      "running",
+      "starting",
       null,
       null,
     ]);
@@ -625,7 +653,7 @@ describe("relaunching a lost agent", () => {
       [agent()?.state, agent()?.generation],
     ]).toEqual([
       ["lost", true, ["close", "relaunch"]],
-      ["running", 1],
+      ["starting", 1],
     ]);
   });
 
@@ -700,7 +728,7 @@ describe("an agent's terminal, against the terminal budget", () => {
     exit("0");
     expect(() => budget.admit()).toThrow(TerminalLimit);
     await lifecycle.respawn(agentId, { idempotencyKey: "r", generation: 0 });
-    expect(agent()?.state).toBe("running");
+    expect(agent()?.state).toBe("starting");
   });
 
   it("gives its slot back once it is closed", async () => {
@@ -713,7 +741,7 @@ describe("an agent's terminal, against the terminal budget", () => {
   it("relaunches a lost agent into the slot its lost terminal gave back", async () => {
     const { lifecycle, agentId, agent } = await lost({ maxOpen: 1 });
     await lifecycle.relaunch(agentId, { idempotencyKey: "l", generation: 0 });
-    expect(agent()?.state).toBe("running");
+    expect(agent()?.state).toBe("starting");
   });
 
   it("refuses a relaunch with no slot left, leaving the agent lost and recording nothing", async () => {

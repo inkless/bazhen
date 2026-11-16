@@ -1,7 +1,15 @@
 import { hostname } from "node:os";
 import { basename } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
-import { givePageAgentTranscript, kill, launch, patchState, screen, uniqueName } from "./page.ts";
+import {
+  generationOf,
+  givePageAgentTranscript,
+  kill,
+  launch,
+  patchState,
+  screen,
+  uniqueName,
+} from "./page.ts";
 
 /**
  * Launches an agent from outside the page, as another device would, under `name` if given;
@@ -81,12 +89,10 @@ test("shows the fleet under its host, and closes an agent from its workspace", a
   await expect(agents.getByRole("heading", { level: 2 })).toHaveText(new RegExp(`^${hostname()}`));
   await expect(agents.locator('[aria-current="true"]')).toBeVisible();
   // Launched without a name, it is given its project's next number; then its project and harness.
-  await expect(workspace(page).locator(".workspace-head > :is(h2, .meta, .state)")).toHaveText([
-    /^[\w-]+-\d+$/,
-    basename(String(process.env["BZ_E2E_WORK"])),
-    "claude-code",
-    "running",
-  ]);
+  await expect(workspace(page).locator(".workspace-head > :is(h2, .meta, .state)")).toHaveText(
+    [/^[\w-]+-\d+$/, basename(String(process.env["BZ_E2E_WORK"])), "claude-code", "running"],
+    { timeout: 20_000 },
+  );
 
   await workspace(page).getByText("Attach from a terminal").click();
   await expect(workspace(page).locator(".attach code")).toContainText(" attach-session -t ");
@@ -209,7 +215,9 @@ test("respawns an agent whose process ended, onto a fresh terminal", async ({ pa
   await givePageAgentTranscript(page, agentId);
 
   await workspace(page).getByRole("button", { name: "Respawn" }).click();
-  await expect(stateOf(page, "running")).toBeVisible({ timeout: 20_000 });
+  // The conversation it was given is no real one, so the new TUI gives up on it and ends, never
+  // running: what is tested here is the new process in the terminal, not the resume.
+  await expect.poll(() => generationOf(page, agentId), { timeout: 20_000 }).toBe(1);
   await expect.poll(() => screen(page), { timeout: 20_000 }).toContain("Claude Code");
 });
 
@@ -293,7 +301,7 @@ test("the close confirm is a modal: Escape, Cancel and a tap outside each leave 
   await page.mouse.click(2, 2);
   await expect(dialog).toHaveCount(0);
 
-  await expect(stateOf(page, "running")).toBeVisible();
+  await expect(stateOf(page, "running")).toBeVisible({ timeout: 20_000 });
   expect(closes).toEqual([]);
 });
 

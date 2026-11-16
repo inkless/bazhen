@@ -3,7 +3,12 @@ import { messageText } from "@bazhen/harness-codex";
 import { newId } from "@bazhen/core";
 import { Mailbox } from "../mailbox/mailbox.ts";
 import { UnknownAgent } from "../store/store.ts";
-import { withCodexAgents, testView } from "../testing/fixtures.ts";
+import {
+  ready,
+  withCodexAgents,
+  withStartingCodexAgentsOn,
+  testView,
+} from "../testing/fixtures.ts";
 import { CodexMail } from "./mail.ts";
 
 /**
@@ -16,8 +21,12 @@ async function mailFor(
   refuses: (args: readonly string[]) => boolean = () => false,
   startsTurn = false,
   held: (agentId: string) => boolean = () => false,
+  starting = false,
 ) {
-  const { store, agentOn } = await withCodexAgents("thr-1", "thr-2", null);
+  const agents = starting
+    ? withStartingCodexAgentsOn("tmux", "thr-1", "thr-2", null)
+    : withCodexAgents("thr-1", "thr-2", null);
+  const { store, agentOn } = await agents;
   const agentId = agentOn("thr-1");
   const ran: (readonly string[])[] = [];
   const turn = (threadId: string, text: string) =>
@@ -125,6 +134,21 @@ describe("Codex mail", () => {
     mail.deliverQueued(agentId);
     await expect.poll(() => stateOf(id)).toBe("queued_in_codex");
     expect(ran.map((args) => args[2])).toEqual(["thr-new"]);
+  });
+
+  it("hands nothing to Codex for an agent whose TUI isn't up, and all of it once it runs", async () => {
+    const { ran, send, stateOf, store, mail, agentOn } = await mailFor(
+      undefined,
+      false,
+      undefined,
+      true,
+    );
+    const id = await send("hello");
+    const before = [stateOf(id), ran.length];
+    ready(store, agentOn("thr-1"), "codex_title");
+    mail.deliverQueued(agentOn("thr-1"));
+    await expect.poll(() => stateOf(id)).toBe("queued_in_codex");
+    expect(before).toEqual(["queued", 0]);
   });
 
   it("stores it in the Codex home when no app-server takes it", async () => {

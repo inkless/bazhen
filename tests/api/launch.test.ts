@@ -64,6 +64,7 @@ describe("launching an agent", () => {
 
   it("shows a launched agent as running in the state snapshot", async () => {
     const { agentId } = LaunchAgentResponse.parse((await launch("second")).body);
+    await daemon.running(agentId);
     const state = StateSnapshot.parse((await daemon.request("/v1/state")).body);
     expect(state.agents.find((a) => a.id === agentId)).toMatchObject({
       harness: "claude-code",

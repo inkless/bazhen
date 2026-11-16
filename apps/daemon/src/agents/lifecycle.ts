@@ -15,7 +15,6 @@ import {
 } from "@bazhen/core";
 import {
   AgentCommandResponse,
-  type AgentState,
   type CloseAgentRequest,
   type EventPayload,
   type EventType,
@@ -137,7 +136,7 @@ export class Lifecycle {
    */
   close(agentId: string, req: CloseAgentRequest): Promise<AgentCommandResponse> {
     // Force only finishes a close already refused: anything else still ends its terminal.
-    const accepts = req.force === true ? (state: AgentState) => state === "closing" : closable;
+    const accepts = req.force === true ? (a: Commandable) => a.state === "closing" : closable;
     return this.command("close", agentId, req, accepts, async (found) => {
       if (found.state === "closed") return () => [];
       const closing =
@@ -327,7 +326,7 @@ export class Lifecycle {
     name: string,
     agentId: string,
     req: { readonly idempotencyKey: string; readonly generation: number },
-    accepts: (state: AgentState) => boolean,
+    accepts: (a: Commandable) => boolean,
     act: (found: AgentTerminal) => Promise<() => number[]>,
   ): Promise<AgentCommandResponse> {
     const request = { command: name, agentId, ...req };
@@ -338,7 +337,7 @@ export class Lifecycle {
       if (prior !== undefined) return prior;
       const found = this.store.agentTerminal({ agentId });
       if (found === undefined) throw new UnknownAgent(agentId);
-      if (!accepts(found.state)) throw new StateConflict(`agent ${agentId}`, found.state);
+      if (!accepts(found)) throw new StateConflict(`agent ${agentId}`, found.state);
       if (found.generation !== req.generation)
         throw new StaleGeneration(`agent ${agentId}`, found.generation);
       const last = await act(found);
@@ -361,11 +360,11 @@ export class Lifecycle {
 
 type AgentEventType = Extract<EventType, `agent.${string}`>;
 
-const closable = (state: AgentState) =>
-  state === "closed" || agentCommands(state).includes("close");
-const respawnable = (state: AgentState) => agentCommands(state).includes("respawn");
-const relaunchable = (state: AgentState) => agentCommands(state).includes("relaunch");
-const running = (state: AgentState) => agentCommands(state).includes("signal");
+type Commandable = Pick<AgentTerminal, "state" | "terminalState">;
+const closable = (a: Commandable) => a.state === "closed" || agentCommands(a).includes("close");
+const respawnable = (a: Commandable) => agentCommands(a).includes("respawn");
+const relaunchable = (a: Commandable) => agentCommands(a).includes("relaunch");
+const running = (a: Commandable) => agentCommands(a).includes("signal");
 
 function rejection(cause: unknown): EventPayload<"agent.respawn_rejected"> {
   const detail = failureDetail(cause);

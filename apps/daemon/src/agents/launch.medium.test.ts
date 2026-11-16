@@ -101,7 +101,7 @@ describe("launchAgent", () => {
     );
   });
 
-  it("records the agent before starting it, then running with its harness session", async () => {
+  it("records the agent before starting it, then its terminal on its harness session, still starting", async () => {
     const { store, deps } = setup();
     const answer = await launchAgent(deps, request);
     expect(store.events(0).map((e) => e.type)).toEqual([
@@ -114,10 +114,19 @@ describe("launchAgent", () => {
         id: answer.agentId,
         terminalId: answer.terminalId,
         project: "repo",
-        state: "running",
+        state: "starting",
         externalRef: { environmentId: deps.environment.id, kind: "claude-session", id: "s-1" },
       }),
     ]);
+    expect(store.agentTerminal({ agentId: answer.agentId })?.terminalState).toBe("running");
+  });
+
+  // Its harness may wait on a dialog for as long as the human takes.
+  it("answers a settled launch, and frees its agent's slot, without waiting on its harness", async () => {
+    const { store, deps } = setup();
+    const { agentId } = await launchSettled(deps, request);
+    const state = store.snapshot(testView).agents[0]?.state;
+    expect([state, deps.queue.busy(agentId)]).toEqual(["starting", false]);
   });
 
   it("launches in the daemon user's home for a ~/ directory", async () => {
