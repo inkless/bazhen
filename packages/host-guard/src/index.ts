@@ -68,7 +68,6 @@ export {
 } from "./notify.ts";
 export {
   CAPPED_ENV,
-  MIN_SYSTEMD,
   SLICE,
   cappedRunRefusal,
   cappedScope,
@@ -91,3 +90,14 @@ export {
   type HostPtys,
   type PtySource,
 } from "./ptys.ts";
+export {
+  MEMORY_MAX,
+  MIN_SYSTEMD,
+  TERMINALS_SLICE,
+  inTerminalScope,
+  probeContainment,
+  terminalScope,
+  type Containment,
+  type ScopeLaunch,
+  type TerminalCaps,
+} from "./scope.ts";

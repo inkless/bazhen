@@ -1,11 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   CAPPED_ENV,
-  MIN_SYSTEMD,
   cappedRunRefusal,
   cgroupLimit,
   cappedScope,
-  cgroupOf,
   chooseMode,
   clampMemory,
   cpuLimit,
@@ -26,6 +24,7 @@ import {
   type ModeDeps,
   type Verdict,
 } from "./cap.ts";
+import { MIN_SYSTEMD, cgroupOf } from "./scope.ts";
 
 const GIB = 1024 ** 3;
 const cap = { memory: 8 * GIB, timeMs: 20 * 60_000 };

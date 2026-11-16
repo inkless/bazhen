@@ -11,9 +11,19 @@
 // signals a pid read from a listing.
 
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, watch, type FSWatcher } from "node:fs";
+import { existsSync, readdirSync, watch, type FSWatcher } from "node:fs";
 import { availableParallelism, totalmem } from "node:os";
+import {
+  MIN_SYSTEMD,
+  PROBE_SCRIPT,
+  cgroupOf,
+  parseProbe,
+  readText,
+  scopeArgs,
+  systemdVersion,
+  uniqueUnit,
+  type ProbeReading,
+} from "./scope.ts";
 import { isAlive, rethrowUnsafe, signalGroup, spawnGroup } from "./signal.ts";
 
 export interface Cap {
@@ -36,8 +46,6 @@ export const SLICE = "bazhen-tests.slice";
 /** Where systemd puts `SLICE`: a dash in a slice's name nests it under the slice before it. */
 const SLICE_DIR = "bazhen.slice/bazhen-tests.slice";
 const UNIT = /^bazhen-capped-[\w-]+\.scope$/;
-/** The first systemd whose scopes take `OOMPolicy`; older ones end the whole scope instead. */
-export const MIN_SYSTEMD = 253;
 const MIB = 1024 ** 2;
 const STOP_GRACE_MS = 10_000;
 const STEP_TIMEOUT_MS = 10_000;
@@ -75,17 +83,6 @@ export function cgroupLimit(read = readText): number {
 
 /** What all capped runs together may use: most of the machine, never all of it. */
 export const sliceMemory = (total = totalmem()) => wholeMib(total * 0.6);
-
-const readText = (path: string): string | undefined => {
-  try {
-    return readFileSync(path, "utf8");
-  } catch {
-    return undefined;
-  }
-};
-
-/** The unified-hierarchy cgroup a `/proc/<pid>/cgroup` names. */
-export const cgroupOf = (text: string) => /^0::(\/\S*)$/m.exec(text)?.[1];
 
 /**
  * The memory cap of the capped scope this process runs in, read from the kernel rather than the
@@ -143,41 +140,26 @@ export function fallbackWatchdog(
 
 export function scopeArgv(unit: string, cap: Cap, command: string, args: readonly string[]) {
   return [
-    "--user",
-    "--scope",
-    "--quiet",
-    `--unit=${unit}`,
-    `--slice=${SLICE}`,
-    "-p",
-    `MemoryMax=${cap.memory}`,
-    "-p",
-    "MemorySwapMax=0",
-    "-p",
-    "OOMPolicy=continue",
-    "-p",
-    `RuntimeMaxSec=${Math.ceil(cap.timeMs / 1000)}`,
-    "-p",
-    "TimeoutStopSec=10",
-    // A scope that failed (timed out, or killed) would otherwise stay listed until reset.
-    "-p",
-    "CollectMode=inactive-or-failed",
-    "--",
+    ...scopeArgs(unit, SLICE, [
+      `MemoryMax=${cap.memory}`,
+      "MemorySwapMax=0",
+      "OOMPolicy=continue",
+      `RuntimeMaxSec=${Math.ceil(cap.timeMs / 1000)}`,
+      "TimeoutStopSec=10",
+      // A scope that failed (timed out, or killed) would otherwise stay listed until reset.
+      "CollectMode=inactive-or-failed",
+    ]),
     command,
     ...args,
   ];
 }
 
-/** What a probe read from inside a scope started like a real one. */
-export interface ProbeReading {
-  readonly version?: number | undefined;
-  readonly memory?: string | undefined;
-  readonly swap?: string | undefined;
-  readonly slice?: string | undefined;
-  readonly sliceSwap?: string | undefined;
-}
-
 /** Whether a probe's reading shows systemd enforcing the caps it was asked for. */
-export function judgeProbe(cap: Cap, slice: number, got: ProbeReading): Verdict {
+export function judgeProbe(
+  cap: Cap,
+  slice: number,
+  got: ProbeReading & { readonly version?: number | undefined },
+): Verdict {
   if (got.version === undefined) return { ok: false, why: "systemd-run is missing" };
   if (got.version < MIN_SYSTEMD) {
     return { ok: false, why: `systemd ${got.version} is older than ${MIN_SYSTEMD}` };
@@ -199,18 +181,6 @@ export function judgeProbe(cap: Cap, slice: number, got: ProbeReading): Verdict 
   return { ok: true };
 }
 
-const PROBE_SCRIPT = `
-const { readFileSync: r } = require("node:fs");
-const at = (p) => { try { return r(p, "utf8"); } catch { return undefined; } };
-const cg = "/sys/fs/cgroup" + /^0::(\\/\\S*)$/m.exec(at("/proc/self/cgroup") ?? "")?.[1];
-const slice = cg.slice(0, cg.lastIndexOf("/"));
-process.stdout.write(JSON.stringify({
-  memory: at(cg + "/memory.max"),
-  swap: at(cg + "/memory.swap.max"),
-  slice: at(slice + "/memory.max"),
-  sliceSwap: at(slice + "/memory.swap.max"),
-}));`;
-
 function output(
   command: string,
   args: readonly string[],
@@ -223,8 +193,7 @@ function output(
   });
 }
 
-// Unique across pid reuse, so a journal line about an earlier unit of the same name never counts.
-const unitName = () => `bazhen-capped-${process.pid}-${randomBytes(6).toString("hex")}.scope`;
+const unitName = () => uniqueUnit(`bazhen-capped-${process.pid}`);
 
 /**
  * Whether systemd enforces `cap` here: it sets the shared slice's cap, then starts a scope like a
@@ -232,9 +201,8 @@ const unitName = () => `bazhen-capped-${process.pid}-${randomBytes(6).toString("
  * `MemoryMax` and enforces nothing, and only reading it back tells the two apart.
  */
 export async function probeSystemd(cap: Cap, slice = sliceMemory()): Promise<Verdict> {
-  const versionText = await output("systemd-run", ["--version"]);
-  const version = Number(/^systemd (\d+)/.exec(versionText ?? "")?.[1]);
-  if (!Number.isInteger(version)) return judgeProbe(cap, slice, {});
+  const version = systemdVersion((await output("systemd-run", ["--version"])) ?? "");
+  if (version === undefined) return judgeProbe(cap, slice, {});
   if (version < MIN_SYSTEMD) return judgeProbe(cap, slice, { version });
   const set = await output("systemctl", [
     "--user",
@@ -250,24 +218,9 @@ export async function probeSystemd(cap: Cap, slice = sliceMemory()): Promise<Ver
     "systemd-run",
     scopeArgv(unitName(), probe, process.execPath, ["-e", PROBE_SCRIPT]),
   );
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(read ?? "");
-  } catch {
-    return { ok: false, why: "a probe scope wouldn't start" };
-  }
-  const field = (name: string) => {
-    const value: unknown =
-      typeof parsed === "object" && parsed !== null ? Reflect.get(parsed, name) : undefined;
-    return typeof value === "string" ? value : undefined;
-  };
-  return judgeProbe(cap, slice, {
-    version,
-    memory: field("memory"),
-    swap: field("swap"),
-    slice: field("slice"),
-    sliceSwap: field("sliceSwap"),
-  });
+  const reading = parseProbe(read ?? "");
+  if (reading === undefined) return { ok: false, why: "a probe scope wouldn't start" };
+  return judgeProbe(cap, slice, { version, ...reading });
 }
 
 /** The bytes a `memory.stat` counts as anonymous, and the kills a `memory.events` counts. */
