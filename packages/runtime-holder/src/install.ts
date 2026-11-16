@@ -28,10 +28,11 @@ const BAD = /^\.bad-[0-9a-f]{16}-[0-9a-f]{8}$/;
  */
 export const FRESH_MS = 10 * 60_000;
 /**
- * `ps` prints a path as it is only in printable ASCII: in the C locale, other bytes come out as
- * `?` or escaped, so no holder under such a directory would be found running.
+ * `ps` prints a path as it is only in printable ASCII less the backslash: in the C locale, other
+ * bytes come out as `?` or escaped, and BSD's `ps` doubles a backslash, so no holder under such a
+ * directory would be found running.
  */
-const PRINTABLE = /^[\x20-\x7e]+$/;
+const PRINTABLE = /^[\x20-\x5b\x5d-\x7e]+$/;
 const PS_MAX_BYTES = 16 << 20;
 const PS_TIMEOUT_MS = 5_000;
 const PS_ENV = { LC_ALL: "C", PATH: process.env["PATH"] ?? "/usr/bin:/bin" };

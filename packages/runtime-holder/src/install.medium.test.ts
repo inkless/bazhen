@@ -346,6 +346,13 @@ describe("the builds in use", () => {
     ]).toEqual([null, [], [OLD]]);
   });
 
+  it("are unknown under a directory with a backslash, which BSD's ps doubles", async () => {
+    const slashed = join(root, "a\\b", "holder");
+    mkdirSync(slashed, { recursive: true, mode: 0o700 });
+    const listed = ps([`77 ${uid} ${slashed}/${OLD}/bazhen-holder`]);
+    expect(await runningBuilds(slashed, uid, listed, SELF)).toBeNull();
+  });
+
   it("are read from the real ps, which lists this process", async () => {
     expect(await runningBuilds(dir, uid)).toEqual(new Set());
   });

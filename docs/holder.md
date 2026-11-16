@@ -17,7 +17,8 @@ opened from then on run the new build. Terminals already open keep the build the
 until they close, and `bazhen doctor` marks them as on an older build. At each start, the daemon
 removes the builds no process of yours runs, once they are ten minutes old. It removes nothing
 when `ps` can't say what runs: when it fails, when it doesn't list the daemon itself, or when
-the state directory's path isn't printable ASCII, which `ps` doesn't print as it is. Under such
+the state directory's path isn't printable ASCII without a backslash, which `ps` doesn't
+print as it is. Under such
 a path, old builds stay until you remove them.
 
 The daemon refuses to install into a `holder` directory that is a symlink, belongs to another
