@@ -1,6 +1,6 @@
-//! The daemon's answer to a call, read as the message the call expects. As the Node CLI read it,
-//! only the body counts: an answer is the message it holds, whatever its status, and anything
-//! else is refused with the status and the body as they came.
+//! The daemon's answer to a call, read as the message the call expects. Only the body counts:
+//! an answer is the message it holds, whatever its status, and anything else is refused with the
+//! status and the body as they came.
 
 use bazhen_client::Limits;
 use bazhen_client::framing::{body, split_head, status};

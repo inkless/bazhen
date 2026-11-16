@@ -41,7 +41,6 @@ Contributing, for people and agents: [AGENTS.md](AGENTS.md) and [docs/standards/
   socket (Rust); `pnpm build` builds it at `target/release/bazhen`. `bazhen start` finds the
   checkout from the binary's resolved path, three levels up, so link to the binary rather than
   copy it, and keep it under the checkout: a `CARGO_TARGET_DIR` elsewhere breaks `start`
-- `apps/cli` — the Node CLI `crates/bazhen` replaces
 - `crates/bazhen-hook` — `bazhen-hook`, the hook client harnesses run (Rust, standard library only)
 - `crates/bazhen-holder-proto` — `holder/1`, what the daemon and a PTY holder say (Rust)
 - `crates/bazhen-holder` — `bazhen-holder`, the process that holds one terminal's PTY and child (Rust)

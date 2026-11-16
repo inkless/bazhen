@@ -40,7 +40,6 @@ const PACKAGE_DIR: Record<string, string> = {
   "@bazhen/harness-codex": "packages/harness-codex",
   "@bazhen/daemon": "apps/daemon",
   "@bazhen/web": "apps/web",
-  "@bazhen/cli": "apps/cli",
 };
 
 const RUNTIME_LIBS = ["node-pty", "hono", "@hono/*", "ws", "@xterm/*"];
@@ -136,23 +135,7 @@ export const MATRIX: Area[] = [
     platformFree: true,
     thirdParty: RUNTIME_LIBS,
   },
-  { dir: "apps/daemon", banned: ["@bazhen/web", "@bazhen/cli"] },
-  // The CLI holds no logic: it calls the daemon's API through the daemon's own socket client and
-  // path resolution, and runs the daemon's own start-up, rather than copies of them.
-  {
-    dir: "apps/cli",
-    banned: [
-      "@bazhen/core",
-      "@bazhen/runtime-tmux",
-      "@bazhen/runtime-holder",
-      "@bazhen/env-local",
-      "@bazhen/harness-claude-code",
-      "@bazhen/harness-codex",
-      "@bazhen/host-guard",
-      "@bazhen/web",
-    ],
-    onlySubpaths: { "@bazhen/daemon": ["paths", "client", "start"] },
-  },
+  { dir: "apps/daemon", banned: ["@bazhen/web"] },
   // The black-box suite: it reaches the daemon only over its public surfaces. It may use
   // @bazhen/host-guard, a dependency-free safety guard rather than a daemon internal, to run tmux.
   {
@@ -197,11 +180,10 @@ export const MATRIX: Area[] = [
       "@bazhen/harness-claude-code",
       "@bazhen/harness-codex",
       "@bazhen/web",
-      "@bazhen/cli",
     ],
   },
-  // The CLI's black-box suite: the CLI as a process, against a fake daemon on its socket. It
-  // reaches the CLI only through its command line, so it holds whatever language the CLI is in.
+  // The CLI's black-box suite: the CLI (crates/bazhen) as a process, against a fake daemon on its
+  // socket. It reaches the CLI only through its command line.
   {
     dir: "tests/cli",
     medium: true,
@@ -214,7 +196,6 @@ export const MATRIX: Area[] = [
       "@bazhen/harness-claude-code",
       "@bazhen/harness-codex",
       "@bazhen/daemon",
-      "@bazhen/cli",
       "@bazhen/web",
     ],
   },

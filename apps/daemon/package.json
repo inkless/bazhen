@@ -6,9 +6,6 @@
   "exports": {
     "./pty": "./src/pty/node-pty.ts",
     "./stream": "./src/stream/hub.ts",
-    "./paths": "./src/config/paths.ts",
-    "./client": "./src/socket/client.ts",
-    "./start": "./src/start.ts",
     "./testing": "./src/testing/browser-terminal.ts"
   },
   "scripts": {
