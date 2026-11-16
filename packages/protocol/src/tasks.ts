@@ -1,10 +1,7 @@
 import { z } from "zod";
 import { AgentName, AgentRef } from "./agent-name.ts";
 import { HarnessId, Id, IdempotencyKey } from "./ids.ts";
-
-/** What an assignment lets its agent do on its task (foundation-design §3). */
-export const Role = z.enum(["coordinator", "lead", "worker"]);
-export type Role = z.infer<typeof Role>;
+import { Role } from "./roles.ts";
 
 export const TaskState = z.enum(["open", "done", "cancelled"]);
 export type TaskState = z.infer<typeof TaskState>;
@@ -144,7 +141,7 @@ export const DelegateTaskRequest = z
         name: AgentName.optional(),
       })
       .optional(),
-    role: Role.exclude(["coordinator"]).default("worker"),
+    role: Role.default("worker"),
     title: TaskTitle,
     brief: TaskBrief,
   })

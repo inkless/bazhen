@@ -9,6 +9,7 @@ export * from "./lease.ts";
 export * from "./machine.ts";
 export * from "./mailbox.ts";
 export * from "./notice.ts";
+export * from "./roles.ts";
 export * from "./runtime.ts";
 export * from "./shell.ts";
 export * from "./task.ts";

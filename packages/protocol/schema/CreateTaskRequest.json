@@ -39,11 +39,7 @@
         },
         "role": {
           "type": "string",
-          "enum": [
-            "coordinator",
-            "lead",
-            "worker"
-          ]
+          "pattern": "^[a-z][a-z0-9-]{0,31}$"
         }
       },
       "required": [

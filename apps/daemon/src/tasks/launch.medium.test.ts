@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { isId, LaunchFailed, newId, TaskRefused, type AgentSessionId } from "@bazhen/core";
 import { TerminalLimit } from "../terminals/budget.ts";
-import { inbox, taskFleet, testView } from "../testing/fixtures.ts";
+import { BUILTIN_BOOK, inbox, taskFleet, testView } from "../testing/fixtures.ts";
 import type { Raised } from "../attention/inbox.ts";
 import { MailTooLong, Tasks } from "./tasks.ts";
 
@@ -128,7 +128,13 @@ describe("delegating to a new agent", () => {
       maxLaunched: 5,
       maxDepth: 3,
     };
-    const tasks = new Tasks(store, mailbox, () => newId("attn"), failing);
+    const tasks = new Tasks(
+      store,
+      mailbox,
+      () => newId("attn"),
+      failing,
+      () => BUILTIN_BOOK,
+    );
     const req = { idempotencyKey: "d", launch, role: "worker" as const, ...sub };
     await expect(tasks.launchAndDelegate(coordinator, req)).rejects.toThrow(LaunchFailed);
     expect(store.snapshot(testView).tasks.map((t) => t.title)).toEqual(["Fix the build"]);
@@ -233,15 +239,21 @@ describe("delegating to a new agent", () => {
     const { store, mailbox, coordinator, parentId } = f;
     const raised: Raised[] = [];
     const launchedIds: string[] = [];
-    const tasks: Tasks = new Tasks(store, mailbox, (r) => (raised.push(r), newId("attn")), {
-      ...f.launcher,
-      launch: async (req, by) => {
-        const launched = await f.launcher.launch(req, by);
-        launchedIds.push(launched.agentId);
-        tasks.finish(null, parentId, { idempotencyKey: "x", outcome: "cancelled" });
-        return launched;
+    const tasks: Tasks = new Tasks(
+      store,
+      mailbox,
+      (r) => (raised.push(r), newId("attn")),
+      {
+        ...f.launcher,
+        launch: async (req, by) => {
+          const launched = await f.launcher.launch(req, by);
+          launchedIds.push(launched.agentId);
+          tasks.finish(null, parentId, { idempotencyKey: "x", outcome: "cancelled" });
+          return launched;
+        },
       },
-    });
+      () => BUILTIN_BOOK,
+    );
     await expect(tasks.launchAndDelegate(coordinator, launchRequest("d"))).rejects.toThrow(
       TaskRefused,
     );

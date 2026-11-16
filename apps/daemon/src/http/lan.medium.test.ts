@@ -51,6 +51,7 @@ const commands: LanParts["commands"] = {
   appVersion: "0.1.0",
   schemaVersion: () => 1,
   runtime: new FakeRuntime(),
+  roles: () => ({ roles: [], problems: [] }),
   state: () => ({
     epoch: "e1",
     eventId: 0,

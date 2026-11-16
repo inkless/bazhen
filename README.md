@@ -207,6 +207,7 @@ a task mails it the brief and the commands to answer with:
 | `bazhen task cancel <task> [--note …] [--cascade]`       | Cancel it                                                                            |
 | `bazhen agents`                                          | The agents running, by name and id, to delegate to                                   |
 | `bazhen whoami`                                          | Inside an agent: its name, id, tasks, and whom it reports to on each                 |
+| `bazhen roles`                                           | The roles defined, what each hands on, and any role file skipped                     |
 | `bazhen rename <agent> <name>`                           | Rename an agent; inside an agent, only itself                                        |
 | `bazhen escalate <question> [--task …]`                  | Inside an agent: put a question or problem in the human's inbox                      |
 | `bazhen delegate <agent> --title … --brief … [--task …]` | Inside an agent: hand part of a task it coordinates or leads to another agent        |
@@ -217,8 +218,19 @@ failed: the one it was launched with (`--name`), or `<project>-<n>`, whose numbe
 twice. Claude Code shows it as its session's name, which keeps the old one after a rename until the
 agent next starts. Mail stays with the agent's id, which a rename doesn't change.
 
-The human assigns any role. A coordinator gives the task to a lead or workers, a lead to workers,
-and a worker to no one. Ending an assignment ends everything granted under it. Every agent
+Roles are configuration. Bazhen ships four, coordinator, lead, worker and reviewer, each a
+Markdown file whose front matter says which roles it may hand on (`grants`), whether a task has
+only one (`singlePerTask`) and how many tasks an agent may hold in it at once
+(`maxActiveTasks`), and whose body is the role's prompt. A file
+`~/.config/bazhen/roles/<role>.md` replaces the built-in of its name whole, or adds a role, and
+takes effect at its next use. A file that doesn't parse is reported and skipped, and the built-in
+stands; `bazhen roles` lists both.
+
+The human assigns any role. As shipped, a coordinator gives the task to a lead, workers or
+reviewers, a lead to workers or reviewers, and a worker or reviewer to no one; a worker holds one
+task at a time. An agent whose role grants something runs the task: its `done` finishes it. One
+whose role grants nothing finishes only its own part, so a role file that drops a role's grants
+also takes away its say over the task. Ending an assignment ends everything granted under it. Every agent
 Bazhen launches is told these commands as it starts, beside its harness's own instructions. When an agent finishes a task you own, or a subtask falls to
 you, it shows in your inbox.
 

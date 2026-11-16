@@ -307,6 +307,7 @@ async function run(verb: string): Promise<number> {
   switch (verb) {
     case "agents":
     case "whoami":
+    case "roles":
     case "rename":
     case "task":
     case "delegate":

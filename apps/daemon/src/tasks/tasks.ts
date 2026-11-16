@@ -3,12 +3,14 @@ import {
   checkFinish,
   checkGrant,
   checkUnassign,
+  grantingAssignment,
   isId,
   newId,
   TaskRefused,
   type AgentSessionId,
   type AssignmentId,
   type Caller,
+  type RoleBook,
 } from "@bazhen/core";
 import {
   AssignTaskResponse,
@@ -60,6 +62,16 @@ export interface Launcher {
   readonly maxLaunched: number;
   /** How many launches down an agent may still launch another. */
   readonly maxDepth: number;
+}
+
+/** A role no definition has: `bazhen roles` lists those that do. */
+export class UnknownRole extends Error {
+  readonly role: string;
+
+  constructor(role: string) {
+    super(`no role is defined as ${role}: bazhen roles lists them`);
+    this.role = role;
+  }
 }
 
 export class UnknownTask extends Error {
@@ -132,20 +144,33 @@ export class Tasks {
 
   private readonly launcher: Launcher;
 
+  private readonly roles: () => RoleBook;
+
   /**
    * `raise` puts an item in the human's inbox, and answers with its id; `launcher` starts the
-   * agent a delegation launches.
+   * agent a delegation launches; `roles` are the role definitions in force now.
    */
   constructor(
     store: Store,
     mailbox: Pick<Mailbox, "send">,
     raise: (raised: Raised) => string,
     launcher: Launcher,
+    roles: () => RoleBook,
   ) {
     this.store = store;
     this.mailbox = mailbox;
     this.raise = raise;
     this.launcher = launcher;
+    this.roles = roles;
+  }
+
+  /**
+   * The roles in force, with `role` among them, or a refusal naming it. A command reads them once,
+   * so every check it makes sees the same definitions, an edit to a role file meanwhile included.
+   */
+  private defined(role: Role, book: RoleBook = this.roles()): RoleBook {
+    if (book.get(role) === undefined) throw new UnknownRole(role);
+    return book;
   }
 
   create(caller: Caller, req: CreateTaskRequest): CreateTaskResponse {
@@ -156,6 +181,7 @@ export class Tasks {
       (r) => CreateTaskResponse.parse(r),
       () => {
         this.checkCaller(caller);
+        const book = this.roles();
         const parentTaskId = req.parentTaskId ?? null;
         let delegatedFrom: AssignmentId | null = null;
         if (parentTaskId !== null) {
@@ -164,7 +190,7 @@ export class Tasks {
             throw new TaskRefused("conflict", `the parent task is ${parent.state}`);
           }
           // An agent's subtask is a delegation: it needs the authority delegating would.
-          if (caller !== null) delegatedFrom = checkDelegate(parent, caller, "worker");
+          if (caller !== null) delegatedFrom = grantingAssignment(parent, caller, book)?.id ?? null;
         }
         const taskId = newId("task");
         const created = this.store.append({
@@ -181,7 +207,8 @@ export class Tasks {
         });
         if (req.assign === undefined) return { taskId, assignmentId: null, eventIds: [created] };
         const from = parentTaskId === null || caller === null ? undefined : delegatedFrom;
-        const granted = this.grant(caller, taskId, req.assign, idempotencyKey, from);
+        const assigned = this.defined(req.assign.role, book);
+        const granted = this.grant(caller, taskId, req.assign, idempotencyKey, assigned, from);
         return { taskId, ...granted, eventIds: [created, ...granted.eventIds] };
       },
     );
@@ -195,7 +222,7 @@ export class Tasks {
       (r) => AssignTaskResponse.parse(r),
       () => {
         this.checkCaller(caller);
-        return this.grant(caller, taskId, req, idempotencyKey);
+        return this.grant(caller, taskId, req, idempotencyKey, this.defined(req.role));
       },
     );
   }
@@ -256,7 +283,7 @@ export class Tasks {
       () => {
         this.checkCaller(caller);
         const view = this.view(taskId);
-        const finish = checkFinish(view, caller, outcome, cascade);
+        const finish = checkFinish(view, caller, outcome, cascade, this.roles());
         const task = this.named(taskId);
         checkLength(finishedMail(task, outcome, this.who(caller), note));
         if (finish.kind === "assignment") {
@@ -439,10 +466,12 @@ export class Tasks {
     const prior = this.store.replay(idempotencyKey, asked, (r) => CreateTaskResponse.parse(r));
     if (prior !== undefined) return prior;
     // Everything that would refuse the delegation is checked before an agent is started for it.
-    const { parentTaskId } = this.checkDelegation(caller, req);
+    const book = this.defined(req.role);
+    const { parentTaskId } = this.checkDelegation(caller, req, book);
     const by = this.agentCaller(caller);
     const task = { id: newId("task"), title: req.title, brief: req.brief, parentTaskId };
-    checkLength(assignedMail(task, req.role, this.who(by)));
+    const grants = book.rules(req.role).grants;
+    checkLength(assignedMail(task, req.role, grants, this.who(by)));
     const key = `${idempotencyKey}:launch:${by}`;
     // A launch this command already made is replayed, not counted again against the limits.
     const fresh = this.store.recall(key) === undefined;
@@ -487,7 +516,8 @@ export class Tasks {
       asked,
       (r) => CreateTaskResponse.parse(r),
       () => {
-        const { parentTaskId, from } = this.checkDelegation(caller, req);
+        const book = this.defined(req.role);
+        const { parentTaskId, from } = this.checkDelegation(caller, req, book);
         if (agentId === caller) {
           throw new TaskRefused("forbidden", "an agent can't delegate to itself");
         }
@@ -515,18 +545,18 @@ export class Tasks {
           },
         });
         const grant = { agentId, role: req.role };
-        const granted = this.grant(caller, taskId, grant, req.idempotencyKey, from);
+        const granted = this.grant(caller, taskId, grant, req.idempotencyKey, book, from);
         return { taskId, ...granted, eventIds: [created, ...granted.eventIds] };
       },
     );
   }
 
   /** The parent a delegation is part of, and the assignment it hands on from, or a refusal. */
-  private checkDelegation(caller: Caller, req: DelegateTaskRequest) {
+  private checkDelegation(caller: Caller, req: DelegateTaskRequest, book: RoleBook) {
     if (caller === null) throw new TaskRefused("forbidden", "only an agent delegates");
     this.checkCaller(caller);
-    const parentTaskId = req.fromTaskId ?? this.delegatingTask(caller);
-    return { parentTaskId, from: checkDelegate(this.view(parentTaskId), caller, req.role) };
+    const parentTaskId = req.fromTaskId ?? this.delegatingTask(caller, book);
+    return { parentTaskId, from: checkDelegate(this.view(parentTaskId), caller, req.role, book) };
   }
 
   /** The caller, as an agent: only an agent delegates. */
@@ -558,10 +588,10 @@ export class Tasks {
   }
 
   /** The one task the agent coordinates or leads, which an unqualified delegate is part of. */
-  private delegatingTask(agentId: string): string {
+  private delegatingTask(agentId: string, book: RoleBook): string {
     const held = this.store
       .assignments({ agentId }, "active")
-      .filter((a) => a.role !== "worker")
+      .filter((a) => book.rules(a.role).grants.length > 0)
       .map((a) => a.taskId);
     const [only, ...more] = [...new Set(held)];
     if (only !== undefined && more.length === 0) return only;
@@ -578,6 +608,7 @@ export class Tasks {
     taskId: string,
     req: { readonly agentId: string; readonly role: Role },
     key: string,
+    book: RoleBook,
     delegatedFrom?: AssignmentId | null,
   ): AssignTaskResponse {
     const agentId = req.agentId;
@@ -585,8 +616,12 @@ export class Tasks {
     const view = this.view(taskId);
     const detail = this.store.taskDetail(taskId);
     if (detail === undefined) throw new UnknownTask(taskId);
-    const body = checkLength(assignedMail(detail, req.role, this.who(caller)));
-    const checked = checkGrant(view, caller, { agentId, role: req.role });
+    const grants = book.rules(req.role).grants;
+    const body = checkLength(assignedMail(detail, req.role, grants, this.who(caller)));
+    const held = this.store
+      .assignments({ agentId }, "active")
+      .filter((a) => a.role === req.role).length;
+    const checked = checkGrant(view, caller, { agentId, role: req.role }, book, held);
     const parentAssignmentId = delegatedFrom === undefined ? checked : delegatedFrom;
     const assignmentId = newId("asgn");
     const granted = this.store.append({

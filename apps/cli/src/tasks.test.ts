@@ -93,6 +93,9 @@ const usage = (argv: string[], context = ctx()) => {
   return "accepted";
 };
 
+const delegate = (role: string) =>
+  usage(["delegate", OTHER, "--title", "t", "--brief", "b", "--role", role], ctx(AGENT));
+
 describe("bazhen task verbs", () => {
   it("delegates as a worker unless told otherwise, from the task named", () => {
     const verb = taskVerb(
@@ -109,6 +112,32 @@ describe("bazhen task verbs", () => {
         brief: "b",
         fromTaskId: TASK,
       },
+    ]);
+  });
+
+  it("delegates in any role the daemon may define, and refuses only one no role could be named", () => {
+    expect([delegate("reviewer"), delegate("Lead")]).toEqual([
+      "accepted",
+      "--role is a role bazhen roles lists, not Lead",
+    ]);
+  });
+
+  it("lists each role with what it grants and limits, then each role file skipped", () => {
+    const role = {
+      key: "worker",
+      title: "Worker",
+      description: "",
+      grants: [],
+      singlePerTask: false,
+      maxActiveTasks: 1,
+      prompt: "p",
+      source: "builtin" as const,
+    };
+    const verb = taskVerb(["roles"], ctx());
+    const reply = { roles: [role], problems: [{ file: "/r/lead.md", problem: "no prompt" }] };
+    expect([verb.call.path, after(verb, reply)]).toEqual([
+      "/v1/roles",
+      "worker  Worker  grants nothing  at most 1 task(s) at once\nskipped /r/lead.md: no prompt",
     ]);
   });
 

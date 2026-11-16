@@ -43,6 +43,7 @@ function daemon(root: string = bundle(), always = true) {
     schemaVersion: () => 1,
     runtime: new FakeRuntime(),
     allow: { hosts: [host], origins: [`http://${host}`] },
+    roles: () => ({ roles: [], problems: [] }),
     state: () => ({
       epoch: "e1",
       eventId: 0,
