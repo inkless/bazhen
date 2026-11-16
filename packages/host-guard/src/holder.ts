@@ -12,7 +12,9 @@ import {
   type HolderProcess,
   type HolderUse,
   killHolder,
+  type OwnChild,
   rebindHolder,
+  signalOwnChild,
   vouchHolderProcess,
 } from "./signal.ts";
 import type { ScopeLaunch } from "./scope.ts";
@@ -38,6 +40,11 @@ const VOUCH_POLL_MS = 20;
 const STDERR_MS = 200;
 export const HOLDER_READY_MS = 5_000;
 const READY_MS_MAX = 60_000;
+/**
+ * How long a launcher has to exec the holder, `systemd-run`'s call to the user manager included:
+ * one still running then is ended, and the holder never given its spec.
+ */
+export const HOLDER_LAUNCH_MS = 10_000;
 
 /**
  * A start no process has, for a holder `ps` couldn't read: recorded under it, it names the pid,
@@ -131,14 +138,15 @@ export function holderSocketRefusal(
 export class HolderStartFailed extends Error {
   /**
    * Its exit code, the signal that ended it, `silent` for one that said nothing in time,
-   * `unstarted` for a binary that couldn't be run at all, or `unchecked` for one `ps` couldn't
-   * read as it started, which may still run.
+   * `unstarted` for a binary that couldn't be run at all, `unlaunched` for one its launcher didn't
+   * run in time, or `unchecked` for one `ps` couldn't read as it started, which may still run.
    */
   readonly ending:
     | { readonly code: number }
     | { readonly signal: string }
     | "silent"
     | "unstarted"
+    | "unlaunched"
     | "unchecked";
   readonly stderr: string;
   /** Whether it may still run: one `ps` didn't show as the holder is never killed. */
@@ -158,11 +166,13 @@ export class HolderStartFailed extends Error {
         ? "it said nothing in time"
         : ending === "unstarted"
           ? "it couldn't be run"
-          : ending === "unchecked"
-            ? "ps couldn't say what it is"
-            : "code" in ending
-              ? `it exited ${ending.code}`
-              : `${ending.signal} ended it`;
+          : ending === "unlaunched"
+            ? "its launcher didn't run it in time"
+            : ending === "unchecked"
+              ? "ps couldn't say what it is"
+              : "code" in ending
+                ? `it exited ${ending.code}`
+                : `${ending.signal} ended it`;
     super(`the holder didn't start: ${how}${detail}: ${stderr.trim() || "(no stderr)"}`, {
       cause,
     });
@@ -174,7 +184,7 @@ export class HolderStartFailed extends Error {
 }
 
 /** A started process, as `startHolder` uses it: Node's `ChildProcess` is one. */
-export interface HolderChild {
+export interface HolderChild extends OwnChild {
   readonly pid?: number | undefined;
   readonly stdin: Writable | null;
   readonly stdout: Readable | null;
@@ -195,8 +205,10 @@ export interface StartHolderOptions {
   readonly env: Readonly<Record<string, string>>;
   /** Where the holder is started from; it moves to `/` before it starts anything. */
   readonly cwd?: string;
-  /** How long it has to say `ready`, in ms: up to a minute. */
+  /** How long it has to say `ready` once it runs, in ms: up to a minute. */
   readonly readyMs?: number;
+  /** How long its launchers have to exec it, in ms: up to a minute. */
+  readonly launchMs?: number;
   /** Limits it runs under, set by a fixed `/bin/sh` that then execs it. */
   readonly limits?: HolderLimits;
   /**
@@ -295,6 +307,7 @@ export async function startHolderWith(
 ): Promise<StartedHolder> {
   const { binary, root, spec } = options;
   const readyMs = options.readyMs ?? HOLDER_READY_MS;
+  const launchMs = options.launchMs ?? HOLDER_LAUNCH_MS;
   const unfitBinary = binaryRefusal(binary);
   if (unfitBinary !== undefined) {
     throw new RangeError(`refusing holder binary ${binary}: ${unfitBinary}`);
@@ -304,8 +317,13 @@ export async function startHolderWith(
   if (badNames.length > 0) {
     throw new RangeError(`refusing the holder's environment names ${badNames.join(", ")}`);
   }
-  if (!Number.isSafeInteger(readyMs) || readyMs <= 0 || readyMs > READY_MS_MAX) {
-    throw new RangeError(`readyMs ${readyMs} isn't between 1 and ${READY_MS_MAX}`);
+  for (const [name, ms] of [
+    ["readyMs", readyMs],
+    ["launchMs", launchMs],
+  ] as const) {
+    if (!Number.isSafeInteger(ms) || ms <= 0 || ms > READY_MS_MAX) {
+      throw new RangeError(`${name} ${ms} isn't between 1 and ${READY_MS_MAX}`);
+    }
   }
   const refusal = holderSocketRefusal(spec.socket, root, spec.terminalId);
   if (refusal !== undefined) {
@@ -401,6 +419,20 @@ export async function startHolderWith(
   } catch (error) {
     throw await failure(", as recording it failed", holder, error);
   }
+  // The spec goes only to the holder itself: written while a launcher still runs, it would wait in
+  // the pipe for a holder exec'd after this start had failed, which would run it unrecorded.
+  if (!(await execed(holder, reading, read, exitedYet, launchMs))) {
+    child.stdin?.end();
+    // Still the child spawned here and unreaped, whatever it runs now; one it execs after this
+    // finds no spec and exits.
+    if (!exitedYet()) signalOwnChild(child, "SIGKILL");
+    await Promise.race([exited, delay(STDERR_MS)]);
+    await Promise.race([stderrEnded, delay(STDERR_MS)]);
+    letGo();
+    const running = !exitedYet();
+    const detail = running ? `; pid ${pid} was sent SIGKILL and hasn't exited yet` : "";
+    throw new HolderStartFailed(ending ?? "unlaunched", stderr, { detail, running });
+  }
   const line = firstLine(child, exited, readyMs);
   child.stdin?.end(payload);
   const said = await line;
@@ -482,6 +514,27 @@ async function endUnready(
     return { running: true, note };
   }
   return { running: false, note: kill(proof) ? "it was killed" : "" };
+}
+
+/**
+ * Whether `holder.pid` runs the holder itself within `ms`, as `ps` shows it once every launcher
+ * before it has exec'd: false for one that exits first, or still runs something else.
+ */
+async function execed(
+  holder: HolderProcess,
+  first: PsReading,
+  read: (pid: number) => Promise<PsReading>,
+  gone: () => boolean,
+  ms: number,
+): Promise<boolean> {
+  const deadline = Date.now() + ms;
+  let reading = first;
+  while (!isHolder(reading, holder)) {
+    if (gone() || Date.now() >= deadline) return false;
+    await delay(VOUCH_POLL_MS);
+    reading = await read(holder.pid);
+  }
+  return !gone();
 }
 
 /** Whether `reading` is a `bazhen-holder` that started within `START_SKEW_S` of `holder.start`. */

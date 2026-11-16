@@ -47,6 +47,10 @@ class FakeChild extends EventEmitter implements HolderChild {
   unrefed = false;
   sent = "";
   stdinEnded = false;
+  exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
+  /** The signals sent through its own handle; none reaches a process. */
+  readonly signalled: NodeJS.Signals[] = [];
 
   constructor() {
     super();
@@ -58,7 +62,14 @@ class FakeChild extends EventEmitter implements HolderChild {
     this.unrefed = true;
   }
 
-  exit(code: number | null, signal: string | null = null): void {
+  kill(signal: NodeJS.Signals = "SIGTERM"): boolean {
+    this.signalled.push(signal);
+    return true;
+  }
+
+  exit(code: number | null, signal: NodeJS.Signals | null = null): void {
+    this.exitCode = code;
+    this.signalCode = signal;
     this.stderr.end();
     this.emit("exit", code, signal);
   }
@@ -401,6 +412,9 @@ describe("starting a holder in a scope of its own", () => {
     start,
     args: `${SYSTEMD_RUN} --user --scope -- ${BINARY}`,
   });
+  /** `ps` showing the launcher until `at`, in epoch ms, and the holder it execs from then on. */
+  const execsAt = (at: number) => async () =>
+    Date.now() < at ? launcherAt(START) : holderAt(START);
 
   it("runs the scope's launcher first, which execs the CPU limit's shell, which execs it", async () => {
     const run = started(always(holderAt(START)), {
@@ -436,14 +450,32 @@ describe("starting a holder in a scope of its own", () => {
     expect(run.spawned.map((spawn) => spawn.file)).toEqual([SYSTEMD_RUN]);
   });
 
-  it("kills nothing still in the launcher, which ps doesn't show as the holder", async () => {
-    const run = started(always(launcherAt(START)), { scope, readyMs: 50 });
+  it("gives a launcher that hasn't exec'd the holder in time no spec, and ends it by its own handle", async () => {
+    const run = started(always(launcherAt(START)), { scope, launchMs: 100 });
     await expect(failureOf(run)).resolves.toMatchObject({
-      message: expect.stringContaining(`pid ${PID} is left running`),
+      ending: "unlaunched",
+      message: expect.stringContaining(`pid ${PID} was sent SIGKILL`),
       running: true,
     });
+    expect([run.child.sent, run.child.stdinEnded, run.child.signalled]).toEqual([
+      "",
+      true,
+      ["SIGKILL"],
+    ]);
     expect(run.kills).toEqual([]);
     expect(run.spawned.map((spawn) => spawn.file)).toEqual([SYSTEMD_RUN]);
+  });
+
+  it("writes the spec only once ps shows the holder exec'd, and times ready from then", async () => {
+    const execAt = Date.now() + 300;
+    let sentAt = 0;
+    const child = new FakeChild();
+    child.stdin.once("data", () => (sentAt = Date.now()));
+    const run = started(execsAt(execAt), { scope, readyMs: 150 }, child);
+    await expect.poll(() => run.child.sent, { timeout: 2_000 }).not.toBe("");
+    run.child.stdout.write("ready\n");
+    await expect(run.start).resolves.toMatchObject({ pid: PID, start: START });
+    expect(sentAt).toBeGreaterThanOrEqual(execAt);
   });
 
   it("fails with the launcher's exit and stderr when systemd can't make the scope", async () => {
@@ -455,7 +487,7 @@ describe("starting a holder in a scope of its own", () => {
       stderr: expect.stringContaining("Failed to start transient scope unit"),
       running: false,
     });
-    expect(run.kills).toEqual([]);
+    expect([run.kills, run.child.signalled, run.child.sent]).toEqual([[], [], ""]);
     expect(run.spawned.map((spawn) => spawn.file)).toEqual([SYSTEMD_RUN]);
   });
 
