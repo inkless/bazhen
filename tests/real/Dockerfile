@@ -7,6 +7,9 @@ ARG NODE_VERSION
 # Exact, so a tmux upgrade is a change someone makes and the defect pins are re-run against.
 ARG TMUX_VERSION=3.6b
 ARG TMUX_SHA256=390759d25fdba016887ec982b808927e637070fd7d03a8021f8ef3102b9ae3c7
+# rustup, not Debian's cargo, which is older and ignores rust-toolchain.toml; rustup installs the
+# toolchain that file pins.
+ARG RUSTUP_VERSION=1.27.1-3+b1
 
 # Debian ships tmux 3.5a, not the 3.6b that developers' machines run, so the suites would test a
 # version nobody uses. tmux is built here from the release tarball, and only the installed tree
@@ -27,6 +30,21 @@ RUN echo "${TMUX_SHA256}  /tmp/tmux.tar.gz" | sha256sum -c - \
   && make -j"$(nproc)" \
   && make install DESTDIR=/tmux-root
 
+# The cargo tools falsify runs, at the versions scripts/cargo-gate.ts pins, built from source with
+# their lockfiles. A stage of their own, so only a toolchain or version change rebuilds them.
+FROM node:${NODE_VERSION}-trixie AS rust-tools
+ARG RUSTUP_VERSION
+ARG NEXTEST_VERSION
+ARG CARGO_MUTANTS_VERSION
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends "rustup=${RUSTUP_VERSION}" \
+  && rm -rf /var/lib/apt/lists/*
+COPY rust-toolchain.toml /tmp/rust-tools/
+RUN cd /tmp/rust-tools \
+  && rustup show \
+  && cargo install --locked --root /rust-tools \
+    "cargo-nextest@${NEXTEST_VERSION}" "cargo-mutants@${CARGO_MUTANTS_VERSION}"
+
 FROM node:${NODE_VERSION}-trixie
 
 ARG PNPM_VERSION
@@ -37,9 +55,7 @@ ARG NEOVIM_VERSION=0.10.4-8
 ARG LESS_VERSION=668-1
 ARG MAN_DB_VERSION=2.13.1-1
 ARG HTOP_VERSION=3.4.1-5
-# rustup, not Debian's cargo, which is older and ignores rust-toolchain.toml; rustup installs the
-# toolchain that file pins.
-ARG RUSTUP_VERSION=1.27.1-3+b1
+ARG RUSTUP_VERSION
 # Without a UTF-8 locale, tmux prints a tab in a -F format as `_`, which merges every column
 # the runtime reads back. CI runners and login sessions set one.
 ENV HUSKY=0 CI=1 LANG=C.UTF-8
@@ -58,6 +74,8 @@ RUN echo "man-db man-db/auto-update boolean false" | debconf-set-selections \
   && touch /etc/bazhen-disposable-host
 
 COPY --from=tmux-build /tmux-root/usr/local /usr/local
+# Onto the PATH every user and suite has, where a cargo install as root would not be.
+COPY --from=rust-tools /rust-tools/bin/cargo-nextest /rust-tools/bin/cargo-mutants /usr/local/bin/
 # The build proves it carries the pinned tmux, not another that something else pulled in.
 RUN test "$(tmux -V)" = "tmux ${TMUX_VERSION}"
 
@@ -81,3 +99,11 @@ COPY --chown=node crates crates
 RUN cargo fetch --locked
 COPY --chown=node . .
 RUN pnpm install --offline --frozen-lockfile
+# Falsify lists the Rust tests at the merge base, and judges a branch that changes falsify with
+# the base's falsify too: both need what the base's lockfiles name, which HEAD's may not. They
+# are fetched from a throwaway worktree of the merge base, which falsify judges against, while the
+# build still has a network.
+ARG BASE_REF
+RUN git worktree add --quiet --detach /tmp/base "$(git merge-base "${BASE_REF}" HEAD)" \
+  && (cd /tmp/base && cargo fetch --locked && pnpm fetch) \
+  && git worktree remove --force /tmp/base

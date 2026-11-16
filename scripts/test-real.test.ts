@@ -1,6 +1,8 @@
 import { SLICE } from "@bazhen/host-guard";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { RUST_TOOLS } from "./cargo-gate.ts";
 import {
+  suiteCommand,
   looksSecret,
   ownerOf,
   parseArgs,
@@ -43,11 +45,13 @@ describe("pnpm test:real", () => {
     expect(() => parseArgs(["--base", "--api"])).toThrow("usage");
   });
 
-  it("builds the image on the repository's own node, pnpm and Playwright pins", () => {
+  it("builds the image on the repository's own node, pnpm, Playwright and Rust tool pins", () => {
     expect(pins(read(repo))).toEqual({
       NODE_VERSION: "26.13.0",
       PNPM_VERSION: "12.16.1",
       PLAYWRIGHT_VERSION: "1.64.1",
+      NEXTEST_VERSION: RUST_TOOLS["cargo-nextest"],
+      CARGO_MUTANTS_VERSION: RUST_TOOLS["cargo-mutants"],
     });
   });
 
@@ -59,6 +63,16 @@ describe("pnpm test:real", () => {
     });
     expect(() => tmuxBuildArgs({ BZ_TMUX_VERSION: "3.4" })).toThrow("together");
     expect(() => tmuxBuildArgs({ BZ_TMUX_SHA256: "ab" })).toThrow("together");
+  });
+
+  it("runs a suite's script, and falsify against the image's base, then the base's falsify", () => {
+    expect(suiteCommand("api")).toEqual(["pnpm", "test:api"]);
+    expect(suiteCommand("falsify")).toEqual([
+      "sh",
+      "-c",
+      "pnpm test:falsify --base refs/remotes/origin/main && " +
+        "pnpm test:falsify:base --base refs/remotes/origin/main",
+    ]);
   });
 
   it("refuses to build when a pin is missing", () => {

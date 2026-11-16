@@ -213,7 +213,7 @@ describe("classify", () => {
 
 describe("parseNameStatus", () => {
   it("reads plain statuses", () => {
-    expect(parseNameStatus("M\ta.ts\nA\tb.ts\nD\tc.ts\n")).toEqual([
+    expect(parseNameStatus("M\0a.ts\0A\0b.ts\0D\0c.ts\0")).toEqual([
       { status: "M", path: "a.ts" },
       { status: "A", path: "b.ts" },
       { status: "D", path: "c.ts" },
@@ -221,8 +221,15 @@ describe("parseNameStatus", () => {
   });
 
   it("keeps the old path of a rename", () => {
-    expect(parseNameStatus("R087\told.test.ts\tnew.test.ts\n")).toEqual([
+    expect(parseNameStatus("R087\0old.test.ts\0new.test.ts\0M\0a.ts\0")).toEqual([
       { status: "R", path: "new.test.ts", oldPath: "old.test.ts" },
+      { status: "M", path: "a.ts" },
+    ]);
+  });
+
+  it("reads a path git would quote, with a tab or a quote in it, as it is", () => {
+    expect(parseNameStatus('M\0odd\tname "x".ts\0')).toEqual([
+      { status: "M", path: 'odd\tname "x".ts' },
     ]);
   });
 });

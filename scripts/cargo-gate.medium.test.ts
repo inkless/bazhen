@@ -3,7 +3,7 @@
 // checked, not only the functions that build it. The gate also reads the cargo configs in the
 // repository's real parent directories; one there with a runner or [env] fails these tests too.
 
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -11,13 +11,14 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { GATES } from "./cargo-gate.ts";
+import { GATES, RUST_TOOLS, type RustTool } from "./cargo-gate.ts";
 
 const GATE_SCRIPT = fileURLToPath(new URL("cargo-gate.ts", import.meta.url));
 
@@ -109,6 +110,35 @@ describe("cargo-gate.ts", () => {
       status: 1,
       hint: true,
       logged: [],
+    });
+  });
+});
+
+const isFile = (path: string) => existsSync(path) && statSync(path).isFile();
+const isRustTool = (name: string | undefined): name is RustTool =>
+  name !== undefined && Object.hasOwn(RUST_TOOLS, name);
+
+describe("the pinned Rust tools", () => {
+  const root = fileURLToPath(new URL("..", import.meta.url));
+  const PINNED = /\b(cargo-(?:nextest|deny|mutants))[@ ]v?(\d[\w.-]*)/g;
+  const tracked = execFileSync("git", ["ls-files", "-z"], { cwd: root, encoding: "utf8" })
+    .split("\0")
+    .filter((file) => file !== "" && file !== "pnpm-lock.yaml" && isFile(join(root, file)));
+  const pins = tracked.flatMap((file) =>
+    [...readFileSync(join(root, file), "utf8").matchAll(PINNED)].flatMap(([, tool, version]) =>
+      isRustTool(tool) ? [{ file, tool, version }] : [],
+    ),
+  );
+  const named = (file: string) => new Set(pins.filter((p) => p.file === file).map((p) => p.tool));
+
+  it("are installed at the version RUST_TOOLS names, wherever a file names one", () => {
+    expect(pins.filter((pin) => pin.version !== RUST_TOOLS[pin.tool])).toEqual([]);
+  });
+
+  it("are all named by CI and the README", () => {
+    expect({ ci: named(".github/workflows/ci.yml"), readme: named("README.md") }).toEqual({
+      ci: new Set(Object.keys(RUST_TOOLS)),
+      readme: new Set(Object.keys(RUST_TOOLS)),
     });
   });
 });

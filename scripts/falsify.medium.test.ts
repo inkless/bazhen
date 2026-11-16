@@ -18,10 +18,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isAlive } from "@bazhen/host-guard";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { installCommand } from "./cargo-gate.ts";
+import { inSignalSandbox } from "./signal-paths.ts";
 
 const FALSIFY = fileURLToPath(new URL("falsify.ts", import.meta.url));
 const SOURCE = "packages/a/src/x.ts";
@@ -38,6 +40,12 @@ const STUB_PNPM = `#!/bin/sh
 } >> "$STUB_LOG"
 case "$1" in
   install)
+    if [ "\${STUB_FAIL_INSTALL:-}" = 1 ]; then
+      for arg in "$@"; do mode="$arg"; done
+      i=1
+      while [ $i -le 25 ]; do echo "pnpm $mode line $i" >&2; i=$((i + 1)); done
+      exit 1
+    fi
     if [ "\${STUB_FAIL_OFFLINE:-}" = 1 ]; then
       for arg in "$@"; do [ "$arg" = --offline ] && exit 1; done
     fi
@@ -319,6 +327,16 @@ describe("falsify on a branch in a linked worktree", () => {
       status: 0,
       log: expect.stringContaining("--prefer-offline"),
     });
+  });
+
+  it("prints the end of what each failed install attempt said", () => {
+    const result = againstBase({ STUB_FAIL_INSTALL: "1" });
+    expect({
+      status: result.status,
+      offlineEnd: result.output.includes("pnpm --offline line 25"),
+      onlineEnd: result.output.includes("pnpm --prefer-offline line 25"),
+      offlineStart: result.output.includes("pnpm --offline line 1\n"),
+    }).toEqual({ status: 1, offlineEnd: true, onlineEnd: true, offlineStart: false });
   });
 
   it("sweeps a stale worktree whose pid is dead and keeps one whose pid is alive", () => {
@@ -901,7 +919,7 @@ describe("falsify judging new Rust tests by mutating the change", () => {
     const result = againstBase({ STUB_MUTANTS_FAIL: "1" });
     expect({
       status: result.status,
-      hint: result.output.includes("cargo install --locked cargo-mutants@27.1.0"),
+      hint: result.output.includes(installCommand("cargo-mutants")),
       judged: result.output.includes("falsify: new tests run"),
     }).toEqual({ status: 1, hint: true, judged: false });
     expect(leftovers()).toEqual([]);
@@ -968,4 +986,151 @@ describe("falsify judging new Rust tests by mutating the change", () => {
     },
     30_000,
   );
+});
+
+/** A branch commit whose source sends a signal through the TypeScript chokepoint. */
+const signallingSource = () => {
+  write(
+    fx.linked,
+    SOURCE,
+    'import { signalGroup } from "@bazhen/host-guard";\nexport const v = 2;\n' +
+      'export const stop = (c) => signalGroup(c, "SIGTERM");\n',
+  );
+  git(fx.linked, "add", SOURCE);
+  git(fx.linked, "commit", "--quiet", "-m", "feat: stop");
+};
+
+describe("falsify outside a sandbox", () => {
+  const AS_HOST = { BZ_FALSIFY_AS_HOST: "1" };
+
+  it("refuses to revert source that signals processes, before it makes a worktree", () => {
+    signallingSource();
+    // A worktree made before the refusal would fail here, on a folder it can't write to.
+    chmodSync(fx.tmp, 0o500);
+    let result: ReturnType<typeof againstBase>;
+    try {
+      result = againstBase(AS_HOST);
+    } finally {
+      chmodSync(fx.tmp, 0o700);
+    }
+    expect({
+      status: result.status,
+      named: result.output.includes(`  ${SOURCE}`),
+      pointsAt: result.output.includes("pnpm test:real falsify"),
+      crashed: /EACCES|permission denied/i.test(result.output),
+      installed: stubLog().includes("ARGS: install"),
+      leftovers: leftovers(),
+    }).toEqual({
+      status: 1,
+      named: true,
+      pointsAt: true,
+      crashed: false,
+      installed: false,
+      leftovers: [],
+    });
+  });
+
+  it("refuses a branch whose TypeScript signals before its Rust tests run", () => {
+    signallingSource();
+    mutatedBranch(
+      ["tests::b_is_two"],
+      [mutantOfB("replace b -> u8 with 0")],
+      [`MUTATED|tests::b_is_two|${ASSERTION}`],
+    );
+    const result = againstBase(AS_HOST);
+    expect({
+      status: result.status,
+      named: result.output.includes(`  ${SOURCE}`),
+      nextest: stubLog().includes("NEXTEST:"),
+    }).toEqual({ status: 1, named: true, nextest: false });
+  });
+
+  it("refuses to mutate Rust that signals processes, before any mutant runs", () => {
+    mutatedBranch(
+      ["tests::b_is_two"],
+      [mutantOfB("replace b -> u8 with 0")],
+      [`MUTATED|tests::b_is_two|${ASSERTION}`],
+      {
+        "crates/x/src/sweep.rs":
+          "pub fn sweep(pid: i32) {\n    unsafe { libc::kill(pid, 9) };\n}\n",
+      },
+    );
+    const result = againstBase(AS_HOST);
+    expect({
+      status: result.status,
+      named: result.output.includes("  crates/x/src/sweep.rs"),
+      runs: runs(),
+      leftovers: leftovers(),
+    }).toEqual({ status: 1, named: true, runs: 0, leftovers: [] });
+  });
+
+  it("refuses signalling Rust however deep in the repository it is run from", () => {
+    mutatedBranch(
+      ["tests::b_is_two"],
+      [mutantOfB("replace b -> u8 with 0")],
+      [`MUTATED|tests::b_is_two|${ASSERTION}`],
+      {
+        "crates/x/src/sweep.rs":
+          "pub fn sweep(pid: i32) {\n    unsafe { libc::kill(pid, 9) };\n}\n",
+      },
+    );
+    const result = spawnSync("node", [FALSIFY, "--base", fx.base], {
+      cwd: join(fx.linked, "crates/x/src"),
+      env: env(AS_HOST),
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    expect({
+      status: result.status,
+      named: result.stderr.includes("  crates/x/src/sweep.rs"),
+      runs: runs(),
+      leftovers: leftovers(),
+    }).toEqual({ status: 1, named: true, runs: 0, leftovers: [] });
+  });
+
+  it("refuses signalling TypeScript however deep in the repository it is run from", () => {
+    signallingSource();
+    const result = spawnSync("node", [FALSIFY, "--base", fx.base], {
+      cwd: join(fx.linked, "packages/a/src"),
+      env: env(AS_HOST),
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    expect({
+      status: result.status,
+      named: result.stderr.includes(`  ${SOURCE}`),
+      installed: stubLog().includes("ARGS: install"),
+      leftovers: leftovers(),
+    }).toEqual({ status: 1, named: true, installed: false, leftovers: [] });
+  });
+
+  it("keeps a relative TMPDIR the caller's, run from a subdirectory", () => {
+    const cwd = join(fx.linked, "packages/a/src");
+    const result = spawnSync("node", [FALSIFY, "--base", fx.base], {
+      cwd,
+      env: env({ ...AS_HOST, TMPDIR: relative(cwd, fx.tmp) }),
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    expect({
+      status: result.status,
+      inTmp: stubLog().includes(`PWD: ${fx.tmp}/bz-falsify-`),
+    }).toEqual({ status: 0, inTmp: true });
+  });
+
+  it("judges the tests ignored as signalling only in a sandbox", () => {
+    mutatedBranch(
+      ["tests::b_is_two"],
+      [mutantOfB("replace b -> u8 with 0")],
+      [`MUTATED|tests::b_is_two|${ASSERTION}`],
+    );
+    expect(againstBase(AS_HOST).status).toBe(0);
+    const asHost = stubLog().includes("--run-ignored all");
+    writeFileSync(fx.log, "");
+    expect(againstBase().status).toBe(0);
+    expect({ asHost, here: stubLog().includes("--run-ignored all") }).toEqual({
+      asHost: false,
+      here: inSignalSandbox(),
+    });
+  });
 });

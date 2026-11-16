@@ -98,9 +98,11 @@ Every new test must be shown to fail without the code it covers.
   is reverted like any other script: the copy that runs is your checkout's, so only the tests
   see the base's. A script's committed output is reverted with it (`.oxlintrc.json` with
   `scripts/lint-config.ts`; the protocol's schema and fixtures with their sources), listed in
-  `GENERATED` in `scripts/falsify.ts`. A branch that changes falsify or anything it imports is
-  judged by the base's falsify too, in CI, so its new tests also need what that falsify asks for,
-  usually a `Control:` line. Only committed work counts. Each test comes out as one of:
+  `GENERATED` in `scripts/falsify.ts`. A branch that changes falsify, anything it imports, or how
+  it is run is judged by the base's falsify too, in CI and in `pnpm test:real falsify`
+  (`pnpm test:falsify:base`, `scripts/falsify-base.ts`, which runs only in a sandbox), so its new
+  tests also need what that falsify asks for, usually a `Control:` line. Only committed work
+  counts. Each test comes out as one of:
   - **KILLED** — it failed. Good.
   - **SURVIVED** — it passed without the change, so it can't detect the change. The check
     fails. Only a test that directly imports a reverted file, or runs one it names with
@@ -138,7 +140,18 @@ Two lessons from the scaffold's controls:
 
 `pnpm test:falsify --base <ref>` judges the branch against another base. On the host, a new test
 that runs real tmux comes out INVALID, because its setup refuses; `pnpm test:real falsify` judges
-it in the container. Hand-made mutants of such a test run there too. Stryker-style mutation
+it in the container. Hand-made mutants of such a test run there too. The image carries
+cargo-nextest and cargo-mutants at the versions `RUST_TOOLS` in `scripts/cargo-gate.ts` pins, and
+fetches what the base's lockfiles name as well as HEAD's, so a branch touching the Rust workspace
+is judged there with no network, the base's falsify included. When falsify can't install a
+worktree's dependencies, it prints the end of what pnpm said.
+
+Falsify reverts and mutates code that signals processes only in a sandbox, as
+`scripts/signal-paths.ts` defines one. Outside it, a branch that would revert or mutate such code
+(`isSignallingSource`), or run a test that signals (`isSignallingTest`), is refused before any of
+its tests run. Falsify names the files and points at `pnpm test:real falsify`, and judges none of
+the branch, since a partial verdict would read as a pass. Inside the sandbox it also runs the Rust
+tests ignored as signalling, which a plain nextest run skips. Stryker-style mutation
 scores are not a gate, because their cost and equivalent mutants make the number meaningless.
 
 ## Memory and time caps

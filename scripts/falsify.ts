@@ -54,11 +54,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { basename, join, posix } from "node:path";
+import { basename, isAbsolute, join, posix, resolve } from "node:path";
 import { isAlive, rethrowUnsafe, signalGroup, spawnGroup } from "@bazhen/host-guard";
 import { KILLS_ENV } from "./capped.ts";
-import { GATES, configFailures, gateEnv, outsideConfigs } from "./cargo-gate.ts";
+import { GATES, configFailures, gateEnv, installCommand, outsideConfigs } from "./cargo-gate.ts";
 import { isMain } from "./is-main.ts";
+import { inSandbox, judgeableHere, signallingWork } from "./falsify-signals.ts";
 import {
   failedOnAssertion,
   inTestCode,
@@ -82,9 +83,9 @@ const REVERTIBLE = /^(?:(?:apps|packages)\/[^/]+\/src\/|scripts\/.+\.tsx?$)/;
 const TITLE = /(?<![.\w])(?:it|test)(?:\.\w+(?:\([^()]*\))?)*\(\s*(["'`])((?:\\.|(?!\1).)+)\1/g;
 const TEST_CALL = /(?<![.\w])(?:it|test)(?:\.\w+)*\s*\(/;
 const CONTROL_TRAILER = /^Control: .+ -> .+$/m;
-const WORKTREE_PREFIX = "bz-falsify-";
+export const WORKTREE_PREFIX = "bz-falsify-";
 const LOCK_REASON = /^bz-falsify pid=(\d+)$/;
-const INSTALL_TIMEOUT_MS = 120_000;
+export const INSTALL_TIMEOUT_MS = 120_000;
 const VITEST_TIMEOUT_MS = 300_000;
 const CARGO_TIMEOUT_MS = 900_000;
 // The most mutants run for one branch. A count, not a time budget, so a verdict is the same on
@@ -115,7 +116,7 @@ const GIT_LOCATION_VARS = [
   "GIT_COMMON_DIR",
 ];
 
-function isolatedEnv(): NodeJS.ProcessEnv {
+export function isolatedEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
   for (const name of GIT_LOCATION_VARS) delete env[name];
   return env;
@@ -129,6 +130,29 @@ const git = (args: string[], cwd = process.cwd()) =>
     maxBuffer: 64 * 1024 * 1024,
     stdio: ["ignore", "pipe", "pipe"],
   });
+
+/**
+ * Moves to the repository's root, as every path falsify and falsify-base read is the root's,
+ * whatever folder they were run from. A relative TMPDIR or CARGO_HOME is resolved first, so it
+ * still names the folder the caller meant.
+ */
+export function workFromRoot(top: string): void {
+  for (const name of ["TMPDIR", "CARGO_HOME"]) {
+    const value = process.env[name];
+    if (value !== undefined && value !== "" && !isAbsolute(value))
+      process.env[name] = resolve(value);
+  }
+  process.chdir(top);
+}
+
+/**
+ * A file as the commit `rev` has it, or undefined where it has none. Any other failure throws, so
+ * an unreadable file is never taken for an absent one.
+ */
+function fileAt(rev: string, path: string): string | undefined {
+  if (git(["ls-tree", "-z", "--full-tree", rev, "--", path]) === "") return undefined;
+  return git(["cat-file", "blob", `${rev}:${path}`]);
+}
 
 /**
  * Whether a changed path is source the revert check puts back as the base had it: anything under
@@ -170,17 +194,20 @@ export function revertsOf(changes: Change[]): Change[] {
 }
 
 export function parseNameStatus(out: string): Change[] {
-  return out
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => {
-      const parts = line.split("\t");
-      const status = parts[0]?.[0] ?? "";
-      const path = parts[parts.length - 1] ?? "";
-      return (status === "R" || status === "C") && parts.length >= 3
-        ? { status, path, oldPath: parts[1] ?? "" }
-        : { status, path };
-    });
+  const fields = out.split("\0");
+  const changes: Change[] = [];
+  for (let i = 0; i < fields.length;) {
+    const status = fields[i]?.[0] ?? "";
+    if (status === "") break;
+    if (status === "R" || status === "C") {
+      changes.push({ status, oldPath: fields[i + 1] ?? "", path: fields[i + 2] ?? "" });
+      i += 3;
+    } else {
+      changes.push({ status, path: fields[i + 1] ?? "" });
+      i += 2;
+    }
+  }
+  return changes;
 }
 
 const unescape = (title: string) => title.replace(/\\(["'`])/g, "$1");
@@ -439,7 +466,7 @@ function sweepStale(top: string): void {
   }
 }
 
-function removeWorktree(dir: string, top: string): void {
+export function removeWorktree(dir: string, top: string): void {
   const quiet = (args: string[]) => {
     try {
       git(args, top);
@@ -502,13 +529,18 @@ function run(
   args: string[],
   cwd: string,
   timeoutMs: number,
-  options: { env?: NodeJS.ProcessEnv; stdout?: number; onTimeout?: () => void } = {},
+  options: {
+    env?: NodeJS.ProcessEnv;
+    stdout?: number;
+    stderr?: number;
+    onTimeout?: () => void;
+  } = {},
 ): Promise<boolean> {
   return new Promise((done) => {
     const child = spawnGroup(cmd, args, {
       cwd,
       env: options.env ?? isolatedEnv(),
-      stdio: ["ignore", options.stdout ?? "ignore", "ignore"],
+      stdio: ["ignore", options.stdout ?? "ignore", options.stderr ?? "ignore"],
     });
     running = child;
     let timedOut = false;
@@ -531,22 +563,57 @@ function run(
   });
 }
 
+/** Offline first: in the test container, the store the image fetched is all there is. */
+export const INSTALL_MODES = ["--offline", "--prefer-offline"] as const;
+
 // --ignore-scripts: the root `prepare` script (husky) would set core.hooksPath in the shared git
 // config, and nothing else needs a lifecycle script (node-pty's build is declined via
 // allowBuilds).
-async function install(dir: string): Promise<boolean> {
-  const flags = ["--frozen-lockfile", "--ignore-scripts"];
-  return (
-    (await run("pnpm", ["install", ...flags, "--offline"], dir, INSTALL_TIMEOUT_MS)) ||
-    run("pnpm", ["install", ...flags, "--prefer-offline"], dir, INSTALL_TIMEOUT_MS)
-  );
+export const installArgs = (mode: (typeof INSTALL_MODES)[number]) => [
+  "install",
+  "--frozen-lockfile",
+  "--ignore-scripts",
+  mode,
+];
+
+/** What each failed install attempt printed to stderr, or undefined once one succeeds. */
+async function install(dir: string): Promise<string[] | undefined> {
+  const said: string[] = [];
+  for (const mode of INSTALL_MODES) {
+    const path = join(dir, `falsify-install${mode.slice(1)}.log`);
+    const fd = openSync(path, "w");
+    let ok: boolean;
+    try {
+      ok = await run("pnpm", installArgs(mode), dir, INSTALL_TIMEOUT_MS, { stderr: fd });
+    } finally {
+      closeSync(fd);
+    }
+    if (ok) return undefined;
+    said.push(`\`pnpm install ${mode}\` said:\n${indentedTail(readFileSync(path, "utf8"))}`);
+  }
+  return said;
+}
+
+const INSTALL_TAIL_LINES = 20;
+
+/** The last lines of a command's output, indented, or a note that it printed nothing. */
+function indentedTail(text: string): string {
+  const lines = text
+    .trimEnd()
+    .split("\n")
+    .filter((line) => line.trim() !== "");
+  if (lines.length === 0) return "  (nothing)";
+  return lines
+    .slice(-INSTALL_TAIL_LINES)
+    .map((line) => `  ${line}`)
+    .join("\n");
 }
 
 /**
  * A detached worktree of `commit` in `dir`, locked in the same step as it is created, so a crash
  * can never leave an unlocked (and so never-swept) worktree behind.
  */
-function addWorktree(dir: string, commit: string, top: string): void {
+export function addWorktree(dir: string, commit: string, top: string): void {
   git(["worktree", "add", "--quiet", "--detach", "--lock", "--reason", LOCK, dir, commit], top);
 }
 
@@ -605,8 +672,7 @@ async function listRustTests(dir: string, top: string): Promise<unknown> {
   }
 }
 
-const MUTANTS_HINT =
-  "if cargo-mutants is missing, install it: cargo install --locked cargo-mutants@27.1.0";
+const MUTANTS_HINT = `if cargo-mutants is missing, install it: ${installCommand("cargo-mutants")}`;
 
 /** The mutants cargo-mutants lists in `dir` in the code the diff in the file `diff` touches. */
 async function listMutants(dir: string, top: string, diff: string): Promise<unknown> {
@@ -658,6 +724,10 @@ async function runRustTests(
     "libtest-json-plus",
     "--message-format-version",
     LIBTEST_JSON_VERSION,
+    // A test that signals processes is ignored outside a sandbox; inside one it is judged. The
+    // filter names only the branch's new tests, but every one of them runs, whatever it is
+    // ignored for.
+    ...(inSandbox() ? ["--run-ignored", "all"] : []),
     "-E",
     nextestFilter(tests),
   ];
@@ -854,7 +924,7 @@ async function mutateRustTests(
  * `#[test]`, proptest, or a macro of the crate's own. Mutants are applied only in that worktree,
  * which is removed on every way out, a signal included.
  */
-async function judgeRustTests(top: string, base: string, head: string) {
+async function judgeRustTests(top: string, base: string, head: string, rustFiles: string[]) {
   const dir = mkdtempSync(join(tmpdir(), WORKTREE_PREFIX));
   cleanup = () => {
     cleanup = undefined;
@@ -881,7 +951,7 @@ async function judgeRustTests(top: string, base: string, head: string) {
       console.error(
         `falsify: \`cargo-nextest nextest list\` failed at ${where}, so the Rust tests the ` +
           "branch adds are unknown. Run `pnpm test:rust` there to see why; if cargo-nextest is " +
-          "missing, install it: cargo install --locked cargo-nextest@0.9.152",
+          `missing, install it: ${installCommand("cargo-nextest")}`,
       );
       return undefined;
     }
@@ -889,6 +959,10 @@ async function judgeRustTests(top: string, base: string, head: string) {
     const added = addedRustTests(atBase, rustTestIds(after));
     if (added.length === 0)
       return { verdicts: [], unapplied: [], timedOut: [], memoryKilled: [], ran: 0, total: 0 };
+    // Mutants are made only in the changed files, and the new tests live in them.
+    if (!judgeableHere(signallingWork(rustFiles, rustFiles, [base, head], fileAt))) {
+      return undefined;
+    }
     return await mutateRustTests(dir, top, [base, head], after, added, new Set(atBase));
   } finally {
     cleanup?.();
@@ -941,6 +1015,7 @@ async function main(args: string[]): Promise<number> {
     return 2;
   }
   const top = git(["rev-parse", "--show-toplevel"]).trim();
+  workFromRoot(top);
   if (options.harness) {
     const read = (path: string) => {
       const file = join(top, path);
@@ -981,7 +1056,7 @@ async function main(args: string[]): Promise<number> {
   const messages = git(["log", "--format=%B", `${base}..${head}`]);
   const range = [base, head];
 
-  const changes = parseNameStatus(git(["diff", "--name-status", "-M", ...range]));
+  const changes = parseNameStatus(git(["diff", "--name-status", "-z", "-M", ...range]));
   const tests = changes.filter((c) => c.status !== "D" && TEST_FILE.test(c.path));
   const targets = tests.flatMap((t) => {
     const paths = t.status === "R" && t.oldPath ? [t.oldPath, t.path] : [t.path];
@@ -990,6 +1065,17 @@ async function main(args: string[]): Promise<number> {
       title,
     }));
   });
+  // Before any test runs, Rust's included: the TS side would refuse after the mutants had run.
+  const reverts = revertsOf(changes);
+  if (targets.length > 0 && reverts.length > 0) {
+    const work = signallingWork(
+      reverts.flatMap(pathsOf),
+      targets.map((t) => t.file),
+      [base, head],
+      fileAt,
+    );
+    if (!judgeableHere(work)) return 1;
+  }
   let rust: RustJudgement = {
     verdicts: [],
     unapplied: [],
@@ -1003,7 +1089,8 @@ async function main(args: string[]): Promise<number> {
     process.on("SIGTERM", handleSignal);
     process.on("SIGHUP", handleSignal);
     try {
-      const judged = await judgeRustTests(top, base, head);
+      const rustFiles = changes.flatMap(pathsOf).filter((path) => path.endsWith(".rs"));
+      const judged = await judgeRustTests(top, base, head, rustFiles);
       if (judged === undefined) return 1;
       rust = judged;
     } finally {
@@ -1018,7 +1105,6 @@ async function main(args: string[]): Promise<number> {
     return 0;
   }
 
-  const reverts = revertsOf(changes);
   const results: {
     file: string;
     title: string;
@@ -1051,10 +1137,11 @@ async function main(args: string[]): Promise<number> {
           git(["checkout", base, "--", c.oldPath], dir);
         } else git(["checkout", base, "--", c.path], dir);
       }
-      if (!(await install(dir))) {
+      const installFailed = await install(dir);
+      if (installFailed !== undefined) {
         console.error(
           "falsify: couldn't install dependencies in the temporary worktree; run `pnpm install` " +
-            "and retry.",
+            `and retry.\n${installFailed.join("\n")}`,
         );
         return 1;
       }
