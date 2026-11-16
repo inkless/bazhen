@@ -1,0 +1,112 @@
+//! A terminal's stream, `/v1/terminals/:id/stream`: the text frames a view and the daemon send
+//! each other over its WebSocket. The terminal's output, and a view's keystrokes, are binary
+//! frames, never one of these.
+
+use serde::{Deserialize, Serialize};
+
+use crate::ids::AttachmentId;
+
+/// The largest frame a view may send.
+pub const STREAM_FRAME_MAX_BYTES: usize = 1 << 20;
+
+/// Whether a view may drive the terminal, or only watches it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AttachmentMode {
+    Observe,
+    Interactive,
+}
+
+/// A view's own earlier attachment, which it ends as it reattaches.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Resumes {
+    pub attachment_id: AttachmentId,
+    pub token: String,
+}
+
+/// A text frame a view sends. `Hello` comes first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum StreamClientFrame {
+    #[serde(rename_all = "camelCase")]
+    Hello {
+        /// The build the view is from; a daemon of another refuses it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        protocol_id: Option<String>,
+        mode: AttachmentMode,
+        cols: u16,
+        rows: u16,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resumes: Option<Resumes>,
+    },
+    Resize {
+        cols: u16,
+        rows: u16,
+    },
+    /// Takes the lease, as a click in the web app does.
+    Engage,
+    /// The lease epoch the view's following input is typed under.
+    Epoch {
+        epoch: u64,
+    },
+    Ping,
+}
+
+/// Why the daemon ended a view while the terminal goes on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EndedReason {
+    /// It fell too far behind the terminal's output.
+    EvictedSlow,
+    /// The daemon's client lost the terminal.
+    Disconnected,
+}
+
+/// A text frame the daemon sends.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum StreamServerFrame {
+    #[serde(rename_all = "camelCase")]
+    Attached {
+        attachment_id: AttachmentId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resume_token: Option<String>,
+    },
+    /// Who drives now.
+    #[serde(rename_all = "camelCase")]
+    Lease {
+        driver: bool,
+        epoch: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        driven: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        driver_device: Option<String>,
+    },
+    Pong,
+    /// The binary frames until `SnapshotEnd` are the terminal's history and screen.
+    #[serde(rename_all = "camelCase")]
+    SnapshotStart {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        history_lines: Option<u64>,
+    },
+    SnapshotEnd,
+    /// Input from a view that wasn't driving was dropped.
+    InputDropped,
+    Screen {
+        alternate: bool,
+    },
+    /// The terminal closed.
+    Exit,
+    Ended {
+        reason: EndedReason,
+    },
+    /// The view can't go on.
+    Error {
+        message: String,
+    },
+    /// Something went wrong that the view can live with.
+    Notice {
+        message: String,
+    },
+}

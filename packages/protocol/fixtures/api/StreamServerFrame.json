@@ -1,0 +1,402 @@
+[
+  {
+    "name": "example 1",
+    "wire": {
+      "type": "attached",
+      "attachmentId": "att_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "resumeToken": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+    },
+    "parsed": {
+      "type": "attached",
+      "attachmentId": "att_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "resumeToken": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+    }
+  },
+  {
+    "name": "example 2",
+    "wire": {
+      "type": "attached",
+      "attachmentId": "att_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"
+    },
+    "parsed": {
+      "type": "attached",
+      "attachmentId": "att_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"
+    }
+  },
+  {
+    "name": "example 3",
+    "wire": {
+      "type": "lease",
+      "driver": true,
+      "epoch": 3
+    },
+    "parsed": {
+      "type": "lease",
+      "driver": true,
+      "epoch": 3
+    }
+  },
+  {
+    "name": "example 4",
+    "wire": {
+      "type": "lease",
+      "driver": false,
+      "epoch": 4,
+      "driven": true,
+      "driverDevice": "Phone"
+    },
+    "parsed": {
+      "type": "lease",
+      "driver": false,
+      "epoch": 4,
+      "driven": true,
+      "driverDevice": "Phone"
+    }
+  },
+  {
+    "name": "example 5",
+    "wire": {
+      "type": "pong"
+    },
+    "parsed": {
+      "type": "pong"
+    }
+  },
+  {
+    "name": "example 6",
+    "wire": {
+      "type": "snapshot_start",
+      "historyLines": 10000
+    },
+    "parsed": {
+      "type": "snapshot_start",
+      "historyLines": 10000
+    }
+  },
+  {
+    "name": "example 7",
+    "wire": {
+      "type": "snapshot_start"
+    },
+    "parsed": {
+      "type": "snapshot_start"
+    }
+  },
+  {
+    "name": "example 8",
+    "wire": {
+      "type": "snapshot_end"
+    },
+    "parsed": {
+      "type": "snapshot_end"
+    }
+  },
+  {
+    "name": "example 9",
+    "wire": {
+      "type": "input_dropped"
+    },
+    "parsed": {
+      "type": "input_dropped"
+    }
+  },
+  {
+    "name": "example 10",
+    "wire": {
+      "type": "screen",
+      "alternate": true
+    },
+    "parsed": {
+      "type": "screen",
+      "alternate": true
+    }
+  },
+  {
+    "name": "example 11",
+    "wire": {
+      "type": "exit"
+    },
+    "parsed": {
+      "type": "exit"
+    }
+  },
+  {
+    "name": "example 12",
+    "wire": {
+      "type": "ended",
+      "reason": "evicted_slow"
+    },
+    "parsed": {
+      "type": "ended",
+      "reason": "evicted_slow"
+    }
+  },
+  {
+    "name": "example 13",
+    "wire": {
+      "type": "error",
+      "message": "no such terminal"
+    },
+    "parsed": {
+      "type": "error",
+      "message": "no such terminal"
+    }
+  },
+  {
+    "name": "example 14",
+    "wire": {
+      "type": "notice",
+      "message": "the runtime refused the resize"
+    },
+    "parsed": {
+      "type": "notice",
+      "message": "the runtime refused the resize"
+    }
+  },
+  {
+    "name": ".(type=ended).reason = \"evicted_slow\"",
+    "wire": {
+      "type": "ended",
+      "reason": "evicted_slow"
+    },
+    "parsed": {
+      "type": "ended",
+      "reason": "evicted_slow"
+    }
+  },
+  {
+    "name": ".(type=ended).reason = \"disconnected\"",
+    "wire": {
+      "type": "ended",
+      "reason": "disconnected"
+    },
+    "parsed": {
+      "type": "ended",
+      "reason": "disconnected"
+    }
+  },
+  {
+    "name": "example 1, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "attached",
+      "attachmentId": "att_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "resumeToken": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "attached",
+      "attachmentId": "att_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "resumeToken": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+    }
+  },
+  {
+    "name": "example 2, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "attached",
+      "attachmentId": "att_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "attached",
+      "attachmentId": "att_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"
+    }
+  },
+  {
+    "name": "example 3, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "lease",
+      "driver": true,
+      "epoch": 3,
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "lease",
+      "driver": true,
+      "epoch": 3
+    }
+  },
+  {
+    "name": "example 4, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "lease",
+      "driver": false,
+      "epoch": 4,
+      "driven": true,
+      "driverDevice": "Phone",
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "lease",
+      "driver": false,
+      "epoch": 4,
+      "driven": true,
+      "driverDevice": "Phone"
+    }
+  },
+  {
+    "name": "example 5, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "pong",
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "pong"
+    }
+  },
+  {
+    "name": "example 6, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "snapshot_start",
+      "historyLines": 10000,
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "snapshot_start",
+      "historyLines": 10000
+    }
+  },
+  {
+    "name": "example 7, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "snapshot_start",
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "snapshot_start"
+    }
+  },
+  {
+    "name": "example 8, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "snapshot_end",
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "snapshot_end"
+    }
+  },
+  {
+    "name": "example 9, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "input_dropped",
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "input_dropped"
+    }
+  },
+  {
+    "name": "example 10, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "screen",
+      "alternate": true,
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "screen",
+      "alternate": true
+    }
+  },
+  {
+    "name": "example 11, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "exit",
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "exit"
+    }
+  },
+  {
+    "name": "example 12, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "ended",
+      "reason": "evicted_slow",
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "ended",
+      "reason": "evicted_slow"
+    }
+  },
+  {
+    "name": "example 13, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "error",
+      "message": "no such terminal",
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "error",
+      "message": "no such terminal"
+    }
+  },
+  {
+    "name": "example 14, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "notice",
+      "message": "the runtime refused the resize",
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "notice",
+      "message": "the runtime refused the resize"
+    }
+  }
+]
