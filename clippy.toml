@@ -2,6 +2,8 @@ allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 allow-panic-in-tests = true
 allow-indexing-slicing-in-tests = true
+# An agent, a wire message, holds four of the protocol's own booleans.
+max-struct-bools = 4
 # Each makes an fd without FD_CLOEXEC, which a child would inherit, and which the holder takes for
 # one it inherited and closes (crates/bazhen-holder/src/pty.rs, close_inherited_fds).
 disallowed-methods = [

@@ -7,6 +7,7 @@ import {
   type HarnessChannelPort,
   type HarnessLaunch,
   type LaunchOptions,
+  whole,
 } from "@bazhen/core";
 import type { Activity, ApprovalDecision, ExternalRef } from "@bazhen/protocol";
 import { z } from "zod";
@@ -228,7 +229,7 @@ export function readQuestion(method: string, params: unknown): CodexQuestion | n
       threadId: p.data.threadId,
       itemId: p.data.itemId,
       key: p.data.itemId,
-      summary: summary === "" ? "The agent asks you a question" : summary.slice(0, 300),
+      summary: summary === "" ? "The agent asks you a question" : whole(summary, 300),
       answers: freeText ? only.id : null,
     };
   }
@@ -236,7 +237,7 @@ export function readQuestion(method: string, params: unknown): CodexQuestion | n
     const p = Elicitation.safeParse(params);
     if (!p.success) return null;
     const { threadId, serverName, message } = p.data;
-    const summary = `${serverName} asks: ${message ?? "input in the terminal"}`.slice(0, 300);
+    const summary = whole(`${serverName} asks: ${message ?? "input in the terminal"}`, 300);
     const key = JSON.stringify(["elicitation", serverName, message ?? null]);
     return { threadId, itemId: null, key, summary, answers: null };
   }

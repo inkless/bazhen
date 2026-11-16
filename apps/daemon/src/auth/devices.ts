@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { parse } from "hono/utils/cookie";
 import type { DeviceId } from "@bazhen/core";
+import { whole } from "@bazhen/core";
 import { DEVICE_NAME_MAX, type Device } from "@bazhen/protocol";
 import type { PairedFrom, Store, StoredDevice } from "../store/store.ts";
 import { forwardedFromElsewhere } from "./forwarded.ts";
@@ -32,7 +33,7 @@ const idleLimit = (device: { secure: boolean }) =>
 
 /** A device name as it may be stored and shown: printable, trimmed, and not too long. */
 export const deviceName = (requested: string | undefined) =>
-  requested?.replace(UNPRINTABLE, "").trim().slice(0, DEVICE_NAME_MAX) || DEFAULT_NAME;
+  whole(requested?.replace(UNPRINTABLE, "").trim() ?? "", DEVICE_NAME_MAX) || DEFAULT_NAME;
 
 /** What closes when its device is revoked or lapses: a WebSocket's underlying socket. */
 export interface Closable {

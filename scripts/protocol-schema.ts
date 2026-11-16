@@ -1,6 +1,7 @@
-// Writes the protocol's JSON Schema into packages/protocol/schema/ (foundation-design §5.5), and
-// the holder protocol's fixtures for its current version into
-// packages/protocol/fixtures/holder/<version>/. With `--check`, writes nothing and fails when the
+// Writes the protocol's JSON Schema into packages/protocol/schema/ (foundation-design §5.5), the
+// holder protocol's fixtures for its current version into
+// packages/protocol/fixtures/holder/<version>/, and the API messages' fixtures, which hold other
+// languages' types to these, into packages/protocol/fixtures/api/. With `--check`, writes nothing and fails when the
 // committed files differ from a fresh export, so a protocol change can't ship without them. Only
 // files git tracks count as committed: a generated file left unstaged would pass here and fail in
 // CI. An older version's fixtures are never written: they are what its peers really sent, so
@@ -11,6 +12,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { apiFixtures } from "../packages/protocol/src/api-fixtures.ts";
 import { HOLDER_PROTOCOL_VERSION } from "../packages/protocol/src/holder.ts";
 import { holderFixtures } from "../packages/protocol/src/holder-fixtures.ts";
 import { jsonSchemas } from "../packages/protocol/src/json-schema.ts";
@@ -76,6 +78,7 @@ const holderRoot = join(root, "fixtures/holder");
 const outputs = (): Record<string, Record<string, string>> => ({
   "schema/": jsonSchemas(),
   [`fixtures/holder/${HOLDER_PROTOCOL_VERSION}/`]: holderFixtures(),
+  "fixtures/api/": apiFixtures(),
 });
 
 function committed(dir: string): Record<string, string> {

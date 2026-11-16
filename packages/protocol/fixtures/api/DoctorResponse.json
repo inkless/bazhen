@@ -1,0 +1,3715 @@
+[
+  {
+    "name": "example 1",
+    "wire": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.49",
+      "runtime": {
+        "state": "healthy",
+        "version": "3.4"
+      },
+      "runtimes": [
+        {
+          "kind": "tmux",
+          "state": "healthy",
+          "version": "3.4"
+        },
+        {
+          "kind": "holder",
+          "state": "unreachable",
+          "version": null,
+          "workarounds": [
+            "w"
+          ]
+        }
+      ],
+      "hookClient": {
+        "path": "/r/target/release/bazhen-hook",
+        "fallback": false
+      },
+      "peerReader": {
+        "path": "/r/target/release/bazhen-peer"
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": true
+      },
+      "agents": {
+        "shell": "login",
+        "loginShell": "/bin/zsh"
+      },
+      "codex": {
+        "daemon": "0.160.0",
+        "cli": "0.166.0"
+      },
+      "web": {
+        "externalOrigins": [
+          "https://box.ts.net"
+        ],
+        "from": "config",
+        "allowInsecureOrigins": true,
+        "pairing": {
+          "mode": "always",
+          "required": true
+        },
+        "app": "/r/apps/web/dist",
+        "lan": {
+          "url": "https://my-mac.local:7942",
+          "allow": [
+            "192.168.1.0/24"
+          ],
+          "certificate": {
+            "fingerprint": "AB:CD",
+            "path": "/s/lan.crt",
+            "expiresAt": "2026-11-16T12:00:00.000Z"
+          },
+          "error": "stopped",
+          "subnets": [
+            {
+              "interface": "eno1",
+              "cidr": "192.168.1.0/24"
+            }
+          ]
+        }
+      },
+      "notifications": {
+        "desktop": true,
+        "notifier": "notify-send"
+      },
+      "terminals": {
+        "open": 3,
+        "max": 100,
+        "host": {
+          "used": 37,
+          "max": 4096,
+          "exact": true
+        },
+        "refusing": "budget"
+      },
+      "holder": {
+        "binary": "/s/holder/3f9a/bazhen-holder",
+        "build": "3f9a",
+        "reason": "x",
+        "holders": [
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": "3f9a",
+            "protocol": [
+              "1.2"
+            ],
+            "contained": true
+          },
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": "3f9a",
+            "protocol": [
+              "1.2"
+            ]
+          }
+        ]
+      },
+      "containment": {
+        "state": "scoped",
+        "systemd": 255,
+        "oomPolicy": true,
+        "terminal": {
+          "asked": "50%",
+          "bytes": 33285996544
+        },
+        "total": {
+          "asked": "infinity",
+          "bytes": null
+        },
+        "swap": {
+          "asked": "0",
+          "bytes": 0
+        }
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "refresh",
+        "kept": 40,
+        "removed": {
+          "secrets": 2,
+          "session": 1
+        }
+      }
+    },
+    "parsed": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.49",
+      "runtime": {
+        "state": "healthy",
+        "version": "3.4"
+      },
+      "runtimes": [
+        {
+          "kind": "tmux",
+          "state": "healthy",
+          "version": "3.4"
+        },
+        {
+          "kind": "holder",
+          "state": "unreachable",
+          "version": null,
+          "workarounds": [
+            "w"
+          ]
+        }
+      ],
+      "hookClient": {
+        "path": "/r/target/release/bazhen-hook",
+        "fallback": false
+      },
+      "peerReader": {
+        "path": "/r/target/release/bazhen-peer"
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": true
+      },
+      "agents": {
+        "shell": "login",
+        "loginShell": "/bin/zsh"
+      },
+      "codex": {
+        "daemon": "0.160.0",
+        "cli": "0.166.0"
+      },
+      "web": {
+        "externalOrigins": [
+          "https://box.ts.net"
+        ],
+        "from": "config",
+        "allowInsecureOrigins": true,
+        "pairing": {
+          "mode": "always",
+          "required": true
+        },
+        "app": "/r/apps/web/dist",
+        "lan": {
+          "url": "https://my-mac.local:7942",
+          "allow": [
+            "192.168.1.0/24"
+          ],
+          "certificate": {
+            "fingerprint": "AB:CD",
+            "path": "/s/lan.crt",
+            "expiresAt": "2026-11-16T12:00:00.000Z"
+          },
+          "error": "stopped",
+          "subnets": [
+            {
+              "interface": "eno1",
+              "cidr": "192.168.1.0/24"
+            }
+          ]
+        }
+      },
+      "notifications": {
+        "desktop": true,
+        "notifier": "notify-send"
+      },
+      "terminals": {
+        "open": 3,
+        "max": 100,
+        "host": {
+          "used": 37,
+          "max": 4096,
+          "exact": true
+        },
+        "refusing": "budget"
+      },
+      "holder": {
+        "binary": "/s/holder/3f9a/bazhen-holder",
+        "build": "3f9a",
+        "reason": "x",
+        "holders": [
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": "3f9a",
+            "protocol": [
+              "1.2"
+            ],
+            "contained": true
+          },
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": "3f9a",
+            "protocol": [
+              "1.2"
+            ]
+          }
+        ]
+      },
+      "containment": {
+        "state": "scoped",
+        "systemd": 255,
+        "oomPolicy": true,
+        "terminal": {
+          "asked": "50%",
+          "bytes": 33285996544
+        },
+        "total": {
+          "asked": "infinity",
+          "bytes": null
+        },
+        "swap": {
+          "asked": "0",
+          "bytes": 0
+        }
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "refresh",
+        "kept": 40,
+        "removed": {
+          "secrets": 2,
+          "session": 1
+        }
+      }
+    }
+  },
+  {
+    "name": "example 2",
+    "wire": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    },
+    "parsed": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    }
+  },
+  {
+    "name": "example 3",
+    "wire": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      },
+      "peerReader": null,
+      "codex": {
+        "daemon": null,
+        "cli": null
+      },
+      "web": {
+        "externalOrigins": [],
+        "from": null,
+        "allowInsecureOrigins": false,
+        "pairing": {
+          "mode": "auto",
+          "required": false
+        },
+        "app": null,
+        "lan": null
+      },
+      "notifications": {
+        "desktop": false,
+        "notifier": null
+      },
+      "terminals": {
+        "open": 0,
+        "max": 4,
+        "host": null,
+        "refusing": null
+      },
+      "holder": {
+        "binary": null,
+        "build": null,
+        "reason": null,
+        "holders": [
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": null,
+            "protocol": [],
+            "contained": null
+          }
+        ]
+      },
+      "containment": {
+        "state": "uncontained",
+        "why": "no systemd user manager"
+      }
+    },
+    "parsed": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "peerReader": null,
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "codex": {
+        "daemon": null,
+        "cli": null
+      },
+      "web": {
+        "externalOrigins": [],
+        "from": null,
+        "allowInsecureOrigins": false,
+        "pairing": {
+          "mode": "auto",
+          "required": false
+        },
+        "app": null,
+        "lan": null
+      },
+      "notifications": {
+        "desktop": false,
+        "notifier": null
+      },
+      "terminals": {
+        "open": 0,
+        "max": 4,
+        "host": null,
+        "refusing": null
+      },
+      "holder": {
+        "binary": null,
+        "build": null,
+        "reason": null,
+        "holders": [
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": null,
+            "protocol": [],
+            "contained": null
+          }
+        ]
+      },
+      "containment": {
+        "state": "uncontained",
+        "why": "no systemd user manager"
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    }
+  },
+  {
+    "name": "example 4",
+    "wire": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      },
+      "web": {
+        "externalOrigins": [],
+        "from": "BAZHEN_EXTERNAL_ORIGINS",
+        "allowInsecureOrigins": false,
+        "lan": {
+          "url": "https://my-mac.local:7942",
+          "allow": [
+            "192.168.1.0/24"
+          ],
+          "certificate": null,
+          "error": null,
+          "subnets": []
+        }
+      },
+      "terminals": {
+        "open": 1,
+        "max": 4,
+        "host": {
+          "used": 1,
+          "max": 9,
+          "exact": false
+        },
+        "refusing": "host"
+      },
+      "containment": {
+        "state": "scoped",
+        "systemd": 249,
+        "oomPolicy": false,
+        "terminal": {
+          "asked": "1G",
+          "bytes": null
+        },
+        "total": {
+          "asked": "2G",
+          "bytes": null
+        },
+        "swap": {
+          "asked": "1G",
+          "bytes": null
+        }
+      }
+    },
+    "parsed": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "web": {
+        "externalOrigins": [],
+        "from": "BAZHEN_EXTERNAL_ORIGINS",
+        "allowInsecureOrigins": false,
+        "lan": {
+          "url": "https://my-mac.local:7942",
+          "allow": [
+            "192.168.1.0/24"
+          ],
+          "certificate": null,
+          "error": null,
+          "subnets": []
+        }
+      },
+      "terminals": {
+        "open": 1,
+        "max": 4,
+        "host": {
+          "used": 1,
+          "max": 9,
+          "exact": false
+        },
+        "refusing": "host"
+      },
+      "containment": {
+        "state": "scoped",
+        "systemd": 249,
+        "oomPolicy": false,
+        "terminal": {
+          "asked": "1G",
+          "bytes": null
+        },
+        "total": {
+          "asked": "2G",
+          "bytes": null
+        },
+        "swap": {
+          "asked": "1G",
+          "bytes": null
+        }
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    }
+  },
+  {
+    "name": "example 5",
+    "wire": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      },
+      "web": {
+        "externalOrigins": [],
+        "from": null,
+        "allowInsecureOrigins": false
+      },
+      "containment": {
+        "state": "unchecked"
+      }
+    },
+    "parsed": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "web": {
+        "externalOrigins": [],
+        "from": null,
+        "allowInsecureOrigins": false
+      },
+      "containment": {
+        "state": "unchecked"
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    }
+  },
+  {
+    "name": "runtime.state = \"healthy\"",
+    "wire": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "healthy",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    },
+    "parsed": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "healthy",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    }
+  },
+  {
+    "name": "runtime.state = \"unreachable\"",
+    "wire": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "unreachable",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    },
+    "parsed": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "unreachable",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    }
+  },
+  {
+    "name": "runtime.state = \"not-running\"",
+    "wire": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    },
+    "parsed": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    }
+  },
+  {
+    "name": "runtimes[].state = \"healthy\"",
+    "wire": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.49",
+      "runtime": {
+        "state": "healthy",
+        "version": "3.4"
+      },
+      "runtimes": [
+        {
+          "kind": "tmux",
+          "state": "healthy",
+          "version": "3.4"
+        },
+        {
+          "kind": "holder",
+          "state": "healthy",
+          "version": null,
+          "workarounds": [
+            "w"
+          ]
+        }
+      ],
+      "hookClient": {
+        "path": "/r/target/release/bazhen-hook",
+        "fallback": false
+      },
+      "peerReader": {
+        "path": "/r/target/release/bazhen-peer"
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": true
+      },
+      "agents": {
+        "shell": "login",
+        "loginShell": "/bin/zsh"
+      },
+      "codex": {
+        "daemon": "0.160.0",
+        "cli": "0.166.0"
+      },
+      "web": {
+        "externalOrigins": [
+          "https://box.ts.net"
+        ],
+        "from": "config",
+        "allowInsecureOrigins": true,
+        "pairing": {
+          "mode": "always",
+          "required": true
+        },
+        "app": "/r/apps/web/dist",
+        "lan": {
+          "url": "https://my-mac.local:7942",
+          "allow": [
+            "192.168.1.0/24"
+          ],
+          "certificate": {
+            "fingerprint": "AB:CD",
+            "path": "/s/lan.crt",
+            "expiresAt": "2026-11-16T12:00:00.000Z"
+          },
+          "error": "stopped",
+          "subnets": [
+            {
+              "interface": "eno1",
+              "cidr": "192.168.1.0/24"
+            }
+          ]
+        }
+      },
+      "notifications": {
+        "desktop": true,
+        "notifier": "notify-send"
+      },
+      "terminals": {
+        "open": 3,
+        "max": 100,
+        "host": {
+          "used": 37,
+          "max": 4096,
+          "exact": true
+        },
+        "refusing": "budget"
+      },
+      "holder": {
+        "binary": "/s/holder/3f9a/bazhen-holder",
+        "build": "3f9a",
+        "reason": "x",
+        "holders": [
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": "3f9a",
+            "protocol": [
+              "1.2"
+            ],
+            "contained": true
+          },
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": "3f9a",
+            "protocol": [
+              "1.2"
+            ]
+          }
+        ]
+      },
+      "containment": {
+        "state": "scoped",
+        "systemd": 255,
+        "oomPolicy": true,
+        "terminal": {
+          "asked": "50%",
+          "bytes": 33285996544
+        },
+        "total": {
+          "asked": "infinity",
+          "bytes": null
+        },
+        "swap": {
+          "asked": "0",
+          "bytes": 0
+        }
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "refresh",
+        "kept": 40,
+        "removed": {
+          "secrets": 2,
+          "session": 1
+        }
+      }
+    },
+    "parsed": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.49",
+      "runtime": {
+        "state": "healthy",
+        "version": "3.4"
+      },
+      "runtimes": [
+        {
+          "kind": "tmux",
+          "state": "healthy",
+          "version": "3.4"
+        },
+        {
+          "kind": "holder",
+          "state": "healthy",
+          "version": null,
+          "workarounds": [
+            "w"
+          ]
+        }
+      ],
+      "hookClient": {
+        "path": "/r/target/release/bazhen-hook",
+        "fallback": false
+      },
+      "peerReader": {
+        "path": "/r/target/release/bazhen-peer"
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": true
+      },
+      "agents": {
+        "shell": "login",
+        "loginShell": "/bin/zsh"
+      },
+      "codex": {
+        "daemon": "0.160.0",
+        "cli": "0.166.0"
+      },
+      "web": {
+        "externalOrigins": [
+          "https://box.ts.net"
+        ],
+        "from": "config",
+        "allowInsecureOrigins": true,
+        "pairing": {
+          "mode": "always",
+          "required": true
+        },
+        "app": "/r/apps/web/dist",
+        "lan": {
+          "url": "https://my-mac.local:7942",
+          "allow": [
+            "192.168.1.0/24"
+          ],
+          "certificate": {
+            "fingerprint": "AB:CD",
+            "path": "/s/lan.crt",
+            "expiresAt": "2026-11-16T12:00:00.000Z"
+          },
+          "error": "stopped",
+          "subnets": [
+            {
+              "interface": "eno1",
+              "cidr": "192.168.1.0/24"
+            }
+          ]
+        }
+      },
+      "notifications": {
+        "desktop": true,
+        "notifier": "notify-send"
+      },
+      "terminals": {
+        "open": 3,
+        "max": 100,
+        "host": {
+          "used": 37,
+          "max": 4096,
+          "exact": true
+        },
+        "refusing": "budget"
+      },
+      "holder": {
+        "binary": "/s/holder/3f9a/bazhen-holder",
+        "build": "3f9a",
+        "reason": "x",
+        "holders": [
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": "3f9a",
+            "protocol": [
+              "1.2"
+            ],
+            "contained": true
+          },
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": "3f9a",
+            "protocol": [
+              "1.2"
+            ]
+          }
+        ]
+      },
+      "containment": {
+        "state": "scoped",
+        "systemd": 255,
+        "oomPolicy": true,
+        "terminal": {
+          "asked": "50%",
+          "bytes": 33285996544
+        },
+        "total": {
+          "asked": "infinity",
+          "bytes": null
+        },
+        "swap": {
+          "asked": "0",
+          "bytes": 0
+        }
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "refresh",
+        "kept": 40,
+        "removed": {
+          "secrets": 2,
+          "session": 1
+        }
+      }
+    }
+  },
+  {
+    "name": "runtimes[].state = \"unreachable\"",
+    "wire": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.49",
+      "runtime": {
+        "state": "healthy",
+        "version": "3.4"
+      },
+      "runtimes": [
+        {
+          "kind": "tmux",
+          "state": "unreachable",
+          "version": "3.4"
+        },
+        {
+          "kind": "holder",
+          "state": "unreachable",
+          "version": null,
+          "workarounds": [
+            "w"
+          ]
+        }
+      ],
+      "hookClient": {
+        "path": "/r/target/release/bazhen-hook",
+        "fallback": false
+      },
+      "peerReader": {
+        "path": "/r/target/release/bazhen-peer"
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": true
+      },
+      "agents": {
+        "shell": "login",
+        "loginShell": "/bin/zsh"
+      },
+      "codex": {
+        "daemon": "0.160.0",
+        "cli": "0.166.0"
+      },
+      "web": {
+        "externalOrigins": [
+          "https://box.ts.net"
+        ],
+        "from": "config",
+        "allowInsecureOrigins": true,
+        "pairing": {
+          "mode": "always",
+          "required": true
+        },
+        "app": "/r/apps/web/dist",
+        "lan": {
+          "url": "https://my-mac.local:7942",
+          "allow": [
+            "192.168.1.0/24"
+          ],
+          "certificate": {
+            "fingerprint": "AB:CD",
+            "path": "/s/lan.crt",
+            "expiresAt": "2026-11-16T12:00:00.000Z"
+          },
+          "error": "stopped",
+          "subnets": [
+            {
+              "interface": "eno1",
+              "cidr": "192.168.1.0/24"
+            }
+          ]
+        }
+      },
+      "notifications": {
+        "desktop": true,
+        "notifier": "notify-send"
+      },
+      "terminals": {
+        "open": 3,
+        "max": 100,
+        "host": {
+          "used": 37,
+          "max": 4096,
+          "exact": true
+        },
+        "refusing": "budget"
+      },
+      "holder": {
+        "binary": "/s/holder/3f9a/bazhen-holder",
+        "build": "3f9a",
+        "reason": "x",
+        "holders": [
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": "3f9a",
+            "protocol": [
+              "1.2"
+            ],
+            "contained": true
+          },
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": "3f9a",
+            "protocol": [
+              "1.2"
+            ]
+          }
+        ]
+      },
+      "containment": {
+        "state": "scoped",
+        "systemd": 255,
+        "oomPolicy": true,
+        "terminal": {
+          "asked": "50%",
+          "bytes": 33285996544
+        },
+        "total": {
+          "asked": "infinity",
+          "bytes": null
+        },
+        "swap": {
+          "asked": "0",
+          "bytes": 0
+        }
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "refresh",
+        "kept": 40,
+        "removed": {
+          "secrets": 2,
+          "session": 1
+        }
+      }
+    },
+    "parsed": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.49",
+      "runtime": {
+        "state": "healthy",
+        "version": "3.4"
+      },
+      "runtimes": [
+        {
+          "kind": "tmux",
+          "state": "unreachable",
+          "version": "3.4"
+        },
+        {
+          "kind": "holder",
+          "state": "unreachable",
+          "version": null,
+          "workarounds": [
+            "w"
+          ]
+        }
+      ],
+      "hookClient": {
+        "path": "/r/target/release/bazhen-hook",
+        "fallback": false
+      },
+      "peerReader": {
+        "path": "/r/target/release/bazhen-peer"
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": true
+      },
+      "agents": {
+        "shell": "login",
+        "loginShell": "/bin/zsh"
+      },
+      "codex": {
+        "daemon": "0.160.0",
+        "cli": "0.166.0"
+      },
+      "web": {
+        "externalOrigins": [
+          "https://box.ts.net"
+        ],
+        "from": "config",
+        "allowInsecureOrigins": true,
+        "pairing": {
+          "mode": "always",
+          "required": true
+        },
+        "app": "/r/apps/web/dist",
+        "lan": {
+          "url": "https://my-mac.local:7942",
+          "allow": [
+            "192.168.1.0/24"
+          ],
+          "certificate": {
+            "fingerprint": "AB:CD",
+            "path": "/s/lan.crt",
+            "expiresAt": "2026-11-16T12:00:00.000Z"
+          },
+          "error": "stopped",
+          "subnets": [
+            {
+              "interface": "eno1",
+              "cidr": "192.168.1.0/24"
+            }
+          ]
+        }
+      },
+      "notifications": {
+        "desktop": true,
+        "notifier": "notify-send"
+      },
+      "terminals": {
+        "open": 3,
+        "max": 100,
+        "host": {
+          "used": 37,
+          "max": 4096,
+          "exact": true
+        },
+        "refusing": "budget"
+      },
+      "holder": {
+        "binary": "/s/holder/3f9a/bazhen-holder",
+        "build": "3f9a",
+        "reason": "x",
+        "holders": [
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": "3f9a",
+            "protocol": [
+              "1.2"
+            ],
+            "contained": true
+          },
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": "3f9a",
+            "protocol": [
+              "1.2"
+            ]
+          }
+        ]
+      },
+      "containment": {
+        "state": "scoped",
+        "systemd": 255,
+        "oomPolicy": true,
+        "terminal": {
+          "asked": "50%",
+          "bytes": 33285996544
+        },
+        "total": {
+          "asked": "infinity",
+          "bytes": null
+        },
+        "swap": {
+          "asked": "0",
+          "bytes": 0
+        }
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "refresh",
+        "kept": 40,
+        "removed": {
+          "secrets": 2,
+          "session": 1
+        }
+      }
+    }
+  },
+  {
+    "name": "runtimes[].state = \"not-running\"",
+    "wire": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.49",
+      "runtime": {
+        "state": "healthy",
+        "version": "3.4"
+      },
+      "runtimes": [
+        {
+          "kind": "tmux",
+          "state": "not-running",
+          "version": "3.4"
+        },
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null,
+          "workarounds": [
+            "w"
+          ]
+        }
+      ],
+      "hookClient": {
+        "path": "/r/target/release/bazhen-hook",
+        "fallback": false
+      },
+      "peerReader": {
+        "path": "/r/target/release/bazhen-peer"
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": true
+      },
+      "agents": {
+        "shell": "login",
+        "loginShell": "/bin/zsh"
+      },
+      "codex": {
+        "daemon": "0.160.0",
+        "cli": "0.166.0"
+      },
+      "web": {
+        "externalOrigins": [
+          "https://box.ts.net"
+        ],
+        "from": "config",
+        "allowInsecureOrigins": true,
+        "pairing": {
+          "mode": "always",
+          "required": true
+        },
+        "app": "/r/apps/web/dist",
+        "lan": {
+          "url": "https://my-mac.local:7942",
+          "allow": [
+            "192.168.1.0/24"
+          ],
+          "certificate": {
+            "fingerprint": "AB:CD",
+            "path": "/s/lan.crt",
+            "expiresAt": "2026-11-16T12:00:00.000Z"
+          },
+          "error": "stopped",
+          "subnets": [
+            {
+              "interface": "eno1",
+              "cidr": "192.168.1.0/24"
+            }
+          ]
+        }
+      },
+      "notifications": {
+        "desktop": true,
+        "notifier": "notify-send"
+      },
+      "terminals": {
+        "open": 3,
+        "max": 100,
+        "host": {
+          "used": 37,
+          "max": 4096,
+          "exact": true
+        },
+        "refusing": "budget"
+      },
+      "holder": {
+        "binary": "/s/holder/3f9a/bazhen-holder",
+        "build": "3f9a",
+        "reason": "x",
+        "holders": [
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": "3f9a",
+            "protocol": [
+              "1.2"
+            ],
+            "contained": true
+          },
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": "3f9a",
+            "protocol": [
+              "1.2"
+            ]
+          }
+        ]
+      },
+      "containment": {
+        "state": "scoped",
+        "systemd": 255,
+        "oomPolicy": true,
+        "terminal": {
+          "asked": "50%",
+          "bytes": 33285996544
+        },
+        "total": {
+          "asked": "infinity",
+          "bytes": null
+        },
+        "swap": {
+          "asked": "0",
+          "bytes": 0
+        }
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "refresh",
+        "kept": 40,
+        "removed": {
+          "secrets": 2,
+          "session": 1
+        }
+      }
+    },
+    "parsed": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.49",
+      "runtime": {
+        "state": "healthy",
+        "version": "3.4"
+      },
+      "runtimes": [
+        {
+          "kind": "tmux",
+          "state": "not-running",
+          "version": "3.4"
+        },
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null,
+          "workarounds": [
+            "w"
+          ]
+        }
+      ],
+      "hookClient": {
+        "path": "/r/target/release/bazhen-hook",
+        "fallback": false
+      },
+      "peerReader": {
+        "path": "/r/target/release/bazhen-peer"
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": true
+      },
+      "agents": {
+        "shell": "login",
+        "loginShell": "/bin/zsh"
+      },
+      "codex": {
+        "daemon": "0.160.0",
+        "cli": "0.166.0"
+      },
+      "web": {
+        "externalOrigins": [
+          "https://box.ts.net"
+        ],
+        "from": "config",
+        "allowInsecureOrigins": true,
+        "pairing": {
+          "mode": "always",
+          "required": true
+        },
+        "app": "/r/apps/web/dist",
+        "lan": {
+          "url": "https://my-mac.local:7942",
+          "allow": [
+            "192.168.1.0/24"
+          ],
+          "certificate": {
+            "fingerprint": "AB:CD",
+            "path": "/s/lan.crt",
+            "expiresAt": "2026-11-16T12:00:00.000Z"
+          },
+          "error": "stopped",
+          "subnets": [
+            {
+              "interface": "eno1",
+              "cidr": "192.168.1.0/24"
+            }
+          ]
+        }
+      },
+      "notifications": {
+        "desktop": true,
+        "notifier": "notify-send"
+      },
+      "terminals": {
+        "open": 3,
+        "max": 100,
+        "host": {
+          "used": 37,
+          "max": 4096,
+          "exact": true
+        },
+        "refusing": "budget"
+      },
+      "holder": {
+        "binary": "/s/holder/3f9a/bazhen-holder",
+        "build": "3f9a",
+        "reason": "x",
+        "holders": [
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": "3f9a",
+            "protocol": [
+              "1.2"
+            ],
+            "contained": true
+          },
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": "3f9a",
+            "protocol": [
+              "1.2"
+            ]
+          }
+        ]
+      },
+      "containment": {
+        "state": "scoped",
+        "systemd": 255,
+        "oomPolicy": true,
+        "terminal": {
+          "asked": "50%",
+          "bytes": 33285996544
+        },
+        "total": {
+          "asked": "infinity",
+          "bytes": null
+        },
+        "swap": {
+          "asked": "0",
+          "bytes": 0
+        }
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "refresh",
+        "kept": 40,
+        "removed": {
+          "secrets": 2,
+          "session": 1
+        }
+      }
+    }
+  },
+  {
+    "name": "agents.shell = \"direct\"",
+    "wire": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    },
+    "parsed": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    }
+  },
+  {
+    "name": "agents.shell = \"login\"",
+    "wire": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "login",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    },
+    "parsed": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "login",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    }
+  },
+  {
+    "name": "web.from = \"BAZHEN_EXTERNAL_ORIGINS\"",
+    "wire": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      },
+      "web": {
+        "externalOrigins": [],
+        "from": "BAZHEN_EXTERNAL_ORIGINS",
+        "allowInsecureOrigins": false,
+        "lan": {
+          "url": "https://my-mac.local:7942",
+          "allow": [
+            "192.168.1.0/24"
+          ],
+          "certificate": null,
+          "error": null,
+          "subnets": []
+        }
+      },
+      "terminals": {
+        "open": 1,
+        "max": 4,
+        "host": {
+          "used": 1,
+          "max": 9,
+          "exact": false
+        },
+        "refusing": "host"
+      },
+      "containment": {
+        "state": "scoped",
+        "systemd": 249,
+        "oomPolicy": false,
+        "terminal": {
+          "asked": "1G",
+          "bytes": null
+        },
+        "total": {
+          "asked": "2G",
+          "bytes": null
+        },
+        "swap": {
+          "asked": "1G",
+          "bytes": null
+        }
+      }
+    },
+    "parsed": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "web": {
+        "externalOrigins": [],
+        "from": "BAZHEN_EXTERNAL_ORIGINS",
+        "allowInsecureOrigins": false,
+        "lan": {
+          "url": "https://my-mac.local:7942",
+          "allow": [
+            "192.168.1.0/24"
+          ],
+          "certificate": null,
+          "error": null,
+          "subnets": []
+        }
+      },
+      "terminals": {
+        "open": 1,
+        "max": 4,
+        "host": {
+          "used": 1,
+          "max": 9,
+          "exact": false
+        },
+        "refusing": "host"
+      },
+      "containment": {
+        "state": "scoped",
+        "systemd": 249,
+        "oomPolicy": false,
+        "terminal": {
+          "asked": "1G",
+          "bytes": null
+        },
+        "total": {
+          "asked": "2G",
+          "bytes": null
+        },
+        "swap": {
+          "asked": "1G",
+          "bytes": null
+        }
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    }
+  },
+  {
+    "name": "web.from = \"config\"",
+    "wire": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      },
+      "web": {
+        "externalOrigins": [],
+        "from": "config",
+        "allowInsecureOrigins": false,
+        "lan": {
+          "url": "https://my-mac.local:7942",
+          "allow": [
+            "192.168.1.0/24"
+          ],
+          "certificate": null,
+          "error": null,
+          "subnets": []
+        }
+      },
+      "terminals": {
+        "open": 1,
+        "max": 4,
+        "host": {
+          "used": 1,
+          "max": 9,
+          "exact": false
+        },
+        "refusing": "host"
+      },
+      "containment": {
+        "state": "scoped",
+        "systemd": 249,
+        "oomPolicy": false,
+        "terminal": {
+          "asked": "1G",
+          "bytes": null
+        },
+        "total": {
+          "asked": "2G",
+          "bytes": null
+        },
+        "swap": {
+          "asked": "1G",
+          "bytes": null
+        }
+      }
+    },
+    "parsed": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "web": {
+        "externalOrigins": [],
+        "from": "config",
+        "allowInsecureOrigins": false,
+        "lan": {
+          "url": "https://my-mac.local:7942",
+          "allow": [
+            "192.168.1.0/24"
+          ],
+          "certificate": null,
+          "error": null,
+          "subnets": []
+        }
+      },
+      "terminals": {
+        "open": 1,
+        "max": 4,
+        "host": {
+          "used": 1,
+          "max": 9,
+          "exact": false
+        },
+        "refusing": "host"
+      },
+      "containment": {
+        "state": "scoped",
+        "systemd": 249,
+        "oomPolicy": false,
+        "terminal": {
+          "asked": "1G",
+          "bytes": null
+        },
+        "total": {
+          "asked": "2G",
+          "bytes": null
+        },
+        "swap": {
+          "asked": "1G",
+          "bytes": null
+        }
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    }
+  },
+  {
+    "name": "web.pairing.mode = \"auto\"",
+    "wire": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      },
+      "peerReader": null,
+      "codex": {
+        "daemon": null,
+        "cli": null
+      },
+      "web": {
+        "externalOrigins": [],
+        "from": null,
+        "allowInsecureOrigins": false,
+        "pairing": {
+          "mode": "auto",
+          "required": false
+        },
+        "app": null,
+        "lan": null
+      },
+      "notifications": {
+        "desktop": false,
+        "notifier": null
+      },
+      "terminals": {
+        "open": 0,
+        "max": 4,
+        "host": null,
+        "refusing": null
+      },
+      "holder": {
+        "binary": null,
+        "build": null,
+        "reason": null,
+        "holders": [
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": null,
+            "protocol": [],
+            "contained": null
+          }
+        ]
+      },
+      "containment": {
+        "state": "uncontained",
+        "why": "no systemd user manager"
+      }
+    },
+    "parsed": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "peerReader": null,
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "codex": {
+        "daemon": null,
+        "cli": null
+      },
+      "web": {
+        "externalOrigins": [],
+        "from": null,
+        "allowInsecureOrigins": false,
+        "pairing": {
+          "mode": "auto",
+          "required": false
+        },
+        "app": null,
+        "lan": null
+      },
+      "notifications": {
+        "desktop": false,
+        "notifier": null
+      },
+      "terminals": {
+        "open": 0,
+        "max": 4,
+        "host": null,
+        "refusing": null
+      },
+      "holder": {
+        "binary": null,
+        "build": null,
+        "reason": null,
+        "holders": [
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": null,
+            "protocol": [],
+            "contained": null
+          }
+        ]
+      },
+      "containment": {
+        "state": "uncontained",
+        "why": "no systemd user manager"
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    }
+  },
+  {
+    "name": "web.pairing.mode = \"always\"",
+    "wire": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      },
+      "peerReader": null,
+      "codex": {
+        "daemon": null,
+        "cli": null
+      },
+      "web": {
+        "externalOrigins": [],
+        "from": null,
+        "allowInsecureOrigins": false,
+        "pairing": {
+          "mode": "always",
+          "required": false
+        },
+        "app": null,
+        "lan": null
+      },
+      "notifications": {
+        "desktop": false,
+        "notifier": null
+      },
+      "terminals": {
+        "open": 0,
+        "max": 4,
+        "host": null,
+        "refusing": null
+      },
+      "holder": {
+        "binary": null,
+        "build": null,
+        "reason": null,
+        "holders": [
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": null,
+            "protocol": [],
+            "contained": null
+          }
+        ]
+      },
+      "containment": {
+        "state": "uncontained",
+        "why": "no systemd user manager"
+      }
+    },
+    "parsed": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "peerReader": null,
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "codex": {
+        "daemon": null,
+        "cli": null
+      },
+      "web": {
+        "externalOrigins": [],
+        "from": null,
+        "allowInsecureOrigins": false,
+        "pairing": {
+          "mode": "always",
+          "required": false
+        },
+        "app": null,
+        "lan": null
+      },
+      "notifications": {
+        "desktop": false,
+        "notifier": null
+      },
+      "terminals": {
+        "open": 0,
+        "max": 4,
+        "host": null,
+        "refusing": null
+      },
+      "holder": {
+        "binary": null,
+        "build": null,
+        "reason": null,
+        "holders": [
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": null,
+            "protocol": [],
+            "contained": null
+          }
+        ]
+      },
+      "containment": {
+        "state": "uncontained",
+        "why": "no systemd user manager"
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    }
+  },
+  {
+    "name": "terminals.refusing = \"budget\"",
+    "wire": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      },
+      "web": {
+        "externalOrigins": [],
+        "from": "BAZHEN_EXTERNAL_ORIGINS",
+        "allowInsecureOrigins": false,
+        "lan": {
+          "url": "https://my-mac.local:7942",
+          "allow": [
+            "192.168.1.0/24"
+          ],
+          "certificate": null,
+          "error": null,
+          "subnets": []
+        }
+      },
+      "terminals": {
+        "open": 1,
+        "max": 4,
+        "host": {
+          "used": 1,
+          "max": 9,
+          "exact": false
+        },
+        "refusing": "budget"
+      },
+      "containment": {
+        "state": "scoped",
+        "systemd": 249,
+        "oomPolicy": false,
+        "terminal": {
+          "asked": "1G",
+          "bytes": null
+        },
+        "total": {
+          "asked": "2G",
+          "bytes": null
+        },
+        "swap": {
+          "asked": "1G",
+          "bytes": null
+        }
+      }
+    },
+    "parsed": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "web": {
+        "externalOrigins": [],
+        "from": "BAZHEN_EXTERNAL_ORIGINS",
+        "allowInsecureOrigins": false,
+        "lan": {
+          "url": "https://my-mac.local:7942",
+          "allow": [
+            "192.168.1.0/24"
+          ],
+          "certificate": null,
+          "error": null,
+          "subnets": []
+        }
+      },
+      "terminals": {
+        "open": 1,
+        "max": 4,
+        "host": {
+          "used": 1,
+          "max": 9,
+          "exact": false
+        },
+        "refusing": "budget"
+      },
+      "containment": {
+        "state": "scoped",
+        "systemd": 249,
+        "oomPolicy": false,
+        "terminal": {
+          "asked": "1G",
+          "bytes": null
+        },
+        "total": {
+          "asked": "2G",
+          "bytes": null
+        },
+        "swap": {
+          "asked": "1G",
+          "bytes": null
+        }
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    }
+  },
+  {
+    "name": "terminals.refusing = \"host\"",
+    "wire": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      },
+      "web": {
+        "externalOrigins": [],
+        "from": "BAZHEN_EXTERNAL_ORIGINS",
+        "allowInsecureOrigins": false,
+        "lan": {
+          "url": "https://my-mac.local:7942",
+          "allow": [
+            "192.168.1.0/24"
+          ],
+          "certificate": null,
+          "error": null,
+          "subnets": []
+        }
+      },
+      "terminals": {
+        "open": 1,
+        "max": 4,
+        "host": {
+          "used": 1,
+          "max": 9,
+          "exact": false
+        },
+        "refusing": "host"
+      },
+      "containment": {
+        "state": "scoped",
+        "systemd": 249,
+        "oomPolicy": false,
+        "terminal": {
+          "asked": "1G",
+          "bytes": null
+        },
+        "total": {
+          "asked": "2G",
+          "bytes": null
+        },
+        "swap": {
+          "asked": "1G",
+          "bytes": null
+        }
+      }
+    },
+    "parsed": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "web": {
+        "externalOrigins": [],
+        "from": "BAZHEN_EXTERNAL_ORIGINS",
+        "allowInsecureOrigins": false,
+        "lan": {
+          "url": "https://my-mac.local:7942",
+          "allow": [
+            "192.168.1.0/24"
+          ],
+          "certificate": null,
+          "error": null,
+          "subnets": []
+        }
+      },
+      "terminals": {
+        "open": 1,
+        "max": 4,
+        "host": {
+          "used": 1,
+          "max": 9,
+          "exact": false
+        },
+        "refusing": "host"
+      },
+      "containment": {
+        "state": "scoped",
+        "systemd": 249,
+        "oomPolicy": false,
+        "terminal": {
+          "asked": "1G",
+          "bytes": null
+        },
+        "total": {
+          "asked": "2G",
+          "bytes": null
+        },
+        "swap": {
+          "asked": "1G",
+          "bytes": null
+        }
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    }
+  },
+  {
+    "name": "env.source = \"start\"",
+    "wire": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    },
+    "parsed": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    }
+  },
+  {
+    "name": "env.source = \"refresh\"",
+    "wire": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "refresh",
+        "kept": 3,
+        "removed": {}
+      }
+    },
+    "parsed": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "refresh",
+        "kept": 3,
+        "removed": {}
+      }
+    }
+  },
+  {
+    "name": "example 1, with a field no version defines in each of its objects",
+    "wire": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.49",
+      "runtime": {
+        "state": "healthy",
+        "version": "3.4",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "runtimes": [
+        {
+          "kind": "tmux",
+          "state": "healthy",
+          "version": "3.4",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        {
+          "kind": "holder",
+          "state": "unreachable",
+          "version": null,
+          "workarounds": [
+            "w"
+          ],
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        }
+      ],
+      "hookClient": {
+        "path": "/r/target/release/bazhen-hook",
+        "fallback": false,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "peerReader": {
+        "path": "/r/target/release/bazhen-peer",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": true,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "agents": {
+        "shell": "login",
+        "loginShell": "/bin/zsh",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "codex": {
+        "daemon": "0.160.0",
+        "cli": "0.166.0",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "web": {
+        "externalOrigins": [
+          "https://box.ts.net"
+        ],
+        "from": "config",
+        "allowInsecureOrigins": true,
+        "pairing": {
+          "mode": "always",
+          "required": true,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "app": "/r/apps/web/dist",
+        "lan": {
+          "url": "https://my-mac.local:7942",
+          "allow": [
+            "192.168.1.0/24"
+          ],
+          "certificate": {
+            "fingerprint": "AB:CD",
+            "path": "/s/lan.crt",
+            "expiresAt": "2026-11-16T12:00:00.000Z",
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
+          },
+          "error": "stopped",
+          "subnets": [
+            {
+              "interface": "eno1",
+              "cidr": "192.168.1.0/24",
+              "fieldFromANewerDaemon": {
+                "any": [
+                  1
+                ]
+              }
+            }
+          ],
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "notifications": {
+        "desktop": true,
+        "notifier": "notify-send",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "terminals": {
+        "open": 3,
+        "max": 100,
+        "host": {
+          "used": 37,
+          "max": 4096,
+          "exact": true,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "refusing": "budget",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "holder": {
+        "binary": "/s/holder/3f9a/bazhen-holder",
+        "build": "3f9a",
+        "reason": "x",
+        "holders": [
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": "3f9a",
+            "protocol": [
+              "1.2"
+            ],
+            "contained": true,
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
+          },
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": "3f9a",
+            "protocol": [
+              "1.2"
+            ],
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
+          }
+        ],
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "containment": {
+        "state": "scoped",
+        "systemd": 255,
+        "oomPolicy": true,
+        "terminal": {
+          "asked": "50%",
+          "bytes": 33285996544,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "total": {
+          "asked": "infinity",
+          "bytes": null,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "swap": {
+          "asked": "0",
+          "bytes": 0,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "refresh",
+        "kept": 40,
+        "removed": {
+          "secrets": 2,
+          "session": 1
+        },
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.49",
+      "runtime": {
+        "state": "healthy",
+        "version": "3.4"
+      },
+      "runtimes": [
+        {
+          "kind": "tmux",
+          "state": "healthy",
+          "version": "3.4"
+        },
+        {
+          "kind": "holder",
+          "state": "unreachable",
+          "version": null,
+          "workarounds": [
+            "w"
+          ]
+        }
+      ],
+      "hookClient": {
+        "path": "/r/target/release/bazhen-hook",
+        "fallback": false
+      },
+      "peerReader": {
+        "path": "/r/target/release/bazhen-peer"
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": true
+      },
+      "agents": {
+        "shell": "login",
+        "loginShell": "/bin/zsh"
+      },
+      "codex": {
+        "daemon": "0.160.0",
+        "cli": "0.166.0"
+      },
+      "web": {
+        "externalOrigins": [
+          "https://box.ts.net"
+        ],
+        "from": "config",
+        "allowInsecureOrigins": true,
+        "pairing": {
+          "mode": "always",
+          "required": true
+        },
+        "app": "/r/apps/web/dist",
+        "lan": {
+          "url": "https://my-mac.local:7942",
+          "allow": [
+            "192.168.1.0/24"
+          ],
+          "certificate": {
+            "fingerprint": "AB:CD",
+            "path": "/s/lan.crt",
+            "expiresAt": "2026-11-16T12:00:00.000Z"
+          },
+          "error": "stopped",
+          "subnets": [
+            {
+              "interface": "eno1",
+              "cidr": "192.168.1.0/24"
+            }
+          ]
+        }
+      },
+      "notifications": {
+        "desktop": true,
+        "notifier": "notify-send"
+      },
+      "terminals": {
+        "open": 3,
+        "max": 100,
+        "host": {
+          "used": 37,
+          "max": 4096,
+          "exact": true
+        },
+        "refusing": "budget"
+      },
+      "holder": {
+        "binary": "/s/holder/3f9a/bazhen-holder",
+        "build": "3f9a",
+        "reason": "x",
+        "holders": [
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": "3f9a",
+            "protocol": [
+              "1.2"
+            ],
+            "contained": true
+          },
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": "3f9a",
+            "protocol": [
+              "1.2"
+            ]
+          }
+        ]
+      },
+      "containment": {
+        "state": "scoped",
+        "systemd": 255,
+        "oomPolicy": true,
+        "terminal": {
+          "asked": "50%",
+          "bytes": 33285996544
+        },
+        "total": {
+          "asked": "infinity",
+          "bytes": null
+        },
+        "swap": {
+          "asked": "0",
+          "bytes": 0
+        }
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "refresh",
+        "kept": 40,
+        "removed": {
+          "secrets": 2,
+          "session": 1
+        }
+      }
+    }
+  },
+  {
+    "name": "example 2, with a field no version defines in each of its objects",
+    "wire": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {},
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    }
+  },
+  {
+    "name": "example 3, with a field no version defines in each of its objects",
+    "wire": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {},
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "peerReader": null,
+      "codex": {
+        "daemon": null,
+        "cli": null,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "web": {
+        "externalOrigins": [],
+        "from": null,
+        "allowInsecureOrigins": false,
+        "pairing": {
+          "mode": "auto",
+          "required": false,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "app": null,
+        "lan": null,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "notifications": {
+        "desktop": false,
+        "notifier": null,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "terminals": {
+        "open": 0,
+        "max": 4,
+        "host": null,
+        "refusing": null,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "holder": {
+        "binary": null,
+        "build": null,
+        "reason": null,
+        "holders": [
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": null,
+            "protocol": [],
+            "contained": null,
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
+          }
+        ],
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "containment": {
+        "state": "uncontained",
+        "why": "no systemd user manager",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "peerReader": null,
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "codex": {
+        "daemon": null,
+        "cli": null
+      },
+      "web": {
+        "externalOrigins": [],
+        "from": null,
+        "allowInsecureOrigins": false,
+        "pairing": {
+          "mode": "auto",
+          "required": false
+        },
+        "app": null,
+        "lan": null
+      },
+      "notifications": {
+        "desktop": false,
+        "notifier": null
+      },
+      "terminals": {
+        "open": 0,
+        "max": 4,
+        "host": null,
+        "refusing": null
+      },
+      "holder": {
+        "binary": null,
+        "build": null,
+        "reason": null,
+        "holders": [
+          {
+            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "build": null,
+            "protocol": [],
+            "contained": null
+          }
+        ]
+      },
+      "containment": {
+        "state": "uncontained",
+        "why": "no systemd user manager"
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    }
+  },
+  {
+    "name": "example 4, with a field no version defines in each of its objects",
+    "wire": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {},
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "web": {
+        "externalOrigins": [],
+        "from": "BAZHEN_EXTERNAL_ORIGINS",
+        "allowInsecureOrigins": false,
+        "lan": {
+          "url": "https://my-mac.local:7942",
+          "allow": [
+            "192.168.1.0/24"
+          ],
+          "certificate": null,
+          "error": null,
+          "subnets": [],
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "terminals": {
+        "open": 1,
+        "max": 4,
+        "host": {
+          "used": 1,
+          "max": 9,
+          "exact": false,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "refusing": "host",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "containment": {
+        "state": "scoped",
+        "systemd": 249,
+        "oomPolicy": false,
+        "terminal": {
+          "asked": "1G",
+          "bytes": null,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "total": {
+          "asked": "2G",
+          "bytes": null,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "swap": {
+          "asked": "1G",
+          "bytes": null,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "web": {
+        "externalOrigins": [],
+        "from": "BAZHEN_EXTERNAL_ORIGINS",
+        "allowInsecureOrigins": false,
+        "lan": {
+          "url": "https://my-mac.local:7942",
+          "allow": [
+            "192.168.1.0/24"
+          ],
+          "certificate": null,
+          "error": null,
+          "subnets": []
+        }
+      },
+      "terminals": {
+        "open": 1,
+        "max": 4,
+        "host": {
+          "used": 1,
+          "max": 9,
+          "exact": false
+        },
+        "refusing": "host"
+      },
+      "containment": {
+        "state": "scoped",
+        "systemd": 249,
+        "oomPolicy": false,
+        "terminal": {
+          "asked": "1G",
+          "bytes": null
+        },
+        "total": {
+          "asked": "2G",
+          "bytes": null
+        },
+        "swap": {
+          "asked": "1G",
+          "bytes": null
+        }
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    }
+  },
+  {
+    "name": "example 5, with a field no version defines in each of its objects",
+    "wire": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {},
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "web": {
+        "externalOrigins": [],
+        "from": null,
+        "allowInsecureOrigins": false,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "containment": {
+        "state": "unchecked",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.30",
+      "runtime": {
+        "state": "not-running",
+        "version": null
+      },
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "web": {
+        "externalOrigins": [],
+        "from": null,
+        "allowInsecureOrigins": false
+      },
+      "containment": {
+        "state": "unchecked"
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    }
+  }
+]

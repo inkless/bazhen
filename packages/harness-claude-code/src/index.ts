@@ -5,6 +5,7 @@ import {
   type HarnessAdapter,
   type HarnessLaunch,
   type LaunchOptions,
+  whole,
 } from "@bazhen/core";
 import type { Activity, ApprovalDecision, ExternalRef, Usage } from "@bazhen/protocol";
 
@@ -352,7 +353,7 @@ function usageOf(payload: unknown): Usage {
   const used = field(window, "used_percentage");
   const size = field(window, "context_window_size");
   return {
-    ...(typeof name === "string" && name !== "" ? { model: name.slice(0, 200) } : {}),
+    ...(typeof name === "string" && name !== "" ? { model: whole(name, 200) } : {}),
     // Whole percent: a finer change isn't worth an event.
     ...(typeof used === "number" && used >= 0 && used <= 100
       ? { contextUsedPercent: Math.round(used) }
@@ -415,7 +416,7 @@ function turnEndOf(
 /** Claude Code's name for the API error a StopFailure reports, such as `server_error`. */
 function errorOf(payload: unknown): string | null {
   const error = field(payload, "error");
-  return typeof error === "string" ? error.slice(0, 200) : null;
+  return typeof error === "string" ? whole(error, 200) : null;
 }
 
 /** Which Claude Code session ran a hook, and whether one of its subagents did. */
@@ -497,13 +498,13 @@ function questionSummary(payload: unknown): string {
   const asked = Array.isArray(questions)
     ? questions.map((q) => field(q, "question")).filter((q) => typeof q === "string")
     : [];
-  return asked.length === 0 ? "The agent asks you a question" : asked.join(" / ").slice(0, 300);
+  return asked.length === 0 ? "The agent asks you a question" : whole(asked.join(" / "), 300);
 }
 
 function approvalSummary(payload: unknown): string {
   const tool = field(payload, "tool_name");
   const input = JSON.stringify(field(payload, "tool_input") ?? {});
-  return `${typeof tool === "string" ? tool : "A tool"}: ${input.slice(0, 300)}`;
+  return `${typeof tool === "string" ? tool : "A tool"}: ${whole(input, 300)}`;
 }
 
 /** The hook output that answers a PermissionRequest, dismissing the TUI's own prompt. */

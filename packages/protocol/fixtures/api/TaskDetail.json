@@ -1,0 +1,1595 @@
+[
+  {
+    "name": "example 1",
+    "wire": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "title": "t",
+      "state": "open",
+      "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "brief": "b",
+      "note": "shipped",
+      "assignments": [
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "ended",
+          "endReason": "unassigned"
+        },
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": null,
+          "state": "active",
+          "endReason": null
+        }
+      ],
+      "subtasks": [
+        {
+          "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "title": "t",
+          "state": "done",
+          "ownerAgentId": null,
+          "parentTaskId": null
+        }
+      ],
+      "notes": [
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "text": "Halfway.",
+          "handoff": true,
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": null,
+          "role": null,
+          "text": "Halfway.",
+          "handoff": false,
+          "at": "2026-11-16T12:00:00.000Z"
+        }
+      ]
+    },
+    "parsed": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "title": "t",
+      "state": "open",
+      "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "brief": "b",
+      "note": "shipped",
+      "assignments": [
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "ended",
+          "endReason": "unassigned"
+        },
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": null,
+          "state": "active",
+          "endReason": null
+        }
+      ],
+      "subtasks": [
+        {
+          "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "title": "t",
+          "state": "done",
+          "ownerAgentId": null,
+          "parentTaskId": null
+        }
+      ],
+      "notes": [
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "text": "Halfway.",
+          "handoff": true,
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": null,
+          "role": null,
+          "text": "Halfway.",
+          "handoff": false,
+          "at": "2026-11-16T12:00:00.000Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "example 2",
+    "wire": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "title": "t",
+      "state": "done",
+      "ownerAgentId": null,
+      "parentTaskId": null,
+      "brief": "b",
+      "note": null,
+      "assignments": [],
+      "subtasks": []
+    },
+    "parsed": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "title": "t",
+      "state": "done",
+      "ownerAgentId": null,
+      "parentTaskId": null,
+      "brief": "b",
+      "note": null,
+      "assignments": [],
+      "subtasks": [],
+      "notes": []
+    }
+  },
+  {
+    "name": "state = \"open\"",
+    "wire": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "title": "t",
+      "state": "open",
+      "ownerAgentId": null,
+      "parentTaskId": null,
+      "brief": "b",
+      "note": null,
+      "assignments": [],
+      "subtasks": []
+    },
+    "parsed": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "title": "t",
+      "state": "open",
+      "ownerAgentId": null,
+      "parentTaskId": null,
+      "brief": "b",
+      "note": null,
+      "assignments": [],
+      "subtasks": [],
+      "notes": []
+    }
+  },
+  {
+    "name": "state = \"done\"",
+    "wire": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "title": "t",
+      "state": "done",
+      "ownerAgentId": null,
+      "parentTaskId": null,
+      "brief": "b",
+      "note": null,
+      "assignments": [],
+      "subtasks": []
+    },
+    "parsed": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "title": "t",
+      "state": "done",
+      "ownerAgentId": null,
+      "parentTaskId": null,
+      "brief": "b",
+      "note": null,
+      "assignments": [],
+      "subtasks": [],
+      "notes": []
+    }
+  },
+  {
+    "name": "state = \"cancelled\"",
+    "wire": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "title": "t",
+      "state": "cancelled",
+      "ownerAgentId": null,
+      "parentTaskId": null,
+      "brief": "b",
+      "note": null,
+      "assignments": [],
+      "subtasks": []
+    },
+    "parsed": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "title": "t",
+      "state": "cancelled",
+      "ownerAgentId": null,
+      "parentTaskId": null,
+      "brief": "b",
+      "note": null,
+      "assignments": [],
+      "subtasks": [],
+      "notes": []
+    }
+  },
+  {
+    "name": "assignments[].state = \"active\"",
+    "wire": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "title": "t",
+      "state": "open",
+      "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "brief": "b",
+      "note": "shipped",
+      "assignments": [
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "active",
+          "endReason": "unassigned"
+        },
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": null,
+          "state": "active",
+          "endReason": null
+        }
+      ],
+      "subtasks": [
+        {
+          "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "title": "t",
+          "state": "done",
+          "ownerAgentId": null,
+          "parentTaskId": null
+        }
+      ],
+      "notes": [
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "text": "Halfway.",
+          "handoff": true,
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": null,
+          "role": null,
+          "text": "Halfway.",
+          "handoff": false,
+          "at": "2026-11-16T12:00:00.000Z"
+        }
+      ]
+    },
+    "parsed": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "title": "t",
+      "state": "open",
+      "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "brief": "b",
+      "note": "shipped",
+      "assignments": [
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "active",
+          "endReason": "unassigned"
+        },
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": null,
+          "state": "active",
+          "endReason": null
+        }
+      ],
+      "subtasks": [
+        {
+          "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "title": "t",
+          "state": "done",
+          "ownerAgentId": null,
+          "parentTaskId": null
+        }
+      ],
+      "notes": [
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "text": "Halfway.",
+          "handoff": true,
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": null,
+          "role": null,
+          "text": "Halfway.",
+          "handoff": false,
+          "at": "2026-11-16T12:00:00.000Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "assignments[].state = \"ended\"",
+    "wire": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "title": "t",
+      "state": "open",
+      "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "brief": "b",
+      "note": "shipped",
+      "assignments": [
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "ended",
+          "endReason": "unassigned"
+        },
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": null,
+          "state": "ended",
+          "endReason": null
+        }
+      ],
+      "subtasks": [
+        {
+          "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "title": "t",
+          "state": "done",
+          "ownerAgentId": null,
+          "parentTaskId": null
+        }
+      ],
+      "notes": [
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "text": "Halfway.",
+          "handoff": true,
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": null,
+          "role": null,
+          "text": "Halfway.",
+          "handoff": false,
+          "at": "2026-11-16T12:00:00.000Z"
+        }
+      ]
+    },
+    "parsed": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "title": "t",
+      "state": "open",
+      "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "brief": "b",
+      "note": "shipped",
+      "assignments": [
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "ended",
+          "endReason": "unassigned"
+        },
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": null,
+          "state": "ended",
+          "endReason": null
+        }
+      ],
+      "subtasks": [
+        {
+          "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "title": "t",
+          "state": "done",
+          "ownerAgentId": null,
+          "parentTaskId": null
+        }
+      ],
+      "notes": [
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "text": "Halfway.",
+          "handoff": true,
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": null,
+          "role": null,
+          "text": "Halfway.",
+          "handoff": false,
+          "at": "2026-11-16T12:00:00.000Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "assignments[].endReason = \"unassigned\"",
+    "wire": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "title": "t",
+      "state": "open",
+      "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "brief": "b",
+      "note": "shipped",
+      "assignments": [
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "ended",
+          "endReason": "unassigned"
+        },
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": null,
+          "state": "active",
+          "endReason": null
+        }
+      ],
+      "subtasks": [
+        {
+          "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "title": "t",
+          "state": "done",
+          "ownerAgentId": null,
+          "parentTaskId": null
+        }
+      ],
+      "notes": [
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "text": "Halfway.",
+          "handoff": true,
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": null,
+          "role": null,
+          "text": "Halfway.",
+          "handoff": false,
+          "at": "2026-11-16T12:00:00.000Z"
+        }
+      ]
+    },
+    "parsed": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "title": "t",
+      "state": "open",
+      "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "brief": "b",
+      "note": "shipped",
+      "assignments": [
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "ended",
+          "endReason": "unassigned"
+        },
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": null,
+          "state": "active",
+          "endReason": null
+        }
+      ],
+      "subtasks": [
+        {
+          "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "title": "t",
+          "state": "done",
+          "ownerAgentId": null,
+          "parentTaskId": null
+        }
+      ],
+      "notes": [
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "text": "Halfway.",
+          "handoff": true,
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": null,
+          "role": null,
+          "text": "Halfway.",
+          "handoff": false,
+          "at": "2026-11-16T12:00:00.000Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "assignments[].endReason = \"completed\"",
+    "wire": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "title": "t",
+      "state": "open",
+      "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "brief": "b",
+      "note": "shipped",
+      "assignments": [
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "ended",
+          "endReason": "completed"
+        },
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": null,
+          "state": "active",
+          "endReason": null
+        }
+      ],
+      "subtasks": [
+        {
+          "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "title": "t",
+          "state": "done",
+          "ownerAgentId": null,
+          "parentTaskId": null
+        }
+      ],
+      "notes": [
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "text": "Halfway.",
+          "handoff": true,
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": null,
+          "role": null,
+          "text": "Halfway.",
+          "handoff": false,
+          "at": "2026-11-16T12:00:00.000Z"
+        }
+      ]
+    },
+    "parsed": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "title": "t",
+      "state": "open",
+      "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "brief": "b",
+      "note": "shipped",
+      "assignments": [
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "ended",
+          "endReason": "completed"
+        },
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": null,
+          "state": "active",
+          "endReason": null
+        }
+      ],
+      "subtasks": [
+        {
+          "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "title": "t",
+          "state": "done",
+          "ownerAgentId": null,
+          "parentTaskId": null
+        }
+      ],
+      "notes": [
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "text": "Halfway.",
+          "handoff": true,
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": null,
+          "role": null,
+          "text": "Halfway.",
+          "handoff": false,
+          "at": "2026-11-16T12:00:00.000Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "assignments[].endReason = \"task_finished\"",
+    "wire": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "title": "t",
+      "state": "open",
+      "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "brief": "b",
+      "note": "shipped",
+      "assignments": [
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "ended",
+          "endReason": "task_finished"
+        },
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": null,
+          "state": "active",
+          "endReason": null
+        }
+      ],
+      "subtasks": [
+        {
+          "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "title": "t",
+          "state": "done",
+          "ownerAgentId": null,
+          "parentTaskId": null
+        }
+      ],
+      "notes": [
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "text": "Halfway.",
+          "handoff": true,
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": null,
+          "role": null,
+          "text": "Halfway.",
+          "handoff": false,
+          "at": "2026-11-16T12:00:00.000Z"
+        }
+      ]
+    },
+    "parsed": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "title": "t",
+      "state": "open",
+      "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "brief": "b",
+      "note": "shipped",
+      "assignments": [
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "ended",
+          "endReason": "task_finished"
+        },
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": null,
+          "state": "active",
+          "endReason": null
+        }
+      ],
+      "subtasks": [
+        {
+          "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "title": "t",
+          "state": "done",
+          "ownerAgentId": null,
+          "parentTaskId": null
+        }
+      ],
+      "notes": [
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "text": "Halfway.",
+          "handoff": true,
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": null,
+          "role": null,
+          "text": "Halfway.",
+          "handoff": false,
+          "at": "2026-11-16T12:00:00.000Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "assignments[].endReason = \"agent_closed\"",
+    "wire": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "title": "t",
+      "state": "open",
+      "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "brief": "b",
+      "note": "shipped",
+      "assignments": [
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "ended",
+          "endReason": "agent_closed"
+        },
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": null,
+          "state": "active",
+          "endReason": null
+        }
+      ],
+      "subtasks": [
+        {
+          "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "title": "t",
+          "state": "done",
+          "ownerAgentId": null,
+          "parentTaskId": null
+        }
+      ],
+      "notes": [
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "text": "Halfway.",
+          "handoff": true,
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": null,
+          "role": null,
+          "text": "Halfway.",
+          "handoff": false,
+          "at": "2026-11-16T12:00:00.000Z"
+        }
+      ]
+    },
+    "parsed": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "title": "t",
+      "state": "open",
+      "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "brief": "b",
+      "note": "shipped",
+      "assignments": [
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "ended",
+          "endReason": "agent_closed"
+        },
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": null,
+          "state": "active",
+          "endReason": null
+        }
+      ],
+      "subtasks": [
+        {
+          "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "title": "t",
+          "state": "done",
+          "ownerAgentId": null,
+          "parentTaskId": null
+        }
+      ],
+      "notes": [
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "text": "Halfway.",
+          "handoff": true,
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": null,
+          "role": null,
+          "text": "Halfway.",
+          "handoff": false,
+          "at": "2026-11-16T12:00:00.000Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "assignments[].endReason = \"parent_ended\"",
+    "wire": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "title": "t",
+      "state": "open",
+      "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "brief": "b",
+      "note": "shipped",
+      "assignments": [
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "ended",
+          "endReason": "parent_ended"
+        },
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": null,
+          "state": "active",
+          "endReason": null
+        }
+      ],
+      "subtasks": [
+        {
+          "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "title": "t",
+          "state": "done",
+          "ownerAgentId": null,
+          "parentTaskId": null
+        }
+      ],
+      "notes": [
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "text": "Halfway.",
+          "handoff": true,
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": null,
+          "role": null,
+          "text": "Halfway.",
+          "handoff": false,
+          "at": "2026-11-16T12:00:00.000Z"
+        }
+      ]
+    },
+    "parsed": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "title": "t",
+      "state": "open",
+      "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "brief": "b",
+      "note": "shipped",
+      "assignments": [
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "ended",
+          "endReason": "parent_ended"
+        },
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": null,
+          "state": "active",
+          "endReason": null
+        }
+      ],
+      "subtasks": [
+        {
+          "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "title": "t",
+          "state": "done",
+          "ownerAgentId": null,
+          "parentTaskId": null
+        }
+      ],
+      "notes": [
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "text": "Halfway.",
+          "handoff": true,
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": null,
+          "role": null,
+          "text": "Halfway.",
+          "handoff": false,
+          "at": "2026-11-16T12:00:00.000Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "subtasks[].state = \"open\"",
+    "wire": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "title": "t",
+      "state": "open",
+      "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "brief": "b",
+      "note": "shipped",
+      "assignments": [
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "ended",
+          "endReason": "unassigned"
+        },
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": null,
+          "state": "active",
+          "endReason": null
+        }
+      ],
+      "subtasks": [
+        {
+          "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "title": "t",
+          "state": "open",
+          "ownerAgentId": null,
+          "parentTaskId": null
+        }
+      ],
+      "notes": [
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "text": "Halfway.",
+          "handoff": true,
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": null,
+          "role": null,
+          "text": "Halfway.",
+          "handoff": false,
+          "at": "2026-11-16T12:00:00.000Z"
+        }
+      ]
+    },
+    "parsed": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "title": "t",
+      "state": "open",
+      "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "brief": "b",
+      "note": "shipped",
+      "assignments": [
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "ended",
+          "endReason": "unassigned"
+        },
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": null,
+          "state": "active",
+          "endReason": null
+        }
+      ],
+      "subtasks": [
+        {
+          "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "title": "t",
+          "state": "open",
+          "ownerAgentId": null,
+          "parentTaskId": null
+        }
+      ],
+      "notes": [
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "text": "Halfway.",
+          "handoff": true,
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": null,
+          "role": null,
+          "text": "Halfway.",
+          "handoff": false,
+          "at": "2026-11-16T12:00:00.000Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "subtasks[].state = \"done\"",
+    "wire": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "title": "t",
+      "state": "open",
+      "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "brief": "b",
+      "note": "shipped",
+      "assignments": [
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "ended",
+          "endReason": "unassigned"
+        },
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": null,
+          "state": "active",
+          "endReason": null
+        }
+      ],
+      "subtasks": [
+        {
+          "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "title": "t",
+          "state": "done",
+          "ownerAgentId": null,
+          "parentTaskId": null
+        }
+      ],
+      "notes": [
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "text": "Halfway.",
+          "handoff": true,
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": null,
+          "role": null,
+          "text": "Halfway.",
+          "handoff": false,
+          "at": "2026-11-16T12:00:00.000Z"
+        }
+      ]
+    },
+    "parsed": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "title": "t",
+      "state": "open",
+      "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "brief": "b",
+      "note": "shipped",
+      "assignments": [
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "ended",
+          "endReason": "unassigned"
+        },
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": null,
+          "state": "active",
+          "endReason": null
+        }
+      ],
+      "subtasks": [
+        {
+          "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "title": "t",
+          "state": "done",
+          "ownerAgentId": null,
+          "parentTaskId": null
+        }
+      ],
+      "notes": [
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "text": "Halfway.",
+          "handoff": true,
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": null,
+          "role": null,
+          "text": "Halfway.",
+          "handoff": false,
+          "at": "2026-11-16T12:00:00.000Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "subtasks[].state = \"cancelled\"",
+    "wire": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "title": "t",
+      "state": "open",
+      "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "brief": "b",
+      "note": "shipped",
+      "assignments": [
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "ended",
+          "endReason": "unassigned"
+        },
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": null,
+          "state": "active",
+          "endReason": null
+        }
+      ],
+      "subtasks": [
+        {
+          "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "title": "t",
+          "state": "cancelled",
+          "ownerAgentId": null,
+          "parentTaskId": null
+        }
+      ],
+      "notes": [
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "text": "Halfway.",
+          "handoff": true,
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": null,
+          "role": null,
+          "text": "Halfway.",
+          "handoff": false,
+          "at": "2026-11-16T12:00:00.000Z"
+        }
+      ]
+    },
+    "parsed": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "title": "t",
+      "state": "open",
+      "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "brief": "b",
+      "note": "shipped",
+      "assignments": [
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "ended",
+          "endReason": "unassigned"
+        },
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": null,
+          "state": "active",
+          "endReason": null
+        }
+      ],
+      "subtasks": [
+        {
+          "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "title": "t",
+          "state": "cancelled",
+          "ownerAgentId": null,
+          "parentTaskId": null
+        }
+      ],
+      "notes": [
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "text": "Halfway.",
+          "handoff": true,
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": null,
+          "role": null,
+          "text": "Halfway.",
+          "handoff": false,
+          "at": "2026-11-16T12:00:00.000Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "example 1, with a field no version defines in each of its objects",
+    "wire": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "title": "t",
+      "state": "open",
+      "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "brief": "b",
+      "note": "shipped",
+      "assignments": [
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "ended",
+          "endReason": "unassigned",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": null,
+          "state": "active",
+          "endReason": null,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        }
+      ],
+      "subtasks": [
+        {
+          "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "title": "t",
+          "state": "done",
+          "ownerAgentId": null,
+          "parentTaskId": null,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        }
+      ],
+      "notes": [
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "text": "Halfway.",
+          "handoff": true,
+          "at": "2026-11-16T12:00:00.000Z",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": null,
+          "role": null,
+          "text": "Halfway.",
+          "handoff": false,
+          "at": "2026-11-16T12:00:00.000Z",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        }
+      ],
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "title": "t",
+      "state": "open",
+      "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "brief": "b",
+      "note": "shipped",
+      "assignments": [
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "ended",
+          "endReason": "unassigned"
+        },
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": null,
+          "state": "active",
+          "endReason": null
+        }
+      ],
+      "subtasks": [
+        {
+          "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "title": "t",
+          "state": "done",
+          "ownerAgentId": null,
+          "parentTaskId": null
+        }
+      ],
+      "notes": [
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "text": "Halfway.",
+          "handoff": true,
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        {
+          "eventId": 7,
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": null,
+          "role": null,
+          "text": "Halfway.",
+          "handoff": false,
+          "at": "2026-11-16T12:00:00.000Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "example 2, with a field no version defines in each of its objects",
+    "wire": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "title": "t",
+      "state": "done",
+      "ownerAgentId": null,
+      "parentTaskId": null,
+      "brief": "b",
+      "note": null,
+      "assignments": [],
+      "subtasks": [],
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "title": "t",
+      "state": "done",
+      "ownerAgentId": null,
+      "parentTaskId": null,
+      "brief": "b",
+      "note": null,
+      "assignments": [],
+      "subtasks": [],
+      "notes": []
+    }
+  }
+]

@@ -13,6 +13,7 @@ import {
   type Caller,
   type RoleBook,
   type TaskView,
+  whole,
 } from "@bazhen/core";
 import {
   AssignTaskResponse,
@@ -103,7 +104,7 @@ const SUMMARY_MAX = 500;
 /** Text an agent wrote, made safe to show: no control or escape characters, and bounded. */
 const printable = (text: string) => {
   const clean = text.replace(/[\p{Cc}\p{Cf}]+/gu, " ").trim();
-  return clean.length > SUMMARY_MAX ? `${clean.slice(0, SUMMARY_MAX - 1)}…` : clean;
+  return clean.length > SUMMARY_MAX ? `${whole(clean, SUMMARY_MAX - 1)}…` : clean;
 };
 
 /** What the human's inbox says of a task an agent finished. */

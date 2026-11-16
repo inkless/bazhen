@@ -1,0 +1,201 @@
+[
+  {
+    "name": "example 1",
+    "wire": {
+      "messages": [
+        {
+          "id": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "seen"
+        }
+      ]
+    },
+    "parsed": {
+      "messages": [
+        {
+          "id": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "seen"
+        }
+      ]
+    }
+  },
+  {
+    "name": "messages[].state = \"queued\"",
+    "wire": {
+      "messages": [
+        {
+          "id": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "queued"
+        }
+      ]
+    },
+    "parsed": {
+      "messages": [
+        {
+          "id": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "queued"
+        }
+      ]
+    }
+  },
+  {
+    "name": "messages[].state = \"offered\"",
+    "wire": {
+      "messages": [
+        {
+          "id": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "offered"
+        }
+      ]
+    },
+    "parsed": {
+      "messages": [
+        {
+          "id": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "offered"
+        }
+      ]
+    }
+  },
+  {
+    "name": "messages[].state = \"emitted\"",
+    "wire": {
+      "messages": [
+        {
+          "id": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "emitted"
+        }
+      ]
+    },
+    "parsed": {
+      "messages": [
+        {
+          "id": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "emitted"
+        }
+      ]
+    }
+  },
+  {
+    "name": "messages[].state = \"seen\"",
+    "wire": {
+      "messages": [
+        {
+          "id": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "seen"
+        }
+      ]
+    },
+    "parsed": {
+      "messages": [
+        {
+          "id": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "seen"
+        }
+      ]
+    }
+  },
+  {
+    "name": "messages[].state = \"queued_in_codex\"",
+    "wire": {
+      "messages": [
+        {
+          "id": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "queued_in_codex"
+        }
+      ]
+    },
+    "parsed": {
+      "messages": [
+        {
+          "id": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "queued_in_codex"
+        }
+      ]
+    }
+  },
+  {
+    "name": "messages[].state = \"delivered\"",
+    "wire": {
+      "messages": [
+        {
+          "id": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "delivered"
+        }
+      ]
+    },
+    "parsed": {
+      "messages": [
+        {
+          "id": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "delivered"
+        }
+      ]
+    }
+  },
+  {
+    "name": "messages[].state = \"undeliverable\"",
+    "wire": {
+      "messages": [
+        {
+          "id": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "undeliverable"
+        }
+      ]
+    },
+    "parsed": {
+      "messages": [
+        {
+          "id": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "undeliverable"
+        }
+      ]
+    }
+  },
+  {
+    "name": "example 1, with a field no version defines in each of its objects",
+    "wire": {
+      "messages": [
+        {
+          "id": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "seen",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        }
+      ],
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "messages": [
+        {
+          "id": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "seen"
+        }
+      ]
+    }
+  }
+]

@@ -121,6 +121,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "bazhen-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bazhen-test-signal"
 version = "0.1.0"
 dependencies = [

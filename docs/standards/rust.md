@@ -228,7 +228,9 @@ fds (`pipe`, `net`) adds its flag-less calls to the list in the same commit.
 **The allow-list** is in `[workspace.lints.clippy]` only, one line each, with its reason beside
 it. It holds `must_use_candidate`, which fires on nearly every pure function; `#[must_use]` goes
 where ignoring the value is a bug. A lint joins the list only once it has fired on real code, its
-fix made the code worse, and the commit says so.
+fix made the code worse, and the commit says so. A lint with a threshold is tuned in `clippy.toml`
+rather than allowed: `max-struct-bools = 4` lets a wire message (an agent) hold the four booleans
+its protocol defines, and still flags a fifth.
 
 ## Formatting
 

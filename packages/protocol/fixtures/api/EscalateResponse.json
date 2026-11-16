@@ -1,0 +1,25 @@
+[
+  {
+    "name": "example 1",
+    "wire": {
+      "attentionId": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"
+    },
+    "parsed": {
+      "attentionId": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"
+    }
+  },
+  {
+    "name": "example 1, with a field no version defines in each of its objects",
+    "wire": {
+      "attentionId": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "attentionId": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"
+    }
+  }
+]

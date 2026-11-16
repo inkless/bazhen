@@ -1,0 +1,37 @@
+[
+  {
+    "name": "example 1",
+    "wire": {
+      "env": {
+        "PATH": "/bin",
+        "HOME": "/h"
+      }
+    },
+    "parsed": {
+      "env": {
+        "PATH": "/bin",
+        "HOME": "/h"
+      }
+    }
+  },
+  {
+    "name": "example 1, with a field no version defines in each of its objects",
+    "wire": {
+      "env": {
+        "PATH": "/bin",
+        "HOME": "/h"
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "env": {
+        "PATH": "/bin",
+        "HOME": "/h"
+      }
+    }
+  }
+]
