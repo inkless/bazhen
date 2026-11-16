@@ -180,6 +180,17 @@ describe("bazhen agents", () => {
     );
   });
 
+  it("prints an attention kind newer than it knows as the daemon named it", async () => {
+    const open = { ...item("attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d", "open"), kind: "a_later_kind" };
+    const state = { ...snapshot({ agents: [agent(AGENT, "quiet")] }), attention: [open] };
+    s.daemon.raw("GET /v1/state", 200, JSON.stringify(state));
+    const ran = await s.bazhen(["agents", "--json"]);
+    expect([ran.code, JSON.parse(ran.stdout)]).toEqual([
+      0,
+      [expect.objectContaining({ attention: [{ id: open.id, kind: "a_later_kind" }] })],
+    ]);
+  });
+
   it("prints an empty fleet as an empty JSON list, and takes --json on agents only", async () => {
     s.daemon.answer("GET /v1/state", StateSnapshot, snapshot());
     const empty = await s.bazhen(["agents", "--json"]);

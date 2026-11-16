@@ -98,7 +98,7 @@ pub(crate) fn fleet(s: &StateSnapshot, now_ms: i64) -> Vec<FleetAgent> {
                 .filter(|i| i.agent_id == a.id && i.state == AttentionState::Open)
                 .map(|i| FleetAttention {
                     id: i.id.clone(),
-                    kind: i.kind,
+                    kind: i.kind.clone(),
                 })
                 .collect(),
         })
