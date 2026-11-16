@@ -260,7 +260,8 @@ A test owns everything it touches and leaves nothing behind.
   `ALLOWED_SIGNALS` names, each with its reason and how many times it appears. Another signal in
   the same file still counts, and so does a copy of an allowed call, an entry whose call has gone,
   and any option but `timeout` at an allowed start. A file listed only for its fixtures, text that
-  names kills and runs none, may hold no signal of its own. The
+  names kills and runs none, has every kill on a command line allowed, a real one included, so
+  review is what keeps one out; any other signal in it still counts. The
   check is defence in depth: it reads text, so the
   chokepoints' own refusals are what stop a stray signal. On a command line it is a best-effort
   heuristic that fails closed where it reads one. It takes a literal's own escapes, then reads
