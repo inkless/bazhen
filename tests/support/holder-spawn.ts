@@ -6,7 +6,16 @@
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { HolderStartFailed, inSignalSandbox, readProcess, startHolder } from "@bazhen/host-guard";
+import {
+  HolderStartFailed,
+  inSignalSandbox,
+  killHolder,
+  readProcess,
+  startHolder,
+  type StartedHolder,
+  type StartHolderOptions,
+  vouchHolder,
+} from "@bazhen/host-guard";
 import { HOLDER_PROTOCOL_VERSION, type HolderTheme } from "@bazhen/protocol";
 import { connectHolder, type HolderClient } from "@bazhen/runtime-holder";
 import {
@@ -90,6 +99,8 @@ export interface SpawnedHolder {
   readonly terminalId: string;
   readonly socket: string;
   readonly pid: number;
+  /** When it started, as `ps` said before it read its spec. */
+  readonly start: number;
   /** Its exit code, once it has exited; null for a signal. */
   readonly exited: Promise<number | null>;
   /** Its ledger entry, which `closeHolder` removes. */
@@ -97,10 +108,35 @@ export interface SpawnedHolder {
 }
 
 /**
- * Starts a holder for `terminalId` running `argv`, as the daemon does, through host-guard's
- * `startHolder`, and waits for `ready`. Its socket is the run's, its child's env what
- * `holderEnv()` builds, and it is recorded in the ledger before it reads its spec, so a run that
- * dies before closing it has it swept by the next.
+ * Starts a holder through host-guard's `startHolder`, from the run's HOME, under the CPU limit,
+ * recorded in the ledger before it reads its spec, so a run that dies before closing it has it
+ * swept by the next.
+ */
+async function startRecorded(options: StartHolderOptions): Promise<SpawnedHolder> {
+  const { terminalId, socket } = options.spec;
+  let entry: string | undefined;
+  try {
+    const started = await startHolder({
+      ...options,
+      cwd: userDir(testHome()),
+      limits: { cpuSeconds: CPU_SECONDS },
+      onStarted: async ({ pid, start }) => {
+        entry = await record(pid, start, socket);
+      },
+    });
+    const { pid, start, exited } = started;
+    return { terminalId, socket, pid, start, exited, entry: entry! };
+  } catch (error) {
+    // One left running stays recorded, for the next run's sweep to kill.
+    const running = error instanceof HolderStartFailed && error.running;
+    if (entry !== undefined && !running) rmSync(entry, { force: true });
+    throw error;
+  }
+}
+
+/**
+ * Starts a holder for `terminalId` running `argv`, as the daemon does, and waits for `ready`. Its
+ * socket is the run's, and its child's env what `holderEnv()` builds.
  */
 export async function spawnHolder(
   terminalId: string,
@@ -127,26 +163,49 @@ export async function spawnHolder(
     ...holderProcessSpec(argv),
     ...(theme === undefined ? {} : { theme }),
   };
-  let entry: string | undefined;
-  try {
-    const started = await startHolder({
-      binary: HOLDER_BINARY,
-      root: runDir(testHome()),
-      spec,
-      env: bareHolder ? {} : requireHolderEnv(holderEnv()),
-      cwd: userDir(testHome()),
-      limits: { cpuSeconds: CPU_SECONDS },
-      onStarted: async ({ pid, start }) => {
-        entry = await record(pid, start, socket);
-      },
-    });
-    return { terminalId, socket, pid: started.pid, exited: started.exited, entry: entry! };
-  } catch (error) {
-    // One left running stays recorded, for the next run's sweep to kill.
-    const running = error instanceof HolderStartFailed && error.running;
-    if (entry !== undefined && !running) rmSync(entry, { force: true });
-    throw error;
-  }
+  return startRecorded({
+    binary: HOLDER_BINARY,
+    root: runDir(testHome()),
+    spec,
+    env: bareHolder ? {} : requireHolderEnv(holderEnv()),
+  });
+}
+
+const isEnv = (value: unknown): value is Readonly<Record<string, string>> =>
+  typeof value === "object" &&
+  value !== null &&
+  Object.values(value).every((entry) => typeof entry === "string");
+
+/**
+ * A `start` for a `HolderRuntime` under test: each holder it starts is started as `spawnHolder`
+ * starts one, its child's env checked as every holder test's is, and collected in `started` for
+ * `closeHolder` to end.
+ */
+export function holderStarter(started: SpawnedHolder[], sandboxed = inSignalSandbox()) {
+  return async (options: StartHolderOptions): Promise<StartedHolder> => {
+    requireSignalSandbox(sandboxed);
+    const env = "env" in options.spec ? options.spec.env : undefined;
+    if (!isEnv(env)) throw new Error("a holder test's spawn spec carries no environment");
+    requireHolderEnv(env);
+    const holder = await startRecorded(options);
+    started.push(holder);
+    return holder;
+  };
+}
+
+/**
+ * Kills a holder a test started, as a reboot would, once `ps` shows it is still that holder, and
+ * waits for it to exit; its ledger entry goes with it.
+ */
+export async function killTestHolder(holder: SpawnedHolder, within = CLOSE_MS): Promise<void> {
+  requireSignalSandbox(inSignalSandbox());
+  const proof = await vouchHolder({ pid: holder.pid, start: holder.start });
+  if (proof !== null) killHolder(proof);
+  const deadline = new Promise<never>((_, refuse) =>
+    setTimeout(() => refuse(new Error(`holder ${holder.pid} outlived its kill`)), within).unref(),
+  );
+  await Promise.race([holder.exited, deadline]);
+  rmSync(holder.entry, { force: true });
 }
 
 const closed = new WeakMap<SpawnedHolder, Promise<number | null>>();

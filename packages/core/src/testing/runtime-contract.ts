@@ -22,16 +22,21 @@ export interface ContractHarness {
   make(): { readonly runtime: RuntimeAdapter; dispose(): void };
   /** Leaves what holds `runtime`'s terminals running, but where it can no longer be read. */
   unreadable(runtime: RuntimeAdapter): void;
-  /** Replaces the terminal's process outside Bazhen, under the generation it already has. */
-  replaceProcess(runtime: RuntimeAdapter, ref: RuntimeRef): void;
+  /**
+   * Replaces the terminal's process outside Bazhen, under the generation it already has where the
+   * runtime allows that, and settles once it is replaced.
+   */
+  replaceProcess(runtime: RuntimeAdapter, ref: RuntimeRef): void | Promise<void>;
   /** Ends the terminal outside Bazhen, as a killed session would. */
-  vanish(runtime: RuntimeAdapter, ref: RuntimeRef): void;
+  vanish(runtime: RuntimeAdapter, ref: RuntimeRef): void | Promise<void>;
   /** Ends every terminal and whatever holds them, as a reboot would, before it settles. */
   reboot(runtime: RuntimeAdapter): void | Promise<void>;
   /** The same terminal's ref, as if it had been made on a server other than the one running it. */
   forge(ref: RuntimeRef): RuntimeRef;
   /** Where the runtime runs a terminal's process, for one that reuses it across a respawn. */
   placeOf(ref: RuntimeRef): string | undefined;
+  /** False for a runtime that refuses every paste, having no gate to check the program first. */
+  readonly pastes?: boolean;
   /** Whether it may never learn how a process ended, and call the cause unknown, as tmux 3.4 may. */
   readonly exitMayBeUnknown: boolean;
   /** Where the terminals' programs run. */
@@ -216,35 +221,56 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       expect([entry?.tags, entry?.exit]).toEqual([{ kind: "shell" }, null]);
     });
 
-    it("pastes text into a terminal's process exactly, and never presses Enter", async () => {
-      const runtime = fresh();
-      const ref = await runtime.create(spec(["cat"]));
-      const { stream } = await runtime.attach(ref, { cols: 100, rows: 30 }, 0);
-      onTestFinished(() => stream.close());
-      let seen = "";
-      stream.onData((bytes) => (seen += decode(bytes)));
-      const text = `echo "$HOME" 'a  b'; #{pane_id} ~ \\`;
-      await runtime.paste(ref, text, false);
-      await expect.poll(() => seen, { timeout: harness.waitMs }).toContain(text);
-      // `cat` prints a line back once it ends: with no Enter, it is only ever seen echoed, once.
-      await delay(300);
-      // And `cat` never asked for bracketed paste, so the paste isn't marked.
-      expect([seen.split(text).length - 1, seen.includes("[200~")]).toEqual([1, false]);
-    });
+    it.skipIf(harness.pastes === false)(
+      "pastes text into a terminal's process exactly, and never presses Enter",
+      async () => {
+        const runtime = fresh();
+        const ref = await runtime.create(spec(["cat"]));
+        const { stream } = await runtime.attach(ref, { cols: 100, rows: 30 }, 0);
+        onTestFinished(() => stream.close());
+        let seen = "";
+        stream.onData((bytes) => (seen += decode(bytes)));
+        const text = `echo "$HOME" 'a  b'; #{pane_id} ~ \\`;
+        await runtime.paste(ref, text, false);
+        await expect.poll(() => seen, { timeout: harness.waitMs }).toContain(text);
+        // `cat` prints a line back once it ends: with no Enter, it is only ever seen echoed, once.
+        await delay(300);
+        // And `cat` never asked for bracketed paste, so the paste isn't marked.
+        expect([seen.split(text).length - 1, seen.includes("[200~")]).toEqual([1, false]);
+      },
+    );
 
-    it("marks a paste with the bracketed-paste sequences when asked, whatever the program asked", async () => {
-      const runtime = fresh();
-      const ref = await runtime.create(spec(["cat"]));
-      const { stream } = await runtime.attach(ref, { cols: 100, rows: 30 }, 0);
-      onTestFinished(() => stream.close());
-      let seen = "";
-      stream.onData((bytes) => (seen += decode(bytes)));
-      await runtime.paste(ref, "echo marked 你好", true);
-      // As the terminal echoes them: ESC is shown as ^[ where the terminal echoes controls so.
-      const marked = () =>
-        ["\u001b", "^["].some((esc) => seen.includes(`[200~echo marked 你好${esc}[201~`));
-      await expect.poll(marked, { timeout: harness.waitMs }).toBe(true);
-    });
+    it.skipIf(harness.pastes === false)(
+      "marks a paste with the bracketed-paste sequences when asked, whatever the program asked",
+      async () => {
+        const runtime = fresh();
+        const ref = await runtime.create(spec(["cat"]));
+        const { stream } = await runtime.attach(ref, { cols: 100, rows: 30 }, 0);
+        onTestFinished(() => stream.close());
+        let seen = "";
+        stream.onData((bytes) => (seen += decode(bytes)));
+        await runtime.paste(ref, "echo marked 你好", true);
+        // As the terminal echoes them: ESC is shown as ^[ where the terminal echoes controls so.
+        const marked = () =>
+          ["\u001b", "^["].some((esc) => seen.includes(`[200~echo marked 你好${esc}[201~`));
+        await expect.poll(marked, { timeout: harness.waitMs }).toBe(true);
+      },
+    );
+
+    it.runIf(harness.pastes === false)(
+      "refuses a paste of text it would otherwise take, as it has no gate to check first",
+      async () => {
+        const runtime = fresh();
+        const ref = await runtime.create(spec(["cat"]));
+        // A PasteRefused, by name, as host-guard throws it: core can't import host-guard.
+        await expect(runtime.paste(ref, "make", true)).rejects.toMatchObject({
+          name: "PasteRefused",
+        });
+        await expect(runtime.paste(ref, "make", false)).rejects.toMatchObject({
+          name: "PasteRefused",
+        });
+      },
+    );
 
     it("refuses to paste a key, or into a process that has exited or been replaced", async () => {
       const runtime = fresh();
@@ -254,7 +280,7 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       await expect(runtime.paste(ref, "\u001b[D", true)).rejects.toThrow(RangeError);
       await expect(runtime.paste(ref, "\u009b2J", true)).rejects.toThrow(RangeError);
       await expect(runtime.paste(ref, "echo Å", false)).rejects.toThrow(RangeError);
-      harness.replaceProcess(runtime, ref);
+      await harness.replaceProcess(runtime, ref);
       await expect(runtime.paste(ref, "make", false)).rejects.toThrow(StaleIncarnation);
       const dead = await runtime.create(spec(exiting(0)));
       await deadOf(runtime, dead);
@@ -302,7 +328,7 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       dropped.stream.onClose((why) => whys.push(`consumer ${why}`));
       dropped.stream.close();
       await expect.poll(() => whys, { timeout: harness.waitMs }).toEqual(["consumer ended"]);
-      harness.vanish(runtime, ref);
+      await harness.vanish(runtime, ref);
       await expect
         .poll(() => whys, { timeout: harness.waitMs })
         .toEqual(["consumer ended", "terminal ended"]);
@@ -447,7 +473,7 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
     it("refuses to act on a process replaced outside Bazhen, on a server it was made on", async () => {
       const runtime = fresh();
       const ref = await runtime.create(spec(sleeping));
-      harness.replaceProcess(runtime, ref);
+      await harness.replaceProcess(runtime, ref);
       const refused = runtime.signal(ref, "SIGKILL");
       await expect(refused).rejects.toThrow(StaleIncarnation);
       await expect(refused).rejects.toMatchObject({
@@ -496,7 +522,7 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       await runtime.create(spec(sleeping)); // keeps the server up once the others are gone
       const ref = await runtime.create(spec(sleeping));
       const gone = await runtime.create(spec(sleeping));
-      harness.vanish(runtime, gone);
+      await harness.vanish(runtime, gone);
       await runtime.close(ref);
       await runtime.close(gone);
       const left = (await runtime.inventory()).map((e) => e.ref.terminalId);
@@ -673,14 +699,15 @@ export function snapshotContract(name: string, harness: SnapshotHarness): void {
     it.each([
       [
         "its consumer closes it",
-        (_: RuntimeAdapter, client: SnapshotClient) => client.stream.close(),
+        async (_: RuntimeAdapter, client: SnapshotClient) => client.stream.close(),
       ],
       [
         "its terminal ends",
-        (runtime: RuntimeAdapter, client: SnapshotClient) => harness.vanish(runtime, client.ref),
+        async (runtime: RuntimeAdapter, client: SnapshotClient) =>
+          harness.vanish(runtime, client.ref),
       ],
     ])(
-      "refuses a snapshot pending when %s, once it has closed, and any asked for after",
+      "settles a snapshot asked for as %s before it closes, rejects one left once it has, and any after",
       async (_how, close) => {
         const runtime = fresh();
         await runtime.create({ ...spec, terminalId: newId("term"), argv: ["sleep", "300"] });
@@ -688,13 +715,24 @@ export function snapshotContract(name: string, harness: SnapshotHarness): void {
         const client = { ...(await snapshotClient(runtime, ref)), ref };
         const order: string[] = [];
         client.stream.onClose(() => order.push("closed"));
-        const pending = client.stream.snapshot().catch((err: unknown) => {
-          order.push("rejected");
-          throw err;
-        });
-        close(runtime, client);
-        await expect(pending).rejects.toBeInstanceOf(Error);
-        expect(order).toEqual(["closed", "rejected"]);
+        // A runtime may answer the snapshot before the close reaches it, as a holder does: then
+        // it resolved before the stream closed. One still waiting when it closes is rejected.
+        const errors: unknown[] = [];
+        const settled = client.stream.snapshot().then(
+          () => order.push("resolved"),
+          (err: unknown) => {
+            order.push("rejected");
+            errors.push(err);
+          },
+        );
+        await close(runtime, client);
+        await expect.poll(() => order.includes("closed"), { timeout: harness.waitMs }).toBe(true);
+        await settled;
+        expect(order).toBeOneOf([
+          ["resolved", "closed"],
+          ["closed", "rejected"],
+        ]);
+        expect(errors.filter((err) => !(err instanceof Error))).toEqual([]);
         await expect(client.stream.snapshot()).rejects.toBeInstanceOf(Error);
       },
     );

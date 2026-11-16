@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@bazhen/core": "workspace:*",
+    "@bazhen/daemon": "workspace:*",
     "@bazhen/runtime-holder": "workspace:*"
   }
 }

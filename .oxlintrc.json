@@ -3408,15 +3408,6 @@
             "patterns": [
               {
                 "group": [
-                  "@bazhen/core",
-                  "@bazhen/core/**",
-                  "**/packages/core/**",
-                  "**/core/src/**"
-                ],
-                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/core."
-              },
-              {
-                "group": [
                   "@bazhen/host-guard",
                   "@bazhen/host-guard/**",
                   "**/packages/host-guard/**",
@@ -3462,15 +3453,6 @@
               },
               {
                 "group": [
-                  "@bazhen/daemon",
-                  "@bazhen/daemon/**",
-                  "**/apps/daemon/**",
-                  "**/daemon/src/**"
-                ],
-                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
-              },
-              {
-                "group": [
                   "@bazhen/web",
                   "@bazhen/web/**",
                   "**/apps/web/**",
@@ -3486,6 +3468,26 @@
                   "**/cli/src/**"
                 ],
                 "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/cli."
+              },
+              {
+                "group": [
+                  "@bazhen/core",
+                  "@bazhen/core/**",
+                  "**/packages/core/**",
+                  "**/core/src/**",
+                  "!@bazhen/core/testing"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import from @bazhen/core only @bazhen/core/testing."
+              },
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**",
+                  "!@bazhen/daemon/testing"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import from @bazhen/daemon only @bazhen/daemon/testing."
               },
               {
                 "group": [
@@ -3524,15 +3526,6 @@
             "patterns": [
               {
                 "group": [
-                  "@bazhen/core",
-                  "@bazhen/core/**",
-                  "**/packages/core/**",
-                  "**/core/src/**"
-                ],
-                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/core."
-              },
-              {
-                "group": [
                   "@bazhen/host-guard",
                   "@bazhen/host-guard/**",
                   "**/packages/host-guard/**",
@@ -3578,15 +3571,6 @@
               },
               {
                 "group": [
-                  "@bazhen/daemon",
-                  "@bazhen/daemon/**",
-                  "**/apps/daemon/**",
-                  "**/daemon/src/**"
-                ],
-                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
-              },
-              {
-                "group": [
                   "@bazhen/web",
                   "@bazhen/web/**",
                   "**/apps/web/**",
@@ -3602,6 +3586,26 @@
                   "**/cli/src/**"
                 ],
                 "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/cli."
+              },
+              {
+                "group": [
+                  "@bazhen/core",
+                  "@bazhen/core/**",
+                  "**/packages/core/**",
+                  "**/core/src/**",
+                  "!@bazhen/core/testing"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import from @bazhen/core only @bazhen/core/testing."
+              },
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**",
+                  "!@bazhen/daemon/testing"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import from @bazhen/daemon only @bazhen/daemon/testing."
               },
               {
                 "group": [
@@ -3639,15 +3643,6 @@
             "patterns": [
               {
                 "group": [
-                  "@bazhen/core",
-                  "@bazhen/core/**",
-                  "**/packages/core/**",
-                  "**/core/src/**"
-                ],
-                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/core."
-              },
-              {
-                "group": [
                   "@bazhen/host-guard",
                   "@bazhen/host-guard/**",
                   "**/packages/host-guard/**",
@@ -3693,15 +3688,6 @@
               },
               {
                 "group": [
-                  "@bazhen/daemon",
-                  "@bazhen/daemon/**",
-                  "**/apps/daemon/**",
-                  "**/daemon/src/**"
-                ],
-                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
-              },
-              {
-                "group": [
                   "@bazhen/web",
                   "@bazhen/web/**",
                   "**/apps/web/**",
@@ -3717,6 +3703,26 @@
                   "**/cli/src/**"
                 ],
                 "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/cli."
+              },
+              {
+                "group": [
+                  "@bazhen/core",
+                  "@bazhen/core/**",
+                  "**/packages/core/**",
+                  "**/core/src/**",
+                  "!@bazhen/core/testing"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import from @bazhen/core only @bazhen/core/testing."
+              },
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**",
+                  "!@bazhen/daemon/testing"
+                ],
+                "message": "tests/holder (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import from @bazhen/daemon only @bazhen/daemon/testing."
               },
               {
                 "group": [

@@ -6,6 +6,7 @@ export {
   isSafeEnvEntry,
   pasteScript,
   PasteRefused,
+  pasteTextRefusal,
   readProcess,
   START_SKEW_S,
   terminalGroups,
@@ -79,6 +80,7 @@ export {
   type Mode,
   type Verdict,
 } from "./cap.ts";
+export { parseLsofCwds, processCwds } from "./cwd.ts";
 export {
   hostPtyReader,
   machinePtySource,

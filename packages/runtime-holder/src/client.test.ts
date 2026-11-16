@@ -52,6 +52,11 @@ const u32 = (value: number) => [
 
 const spec = { argv: ["sh"], cwd: "/", env: {}, generation: 1 };
 
+const respawned = (generation: number) =>
+  ({ type: "respawned", body: { generation, childPid: 9, childStart: 1 } }) as const;
+const snap = (id: number) =>
+  ({ type: "snapshot", id, offset: 0, droppedLines: 0, bytes: new Uint8Array() }) as const;
+
 /** Each verb answered `ok`: what it sends, and how. */
 const OK_VERBS: [string, (client: HolderClient) => Promise<void>, object][] = [
   [
@@ -213,6 +218,24 @@ describe("HolderClient", () => {
     await attached;
     expect(events.map((event) => event.type)).toEqual(["snapshot", "data"]);
     expect(events[0]).toMatchObject({ offset: 7, bytes: Buffer.from(vt) });
+  });
+
+  it("gives each snapshot the generation it was answered in, not that of a respawn behind it", async () => {
+    const { client, holder, events } = await connected();
+    const first = client.snapshot();
+    const asked = await holder.request();
+    holder.send(snap(asked.id), respawned(3));
+    const second = client.snapshot();
+    const next = await holder.request();
+    holder.send(snap(next.id));
+    expect([(await first).generation, (await second).generation, client.generation]).toEqual([
+      0, 3, 3,
+    ]);
+    const attached = client.attach();
+    const [s, sub] = [await holder.request(), await holder.request()];
+    holder.send(snap(s.id), { type: "ok", id: sub.id, body: { request: "subscribe" } });
+    await attached;
+    expect(events.at(-1)).toMatchObject({ type: "snapshot", generation: 3 });
   });
 
   it("skips replies and events of types it doesn't know", async () => {

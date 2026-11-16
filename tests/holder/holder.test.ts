@@ -674,6 +674,7 @@ describe("closing a holder in a test", () => {
       terminalId: "hung",
       socket,
       pid: exitedPid(),
+      start: 0,
       exited: new Promise(() => {}),
       entry,
     };

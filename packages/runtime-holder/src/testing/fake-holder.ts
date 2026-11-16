@@ -5,6 +5,7 @@ import {
   HOLDER_PROTOCOL_VERSION,
   holderRequestDecoder,
   type HolderHelloReply,
+  type HolderHelloRequest,
   type HolderReply,
   type HolderRequest,
   type UnknownHolderRequest,
@@ -51,18 +52,27 @@ export interface FakeHolderOptions {
 export class FakeHolder {
   /** Each chunk read, as the client wrote it. */
   readonly chunks: Uint8Array[] = [];
+  /** Resolves once the connection's socket has closed at this end. */
+  readonly closed: Promise<void>;
+  /** Resolves once the client has hung up: everything it sent has been read, then its end. */
+  readonly ended: Promise<void>;
+  /** The `hello` the client sent, once the fake has answered it. */
+  hello: HolderHelloRequest | undefined;
   private readonly stream: Duplex;
   private readonly queued: FakeRequest[] = [];
   private readonly waiting: ((request: FakeRequest) => void)[] = [];
 
   constructor(stream: Duplex, options: FakeHolderOptions = {}) {
     this.stream = stream;
+    this.closed = new Promise((resolve) => stream.once("close", () => resolve()));
+    this.ended = new Promise((resolve) => stream.once("end", () => resolve()));
     const decoder = holderRequestDecoder();
     stream.on("data", (chunk: Uint8Array) => {
       this.chunks.push(chunk);
       const { frames, malformed } = decoder.push(chunk);
       for (const request of frames) {
         if (request.type === "hello" && options.hello !== false) {
+          this.hello = request.body;
           const writer = request.body.writer ?? false;
           const body = fakeHello({ writer, ...options.hello });
           this.send({ type: "hello", id: request.id, body });
@@ -131,12 +141,19 @@ export type FakeClose = "exits" | "stays" | "ignores";
 /** A fake holder on a Unix socket at `path`. */
 export async function listenFakeHolder(
   path: string,
-  options: Omit<FakeHolderOptions, "onClose"> & { readonly close?: FakeClose } = {},
+  options: Omit<FakeHolderOptions, "onClose"> & {
+    readonly close?: FakeClose;
+    /**
+     * Keeps this end of a connection open after the client hangs up, until the test hangs it up
+     * too, as a holder slow to see the end would: the client's socket stays open meanwhile.
+     */
+    readonly halfOpen?: boolean;
+  } = {},
 ): Promise<FakeHolderServer> {
   const sockets = new Set<Socket>();
   const connected: FakeHolder[] = [];
   const waiting: ((holder: FakeHolder) => void)[] = [];
-  const server = createServer((socket) => {
+  const server = createServer({ allowHalfOpen: options.halfOpen === true }, (socket) => {
     sockets.add(socket);
     socket.on("close", () => sockets.delete(socket));
     const holder = new FakeHolder(

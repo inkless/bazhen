@@ -8,6 +8,8 @@
     "./testing": "./src/testing/fake-holder.ts"
   },
   "dependencies": {
+    "@bazhen/core": "workspace:*",
+    "@bazhen/host-guard": "workspace:*",
     "@bazhen/protocol": "workspace:*"
   }
 }
