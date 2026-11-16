@@ -99,11 +99,9 @@ pub(crate) fn status(daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
     } else {
         agents.join(", ")
     };
-    out.line(&format!(
-        "bazhen {} (protocol {}), running",
-        health.app_version,
-        health.protocol_id.get(..12).unwrap_or(&health.protocol_id)
-    ));
+    for line in doctor::build_lines(&health.app_version, &health.protocol_id, ", running") {
+        out.line(&line);
+    }
     let reports = doctor::reports(
         health.runtimes.as_ref(),
         health.runtime.state,

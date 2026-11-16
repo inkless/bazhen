@@ -11,7 +11,7 @@ import {
   StateSnapshot,
   StopResponse,
 } from "@bazhen/protocol";
-import { runsNode, type Scene, scene } from "./cli.ts";
+import { type Scene, scene } from "./cli.ts";
 import {
   AGENT,
   ANOTHER_BUILD,
@@ -85,8 +85,7 @@ describe("bazhen status", () => {
     expect(lines(ran.stdout).slice(1)).toEqual(["tmux: healthy 3.4", "agents: none", ""]);
   });
 
-  it("says a daemon speaking another protocol is another build, to restart", async ({ skip }) => {
-    skip(!runsNode(), "pending the Rust CLI's protocol id");
+  it("says a daemon speaking another protocol is another build, to restart", async () => {
     s.daemon
       .answer("GET /v1/health", HealthResponse, health({ protocolId: "f".repeat(64) }))
       .answer("GET /v1/state", StateSnapshot, snapshot());
@@ -100,8 +99,7 @@ describe("bazhen status", () => {
     ]);
   });
 
-  it("fails against a daemon from before protocol ids, saying to restart it", async ({ skip }) => {
-    skip(!runsNode(), "pending the Rust CLI's protocol id");
+  it("fails against a daemon from before protocol ids, saying to restart it", async () => {
     s.daemon
       .raw("GET /v1/health", 200, OLDER_HEALTH)
       .answer("GET /v1/state", StateSnapshot, snapshot());
@@ -495,8 +493,7 @@ describe("bazhen doctor", () => {
 });
 
 describe("bazhen stop", () => {
-  it("stops a daemon from before protocol ids", async ({ skip }) => {
-    skip(!runsNode(), "pending the Rust CLI's protocol id");
+  it("stops a daemon from before protocol ids", async () => {
     s.daemon
       .raw("GET /v1/health", 200, OLDER_HEALTH)
       .answerWith("POST /v1/daemon/stop", StopResponse, () => {

@@ -344,6 +344,11 @@ for `crates/bazhen-holder-proto/tests/fixtures.rs`: the crate decodes each fixtu
 back to equal JSON. An object zod doesn't make strict accepts fields it doesn't know, so only a
 strict one gets `#[serde(deny_unknown_fields)]`, and a field with a default may be missing.
 
+`pnpm schema` also writes `crates/bazhen-protocol/src/id.rs`, the `PROTOCOL_ID` the Rust crates
+speak: the hash of `packages/protocol/schema/` that `protocolId()` gives. `pnpm schema --check` holds
+it to the schema, and a test in `crates/bazhen` hashes the schema itself, so neither side drifts.
+The CLI compares it with the daemon's `protocolId`, and calls one that differs another build.
+
 The types aren't generated from the JSON Schema. typify, tried on every schema, fails on the event
 and agent-reference unions, names each nested type by where it sits because the schemas inline
 them, and writes `#![allow]`s the scan refuses. Once the daemon is Rust, the direction turns: the
