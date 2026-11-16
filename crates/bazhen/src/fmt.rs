@@ -76,8 +76,16 @@ pub(crate) fn age_seconds(at: &str, now_ms: i64) -> u64 {
 /// `bytes` in GiB to one decimal, rounded as JavaScript's `toFixed(1)` rounds: a tie upward, where
 /// Rust's `{:.1}` would round it to even.
 pub(crate) fn gib(bytes: u64) -> String {
-    const GIB: u128 = 1 << 30;
-    let tenths = (u128::from(bytes) * 20 + GIB) / (2 * GIB);
+    tenths_of(bytes, 1 << 30)
+}
+
+/// `bytes` in MiB to one decimal, rounded as `gib` rounds.
+pub(crate) fn mib(bytes: u64) -> String {
+    tenths_of(bytes, 1 << 20)
+}
+
+fn tenths_of(bytes: u64, unit: u128) -> String {
+    let tenths = (u128::from(bytes) * 20 + unit) / (2 * unit);
     format!("{}.{}", tenths / 10, tenths % 10)
 }
 

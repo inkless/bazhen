@@ -388,6 +388,51 @@ describe("bazhen doctor", () => {
       ]);
     });
 
+    it("lists each holder with its pid, memory and socket, once the daemon says them", async () => {
+      const binary = `/s/holder/${NEW}/bazhen-holder`;
+      const MiB = 1 << 20;
+      const holders = [
+        {
+          ...on(NEW),
+          terminalId: "term_a",
+          socket: "/r/holders/term_a.sock",
+          holderPid: 4242,
+          stats: { engineBytes: 2 * MiB, rss: 9.75 * MiB, ringBytes: MiB, historyLines: 812 },
+        },
+        {
+          ...on(NEW),
+          terminalId: "term_b",
+          socket: "/r/holders/term_b.sock",
+          holderPid: 4243,
+          stats: { engineBytes: 0, rss: null, ringBytes: 0, historyLines: 0 },
+        },
+        {
+          ...on(NEW),
+          terminalId: "term_c",
+          socket: "/r/holders/term_c.sock",
+          holderPid: 4244,
+          stats: null,
+        },
+        {
+          ...on(null, ["0.9"]),
+          terminalId: "term_d",
+          socket: "/r/holders/term_d.sock",
+          holderPid: null,
+          stats: null,
+        },
+        on(NEW),
+      ];
+      expect(await tail({ holder: { binary, build: NEW, reason: null, holders } })).toEqual([
+        `holder: build ${NEW} (${binary})`,
+        `  4 terminals on ${NEW}, protocol 1.2`,
+        "  1 terminal on an unknown build, protocol 0.9",
+        "  term_a: pid 4242, 9.8 MiB resident (engine 2.0 MiB, ring 1.0 MiB), 812 history lines (/r/holders/term_a.sock)",
+        "  term_b: pid 4243, resident size unknown (engine 0.0 MiB, ring 0.0 MiB), 0 history lines (/r/holders/term_b.sock)",
+        "  term_c: pid 4244, memory not reported (/r/holders/term_c.sock)",
+        "  term_d: shares no protocol with this build; restart it (/r/holders/term_d.sock)",
+      ]);
+    });
+
     it("warns under a runtime of each defect Bazhen works around there", async () => {
       const runtimes = [
         {

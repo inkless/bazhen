@@ -67,6 +67,28 @@ impl Caller {
             ..Self::default()
         }
     }
+
+    /// The headers that say who calls, each name with its value, in the order requests carry
+    /// them. A token that isn't one is left out.
+    ///
+    /// # Errors
+    ///
+    /// `Header` when a value holds a character no header can carry.
+    pub fn headers(&self) -> Result<Vec<(&'static str, String)>, Error> {
+        let checked = |name: &'static str, value: Option<&str>| match value {
+            None => Ok(None),
+            Some(v) if is_header_value(v) => Ok(Some((name, v.to_owned()))),
+            Some(_) => Err(Error::Header { name }),
+        };
+        let agent = checked("Bazhen-Agent-Id", self.agent_id.as_deref())?;
+        let token = self
+            .token
+            .as_deref()
+            .filter(|t| is_agent_token(t))
+            .map(|t| ("Bazhen-Agent-Token", t.to_owned()));
+        let device = checked("Bazhen-Device-Id", self.device_id.as_deref())?;
+        Ok([agent, token, device].into_iter().flatten().collect())
+    }
 }
 
 /// A variable's value as text; one that isn't UTF-8 keeps a U+FFFD where it isn't, so a header
@@ -228,21 +250,16 @@ fn request_head(
     length: usize,
     caller: &Caller,
 ) -> Result<String, Error> {
-    let line = |name: &'static str, value: Option<&str>| match value {
-        None => Ok(String::new()),
-        Some(v) if is_header_value(v) => Ok(format!("{name}: {v}\r\n")),
-        Some(_) => Err(Error::Header { name }),
-    };
-    let agent = line("Bazhen-Agent-Id", caller.agent_id.as_deref())?;
-    let token = caller
-        .token
-        .as_deref()
-        .filter(|t| is_agent_token(t))
-        .map_or_default(|t| format!("Bazhen-Agent-Token: {t}\r\n"));
-    let device = line("Bazhen-Device-Id", caller.device_id.as_deref())?;
+    let mut said = String::new();
+    for (name, value) in caller.headers()? {
+        said.push_str(name);
+        said.push_str(": ");
+        said.push_str(&value);
+        said.push_str("\r\n");
+    }
     Ok(format!(
         "{} {path} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n\
-         {agent}{token}{device}Content-Length: {length}\r\nConnection: close\r\n\r\n",
+         {said}Content-Length: {length}\r\nConnection: close\r\n\r\n",
         method.as_str()
     ))
 }

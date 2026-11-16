@@ -47,6 +47,7 @@ signal-hook = { version = "=0.4.6", default-features = false }
 thiserror = { version = "=2.0.21", default-features = false, features = ["std"] }
 tracing = { version = "=0.1.44", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "=0.3.23", default-features = false, features = ["fmt", "std"] }
+tungstenite = { version = "=0.30.0", default-features = false, features = ["handshake"] }
 unicode-width = { version = "=0.2.3", default-features = false }
 
 [workspace.lints.rust]

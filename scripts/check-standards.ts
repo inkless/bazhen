@@ -687,6 +687,8 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-client/src/framing.rs::body": "framing",
   "crates/bazhen-hook/src/lib.rs::parse_reply": "parse_reply",
   "crates/bazhen/src/reply.rs::decode": "reply",
+  "crates/bazhen/src/attach/attachment.rs::Attachment::keys": "attach",
+  "crates/bazhen/src/attach/attachment.rs::Attachment::frame": "attach",
   "crates/bazhen-protocol/src/wire.rs::well_formed": "wire",
   "crates/bazhen-protocol/src/wire.rs::from_slice": "wire",
   "crates/bazhen-hook/src/pane_title.rs::body": "pane_title",
@@ -919,6 +921,17 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/server.rs::send": "encodes and queues a reply; reads no bytes",
   "crates/bazhen-holder/src/server.rs::serve":
     "answers requests FrameDecoder decoded, which the proto crate's frame target fuzzes",
+  "crates/bazhen/src/attach/attachment.rs::Attachment::declared":
+    "reads whether an epoch was declared; parses nothing",
+  "crates/bazhen/src/attach/attachment.rs::Attachment::declare":
+    "hands the keys Attachment::keys held over, whole; parses nothing",
+  "crates/bazhen/src/attach/link.rs::pump":
+    "moves bytes between the daemon's socket and the person's terminal; tungstenite frames them, and Attachment::keys and frame, which the attach target fuzzes, read them",
+  "crates/bazhen/src/attach/tty.rs::Resizes::clear":
+    "discards resize wake-ups, whose bytes the handler wrote and which carry no content",
+  "crates/bazhen/src/attach/tty.rs::Resizes::drop": "removes the signal handler; reads nothing",
+  "crates/bazhen/src/attach/tty.rs::Resizes::fd":
+    "borrows the wake-up socket for poll; reads nothing",
   "crates/bazhen-holder/src/signals.rs::Wakeups::clear":
     "discards signal wake-ups, whose bytes the handler wrote and which carry no content",
   "crates/bazhen-holder/src/signals.rs::Wakeups::drop": "removes the signal handler; reads nothing",

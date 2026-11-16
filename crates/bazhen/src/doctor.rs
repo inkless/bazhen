@@ -9,7 +9,7 @@ use bazhen_protocol::nullable::Nullable;
 use bazhen_protocol::text::is_plain_remote;
 
 use crate::call::ANOTHER_BUILD;
-use crate::fmt::gib;
+use crate::fmt::{gib, mib};
 
 fn state(s: RuntimeHealthState) -> &'static str {
     match s {
@@ -340,7 +340,38 @@ fn holder_lines(h: &Holder) -> Vec<String> {
         let noun = if count == 1 { "terminal" } else { "terminals" };
         out.push(format!("  {count} {noun} {key}"));
     }
+    out.extend(h.holders.iter().filter_map(holder_line));
     out
+}
+
+/// One holder: its process, its memory and its socket; none from a daemon that doesn't say.
+fn holder_line(h: &RunningHolder) -> Option<String> {
+    let socket = h.socket.as_deref()?;
+    let Nullable::Value(pid) = h.holder_pid else {
+        return Some(format!(
+            "  {}: shares no protocol with this build; restart it ({socket})",
+            h.terminal_id
+        ));
+    };
+    let memory = match &h.stats {
+        Nullable::Value(s) => {
+            let resident = s.rss.map_or_else(
+                || "resident size unknown".to_owned(),
+                |b| format!("{} MiB resident", mib(b)),
+            );
+            format!(
+                "{resident} (engine {} MiB, ring {} MiB), {} history lines",
+                mib(s.engine_bytes),
+                mib(s.ring_bytes),
+                s.history_lines
+            )
+        }
+        Nullable::Null | Nullable::Absent => "memory not reported".to_owned(),
+    };
+    Some(format!(
+        "  {}: pid {pid}, {memory} ({socket})",
+        h.terminal_id
+    ))
 }
 
 /// A cap as people read it: `50% (31.0 GiB)`, `0 (none)`, or `infinity (no cap)`.
