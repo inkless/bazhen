@@ -7,7 +7,7 @@
 pub mod framing;
 
 use std::env;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Duration;
@@ -37,7 +37,7 @@ impl Method {
 /// Who a request comes from, as the daemon's rules need it said: the agent the caller runs inside,
 /// with the token that proves it, and the paired device whose shell it runs in. All advisory but
 /// the token.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct Caller {
     agent_id: Option<String>,
     token: Option<String>,
@@ -66,14 +66,42 @@ impl Caller {
     }
 }
 
+/// The token proves who the caller is, so no log or panic message may hold it.
+impl std::fmt::Debug for Caller {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Caller")
+            .field("agent_id", &self.agent_id)
+            .field("token", &self.token.as_ref().map(|_| "<redacted>"))
+            .field("device_id", &self.device_id)
+            .finish()
+    }
+}
+
 /// The agent token in the file `BAZHEN_AGENT_AUTH_FILE` names, if it holds one. The daemon
 /// refuses an agent that names itself without the token it was given, so one that can't be read
 /// is sent as nothing.
 pub fn agent_token() -> Option<String> {
-    let file = env::var_os("BAZHEN_AGENT_AUTH_FILE")?;
-    let token = std::fs::read_to_string(file).ok()?;
-    let token = token.trim();
-    is_agent_token(token).then(|| token.to_owned())
+    token_in(Path::new(&env::var_os("BAZHEN_AGENT_AUTH_FILE")?))
+}
+
+/// The most of a token file read: a token and room for the white space around it. A file holding
+/// more holds no token, and is never read to its end, so a huge file costs the hook nothing.
+const TOKEN_FILE_MAX: u64 = 4096;
+
+/// The token the regular file at `path` holds, trimmed; none from anything else, such as a FIFO
+/// that would block the read or a device with no end.
+fn token_in(path: &Path) -> Option<String> {
+    let file = std::fs::File::open(path).ok()?;
+    if !file.metadata().ok()?.is_file() {
+        return None;
+    }
+    let mut text = String::new();
+    file.take(TOKEN_FILE_MAX + 1)
+        .read_to_string(&mut text)
+        .ok()?;
+    let token = text.trim();
+    (u64::try_from(text.len()).ok()? <= TOKEN_FILE_MAX && is_agent_token(token))
+        .then(|| token.to_owned())
 }
 
 /// A token as the daemon mints it: 32 bytes, base64url, so 43 characters that need no escaping
@@ -233,6 +261,52 @@ mod tests {
     }
 
     #[test]
+    fn a_tokenless_post_has_the_head_shell_reports_and_pane_titles_always_had() {
+        let head = request_head(
+            Method::Post,
+            "/v1/shells/report",
+            7,
+            &Caller::with_token(None),
+        );
+        assert_eq!(
+            head.unwrap(),
+            "POST /v1/shells/report HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n\
+             Content-Length: 7\r\nConnection: close\r\n\r\n"
+        );
+    }
+
+    #[test]
+    fn debug_never_prints_the_token() {
+        let token = "s".repeat(43);
+        let printed = format!("{:?}", caller(Some("agent_x"), Some(&token), Some("dev_y")));
+        assert!(!printed.contains(&token), "{printed}");
+        assert!(
+            printed.contains("agent_x") && printed.contains("<redacted>"),
+            "{printed}"
+        );
+    }
+
+    #[test]
+    fn reads_a_token_from_a_file_holding_one_and_nothing_else() {
+        let dir = TempDir::new("token");
+        let token = "t".repeat(43);
+        let write = |name: &str, content: &[u8]| {
+            let path = dir.0.join(name);
+            std::fs::write(&path, content).unwrap();
+            path
+        };
+        let padded = write("padded", format!("  {token}\n").as_bytes());
+        let more = write("more", format!("{token}\nx").as_bytes());
+        let huge = write("huge", &vec![b't'; 1 << 20]);
+        let long = write("long", format!("{token}{}", "\n".repeat(5000)).as_bytes());
+        assert_eq!(token_in(&padded), Some(token));
+        for refused in [more, huge, long, dir.0.join("missing"), dir.0.clone()] {
+            assert_eq!(token_in(&refused), None, "{refused:?}");
+        }
+        assert_eq!(token_in(Path::new("/dev/zero")), None);
+    }
+
+    #[test]
     fn head_carries_the_agent_token_only_when_it_is_one() {
         let token = "t".repeat(43);
         let head = |t: Option<&str>| {
@@ -292,8 +366,28 @@ mod tests {
         }
     }
 
-    fn socket_in(dir: &Path) -> std::path::PathBuf {
-        dir.join("daemon.sock")
+    /// A directory of the test's own, removed when the test ends, whether or not it passed.
+    struct TempDir(std::path::PathBuf);
+
+    impl TempDir {
+        fn new(name: &str) -> Self {
+            static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let dir = env::temp_dir().join(format!("bz-client-{name}-{}-{n}", std::process::id()));
+            std::fs::create_dir(&dir).unwrap();
+            Self(dir)
+        }
+
+        fn socket(&self) -> std::path::PathBuf {
+            self.0.join("daemon.sock")
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            // A directory left in the temp dir costs nothing a test would see.
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
     }
 
     /// A daemon that reads one request and answers it with `reply`, and hands back what it read.
@@ -311,16 +405,10 @@ mod tests {
         })
     }
 
-    fn temp_dir(name: &str) -> std::path::PathBuf {
-        let dir = env::temp_dir().join(format!("bz-client-{name}-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
     #[test]
     fn exchanges_a_request_for_its_whole_response() {
-        let dir = temp_dir("ok");
-        let socket = socket_in(&dir);
+        let dir = TempDir::new("ok");
+        let socket = dir.socket();
         let server = daemon(&socket, b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}");
         let reply = exchange(
             &socket,
@@ -332,7 +420,6 @@ mod tests {
             Duration::from_secs(2),
         );
         let got = server.join().unwrap();
-        std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(
             reply.unwrap(),
             b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}"
@@ -343,9 +430,9 @@ mod tests {
 
     #[test]
     fn says_nothing_answers_where_no_daemon_listens() {
-        let dir = temp_dir("none");
+        let dir = TempDir::new("none");
         let reply = exchange(
-            &socket_in(&dir),
+            &dir.socket(),
             Method::Get,
             "/",
             b"",
@@ -353,14 +440,13 @@ mod tests {
             LIMITS,
             Duration::from_secs(1),
         );
-        std::fs::remove_dir_all(&dir).unwrap();
         assert!(matches!(reply, Err(Error::Unreachable { .. })), "{reply:?}");
     }
 
     #[test]
     fn says_an_answer_that_closes_short_of_its_length_was_cut_short() {
-        let dir = temp_dir("short");
-        let socket = socket_in(&dir);
+        let dir = TempDir::new("short");
+        let socket = dir.socket();
         let server = daemon(&socket, b"HTTP/1.1 200 OK\r\nContent-Length: 9\r\n\r\n{}");
         let reply = exchange(
             &socket,
@@ -372,7 +458,6 @@ mod tests {
             Duration::from_secs(2),
         );
         server.join().unwrap();
-        std::fs::remove_dir_all(&dir).unwrap();
         assert!(matches!(reply, Err(Error::Truncated)), "{reply:?}");
     }
 }

@@ -2,7 +2,7 @@
 
 use bazhen_client::Limits;
 use bazhen_client::framing::{
-    Framing, content_length, header, is_truncated, reply_end, split_head, status,
+    Framing, content_length, header, headers, is_truncated, reply_end, split_head, status,
 };
 use libfuzzer_sys::fuzz_target;
 
@@ -40,5 +40,7 @@ fuzz_target!(|response: &[u8]| {
             .filter(|v| !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit()))
             .and_then(|v| v.parse().ok());
         assert_eq!(content_length(head), length);
+        let lengths = headers(head, "Content-Length").count();
+        assert!(lengths == 1 || header(head, "Content-Length").is_none());
     }
 });

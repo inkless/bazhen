@@ -673,6 +673,7 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-client/src/framing.rs::is_truncated": "framing",
   "crates/bazhen-client/src/framing.rs::split_head": "framing",
   "crates/bazhen-client/src/framing.rs::header": "framing",
+  "crates/bazhen-client/src/framing.rs::headers": "framing",
   "crates/bazhen-client/src/framing.rs::content_length": "framing",
   "crates/bazhen-client/src/framing.rs::status": "framing",
   "crates/bazhen-hook/src/lib.rs::parse_reply": "parse_reply",

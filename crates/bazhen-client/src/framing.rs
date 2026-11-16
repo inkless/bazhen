@@ -22,7 +22,7 @@ pub(crate) fn read_response(
     limits: Limits,
     stall: Duration,
 ) -> io::Result<Vec<u8>> {
-    let cap = limits.head + 4 + limits.body + 1;
+    let cap = limits.head.saturating_add(limits.body).saturating_add(5);
     let mut response = Vec::new();
     let mut chunk = vec![0; 64 << 10];
     let mut framing = Framing::new(limits);
@@ -102,12 +102,11 @@ impl Framing {
             let found = response
                 .get(from..)
                 .and_then(|rest| rest.windows(4).position(|w| w == b"\r\n\r\n"));
-            match found {
-                Some(at) => self.end = Some(end_by_head(response, from + at, self.limits)),
-                None => {
-                    return (response.len() >= self.limits.head + 4).then_some(response.len());
-                }
-            }
+            let Some(at) = found else {
+                let over = self.limits.head.saturating_add(4);
+                return (response.len() >= over).then_some(response.len());
+            };
+            self.end = Some(end_by_head(response, from + at, self.limits));
         }
         self.end.filter(|&end| response.len() >= end)
     }
@@ -122,7 +121,7 @@ fn end_by_head(response: &[u8], head_end: usize, limits: Limits) -> usize {
         .and_then(|head| std::str::from_utf8(head).ok())
         .and_then(content_length)
         .filter(|&n| head_end <= limits.head && n <= limits.body);
-    length.map_or(head_len, |n| head_len + n)
+    length.map_or(head_len, |n| head_len.saturating_add(n))
 }
 
 /// Whether the response ended early, before `reply_end` could say where it ends. Anything else is
@@ -323,6 +322,18 @@ mod tests {
         };
         assert_eq!(reply_end(&big, wider), Some(big.len()));
         assert_eq!(reply_end(&big, LIMITS), Some(big.len() - body.len()));
+    }
+
+    #[test]
+    fn limits_as_large_as_a_usize_holds_frame_as_any_other() {
+        let most = Limits {
+            head: usize::MAX,
+            body: usize::MAX,
+        };
+        let (mut client, _open) = daemon_wrote(&ok(), false);
+        assert_eq!(reply_end(&ok(), most), Some(ok().len()));
+        assert!(!is_truncated(&ok(), most));
+        assert_eq!(read_response(&mut client, most, STALL).unwrap(), ok());
     }
 
     #[test]
