@@ -35,7 +35,12 @@ afterEach(() => {
  * The daemon's real hook ingress, served on a Unix socket as main.ts serves it. A `tokened`
  * agent is given a token, in `tokenFile`; otherwise it is one started before agents had tokens.
  */
-async function daemon(tokened = false, peer?: IngressDeps["peer"], starting = false) {
+async function daemon(
+  tokened = false,
+  peer?: IngressDeps["peer"],
+  starting = false,
+  outsidePane = false,
+) {
   const { store, agentId } = await claudeAgent({ starting });
   dir = mkdtempSync("/tmp/bz-ingress-");
   const tokens = new AgentTokens(store, join(dir, "agents"), process.getuid?.() ?? 0);
@@ -50,9 +55,13 @@ async function daemon(tokened = false, peer?: IngressDeps["peer"], starting = fa
     deadlineMs: 60_000,
     notStarted: (id, summary) => inbox.notStarted(id, summary),
   });
-  // Every hook here runs through a shell of the pane's process.
+  // Every hook here runs through a shell of the pane's process, unless `outsidePane`, when the
+  // hook client's parent, this test, is a TUI of its own outside the agent's terminal.
   const binding = new SessionBinding(store, {
-    parent: async () => ({ ppid: PANE_PID, command: "sh" }),
+    parent: async (pid) =>
+      outsidePane && pid === process.pid
+        ? { ppid: 1, command: "claude" }
+        : { ppid: PANE_PID, command: "sh" },
   });
   const app = hookApp({
     mailbox,
@@ -283,6 +292,13 @@ describe.each([
     const another = lifecycle();
     await run(client, "Stop", env, stop());
     expect([another, lifecycle()]).toEqual(["starting", "running"]);
+  });
+
+  it("doesn't run a starting agent on a hook of its session from outside its terminal", async () => {
+    const { socket, agentId, lifecycle } = await daemon(false, undefined, true, true);
+    const env = { BAZHEN_AGENT_ID: agentId, BAZHEN_SOCKET: socket };
+    await run(client, "Stop", env, stop());
+    expect(lifecycle()).toBe("starting");
   });
 
   it("records what the agent's own session says it is doing, and nothing another says", async () => {

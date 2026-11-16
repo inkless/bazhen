@@ -8,12 +8,17 @@ const LATER_SESSION = "33333333-3333-4333-8333-333333333333";
 
 afterEach(() => vi.restoreAllMocks());
 
+/** The process a respawn starts in the agent's pane, which is a new one. */
+const RESPAWNED_PANE_PID = 4343;
+
 /** The pane's TUI runs hooks through `sh` 900; a nested claude 800 runs its own through 700. */
 const procs: Record<number, ProcessEntry> = {
   900: { ppid: PANE_PID, command: "/bin/sh" },
   // A second shell of the pane's, which `ps` is slow to answer for.
   950: { ppid: PANE_PID, command: "/bin/sh" },
   800: { ppid: 600, command: "claude" },
+  // A shell of the TUI a respawn started, in a pane process of its own.
+  905: { ppid: RESPAWNED_PANE_PID, command: "/bin/sh" },
   700: { ppid: 800, command: "sh" },
   600: { ppid: PANE_PID, command: "bash" },
 };
@@ -204,14 +209,17 @@ describe("SessionBinding", () => {
     const system = { entityId: agentId, actor: "system" } as const;
     store.append({ ...system, type: "agent.exited", payload: { exit: { type: "unknown" } } });
     store.append({ ...system, type: "agent.respawn_requested", payload: {} });
-    const early = binding.startedHere(agentId, 900);
+    const early = binding.startedHere(agentId, 905);
     await new Promise((resolve) => setTimeout(resolve, 20));
     store.append({
       ...system,
       type: "agent.respawned",
       payload: {
         externalRef: null,
-        runtimeRef: { runtime: "tmux", locator: { panePid: String(PANE_PID), generation: "1" } },
+        runtimeRef: {
+          runtime: "tmux",
+          locator: { panePid: String(RESPAWNED_PANE_PID), generation: "1" },
+        },
       },
     });
     expect(await early).toBe(true);
