@@ -75,7 +75,7 @@ import { currentInputs } from "./config/paths.ts";
 import { ensurePrivateDir } from "./config/private-dir.ts";
 import { createApp, type AppDeps, type TaskCommands } from "./http/app.ts";
 import { allowlists } from "./http/guard.ts";
-import { upgrades } from "./http/upgrades.ts";
+import { socketUpgrades, upgrades } from "./http/upgrades.ts";
 import { BUNDLE, built } from "./http/web.ts";
 import { DeviceAuth } from "./auth/devices.ts";
 import { PairingCodes } from "./auth/pairing.ts";
@@ -537,10 +537,12 @@ const hub = new TerminalHub(runtime, {
 const server = serve({ fetch: app.fetch, hostname: HOSTNAME, port }, (info) => {
   console.log(`bazhen daemon listening on http://${HOSTNAME}:${info.port} (data: ${paths.data})`);
 });
-const streams = [
-  streamRoute({ protocolId: PROTOCOL_ID, hub, runtimeRef: (id) => store.runtimeRef(id) }),
-  eventRoute(store, presence),
-];
+const terminalStream = streamRoute({
+  protocolId: PROTOCOL_ID,
+  hub,
+  runtimeRef: (id) => store.runtimeRef(id),
+});
+const streams = [terminalStream, eventRoute(store, presence)];
 server.on("upgrade", upgrades(allow, streams, gate));
 
 // The LAN listener. A certificate it can't use stops only this listener: loopback keeps serving,
@@ -715,6 +717,7 @@ const socketListener = getRequestListener(
 );
 const socketServer = createServer((req, res) => void socketListener(req, res));
 socketServer.on("connection", (connection) => noteAccepted(connection));
+socketServer.on("upgrade", socketUpgrades(agentTokens, [terminalStream], peer));
 socketServer.requestTimeout = 0;
 rmSync(paths.socket, { force: true });
 socketServer.listen(paths.socket, () => chmodSync(paths.socket, 0o600));

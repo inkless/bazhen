@@ -305,6 +305,14 @@ function needsRestartOf(
   return { holderPid: view.restartHolder?.(terminalId) ?? null, served };
 }
 
+/**
+ * Whether a terminal in `state` can be attached to. A holder that no major this build speaks
+ * reaches can't be; one it serves on an older major can, though it still needs a restart.
+ */
+function attachable(state: SQLOutputValue | undefined, restart: NeedsRestart | null): boolean {
+  return ATTACHABLE.has(String(state)) && (restart === null || restart.served);
+}
+
 /** Agent states whose directory still holds their work, so a shell can be opened beside them. */
 export const LINKABLE: ReadonlySet<AgentState> = new Set(["running", "exited"]);
 
@@ -1430,11 +1438,9 @@ export class Store {
             }) => {
               const { headlineText, headlineTask, headlineAt, ...r } = row;
               const restart = needsRestartOf(needsRestart, terminalState, r.terminalId, view);
-              // A holder this build can't speak to can't be attached to either.
-              const ref =
-                ATTACHABLE.has(String(terminalState)) && restart === null
-                  ? refFrom(r.terminalId, { runtime: runtime ?? null, locator: locator ?? null })
-                  : null;
+              const ref = attachable(terminalState, restart)
+                ? refFrom(r.terminalId, { runtime: runtime ?? null, locator: locator ?? null })
+                : null;
               const externalRef =
                 typeof r.externalRef === "string"
                   ? ExternalRef.parse(JSON.parse(r.externalRef))
@@ -1519,10 +1525,9 @@ export class Store {
           .map(({ runtime, locator, foreground, retypeable, needsRestart, ...r }) => {
             const state = TerminalState.parse(r.state);
             const restart = needsRestartOf(needsRestart, state, r.id, view);
-            const ref =
-              ATTACHABLE.has(state) && restart === null
-                ? refFrom(r.id, { runtime: runtime ?? null, locator: locator ?? null })
-                : null;
+            const ref = attachable(state, restart)
+              ? refFrom(r.id, { runtime: runtime ?? null, locator: locator ?? null })
+              : null;
             return {
               ...r,
               foreground: typeof foreground === "string" ? JSON.parse(foreground) : null,

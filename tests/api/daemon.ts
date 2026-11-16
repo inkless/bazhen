@@ -460,6 +460,15 @@ export class Daemon {
     return view;
   }
 
+  /** Opens a view of a terminal over the daemon's socket, as `bazhen attach` does. */
+  async socketView(terminalId: string, mode: "observe" | "interactive"): Promise<View> {
+    const ws = new WebSocket(`ws+unix://${this.socket}:/v1/terminals/${terminalId}/stream`);
+    const view = new View(ws);
+    await opened(ws);
+    view.frame({ type: "hello", protocolId: await protocolId(), mode, cols: 100, rows: 30 });
+    return view;
+  }
+
   /** Opens the event stream as a browser would, resuming after `cursor`. */
   async events(
     cursor: { epoch: string; eventId: number },
@@ -579,6 +588,13 @@ export class Daemon {
   /** The environment the agent's process runs with, as its own tools see it (Linux only). */
   agentEnv(agentId: string): Record<string, string> {
     return processEnv(this.panePid(agentId));
+  }
+
+  /** The token the agent's process presents, from the file its environment names (Linux only). */
+  agentToken(agentId: string): string {
+    const file = this.agentEnv(agentId)["BAZHEN_AGENT_AUTH_FILE"];
+    if (file === undefined) throw new Error(`agent ${agentId} runs with no token file`);
+    return readFileSync(file, "utf8").trim();
   }
 
   /** The environment a shell terminal's process runs with (Linux only). */
