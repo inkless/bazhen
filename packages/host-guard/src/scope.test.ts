@@ -1,24 +1,34 @@
 import { describe, expect, it } from "vitest";
 import {
-  MEMORY_MAX,
   PROBE_SCRIPT,
   TERMINALS_SLICE,
   inTerminalScope,
   isTerminalScope,
+  memoryMaxRefusal,
   parseProbe,
   probeContainment,
   scopeArgs,
+  swapMaxRefusal,
   terminalScope,
   type Containment,
   type ProbeDeps,
   type Ran,
+  type TerminalCaps,
 } from "./scope.ts";
 
 const GIB = 1024 ** 3;
-const caps = { terminal: "50%", total: "80%" };
+/** The fake machine's memory, which a percentage cap is taken of. */
+const MACHINE = 64 * GIB;
+const caps: TerminalCaps = { terminal: "50%", total: "80%", swap: "0" };
 const RUN = "/usr/bin/systemd-run";
 const CTL = "/usr/bin/systemctl";
 const XDG = "/run/user/1000";
+/** What a probe scope reads under `caps` on the fake machine. */
+const GOOD_READING = {
+  memory: `${32 * GIB}\n`,
+  slice: `${Math.floor(MACHINE * 0.8)}\n`,
+  swap: "0\n",
+};
 
 interface Call {
   readonly file: string;
@@ -27,14 +37,14 @@ interface Call {
 }
 
 const ok = (stdout: string): Ran => ({ code: 0, stdout, stderr: "" });
+const reads = (reading: Record<string, string>) => ok(JSON.stringify(reading));
 
 const scoped = (oomPolicy: boolean): Extract<Containment, { kind: "scoped" }> => ({
   kind: "scoped",
   systemd: oomPolicy ? 255 : 252,
   oomPolicy,
   caps,
-  terminalBytes: 31 * GIB,
-  totalBytes: 50 * GIB,
+  enforced: { terminal: 32 * GIB, total: 51 * GIB, swap: 0 },
   systemdRun: RUN,
   runtimeDir: XDG,
 });
@@ -62,7 +72,6 @@ function fakeSystemd(answers: {
   onPath?: readonly string[];
 }) {
   const calls: Call[] = [];
-  const reading = { memory: `${31 * GIB}\n`, slice: `${50 * GIB}\n` };
   const deps: ProbeDeps = {
     platform: answers.platform ?? "linux",
     env: answers.env ?? { XDG_RUNTIME_DIR: XDG, PATH: "/usr/bin", HOME: "/home/u" },
@@ -71,12 +80,13 @@ function fakeSystemd(answers: {
         ? `/usr/bin/${command}`
         : undefined,
     node: "/usr/bin/node",
+    totalMemory: MACHINE,
     run: (file, args, env) => {
       calls.push({ file, args, env });
       if (args[0] === "--version")
         return Promise.resolve(ok(answers.version ?? "systemd 255 (255.4)\n+PAM"));
       if (file === CTL) return Promise.resolve(answers.set ?? ok(""));
-      return Promise.resolve(answers.probe ?? ok(JSON.stringify(reading)));
+      return Promise.resolve(answers.probe ?? reads(GOOD_READING));
     },
   };
   return { deps, calls };
@@ -103,15 +113,14 @@ describe("the argv that starts a command in a scope", () => {
 });
 
 describe("whether terminals can be contained here", () => {
-  it("contains them when the kernel shows both caps from inside a probe scope", async () => {
+  it("contains them when the kernel shows every cap asked, from inside a probe scope", async () => {
     const { deps } = fakeSystemd({});
     expect(await probeContainment(caps, deps)).toEqual({
       kind: "scoped",
       systemd: 255,
       oomPolicy: true,
       caps,
-      terminalBytes: 31 * GIB,
-      totalBytes: 50 * GIB,
+      enforced: { terminal: 32 * GIB, total: Math.floor(MACHINE * 0.8), swap: 0 },
       systemdRun: RUN,
       runtimeDir: XDG,
     });
@@ -138,6 +147,7 @@ describe("whether terminals can be contained here", () => {
     const probe = probeArgs(calls);
     expect(valueAfter(probe, "-p")).toEqual([
       "MemoryMax=50%",
+      "MemorySwapMax=0",
       "OOMPolicy=continue",
       "CollectMode=inactive-or-failed",
     ]);
@@ -159,16 +169,20 @@ describe("whether terminals can be contained here", () => {
   });
 
   it("takes infinity as no cap, which the kernel shows as max", async () => {
-    const reading = { memory: "max\n", slice: "max\n" };
-    const probe = { code: 0, stdout: JSON.stringify(reading), stderr: "" };
+    const probe = reads({ memory: "max\n", slice: "max\n", swap: "max\n" });
     const { deps } = fakeSystemd({ probe });
-    expect(await probeContainment({ terminal: "infinity", total: "infinity" }, deps)).toMatchObject(
-      {
-        kind: "scoped",
-        terminalBytes: null,
-        totalBytes: null,
-      },
-    );
+    const none = { terminal: "infinity", total: "infinity", swap: "infinity" };
+    expect(await probeContainment(none, deps)).toMatchObject({
+      kind: "scoped",
+      enforced: { terminal: null, total: null, swap: null },
+    });
+  });
+
+  it("takes a size the kernel rounds down to its page", async () => {
+    const probe = reads({ ...GOOD_READING, memory: `${300_000_000 - 3_456}\n` });
+    const { deps } = fakeSystemd({ probe });
+    const got = await probeContainment({ ...caps, terminal: "300000000" }, deps);
+    expect(got).toMatchObject({ kind: "scoped", enforced: { terminal: 300_000_000 - 3_456 } });
   });
 
   const refusals: [string, Parameters<typeof fakeSystemd>[0], string][] = [
@@ -188,13 +202,23 @@ describe("whether terminals can be contained here", () => {
     ],
     [
       "when the kernel shows no cap the manager took",
-      { probe: { code: 0, stdout: JSON.stringify({ memory: "max\n", slice: "1\n" }), stderr: "" } },
-      "enforces no cap here",
+      { probe: reads({ ...GOOD_READING, memory: "max\n" }) },
+      "was asked for 50%, but the kernel shows a scope's memory.max as max",
+    ],
+    [
+      "when the kernel shows a cap other than the one asked",
+      { probe: reads({ ...GOOD_READING, slice: `${8 * GIB}\n` }) },
+      "was asked for 80%, but the kernel shows bazhen-terminals.slice's memory.max as 8589934592",
+    ],
+    [
+      "when swap isn't capped as asked",
+      { probe: reads({ ...GOOD_READING, swap: "max\n" }) },
+      "was asked for 0, but the kernel shows a scope's memory.swap.max as max",
     ],
     [
       "when the memory controller isn't there to read",
-      { probe: { code: 0, stdout: "{}", stderr: "" } },
-      "the kernel shows no memory.max",
+      { probe: reads({}) },
+      "the kernel shows a scope's memory.max as nothing",
     ],
   ];
 
@@ -204,21 +228,53 @@ describe("whether terminals can be contained here", () => {
     expect(got).toEqual({ kind: "uncontained", why: expect.stringContaining(why) });
   });
 
-  it("refuses a cap systemd wouldn't take, before running anything", async () => {
+  it.each([
+    ["above it", 512 * 1024 ** 2],
+    ["a page or more below it", 256 * 1024 ** 2 - 64 * 1024],
+  ])("leaves them uncontained when the kernel shows bytes %s", async (_, shownBytes) => {
+    const probe = reads({ ...GOOD_READING, memory: `${shownBytes}\n` });
+    const { deps } = fakeSystemd({ probe });
+    const got = await probeContainment({ ...caps, terminal: "256M" }, deps);
+    expect(got).toEqual({ kind: "uncontained", why: expect.stringContaining("asked for 256M") });
+  });
+
+  it("throws on a cap systemd wouldn't take, before running anything", async () => {
     const { deps, calls } = fakeSystemd({});
-    const got = await probeContainment({ terminal: "8GB", total: "80%" }, deps);
-    expect(got).toEqual({ kind: "uncontained", why: expect.stringContaining("8GB") });
+    await expect(probeContainment({ ...caps, terminal: "0" }, deps)).rejects.toThrow(RangeError);
     expect(calls).toEqual([]);
   });
 });
 
-describe("the sizes a cap may be given in", () => {
-  it.each(["8G", "512M", "1073741824", "50%", "12.5%", "100%", "infinity"])("takes %s", (size) => {
-    expect(MEMORY_MAX.test(size)).toBe(true);
+describe("the memory caps a terminal may be given", () => {
+  it.each(["64M", "8G", "1T", "67108864", "1%", "50%", "100%", "infinity"])("takes %s", (size) => {
+    expect(memoryMaxRefusal(size)).toBeUndefined();
   });
 
-  it.each(["8GB", "8g", "-1", "101%", "100.5%", "", "max", "8 G"])("refuses %j", (size) => {
-    expect(MEMORY_MAX.test(size)).toBe(false);
+  it.each([
+    ["0", "at least 64M"],
+    ["1K", "at least 64M"],
+    ["63M", "at least 64M"],
+    ["0%", "a whole percentage"],
+    ["101%", "a whole percentage"],
+    ["12.345%", "a whole percentage"],
+    ["12.5%", "a whole percentage"],
+    ["8GB", "a whole percentage"],
+    ["8g", "a whole percentage"],
+    ["-1", "a whole percentage"],
+    ["", "a whole percentage"],
+    ["max", "a whole percentage"],
+  ])("refuses %j, saying it %s", (size, why) => {
+    expect(memoryMaxRefusal(size)).toContain(why);
+  });
+});
+
+describe("the swap caps a terminal may be given", () => {
+  it.each(["0", "512M", "4G", "infinity"])("takes %s", (size) => {
+    expect(swapMaxRefusal(size)).toBeUndefined();
+  });
+
+  it.each(["10%", "4GB", "-1", "", "none"])("refuses %j", (size) => {
+    expect(swapMaxRefusal(size)).toContain("0 for none");
   });
 });
 
@@ -231,10 +287,11 @@ describe("a terminal's scope launch", () => {
     expect(argv.at(-1)).toBe("--");
   });
 
-  it("caps it at the terminal's cap and keeps its holder through an OOM kill", () => {
+  it("caps its memory and swap, and keeps its holder through an OOM kill", () => {
     const { argv } = terminalScope(scoped(true), "term_abc");
     expect(valueAfter(argv, "-p")).toEqual([
       "MemoryMax=50%",
+      "MemorySwapMax=0",
       "OOMPolicy=continue",
       "CollectMode=inactive-or-failed",
     ]);
@@ -242,7 +299,11 @@ describe("a terminal's scope launch", () => {
 
   it("leaves OOMPolicy to the kernel before systemd 253", () => {
     const { argv } = terminalScope(scoped(false), "term_abc");
-    expect(valueAfter(argv, "-p")).toEqual(["MemoryMax=50%", "CollectMode=inactive-or-failed"]);
+    expect(valueAfter(argv, "-p")).toEqual([
+      "MemoryMax=50%",
+      "MemorySwapMax=0",
+      "CollectMode=inactive-or-failed",
+    ]);
   });
 
   it("needs only the bus's directory in the environment", () => {

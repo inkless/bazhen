@@ -22,6 +22,7 @@ import {
 } from "@bazhen/core";
 import {
   type Containment,
+  HolderStartFailed,
   holderSocket,
   holdersDir,
   PasteRefused,
@@ -365,28 +366,22 @@ async function outdatedHolder(root: string, terminalId: TerminalId): Promise<Run
   };
 }
 
+/** A runtime option deciding `containment` for every holder it starts. */
+const decided = (containment: Containment) => ({ containment: async () => containment });
+
 describe("HolderRuntime: containing each terminal", () => {
   const scoped: Containment = {
     kind: "scoped",
     systemd: 255,
     oomPolicy: true,
-    caps: { terminal: "50%", total: "80%" },
-    terminalBytes: 1 << 30,
-    totalBytes: 2 << 30,
+    caps: { terminal: "50%", total: "80%", swap: "0" },
+    enforced: { terminal: 1 << 30, total: 2 << 30, swap: 0 },
     systemdRun: "/usr/bin/systemd-run",
     runtimeDir: "/run/user/1000",
   };
 
   it("starts each holder in a scope of its own, the bus in the holder's env alone", async () => {
-    const { runtime, started } = startingFakes(
-      privateRoot(),
-      {},
-      undefined,
-      {},
-      {
-        containment: scoped,
-      },
-    );
+    const { runtime, started } = startingFakes(privateRoot(), {}, undefined, {}, decided(scoped));
     const s = spec();
     await runtime.create(s);
     const [options] = started;
@@ -397,6 +392,7 @@ describe("HolderRuntime: containing each terminal", () => {
           new RegExp(`^--unit=bazhen-terminal-${s.terminalId}-[0-9a-f]+\\.scope$`),
         ),
         "MemoryMax=50%",
+        "MemorySwapMax=0",
       ]),
     );
     expect(options?.scope?.env).toEqual({ XDG_RUNTIME_DIR: "/run/user/1000" });
@@ -406,26 +402,46 @@ describe("HolderRuntime: containing each terminal", () => {
   });
 
   it("gives each holder a scope no other launch has, a respawn's included", async () => {
-    const { runtime, started } = startingFakes(
-      privateRoot(),
-      {},
-      undefined,
-      {},
-      {
-        containment: scoped,
-      },
-    );
+    const { runtime, started } = startingFakes(privateRoot(), {}, undefined, {}, decided(scoped));
     await runtime.create(spec());
     await runtime.create(spec());
     const units = started.map((o) => o.scope?.argv.find((a) => a.startsWith("--unit=")));
     expect(new Set(units).size).toBe(2);
   });
 
-  it("starts holders where the daemon runs when terminals can't be contained", async () => {
-    const containment: Containment = { kind: "uncontained", why: "darwin has no cgroups" };
-    const { runtime, started } = startingFakes(privateRoot(), {}, undefined, {}, { containment });
+  it("starts a holder in a scope only when terminals can be contained", async () => {
+    const uncontained: Containment = { kind: "uncontained", why: "darwin has no cgroups" };
+    const scopedAt = await Promise.all(
+      [scoped, uncontained].map(async (containment) => {
+        const built = startingFakes(privateRoot(), {}, undefined, {}, decided(containment));
+        await built.runtime.create(spec());
+        return built.started.map((options) => options.scope !== undefined);
+      }),
+    );
+    expect(scopedAt).toEqual([[true], [false]]);
+  });
+
+  it("fails a create whose scoped start fails, and never retries it unscoped", async () => {
+    const started: StartHolderOptions[] = [];
+    const { runtime } = runtimeAt(privateRoot(), {
+      ...decided(scoped),
+      start: async (options) => {
+        started.push(options);
+        throw new HolderStartFailed({ code: 1 }, "Failed to start transient scope unit");
+      },
+    });
+    await expect(runtime.create(spec())).rejects.toThrow("Failed to start transient scope unit");
+    expect(started.map((options) => options.scope !== undefined)).toEqual([true]);
+  });
+
+  it("asks for the decision only when it starts a holder", async () => {
+    let asked = 0;
+    const containment = async () => (asked++, scoped);
+    const { runtime } = startingFakes(privateRoot(), {}, undefined, {}, { containment });
+    await runtime.inventory();
+    expect(asked).toBe(0);
     await runtime.create(spec());
-    expect(started[0]).not.toHaveProperty("scope");
+    expect(asked).toBe(1);
   });
 
   it("says of each answering holder whether its pid runs in a terminal's scope", async () => {

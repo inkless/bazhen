@@ -10,9 +10,17 @@ on:
   pull_request:
     paths:
       - "packages/host-guard/**"
+      - "packages/runtime-holder/**"
       - "crates/bazhen-holder/**"
+      - "apps/daemon/src/terminals/**"
+      - "apps/daemon/src/main.ts"
       - "tests/holder/containment.test.ts"
       - "tests/support/holder-containment.ts"
+      - "tests/support/holder-spawn.ts"
+      - "tests/support/holder-setup.ts"
+      - "vitest.config.ts"
+      - "package.json"
+      - "scripts/capped.ts"
       - ".github/workflows/containment.yml"
 
 concurrency:

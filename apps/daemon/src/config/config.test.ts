@@ -25,7 +25,7 @@ describe("resolveConfig", () => {
       launchLimits: { maxLaunched: 5, maxDepth: 3 },
       maxOpenTerminals: 100,
       defaultRuntime: "tmux",
-      terminalCaps: { terminal: "50%", total: "80%" },
+      terminalCaps: { terminal: "50%", total: "80%", swap: "0" },
     });
   });
 
@@ -46,7 +46,7 @@ describe("resolveConfig", () => {
       launchLimits: { maxLaunched: 5, maxDepth: 3 },
       maxOpenTerminals: 100,
       defaultRuntime: "tmux",
-      terminalCaps: { terminal: "50%", total: "80%" },
+      terminalCaps: { terminal: "50%", total: "80%", swap: "0" },
     });
   });
 
@@ -59,11 +59,14 @@ describe("resolveConfig", () => {
     expect(resolveConfig({ terminals: { max_open: 12 } }, {}).maxOpenTerminals).toBe(12);
   });
 
-  it("takes each terminal's memory cap and all terminals' from the file", () => {
-    const terminals = { terminals: { memory_max: "8G", total_memory_max: "infinity" } };
+  it("takes each terminal's memory and swap caps and all terminals' from the file", () => {
+    const terminals = {
+      terminals: { memory_max: "8G", total_memory_max: "infinity", swap_max: "2G" },
+    };
     expect(resolveConfig(terminals, {}).terminalCaps).toEqual({
       terminal: "8G",
       total: "infinity",
+      swap: "2G",
     });
   });
 

@@ -50,7 +50,10 @@ it("keeps a holder on the build it started from while the next installs, then pr
   writeFileSync(nextSource, "the next build, which nothing here runs", { mode: 0o755 });
   const next = await installHolder({ source: nextSource, dir, uid });
   const whileRunning = {
-    builds: (await runtime.builds()).filter((b) => b.terminalId === holder.terminalId),
+    // Started outside any scope: not contained on Linux, unreadable where there are no cgroups.
+    builds: (await runtime.builds())
+      .filter((b) => b.terminalId === holder.terminalId)
+      .map(({ contained, ...build }) => ({ ...build, scoped: contained === true })),
     pruned: await pruneUnusedHolders(dir, uid, next),
     inode: statSync(old.binary).ino,
     same: readFileSync(old.binary).equals(bytes),
@@ -64,7 +67,12 @@ it("keeps a holder on the build it started from while the next installs, then pr
   expect([whileRunning, afterClose, readdirSync(dir)]).toEqual([
     {
       builds: [
-        { terminalId: holder.terminalId, build: old.build, protocol: [HOLDER_PROTOCOL_VERSION] },
+        {
+          terminalId: holder.terminalId,
+          build: old.build,
+          protocol: [HOLDER_PROTOCOL_VERSION],
+          scoped: false,
+        },
       ],
       pruned: [],
       inode,

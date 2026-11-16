@@ -59,9 +59,9 @@ export type HealthResponse = z.infer<typeof HealthResponse>;
 export const MemoryCap = z.object({ asked: z.string(), bytes: z.int().nonnegative().nullable() });
 export type MemoryCap = z.infer<typeof MemoryCap>;
 
-/** A cap as people read it: `50% (31.0 GiB)`, or `infinity (no cap)`. */
+/** A cap as people read it: `50% (31.0 GiB)`, `0 (none)`, or `infinity (no cap)`. */
 export const memoryCapText = ({ asked, bytes }: MemoryCap) =>
-  `${asked} (${bytes === null ? "no cap" : `${(bytes / 1024 ** 3).toFixed(1)} GiB`})`;
+  `${asked} (${bytes === null ? "no cap" : bytes === 0 ? "none" : `${(bytes / 1024 ** 3).toFixed(1)} GiB`})`;
 
 /**
  * `GET /v1/daemon/doctor`, on the Unix socket only: what `bazhen doctor` shows. The environment
@@ -166,9 +166,10 @@ export const DoctorResponse = z.object({
     .optional(),
   /**
    * Whether each new holder terminal starts in a systemd scope of its own: if so, each terminal's
-   * memory cap and all terminals' together, as configured and as the kernel enforces them (bytes,
-   * null for no cap), and whether a process past its cap is killed alone (`OOMPolicy=continue`,
-   * systemd 253 or later); if not, why. tmux terminals are never contained. Absent before 1.53.
+   * memory cap and swap cap and all terminals' memory together, as configured and as the kernel
+   * enforces them (bytes, null for no cap), and whether a process past its cap is killed alone
+   * (`OOMPolicy=continue`, systemd 253 or later); if not, why. `unchecked` until a holder terminal
+   * has needed it. tmux terminals are never contained. Absent before 1.53.
    */
   containment: z
     .discriminatedUnion("state", [
@@ -178,8 +179,10 @@ export const DoctorResponse = z.object({
         oomPolicy: z.boolean(),
         terminal: MemoryCap,
         total: MemoryCap,
+        swap: MemoryCap,
       }),
       z.object({ state: z.literal("uncontained"), why: z.string() }),
+      z.object({ state: z.literal("unchecked") }),
     ])
     .optional(),
   env: z.object({

@@ -2,6 +2,30 @@ import { type DoctorResponse, memoryCapText } from "@bazhen/protocol";
 
 type Containment = NonNullable<DoctorResponse["containment"]>;
 
+/** The first line, and any note under it, for the daemon's decision. */
+function decisionLines(containment: Containment): string[] {
+  if (containment.state === "unchecked") {
+    return ["containment: not checked yet (no holder terminal has started since the daemon did)"];
+  }
+  if (containment.state === "uncontained") {
+    return [
+      `containment: none (${containment.why})`,
+      "  warning: one terminal's runaway memory can end every other terminal",
+    ];
+  }
+  return [
+    `containment: each holder terminal in a systemd scope of its own, at most ` +
+      `${memoryCapText(containment.terminal)} each with ${memoryCapText(containment.swap)} ` +
+      `of swap, and ${memoryCapText(containment.total)} together`,
+    ...(containment.oomPolicy
+      ? []
+      : [
+          `  note: systemd ${containment.systemd} predates OOMPolicy for scopes (253), ` +
+            "so the kernel alone decides what dies past a cap",
+        ]),
+  ];
+}
+
 /**
  * What `bazhen doctor` says of containment: whether new holder terminals start in a scope of their
  * own, with what caps, and which terminals run outside one.
@@ -11,22 +35,7 @@ export function containmentLines(
   holders: NonNullable<DoctorResponse["holder"]>["holders"],
   runtimeKinds: readonly string[],
 ): string[] {
-  const lines =
-    containment.state === "uncontained"
-      ? [
-          `containment: none (${containment.why})`,
-          "  warning: one terminal's runaway memory can end every other terminal",
-        ]
-      : [
-          `containment: each holder terminal in a systemd scope of its own, at most ` +
-            `${memoryCapText(containment.terminal)} each and ${memoryCapText(containment.total)} together`,
-          ...(containment.oomPolicy
-            ? []
-            : [
-                `  note: systemd ${containment.systemd} predates OOMPolicy for scopes (253), ` +
-                  "so the kernel alone decides what dies past a cap",
-              ]),
-        ];
+  const lines = decisionLines(containment);
   const outside = holders.filter((holder) => holder.contained === false).length;
   if (outside > 0) {
     const which = outside === 1 ? "1 holder terminal runs" : `${outside} holder terminals run`;

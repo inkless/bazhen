@@ -42,7 +42,7 @@ import { retire } from "./events/retention.ts";
 import { eventRoute } from "./events/server.ts";
 import { TerminalHub } from "./stream/hub.ts";
 import { HOLDER_SOURCE, holderDoctor } from "./terminals/holder.ts";
-import { containmentDoctor, containmentLog } from "./terminals/containment.ts";
+import { ContainmentCheck, containmentDoctor, containmentLog } from "./terminals/containment.ts";
 import { endOpenAttachments, storeLog } from "./stream/log.ts";
 import { ShellLifecycle } from "./shells/lifecycle.ts";
 import { reconcileShells } from "./shells/reconcile.ts";
@@ -203,11 +203,17 @@ if (noDefault !== null) {
   process.exit(1);
 }
 // Decided once: a manager that can't contain terminals now can't contain the next one either, and
-// one that could and then fails a scope fails that terminal's create.
-const containment = await probeContainment(config.terminalCaps);
-const contained = containmentLog(containment);
-if (contained.warn) console.warn(`bazhen: ${contained.message}`);
-else console.log(`bazhen: ${contained.message}`);
+// one that could and then fails a scope fails that terminal's create. Only a holder terminal needs
+// it, so a daemon that makes none never reaches the user manager.
+const containment = new ContainmentCheck(
+  () => probeContainment(config.terminalCaps),
+  (decided) => {
+    const said = containmentLog(decided);
+    if (said.warn) console.warn(`bazhen: ${said.message}`);
+    else console.log(`bazhen: ${said.message}`);
+  },
+);
+if (config.defaultRuntime === "holder") void containment.decide();
 // Built with or without an installed build: holders made earlier are served either way, and only
 // a new terminal needs one.
 const holderRuntime = new HolderRuntime({
@@ -216,7 +222,7 @@ const holderRuntime = new HolderRuntime({
   ...(holderInstall.installed === null && { unavailable: holderInstall.reason }),
   installDir: holderDir,
   env: hostEnv,
-  containment,
+  containment: () => containment.decide(),
 });
 
 /**
@@ -608,7 +614,7 @@ const socketListener = getRequestListener(
         })),
         hookClient: { path: hookRunner, fallback: hookRunner === HOOK_SCRIPT },
         holder: await holderDoctor(holderInstall, holderRuntime),
-        containment: containmentDoctor(containment),
+        containment: containmentDoctor(containment.decided),
         config: configFile,
         agents: {
           shell: config.loginShell === undefined ? "direct" : "login",

@@ -1,17 +1,31 @@
 import type { Containment } from "@bazhen/host-guard";
 import { describe, expect, it } from "vitest";
-import { containmentDoctor, containmentLog } from "./containment.ts";
+import { ContainmentCheck, containmentDoctor, containmentLog } from "./containment.ts";
 
 const GIB = 1024 ** 3;
 const scoped = (systemd: number): Containment => ({
   kind: "scoped",
   systemd,
   oomPolicy: systemd >= 253,
-  caps: { terminal: "50%", total: "infinity" },
-  terminalBytes: 31 * GIB,
-  totalBytes: null,
+  caps: { terminal: "50%", total: "infinity", swap: "0" },
+  enforced: { terminal: 31 * GIB, total: null, swap: 0 },
   systemdRun: "/usr/bin/systemd-run",
   runtimeDir: "/run/user/1000",
+});
+
+describe("deciding whether terminals can be contained", () => {
+  it("probes only once something asks, and once however many ask", async () => {
+    let probes = 0;
+    const decided: Containment[] = [];
+    const check = new ContainmentCheck(
+      async () => (probes++, scoped(255)),
+      (c) => decided.push(c),
+    );
+    expect([probes, check.decided]).toEqual([0, undefined]);
+    await Promise.all([check.decide(), check.decide()]);
+    await check.decide();
+    expect([probes, decided.length, check.decided]).toEqual([1, 1, scoped(255)]);
+  });
 });
 
 describe("what doctor says of containment", () => {
@@ -22,6 +36,7 @@ describe("what doctor says of containment", () => {
       oomPolicy: true,
       terminal: { asked: "50%", bytes: 31 * GIB },
       total: { asked: "infinity", bytes: null },
+      swap: { asked: "0", bytes: 0 },
     });
   });
 
@@ -32,15 +47,19 @@ describe("what doctor says of containment", () => {
       why: "darwin has no cgroups",
     });
   });
+
+  it("says it hasn't checked before any holder terminal needed it", () => {
+    expect(containmentDoctor(undefined)).toEqual({ state: "unchecked" });
+  });
 });
 
-describe("what the daemon says of containment as it starts", () => {
-  it("names the slice and both caps, in GiB", () => {
+describe("what the daemon says of containment once decided", () => {
+  it("names the slice and every cap, in GiB", () => {
     expect(containmentLog(scoped(255))).toEqual({
       warn: false,
       message:
         "holder terminals each start in a scope of their own in bazhen-terminals.slice, " +
-        "at most 50% (31.0 GiB) each and infinity (no cap) together",
+        "at most 50% (31.0 GiB) each with 0 (none) of swap, and infinity (no cap) together",
     });
   });
 

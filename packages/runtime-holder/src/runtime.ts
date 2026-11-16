@@ -90,10 +90,10 @@ export interface HolderRuntimeOptions {
   /** Starts a holder: host-guard's `startHolder`, unless a test records what it starts. */
   readonly start?: (options: StartHolderOptions) => Promise<StartedHolder>;
   /**
-   * Whether each new terminal's holder starts in a scope of its own. Without one, holders start
-   * where the daemon runs.
+   * Whether each new terminal's holder starts in a scope of its own, asked before every start and
+   * decided once by the caller. Without it, holders start where the daemon runs.
    */
-  readonly containment?: Containment;
+  readonly containment?: () => Promise<Containment>;
   /** Whether a holder's pid runs in a terminal's scope: host-guard's, unless a test says. */
   readonly inScope?: (pid: number) => boolean | null;
 }
@@ -438,7 +438,7 @@ export class HolderRuntime implements RuntimeAdapter {
       ...this.processSpec(spec),
     };
     const start = this.opts.start ?? startHolder;
-    const { containment } = this.opts;
+    const containment = await this.opts.containment?.();
     const scope =
       containment?.kind === "scoped" ? { scope: terminalScope(containment, spec.terminalId) } : {};
     await start({ binary, root: this.opts.root, spec: holderSpec, env: {}, ...scope });

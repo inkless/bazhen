@@ -80,6 +80,10 @@ describe("readConfigFile", () => {
       "terminals.total_memory_max:",
     ],
     ["a cap given as a number", "[terminals]\nmemory_max = 8", "terminals.memory_max:"],
+    ["a cap of nothing", '[terminals]\nmemory_max = "0"', "at least 64M"],
+    ["a cap a terminal can't start in", '[terminals]\nmemory_max = "1K"', "at least 64M"],
+    ["a fraction of a percent", '[terminals]\ntotal_memory_max = "12.345%"', "whole percentage"],
+    ["a swap cap as a percentage", '[terminals]\nswap_max = "10%"', "terminals.swap_max:"],
     ["a runtime it doesn't run", '[runtime]\ndefault = "screen"', "runtime.default:"],
     ["broken TOML", "[daemon\nport = 1", "config.toml:"],
   ])("refuses %s, naming the file and the key", (_what, text, message) => {

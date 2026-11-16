@@ -91,8 +91,9 @@ export {
   type PtySource,
 } from "./ptys.ts";
 export {
-  MEMORY_MAX,
   MIN_SYSTEMD,
+  memoryMaxRefusal,
+  swapMaxRefusal,
   TERMINALS_SLICE,
   inTerminalScope,
   probeContainment,

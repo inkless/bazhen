@@ -490,6 +490,30 @@
                 "asked",
                 "bytes"
               ]
+            },
+            "swap": {
+              "type": "object",
+              "properties": {
+                "asked": {
+                  "type": "string"
+                },
+                "bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "asked",
+                "bytes"
+              ]
             }
           },
           "required": [
@@ -497,7 +521,8 @@
             "systemd",
             "oomPolicy",
             "terminal",
-            "total"
+            "total",
+            "swap"
           ]
         },
         {
@@ -514,6 +539,18 @@
           "required": [
             "state",
             "why"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "const": "unchecked"
+            }
+          },
+          "required": [
+            "state"
           ]
         }
       ]

@@ -115,18 +115,26 @@ Everything the terminal runs is in that scope, outside the cgroup of the app tha
 and a runaway in one terminal can't take memory from the rest.
 
 - **Caps.** `terminals.memory_max` caps each terminal's scope (default `50%` of RAM), and
-  `terminals.total_memory_max` caps the slice they share (default `80%`). Both take what systemd's
-  `MemoryMax=` does: bytes with an optional `K`, `M`, `G` or `T`, a percentage, or `infinity`.
-  Swap isn't capped.
+  `terminals.total_memory_max` caps the slice they share (default `80%`). Each is bytes with an
+  optional `K`, `M`, `G` or `T`, at least `64M`; a whole percentage of RAM from `1%` to `100%`; or
+  `infinity`. `terminals.swap_max` caps each terminal's swap (default `0`): bytes, `0` for none, or
+  `infinity`. A cap the daemon can't use stops it at start, naming the key.
 - **Past a cap**, the kernel kills the biggest process in that scope, which is the runaway rather
-  than its holder. With systemd 253 or later each scope has `OOMPolicy=continue`, so systemd leaves
-  the rest of the scope alone, and the holder reports its child's exit by SIGKILL. Older systemd
-  takes no `OOMPolicy` on a scope, and doctor says the kernel alone decides what dies.
-- **Decided at start.** The daemon probes once as it starts. It sets the slice's cap, starts a
-  throwaway scope, and reads both caps back from the kernel, since a manager without the memory
-  controller accepts a cap and enforces nothing. If the probe fails, holders start where the daemon
-  runs, and the daemon and doctor say why. If it succeeds and a terminal's scope then can't be made,
-  that terminal's create fails rather than run uncontained.
+  than its holder. With no swap a runaway reaches that kill at once, instead of filling swap first
+  and stalling every terminal. With systemd 253 or later each scope has `OOMPolicy=continue`, so
+  systemd leaves the rest of the scope alone, and the holder reports its child's exit by SIGKILL.
+  Older systemd takes no `OOMPolicy` on a scope, and doctor says the kernel alone decides what dies.
+- **Decided once, when first needed**: as the daemon starts when `runtime.default` is `holder`,
+  otherwise at the first holder terminal, so a daemon that makes none never reaches the user
+  manager. It sets the slice's cap, starts a throwaway scope, and reads every cap back from the
+  kernel, since a manager without the memory controller accepts a cap and enforces nothing. If the
+  probe fails, holders start where the daemon runs, and the daemon and doctor say why. If it
+  succeeds and a terminal's scope then can't be made, that terminal's create fails rather than run
+  uncontained.
+- **The spec waits for the holder.** A holder reads what to run on stdin, and it is written only
+  once `ps` shows `systemd-run` has exec'd the holder. A launcher that hasn't within 10 seconds,
+  as on a user manager that doesn't answer, is ended, and a holder it runs later finds no spec and
+  exits, so nothing runs that the daemon doesn't know of.
 - **Not contained**: terminals on macOS, which has no cgroups; tmux terminals; and holders started
   before containment, or by a daemon that couldn't contain them. Doctor counts the holders outside
   a scope; restarting a terminal starts its new holder in one.

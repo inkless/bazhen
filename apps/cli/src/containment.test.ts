@@ -8,6 +8,7 @@ const scoped = (systemd: number) => ({
   oomPolicy: systemd >= 253,
   terminal: { asked: "50%", bytes: 31 * GIB },
   total: { asked: "80%", bytes: 50 * GIB },
+  swap: { asked: "0", bytes: 0 },
 });
 const holder = (contained: boolean | null | undefined) => ({
   terminalId: "term_a",
@@ -17,10 +18,16 @@ const holder = (contained: boolean | null | undefined) => ({
 });
 
 describe("what doctor says of containment", () => {
-  it("names both caps as configured and as enforced", () => {
+  it("names every cap as configured and as enforced", () => {
     expect(containmentLines(scoped(255), [], ["holder"])).toEqual([
       "containment: each holder terminal in a systemd scope of its own, at most " +
-        "50% (31.0 GiB) each and 80% (50.0 GiB) together",
+        "50% (31.0 GiB) each with 0 (none) of swap, and 80% (50.0 GiB) together",
+    ]);
+  });
+
+  it("says it hasn't checked before any holder terminal has started", () => {
+    expect(containmentLines({ state: "unchecked" }, [], ["holder"])).toEqual([
+      "containment: not checked yet (no holder terminal has started since the daemon did)",
     ]);
   });
 

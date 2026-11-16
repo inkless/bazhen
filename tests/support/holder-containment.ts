@@ -8,8 +8,8 @@ import { type Containment, probeContainment, type TerminalCaps } from "@bazhen/h
 export type { Containment };
 export type Scoped = Extract<Containment, { kind: "scoped" }>;
 
-/** The caps the suite probes with: small, since every terminal it starts is small. */
-export const SUITE_CAPS: TerminalCaps = { terminal: "256M", total: "1G" };
+/** The caps the suite probes with: small, since every terminal it starts is small; no swap. */
+export const SUITE_CAPS: TerminalCaps = { terminal: "256M", total: "1G", swap: "0" };
 
 /** The containment this runner gives, as the daemon would decide it with `SUITE_CAPS`. */
 export const probeSuite = () => probeContainment(SUITE_CAPS);
@@ -31,6 +31,9 @@ export function cgroupOfPid(pid: number): string {
 
 /** A cgroup's `memory.max`, as the kernel shows it. */
 export const memoryMax = (cgroup: string) => read(`/sys/fs/cgroup${cgroup}/memory.max`);
+
+/** A cgroup's `memory.swap.max`, as the kernel shows it. */
+export const swapMax = (cgroup: string) => read(`/sys/fs/cgroup${cgroup}/memory.swap.max`);
 
 /** The OOM kills a cgroup has counted. */
 export const oomKills = (cgroup: string) =>

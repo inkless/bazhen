@@ -8,6 +8,7 @@
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { accessSync, constants, readFileSync } from "node:fs";
+import { totalmem } from "node:os";
 import { delimiter, join } from "node:path";
 
 /** The first systemd whose scopes take `OOMPolicy`; older ones refuse the property. */
@@ -115,16 +116,61 @@ export function parseProbe(stdout: string): ProbeReading | undefined {
 export const uniqueUnit = (prefix: string, random = () => randomBytes(6).toString("hex")) =>
   `${prefix}-${random()}.scope`;
 
-/** The memory caps terminals get, in any form systemd's `MemoryMax=` takes. */
+/** The memory caps terminals get, as systemd's `MemoryMax=` and `MemorySwapMax=` take them. */
 export interface TerminalCaps {
-  /** Each terminal's scope. */
+  /** Each terminal's scope's memory. */
   readonly terminal: string;
-  /** All terminals together: `TERMINALS_SLICE`. */
+  /** All terminals' memory together: `TERMINALS_SLICE`. */
   readonly total: string;
+  /** Each terminal's scope's swap. */
+  readonly swap: string;
 }
 
-/** A size `MemoryMax=` takes: bytes with an optional K/M/G/T suffix, a percentage, or infinity. */
-export const MEMORY_MAX = /^(?:\d+[KMGT]?|(?:100|\d{1,2}(?:\.\d+)?)%|infinity)$/;
+const UNIT_BYTES: Readonly<Record<string, number>> = {
+  "": 1,
+  K: 1024,
+  M: 1024 ** 2,
+  G: 1024 ** 3,
+  T: 1024 ** 4,
+};
+/** The least a memory cap may be: below it a terminal's own shell and holder can't start. */
+export const MIN_MEMORY_MAX = 64 * 1024 ** 2;
+const SIZE_FORM = "bytes with an optional K, M, G or T";
+
+/** A size in bytes, as `<n>[K|M|G|T]` gives it, or undefined for anything else. */
+function sizeBytes(text: string): number | undefined {
+  const match = /^(\d+)([KMGT]?)$/.exec(text);
+  if (match === null) return undefined;
+  const bytes = Number(match[1]) * (UNIT_BYTES[match[2] ?? ""] ?? 1);
+  return Number.isSafeInteger(bytes) ? bytes : undefined;
+}
+
+/** A whole percentage from 1 to 100, as `<n>%` gives it, or undefined for anything else. */
+function percentage(text: string): number | undefined {
+  const match = /^(\d{1,3})%$/.exec(text);
+  const percent = Number(match?.[1]);
+  return match !== null && percent >= 1 && percent <= 100 ? percent : undefined;
+}
+
+/**
+ * Why `value` can't cap a terminal's memory, or all terminals', or undefined when it can: bytes
+ * with an optional K, M, G or T of at least 64M, a whole percentage of RAM from 1 to 100, or
+ * `infinity`.
+ */
+export function memoryMaxRefusal(value: string): string | undefined {
+  if (value === "infinity" || percentage(value) !== undefined) return undefined;
+  const bytes = sizeBytes(value);
+  if (bytes === undefined)
+    return `must be ${SIZE_FORM}, a whole percentage from 1% to 100%, or infinity`;
+  return bytes < MIN_MEMORY_MAX ? "must be at least 64M, or a terminal can't start" : undefined;
+}
+
+/** Why `value` can't cap a terminal's swap, or undefined when it can: bytes, 0 included, or `infinity`. */
+export function swapMaxRefusal(value: string): string | undefined {
+  return value === "infinity" || sizeBytes(value) !== undefined
+    ? undefined
+    : `must be ${SIZE_FORM}, 0 for none, or infinity`;
+}
 
 /**
  * Whether new terminals start contained, and if not, why. A cap reads back from the kernel as
@@ -137,8 +183,8 @@ export type Containment =
       /** Whether each scope takes `OOMPolicy=continue`; before 253 the kernel's kill is all. */
       readonly oomPolicy: boolean;
       readonly caps: TerminalCaps;
-      readonly terminalBytes: number | null;
-      readonly totalBytes: number | null;
+      /** Each cap as the kernel enforces it: bytes, or null for none. */
+      readonly enforced: { readonly [K in keyof TerminalCaps]: number | null };
       /** The `systemd-run` every scope starts through, by absolute path. */
       readonly systemdRun: string;
       /** Where the user manager's bus is, which `systemd-run` needs and a holder's env lacks. */
@@ -153,6 +199,8 @@ export interface ProbeDeps {
   readonly which: (command: string, path: string | undefined) => string | undefined;
   readonly run: (file: string, args: readonly string[], env: NodeJS.ProcessEnv) => Promise<Ran>;
   readonly node: string;
+  /** The machine's memory, which a percentage cap is taken of. */
+  readonly totalMemory: number;
 }
 
 /** The first executable named `command` on `path`. */
@@ -176,6 +224,7 @@ const realProbeDeps = (): ProbeDeps => ({
   which,
   run: (file, args, env) => runCommand(file, args, env),
   node: process.execPath,
+  totalMemory: totalmem(),
 });
 
 const said = (ran: Ran) => ran.stderr.trim().slice(0, STDERR_MAX) || `exit ${String(ran.code)}`;
@@ -190,9 +239,25 @@ function kernelBytes(text: string | undefined): number | null | undefined {
 
 const uncontained = (why: string): Containment => ({ kind: "uncontained", why });
 
-/** Whether the kernel's reading enforces what was asked: a number for a cap, `max` for none. */
-const enforces = (asked: string, got: number | null | undefined) =>
-  asked === "infinity" ? got === null : typeof got === "number";
+/** How far a cap the kernel shows may lie below the bytes asked: it rounds down to a page. */
+const PAGE_SLACK = 64 * 1024;
+
+/**
+ * Whether the kernel's reading is the cap asked: `max` for `infinity`; the bytes asked, rounded down
+ * to a page; or a percentage of the machine's memory, within a percent of it, as systemd takes its
+ * memory from what the kernel says it has.
+ */
+function enforces(asked: string, got: number | null | undefined, totalMemory: number): boolean {
+  if (asked === "infinity") return got === null;
+  if (typeof got !== "number") return false;
+  const percent = percentage(asked);
+  if (percent !== undefined)
+    return Math.abs(got - (totalMemory * percent) / 100) <= totalMemory / 100;
+  const bytes = sizeBytes(asked);
+  return bytes !== undefined && got <= bytes && got > bytes - PAGE_SLACK;
+}
+
+const shown = (text: string | undefined) => text?.trim() ?? "nothing";
 
 /**
  * Whether this machine can contain each terminal in a scope with `caps`: it sets the terminals'
@@ -203,9 +268,10 @@ export async function probeContainment(
   caps: TerminalCaps,
   deps: ProbeDeps = realProbeDeps(),
 ): Promise<Containment> {
-  for (const [name, value] of Object.entries(caps)) {
-    if (!MEMORY_MAX.test(value)) return uncontained(`the ${name} cap ${value} isn't a MemoryMax`);
-  }
+  const refusal =
+    memoryMaxRefusal(caps.terminal) ?? memoryMaxRefusal(caps.total) ?? swapMaxRefusal(caps.swap);
+  if (refusal !== undefined)
+    throw new RangeError(`refusing caps ${JSON.stringify(caps)}: ${refusal}`);
   if (deps.platform !== "linux") return uncontained(`${deps.platform} has no cgroups`);
   const runtimeDir = deps.env["XDG_RUNTIME_DIR"];
   if (runtimeDir === undefined || !runtimeDir.startsWith("/")) {
@@ -243,30 +309,37 @@ export async function probeContainment(
   );
   const reading = probe.code === 0 ? parseProbe(probe.stdout) : undefined;
   if (reading === undefined) return uncontained(`a probe scope wouldn't start: ${said(probe)}`);
-  const terminalBytes = kernelBytes(reading.memory);
-  const totalBytes = kernelBytes(reading.slice);
-  if (!enforces(caps.terminal, terminalBytes) || !enforces(caps.total, totalBytes)) {
-    return uncontained(
-      `systemd ${systemd} takes a scope's MemoryMax but the kernel shows ` +
-        `${reading.memory?.trim() ?? "no memory.max"}, so it enforces no cap here`,
-    );
-  }
-  return {
-    kind: "scoped",
-    systemd,
-    oomPolicy,
-    caps,
-    terminalBytes: terminalBytes ?? null,
-    totalBytes: totalBytes ?? null,
-    systemdRun,
-    runtimeDir,
+  const read = {
+    terminal: ["a scope's memory.max", reading.memory],
+    total: [`${TERMINALS_SLICE}'s memory.max`, reading.slice],
+    swap: ["a scope's memory.swap.max", reading.swap],
+  } as const;
+  const enforced: Record<keyof TerminalCaps, number | null> = {
+    terminal: null,
+    total: null,
+    swap: null,
   };
+  for (const name of ["terminal", "total", "swap"] as const) {
+    const [what, text] = read[name];
+    const bytes = kernelBytes(text);
+    if (!enforces(caps[name], bytes, deps.totalMemory)) {
+      return uncontained(
+        `systemd ${systemd} was asked for ${caps[name]}, but the kernel shows ${what} as ` +
+          `${shown(text)}, so it doesn't enforce that cap here`,
+      );
+    }
+    enforced[name] = bytes ?? null;
+  }
+  return { kind: "scoped", systemd, oomPolicy, caps, enforced, systemdRun, runtimeDir };
 }
 
 /** The properties of a terminal's scope. */
 function terminalProperties(caps: TerminalCaps, oomPolicy: boolean): string[] {
   return [
     `MemoryMax=${caps.terminal}`,
+    // Uncapped, a runaway at its memory cap would go on into swap and stall every terminal before
+    // the kernel killed it.
+    `MemorySwapMax=${caps.swap}`,
     // Past its cap the kernel kills the scope's biggest process, a runaway rather than its small
     // holder, and the default policy would then stop the holder too.
     ...(oomPolicy ? ["OOMPolicy=continue"] : []),

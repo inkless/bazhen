@@ -14,6 +14,7 @@ import {
   oomKills,
   probeSuite,
   type Scoped,
+  swapMax,
   unitProperty,
 } from "../support/holder-containment.ts";
 import {
@@ -50,9 +51,10 @@ afterEach(async () => {
 async function started(
   terminalId: string,
   argv: readonly [string, ...string[]],
-  containment: Scoped | undefined = scoped,
+  containment: Scoped | "unscoped" = scoped,
 ) {
-  const holder = await spawnHolder(terminalId, argv, containment && { containment });
+  const options = containment === "unscoped" ? {} : { containment };
+  const holder = await spawnHolder(terminalId, argv, options);
   running.push(holder);
   return holder;
 }
@@ -82,13 +84,14 @@ const until = async (done: () => boolean | Promise<boolean>, what: string, ms = 
 };
 
 describe("a holder started in a scope", () => {
-  it("runs in a terminal's scope of its own, under the terminal's cap, its child with it", async () => {
+  it("runs in a terminal's scope of its own, under the terminal's caps, its child with it", async () => {
     const holder = await started("scoped", ["sleep", "60"]);
     const { childPid } = await hello(holder);
     const cgroup = cgroupOfPid(holder.pid);
     expect(cgroup).toMatch(TERMINAL_SCOPE);
     expect(cgroupOfPid(childPid)).toBe(cgroup);
     expect(Number(memoryMax(cgroup))).toBe(256 * MIB);
+    expect(swapMax(cgroup)).toBe("0");
     expect(unitProperty(cgroup, "OOMPolicy")).toBe(expectedOomPolicy());
   });
 
@@ -109,7 +112,7 @@ describe("a holder started in a scope", () => {
   });
 
   it("is told apart from one started without a scope, which stays where it was started", async () => {
-    const holder = await started("unscoped", ["sleep", "60"], undefined);
+    const holder = await started("unscoped", ["sleep", "60"], "unscoped");
     expect(cgroupOfPid(holder.pid)).not.toMatch(TERMINAL_SCOPE);
   });
 });
