@@ -7,6 +7,8 @@
 use std::io::{self, ErrorKind, Read as _, Write as _};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
+use std::sync::mpsc;
+use std::thread;
 use std::time::{Duration, Instant};
 
 use bazhen_holder_proto::body::{
@@ -22,6 +24,8 @@ use crate::call::Failed;
 
 /// How long a holder has to answer `hello`, as the daemon gives it.
 const HELLO: Duration = Duration::from_secs(2);
+/// How long a look for the daemon waits for its socket to take a connection.
+const PROBE: Duration = Duration::from_millis(500);
 /// How often an attachment that types looks again for a daemon that came back.
 const RECHECK: Duration = Duration::from_secs(2);
 /// The most read from the person's terminal, or the holder, at once.
@@ -169,12 +173,28 @@ impl Direct {
 
 /// Whether the daemon at `socket` is surely not there: nothing at the path, or a socket nothing
 /// listens on, as a daemon that ended leaves. Anything else may be a daemon, slow or one this
-/// process can't reach, which could be holding the terminal's input; the reason says which.
+/// process can't reach, which could be holding the terminal's input; the reason says which. The
+/// connect runs on a thread of its own and is given PROBE: on Linux it blocks for as long as a
+/// wedged daemon's backlog stays full.
 pub(crate) fn daemon_absent(socket: &Path) -> Result<(), String> {
-    match UnixStream::connect(socket) {
-        Err(e) if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::ConnectionRefused) => Ok(()),
-        Err(e) => Err(format!("its socket can't be reached: {e}")),
-        Ok(_) => Err("something listens on its socket".to_owned()),
+    let (tell, told) = mpsc::channel();
+    let path = socket.to_path_buf();
+    thread::spawn(move || {
+        // A connect that outlived PROBE has no one left to tell.
+        let _ = tell.send(UnixStream::connect(path));
+    });
+    absence(told.recv_timeout(PROBE).ok())
+}
+
+/// What a connect to the daemon's socket says of it, or `None` when it didn't finish in time.
+fn absence(connected: Option<io::Result<UnixStream>>) -> Result<(), String> {
+    match connected {
+        Some(Err(e)) if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::ConnectionRefused) => {
+            Ok(())
+        }
+        Some(Err(e)) => Err(format!("its socket can't be reached: {e}")),
+        Some(Ok(_)) => Err("something listens on its socket".to_owned()),
+        None => Err("its socket is too busy to take a connection".to_owned()),
     }
 }
 
@@ -570,6 +590,11 @@ mod tests {
         let mut viewer = Direct::new(false);
         assert_eq!(writer.daemon_back(), [Step::End(Ending::Yielded)]);
         assert_eq!(viewer.daemon_back(), []);
+    }
+
+    #[test]
+    fn takes_a_connect_that_never_finished_for_a_daemon_that_may_be_there() {
+        assert!(absence(None).is_err());
     }
 
     #[test]
