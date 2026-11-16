@@ -66,17 +66,20 @@ pub fn epoch_seconds(system: &[u8], stat: &[u8], ticks_per_second: u64) -> Optio
     boot_time(system)?.checked_add(since_boot)
 }
 
-/// Field 22 of `/proc/<pid>/stat`, the start in clock ticks since boot. Field 2 is the program's
-/// name in parentheses, which can hold anything, `)` and spaces included, so fields are counted
-/// from the last `)`: the state, field 3, is the first token after it.
+/// Field 22 of `/proc/<pid>/stat`, the start in clock ticks since boot.
 pub fn start_ticks(stat: &[u8]) -> Option<u64> {
+    stat_field(stat, 22).and_then(decimal)
+}
+
+/// Field `n`, from 3 on, of a `/proc/<pid>/stat` line. Field 2 is the program's name in
+/// parentheses, which can hold anything, `)` and spaces included, so fields are counted from the
+/// last `)`: the state, field 3, is the first token after it.
+pub fn stat_field(stat: &[u8], n: usize) -> Option<&[u8]> {
     let close = stat.iter().rposition(|&b| b == b')')?;
     let rest = stat.get(close + 1..)?;
-    let field = rest
-        .split(u8::is_ascii_whitespace)
+    rest.split(u8::is_ascii_whitespace)
         .filter(|token| !token.is_empty())
-        .nth(22 - 3)?;
-    decimal(field)
+        .nth(n.checked_sub(3)?)
 }
 
 /// The `btime` line of `/proc/stat`: when the system booted, in epoch seconds.

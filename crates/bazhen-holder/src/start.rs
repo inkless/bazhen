@@ -35,6 +35,7 @@ use crate::holder::Holder;
 use crate::pty::{self, Pty, SpawnError, WindowSize};
 use crate::ring::{RING_BYTES, Ring};
 use crate::server::{Server, Terminal};
+use crate::session;
 use crate::signals::Wakeups;
 use crate::socket::{self, BindError, Socket};
 use crate::start_time;
@@ -58,6 +59,11 @@ pub enum StartError {
     Spawn(#[from] SpawnError),
     #[error(transparent)]
     Bind(#[from] BindError),
+    #[error("this system can't end a terminal's processes safely: {0}")]
+    Unsupported(#[source] io::Error),
+    /// A test build of the holder, started off a disposable host, where it would send nothing.
+    #[error("this is a test build of the holder, which runs only on a disposable host")]
+    TestBuildOffSandbox,
 }
 
 impl StartError {
@@ -69,6 +75,8 @@ impl StartError {
             Self::GroupLeader => 4,
             Self::Bind(BindError::NotPrivate(_)) => 6,
             Self::Bind(BindError::Taken(_)) => 7,
+            Self::Unsupported(_) => 8,
+            Self::TestBuildOffSandbox => 9,
         }
     }
 }
@@ -109,10 +117,26 @@ pub fn run() -> ExitCode {
 }
 
 fn start(stdin: &mut impl Read) -> Result<(Holder<Screen>, Server), StartError> {
+    start_marked(
+        stdin,
+        std::path::Path::new(crate::guard::DISPOSABLE_HOST_MARKER),
+    )
+}
+
+/// `start`, where a disposable host carries its marker at `marker`: a test build refuses to start
+/// off one, before it reads its spec or changes anything, since there it would send no signal.
+fn start_marked(
+    stdin: &mut impl Read,
+    marker: &Path,
+) -> Result<(Holder<Screen>, Server), StartError> {
+    if cfg!(feature = "sandbox-tripwire") {
+        crate::guard::tripwire_at(marker).map_err(|_| StartError::TestBuildOffSandbox)?;
+    }
     let spec = read_spec(stdin)?;
     become_session_leader()?;
     std::env::set_current_dir("/").map_err(StartError::Setup)?;
     pty::close_inherited_fds().map_err(StartError::Setup)?;
+    session::supported().map_err(StartError::Unsupported)?;
     // Before the bind: a SIGUSR1 sent once the socket exists must find its handler, and not end
     // the holder by its default action. The handlers go first, then the unblocking, so neither
     // signal is ever deliverable with no handler for it.
@@ -417,6 +441,13 @@ mod tests {
     }
 
     #[test]
+    fn a_test_build_off_a_disposable_host_refuses_to_start_before_it_reads_its_spec() {
+        let mut spec: &[u8] = b"";
+        let started = start_marked(&mut spec, Path::new("/nonexistent/bazhen-disposable-host"));
+        assert!(matches!(started, Err(StartError::TestBuildOffSandbox)));
+    }
+
+    #[test]
     fn each_failure_has_its_own_exit_code() {
         let codes = [
             StartError::Setup(io::Error::other("x")).exit_code(),
@@ -426,7 +457,9 @@ mod tests {
             EXIT_AFTER_READY,
             StartError::Bind(BindError::NotPrivate(String::new())).exit_code(),
             StartError::Bind(BindError::Taken(String::new())).exit_code(),
+            StartError::Unsupported(io::Error::other("x")).exit_code(),
+            StartError::TestBuildOffSandbox.exit_code(),
         ];
-        assert_eq!(codes, [1, 2, 3, 4, 5, 6, 7]);
+        assert_eq!(codes, [1, 2, 3, 4, 5, 6, 7, 8, 9]);
     }
 }

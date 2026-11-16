@@ -442,6 +442,92 @@ fn close_answers_ok_ends_the_child_removes_the_socket_and_exits_0() {
     assert!(home.join("t1.lock").exists());
 }
 
+/// A child that leaves a job behind in a group of its own, which ignores `SIGHUP` and writes its
+/// pid to the file named by `$0`, then exits.
+const LEAVES_A_STRAGGLER: &str =
+    r#"set -m; (trap '' HUP; exec sh -c 'echo $$ > "$1"; exec sleep 30' sh "$0") & exit 0"#;
+
+/// The straggler's pid, once it has written it.
+fn straggler(path: &Path) -> Result<Pid> {
+    let text = super::wait_for_file(path, |text| text.ends_with('\n'))?;
+    pid(text.trim().parse()?)
+}
+
+/// Whether `pid` has died: gone, or a zombie its new parent hasn't reaped yet.
+fn gone(pid: Pid) -> bool {
+    let raw = u32::try_from(pid.as_raw_nonzero().get()).unwrap_or_default();
+    rustix::process::test_kill_process(pid).is_err()
+        || super::ps("state=", raw).is_some_and(|state| state.starts_with('Z'))
+}
+
+/// Waits, for at most `DEADLINE`, until `pid` has died.
+fn wait_gone(pid: Pid) -> Result<()> {
+    let deadline = Instant::now() + DEADLINE;
+    while !gone(pid) {
+        if Instant::now() >= deadline {
+            return Err(format!("{} still runs", pid.as_raw_nonzero()).into());
+        }
+        // Not ours to wait on: init reaps it once it dies. This checks every 20 ms.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    Ok(())
+}
+
+/// A `hello` once the child's exit is published.
+pub(super) fn exited_hello(socket: &Path) -> Result<HelloReply> {
+    exited_in(socket, None)
+}
+
+/// A `hello` once the exit of `generation`'s child, or of any, is published: a new connection may
+/// be answered before a respawn sent on another reaches the holder.
+pub(super) fn exited_in(socket: &Path, generation: Option<u64>) -> Result<HelloReply> {
+    let deadline = Instant::now() + DEADLINE;
+    loop {
+        let hello = Client::connect(socket)?.hello(false)?;
+        if hello.exit.is_some() && generation.is_none_or(|g| g == hello.generation.get()) {
+            return Ok(hello);
+        }
+        if Instant::now() > deadline {
+            return Err("the child never exited".into());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+/// Kills a straggler a test left, if it is still in the session the test's child led: a pid that
+/// has left it may already be another process's.
+fn kill_straggler(straggler: Pid, child: Pid) {
+    if rustix::process::getsid(Some(straggler)).is_ok_and(|sid| sid == child) {
+        let _ = bazhen_test_signal::signal(straggler.as_raw_pid(), Signal::KILL);
+    }
+}
+
+#[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
+fn a_close_ends_what_the_child_left_running_before_the_holder_exits() {
+    bazhen_test_signal::require_sandbox().unwrap();
+    sweep().unwrap();
+    let home = home("straggler").unwrap();
+    let file = home.join("straggler");
+    let argv = ["sh", "-c", LEAVES_A_STRAGGLER, file.to_str().unwrap()];
+    let (mut holder, socket) = serving(&home, &argv).unwrap();
+    let left = straggler(&file).unwrap();
+    let mut client = Client::connect(&socket).unwrap();
+    let hello = client.hello(false).unwrap();
+    let child = pid(hello.child_pid.get()).unwrap();
+    exited_hello(&socket).unwrap();
+    assert!(!gone(left));
+    client.send(&Request::Close { id: RequestId(1) }).unwrap();
+    let (code, _) = holder.exit().unwrap();
+    let ended = gone(left);
+    kill_straggler(left, child);
+    assert_eq!(code, Some(0));
+    assert!(
+        ended,
+        "the holder exited with its child's job still running"
+    );
+}
+
 #[test]
 #[ignore = "signals processes; runs in pnpm test:real rust"]
 fn binds_its_socket_again_on_sigusr1_and_unprompted() {

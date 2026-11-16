@@ -106,6 +106,24 @@ const TOOLS: Record<Gate, { probe: string[]; hint: string }> = {
   "test-all": { probe: ["cargo-nextest", "nextest", "--version"], hint: INSTALL_TOOLS },
 };
 
+// The holder as it ships, which `lint` checks after the workspace: the workspace pass builds it
+// with every feature, and its tests' dev-dependency on itself turns sandbox-tripwire on too, so
+// only a pass of its lib and binary alone sees it without.
+export const SHIPPED_LINT = [
+  "cargo-clippy",
+  "clippy",
+  "--quiet",
+  "-p",
+  "bazhen-holder",
+  "--lib",
+  "--bins",
+  "--locked",
+  ...NO_WRAPPER,
+  "--",
+  "-D",
+  "warnings",
+];
+
 // Variables that change what cargo, rustc, clippy or nextest run, or with which flags.
 const REMOVED = new Set([
   "RUSTFLAGS",
@@ -216,6 +234,8 @@ export interface GateHost {
     env: NodeJS.ProcessEnv,
     quiet: boolean,
   ) => SpawnSyncReturns<Buffer>;
+  /** A cargo config's text, or undefined when there is none: the filesystem's by default. */
+  readonly read?: (path: string) => string | undefined;
 }
 
 const thisGateHost = (): GateHost => ({
@@ -242,7 +262,9 @@ export function main(args: string[], host: GateHost = thisGateHost()): number {
   const env = gateEnv(process.env);
   const cargoHome = process.env.CARGO_HOME ?? join(homedir(), ".cargo");
   const compiles = gate === "lint" || gate === "test" || gate === "test-all";
-  const failures = compiles ? configFailures(outsideConfigs(root, cargoHome), readIfPresent) : [];
+  const failures = compiles
+    ? configFailures(outsideConfigs(root, cargoHome), host.read ?? readIfPresent)
+    : [];
   if (failures.length > 0) {
     console.error(failures.join("\n"));
     return 1;
@@ -254,13 +276,16 @@ export function main(args: string[], host: GateHost = thisGateHost()): number {
     console.error(hint);
     return 1;
   }
-  const [bin = "", ...rest] = GATES[gate];
-  const run = host.run(bin, [...rest, ...tests], env, false);
-  if (run.error !== undefined) {
-    console.error(run.error.message);
-    return 1;
+  const commands = gate === "lint" ? [GATES[gate], SHIPPED_LINT] : [GATES[gate]];
+  for (const [bin = "", ...rest] of commands) {
+    const run = host.run(bin, [...rest, ...tests], env, false);
+    if (run.error !== undefined) {
+      console.error(run.error.message);
+      return 1;
+    }
+    if (run.status !== 0) return run.status ?? 1;
   }
-  return run.status ?? 1;
+  return 0;
 }
 
 if (isMain(import.meta)) process.exit(main(process.argv.slice(2)));

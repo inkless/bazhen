@@ -1,7 +1,6 @@
 //! The holder's child on real PTYs: its session and terminal, its fds and signals, how its exit
 //! is seen, and how a close ends it. Every wait has a deadline. A guard kills the group of any
-//! child a test leaves running, and the test's PTY, dropped with it, hangs up its terminal, which
-//! ends a foreground job in a group of its own; a grandchild a test starts on purpose ends by
+//! child a test leaves running; a job a test starts on purpose in a group of its own ends by
 //! itself within 30 s.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -15,6 +14,7 @@ use std::time::{Duration, Instant};
 
 use bazhen_holder::child::{CLOSE_GRACE, ChildProcess, Reaper};
 use bazhen_holder::pty::{self, Pty, WindowSize};
+use bazhen_holder::session::SWEEP_EVERY;
 use bazhen_holder_proto::body::{
     Argv, Cols, Env, ExitStatus, Generation, NonEmpty, ProcessSpec, Rows, Size,
 };
@@ -116,7 +116,7 @@ fn wait_once(running: &mut Running, timeout: Duration) -> Result<()> {
     Ok(())
 }
 
-/// Waits until the child is reaped, checking only when `SIGCHLD` has woken the reaper, so an exit
+/// Waits until the child's exit is seen, checking only when `SIGCHLD` has woken the reaper, so an exit
 /// the reaper misses times out rather than being found by a later poll.
 fn wait_exit(running: &mut Running) -> Result<ExitStatus> {
     let deadline = Instant::now() + DEADLINE;
@@ -132,7 +132,7 @@ fn wait_exit(running: &mut Running) -> Result<ExitStatus> {
         };
         if readable {
             running.reaper.clear();
-            if let Some(status) = running.child.reap() {
+            if let Some(status) = running.child.poll_exit() {
                 let status = status.clone();
                 read_master(running);
                 return Ok(status);
@@ -331,9 +331,7 @@ fn the_child_gets_no_fd_the_holder_opened() {
         child.iter().all(|fd| *fd <= 2 || before.contains(fd)),
         "the child has fds this process doesn't: {child:?}"
     );
-    running
-        .child
-        .close(running.pty.foreground_group(), Instant::now());
+    close_now(&mut running).unwrap();
     assert_eq!(wait_exit(&mut running).unwrap(), signalled("SIGHUP"));
 }
 
@@ -379,9 +377,7 @@ fn a_close_hangs_up_the_foreground_group_as_well_as_the_childs() {
         r.pty.foreground_group().is_some_and(|group| group != pid)
     })
     .unwrap();
-    running
-        .child
-        .close(running.pty.foreground_group(), Instant::now());
+    close_now(&mut running).unwrap();
     assert_eq!(wait_exit(&mut running).unwrap(), exited(4).unwrap());
 }
 
@@ -398,9 +394,7 @@ fn a_close_continues_a_stopped_child_so_it_acts_on_the_hangup() {
             .is_ok_and(|out| out.stdout.starts_with(b"T"))
     })
     .unwrap();
-    running
-        .child
-        .close(running.pty.foreground_group(), Instant::now());
+    close_now(&mut running).unwrap();
     assert_eq!(wait_exit(&mut running).unwrap(), signalled("SIGHUP"));
 }
 
@@ -413,16 +407,17 @@ fn a_close_kills_a_child_that_ignores_the_hangup_once_the_grace_is_over() {
     let mut running = start(&["sh", "-c", script, file.arg()]).unwrap();
     wait_for(&mut running, |_| read_text(file.path()) == "armed\n").unwrap();
     let now = Instant::now();
-    running.child.close(running.pty.foreground_group(), now);
+    running.child.close(now);
+    assert_eq!(running.child.close_deadline(), Some(now));
+    running.child.close_step(now);
     assert_eq!(running.child.close_deadline(), Some(now + CLOSE_GRACE));
-    running
-        .child
-        .close_step(running.pty.foreground_group(), now + CLOSE_GRACE / 2);
+    running.child.close_step(now + CLOSE_GRACE / 2);
     assert_eq!(running.child.close_deadline(), Some(now + CLOSE_GRACE));
-    running
-        .child
-        .close_step(running.pty.foreground_group(), now + CLOSE_GRACE);
-    assert_eq!(running.child.close_deadline(), None);
+    running.child.close_step(now + CLOSE_GRACE);
+    assert_eq!(
+        running.child.close_deadline(),
+        Some(now + CLOSE_GRACE + SWEEP_EVERY)
+    );
     assert_eq!(wait_exit(&mut running).unwrap(), signalled("SIGKILL"));
 }
 
@@ -481,10 +476,9 @@ fn a_close_kills_the_childs_whole_group_once_the_grace_is_over() {
     wait_for(&mut running, |_| read_text(file.path()).ends_with('\n')).unwrap();
     let grandchild = pid_in(file.path()).unwrap();
     let now = Instant::now();
-    running.child.close(running.pty.foreground_group(), now);
-    running
-        .child
-        .close_step(running.pty.foreground_group(), now + CLOSE_GRACE);
+    running.child.close(now);
+    running.child.close_step(now);
+    running.child.close_step(now + CLOSE_GRACE);
     assert_eq!(wait_exit(&mut running).unwrap(), signalled("SIGKILL"));
     let gone = wait_gone(grandchild);
     kill_grandchild(grandchild, running.child.pid());
@@ -543,4 +537,136 @@ fn a_pty_is_never_sized_zero() {
     let (pty, _slave) = Pty::open(zero).unwrap();
     let opened = rustix::termios::tcgetwinsize(pty.master()).unwrap();
     assert_eq!((opened.ws_col, opened.ws_row), (1, 1));
+}
+
+/// Starts closing the child and makes the close's first pass, its hangup.
+fn close_now(running: &mut Running) -> Result<()> {
+    bazhen_test_signal::require_sandbox()?;
+    let now = Instant::now();
+    running.child.close(now);
+    running.child.close_step(now);
+    Ok(())
+}
+
+/// Closes the child and drives the close as the holder's loop does, until the child and its whole
+/// session have ended.
+fn close_until_ended(running: &mut Running) -> Result<()> {
+    bazhen_test_signal::require_sandbox()?;
+    running.child.close(Instant::now());
+    let deadline = Instant::now() + DEADLINE;
+    while !running.child.ended() {
+        if Instant::now() >= deadline {
+            return Err("the close never ended".into());
+        }
+        running.child.poll_exit();
+        running.child.close_step(Instant::now());
+        wait_once(running, Duration::from_millis(20))?;
+    }
+    Ok(())
+}
+
+/// The pids written to `path`, one a line.
+fn pids_in(path: &Path) -> Result<Vec<Pid>> {
+    read_text(path)
+        .lines()
+        .map(|line| {
+            let raw: i32 = line.trim().parse()?;
+            Pid::from_raw(raw).ok_or_else(|| "not a pid".into())
+        })
+        .collect()
+}
+
+#[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
+fn a_close_ends_background_jobs_in_groups_of_their_own_a_nohup_one_included() {
+    bazhen_test_signal::require_sandbox().unwrap();
+    let file = scratch("jobs").unwrap();
+    let script = r#"set -m; sleep 30 & echo $! >> "$0"
+        nohup sleep 30 > /dev/null 2>&1 & echo $! >> "$0"; wait"#;
+    let mut running = start(&["sh", "-c", script, file.arg()]).unwrap();
+    wait_for(&mut running, |_| {
+        read_text(file.path()).lines().count() == 2
+    })
+    .unwrap();
+    let jobs = pids_in(file.path()).unwrap();
+    for job in &jobs {
+        assert_eq!(getpgid(Some(*job)).unwrap(), *job);
+    }
+    close_until_ended(&mut running).unwrap();
+    for job in jobs {
+        wait_gone(job).unwrap();
+    }
+}
+
+#[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
+fn a_background_job_that_traps_the_hangup_is_sent_it() {
+    bazhen_test_signal::require_sandbox().unwrap();
+    let file = scratch("trapping-job").unwrap();
+    let script = r#"set -m
+        (trap 'echo hup >> "$0"; exit 0' HUP; echo armed >> "$0"
+         i=0; while [ $i -lt 30 ]; do sleep 1; i=$((i+1)); done) &
+        wait"#;
+    let mut running = start(&["sh", "-c", script, file.arg()]).unwrap();
+    wait_for(&mut running, |_| read_text(file.path()) == "armed\n").unwrap();
+    close_until_ended(&mut running).unwrap();
+    assert_eq!(read_text(file.path()), "armed\nhup\n");
+}
+
+#[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
+fn a_close_after_the_child_exited_ends_what_it_left_running() {
+    bazhen_test_signal::require_sandbox().unwrap();
+    let file = scratch("straggler").unwrap();
+    let script = format!("set -m; {HUP_IGNORING_GRANDCHILD} exit 0");
+    let mut running = start(&["sh", "-c", &script, file.arg()]).unwrap();
+    wait_for(&mut running, |_| read_text(file.path()).ends_with('\n')).unwrap();
+    let straggler = pid_in(file.path()).unwrap();
+    assert_eq!(wait_exit(&mut running).unwrap(), exited(0).unwrap());
+    assert!(test_kill_process(straggler).is_ok());
+    close_until_ended(&mut running).unwrap();
+    wait_gone(straggler).unwrap();
+}
+
+#[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
+fn closing_an_exited_child_with_nothing_left_ends_without_waiting_out_the_grace() {
+    bazhen_test_signal::require_sandbox().unwrap();
+    let mut running = start(&["true"]).unwrap();
+    assert_eq!(wait_exit(&mut running).unwrap(), exited(0).unwrap());
+    let now = Instant::now();
+    running.child.close(now);
+    let mut at = now;
+    while let Some(next) = running.child.close_deadline() {
+        at = next;
+        running.child.close_step(at);
+    }
+    assert!(running.child.ended());
+    assert!(at < now + CLOSE_GRACE, "{:?}", at - now);
+}
+
+#[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
+fn an_exited_child_is_left_unreaped_until_its_session_has_ended() {
+    bazhen_test_signal::require_sandbox().unwrap();
+    let file = scratch("pinned").unwrap();
+    let script = format!("set -m; {HUP_IGNORING_GRANDCHILD} exit 0");
+    let mut running = start(&["sh", "-c", &script, file.arg()]).unwrap();
+    wait_for(&mut running, |_| read_text(file.path()).ends_with('\n')).unwrap();
+    let straggler = pid_in(file.path()).unwrap();
+    assert_eq!(wait_exit(&mut running).unwrap(), exited(0).unwrap());
+    let pid = running.child.pid();
+    let unreaped = || {
+        rustix::process::waitid(
+            rustix::process::WaitId::Pid(pid),
+            rustix::process::WaitIdOptions::EXITED
+                | rustix::process::WaitIdOptions::NOHANG
+                | rustix::process::WaitIdOptions::NOWAIT,
+        )
+        .is_ok_and(|status| status.is_some())
+    };
+    assert!(unreaped());
+    close_until_ended(&mut running).unwrap();
+    assert!(!unreaped());
+    wait_gone(straggler).unwrap();
 }

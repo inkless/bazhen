@@ -3,15 +3,17 @@
 
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::time::Instant;
 
 use bazhen_holder_proto::body::{
-    Argv, Env, ErrorBody, ExitStatus, Generation, HelloReply, NonEmpty, ProcessSpec,
+    Argv, Env, ErrorBody, ExitStatus, Generation, NonEmpty, ProcessSpec,
 };
 use bazhen_holder_proto::{Reply, Request};
 
-use super::{Client, FLOOD, is_ok, serving, serving_with};
-use crate::{DEADLINE, Result, home, start_time, sweep};
+use super::{
+    Client, FLOOD, LEAVES_A_STRAGGLER, exited_hello, exited_in, gone, is_ok, kill_straggler, pid,
+    serving, serving_with, straggler, wait_gone,
+};
+use crate::{Result, home, start_time, sweep};
 
 impl Client {
     fn respawn(&mut self, generation: u64, argv: &[&str]) -> Result<Request> {
@@ -34,26 +36,6 @@ impl Client {
     fn respawn_refused(&mut self, generation: u64, argv: &[&str]) -> Result<ErrorBody> {
         let request = self.respawn(generation, argv)?;
         self.refused(&request)
-    }
-}
-
-/// A `hello` once the child's exit is published.
-fn exited_hello(socket: &Path) -> Result<HelloReply> {
-    exited_in(socket, None)
-}
-
-/// A `hello` once the exit of `generation`'s child, or of any, is published: a new connection may
-/// be answered before a respawn sent on another reaches the holder.
-fn exited_in(socket: &Path, generation: Option<u64>) -> Result<HelloReply> {
-    let deadline = Instant::now() + DEADLINE;
-    loop {
-        let hello = Client::connect(socket)?.hello(false)?;
-        if hello.exit.is_some() && generation.is_none_or(|g| g == hello.generation.get()) {
-            return Ok(hello);
-        }
-        if Instant::now() > deadline {
-            return Err("the child never exited".into());
-        }
     }
 }
 
@@ -330,4 +312,68 @@ fn the_new_child_gets_a_fresh_terminal_and_the_old_one_is_closed() {
     if let Some(held) = ptys_held(holder.pid().unwrap()) {
         assert_eq!(held, (1, 0), "PTYs left open across respawns");
     }
+}
+
+/// The old generation's straggler, started before its child exited, and the respawn, answered.
+fn respawned_past_a_straggler(
+    home: &crate::Home,
+) -> Result<(
+    crate::Started,
+    Client,
+    rustix::process::Pid,
+    rustix::process::Pid,
+    std::path::PathBuf,
+)> {
+    let file = home.join("straggler");
+    let path = file.to_str().ok_or("a path that isn't UTF-8")?;
+    let (holder, socket) = serving(home, &["sh", "-c", LEAVES_A_STRAGGLER, path])?;
+    let left = straggler(&file)?;
+    let old = pid(exited_hello(&socket)?.child_pid.get())?;
+    if gone(left) {
+        return Err("the straggler died with its child".into());
+    }
+    let mut client = Client::connect(&socket)?;
+    client.hello(false)?;
+    let respawn = client.respawn(1, &["sleep", "30"])?;
+    client.send(&respawn)?;
+    if !matches!(client.reply()?, Reply::Respawned(_)) {
+        return Err("the respawn wasn't told".into());
+    }
+    if !matches!(client.reply()?, Reply::Ok { id, .. } if id == respawn.id()) {
+        return Err("the respawn wasn't answered ok".into());
+    }
+    Ok((holder, client, left, old, socket))
+}
+
+#[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
+fn a_respawn_ends_what_the_old_generation_left_running() {
+    bazhen_test_signal::require_sandbox().unwrap();
+    sweep().unwrap();
+    let home = home("rsstraggler").unwrap();
+    let (_holder, _client, left, old, socket) = respawned_past_a_straggler(&home).unwrap();
+    let ended = wait_gone(left);
+    kill_straggler(left, old);
+    ended.unwrap();
+    let now = Client::connect(&socket).unwrap().hello(false).unwrap();
+    assert_eq!((now.generation.get(), now.exit), (1, None));
+}
+
+#[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
+fn a_close_right_after_a_respawn_ends_the_old_generation_before_the_holder_exits() {
+    bazhen_test_signal::require_sandbox().unwrap();
+    sweep().unwrap();
+    let home = home("rsclosestraggler").unwrap();
+    let (mut holder, mut client, left, old, _) = respawned_past_a_straggler(&home).unwrap();
+    let close = Request::Close { id: client.id() };
+    client.send(&close).unwrap();
+    let (code, _) = holder.exit().unwrap();
+    let ended = gone(left);
+    kill_straggler(left, old);
+    assert_eq!(code, Some(0));
+    assert!(
+        ended,
+        "the holder exited with the old generation's job still running"
+    );
 }

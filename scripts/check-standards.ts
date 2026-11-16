@@ -407,6 +407,10 @@ function checkAgentContext(): void {
 // The modules that may hold `unsafe` code, each with why it must (docs/standards/rust.md § Unsafe).
 // Each may set `#![expect(unsafe_code, reason = "...")]`, and nothing else in crates/ may.
 const UNSAFE_MODULES: Record<string, string> = {
+  "crates/bazhen-holder/src/linux.rs":
+    "a raw pidfd_send_signal syscall, the one way to send signal 0, which sends nothing, through " +
+    "a pidfd, so the holder learns at start whether it may send through one; rustix's takes " +
+    "only a real signal",
   "crates/bazhen-holder/src/pty.rs":
     "Command::pre_exec, to make the child a session leader on its PTY between fork and exec, and " +
     "libc's sigprocmask and signal there, to give it an empty signal mask and default " +
@@ -415,8 +419,9 @@ const UNSAFE_MODULES: Record<string, string> = {
     "value owns; rustix covers none of them",
   "crates/bazhen-holder/src/macos.rs":
     "libc's sysctl(KERN_PROC_PID), the one call that says when a macOS process started, a zombie " +
-    "included, which ps reads too; and getpeereid, which names a socket peer's user; rustix " +
-    "covers neither",
+    "included, which ps reads too, and sysctl(KERN_PROC_ALL), which lists every process; and " +
+    "getpeereid, which names a socket peer's user; rustix covers neither. rustix's kevent, which " +
+    "watches a process for its exit before a close signals it, is unsafe",
 };
 
 /** The index just past the `]` that closes the `[` at `open`, or the end of `code`. */
@@ -435,6 +440,10 @@ function closingBracket(code: string, open: number): number {
 // it from the tests.
 const CFG_ALLOWED: Record<string, string> = {
   test: "nextest and clippy's --all-targets build the test configuration",
+  feature:
+    "bazhen-holder's sandbox-tripwire is on in every test build, by its dev-dependency on " +
+    "itself, which the workspace's clippy and nextest build; and off in the holder as it ships, " +
+    "which lint checks too (SHIPPED_LINT in scripts/cargo-gate.ts). CFG_VALUES holds it to that one",
   target_os:
     "`check` builds Linux and `rust-macos` builds macOS, each running clippy and nextest; " +
     "CFG_VALUES holds it to those two",
@@ -443,6 +452,7 @@ const CFG_ALLOWED: Record<string, string> = {
 // The values a CFG_ALLOWED key that takes one may be given: only those a gate builds.
 const CFG_VALUES: Record<string, readonly string[]> = {
   target_os: ["linux", "macos"],
+  feature: ["sandbox-tripwire"],
 };
 
 /** The predicate of a cfg or cfg_attr attribute, or undefined for any other attribute. */
@@ -664,8 +674,18 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/start_time.rs::start_ticks": "proc_stat",
   "crates/bazhen-holder/src/start_time.rs::boot_time": "proc_stat",
   "crates/bazhen-holder/src/rss.rs::resident_pages": "proc_stat",
+  "crates/bazhen-holder/src/start_time.rs::stat_field": "proc_stat",
+  "crates/bazhen-holder/src/session.rs::member_state": "proc_stat",
 };
 const NOT_DECODERS: Record<string, string> = {
+  "crates/bazhen-holder/src/holder.rs::Holder::retire_later":
+    "starts ending a child the holder spawned; reads no bytes",
+  "crates/bazhen-holder/src/holder.rs::Holder::retire":
+    "starts ending a child the holder spawned; reads no bytes",
+  "crates/bazhen-holder/src/macos.rs::ExitWatch::exited":
+    "asks the kernel whether a watched process exited; reads no bytes",
+  "crates/bazhen-holder/src/session.rs::Member::of_send":
+    "names what the guard's send made of a process; reads no bytes",
   "crates/bazhen-holder/src/engine.rs::advance":
     "passes the child's output to the engine's Engine::advance, which its advance target fuzzes",
   "crates/bazhen-holder/src/engine.rs::Engine::advance":
@@ -814,8 +834,9 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/holder.rs::Holder::flush_input":
     "writes queued input to the master; reads nothing",
   "crates/bazhen-holder/src/holder.rs::Holder::resize": "sets the window size; reads nothing",
-  "crates/bazhen-holder/src/holder.rs::Holder::child_reaped":
+  "crates/bazhen-holder/src/holder.rs::Holder::child_exited":
     "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/holder.rs::Holder::ended": "returns a state; reads no bytes",
   "crates/bazhen-holder/src/holder.rs::Holder::master_closed":
     "marks the master's output over and drops queued input; reads nothing",
   "crates/bazhen-holder/src/holder.rs::Holder::foreground_group":
@@ -898,6 +919,7 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/start.rs::StartError::exit_code":
     "maps a variant to its exit code; reads no bytes",
   "crates/bazhen-holder/src/start.rs::start": "reads stdin only through read_spec",
+  "crates/bazhen-holder/src/start.rs::start_marked": "reads stdin only through read_spec",
   "crates/bazhen-holder/src/start.rs::read_spec":
     "reads at most MAX_REQUEST_BYTES + 1 bytes for decode_spawn_spec, which is fuzzed (spawn_spec), then checks the strings it decoded",
   "crates/bazhen-hook/src/lib.rs::hook_request": "an encoder: it writes the request",
@@ -1948,9 +1970,14 @@ function closingBrace(code: string, from: number): number {
 }
 
 // What signals processes a test didn't start: a holder, which signals its child's whole
-// session when it closes; a child's close or signal; and the ledger sweep, which kills holders.
+// session when it closes; a child's close or signal; a respawn, which retires the old session; a
+// session's sweep, made by an ending, a retirement or a pass over a session's processes; and the
+// ledger sweep, which kills holders. A
+// send through the guard alone isn't one: off a disposable host, a test build's guard sends
+// nothing.
 const HOLDER_BINARY = "CARGO_BIN_EXE_bazhen-holder";
-const SIGNALLING_CALL = /\.\s*(?:close(?:_step)?|signal)\s*\(|\bsweep\s*\(/;
+const SIGNALLING_CALL =
+  /\.\s*(?:close(?:_step)?|signal|respawn)\s*\(|\bsweep\s*\(|\bsession\s*\(\s*\)\s*\.|\b(?:pass_among|retire)\s*\(|\bEnding\s*::|\bSession\s*::\s*led_by\b/;
 
 /** A Rust test file's test binary: `tests/<name>.rs`, or every file under `tests/<name>/`. */
 const testBinary = (file: string) => /^(crates\/[^/]+\/tests\/[^/.]+)/.exec(file)?.[1];
@@ -2036,7 +2063,10 @@ function testLines(source: string): Set<number> {
 const devTable = (name: string) => /(?:^|\.)dev-dependencies(?:\.|$)/.test(name);
 
 /** The chokepoints that are product code, whose test modules are checked like any test. */
-const PRODUCT_CHOKEPOINTS = new Set(["crates/bazhen-holder/src/child.rs"]);
+const PRODUCT_CHOKEPOINTS = new Set([
+  "crates/bazhen-holder/src/guard.rs",
+  "crates/bazhen-holder/src/linux.rs",
+]);
 
 const TEST_SIGNAL_MANIFEST = "crates/bazhen-test-signal/Cargo.toml";
 

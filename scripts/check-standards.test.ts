@@ -1447,15 +1447,16 @@ describe("rustFailures on decoders and fuzz crates", () => {
 });
 
 /** A reader that gives `source` for the holder's chokepoint and nothing for any other file. */
-const childOnly =
+const guardOnly =
   (source: string) =>
   (f: string): string =>
-    f === "crates/bazhen-holder/src/child.rs" ? source : "";
+    f === "crates/bazhen-holder/src/guard.rs" ? source : "";
 
 describe("the signal chokepoints", () => {
   const CHOKEPOINTS = [
     "packages/host-guard/src/signal.ts",
-    "crates/bazhen-holder/src/child.rs",
+    "crates/bazhen-holder/src/guard.rs",
+    "crates/bazhen-holder/src/linux.rs",
     "crates/bazhen-test-signal/src/lib.rs",
   ];
   const failures = (sources: Record<string, string>) =>
@@ -1472,7 +1473,7 @@ describe("the signal chokepoints", () => {
       expect.stringMatching(
         /^crates\/bazhen-holder\/tests\/a\.rs:2: .*kill_process.*bazhen_test_signal/,
       ),
-      expect.stringMatching(/^crates\/bazhen-holder\/src\/b\.rs:1: .*killpg.*src\/child\.rs/),
+      expect.stringMatching(/^crates\/bazhen-holder\/src\/b\.rs:1: .*killpg.*src\/guard\.rs/),
       expect.stringMatching(/^scripts\/c\.ts:1: .*process\.kill.*@bazhen\/host-guard/),
     ]);
   });
@@ -1488,7 +1489,7 @@ describe("the signal chokepoints", () => {
     const source =
       "fn f() { kill_process(p, s); }\n#[cfg(test)]\nmod tests {\n    fn g() { kill_process(p, s); }\n}";
     expect(failures({ "crates/bazhen-holder/src/a.rs": source })).toEqual([
-      expect.stringMatching(/^crates\/bazhen-holder\/src\/a\.rs:1: .*src\/child\.rs/),
+      expect.stringMatching(/^crates\/bazhen-holder\/src\/a\.rs:1: .*src\/guard\.rs/),
       expect.stringMatching(/^crates\/bazhen-holder\/src\/a\.rs:4: .*bazhen_test_signal/),
     ]);
   });
@@ -1515,8 +1516,8 @@ describe("the signal chokepoints", () => {
     const source =
       "fn f() { kill_process(p, s); }\n#[cfg(test)]\nmod tests {\n    fn g() { kill_process(p, s); }\n}";
     expect(
-      signalChokepointFailures(CHOKEPOINTS, childOnly(source)).map((f) => f.split(": ")[0]),
-    ).toEqual(["crates/bazhen-holder/src/child.rs:4"]);
+      signalChokepointFailures(CHOKEPOINTS, guardOnly(source)).map((f) => f.split(": ")[0]),
+    ).toEqual(["crates/bazhen-holder/src/guard.rs:4"]);
   });
 
   it("names a chokepoint that no longer exists", () => {
@@ -1544,6 +1545,22 @@ describe("tests that signal processes they didn't start", () => {
         "crates/h/tests/other.rs": "#[test]\nfn c() {}",
       }),
     ).toEqual(["crates/h/tests/binary/main.rs:2", "crates/h/tests/binary/socket.rs:1"]);
+  });
+
+  it("must be marked when its body sweeps a session, ends one, retires one or respawns", () => {
+    const bodies = [
+      "leader.session().count();",
+      "session.pass_among([pid], None);",
+      "holder.retire(child);",
+      "let e = Ending::start(session, now);",
+      "let s = Session::led_by(pid);",
+      "holder.respawn(pty, child, generation);",
+      "signal_group(pid, Signal::CONT);",
+    ];
+    const source = bodies.map((body, i) => `#[test]\nfn t${String(i)}() { ${body} }`).join("\n");
+    expect(unmarked({ "crates/h/src/session.rs": source })).toEqual(
+      bodies.slice(0, -1).map((_, i) => `crates/h/src/session.rs:${String(2 * i + 1)}`),
+    );
   });
 
   it("must be marked anywhere when its own body closes a child or sweeps the ledger", () => {

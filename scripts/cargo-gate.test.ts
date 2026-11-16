@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   GATES,
+  SHIPPED_LINT,
   configFailures,
   gateEnv,
   main,
@@ -101,12 +102,28 @@ describe("GATES", () => {
 
   it("fails clippy on any warning, and overrides a configured wrapper or compiler", () => {
     expect(GATES.lint.slice(-3)).toEqual(["--", "-D", "warnings"]);
-    for (const gate of [GATES.lint, GATES.test, GATES["test-all"]]) {
+    for (const gate of [GATES.lint, SHIPPED_LINT, GATES.test, GATES["test-all"]]) {
       expect(gate.join(" ")).toContain(
         '--config build.rustc-wrapper="" --config build.rustc-workspace-wrapper="" ' +
           '--config build.rustc="rustc"',
       );
     }
+  });
+
+  it("lints the holder again as it ships: its lib and binary, with no feature", () => {
+    expect(SHIPPED_LINT.slice(0, 7)).toEqual([
+      "cargo-clippy",
+      "clippy",
+      "--quiet",
+      "-p",
+      "bazhen-holder",
+      "--lib",
+      "--bins",
+    ]);
+    expect(SHIPPED_LINT).toContain("--locked");
+    expect(SHIPPED_LINT).not.toContain("--all-targets");
+    expect(SHIPPED_LINT.join(" ")).not.toMatch(/features/);
+    expect(SHIPPED_LINT.slice(-3)).toEqual(["--", "-D", "warnings"]);
   });
 
   it("lints and tests every feature, so no code hides behind one", () => {
@@ -131,12 +148,19 @@ const ran = (sandboxed: boolean, gate: string) => {
       signal: null,
     };
   };
-  return { code: main([gate], { sandboxed, run }), runs };
+  return { code: main([gate], { sandboxed, run, read: () => undefined }), runs };
 };
 
 describe("main", () => {
   it("starts nothing for test-all off a sandbox, and exits 2", () => {
     expect(ran(false, "test-all")).toEqual({ code: 2, runs: [] });
+  });
+
+  it("lints the workspace, then the holder as it ships", () => {
+    expect(ran(false, "lint")).toEqual({
+      code: 0,
+      runs: ["cargo-clippy", "cargo-clippy", "cargo-clippy"],
+    });
   });
 
   it("runs a gate that needs no sandbox anywhere", () => {

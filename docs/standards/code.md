@@ -45,8 +45,9 @@ Each layer has one job:
   parent or its group. It depends on nothing of Bazhen's, so anything may use it. The one signal
   sent elsewhere is `ChildProcess.kill()` on a child this process spawned and still holds: Node
   addresses it by the child's own pid, so it can't reach anything else. Rust sends through
-  `bazhen-test-signal` in tests and `crates/bazhen-holder/src/child.rs` in the holder (`testing.md`
-  § Hermeticity).
+  `bazhen-test-signal` in tests and `crates/bazhen-holder/src/guard.rs` in the holder, which sends
+  only to the holder's own unreaped child's group or a process in the session that child leads
+  (`testing.md` § Hermeticity).
 - `apps/daemon` is the composition root: it wires the adapters and implementations into core.
 - `apps/web` is the client: it talks to the daemon only through the protocol.
 - `tests/holder` runs only on a disposable host, and imports the holder client and nothing that

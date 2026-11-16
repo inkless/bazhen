@@ -7,8 +7,11 @@
 pub mod child;
 pub mod conn;
 pub mod engine;
+pub mod guard;
 pub mod holder;
 pub mod input;
+#[cfg(target_os = "linux")]
+mod linux;
 pub mod log;
 #[cfg(target_os = "macos")]
 mod macos;
@@ -16,6 +19,7 @@ pub mod pty;
 pub mod ring;
 pub mod rss;
 pub mod server;
+pub mod session;
 mod signals;
 pub mod socket;
 pub mod start;

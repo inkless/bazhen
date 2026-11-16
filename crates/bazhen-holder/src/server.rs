@@ -294,11 +294,11 @@ impl Server {
             .encode()
             .ok()
         });
-        // Told to no one, the respawn can't happen: the new child is ended, and the terminal stays
-        // as it was.
+        // Told to no one, the respawn can't happen: the new child and its session are ended, and
+        // the terminal stays as it was.
         let Some(frame) = respawned else {
             tracing::error!("could not say the respawn; ending its child");
-            child.kill_now();
+            holder.retire(child);
             if let Some(conn) = self.conns.get_mut(asker) {
                 refuse(
                     conn,
@@ -358,14 +358,17 @@ impl Server {
         }
     }
 
-    /// Whether a close is done: the child has ended and its connections have read what they are
-    /// owed or run out of time, or the child has outlived its kill by `CLOSE_GIVE_UP`.
+    /// Whether a close is done: the child's exit is published, every session the holder started
+    /// has ended (`Holder::ended`), and the connections have read what they are owed or run out of
+    /// time; or `CLOSE_GIVE_UP` has passed without that.
     fn close_done(&mut self, holder: &Holder<Screen>, now: Instant) -> bool {
         let until = match self.closing {
             None => return false,
-            Some(Closing::Ending { since }) if holder.exit().is_none() => {
+            Some(Closing::Ending { since }) if holder.exit().is_none() || !holder.ended() => {
                 if now >= since + CLOSE_GIVE_UP {
-                    tracing::error!("the child outlived its kill; exiting without it");
+                    tracing::error!(
+                        "the terminal's processes outlived their kill; exiting without them"
+                    );
                     return true;
                 }
                 return false;
@@ -615,6 +618,11 @@ fn answer(
                 let why = format!("the system refused the signal: {errno}");
                 refuse(conn, id, "signal", ErrorCode::Failed, &why);
             }
+            Err(SignalRefused::Guarded(refused)) => {
+                tracing::error!(%refused, "the guard refused to signal the child");
+                let why = format!("the holder refused the signal: {refused}");
+                refuse(conn, id, "signal", ErrorCode::Failed, &why);
+            }
         },
         Request::SetTags { id, body } => {
             shared.terminal.tags = body.tags;
@@ -765,7 +773,7 @@ fn foreground(
     terminal: &Terminal,
     holder: &Holder<Screen>,
 ) -> Result<Foreground, (ErrorCode, &'static str)> {
-    if holder.child_reaped() {
+    if holder.child_exited() {
         return Err((ErrorCode::Exited, "the child has exited"));
     }
     let failed = |why| (ErrorCode::Failed, why);
