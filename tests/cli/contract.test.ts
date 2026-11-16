@@ -530,7 +530,7 @@ describe("who is asking", () => {
       {
         code: 1,
         stdout: "",
-        stderr: "BAZHEN_AGENT_ID holds a character a request can't carry\n",
+        stderr: "BAZHEN_AGENT_ID holds a character outside printable ASCII\n",
       },
       [],
     ]);

@@ -93,7 +93,7 @@ impl Daemon {
         )
         .map_err(|e| match e {
             Error::Header { name } => Failed::Unsendable(format!(
-                "{} holds a character a request can't carry",
+                "{} holds a character outside printable ASCII",
                 env_name(name)
             )),
             Error::Unreachable { .. } | Error::Broken(_) | Error::Truncated => Failed::NotRunning,

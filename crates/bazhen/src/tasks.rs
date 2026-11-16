@@ -2,10 +2,14 @@
 //! command line, and its answer printed as plain lines. A command line that doesn't say what to
 //! do is refused before anything is sent, with why.
 
+use std::io::Read;
+use std::path::Path;
 use std::time::Duration;
 
+use bazhen_client::{env_text, read_regular};
+
 use bazhen_protocol::agents::{AgentCommandResponse, HarnessId, RenameAgentRequest, StateSnapshot};
-use bazhen_protocol::ids::is_id;
+use bazhen_protocol::ids::{MessageId, is_id};
 use bazhen_protocol::mail::{
     MESSAGE_WAIT_MAX_MS, MailboxState, SendMessageRequest, SendMessageResponse,
     WaitMessagesRequest, WaitMessagesResponse,
@@ -77,7 +81,7 @@ pub(crate) fn run(p: &Parsed, daemon: &Daemon, now_ms: i64, out: &mut Out) -> Re
         p,
         daemon,
         now_ms,
-        agent: std::env::var("BAZHEN_AGENT_ID").ok(),
+        agent: env_text("BAZHEN_AGENT_ID"),
     };
     match verb.run(out) {
         Ok(answer) => {
@@ -127,8 +131,30 @@ fn key() -> Step<String> {
     uuid().map_err(|e| Stop::Unreadable(format!("can't read the system's random source: {e}")))
 }
 
+/// The most of a file a brief or a message is read from: past any the daemon takes, so a file
+/// it would refuse is still sent for it to say why, but never a device without an end.
+const FILE_MAX: u64 = 1 << 20;
+
+/// The text of a file a brief or a message comes from: a regular file, or `/dev/stdin`, each at
+/// most `FILE_MAX` bytes. A FIFO, a device or anything else is refused, so `/dev/zero` can't run
+/// the CLI out of memory, nor a FIFO with no writer hold it for ever.
 fn read_file(path: &str) -> Step<String> {
-    std::fs::read_to_string(path).map_err(|e| Stop::Unreadable(format!("can't read {path}: {e}")))
+    let unread = |why: String| Stop::Unreadable(format!("can't read {path}: {why}"));
+    let bytes = if path == "/dev/stdin" {
+        let mut bytes = Vec::new();
+        std::io::stdin()
+            .lock()
+            .take(FILE_MAX + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| unread(e.to_string()))?;
+        if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > FILE_MAX {
+            return Err(unread(format!("more than {FILE_MAX} bytes")));
+        }
+        bytes
+    } else {
+        read_regular(Path::new(path), FILE_MAX).map_err(|e| unread(e.to_string()))?
+    };
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 /// Where a message stands for a sender waiting on it: landed, bounced, or still on its way.
@@ -382,7 +408,7 @@ impl Verb<'_> {
             Some(ms) => {
                 let name = agent.to_string();
                 self.wait_for(
-                    &[(r.message_id.to_string(), name.clone())],
+                    &[(r.message_id.clone(), name.clone())],
                     ms,
                     &[],
                     |_| name.clone(),
@@ -429,10 +455,10 @@ impl Verb<'_> {
                 exit: Exit::Bounced,
             });
         }
-        let sent: Vec<(String, String)> = r
+        let sent: Vec<(MessageId, String)> = r
             .sent
             .iter()
-            .map(|m| (m.message_id.to_string(), m.agent_id.to_string()))
+            .map(|m| (m.message_id.clone(), m.agent_id.to_string()))
             .collect();
         self.wait_for(&sent, ms, &skipped, str::to_owned, out)
     }
@@ -442,7 +468,7 @@ impl Verb<'_> {
     /// still knows what went, and resends nothing.
     fn wait_for(
         &self,
-        sent: &[(String, String)],
+        sent: &[(MessageId, String)],
         ms: u64,
         skipped: &[String],
         to: impl Fn(&str) -> String,
@@ -457,11 +483,7 @@ impl Verb<'_> {
             said.join("\n"),
             ms / 1000
         ));
-        let ids = sent
-            .iter()
-            .map(|(id, _)| bazhen_protocol::ids::MessageId::parse(id))
-            .collect::<Option<Vec<_>>>()
-            .unwrap_or_default();
+        let ids = sent.iter().map(|(id, _)| id.clone()).collect();
         let r: WaitMessagesResponse = self.daemon.post(
             "/v1/messages/wait",
             &WaitMessagesRequest {

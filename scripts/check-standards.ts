@@ -1002,9 +1002,10 @@ const NOT_DECODERS: Record<string, string> = {
     "sets a socket's blocking mode; reads nothing",
   "crates/bazhen-client/src/framing.rs::in_chunks":
     "reached only through Framing::end_of and body, both fuzzed",
-  "crates/bazhen-client/src/framing.rs::scan_chunks":
+  "crates/bazhen-client/src/framing.rs::ChunkScan::advance":
     "reached only through Framing::end_of and body, both fuzzed",
-  "crates/bazhen-client/src/framing.rs::chunks_end": "reached only through Framing::end_of, fuzzed",
+  "crates/bazhen-client/src/framing.rs::ChunkScan::end":
+    "reached only through Framing::end_of, fuzzed",
   "crates/bazhen-client/src/framing.rs::end_by_head":
     "reached only through reply_end and Framing::end_of, both fuzzed",
   "crates/bazhen-hook/src/statusline.rs::report":
