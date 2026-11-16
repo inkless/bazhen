@@ -278,6 +278,8 @@ export class HolderStream implements SnapshotStream {
   private readonly release: () => void;
   private at: Position = { generation: 0, offset: 0 };
   private alternate = false;
+  /** Whether an event has said which screen it is on: every event comes after `hello`'s say. */
+  private alternateTold = false;
   /** The attach's snapshot, once read: the events before it describe the state it captured. */
   private attached: Snapshot | null = null;
   private flowing = false;
@@ -304,7 +306,7 @@ export class HolderStream implements SnapshotStream {
   /** Attaches on `reader`, whose events must come to `event`: its snapshot, then its output. */
   async attach(reader: HolderClient): Promise<SnapshotAttached> {
     this.reader = reader;
-    this.alternate = reader.hello.alternate;
+    if (!this.alternateTold) this.alternate = reader.hello.alternate;
     void reader.ended.then(() => this.end("ended"));
     try {
       await reader.attach();
@@ -340,6 +342,7 @@ export class HolderStream implements SnapshotStream {
       this.at = { generation: event.generation, offset: event.offset };
     } else if (event.type === "alternate") {
       this.alternate = event.body.on;
+      this.alternateTold = true;
     } else if (event.type === "resized") {
       this.size = { cols: event.body.cols, rows: event.body.rows };
     }

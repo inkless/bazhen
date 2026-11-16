@@ -280,7 +280,10 @@ export class HolderRuntime implements RuntimeAdapter {
   }
 
   async inventory(): Promise<RuntimeInventoryEntry[]> {
-    return (await this.reachAll()).flatMap((reached) => {
+    const all = await this.reachAll();
+    const listed = new Set(all.map((reached) => reached.socket));
+    for (const socket of this.unreadable) if (!listed.has(socket)) this.unreadable.delete(socket);
+    return all.flatMap((reached) => {
       if (reached.is === "unreadable") {
         if (!this.unreadable.has(reached.socket)) {
           this.unreadable.add(reached.socket);

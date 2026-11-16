@@ -442,6 +442,8 @@ async function attachable(
     readonly hello?: Partial<HolderHelloReply>;
     /** Sent ahead of the attach's snapshot, as events the holder had queued first. */
     readonly beforeSnapshot?: (holder: FakeHolder) => void;
+    /** Called as a resize comes in, before it is answered. */
+    readonly duringResize?: () => void;
   } = {},
 ) {
   const root = privateRoot();
@@ -455,6 +457,9 @@ async function attachable(
     } else if (request.type === "subscribe") {
       ok(holder, request);
       after(holder);
+    } else if (request.type === "resize") {
+      options.duringResize?.();
+      ok(holder, request);
     } else if (request.type !== "input") ok(holder, request);
   };
   const { runtime, terminals } = startingFakes(
@@ -594,6 +599,27 @@ describe("HolderRuntime: streams", () => {
     attached.stream.onAlternate((on) => seen.push(on));
     await expect.poll(() => seen).toEqual(["new"]);
     expect([attached.generation, attached.alternate]).toEqual([1, true]);
+    attached.stream.close();
+  });
+
+  it("keeps a screen switch sent while an attach resizes, over what its hello said", async () => {
+    let terminal: FakeTerminal | undefined;
+    const readers = () => terminal!.connections.filter((c) => c.holder.hello?.writer === false);
+    const { runtime, ref, fake } = await attachable(0, () => {}, 0, {
+      duringResize: () =>
+        readers()
+          .at(-1)!
+          .holder.send({ type: "alternate", body: { offset: 0, on: true } }),
+    });
+    terminal = fake;
+    const attached = await runtime.attach(ref, { cols: 90, rows: 30 }, 0);
+    const pushed: boolean[] = [];
+    attached.stream.onAlternate((on) => pushed.push(on));
+    readers()
+      .at(-1)!
+      .holder.send({ type: "alternate", body: { offset: 0, on: false } });
+    await expect.poll(() => pushed).toEqual([false]);
+    expect(attached.alternate).toBe(true);
     attached.stream.close();
   });
 
