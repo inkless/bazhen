@@ -111,15 +111,19 @@ Every new test must be shown to fail without the code it covers.
   is reverted like any other script: the copy that runs is your checkout's, so only the tests
   see the base's. A script's committed output is reverted with it (`.oxlintrc.json` with
   `scripts/lint-config.ts`; the protocol's schema and fixtures with their sources), listed in
-  `GENERATED` in `scripts/falsify.ts`. A branch that changes falsify, anything it imports, or how
-  it is run is judged by the base's falsify too, in CI and in `pnpm test:real falsify`
-  (`pnpm test:falsify:base`, `scripts/falsify-base.ts`, which runs only in a sandbox), so its new
-  tests also need what that falsify asks for, usually a `Control:` line. Only committed work
-  counts. Each test comes out as one of:
+  `GENERATED` in `scripts/falsify.ts`, and the protocol id the Rust crates speak with them.
+  A `tests/cli` test runs the CLI rather than importing it, so when one is judged the branch's
+  Rust changes are reverted too and the CLI is built there (`pnpm build:cli`): it runs the base's
+  CLI. It is related to a reverted file the CLI was built from, as cargo lists them, and a CLI
+  that won't build fails the check, naming cargo's error. A branch that changes falsify,
+  anything it imports, or how it is run is judged by the base's falsify too, in CI and in
+  `pnpm test:real falsify` (`pnpm test:falsify:base`, `scripts/falsify-base.ts`, which runs only
+  in a sandbox), so its new tests also need what that falsify asks for, usually a `Control:`
+  line. Only committed work counts. Each test comes out as one of:
   - **KILLED** — it failed. Good.
   - **SURVIVED** — it passed without the change, so it can't detect the change. The check
-    fails. Only a test that directly imports a reverted file, or runs one it names with
-    `new URL("<file>", import.meta.url)`, can survive.
+    fails. Only a test that directly imports a reverted file, runs one it names with
+    `new URL("<file>", import.meta.url)`, or runs a CLI built from one, can survive.
   - **INVALID** — no verdict: it couldn't load, timed out, was skipped, its title couldn't be
     read or isn't unique, or it passed but imports no reverted file, so it is unrelated to the
     source change (a characterization or property test of existing code); a branch that adds

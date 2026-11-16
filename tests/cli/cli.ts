@@ -1,7 +1,8 @@
 // The `bazhen` CLI as a process, against a fake daemon on the socket it looks for. The suite
 // holds the CLI's verbs, what it sends, what it prints and how it exits: it runs
 // `target/release/bazhen`, which `pnpm test:medium` builds, unless `BAZHEN_CLI` names another
-// binary. The api suites, which run the CLI against the real daemon, remain the end-to-end gate.
+// binary, as falsify names the base's build. The api suites, which run the CLI against the real
+// daemon, remain the end-to-end gate.
 
 import { execFile } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";

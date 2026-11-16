@@ -16,6 +16,12 @@
 //             recorded as a trailer in a commit on the branch:
 //             `Control: <what you broke> -> <how the test failed>`.
 //
+// A test under tests/cli runs the `bazhen` binary BAZHEN_CLI names, not code it imports. When
+// one is judged, the branch's Rust changes are reverted in the worktree too, and the CLI is built
+// there with `pnpm run build:cli`, so the test runs the base's CLI. It is related to a reverted
+// file the CLI was built from, as cargo's dep-info for it lists. A CLI that won't build is no
+// verdict: falsify fails, naming cargo's error.
+//
 // A Rust test under crates/ lives in the file it tests, so reverting the source would revert the
 // test with it. When the branch touches the Rust workspace, nextest lists the tests at the base and
 // at HEAD, so a test is found however it is declared (`#[test]`, proptest, a macro of the crate's
@@ -80,6 +86,11 @@ export type Change = { status: string; path: string; oldPath?: string };
 
 const TEST_FILE = /(^|\/)[^/]+\.test\.tsx?$/;
 const REVERTIBLE = /^(?:(?:apps|packages)\/[^/]+\/src\/|scripts\/.+\.tsx?$)/;
+// What can change the set of Rust tests, or what a Rust binary does: a crate's files, or the
+// workspace's manifest and lockfile.
+const RUST_INPUT = /^(?:crates\/|Cargo\.(?:toml|lock)$)/;
+// Tests that run the `bazhen` binary BAZHEN_CLI names, rather than importing what they test.
+const CLI_TESTS = "tests/cli/";
 const TITLE = /(?<![.\w])(?:it|test)(?:\.\w+(?:\([^()]*\))?)*\(\s*(["'`])((?:\\.|(?!\1).)+)\1/g;
 const TEST_CALL = /(?<![.\w])(?:it|test)(?:\.\w+)*\s*\(/;
 const CONTROL_TRAILER = /^Control: .+ -> .+$/m;
@@ -171,7 +182,11 @@ const GENERATED: readonly { sources: readonly string[]; outputs: readonly string
   { sources: ["scripts/lint-config.ts"], outputs: [".oxlintrc.json"] },
   {
     sources: ["scripts/protocol-schema.ts", "packages/protocol/src/"],
-    outputs: ["packages/protocol/schema/", "packages/protocol/fixtures/"],
+    outputs: [
+      "packages/protocol/schema/",
+      "packages/protocol/fixtures/",
+      "crates/bazhen-protocol/src/id.rs",
+    ],
   },
 ];
 
@@ -182,10 +197,12 @@ const pathsOf = (c: Change) => (c.oldPath === undefined ? [c.path] : [c.path, c.
 
 /**
  * The changes the revert check puts back as the base had them: the revertible source, and the
- * changed outputs of every generator whose source that includes.
+ * changed outputs of every generator whose source that includes. When `cli`, a CLI test is among
+ * those judged, so the Rust workspace is put back too, and the CLI built from it is the base's.
  */
-export function revertsOf(changes: Change[]): Change[] {
-  const source = changes.filter((c) => pathsOf(c).some(isRevertible));
+export function revertsOf(changes: Change[], { cli = false } = {}): Change[] {
+  const reverts = (path: string) => isRevertible(path) || (cli && RUST_INPUT.test(path));
+  const source = changes.filter((c) => pathsOf(c).some(reverts));
   const reverted = source.flatMap(pathsOf);
   const outputs = GENERATED.filter((g) => reverted.some((p) => within(p, g.sources))).flatMap(
     (g) => g.outputs,
@@ -242,9 +259,6 @@ export function newTitles(diff: string, file: string): string[] {
 }
 
 const withoutAsync = (call: string) => call.replaceAll(/\basync\s+/g, "");
-
-// What can change the set of Rust tests: a crate's files, or the workspace's manifest and lockfile.
-const RUST_INPUT = /^(?:crates\/|Cargo\.(?:toml|lock)$)/;
 
 /**
  * Each test in a `cargo nextest list --message-format json` report, as `<target> <test name>`.
@@ -395,7 +409,8 @@ const HARNESS = "scripts/falsify.ts";
  * test's folder (with `.ts`, `.tsx` or `/index.ts` tried when it has no extension), or a
  * workspace package (`@bazhen/x`, `@bazhen/x/sub`), which counts every reverted path under that
  * package's folder. A `new URL("<path>", import.meta.url)` naming a reverted file counts too, so
- * a test that runs a script instead of importing it is related to it. `packages` maps package
+ * a test that runs a script instead of importing it is related to it, and so does any of
+ * `cliInputs`, what the CLI was built from, for a test of the CLI. `packages` maps package
  * names to folders, e.g. `@bazhen/core` → `packages/core`.
  */
 export function relatedReverts(
@@ -403,8 +418,12 @@ export function relatedReverts(
   testSource: string,
   revertedPaths: string[],
   packages: Record<string, string>,
+  cliInputs: readonly string[] = [],
 ): string[] {
   const related = new Set<string>();
+  if (isCliTest(testPath)) {
+    for (const r of revertedPaths) if (cliInputs.includes(r)) related.add(r);
+  }
   for (const [, url = ""] of testSource.matchAll(FILE_URL)) {
     const path = posix.join(posix.dirname(testPath), url);
     if (revertedPaths.includes(path)) related.add(path);
@@ -421,6 +440,35 @@ export function relatedReverts(
   }
   return [...related];
 }
+
+export const isCliTest = (path: string): boolean => path.startsWith(CLI_TESTS);
+
+/**
+ * The files under `root` a cargo dep-info file (`<binary>.d`) lists as its binary's inputs,
+ * relative to `root`. Its first rule names them, separated by spaces, a space in a path escaped.
+ */
+export function depInfoSources(text: string, root: string): string[] {
+  const rule = text.split("\n", 1)[0] ?? "";
+  const prefix = `${root}/`;
+  return (rule.match(/(?:\\.|\S)+/g) ?? [])
+    .slice(1)
+    .map((path) => path.replaceAll(/\\(.)/g, "$1"))
+    .filter((path) => path.startsWith(prefix))
+    .map((path) => path.slice(prefix.length));
+}
+
+/**
+ * What a binary built from `sources` was built from, manifests included: the workspace's, its
+ * lockfile, and that of each crate a source sits in. Cargo's dep-info lists none of them.
+ */
+export function binaryInputs(sources: string[]): string[] {
+  const crates = new Set(sources.flatMap((s) => /^crates\/[^/]+\//.exec(s) ?? []));
+  return [...sources, "Cargo.toml", "Cargo.lock", ...[...crates].map((c) => `${c}Cargo.toml`)];
+}
+
+/** The lines of a cargo build's stderr that state an error, as `error[E0425]: …`. */
+export const cargoErrors = (said: string): string[] =>
+  said.split("\n").filter((line) => /^error(?:\[\w+\])?:/.test(line));
 
 /** Workspace package names mapped to their folders, read from apps/* and packages/*. */
 function workspacePackages(top: string): Record<string, string> {
@@ -619,10 +667,82 @@ export function addWorktree(dir: string, commit: string, top: string): void {
 
 const LOCK = `bz-falsify pid=${process.pid}`;
 
+const cargoTarget = (top: string) => join(top, "target", "falsify");
+
 const rustEnv = (top: string): NodeJS.ProcessEnv => ({
   ...gateEnv(isolatedEnv()),
-  CARGO_TARGET_DIR: join(top, "target", "falsify"),
+  CARGO_TARGET_DIR: cargoTarget(top),
 });
+
+/**
+ * Whether cargo, run in the temporary worktree `dir` to do `what`, would read a config falsify
+ * refuses; it says which.
+ */
+function refusesCargoConfig(dir: string, what: string): boolean {
+  const cargoHome = process.env["CARGO_HOME"] ?? join(homedir(), ".cargo");
+  const unsafeConfig = configFailures(outsideConfigs(dir, cargoHome), (path) =>
+    existsSync(path) ? readFileSync(path, "utf8") : undefined,
+  );
+  if (unsafeConfig.length === 0) return false;
+  console.error(
+    `falsify: cargo would read this config while it ${what} in a temporary worktree under ` +
+      `${tmpdir()}:\n${unsafeConfig.join("\n")}`,
+  );
+  return true;
+}
+
+/**
+ * Builds the CLI in the worktree `dir` with its own `build:cli` script, and returns the binary
+ * and what it was built from; or undefined, with the reason printed, so no CLI test is judged
+ * against a binary that isn't the base's.
+ */
+async function buildCli(
+  dir: string,
+  top: string,
+): Promise<{ binary: string; inputs: string[] } | undefined> {
+  if (refusesCargoConfig(dir, "builds the base's CLI")) return undefined;
+  const binary = join(cargoTarget(top), "release", "bazhen");
+  // Cargo writes it on every build, a fresh one included; one left by an earlier run would name
+  // another worktree's files.
+  const depInfo = `${binary}.d`;
+  rmSync(depInfo, { force: true });
+  const log = join(dir, "falsify-build-cli.log");
+  const fd = openSync(log, "w");
+  let ok: boolean;
+  let timedOut = false;
+  try {
+    ok = await run("pnpm", ["run", "build:cli"], dir, CARGO_TIMEOUT_MS, {
+      env: rustEnv(top),
+      stderr: fd,
+      onTimeout: () => (timedOut = true),
+    });
+  } finally {
+    closeSync(fd);
+  }
+  if (!ok) {
+    const said = readFileSync(log, "utf8");
+    const errors = cargoErrors(said);
+    const why = timedOut
+      ? `it timed out after ${CARGO_TIMEOUT_MS / 1000} s`
+      : errors.length > 0
+        ? `cargo said:\n${errors.map((line) => `  ${line}`).join("\n")}`
+        : "it named no cargo error";
+    console.error(
+      "falsify: `pnpm run build:cli` failed in the temporary worktree, so the CLI tests can't be " +
+        `judged against the base's CLI: ${why}\nThe end of what it said:\n${indentedTail(said)}`,
+    );
+    return undefined;
+  }
+  if (!existsSync(depInfo)) {
+    console.error(
+      `falsify: the base's CLI built, but cargo wrote no ${depInfo}, so what it was built from ` +
+        "is unknown and no CLI test can be judged.",
+    );
+    return undefined;
+  }
+  const sources = depInfoSources(readFileSync(depInfo, "utf8"), realpathSync(dir));
+  return { binary, inputs: binaryInputs(sources) };
+}
 
 /**
  * Runs a command in `dir` with its stdout in `dir/<file>`, and returns whether it exited 0 and
@@ -931,17 +1051,7 @@ async function judgeRustTests(top: string, base: string, head: string, rustFiles
     removeWorktree(dir, top);
   };
   try {
-    const cargoHome = process.env["CARGO_HOME"] ?? join(homedir(), ".cargo");
-    const unsafeConfig = configFailures(outsideConfigs(dir, cargoHome), (path) =>
-      existsSync(path) ? readFileSync(path, "utf8") : undefined,
-    );
-    if (unsafeConfig.length > 0) {
-      console.error(
-        "falsify: cargo would read this config while it runs the Rust tests in a temporary " +
-          `worktree under ${tmpdir()}:\n${unsafeConfig.join("\n")}`,
-      );
-      return undefined;
-    }
+    if (refusesCargoConfig(dir, "runs the Rust tests")) return undefined;
     addWorktree(dir, base, top);
     const before = await listRustTests(dir, top);
     git(["checkout", "--quiet", "--detach", head], dir);
@@ -1066,7 +1176,8 @@ async function main(args: string[]): Promise<number> {
     }));
   });
   // Before any test runs, Rust's included: the TS side would refuse after the mutants had run.
-  const reverts = revertsOf(changes);
+  const cliTests = targets.some((t) => isCliTest(t.file));
+  const reverts = revertsOf(changes, { cli: cliTests });
   if (targets.length > 0 && reverts.length > 0) {
     const work = signallingWork(
       reverts.flatMap(pathsOf),
@@ -1145,6 +1256,12 @@ async function main(args: string[]): Promise<number> {
         );
         return 1;
       }
+      // A CLI test runs the binary BAZHEN_CLI names: the base's, never the caller's own build.
+      let cli: { binary: string; inputs: string[] } | undefined;
+      if (cliTests) {
+        cli = await buildCli(dir, top);
+        if (cli === undefined) return 1;
+      }
       const reportFile = join(dir, "falsify-report.json");
       await run(
         "pnpm",
@@ -1158,6 +1275,7 @@ async function main(args: string[]): Promise<number> {
         ],
         dir,
         VITEST_TIMEOUT_MS,
+        cli === undefined ? {} : { env: { ...isolatedEnv(), BAZHEN_CLI: cli.binary } },
       );
       let report: VitestReport = { testResults: [] };
       try {
@@ -1175,7 +1293,7 @@ async function main(args: string[]): Promise<number> {
         const source = readFileSync(join(dir, t.file), "utf8");
         if (
           outcome === "SURVIVED" &&
-          relatedReverts(t.file, source, revertedPaths, packages).length === 0
+          relatedReverts(t.file, source, revertedPaths, packages, cli?.inputs).length === 0
         ) {
           results.push({ ...t, outcome: "INVALID", unrelated: true });
         } else results.push({ ...t, outcome });
