@@ -48,6 +48,8 @@ const ConfigFile = z.strictObject({
       max_launched: z.int().min(0).optional(),
       /** How many launches down an agent may still launch another. */
       max_launch_depth: z.int().min(1).optional(),
+      /** How long an agent's harness has to come up, once its terminal runs, before you're told. */
+      start_deadline_seconds: z.int().min(1).optional(),
       env: z
         .strictObject({
           deny: z.array(EnvRule).optional(),
@@ -124,6 +126,8 @@ export interface Config {
   } | null;
   /** How far agents may launch agents to delegate to: at once, and down a chain. */
   readonly launchLimits: { readonly maxLaunched: number; readonly maxDepth: number };
+  /** `agents.start_deadline_seconds`, in ms: how long a harness has to come up. */
+  readonly startDeadlineMs: number;
   /** `terminals.max_open`: past it, a new agent or shell is refused. */
   readonly maxOpenTerminals: number;
   /** `terminals.history_lines`: the history each new terminal keeps, for as long as it runs. */
@@ -217,6 +221,7 @@ export function resolveConfig(
       maxLaunched: file.agents?.max_launched ?? 5,
       maxDepth: file.agents?.max_launch_depth ?? 3,
     },
+    startDeadlineMs: (file.agents?.start_deadline_seconds ?? 60) * 1000,
     maxOpenTerminals: file.terminals?.max_open ?? DEFAULT_MAX_OPEN_TERMINALS,
     historyLines: file.terminals?.history_lines ?? HISTORY_LINES,
     defaultRuntime: file.runtime?.default ?? "tmux",

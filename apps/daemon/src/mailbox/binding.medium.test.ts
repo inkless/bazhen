@@ -166,6 +166,38 @@ describe("SessionBinding", () => {
     expect(await owned).toBe(true);
   });
 
+  // The SessionStart is the agent's sign of life, so it can't wait for the agent to run.
+  it("judges at once a new session's SessionStart once its relaunch is recorded, though the agent still starts", async () => {
+    const { store, agentId } = await claudeAgent();
+    const binding = new SessionBinding(store, table, 60_000);
+    const system = { entityId: agentId, actor: "system" } as const;
+    const environmentId = String(store.agentEnvironment(agentId));
+    store.append({ ...system, type: "agent.lost", payload: {} });
+    store.append({
+      ...system,
+      type: "agent.relaunch_requested",
+      payload: { terminalId: newId("term"), generation: 1, fresh: true },
+    });
+    store.append({
+      ...system,
+      type: "agent.relaunched",
+      payload: {
+        externalRef: { environmentId, kind: "claude-session", id: LATER_SESSION },
+        runtimeRef: { runtime: "tmux", locator: { panePid: String(PANE_PID) } },
+      },
+    });
+    const owned = binding.owns(
+      agentId,
+      { sessionId: NEW_SESSION, transcriptPath: null, subagent: false, subagentId: null },
+      { sessionStarted: true, ppid: 900 },
+    );
+    const waited = new Promise((resolve) => setTimeout(() => resolve("waited"), 1000));
+    expect([
+      store.snapshot(testView).agents[0]?.state,
+      await Promise.race([owned, waited]),
+    ]).toEqual(["starting", true]);
+  });
+
   it("refuses a SessionStart whose agent stays starting past the wait, with no pane to check", async () => {
     const { store, agentId } = await claudeAgent();
     const binding = new SessionBinding(store, table, 10);

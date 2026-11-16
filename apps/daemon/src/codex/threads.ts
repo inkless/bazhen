@@ -21,6 +21,8 @@ export interface CodexThreadsOptions {
   readonly giveUpMs?: number;
   /** An agent's mail, held while it waits to move, may go again: to its thread as it is now. */
   readonly released?: (agentId: string) => void;
+  /** The agent's TUI shows its thread, which it does only once it is up. */
+  readonly ready?: (agentId: string) => void;
 }
 
 /** The longest wait between resumes of a thread the TUI shows but the server can't load yet. */
@@ -253,8 +255,12 @@ export class CodexThreads {
     }
   }
 
-  /** The title names the agent's thread: switches are followed again, if it said they weren't. */
+  /**
+   * The title names the agent's thread: its TUI is up, and switches are followed again, if it said
+   * they weren't.
+   */
   private tracked(agentId: string): void {
+    this.opts.ready?.(agentId);
     const latest = this.opts.store.latestActivity(agentId);
     if (latest?.detail !== UNTRACKED) return;
     const { detail: _untracked, ...rest } = latest;

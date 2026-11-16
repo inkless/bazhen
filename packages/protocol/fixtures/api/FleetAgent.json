@@ -1472,6 +1472,76 @@
     "text": "{\"id\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"name\":\"BZ-127\",\"harness\":\"codex\",\"state\":\"running\",\"project\":\"bazhen\",\"cwd\":\"/work\",\"launchedBy\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d\",\"signal\":{\"value\":\"working\",\"source\":\"native\",\"ageSeconds\":125},\"listening\":true,\"headline\":{\"text\":\"Halfway.\",\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"ageSeconds\":30},\"tasks\":[{\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"assignmentId\":\"asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"role\":\"worker\"}],\"attention\":[{\"id\":\"attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"kind\":\"task_done\"}]}"
   },
   {
+    "name": "attention[].kind = \"stuck_starting\"",
+    "wire": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "working",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "stuck_starting"
+        }
+      ]
+    },
+    "parsed": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "working",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "stuck_starting"
+        }
+      ]
+    },
+    "text": "{\"id\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"name\":\"BZ-127\",\"harness\":\"codex\",\"state\":\"running\",\"project\":\"bazhen\",\"cwd\":\"/work\",\"launchedBy\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d\",\"signal\":{\"value\":\"working\",\"source\":\"native\",\"ageSeconds\":125},\"listening\":true,\"headline\":{\"text\":\"Halfway.\",\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"ageSeconds\":30},\"tasks\":[{\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"assignmentId\":\"asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"role\":\"worker\"}],\"attention\":[{\"id\":\"attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"kind\":\"stuck_starting\"}]}"
+  },
+  {
     "name": "example 1, with a field no version defines in each of its objects",
     "wire": {
       "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",

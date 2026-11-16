@@ -21,6 +21,8 @@ import type { SentMessage } from "@bazhen/harness-claude-code";
 import { hookApp, type IngressDeps } from "./ingress.ts";
 import { Mailbox } from "./mailbox.ts";
 import { Inbox } from "../attention/inbox.ts";
+import { localEnvironmentId } from "../agents/launch.ts";
+import { Readiness } from "../agents/readiness.ts";
 
 let server: Server | undefined;
 let dir = "";
@@ -33,8 +35,8 @@ afterEach(() => {
  * The daemon's real hook ingress, served on a Unix socket as main.ts serves it. A `tokened`
  * agent is given a token, in `tokenFile`; otherwise it is one started before agents had tokens.
  */
-async function daemon(tokened = false, peer?: IngressDeps["peer"]) {
-  const { store, agentId } = await claudeAgent();
+async function daemon(tokened = false, peer?: IngressDeps["peer"], starting = false) {
+  const { store, agentId } = await claudeAgent({ starting });
   dir = mkdtempSync("/tmp/bz-ingress-");
   const tokens = new AgentTokens(store, join(dir, "agents"), process.getuid?.() ?? 0);
   const tokenFile = tokened ? tokens.mint(agentId).file : "";
@@ -42,6 +44,12 @@ async function daemon(tokened = false, peer?: IngressDeps["peer"]) {
   const mailbox = new Mailbox(store);
   const approvals = new Approvals(store);
   const inbox = new Inbox(store, approvals, (id, req) => mailbox.send(id, req));
+  const readiness = new Readiness({
+    store,
+    environmentId: localEnvironmentId(store),
+    deadlineMs: 60_000,
+    notStarted: (id, summary) => inbox.notStarted(id, summary),
+  });
   // Every hook here runs through a shell of the pane's process.
   const binding = new SessionBinding(store, {
     parent: async () => ({ ppid: PANE_PID, command: "sh" }),
@@ -54,6 +62,7 @@ async function daemon(tokened = false, peer?: IngressDeps["peer"]) {
       failed: (id, error) => inbox.turnFailed(id, error),
     },
     knows: (id) => id === agentId,
+    ready: (id) => readiness.ready(id, "claude_hook"),
     credentials: tokened ? tokens : untokenedCredentials,
     ...(peer && { peer }),
     binding,
@@ -68,6 +77,7 @@ async function daemon(tokened = false, peer?: IngressDeps["peer"]) {
   const state = (id: string) => store.snapshot(testView).messages.find((m) => m.id === id)?.state;
   const activity = () => store.latestActivity(agentId);
   const usage = () => store.snapshot(testView).agents[0]?.usage;
+  const lifecycle = () => store.snapshot(testView).agents[0]?.state;
   const failures = () =>
     store
       .snapshot(testView)
@@ -81,6 +91,7 @@ async function daemon(tokened = false, peer?: IngressDeps["peer"]) {
     activity,
     usage,
     failures,
+    lifecycle,
     observed,
     tokens,
     tokenFile,
@@ -263,6 +274,15 @@ describe.each([
     const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
     const sub = await run(client, "PostToolUse", env, postToolUse({ agent_id: "sub-1" }));
     expect([sub.code, sub.stdout, state(messageId)]).toEqual([0, "", "queued"]);
+  });
+
+  it("runs a starting agent on a hook of its own session, and on none of another's", async () => {
+    const { socket, agentId, lifecycle } = await daemon(false, undefined, true);
+    const env = { BAZHEN_AGENT_ID: agentId, BAZHEN_SOCKET: socket };
+    await run(client, "Stop", env, stop("66666666-6666-4666-8666-666666666666"));
+    const another = lifecycle();
+    await run(client, "Stop", env, stop());
+    expect([another, lifecycle()]).toEqual(["starting", "running"]);
   });
 
   it("records what the agent's own session says it is doing, and nothing another says", async () => {

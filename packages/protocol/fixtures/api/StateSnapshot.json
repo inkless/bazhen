@@ -5901,6 +5901,56 @@
     }
   },
   {
+    "name": "attention[].kind = \"stuck_starting\"",
+    "wire": {
+      "epoch": "e",
+      "eventId": 1,
+      "environments": [],
+      "agents": [],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "open",
+          "closeReason": null,
+          "summary": "Run it?\ud83d\ud83d👍",
+          "kind": "stuck_starting",
+          "taskId": null,
+          "messageId": null,
+          "openedAt": "2026-11-16T12:00:00.000Z",
+          "actions": []
+        }
+      ],
+      "messages": []
+    },
+    "parsed": {
+      "epoch": "e",
+      "eventId": 1,
+      "environments": [],
+      "agents": [],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "open",
+          "closeReason": null,
+          "summary": "Run it?��👍",
+          "kind": "stuck_starting",
+          "taskId": null,
+          "messageId": null,
+          "openedAt": "2026-11-16T12:00:00.000Z",
+          "actions": []
+        }
+      ],
+      "messages": [],
+      "shells": [],
+      "tasks": [],
+      "assignments": [],
+      "notices": [],
+      "observed": []
+    }
+  },
+  {
     "name": "attention[].actions[] = \"allow\"",
     "wire": {
       "epoch": "e",

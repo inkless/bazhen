@@ -3,7 +3,7 @@
 // one predicate per invariant, and `fc.assert` inside the test.
 
 import * as fc from "fast-check";
-import type { MailboxState, TerminalState } from "@bazhen/protocol";
+import type { AgentState, MailboxState, TerminalState } from "@bazhen/protocol";
 import { describe, expect, it } from "vitest";
 import { agent, type AgentEvent } from "./agent.ts";
 import { InvalidTransition, type Machine } from "./machine.ts";
@@ -136,6 +136,7 @@ describe("terminal, over any sequence of events", () => {
 
 const AGENT_EVENTS: [AgentEvent, number][] = [
   ["launch.confirmed", 4],
+  ["harness.ready", 4],
   ["launch.rejected", 1],
   ["process.exited", 3],
   ["environment.unreachable", 2],
@@ -149,6 +150,16 @@ const AGENT_EVENTS: [AgentEvent, number][] = [
   ["close.completed", 1],
 ];
 const agentWalks = sequences(AGENT_EVENTS).map((e) => walk(agent, "starting", e));
+
+/** Every step into running comes after a harness sign of life since the agent last started. */
+const runsOnlyOnceReady = (steps: Step<AgentState, AgentEvent>[]) => {
+  let ready = false;
+  return steps.every((s) => {
+    if (s.to === "starting" && s.from !== "starting") ready = false;
+    if (s.accepted && s.event === "harness.ready") ready = true;
+    return s.to !== "running" || s.from === "running" || ready;
+  });
+};
 
 describe("agent session, over any sequence of events", () => {
   it("accepts no event once closed or failed", () => {
@@ -168,6 +179,10 @@ describe("agent session, over any sequence of events", () => {
       ),
     ).not.toThrow();
     expect(tryNext(agent, "starting", "relaunch.rejected")).toBe("lost");
+  });
+
+  it("runs only once its harness has shown a sign of life since it last started", () => {
+    expect(check(agentWalks, runsOnlyOnceReady)).not.toThrow();
   });
 
   it("starts again only on an explicit respawn or relaunch", () => {

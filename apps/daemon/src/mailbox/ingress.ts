@@ -29,6 +29,8 @@ export interface IngressDeps {
   };
   /** Whether the daemon runs this agent; a hook from any other is ignored, never adopted. */
   readonly knows: (agentId: string) => boolean;
+  /** A hook of the agent's own session: its harness is up (foundation-design §4.5). */
+  readonly ready: (agentId: string) => void;
   /** A hook names its agent; its agent token must be that agent's (foundation-design §9.1). */
   readonly credentials: AgentCredentials;
   /** Whose process made the hook's call, which must be that agent's too; absent when unread. */
@@ -74,11 +76,14 @@ export function hookApp(deps: IngressDeps): Hono<{ Bindings: HttpBindings }> {
     // A waiter's SessionStart may move the binding first, so it is observed once it has.
     if (read.kind !== "wait") observe();
     // Subagents and other sessions may still raise approvals, but never take or confirm mail.
-    const own = () =>
-      deps.binding.owns(agentId, origin, {
+    const own = async () => {
+      const owned = await deps.binding.owns(agentId, origin, {
         sessionStarted: read.kind === "wait" && read.sessionStarted,
         ppid,
       });
+      if (owned) deps.ready(agentId);
+      return owned;
+    };
     switch (read.kind) {
       case "wait":
         if (!(await own())) return framed(QUIET);

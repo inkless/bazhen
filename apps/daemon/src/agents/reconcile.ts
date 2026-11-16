@@ -132,7 +132,8 @@ export function settle(
     return;
   }
   if (found !== undefined) return;
-  if (state === "running" || state === "exited")
-    store.append({ ...system, type: "agent.lost", payload: {} });
+  // A starting agent whose terminal runs is waiting on its harness, and is lost as a running one.
+  const ran = state === "running" || (state === "starting" && terminalState === "running");
+  if (ran || state === "exited") store.append({ ...system, type: "agent.lost", payload: {} });
   else if (state === "closing") recordClosed(store, agentId, "system");
 }

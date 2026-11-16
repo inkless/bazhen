@@ -1,4 +1,10 @@
-import type { AgentCommand, AgentState, ExternalRef, HarnessId } from "@bazhen/protocol";
+import type {
+  AgentCommand,
+  AgentState,
+  ExternalRef,
+  HarnessId,
+  TerminalState,
+} from "@bazhen/protocol";
 import type { AgentSessionId, EnvironmentId, TerminalId } from "./ids.ts";
 import { machine } from "./machine.ts";
 
@@ -24,6 +30,7 @@ export interface AgentSession {
 
 export type AgentEvent =
   | "launch.confirmed"
+  | "harness.ready"
   | "launch.rejected"
   | "process.exited"
   | "environment.unreachable"
@@ -39,14 +46,22 @@ export type AgentEvent =
 // While its environment is unreachable an agent is unknown, never lost: only a reachable
 // environment that positively lacks the target makes it lost (foundation-design §4.4, §4.5).
 export const agent = machine<AgentState, AgentEvent>("agent session", {
+  // An agent is starting until its harness shows a sign of life, not merely until its terminal
+  // runs: a TUI stopped at a trust or login dialog is not running. Its terminal tells the two
+  // phases apart. Unreachable is left out: unknown returns to running on reconfirm, which would
+  // skip the harness's sign.
   // A rejected respawn returns to exited, where the terminal still is: it stays closable, and
   // failed would leave its tmux session with nothing to close it. A rejected relaunch returns to
   // lost the same way, so it can be relaunched again or removed.
   starting: {
-    "launch.confirmed": "running",
+    "launch.confirmed": "starting",
+    "harness.ready": "running",
     "launch.rejected": "failed",
     "respawn.rejected": "exited",
     "relaunch.rejected": "lost",
+    "process.exited": "exited",
+    "target.absent": "lost",
+    "close.requested": "closing",
   },
   running: {
     "process.exited": "exited",
@@ -72,11 +87,19 @@ export const agent = machine<AgentState, AgentEvent>("agent session", {
 });
 
 /**
- * The commands an agent in `state` takes, by its lifecycle alone. A closing agent takes close
+ * The commands an agent takes, by its lifecycle and its terminal's. A closing agent takes close
  * again, which finishes what an unreachable environment stopped; a closed one answers it with
- * nothing to do, so it isn't offered.
+ * nothing to do, so it isn't offered. A starting agent takes close and signal only once its
+ * terminal runs: before then its start holds it, and there is no process to end.
  */
-export function agentCommands(state: AgentState): AgentCommand[] {
+export function agentCommands({
+  state,
+  terminalState,
+}: {
+  readonly state: AgentState;
+  readonly terminalState: TerminalState | null;
+}): AgentCommand[] {
+  if (state === "starting") return terminalState === "running" ? ["close", "signal"] : [];
   return [
     ...(agent.accepts(state, "close.requested") || state === "closing" ? ["close" as const] : []),
     ...(agent.accepts(state, "respawn.requested") ? ["respawn" as const] : []),
@@ -105,10 +128,11 @@ export type Resumes = (a: ResumeEvidence) => boolean;
 export function offeredCommands(
   a: {
     readonly state: AgentState;
+    readonly terminalState: TerminalState | null;
     readonly generation: number | null;
   } & ResumeEvidence,
   resumes: Resumes,
 ): AgentCommand[] {
   if (a.generation === null) return [];
-  return agentCommands(a.state).filter((c) => c !== "respawn" || resumes(a));
+  return agentCommands(a).filter((c) => c !== "respawn" || resumes(a));
 }

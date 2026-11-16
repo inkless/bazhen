@@ -166,9 +166,15 @@ export class SessionBinding {
     return true;
   }
 
-  /** Resolves once the agent is no longer starting, or after `startWaitMs` if it stays so. */
+  /**
+   * Resolves once the agent's start is recorded, or after `startWaitMs` if it isn't. That is its
+   * terminal confirmed, not the agent running: a SessionStart is what makes it run.
+   */
   private started(agentId: string): Promise<void> {
-    const starting = () => this.store.agentTerminal({ agentId })?.state === "starting";
+    const starting = () => {
+      const found = this.store.agentTerminal({ agentId });
+      return found?.state === "starting" && found.terminalState !== "running";
+    };
     if (!starting()) return Promise.resolve();
     return new Promise((resolve) => {
       const done = () => {

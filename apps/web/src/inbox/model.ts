@@ -21,12 +21,17 @@ export const KINDS: Record<AttentionKind, { label: string; tone: "warn" | "dange
   undeliverable: { label: "Not delivered", tone: "danger" },
   escalation: { label: "Escalation", tone: "plain" },
   task_done: { label: "Task done", tone: "plain" },
+  stuck_starting: { label: "Not started", tone: "warn" },
 };
 
-/** Approvals and questions hold an agent up, so they come first; then failures; then the rest. */
+/**
+ * Approvals, questions and a harness that hasn't come up hold an agent up, so they come first;
+ * then failures; then the rest.
+ */
 const URGENCY: Record<AttentionKind, number> = {
   approval: 0,
   question: 0,
+  stuck_starting: 0,
   failed: 1,
   undeliverable: 1,
   escalation: 2,

@@ -46,6 +46,8 @@ const append = (store: Store, agentId: string, type: "agent.closing" | "agent.ex
 
 const stateOf = (store: Store, agentId: string) =>
   store.snapshot(testView).agents.find((a) => a.id === agentId)?.state;
+const terminalOf = (store: Store, agentId: string) =>
+  store.agentTerminal({ agentId })?.terminalState;
 
 const launch = (store: Store, environment: EnvironmentAdapter, queue: AgentQueue, key: string) =>
   launchAgent(
@@ -158,7 +160,7 @@ describe("ServerWatch", () => {
     const during = stateOf(store, agentId);
     creating.resolve({ runtime: null, externalRef: null });
     await launching;
-    expect([during, stateOf(store, agentId)]).toEqual(["starting", "running"]);
+    expect([during, terminalOf(store, agentId)]).toEqual(["starting", "running"]);
   });
 
   it("settles a launch the last daemon left starting, which no command here holds", async () => {
@@ -174,16 +176,16 @@ describe("ServerWatch", () => {
     expect(stateOf(store, agentId)).toBe("failed");
   });
 
-  it("settles a launch the last daemon left starting as running, once its terminal is there", async () => {
+  it("settles a launch the last daemon left starting, once its terminal is there, to wait on its harness", async () => {
     const { store } = await withAgent();
     const { agentId, terminalId } = await leftLaunch(store);
     const ref = { terminalId, runtime: "tmux", locator: { generation: "0" } };
     const environment = fakeEnvironment(store, undefined, () => [{ agentId, ref, dead: false }]);
     await new ServerWatch({ store, environment, queue: new AgentQueue(), log: () => {} }).tick();
-    expect(stateOf(store, agentId)).toBe("running");
+    expect([stateOf(store, agentId), terminalOf(store, agentId)]).toEqual(["starting", "running"]);
   });
 
-  it("leaves a respawn in flight alone, and its agent runs at the next generation", async () => {
+  it("leaves a respawn in flight alone, and its terminal runs at the next generation", async () => {
     const { store, agentId, environment } = await claudeAgent();
     append(store, agentId, "agent.exited");
     const queue = new AgentQueue();
@@ -204,7 +206,18 @@ describe("ServerWatch", () => {
     starting.resolve();
     await respawning;
     const agent = store.snapshot(testView).agents.find((a) => a.id === agentId);
-    expect([agent?.state, agent?.generation]).toEqual(["running", 1]);
+    expect([terminalOf(store, agentId), agent?.generation]).toEqual(["running", 1]);
+  });
+
+  it("leaves an agent waiting on its harness alone while its terminal runs, and loses it once gone", async () => {
+    const { store, agentId, terminalId } = await withAgent(undefined, { starting: true });
+    const ref = { terminalId, runtime: "tmux", locator: {} };
+    const present = fakeEnvironment(store, undefined, () => [{ agentId, ref, dead: false }]);
+    await new ServerWatch({ store, environment: present, queue: new AgentQueue() }).tick();
+    const waiting = stateOf(store, agentId);
+    const gone = fakeEnvironment(store);
+    await new ServerWatch({ store, environment: gone, queue: new AgentQueue() }).tick();
+    expect([waiting, stateOf(store, agentId)]).toEqual(["starting", "lost"]);
   });
 
   it("leaves alone an agent a command settled while the check was reading the environment", async () => {

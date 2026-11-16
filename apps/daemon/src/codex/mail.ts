@@ -42,7 +42,8 @@ export class CodexMail {
 
   /**
    * Hands a queued message to its agent's thread, trying again with backoff, and gives it up as
-   * undeliverable after the last attempt. One no longer queued is left alone.
+   * undeliverable after the last attempt. One no longer queued is left alone, and one for an
+   * agent still starting waits for `deliverQueued` once it runs.
    */
   async deliver(messageId: string, agentId: string): Promise<void> {
     if (this.sending.has(messageId)) return;
@@ -54,6 +55,8 @@ export class CodexMail {
         if (message === undefined || threadId === undefined) return;
         // Still queued: it goes once the hold ends, to the thread the agent is bound to then.
         if (this.opts.held?.(agentId) === true) return;
+        // Its TUI isn't up, maybe held at a dialog, and the app-server would start a turn anyway.
+        if (this.opts.store.agentTerminal({ agentId })?.state === "starting") return;
         const offline = await this.queue(threadId, messageText(message.id, message.body));
         // A turn carrying it may have started, and confirmed it, before the queue returned.
         if (this.queued(messageId, agentId) === undefined) return;

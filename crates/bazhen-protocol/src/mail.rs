@@ -88,6 +88,11 @@ pub enum AttentionKind {
     Undeliverable,
     Escalation,
     TaskDone,
+    StuckStarting,
+    /// A kind added after this build, which reads as a plain item rather than failing the whole
+    /// answer it came in.
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -142,4 +147,17 @@ pub struct WaitMessagesRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WaitMessagesResponse {
     pub messages: Vec<Message>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_attention_kind_newer_than_this_build_reads_as_unknown() {
+        let kind: AttentionKind = serde_json::from_str(r#""a_kind_from_later""#).unwrap();
+        assert_eq!(kind, AttentionKind::Unknown);
+        let known: AttentionKind = serde_json::from_str(r#""stuck_starting""#).unwrap();
+        assert_eq!(known, AttentionKind::StuckStarting);
+    }
 }

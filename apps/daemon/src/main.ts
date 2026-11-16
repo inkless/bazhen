@@ -56,6 +56,7 @@ import { ForegroundWatch } from "./shells/foreground.ts";
 import { streamRoute } from "./stream/server.ts";
 import { Approvals } from "./mailbox/approvals.ts";
 import { Inbox } from "./attention/inbox.ts";
+import { Readiness } from "./agents/readiness.ts";
 import { Notices, deviceOf } from "./attention/notices.ts";
 import { MAC_APP, desktopNotifier, hostNotifier, notifyOnAttention } from "./notify/desktop.ts";
 import { Presence } from "./notify/presence.ts";
@@ -311,6 +312,7 @@ const codexThreads = new CodexThreads({
     resume: (threadId) => codex.resume(threadId),
   },
   released: (agentId) => codexMail.deliverQueued(agentId),
+  ready: (agentId) => readiness.ready(agentId, "codex_title"),
 });
 const localId = localEnvironmentId(store);
 // Agents use the user's own Codex home and its managed app-server, connected on first use.
@@ -362,6 +364,17 @@ const environment = new LocalEnvironment({
   ...(hostEnv.SHELL?.startsWith("/") === true && { shell: hostEnv.SHELL }),
 });
 await reconcile(store, environment);
+// An agent is starting until its harness shows a sign of life; one that takes too long is the
+// human's to look at, in its terminal (§4.5).
+const readiness = new Readiness({
+  store,
+  environmentId: environment.id,
+  deadlineMs: config.startDeadlineMs,
+  notStarted: (agentId, summary) => inbox.notStarted(agentId, summary),
+  terminalUp: (terminalId) => void codexThreads.titleChanged(terminalId),
+  released: (agentId) => codexMail.deliverQueued(agentId),
+});
+const stopReadiness = readiness.follow();
 // What a Claude Code agent was doing went with the last daemon's memory (foundation-design §4.6).
 const activity = new ActivityTracker((agentId, a) => store.recordActivity(agentId, a));
 const queue = new AgentQueue();
@@ -484,7 +497,8 @@ const snapshotView: SnapshotView = {
   promptHash: (role) => prompts.compose(role).hash,
 };
 for (const a of store.snapshot(snapshotView).agents) {
-  if (a.harness === "claude-code" && a.state === "running") activity.restarted(a.id);
+  if (a.harness === "claude-code" && (a.state === "running" || a.state === "starting"))
+    activity.restarted(a.id);
 }
 const commands = {
   appVersion: APP_VERSION,
@@ -610,6 +624,7 @@ const socketListener = getRequestListener(
         failed: (agentId, error) => inbox.turnFailed(agentId, error),
       },
       knows: (agentId) => store.agent(agentId) !== undefined,
+      ready: (agentId) => readiness.ready(agentId, "claude_hook"),
       credentials: agentTokens,
       ...(peer && { peer }),
       binding: new SessionBinding(store, psTable),
@@ -643,7 +658,10 @@ const socketListener = getRequestListener(
       holderRuntime.replaceEnv(next.env);
       captured = { ...next, at: new Date().toISOString(), source: "refresh" };
       codexCliRead = codexCliVersion(next.env);
-      const running = store.snapshot(snapshotView).agents.filter((a) => a.state === "running");
+      // A starting agent's process may be up already, and keeps the environment it started with.
+      const running = store
+        .snapshot(snapshotView)
+        .agents.filter((a) => a.state === "running" || a.state === "starting");
       return {
         capturedAt: captured.at,
         kept: Object.keys(next.env).length,
@@ -731,6 +749,7 @@ function shutdown(reason: NodeJS.Signals | "requested") {
   clearInterval(retention);
   clearInterval(deviceSweep);
   serverWatch.stop();
+  stopReadiness();
   server.close();
   lanServer?.close();
   socketServer.close();

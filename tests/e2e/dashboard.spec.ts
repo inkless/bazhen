@@ -81,12 +81,10 @@ test("shows the fleet under its host, and closes an agent from its workspace", a
   await expect(agents.getByRole("heading", { level: 2 })).toHaveText(new RegExp(`^${hostname()}`));
   await expect(agents.locator('[aria-current="true"]')).toBeVisible();
   // Launched without a name, it is given its project's next number; then its project and harness.
-  await expect(workspace(page).locator(".workspace-head > :is(h2, .meta, .state)")).toHaveText([
-    /^[\w-]+-\d+$/,
-    basename(String(process.env["BZ_E2E_WORK"])),
-    "claude-code",
-    "running",
-  ]);
+  await expect(workspace(page).locator(".workspace-head > :is(h2, .meta, .state)")).toHaveText(
+    [/^[\w-]+-\d+$/, basename(String(process.env["BZ_E2E_WORK"])), "claude-code", "running"],
+    { timeout: 20_000 },
+  );
 
   await workspace(page).getByText("Attach from a terminal").click();
   await expect(workspace(page).locator(".attach code")).toContainText(" attach-session -t ");
@@ -293,7 +291,7 @@ test("the close confirm is a modal: Escape, Cancel and a tap outside each leave 
   await page.mouse.click(2, 2);
   await expect(dialog).toHaveCount(0);
 
-  await expect(stateOf(page, "running")).toBeVisible();
+  await expect(stateOf(page, "running")).toBeVisible({ timeout: 20_000 });
   expect(closes).toEqual([]);
 });
 

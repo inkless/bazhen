@@ -314,7 +314,7 @@ function attachable(state: SQLOutputValue | undefined, restart: NeedsRestart | n
 }
 
 /** Agent states whose directory still holds their work, so a shell can be opened beside them. */
-export const LINKABLE: ReadonlySet<AgentState> = new Set(["running", "exited"]);
+export const LINKABLE: ReadonlySet<AgentState> = new Set(["starting", "running", "exited"]);
 
 /** The database, or a journal beside it, is not this user's own file, so it isn't opened. */
 export class UnsafeDatabase extends Error {
@@ -472,9 +472,15 @@ function holeFills(migrations: readonly Migration[], applied: ReadonlySet<string
  */
 export const NAMED_MIGRATIONS_VERSION = 1000;
 
-/** Running Codex agents, bound to a thread. */
-const RUNNING_CODEX = `harness = 'codex' AND state = 'running'
+/**
+ * Live Codex agents, bound to a thread: running, or starting, whose thread Bazhen started before
+ * its TUI, and which takes mail and approvals as soon as its TUI is up.
+ */
+const LIVE_CODEX = `harness = 'codex' AND state IN ('starting', 'running')
   AND json_extract(external_ref, '$.kind') = 'codex-thread'`;
+/** A live Codex agent `a` whose terminal `t` is up, as a title is read from. */
+const UP_CODEX = `a.harness = 'codex'
+  AND (a.state = 'running' OR (a.state = 'starting' AND t.state = 'running'))`;
 const THREAD = "json_extract(external_ref, '$.id')";
 
 /** The SQLite seam. Nothing else in the daemon imports node:sqlite. */
@@ -1064,40 +1070,40 @@ export class Store {
   }
 
   /**
-   * The running Codex agent bound to a thread, if exactly one is: of two, neither is guessed at,
+   * The live Codex agent bound to a thread, if exactly one is: of two, neither is guessed at,
    * so nothing meant for one reaches the other.
    */
   codexAgent(threadId: string): string | undefined {
-    const sql = `SELECT id FROM agent_sessions WHERE ${RUNNING_CODEX} AND ${THREAD} = ? LIMIT 2`;
+    const sql = `SELECT id FROM agent_sessions WHERE ${LIVE_CODEX} AND ${THREAD} = ? LIMIT 2`;
     const rows = this.prepare(sql).all(threadId);
     return rows.length === 1 ? String(rows[0]?.id) : undefined;
   }
 
-  /** Every running Codex agent bound to a thread. */
+  /** Every live Codex agent bound to a thread. */
   codexAgentsOn(threadId: string): string[] {
-    const sql = `SELECT id FROM agent_sessions WHERE ${RUNNING_CODEX} AND ${THREAD} = ?`;
+    const sql = `SELECT id FROM agent_sessions WHERE ${LIVE_CODEX} AND ${THREAD} = ?`;
     return this.prepare(sql)
       .all(threadId)
       .map((r) => String(r.id));
   }
 
   /**
-   * The running Codex agent a message is for, while it is queued or queued in Codex, and whether
+   * The live Codex agent a message is for, while it is queued or queued in Codex, and whether
    * Codex has taken it yet.
    */
   codexMessageAgent(messageId: string): { agentId: string; inCodex: boolean } | undefined {
     const sql = `SELECT a.id, m.state FROM mailbox m JOIN agent_sessions a ON a.id = m.agent_session_id
                  WHERE m.id = ? AND m.state IN ('queued', 'queued_in_codex')
-                   AND a.harness = 'codex' AND a.state = 'running'`;
+                   AND a.harness = 'codex' AND a.state IN ('starting', 'running')`;
     const row = this.prepare(sql).get(messageId);
     if (row === undefined) return undefined;
     return { agentId: String(row.id), inCodex: row.state === "queued_in_codex" };
   }
 
-  /** The terminals of the running Codex agents, on every runtime. */
+  /** The terminals of the live Codex agents that are up, on every runtime. */
   codexTerminals(): TerminalId[] {
-    const sql = `SELECT terminal_id FROM agent_sessions
-                 WHERE harness = 'codex' AND state = 'running' AND terminal_id IS NOT NULL`;
+    const sql = `SELECT a.terminal_id FROM agent_sessions a
+                 JOIN terminals t ON t.id = a.terminal_id WHERE ${UP_CODEX}`;
     return this.prepare(sql)
       .all()
       .flatMap((r) => {
@@ -1106,29 +1112,29 @@ export class Store {
       });
   }
 
-  /** The terminal of the running Codex agent in a tmux pane, on the tmux server at `socket`. */
+  /** The terminal of the live Codex agent in a tmux pane, on the tmux server at `socket`. */
   codexTerminalInPane(socket: string, pane: string): TerminalId | undefined {
     const sql = `SELECT t.id FROM agent_sessions a JOIN terminals t ON t.id = a.terminal_id
-                 WHERE a.harness = 'codex' AND a.state = 'running'
+                 WHERE ${UP_CODEX}
                    AND json_extract(t.locator, '$.socket') = ?
                    AND json_extract(t.locator, '$.paneId') = ?`;
     const id = String(this.prepare(sql).get(socket, pane)?.id);
     return isId("term", id) ? id : undefined;
   }
 
-  /** The thread a running Codex agent is bound to, if it is one. */
+  /** The thread a live Codex agent is bound to, if it is one. */
   codexThread(agentId: string): string | undefined {
-    const sql = `SELECT ${THREAD} AS thread FROM agent_sessions WHERE ${RUNNING_CODEX} AND id = ?`;
+    const sql = `SELECT ${THREAD} AS thread FROM agent_sessions WHERE ${LIVE_CODEX} AND id = ?`;
     const row = this.prepare(sql).get(agentId);
     return row === undefined ? undefined : String(row.thread);
   }
 
-  /** The running Codex agent in a terminal, with its thread and the terminal's incarnation. */
+  /** The live Codex agent whose terminal is up, with its thread and the terminal's incarnation. */
   codexAgentIn(terminalId: TerminalId) {
     const sql = `SELECT a.id, a.environment_id, json_extract(a.external_ref, '$.id') AS thread,
                         t.id AS terminal_id, t.runtime, t.locator
                  FROM agent_sessions a JOIN terminals t ON t.id = a.terminal_id
-                 WHERE a.harness = 'codex' AND a.state = 'running'
+                 WHERE ${UP_CODEX}
                    AND json_extract(a.external_ref, '$.kind') = 'codex-thread'
                    AND t.id = ?`;
     const row = this.prepare(sql).get(terminalId);
@@ -1139,9 +1145,9 @@ export class Store {
     return { agentId: String(row.id), environmentId, threadId: String(row.thread), runtime };
   }
 
-  /** The Codex threads the running Codex agents are bound to. */
+  /** The Codex threads the live Codex agents are bound to. */
   codexThreads(): string[] {
-    const sql = `SELECT ${THREAD} AS thread FROM agent_sessions WHERE ${RUNNING_CODEX}`;
+    const sql = `SELECT ${THREAD} AS thread FROM agent_sessions WHERE ${LIVE_CODEX}`;
     return this.prepare(sql)
       .all()
       .map((r) => String(r.thread));
@@ -1480,6 +1486,8 @@ export class Store {
                 commands: offeredCommands(
                   {
                     state: AgentState.parse(r.state),
+                    terminalState:
+                      terminalState === null ? null : TerminalState.parse(terminalState),
                     generation: typeof r.generation === "number" ? r.generation : null,
                     ...evidence,
                   },
@@ -1828,6 +1836,29 @@ export class Store {
       "SELECT max(id) AS id FROM events WHERE entity_id = ? AND type = ?",
     ).get(entityId, type);
     return typeof row?.id === "number" ? row.id : undefined;
+  }
+
+  /**
+   * The event that confirmed the terminal of an agent's latest start, when it was recorded, as
+   * milliseconds since the epoch; undefined before any, or once retention has dropped it.
+   */
+  startOf(agentId: string): { readonly eventId: number; readonly at: number } | undefined {
+    const row = this.prepare(
+      `SELECT id, ts FROM events WHERE entity_type = 'agent' AND entity_id = ?
+         AND type IN ('agent.running', 'agent.respawned', 'agent.relaunched')
+       ORDER BY id DESC LIMIT 1`,
+    ).get(agentId);
+    if (typeof row?.id !== "number" || typeof row.ts !== "string") return undefined;
+    return { eventId: row.id, at: Date.parse(row.ts) };
+  }
+
+  /** Whether an item of `kind` about the agent has opened, open still or not, since `eventId`. */
+  openedSince(agentId: string, kind: AttentionKind, eventId: number): boolean {
+    const row = this.prepare(
+      `SELECT 1 AS found FROM attention_items
+       WHERE agent_session_id = ? AND kind = ? AND created_event_id > ? LIMIT 1`,
+    ).get(agentId, kind, eventId);
+    return row !== undefined;
   }
 
   /** This database's epoch, which every cursor into its log carries. */

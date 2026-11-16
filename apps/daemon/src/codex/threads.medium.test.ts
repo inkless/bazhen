@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { newId, type RuntimeRef } from "@bazhen/core";
-import { FIXTURE_TMUX_SOCKET, withCodexAgents, withCodexAgentsOn } from "../testing/fixtures.ts";
+import {
+  FIXTURE_TMUX_SOCKET,
+  testView,
+  withCodexAgents,
+  withCodexAgentsOn,
+  withStartingCodexAgentsOn,
+} from "../testing/fixtures.ts";
+import { localEnvironmentId } from "../agents/launch.ts";
+import { Readiness } from "../agents/readiness.ts";
 import { CodexThreads, UNTRACKED } from "./threads.ts";
 
 const A = "01a1ce15-39c0-7183-b5b6-f6f2f0000001";
@@ -30,10 +38,19 @@ async function setup(opts: {
   runtime?: "tmux" | "holder";
   /** What `thread/list` waits on before it answers, as a server slow to answer. */
   listing?: Promise<unknown>;
+  /** Its agents still starting, their TUIs not yet up. */
+  starting?: boolean;
 }) {
   let unsaved = opts.unsaved ?? 0;
   const runtime = opts.runtime ?? "tmux";
-  const { store, agentOn } = await withCodexAgentsOn(runtime, A, ...(opts.others ?? []));
+  const agents = opts.starting === true ? withStartingCodexAgentsOn : withCodexAgentsOn;
+  const { store, agentOn } = await agents(runtime, A, ...(opts.others ?? []));
+  const readiness = new Readiness({
+    store,
+    environmentId: localEnvironmentId(store),
+    deadlineMs: 60_000,
+    notStarted: () => {},
+  });
   const released: string[] = [];
   const agentId = agentOn(A);
   const resumed: string[] = [];
@@ -65,6 +82,7 @@ async function setup(opts: {
     log: (message) => logged.push(message),
     retryMs: 5,
     released: (id) => released.push(id),
+    ready: (id) => readiness.ready(id, "codex_title"),
     ...(opts.giveUpMs === undefined ? {} : { giveUpMs: opts.giveUpMs }),
   });
   const terminal =
@@ -77,6 +95,7 @@ async function setup(opts: {
   const boundTo = () => store.codexThread(agentId);
   const untracked = () => store.latestActivity(agentId)?.detail === UNTRACKED;
   const held = () => threads.held(agentId);
+  const lifecycle = () => store.snapshot(testView).agents.find((a) => a.id === agentId)?.state;
   return {
     store,
     agentId,
@@ -91,9 +110,20 @@ async function setup(opts: {
     logged,
     released,
     held,
+    lifecycle,
     agentOn,
   };
 }
+
+describe("a Codex agent's TUI coming up", () => {
+  it("runs a starting agent once its title names its thread, and not on a title naming none", async () => {
+    const s = await setup({ titles: ["codex", shown(A)], starting: true });
+    await s.threads.titleChanged(s.terminal);
+    const before = s.lifecycle();
+    await s.threads.titleChanged(s.terminal);
+    expect([before, s.lifecycle()]).toEqual(["starting", "running"]);
+  });
+});
 
 describe("Codex thread switches", () => {
   it("moves the agent to the one thread its title names, subscribing to it first", async () => {

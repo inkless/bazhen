@@ -23,6 +23,7 @@ describe("resolveConfig", () => {
       pairingRequired: false,
       lan: null,
       launchLimits: { maxLaunched: 5, maxDepth: 3 },
+      startDeadlineMs: 60_000,
       maxOpenTerminals: 100,
       historyLines: 10_000,
       defaultRuntime: "tmux",
@@ -45,6 +46,7 @@ describe("resolveConfig", () => {
       pairingRequired: false,
       lan: null,
       launchLimits: { maxLaunched: 5, maxDepth: 3 },
+      startDeadlineMs: 60_000,
       maxOpenTerminals: 100,
       historyLines: 10_000,
       defaultRuntime: "tmux",
@@ -55,6 +57,11 @@ describe("resolveConfig", () => {
   it("takes how far agents may launch agents from the file", () => {
     const limits = { agents: { max_launched: 2, max_launch_depth: 1 } };
     expect(resolveConfig(limits, {}).launchLimits).toEqual({ maxLaunched: 2, maxDepth: 1 });
+  });
+
+  it("takes how long an agent's harness has to come up from the file, in seconds", () => {
+    const agents = { agents: { start_deadline_seconds: 90 } };
+    expect(resolveConfig(agents, {}).startDeadlineMs).toBe(90_000);
   });
 
   it("takes how many terminals may be open at once from the file", () => {

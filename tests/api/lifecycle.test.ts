@@ -65,7 +65,8 @@ describe("an agent's lifecycle after launch", () => {
   });
 
   it("refuses a close naming a generation the agent has moved past, and leaves it running", async () => {
-    const { agentId } = await daemon.program(["sleep", "300"]);
+    const { agentId } = await daemon.launch("stale-close");
+    await daemon.running(agentId);
     const { status, body } = await close(agentId, "stale", 5);
     expect([status, ErrorResponse.parse(body).error]).toEqual([409, "stale_generation"]);
     expect((await agentOf(agentId))?.state).toBe("running");

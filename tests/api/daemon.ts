@@ -294,6 +294,13 @@ export class Daemon {
     return this.output;
   }
 
+  /** A new directory beside the work directory, which no harness has been told to trust. */
+  untrustedDirectory(name: string): string {
+    const dir = join(this.home, name);
+    mkdirSync(dir);
+    return dir;
+  }
+
   /** Launches an agent in the work directory, keyed by `key`. */
   async launch(
     key: string,
@@ -570,6 +577,21 @@ export class Daemon {
     } finally {
       db.close();
     }
+  }
+
+  /** The agent's lifecycle state, as the daemon's state shows it now. */
+  async agentState(agentId: string): Promise<string | undefined> {
+    const state = StateSnapshot.parse((await this.request("/v1/state")).body);
+    return state.agents.find((a) => a.id === agentId)?.state;
+  }
+
+  /** Waits until the agent's harness has shown its first sign of life, which makes it running. */
+  async running(agentId: string, timeoutMs = 30_000): Promise<void> {
+    await waitUntil(
+      async () => (await this.agentState(agentId)) === "running",
+      `agent ${agentId}'s harness to come up`,
+      timeoutMs,
+    );
   }
 
   /** The title the agent's TUI set, from its holder or its tmux pane. */

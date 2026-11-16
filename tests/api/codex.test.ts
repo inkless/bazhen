@@ -150,17 +150,17 @@ describe("a Codex agent", () => {
   it("is bound to the thread Bazhen started for it, before its TUI runs", async () => {
     expect((await state()).agents.find((a) => a.id === launched.agentId)).toMatchObject({
       harness: "codex",
-      state: "running",
       externalRef: { kind: "codex-thread", id: expect.any(String) },
     });
   });
 
-  it("runs its TUI in its terminal, which takes a turn through the fake model", async () => {
+  it("runs once its TUI is up in its terminal, which takes a turn through the fake model", async () => {
     await waitUntil(
       () => daemon.screen(launched.agentId).includes(BANNER.codex),
       "Codex's TUI",
       30_000,
     );
+    await daemon.running(launched.agentId);
     await daemon.prompt(launched, "hello from bazhen");
     await expect
       .poll(() => daemon.screen(launched.agentId), { timeout: 30_000 })
@@ -305,6 +305,7 @@ describe("a Codex agent", () => {
       "Codex's TUI after the respawn",
       30_000,
     );
+    await daemon.running(launched.agentId);
     expect(await agent()).toMatchObject({ state: "running", generation: 1, externalRef: thread });
     // The TUI titles its pane with the thread it shows: the same thread, not a new one.
     await expect
