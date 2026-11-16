@@ -214,6 +214,8 @@ fn status_of(code: Option<i32>, signal: Option<i32>) -> Option<ExitStatus> {
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::process::ExitStatusExt as _;
+
     use super::*;
 
     #[test]
@@ -339,5 +341,21 @@ mod tests {
         });
         assert!(status.success(), "{status:?}");
         assert_eq!(seen, "hup\nusr1\n");
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn a_second_close_carries_on_the_first_rather_than_starting_it_over() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let (status, _) = signals_seen_by_a_stand_in(|pid| {
+            let now = Instant::now();
+            let mut child = ChildProcess::new(pid);
+            child.close(now);
+            child.close_step(now);
+            // Started over, the close would hang up again here, and kill only a grace later.
+            child.close(now + CLOSE_GRACE);
+            child.close_step(now + CLOSE_GRACE);
+        });
+        assert_eq!(status.signal(), Some(libc::SIGKILL), "{status:?}");
     }
 }

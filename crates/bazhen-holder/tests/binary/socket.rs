@@ -557,6 +557,24 @@ fn binds_its_socket_again_on_sigusr1_and_unprompted() {
         .unwrap();
 }
 
+/// How long a holder woken by `SIGUSR1` is left before it is looked at: well past the 2
+/// CPU-seconds a test's holder gets, so one that spins on a wake-up it never drained dies of
+/// `SIGXCPU` first. The time is what this measures, so it is waited out.
+const IDLE_FOR: std::time::Duration = std::time::Duration::from_secs(5);
+
+#[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
+fn a_holder_woken_by_sigusr1_goes_idle_again() {
+    bazhen_test_signal::require_sandbox().unwrap();
+    sweep().unwrap();
+    let home = home("woken").unwrap();
+    let (mut holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
+    bazhen_test_signal::signal(holder.pid, Signal::USR1).unwrap();
+    std::thread::sleep(IDLE_FOR);
+    assert_eq!(holder.state(), "still runs");
+    Client::connect(&socket).unwrap().hello(false).unwrap();
+}
+
 #[test]
 #[ignore = "signals processes; runs in pnpm test:real rust"]
 fn a_storm_of_sigusr1_during_a_flood_loses_no_output() {
