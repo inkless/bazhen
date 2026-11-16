@@ -60,8 +60,10 @@ import {
 } from "./client.ts";
 import { Control, HolderStream } from "./runtime-stream.ts";
 import { decodeTags, encodeTags, unlinked } from "./tags.ts";
+import { TitleWatch } from "./title-watch.ts";
 
 const EXIT_POLL_MS = 1_000;
+const TITLE_SYNC_MS = 5_000;
 /** How long a holder has to answer `hello` before it counts as one that can't be read. */
 const HELLO_MS = 2_000;
 const DEFAULT_COLORTERM = "truecolor";
@@ -83,6 +85,8 @@ export interface HolderRuntimeOptions {
   readonly env: Readonly<Record<string, string>>;
   /** How often dead terminals are looked for while anyone listens. */
   readonly exitPollMs?: number;
+  /** How often, while titles are listened to, agents' holders are listed for any not watched. */
+  readonly titleSyncMs?: number;
   /** How long a holder has to answer `hello`. */
   readonly helloMs?: number;
   /** Where a failure no caller waits on goes: exit polling, or a holder that can't be read. */
@@ -159,6 +163,7 @@ export class HolderRuntime implements RuntimeAdapter {
   private readonly opts: HolderRuntimeOptions;
   private env: Readonly<Record<string, string>>;
   private readonly exits: ExitWatch;
+  private readonly titles: TitleWatch;
   private readonly controls = new Map<string, Control>();
   /** For each terminal, what settles once its last control connection has closed. */
   private readonly retiring = new Map<string, Promise<void>>();
@@ -171,6 +176,17 @@ export class HolderRuntime implements RuntimeAdapter {
     this.exits = new ExitWatch({
       read: () => this.deadTerminals(),
       intervalMs: opts.exitPollMs ?? EXIT_POLL_MS,
+      onError: this.report,
+    });
+    this.titles = new TitleWatch({
+      list: async () =>
+        (await this.listed()).entries.flatMap(({ ref, tags }) =>
+          tags.kind === "agent"
+            ? [{ terminalId: ref.terminalId, socket: this.socketOf(ref.terminalId) }]
+            : [],
+        ),
+      connect: (socket, onEvent) => this.connect(socket, false, onEvent),
+      syncMs: opts.titleSyncMs ?? TITLE_SYNC_MS,
       onError: this.report,
     });
   }
@@ -450,6 +466,7 @@ export class HolderRuntime implements RuntimeAdapter {
         cause: reached.is === "outdated" ? reached.protocol : reached.cause,
       });
     }
+    if (spec.tags.kind === "agent") void this.titles.watch(spec.terminalId, socket);
     return this.refOf(spec.terminalId, reached.hello);
   }
 
@@ -686,6 +703,15 @@ export class HolderRuntime implements RuntimeAdapter {
 
   onExit(cb: (ref: RuntimeRef, status: ExitStatus) => void): () => void {
     return this.exits.subscribe(cb);
+  }
+
+  /**
+   * Calls `cb` with an agent terminal whose title may have changed, which `title` then reads: as
+   * the runtime starts watching it, and each time its program sets one. Returns the unsubscribe
+   * function.
+   */
+  onTitle(cb: (terminalId: TerminalId) => void): () => void {
+    return this.titles.subscribe(cb);
   }
 
   attachCommand(ref: RuntimeRef): string {
