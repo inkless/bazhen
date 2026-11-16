@@ -23,6 +23,20 @@ describe("the PTY seam's hang-up", () => {
     pty.hangUp();
     expect(sent).not.toHaveBeenCalled();
     await exit;
+    expect(sent).not.toHaveBeenCalled();
+  });
+
+  it("hangs up a live tmux client, which leaves its server, and sends no signal", async () => {
+    tmuxOut(server, "new-session", "-d", "-s", "live", "sleep", "300");
+    const client = attachClient(server, "live");
+    const exit = exited(client);
+    await expect.poll(clients, { timeout: 5_000 }).not.toBe("");
+    const sent = vi.spyOn(process, "kill").mockImplementation(() => true);
+    client.hangUp();
+    expect(sent).not.toHaveBeenCalled();
+    await exit;
+    await expect.poll(clients, { timeout: 5_000 }).toBe("");
+    expect(sent).not.toHaveBeenCalled();
   });
 
   it("hangs up a tmux client that has already left, and sends no signal", async () => {
