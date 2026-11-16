@@ -1,6 +1,6 @@
 // The runtime contract and the snapshot attach contract, on HolderRuntime with real holders.
 
-import { chmodSync, existsSync, mkdirSync, readdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { runtimeContract, snapshotContract, type SnapshotHarness } from "@bazhen/core/testing";
 import { replay } from "@bazhen/daemon/testing";
@@ -106,7 +106,8 @@ const harness: SnapshotHarness = {
   placeOf: (ref) => ref.locator.socket,
   exitMayBeUnknown: false,
   pastes: false,
-  cwd: userDir(testHome()),
+  // Resolved, as the OS reports a process's directory: macOS's /tmp is a link to /private/tmp.
+  cwd: realpathSync(userDir(testHome())),
   waitMs: 10_000,
   replay,
 };
