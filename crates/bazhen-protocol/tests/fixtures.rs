@@ -13,6 +13,7 @@ use bazhen_protocol::daemon::{
     DoctorResponse, EnvRefreshRequest, EnvRefreshResponse, HealthResponse, StopResponse,
 };
 use bazhen_protocol::ids::{TaskId, is_id};
+use bazhen_protocol::input::has_keystrokes;
 use bazhen_protocol::mail::{
     MESSAGE_WAIT_MAX_MS, MailboxState, SendMessageRequest, SendMessageResponse,
     WaitMessagesRequest, WaitMessagesResponse,
@@ -191,11 +192,12 @@ fn verdict(case: &Value) -> std::result::Result<String, String> {
 }
 
 /// Each section of `checks.json` a test here reads; one it doesn't fails.
-const CHECKS: [&str; 9] = [
+const CHECKS: [&str; 10] = [
     "agentName",
     "agentRef",
     "constants",
     "datetime",
+    "keystrokes",
     "plainRemote",
     "quoteNote",
     "role",
@@ -273,6 +275,18 @@ fn notes_are_quoted_and_origins_judged_as_the_protocol_does() {
             case["plain"] == true,
             "{case}"
         );
+    }
+}
+
+#[test]
+fn input_holds_keystrokes_as_the_protocol_reads_it() {
+    for case in cases("keystrokes").unwrap() {
+        // One byte per character, as the TypeScript reads a view's input.
+        let bytes: Vec<u8> = input(&case)
+            .chars()
+            .map(|c| u8::try_from(u32::from(c)).unwrap())
+            .collect();
+        assert_eq!(has_keystrokes(&bytes), case["keystrokes"] == true, "{case}");
     }
 }
 

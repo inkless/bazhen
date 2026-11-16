@@ -1,10 +1,11 @@
 //! `bazhen <verb>`: the daemon's command-line client. It holds no logic of the daemon's: every
 //! verb is a call to the daemon's API over its Unix socket, except `start`, which runs the
-//! daemon's own start-up.
+//! daemon's own start-up, and `attach`, which holds a terminal's stream open over that socket.
 //!
-//! Its decoder is public so the fuzz targets in `fuzz/` can reach it.
+//! Its decoders are public so the fuzz targets in `fuzz/` can reach them.
 
 mod args;
+pub mod attach;
 mod call;
 mod daemon_verbs;
 mod doctor;
@@ -20,6 +21,7 @@ mod tasks;
 pub use bazhen_protocol;
 
 use std::ffi::OsString;
+use std::path::Path;
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -80,6 +82,7 @@ if it bounced, and 5 if it is still on its way when the timeout (60 s unless giv
 pub(crate) const USAGE: &str = concat!(
     "usage: bazhen <start|stop|status|doctor|env refresh|pair|devices [revoke|dismiss <id>]> ",
     "[--home <dir>] [--port <port>]\n",
+    "usage: bazhen attach <agent|shell|terminal> [--home <dir>]   (Ctrl-\\ Ctrl-\\ detaches)\n",
     "usage:
   bazhen agents [--json]
   bazhen whoami
@@ -138,6 +141,7 @@ fn run(args: Vec<OsString>, out: &mut Out) -> Exit {
                 .unwrap_or(socket);
             tasks::run(&p, &Daemon::at(task_socket), now_ms, out)
         }
+        "attach" => attach::run(&p, Path::new(&daemon.socket()), &daemon, out),
         "start" => Ok(daemon_verbs::start(&p, out)),
         "stop" => daemon_verbs::stop(&daemon, out),
         "status" => daemon_verbs::status(&daemon, out),

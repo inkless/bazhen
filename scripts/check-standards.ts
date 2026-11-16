@@ -687,8 +687,11 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-client/src/framing.rs::body": "framing",
   "crates/bazhen-hook/src/lib.rs::parse_reply": "parse_reply",
   "crates/bazhen/src/reply.rs::decode": "reply",
+  "crates/bazhen/src/attach/attachment.rs::Attachment::keys": "attach",
+  "crates/bazhen/src/attach/attachment.rs::Attachment::frame": "attach",
   "crates/bazhen-protocol/src/wire.rs::well_formed": "wire",
   "crates/bazhen-protocol/src/wire.rs::from_slice": "wire",
+  "crates/bazhen-protocol/src/input.rs::has_keystrokes": "input",
   "crates/bazhen-hook/src/pane_title.rs::body": "pane_title",
   "crates/bazhen-hook/src/shell_report.rs::report_body": "shell_report",
   "crates/bazhen-hook/src/shell_report.rs::micros": "shell_report",
@@ -919,6 +922,50 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/server.rs::send": "encodes and queues a reply; reads no bytes",
   "crates/bazhen-holder/src/server.rs::serve":
     "answers requests FrameDecoder decoded, which the proto crate's frame target fuzzes",
+  "crates/bazhen-protocol/src/input.rs::without_replies":
+    "a step of has_keystrokes, which the input target fuzzes",
+  "crates/bazhen-protocol/src/input.rs::strip":
+    "a step of has_keystrokes, which the input target fuzzes",
+  "crates/bazhen-protocol/src/input.rs::find":
+    "a step of has_keystrokes, which the input target fuzzes",
+  "crates/bazhen-protocol/src/input.rs::At::peek":
+    "a step of has_keystrokes, which the input target fuzzes",
+  "crates/bazhen-protocol/src/input.rs::At::byte":
+    "a step of has_keystrokes, which the input target fuzzes",
+  "crates/bazhen-protocol/src/input.rs::At::one_of":
+    "a step of has_keystrokes, which the input target fuzzes",
+  "crates/bazhen-protocol/src/input.rs::At::many":
+    "a step of has_keystrokes, which the input target fuzzes",
+  "crates/bazhen-protocol/src/input.rs::At::digits":
+    "a step of has_keystrokes, which the input target fuzzes",
+  "crates/bazhen-protocol/src/input.rs::At::any":
+    "a step of has_keystrokes, which the input target fuzzes",
+  "crates/bazhen-protocol/src/input.rs::event_report":
+    "a step of has_keystrokes, which the input target fuzzes",
+  "crates/bazhen-protocol/src/input.rs::reply":
+    "a step of has_keystrokes, which the input target fuzzes",
+  "crates/bazhen/src/attach/attachment.rs::Attachment::declared":
+    "reads whether an epoch was declared; parses nothing",
+  "crates/bazhen/src/attach/attachment.rs::Attachment::declare":
+    "hands the keys Attachment::keys held over, whole; parses nothing",
+  "crates/bazhen/src/attach/attachment.rs::Attachment::engage":
+    "asks for the lease when keys are held for it; reads no bytes",
+  "crates/bazhen/src/attach/attachment.rs::Attachment::resized":
+    "records the terminal's size and frames it; reads no bytes",
+  "crates/bazhen/src/attach/link.rs::drain":
+    "reads the daemon's frames through tungstenite, and their text through Attachment::frame, which the attach target fuzzes",
+  "crates/bazhen/src/attach/link.rs::act": "writes frames and keys this build made; reads nothing",
+  "crates/bazhen/src/attach/link.rs::pump":
+    "moves bytes between the daemon's socket and the person's terminal; tungstenite frames them, and Attachment::keys and frame, which the attach target fuzzes, read them",
+  "crates/bazhen/src/attach/tty.rs::Stops::fd":
+    "borrows the wake-up socket for poll; reads nothing",
+  "crates/bazhen/src/attach/tty.rs::Stops::drop":
+    "has a later stop signal end the process at once; reads nothing",
+  "crates/bazhen/src/attach/tty.rs::Wakeups::clear":
+    "discards signal wake-ups, whose bytes the handler wrote and which carry no content",
+  "crates/bazhen/src/attach/tty.rs::Wakeups::drop": "removes the signal handlers; reads nothing",
+  "crates/bazhen/src/attach/tty.rs::Wakeups::fd":
+    "borrows the wake-up socket for poll; reads nothing",
   "crates/bazhen-holder/src/signals.rs::Wakeups::clear":
     "discards signal wake-ups, whose bytes the handler wrote and which carry no content",
   "crates/bazhen-holder/src/signals.rs::Wakeups::drop": "removes the signal handler; reads nothing",

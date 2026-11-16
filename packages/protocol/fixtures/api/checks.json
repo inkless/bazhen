@@ -592,5 +592,155 @@
       "input": "  indented",
       "quoted": ">   indented"
     }
+  ],
+  "keystrokes": [
+    {
+      "input": "a",
+      "keystrokes": true
+    },
+    {
+      "input": "",
+      "keystrokes": false
+    },
+    {
+      "input": "\r",
+      "keystrokes": true
+    },
+    {
+      "input": "é",
+      "keystrokes": true
+    },
+    {
+      "input": "\u001b",
+      "keystrokes": true
+    },
+    {
+      "input": "\u001b[",
+      "keystrokes": true
+    },
+    {
+      "input": "\u001b[A",
+      "keystrokes": true
+    },
+    {
+      "input": "\u001b[1;2R",
+      "keystrokes": true
+    },
+    {
+      "input": "\u001b[I",
+      "keystrokes": false
+    },
+    {
+      "input": "\u001b[O",
+      "keystrokes": false
+    },
+    {
+      "input": "\u001b[I\u001b[O",
+      "keystrokes": false
+    },
+    {
+      "input": "\u001b[Ix",
+      "keystrokes": true
+    },
+    {
+      "input": "\u001b[<65;10;5M",
+      "keystrokes": false
+    },
+    {
+      "input": "\u001b[<0;10;5m",
+      "keystrokes": false
+    },
+    {
+      "input": "\u001b[96;10;5M",
+      "keystrokes": false
+    },
+    {
+      "input": "\u001b[Ma*%",
+      "keystrokes": false
+    },
+    {
+      "input": "\u001b[?62;22c",
+      "keystrokes": false
+    },
+    {
+      "input": "\u001b[>0;276;0c",
+      "keystrokes": false
+    },
+    {
+      "input": "\u001b[c",
+      "keystrokes": true
+    },
+    {
+      "input": "\u001b[0n",
+      "keystrokes": false
+    },
+    {
+      "input": "\u001b[?1;2R",
+      "keystrokes": false
+    },
+    {
+      "input": "\u001b[?2004;1$y",
+      "keystrokes": false
+    },
+    {
+      "input": "\u001b[2004;2$y",
+      "keystrokes": false
+    },
+    {
+      "input": "\u001b[8;24;80t",
+      "keystrokes": false
+    },
+    {
+      "input": "\u001bP1$r0m\u001b\\",
+      "keystrokes": false
+    },
+    {
+      "input": "\u001bP>|xterm(388)\u001b\\",
+      "keystrokes": false
+    },
+    {
+      "input": "\u001bP1$r0m",
+      "keystrokes": true
+    },
+    {
+      "input": "\u001bPabc\u001b\\",
+      "keystrokes": true
+    },
+    {
+      "input": "\u001bP1+r544e=787465726d\u001b\\",
+      "keystrokes": true
+    },
+    {
+      "input": "5M",
+      "keystrokes": true
+    },
+    {
+      "input": "\u001b]10;rgb:ffff/ffff/ffff\u001b\\",
+      "keystrokes": false
+    },
+    {
+      "input": "\u001b]4;1;rgb:cd/00/00\u0007",
+      "keystrokes": false
+    },
+    {
+      "input": "\u001b]11;rgb:00/00/00",
+      "keystrokes": true
+    },
+    {
+      "input": "\u001b[?62;22c\u001b[<0;1;1M\u001b[O",
+      "keystrokes": false
+    },
+    {
+      "input": "\u001b[?62;22cq",
+      "keystrokes": true
+    },
+    {
+      "input": "\u001b[200~\u001b[I\u001b[201~",
+      "keystrokes": true
+    },
+    {
+      "input": "\u001b[200~unended",
+      "keystrokes": true
+    }
   ]
 }

@@ -6,6 +6,7 @@ pub mod agents;
 pub mod daemon;
 pub mod id;
 pub mod ids;
+pub mod input;
 pub mod mail;
 pub mod names;
 pub mod notices;

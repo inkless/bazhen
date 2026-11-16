@@ -13,6 +13,12 @@ jiff = { workspace = true }
 rustix = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+signal-hook = { workspace = true }
+tungstenite = { workspace = true }
+
+[dev-dependencies]
+bazhen-test-signal = { workspace = true }
+proptest = { workspace = true }
 
 [lints]
 workspace = true

@@ -19,6 +19,7 @@ import {
   WaitMessagesResponse,
 } from "./mail.ts";
 import { DismissNoticeRequest, DismissNoticeResponse } from "./notices.ts";
+import { hasKeystrokes } from "./input.ts";
 import { isPlainRemote } from "./origins.ts";
 import { Role, RolesResponse } from "./roles.ts";
 import { STREAM_FRAME_MAX_BYTES, StreamClientFrame, StreamServerFrame } from "./stream.ts";
@@ -889,6 +890,48 @@ const DATETIME_INPUTS = [
   "",
 ];
 
+const E = "\x1b";
+/** A view's input as one byte per character: keys, replies, reports and pastes, alone and mixed. */
+const KEY_INPUTS = [
+  "a",
+  "",
+  "\r",
+  "\xe9",
+  E,
+  `${E}[`,
+  `${E}[A`,
+  `${E}[1;2R`,
+  `${E}[I`,
+  `${E}[O`,
+  `${E}[I${E}[O`,
+  `${E}[Ix`,
+  `${E}[<65;10;5M`,
+  `${E}[<0;10;5m`,
+  `${E}[96;10;5M`,
+  `${E}[Ma*%`,
+  `${E}[?62;22c`,
+  `${E}[>0;276;0c`,
+  `${E}[c`,
+  `${E}[0n`,
+  `${E}[?1;2R`,
+  `${E}[?2004;1$y`,
+  `${E}[2004;2$y`,
+  `${E}[8;24;80t`,
+  `${E}P1$r0m${E}\\`,
+  `${E}P>|xterm(388)${E}\\`,
+  `${E}P1$r0m`,
+  `${E}Pabc${E}\\`,
+  `${E}P1+r544e=787465726d${E}\\`,
+  "5M",
+  `${E}]10;rgb:ffff/ffff/ffff${E}\\`,
+  `${E}]4;1;rgb:cd/00/00\x07`,
+  `${E}]11;rgb:00/00/00`,
+  `${E}[?62;22c${E}[<0;1;1M${E}[O`,
+  `${E}[?62;22cq`,
+  `${E}[200~${E}[I${E}[201~`,
+  `${E}[200~unended`,
+];
+
 /** The checks a client makes before it asks the daemon, with the protocol's verdicts. */
 export function checkFixtures() {
   return {
@@ -912,6 +955,7 @@ export function checkFixtures() {
         : { input, ok: false },
     ),
     quoteNote: QUOTE_INPUTS.map((input) => ({ input, quoted: quoteNote(input) })),
+    keystrokes: KEY_INPUTS.map((input) => ({ input, keystrokes: hasKeystrokes(input) })),
   };
 }
 

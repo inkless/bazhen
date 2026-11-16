@@ -1206,3 +1206,33 @@ export class View {
     this.ws.close();
   }
 }
+
+/** `Ctrl-\` twice: what detaches. */
+export const DETACH = "\x1c\x1c";
+
+/**
+ * `bazhen attach <target>` in a terminal of its own, which util-linux's `script` gives it, sized
+ * as a person's would be: what it shows, keys to type into it, and how it exits.
+ */
+export function attachInScript(daemon: Daemon, target: string) {
+  const child = spawn(
+    "script",
+    ["-qfec", `stty cols 100 rows 30 && exec bazhen attach ${target}`, "/dev/null"],
+    { env: daemon.env, stdio: ["pipe", "pipe", "inherit"] },
+  );
+  let shown = "";
+  child.stdout.on("data", (chunk: Buffer) => (shown += chunk.toString("utf8")));
+  const exited = new Promise<number | null>((resolve) => child.once("exit", resolve));
+  return {
+    shown: () => shown,
+    /** Waits until it has shown `text`, saying what it showed instead if it never does. */
+    shows: (text: string, what: string) =>
+      waitUntil(() => shown.includes(text), what).catch((err: unknown) => {
+        throw new Error(`${String(err)}; it showed ${JSON.stringify(shown)}`);
+      }),
+    type: (keys: string) => child.stdin.write(keys),
+    exited,
+    /** Detaches, should a test have left it attached. */
+    leave: () => child.stdin.end(DETACH),
+  };
+}
