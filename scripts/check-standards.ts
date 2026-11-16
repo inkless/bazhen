@@ -1460,6 +1460,14 @@ export const DENY_CONFIG = [
   'multiple-versions = "deny"',
   'wildcards = "deny"',
   "allow-wildcard-paths = true",
+  "deny = [ " +
+    ["sysinfo", "psutil", "heim"]
+      .map(
+        (name) =>
+          `{ crate = "${name}", reason = "Process::kill signals any pid; signal through a chokepoint" }, `,
+      )
+      .join("") +
+    "]",
   "[sources]",
   'unknown-registry = "deny"',
   'unknown-git = "deny"',
@@ -1770,6 +1778,104 @@ export function metadataFailures(meta: CargoMetadata, paths: string[]): string[]
 }
 
 /**
+ * The crates a short-lived client must never build: an async runtime, the HTTP stack, SQLite. The
+ * CLI and the hook start on every call, and a crate both they and the daemon use passes on
+ * whatever it takes (docs/standards/rust.md § Crates).
+ */
+export const HEAVY_CRATES = [
+  "tokio",
+  "async-std",
+  "smol",
+  "hyper",
+  "axum",
+  "reqwest",
+  "rusqlite",
+  "libsqlite3-sys",
+  "sqlx",
+];
+
+// The members that may reach a crate in HEAVY_CRATES, each with why. A member that depends on
+// one of them reaches the heavy crate too, so it needs its own entry.
+const HEAVY_ALLOWED: Record<string, string> = {};
+
+/** Each package's dependencies, by name, as Cargo.lock records them. */
+export function lockGraph(lock: string): Map<string, string[]> {
+  const graph = new Map<string, string[]>();
+  for (const block of lock.split(/^\[\[package\]\]$/m).slice(1)) {
+    const name = /^name = "([^"]+)"$/m.exec(block)?.[1];
+    if (name === undefined) continue;
+    const list = /^dependencies = \[([^\]]*)\]/m.exec(block)?.[1] ?? "";
+    // An entry is `"name"`, or `"name version"` where two versions are locked.
+    const deps = [...list.matchAll(/"([^"\s]+)[^"]*"/g)].flatMap((m) => (m[1] ? [m[1]] : []));
+    graph.set(name, [...(graph.get(name) ?? []), ...deps]);
+  }
+  return graph;
+}
+
+/**
+ * Where a member reaches a crate in HEAVY_CRATES through what it builds, and isn't listed in
+ * `allowed`, each with the chain that gets there, and an entry of `allowed` that is stale. A
+ * member's own edges come from `cargo metadata`, so dev-dependencies, which only its tests build,
+ * don't count; past the first crate that isn't ours, from Cargo.lock.
+ */
+export function heavyDependencyFailures(
+  meta: CargoMetadata,
+  lock: string,
+  allowed: Record<string, string>,
+  heavy: readonly string[] = HEAVY_CRATES,
+): string[] {
+  const third = lockGraph(lock);
+  const members = new Map(
+    meta.packages.map((p) => [
+      p.name,
+      p.dependencies.filter((d) => d.kind === null).map((d) => d.name),
+    ]),
+  );
+  const edges = (name: string) => members.get(name) ?? third.get(name) ?? [];
+  const chains = (start: string) => {
+    const via = new Map<string, string>();
+    const queue = [start];
+    for (let name = queue.shift(); name !== undefined; name = queue.shift()) {
+      for (const next of edges(name)) {
+        if (next === start || via.has(next)) continue;
+        via.set(next, name);
+        queue.push(next);
+      }
+    }
+    const chain = (end: string) => {
+      const path = [end];
+      for (let at = via.get(end); at !== undefined; at = via.get(at)) path.unshift(at);
+      return path.join(" → ");
+    };
+    return heavy.filter((h) => via.has(h)).map(chain);
+  };
+  const out: string[] = [];
+  for (const name of members.keys()) {
+    const reached = chains(name);
+    if (Object.hasOwn(allowed, name)) {
+      if (reached.length === 0) {
+        out.push(
+          `scripts/check-standards.ts: HEAVY_ALLOWED lists ${name}, which reaches none of ` +
+            "HEAVY_CRATES; remove it.",
+        );
+      }
+      continue;
+    }
+    for (const chain of reached) {
+      out.push(
+        `${name}: builds ${chain}. The CLI, the hook and the crates they share start on every ` +
+          "call, so they take no async runtime, HTTP stack or SQLite; a crate that needs one goes " +
+          "in HEAVY_ALLOWED in scripts/check-standards.ts, with why (docs/standards/rust.md § Crates).",
+      );
+    }
+  }
+  for (const name of Object.keys(allowed).filter((n) => !members.has(n))) {
+    out.push(`scripts/check-standards.ts: HEAVY_ALLOWED lists missing ${name}.`);
+  }
+  return out;
+}
+
+/**
  * Why a member manifest gives a test target a harness of its own, which could run nothing, or
  * holds an escape: a quoted key can spell `harness` with escapes (`"\u0068arness"`) that no text
  * check reads as the word, so a member manifest has none.
@@ -1848,6 +1954,7 @@ export function rustFailures(
     macroModules?: Record<string, string>;
     fuzzed?: Record<string, string>;
     notDecoders?: Record<string, string>;
+    heavyAllowed?: Record<string, string>;
   } = {},
 ): string[] {
   const out: string[] = [];
@@ -1876,7 +1983,13 @@ export function rustFailures(
     out.push(...attributeFailures(file, read(file), unsafeModules));
     out.push(...macroFailures(file, read(file), options.macroModules ?? {}));
   }
-  if (options.metadata !== undefined) out.push(...metadataFailures(options.metadata, paths));
+  if (options.metadata !== undefined) {
+    out.push(...metadataFailures(options.metadata, paths));
+    if (paths.includes("Cargo.lock")) {
+      const lock = read("Cargo.lock");
+      out.push(...heavyDependencyFailures(options.metadata, lock, options.heavyAllowed ?? {}));
+    } else out.push("Cargo.lock is missing; the gates build with --locked.");
+  }
   for (const file of Object.keys(options.macroModules ?? {}).filter((f) => !paths.includes(f))) {
     out.push(`scripts/check-standards.ts: MACRO_MODULES lists missing ${file}.`);
   }
@@ -2000,6 +2113,7 @@ function checkRust(): void {
       macroModules: MACRO_MODULES,
       fuzzed: FUZZED_DECODERS,
       notDecoders: NOT_DECODERS,
+      heavyAllowed: HEAVY_ALLOWED,
     }),
   );
 }

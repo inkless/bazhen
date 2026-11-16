@@ -40,7 +40,8 @@ export const SIGNAL_CHOKEPOINTS: Readonly<Record<string, string>> = {
 export function chokepointFor(file: string, inTest = false): string {
   if (inTest || /^crates\/[^/]+\/tests\//.test(file))
     return "bazhen_test_signal (crates/bazhen-test-signal)";
-  if (file.endsWith(".rs")) return "crates/bazhen-holder/src/guard.rs";
+  if (file.startsWith("crates/bazhen-holder/src/")) return "crates/bazhen-holder/src/guard.rs";
+  if (file.endsWith(".rs")) return "crates/bazhen-host-guard (docs/standards/rust.md § Signals)";
   return "@bazhen/host-guard (packages/host-guard/src/signal.ts)";
 }
 
@@ -49,6 +50,10 @@ export function chokepointFor(file: string, inTest = false): string {
 // A `use` of nix's or libc's `kill` inside braces counts as one, and so do the raw syscalls.
 const RUST_RAW =
   /\b(?:kill_process|kill_process_group|kill_current_process_group|pidfd_send_signal|killpg|sigqueue|SYS_kill|SYS_tkill|SYS_tgkill|SYS_pidfd_send_signal|SYS_rt_sigqueueinfo)\b|\b(?:libc|signal)\s*::\s*kill\b|\buse\s+(?:nix\s*::\s*sys\s*::\s*signal|libc)\s*::\s*\{[^}]*\bkill\b[^}]*\}/g;
+// A glob import of libc or nix's signal module brings in a bare `kill`, and a renamed one turns
+// `libc::kill` into `c::kill`; neither then names what RUST_RAW reads, so each counts as a call.
+const RUST_HIDDEN =
+  /\buse\s+(?:::\s*)?(?:libc|nix\s*::\s*sys\s*::\s*signal)\s*::\s*(?:\*|\{[^}]*\*[^}]*\})|\buse\s+(?:::\s*)?(?:libc|nix(?:\s*::\s*sys(?:\s*::\s*signal)?)?)(?:\s+as\b|\s*::\s*\{[^}]*\b(?:self|sys|signal)\s+as\b[^}]*\})|\bextern\s+crate\s+(?:libc|nix)\s+as\b/g;
 const TS_KILL = /\bprocess\s*\??\.\s*kill\b/g;
 const TS_KILL_COMPUTED = /\bprocess\s*\??\.?\s*\[\s*["'`]kill["'`]\s*\]/g;
 const TS_KILL_BOUND = /\{[^}]*\bkill\b[^}]*\}\s*=\s*(?:globalThis\s*\.\s*)?process\b/g;
@@ -488,7 +493,11 @@ export function rawSignalCalls(file: string, text: string): { line: number; call
       cooked: raw[n],
     }));
     const spans = allowedKills(file, code);
-    return [...found(code, RUST_RAW), ...kills(literals, code).filter(outside(spans))]
+    return [
+      ...found(code, RUST_RAW),
+      ...found(code, RUST_HIDDEN),
+      ...kills(literals, code).filter(outside(spans)),
+    ]
       .toSorted((a, b) => a.index - b.index)
       .map(({ line, call }) => ({ line, call }));
   }

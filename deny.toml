@@ -28,6 +28,13 @@ multiple-versions = "deny"
 wildcards = "deny"
 # Our own crates depend on each other by path, which cargo-deny reads as a wildcard.
 allow-wildcard-paths = true
+# Crates that signal any pid through a method (`Process::kill`), which the chokepoint scan can't
+# tell from a child's own kill: docs/standards/rust.md § Signals.
+deny = [
+  { crate = "sysinfo", reason = "Process::kill signals any pid; signal through a chokepoint" },
+  { crate = "psutil", reason = "Process::kill signals any pid; signal through a chokepoint" },
+  { crate = "heim", reason = "Process::kill signals any pid; signal through a chokepoint" },
+]
 
 [sources]
 unknown-registry = "deny"

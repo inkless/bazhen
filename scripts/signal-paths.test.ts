@@ -24,6 +24,24 @@ describe("raw signal calls in Rust", () => {
     ]);
   });
 
+  it("finds a glob or renamed import of libc or nix's signal module, and no other", () => {
+    const source = [
+      "use libc::*;",
+      "use std::io::*;",
+      "use ::nix::sys::signal::{self, *};",
+      "use nix::unistd::*;",
+      "use libc as c;",
+      "use tokio::signal as ts;",
+      "pub(crate) use nix::sys::signal as s;",
+      "use rustix::process as p;",
+      "use nix::{sys::signal as sig, unistd};",
+      "use libc_print::*;",
+      "use nix::sys::signal::{self as s2};",
+      "extern crate libc as c2;",
+    ].join("\n");
+    expect(rawSignalCalls("a.rs", source).map((c) => c.line)).toEqual([1, 3, 5, 7, 9, 11, 12]);
+  });
+
   it("gives the line each is on", () => {
     expect(rawSignalCalls("a.rs", "fn f() {}\n\nkill_process(p, s);")).toEqual([
       { line: 3, call: "kill_process" },

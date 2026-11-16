@@ -23,6 +23,8 @@ import {
   harnessFailures,
   macroFailures,
   metadataFailures,
+  heavyDependencyFailures,
+  lockGraph,
   type CargoMetadata,
   rootManifestFailures,
   offTokenLines,
@@ -470,6 +472,93 @@ describe("metadataFailures", () => {
     ).toEqual([
       expect.stringContaining("crates/x/Cargo.toml: isn't a member of the root workspace"),
       expect.stringContaining("crates/a/tests/t.rs: is where Cargo looks for a target"),
+    ]);
+  });
+});
+
+const local = (name: string) => ({ name, req: "*", kind: null, path: `${ROOT}crates/${name}` });
+const dep = (name: string, kind: string | null = null) => ({ name, req: "=1.0.0", kind });
+
+describe("heavyDependencyFailures", () => {
+  const lock = [
+    "version = 4",
+    "",
+    "[[package]]",
+    'name = "axum"',
+    'version = "1.0.0"',
+    "dependencies = [",
+    ' "hyper",',
+    ' "tokio 1.0.0",',
+    "]",
+    "",
+    "[[package]]",
+    'name = "tokio"',
+    'version = "1.0.0"',
+    "",
+    "[[package]]",
+    'name = "hyper"',
+    'version = "1.0.0"',
+    "",
+    "[[package]]",
+    'name = "cli"',
+    'version = "0.1.0"',
+    "dependencies = [",
+    ' "proptest",',
+    ' "tokio",',
+    "]",
+  ].join("\n");
+  const workspace = meta(
+    pkg("cli", [], [local("client"), dep("tokio", "dev")]),
+    pkg("client", [], [dep("serde")]),
+    pkg("daemon", [], [local("client"), dep("axum")]),
+    pkg("tool", [], [local("daemon")]),
+  );
+
+  it("reads each package's dependencies from Cargo.lock, a versioned entry by its name", () => {
+    expect(lockGraph(lock).get("axum")).toEqual(["hyper", "tokio"]);
+    expect(lockGraph(lock).get("tokio")).toEqual([]);
+  });
+
+  it("names each heavy crate a member builds, with the chain, through ours and theirs", () => {
+    expect(heavyDependencyFailures(workspace, lock, {}, ["tokio", "axum"])).toEqual([
+      expect.stringMatching(/^daemon: builds daemon → axum → tokio\. /),
+      expect.stringMatching(/^daemon: builds daemon → axum\. /),
+      expect.stringMatching(/^tool: builds tool → daemon → axum → tokio\. /),
+      expect.stringMatching(/^tool: builds tool → daemon → axum\. /),
+    ]);
+  });
+
+  it("passes a listed member, but not one that depends on it, nor a dev-dependency's reach", () => {
+    expect(heavyDependencyFailures(workspace, lock, { daemon: "the daemon" }, ["tokio"])).toEqual([
+      expect.stringMatching(/^tool: builds tool → daemon → axum → tokio\. .*HEAVY_ALLOWED/),
+    ]);
+  });
+
+  const viaRustChecks = (paths: string[]) =>
+    rustFailures(paths, (f) => (f === "Cargo.lock" ? lock : ""), {}, { metadata: workspace })
+      .filter((f) => / builds |Cargo\.lock/.test(f))
+      .map((f) => f.split(". ")[0]);
+
+  it("is part of the Rust checks, which refuse a workspace with no Cargo.lock to read", () => {
+    expect(viaRustChecks(["Cargo.lock"])).toEqual([
+      "daemon: builds daemon → axum → tokio",
+      "daemon: builds daemon → axum → hyper",
+      "daemon: builds daemon → axum",
+      "tool: builds tool → daemon → axum → tokio",
+      "tool: builds tool → daemon → axum → hyper",
+      "tool: builds tool → daemon → axum",
+    ]);
+    expect(viaRustChecks([])).toEqual(["Cargo.lock is missing; the gates build with --locked."]);
+  });
+
+  it("names a listed member that reaches no heavy crate, or isn't a member", () => {
+    expect(
+      heavyDependencyFailures(workspace, lock, { daemon: "", tool: "", client: "", gone: "" }, [
+        "tokio",
+      ]),
+    ).toEqual([
+      "scripts/check-standards.ts: HEAVY_ALLOWED lists client, which reaches none of HEAVY_CRATES; remove it.",
+      "scripts/check-standards.ts: HEAVY_ALLOWED lists missing gone.",
     ]);
   });
 });
@@ -1475,6 +1564,22 @@ describe("the signal chokepoints", () => {
       ),
       expect.stringMatching(/^crates\/bazhen-holder\/src\/b\.rs:1: .*killpg.*src\/guard\.rs/),
       expect.stringMatching(/^scripts\/c\.ts:1: .*process\.kill.*@bazhen\/host-guard/),
+    ]);
+  });
+
+  it("sends a raw call in a crate other than the holder to the host-guard crate", () => {
+    expect(
+      failures({
+        "crates/bazhen-cli/src/main.rs": "use libc::*;\nfn f() {}",
+        "crates/bazhen-holder-engine/src/a.rs": "nix::sys::signal::kill(pid, None);",
+      }),
+    ).toEqual([
+      expect.stringMatching(
+        /^crates\/bazhen-cli\/src\/main\.rs:1: .*use libc::\*.*bazhen-host-guard/,
+      ),
+      expect.stringMatching(
+        /^crates\/bazhen-holder-engine\/src\/a\.rs:1: .*signal::kill.*bazhen-host-guard/,
+      ),
     ]);
   });
 
