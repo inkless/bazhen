@@ -148,6 +148,34 @@ fn shown(master: &OwnedFd, quiet: Duration) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// Everything the attach writes to its terminal until the terminal closes, read as it comes on a
+/// thread of its own: macOS drops what is left unread once the attach's end closes.
+fn read_until_closed(master: &OwnedFd) -> Res<thread::JoinHandle<String>> {
+    let master = master.try_clone()?;
+    let bound = rustix::event::Timespec {
+        tv_sec: i64::try_from(BOUND.as_secs())?,
+        tv_nsec: 0,
+    };
+    Ok(thread::spawn(move || {
+        let mut out = Vec::new();
+        let mut chunk = [0u8; 4096];
+        loop {
+            let mut fds = [rustix::event::PollFd::new(
+                &master,
+                rustix::event::PollFlags::IN,
+            )];
+            if !matches!(rustix::event::poll(&mut fds, Some(&bound)), Ok(1..)) {
+                break;
+            }
+            match rustix::io::read(&master, &mut chunk) {
+                Ok(n @ 1..) => out.extend(chunk.iter().take(n)),
+                _ => break,
+            }
+        }
+        String::from_utf8_lossy(&out).into_owned()
+    }))
+}
+
 /// How `child` exited, if it did within BOUND; it is killed otherwise.
 fn exited_within_bound(child: Child) -> Res<Option<i32>> {
     let (tell, exited) = mpsc::channel();
@@ -248,9 +276,10 @@ fn a_first_request_to_stop_ends_an_idle_attach_cleanly_saying_so() {
         "the attach never showed the daemon's frame: {}",
         ended(s)
     );
+    let reading = read_until_closed(&s.master).unwrap();
     bazhen_test_signal::signal(s.child.id(), Signal::TERM).unwrap();
     let code = exited_within_bound(s.child).unwrap();
-    let said = shown(&s.master, Duration::from_millis(200));
+    let said = reading.join().unwrap();
     s.finish.send(()).unwrap();
     s.daemon.join().unwrap().unwrap();
     drop(s.home);
