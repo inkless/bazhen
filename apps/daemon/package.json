@@ -22,6 +22,7 @@
     "@bazhen/harness-codex": "workspace:*",
     "@bazhen/host-guard": "workspace:*",
     "@bazhen/protocol": "workspace:*",
+    "@bazhen/runtime-holder": "workspace:*",
     "@bazhen/runtime-tmux": "workspace:*",
     "@hono/node-server": "2.1.5",
     "@xterm/addon-serialize": "0.14.0",

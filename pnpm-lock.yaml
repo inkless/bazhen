@@ -238,6 +238,9 @@ importers:
       '@bazhen/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      '@bazhen/runtime-holder':
+        specifier: workspace:*
+        version: link:../../packages/runtime-holder
       '@bazhen/runtime-tmux':
         specifier: workspace:*
         version: link:../../packages/runtime-tmux

@@ -28,7 +28,7 @@ client. Agents, tasks, and orchestration come later.
 | `pnpm test`                      | Small tests                                                                                                             |
 | `pnpm test:real [suite…]`        | The tests that run real tmux, in a throwaway Linux container: integration, api, e2e                                     |
 | `pnpm test:falsify`              | Run the branch's new tests against the base's source, Rust ones against mutants of the change; CI runs it on PRs        |
-| `pnpm build`                     | Compile packages to `dist/` and build the web bundle, which the daemon serves at `http://127.0.0.1:7900`                |
+| `pnpm build`                     | Compile packages to `dist/`, build the web bundle, which the daemon serves at `http://127.0.0.1:7900`, and the holder   |
 | `pnpm format`                    | Rewrite files with oxfmt and rustfmt                                                                                    |
 
 Contributing, for people and agents: [AGENTS.md](AGENTS.md) and [docs/standards/](docs/standards/).

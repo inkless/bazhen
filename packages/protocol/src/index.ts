@@ -111,6 +111,26 @@ export const DoctorResponse = z.object({
       refusing: z.enum(["budget", "host"]).nullable(),
     })
     .optional(),
+  /**
+   * The holder build new terminals run, named by its hash, or null for none built; and for each
+   * holder that answers, the build it runs, null where it can't be told, and the holder/1
+   * versions it speaks (design §4.7). Absent before 1.47.
+   */
+  holder: z
+    .object({
+      binary: z.string().nullable(),
+      build: z.string().nullable(),
+      /** Why no build is installed, when none is. */
+      reason: z.string().nullable(),
+      holders: z.array(
+        z.object({
+          terminalId: z.string(),
+          build: z.string().nullable(),
+          protocol: z.array(z.string()),
+        }),
+      ),
+    })
+    .optional(),
   env: z.object({
     capturedAt: z.string(),
     /** Captured when the daemon started, or by the latest `bazhen env refresh`. */

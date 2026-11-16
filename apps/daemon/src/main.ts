@@ -10,6 +10,7 @@ import { CodexHarness, DAEMON_START_ARGS } from "@bazhen/harness-codex";
 import { filterEnv } from "@bazhen/core";
 import { TmuxServer, findNotifySend, hostPtyReader } from "@bazhen/host-guard";
 import { PROTOCOL_VERSION } from "@bazhen/protocol";
+import { HolderRuntime, installHolder, pruneUnusedHolders } from "@bazhen/runtime-holder";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
 import { launchAgent, launchSettled, localEnvironmentId } from "./agents/launch.ts";
 import { Lifecycle } from "./agents/lifecycle.ts";
@@ -34,6 +35,7 @@ import { CodexThreads, paneTitleCommand } from "./codex/threads.ts";
 import { retire } from "./events/retention.ts";
 import { eventRoute } from "./events/server.ts";
 import { TerminalHub } from "./stream/hub.ts";
+import { HOLDER_SOURCE, holderDoctor } from "./terminals/holder.ts";
 import { endOpenAttachments, storeLog } from "./stream/log.ts";
 import { ShellLifecycle } from "./shells/lifecycle.ts";
 import { reconcileShells } from "./shells/reconcile.ts";
@@ -174,6 +176,30 @@ approvals.closeAbandoned();
 const hookRunner = hookClient();
 if (hookRunner === HOOK_SCRIPT) console.warn(`bazhen-hook is not built; hooks use ${HOOK_SCRIPT}`);
 const hookPath = stableHookClient(join(paths.state, "hook"), hookRunner, inputs.uid);
+// Installed once, at start: a holder built later reaches new terminals from the next start.
+const holderDir = join(paths.state, "holder");
+const holderInstall = await installHolder({
+  source: HOLDER_SOURCE,
+  dir: holderDir,
+  uid: inputs.uid,
+});
+if (holderInstall.installed === null) console.warn(`no holder: ${holderInstall.reason}`);
+void pruneUnusedHolders(holderDir, inputs.uid, holderInstall).then(
+  (removed) => {
+    if (removed.length > 0)
+      console.log(`removed holder builds no process runs: ${removed.join(", ")}`);
+  },
+  (err: unknown) => console.warn(`holder builds weren't pruned: ${String(err)}`),
+);
+const holderRuntime =
+  holderInstall.installed === null
+    ? null
+    : new HolderRuntime({
+        root: paths.run,
+        binary: holderInstall.installed.binary,
+        installDir: holderInstall.installed.installDir,
+        env: hostEnv,
+      });
 
 /**
  * With `shells.retype_last_command` on, what new shells report their lines through. Turned off,
@@ -526,6 +552,7 @@ const socketListener = getRequestListener(
         protocolVersion: PROTOCOL_VERSION,
         runtime: { state: runtimeHealth.state, version: runtimeHealth.version },
         hookClient: { path: hookRunner, fallback: hookRunner === HOOK_SCRIPT },
+        holder: await holderDoctor(holderInstall, holderRuntime),
         config: configFile,
         agents: {
           shell: config.loginShell === undefined ? "direct" : "login",

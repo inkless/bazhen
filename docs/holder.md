@@ -4,6 +4,26 @@ A holder (`bazhen-holder`) is the process that keeps one terminal: its PTY, its 
 stretch of its output, and a terminal engine that holds its screen and history. There is one per
 terminal, and each outlives the daemon.
 
+## Installing and upgrading
+
+`pnpm build` and `pnpm dev` build the holder with the `release-holder` profile, into
+`target/release-holder/bazhen-holder`. At start, the daemon copies it into Bazhen's state
+directory, at `holder/<build>/bazhen-holder`, where `<build>` is the first 16 hex digits of the
+binary's SHA-256. New terminals run that copy. Nothing writes to it again, so `cargo build` and
+`cargo clean` never touch a binary a holder runs.
+
+After a rebuild, the next daemon start installs the new build beside the old one. Terminals
+opened from then on run the new build. Terminals already open keep the build they started on
+until they close, and `bazhen doctor` marks them as on an older build. At each start, the daemon
+removes the builds no process of yours runs, once they are ten minutes old. It removes nothing
+when `ps` can't say what runs: when it fails, when it doesn't list the daemon itself, or when
+the state directory's path isn't printable ASCII, which `ps` doesn't print as it is. Under such
+a path, old builds stay until you remove them.
+
+The daemon refuses to install into a `holder` directory that is a symlink, belongs to another
+user, or that others may write. Then no build is installed, holder terminals can't be created,
+and `bazhen doctor` says why.
+
 ## What closing a terminal ends
 
 Each terminal runs in a holder process, `bazhen-holder`, which starts the terminal's program as

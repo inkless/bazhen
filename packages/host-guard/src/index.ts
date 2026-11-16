@@ -19,14 +19,17 @@ export {
   type ServerVerdict,
 } from "./tmux.ts";
 export {
+  HOLDER_BUILD,
   HOLDER_COMMAND,
   HOLDER_READY_MS,
   HOLDER_SOCKET_MAX_BYTES,
   HOLDER_SPEC_MAX_BYTES,
   HolderStartFailed,
+  holderBuildOf,
   holderSocket,
   holderSocketRefusal,
   holdersDir,
+  installedHolder,
   rebindHolderSocket,
   startHolder,
   UNKNOWN_START,

@@ -145,9 +145,12 @@ export async function spawnHolder(
     theme,
     sandboxed = inSignalSandbox(),
     bareHolder = false,
+    binary = HOLDER_BINARY,
   }: {
     readonly theme?: HolderTheme;
     readonly sandboxed?: boolean;
+    /** The holder binary, by absolute path: the one Cargo built, unless installed elsewhere. */
+    readonly binary?: string;
     /** Start the holder itself with no environment at all, as the daemon does. */
     readonly bareHolder?: boolean;
   } = {},
@@ -164,7 +167,7 @@ export async function spawnHolder(
     ...(theme === undefined ? {} : { theme }),
   };
   return startRecorded({
-    binary: HOLDER_BINARY,
+    binary,
     root: runDir(testHome()),
     spec,
     env: bareHolder ? {} : requireHolderEnv(holderEnv()),
