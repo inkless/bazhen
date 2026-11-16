@@ -369,6 +369,11 @@ export interface RuntimeAdapter {
 
 /** The PTY seam: the only place a PTY library is named. */
 export interface PtyProcess {
+  /**
+   * The path of the PTY's terminal device. No other PTY can have it while this one's master is
+   * open anywhere.
+   */
+  readonly tty: string;
   onData(cb: (bytes: Uint8Array) => void): void;
   onExit(cb: (code: number) => void): void;
   write(bytes: Uint8Array): void;

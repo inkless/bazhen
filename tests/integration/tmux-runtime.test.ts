@@ -1,3 +1,5 @@
+import { spawn } from "node:child_process";
+import { readdirSync, readFileSync, readlinkSync } from "node:fs";
 import { afterAll, describe, expect, it } from "vitest";
 import type { TerminalTags } from "@bazhen/core";
 import { filterEnv, newId } from "@bazhen/core";
@@ -47,6 +49,37 @@ const pasteBuffers = () =>
     .split("\n")
     .filter((name) => name.startsWith("bazhen-paste-"));
 
+/** Each tmux client of `session`, by its pid and its terminal device. */
+const clientsOf = (session: string) =>
+  tmuxOut(server, "list-clients", "-t", session, "-F", "#{client_pid} #{client_tty}")
+    .split("\n")
+    .filter((line) => line !== "")
+    .map((line) => {
+      const [pid = "", tty = ""] = line.split(" ");
+      return { pid: Number(pid), tty };
+    });
+
+function soleClientOf(session: string) {
+  const [client, ...others] = clientsOf(session);
+  if (client === undefined || others.length > 0) throw new Error(`not one client: ${session}`);
+  return client;
+}
+
+/** The pts numbers of the PTY masters `pid` holds, read from its fds' info. */
+function mastersHeldBy(pid: number): number[] {
+  return readdirSync(`/proc/${pid}/fd`).flatMap((fd) => {
+    try {
+      if (!readlinkSync(`/proc/${pid}/fd/${fd}`).endsWith("ptmx")) return [];
+      const index = /^tty-index:\s+(\d+)$/m.exec(readFileSync(`/proc/${pid}/fdinfo/${fd}`, "utf8"));
+      return index === null ? [] : [Number(index[1])];
+    } catch {
+      return [];
+    }
+  });
+}
+
+const ptsNumber = (tty: string) => Number(/^\/dev\/pts\/(\d+)$/.exec(tty)?.[1]);
+
 const screen = (session: string | undefined) =>
   tmuxOut(server, "capture-pane", "-p", "-t", `${String(session)}:0`);
 
@@ -94,6 +127,41 @@ describe("tmux runtime on a private server", () => {
       ).trim(),
     ).toBe(String(HISTORY_LINES));
   });
+
+  // A child_process child inherits every PTY master this process holds, as node-pty's next attach
+  // client can: closing the stream's own copy of the master then hangs nobody up.
+  it.runIf(process.platform === "linux")(
+    "detaches a closed stream's client while another process holds its PTY's master, and only it",
+    async () => {
+      const ref = await runtime.create(spec(["sleep", "300"]));
+      const session = String(ref.locator.session);
+      const closing = await runtime.attach(ref, null);
+      await expect.poll(() => clientsOf(session)).toHaveLength(1);
+      const leaving = soleClientOf(session);
+      const holder = spawn("sh", ["-c", "read line"], { stdio: ["pipe", "ignore", "ignore"] });
+      const ended = new Promise((resolve) => holder.on("exit", resolve));
+      try {
+        expect(mastersHeldBy(Number(holder.pid))).toContain(ptsNumber(leaving.tty));
+        const kept = await runtime.attach(ref, null);
+        await expect.poll(() => clientsOf(session)).toHaveLength(2);
+        const keptTty = clientsOf(session).find(({ tty }) => tty !== leaving.tty)?.tty;
+        closing.stream.close();
+        await expect
+          .poll(() => clientsOf(session).map(({ tty }) => tty), { timeout: 5_000 })
+          .toEqual([keptTty]);
+        // Its terminal device stays its own while the holder keeps the master open: a new client
+        // can't be given that name, so detaching by it can't reach another client.
+        const next = await runtime.attach(ref, null);
+        await expect.poll(() => clientsOf(session)).toHaveLength(2);
+        expect(clientsOf(session).map(({ tty }) => tty)).not.toContain(leaving.tty);
+        kept.stream.close();
+        next.stream.close();
+      } finally {
+        holder.stdin.end();
+        await ended;
+      }
+    },
+  );
 
   it("attaches with the whole of a history longer than a megabyte", async () => {
     const wide = {

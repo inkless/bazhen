@@ -29,6 +29,15 @@ const method = (target: object, name: (typeof RELIED_ON)[number]) => {
   return found;
 };
 
+/** Whether `target` has node-pty's `ptsName` getter, which its typings leave out. */
+function hasPtsName(target: object): boolean {
+  for (let at: object | null = target; at !== null; at = Reflect.getPrototypeOf(at)) {
+    const found = Reflect.getOwnPropertyDescriptor(at, "ptsName");
+    if (found !== undefined) return typeof found.get === "function";
+  }
+  return false;
+}
+
 /**
  * Makes `proc` one that can be hung up without a signal, and returns its hang-up.
  *
@@ -48,10 +57,12 @@ function disarm(proc: IPty): () => void {
 
 /**
  * The PTY seam over a node-pty `spawn` whose terminals have `terminal` as their prototype. A
- * prototype without what the hang-up relies on is refused here, before any child is started.
+ * prototype without what the hang-up relies on, or without the terminal device's name, is refused
+ * here, before any child is started.
  */
 export function ptySpawner(spawn: PtySpawn, terminal: object): PtySpawner {
   for (const name of RELIED_ON) method(terminal, name);
+  if (!hasPtsName(terminal)) throw new TypeError("node-pty's terminal has no ptsName");
   return {
     spawn(argv, size, env): PtyProcess {
       const [file, ...args] = argv;
@@ -63,6 +74,11 @@ export function ptySpawner(spawn: PtySpawn, terminal: object): PtySpawner {
         encoding: null,
       });
       const hangUp = disarm(proc);
+      const tty: unknown = Reflect.get(proc, "ptsName");
+      if (typeof tty !== "string" || tty === "") {
+        hangUp();
+        throw new TypeError("node-pty's terminal names no terminal device");
+      }
       // node-pty resizes by its fd's number even once the master is closed, when that number may
       // be another file's. At the child's end of file it closes the master before it reports the
       // exit, and says so by its own `close`.
@@ -73,6 +89,7 @@ export function ptySpawner(spawn: PtySpawn, terminal: object): PtySpawner {
       proc.onExit(end);
       Reflect.apply(method(proc, "on"), proc, ["close", end]);
       return {
+        tty,
         onData: (cb) => {
           proc.onData((d: string | Buffer) => cb(typeof d === "string" ? Buffer.from(d) : d));
         },
