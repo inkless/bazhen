@@ -3,6 +3,7 @@ import { AgentName, AgentRef } from "./agent-name.ts";
 import { hasLoneSurrogate } from "./holder.ts";
 import { HarnessId, Id, IdempotencyKey } from "./ids.ts";
 import { Role } from "./roles.ts";
+import { SendMessageRequest } from "./mail.ts";
 import { INVISIBLE, showable, TAG_CHARACTERS } from "./text.ts";
 
 export const TaskState = z.enum(["open", "done", "cancelled"]);
@@ -31,6 +32,21 @@ export type AssignmentEndReason = z.infer<typeof AssignmentEndReason>;
 /** The instructions an assignee is mailed, so no longer than a message may be. */
 export const TaskBrief = z.string().min(1).max(20_000);
 export const TaskTitle = z.string().trim().min(1).max(200);
+
+/**
+ * A title a request gives a task (protocol 1.45). Mail puts it on a line of its own, so it holds
+ * no control character, bidirectional override or character that draws as nothing, which could
+ * end that line or pass for another. Only requests are held to it: a title stored before keeps
+ * loading as `TaskTitle`.
+ */
+export const NewTaskTitle = TaskTitle.refine(
+  (title) =>
+    showable(title) &&
+    !hasLoneSurrogate(title) &&
+    !INVISIBLE.test(title) &&
+    !TAG_CHARACTERS.test(title),
+  { message: "a title can't hold control characters, bidirectional overrides or invisible ones" },
+);
 
 /** A task as the state snapshot shows it: without its brief or note, which only its own read has. */
 export const Task = z.object({
@@ -154,7 +170,7 @@ const Grant = z.object({ agentId: AgentRef, role: Role });
 /** `POST /v1/tasks`. Assigning in the same request mails the brief, or refuses the whole create. */
 export const CreateTaskRequest = z.object({
   idempotencyKey: IdempotencyKey,
-  title: TaskTitle,
+  title: NewTaskTitle,
   brief: TaskBrief,
   parentTaskId: Id("task").optional(),
   assign: Grant.optional(),
@@ -227,7 +243,7 @@ export const DelegateTaskRequest = z
       })
       .optional(),
     role: Role.default("worker"),
-    title: TaskTitle,
+    title: NewTaskTitle,
     brief: TaskBrief,
   })
   .refine((r) => (r.agentId === undefined) !== (r.launch === undefined), {
@@ -248,3 +264,18 @@ export type EscalateRequest = z.infer<typeof EscalateRequest>;
 
 export const EscalateResponse = z.object({ attentionId: Id("attn") });
 export type EscalateResponse = z.infer<typeof EscalateResponse>;
+
+/**
+ * `POST /v1/tasks/:id/messages`: one message to each of the task's active assignees but the
+ * sender, as the sender's own send to each would be (protocol 1.45).
+ */
+export const BroadcastMessageRequest = SendMessageRequest;
+export type BroadcastMessageRequest = z.infer<typeof BroadcastMessageRequest>;
+
+export const BroadcastMessageResponse = z.object({
+  sent: z.array(z.object({ agentId: Id("agent"), messageId: Id("msg") })),
+  /** Assignees that take no mail now, as one closing or a Codex agent with no thread. */
+  skipped: z.array(z.object({ agentId: Id("agent"), reason: z.string() })),
+  eventIds: z.array(z.number().int().positive()),
+});
+export type BroadcastMessageResponse = z.infer<typeof BroadcastMessageResponse>;

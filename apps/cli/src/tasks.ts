@@ -8,21 +8,26 @@ import {
   AgentName,
   AgentRef,
   AssignTaskResponse,
+  BroadcastMessageResponse,
   CreateTaskResponse,
   HarnessId,
   EscalateResponse,
   Id,
+  MESSAGE_WAIT_MAX_MS,
   Role,
   RolesResponse,
   SendMessageResponse,
+  SETTLED,
   StateSnapshot,
   TaskCommandResponse,
   TaskDetail,
   TaskNoteText,
   quoteNote,
   type FleetAgent,
+  WaitMessagesResponse,
   type Agent,
   type Assignment,
+  type MailboxState,
   type Task,
   type TaskNote,
 } from "@bazhen/protocol";
@@ -42,9 +47,11 @@ export const TASK_USAGE = `usage:
   bazhen task cancel <task> [--note <text>] [--cascade]
   bazhen task note [<task>] <text> [--handoff]
   bazhen escalate <question> [--task <task>]
-  bazhen send <agent> (<text> | --file <path>)
+  bazhen send (<agent> | --task <task>) (<text> | --file <path>) [--wait [--timeout <seconds>]]
   bazhen delegate (<agent> | --launch claude-code|codex [--dir <dir>] [--name <name>]) --title <title> (--brief <text> | --brief-file <path>) [--task <task>] [--role <role>]
-<agent> is an agent's name or id, and <role> one of the roles bazhen roles lists.`;
+<agent> is an agent's name or id, and <role> one of the roles bazhen roles lists. send --wait
+exits 0 once the agent has the message in a prompt (a turn cut short may still get it again), 4
+if it bounced, and 5 if it is still on its way when the timeout (60 s unless given) runs out.`;
 
 /** A command line that doesn't say what to do; the message says why. */
 export class Usage extends Error {}
@@ -74,11 +81,34 @@ export interface Context {
  */
 export interface Verb {
   readonly call: Call<unknown>;
-  readonly answer: (reply: unknown) => string | Verb;
+  readonly answer: (reply: unknown) => Answer;
+  /** What has happened already, said before the call, which may fail or take long. */
+  readonly progress?: string;
 }
 
+/** What a verb prints when the exit status says more than that it ran. */
+export interface Exit {
+  readonly text: string;
+  readonly code: number;
+}
+
+/** What a verb's answer leads to: lines to print, lines with an exit status, or the next call. */
+export type Answer = string | Exit | Verb;
+
+export const isVerb = (answer: Answer): answer is Verb =>
+  typeof answer !== "string" && "call" in answer;
+
+/** `send --wait`'s exit status, as `triage send --wait` gives it. */
+export const LANDED = 0;
+export const BOUNCED = 4;
+export const QUEUED = 5;
+
+const DEFAULT_WAIT_S = 60;
+/** How much longer than the daemon may hold a wait the CLI gives the call to come back. */
+const WAIT_MARGIN_MS = 5000;
+
 /** A verb whose answer is checked against the call's reply schema before `then` reads it. */
-function verb<T>(call: Call<T>, then: (reply: T) => string | Verb): Verb {
+function verb<T>(call: Call<T>, then: (reply: T) => Answer): Verb {
   return {
     call,
     answer: (reply) => {
@@ -107,29 +137,41 @@ const OPTIONS = {
   home: { type: "string" },
   port: { type: "string" },
   json: { type: "boolean" },
+  wait: { type: "boolean" },
+  timeout: { type: "string" },
   handoff: { type: "boolean" },
 } as const;
 
 /** The command line's words and options; a malformed one is a Usage, not a crash. */
 function parse(argv: readonly string[]) {
   try {
-    return parseArgs({ args: [...argv], options: OPTIONS, allowPositionals: true });
+    return parseArgs({ args: [...argv], options: OPTIONS, allowPositionals: true, tokens: true });
   } catch (err) {
     if (err instanceof TypeError) throw new Usage(err.message, { cause: err });
     throw err;
   }
 }
 
-/** The options `send` and `task note` take beside their text; `--home` and `--port` are every verb's. */
-const SEND_OPTIONS: ReadonlySet<string> = new Set(["file", "home", "port"]);
+/** The options `send` and `task note` take, beside their text; `--home` and `--port` are every verb's. */
+const SEND_OPTIONS: ReadonlySet<string> = new Set([
+  "file",
+  "task",
+  "wait",
+  "timeout",
+  "home",
+  "port",
+]);
 const NOTE_OPTIONS: ReadonlySet<string> = new Set(["handoff", "home", "port"]);
+const SEND_TO_AGENT_OPTIONS: ReadonlySet<string> = new Set(
+  [...SEND_OPTIONS].filter((o) => o !== "task"),
+);
 
 const state: Call<StateSnapshot> = { method: "GET", path: "/v1/state", reply: StateSnapshot };
 const rolesCall: Call<RolesResponse> = { method: "GET", path: "/v1/roles", reply: RolesResponse };
 
 /** Builds the verb `argv` names (the words after `bazhen`), or throws Usage. */
 export function taskVerb(argv: readonly string[], ctx: Context): Verb {
-  const { positionals, values } = parse(argv);
+  const { positionals, values, tokens } = parse(argv);
   const [name, sub, ...rest] = positionals;
   const need = (value: string | undefined, what: string) => {
     if (value === undefined || value === "") throw new Usage(`missing ${what}`);
@@ -147,13 +189,20 @@ export function taskVerb(argv: readonly string[], ctx: Context): Verb {
     if (!parsed.success) throw new Usage(`--role is a role bazhen roles lists, not ${values.role}`);
     return parsed.data;
   };
-  const post = <T>(path: string, reply: Call<T>["reply"], body: object, print: (r: T) => string) =>
+  const post = <T>(path: string, reply: Call<T>["reply"], body: object, print: (r: T) => Answer) =>
     verb({ method: "POST", path, reply, body: { idempotencyKey: ctx.key(), ...body } }, print);
 
   if (name !== "send" && values.file !== undefined) {
     throw new Usage("--file is for send; a brief takes --brief-file");
   }
-  if (values.json !== undefined && name !== "agents") throw new Usage("--json is for agents");
+  for (const [option, owner] of [
+    ["wait", "send"],
+    ["timeout", "send"],
+    ["json", "agents"],
+  ] as const) {
+    if (values[option] !== undefined && name !== owner)
+      throw new Usage(`--${option} is for ${owner}`);
+  }
   if (values.handoff !== undefined && (name !== "task" || sub !== "note")) {
     throw new Usage("--handoff is for task note");
   }
@@ -211,18 +260,44 @@ export function taskVerb(argv: readonly string[], ctx: Context): Verb {
     );
   }
   if (name === "send") {
-    const agentId = agentRef(sub, "the agent to send to");
-    const text = words(rest, SEND_OPTIONS);
+    // Only before any word of the text, so a --task in unquoted text is refused rather than read
+    // as a broadcast of the words before it.
+    const firstWord = tokens.findIndex((t) => t.kind === "positional" && t.index > 0);
+    const taskAt = tokens.findIndex((t) => t.kind === "option" && t.name === "task");
+    const broadcasts = taskAt !== -1 && (firstWord === -1 || taskAt < firstWord);
+    const toTask = broadcasts ? values.task : undefined;
+    if (!broadcasts && values.task !== undefined) {
+      throw new Usage(
+        "put the text in quotes: it holds --task; to send to a task's agents, put --task <task> before the text",
+      );
+    }
+    const agentId = toTask === undefined ? agentRef(sub, "the agent to send to") : undefined;
+    const text = words(
+      toTask === undefined ? rest : [sub, ...rest],
+      broadcasts ? SEND_OPTIONS : SEND_TO_AGENT_OPTIONS,
+    );
     if (text !== "" && values.file !== undefined) {
       throw new Usage("give the text or --file, not both");
     }
     const body =
       values.file === undefined ? need(text, "the text to send") : ctx.readFile(values.file);
+    const wait = waitMs(values.wait === true, values.timeout);
+    if (agentId === undefined) {
+      return post(
+        `/v1/tasks/${encodeURIComponent(need(toTask, "--task"))}/messages`,
+        BroadcastMessageResponse,
+        { body },
+        (r) => broadcast(r, wait),
+      );
+    }
     return post(
       `/v1/agents/${encodeURIComponent(agentId)}/messages`,
       SendMessageResponse,
       { body },
-      (r) => `sent ${r.messageId} to ${agentId}`,
+      (r) =>
+        wait === undefined
+          ? `sent ${r.messageId} to ${agentId}`
+          : waitFor([{ messageId: r.messageId, agentId }], wait, [], () => agentId),
     );
   }
   if (name === "delegate") {
@@ -376,6 +451,77 @@ const activeFor = (s: StateSnapshot, agentId: string) =>
 
 const ended = (a: Agent) => a.state === "closed" || a.state === "failed";
 
+/** The milliseconds to wait for, from `--wait` and `--timeout`; undefined without `--wait`. */
+function waitMs(wait: boolean, timeout: string | undefined): number | undefined {
+  if (!wait) {
+    if (timeout !== undefined)
+      throw new Usage("--timeout is how long --wait waits; give --wait too");
+    return undefined;
+  }
+  if (timeout === undefined) return DEFAULT_WAIT_S * 1000;
+  const seconds = /^[0-9]+$/.test(timeout) ? Number(timeout) : Number.NaN;
+  if (!(seconds * 1000 <= MESSAGE_WAIT_MAX_MS)) {
+    throw new Usage(
+      `--timeout is whole seconds, at most ${MESSAGE_WAIT_MAX_MS / 1000}, not ${timeout}`,
+    );
+  }
+  return seconds * 1000;
+}
+
+/** Where a message stands for a sender waiting on it: landed, bounced, or still on its way. */
+const exitFor = (mail: MailboxState) => {
+  if (mail === "undeliverable") return BOUNCED;
+  return SETTLED.has(mail) ? LANDED : QUEUED;
+};
+
+/** The exit status of several sends: any bounced, else any still on its way, else landed. */
+const worst = (codes: readonly number[]) => {
+  if (codes.includes(BOUNCED)) return BOUNCED;
+  return codes.includes(QUEUED) ? QUEUED : LANDED;
+};
+
+/** Waits on the messages, then prints each one's state after `before`, and exits as they stand. */
+function waitFor(
+  sent: readonly { readonly messageId: string; readonly agentId: string }[],
+  timeoutMs: number,
+  skipped: readonly string[],
+  to: (agentId: string) => string,
+): Verb {
+  const wait = verb(
+    {
+      method: "POST",
+      path: "/v1/messages/wait",
+      reply: WaitMessagesResponse,
+      body: { messageIds: sent.map((m) => m.messageId), timeoutMs },
+      timeoutMs: timeoutMs + WAIT_MARGIN_MS,
+    },
+    (r) => ({
+      text: [...skipped, ...r.messages.map((m) => `${m.id} to ${to(m.agentId)}: ${m.state}`)].join(
+        "\n",
+      ),
+      code: worst([...skipped.map(() => BOUNCED), ...r.messages.map((m) => exitFor(m.state))]),
+    }),
+  );
+  // Said before the wait, so a sender whose wait fails still knows what went, and resends nothing.
+  const said = sent.map((m) => `sent ${m.messageId} to ${to(m.agentId)}`);
+  return { ...wait, progress: `${said.join("\n")}\nwaiting up to ${timeoutMs / 1000} s` };
+}
+
+/**
+ * A task's broadcast: each message sent and each assignee skipped, waited on when asked. One that
+ * skipped anyone exits as bounced, as a send to an agent that takes no mail fails, so a script
+ * never takes it for having reached the whole task.
+ */
+function broadcast(r: BroadcastMessageResponse, wait: number | undefined): Answer {
+  const skipped = r.skipped.map((s) => `skipped ${s.agentId}: ${s.reason}`);
+  if (wait === undefined) {
+    const text = [...r.sent.map((m) => `sent ${m.messageId} to ${m.agentId}`), ...skipped];
+    return skipped.length === 0 ? text.join("\n") : { text: text.join("\n"), code: BOUNCED };
+  }
+  if (r.sent.length === 0) return { text: skipped.join("\n"), code: BOUNCED };
+  return waitFor(r.sent, wait, skipped, (agentId) => agentId);
+}
+
 /** Whole seconds from an ISO time to `now`, never negative, so a reader does no date arithmetic. */
 const ageSeconds = (at: string, now: number) =>
   Math.max(0, Math.floor((now - Date.parse(at)) / 1000));
@@ -400,7 +546,7 @@ export function listAgents(s: StateSnapshot, now: number): string {
       const line = [a.name, a.id, a.harness, a.state, signal, a.project, a.cwd]
         .filter((f) => f !== "")
         .join("  ");
-      return a.headline === null ? [line] : [line, `  ${a.headline.text}`];
+      return a.headline === null ? [line] : [line, `  > ${a.headline.text}`];
     })
     .join("\n");
 }

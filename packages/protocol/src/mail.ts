@@ -106,6 +106,36 @@ export const SendMessageResponse = z.object({
 });
 export type SendMessageResponse = z.infer<typeof SendMessageResponse>;
 
+/**
+ * The states a waiting sender stops at: the agent has the message in a prompt it read, or will
+ * never get it. `delivered` and `undeliverable` are final. `seen` is not: a turn cut short (Esc,
+ * a failed turn, a new session, a daemon restart) puts the message back, and the mailbox offers
+ * it again, at least once more, so the agent still gets it unless it bounces.
+ */
+export const SETTLED: ReadonlySet<MailboxState> = new Set<MailboxState>([
+  "seen",
+  "delivered",
+  "undeliverable",
+]);
+
+/** The most a wait for mail holds its request, and the most messages it waits on. */
+export const MESSAGE_WAIT_MAX_MS = 600_000;
+export const MESSAGE_WAIT_MAX_MESSAGES = 100;
+
+/**
+ * `POST /v1/messages/wait`: answered once every message is settled, or at `timeoutMs` with the
+ * states then (protocol 1.45).
+ */
+export const WaitMessagesRequest = z.object({
+  messageIds: z.array(Id("msg")).min(1).max(MESSAGE_WAIT_MAX_MESSAGES),
+  timeoutMs: z.number().int().nonnegative().max(MESSAGE_WAIT_MAX_MS),
+});
+export type WaitMessagesRequest = z.infer<typeof WaitMessagesRequest>;
+
+/** In the order asked. */
+export const WaitMessagesResponse = z.object({ messages: z.array(Message) });
+export type WaitMessagesResponse = z.infer<typeof WaitMessagesResponse>;
+
 export const AnswerAttentionRequest = z.object({
   idempotencyKey: IdempotencyKey,
   decision: ApprovalDecision,

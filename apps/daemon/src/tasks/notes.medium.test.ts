@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { TaskRefused } from "@bazhen/core";
 import type { AgentSessionId } from "@bazhen/core";
+import { recordClosed } from "../agents/lifecycle.ts";
 import type { Store } from "../store/store.ts";
 import { inbox, taskFleet, testView } from "../testing/fixtures.ts";
 import { assignedMail, MAIL_LIMIT } from "./mail.ts";
@@ -229,5 +230,57 @@ describe("a handoff in the next brief", () => {
     note(tasks, worker, taskId, "Short.", true);
     tasks.assign(null, taskId, { idempotencyKey: "assign-lead", agentId: lead, role: "worker" });
     expect(lastMail(store, lead).includes("A handoff note")).toBe(false);
+  });
+});
+
+describe("Tasks broadcast", () => {
+  it("sends each active assignee but the sender, and names one that takes no mail", async () => {
+    const { store, tasks, coordinator, lead, worker } = await taskFleet();
+    const taskId = workerTask(tasks, worker);
+    for (const [agentId, role] of [
+      [coordinator, "coordinator"],
+      [lead, "lead"],
+    ] as const) {
+      tasks.assign(null, taskId, { idempotencyKey: `assign-${role}`, agentId, role });
+    }
+    store.append({ type: "agent.closing", entityId: lead, actor: "user", payload: {} });
+    const before = inbox(store, coordinator).length;
+    const answer = tasks.broadcast(coordinator, taskId, { idempotencyKey: "all", body: "Stop." });
+    expect([
+      answer.sent.map((s) => s.agentId),
+      answer.skipped.map((s) => s.agentId),
+      inbox(store, worker).at(-1)?.endsWith(`To everyone on task ${taskId} (Fix it):\n\nStop.`),
+      inbox(store, coordinator).length - before,
+    ]).toEqual([[worker], [lead], true, 0]);
+  });
+
+  it("sends no one twice when its request is repeated", async () => {
+    const { store, tasks, lead, worker } = await taskFleet();
+    const taskId = workerTask(tasks, worker);
+    tasks.assign(null, taskId, { idempotencyKey: "assign-lead", agentId: lead, role: "lead" });
+    const req = { idempotencyKey: "all", body: "Rebase." };
+    const first = tasks.broadcast(null, taskId, req);
+    const count = () => inbox(store, worker).filter((m) => m.endsWith("Rebase.")).length;
+    expect([tasks.broadcast(null, taskId, req), count()]).toEqual([first, 1]);
+  });
+
+  it("takes a broadcast from an agent that isn't on the task, as it could send to each", async () => {
+    const { tasks, lead, worker } = await taskFleet();
+    const taskId = workerTask(tasks, worker);
+    const answer = tasks.broadcast(lead, taskId, { idempotencyKey: "outside", body: "FYI." });
+    expect(answer.sent.map((s) => s.agentId)).toEqual([worker]);
+  });
+
+  it("refuses a task with no one but the sender on it", async () => {
+    const { store, tasks, worker } = await taskFleet();
+    const taskId = workerTask(tasks, worker);
+    expect(() => tasks.broadcast(worker, taskId, { idempotencyKey: "self", body: "hi" })).toThrow(
+      TaskRefused,
+    );
+    store.append({ type: "agent.closing", entityId: worker, actor: "user", payload: {} });
+    recordClosed(store, worker, "user");
+    expect(() => tasks.broadcast(null, taskId, { idempotencyKey: "none", body: "hi" })).toThrow(
+      TaskRefused,
+    );
   });
 });

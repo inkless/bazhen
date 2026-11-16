@@ -201,6 +201,21 @@ export function register(store: Store) {
 /** Resolves once the listeners a commit queued have run. */
 export const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+/** A timer a test fires by hand, as `After` takes one, and the ones it has set and not called off. */
+export function handTimer() {
+  const pending = new Set<() => void>();
+  const after = (_ms: number, fn: () => void) => {
+    pending.add(fn);
+    return () => {
+      pending.delete(fn);
+    };
+  };
+  const fire = () => {
+    for (const fn of pending) fn();
+  };
+  return { after, pending, fire };
+}
+
 /**
  * A server on a free port whose upgrades go through the daemon's guard to `routes`, and given
  * `gate`, its device check.

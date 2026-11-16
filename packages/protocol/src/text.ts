@@ -23,7 +23,8 @@ export function showable(text: string, allow: ReadonlySet<number> = NONE): boole
 /**
  * Characters that draw as nothing, or as a line break, so text holding one reads other than it
  * looks: zero-width spaces and joiners, the directional marks, the word joiner and invisible
- * operators, the byte-order mark, and the line and paragraph separators.
+ * operators, the byte-order mark, and the line and paragraph separators. The joiners U+200C and
+ * U+200D also shape Persian, Indic and emoji text, which text held to this set can't carry.
  */
 export const INVISIBLE = /[\u061c\u200b-\u200f\u2028\u2029\u2060-\u2064\ufeff]/u;
 

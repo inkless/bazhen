@@ -16,6 +16,7 @@ import {
 } from "@bazhen/core";
 import {
   AssignTaskResponse,
+  BroadcastMessageResponse,
   CreateTaskResponse,
   EscalateResponse,
   SendMessageResponse,
@@ -23,6 +24,7 @@ import {
   type AddTaskNoteRequest,
   type AgentState,
   type AssignTaskRequest,
+  type BroadcastMessageRequest,
   type CreateTaskRequest,
   type DelegateTaskRequest,
   type LaunchAgentRequest,
@@ -36,7 +38,7 @@ import {
 } from "@bazhen/protocol";
 import type { Raised } from "../attention/inbox.ts";
 import { failureDetail } from "../commands.ts";
-import type { Mailbox } from "../mailbox/mailbox.ts";
+import { AgentGone, type Mailbox } from "../mailbox/mailbox.ts";
 import { UnknownAgent, type Store } from "../store/store.ts";
 import {
   assignedMail,
@@ -408,6 +410,50 @@ export class Tasks {
           { idempotencyKey: `${idempotencyKey}:sent`, body: text },
           caller,
         );
+      },
+    );
+  }
+
+  /**
+   * One message to each of the task's active assignees but the sender, as the sender's own send
+   * to each would be, keyed by the request's key and the assignee, so a retry sends no one
+   * twice. An assignee that takes no mail now is skipped and named. Whoever may send to each may
+   * send to them all: an agent need not be on the task.
+   */
+  broadcast(
+    caller: Caller,
+    taskId: string,
+    req: BroadcastMessageRequest,
+  ): BroadcastMessageResponse {
+    const { idempotencyKey, body } = req;
+    return this.store.once(
+      idempotencyKey,
+      { caller, taskId, body },
+      (r) => BroadcastMessageResponse.parse(r),
+      () => {
+        this.checkCaller(caller);
+        const to = [...new Set(this.view(taskId).active.map((a) => a.agentId))].filter(
+          (agentId) => agentId !== caller,
+        );
+        if (to.length === 0) {
+          throw new TaskRefused("conflict", `task ${taskId} has no one else on it to send to`);
+        }
+        const task = this.named(taskId);
+        // Said, so each reader knows the others on the task have it too, and answers once.
+        const told = checkLength(`To everyone on task ${task.id} (${task.title}):\n\n${body}`);
+        const answer: BroadcastMessageResponse = { sent: [], skipped: [], eventIds: [] };
+        for (const agentId of to) {
+          try {
+            const key = `${idempotencyKey}:${agentId}`;
+            const sent = this.send(caller, agentId, { idempotencyKey: key, body: told });
+            answer.sent.push({ agentId, messageId: sent.messageId });
+            answer.eventIds.push(...sent.eventIds);
+          } catch (err) {
+            if (!(err instanceof UnknownAgent || err instanceof AgentGone)) throw err;
+            answer.skipped.push({ agentId, reason: err.message });
+          }
+        }
+        return answer;
       },
     );
   }

@@ -79,6 +79,7 @@ import { Tasks } from "./tasks/tasks.ts";
 import { TerminalBudget } from "./terminals/budget.ts";
 import { nodePtySpawner } from "./pty/node-pty.ts";
 import { listeningOf } from "./mailbox/listening.ts";
+import { waitForMail } from "./mailbox/wait.ts";
 import { Store, UnsafeDatabase, type SnapshotView } from "./store/store.ts";
 
 const APP_VERSION = "0.1.0";
@@ -154,6 +155,7 @@ const tasks: TaskCommands = {
   delegate: async (caller, req) => taskService.launchAndDelegate(caller, req),
   escalate: (caller, req) => taskService.escalate(caller, req),
   send: (caller, agentId, req) => taskService.send(caller, agentId, req),
+  broadcast: (caller, taskId, req) => taskService.broadcast(caller, taskId, req),
   note: (caller, taskId, req) => taskService.note(caller, taskId, req),
 };
 const presence = new Presence();
@@ -390,6 +392,7 @@ const commands = {
   renameShell: (terminalId, req) => shells.rename(terminalId, req),
   unlinkShell: (terminalId, req) => shells.unlink(terminalId, req),
   tasks,
+  waitMessages: (req, signal) => waitForMail(store, req, signal),
 } satisfies Omit<AppDeps, "allow">;
 const app = createApp({
   ...commands,
