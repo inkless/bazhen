@@ -15,6 +15,7 @@ import {
   rebindHolder,
   vouchHolderProcess,
 } from "./signal.ts";
+import type { ScopeLaunch } from "./scope.ts";
 import { type PsReading, readProcess, rootRefusal, START_SKEW_S } from "./tmux.ts";
 
 export const HOLDER_COMMAND = "bazhen-holder";
@@ -199,6 +200,11 @@ export interface StartHolderOptions {
   /** Limits it runs under, set by a fixed `/bin/sh` that then execs it. */
   readonly limits?: HolderLimits;
   /**
+   * The scope it starts in, as `terminalScope` gives it: its launcher runs first and execs the
+   * rest, so the holder keeps the pid that was spawned. Its environment joins the holder's own.
+   */
+  readonly scope?: ScopeLaunch;
+  /**
    * Called once the holder runs and before it reads its spec, so the caller can record it before
    * it can outlive the call. One that throws stops the start, and the holder is ended. For a
    * holder `ps` couldn't read, it is called only once it has been given no spec and still runs,
@@ -214,14 +220,26 @@ export interface HolderLimits {
 
 const CPU_SECONDS_MAX = 24 * 60 * 60;
 
-/** The argv that runs `binary` under `limits`: the binary alone, or a fixed shell that execs it. */
-function holderArgv(binary: string, limits: HolderLimits | undefined): [string, ...string[]] {
+/**
+ * The argv that runs `binary` under `limits` in `scope`: the scope's launcher, then a fixed shell
+ * that sets the limits, each exec'ing what follows, or the binary alone.
+ */
+function holderArgv(
+  binary: string,
+  limits: HolderLimits | undefined,
+  scope: ScopeLaunch | undefined,
+): [string, ...string[]] {
   const cpu = limits?.cpuSeconds;
-  if (cpu === undefined) return [binary];
-  if (!Number.isSafeInteger(cpu) || cpu <= 0 || cpu > CPU_SECONDS_MAX) {
+  if (cpu !== undefined && (!Number.isSafeInteger(cpu) || cpu <= 0 || cpu > CPU_SECONDS_MAX)) {
     throw new RangeError(`cpuSeconds ${cpu} isn't between 1 and ${CPU_SECONDS_MAX}`);
   }
-  return ["/bin/sh", "-c", `ulimit -t ${cpu} && exec "$0" "$@"`, binary];
+  const limited: [string, ...string[]] =
+    cpu === undefined ? [binary] : ["/bin/sh", "-c", `ulimit -t ${cpu} && exec "$0" "$@"`, binary];
+  if (scope === undefined) return limited;
+  if (!isAbsolute(scope.argv[0])) {
+    throw new RangeError(`refusing scope launcher ${scope.argv[0]}: it isn't absolute`);
+  }
+  return [...scope.argv, ...limited];
 }
 
 export interface StartedHolder extends HolderProcess {
@@ -281,7 +299,8 @@ export async function startHolderWith(
   if (unfitBinary !== undefined) {
     throw new RangeError(`refusing holder binary ${binary}: ${unfitBinary}`);
   }
-  const badNames = Object.keys(options.env).filter((name) => !ENV_NAME.test(name));
+  const env = { ...options.env, ...options.scope?.env };
+  const badNames = Object.keys(env).filter((name) => !ENV_NAME.test(name));
   if (badNames.length > 0) {
     throw new RangeError(`refusing the holder's environment names ${badNames.join(", ")}`);
   }
@@ -302,9 +321,9 @@ export async function startHolderWith(
   privateHoldersDir(root, spec.socket);
   const read = seams.read ?? readProcess;
   const kill = seams.kill ?? killHolder;
-  const [file, ...args] = holderArgv(binary, options.limits);
+  const [file, ...args] = holderArgv(binary, options.limits, options.scope);
   const child = (seams.spawn ?? realSpawn)(file, args, {
-    env: { ...options.env },
+    env,
     cwd: options.cwd ?? "/",
   });
   let ending: { code: number } | { signal: string } | undefined;
