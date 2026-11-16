@@ -41,7 +41,7 @@ async function following() {
 beforeAll(async () => {
   model = await startFakeResponses();
   daemon = await Daemon.start({ responsesUrl: model.url });
-  await daemon.kill();
+  await daemon.crash();
   daemon.writeConfig('[runtime]\ndefault = "holder"\n');
   await daemon.restart();
   launched = await daemon.launch("codex-on-holder", "codex");
@@ -89,7 +89,7 @@ describe("a Codex agent on a holder", () => {
   // from the holder, as the medium tests of each pin separately.
   it("is bound, once the daemon is back, to the thread its TUI went to while it was down, and holds mail till then", async () => {
     const before = await bound();
-    await daemon.kill();
+    await daemon.crash();
     const holder = daemon.holderOf(launched.agentId);
     expect(holder).toBeDefined();
     await promptHolder(String(holder), "/new");

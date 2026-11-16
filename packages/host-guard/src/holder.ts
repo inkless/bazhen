@@ -268,7 +268,7 @@ export interface StartSeams {
     options: { env: Record<string, string>; cwd: string },
   ) => HolderChild;
   readonly read?: (pid: number) => Promise<PsReading>;
-  readonly kill?: (proof: HolderProcess) => boolean;
+  readonly killHolder?: (proof: HolderProcess) => boolean;
 }
 
 const realSpawn: NonNullable<StartSeams["spawn"]> = (file, args, options) =>
@@ -339,7 +339,7 @@ export async function startHolderWith(
   }
   privateHoldersDir(root, spec.socket);
   const read = seams.read ?? readProcess;
-  const kill = seams.kill ?? killHolder;
+  const kill = seams.killHolder ?? killHolder;
   const [file, ...args] = holderArgv(binary, options.limits, options.scope);
   const child = (seams.spawn ?? realSpawn)(file, args, {
     env,

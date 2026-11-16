@@ -76,7 +76,7 @@ export function teardown(): void {
   // Setup never made this run's directory, so no server is this run's to stop.
   if (dir === undefined) return;
   const leaked = serversIn(dir);
-  for (const server of leaked.values()) server.kill();
+  for (const server of leaked.values()) server.killServer();
   rmSync(dir, { recursive: true, force: true });
   if (leaked.size > 0) {
     failSetup(

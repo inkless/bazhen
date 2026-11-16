@@ -24,7 +24,7 @@ export const nodePtySpawner: PtySpawner = {
       },
       write: (bytes) => proc.write(Buffer.from(bytes)),
       resize: (next) => proc.resize(next.cols, next.rows),
-      kill: () => proc.kill(),
+      hangUp: () => proc.kill(),
     };
   },
 };

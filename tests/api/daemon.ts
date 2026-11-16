@@ -24,7 +24,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { WebSocket } from "ws";
-import { GENERATION_OPTION, signalPane, TmuxServer } from "@bazhen/host-guard";
+import { GENERATION_OPTION, signalOwnChild, signalPane, TmuxServer } from "@bazhen/host-guard";
 import {
   encodeHolderRequest,
   EventFrame,
@@ -134,7 +134,7 @@ export async function cliHome() {
   const env = { ...homeEnv(home), BAZHEN_PORT: String(await freePort()) };
   const cleanup = async () => {
     await bazhen(["stop"], env);
-    TmuxServer.at(join(home, "run", "tmux.sock"), { root: home }).kill();
+    TmuxServer.at(join(home, "run", "tmux.sock"), { root: home }).killServer();
     rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   };
   return { env, cleanup };
@@ -814,7 +814,7 @@ export class Daemon {
   }
 
   /** Kills the daemon outright, as a crash would; its agents keep running in tmux. */
-  async kill(): Promise<void> {
+  async crash(): Promise<void> {
     await this.exit("SIGKILL");
   }
 
@@ -828,7 +828,7 @@ export class Daemon {
     if (child === undefined || child.exitCode !== null || child.signalCode !== null) return;
     await new Promise((resolve) => {
       child.once("exit", resolve);
-      child.kill(signal);
+      signalOwnChild(child, signal);
     });
   }
 
@@ -874,7 +874,7 @@ export class Daemon {
     const codexStopped = codexDaemonStarted(this.home)
       ? run("codex", ["app-server", "daemon", "stop"], { env: this.env, timeout: 90_000 })
       : undefined;
-    this.tmuxServer.kill();
+    this.tmuxServer.killServer();
     await this.closeHolders();
     await codexStopped;
     // The agents' processes may still be writing their state as the server goes down.

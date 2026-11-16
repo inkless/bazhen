@@ -51,10 +51,12 @@ export {
   killHolder,
   rethrowUnsafe,
   signalGroup,
+  signalOwnChild,
   signalPane,
   spawnGroup,
   UnsafeTarget,
   type HolderProcess,
+  type OwnChild,
   type PaneGroup,
   type RunOutcome,
 } from "./signal.ts";

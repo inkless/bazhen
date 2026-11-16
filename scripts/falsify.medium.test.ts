@@ -20,7 +20,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isAlive } from "@bazhen/host-guard";
+import { isAlive, signalOwnChild } from "@bazhen/host-guard";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { installCommand } from "./cargo-gate.ts";
 import { inSignalSandbox } from "./signal-paths.ts";
@@ -940,7 +940,7 @@ describe("falsify judging new Rust tests by mutating the change", () => {
       const exited = once(child, "exit");
       await expect.poll(() => stubLog().includes("HANGING"), { timeout: 20_000 }).toBe(true);
       const nextest = Number(/^HANGING (\d+)$/m.exec(stubLog())?.[1]);
-      child.kill(signal);
+      signalOwnChild(child, signal);
       const [status] = await exited;
       await expect.poll(() => isAlive(nextest), { timeout: 5000 }).toBe(false);
       expect({
@@ -968,14 +968,14 @@ describe("falsify judging new Rust tests by mutating the change", () => {
       const exited = once(child, "exit");
       await expect.poll(() => stubLog().includes("HANGING"), { timeout: 20_000 }).toBe(true);
       const stub = Number(/^HANGING (\d+)$/m.exec(stubLog())?.[1]);
-      child.kill("SIGINT");
+      signalOwnChild(child, "SIGINT");
       await expect.poll(() => stubLog().includes("TERMED"), { timeout: 5000 }).toBe(true);
       // Still waiting out the grace, so the second Ctrl-C lands while it stops.
       expect({ exitCode: child.exitCode, signalCode: child.signalCode }).toEqual({
         exitCode: null,
         signalCode: null,
       });
-      child.kill("SIGINT");
+      signalOwnChild(child, "SIGINT");
       const [status, signal] = await exited;
       await expect.poll(() => isAlive(stub), { timeout: 5000 }).toBe(false);
       expect({ status, signal, leftovers: leftovers() }).toEqual({

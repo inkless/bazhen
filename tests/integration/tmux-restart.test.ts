@@ -51,7 +51,7 @@ async function started(): Promise<{
   cleanups.push(async () => {
     // A server whose socket a test deleted is unreachable to kill: bring the socket back first.
     if (!existsSync(server.socket)) await runtime.health([ref]);
-    if (await waitFor(() => existsSync(server.socket), 2_000)) server.kill();
+    if (await waitFor(() => existsSync(server.socket), 2_000)) server.killServer();
   });
   return { server, runtime, ref };
 }
@@ -78,7 +78,7 @@ afterEach(async () => {
 describe("a tmux server that is gone", () => {
   it("is not running, even against the refs it recorded, and holds no terminals", async () => {
     const { server, runtime, ref } = await started();
-    server.kill();
+    server.killServer();
     expect([(await runtime.health([ref])).state, await runtime.inventory()]).toEqual([
       "not-running",
       [],
@@ -87,7 +87,7 @@ describe("a tmux server that is gone", () => {
 
   it("takes its terminals with it: a respawn or a read on one finds it gone, not out of reach", async () => {
     const { server, runtime, ref } = await started();
-    server.kill();
+    server.killServer();
     const failures = await Promise.all([
       runtime.respawn(ref, { ...spec(), generation: 1 }).catch((err: unknown) => err),
       runtime.foreground(ref).catch((err: unknown) => err),
@@ -111,7 +111,7 @@ describe("a live tmux server whose socket was deleted", () => {
     await runtime.health([ref]);
     await waitFor(() => existsSync(server.socket));
     const kept = (await runtime.inventory()).map((e) => e.ref.terminalId);
-    server.kill();
+    server.killServer();
     const onceGone = await runtime.close(ref).then(
       () => "closed",
       () => "refused",

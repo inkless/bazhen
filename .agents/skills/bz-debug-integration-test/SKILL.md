@@ -34,7 +34,7 @@ Teardown found servers from this run alive, and has already killed them. The mes
 
 1. The label in `bz-test-<run>-<label>` tells you which test started each one. A server named
    `default` can't be one of them: `@bazhen/host-guard` refuses that name.
-2. That test is missing `afterAll(() => server.kill())`, or it created a second socket it
+2. That test is missing `afterAll(() => server.killServer())`, or it created a second socket it
    never recorded. Fix the test. Teardown is a backstop, not the cleanup.
 
 ## The run hangs

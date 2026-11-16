@@ -36,7 +36,7 @@ async function withLiveAgent(): Promise<{ daemon: Daemon; agent: LaunchAgentResp
 /** The same, then the daemon killed with -9. */
 async function killedWithAgent(): Promise<{ daemon: Daemon; agent: LaunchAgentResponse }> {
   const live = await withLiveAgent();
-  await live.daemon.kill();
+  await live.daemon.crash();
   return live;
 }
 
@@ -52,7 +52,7 @@ describe("a daemon started again after its tmux server died", () => {
   let agent: LaunchAgentResponse;
   beforeAll(async () => {
     ({ daemon, agent } = await killedWithAgent());
-    daemon.tmuxServer.kill();
+    daemon.tmuxServer.killServer();
     await daemon.restart();
   });
   afterAll(async () => {
@@ -89,7 +89,7 @@ describe("a running daemon whose tmux server dies", () => {
   let agent: LaunchAgentResponse;
   beforeAll(async () => {
     ({ daemon, agent } = await withLiveAgent());
-    daemon.tmuxServer.kill();
+    daemon.tmuxServer.killServer();
   });
   afterAll(async () => {
     await daemon?.stop();
@@ -150,7 +150,7 @@ describe("an agent lost with its tmux server, relaunched", () => {
       "the model's reply",
       30_000,
     );
-    daemon.tmuxServer.kill();
+    daemon.tmuxServer.killServer();
     await waitUntil(
       async () => (await stateOf(daemon, agent.agentId)) === "lost",
       "the agent to be lost",

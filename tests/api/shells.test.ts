@@ -142,8 +142,8 @@ describe("a shell after its tmux server died", () => {
       "a foreground read in the new directory",
     );
     view.close();
-    await restarted.kill();
-    restarted.tmuxServer.kill();
+    await restarted.crash();
+    restarted.tmuxServer.killServer();
     await restarted.restart();
   });
   afterAll(async () => {

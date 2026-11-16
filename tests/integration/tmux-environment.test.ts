@@ -19,7 +19,7 @@ const runtime = new TmuxRuntime({
   env: { ...base, BZ_OLD: "old", [FUNCTION]: "() {  echo hi\n}" },
 });
 afterAll(() => {
-  server.kill();
+  server.killServer();
   rmSync(dir, { recursive: true, force: true });
 });
 

@@ -114,7 +114,7 @@ export interface SweepDeps {
   readonly list: (dir: string) => string[];
   readonly startOf: (pid: number) => Promise<Start>;
   readonly vouch: (holder: HolderProcess) => Promise<HolderProcess | null>;
-  readonly kill: (proof: HolderProcess) => boolean;
+  readonly killHolder: (proof: HolderProcess) => boolean;
   readonly now: () => number;
   /** Whether this host may kill a holder it didn't start: a disposable one. */
   readonly sandboxed: () => boolean;
@@ -124,7 +124,7 @@ const DEPS: SweepDeps = {
   list: (dir) => readdirSync(dir),
   startOf,
   vouch: (holder) => vouchHolder(holder),
-  kill: (proof) => killHolder(proof),
+  killHolder: (proof) => killHolder(proof),
   now: Date.now,
   sandboxed: () => inSignalSandbox(),
 };
@@ -160,7 +160,7 @@ export async function sweep(dir: string = ledgerDir(), deps: SweepDeps = DEPS): 
     if (!ownerGone(entry, await deps.startOf(entry.owner))) continue;
     if (inTestHome(entry.socket)) {
       const proof = await deps.vouch({ pid: entry.holder, start: entry.holderStart });
-      if (proof !== null && deps.kill(proof)) killed++;
+      if (proof !== null && deps.killHolder(proof)) killed++;
     }
     // A holder started since, at the same pid, has an entry of its own here.
     if (readEntry(path) === text) rmSync(path, { force: true });

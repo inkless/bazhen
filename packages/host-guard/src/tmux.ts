@@ -603,7 +603,7 @@ export class TmuxServer {
   }
 
   /** Ends this server, if it runs. */
-  kill(): void {
+  killServer(): void {
     try {
       this.runSync(["kill-server"], { stdio: "ignore" });
     } catch {

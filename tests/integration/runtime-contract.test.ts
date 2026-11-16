@@ -40,7 +40,7 @@ runtimeContract("TmuxRuntime", {
       dispose: () => {
         // Readable again first, or nothing could stop it.
         if (existsSync(server.socket)) chmodSync(server.socket, 0o700);
-        server.kill();
+        server.killServer();
       },
     };
   },
@@ -59,7 +59,7 @@ runtimeContract("TmuxRuntime", {
   reboot: async (runtime) => {
     const server = serverOf(runtime);
     const pid = Number(tmuxOut(server, "display-message", "-p", "#{pid}"));
-    server.kill();
+    server.killServer();
     await vi.waitFor(
       () => {
         if (isAlive(pid)) throw new Error(`tmux server ${pid} still runs after kill-server`);

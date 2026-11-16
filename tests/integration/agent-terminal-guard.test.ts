@@ -40,7 +40,7 @@ const launch = (agentId: ReturnType<typeof newId<"agent">>, project = "runs") =>
     tokenFile: "/nonexistent/agent.token",
   });
 
-afterAll(() => server.kill());
+afterAll(() => server.killServer());
 
 describe("one terminal per agent", () => {
   it("refuses to start a second terminal for an agent a live one already carries", async () => {
