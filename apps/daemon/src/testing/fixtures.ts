@@ -96,6 +96,8 @@ export function fakeEnvironment(
     harnesses: ["claude-code"],
     resumes: resumesClaude,
     themes: { "claude-code": ["light", "dark"] },
+    runtimes: ["tmux"],
+    defaultRuntime: "tmux",
     health: async () => ({ state: "reachable", version: null }),
     inventory: async () => present(),
     launch,

@@ -72,6 +72,8 @@ export interface ShellOpen {
    */
   readonly openedBy?: DeviceId;
   readonly integration?: ShellIntegration;
+  /** The runtime it is created on, as its open recorded; the environment's default when none. */
+  readonly runtime?: string;
 }
 
 /**
@@ -87,6 +89,8 @@ export interface AgentLaunch {
   readonly request: AgentLaunchRequest;
   readonly options: LaunchOptions;
   readonly size: Size;
+  /** The runtime its terminal is created on, as its launch recorded; the default when none. */
+  readonly runtime?: string;
 }
 
 /** A respawn: the agent as recorded, and the generation its terminal's new incarnation takes. */
@@ -175,12 +179,20 @@ export interface EnvironmentAdapter {
   /** The themes each harness it runs can start its TUI in. */
   readonly themes: Readonly<Partial<Record<HarnessId, readonly TuiTheme[]>>>;
   /**
+   * The kinds of runtime its terminals run on. Each is read, and its terminals concluded on, by
+   * itself: one that can't be read says nothing of another's terminals (design §5.4).
+   */
+  readonly runtimes: readonly string[];
+  /** The runtime a new terminal is created on. */
+  readonly defaultRuntime: string;
+  /**
    * Only a reachable environment can say an agent is gone (foundation-design §4.4). `known` are
    * the refs the daemon recorded, by which an environment tells a dead runtime from one it can't
-   * reach just now.
+   * reach just now. Given `runtime`, only that runtime is read.
    */
-  health(known?: readonly RuntimeRef[]): Promise<EnvironmentHealth>;
-  inventory(): Promise<AgentInventoryEntry[]>;
+  health(known?: readonly RuntimeRef[], runtime?: string): Promise<EnvironmentHealth>;
+  /** Given `runtime`, only the agents on that runtime. */
+  inventory(runtime?: string): Promise<AgentInventoryEntry[]>;
   launch(launch: AgentLaunch): Promise<AgentRefs>;
   /** Starts the agent's exited terminal again, on its existing harness session. */
   respawn(respawn: AgentRespawn): Promise<AgentRefs & { readonly runtime: RuntimeRef }>;
@@ -193,8 +205,8 @@ export interface EnvironmentAdapter {
   close(refs: AgentRefs): Promise<void>;
   /** Whether the environment positively no longer has what ran the agent (RuntimeAdapter.gone). */
   gone(refs: AgentRefs): Promise<boolean>;
-  /** The shells it holds, live or dead; an unreadable environment throws. */
-  shells(): Promise<ShellInventoryEntry[]>;
+  /** The shells it holds, live or dead, on `runtime` alone if named; an unreadable one throws. */
+  shells(runtime?: string): Promise<ShellInventoryEntry[]>;
   openShell(open: ShellOpen): Promise<RuntimeRef>;
   /**
    * What runs in the shell's foreground when it is not the shell itself, such as `nvim`, or null

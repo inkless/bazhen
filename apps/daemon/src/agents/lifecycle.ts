@@ -229,10 +229,13 @@ export class Lifecycle {
       const terminalId = newId("term");
       const generation = found.generation + 1;
       this.startAgain.budget.admit();
+      // A new terminal, so on the runtime of the moment, wherever the lost one was.
+      const on = this.environment.defaultRuntime;
       const requested = this.record(agentId, "agent.relaunch_requested", {
         terminalId,
         generation,
         fresh,
+        runtime: on,
       });
       this.startAgain.replaced(agentId);
       const options = launchOptions(req.theme, launched.name);
@@ -245,6 +248,7 @@ export class Lifecycle {
           request: launch,
           options,
           size: this.startAgain.size,
+          runtime: on,
         })
         .then(({ runtime, ...rest }) => {
           if (runtime === null) throw new NoTerminal();

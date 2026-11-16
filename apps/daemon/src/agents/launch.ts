@@ -177,6 +177,7 @@ export async function launchAgent(
   // Recorded before this call first yields, so a repeat in the same tick finds the key answered.
   // The name is chosen in the same transaction, so two launches can't take one name.
   let name = "";
+  const runtime = environment.defaultRuntime;
   const launched = record(() => {
     const named = launchName(store, req.name, request.project);
     budget.admit();
@@ -190,6 +191,7 @@ export async function launchAgent(
         terminalId,
         ...(launchedBy === undefined ? {} : { launchedBy }),
         ...named,
+        runtime,
       },
     });
   }, []);
@@ -205,6 +207,7 @@ export async function launchAgent(
       request,
       options,
       size,
+      runtime,
     });
     const refs = await launching.catch((cause) => {
       console.error(`agent ${agentId} failed to launch:`, cause);

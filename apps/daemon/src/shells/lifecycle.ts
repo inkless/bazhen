@@ -368,6 +368,7 @@ export class ShellLifecycle {
     const { store, environment, size, budget, integration } = this.deps;
     const { cwd, linkedAgentId, theme, restartOf, openedBy, retype } = shell;
     const terminalId = newId("term");
+    const runtime = environment.defaultRuntime;
     const reporting = integration && { ...integration, ...newShellToken() };
     const opened = store.transaction(() => {
       budget.admit();
@@ -380,6 +381,7 @@ export class ShellLifecycle {
             linkedAgentId,
             ...(theme && { theme }),
             ...(restartOf && { restartOf }),
+            runtime,
           }),
         ],
       };
@@ -394,6 +396,7 @@ export class ShellLifecycle {
         terminalId,
         cwd,
         size,
+        runtime,
         ...(linkedAgentId !== null && { linkedAgentId }),
         ...(theme && { theme }),
         ...(openedBy && { openedBy }),
