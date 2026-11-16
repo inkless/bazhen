@@ -1,6 +1,7 @@
 //! `bazhen attach` can't be left running past two requests to stop it, even stuck writing to a
 //! terminal that stopped reading: the first wakes its loop, which never reads the wake-up while
-//! the write blocks, so the second must end the process by itself.
+//! the write blocks, so the second must end the process by itself. The first alone, to an attach
+//! that isn't stuck, ends it cleanly.
 
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead as _, BufReader, Write as _};
@@ -10,15 +11,18 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bazhen::bazhen_protocol::id::PROTOCOL_ID;
 use bazhen_test_signal::Signal;
+use rustix::fd::OwnedFd;
 use rustix::fs::OFlags;
 use rustix::pty::{OpenptFlags, grantpt, openpt, ptsname, unlockpt};
 use tungstenite::Message;
 
 const TERMINAL: &str = "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
+/// What the fake daemon shows an attach it doesn't flood, once it is attached.
+const READY: &str = "ready-for-the-signal";
 /// Longer than any exit takes, short of the test's own timeout.
 const BOUND: Duration = Duration::from_secs(10);
 
@@ -67,12 +71,13 @@ fn answer(mut stream: UnixStream, body: &str) -> Res<()> {
     Ok(())
 }
 
-/// A daemon at `socket` that answers attach's health and state, takes its stream, and floods it
-/// with output until its sends stall: then `stalled` hears, and the stream is held open until
-/// `done` does.
+/// A daemon at `socket` that answers attach's health and state and takes its stream. With
+/// `flood`, it sends output until its sends stall; without, one frame, READY. Then `sent` hears,
+/// and the stream is held open until `done` does.
 fn daemon(
     socket: &Path,
-    stalled: mpsc::Sender<()>,
+    flood: bool,
+    sent: mpsc::Sender<()>,
     done: mpsc::Receiver<()>,
 ) -> Res<thread::JoinHandle<Res<()>>> {
     let listener = UnixListener::bind(socket)?;
@@ -83,17 +88,22 @@ fn daemon(
         let (stream, _) = listener.accept()?;
         let mut ws = tungstenite::accept(stream).map_err(|e| e.to_string())?;
         ws.read()?;
-        ws.get_ref()
-            .set_write_timeout(Some(Duration::from_millis(500)))?;
-        while ws.send(Message::binary(vec![b'x'; 64 << 10])).is_ok() {}
-        stalled.send(())?;
+        if flood {
+            ws.get_ref()
+                .set_write_timeout(Some(Duration::from_millis(500)))?;
+            while ws.send(Message::binary(vec![b'x'; 64 << 10])).is_ok() {}
+        } else {
+            ws.send(Message::binary(READY.as_bytes().to_vec()))?;
+        }
+        sent.send(())?;
         let _ = done.recv();
         Ok(())
     }))
 }
 
-/// `bazhen attach TERMINAL` on a PTY whose other end nothing reads, against the daemon in `home`.
-fn attach(home: &Path) -> Res<(Child, rustix::fd::OwnedFd)> {
+/// `bazhen attach TERMINAL` on a PTY whose other end only the test reads, against the daemon in
+/// `home`.
+fn attach(home: &Path) -> Res<(Child, OwnedFd)> {
     let master = openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY)?;
     grantpt(&master)?;
     unlockpt(&master)?;
@@ -114,8 +124,12 @@ fn attach(home: &Path) -> Res<(Child, rustix::fd::OwnedFd)> {
     Ok((child, master))
 }
 
-/// What the attach has written to its terminal and nothing has read yet.
-fn shown(master: &rustix::fd::OwnedFd) -> String {
+/// What the attach writes to its terminal, read until it has been quiet for `quiet`.
+fn shown(master: &OwnedFd, quiet: Duration) -> String {
+    let wait = rustix::time::Timespec {
+        tv_sec: 0,
+        tv_nsec: i64::from(quiet.subsec_nanos()),
+    };
     let mut out = Vec::new();
     let mut chunk = [0u8; 4096];
     loop {
@@ -123,8 +137,7 @@ fn shown(master: &rustix::fd::OwnedFd) -> String {
             master,
             rustix::event::PollFlags::IN,
         )];
-        let ready = rustix::event::poll(&mut fds, Some(&rustix::time::Timespec::default()));
-        if !matches!(ready, Ok(1..)) {
+        if !matches!(rustix::event::poll(&mut fds, Some(&wait)), Ok(1..)) {
             break;
         }
         match rustix::io::read(master, &mut chunk) {
@@ -153,32 +166,94 @@ fn exited_within_bound(child: Child) -> Res<Option<i32>> {
     Ok(None)
 }
 
+/// A home with a fake daemon, flooding when `flood`, and an attach to it.
+struct Scene {
+    home: Home,
+    child: Child,
+    master: OwnedFd,
+    daemon: thread::JoinHandle<Res<()>>,
+    sent: mpsc::Receiver<()>,
+    finish: mpsc::Sender<()>,
+}
+
+fn scene(name: &str, flood: bool) -> Res<Scene> {
+    let home = Home(std::env::temp_dir().join(format!("bz-sig-{name}-{}", std::process::id())));
+    fs::create_dir_all(home.0.join("run"))?;
+    let (told, sent) = mpsc::channel();
+    let (finish, done) = mpsc::channel();
+    let daemon = daemon(&home.0.join("run/bazhen.sock"), flood, told, done)?;
+    let (child, master) = attach(&home.0)?;
+    Ok(Scene {
+        home,
+        child,
+        master,
+        daemon,
+        sent,
+        finish,
+    })
+}
+
+/// How the attach and the daemon ended and what the attach showed, once a test gives up on it.
+/// The daemon is joined only once it has ended by itself: one still waiting on the attach never
+/// would.
+fn ended(s: Scene) -> String {
+    drop(s.finish);
+    let code = exited_within_bound(s.child);
+    let daemon = s
+        .daemon
+        .is_finished()
+        .then(|| s.daemon.join().map_err(|_| "panicked"));
+    format!(
+        "the attach exited {code:?}, the daemon ended {daemon:?}, and its terminal showed {:?}",
+        shown(&s.master, Duration::ZERO)
+    )
+}
+
 #[test]
 #[ignore = "signals processes; runs in pnpm test:real rust"]
 fn a_second_request_to_stop_ends_an_attach_stuck_writing_to_its_terminal() {
     bazhen_test_signal::require_sandbox().unwrap();
-    let home = Home(std::env::temp_dir().join(format!("bz-sig-{}", std::process::id())));
-    fs::create_dir_all(home.0.join("run")).unwrap();
-    let (stalled, stall) = mpsc::channel();
-    let (finish, done) = mpsc::channel();
-    let daemon = daemon(&home.0.join("run/bazhen.sock"), stalled, done).unwrap();
-    let (child, master) = attach(&home.0).unwrap();
-    if stall.recv_timeout(BOUND).is_err() {
-        let code = exited_within_bound(child).unwrap();
-        panic!(
-            "the attach never stalled: it exited {code:?}, the daemon ended {:?}, and its terminal \
-             showed {:?}",
-            daemon.join().map_err(|_| "panicked"),
-            shown(&master)
-        );
-    }
-    bazhen_test_signal::signal(child.id(), Signal::TERM).unwrap();
-    bazhen_test_signal::signal(child.id(), Signal::INT).unwrap();
-    let code = exited_within_bound(child).unwrap();
-    finish.send(()).unwrap();
-    daemon.join().unwrap().unwrap();
+    let s = scene("stuck", true).unwrap();
+    assert!(
+        s.sent.recv_timeout(BOUND).is_ok(),
+        "the attach never stalled: {}",
+        ended(s)
+    );
+    bazhen_test_signal::signal(s.child.id(), Signal::TERM).unwrap();
+    bazhen_test_signal::signal(s.child.id(), Signal::INT).unwrap();
+    let code = exited_within_bound(s.child).unwrap();
+    s.finish.send(()).unwrap();
+    s.daemon.join().unwrap().unwrap();
+    drop(s.home);
     assert!(
         matches!(code, Some(143 | 130)),
         "attach was still running, or ended otherwise: {code:?}"
     );
+}
+
+#[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
+fn a_first_request_to_stop_ends_an_idle_attach_cleanly_saying_so() {
+    bazhen_test_signal::require_sandbox().unwrap();
+    let s = scene("idle", false).unwrap();
+    let mut seen = String::new();
+    if s.sent.recv_timeout(BOUND).is_ok() {
+        let by = Instant::now() + BOUND;
+        while !seen.contains(READY) && Instant::now() < by {
+            seen.push_str(&shown(&s.master, Duration::from_millis(100)));
+        }
+    }
+    assert!(
+        seen.contains(READY),
+        "the attach never showed the daemon's frame: {}",
+        ended(s)
+    );
+    bazhen_test_signal::signal(s.child.id(), Signal::TERM).unwrap();
+    let code = exited_within_bound(s.child).unwrap();
+    let said = shown(&s.master, Duration::from_millis(200));
+    s.finish.send(()).unwrap();
+    s.daemon.join().unwrap().unwrap();
+    drop(s.home);
+    assert_eq!(code, Some(1), "{said:?}");
+    assert!(said.contains("stopped by a signal"), "{said:?}");
 }
