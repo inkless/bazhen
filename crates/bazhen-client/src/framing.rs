@@ -59,10 +59,10 @@ pub(crate) fn read_response(
 }
 
 /// The most of a response read: a head and a body at their limits, and for a body sent in chunks,
-/// the lines that frame them, which `ChunkScan` holds to the same again.
+/// the most `ChunkScan` takes before it answers.
 fn read_cap(limits: Limits) -> usize {
     let body = if limits.chunked {
-        limits.body.saturating_mul(2).saturating_add(CHUNK_LINE_MAX)
+        chunks_bound(limits.body)
     } else {
         limits.body
     };
@@ -175,6 +175,11 @@ fn in_chunks(response: &[u8], head_end: usize) -> bool {
 /// The longest line a chunk's size, its extensions or a trailer may take.
 const CHUNK_LINE_MAX: usize = 4096;
 
+/// The most a body sent in chunks may take, its framing included, for `limit` bytes of data.
+fn chunks_bound(limit: usize) -> usize {
+    limit.saturating_mul(2).saturating_add(CHUNK_LINE_MAX)
+}
+
 /// How a body sent in chunks stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Chunks {
@@ -209,11 +214,13 @@ impl ChunkScan {
     }
 
     /// Where the response ends, if it has; `limit` bounds the data, and the framing around it too.
+    /// Once the chunks have taken `chunks_bound` and still don't end, they are refused, so this
+    /// answers before a read reaches `read_cap`.
     fn end(&mut self, response: &[u8], limit: usize) -> Option<usize> {
         match self.advance(response, limit, |_| {}) {
             Chunks::Done(end) => Some(end),
-            Chunks::More => None,
-            Chunks::Bad => Some(response.len()),
+            Chunks::More if response.len() - self.start < chunks_bound(limit) => None,
+            Chunks::More | Chunks::Bad => Some(response.len()),
         }
     }
 
@@ -222,7 +229,7 @@ impl ChunkScan {
     /// changes nothing.
     fn advance(&mut self, response: &[u8], limit: usize, mut data: impl FnMut(&[u8])) -> Chunks {
         loop {
-            if self.at - self.start > limit.saturating_mul(2).saturating_add(CHUNK_LINE_MAX) {
+            if self.at - self.start > chunks_bound(limit) {
                 return Chunks::Bad;
             }
             let rest = response.get(self.at..).unwrap_or_default();
@@ -453,6 +460,29 @@ mod tests {
         );
         drop(client);
         writer.join().unwrap();
+    }
+
+    #[test]
+    fn refuses_chunks_that_go_on_past_the_read_cap_rather_than_call_them_cut_short() {
+        let small = Limits {
+            head: 1024,
+            body: 16,
+            chunked: true,
+        };
+        let (mut client, mut daemon) = UnixStream::pair().unwrap();
+        let line = format!("1;{}\r\na\r\n", "x".repeat(4000));
+        let mut sent = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n".to_vec();
+        for _ in 0..3 {
+            sent.extend_from_slice(line.as_bytes());
+        }
+        assert!(sent.len() > read_cap(small));
+        daemon.write_all(&sent).unwrap();
+        // The daemon holds the connection open, as one still sending would.
+        let read = read_response(&mut client, small, STALL, soon()).unwrap();
+        assert!(read.len() <= read_cap(small), "{}", read.len());
+        assert!(!is_truncated(&read, small));
+        assert_eq!(body(&read, small), None);
+        drop(daemon);
     }
 
     #[test]

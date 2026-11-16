@@ -286,6 +286,8 @@ function run(
       }
       resolve({ code: err === null ? 0 : Number(err.code ?? 1), stdout, stderr });
     });
+    // A CLI that doesn't read its stdin may exit before this lands; that is no failure of its.
+    child.stdin?.on("error", () => {});
     child.stdin?.end(input);
   });
 }

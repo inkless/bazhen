@@ -312,9 +312,19 @@ fn send(
             .filter(|d| !d.is_zero())
             .ok_or(io::Error::from(io::ErrorKind::TimedOut))
     };
-    stream.set_write_timeout(Some(left()?))?;
-    stream.write_all(head.as_bytes())?;
-    stream.write_all(body)?;
+    for mut bytes in [head.as_bytes(), body] {
+        // Each write gets only what is left, so a daemon that reads slowly can't stretch the
+        // writes past the deadline a little at a time.
+        while !bytes.is_empty() {
+            stream.set_write_timeout(Some(left()?))?;
+            match stream.write(bytes) {
+                Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
+                Ok(n) => bytes = bytes.get(n..).unwrap_or_default(),
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(e),
+            }
+        }
+    }
     read_response(stream, limits, REPLY_STALL, deadline)
 }
 
@@ -370,6 +380,46 @@ mod tests {
             "POST /v1/shells/report HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n\
              Content-Length: 7\r\nConnection: close\r\n\r\n"
         );
+    }
+
+    #[test]
+    fn gives_up_at_its_deadline_on_a_daemon_that_reads_the_request_slowly() {
+        let (mut client, mut daemon) = UnixStream::pair().unwrap();
+        let reader = thread::spawn(move || {
+            let mut chunk = [0; 4096];
+            for _ in 0..30 {
+                if matches!(daemon.read(&mut chunk), Ok(0) | Err(_)) {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+        });
+        let start = Instant::now();
+        let body = vec![b'x'; 16 << 20];
+        let deadline = start + Duration::from_millis(500);
+        let sent = send(
+            &mut client,
+            "POST / HTTP/1.1\r\n\r\n",
+            &body,
+            LIMITS,
+            deadline,
+        );
+        let kind = sent.map_err(|e| e.kind());
+        assert!(
+            matches!(
+                kind,
+                Err(io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock)
+            ),
+            "{kind:?}"
+        );
+        // The reader goes on for 3 s: writes each given the whole timeout again would last it out.
+        assert!(
+            start.elapsed() < Duration::from_millis(1500),
+            "{:?}",
+            start.elapsed()
+        );
+        drop(client);
+        reader.join().unwrap();
     }
 
     #[test]
@@ -520,7 +570,6 @@ mod tests {
         }
     }
 
-    /// A daemon that reads one request and answers it with `reply`, and hands back what it read.
     fn request_is_whole(request: &[u8]) -> bool {
         let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") else {
             return false;
@@ -529,6 +578,7 @@ mod tests {
         request.len() >= end + 4 + framing::content_length(head).unwrap_or(0)
     }
 
+    /// A daemon that reads one request and answers it with `reply`, and hands back what it read.
     fn daemon(socket: &Path, reply: &'static [u8]) -> thread::JoinHandle<Vec<u8>> {
         let listener = UnixListener::bind(socket).unwrap();
         thread::spawn(move || {
