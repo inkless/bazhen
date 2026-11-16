@@ -248,6 +248,16 @@ describe("bazhen whoami", () => {
     expect(ran.stdout).toContain("as worker, reporting to the human");
   });
 
+  it("says the role an agent was launched in, beside who launched it", async () => {
+    s.daemon.answer(
+      "GET /v1/state",
+      StateSnapshot,
+      snapshot({ agents: [agent(AGENT, "BZ-127", { role: "reviewer" })] }),
+    );
+    const ran = await s.bazhen(["whoami"], asAgent);
+    expect(ran.stdout.split("\n")[2]).toBe("launched by the human, as a reviewer");
+  });
+
   it("says when the agent has no tasks", async () => {
     s.daemon.answer("GET /v1/state", StateSnapshot, snapshot({ agents: [agent(AGENT, "BZ-127")] }));
     expect((await s.bazhen(["whoami"], asAgent)).stdout).toMatch(/\nno tasks\n$/);
