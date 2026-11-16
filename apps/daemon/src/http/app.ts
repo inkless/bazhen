@@ -54,6 +54,7 @@ import {
 import {
   AgentTerminalExists,
   HarnessRefused,
+  healthOfEach,
   isId,
   LaunchFailed,
   TaskRefused,
@@ -304,13 +305,15 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   }
 
   app.get("/v1/health", async (c) => {
-    const runtime = await deps.runtime.health();
+    const runtimes = await healthOfEach(deps.runtime);
+    const runtime = runtimes.find((r) => r.kind === "tmux") ?? (await deps.runtime.health());
     const body = HealthResponse.parse({
       status: "ok",
       appVersion: deps.appVersion,
       protocolVersion: PROTOCOL_VERSION,
       schemaVersion: deps.schemaVersion(),
       runtime: { kind: "tmux", state: runtime.state, version: runtime.version },
+      runtimes,
     });
     return c.json(body);
   });

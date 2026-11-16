@@ -7,7 +7,7 @@ import { getRequestListener, serve } from "@hono/node-server";
 import { LocalEnvironment } from "@bazhen/env-local";
 import { ClaudeCodeHarness } from "@bazhen/harness-claude-code";
 import { CodexHarness, DAEMON_START_ARGS } from "@bazhen/harness-codex";
-import { filterEnv, RoutedRuntime, UnknownRuntime } from "@bazhen/core";
+import { filterEnv, healthOfEach, RoutedRuntime, UnknownRuntime } from "@bazhen/core";
 import { TmuxServer, findNotifySend, hostPtyReader } from "@bazhen/host-guard";
 import { PROTOCOL_VERSION } from "@bazhen/protocol";
 import { HolderRuntime, installHolder, pruneUnusedHolders } from "@bazhen/runtime-holder";
@@ -572,11 +572,13 @@ const socketListener = getRequestListener(
       };
     },
     doctor: async () => {
-      const runtimeHealth = await runtime.health();
+      const runtimes = await healthOfEach(runtime);
+      const tmuxHealth = runtimes.find((r) => r.kind === "tmux") ?? (await tmux.health());
       return {
         appVersion: APP_VERSION,
         protocolVersion: PROTOCOL_VERSION,
-        runtime: { state: runtimeHealth.state, version: runtimeHealth.version },
+        runtime: { state: tmuxHealth.state, version: tmuxHealth.version },
+        runtimes,
         hookClient: { path: hookRunner, fallback: hookRunner === HOOK_SCRIPT },
         holder: await holderDoctor(holderInstall, holderRuntime),
         config: configFile,

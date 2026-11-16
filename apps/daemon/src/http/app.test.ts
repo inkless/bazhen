@@ -3,6 +3,7 @@ import {
   AgentTerminalExists,
   HarnessRefused,
   newId,
+  RoutedRuntime,
   NotResumable,
   TaskRefused,
   UnsupportedHarness,
@@ -249,6 +250,27 @@ describe("HTTP app", () => {
       protocolVersion: PROTOCOL_VERSION,
       schemaVersion: 1,
       runtime: { state: "not-running", version: "fake" },
+    });
+  });
+
+  it("reports each runtime of a routed one by itself, and tmux's as the runtime", async () => {
+    const tmux = new FakeRuntime({ kind: "tmux" });
+    const holder = new FakeRuntime({ kind: "holder" });
+    const routed = new RoutedRuntime({
+      runtimes: [tmux, holder],
+      defaultKind: "tmux",
+      onError: () => {},
+    });
+    holder.disconnect();
+    const res = await createApp({ ...deps, runtime: routed }).request("/v1/health", {
+      headers: { host },
+    });
+    expect(await res.json()).toMatchObject({
+      runtime: { kind: "tmux", state: "not-running", version: "fake" },
+      runtimes: [
+        { kind: "tmux", state: "not-running", version: "fake" },
+        { kind: "holder", state: "unreachable", version: null },
+      ],
     });
   });
 

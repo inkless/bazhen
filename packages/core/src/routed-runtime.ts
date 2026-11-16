@@ -37,6 +37,15 @@ export interface RoutedRuntimeOptions {
   readonly onError: (err: unknown) => void;
 }
 
+/** Each runtime of `runtime`'s, by kind, with its own health: one, unless it is routed. */
+export async function healthOfEach(
+  runtime: RuntimeAdapter,
+): Promise<(RuntimeHealth & { readonly kind: string })[]> {
+  const each =
+    runtime instanceof RoutedRuntime ? runtime.kinds.map((k) => runtime.only(k)) : [runtime];
+  return Promise.all(each.map(async (r) => ({ kind: r.kind, ...(await r.health()) })));
+}
+
 /** Worst first: one runtime that can't be read is what a reader of all of them must know. */
 const SEVERITY: Record<RuntimeHealthState, number> = {
   unreachable: 2,
