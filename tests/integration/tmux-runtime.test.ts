@@ -130,52 +130,57 @@ describe("tmux runtime on a private server", () => {
 
   // A child_process child inherits every PTY master this process holds, as node-pty's next attach
   // client can: closing the stream's own copy of the master then hangs nobody up.
-  it.runIf(process.platform === "linux")(
-    "detaches a closed stream's client while another process holds its PTY's master, and only it",
-    async () => {
-      const ref = await runtime.create(spec(["sleep", "300"]));
-      const session = String(ref.locator.session);
-      const closing = await runtime.attach(ref, null);
-      await expect.poll(() => clientsOf(session)).toHaveLength(1);
-      const leaving = soleClientOf(session);
-      const holder = spawn("sh", ["-c", "read line"], { stdio: ["pipe", "ignore", "ignore"] });
-      const ended = new Promise((resolve) => holder.on("exit", resolve));
-      const open: RuntimeStream[] = [];
-      try {
-        expect(mastersHeldBy(Number(holder.pid))).toContain(ptsNumber(leaving.tty));
-        open.push((await runtime.attach(ref, null)).stream);
-        await expect.poll(() => clientsOf(session)).toHaveLength(2);
-        const keptTty = clientsOf(session).find(({ tty }) => tty !== leaving.tty)?.tty;
-        closing.stream.close();
-        await expect
-          .poll(() => clientsOf(session).map(({ tty }) => tty), { timeout: 5_000 })
-          .toEqual([keptTty]);
-        // Its terminal device stays its own while the holder keeps the master open: a new client
-        // can't be given that name, so detaching by it can't reach another client.
-        open.push((await runtime.attach(ref, null)).stream);
-        await expect.poll(() => clientsOf(session)).toHaveLength(2);
-        expect(clientsOf(session).map(({ tty }) => tty)).not.toContain(leaving.tty);
-      } finally {
-        for (const stream of open) stream.close();
-        holder.stdin.end();
-        await ended;
-      }
-    },
-  );
-
-  // Once its client has gone and the master with it, the device's name may be another PTY's.
-  it("issues no detach for a stream whose client has already left", async () => {
+  it("detaches a closed stream's client while another process holds its PTY's master, and only it", async () => {
     const ref = await runtime.create(spec(["sleep", "300"]));
     const session = String(ref.locator.session);
-    const { stream } = await runtime.attach(ref, null);
+    const closing = await runtime.attach(ref, null);
     await expect.poll(() => clientsOf(session)).toHaveLength(1);
-    const gone = new Promise((resolve) => stream.onClose(resolve));
-    tmuxOut(server, "detach-client", "-t", soleClientOf(session).tty);
-    await gone;
-    const ran = vi.spyOn(server, "run");
+    const leaving = soleClientOf(session);
+    const holder = spawn("sh", ["-c", "read line"], { stdio: ["pipe", "ignore", "ignore"] });
+    const ended = new Promise((resolve) => holder.on("exit", resolve));
+    const open: RuntimeStream[] = [];
     try {
-      stream.close();
-      expect(ran.mock.calls.flatMap(([args]) => args)).not.toContain("detach-client");
+      expect(mastersHeldBy(Number(holder.pid))).toContain(ptsNumber(leaving.tty));
+      open.push((await runtime.attach(ref, null)).stream);
+      await expect.poll(() => clientsOf(session)).toHaveLength(2);
+      const keptTty = clientsOf(session).find(({ tty }) => tty !== leaving.tty)?.tty;
+      closing.stream.close();
+      await expect
+        .poll(() => clientsOf(session).map(({ tty }) => tty), { timeout: 5_000 })
+        .toEqual([keptTty]);
+      // Its terminal device stays its own while the holder keeps the master open: a new client
+      // can't be given that name, so detaching by it can't reach another client.
+      open.push((await runtime.attach(ref, null)).stream);
+      await expect.poll(() => clientsOf(session)).toHaveLength(2);
+      expect(clientsOf(session).map(({ tty }) => tty)).not.toContain(leaving.tty);
+    } finally {
+      for (const stream of open) stream.close();
+      holder.stdin.end();
+      await ended;
+    }
+  });
+
+  // Once a client has gone and its master with it, its device's name may be another PTY's.
+  it("detaches by its terminal device only a stream whose master is still open", async () => {
+    const ref = await runtime.create(spec(["sleep", "300"]));
+    const session = String(ref.locator.session);
+    const gone = await runtime.attach(ref, null);
+    await expect.poll(() => clientsOf(session)).toHaveLength(1);
+    const left = new Promise((resolve) => gone.stream.onClose(resolve));
+    tmuxOut(server, "detach-client", "-t", soleClientOf(session).tty);
+    await left;
+    const live = await runtime.attach(ref, null);
+    await expect.poll(() => clientsOf(session)).toHaveLength(1);
+    const liveTty = soleClientOf(session).tty;
+    const ran = vi.spyOn(server, "run");
+    const detaches = () =>
+      ran.mock.calls
+        .map(([args]) => args.slice(args.indexOf("detach-client")))
+        .filter((a) => a[0] === "detach-client");
+    try {
+      gone.stream.close();
+      live.stream.close();
+      expect(detaches()).toEqual([["detach-client", "-t", liveTty]]);
     } finally {
       ran.mockRestore();
     }

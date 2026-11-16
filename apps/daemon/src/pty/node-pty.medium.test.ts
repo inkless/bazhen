@@ -181,27 +181,26 @@ describe("the PTY seam over node-pty", () => {
     });
   });
 
-  it("names the terminal device node-pty opened, while its master is open", () => {
-    expect(spawned(standIn().terminal).tty).toBe("/dev/pts/999");
-  });
-
-  it("names no device once hung up, when another PTY may be given its name", () => {
+  it("names its terminal device while the master is open, and none once hung up", () => {
     signals();
     const pty = spawned(standIn().terminal);
+    expect(pty.tty).toBe("/dev/pts/999");
     pty.hangUp();
     expect(pty.tty).toBeUndefined();
   });
 
-  it("names no device once node-pty has closed the master, before the exit is heard", () => {
+  it("names its terminal device until node-pty closes the master, before the exit is heard", () => {
     const { terminal } = standIn();
     const pty = spawned(terminal);
+    expect(pty.tty).toBe("/dev/pts/999");
     endOfFile(terminal);
     expect(pty.tty).toBeUndefined();
   });
 
-  it("names no device once its child has exited", () => {
+  it("names its terminal device until its child exits", () => {
     const { terminal, exit } = standIn();
     const pty = spawned(terminal);
+    expect(pty.tty).toBe("/dev/pts/999");
     exit(0);
     expect(pty.tty).toBeUndefined();
   });
