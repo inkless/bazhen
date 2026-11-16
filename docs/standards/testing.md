@@ -167,6 +167,25 @@ the branch, since a partial verdict would read as a pass. Inside the sandbox it 
 tests ignored as signalling, which a plain nextest run skips. Stryker-style mutation
 scores are not a gate, because their cost and equivalent mutants make the number meaningless.
 
+The holder's whole crate is swept by `pnpm test:real mutants --group <signal|lifecycle|rest>
+[--shard k/n]` (`scripts/holder-mutants.ts`), a tool for finding untested code, not a check. The
+groups go most valuable first: code that signals, then binding the socket and the server's close
+and drop paths, then the rest, each about one container run. Every mutant cargo-mutants' Rust
+tests miss is judged again by `pnpm test:holder`, so one only the black-box suite catches isn't
+counted missed. A survivor in signal or lifecycle code gets a test that kills it, or a note saying
+why it changes nothing. The script refuses to start before it lists anything anywhere but a
+sandbox, since a mutant of the holder can signal any pid it computes, and refuses a run whose
+groups don't partition the crate's mutants. CI's `Holder mutants` workflow runs a group by hand,
+never on a push.
+
+The chaos suite, `tests/holder/chaos.test.ts`, deals holders the faults of a daemon's machine
+through a stand-in daemon, a process of its own running `HolderRuntime`
+(`tests/support/stand-in-daemon.ts`): killed with -9 under floods, stopped with SIGSTOP, a holder
+killed, sockets deleted, out of descriptors. Its waits are for events, never for time to pass,
+and each also stops once what it waits for can't happen, so a fault fails on the assertion it
+breaks rather than on a timeout. Its floods are `seq` output, so every byte at every offset is
+known and each attach is checked whole.
+
 ## Memory and time caps
 
 A test that runs away with memory takes more than its own run. Past the machine's memory the

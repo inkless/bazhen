@@ -1,8 +1,9 @@
 // Where holder tests keep their holders: under the temporary BAZHEN_HOME their run made, and
 // never under any other, a real one included.
 
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
+import { newId, type TerminalSpec } from "@bazhen/core";
 import type { HolderClient } from "@bazhen/runtime-holder";
 
 type HolderProcessSpec = Parameters<HolderClient["respawn"]>[0];
@@ -131,6 +132,20 @@ export function holderProcessSpec(
     argv: [...argv],
     cwd: userDir(testHome(env)),
     env: holderEnv(extra, env),
+    generation: 0,
+  };
+}
+
+/** A terminal for a `HolderRuntime` under test, at 80×24, running `argv` in the run's HOME. */
+export function holderTerminalSpec(argv: readonly [string, ...string[]]): TerminalSpec {
+  return {
+    terminalId: newId("term"),
+    tags: { kind: "shell" },
+    argv,
+    cwd: realpathSync(userDir(testHome())),
+    env: {},
+    size: { cols: 80, rows: 24 },
+    historyLines: 10_000,
     generation: 0,
   };
 }

@@ -604,6 +604,97 @@ mod tests {
         assert_eq!(leader.session().count(), Sweep::default());
     }
 
+    /// Runs this process out of file descriptors, and holds them until the result is dropped.
+    /// Each test runs in a process of its own, so this touches no other test, and its own limit
+    /// is lowered first, so the system's file table is never what runs out. Linux only: there a
+    /// pass reads processes from /proc, which takes a descriptor; macOS asks the kernel by
+    /// `proc_listpids` and `proc_pidinfo`, which take none.
+    #[cfg(target_os = "linux")]
+    fn out_of_descriptors() -> Vec<std::fs::File> {
+        let limit = rustix::process::getrlimit(rustix::process::Resource::Nofile);
+        rustix::process::setrlimit(
+            rustix::process::Resource::Nofile,
+            rustix::process::Rlimit {
+                current: Some(64),
+                maximum: limit.maximum,
+            },
+        )
+        .unwrap();
+        let mut held = Vec::new();
+        loop {
+            match std::fs::File::open("/dev/null") {
+                Ok(file) => held.push(file),
+                Err(error) if error.raw_os_error() == Some(libc::EMFILE) => return held,
+                Err(error) => panic!("opening /dev/null: {error}"),
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn a_pass_that_cant_list_the_processes_is_incomplete_not_empty() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let leader = Leader::start(JOB);
+        let session = leader.session();
+        let held = out_of_descriptors();
+        let sweep = session.count();
+        drop(held);
+        assert!(sweep.incomplete, "{sweep:?}");
+        assert!(!sweep.is_empty());
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn a_member_that_cant_be_read_makes_the_pass_incomplete_not_empty() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let leader = Leader::start(JOB);
+        let session = leader.session();
+        let held = out_of_descriptors();
+        let sweep = session.pass_among([leader.child.pid()], None);
+        drop(held);
+        assert!(sweep.incomplete, "{sweep:?}");
+        assert!(!sweep.is_empty());
+    }
+
+    /// What `tracing` wrote while `body` ran.
+    fn logged(body: impl FnOnce()) -> String {
+        #[derive(Clone, Default)]
+        struct Capture(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+        impl std::io::Write for Capture {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let capture = Capture::default();
+        let writer = capture.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(move || writer.clone())
+            .with_ansi(false)
+            .finish();
+        tracing::subscriber::with_default(subscriber, body);
+        let bytes = capture.0.lock().unwrap().clone();
+        String::from_utf8(bytes).unwrap()
+    }
+
+    #[test]
+    fn a_member_that_refuses_the_close_is_logged_once_with_its_pid() {
+        let refusing = Sweep {
+            refused: vec![Pid::from_raw(NO_PROCESS).unwrap()],
+            ..Sweep::default()
+        };
+        let now = Instant::now();
+        // The hangup is two passes, SIGHUP then SIGCONT, and the pid refuses both.
+        let log = logged(|| scripted([refusing.clone(), refusing], now).step(false, now));
+        assert_eq!(log.matches("another user's").count(), 1, "{log}");
+        assert!(log.contains(&format!("pid={NO_PROCESS}")), "{log}");
+    }
+
     #[test]
     fn this_system_can_sweep_a_session() {
         supported().unwrap();

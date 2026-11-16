@@ -1,4 +1,5 @@
-// `pnpm test:real [suite…] [--base <ref>]`: the real-tmux suites, in a container built from this
+// `pnpm test:real [suite…] [--base <ref>] [--group <g> [--shard k/n]]`: the real-tmux suites, and
+// the holder's mutants by group (scripts/holder-mutants.ts), in a container built from this
 // worktree (docs/standards/testing.md). The build context is a fresh repository holding HEAD and
 // falsify's base, overlaid with the worktree's uncommitted files, so falsify judges commits and
 // the other suites test what is on disk. Each suite gets a container of its own, with nothing of
@@ -36,6 +37,7 @@ const SUITES = {
   falsify: "test:falsify",
   rust: "test:rust:all",
   holder: "test:holder",
+  mutants: "test:mutants:holder",
 } as const;
 type Suite = keyof typeof SUITES;
 const DEFAULT_SUITES: Suite[] = ["integration", "api", "e2e", "holder", "rust"];
@@ -44,31 +46,76 @@ const DEFAULT_BASE = "origin/main";
 const BASE_REF = "refs/remotes/origin/main";
 
 const isSuite = (name: string): name is Suite => Object.hasOwn(SUITES, name);
-const USAGE = `usage: pnpm test:real [${Object.keys(SUITES).join("|")}]… [--base <ref>]`;
+const USAGE =
+  `usage: pnpm test:real [${Object.keys(SUITES).join("|")}]… [--base <ref>] ` +
+  "[--group <g> [--shard k/n]]";
+
+/** The groups of the holder's mutants, as scripts/holder-mutants.ts names them. */
+export const MUTANT_GROUPS: readonly string[] = ["signal", "lifecycle", "rest"];
+
+/** Which of the holder's mutants the `mutants` suite runs: a group, and a shard of it. */
+export interface MutantsPart {
+  readonly group: string;
+  readonly shard?: string;
+}
 
 /**
  * What a suite's container runs. Falsify judges against the base the image carries, and then, as
  * CI does, has the base's falsify judge a branch that changes falsify.
  */
-export function suiteCommand(suite: Suite): string[] {
+export function suiteCommand(suite: Suite, mutants?: MutantsPart): string[] {
+  if (suite === "mutants") {
+    if (mutants === undefined) throw new Error(`the mutants suite needs --group; ${USAGE}`);
+    const shard = mutants.shard === undefined ? [] : ["--shard", mutants.shard];
+    return ["pnpm", SUITES.mutants, "--group", mutants.group, ...shard];
+  }
   if (suite !== "falsify") return ["pnpm", SUITES[suite]];
   const base = `--base ${BASE_REF}`;
   return ["sh", "-c", `pnpm ${SUITES.falsify} ${base} && pnpm test:falsify:base ${base}`];
 }
 
-/** The suites named on the command line, in order, or the default set, and falsify's base. */
-export function parseArgs(args: readonly string[]): { suites: Suite[]; base: string } {
-  const at = args.indexOf("--base");
-  const base = at === -1 ? DEFAULT_BASE : args[at + 1];
-  const names = at === -1 ? args : [...args.slice(0, at), ...args.slice(at + 2)];
-  const unknown = names.filter((a) => !isSuite(a));
-  if (base === undefined || base.startsWith("-") || unknown.length > 0) {
-    throw new Error(unknown.length > 0 ? `unknown suite ${unknown.join(", ")}; ${USAGE}` : USAGE);
+const OPTIONS = ["--base", "--group", "--shard"] as const;
+
+/**
+ * The suites named on the command line, in order, or the default set; falsify's base; and, for
+ * the mutants suite, its group and shard, which it needs and nothing else takes.
+ */
+export function parseArgs(args: readonly string[]): {
+  suites: Suite[];
+  base: string;
+  mutants?: MutantsPart;
+} {
+  const values = new Map<string, string | undefined>();
+  const names: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i] ?? "";
+    if (!(OPTIONS as readonly string[]).includes(arg)) {
+      names.push(arg);
+      continue;
+    }
+    const value = args[i + 1];
+    values.set(arg, value === undefined || value.startsWith("-") ? undefined : value);
+    i++;
   }
-  return {
-    suites: names.length === 0 ? DEFAULT_SUITES : [...new Set(names.filter(isSuite))],
-    base,
-  };
+  const unknown = names.filter((a) => !isSuite(a));
+  if (unknown.length > 0) throw new Error(`unknown suite ${unknown.join(", ")}; ${USAGE}`);
+  if ([...values.values()].includes(undefined)) throw new Error(USAGE);
+  const base = values.get("--base") ?? DEFAULT_BASE;
+  const group = values.get("--group");
+  const shard = values.get("--shard");
+  const suites = names.length === 0 ? DEFAULT_SUITES : [...new Set(names.filter(isSuite))];
+  if (
+    (group !== undefined) !== suites.includes("mutants") ||
+    (shard !== undefined && group === undefined)
+  ) {
+    throw new Error(`--group and --shard go with the mutants suite, which needs a group; ${USAGE}`);
+  }
+  if (group === undefined) return { suites, base };
+  // Refused here, before an image is built for a run that would refuse it.
+  if (!MUTANT_GROUPS.includes(group)) {
+    throw new Error(`no mutant group ${group}; it is one of ${MUTANT_GROUPS.join(", ")}`);
+  }
+  return { suites, base, mutants: { group, ...(shard === undefined ? {} : { shard }) } };
 }
 
 /** The image's build arguments: the repository's own pins, and the Rust tools falsify runs. */
@@ -518,7 +565,7 @@ const exitCodeFor = (signal: NodeJS.Signals) => 128 + constants.signals[signal];
  * wedged Docker can't hold the run, and the next run's sweep removes what was left.
  */
 export async function run(args: readonly string[], host: Host): Promise<number> {
-  const { suites, base } = parseArgs(args);
+  const { suites, base, mutants } = parseArgs(args);
   const inFlight = new Set<DockerCall>();
   let interrupted: NodeJS.Signals | undefined;
   const { promise: abandoned, resolve: abandon } = Promise.withResolvers<undefined>();
@@ -639,7 +686,7 @@ export async function run(args: readonly string[], host: Host): Promise<number> 
           "--memory-swap",
           memory,
           image,
-          ...suiteCommand(suite),
+          ...suiteCommand(suite, mutants),
         ]);
         if (interrupted !== undefined) return 1;
         if (!passed) failedSuites.push(suite);

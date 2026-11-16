@@ -4,14 +4,19 @@
 // helper that spawns a real holder belongs here too, passing its spec's env the same way.
 
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
-import { rmSync } from "node:fs";
+import { once } from "node:events";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
+import type { RuntimeRef } from "@bazhen/core";
 import {
   type Containment,
   HolderStartFailed,
   inSignalSandbox,
   killHolder,
   readProcess,
+  signalGroup,
+  spawnGroup,
   startHolder,
   type StartedHolder,
   type StartHolderOptions,
@@ -93,7 +98,11 @@ export function replayEngine(
   return parsed;
 }
 
-/** CPU-seconds a holder may use: one that spins, under a mutant say, dies of SIGXCPU instead. */
+/**
+ * CPU-seconds a holder may use: one that spins, under a mutant say, dies of SIGXCPU instead. A
+ * holder reads its child's output as fast as it comes, so one that floods spends its CPU at the
+ * child's pace; a test that floods for longer gives its holders more.
+ */
 const CPU_SECONDS = 10;
 const CLOSE_MS = 5_000;
 
@@ -114,14 +123,17 @@ export interface SpawnedHolder {
  * recorded in the ledger before it reads its spec, so a run that dies before closing it has it
  * swept by the next.
  */
-async function startRecorded(options: StartHolderOptions): Promise<SpawnedHolder> {
+async function startRecorded(
+  options: StartHolderOptions,
+  cpuLimit = CPU_SECONDS,
+): Promise<SpawnedHolder> {
   const { terminalId, socket } = options.spec;
   let entry: string | undefined;
   try {
     const started = await startHolder({
       ...options,
       cwd: userDir(testHome()),
-      limits: { cpuSeconds: CPU_SECONDS },
+      limits: { cpuSeconds: cpuLimit },
       onStarted: async ({ pid, start }) => {
         entry = await record(pid, start, socket);
       },
@@ -188,15 +200,19 @@ const isEnv = (value: unknown): value is Readonly<Record<string, string>> =>
 /**
  * A `start` for a `HolderRuntime` under test: each holder it starts is started as `spawnHolder`
  * starts one, its child's env checked as every holder test's is, and collected in `started` for
- * `closeHolder` to end.
+ * `closeHolder` to end, each allowed `cpuLimit` seconds of CPU.
  */
-export function holderStarter(started: SpawnedHolder[], sandboxed = inSignalSandbox()) {
+export function holderStarter(
+  started: SpawnedHolder[],
+  sandboxed = inSignalSandbox(),
+  cpuLimit = CPU_SECONDS,
+) {
   return async (options: StartHolderOptions): Promise<StartedHolder> => {
     requireSignalSandbox(sandboxed);
     const env = "env" in options.spec ? options.spec.env : undefined;
     if (!isEnv(env)) throw new Error("a holder test's spawn spec carries no environment");
     requireHolderEnv(env);
-    const holder = await startRecorded(options);
+    const holder = await startRecorded(options, cpuLimit);
     started.push(holder);
     return holder;
   };
@@ -282,4 +298,77 @@ export async function processStart(pid: number): Promise<number | null> {
   if (reading === "absent") return null;
   if (reading === "unreadable") throw new Error(`ps can't say what ${pid} is`);
   return reading.start;
+}
+
+const STAND_IN = fileURLToPath(new URL("stand-in-daemon.ts", import.meta.url));
+
+/** A stand-in daemon a chaos test started, which only this module may signal. */
+export interface StandInProcess {
+  /** Settles once it has exited and every line it printed has been read. */
+  readonly done: Promise<void>;
+  /** Kills, stops or continues its whole group, which nothing but it is in. */
+  signal(signal: "SIGKILL" | "SIGSTOP" | "SIGCONT"): void;
+}
+
+/**
+ * How a stand-in starts: as the daemon would, or running out of descriptors first, which it may
+ * only under a cap of its own, `nofile`, so the system's file table is never what runs out.
+ */
+export type StandInOptions =
+  | { readonly exhaust?: false }
+  | { readonly exhaust: true; readonly nofile: number };
+
+/**
+ * Starts ./stand-in-daemon.ts on `refs`, whose holders bind in `root`, in a group of its own, with
+ * the run's environment, and hands each line it prints to `onLine`.
+ */
+export function startStandIn(
+  root: string,
+  refs: readonly RuntimeRef[],
+  onLine: (line: string) => void,
+  options: StandInOptions = {},
+): StandInProcess {
+  requireSignalSandbox(inSignalSandbox());
+  const node = [process.execPath, STAND_IN, root, JSON.stringify(refs)];
+  const argv =
+    options.exhaust === true
+      ? [
+          "/bin/sh",
+          "-c",
+          `ulimit -n ${options.nofile} && exec "$@"`,
+          "stand-in",
+          ...node,
+          "--exhaust",
+        ]
+      : node;
+  const [command = process.execPath, ...args] = argv;
+  const child = spawnGroup(command, args, {
+    stdio: ["ignore", "pipe", "inherit"],
+    cwd: userDir(testHome()),
+    env: holderEnv(),
+  });
+  const lines = createInterface({ input: child.stdout! });
+  lines.on("line", onLine);
+  const done = Promise.all([once(child, "exit"), once(lines, "close")]).then(() => {});
+  return { done, signal: (signal) => signalGroup(child, signal) };
+}
+
+// A process's /proc/<pid>/stat: its command, in parentheses that may hold anything, then fields
+// from the third on, of which utime and stime are the 14th and 15th, in clock ticks.
+const STAT_TAIL = /\)\s+(.*)$/s;
+/** USER_HZ, which /proc counts CPU time in: 100 on the x86_64 and aarch64 Linux the suite runs on. */
+const TICKS_PER_SECOND = 100;
+
+/**
+ * The CPU time `pid` has used, user and system together, in seconds; null where /proc doesn't
+ * say, as on macOS.
+ */
+export function cpuSeconds(pid: number): number | null {
+  const path = `/proc/${pid}/stat`;
+  if (!existsSync(path)) return null;
+  const fields = STAT_TAIL.exec(readFileSync(path, "utf8"))?.[1]?.split(" ");
+  const utime = Number(fields?.[11]);
+  const stime = Number(fields?.[12]);
+  if (!Number.isFinite(utime) || !Number.isFinite(stime)) throw new Error(`can't read ${path}`);
+  return (utime + stime) / TICKS_PER_SECOND;
 }

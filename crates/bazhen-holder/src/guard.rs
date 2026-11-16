@@ -247,20 +247,29 @@ mod tests {
         }
     }
 
+    /// `pid`'s parent as `ps` reads it, apart from the guard's own reading, which is under test.
+    fn parent_by_ps(pid: i32) -> Option<i32> {
+        let out = Command::new("ps")
+            .args(["-o", "ppid=", "-p", &pid.to_string()])
+            .output()
+            .ok()?;
+        String::from_utf8(out.stdout).ok()?.trim().parse().ok()
+    }
+
     #[test]
     fn every_process_the_holder_descends_from_is_refused() {
         let own = [getpid(), getpgrp(), getsid(None).unwrap()].map(Pid::as_raw_pid);
-        let mut next = getppid();
+        let mut next = getppid().map(Pid::as_raw_pid);
         let mut seen = 0;
-        while let Some(pid) = next.filter(|pid| !pid.is_init()) {
-            let raw = pid.as_raw_pid();
+        while let Some(raw) = next.filter(|raw| *raw > 1) {
             if !own.contains(&raw) {
                 assert_eq!(vet(raw), Err(Refused::Ancestor(raw)));
                 seen += 1;
             }
-            next = parent(pid);
+            next = parent_by_ps(raw);
         }
-        assert!(seen > 0, "no ancestor to try");
+        // Past the parent, so a walk that stops there or skips a link is caught.
+        assert!(seen >= 2, "only {seen} ancestor(s) to try");
     }
 
     #[test]
