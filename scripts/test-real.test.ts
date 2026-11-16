@@ -132,7 +132,11 @@ type Answer = DockerResult | "pending" | "wedged";
 
 const never = new Promise<never>(() => {});
 
-/** A host in memory. `answer` decides each docker command's result. */
+/**
+ * A host in memory. `answer` decides each docker command's result. It is disposable unless told
+ * otherwise, as a CI runner is, so a test of something other than where containers land needs no
+ * slice. Its probe's cgroup reads as `cgroup` only while the probe runs, as `/proc` does.
+ */
 function fakeHost(
   answer: (args: readonly string[]) => Answer,
   more: {
@@ -142,6 +146,7 @@ function fakeHost(
     timeouts?: boolean;
     cgroup?: string;
     sliceCap?: number;
+    disposable?: boolean;
   } = {},
 ) {
   const calls: string[][] = [];
@@ -149,11 +154,15 @@ function fakeHost(
   const removed: string[] = [];
   const waiting: string[][] = [];
   const handlers = new Set<(signal: NodeJS.Signals) => void>();
+  let probeRuns = false;
   const host: Host = {
     pid: OWN_PID,
     id: HOST,
+    disposable: more.disposable ?? true,
     docker(args): DockerCall {
       calls.push([...args]);
+      if (verb(args) === "run --detach") probeRuns = true;
+      if (args[0] === "stop") probeRuns = false;
       const answered = answer(args);
       if (typeof answered === "object") return { done: Promise.resolve(answered), stop: () => {} };
       let settle!: (r: DockerResult) => void;
@@ -174,7 +183,7 @@ function fakeHost(
       return () => handlers.delete(handler);
     },
     after: () => (more.timeouts === true ? Promise.resolve() : never),
-    cgroupOf: () => more.cgroup,
+    cgroupOf: () => (probeRuns ? more.cgroup : undefined),
     memoryMax: (cgroup) => (cgroup.endsWith(`/${SLICE}`) ? more.sliceCap : undefined),
   };
   const signal = (s: NodeJS.Signals) => {
@@ -235,6 +244,29 @@ const isRemoval = (c: string[]) => c[0] === "rm" || verb(c) === "image rm";
 const cleanup = (calls: string[][]) => calls.filter(isRemoval);
 const quietly = () => vi.spyOn(console, "warn").mockImplementation(() => {});
 afterEach(() => vi.restoreAllMocks());
+const probeWontStart = (args: readonly string[]): Answer =>
+  verb(args) === "run --detach" ? result(125) : probeHasPid(args);
+/** A run on a machine people work on, where the probe answers `answer` and lands in `cgroup`. */
+async function onAWorkstation(answer: (args: readonly string[]) => Answer, cgroup?: string) {
+  const said = vi.spyOn(console, "error").mockImplementation(() => {});
+  const fake = fakeHost(answer, { ...(cgroup === undefined ? {} : { cgroup }), disposable: false });
+  const code = await run(["api"], fake.host);
+  const message = said.mock.calls.flat().join("\n");
+  return {
+    code,
+    suiteStarted: fake.calls.some(isSuiteRun),
+    imageRemoved: cleanup(fake.calls).some((c) => c.join(" ") === `image rm ${IMAGE}`),
+    refused: message.includes("Refusing to start"),
+    said: message,
+  };
+}
+const refusal = (why: string) => ({
+  code: 1,
+  suiteStarted: false,
+  imageRemoved: true,
+  refused: true,
+  said: expect.stringContaining(why),
+});
 
 describe("pnpm test:real cleans up after itself", () => {
   it("names its run, image and containers by its own pid and host, and labels them with both", async () => {
@@ -263,6 +295,7 @@ describe("pnpm test:real cleans up after itself", () => {
     const fake = fakeHost(probeHasPid, {
       cgroup: `${userSlice}/libpod-x.scope`,
       sliceCap: 2 ** 34,
+      disposable: false,
     });
     expect(await run(["api"], fake.host)).toBe(0);
     expect(valueAfter(fake.calls.find(isSuiteRun), "--cgroup-parent")).toBe(SLICE);
@@ -290,26 +323,51 @@ describe("pnpm test:real cleans up after itself", () => {
     const fake = fakeHost(probeHasPid, {
       cgroup: `${userSlice}/libpod-x.scope/container`,
       sliceCap: 2 ** 34,
+      disposable: false,
     });
     expect(await run(["api"], fake.host)).toBe(0);
     expect(valueAfter(fake.calls.find(isSuiteRun), "--cgroup-parent")).toBe(SLICE);
   });
 
-  it("keeps the containers out of a slice with no cap, which holds nothing together", async () => {
+  it("on a disposable host, keeps the containers out of a slice with no cap, which holds nothing together", async () => {
     const warn = quietly();
-    const fake = fakeHost(probeHasPid, { cgroup: `${userSlice}/libpod-x.scope` });
+    const fake = fakeHost(probeHasPid, { cgroup: `${userSlice}/libpod-x.scope`, disposable: true });
     expect(await run(["api"], fake.host)).toBe(0);
     expect(fake.calls.find(isSuiteRun)).not.toContain("--cgroup-parent");
     expect(warn).toHaveBeenCalledWith(expect.stringContaining(`${SLICE} has no memory cap`));
   });
 
-  it("runs the suites where they would have run, and says so, where the probe lands elsewhere", async () => {
+  it("on a disposable host, runs the suites where they would have run, and says so, where the probe lands elsewhere", async () => {
     const warn = quietly();
     // Rootful Docker under systemd makes a system slice of the same name, without the cap.
-    const fake = fakeHost(probeHasPid, { cgroup: `/bazhen.slice/${SLICE}/docker-x.scope` });
+    const fake = fakeHost(probeHasPid, {
+      cgroup: `/bazhen.slice/${SLICE}/docker-x.scope`,
+      disposable: true,
+    });
     expect(await run(["api"], fake.host)).toBe(0);
     expect(fake.calls.find(isSuiteRun)).not.toContain("--cgroup-parent");
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`lands in /bazhen.slice/${SLICE}`));
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("a quarter of the machine"));
+  });
+
+  it("refuses to run outside the slice on a machine people work on, where the probe's cgroup can't be read", async () => {
+    expect(await onAWorkstation(passing)).toEqual(refusal("cgroup couldn't be read"));
+  });
+
+  it("refuses to run outside the slice on a machine people work on, where the probe lands elsewhere", async () => {
+    const elsewhere = `/bazhen.slice/${SLICE}/docker-x.scope`;
+    expect(await onAWorkstation(probeHasPid, elsewhere)).toEqual(refusal(`lands in ${elsewhere}`));
+  });
+
+  it("refuses to run outside the slice on a machine people work on, where the slice has no cap", async () => {
+    const uncapped = `${userSlice}/libpod-x.scope`;
+    expect(await onAWorkstation(probeHasPid, uncapped)).toEqual(
+      refusal(`${SLICE} has no memory cap`),
+    );
+  });
+
+  it("refuses to run outside the slice on a machine people work on, where the probe won't start", async () => {
+    expect(await onAWorkstation(probeWontStart)).toEqual(refusal("wouldn't start"));
   });
 
   it("gives each suite's container a memory cap with no swap beyond it", async () => {

@@ -25,7 +25,7 @@ import {
 } from "node:fs";
 import { availableParallelism, constants, hostname, tmpdir, totalmem } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
-import { SLICE, isAlive, signalGroup, spawnGroup } from "@bazhen/host-guard";
+import { SLICE, inSignalSandbox, isAlive, signalGroup, spawnGroup } from "@bazhen/host-guard";
 import { RUST_TOOLS } from "./cargo-gate.ts";
 import { isMain } from "./is-main.ts";
 
@@ -131,7 +131,8 @@ export function cpuBudget(
  * set. A test that runs away is then OOM-killed inside its container, never by the machine's own
  * OOM killer, which may pick any process on it. In the slice every capped run shares, whose cap
  * holds all the containers together, a container may have half the machine, as with its CPUs.
- * Outside it nothing holds several runs together, so each container gets a quarter.
+ * A run goes outside it only on a disposable host, where nothing else shares the machine, and
+ * each container gets a quarter there.
  */
 export function memoryBudget(
   env: Readonly<Record<string, string | undefined>>,
@@ -188,16 +189,21 @@ export async function sliceParent(
     ]);
     if (started.code !== 0) continue;
     const inspected = await quiet(["inspect", "--format", "{{.State.Pid}}", probe]);
-    await quiet(["stop", "--time", "0", probe]);
     const pid = Number(inspected.out.trim());
+    // Read while the probe runs: once it is stopped and reaped, its /proc entry is gone.
     const cgroup = pid > 1 ? host.cgroupOf(pid) : undefined;
+    const at = cgroup?.indexOf(`${ours}/`) ?? -1;
+    // The slice itself, however deep a runtime puts its containers below it.
+    const cap =
+      cgroup !== undefined && at >= 0
+        ? host.memoryMax(cgroup.slice(0, at + ours.length))
+        : undefined;
+    await quiet(["stop", "--time", "0", probe]);
     if (cgroup === undefined) {
       why = "a probe container's cgroup couldn't be read";
       continue;
     }
-    if (!cgroup.includes(`${ours}/`)) return { why: `a container lands in ${cgroup}, not ${ours}` };
-    // The slice itself, however deep a runtime puts its containers below it.
-    const cap = host.memoryMax(cgroup.slice(0, cgroup.indexOf(`${ours}/`) + ours.length));
+    if (at < 0) return { why: `a container lands in ${cgroup}, not ${ours}` };
     return cap === undefined ? { why: `${SLICE} has no memory cap` } : { parent };
   }
   return { why };
@@ -355,6 +361,11 @@ export interface Host {
   onSignal(handler: (signal: NodeJS.Signals) => void): () => void;
   /** Settles after `ms`, without keeping the process alive. */
   after(ms: number): Promise<void>;
+  /**
+   * Whether this host exists to be thrown away, a CI runner: no other run shares its memory, so
+   * containers may run outside the shared slice there, and nowhere else.
+   */
+  readonly disposable: boolean;
   /** The cgroup a process on this host is in, from its `/proc/<pid>/cgroup`. */
   cgroupOf(pid: number): string | undefined;
   /** A cgroup's `memory.max` in bytes, or undefined where it is unset or can't be read. */
@@ -546,10 +557,19 @@ export async function run(args: readonly string[], host: Host): Promise<number> 
       const probe = `${name}-slice-probe`;
       const placement = await sliceParent(host, quiet, { image, probe, labels });
       const inSlice = "parent" in placement;
+      if (!inSlice && !host.disposable) {
+        console.error(
+          `test:real: ${placement.why}, so its containers would run outside the memory cap ` +
+            `every capped run shares. Refusing to start: run it where containers join ${SLICE} ` +
+            "(rootless Podman under a user systemd), or on a disposable host. Rootful Docker " +
+            "and Docker Desktop put containers outside it, so a workstation can't run it on them",
+        );
+        return 1;
+      }
       if (!inSlice) {
         console.warn(
-          `test:real: ${placement.why}, so each container gets a quarter of the machine's ` +
-            "memory, outside the cap every capped run shares",
+          `test:real: ${placement.why}, so on this disposable host each container gets a ` +
+            "quarter of the machine's memory, outside the cap every capped run shares",
         );
       }
       const parent = inSlice ? placement.parent : [];
@@ -669,6 +689,7 @@ const SIGNALS: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP"];
 const host: Host = {
   pid: process.pid,
   id: hostname(),
+  disposable: inSignalSandbox(),
   docker,
   prepare(base, prefix) {
     const dir = buildContext(git(process.cwd(), "rev-parse", "--show-toplevel"), base, prefix);
