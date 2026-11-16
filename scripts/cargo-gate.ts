@@ -124,8 +124,9 @@ export const SHIPPED_LINT = [
   "warnings",
 ];
 
-// Variables that change what cargo, rustc, clippy or nextest run, or with which flags.
+// Variables that change what cargo, rustc, clippy, nextest or proptest run, or with which flags.
 const REMOVED = new Set([
+  "PROPTEST_CASES",
   "RUSTFLAGS",
   "RUSTDOCFLAGS",
   "RUSTC",
@@ -141,16 +142,36 @@ const REMOVED_PREFIX =
   /^(CARGO_BUILD_(?!TARGET_DIR$)|CARGO_TARGET_(?!DIR$)|CARGO_ALIAS_|CARGO_PROFILE_|NEXTEST_)/;
 
 /**
- * The environment a gate runs in: the caller's, less everything that changes the build's flags or
- * tools. `CARGO_ENCODED_RUSTFLAGS`, set and empty, outranks every other source of rustflags,
- * cargo config in any parent directory included.
+ * The seed every proptest draws its cases from unless the caller gives one, so that a run tests the
+ * change and not the draw: the scheduled job in `.github/workflows/fuzz.yml` gives a random one.
+ * Changing it changes every property's cases.
+ */
+export const PROPTEST_SEED = "1";
+
+/** `seed` if proptest reads it as a seed, a u64; anything else it would replace with a random one. */
+function proptestSeed(seed: string | undefined): string {
+  return seed !== undefined && /^\d{1,20}$/.test(seed) && BigInt(seed) < 2n ** 64n
+    ? seed
+    : PROPTEST_SEED;
+}
+
+/**
+ * The environment a gate runs in: the caller's, less everything that changes the build's flags,
+ * tools or test cases, with proptest's seed fixed unless the caller gave one. `CARGO_ENCODED_RUSTFLAGS`,
+ * set and empty, outranks every other source of rustflags, cargo config in any parent directory
+ * included.
  */
 export function gateEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const clean: NodeJS.ProcessEnv = {};
   for (const [name, value] of Object.entries(env)) {
     if (!REMOVED.has(name) && !REMOVED_PREFIX.test(name)) clean[name] = value;
   }
-  return { ...clean, CARGO_ENCODED_RUSTFLAGS: "", CARGO_ENCODED_RUSTDOCFLAGS: "" };
+  return {
+    ...clean,
+    PROPTEST_RNG_SEED: proptestSeed(env.PROPTEST_RNG_SEED),
+    CARGO_ENCODED_RUSTFLAGS: "",
+    CARGO_ENCODED_RUSTDOCFLAGS: "",
+  };
 }
 
 const isGate = (name: string | undefined): name is Gate =>

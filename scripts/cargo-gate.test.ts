@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   GATES,
+  PROPTEST_SEED,
   SHIPPED_LINT,
   configFailures,
   gateEnv,
@@ -9,6 +10,8 @@ import {
   parseGate,
   sandboxRefusal,
 } from "./cargo-gate.ts";
+
+const seed = (given?: string) => gateEnv({ PROPTEST_RNG_SEED: given }).PROPTEST_RNG_SEED;
 
 describe("gateEnv", () => {
   it("drops every variable that changes the build's flags, tools or test runner", () => {
@@ -36,6 +39,7 @@ describe("gateEnv", () => {
       CLIPPY_CONF_DIR: "/tmp",
       CLIPPY_ARGS: "--cap-lints=allow",
       NEXTEST_PROFILE: "lax",
+      PROPTEST_CASES: "1",
     });
     expect(env).toEqual({
       PATH: "/usr/bin",
@@ -45,7 +49,19 @@ describe("gateEnv", () => {
       CARGO_HOME: "/home/u/.cargo",
       CARGO_ENCODED_RUSTFLAGS: "",
       CARGO_ENCODED_RUSTDOCFLAGS: "",
+      PROPTEST_RNG_SEED: "1",
     });
+  });
+
+  it("fixes proptest's seed, unless the caller gave one it reads as a seed", () => {
+    expect([undefined, "", "random", "-1", "1e3", "18446744073709551616"].map(seed)).toEqual(
+      Array(6).fill(PROPTEST_SEED),
+    );
+    expect([PROPTEST_SEED, seed("42"), seed("18446744073709551615")]).toEqual([
+      "1",
+      "42",
+      "18446744073709551615",
+    ]);
   });
 });
 
