@@ -18,7 +18,7 @@ import type {
   ShellForeground,
   ShellInventoryEntry,
   ShellOpen,
-  TerminalId,
+  Compatibility,
 } from "@bazhen/core";
 import type {
   ExitStatus,
@@ -128,8 +128,8 @@ export class LocalEnvironment implements EnvironmentAdapter {
     return runtime === undefined ? this.runtime : this.runtime.only(runtime);
   }
 
-  async outdated(runtime?: string): Promise<ReadonlyMap<TerminalId, readonly string[]>> {
-    return (await this.read(runtime).outdated?.()) ?? new Map();
+  compatibility(): Promise<Compatibility> {
+    return this.runtime.compatibility();
   }
 
   async inventory(runtime?: string): Promise<AgentInventoryEntry[]> {

@@ -42,6 +42,7 @@ import {
   AttentionKind,
   DEVICE_PAIRED,
   type AttentionAction,
+  type NeedsRestart,
   type NoticeAction,
   type MailboxState,
   type ResetReason,
@@ -172,6 +173,11 @@ export interface SnapshotView {
   host(kind: EnvironmentKind): string;
   /** How a human attaches to a terminal, or null when they can't. */
   attachCommand(ref: RuntimeRef): string | null;
+  /**
+   * The pid of the holder a terminal needing a restart runs on, as last proved still running it;
+   * null, or absent, when it hasn't been.
+   */
+  restartHolder?(terminalId: string): number | null;
   /** Whether an agent's harness session can be resumed, as a respawn or relaunch would. */
   readonly resumes: Resumes;
   /** The themes a harness can start its TUI in. */
@@ -269,11 +275,21 @@ function refFrom(
 }
 
 /** A terminal's restart prompt, with the holder to end, from its row; null when it needs none. */
-function needsRestartOf(flag: SQLOutputValue | undefined, locator: SQLOutputValue | undefined) {
-  if (flag !== 1) return null;
-  const recorded: Record<string, unknown> = typeof locator === "string" ? JSON.parse(locator) : {};
-  const pid = Number(recorded.holderPid);
-  return { holderPid: Number.isSafeInteger(pid) && pid > 1 ? pid : null };
+/** Terminal states whose holder may still run, so a restart prompt still means something. */
+const RESTARTABLE: ReadonlySet<string> = new Set<TerminalState>(["creating", "running", "exited"]);
+
+/**
+ * A terminal's restart prompt, or null when it needs none or has ended. The holder to end is
+ * named only as the view last proved it still runs, so a pid reused since is never named.
+ */
+function needsRestartOf(
+  flag: SQLOutputValue | undefined,
+  state: SQLOutputValue | undefined,
+  terminalId: SQLOutputValue | undefined,
+  view: SnapshotView,
+): NeedsRestart | null {
+  if (flag !== 1 || !RESTARTABLE.has(String(state)) || typeof terminalId !== "string") return null;
+  return { holderPid: view.restartHolder?.(terminalId) ?? null };
 }
 
 /** Agent states whose directory still holds their work, so a shell can be opened beside them. */
@@ -590,6 +606,15 @@ export class Store {
     const sql = `SELECT 1 AS yes FROM terminals WHERE id = ? AND needs_restart = 0
                  AND state NOT IN ('closed', 'failed', 'lost')`;
     return this.prepare(sql).get(terminalId) !== undefined;
+  }
+
+  /** The terminals not yet ended that are recorded as needing a restart. */
+  restartsRecorded(): TerminalId[] {
+    const sql = `SELECT id FROM terminals WHERE needs_restart = 1
+                 AND state NOT IN ('closed', 'failed', 'lost')`;
+    return this.prepare(sql)
+      .all()
+      .flatMap((r) => (typeof r.id === "string" && isId("term", r.id) ? [r.id] : []));
   }
 
   /** A terminal's current runtime incarnation, if it is running in one. */
@@ -1256,9 +1281,12 @@ export class Store {
               ...row
             }) => {
               const { headlineText, headlineTask, headlineAt, ...r } = row;
-              const ref = ATTACHABLE.has(String(terminalState))
-                ? refFrom(r.terminalId, { runtime: runtime ?? null, locator: locator ?? null })
-                : null;
+              const restart = needsRestartOf(needsRestart, terminalState, r.terminalId, view);
+              // A holder this build can't speak to can't be attached to either.
+              const ref =
+                ATTACHABLE.has(String(terminalState)) && restart === null
+                  ? refFrom(r.terminalId, { runtime: runtime ?? null, locator: locator ?? null })
+                  : null;
               const externalRef =
                 typeof r.externalRef === "string"
                   ? ExternalRef.parse(JSON.parse(r.externalRef))
@@ -1275,7 +1303,7 @@ export class Store {
                 ...(activity === null ? {} : { activity: activityOf(activity) }),
                 ...(typeof usage === "string" ? { usage: Usage.parse(JSON.parse(usage)) } : {}),
                 attachCommand: ref === null ? null : view.attachCommand(ref),
-                needsRestart: needsRestartOf(needsRestart, locator),
+                needsRestart: restart,
                 themes: view.themes(HarnessId.parse(r.harness)),
                 resumable: view.resumes(evidence),
                 canOpenShell: LINKABLE.has(AgentState.parse(r.state)),
@@ -1337,16 +1365,18 @@ export class Store {
           .all()
           .map(({ runtime, locator, foreground, retypeable, needsRestart, ...r }) => {
             const state = TerminalState.parse(r.state);
-            const ref = ATTACHABLE.has(state)
-              ? refFrom(r.id, { runtime: runtime ?? null, locator: locator ?? null })
-              : null;
+            const restart = needsRestartOf(needsRestart, state, r.id, view);
+            const ref =
+              ATTACHABLE.has(state) && restart === null
+                ? refFrom(r.id, { runtime: runtime ?? null, locator: locator ?? null })
+                : null;
             return {
               ...r,
               foreground: typeof foreground === "string" ? JSON.parse(foreground) : null,
               attachCommand: ref === null ? null : view.attachCommand(ref),
               commands: shellCommands(state, r.linkedAgentId !== null),
               retypeable: view.shellsReport && retypeable === 1,
-              needsRestart: needsRestartOf(needsRestart, locator),
+              needsRestart: restart,
             };
           }),
         tasks: this.prepare(`${TASK} ORDER BY created_event_id`).all(),

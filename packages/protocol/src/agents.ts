@@ -328,6 +328,11 @@ export const ErrorResponse = z.object({
     "unavailable",
     /** A close found no terminal, but the server it ran on may still run it; `force` closes it. */
     "server_unconfirmed",
+    /**
+     * A close reached a holder this build can't speak to, which can't be closed from here, with or
+     * without `force`: it runs until its process is ended, as the message says (protocol 1.49).
+     */
+    "needs_restart",
     /** A shell close found a program other than the shell running; `confirmBusy` closes it. */
     "busy",
     "not_found",

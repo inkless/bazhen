@@ -297,6 +297,8 @@ export const EVENTS = {
     entity: "terminal",
     payload: z.object({ protocol: HolderVersions }),
   },
+  /** The terminal is served in full again, as after a daemon update to a build its holder speaks. */
+  "terminal.restart_cleared": { entity: "terminal", payload: z.object({}) },
   /** A linked shell became standalone; its agent's close no longer takes it. */
   "terminal.unlinked": { entity: "terminal", payload: z.object({}) },
   /** A shell's name, as the user gave it, or null when taken away. */

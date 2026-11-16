@@ -15,6 +15,7 @@ import {
   ProcessState,
   StaleIncarnation,
   TerminalUnconfirmed,
+  TerminalUnservable,
   type RuntimeRef,
   type TerminalId,
   type TerminalSpec,
@@ -366,19 +367,27 @@ describe("HolderRuntime: a holder this build can't speak to", () => {
     const root = privateRoot();
     const { runtime } = runtimeAt(root);
     const ref = await outdatedHolder(root, newId("term"));
+    const current = newId("term");
+    await fakeTerminal(root, current);
+    const { outdated, served } = await runtime.compatibility();
     expect([
       (await runtime.health([ref])).state,
-      await runtime.inventory(),
-      [...(await runtime.outdated())],
-    ]).toEqual(["healthy", [], [[ref.terminalId, ["2.0"]]]]);
+      (await runtime.inventory()).map((e) => e.ref.terminalId),
+      [...outdated],
+      [...served],
+    ]).toEqual(["healthy", [current], [[ref.terminalId, ["2.0"]]], [current]]);
   });
 
-  it("never calls it gone, nor closed", async () => {
+  it("never calls it gone, and refuses to close it, naming its holder", async () => {
     const root = privateRoot();
     const { runtime } = runtimeAt(root);
     const ref = await outdatedHolder(root, newId("term"));
     expect(await runtime.gone(ref)).toBe(false);
-    await expect(runtime.close(ref)).rejects.toBeInstanceOf(TerminalUnconfirmed);
+    await expect(runtime.close(ref)).rejects.toMatchObject({
+      constructor: TerminalUnservable,
+      protocol: ["2.0"],
+      holderPid: FAKE_PID,
+    });
   });
 });
 

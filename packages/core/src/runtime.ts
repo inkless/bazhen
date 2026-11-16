@@ -68,6 +68,14 @@ export interface TerminalForeground extends Foreground {
   readonly cwd: string | null;
 }
 
+/** What one read of a runtime found of the protocol each of its terminals is served in. */
+export interface Compatibility {
+  /** Each terminal this build can't fully serve, with the versions what runs it speaks. */
+  readonly outdated: ReadonlyMap<TerminalId, readonly string[]>;
+  /** The terminals served in full, which need no restart. */
+  readonly served: ReadonlySet<TerminalId>;
+}
+
 export interface RuntimeHealth {
   readonly state: RuntimeHealthState;
   readonly version: string | null;
@@ -116,6 +124,23 @@ export class TerminalUnconfirmed extends Error {
   constructor(terminalId: TerminalId, cause: unknown) {
     super(`terminal ${terminalId}: its server may still be running it`, { cause });
     this.terminalId = terminalId;
+  }
+}
+
+/**
+ * What runs the terminal answers, but in no protocol this build speaks, so it can be neither
+ * served nor ended from here: it runs until its own process is ended (design §4.7).
+ */
+export class TerminalUnservable extends TerminalUnconfirmed {
+  readonly protocol: readonly string[];
+  /** The holder's pid as the terminal's ref recorded it; null when it recorded none. */
+  readonly holderPid: number | null;
+
+  constructor(terminalId: TerminalId, protocol: readonly string[], holderPid: number | null) {
+    super(terminalId, new Error(`its holder speaks only ${protocol.join(", ")}`));
+    this.message = `terminal ${terminalId}: its holder speaks only ${protocol.join(", ")}, which this build doesn't`;
+    this.protocol = protocol;
+    this.holderPid = holderPid;
   }
 }
 
@@ -267,11 +292,11 @@ export interface RuntimeAdapter {
   /** The terminals the server holds: none when no server runs. An unreadable server throws. */
   inventory(): Promise<RuntimeInventoryEntry[]>;
   /**
-   * The terminals that run where this build can't fully serve them, such as on a holder of an
-   * older protocol major, each with the versions what runs it speaks; they need a restart to be
-   * served in full. Absent from a runtime whose terminals are always served in full.
+   * Which terminals this build serves in full, and which run where it can't, such as on a holder
+   * of another protocol major, with the versions what runs those speaks; they need a restart to
+   * be served in full. Absent from a runtime whose terminals are always served in full.
    */
-  outdated?(): Promise<ReadonlyMap<TerminalId, readonly string[]>>;
+  compatibility?(): Promise<Compatibility>;
   create(spec: TerminalSpec): Promise<RuntimeRef>;
   /**
    * Opens a client at `size`, or, given null, at whatever size the terminal already has, with up

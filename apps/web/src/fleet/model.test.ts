@@ -74,10 +74,13 @@ describe("restartNote", () => {
       restartNote({ holderPid: 4243 }, "relaunch"),
       restartNote({ holderPid: null }, "restart"),
     ]).toEqual([
-      "Runs on an older holder this version of Bazhen can't fully serve. That holder, pid 4243, " +
-        "keeps running until you end its process; then relaunch it to run on a current one.",
-      "Runs on an older holder this version of Bazhen can't fully serve. That holder keeps " +
-        "running until you end its process; then restart it to run on a current one.",
+      "Runs on a holder whose protocol this version of Bazhen doesn't speak, older or newer, so " +
+        "it can't be fully served here. That holder keeps running until its process is ended: " +
+        "check that `ps -o comm= -p 4243` prints bazhen-holder, then end that process. Then " +
+        "relaunch it to run on a current holder.",
+      "Runs on a holder whose protocol this version of Bazhen doesn't speak, older or newer, so " +
+        "it can't be fully served here. That holder keeps running until its process is ended. " +
+        "Then restart it to run on a current holder.",
     ]);
   });
 });

@@ -74,6 +74,7 @@ import {
   EnvironmentUnavailable,
   failureDetail,
   ServerUnconfirmed,
+  HolderUnservable,
   StaleGeneration,
   StateConflict,
   TerminalReplaced,
@@ -305,8 +306,13 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   }
 
   app.get("/v1/health", async (c) => {
-    const runtimes = await healthOfEach(deps.runtime);
-    const runtime = runtimes.find((r) => r.kind === "tmux") ?? (await deps.runtime.health());
+    // `runtime` reads as every runtime's worst, as it did with tmux alone; `runtimes` says each.
+    const [runtimes, worst] = await Promise.all([
+      healthOfEach(deps.runtime),
+      deps.runtime.health(),
+    ]);
+    const version = runtimes.find((r) => r.kind === "tmux")?.version ?? worst.version;
+    const runtime = { state: worst.state, version };
     const body = HealthResponse.parse({
       status: "ok",
       appVersion: deps.appVersion,
@@ -469,6 +475,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     if (err instanceof StaleGeneration) return fail(c, 409, "stale_generation", err.message);
     if (err instanceof NotResumable) return fail(c, 409, "not_resumable", err.message);
     if (err instanceof ServerUnconfirmed) return fail(c, 409, "server_unconfirmed", err.message);
+    if (err instanceof HolderUnservable) return fail(c, 409, "needs_restart", err.message);
     const conflict = [
       AgentGone,
       StateConflict,

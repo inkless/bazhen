@@ -1,6 +1,7 @@
 import type { ExitStatus, RuntimeHealthState, Signal } from "@bazhen/protocol";
 import type {
   Attached,
+  Compatibility,
   Foreground,
   ProcessSpec,
   RuntimeAdapter,
@@ -11,7 +12,6 @@ import type {
   TerminalForeground,
   TerminalSpec,
 } from "./runtime.ts";
-import type { TerminalId } from "./ids.ts";
 
 /**
  * A ref names a runtime this daemon doesn't run. Never "gone": the terminal may well be running
@@ -112,12 +112,15 @@ export class RoutedRuntime implements RuntimeAdapter {
     return all.flat();
   }
 
-  /** Every runtime's outdated terminals; one that can't be read throws, as its inventory does. */
-  async outdated(): Promise<ReadonlyMap<TerminalId, readonly string[]>> {
+  /** Every runtime's compatibility; one that can't be read throws, as its inventory does. */
+  async compatibility(): Promise<Compatibility> {
     const all = await Promise.all(
-      [...this.runtimes.values()].map(async (r) => [...((await r.outdated?.()) ?? [])]),
+      [...this.runtimes.values()].map((r) => r.compatibility?.() ?? Promise.resolve(undefined)),
     );
-    return new Map(all.flat());
+    return {
+      outdated: new Map(all.flatMap((c) => [...(c?.outdated ?? [])])),
+      served: new Set(all.flatMap((c) => [...(c?.served ?? [])])),
+    };
   }
 
   async create(spec: TerminalSpec): Promise<RuntimeRef> {

@@ -43,8 +43,8 @@ export const HealthResponse = z.object({
     version: z.string().nullable(),
   }),
   /**
-   * Every runtime the daemon runs terminals on, each read by itself; `runtime` is tmux's alone.
-   * Absent from a daemon before 1.49.
+   * Every runtime the daemon runs terminals on, each read by itself; `runtime` is the worst of
+   * them, with tmux's version. Absent from a daemon before 1.49.
    */
   runtimes: z.array(RuntimeHealthReport).optional(),
 });

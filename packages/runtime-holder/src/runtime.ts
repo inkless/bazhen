@@ -7,6 +7,8 @@ import {
   shellCommand,
   StaleIncarnation,
   TerminalUnconfirmed,
+  TerminalUnservable,
+  type Compatibility,
   type DeadTerminal,
   type Foreground,
   type ProcessSpec,
@@ -224,6 +226,10 @@ export class HolderRuntime implements RuntimeAdapter {
       if (reached.is === "none" && (await this.gone(ref))) {
         throw new StaleIncarnation(ref.terminalId, "gone");
       }
+      if (reached.is === "outdated") {
+        const pid = recordedHolder(ref)?.pid ?? null;
+        throw new TerminalUnservable(ref.terminalId, reached.protocol, pid);
+      }
       throw new TerminalUnconfirmed(ref.terminalId, error);
     }
     const { hello } = client;
@@ -336,20 +342,21 @@ export class HolderRuntime implements RuntimeAdapter {
   /**
    * The terminals whose holders this build can't fully serve, with the versions each speaks: one
    * sharing no major with it, and one it serves only on an older major. Each needs a restart onto
-   * a new holder to be served in full (design §4.7). Holders that can't be listed throw.
+   * a new holder to be served in full (design §4.7). Beside them, the terminals it serves in full.
+   * Holders that can't be listed throw.
    */
-  async outdated(): Promise<ReadonlyMap<TerminalId, readonly string[]>> {
-    const found = new Map<TerminalId, readonly string[]>();
+  async compatibility(): Promise<Compatibility> {
+    const outdated = new Map<TerminalId, readonly string[]>();
+    const served = new Set<TerminalId>();
     for (const reached of await this.reachAll()) {
-      if (reached.is === "outdated") {
-        const at = terminalAt(reached.socket);
-        if (at !== null) found.set(at, reached.protocol);
-      } else if (reached.is === "holder" && isOlderHolderMajor(reached.hello.version)) {
-        const at = terminalAt(reached.socket);
-        if (at === reached.hello.terminalId) found.set(at, reached.hello.protocol);
-      }
+      const at = terminalAt(reached.socket);
+      if (at === null) continue;
+      if (reached.is === "outdated") outdated.set(at, reached.protocol);
+      else if (reached.is !== "holder" || reached.hello.terminalId !== at) continue;
+      else if (isOlderHolderMajor(reached.hello.version)) outdated.set(at, reached.hello.protocol);
+      else served.add(at);
     }
-    return found;
+    return { outdated, served };
   }
 
   /**

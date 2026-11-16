@@ -79,7 +79,7 @@ import {
 import { Roles } from "./roles/roles.ts";
 import { Tasks } from "./tasks/tasks.ts";
 import { TerminalBudget } from "./terminals/budget.ts";
-import { recordOutdated } from "./terminals/needs-restart.ts";
+import { RestartWatch } from "./terminals/needs-restart.ts";
 import { defaultRuntimeRefusal } from "./terminals/runtimes.ts";
 import { nodePtySpawner } from "./pty/node-pty.ts";
 import { listeningOf } from "./mailbox/listening.ts";
@@ -325,7 +325,8 @@ const shellReports = new ShellReports(store, (terminalId, brackets) =>
   shells.prompted(terminalId, brackets),
 );
 await reconcileShells(store, environment, shells);
-await recordOutdated(store, environment).catch((err: unknown) => {
+const restarts = new RestartWatch({ store, environment });
+await restarts.sweep().catch((err: unknown) => {
   console.warn("terminals on holders this build can't fully serve weren't read:", err);
 });
 // After both reconciles, whose health checks have a server whose socket was deleted recreate it.
@@ -357,7 +358,7 @@ const serverWatch = new ServerWatch({
   alsoEachTick: async () => {
     await shells.settleOrphans();
     await foreground.refresh();
-    await recordOutdated(store, environment);
+    await restarts.sweep();
   },
 });
 serverWatch.start();
@@ -391,6 +392,7 @@ const gate = { devices, always: config.pairingRequired };
 const notices = new Notices(store);
 const snapshotView: SnapshotView = {
   host: (kind) => (kind === "local" ? hostname() : ""),
+  restartHolder: (terminalId) => restarts.holderPid(terminalId),
   attachCommand: (ref) => {
     try {
       return runtime.attachCommand(ref);
@@ -572,12 +574,12 @@ const socketListener = getRequestListener(
       };
     },
     doctor: async () => {
-      const runtimes = await healthOfEach(runtime);
-      const tmuxHealth = runtimes.find((r) => r.kind === "tmux") ?? (await tmux.health());
+      const [runtimes, worst] = await Promise.all([healthOfEach(runtime), runtime.health()]);
+      const tmuxVersion = runtimes.find((r) => r.kind === "tmux")?.version ?? null;
       return {
         appVersion: APP_VERSION,
         protocolVersion: PROTOCOL_VERSION,
-        runtime: { state: tmuxHealth.state, version: tmuxHealth.version },
+        runtime: { state: worst.state, version: tmuxVersion },
         runtimes,
         hookClient: { path: hookRunner, fallback: hookRunner === HOOK_SCRIPT },
         holder: await holderDoctor(holderInstall, holderRuntime),

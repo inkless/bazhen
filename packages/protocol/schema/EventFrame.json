@@ -2419,6 +2419,66 @@
                 },
                 "type": {
                   "type": "string",
+                  "const": "terminal.restart_cleared"
+                },
+                "entityType": {
+                  "type": "string",
+                  "const": "terminal"
+                },
+                "entityId": {
+                  "type": "string"
+                },
+                "actor": {
+                  "type": "string"
+                },
+                "causationId": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "correlationId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "payload": {
+                  "type": "object",
+                  "properties": {}
+                }
+              },
+              "required": [
+                "id",
+                "ts",
+                "type",
+                "entityType",
+                "entityId",
+                "actor",
+                "causationId",
+                "correlationId",
+                "payload"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "ts": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string",
                   "const": "terminal.unlinked"
                 },
                 "entityType": {

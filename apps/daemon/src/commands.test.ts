@@ -5,6 +5,7 @@ import {
   ProcessState,
   StaleIncarnation,
   TerminalUnconfirmed,
+  TerminalUnservable,
 } from "@bazhen/core";
 import {
   DETAIL_MAX,
@@ -13,6 +14,7 @@ import {
   withoutControls,
   forceable,
   fromEnvironment,
+  HolderUnservable,
   ServerUnconfirmed,
   stillRunning,
   TerminalReplaced,
@@ -51,6 +53,16 @@ describe("an environment's failure as a command's", () => {
       "message",
       "could not reach the environment running shell x: tmux respawn-pane failed: no server",
     );
+  });
+
+  it("refuses a close of a holder it can't speak to, with force or without, naming the pid", () => {
+    const cause = new TerminalUnservable(terminalId, ["2.0"], 4243);
+    expect(as(cause)).toBeInstanceOf(HolderUnservable);
+    expect(as(cause)).toHaveProperty(
+      "message",
+      expect.stringContaining("its holder, pid 4243, keeps running until its process is ended"),
+    );
+    expect(forceable(cause)).toBe(false);
   });
 
   it("lets force record past an unconfirmed server or an unreachable one, never a replaced pane", () => {

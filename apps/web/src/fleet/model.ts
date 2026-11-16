@@ -12,10 +12,14 @@ import {
  * that needs no restart. The daemon never ends that holder itself, so the user is told how to.
  */
 export function restartNote(needs: NeedsRestart, then: "relaunch" | "restart"): string {
-  const holder = needs.holderPid === null ? "That holder" : `That holder, pid ${needs.holderPid},`;
+  const how =
+    needs.holderPid === null
+      ? "That holder keeps running until its process is ended."
+      : `That holder keeps running until its process is ended: check that ` +
+        `\`ps -o comm= -p ${needs.holderPid}\` prints bazhen-holder, then end that process.`;
   return (
-    "Runs on an older holder this version of Bazhen can't fully serve. " +
-    `${holder} keeps running until you end its process; then ${then} it to run on a current one.`
+    "Runs on a holder whose protocol this version of Bazhen doesn't speak, older or newer, so " +
+    `it can't be fully served here. ${how} Then ${then} it to run on a current holder.`
   );
 }
 
