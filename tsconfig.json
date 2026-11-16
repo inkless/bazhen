@@ -41,6 +41,9 @@
       "path": "tests/holder"
     },
     {
+      "path": "tests/cli"
+    },
+    {
       "path": "tests/api"
     },
     {

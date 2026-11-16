@@ -48,6 +48,7 @@ Contributing, for people and agents: [AGENTS.md](AGENTS.md) and [docs/standards/
 - `packages/runtime-tmux` — the tmux runtime adapter
 - `tests/integration` — tests against a private tmux server (container or CI only)
 - `tests/e2e` — Playwright browser tests
+- `tests/cli` — the `bazhen` CLI as a process, against a fake daemon
 
 ## Configuration
 

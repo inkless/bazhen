@@ -35,6 +35,7 @@ export default defineConfig({
             "packages/*/src/**/*.medium.test.ts",
             "apps/*/src/**/*.medium.test.ts",
             "scripts/*.medium.test.ts",
+            "tests/cli/**/*.test.ts",
           ],
           exclude: ["scripts/hook-bench.medium.test.ts", "**/node_modules/**"],
           globalSetup: [CAPPED, "tests/support/medium-setup.ts"],
