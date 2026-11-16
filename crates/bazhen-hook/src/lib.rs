@@ -32,6 +32,7 @@ const MAX_HEAD: usize = 16 << 10;
 pub const LIMITS: Limits = Limits {
     head: MAX_HEAD,
     body: MAX_BODY,
+    chunked: false,
 };
 /// Only a backstop: the harness's own timeout for each hook ends it first.
 const HOOK_DEADLINE: Duration = Duration::from_mins(10);

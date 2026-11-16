@@ -681,7 +681,9 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-client/src/framing.rs::headers": "framing",
   "crates/bazhen-client/src/framing.rs::content_length": "framing",
   "crates/bazhen-client/src/framing.rs::status": "framing",
+  "crates/bazhen-client/src/framing.rs::body": "framing",
   "crates/bazhen-hook/src/lib.rs::parse_reply": "parse_reply",
+  "crates/bazhen/src/reply.rs::decode": "reply",
   "crates/bazhen-protocol/src/wire.rs::well_formed": "wire",
   "crates/bazhen-protocol/src/wire.rs::from_slice": "wire",
   "crates/bazhen-hook/src/pane_title.rs::body": "pane_title",
@@ -980,6 +982,12 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/start.rs::read_spec":
     "reads at most MAX_REQUEST_BYTES + 1 bytes for decode_spawn_spec, which is fuzzed (spawn_spec), then checks the strings it decoded",
   "crates/bazhen-hook/src/lib.rs::hook_request": "an encoder: it writes the request",
+  "crates/bazhen/src/call.rs::Daemon::call":
+    "writes a request; the reply goes to reply::decode, fuzzed",
+  "crates/bazhen/src/sha256.rs::sha256":
+    "a hash of the run directory's path, which the CLI made itself; it reads its input as data only",
+  "crates/bazhen/src/sha256.rs::compress": "reached only through sha256, of a path the CLI made",
+  "crates/bazhen/src/sha256.rs::hex": "an encoder: it writes bytes as hex",
   "crates/bazhen-protocol/src/wire.rs::hex4": "reached only through well_formed, fuzzed",
   "crates/bazhen-hook/src/lib.rs::ask": "sends a request; the reply goes to parse_reply",
   "crates/bazhen-hook/src/lib.rs::post": "writes a request; the reply goes to read_response",
@@ -992,6 +1000,12 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-client/src/framing.rs::bound_reads": "sets a socket's read timeout; reads nothing",
   "crates/bazhen-client/src/framing.rs::bound_or_unblock":
     "sets a socket's blocking mode; reads nothing",
+  "crates/bazhen-client/src/framing.rs::in_chunks":
+    "reached only through Framing::end_of and body, both fuzzed",
+  "crates/bazhen-client/src/framing.rs::ChunkScan::advance":
+    "reached only through Framing::end_of and body, both fuzzed",
+  "crates/bazhen-client/src/framing.rs::ChunkScan::end":
+    "reached only through Framing::end_of, fuzzed",
   "crates/bazhen-client/src/framing.rs::end_by_head":
     "reached only through reply_end and Framing::end_of, both fuzzed",
   "crates/bazhen-hook/src/statusline.rs::report":

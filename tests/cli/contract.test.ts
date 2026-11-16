@@ -24,7 +24,7 @@ import {
   StopResponse,
   WaitMessagesResponse,
 } from "@bazhen/protocol";
-import { FakeDaemon, type Scene, scene } from "./cli.ts";
+import { FakeDaemon, runsNode, type Scene, scene } from "./cli.ts";
 import {
   AGENT,
   MSG,
@@ -518,6 +518,22 @@ describe("who is asking", () => {
       BAZHEN_AGENT_AUTH_FILE: join(s.dir, "missing"),
     });
     expect([ran.code, asking()]).toEqual([0, [[AGENT, undefined, undefined]]]);
+  });
+
+  it("refuses an agent id no request header can carry, before calling the daemon", async ({
+    skip,
+  }) => {
+    skip(runsNode(), "deliberately different: the Node CLI sends the id as latin-1");
+    state();
+    const ran = await s.bazhen(["task", "list", "--all"], { BAZHEN_AGENT_ID: "agént" });
+    expect([ran, s.daemon.received]).toEqual([
+      {
+        code: 1,
+        stdout: "",
+        stderr: "BAZHEN_AGENT_ID holds a character outside printable ASCII\n",
+      },
+      [],
+    ]);
   });
 
   it("names an empty agent when BAZHEN_AGENT_ID is set but empty", async () => {

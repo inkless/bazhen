@@ -204,6 +204,9 @@ export class FakeDaemon {
   }
 }
 
+/** Whether the suite runs the Node CLI, which differs from the Rust one where a case says so. */
+export const runsNode = () => (process.env["BAZHEN_CLI"] ?? "") === "";
+
 export interface Ran {
   readonly code: number;
   readonly stdout: string;
@@ -220,8 +223,13 @@ export interface Scene {
   /** The socket the CLI finds from `home`. */
   readonly socket: string;
   readonly daemon: FakeDaemon;
-  /** Runs `bazhen <args>` in `dir`, with `env` over the scene's own environment. */
-  readonly bazhen: (args: readonly string[], env?: Record<string, string>) => Promise<Ran>;
+  /** Runs `bazhen <args>` in `dir`, with `env` over the scene's own environment, and `input` on
+   * its stdin. */
+  readonly bazhen: (
+    args: readonly string[],
+    env?: Record<string, string>,
+    input?: string,
+  ) => Promise<Ran>;
   /** As `bazhen`, with only `env` and the scene's PATH: no BAZHEN_HOME. */
   readonly bare: (args: readonly string[], env: Record<string, string>) => Promise<Ran>;
   readonly cleanup: () => Promise<void>;
@@ -249,7 +257,8 @@ export async function scene(): Promise<Scene> {
     dir,
     socket,
     daemon,
-    bazhen: (args, env = {}) => run(args, { ...path, BAZHEN_HOME: home, ...env }, dir),
+    bazhen: (args, env = {}, input = "") =>
+      run(args, { ...path, BAZHEN_HOME: home, ...env }, dir, input),
     bare: (args, env) => run(args, { ...path, ...env }, dir),
     cleanup: async () => {
       await daemon.close();
@@ -258,19 +267,27 @@ export async function scene(): Promise<Scene> {
   };
 }
 
-function run(args: readonly string[], env: Record<string, string>, cwd: string): Promise<Ran> {
+function run(
+  args: readonly string[],
+  env: Record<string, string>,
+  cwd: string,
+  input = "",
+): Promise<Ran> {
   const binary = process.env["BAZHEN_CLI"];
   const [file, argv] =
     binary === undefined || binary === ""
       ? [process.execPath, [NODE_CLI, ...args]]
       : [binary, [...args]];
   return new Promise((resolve, reject) => {
-    execFile(file, argv, { env, cwd, timeout: RUN_MS }, (err, stdout, stderr) => {
+    const child = execFile(file, argv, { env, cwd, timeout: RUN_MS }, (err, stdout, stderr) => {
       if (err?.killed === true) {
         reject(new Error(`bazhen ${args.join(" ")} ran past ${RUN_MS} ms:\n${stdout}${stderr}`));
         return;
       }
       resolve({ code: err === null ? 0 : Number(err.code ?? 1), stdout, stderr });
     });
+    // A CLI that doesn't read its stdin may exit before this lands; that is no failure of its.
+    child.stdin?.on("error", () => {});
+    child.stdin?.end(input);
   });
 }

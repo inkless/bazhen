@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -7,7 +8,7 @@ import {
   SendMessageResponse,
   WaitMessagesResponse,
 } from "@bazhen/protocol";
-import { type Scene, scene } from "./cli.ts";
+import { runsNode, type Scene, scene } from "./cli.ts";
 import { AGENT, MSG, MSG2, OTHER, TASK, UUID } from "./fixtures.ts";
 
 let s: Scene;
@@ -206,6 +207,52 @@ describe("bazhen send --task", () => {
     expect(s.daemon.calls(toTask).map((r) => r.body)).toEqual([
       { idempotencyKey: expect.stringMatching(UUID), body: "file text" },
     ]);
+  });
+
+  it("reads the text to send from stdin, given /dev/stdin", async ({ skip }) => {
+    skip(runsNode(), "the Node CLI opens /dev/stdin by path, which a socket for stdin can't be");
+    s.daemon.answer(toTask, BroadcastMessageResponse, {
+      sent: [{ agentId: OTHER, messageId: MSG }],
+      skipped: [],
+      eventIds: [1],
+    });
+    const ran = await s.bazhen(
+      ["send", "--task", TASK, "--file", "/dev/stdin"],
+      asAgent,
+      "from a pipe\n",
+    );
+    expect(ran.code).toBe(0);
+    expect(s.daemon.calls(toTask).map((r) => r.body)).toEqual([
+      { idempotencyKey: expect.stringMatching(UUID), body: "from a pipe\n" },
+    ]);
+  });
+
+  it.for([
+    ["a device with no end", (): string => "/dev/zero", "not a regular file"],
+    [
+      "a FIFO no one writes to",
+      (): string => {
+        const fifo = join(s.dir, "fifo");
+        execFileSync("mkfifo", [fifo]);
+        return fifo;
+      },
+      "not a regular file",
+    ],
+    [
+      "a file larger than any message",
+      (): string => {
+        const big = join(s.dir, "big");
+        writeFileSync(big, "x".repeat((1 << 20) + 1));
+        return big;
+      },
+      "more than 1048576 bytes",
+    ],
+  ] as const)("refuses, sending nothing, to send %s", async ([, make, why], { skip }) => {
+    skip(runsNode(), "deliberately different: the Node CLI reads any file to its end");
+    const path = make();
+    const ran = await s.bazhen(["send", "--task", TASK, "--file", path], asAgent);
+    expect(ran).toEqual({ code: 1, stdout: "", stderr: `can't read ${path}: ${why}\n` });
+    expect(s.daemon.received).toEqual([]);
   });
 
   it("fails, sending nothing, when the file to send can't be read", async () => {

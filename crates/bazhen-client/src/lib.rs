@@ -11,7 +11,9 @@ use std::io::{self, Read, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
-use std::time::Duration;
+use std::sync::mpsc;
+use std::thread;
+use std::time::{Duration, Instant};
 
 pub use framing::Limits;
 use framing::{is_truncated, read_response};
@@ -51,9 +53,9 @@ impl Caller {
     /// it is; a token that can't be read, or isn't one, is not sent at all.
     pub fn from_env() -> Self {
         Self {
-            agent_id: env::var("BAZHEN_AGENT_ID").ok(),
+            agent_id: env_text("BAZHEN_AGENT_ID"),
             token: agent_token(),
-            device_id: env::var("BAZHEN_DEVICE_ID").ok(),
+            device_id: env_text("BAZHEN_DEVICE_ID"),
         }
     }
 
@@ -65,6 +67,16 @@ impl Caller {
             ..Self::default()
         }
     }
+}
+
+/// A variable's value as text; one that isn't UTF-8 keeps a U+FFFD where it isn't, so a header
+/// refuses it rather than the caller going unnamed.
+pub fn env_text(name: &str) -> Option<String> {
+    env::var_os(name).map(|v| text_of(&v))
+}
+
+fn text_of(value: &std::ffi::OsStr) -> String {
+    value.to_string_lossy().into_owned()
 }
 
 /// The token proves who the caller is, so no log or panic message may hold it.
@@ -89,29 +101,67 @@ pub fn agent_token() -> Option<String> {
 /// more holds no token, and is never read to its end, so a huge file costs the hook nothing.
 const TOKEN_FILE_MAX: u64 = 4096;
 
-/// The token the regular file at `path` holds, trimmed; none from anything else. A FIFO would block
-/// an open until a writer came, and a device may have no end, so neither is read: the path is
-/// looked at first, opened without blocking, and looked at again through the open file, which a
-/// FIFO put in its place between the two can't pass.
+/// The token the regular file at `path` holds, trimmed; none from anything else.
 fn token_in(path: &Path) -> Option<String> {
-    if !std::fs::metadata(path).ok()?.is_file() {
-        return None;
+    let bytes = read_regular(path, TOKEN_FILE_MAX).ok()?;
+    let text = String::from_utf8(bytes).ok()?;
+    let token = text.trim();
+    is_agent_token(token).then(|| token.to_owned())
+}
+
+/// Why a file wasn't read.
+#[derive(Debug)]
+pub enum Unread {
+    /// It is a FIFO, a device, a directory or anything else but a regular file.
+    NotAFile,
+    /// It holds more than the most that is read.
+    TooLarge {
+        max: u64,
+    },
+    Io(io::Error),
+}
+
+impl std::fmt::Display for Unread {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotAFile => f.write_str("not a regular file"),
+            Self::TooLarge { max } => write!(f, "more than {max} bytes"),
+            Self::Io(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for Unread {}
+
+/// The bytes of the regular file at `path`, at most `max` of them. A FIFO would block an open
+/// until a writer came, and a device may have no end, so neither is read: the path is looked at
+/// first, opened without blocking, and looked at again through the open file, which a FIFO put in
+/// its place between the two can't pass; and no more than `max` and one byte is ever read.
+///
+/// # Errors
+///
+/// `NotAFile` for anything but a regular file, `TooLarge` past `max`, and `Io` when it can't be
+/// opened or read.
+pub fn read_regular(path: &Path, max: u64) -> Result<Vec<u8>, Unread> {
+    if !std::fs::metadata(path).map_err(Unread::Io)?.is_file() {
+        return Err(Unread::NotAFile);
     }
     let file = std::fs::OpenOptions::new()
         .read(true)
         .custom_flags(o_nonblock())
         .open(path)
-        .ok()?;
-    if !file.metadata().ok()?.is_file() {
-        return None;
+        .map_err(Unread::Io)?;
+    if !file.metadata().map_err(Unread::Io)?.is_file() {
+        return Err(Unread::NotAFile);
     }
-    let mut text = String::new();
-    file.take(TOKEN_FILE_MAX + 1)
-        .read_to_string(&mut text)
-        .ok()?;
-    let token = text.trim();
-    (u64::try_from(text.len()).ok()? <= TOKEN_FILE_MAX && is_agent_token(token))
-        .then(|| token.to_owned())
+    let mut bytes = Vec::new();
+    file.take(max.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(Unread::Io)?;
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > max {
+        return Err(Unread::TooLarge { max });
+    }
+    Ok(bytes)
 }
 
 /// `O_NONBLOCK` on the systems Bazhen is built for (`deny.toml`'s targets: Linux and macOS, on
@@ -155,7 +205,9 @@ impl std::fmt::Display for Error {
             }
             Self::Broken(source) => write!(f, "the daemon stopped answering: {source}"),
             Self::Truncated => f.write_str("the daemon's answer was cut short"),
-            Self::Header { name } => write!(f, "{name} holds a character a header can't carry"),
+            Self::Header { name } => {
+                write!(f, "{name} holds a character outside printable ASCII")
+            }
         }
     }
 }
@@ -201,8 +253,8 @@ fn is_header_value(s: &str) -> bool {
 }
 
 /// Sends one request and reads its whole response, which ends where its `Content-Length` says,
-/// or at a head `limits` refuse. `timeout` bounds the connect's writes and the wait for the reply
-/// to begin; once it has, each read gets at most the reply stall.
+/// or at a head `limits` refuse. `timeout` bounds the whole exchange, the connect included; once
+/// the reply has begun, each read gets at most the reply stall too.
 ///
 /// # Errors
 ///
@@ -218,16 +270,33 @@ pub fn exchange(
     limits: Limits,
     timeout: Duration,
 ) -> Result<Vec<u8>, Error> {
+    let deadline = Instant::now() + timeout;
     let head = request_head(method, path, body.len(), caller)?;
-    let mut stream = UnixStream::connect(socket).map_err(|source| Error::Unreachable {
+    let mut stream = connect(socket, timeout).map_err(|source| Error::Unreachable {
         socket: socket.display().to_string(),
         source,
     })?;
-    let response = send(&mut stream, &head, body, limits, timeout).map_err(Error::Broken)?;
+    let response = send(&mut stream, &head, body, limits, deadline).map_err(Error::Broken)?;
     if is_truncated(&response, limits) {
         return Err(Error::Truncated);
     }
     Ok(response)
+}
+
+/// A connection to `socket`, or a timeout: a listener whose backlog is full holds a connect until
+/// it takes one, so the connect runs on a thread of its own, left behind if it never ends.
+fn connect(socket: &Path, within: Duration) -> io::Result<UnixStream> {
+    let (done, connected) = mpsc::channel();
+    let path = socket.to_path_buf();
+    thread::Builder::new()
+        .name("connect".to_owned())
+        .spawn(move || {
+            // Nothing is waiting any more when this send fails, so there is no one to tell.
+            let _ = done.send(UnixStream::connect(path));
+        })?;
+    connected
+        .recv_timeout(within)
+        .unwrap_or_else(|_| Err(io::ErrorKind::TimedOut.into()))
 }
 
 fn send(
@@ -235,14 +304,42 @@ fn send(
     head: &str,
     body: &[u8],
     limits: Limits,
-    timeout: Duration,
+    deadline: Instant,
 ) -> io::Result<Vec<u8>> {
-    stream.set_read_timeout(Some(timeout))?;
-    stream.set_write_timeout(Some(timeout))?;
-    stream.write_all(head.as_bytes())?;
-    stream.write_all(body)?;
-    read_response(stream, limits, REPLY_STALL.min(timeout))
+    let left = || {
+        deadline
+            .checked_duration_since(Instant::now())
+            .filter(|d| !d.is_zero())
+            .ok_or(io::Error::from(io::ErrorKind::TimedOut))
+    };
+    // The writes don't block: a write timeout can't bound them, since BSD's starts again each
+    // time the daemon frees a little room, so a daemon that reads slowly would hold the request
+    // for ever. A request that fits the socket's buffer, as nearly all do, never waits here.
+    stream.set_nonblocking(true)?;
+    let mut pause = Duration::from_millis(1);
+    for mut bytes in [head.as_bytes(), body] {
+        while !bytes.is_empty() {
+            match stream.write(bytes) {
+                Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
+                Ok(n) => {
+                    bytes = bytes.get(n..).unwrap_or_default();
+                    pause = Duration::from_millis(1);
+                }
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(pause.min(left()?));
+                    pause = (pause * 2).min(WRITE_PAUSE_MAX);
+                }
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(e),
+            }
+        }
+    }
+    stream.set_nonblocking(false)?;
+    read_response(stream, limits, REPLY_STALL, deadline)
 }
+
+/// The longest a write waits before it tries again on a socket with no room.
+const WRITE_PAUSE_MAX: Duration = Duration::from_millis(20);
 
 #[cfg(test)]
 mod tests {
@@ -254,6 +351,7 @@ mod tests {
     const LIMITS: Limits = Limits {
         head: 16 << 10,
         body: 1 << 20,
+        chunked: false,
     };
 
     fn caller(agent: Option<&str>, token: Option<&str>, device: Option<&str>) -> Caller {
@@ -294,6 +392,62 @@ mod tests {
             head.unwrap(),
             "POST /v1/shells/report HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n\
              Content-Length: 7\r\nConnection: close\r\n\r\n"
+        );
+    }
+
+    #[test]
+    fn gives_up_at_its_deadline_on_a_daemon_that_reads_the_request_slowly() {
+        let (mut client, mut daemon) = UnixStream::pair().unwrap();
+        let reader = thread::spawn(move || {
+            let mut chunk = [0; 4096];
+            for _ in 0..30 {
+                if matches!(daemon.read(&mut chunk), Ok(0) | Err(_)) {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+        });
+        let start = Instant::now();
+        let body = vec![b'x'; 16 << 20];
+        let deadline = start + Duration::from_millis(500);
+        let sent = send(
+            &mut client,
+            "POST / HTTP/1.1\r\n\r\n",
+            &body,
+            LIMITS,
+            deadline,
+        );
+        let kind = sent.map_err(|e| e.kind());
+        assert!(
+            matches!(
+                kind,
+                Err(io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock)
+            ),
+            "{kind:?}"
+        );
+        // The reader goes on for 3 s: writes each given the whole timeout again would last it out.
+        assert!(
+            start.elapsed() < Duration::from_millis(1500),
+            "{:?}",
+            start.elapsed()
+        );
+        drop(client);
+        reader.join().unwrap();
+    }
+
+    #[test]
+    fn refuses_an_agent_id_that_isnt_utf_8_rather_than_send_none() {
+        use std::os::unix::ffi::OsStrExt;
+        let id = text_of(std::ffi::OsStr::from_bytes(b"agent_\xff"));
+        let head = request_head(Method::Get, "/", 0, &caller(Some(&id), None, None));
+        assert!(
+            matches!(
+                head,
+                Err(Error::Header {
+                    name: "Bazhen-Agent-Id"
+                })
+            ),
+            "{head:?}"
         );
     }
 
@@ -429,6 +583,14 @@ mod tests {
         }
     }
 
+    fn request_is_whole(request: &[u8]) -> bool {
+        let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") else {
+            return false;
+        };
+        let head = std::str::from_utf8(&request[..end]).unwrap();
+        request.len() >= end + 4 + framing::content_length(head).unwrap_or(0)
+    }
+
     /// A daemon that reads one request and answers it with `reply`, and hands back what it read.
     fn daemon(socket: &Path, reply: &'static [u8]) -> thread::JoinHandle<Vec<u8>> {
         let listener = UnixListener::bind(socket).unwrap();
@@ -436,9 +598,14 @@ mod tests {
             let (mut conn, _) = listener.accept().unwrap();
             conn.set_read_timeout(Some(Duration::from_millis(500)))
                 .unwrap();
-            let mut got = vec![0; 4096];
-            let n = conn.read(&mut got).unwrap();
-            got.truncate(n);
+            // The whole request, head and body, before answering, as the daemon reads it.
+            let mut got = Vec::new();
+            let mut chunk = [0; 4096];
+            while !request_is_whole(&got) {
+                let n = conn.read(&mut chunk).unwrap();
+                assert!(n > 0, "the request ended early");
+                got.extend_from_slice(&chunk[..n]);
+            }
             conn.write_all(reply).unwrap();
             got
         })

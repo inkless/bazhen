@@ -83,6 +83,14 @@ const tail = async (over: Partial<DoctorResponse>) => {
 
 const on = (build: string | null, protocol = ["1.2"]) => ({ terminalId: "t", build, protocol });
 
+/** `bazhen doctor` against a daemon whose doctor names `peerReader` as the peer reader. */
+const doctorWith = (peerReader: DoctorResponse["peerReader"]) => {
+  s.daemon
+    .answer("GET /v1/health", HealthResponse, health())
+    .answer("GET /v1/daemon/doctor", DoctorResponse, doctor({ peerReader }));
+  return s.bazhen(["doctor"]);
+};
+
 describe("bazhen doctor", () => {
   it("shows what the daemon runs with, and passes when every runtime answers", async () => {
     s.daemon.answer("GET /v1/health", HealthResponse, health()).answer(
@@ -140,6 +148,19 @@ describe("bazhen doctor", () => {
         "  removed: none",
       ]),
     );
+  });
+
+  it("says which program reads who calls on its socket, and warns when none is installed", async () => {
+    const found = lines((await doctorWith({ path: "/r/target/release/bazhen-peer" })).stdout);
+    const none = lines((await doctorWith(null)).stdout);
+    expect(found.slice(2, 4)).toEqual([
+      "hook client: /repo/target/release/bazhen-hook",
+      "peer reader: /r/target/release/bazhen-peer",
+    ]);
+    expect(none.slice(3, 5)).toEqual([
+      "peer reader: none",
+      "  warning: the daemon can't read which process calls on its socket, so a call from inside an agent that presents nothing passes as yours; pnpm build builds bazhen-peer, so this install is incomplete",
+    ]);
   });
 
   it("fails when any runtime can't be read, not only tmux", async () => {

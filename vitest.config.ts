@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 // First in every project: the tests start only inside a capped run.
@@ -6,6 +7,7 @@ const CAPPED = "tests/support/capped-setup.ts";
 const CONTAINMENT = "tests/holder/containment.test.ts";
 // In every project: any test may be a property test.
 const SEEDED = "tests/support/fast-check-setup.ts";
+const RUST_CLI = fileURLToPath(new URL("target/release/bazhen", import.meta.url));
 
 export default defineConfig({
   test: {
@@ -50,6 +52,18 @@ export default defineConfig({
           globalSetup: [CAPPED, "tests/support/medium-setup.ts"],
           setupFiles: [SEEDED],
           testTimeout: 30_000,
+        },
+      },
+      {
+        // The same suite against the Rust CLI, which `pnpm test:medium` builds, while the Node
+        // CLI stays the one `pnpm bazhen` runs.
+        test: {
+          name: "cli-rust",
+          include: ["tests/cli/**/*.test.ts"],
+          globalSetup: [CAPPED, "tests/support/medium-setup.ts"],
+          setupFiles: [SEEDED],
+          testTimeout: 30_000,
+          env: { BAZHEN_CLI: RUST_CLI },
         },
       },
       {
