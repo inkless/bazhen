@@ -26,6 +26,14 @@ program's terminal closing and tmux learning that it exited. Both are a single p
 server's event loop, so they are rare, but not impossible. Upgrade to tmux 3.5 or later to be
 rid of them. `bazhen doctor` warns while the installed tmux has the defect.
 
+The reset hangs on tmux's `pane-died` hook, and a tmux built with utempter, as Debian's and
+Ubuntu's are, can miss it before 3.6: it loses the pane's exit, so the pane is dead but
+`pane-died` never fires (tmux issue 4559). Bazhen's own views reset a dead pane again just
+before they attach to it and just before they leave it, so the web app is covered either way.
+A terminal of your own, attached with the attach command Bazhen shows for each terminal,
+relies on the hook alone: on such a tmux, opening or leaving a dead terminal there, or switching focus away from
+it, can still crash the server.
+
 On tmux 3.5 and later, Bazhen sets no reset, and a dead terminal keeps its last screen.
 
 ## `window-size manual`, set globally, crashes tmux before 3.8

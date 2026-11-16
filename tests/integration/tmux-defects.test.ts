@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { tmuxVersion, type TmuxServer } from "@bazhen/host-guard";
-import { nodePtySpawner } from "@bazhen/daemon/pty";
-import { testServer, tmuxOut } from "./helpers.ts";
+import { attachClient, testServer, tmuxOut } from "./helpers.ts";
 
 // These pin tmux behaviour the runtime is built around. A pin that holds only before some tmux
 // release says so, and asserts the fixed behaviour from that release on, so it holds on every
@@ -59,12 +58,7 @@ function focusPane(label: string, request: string): TmuxServer {
 
 const FOCUS_ON = "\\033[?1004h";
 
-const attach = (server: TmuxServer) =>
-  nodePtySpawner.spawn(
-    server.argv("attach-session", "-t", "f"),
-    { cols: 80, rows: 24 },
-    { PATH: process.env["PATH"] ?? "/usr/bin:/bin" },
-  );
+const attach = (server: TmuxServer) => attachClient(server, "f");
 
 /** Whether a client shows the pane's session: false once none does, or the server is gone. */
 const shown = (server: TmuxServer) =>

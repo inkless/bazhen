@@ -281,6 +281,8 @@ export class TmuxRuntime implements RuntimeAdapter {
   private readonly unknownCause = new UnknownCause(UNKNOWN_EXIT_AFTER_MS);
   /** Until `applyServerSettings` reaches a running server; `health` applies them meanwhile. */
   private settingsPending = true;
+  /** Whether the tmux this runtime runs needs `DEAD_PANE_RESET`. */
+  private readonly resetDeadPanes: boolean;
 
   constructor(opts: TmuxRuntimeOptions) {
     this.opts = opts;
@@ -297,7 +299,8 @@ export class TmuxRuntime implements RuntimeAdapter {
         return "";
       }
     })();
-    writeFileSync(opts.server.config, tmuxConfig(needsReset(installed)), { mode: 0o600 });
+    this.resetDeadPanes = needsReset(installed);
+    writeFileSync(opts.server.config, tmuxConfig(this.resetDeadPanes), { mode: 0o600 });
   }
 
   /**
@@ -445,6 +448,16 @@ export class TmuxRuntime implements RuntimeAdapter {
     this.settingsPending = false;
   }
 
+  /**
+   * `DEAD_PANE_RESET` for one pane, when this tmux needs it, as a client is about to attach to it
+   * or leave it. The hook alone isn't enough: a tmux built with utempter can lose a pane's SIGCHLD
+   * before 3.6, leaving it dead with no status, and then `pane-died` never fires.
+   */
+  private async resetIfDead(paneId: string): Promise<void> {
+    if (!this.resetDeadPanes) return;
+    await this.tmux("if-shell", "-F", "-t", paneId, "#{pane_dead}", `send-keys -R -t ${paneId}`);
+  }
+
   private paneTitleHook(): string[] {
     const hook = this.opts.onPaneTitle;
     return hook === undefined
@@ -517,6 +530,8 @@ export class TmuxRuntime implements RuntimeAdapter {
     // behind it. With no history, `-E -1` would capture the screen's first line instead.
     const lines = alternate === 1 ? 0 : Math.min(historyLines, held);
     const history = lines > 0 ? await this.historyOf(session, lines) : "";
+    const paneId = located(pane.ref, "paneId");
+    await this.resetIfDead(paneId);
     const proc = this.opts.pty.spawn(
       this.opts.server.argv("attach-session", "-t", session),
       { cols, rows },
@@ -556,7 +571,9 @@ export class TmuxRuntime implements RuntimeAdapter {
       onRespawn: () => {},
       close: () => {
         screen.dispose();
-        proc.kill();
+        void this.resetIfDead(paneId)
+          .catch(() => undefined)
+          .finally(() => proc.kill());
       },
     };
     return { kind: "history", stream, history, alternate: alternate === 1 };

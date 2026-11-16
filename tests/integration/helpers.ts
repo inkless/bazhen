@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { TmuxServer, type ConfiguredTmuxServer } from "@bazhen/host-guard";
+import { nodePtySpawner } from "@bazhen/daemon/pty";
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -18,6 +19,14 @@ export function testServer(label: string, config?: string): ConfiguredTmuxServer
     config: config ?? join(root, `${name}.conf`),
   });
 }
+
+/** A tmux client attached to `session`, on a PTY of its own, as a person's terminal would be. */
+export const attachClient = (server: TmuxServer, session: string) =>
+  nodePtySpawner.spawn(
+    server.argv("attach-session", "-t", session),
+    { cols: 80, rows: 24 },
+    { PATH: process.env["PATH"] ?? "/usr/bin:/bin" },
+  );
 
 /** Runs a tmux command on the test's own server and returns what it printed. */
 export const tmuxOut = (server: TmuxServer, ...args: string[]) => server.runSync(args);

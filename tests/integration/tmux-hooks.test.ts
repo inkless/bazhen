@@ -128,33 +128,49 @@ describe("the pane-title hook on a server an older daemon started", () => {
 const attached = (server: ConfiguredTmuxServer) =>
   server.alive() && tmuxOut(server, "list-clients").trim() !== "";
 
+/**
+ * Opens a view of a terminal that asks for focus reports, lets it exit, closes the view and opens
+ * and closes another, then says whether the server lived and the terminal's last output was kept.
+ * `withoutHook` takes the server's pane-died hook off first, as a tmux built with utempter can
+ * leave a dead pane whose death never fires it.
+ */
+async function viewDeadTerminal(withoutHook: boolean) {
+  const server = newServer();
+  const runtime = runtimeOn(server);
+  const ref = await runtime.create({
+    ...titler(),
+    argv: ["sh", "-c", "printf 'last words\\033[?1004h'; read x"],
+  });
+  if (withoutHook) tmuxOut(server, "set-hook", "-gu", "pane-died");
+  const pane = String(ref.locator.paneId);
+  const dead = () => tmuxOut(server, "display-message", "-p", "-t", pane, "#{pane_dead}").trim();
+
+  const first = await runtime.attach(ref, null, 0);
+  await expect.poll(() => attached(server), { timeout: 5_000 }).toBe(true);
+  tmuxOut(server, "send-keys", "-t", pane, "Enter");
+  await expect.poll(dead, { timeout: 5_000 }).toBe("1");
+  first.stream.close();
+  await expect.poll(() => attached(server), { timeout: 5_000 }).toBe(false);
+  const leftAlive = server.alive();
+
+  const second = await runtime.attach(ref, null, 0);
+  await expect.poll(() => attached(server), { timeout: 5_000 }).toBe(true);
+  second.stream.close();
+  await expect.poll(() => attached(server), { timeout: 5_000 }).toBe(false);
+  return {
+    leftAlive,
+    alive: server.alive(),
+    kept: tmuxOut(server, "capture-pane", "-p", "-S", "-", "-t", pane).includes("last words"),
+  };
+}
+
 describe("a dead terminal that had asked for focus reports", () => {
   it("leaves the server running when its view closes and opens again, its last output kept", async () => {
-    const server = newServer();
-    const runtime = runtimeOn(server);
-    const ref = await runtime.create({
-      ...titler(),
-      argv: ["sh", "-c", "printf 'last words\\033[?1004h'; read x"],
-    });
-    const pane = String(ref.locator.paneId);
-    const exit = async () =>
-      (await runtime.inventory()).find((e) => e.ref.terminalId === ref.terminalId)?.exit;
+    expect(await viewDeadTerminal(false)).toEqual({ leftAlive: true, alive: true, kept: true });
+  });
 
-    const first = await runtime.attach(ref, null, 0);
-    await expect.poll(() => attached(server), { timeout: 5_000 }).toBe(true);
-    tmuxOut(server, "send-keys", "-t", pane, "Enter");
-    await expect.poll(exit, { timeout: 5_000 }).toMatchObject({ type: "exited", code: 0 });
-    first.stream.close();
-    await expect.poll(() => attached(server), { timeout: 5_000 }).toBe(false);
-    expect(server.alive()).toBe(true);
-
-    const second = await runtime.attach(ref, null, 0);
-    await expect.poll(() => attached(server), { timeout: 5_000 }).toBe(true);
-    second.stream.close();
-    await expect.poll(() => attached(server), { timeout: 5_000 }).toBe(false);
-    expect(server.alive()).toBe(true);
-    expect(await exit()).toMatchObject({ type: "exited", code: 0 });
-    expect(tmuxOut(server, "capture-pane", "-p", "-S", "-", "-t", pane)).toContain("last words");
+  it("leaves the server running though its death never fired pane-died", async () => {
+    expect(await viewDeadTerminal(true)).toEqual({ leftAlive: true, alive: true, kept: true });
   });
 });
 
