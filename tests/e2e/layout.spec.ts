@@ -312,26 +312,34 @@ test("fits a 40-character name on a phone, wherever the agent is shown", async (
   expect(name).toHaveLength(40);
   const launched = await post(page, "/v1/agents", { harness: "claude-code", cwd: WORK, name });
   const longId = String(Reflect.get(Object(launched), "agentId"));
-  const made = await post(page, "/v1/tasks", {
-    title: "Long names",
-    brief: "Fit a phone.",
-    assign: { agentId: longId, role: "worker" },
-  });
-  const taskId = String(Reflect.get(Object(made), "taskId"));
-
-  for (const hash of [`#/agent/${longId}`, "", "#/tasks", `#/task/${taskId}`]) {
-    await page.goto(`/${hash}`);
-    await expect(page.getByText(name).first()).toBeVisible();
-    await dismissThemeNotice(page);
-    await expect
-      .poll(async () => ({ page: await overflow(page), cut: await pastRightEdge(page, name) }), {
-        message: hash,
-      })
-      .toEqual({ page: { down: 0, across: 0 }, cut: [] });
+  // Later files expect no open task and only their own agents, whatever happens here.
+  try {
+    const made = await post(page, "/v1/tasks", {
+      title: "Long names",
+      brief: "Fit a phone.",
+      assign: { agentId: longId, role: "worker" },
+    });
+    const taskId = String(Reflect.get(Object(made), "taskId"));
+    try {
+      for (const hash of [`#/agent/${longId}`, "", "#/tasks", `#/task/${taskId}`]) {
+        await page.goto(`/${hash}`);
+        // A phone shows one pane, so the name is also in the hidden rail, and in a picker's options.
+        await expect(page.getByText(name).filter({ visible: true }).first()).toBeVisible();
+        await dismissThemeNotice(page);
+        await expect
+          .poll(
+            async () => ({ page: await overflow(page), cut: await pastRightEdge(page, name) }),
+            { message: hash },
+          )
+          .toEqual({ page: { down: 0, across: 0 }, cut: [] });
+      }
+    } finally {
+      await post(page, `/v1/tasks/${taskId}/finish`, { outcome: "cancelled" });
+    }
+  } finally {
+    await closeAgent(page, longId);
+    await page.context().close();
   }
-
-  await closeAgent(page, longId);
-  await page.context().close();
 });
 
 /**
