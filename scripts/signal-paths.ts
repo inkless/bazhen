@@ -297,10 +297,11 @@ export function rawSignalCalls(file: string, text: string): { line: number; call
 const TS_SENDERS = /\b(?:signalGroup|signalPane|signalServer|killHolder|runBounded)\b/;
 // The holder's own: its child's close and signal, which reach its group and the terminal's
 // foreground group, and the guard module that floors them.
-// A session's and an ending's constructors, not the bare names: the engine has an `Ending` of its
-// own, which ends a line of output and signals nothing.
+// A session's and an ending's constructors, or an import of either from the holder's session
+// module, not the bare names: the engine has an `Ending` of its own, which ends a line of output
+// and signals nothing.
 const RUST_SENDERS =
-  /\b(?:bazhen_test_signal|ChildProcess|close_step|pass_among|signal_group|signal_member|guard\s*::)|\bSession\s*::\s*led_by\b|\bEnding\s*::\s*start\b|\b(?:child|holder|old)\s*\.\s*(?:close|signal|respawn|retire)\s*\(/;
+  /\b(?:bazhen_test_signal|ChildProcess|close_step|pass_among|signal_group|signal_member|guard\s*::)|\bSession\s*::\s*led_by\b|\bEnding\s*::\s*start\b|\bsession\s*::\s*(?:\{[^}]*)?\b(?:Session|Ending)\b|\b(?:child|holder|old)\s*\.\s*(?:close|signal|respawn|retire)\s*\(/;
 
 /**
  * Whether a file sends signals, directly or through a chokepoint. Reverting or mutating one can

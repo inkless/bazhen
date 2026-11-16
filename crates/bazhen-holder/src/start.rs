@@ -117,8 +117,21 @@ pub fn run() -> ExitCode {
 }
 
 fn start(stdin: &mut impl Read) -> Result<(Holder<Screen>, Server), StartError> {
-    #[cfg(feature = "sandbox-tripwire")]
-    crate::guard::tripwire().map_err(|_| StartError::TestBuildOffSandbox)?;
+    start_marked(
+        stdin,
+        std::path::Path::new(crate::guard::DISPOSABLE_HOST_MARKER),
+    )
+}
+
+/// `start`, where a disposable host carries its marker at `marker`: a test build refuses to start
+/// off one, before it reads its spec or changes anything, since there it would send no signal.
+fn start_marked(
+    stdin: &mut impl Read,
+    marker: &Path,
+) -> Result<(Holder<Screen>, Server), StartError> {
+    if cfg!(feature = "sandbox-tripwire") {
+        crate::guard::tripwire_at(marker).map_err(|_| StartError::TestBuildOffSandbox)?;
+    }
     let spec = read_spec(stdin)?;
     become_session_leader()?;
     std::env::set_current_dir("/").map_err(StartError::Setup)?;
@@ -425,6 +438,13 @@ mod tests {
             assert!(rustix::io::fcntl_getfd(fd).is_ok(), "fd {fd:?} was closed");
         }
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_test_build_off_a_disposable_host_refuses_to_start_before_it_reads_its_spec() {
+        let mut spec: &[u8] = b"";
+        let started = start_marked(&mut spec, Path::new("/nonexistent/bazhen-disposable-host"));
+        assert!(matches!(started, Err(StartError::TestBuildOffSandbox)));
     }
 
     #[test]

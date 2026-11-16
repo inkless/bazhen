@@ -240,6 +240,9 @@ describe("signalling sources", () => {
       "holder.signal(body.signal)",
       "holder.respawn(pty, child, spec.generation);",
       "holder.retire(child);",
+      "use crate::session::Ending;",
+      "use crate::session::{self, Ending, Session};",
+      "use bazhen_holder::session::{Session, Sweep};",
     ];
     expect(sources.filter((source) => !isSignallingSource("a.rs", source))).toEqual([]);
   });
@@ -249,6 +252,8 @@ describe("signalling sources", () => {
       "match ending { Ending::Newline => {} }",
       "pub enum Ending { Newline, Wrap }",
       "struct Session; let s = Session;",
+      "use bazhen_holder_engine::encode::Ending;",
+      "use crate::session::{Sweep, member_state};",
     ];
     expect(sources.filter((source) => isSignallingSource("a.rs", source))).toEqual([]);
   });

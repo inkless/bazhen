@@ -28,7 +28,6 @@ pub enum Refused {
     #[error("{pid} is not in the session {leader} leads")]
     Outside { pid: i32, leader: i32 },
     /// A test build off a disposable host (the `sandbox-tripwire` feature).
-    #[cfg(feature = "sandbox-tripwire")]
     #[error("this test build is off a disposable host, so it sends no signal")]
     Unsandboxed,
 }
@@ -135,17 +134,21 @@ pub(crate) fn signal_member(pid: Pid, leader: Pid, signal: Signal) -> Result<(),
 /// The marker a disposable host carries, as `bazhen_test_signal::require_sandbox` reads it: that
 /// crate signals whatever a test names, so the holder can't depend on it, and a test holds the two
 /// to one rule.
-#[cfg(feature = "sandbox-tripwire")]
-const DISPOSABLE_HOST_MARKER: &str = "/etc/bazhen-disposable-host";
+pub(crate) const DISPOSABLE_HOST_MARKER: &str = "/etc/bazhen-disposable-host";
 
 /// Refuses a send off a disposable host, in a test build: the last check before every send. The
 /// host qualifies by the marker, a plain file, not a link, that root owns.
 #[cfg(feature = "sandbox-tripwire")]
 pub(crate) fn tripwire() -> Result<(), Refused> {
+    tripwire_at(std::path::Path::new(DISPOSABLE_HOST_MARKER))
+}
+
+/// `tripwire`, with the marker at `marker`.
+pub(crate) fn tripwire_at(marker: &std::path::Path) -> Result<(), Refused> {
     use std::os::unix::fs::MetadataExt as _;
 
-    match std::fs::symlink_metadata(DISPOSABLE_HOST_MARKER) {
-        Ok(marker) if marker.is_file() && marker.uid() == 0 => Ok(()),
+    match std::fs::symlink_metadata(marker) {
+        Ok(found) if found.is_file() && found.uid() == 0 => Ok(()),
         _ => Err(Refused::Unsandboxed),
     }
 }
@@ -183,6 +186,19 @@ mod tests {
     use std::process::{Command, Stdio};
 
     use super::*;
+
+    #[test]
+    fn the_tripwire_passes_only_a_plain_file_root_owns() {
+        assert_eq!(
+            tripwire_at(std::path::Path::new("/nonexistent/bazhen-disposable-host")),
+            Err(Refused::Unsandboxed)
+        );
+        assert_eq!(
+            tripwire_at(std::path::Path::new("/etc")),
+            Err(Refused::Unsandboxed)
+        );
+        assert_eq!(tripwire_at(std::path::Path::new("/etc/passwd")), Ok(()));
+    }
 
     #[test]
     fn every_test_build_sends_only_where_the_test_crate_would() {

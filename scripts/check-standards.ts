@@ -919,6 +919,7 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/start.rs::StartError::exit_code":
     "maps a variant to its exit code; reads no bytes",
   "crates/bazhen-holder/src/start.rs::start": "reads stdin only through read_spec",
+  "crates/bazhen-holder/src/start.rs::start_marked": "reads stdin only through read_spec",
   "crates/bazhen-holder/src/start.rs::read_spec":
     "reads at most MAX_REQUEST_BYTES + 1 bytes for decode_spawn_spec, which is fuzzed (spawn_spec), then checks the strings it decoded",
   "crates/bazhen-hook/src/lib.rs::hook_request": "an encoder: it writes the request",
