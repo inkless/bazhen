@@ -298,7 +298,9 @@ the tests install, and `bazhen doctor` warns when a live Codex agent's server do
 
 Every Codex agent's commands run under the same server, so only the thread a call names tells one
 Codex agent from another, and any of them can name another's. A process in an agent's terminal
-stays that agent's, whatever thread it names. A command in Codex's
+stays that agent's for ordinary calls, whatever thread it names; an agent that deliberately fakes a
+Codex server above itself (`exec -a codex … app-server`) is outside these checks, like the other
+deliberate cases below. A command in Codex's
 `workspace-write` sandbox can't reach the daemon's socket at all; run `bazhen` outside it. On
 macOS, the kernel hides the environment of a process it restricts (`cs_restricted`, unless SIP is
 off), so a command left running after its shell exits is marked only when it isn't one; the
