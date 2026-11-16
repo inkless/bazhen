@@ -91,7 +91,9 @@ describe("bazhen task create", () => {
     ]);
     const none = await s.bazhen(["task", "create", "--title", "t"]);
     const unknown = await s.bazhen(["task", "list", "--everything"]);
-    expect([both, none, unknown].map((r) => r.code)).toEqual([2, 2, 2]);
+    expect([both, none, unknown].map((r) => [r.code, r.stdout])).toEqual(
+      [both, none, unknown].map(() => [2, ""]),
+    );
     expect(both.stderr).toContain("not both");
     expect(none.stderr).toContain("missing --brief");
     expect(unknown.stderr).toContain("--everything");
@@ -100,8 +102,9 @@ describe("bazhen task create", () => {
 
   it("refuses --file, which only send takes, pointing at --brief-file", async () => {
     const ran = await s.bazhen(["task", "create", "--title", "t", "--file", "f"]);
-    expect([ran.code, ran.stderr]).toEqual([
+    expect([ran.code, ran.stdout, ran.stderr]).toEqual([
       2,
+      "",
       expect.stringContaining("a brief takes --brief-file"),
     ]);
   });
@@ -173,18 +176,31 @@ describe("bazhen task done and cancel", () => {
     );
     const several = await s.bazhen(["task", "done"], asAgent);
     const none = await s.bazhen(["task", "done"], { BAZHEN_AGENT_ID: OTHER });
-    expect([several.code, several.stderr]).toEqual([
+    expect([several.code, several.stdout, several.stderr]).toEqual([
       2,
+      "",
       expect.stringContaining(`name one of ${TASK}, ${TASK2}`),
     ]);
-    expect([none.code, none.stderr]).toEqual([2, expect.stringContaining("assigned no task")]);
+    expect([none.code, none.stdout, none.stderr]).toEqual([
+      2,
+      "",
+      expect.stringContaining("assigned no task"),
+    ]);
   });
 
   it("wants the task named outside an agent, and always for a cancel", async () => {
     const finish = await s.bazhen(["task", "done"]);
     const cancel = await s.bazhen(["task", "cancel"], asAgent);
-    expect([finish.code, finish.stderr]).toEqual([2, expect.stringContaining("outside an agent")]);
-    expect([cancel.code, cancel.stderr]).toEqual([2, expect.stringContaining("missing the task")]);
+    expect([finish.code, finish.stdout, finish.stderr]).toEqual([
+      2,
+      "",
+      expect.stringContaining("outside an agent"),
+    ]);
+    expect([cancel.code, cancel.stdout, cancel.stderr]).toEqual([
+      2,
+      "",
+      expect.stringContaining("missing the task"),
+    ]);
     expect(s.daemon.received).toEqual([]);
   });
 });
@@ -350,7 +366,7 @@ describe("bazhen task note", () => {
       s.bazhen(["task", "note", TASK], asAgent),
       s.bazhen(["send", OTHER, "hi", "--handoff"], asAgent),
     ]);
-    expect(runs.map((r) => r.code)).toEqual([2, 2, 2, 2]);
+    expect(runs.map((r) => [r.code, r.stdout])).toEqual(runs.map(() => [2, ""]));
     expect(runs.map((r) => r.stderr)).toEqual([
       expect.stringContaining("control characters"),
       expect.stringContaining("quotes: it holds --all"),
@@ -382,9 +398,10 @@ describe("bazhen delegate", () => {
     s.daemon.answer("POST /v1/tasks/delegate", CreateTaskResponse, created);
     const reviewer = await delegated([OTHER, "--title", "t", "--brief", "b", "--role", "reviewer"]);
     const upper = await delegated([OTHER, "--title", "t", "--brief", "b", "--role", "Lead"]);
-    expect([reviewer.code, upper.code, upper.stderr]).toEqual([
+    expect([reviewer.code, upper.code, upper.stdout, upper.stderr]).toEqual([
       0,
       2,
+      "",
       expect.stringContaining("--role is a role bazhen roles lists, not Lead"),
     ]);
   });
@@ -415,7 +432,7 @@ describe("bazhen delegate", () => {
       delegated(["--launch", "codex", "--name=-x", "--title", "t", "--brief", "b"]),
       delegated(["--launch", "vim", "--title", "t", "--brief", "b"]),
     ]);
-    expect(runs.map((r) => r.code)).toEqual([2, 2, 2, 2, 2]);
+    expect(runs.map((r) => [r.code, r.stdout])).toEqual(runs.map(() => [2, ""]));
     expect(runs.map((r) => r.stderr)).toEqual([
       expect.stringContaining("not both"),
       expect.stringContaining("give --launch too"),
@@ -455,7 +472,11 @@ describe("bazhen escalate, rename and roles", () => {
       idempotencyKey: expect.stringMatching(UUID),
       name: "reviewer",
     });
-    expect([id.code, id.stderr]).toEqual([2, expect.stringContaining("isn't an id")]);
+    expect([id.code, id.stdout, id.stderr]).toEqual([
+      2,
+      "",
+      expect.stringContaining("isn't an id"),
+    ]);
   });
 
   it("lists each role with what it grants and limits, then each role file skipped", async () => {

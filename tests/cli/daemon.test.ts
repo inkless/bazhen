@@ -252,6 +252,17 @@ describe("bazhen doctor", () => {
         "  this host's subnets: none",
       ]);
     });
+
+    it("says the LAN listener isn't serving before its certificate, when it stopped with one loaded", async () => {
+      expect(await web({ ...base, lan: { ...lan, error: "listen EADDRINUSE" } })).toEqual([
+        "external origins: none (loopback only)",
+        "LAN: https://my-mac.local:7942, to 192.168.1.0/24",
+        "  not serving: listen EADDRINUSE",
+        "  certificate SHA-256: ab cd",
+        "  certificate: /s/tls/lan.crt, expires 2029-02-11T00:00:00.000Z",
+        "  this host's subnets: 192.168.1.0/24 (eno1)",
+      ]);
+    });
   });
 
   describe("on terminals and holders", () => {
@@ -317,12 +328,18 @@ describe("bazhen stop", () => {
     s.daemon
       .answer("GET /v1/health", HealthResponse, health())
       .answerWith("POST /v1/daemon/stop", StopResponse, () => {
-        setTimeout(() => void s.daemon.close(), 300);
+        const { daemon } = s;
+        setTimeout(() => void daemon.close(), 300);
         return {};
       });
+    const begun = Date.now();
     const ran = await s.bazhen(["stop"]);
     expect([ran.code, ran.stdout]).toEqual([0, "bazhen stopped; agents keep running\n"]);
-    expect(s.daemon.calls("POST /v1/daemon/stop")).toHaveLength(1);
+    expect(Date.now() - begun).toBeGreaterThanOrEqual(300);
+    const routes = s.daemon.routes();
+    expect(routes.slice(0, 2)).toEqual(["GET /v1/health", "POST /v1/daemon/stop"]);
+    expect(routes.slice(2).length).toBeGreaterThan(0);
+    expect(new Set(routes.slice(2))).toEqual(new Set(["GET /v1/health"]));
   });
 
   it("says it isn't running, and succeeds: stopping is idempotent", async () => {
@@ -336,7 +353,11 @@ describe("bazhen stop", () => {
       .answer("GET /v1/health", HealthResponse, health())
       .answer("POST /v1/daemon/stop", StopResponse, {});
     const ran = await s.bazhen(["stop"]);
-    expect([ran.code, ran.stderr]).toEqual([1, "bazhen is still answering after 5 s\n"]);
+    expect([ran.code, ran.stdout, ran.stderr]).toEqual([
+      1,
+      "",
+      "bazhen is still answering after 5 s\n",
+    ]);
   }, 15_000);
 });
 
@@ -380,7 +401,11 @@ describe("bazhen env refresh", () => {
 
   it("wants refresh after env", async () => {
     const ran = await s.bazhen(["env"]);
-    expect([ran.code, ran.stderr]).toEqual([2, expect.stringContaining("usage: bazhen")]);
+    expect([ran.code, ran.stdout, ran.stderr]).toEqual([
+      2,
+      "",
+      expect.stringContaining("usage: bazhen"),
+    ]);
   });
 });
 
@@ -502,7 +527,11 @@ describe("bazhen devices", () => {
     expect(s.daemon.calls(`POST /v1/notices/${NTC}/dismiss`).map((r) => r.body)).toEqual([
       { idempotencyKey: expect.stringMatching(UUID) },
     ]);
-    expect([none.code, none.stderr]).toEqual([1, `no open pairing notice for ${DEV2}\n`]);
+    expect([none.code, none.stdout, none.stderr]).toEqual([
+      1,
+      "",
+      `no open pairing notice for ${DEV2}\n`,
+    ]);
   });
 
   it("wants the device for revoke and dismiss, and refuses another word", async () => {
@@ -511,10 +540,10 @@ describe("bazhen devices", () => {
       s.bazhen(["devices", "dismiss"]),
       s.bazhen(["devices", "forget", DEV]),
     ]);
-    expect(runs.map((r) => [r.code, r.stderr.split("\n")[0]])).toEqual([
-      [2, "usage: bazhen devices revoke <id>"],
-      [2, "usage: bazhen devices dismiss <id>"],
-      [2, expect.stringContaining("usage: bazhen")],
+    expect(runs.map((r) => [r.code, r.stdout, r.stderr.split("\n")[0]])).toEqual([
+      [2, "", "usage: bazhen devices revoke <id>"],
+      [2, "", "usage: bazhen devices dismiss <id>"],
+      [2, "", expect.stringContaining("usage: bazhen")],
     ]);
     expect(s.daemon.received).toEqual([]);
   });

@@ -35,11 +35,21 @@ export default defineConfig({
             "packages/*/src/**/*.medium.test.ts",
             "apps/*/src/**/*.medium.test.ts",
             "scripts/*.medium.test.ts",
-            "tests/cli/**/*.test.ts",
           ],
           exclude: ["scripts/hook-bench.medium.test.ts", "**/node_modules/**"],
           globalSetup: [CAPPED, "tests/support/medium-setup.ts"],
           setupFiles: [SEEDED],
+        },
+      },
+      {
+        // The CLI as a process: a case may wait out the CLI's own deadlines, and RUN_MS in
+        // tests/cli/cli.ts caps each run below this.
+        test: {
+          name: "cli",
+          include: ["tests/cli/**/*.test.ts"],
+          globalSetup: [CAPPED, "tests/support/medium-setup.ts"],
+          setupFiles: [SEEDED],
+          testTimeout: 30_000,
         },
       },
       {

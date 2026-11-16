@@ -184,9 +184,10 @@ describe("bazhen agents", () => {
     s.daemon.answer("GET /v1/state", StateSnapshot, snapshot());
     const empty = await s.bazhen(["agents", "--json"]);
     const elsewhere = await s.bazhen(["task", "list", "--json"]);
-    expect([empty.stdout, elsewhere.code, elsewhere.stderr]).toEqual([
+    expect([empty.stdout, elsewhere.code, elsewhere.stdout, elsewhere.stderr]).toEqual([
       "[]\n",
       2,
+      "",
       expect.stringContaining("--json is for agents"),
     ]);
   });
@@ -256,9 +257,14 @@ describe("bazhen whoami", () => {
     s.daemon.answer("GET /v1/state", StateSnapshot, snapshot());
     const outside = await s.bazhen(["whoami"]);
     const unknown = await s.bazhen(["whoami"], asAgent);
-    expect([outside.code, outside.stderr]).toEqual([2, expect.stringContaining("inside an agent")]);
-    expect([unknown.code, unknown.stderr]).toEqual([
+    expect([outside.code, outside.stdout, outside.stderr]).toEqual([
       2,
+      "",
+      expect.stringContaining("inside an agent"),
+    ]);
+    expect([unknown.code, unknown.stdout, unknown.stderr]).toEqual([
+      2,
+      "",
       expect.stringContaining(`the daemon has no agent ${AGENT}`),
     ]);
   });

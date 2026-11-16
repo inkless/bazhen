@@ -1,17 +1,39 @@
 // The `bazhen` CLI as a process, against a fake daemon on the socket it looks for. The suite
 // holds the CLI's verbs, what it sends, what it prints and how it exits, whatever language the CLI
-// is written in: `BAZHEN_CLI` names the binary to run, and without it the Node CLI runs.
+// is written in: `BAZHEN_CLI` names the binary to run, and without it the Node CLI runs. The api
+// suites, which run the CLI against the real daemon, remain the end-to-end gate.
 
 import { execFile } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
-import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
+import {
+  createServer,
+  type IncomingHttpHeaders,
+  type Server,
+  type ServerResponse,
+} from "node:http";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  AddTaskNoteRequest,
+  AssignTaskRequest,
+  BroadcastMessageRequest,
+  CreateTaskRequest,
+  DelegateTaskRequest,
+  DismissNoticeRequest,
+  EnvRefreshRequest,
+  ErrorResponse,
+  EscalateRequest,
+  FinishTaskRequest,
+  RenameAgentRequest,
+  SendMessageRequest,
+  UnassignTaskRequest,
+  WaitMessagesRequest,
+} from "@bazhen/protocol";
 
 const repo = fileURLToPath(new URL("../..", import.meta.url));
 const NODE_CLI = join(repo, "apps/cli/src/main.ts");
-/** Far past any call the CLI makes here, so a hung CLI fails its test rather than the run. */
-const RUN_MS = 20_000;
+/** Past any call the CLI makes here, and short of the project's test timeout. */
+export const RUN_MS = 20_000;
 
 /** A request the fake daemon received. */
 export interface Received {
@@ -26,19 +48,54 @@ interface Schema<T> {
   parse(value: unknown): T;
 }
 
-interface Reply {
-  readonly status: number;
-  readonly body: string;
+type Reply = { readonly status: number; readonly type: string; readonly body: string } | "hang";
+
+/** A request schema, as far as checking a body the CLI sent needs one. */
+interface Check {
+  safeParse(value: unknown): { success: true } | { success: false; error: { message: string } };
 }
 
+const NO_BODY: Check = {
+  safeParse: (value) =>
+    value === undefined ? { success: true } : { success: false, error: { message: "no body" } },
+};
+
+/** Each command's request body, as the daemon checks it; a route not listed takes none. */
+const REQUESTS: readonly (readonly [RegExp, Check])[] = [
+  [/^POST \/v1\/tasks$/, CreateTaskRequest],
+  [/^POST \/v1\/tasks\/delegate$/, DelegateTaskRequest],
+  [/^POST \/v1\/tasks\/[^/]+\/assign$/, AssignTaskRequest],
+  [/^POST \/v1\/tasks\/[^/]+\/unassign$/, UnassignTaskRequest],
+  [/^POST \/v1\/tasks\/[^/]+\/finish$/, FinishTaskRequest],
+  [/^POST \/v1\/tasks\/[^/]+\/notes$/, AddTaskNoteRequest],
+  [/^POST \/v1\/tasks\/[^/]+\/messages$/, BroadcastMessageRequest],
+  [/^POST \/v1\/agents\/[^/]+\/messages$/, SendMessageRequest],
+  [/^POST \/v1\/agents\/[^/]+\/rename$/, RenameAgentRequest],
+  [/^POST \/v1\/escalations$/, EscalateRequest],
+  [/^POST \/v1\/messages\/wait$/, WaitMessagesRequest],
+  [/^POST \/v1\/daemon\/env$/, EnvRefreshRequest],
+  [/^POST \/v1\/notices\/[^/]+\/dismiss$/, DismissNoticeRequest],
+];
+
+const requestSchema = (route: string) =>
+  REQUESTS.find(([pattern]) => pattern.test(route))?.[1] ?? NO_BODY;
+
+const json = (status: number, value: unknown): Reply => ({
+  status,
+  type: "application/json",
+  body: JSON.stringify(value),
+});
+
 /**
- * The daemon's socket, answering each route with a canned reply and recording every request.
- * A route it wasn't given answers 404, as the daemon does.
+ * The daemon's socket, answering each route with a canned reply and recording every request. A
+ * request whose body the daemon would refuse is answered 400, as the daemon answers it; a route it
+ * wasn't given answers Hono's plain-text 404.
  */
 export class FakeDaemon {
   readonly received: Received[] = [];
   readonly #routes = new Map<string, (r: Received) => Reply>();
   readonly #server: Server;
+  readonly #hung: ServerResponse[] = [];
 
   private constructor(server: Server) {
     this.#server = server;
@@ -51,28 +108,52 @@ export class FakeDaemon {
       let text = "";
       req.setEncoding("utf8");
       req.on("data", (chunk: string) => (text += chunk));
-      req.on("end", () => {
-        const received = {
-          method: req.method ?? "",
-          path: req.url ?? "",
-          headers: req.headers,
-          body: text === "" ? undefined : JSON.parse(text),
-        };
-        daemon.received.push(received);
-        const route = daemon.#routes.get(`${received.method} ${received.path}`);
-        const reply = route?.(received) ?? {
-          status: 404,
-          body: JSON.stringify({ error: "not_found", message: `no route ${received.path}` }),
-        };
-        res.writeHead(reply.status, { "content-type": "application/json" });
-        res.end(reply.body);
-      });
+      req.on("end", () => daemon.#respond(req.method ?? "", req.url ?? "", req.headers, text, res));
     });
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);
       server.listen(socket, resolve);
     });
     return daemon;
+  }
+
+  #respond(
+    method: string,
+    path: string,
+    headers: IncomingHttpHeaders,
+    text: string,
+    res: ServerResponse,
+  ): void {
+    const route = `${method} ${path}`;
+    let body: unknown;
+    try {
+      body = text === "" ? undefined : JSON.parse(text);
+    } catch {
+      this.received.push({ method, path, headers, body: text });
+      this.#send(res, json(400, { error: "invalid_request", message: "not JSON" }));
+      return;
+    }
+    const received = { method, path, headers, body };
+    this.received.push(received);
+    const checked = requestSchema(route).safeParse(body);
+    if (!checked.success) {
+      this.#send(res, json(400, { error: "invalid_request", message: checked.error.message }));
+      return;
+    }
+    const answer = this.#routes.get(route);
+    this.#send(
+      res,
+      answer?.(received) ?? { status: 404, type: "text/plain", body: "404 Not Found" },
+    );
+  }
+
+  #send(res: ServerResponse, reply: Reply): void {
+    if (reply === "hang") {
+      this.#hung.push(res);
+      return;
+    }
+    res.writeHead(reply.status, { "content-type": reply.type });
+    res.end(reply.body);
   }
 
   /** Answers `route` ("GET /v1/state") with `value`, checked against the reply's schema. */
@@ -82,13 +163,25 @@ export class FakeDaemon {
 
   /** Answers `route` with what `make` makes of each request, checked against the schema. */
   answerWith<T>(route: string, schema: Schema<T>, make: (r: Received) => T): this {
-    this.#routes.set(route, (r) => ({ status: 200, body: JSON.stringify(schema.parse(make(r))) }));
+    this.#routes.set(route, (r) => json(200, schema.parse(make(r))));
     return this;
   }
 
-  /** Answers `route` with a status and body as they are, as a daemon refusing a command does. */
-  fail(route: string, status: number, body: unknown): this {
-    this.#routes.set(route, () => ({ status, body: JSON.stringify(body) }));
+  /** Refuses `route` as the daemon refuses a command: a status, and an error the protocol names. */
+  fail(route: string, status: number, error: ErrorResponse): this {
+    this.#routes.set(route, () => json(status, ErrorResponse.parse(error)));
+    return this;
+  }
+
+  /** Answers `route` with a body no schema checks, as a daemon this CLI can't read might. */
+  raw(route: string, status: number, body: string): this {
+    this.#routes.set(route, () => ({ status, type: "application/json", body }));
+    return this;
+  }
+
+  /** Never answers `route`, as a wedged daemon doesn't. */
+  hang(route: string): this {
+    this.#routes.set(route, () => "hang");
     return this;
   }
 
@@ -104,6 +197,7 @@ export class FakeDaemon {
 
   /** Stops answering: the socket refuses connections from now on, as a stopped daemon's does. */
   async close(): Promise<void> {
+    for (const res of this.#hung.splice(0)) res.destroy();
     if (!this.#server.listening) return;
     this.#server.closeAllConnections();
     await new Promise<void>((resolve) => this.#server.close(() => resolve()));
@@ -117,15 +211,19 @@ export interface Ran {
 }
 
 export interface Scene {
+  /** A directory of the scene's own, holding the rest, removed with it. */
+  readonly root: string;
   /** `BAZHEN_HOME`, under which the CLI looks for the daemon's socket. */
   readonly home: string;
-  /** A directory of the scene's own, to run the CLI in and keep files the CLI reads. */
+  /** A directory to run the CLI in and keep files the CLI reads. */
   readonly dir: string;
   /** The socket the CLI finds from `home`. */
   readonly socket: string;
   readonly daemon: FakeDaemon;
   /** Runs `bazhen <args>` in `dir`, with `env` over the scene's own environment. */
   readonly bazhen: (args: readonly string[], env?: Record<string, string>) => Promise<Ran>;
+  /** As `bazhen`, with only `env` and the scene's PATH: no BAZHEN_HOME. */
+  readonly bare: (args: readonly string[], env: Record<string, string>) => Promise<Ran>;
   readonly cleanup: () => Promise<void>;
 }
 
@@ -137,14 +235,22 @@ export async function scene(): Promise<Scene> {
   mkdirSync(join(home, "run"), { recursive: true, mode: 0o700 });
   mkdirSync(dir);
   const socket = join(home, "run", "bazhen.sock");
-  const daemon = await FakeDaemon.listen(socket);
-  const base = { PATH: process.env["PATH"] ?? "/usr/bin:/bin", HOME: root, BAZHEN_HOME: home };
+  let daemon: FakeDaemon;
+  try {
+    daemon = await FakeDaemon.listen(socket);
+  } catch (err) {
+    rmSync(root, { recursive: true, force: true });
+    throw err;
+  }
+  const path = { PATH: process.env["PATH"] ?? "/usr/bin:/bin", HOME: root };
   return {
+    root,
     home,
     dir,
     socket,
     daemon,
-    bazhen: (args, env = {}) => run(args, { ...base, ...env }, dir),
+    bazhen: (args, env = {}) => run(args, { ...path, BAZHEN_HOME: home, ...env }, dir),
+    bare: (args, env) => run(args, { ...path, ...env }, dir),
     cleanup: async () => {
       await daemon.close();
       rmSync(root, { recursive: true, force: true });
