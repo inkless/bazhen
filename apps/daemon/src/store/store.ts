@@ -55,7 +55,7 @@ import {
   ShellCommandLine,
   type ShellCommand,
 } from "@bazhen/protocol";
-import { LATEST_SCHEMA_VERSION, MIGRATIONS, type Migration } from "./migrations.ts";
+import { MIGRATIONS, NUMBERED_MIGRATIONS, type Migration } from "./migrations.ts";
 import { project, type Recorded, type Statements } from "./projections.ts";
 
 export interface NewEvent<T extends EventType> {
@@ -437,15 +437,32 @@ export class InvalidEvent extends Error {
 }
 
 export class SchemaTooNew extends Error {
-  readonly found: number;
-  readonly supported: number;
+  /** The migrations the database has run that this build doesn't know. */
+  readonly unknown: readonly string[];
 
-  constructor(found: number, supported: number) {
-    super(`database schema ${found} is newer than this build supports (${supported})`);
-    this.found = found;
-    this.supported = supported;
+  constructor(unknown: readonly string[]) {
+    super(
+      `database has migrations this build doesn't know, from a newer one: ${unknown.join(", ")}`,
+    );
+    this.unknown = unknown;
   }
 }
+
+/**
+ * The migrations a database hasn't run that come before one it has: run now, they follow
+ * migrations a fresh database runs after them, which is safe only because parallel migrations
+ * commute.
+ */
+function holeFills(migrations: readonly Migration[], applied: ReadonlySet<string>): string[] {
+  const last = migrations.findLastIndex((m) => applied.has(m.name));
+  return migrations.slice(0, last).flatMap((m) => (applied.has(m.name) ? [] : [m.name]));
+}
+
+/**
+ * What `schema_version` holds once migrations are named: past every version a build that
+ * numbered them supports, so such a build refuses the database rather than re-run its first.
+ */
+export const NAMED_MIGRATIONS_VERSION = 1000;
 
 /** Running Codex agents, bound to a thread. */
 const RUNNING_CODEX = `harness = 'codex' AND state = 'running'
@@ -515,23 +532,56 @@ export class Store {
     return store;
   }
 
-  schemaVersion(): number {
-    const v = this.db.prepare("SELECT max(version) AS v FROM schema_version").get()?.v;
-    return typeof v === "number" ? v : 0;
+  /** The names of the migrations the database has run. */
+  appliedMigrations(): ReadonlySet<string> {
+    const rows = this.db.prepare("SELECT name FROM migrations").all();
+    return new Set(rows.map((r) => String(r.name)));
   }
 
   private migrate(migrations: readonly Migration[]): void {
-    const current = this.schemaVersion();
-    const supported = migrations.at(-1)?.version ?? 0;
-    if (current > supported) throw new SchemaTooNew(current, supported);
+    this.transaction(() => this.nameNumberedMigrations());
+    const applied = this.appliedMigrations();
+    const known = new Set(migrations.map((m) => m.name));
+    const unknown = [...applied].filter((name) => !known.has(name));
+    if (unknown.length > 0) throw new SchemaTooNew(unknown);
+    const late = holeFills(migrations, applied);
+    if (late.length > 0) {
+      console.warn(
+        `bazhen: running migrations this database missed, after later ones it has run: ${late.join(", ")}`,
+      );
+    }
     for (const m of migrations) {
-      if (m.version <= current) continue;
+      if (applied.has(m.name)) continue;
       this.transaction(() => {
         this.db.exec(m.sql);
         m.run?.(this.db);
-        this.db.prepare("INSERT INTO schema_version (version) VALUES (?)").run(m.version);
+        this.db
+          .prepare("INSERT INTO migrations (name, applied_at) VALUES (?, ?)")
+          .run(m.name, new Date().toISOString());
       });
     }
+  }
+
+  /**
+   * Records, by name, the migrations a database the numbering runner left at version n has run:
+   * the first n. Then marks `schema_version` so that runner refuses it.
+   */
+  private nameNumberedMigrations(): void {
+    this.db.exec(
+      "CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL) STRICT",
+    );
+    const v = Number(this.db.prepare("SELECT max(version) AS v FROM schema_version").get()?.v ?? 0);
+    if (v === NAMED_MIGRATIONS_VERSION) return;
+    if (v > NUMBERED_MIGRATIONS.length) throw new SchemaTooNew([`version ${v}`]);
+    const record = this.db.prepare(
+      "INSERT OR IGNORE INTO migrations (name, applied_at) VALUES (?, ?)",
+    );
+    const now = new Date().toISOString();
+    for (const name of NUMBERED_MIGRATIONS.slice(0, v)) record.run(name, now);
+    this.db.exec("DELETE FROM schema_version");
+    this.db
+      .prepare("INSERT INTO schema_version (version) VALUES (?)")
+      .run(NAMED_MIGRATIONS_VERSION);
   }
 
   /**
@@ -1976,8 +2026,6 @@ function referencedEvents(db: DatabaseSync): string {
   );
   return selects.length > 0 ? selects.join(" UNION ") : "SELECT NULL WHERE 0";
 }
-
-export { LATEST_SCHEMA_VERSION };
 
 /** The agent states whose process may still report what it is doing. */
 const REPORTING: ReadonlySet<AgentState> = new Set(["starting", "running", "unknown"]);

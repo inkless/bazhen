@@ -1,489 +1,118 @@
 import type { DatabaseSync } from "node:sqlite";
+import hostEventsTerminals from "./migrations/2026-11-01-host-events-terminals.ts";
+import agentSessions from "./migrations/2026-11-11-agent-sessions.ts";
+import attachmentsAndLeases from "./migrations/2026-11-11-attachments-and-leases.ts";
+import mailboxAndAttention from "./migrations/2026-11-12-mailbox-and-attention.ts";
+import mailboxFirstOffered from "./migrations/2026-11-12-mailbox-first-offered.ts";
+import eventLogEpoch from "./migrations/2026-11-12-event-log-epoch.ts";
+import terminalExit from "./migrations/2026-11-12-terminal-exit.ts";
+import harnessVersions from "./migrations/2026-11-12-harness-versions.ts";
+import activityLatest from "./migrations/2026-11-12-activity-latest.ts";
+import mailboxFailures from "./migrations/2026-11-12-mailbox-failures.ts";
+import terminalTheme from "./migrations/2026-11-12-terminal-theme.ts";
+import agentUsage from "./migrations/2026-11-12-agent-usage.ts";
+import shellTerminals from "./migrations/2026-11-12-shell-terminals.ts";
+import attentionKinds from "./migrations/2026-11-12-attention-kinds.ts";
+import shellNames from "./migrations/2026-11-13-shell-names.ts";
+import tasksAndAssignments from "./migrations/2026-11-13-tasks-and-assignments.ts";
+import devices from "./migrations/2026-11-13-devices.ts";
+import shellForeground from "./migrations/2026-11-13-shell-foreground.ts";
+import taskDelegatedFrom from "./migrations/2026-11-13-task-delegated-from.ts";
+import agentTranscript from "./migrations/2026-11-13-agent-transcript.ts";
+import agentLaunchedBy from "./migrations/2026-11-13-agent-launched-by.ts";
+import notices from "./migrations/2026-11-15-notices.ts";
+import shellLastCommand from "./migrations/2026-11-15-shell-last-command.ts";
+import agentNames from "./migrations/2026-11-15-agent-names.ts";
+import observedMessages from "./migrations/2026-11-15-observed-messages.ts";
+import taskNotes from "./migrations/2026-11-15-task-notes.ts";
+import terminalRuntimeKind from "./migrations/2026-11-15-terminal-runtime-kind.ts";
+import terminalRestartProtocol from "./migrations/2026-11-15-terminal-restart-protocol.ts";
+import agentTokens from "./migrations/2026-11-16-agent-tokens.ts";
+import agentRoles from "./migrations/2026-11-16-agent-roles.ts";
 
 export interface Migration {
-  readonly version: number;
+  /** `YYYY-MM-DD-slug`, the day it was written, and its file's name in `migrations/`. */
+  readonly name: string;
   readonly sql: string;
   /** What SQL can't say, run after `sql` in the same transaction. */
   readonly run?: (db: DatabaseSync) => void;
 }
 
-// Append-only. A shipped migration has already run on users' databases, so editing it forks
-// their schema from new installs; add a new version instead, with a medium test that upgrades
-// from the previous one.
+/**
+ * A database runs each migration it hasn't recorded, in this order. So a migration may build only
+ * on those already here when it was written, and two written in parallel must not depend on each
+ * other: either may run first. When two appended at once conflict, keep both.
+ *
+ * A migration here is never edited, renamed or removed (`pnpm check` holds it): it has run on
+ * users' databases, and changing it forks their schema from new installs. Add one instead, with a
+ * medium test that upgrades a database from the one before.
+ */
 export const MIGRATIONS: readonly Migration[] = [
-  {
-    version: 1,
-    sql: `
-      CREATE TABLE host (
-        id TEXT PRIMARY KEY,
-        created_at TEXT NOT NULL
-      ) STRICT;
-
-      CREATE TABLE events (
-        id INTEGER PRIMARY KEY,
-        host_id TEXT NOT NULL REFERENCES host (id),
-        ts TEXT NOT NULL,
-        type TEXT NOT NULL,
-        entity_type TEXT NOT NULL,
-        entity_id TEXT NOT NULL,
-        actor TEXT NOT NULL,
-        causation_id INTEGER,
-        correlation_id TEXT,
-        payload TEXT NOT NULL
-      ) STRICT;
-      CREATE INDEX events_entity ON events (entity_type, entity_id, id);
-
-      CREATE TABLE terminals (
-        id TEXT PRIMARY KEY,
-        host_id TEXT NOT NULL REFERENCES host (id),
-        state TEXT NOT NULL,
-        generation INTEGER NOT NULL,
-        runtime TEXT NOT NULL,
-        locator TEXT NOT NULL,
-        created_event_id INTEGER NOT NULL REFERENCES events (id),
-        updated_event_id INTEGER NOT NULL REFERENCES events (id)
-      ) STRICT;
-    `,
-  },
-  {
-    version: 2,
-    sql: `
-      CREATE TABLE environments (
-        id TEXT PRIMARY KEY,
-        kind TEXT NOT NULL,
-        created_event_id INTEGER NOT NULL REFERENCES events (id)
-      ) STRICT;
-
-      CREATE TABLE agent_sessions (
-        id TEXT PRIMARY KEY,
-        environment_id TEXT NOT NULL REFERENCES environments (id),
-        harness TEXT NOT NULL,
-        project TEXT NOT NULL,
-        cwd TEXT NOT NULL,
-        state TEXT NOT NULL,
-        terminal_id TEXT,
-        external_ref TEXT,
-        created_event_id INTEGER NOT NULL REFERENCES events (id),
-        updated_event_id INTEGER NOT NULL REFERENCES events (id)
-      ) STRICT;
-
-      -- Rebuilt rather than altered: a terminal that is still being created has no runtime
-      -- incarnation yet, and SQLite can't relax a column's NOT NULL in place.
-      CREATE TABLE terminals_v2 (
-        id TEXT PRIMARY KEY,
-        host_id TEXT NOT NULL REFERENCES host (id),
-        state TEXT NOT NULL,
-        generation INTEGER NOT NULL,
-        runtime TEXT,
-        locator TEXT,
-        environment_id TEXT REFERENCES environments (id),
-        kind TEXT NOT NULL DEFAULT 'agent',
-        agent_session_id TEXT REFERENCES agent_sessions (id),
-        created_event_id INTEGER NOT NULL REFERENCES events (id),
-        updated_event_id INTEGER NOT NULL REFERENCES events (id)
-      ) STRICT;
-      INSERT INTO terminals_v2
-        (id, host_id, state, generation, runtime, locator, created_event_id, updated_event_id)
-        SELECT id, host_id, state, generation, runtime, locator, created_event_id, updated_event_id
-        FROM terminals;
-      DROP TABLE terminals;
-      ALTER TABLE terminals_v2 RENAME TO terminals;
-      CREATE INDEX terminals_agent ON terminals (agent_session_id);
-
-      CREATE TABLE idempotency_keys (
-        key TEXT PRIMARY KEY,
-        response TEXT NOT NULL
-      ) STRICT;
-    `,
-  },
-  {
-    version: 3,
-    sql: `
-      CREATE TABLE attachments_open (
-        id TEXT PRIMARY KEY,
-        terminal_id TEXT NOT NULL REFERENCES terminals (id),
-        mode TEXT NOT NULL,
-        started_event_id INTEGER NOT NULL REFERENCES events (id)
-      ) STRICT;
-
-      CREATE TABLE leases (
-        terminal_id TEXT PRIMARY KEY REFERENCES terminals (id),
-        holder TEXT,
-        epoch INTEGER NOT NULL,
-        updated_event_id INTEGER NOT NULL REFERENCES events (id)
-      ) STRICT;
-    `,
-  },
-  {
-    version: 4,
-    sql: `
-      CREATE TABLE mailbox (
-        id TEXT PRIMARY KEY,
-        agent_session_id TEXT NOT NULL REFERENCES agent_sessions (id),
-        body TEXT NOT NULL,
-        state TEXT NOT NULL,
-        prompt_id TEXT,
-        created_event_id INTEGER NOT NULL REFERENCES events (id),
-        updated_event_id INTEGER NOT NULL REFERENCES events (id)
-      ) STRICT;
-      CREATE INDEX mailbox_agent_state ON mailbox (agent_session_id, state);
-
-      CREATE TABLE attention_items (
-        id TEXT PRIMARY KEY,
-        agent_session_id TEXT NOT NULL REFERENCES agent_sessions (id),
-        state TEXT NOT NULL,
-        close_reason TEXT,
-        summary TEXT NOT NULL,
-        tool_use_id TEXT,
-        main_agent INTEGER NOT NULL,
-        created_event_id INTEGER NOT NULL REFERENCES events (id),
-        updated_event_id INTEGER NOT NULL REFERENCES events (id)
-      ) STRICT;
-    `,
-  },
-  {
-    version: 5,
-    sql: `
-      ALTER TABLE mailbox ADD COLUMN first_offered_event_id INTEGER REFERENCES events (id);
-    `,
-  },
-  {
-    version: 6,
-    sql: `
-      -- One row. Cursors carry the epoch, so a client of another database is told to reset;
-      -- pruned_through is the highest id retention has passed, deleted or kept.
-      CREATE TABLE event_log (
-        epoch TEXT NOT NULL,
-        pruned_through INTEGER NOT NULL
-      ) STRICT;
-      INSERT INTO event_log (epoch, pruned_through) VALUES (lower(hex(randomblob(16))), 0);
-    `,
-  },
-  {
-    version: 7,
-    sql: `
-      ALTER TABLE terminals ADD COLUMN exit TEXT;
-    `,
-  },
-  {
-    version: 8,
-    sql: `
-      -- The version each harness's own server last answered on, per environment.
-      CREATE TABLE harness_versions (
-        environment_id TEXT NOT NULL REFERENCES environments (id),
-        harness TEXT NOT NULL,
-        version TEXT NOT NULL,
-        updated_event_id INTEGER NOT NULL REFERENCES events (id),
-        PRIMARY KEY (environment_id, harness)
-      ) STRICT;
-    `,
-  },
-  {
-    version: 9,
-    sql: `
-      -- The latest activity signal per agent (foundation-design §4.6), as its JSON. Cleared when
-      -- the agent's process is replaced or closed, so a signal never outlives its process.
-      CREATE TABLE activity_latest (
-        agent_session_id TEXT PRIMARY KEY REFERENCES agent_sessions (id),
-        activity TEXT NOT NULL,
-        updated_event_id INTEGER NOT NULL REFERENCES events (id)
-      ) STRICT;
-    `,
-  },
-  {
-    version: 10,
-    sql: `
-      -- How often the agent's side failed each message (a failed or interrupted turn, or a wake
-      -- it never saw), for the re-offer cap (§5.6).
-      ALTER TABLE mailbox ADD COLUMN failures INTEGER NOT NULL DEFAULT 0;
-    `,
-  },
-  {
-    version: 11,
-    sql: `
-      -- The theme the terminal's process was started for, light or dark; NULL when none was
-      -- named, which is drawn and reported as dark.
-      ALTER TABLE terminals ADD COLUMN theme TEXT;
-    `,
-  },
-  {
-    version: 12,
-    sql: `
-      -- The model the agent runs and its context use, as JSON, once its harness reports them.
-      ALTER TABLE agent_sessions ADD COLUMN usage TEXT;
-    `,
-  },
-  {
-    version: 13,
-    sql: `
-      -- A shell terminal has no agent session above it (foundation-design §4.8): it keeps the
-      -- directory it was opened in, and the agent it is shown with, if any, here.
-      ALTER TABLE terminals ADD COLUMN cwd TEXT;
-      ALTER TABLE terminals ADD COLUMN linked_agent_id TEXT REFERENCES agent_sessions (id);
-      CREATE INDEX terminals_linked_agent ON terminals (linked_agent_id);
-    `,
-  },
-  {
-    version: 14,
-    sql: `
-      -- What an item is about (foundation-design §4.6); every item before kinds was an approval.
-      ALTER TABLE attention_items ADD COLUMN kind TEXT NOT NULL DEFAULT 'approval';
-      ALTER TABLE attention_items ADD COLUMN task_id TEXT;
-      ALTER TABLE attention_items ADD COLUMN message_id TEXT;
-    `,
-  },
-  {
-    version: 15,
-    sql: `
-      -- The name a user gave a shell; NULL until they do.
-      ALTER TABLE terminals ADD COLUMN name TEXT;
-    `,
-  },
-  {
-    version: 16,
-    sql: `
-      CREATE TABLE tasks (
-        id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        brief TEXT NOT NULL,
-        state TEXT NOT NULL,
-        -- NULL when the human created it.
-        owner_agent_id TEXT REFERENCES agent_sessions (id),
-        parent_task_id TEXT REFERENCES tasks (id),
-        note TEXT,
-        created_event_id INTEGER NOT NULL REFERENCES events (id),
-        updated_event_id INTEGER NOT NULL REFERENCES events (id)
-      ) STRICT;
-      CREATE INDEX tasks_parent ON tasks (parent_task_id);
-
-      CREATE TABLE assignments (
-        id TEXT PRIMARY KEY,
-        task_id TEXT NOT NULL REFERENCES tasks (id),
-        agent_session_id TEXT NOT NULL REFERENCES agent_sessions (id),
-        role TEXT NOT NULL,
-        parent_assignment_id TEXT REFERENCES assignments (id),
-        state TEXT NOT NULL,
-        end_reason TEXT,
-        created_event_id INTEGER NOT NULL REFERENCES events (id),
-        updated_event_id INTEGER NOT NULL REFERENCES events (id)
-      ) STRICT;
-      CREATE INDEX assignments_task ON assignments (task_id, state);
-      CREATE INDEX assignments_agent ON assignments (agent_session_id, state);
-      CREATE INDEX assignments_parent ON assignments (parent_assignment_id);
-    `,
-  },
-  {
-    version: 17,
-    sql: `
-      -- Paired browsers (foundation-design §9.1). Only a hash of each token is kept, and it is
-      -- written beside device.paired, never in it, so the event log holds no credential.
-      CREATE TABLE devices (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        token_hash TEXT NOT NULL UNIQUE,
-        paired_at TEXT NOT NULL,
-        last_seen_at TEXT NOT NULL,
-        revoked_at TEXT,
-        -- Paired over HTTPS: its cookie is __Host- and Secure, and it lapses after 30 days unused,
-        -- rather than the 1 day a loopback cookie, which other local ports also receive, keeps.
-        secure INTEGER NOT NULL
-      ) STRICT;
-    `,
-  },
-  {
-    version: 18,
-    sql: `
-      -- What runs in a shell's foreground and since when, as JSON, from its events; NULL at the
-      -- shell's prompt.
-      ALTER TABLE terminals ADD COLUMN foreground TEXT;
-      -- The directory the shell was last seen in, for a restart to open in: written straight onto
-      -- the row as the foreground is read, never by an event, and lost if the projection is rebuilt.
-      ALTER TABLE terminals ADD COLUMN current_cwd TEXT;
-    `,
-  },
-  {
-    version: 19,
-    sql: `
-      -- The assignment an agent delegated the task under; NULL for the human's tasks, and for one
-      -- an agent delegated as the parent's owner.
-      ALTER TABLE tasks ADD COLUMN delegated_from TEXT REFERENCES assignments (id);
-    `,
-  },
-  {
-    version: 20,
-    sql: `
-      -- Where the bound harness session keeps its conversation, as its hooks last said; NULL
-      -- until they say, and again whenever the agent moves to another session.
-      ALTER TABLE agent_sessions ADD COLUMN transcript TEXT;
-    `,
-  },
-  {
-    version: 21,
-    sql: `
-      -- The agent that launched this one to delegate to it; NULL when the human launched it.
-      ALTER TABLE agent_sessions ADD COLUMN launched_by TEXT REFERENCES agent_sessions (id);
-    `,
-  },
-  {
-    version: 22,
-    sql: `
-      -- What the human should know that no agent raised, such as a device pairing. A device has
-      -- at most one notice of each kind, so the devices paired bound the table.
-      CREATE TABLE notices (
-        id TEXT PRIMARY KEY,
-        kind TEXT NOT NULL,
-        state TEXT NOT NULL,
-        close_reason TEXT,
-        summary TEXT NOT NULL,
-        device_id TEXT REFERENCES devices (id),
-        device_name TEXT,
-        device_origin TEXT,
-        device_address TEXT,
-        -- Who closed it, and, advisory, the device whose shell asked, as its environment claimed.
-        closed_by TEXT,
-        closed_from_device TEXT REFERENCES devices (id),
-        created_event_id INTEGER NOT NULL REFERENCES events (id),
-        updated_event_id INTEGER NOT NULL REFERENCES events (id),
-        UNIQUE (kind, device_id)
-      ) STRICT;
-      CREATE INDEX notices_state ON notices (state, created_event_id);
-    `,
-  },
-  {
-    version: 23,
-    sql: `
-      -- The line the user last ran in a shell, as its shell integration reported it, to type back
-      -- into its replacement. It can hold a secret the user typed, so it is written straight onto
-      -- the row and never by an event, and cleared once the shell closes or fails.
-      ALTER TABLE terminals ADD COLUMN last_command TEXT;
-      -- The number of the report that set it: an older report, arriving late, changes nothing.
-      ALTER TABLE terminals ADD COLUMN last_command_seq INTEGER;
-      -- The SHA-256, in hex, of the token a live shell's integration reports with; the token
-      -- itself is only in the shell's environment. NULL once the shell can report no more.
-      ALTER TABLE terminals ADD COLUMN report_token_hash TEXT;
-    `,
-  },
-  {
-    version: 24,
-    sql: `
-      ALTER TABLE agent_sessions ADD COLUMN name TEXT;
-      -- The last number a default name took under each base, which no later default takes again.
-      CREATE TABLE agent_name_counters (
-        base TEXT PRIMARY KEY COLLATE NOCASE,
-        last INTEGER NOT NULL
-      ) STRICT;
-      CREATE UNIQUE INDEX agent_sessions_live_name ON agent_sessions (name COLLATE NOCASE)
-        WHERE state NOT IN ('closed', 'failed');
-    `,
-    run: nameEveryAgent,
-  },
-  {
-    version: 25,
-    sql: `
-      -- The name the agent's harness session was last started with, which it answers to until
-      -- its next start, whatever the agent is renamed since. NULL until a start records one.
-      ALTER TABLE agent_sessions ADD COLUMN harness_name TEXT;
-      -- Messages agents sent each other through their harness's own channel; the text is only
-      -- in the event log.
-      CREATE TABLE observed_messages (
-        id TEXT PRIMARY KEY,
-        from_agent_id TEXT NOT NULL,
-        to_agent_id TEXT NOT NULL,
-        summary TEXT NOT NULL,
-        accepted INTEGER NOT NULL,
-        tool_use_id TEXT NOT NULL,
-        created_event_id INTEGER NOT NULL,
-        UNIQUE (from_agent_id, tool_use_id)
-      ) STRICT;
-      -- Every state read takes the latest of them.
-      CREATE INDEX observed_messages_created ON observed_messages (created_event_id);
-    `,
-  },
-  {
-    version: 26,
-    sql: `
-      -- Notes on a task from the agent working it or the human; the latest of an agent's is its
-      -- headline, and the latest handoff on a task goes into the next assignee's brief.
-      CREATE TABLE task_notes (
-        event_id INTEGER PRIMARY KEY REFERENCES events (id),
-        task_id TEXT NOT NULL REFERENCES tasks (id),
-        -- NULL when the human wrote it, with its role.
-        agent_session_id TEXT REFERENCES agent_sessions (id),
-        author_role TEXT,
-        text TEXT NOT NULL,
-        handoff INTEGER NOT NULL
-      ) STRICT;
-      CREATE INDEX task_notes_task ON task_notes (task_id, handoff, event_id);
-      CREATE INDEX task_notes_agent ON task_notes (agent_session_id, event_id);
-    `,
-  },
-  {
-    version: 27,
-    sql: `
-      -- The runtime a terminal is created on, from the moment it is requested, so a terminal still
-      -- being created is looked for there; every terminal before it ran on tmux.
-      ALTER TABLE terminals ADD COLUMN runtime_kind TEXT NOT NULL DEFAULT 'tmux';
-    `,
-  },
-  {
-    version: 28,
-    sql: `
-      -- The versions a terminal's holder speaks, as a JSON array, once it is seen on a holder this
-      -- build can't fully serve; NULL while it needs no restart. A holder runs one binary for life,
-      -- so it stays through respawns until a build that serves it in full reads it.
-      ALTER TABLE terminals ADD COLUMN restart_protocol TEXT;
-    `,
-  },
-  {
-    version: 29,
-    sql: `
-      -- The SHA-256, in hex, of the token the agent's current process proves itself with; the
-      -- token itself is only in a 0600 file its environment names. Each start replaces it.
-      ALTER TABLE agent_sessions ADD COLUMN token_hash TEXT;
-      CREATE UNIQUE INDEX agent_sessions_token ON agent_sessions (token_hash)
-        WHERE token_hash IS NOT NULL;
-      -- 1 for an agent running when agents got tokens: it has none, and is known by the id it
-      -- names until a start of its own gives it one. Never set again once cleared.
-      ALTER TABLE agent_sessions ADD COLUMN untokened INTEGER NOT NULL DEFAULT 0;
-      UPDATE agent_sessions SET untokened = 1 WHERE state NOT IN ('closed', 'failed');
-    `,
-  },
-  {
-    // An agent's launch role, and the hash of the prompt its last start gave it. Agents from
-    // before have neither: no role, and no prompt to have changed from.
-    version: 30,
-    sql: `
-      ALTER TABLE agent_sessions ADD COLUMN role TEXT;
-      ALTER TABLE agent_sessions ADD COLUMN prompt_hash TEXT;
-    `,
-  },
+  hostEventsTerminals,
+  agentSessions,
+  attachmentsAndLeases,
+  mailboxAndAttention,
+  mailboxFirstOffered,
+  eventLogEpoch,
+  terminalExit,
+  harnessVersions,
+  activityLatest,
+  mailboxFailures,
+  terminalTheme,
+  agentUsage,
+  shellTerminals,
+  attentionKinds,
+  shellNames,
+  tasksAndAssignments,
+  devices,
+  shellForeground,
+  taskDelegatedFrom,
+  agentTranscript,
+  agentLaunchedBy,
+  notices,
+  shellLastCommand,
+  agentNames,
+  observedMessages,
+  taskNotes,
+  terminalRuntimeKind,
+  terminalRestartProtocol,
+  agentTokens,
+  agentRoles,
 ];
 
-const trimAt24 = (s: string) => s.replaceAll(/^[-_]+|[-_]+$/g, "");
-
 /**
- * `nameBase` as this migration ran it, frozen here so a later change to the live one can't name
- * a database upgraded after it differently from one upgraded before.
+ * The migrations the runner that numbered them knew, in its order: a database it left at version n
+ * has run the first n. `MIGRATIONS` starts with these, in this order (`pnpm check` holds it).
  */
-function baseAt24(project: string): string {
-  const base = trimAt24(trimAt24(project.replaceAll(/[^A-Za-z0-9_-]+/g, "-")).slice(0, 32));
-  return base === "" ? "agent" : base;
-}
-
-/** Gives each agent, ended ones too, its project's default name, numbered in launch order. */
-function nameEveryAgent(db: DatabaseSync): void {
-  const last = new Map<string, { base: string; n: number }>();
-  const rename = db.prepare("UPDATE agent_sessions SET name = ? WHERE id = ?");
-  const agents = db.prepare("SELECT id, project FROM agent_sessions ORDER BY created_event_id");
-  for (const { id, project } of agents.all()) {
-    const base = baseAt24(String(project));
-    const counter = last.get(base.toLowerCase()) ?? { base, n: 0 };
-    counter.n += 1;
-    last.set(base.toLowerCase(), counter);
-    rename.run(`${base}-${counter.n}`, String(id));
-  }
-  const count = db.prepare("INSERT INTO agent_name_counters (base, last) VALUES (?, ?)");
-  for (const { base, n } of last.values()) count.run(base, n);
-}
-
-export const LATEST_SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;
+export const NUMBERED_MIGRATIONS: readonly string[] = [
+  "2026-11-01-host-events-terminals",
+  "2026-11-11-agent-sessions",
+  "2026-11-11-attachments-and-leases",
+  "2026-11-12-mailbox-and-attention",
+  "2026-11-12-mailbox-first-offered",
+  "2026-11-12-event-log-epoch",
+  "2026-11-12-terminal-exit",
+  "2026-11-12-harness-versions",
+  "2026-11-12-activity-latest",
+  "2026-11-12-mailbox-failures",
+  "2026-11-12-terminal-theme",
+  "2026-11-12-agent-usage",
+  "2026-11-12-shell-terminals",
+  "2026-11-12-attention-kinds",
+  "2026-11-13-shell-names",
+  "2026-11-13-tasks-and-assignments",
+  "2026-11-13-devices",
+  "2026-11-13-shell-foreground",
+  "2026-11-13-task-delegated-from",
+  "2026-11-13-agent-transcript",
+  "2026-11-13-agent-launched-by",
+  "2026-11-15-notices",
+  "2026-11-15-shell-last-command",
+  "2026-11-15-agent-names",
+  "2026-11-15-observed-messages",
+  "2026-11-15-task-notes",
+  "2026-11-15-terminal-runtime-kind",
+  "2026-11-15-terminal-restart-protocol",
+  "2026-11-16-agent-tokens",
+  "2026-11-16-agent-roles",
+];

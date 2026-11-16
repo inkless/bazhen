@@ -330,7 +330,19 @@ A test owns everything it touches and leaves nothing behind.
   replay it. A failure it finds comes back as a test of fast-check's counterexample.
 - **Test HTTP routes through `app.request`,** with a `Host` header from the allowlist
   (`apps/daemon/src/http/app.test.ts`).
-- **Migrations.** A shipped migration is never edited. A new migration gets a medium test that
-  opens a database at the previous schema and upgrades it.
+- **Migrations.** Each is a file in `apps/daemon/src/store/migrations/`, named `YYYY-MM-DD-slug`
+  for the day it was written, and appended to `MIGRATIONS`. A database runs every migration it
+  hasn't recorded, in list order, so one may build only on migrations that were on main when it
+  was written; two written in parallel must not depend on each other, and when their appends
+  conflict, keep both. A migration on main is never edited, renamed or removed. Its file imports
+  only types and exports its migration frozen, so a later change elsewhere can't alter what it
+  does. `pnpm check` holds those, against the merge base with main: each name is listed once, for
+  its own file and that file's own frozen export; files on main are unchanged and keep their
+  order; and the list starts with `NUMBERED_MIGRATIONS`, which never changes. A medium test runs
+  each named migration after all the others, as a database that missed it would, and requires a
+  fresh database's schema, so two that don't commute fail it. Nothing checks that a new migration
+  has its own upgrade test. The formatter skips the directory, so a formatter upgrade can't
+  rewrite a shipped migration. A new migration gets a medium test that opens a database at the
+  migration before it and upgrades it.
 - **No snapshots of terminal output.** Assert the specific bytes or screen content that matter.
 - **Flaky tests are bugs.** There are no retries. Fix the race, or delete the test and record why.

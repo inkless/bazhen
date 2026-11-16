@@ -5,10 +5,11 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { MIGRATIONS } from "../apps/daemon/src/store/migrations.ts";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { MIGRATIONS, NUMBERED_MIGRATIONS } from "../apps/daemon/src/store/migrations.ts";
 import { cssDeclarations } from "../apps/web/src/ui/token-sheet.ts";
 import { gateEnv } from "./cargo-gate.ts";
+import { mergeBase } from "./falsify.ts";
 import { isMain } from "./is-main.ts";
 import { isIdent, newlinesIn, rustCode } from "./rust-source.ts";
 import {
@@ -145,7 +146,9 @@ function checkSiblingTests(): void {
     .concat(readdirSync(join(root, "apps")).map((a) => `apps/${a}/src`))
     .concat(["scripts"]);
   for (const file of dirs.flatMap(sourceFiles)) {
-    const covering = COVERED_ELSEWHERE[file];
+    const covering =
+      COVERED_ELSEWHERE[file] ??
+      (file.startsWith(`${MIGRATIONS_DIR}/`) ? MIGRATIONS_TEST : undefined);
     if (covering !== undefined) {
       if (!existsSync(join(root, covering))) {
         failures.push(`${file}: its covering test ${covering} no longer exists.`);
@@ -2539,22 +2542,254 @@ export function skillFailures(doc: string, dir: string, text: string): string[] 
   return out;
 }
 
-// The store's migration runner skips every version at or below the database's, so a migration
-// numbered past a gap, and merged first, leaves the one that fills the gap never run.
+// A database runs each migration it hasn't recorded by name, so the names are the contract: a
+// migration changed after it shipped forks the schema of every database that ran it from new ones.
 const MIGRATIONS_FILE = "apps/daemon/src/store/migrations.ts";
+const MIGRATIONS_DIR = "apps/daemon/src/store/migrations";
+/** Upgrades a database through every migration, from every version the numbering runner left. */
+const MIGRATIONS_TEST = "apps/daemon/src/store/store.medium.test.ts";
+const MIGRATION_NAME = /^[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9]+(-[a-z0-9]+)*$/;
 
-/** What is wrong with the migrations' `versions`: they must be 1, 2, … in order. */
-export function migrationVersionFailures(versions: readonly number[]): string[] {
-  const at = versions.findIndex((version, i) => version !== i + 1);
-  if (at === -1) return [];
+/** What is wrong with the migrations' names in `MIGRATIONS`, given the files in their directory. */
+export function migrationListFailures(
+  names: readonly string[],
+  files: readonly string[],
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const name of names) {
+    if (seen.has(name)) out.push(`${MIGRATIONS_FILE}: lists ${name} twice.`);
+    seen.add(name);
+    if (!MIGRATION_NAME.test(name)) {
+      out.push(`${MIGRATIONS_FILE}: ${name} isn't named YYYY-MM-DD-slug, the day it was written.`);
+    }
+    if (!files.includes(`${name}.ts`)) {
+      out.push(`${MIGRATIONS_FILE}: ${name} is named for no file ${MIGRATIONS_DIR}/${name}.ts.`);
+    }
+  }
+  for (const file of files) {
+    if (!seen.has(file.replace(/\.ts$/, ""))) {
+      out.push(`${MIGRATIONS_DIR}/${file}: no migration in MIGRATIONS is named for it.`);
+    }
+  }
+  return out;
+}
+
+// After types are stripped: `import … from`, `export … from`, `import "…"`, and any import at run
+// time. A migration's file imports nothing that runs.
+const RUNTIME_IMPORT =
+  /\b(?:import|export)\s[^;'"]*?\bfrom\s*["']([^"']+)["']|\bimport\s*["']([^"']+)["']|\b(import\s*\(|require\s*\()/g;
+
+/**
+ * Why a migration file's imports could change what it does after it shipped: it may import types
+ * and nothing else, so all it does is in its file. Types are what Node's own stripping erases, so
+ * `import type from "x"`, a value named `type`, still counts.
+ */
+export function migrationImportFailures(file: string, source: string): string[] {
+  return [...stripTypeScriptTypes(source).matchAll(RUNTIME_IMPORT)].map(
+    ([, from, bare, dynamic]) => {
+      const what = dynamic === undefined ? `imports ${from ?? bare}` : "imports at run time";
+      return `${file}: ${what}; a migration imports only types.`;
+    },
+  );
+}
+
+/**
+ * Why a migration file exports more than its migration: anything else it exports, a mutable value
+ * above all, is something code elsewhere could reach into it through.
+ */
+export function migrationExportFailures(file: string, source: string): string[] {
+  return [...stripTypeScriptTypes(source).matchAll(/\bexport\s+(?!default\b)(\S+)/g)].map(
+    ([, what]) => `${file}: exports ${what} as well; a migration file exports only its default.`,
+  );
+}
+
+/** Which migrations' exports aren't frozen, so code elsewhere could change one in place. */
+export function migrationFrozenFailures(exported: Readonly<Record<string, unknown>>): string[] {
+  return Object.entries(exported).flatMap(([name, value]) =>
+    Object.isFrozen(value)
+      ? []
+      : [`${MIGRATIONS_DIR}/${name}.ts: export it frozen, with Object.freeze, so it can't change.`],
+  );
+}
+
+/** The names `NUMBERED_MIGRATIONS` lists in `MIGRATIONS_FILE`'s text, or none where it has none. */
+export function listedNumbered(source: string): string[] {
+  const text = source.replaceAll(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+  const list = /NUMBERED_MIGRATIONS[^=]*= \[([^\]]*)\]/.exec(text)?.[1] ?? "";
+  return [...list.matchAll(/"([^"]+)"/g)].flatMap(([, name]) => (name === undefined ? [] : [name]));
+}
+
+/**
+ * Whether `NUMBERED_MIGRATIONS` changed from the base's. A base before named migrations has none
+ * to keep; a base with migration files whose list reads empty was misread, and fails.
+ */
+export function numberedHistoryFailures(
+  before: readonly string[],
+  now: readonly string[],
+  baseHasFiles: boolean,
+): string[] {
+  if (before.length === 0 && !baseHasFiles) return [];
+  if (before.join() === now.join()) return [];
   return [
-    `${MIGRATIONS_FILE}: migration ${at + 1} is numbered ${versions[at]}; versions run 1, 2, … ` +
-      "with no gap, since a database past a gap never runs the migration that fills it.",
+    before.length === 0
+      ? `${MIGRATIONS_FILE}: read no NUMBERED_MIGRATIONS from main's list, which has migration ` +
+        "files; this check can't hold the numbered names to an unreadable list."
+      : `${MIGRATIONS_FILE}: NUMBERED_MIGRATIONS changed from main's; databases the numbering ` +
+        "runner left are converted by it, so it never changes.",
   ];
 }
 
+/** `git diff --name-status` output, as each change's status and the path it ends at. */
+export function parseNameStatus(text: string): { status: string; path: string }[] {
+  return text
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [status = "", path = "", renamed] = line.split("\t");
+      return { status, path: renamed ?? path };
+    });
+}
+
+/** The commit to hold the migrations against, as `find` gives it, or why there is none. */
+export function migrationBase(find: () => string): { base: string } | { failure: string } {
+  try {
+    return { base: find() };
+  } catch (err) {
+    return {
+      failure:
+        `${MIGRATIONS_DIR}: no merge base with main to check shipped migrations against ` +
+        `(a shallow clone needs fetch-depth: 0): ${String(err)}`,
+    };
+  }
+}
+
+/** Whether the base's list was read whole: one name for each migration file the base has. */
+export function baseListFailures(before: readonly string[], files: number): string[] {
+  return before.length === files
+    ? []
+    : [
+        `${MIGRATIONS_FILE}: read ${before.length} migrations from main's list, which has ` +
+          `${files} files; this check can't hold main's migrations to an unreadable list.`,
+      ];
+}
+
+/**
+ * Which entries of `MIGRATIONS` aren't their file's own default export, as a spread or a copy with
+ * its SQL or `run` changed would be: the file would be unchanged, the migration not.
+ */
+export function migrationIdentityFailures(
+  listed: readonly { readonly name: string }[],
+  exported: Readonly<Record<string, unknown>>,
+): string[] {
+  return listed.flatMap((m) =>
+    exported[m.name] === m
+      ? []
+      : [`${MIGRATIONS_FILE}: lists ${m.name} as something other than its file's default export.`],
+  );
+}
+
+/** Whether `MIGRATIONS` starts with the numbered migrations, in their order. */
+export function numberedFailures(names: readonly string[], numbered: readonly string[]): string[] {
+  return names.slice(0, numbered.length).join() === numbered.join()
+    ? []
+    : [
+        `${MIGRATIONS_FILE}: MIGRATIONS doesn't start with NUMBERED_MIGRATIONS in order, so a ` +
+          "database from the runner that numbered them would record the wrong ones as run.",
+      ];
+}
+
+/** The migrations `MIGRATIONS_FILE`'s text lists, in order, by the files it imports them from. */
+export function listedMigrations(text: string): string[] {
+  const source = text.replaceAll(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+  const files = new Map<string, string>();
+  for (const [, id, name] of source.matchAll(
+    /^import (\w+) from "\.\/migrations\/([^"]+)\.ts";$/gm,
+  )) {
+    if (id !== undefined && name !== undefined) files.set(id, name);
+  }
+  const list = /export const MIGRATIONS[^=]*= \[([^\]]*)\]/.exec(source)?.[1] ?? "";
+  return [...list.matchAll(/(\w+),/g)].flatMap(([, id]) => {
+    const name = id === undefined ? undefined : files.get(id);
+    return name === undefined ? [] : [name];
+  });
+}
+
+/**
+ * Whether the branch changed a migration that was on the base: `changed` is `git diff
+ * --name-status` from the merge base over the migrations' directory, and `before` and `now` the
+ * names `MIGRATIONS` lists there and here. A migration is only ever added, after the ones before.
+ */
+export function migrationHistoryFailures(
+  changed: readonly { status: string; path: string }[],
+  before: readonly string[],
+  now: readonly string[],
+): string[] {
+  const out = changed
+    .filter(({ status }) => status !== "A")
+    .map(
+      ({ status, path }) =>
+        `${path}: ${status.startsWith("R") ? "renamed" : status === "D" ? "removed" : "edited"} ` +
+        "after it was on main. A shipped migration has run on users' databases: add a new one.",
+    );
+  const gone = before.filter((name) => !now.includes(name));
+  if (gone.length > 0) out.push(`${MIGRATIONS_FILE}: no longer lists ${gone.join(", ")}.`);
+  else if (now.slice(0, before.length).join() !== before.join()) {
+    out.push(
+      `${MIGRATIONS_FILE}: changes the order of the migrations that were on main; ` +
+        "add new ones after them.",
+    );
+  }
+  return out;
+}
+
+/** Each migration file's default export, by its name. */
+const MIGRATION_EXPORTS: Record<string, unknown> = Object.fromEntries(
+  await Promise.all(
+    readdirSync(join(root, MIGRATIONS_DIR))
+      .filter((file) => file.endsWith(".ts"))
+      .map(async (file) => {
+        const module: unknown = await import(pathToFileURL(join(root, MIGRATIONS_DIR, file)).href);
+        return [file.replace(/\.ts$/, ""), Reflect.get(Object(module), "default")] as const;
+      }),
+  ),
+);
+
+const git = (...args: string[]) =>
+  execFileSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+
 export function checkMigrations(): void {
-  failures.push(...migrationVersionFailures(MIGRATIONS.map((m) => m.version)));
+  const files = readdirSync(join(root, MIGRATIONS_DIR)).filter((f) => f.endsWith(".ts"));
+  const names = MIGRATIONS.map((m) => m.name);
+  failures.push(...migrationListFailures(names, files));
+  failures.push(...numberedFailures(names, NUMBERED_MIGRATIONS));
+  failures.push(...migrationIdentityFailures(MIGRATIONS, MIGRATION_EXPORTS));
+  for (const file of files) {
+    const path = `${MIGRATIONS_DIR}/${file}`;
+    const source = readFileSync(join(root, path), "utf8");
+    failures.push(
+      ...migrationImportFailures(path, source),
+      ...migrationExportFailures(path, source),
+    );
+  }
+  failures.push(...migrationFrozenFailures(MIGRATION_EXPORTS));
+  const found = migrationBase(mergeBase);
+  if ("failure" in found) {
+    failures.push(found.failure);
+    return;
+  }
+  const { base } = found;
+  const changed = parseNameStatus(git("diff", "--name-status", base, "--", MIGRATIONS_DIR));
+  const listing = git("show", `${base}:${MIGRATIONS_FILE}`);
+  const before = listedMigrations(listing);
+  const shipped = git("ls-tree", "--name-only", base, `${MIGRATIONS_DIR}/`)
+    .split("\n")
+    .filter((path) => path.endsWith(".ts"));
+  failures.push(...baseListFailures(before, shipped.length));
+  failures.push(
+    ...numberedHistoryFailures(listedNumbered(listing), NUMBERED_MIGRATIONS, shipped.length > 0),
+  );
+  failures.push(...migrationHistoryFailures(changed, before, names));
 }
 
 /** Every check `pnpm check` runs, in order. */
