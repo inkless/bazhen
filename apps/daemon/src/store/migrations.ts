@@ -426,7 +426,7 @@ export const MIGRATIONS: readonly Migration[] = [
     `,
   },
   {
-    version: 29,
+    version: 28,
     sql: `
       -- Set once a terminal is seen on a holder this build can't fully serve. A holder runs one
       -- binary for life, so it stays set through respawns; a new terminal starts without it.
