@@ -90,7 +90,7 @@ export const StreamServerFrame = z.discriminatedUnion("type", [
     type: z.literal("snapshot_start"),
     /**
      * How much history above its screen the terminal keeps, which the view keeps too as output
-     * scrolls; absent from an older daemon, whose terminals keep `HISTORY_LINES`.
+     * scrolls; absent before 1.56, from a daemon whose terminals keep `HISTORY_LINES`.
      */
     historyLines: z.number().int().nonnegative().optional(),
   }),
