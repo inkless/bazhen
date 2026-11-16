@@ -174,10 +174,14 @@ export class CodexThreads {
   left(terminal: TerminalId): void {
     this.reused.delete(terminal);
     // After any follow in flight, which would otherwise wait again on a move dropped under it.
-    this.queue = this.queue.then(() => {
-      this.gaveUp.delete(terminal);
-      this.settle(terminal);
-    });
+    this.queue = this.queue
+      .then(() => {
+        this.gaveUp.delete(terminal);
+        this.settle(terminal);
+      })
+      .catch((err: unknown) => {
+        this.log(`codex: dropping terminal ${terminal}'s move failed: ${String(err)}`);
+      });
   }
 
   /**
