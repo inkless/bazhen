@@ -230,7 +230,7 @@ describe("signalling sources", () => {
     );
   });
 
-  it("counts what starts or drives a session's end in the holder", () => {
+  it("counts what starts or drives a session's end in the holder, and not the engine's Ending", () => {
     const sources = [
       "let session = Session::led_by(pid)?;",
       "self.ending = Some(Ending::start(session, now));",
@@ -244,18 +244,15 @@ describe("signalling sources", () => {
       "use crate::session::{self, Ending, Session};",
       "use bazhen_holder::session::{Session, Sweep};",
     ];
-    expect(sources.filter((source) => !isSignallingSource("a.rs", source))).toEqual([]);
-  });
-
-  it("doesn't count the engine's own Ending, nor a session named in passing", () => {
-    const sources = [
+    const unrelated = [
       "match ending { Ending::Newline => {} }",
       "pub enum Ending { Newline, Wrap }",
       "struct Session; let s = Session;",
       "use bazhen_holder_engine::encode::Ending;",
       "use crate::session::{Sweep, member_state};",
     ];
-    expect(sources.filter((source) => isSignallingSource("a.rs", source))).toEqual([]);
+    expect(sources.filter((source) => !isSignallingSource("a.rs", source))).toEqual([]);
+    expect(unrelated.filter((source) => isSignallingSource("a.rs", source))).toEqual([]);
   });
 
   it("doesn't count a file that only mentions one", () => {
