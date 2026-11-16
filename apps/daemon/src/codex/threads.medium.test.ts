@@ -261,6 +261,17 @@ describe("Codex thread switches", () => {
     await expect.poll(s.boundTo).toBe(B);
   });
 
+  it("drops a waiting move, and lets its mail go, once nothing will start in its terminal", async () => {
+    const s = await setup({ titles: [shown(B)], listed: [{ id: A }] });
+    await s.threads.titleChanged(s.terminal);
+    expect(s.held()).toBe(true);
+    s.threads.left(s.terminal);
+    await expect.poll(s.held).toBe(false);
+    const lists = s.lists.length;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect([s.boundTo(), s.released, s.lists.length]).toEqual([A, [s.agentId], lists]);
+  });
+
   it("leaves the agent on its thread when no thread is listed in time, and says so", async () => {
     const s = await setup({ titles: [shown(B)], listed: [{ id: A }], giveUpMs: 20 });
     await s.threads.titleChanged(s.terminal);
