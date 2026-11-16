@@ -251,6 +251,23 @@ const forget = (child: { readonly pid?: number | undefined }) => {
   if (child.pid !== undefined) groups.delete(child.pid);
 };
 
+/** A child process as Node holds it until it is reaped: `ChildProcess` is one. */
+export interface OwnChild {
+  readonly exitCode: number | null;
+  readonly signalCode: NodeJS.Signals | null;
+  kill(signal?: NodeJS.Signals): boolean;
+}
+
+/**
+ * Signals a child this process spawned and still holds, and nothing else: Node sends through the
+ * child's own handle, and only until it is reaped, so a pid reused since is out of its reach.
+ * Whether it was sent; never once the child is known to have ended.
+ */
+export function signalOwnChild(child: OwnChild, signal: NodeJS.Signals): boolean {
+  if (child.exitCode !== null || child.signalCode !== null) return false;
+  return child.kill(signal);
+}
+
 /** Signals the whole group of a child that `spawnGroup` started, and nothing else. */
 export function signalGroup(child: { readonly pid?: number | undefined }, signal: NodeJS.Signals) {
   const pid = child.pid;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DoctorResponse, ErrorResponse, HealthResponse } from "./index.ts";
+import { DoctorResponse, ErrorResponse, HealthResponse, memoryCapText } from "./index.ts";
 
 describe("HealthResponse schema", () => {
   it("rejects a runtime state outside the declared set", () => {
@@ -72,6 +72,52 @@ describe("DoctorResponse terminals", () => {
       parses({ open: 3, max: 100, host: { used: 37, max: 4096 }, refusing: null }),
       parses({ open: 3, max: 100, host, refusing: "machine" }),
     ]).toEqual([false, false, false]);
+  });
+});
+
+const cap = (asked: string, bytes: number | null) => ({ asked, bytes });
+
+describe("DoctorResponse containment", () => {
+  const base = doctor(null);
+  /** What a parse keeps of `containment`: undefined for a reply it refuses, or one it drops. */
+  const kept = (containment: unknown) =>
+    DoctorResponse.safeParse({ ...base, containment }).data?.containment;
+  const scoped = { state: "scoped", systemd: 255, oomPolicy: true };
+  const caps = {
+    terminal: cap("50%", 33_285_996_544),
+    total: cap("infinity", null),
+    swap: cap("0", 0),
+  };
+
+  it.each([
+    ["scoped terminals, each cap as asked and enforced", { ...scoped, ...caps }],
+    ["uncontained ones, and why", { state: "uncontained", why: "darwin has no cgroups" }],
+    ["none checked yet", { state: "unchecked" }],
+  ])("keeps %s", (_, containment) => {
+    expect(kept(containment)).toEqual(containment);
+  });
+
+  it.each([
+    ["scoped terminals with no caps", scoped],
+    [
+      "scoped terminals with no swap cap",
+      { ...scoped, terminal: caps.terminal, total: caps.total },
+    ],
+    ["uncontained ones with no reason", { state: "uncontained" }],
+    ["a state it doesn't know", { state: "partial", why: "x" }],
+    ["a cap of negative bytes", { ...scoped, ...caps, terminal: cap("50%", -1) }],
+  ])("refuses %s", (_, containment) => {
+    expect(DoctorResponse.safeParse({ ...base, containment }).success).toBe(false);
+  });
+});
+
+describe("a memory cap as people read it", () => {
+  it("shows what was asked and what the kernel enforces, to a tenth of a GiB", () => {
+    expect([
+      memoryCapText({ asked: "50%", bytes: 33_285_996_544 }),
+      memoryCapText({ asked: "0", bytes: 0 }),
+      memoryCapText({ asked: "infinity", bytes: null }),
+    ]).toEqual(["50% (31.0 GiB)", "0 (none)", "infinity (no cap)"]);
   });
 });
 

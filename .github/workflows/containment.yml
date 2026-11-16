@@ -1,0 +1,65 @@
+name: Containment
+
+# Holders in real systemd scopes (tests/holder/containment.test.ts): each terminal's scope, its
+# caps, and an OOM kill that ends only the process past its cap. A hosted runner has no user
+# manager until lingering starts one, so this is a job of its own, run when the code that starts
+# holders or makes their scopes changes, and nightly beside the fuzz run.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  pull_request:
+    paths:
+      - "packages/host-guard/**"
+      - "packages/runtime-holder/**"
+      - "crates/bazhen-holder/**"
+      - "apps/daemon/src/terminals/**"
+      - "apps/daemon/src/main.ts"
+      - "apps/daemon/src/config/config.ts"
+      - "tests/holder/containment.test.ts"
+      - "tests/support/holder-containment.ts"
+      - "tests/support/holder-spawn.ts"
+      - "tests/support/holder-setup.ts"
+      - "vitest.config.ts"
+      - "package.json"
+      - "scripts/capped.ts"
+      - ".github/workflows/containment.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  HUSKY: 0
+
+jobs:
+  containment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # It starts holders and drives an OOM kill, so it runs only on a host thrown away after use.
+      - name: Mark the runner disposable
+        run: sudo touch /etc/bazhen-disposable-host
+      - name: Start a systemd user manager for the runner's user
+        run: |
+          sudo loginctl enable-linger "$USER"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+      # The suite says why terminals can't be contained, if they can't; this shows what it saw.
+      - name: Wait for the user manager, and show its memory controller
+        run: |
+          for _ in $(seq 30); do systemctl --user show-environment >/dev/null 2>&1 && break; sleep 1; done
+          systemctl --user --no-pager status || true
+          uid=$(id -u)
+          cat "/sys/fs/cgroup/user.slice/user-$uid.slice/user@$uid.service/cgroup.subtree_control" || true
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26.13.0
+          cache: pnpm
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:containment

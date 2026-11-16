@@ -6,6 +6,7 @@ import {
   killHolder,
   rebindHolder,
   signalGroup,
+  signalOwnChild,
   signalPane,
   signalServer,
   unsafeTarget,
@@ -32,6 +33,30 @@ describe("the signal guard", () => {
 
   it("refuses to probe init, every process, or a group", () => {
     for (const pid of [1, 0, -1, -4242, 1.5]) expect(() => isAlive(pid)).toThrow(RangeError);
+  });
+});
+
+/** A child as Node holds it, ended or not, that records each signal sent and reaches nothing. */
+const ownChild = (exitCode: number | null, signalCode: NodeJS.Signals | null) => {
+  const sent: (NodeJS.Signals | undefined)[] = [];
+  return {
+    sent,
+    child: { exitCode, signalCode, kill: (signal?: NodeJS.Signals) => (sent.push(signal), true) },
+  };
+};
+
+describe("the guard on a child this process spawned", () => {
+  it("signals one still running through its own handle", () => {
+    const { child, sent } = ownChild(null, null);
+    expect([signalOwnChild(child, "SIGKILL"), sent]).toEqual([true, ["SIGKILL"]]);
+  });
+
+  it.each([
+    ["exited", 0, null],
+    ["was killed", null, "SIGKILL"],
+  ] as const)("sends nothing to one that %s, whose pid may be another's now", (_, code, signal) => {
+    const { child, sent } = ownChild(code, signal);
+    expect([signalOwnChild(child, "SIGKILL"), sent]).toEqual([false, []]);
   });
 });
 

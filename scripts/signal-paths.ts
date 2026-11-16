@@ -22,9 +22,9 @@ export { DISPOSABLE_HOST_MARKER, SANDBOX_RULE, type SandboxHost, inSignalSandbox
 /** The files allowed a raw signal call, each with what it checks before it sends. */
 export const SIGNAL_CHOKEPOINTS: Readonly<Record<string, string>> = {
   "packages/host-guard/src/signal.ts":
-    "every TypeScript signal: a group this process started, or a target checked to be one of " +
-    "Bazhen's own, a holder by its command and start time, never 0, ±1, this process or its " +
-    "parent",
+    "every TypeScript signal: a group this process started, a child it spawned and hasn't " +
+    "reaped, or a target checked to be one of Bazhen's own, a holder by its command and start " +
+    "time, never 0, ±1, this process or its parent",
   "crates/bazhen-holder/src/linux.rs":
     "signal 0, which sends nothing, through the holder's own pidfd, to learn at start whether " +
     "it may send through one",

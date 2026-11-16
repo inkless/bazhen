@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { parse } from "smol-toml";
 import { z } from "zod";
 import { ENV_RULE, type EnvRules } from "@bazhen/core";
+import { memoryMaxRefusal, swapMaxRefusal, type TerminalCaps } from "@bazhen/host-guard";
 import { isOrigin, originList, originsProblem } from "@bazhen/protocol";
 import { networkInterfaces } from "node:os";
 import { localSubnets, parseRange, type Cidr } from "./cidr.ts";
@@ -15,6 +16,14 @@ const Origin = z.string().refine(isOrigin, "must be an origin, such as https://b
 const Flag = z.enum(["true", "false"]).transform((value) => value === "true");
 const Listen = z.enum(["loopback", "lan"]);
 const RuntimeKind = z.enum(["tmux", "holder"]);
+/** A string `refusal` takes, refused with what it says. */
+const checkedBy = (refusal: (value: string) => string | undefined) =>
+  z.string().superRefine((value, ctx) => {
+    const why = refusal(value);
+    if (why !== undefined) ctx.addIssue({ code: "custom", message: `${value} ${why}` });
+  });
+const MemoryMax = checkedBy(memoryMaxRefusal);
+const SwapMax = checkedBy(swapMaxRefusal);
 const Range = z.string().superRefine((text, ctx) => {
   const parsed = parseRange(text);
   if ("problem" in parsed) ctx.addIssue({ code: "custom", message: `${text} ${parsed.problem}` });
@@ -45,6 +54,12 @@ const ConfigFile = z.strictObject({
     .strictObject({
       /** How many terminals, agents' and shells', may be open at once. */
       max_open: z.int().min(1).optional(),
+      /** The memory each terminal's processes may use together, where they can be contained. */
+      memory_max: MemoryMax.optional(),
+      /** The memory every terminal's processes may use together. */
+      total_memory_max: MemoryMax.optional(),
+      /** The swap each terminal's processes may use together, where they can be contained. */
+      swap_max: SwapMax.optional(),
     })
     .optional(),
   /** Where new terminals run; each one already made stays on the runtime it was made on. */
@@ -105,6 +120,8 @@ export interface Config {
   readonly maxOpenTerminals: number;
   /** `runtime.default`: the runtime new terminals are created on. */
   readonly defaultRuntime: z.infer<typeof RuntimeKind>;
+  /** `terminals.memory_max`, `terminals.total_memory_max` and `terminals.swap_max`. */
+  readonly terminalCaps: TerminalCaps;
 }
 
 export class InvalidConfig extends Error {
@@ -114,6 +131,12 @@ export class InvalidConfig extends Error {
 const DEFAULT_PORT = 7900;
 // Twenty-odd agents with a shell or two each, well under macOS's 511 PTYs.
 const DEFAULT_MAX_OPEN_TERMINALS = 100;
+// One agent's build may need half the machine; all of them together must leave the rest of it.
+const DEFAULT_TERMINAL_MEMORY = "50%";
+const DEFAULT_TOTAL_MEMORY = "80%";
+// A runaway at its memory cap would otherwise go on into swap, stalling every terminal before the
+// kernel killed it.
+const DEFAULT_TERMINAL_SWAP = "0";
 /** Next to the native app's 7943 (a separate listener with its own key). */
 const DEFAULT_LAN_PORT = 7942;
 const CONFIG_FILE = "config.toml";
@@ -186,6 +209,11 @@ export function resolveConfig(
     },
     maxOpenTerminals: file.terminals?.max_open ?? DEFAULT_MAX_OPEN_TERMINALS,
     defaultRuntime: file.runtime?.default ?? "tmux",
+    terminalCaps: {
+      terminal: file.terminals?.memory_max ?? DEFAULT_TERMINAL_MEMORY,
+      total: file.terminals?.total_memory_max ?? DEFAULT_TOTAL_MEMORY,
+      swap: file.terminals?.swap_max ?? DEFAULT_TERMINAL_SWAP,
+    },
     lan,
     ...withPairing(
       externalOrigins(file, env),

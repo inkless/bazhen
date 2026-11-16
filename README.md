@@ -81,6 +81,12 @@ desktop = true # show what needs you on this machine's desktop while no dashboar
 
 [shells]
 retype_last_command = false # keep each shell's last line to type back; see docs/shell-integration.md
+
+[terminals]
+max_open = 100 # agents' and shells' terminals open at once
+memory_max = "50%" # each holder terminal's memory, where it can be contained; see docs/holder.md
+total_memory_max = "80%" # every holder terminal's together: at least 64M, a whole 1-100%, or "infinity"
+swap_max = "0" # each holder terminal's swap: bytes, "0" for none, or "infinity"
 ```
 
 Desktop notifications go through `notify-send` on Linux, and on macOS through Bazhen's own

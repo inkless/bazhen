@@ -403,6 +403,12 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "contained": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
               }
             },
             "required": [
@@ -418,6 +424,135 @@
         "build",
         "reason",
         "holders"
+      ]
+    },
+    "containment": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "const": "scoped"
+            },
+            "systemd": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "oomPolicy": {
+              "type": "boolean"
+            },
+            "terminal": {
+              "type": "object",
+              "properties": {
+                "asked": {
+                  "type": "string"
+                },
+                "bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "asked",
+                "bytes"
+              ]
+            },
+            "total": {
+              "type": "object",
+              "properties": {
+                "asked": {
+                  "type": "string"
+                },
+                "bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "asked",
+                "bytes"
+              ]
+            },
+            "swap": {
+              "type": "object",
+              "properties": {
+                "asked": {
+                  "type": "string"
+                },
+                "bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "asked",
+                "bytes"
+              ]
+            }
+          },
+          "required": [
+            "state",
+            "systemd",
+            "oomPolicy",
+            "terminal",
+            "total",
+            "swap"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "const": "uncontained"
+            },
+            "why": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "why"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "const": "unchecked"
+            }
+          },
+          "required": [
+            "state"
+          ]
+        }
       ]
     },
     "env": {

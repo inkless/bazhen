@@ -7,6 +7,7 @@ import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
+  type Containment,
   HolderStartFailed,
   inSignalSandbox,
   killHolder,
@@ -14,6 +15,7 @@ import {
   startHolder,
   type StartedHolder,
   type StartHolderOptions,
+  terminalScope,
   vouchHolder,
 } from "@bazhen/host-guard";
 import { HOLDER_PROTOCOL_VERSION, type HolderTheme } from "@bazhen/protocol";
@@ -146,6 +148,7 @@ export async function spawnHolder(
     sandboxed = inSignalSandbox(),
     bareHolder = false,
     binary = HOLDER_BINARY,
+    containment,
   }: {
     readonly theme?: HolderTheme;
     readonly sandboxed?: boolean;
@@ -153,6 +156,8 @@ export async function spawnHolder(
     readonly binary?: string;
     /** Start the holder itself with no environment at all, as the daemon does. */
     readonly bareHolder?: boolean;
+    /** Start it in a scope of its own, as the daemon does when terminals can be contained. */
+    readonly containment?: Containment;
   } = {},
 ): Promise<SpawnedHolder> {
   requireSignalSandbox(sandboxed);
@@ -171,6 +176,7 @@ export async function spawnHolder(
     root: runDir(testHome()),
     spec,
     env: bareHolder ? {} : requireHolderEnv(holderEnv()),
+    ...(containment?.kind === "scoped" && { scope: terminalScope(containment, terminalId) }),
   });
 }
 

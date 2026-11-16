@@ -47,6 +47,10 @@ class FakeChild extends EventEmitter implements HolderChild {
   unrefed = false;
   sent = "";
   stdinEnded = false;
+  exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
+  /** The signals sent through its own handle; none reaches a process. */
+  readonly signalled: NodeJS.Signals[] = [];
 
   constructor() {
     super();
@@ -58,7 +62,14 @@ class FakeChild extends EventEmitter implements HolderChild {
     this.unrefed = true;
   }
 
-  exit(code: number | null, signal: string | null = null): void {
+  kill(signal: NodeJS.Signals = "SIGTERM"): boolean {
+    this.signalled.push(signal);
+    return true;
+  }
+
+  exit(code: number | null, signal: NodeJS.Signals | null = null): void {
+    this.exitCode = code;
+    this.signalCode = signal;
     this.stderr.end();
     this.emit("exit", code, signal);
   }
@@ -389,6 +400,105 @@ async function refused(options: Partial<StartHolderOptions>, root = privateRoot(
   );
   return { spawned, error: String(error) };
 }
+
+describe("starting a holder in a scope of its own", () => {
+  const SYSTEMD_RUN = "/usr/bin/systemd-run";
+  const scope = {
+    argv: [SYSTEMD_RUN, "--user", "--scope", "--unit=bazhen-terminal-term_1-ab.scope", "--"],
+    env: { XDG_RUNTIME_DIR: "/run/user/1000" },
+  } as const;
+  const launcherAt = (start: number): PsReading => ({
+    comm: "systemd-run",
+    start,
+    args: `${SYSTEMD_RUN} --user --scope -- ${BINARY}`,
+  });
+  /** `ps` showing the launcher until `at`, in epoch ms, and the holder it execs from then on. */
+  const execsAt = (at: number) => async () =>
+    Date.now() < at ? launcherAt(START) : holderAt(START);
+
+  it("runs the scope's launcher first, which execs the CPU limit's shell, which execs it", async () => {
+    const run = started(always(holderAt(START)), {
+      env: { PATH: "/bin" },
+      limits: { cpuSeconds: 10 },
+      scope,
+    });
+    await expect.poll(() => run.child.sent).not.toBe("");
+    run.child.stdout.write("ready\n");
+    await run.start;
+    expect(run.spawned).toEqual([
+      {
+        file: SYSTEMD_RUN,
+        args: [...scope.argv.slice(1), "/bin/sh", "-c", 'ulimit -t 10 && exec "$0" "$@"', BINARY],
+        env: { PATH: "/bin", XDG_RUNTIME_DIR: "/run/user/1000" },
+      },
+    ]);
+  });
+
+  it("records and returns the spawned pid with its start, which the exec keeps, as the holder's", async () => {
+    const recorded: HolderProcess[] = [];
+    const run = started(
+      inTurn(
+        () => launcherAt(START),
+        () => holderAt(START),
+      ),
+      { scope, onStarted: (holder) => void recorded.push(holder) },
+    );
+    await expect.poll(() => run.child.sent).not.toBe("");
+    run.child.stdout.write("ready\n");
+    await expect(run.start).resolves.toMatchObject({ pid: PID, start: START });
+    expect(recorded).toEqual([{ pid: PID, start: START }]);
+    expect(run.spawned.map((spawn) => spawn.file)).toEqual([SYSTEMD_RUN]);
+  });
+
+  it("gives a launcher that hasn't exec'd the holder in time no spec, and ends it by its own handle", async () => {
+    const run = started(always(launcherAt(START)), { scope, launchMs: 100 });
+    await expect(failureOf(run)).resolves.toMatchObject({
+      ending: "unlaunched",
+      message: expect.stringContaining(`pid ${PID} was sent SIGKILL`),
+      running: true,
+    });
+    expect([run.child.sent, run.child.stdinEnded, run.child.signalled]).toEqual([
+      "",
+      true,
+      ["SIGKILL"],
+    ]);
+    expect(run.kills).toEqual([]);
+    expect(run.spawned.map((spawn) => spawn.file)).toEqual([SYSTEMD_RUN]);
+  });
+
+  it("writes the spec only once ps shows the holder exec'd, and times ready from then", async () => {
+    const execAt = Date.now() + 300;
+    let sentAt = 0;
+    const child = new FakeChild();
+    child.stdin.once("data", () => (sentAt = Date.now()));
+    const run = started(execsAt(execAt), { scope, readyMs: 150 }, child);
+    await expect.poll(() => run.child.sent, { timeout: 2_000 }).not.toBe("");
+    run.child.stdout.write("ready\n");
+    await expect(run.start).resolves.toMatchObject({ pid: PID, start: START });
+    expect(sentAt).toBeGreaterThanOrEqual(execAt);
+  });
+
+  it("fails with the launcher's exit and stderr when systemd can't make the scope", async () => {
+    const run = started(always(launcherAt(START)), { scope });
+    run.child.stderr.write("Failed to start transient scope unit: Unit already exists.\n");
+    run.child.exit(1);
+    await expect(failureOf(run)).resolves.toMatchObject({
+      ending: { code: 1 },
+      stderr: expect.stringContaining("Failed to start transient scope unit"),
+      running: false,
+    });
+    expect([run.kills, run.child.signalled, run.child.sent]).toEqual([[], [], ""]);
+    expect(run.spawned.map((spawn) => spawn.file)).toEqual([SYSTEMD_RUN]);
+  });
+
+  it("refuses a launcher that isn't an absolute path, before spawning", async () => {
+    const run = started(always(holderAt(START)), {
+      scope: { argv: ["systemd-run", "--user", "--scope", "--"], env: {} },
+    });
+    await expect(failureOf(run)).resolves.toBeInstanceOf(RangeError);
+    expect(run.spawned).toEqual([]);
+  });
+});
 
 describe("refusing to start a holder, before anything is spawned", () => {
   it("refuses a socket outside the run root's holders directory", async () => {
