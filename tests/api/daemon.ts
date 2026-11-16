@@ -29,6 +29,8 @@ import {
   encodeHolderRequest,
   EventFrame,
   HOLDER_PROTOCOL_VERSION,
+  holderReplyDecoder,
+  type HolderReply,
   LaunchAgentResponse,
   PROTOCOL_VERSION,
   StreamServerFrame,
@@ -322,10 +324,18 @@ export class Daemon {
   async prompt(launched: { agentId: string; terminalId: string | null }, text: string) {
     const view = await this.view(String(launched.terminalId), "interactive");
     await view.drive();
-    const atCursor = () => this.cursorRow(launched.agentId).split(text).length - 1;
-    const before = atCursor();
+    const holder = this.holderOf(launched.agentId);
+    const row = async () =>
+      holder === undefined
+        ? this.cursorRow(launched.agentId)
+        : (await holderLook(holder)).cursorRow;
+    const atCursor = async () => (await row()).split(text).length - 1;
+    const before = await atCursor();
     view.type(text);
-    await waitUntil(() => atCursor() > before, "the typed prompt on the cursor's row");
+    await waitUntil(
+      async () => (await atCursor()) > before,
+      "the typed prompt on the cursor's row",
+    );
     view.type("\r");
     view.close();
   }
@@ -527,6 +537,37 @@ export class Daemon {
   /** The title the agent's TUI gave its pane. */
   paneTitle(agentId: string): string {
     return this.paneFact(agentId, "pane_title") ?? "";
+  }
+
+  /** The socket of the holder the agent's terminal runs on; none for one on tmux, or none yet. */
+  holderOf(agentId: string): string | undefined {
+    const db = new DatabaseSync(join(this.home, "data", "bazhen.db"), { readOnly: true });
+    try {
+      const row = db
+        .prepare(
+          `SELECT t.id, t.runtime FROM agent_sessions a JOIN terminals t ON t.id = a.terminal_id
+           WHERE a.id = ?`,
+        )
+        .get(agentId);
+      return row?.runtime === "holder"
+        ? join(this.home, "run", "holders", `${String(row.id)}.sock`)
+        : undefined;
+    } finally {
+      db.close();
+    }
+  }
+
+  /** The title the agent's TUI set, from its holder or its tmux pane. */
+  async title(agentId: string): Promise<string> {
+    const holder = this.holderOf(agentId);
+    return holder === undefined ? this.paneTitle(agentId) : (await holderLook(holder)).title;
+  }
+
+  /** What the agent's terminal shows, from its holder or its tmux pane; nothing before it has one. */
+  async shows(agentId: string): Promise<string> {
+    const holder = this.holderOf(agentId);
+    if (holder === undefined) return this.screen(agentId);
+    return existsSync(holder) ? (await holderLook(holder)).screen.join("\n") : "";
   }
 
   /** The environment the agent's process runs with, as its own tools see it (Linux only). */
@@ -870,6 +911,103 @@ export async function closeHolder(socket: string): Promise<void> {
   const timer = setTimeout(() => connection.destroy(new Error(`${socket} didn't close`)), 5_000);
   await ended.finally(() => clearTimeout(timer));
 }
+
+/** What a holder's terminal shows, read over the holder's own protocol, as a client would. */
+export interface HolderLook {
+  /** The title its program set last. */
+  readonly title: string;
+  /** The visible screen's lines, as a browser replaying its snapshot shows them. */
+  readonly screen: string[];
+  /** The screen line the cursor is on. */
+  readonly cursorRow: string;
+}
+
+/**
+ * Says `hello` to the holder at `socket` and asks for a snapshot, then hangs up. Nothing it asks
+ * changes the terminal: no writer slot, no subscription.
+ */
+export async function holderLook(socket: string): Promise<HolderLook> {
+  const connection = createConnection(socket);
+  connection.on("error", () => {});
+  const decoder = holderReplyDecoder();
+  let hello: Extract<HolderReply, { type: "hello" }> | undefined;
+  let snapshot: Extract<HolderReply, { type: "snapshot" }> | undefined;
+  const answered = new Promise<void>((resolve, reject) => {
+    connection.on("data", (chunk: Buffer) => {
+      const { frames, malformed } = decoder.push(new Uint8Array(chunk));
+      for (const frame of frames) {
+        if (frame.type === "hello") hello = frame;
+        if (frame.type === "snapshot") snapshot = { ...frame, bytes: frame.bytes.slice() };
+      }
+      if (malformed !== null) reject(new Error(`${socket} sent ${malformed}`));
+      if (snapshot !== undefined) resolve();
+    });
+    connection.on("close", () => reject(new Error(`${socket} hung up before its snapshot`)));
+  });
+  connection.write(
+    encodeHolderRequest({ type: "hello", id: 1, body: { protocol: [HOLDER_PROTOCOL_VERSION] } }),
+  );
+  connection.write(encodeHolderRequest({ type: "snapshot", id: 2 }));
+  const timer = setTimeout(() => connection.destroy(new Error(`${socket} didn't answer`)), 5_000);
+  try {
+    await answered;
+  } finally {
+    clearTimeout(timer);
+    connection.end();
+  }
+  if (hello === undefined || snapshot === undefined) throw new Error(`${socket} said no hello`);
+  const shown = await replay(snapshot.bytes, hello.body.size);
+  return {
+    title: hello.body.title,
+    screen: shown.screen,
+    cursorRow: shown.screen[shown.cursor[1]] ?? "",
+  };
+}
+
+/**
+ * Submits `text` to the program on the holder at `socket` as `Daemon.prompt` does, typing over a
+ * writer connection of its own: for while no daemon holds the writer slot, as when it is down.
+ */
+export async function promptHolder(socket: string, text: string): Promise<void> {
+  const connection = createConnection(socket);
+  connection.on("error", () => {});
+  const decoder = holderReplyDecoder();
+  const writer = new Promise<boolean>((resolve, reject) => {
+    connection.on("data", (chunk: Buffer) => {
+      for (const frame of decoder.push(new Uint8Array(chunk)).frames)
+        if (frame.type === "hello") resolve(frame.body.writer);
+    });
+    connection.on("close", () => reject(new Error(`${socket} hung up before hello`)));
+  });
+  const hello = { protocol: [HOLDER_PROTOCOL_VERSION], writer: true };
+  connection.write(encodeHolderRequest({ type: "hello", id: 1, body: hello }));
+  try {
+    if (!(await writer)) throw new Error(`${socket} gave its writer slot to another connection`);
+    const type = (id: number, input: string) =>
+      connection.write(encodeHolderRequest({ type: "input", id, bytes: Buffer.from(input) }));
+    const atCursor = async () => (await holderLook(socket)).cursorRow.split(text).length - 1;
+    const before = await atCursor();
+    type(2, text);
+    await waitUntil(
+      async () => (await atCursor()) > before,
+      "the typed prompt on the cursor's row",
+    );
+    type(3, "\r");
+    await new Promise<void>((resolve) => connection.end(resolve));
+  } finally {
+    connection.destroy();
+  }
+}
+
+/**
+ * Whether a title names `threadId`. Codex cuts a long title short with an ellipsis, so the title
+ * is a long enough prefix of it: thread ids are UUIDv7, and a thread started later differs well
+ * within 20 characters.
+ */
+export const showsThread = (title: string, threadId: string) => {
+  const shown = title.replace(/(\.\.\.|…)$/, "");
+  return shown.length >= 20 && threadId.startsWith(shown);
+};
 
 /** Resolves once the upgrade is accepted; a refusal rejects with its status. */
 function opened(ws: WebSocket): Promise<void> {

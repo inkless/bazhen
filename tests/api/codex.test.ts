@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { LaunchAgentResponse, SendMessageResponse, StateSnapshot } from "@bazhen/protocol";
-import { BANNER, Daemon, waitUntil } from "./daemon.ts";
+import { BANNER, Daemon, showsThread, waitUntil } from "./daemon.ts";
 import { FAKE_CODEX_QUESTION, startFakeResponses } from "./fake-responses.ts";
 import type { FakeModel } from "./fake-model.ts";
 
@@ -25,16 +25,6 @@ afterAll(async () => {
   await daemon?.stop();
   await model?.close();
 });
-
-/**
- * Whether a pane title names `threadId`. Codex cuts a long title short with an ellipsis, so the
- * title is a long enough prefix of it: thread ids are UUIDv7, and a thread started later differs
- * well within 20 characters.
- */
-const showsThread = (title: string, threadId: string) => {
-  const shown = title.replace(/(\.\.\.|…)$/, "");
-  return shown.length >= 20 && threadId.startsWith(shown);
-};
 
 /** Each user input item a model request carries, as its JSON text. */
 function userInputs(request: string): string[] {
