@@ -204,6 +204,9 @@ export class FakeDaemon {
   }
 }
 
+/** Whether the suite runs the Node CLI, which differs from the Rust one where a case says so. */
+export const runsNode = () => (process.env["BAZHEN_CLI"] ?? "") === "";
+
 export interface Ran {
   readonly code: number;
   readonly stdout: string;
