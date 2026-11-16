@@ -3,7 +3,7 @@
 // `host-guard`: only @bazhen/host-guard runs tmux; elsewhere a process-starting call that runs
 // tmux, by name, path, argv or shell string, is an error. `signal-guard`: only host-guard's
 // signal.ts sends a signal; elsewhere, host-guard's other modules included, any way of reaching
-// `kill` on `process` is an error. One wrong socket or pid ends someone else's work, so each is
+// `kill` or `abort` on `process` is an error. One wrong socket or pid ends someone else's work, so each is
 // checked in one place and banned everywhere else. The rule follows what a file binds: import aliases,
 // namespace imports, `promisify` and constants. It can flag an argument that merely says `tmux`
 // to a tool that isn't tmux; rename the argument or move the call into host-guard.
@@ -20,8 +20,8 @@ const TMUX =
   "Run tmux only through @bazhen/host-guard (TmuxServer), which names its server by a socket " +
   "path the caller owns (docs/standards/code.md).";
 const KILL =
-  "Send signals only through @bazhen/host-guard (spawnGroup, signalGroup, signalPane, " +
-  "TmuxServer.recreateSocket, isAlive) " +
+  "Send signals only through @bazhen/host-guard (spawnGroup, signalGroup, signalOwnChild, " +
+  "signalPane, TmuxServer.recreateSocket, isAlive) " +
   "(docs/standards/code.md).";
 
 /** child_process's process-starting calls, and the names wrappers of them go by here. */
@@ -48,6 +48,8 @@ const STARTS = new Set([
 const CHILD_PROCESS = new Set(["child_process", "node:child_process"]);
 const PROCESS = new Set(["process", "node:process"]);
 const GLOBALS = new Set(["globalThis", "global", "window", "self"]);
+/** What on `process` sends a signal: `kill` to any pid, `abort` SIGABRT to this one. */
+const SENDS = new Set(["kill", "abort"]);
 
 const isNode = (value: unknown): value is Node =>
   typeof value === "object" && value !== null && typeof Reflect.get(value, "type") === "string";
@@ -64,7 +66,7 @@ export const runsTmux = (text: string) =>
   text.split("/").at(-1) === "tmux" || /(^|[\s;&|`(/])tmux(\s|$|[;&|)`])/.test(text);
 
 /** A rule reporting tmux runs, kill calls, or both: tmux and signals are guarded apart. */
-const guard = (reports: { tmux: boolean; kill: boolean }) => ({
+const guard = (reports: { tmux: boolean; signals: boolean }) => ({
   create(context: Context) {
     const starts = new Set(STARTS);
     const childProcess = new Set<string>();
@@ -126,8 +128,8 @@ const guard = (reports: { tmux: boolean; kill: boolean }) => ({
             } else childProcess.add(local);
           }
           if (PROCESS.has(source)) {
-            if (spec.type === "ImportSpecifier" && imported === "kill") {
-              if (reports.kill) context.report({ node: spec, message: KILL });
+            if (spec.type === "ImportSpecifier" && SENDS.has(imported ?? "")) {
+              if (reports.signals) context.report({ node: spec, message: KILL });
             } else if (spec.type !== "ImportSpecifier") {
               processes.add(local);
             }
@@ -150,11 +152,16 @@ const guard = (reports: { tmux: boolean; kill: boolean }) => ({
         }
         if (id.type === "ObjectPattern" && isProcess(init)) {
           const keys = nodes(id["properties"]).map((p) => nameOf(p["key"]));
-          if (keys.includes("kill") && reports.kill) context.report({ node, message: KILL });
+          if (keys.some((k) => SENDS.has(k ?? "")) && reports.signals)
+            context.report({ node, message: KILL });
         }
       },
       MemberExpression(node: Node) {
-        if (reports.kill && isProcess(node["object"]) && nameOf(node["property"]) === "kill") {
+        if (
+          reports.signals &&
+          isProcess(node["object"]) &&
+          SENDS.has(nameOf(node["property"]) ?? "")
+        ) {
           context.report({ node, message: KILL });
         }
       },
@@ -170,7 +177,7 @@ const guard = (reports: { tmux: boolean; kill: boolean }) => ({
 export default {
   meta: { name: "bazhen" },
   rules: {
-    "host-guard": guard({ tmux: true, kill: false }),
-    "signal-guard": guard({ tmux: false, kill: true }),
+    "host-guard": guard({ tmux: true, signals: false }),
+    "signal-guard": guard({ tmux: false, signals: true }),
   },
 };

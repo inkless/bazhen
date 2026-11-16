@@ -100,19 +100,144 @@ describe("raw signal calls in TypeScript", () => {
     expect(calls("a.ts", source)).toHaveLength(5);
   });
 
-  it("ignores one in a comment, a string or a template, and a child's own kill", () => {
+  it("ignores one in a comment, a string or a template", () => {
     const source = [
       "// process.kill(-1)",
       "/* process.kill(-1) */",
       "const a = 'process.kill(-1, \"SIGKILL\");';",
       "const b = `process.kill(${pid})`;",
+      "// child.kill('SIGTERM')",
+      "const c = 'pty.kill()';",
+    ].join("\n");
+    expect(calls("a.ts", source)).toEqual([]);
+  });
+
+  it("finds process.abort however it is reached", () => {
+    const source = [
+      "process.abort();",
+      "globalThis.process?.abort();",
+      'process["abort"]();',
+      "const { abort } = process;",
+      'import { abort } from "node:process";',
+      'import proc from "node:process";',
+      "proc.abort();",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([1, 2, 3, 4, 5, 7]);
+  });
+
+  it("finds a kill on any object, since text can't tell a child's from another's", () => {
+    const source = [
       "child.kill('SIGTERM');",
+      "this.child?.kill();",
+      "spawn(cmd).kill();",
+      'pty["kill"]("SIGHUP");',
+      "handles[0]?.['kill']();",
+      "const { kill } = child;",
+      "({ pid, kill: stop } = proc);",
+      "const k = child.kill.bind(child);",
+      "child . kill ();",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  });
+
+  it("counts process.kill once, not again as a member named kill", () => {
+    expect(calls("a.ts", "process.kill(pid);\nglobalThis.process?.kill(1);")).toEqual([
+      "process.kill",
+      "process?.kill",
+    ]);
+  });
+
+  it("ignores what only names kill: a definition, a key, a function, a longer name", () => {
+    const source = [
+      "class Fake { kill(signal) { return true; } }",
+      "const pty = { kill: () => undefined };",
+      "interface OwnChild { kill(signal?: NodeJS.Signals): boolean }",
+      "kill(proof);",
+      "if (child.killed) done();",
+      "server.killServer();",
+      "const names = ['kill'];",
+      "return ['kill'];",
     ].join("\n");
     expect(calls("a.ts", source)).toEqual([]);
   });
 
   it("reads no other kind of file", () => {
     expect(calls("README.md", "process.kill(-1)")).toEqual([]);
+  });
+});
+
+describe("kills Node sends for a process start's options", () => {
+  it("finds a timeout, killSignal or signal passed to each child_process start", () => {
+    const starts = [
+      "spawn",
+      "spawnSync",
+      "exec",
+      "execSync",
+      "execFile",
+      "execFileSync",
+      "fork",
+    ].flatMap((start) => [
+      `${start}(cmd, args, { timeout: 1_000 });`,
+      `${start}(cmd, args, { env, killSignal: "SIGKILL" });`,
+      `${start}(cmd, args, { stdio: "ignore", signal: abort.signal });`,
+    ]);
+    expect(starts.filter((source) => calls("a.ts", source).length !== 1)).toEqual([]);
+  });
+
+  it("names the option and the start", () => {
+    expect(calls("a.ts", "execFile(file, args, { env, timeout }, (error, stdout) => {});")).toEqual(
+      ["timeout option of execFile"],
+    );
+  });
+
+  it("finds one through a promisify, an import alias or a child_process namespace", () => {
+    const source = [
+      'import { execFile as ef, spawn } from "node:child_process";',
+      'import * as cp from "child_process";',
+      'import childProcess from "node:child_process";',
+      "const run = promisify(execFile);",
+      "const go = util.promisify(cp.exec);",
+      'await run("ps", args, { timeout: TIMEOUT_MS });',
+      'await go("ls", { timeout: 1 });',
+      "ef(cmd, [], { timeout: 1 });",
+      "cp.spawnSync(cmd, [], { timeout: 1 });",
+      "childProcess.fork(mod, [], { signal });",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([6, 7, 8, 9, 10]);
+  });
+
+  it("finds a killSignal anywhere, as nothing else uses that name", () => {
+    expect(calls("a.ts", 'const opts = { killSignal: "SIGKILL" };')).toEqual(["killSignal"]);
+  });
+
+  it("ignores the same keys anywhere but a child_process start's arguments", () => {
+    const source = [
+      "await expect.poll(() => seen, { timeout: 2_000 }).toBe(true);",
+      "await vi.waitFor(check, { timeout: 2_000 });",
+      'describe("hook client", { timeout: 30_000 }, () => {});',
+      "/x/.exec(text, { timeout: 1 });",
+      "pattern.exec(text);",
+      "await client.close({ signal: AbortSignal.timeout(closeMs) });",
+      'server.run(["list-sessions"], { timeout: 500 });',
+      "const run = (event, timeout) => ({ type: 'command', timeout });",
+      'run("wait", 86_400);',
+      'execFile("ps", args, (error, signal) => done(signal));',
+      "execFile(cmd, [], { env: limits.timeout, cwd: opts.signal }, done);",
+      'const s = "spawn(cmd, [], { timeout: 1 })";',
+      "// execFile(cmd, [], { timeout: 1 })",
+      "await once(ws, 'open', { signal: AbortSignal.timeout(1) });",
+    ].join("\n");
+    expect(calls("a.ts", source)).toEqual([]);
+  });
+
+  it("reads a start's arguments to its own closing paren, past parens in strings", () => {
+    const source = [
+      'execFile("sh", ["-c", "echo )"], { env });',
+      "const later = { timeout: 1 };",
+      "spawn(cmd, [f(x), g(y)],",
+      "  { timeout: 1 });",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([4]);
   });
 });
 
@@ -389,6 +514,9 @@ describe("signalling sources", () => {
     expect(isSignallingSource("a.rs", "kill_process(p, s);")).toBe(true);
     expect(isSignallingSource("a.ts", "signalGroup(child, 'SIGTERM');")).toBe(true);
     expect(isSignallingSource("a.ts", "rebindHolder(proof);")).toBe(true);
+    expect(isSignallingSource("a.ts", "signalOwnChild(child, 'SIGINT');")).toBe(true);
+    expect(isSignallingSource("a.ts", "void reset().finally(() => proc.hangUp());")).toBe(true);
+    expect(isSignallingSource("a.ts", "const pty = { hangUp: () => undefined };")).toBe(false);
     expect(isSignallingSource("a.ts", "await rebindHolderSocket(holder);")).toBe(true);
     expect(
       ["startHolderWith", "rebindHolderWith", "killHolderAt", "rebindHolderAt"].filter(

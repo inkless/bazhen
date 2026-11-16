@@ -1591,6 +1591,31 @@ describe("the signal chokepoints", () => {
   ];
   const failures = (sources: Record<string, string>) =>
     signalChokepointFailures([...CHOKEPOINTS, ...Object.keys(sources)], (f) => sources[f] ?? "");
+  const hits = (source: string) =>
+    failures({ "packages/host-guard/src/tmux.ts": source }).map((f) => f.split(": ")[0]);
+
+  it("allows only the exact call an allowed signal names, not another in the same file", () => {
+    const allowed = 'execFileSync("tmux", ["-V"], { encoding: "utf8", timeout: TIMEOUT_MS });';
+    expect(hits(allowed)).toEqual([]);
+    expect(
+      hits(
+        [
+          allowed,
+          'execFileSync("tmux", ["ls"], { encoding: "utf8", timeout: TIMEOUT_MS });',
+          "child.kill();",
+          'execFileSync("tmux", ["-V"], { encoding: "utf8", timeout: 1 });',
+        ].join("\n"),
+      ),
+    ).toEqual([
+      "packages/host-guard/src/tmux.ts:2",
+      "packages/host-guard/src/tmux.ts:3",
+      "packages/host-guard/src/tmux.ts:4",
+    ]);
+    expect(hits("const pty = { hangUp: () => proc.kill() };\nchild.kill();")).toEqual([
+      "packages/host-guard/src/tmux.ts:1",
+      "packages/host-guard/src/tmux.ts:2",
+    ]);
+  });
 
   it("names each raw signal call outside them, and where to send it instead", () => {
     expect(
@@ -1604,7 +1629,7 @@ describe("the signal chokepoints", () => {
         /^crates\/bazhen-holder\/tests\/a\.rs:2: .*kill_process.*bazhen_test_signal/,
       ),
       expect.stringMatching(/^crates\/bazhen-holder\/src\/b\.rs:1: .*killpg.*src\/guard\.rs/),
-      expect.stringMatching(/^scripts\/c\.ts:1: .*process\.kill.*@bazhen\/host-guard/),
+      expect.stringMatching(/^scripts\/c\.ts:1: .*process[.]kill.*@bazhen\/host-guard/),
     ]);
   });
 

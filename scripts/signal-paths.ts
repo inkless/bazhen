@@ -68,11 +68,105 @@ function signalImports(code: string) {
   });
 }
 
-const TS_KILL = /\bprocess\s*\??\.\s*kill\b/g;
-const TS_KILL_COMPUTED = /\bprocess\s*\??\.?\s*\[\s*["'`]kill["'`]\s*\]/g;
-const TS_KILL_BOUND = /\{[^}]*\bkill\b[^}]*\}\s*=\s*(?:globalThis\s*\.\s*)?process\b/g;
+const TS_KILL = /\bprocess\s*\??\.\s*(?:kill|abort)\b/g;
+const TS_KILL_COMPUTED = /\bprocess\s*\??\.?\s*\[\s*["'`](?:kill|abort)["'`]\s*\]/g;
+const TS_KILL_BOUND = /\{[^}]*\babort\b[^}]*\}\s*=\s*(?:globalThis\s*\.\s*)?process\b/g;
 const TS_KILL_IMPORT =
-  /\bimport\s*(?:type\s+)?\{[^}]*\bkill\b[^}]*\}\s*from\s*["'](?:node:)?process["']/g;
+  /\bimport\s*(?:type\s+)?\{[^}]*\b(?:kill|abort)\b[^}]*\}\s*from\s*["'](?:node:)?process["']/g;
+// A member named kill on anything: a ChildProcess's, a node-pty IPty's, process's. Text can't tell
+// them apart, so each is a signal, and an API whose kill sends none is named for what it does.
+const TS_MEMBER_KILL = /(?:[\w$]+\s*)?\??\.\s*kill\b/g;
+const TS_MEMBER_KILL_COMPUTED = /(?:([\w$]+)|[)\]])\s*(?:\?\.)?\s*\[\s*["'`]kill["'`]\s*\]/g;
+const TS_MEMBER_KILL_BOUND = /\{[^{}]*\bkill\b[^{}]*\}\s*=(?![=>])/g;
+// Words a `[` can follow that make it an array, not an index.
+const NOT_RECEIVERS = new Set([
+  "return",
+  "of",
+  "in",
+  "typeof",
+  "case",
+  "yield",
+  "await",
+  "void",
+  "delete",
+  "throw",
+  "new",
+  "else",
+  "do",
+]);
+
+// child_process's own starts, each of which Node kills the child for when given a `timeout`,
+// `killSignal` or `signal` (an AbortSignal).
+const STARTERS = [
+  "spawn",
+  "spawnSync",
+  "exec",
+  "execSync",
+  "execFile",
+  "execFileSync",
+  "fork",
+] as const;
+const STARTER_NAME = `(?:${STARTERS.join("|")})`;
+const CHILD_PROCESS_MODULE = `["'](?:node:)?child_process["']`;
+const START_OPTION = /(?<=[{,]\s*)\b(timeout|killSignal|signal)\b(?=\s*[:,}])/g;
+
+/** The index of the `)` closing the `(` at `open` in blanked code, or the end of the code. */
+function closingParen(code: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < code.length; i++) {
+    if (code[i] === "(") depth++;
+    else if (code[i] === ")" && --depth === 0) return i;
+  }
+  return code.length;
+}
+
+/**
+ * Each `timeout`, `killSignal` or `signal` key in a child_process start's arguments: the start
+ * called bare or through an import alias, as a member of child_process imported whole, or bound
+ * by `promisify` to a name of its own. A wrapper taking a timeout of its own isn't a start; the
+ * kill it causes is found where it calls Node.
+ */
+function startOptions(code: string, kept: string) {
+  const named = new Map<string, string>(STARTERS.map((s) => [s, s]));
+  const modules: string[] = [];
+  const imports = new RegExp(
+    `\\bimport\\s+(?:(\\w+)|\\*\\s+as\\s+(\\w+)|\\{([^}]*)\\})\\s+from\\s*${CHILD_PROCESS_MODULE}`,
+    "g",
+  );
+  for (const m of kept.matchAll(imports)) {
+    if (code.slice(m.index, m.index + 6) !== "import") continue;
+    const whole = m[1] ?? m[2];
+    if (whole !== undefined) modules.push(whole);
+    for (const spec of (m[3] ?? "").split(",")) {
+      const [imported, local] = spec.trim().split(/\s+as\s+/);
+      if (imported !== undefined && local !== undefined && named.has(imported))
+        named.set(local, imported);
+    }
+  }
+  const module = modules.length > 0 ? `(?:${modules.join("|")})\\s*\\.\\s*` : "";
+  const notMember = "(?<!\\.\\s*)\\b";
+  const promisified = new RegExp(
+    `\\b(?:const|let|var)\\s+(\\w+)\\s*=\\s*(?:\\w+\\s*\\.\\s*)?promisify\\s*\\(\\s*` +
+      `(?:${module === "" ? notMember : `${module}|${notMember}`})` +
+      `(${[...named.keys()].join("|")})\\s*\\)`,
+    "g",
+  );
+  for (const m of code.matchAll(promisified))
+    if (m[1] !== undefined && m[2] !== undefined) named.set(m[1], named.get(m[2]) ?? m[2]);
+  const bare = `${notMember}(${[...named.keys()].join("|")})`;
+  const member = module === "" ? "" : `|${module}(${STARTER_NAME})`;
+  const calls = new RegExp(`(?:${bare}${member})\\s*\\(`, "g");
+  return [...code.matchAll(calls)].flatMap((call) => {
+    const open = call.index + call[0].length - 1;
+    const args = code.slice(open, closingParen(code, open));
+    const start = call[2] ?? named.get(call[1] ?? "") ?? "";
+    return [...args.matchAll(START_OPTION)].map((option) => ({
+      index: open + option.index,
+      line: lineAt(code, open + option.index),
+      call: `${option[1]} option of ${start}`,
+    }));
+  });
+}
 
 const blank = (text: string) => text.replaceAll(/[^\n]/g, " ");
 
@@ -432,29 +526,155 @@ function commandKills(words: string[], named: boolean): boolean {
   return false;
 }
 
+interface AllowedSignal {
+  readonly code: RegExp;
+  readonly why: string;
+}
+
 /**
- * The kills by a started process that are allowed, each by file, the code that may start it,
- * and why it may: a kill found anywhere else in the file still counts.
+ * A start whose `timeout` Node enforces by killing the child it started, through that child's own
+ * handle, which reaches nothing once the child is reaped: what `signalOwnChild` checks.
  */
-export const CLI_KILLS: Readonly<Record<string, { code: RegExp; why: string }>> = {
-  "scripts/signal-paths.ts": {
-    code: /[\s\S]*/,
-    why: "the patterns that find kills, which start nothing",
-  },
-  "scripts/signal-paths.test.ts": {
-    code: /[\s\S]*/,
-    why: "the fixtures those patterns are tested on, which start nothing",
-  },
-  "scripts/lint-plugin.medium.test.ts": {
-    code: /const FIXTURE = \[[\s\S]*?\]\.join\("\\n"\)/,
-    why: "the lint rule's fixture, which oxlint reads and nothing runs",
-  },
-  "packages/host-guard/src/cap.ts": {
-    code: /output\(\s*"systemctl",\s*\["--user",\s*"kill",\s*`--signal=\$\{signal\}`,\s*unit\]\)/,
-    why:
-      "`systemctl --user kill` of the scope unit this process named and started, which reaches " +
-      "only that scope's processes",
-  },
+const timedOut = (code: RegExp, what: string): AllowedSignal => ({
+  code,
+  why: `${what}, which Node kills through its own handle once it outlives its timeout`,
+});
+
+/**
+ * The signals allowed outside a chokepoint, each by file, the exact code that sends it, and why
+ * it may: a signal found anywhere else in the file still counts. A span that runs over several
+ * lines stops at a `;`, so it can't reach into the next statement.
+ */
+export const ALLOWED_SIGNALS: Readonly<Record<string, readonly AllowedSignal[]>> = {
+  "scripts/signal-paths.ts": [
+    { code: /[\s\S]*/, why: "the patterns that find kills, which start nothing" },
+  ],
+  "scripts/signal-paths.test.ts": [
+    { code: /[\s\S]*/, why: "the fixtures those patterns are tested on, which start nothing" },
+  ],
+  "scripts/lint-plugin.medium.test.ts": [
+    {
+      code: /const FIXTURE = \[[\s\S]*?\]\.join\("\\n"\)/,
+      why: "the lint rule's fixture, which oxlint reads and nothing runs",
+    },
+  ],
+  "packages/host-guard/src/cap.ts": [
+    {
+      code: /output\(\s*"systemctl",\s*\["--user",\s*"kill",\s*`--signal=\$\{signal\}`,\s*unit\]\)/,
+      why:
+        "`systemctl --user kill` of the scope unit this process named and started, which reaches " +
+        "only that scope's processes",
+    },
+    timedOut(/execFile\(command, args, \{ timeout \}/, "each systemd and cgroup step it runs"),
+    timedOut(
+      /execFileSync\(path, \["--pdeathsig", "KILL", "--", "true"\], \{ stdio: "ignore", timeout: 2_000 \}\)/,
+      "setpriv's probe for --pdeathsig",
+    ),
+  ],
+  "packages/host-guard/src/scope.ts": [
+    timedOut(
+      /execFile\(file, args, \{ env, timeout, encoding: "utf8" \}/,
+      "each systemd-run and systemctl step it runs",
+    ),
+  ],
+  "packages/host-guard/src/cwd.ts": [
+    timedOut(/run\("lsof", args, \{\s*env: LSOF_ENV,\s*timeout: TIMEOUT_MS,/, "lsof"),
+  ],
+  "packages/host-guard/src/ptys.ts": [
+    timedOut(
+      /execFileSync\("\/usr\/sbin\/sysctl", \["-n", "kern\.tty\.ptmx_max"\], \{\s*encoding: "utf8",\s*timeout: 5_000,/,
+      "sysctl",
+    ),
+  ],
+  "packages/host-guard/src/tmux.ts": [
+    timedOut(
+      /execFileSync\("tmux", \["-V"\], \{ encoding: "utf8", timeout: TIMEOUT_MS \}\)/,
+      "tmux -V",
+    ),
+    timedOut(/run\("ps", args, \{ env: PS_ENV, timeout: TIMEOUT_MS \}\)/, "ps, reading a holder"),
+    timedOut(
+      /run\("ps", args, \{\s*env: PS_ENV,\s*timeout: TIMEOUT_MS,/,
+      "ps, reading terminals' foreground groups",
+    ),
+    timedOut(
+      /execFile\(\s*bin,\s*argv,\s*\{\s*env: opts\.env,\s*timeout: opts\.timeout \?\? TIMEOUT_MS,\s*maxBuffer:/,
+      "tmux, run by TmuxServer.run",
+    ),
+    timedOut(
+      /execFileSync\(bin, argv, \{\s*env: opts\.env,\s*timeout: opts\.timeout \?\? TIMEOUT_MS,\s*stdio:/,
+      "tmux, run by TmuxServer.runSync",
+    ),
+    timedOut(
+      /execFile\(\s*bin,\s*argv,\s*\{ env: opts\.env, timeout: opts\.timeout \?\? TIMEOUT_MS, encoding: "utf8" \}/,
+      "tmux, reading a script on stdin in TmuxServer.source",
+    ),
+  ],
+  "apps/daemon/src/pty/node-pty.ts": [
+    {
+      code: /hangUp: \(\) => proc\.kill\(\)/,
+      why:
+        "node-pty's SIGHUP to the terminal child it spawned, by that child's pid: node-pty " +
+        "exposes no exit state to check before it sends",
+    },
+  ],
+  "apps/daemon/src/codex/channel.ts": [
+    timedOut(/run\("codex", args, \{ env, timeout: 60_000 \}\)/, "the codex CLI"),
+    timedOut(/run\("codex", \["--version"\], \{ env, timeout: 1_000 \}\)/, "codex --version"),
+  ],
+  "apps/daemon/src/mailbox/binding.ts": [
+    timedOut(
+      /execFile\("ps", \["-o", "ppid=,comm=", "-p", String\(pid\)\], \{ timeout: 2000 \}/,
+      "ps, reading a caller's parent",
+    ),
+  ],
+  "scripts/falsify-base.ts": [
+    timedOut(
+      /spawnSync\("pnpm", installArgs\(mode\), \{[^;]*?timeout: INSTALL_TIMEOUT_MS,/,
+      "pnpm install",
+    ),
+  ],
+  "scripts/hook-bench.ts": [
+    timedOut(
+      /spawn\(argv\[0\], argv\.slice\(1\), \{[^;]*?timeout: Math\.max\(1, Math\.ceil\(Math\.min\(hangMs, leftMs\)\)\),/,
+      "the hook client it measures",
+    ),
+  ],
+  "scripts/capped.medium.test.ts": [
+    timedOut(
+      /spawnSync\(capped, \["--test-binary", "--memory", "128M", "--", \.\.\.argv\], \{[^;]*?timeout: 60_000,/,
+      "the capped runner under test",
+    ),
+  ],
+  "scripts/falsify-base.medium.test.ts": [
+    timedOut(
+      /spawnSync\("node", \[SCRIPT, "--base", "main"\], \{[^;]*?timeout: 30_000,/,
+      "falsify-base under test",
+    ),
+  ],
+  "scripts/falsify.medium.test.ts": [
+    timedOut(
+      /spawnSync\("node", \[FALSIFY, [^\]]*\], \{[^;]*?timeout: 30_000,/,
+      "falsify under test",
+    ),
+  ],
+  "tests/api/daemon.ts": [
+    timedOut(
+      /execFile\(\s*process\.execPath,\s*\[join\(repo, "apps\/cli\/src\/main\.ts"\), \.\.\.args\],\s*\{ env, timeout: 30_000 \}/,
+      "the bazhen CLI",
+    ),
+    timedOut(
+      /execFile\(\s*process\.execPath,\s*\[join\(repo, "apps\/daemon\/src\/main\.ts"\)\],\s*\{ env: \{ \.\.\.this\.env, BAZHEN_PORT: String\(this\.port\) \}, timeout: 30_000 \}/,
+      "a second daemon, which should refuse to start",
+    ),
+    timedOut(/run\("codex", args, \{ env: this\.env, timeout: 90_000 \}\)/, "the codex CLI"),
+    timedOut(
+      /run\("codex", \["app-server", "daemon", "stop"\], \{ env: this\.env, timeout: 90_000 \}\)/,
+      "codex's own daemon stop",
+    ),
+  ],
+  "tests/cli/cli.ts": [
+    timedOut(/execFile\(file, argv, \{ env, cwd, timeout: RUN_MS \}/, "the CLI under test"),
+  ],
 };
 
 /** The literals that start a kill: a program sending one, or a shell or systemctl doing so. */
@@ -484,12 +704,14 @@ function kills(
   return out;
 }
 
-/** The spans of `text` where a kill by a started process is allowed (CLI_KILLS). */
-function allowedKills(file: string, text: string): [number, number][] {
-  const allowed = CLI_KILLS[file];
-  if (allowed === undefined) return [];
-  const pattern = new RegExp(allowed.code.source, "g");
-  return [...text.matchAll(pattern)].map((m) => [m.index, m.index + m[0].length]);
+/** The spans of `text` where a signal is allowed (ALLOWED_SIGNALS). */
+function allowedSpans(file: string, text: string): [number, number][] {
+  return (ALLOWED_SIGNALS[file] ?? []).flatMap(({ code }) =>
+    [...text.matchAll(new RegExp(code.source, "g"))].map((m): [number, number] => [
+      m.index,
+      m.index + m[0].length,
+    ]),
+  );
 }
 
 const outside = (spans: [number, number][]) => (m: { index: number }) =>
@@ -506,7 +728,7 @@ export function rawSignalCalls(file: string, text: string): { line: number; call
       body: strings[n] ?? "",
       cooked: raw[n],
     }));
-    const spans = allowedKills(file, code);
+    const spans = allowedSpans(file, code);
     const direct = found(code, RUST_RAW);
     const imports = signalImports(code).filter(
       (u) => !direct.some((d) => d.index >= u.index && d.index < u.end),
@@ -535,28 +757,43 @@ export function rawSignalCalls(file: string, text: string): { line: number; call
     ),
   ].flatMap((m) => (m[1] === undefined || !inCode(m) ? [] : [m[1]]));
   const viaAlias = aliases.flatMap((alias) => [
-    ...found(code, new RegExp(`\\b${alias}\\s*\\??\\.\\s*kill\\b`, "g")),
+    ...found(code, new RegExp(`\\b${alias}\\s*\\??\\.\\s*(?:kill|abort)\\b`, "g")),
     ...found(
       kept,
-      new RegExp(`\\b${alias}\\s*\\??\\.?\\s*\\[\\s*["'\`]kill["'\`]\\s*\\]`, "g"),
+      new RegExp(`\\b${alias}\\s*\\??\\.?\\s*\\[\\s*["'\`](?:kill|abort)["'\`]\\s*\\]`, "g"),
     ).filter(inCode),
   ]);
+  const memberComputed = [...kept.matchAll(TS_MEMBER_KILL_COMPUTED)]
+    .filter((m) => inCode(m) && !NOT_RECEIVERS.has(m[1] ?? ""))
+    .map((m) => ({ index: m.index, line: lineAt(code, m.index), call: m[0] }));
+  const seen = new Set<number>();
   return [
     ...found(code, TS_KILL),
     ...found(code, TS_KILL_BOUND),
     ...imports,
     ...computed,
     ...viaAlias,
-    ...kills(literals, code).filter(outside(allowedKills(file, kept))),
+    ...found(code, TS_MEMBER_KILL),
+    ...memberComputed,
+    ...found(code, TS_MEMBER_KILL_BOUND),
+    ...found(code, /\bkillSignal\b/g),
+    ...startOptions(code, kept),
+    ...kills(literals, code),
   ]
+    .filter((m) => !seen.has(m.index) && seen.add(m.index))
+    .filter(outside(allowedSpans(file, kept)))
     .toSorted((a, b) => a.index - b.index)
     .map(({ line, call }) => ({ line, call }));
 }
 
-/** The chokepoints' own ways in: a file calling one sends signals, though not directly. */
+/**
+ * The chokepoints' own ways in, and the PTY seam's hang-up: a file calling one sends signals,
+ * though not directly.
+ */
 const TS_SENDERS = new RegExp(
   `\\b(?:${[
     "signalGroup",
+    "signalOwnChild",
     "signalPane",
     "signalServer",
     "killHolder",
@@ -568,7 +805,7 @@ const TS_SENDERS = new RegExp(
     "rebindHolderAt",
     "rebindHolderWith",
     "startHolderWith",
-  ].join("|")})\\b`,
+  ].join("|")})\\b|\\.\\s*hangUp\\b`,
 );
 // The holder's own: its child's close and signal, which reach its group and the terminal's
 // foreground group, and the guard module that floors them.
