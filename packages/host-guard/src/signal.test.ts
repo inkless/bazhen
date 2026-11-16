@@ -4,6 +4,7 @@ import {
   groupInStat,
   isAlive,
   killHolder,
+  rebindHolder,
   signalGroup,
   signalPane,
   signalServer,
@@ -122,12 +123,15 @@ describe("a proof for this process or its parent", () => {
   // all that stands between them and the test runner. Stubbed, so a broken refusal sends nothing.
   it("is refused at the send, with nothing sent", () => {
     const kill = vi.spyOn(process, "kill").mockImplementation(() => true);
-    expect(() => killHolder(vouchHolderProcess({ pid: process.ppid, start: 0 }))).toThrow(
+    expect(() => killHolder(vouchHolderProcess({ pid: process.ppid, start: 0 }, "kill"))).toThrow(
       "this process's parent",
     );
     expect(() => signalServer(vouchServer({ pid: process.pid, socket: "/tmp/bz-x/s" }))).toThrow(
       "this process",
     );
+    expect(() =>
+      rebindHolder(vouchHolderProcess({ pid: process.ppid, start: 0 }, "rebind")),
+    ).toThrow("this process's parent");
     expect(kill).not.toHaveBeenCalled();
   });
 });

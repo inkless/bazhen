@@ -1,5 +1,9 @@
-import type { RuntimeRef } from "@bazhen/core";
+import type { RuntimeRef } from "./runtime.ts";
 import type { ExitStatus } from "@bazhen/protocol";
+
+// Every runtime Bazhen runs on has these; core type-checks against no platform's globals.
+declare function setInterval(callback: () => void, ms: number): unknown;
+declare function clearInterval(timer: unknown): void;
 
 export interface DeadTerminal {
   readonly ref: RuntimeRef;
@@ -16,14 +20,13 @@ export interface ExitWatchOptions {
 }
 
 /**
- * Polls for dead terminals while anyone listens, and reports every one on every tick. tmux could
- * announce a death only through a `pane-died` hook running a shell command back into Bazhen,
- * which the argv-only rule forbids (foundation-design §8.2).
+ * Polls for dead terminals while anyone listens, and reports every one on every tick, so a
+ * listener that missed one, or a death the runtime only learns of by asking, is still told.
  */
 export class ExitWatch {
   private readonly opts: ExitWatchOptions;
   private readonly listeners = new Set<Listener>();
-  private timer: ReturnType<typeof setInterval> | undefined;
+  private timer: unknown;
   private reading = false;
 
   constructor(opts: ExitWatchOptions) {

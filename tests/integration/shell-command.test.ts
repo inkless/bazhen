@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
-import { shellCommand } from "@bazhen/runtime-tmux";
+import { shellCommand } from "@bazhen/core";
 
 // The shells a user may paste an attach command into, installed in the test image: each must
 // read the line back as the words it was made from.

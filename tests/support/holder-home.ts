@@ -11,7 +11,9 @@ type HolderProcessSpec = Parameters<HolderClient["respawn"]>[0];
 export const RUN_MARKER = ".bz-holder-test-run";
 export const RUN_ENV = "BZ_HOLDER_TEST_RUN";
 
-export const holdersDir = (home: string) => join(home, "run", "holders");
+/** The run root a holder test's holders are started under, as the daemon's run directory is. */
+export const runDir = (home: string) => join(home, "run");
+export const holdersDir = (home: string) => join(runDir(home), "holders");
 /** tmux's socket directory, empty unless something ran tmux. */
 export const tmuxDir = (home: string) => join(home, "tmux");
 /** The directory first on PATH, whose `tmux` refuses to run. */

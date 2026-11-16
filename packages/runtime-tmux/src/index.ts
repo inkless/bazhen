@@ -36,17 +36,17 @@ import {
 } from "@bazhen/host-guard";
 import {
   assertSameGeneration,
+  ExitWatch,
   isId,
   ProcessState,
+  shellCommand,
   StaleIncarnation,
   TerminalUnconfirmed,
+  type DeadTerminal,
 } from "@bazhen/core";
 import { exitStatus, UnknownCause } from "./exit-status.ts";
 import { redacted } from "./redact.ts";
-import { shellCommand } from "./shell.ts";
 
-export { shellCommand };
-import { ExitWatch, type DeadTerminal } from "./exit-watch.ts";
 import { ScreenWatch } from "./screen-watch.ts";
 
 const EXIT_POLL_MS = 1_000;

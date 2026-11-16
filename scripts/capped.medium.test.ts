@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { cappedScope, chooseMode, runIn } from "../packages/host-guard/src/cap.ts";
+import { cappedScope, chooseMode, runIn } from "../packages/host-guard/src/index.ts";
 import { KILLS_ENV, TEST_BINARY_CAP } from "./capped.ts";
 
 const capped = fileURLToPath(new URL("capped.ts", import.meta.url));

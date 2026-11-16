@@ -3,10 +3,10 @@
 // tests/holder may not import child_process or node-pty itself (scripts/lint-config.ts); the
 // helper that spawns a real holder belongs here too, passing its spec's env the same way.
 
-import { spawn, spawnSync, type SpawnSyncReturns } from "node:child_process";
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { inSignalSandbox, killHolder, readProcess, vouchHolder } from "@bazhen/host-guard";
+import { HolderStartFailed, inSignalSandbox, readProcess, startHolder } from "@bazhen/host-guard";
 import { HOLDER_PROTOCOL_VERSION, type HolderTheme } from "@bazhen/protocol";
 import { connectHolder, type HolderClient } from "@bazhen/runtime-holder";
 import {
@@ -14,6 +14,7 @@ import {
   holderProcessSpec,
   holderSocket,
   requireHolderEnv,
+  runDir,
   testHome,
   userDir,
 } from "./holder-home.ts";
@@ -83,9 +84,6 @@ export function replayEngine(
 
 /** CPU-seconds a holder may use: one that spins, under a mutant say, dies of SIGXCPU instead. */
 const CPU_SECONDS = 10;
-const READY_MS = 5_000;
-/** How long a holder that never said `ready` has to show as the holder, to be killed. */
-const VOUCH_MS = 1_000;
 const CLOSE_MS = 5_000;
 
 export interface SpawnedHolder {
@@ -99,9 +97,10 @@ export interface SpawnedHolder {
 }
 
 /**
- * Starts a holder for `terminalId` running `argv`, as the daemon would, and waits for `ready`.
- * Its socket is the run's, its child's env what `holderEnv()` builds, and it is recorded in the
- * ledger, so a run that dies before closing it has it swept by the next.
+ * Starts a holder for `terminalId` running `argv`, as the daemon does, through host-guard's
+ * `startHolder`, and waits for `ready`. Its socket is the run's, its child's env what
+ * `holderEnv()` builds, and it is recorded in the ledger before it reads its spec, so a run that
+ * dies before closing it has it swept by the next.
  */
 export async function spawnHolder(
   terminalId: string,
@@ -109,7 +108,13 @@ export async function spawnHolder(
   {
     theme,
     sandboxed = inSignalSandbox(),
-  }: { readonly theme?: HolderTheme; readonly sandboxed?: boolean } = {},
+    bareHolder = false,
+  }: {
+    readonly theme?: HolderTheme;
+    readonly sandboxed?: boolean;
+    /** Start the holder itself with no environment at all, as the daemon does. */
+    readonly bareHolder?: boolean;
+  } = {},
 ): Promise<SpawnedHolder> {
   requireSignalSandbox(sandboxed);
   const socket = holderSocket(terminalId);
@@ -122,86 +127,26 @@ export async function spawnHolder(
     ...holderProcessSpec(argv),
     ...(theme === undefined ? {} : { theme }),
   };
-  const script = `ulimit -t ${CPU_SECONDS} && exec "$0" "$@"`;
-  const child = spawn("sh", ["-c", script, HOLDER_BINARY], {
-    env: requireHolderEnv(holderEnv()),
-    cwd: userDir(testHome()),
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-  /** How it ended, once it has: its exit code, or the signal that ended it. */
-  let ended: number | NodeJS.Signals | undefined;
-  const exited = new Promise<number | null>((done) =>
-    child.once("exit", (code, signal) => {
-      ended = code ?? signal ?? undefined;
-      done(code);
-    }),
-  );
-  const failed = new Promise<Error>((done) => child.once("error", done));
-  const pid = child.pid;
-  if (pid === undefined) throw new Error(`the holder didn't start: ${(await failed).message}`);
-  const reading = await readProcess(pid);
-  if (typeof reading === "string") {
-    child.stdin.end();
-    throw new Error(`the holder is ${reading} at once; with no spec it exits`);
-  }
-  const start = reading.start;
-  let entry: string;
+  let entry: string | undefined;
   try {
-    entry = await record(pid, start, socket);
+    const started = await startHolder({
+      binary: HOLDER_BINARY,
+      root: runDir(testHome()),
+      spec,
+      env: bareHolder ? {} : requireHolderEnv(holderEnv()),
+      cwd: userDir(testHome()),
+      limits: { cpuSeconds: CPU_SECONDS },
+      onStarted: async ({ pid, start }) => {
+        entry = await record(pid, start, socket);
+      },
+    });
+    return { terminalId, socket, pid: started.pid, exited: started.exited, entry: entry! };
   } catch (error) {
-    // Unrecorded, nothing would sweep it: it doesn't outlive this.
-    child.stdin.end();
-    await endUnready({ pid, start }, () => ended !== undefined, null);
+    // One left running stays recorded, for the next run's sweep to kill.
+    const running = error instanceof HolderStartFailed && error.running;
+    if (entry !== undefined && !running) rmSync(entry, { force: true });
     throw error;
   }
-  let stderr = "";
-  child.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr += chunk));
-  /** Its first line, or null for none: it ended first, or didn't say one in time. */
-  const firstLine = new Promise<string | null>((done) => {
-    let out = "";
-    child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
-      out += chunk;
-      if (out.includes("\n")) done(out);
-    });
-    void exited.then(() => done(null));
-    setTimeout(() => done(null), READY_MS).unref();
-  });
-  child.stdin.end(JSON.stringify(spec));
-  const line = await firstLine;
-  if (line !== "ready\n") {
-    // Read before `endUnready`, whose kill would otherwise read as the holder's own end.
-    const how =
-      line !== null
-        ? `it said ${JSON.stringify(line)}`
-        : ended === undefined
-          ? `nothing within ${READY_MS} ms`
-          : typeof ended === "number"
-            ? `it exited ${ended}`
-            : `${ended} ended it`;
-    await endUnready({ pid, start }, () => ended !== undefined, entry);
-    throw new Error(`the holder didn't say ready (${how}): ${stderr.trim() || "(no stderr)"}`);
-  }
-  return { terminalId, socket, pid, exited, entry };
-}
-
-/**
- * Ends a holder that never said `ready`: one that has exited is forgotten; one still running is
- * killed, once `ps` shows it is the holder (its shell execs it at once), and kept in the ledger,
- * if it has an entry, for the next sweep if it can't be.
- */
-async function endUnready(
-  holder: { readonly pid: number; readonly start: number },
-  gone: () => boolean,
-  entry: string | null,
-): Promise<void> {
-  const deadline = Date.now() + VOUCH_MS;
-  let proof = null;
-  while (!gone() && proof === null && Date.now() < deadline) {
-    proof = await vouchHolder(holder);
-    if (proof === null) await new Promise((wait) => setTimeout(wait, 20));
-  }
-  const ended = gone() || (proof !== null && killHolder(proof));
-  if (ended && entry !== null) rmSync(entry, { force: true });
 }
 
 const closed = new WeakMap<SpawnedHolder, Promise<number | null>>();

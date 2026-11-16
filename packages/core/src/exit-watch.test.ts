@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExitStatus } from "@bazhen/protocol";
-import { newId } from "@bazhen/core";
+import { newId } from "./ids.ts";
 import { ExitWatch, type DeadTerminal, type ExitWatchOptions } from "./exit-watch.ts";
 
 const deadWith = (status: ExitStatus): DeadTerminal => ({

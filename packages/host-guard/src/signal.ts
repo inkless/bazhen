@@ -1,8 +1,8 @@
 // The one module that sends signals. A signal reaches only a process group this process started,
 // the process of a pane that one of Bazhen's own tmux servers vouched for, one of those servers
-// itself, once its process was checked to be that server, or a `bazhen-holder` checked to be the
-// one a holder test started: a stray pid ends someone else's work, and a stray negative one their
-// whole session.
+// itself, once its process was checked to be that server, or a `bazhen-holder` checked by its
+// command and start time to be the one recorded: a stray pid ends someone else's work, and a stray
+// negative one their whole session.
 
 import { execFileSync, spawn, type SpawnOptions } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -69,26 +69,59 @@ export interface HolderProcess {
   readonly start: number;
 }
 
-const holders = new WeakMap<HolderProcess, number>();
+/** What a holder proof lets its holder be sent: one kind never serves for the other. */
+export type HolderUse = "kill" | "rebind";
 
-/** A checked holder process, as one `killHolder` may reach once. Only holder.ts calls this. */
-export function vouchHolderProcess(holder: HolderProcess, now = Date.now()): HolderProcess {
+const holders: Record<HolderUse, WeakMap<HolderProcess, number>> = {
+  kill: new WeakMap(),
+  rebind: new WeakMap(),
+};
+
+/** A checked holder process, as one signal of `use` may reach once. Only holder.ts calls this. */
+export function vouchHolderProcess(
+  holder: HolderProcess,
+  use: HolderUse,
+  now = Date.now(),
+): HolderProcess {
   if (!isPid(holder.pid)) throw new RangeError(`refusing to vouch for pid ${holder.pid}`);
   const proof = Object.freeze({ ...holder });
-  holders.set(proof, now + PROOF_MS);
+  holders[use].set(proof, now + PROOF_MS);
   return proof;
+}
+
+function spend(holder: HolderProcess, use: HolderUse, now: number): void {
+  const expiry = holders[use].get(holder);
+  holders[use].delete(holder);
+  if (expiry === undefined) throw new RangeError(`refusing to signal ${holder.pid}: unvouched`);
+  if (now > expiry) throw new RangeError(`refusing to signal ${holder.pid}: stale proof`);
 }
 
 /**
  * Sends a checked holder `SIGKILL`, to the pid alone: what its child's group does once the holder
  * is gone is the kernel's hang-up to its session. Whether the holder was still there.
  */
-export function killHolder(holder: HolderProcess, now = Date.now()): boolean {
-  const expiry = holders.get(holder);
-  holders.delete(holder);
-  if (expiry === undefined) throw new RangeError(`refusing to kill ${holder.pid}: unvouched`);
-  if (now > expiry) throw new RangeError(`refusing to kill ${holder.pid}: stale proof`);
+export function killHolder(holder: HolderProcess): boolean {
+  return killHolderAt(holder, Date.now());
+}
+
+/** `killHolder` at the time `now`, for the expiry's tests. Not exported from the package. */
+export function killHolderAt(holder: HolderProcess, now: number): boolean {
+  spend(holder, "kill", now);
   return send(holder.pid, "SIGKILL");
+}
+
+/**
+ * Sends a checked holder `SIGUSR1`, which makes it bind its socket again where the file has gone.
+ * Only that signal, and only to the pid itself. Whether the holder was still there.
+ */
+export function rebindHolder(holder: HolderProcess): boolean {
+  return rebindHolderAt(holder, Date.now());
+}
+
+/** `rebindHolder` at the time `now`, for the expiry's tests. Not exported from the package. */
+export function rebindHolderAt(holder: HolderProcess, now: number): boolean {
+  spend(holder, "rebind", now);
+  return send(holder.pid, "SIGUSR1");
 }
 
 /** A signal refused for its target, before anything was sent: a fault, never a gone group. */

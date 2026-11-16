@@ -25,6 +25,8 @@ export type Area = {
   startsProcessesVia?: string;
   /** Libraries it may use only through the wrappers in `via`, which is an area of its own. */
   onlyThrough?: { packages: string[]; via: string };
+  /** host-guard modules it may import by path, where the rest go only through the package. */
+  hostGuardModules?: string[];
 };
 
 const PACKAGE_DIR: Record<string, string> = {
@@ -213,10 +215,10 @@ export const MATRIX: Area[] = [
     thirdParty: ["node-pty", "hono", "@hono/*", "ws"],
   },
   // Repository scripts: Node tools with no package bans, listed so their small tests get the
-  // small-test bans.
-  { dir: "scripts", banned: [] },
+  // small-test bans. The capped runner and the signal-path rules take host-guard by its index's
+  // path, as they run where the workspace's packages may not resolve.
+  { dir: "scripts", banned: [], hostGuardModules: ["index.ts"] },
 ];
-
 // Small tests (`*.test.ts`) run in process with no I/O; anything that needs a file, a database or
 // a subprocess is a `*.medium.test.ts`.
 const SMALL_TEST_BANS = [
@@ -258,6 +260,20 @@ function packagePatterns(name: string, message: string, allowTypeImports: boolea
   return pattern;
 }
 
+/**
+ * Bans importing host-guard by a module's path, outside host-guard: its modules export forms with
+ * seams that can vouch for any pid, which only its index leaves out. Known gaps, accepted: a path
+ * with a `./` segment in it, a `.mts` or `.js` specifier for the same file, and a dynamic
+ * `import()`, none of which the pattern matches.
+ */
+function hostGuardByPath(where: string, area?: Area): Pattern {
+  const allowed = (area?.hostGuardModules ?? []).map((m) => `!**/host-guard/src/${m}`);
+  return {
+    group: ["**/host-guard/src/**", ...allowed],
+    message: `${where} imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid.`,
+  };
+}
+
 function restrictions(area: Area, smallTest: boolean): Restriction {
   const where = `${area.dir} (tech-stack-and-scaffold.md §3, docs/standards/code.md)`;
   const patterns: Pattern[] = [
@@ -274,6 +290,7 @@ function restrictions(area: Area, smallTest: boolean): Restriction {
       return { ...pattern, group: [...pattern.group, ...allowed.map((a) => `!${p}/${a}`)] };
     }),
   ];
+  if (area.dir !== "packages/host-guard") patterns.push(hostGuardByPath(where, area));
   if (area.thirdParty?.length) {
     patterns.push({
       group: area.thirdParty,
@@ -328,8 +345,17 @@ function overrides(): Override[] {
       },
     ];
   });
+  // Everything no area covers, tests/support and the root's files among them, gets the ban on
+  // host-guard by path; an area's own override, later, replaces it for the area's files.
+  const rest: Override = {
+    files: ["**/*.ts", "**/*.tsx"],
+    rules: {
+      "no-restricted-imports": ["error", { patterns: [hostGuardByPath("this file")] }],
+    },
+  };
   // The one package allowed to run tmux, and within it the one module allowed to send signals.
   return [
+    rest,
     ...areas,
     { files: ["packages/host-guard/src/**"], rules: { "bazhen/host-guard": "off" } },
     { files: ["packages/host-guard/src/signal.ts"], rules: { "bazhen/signal-guard": "off" } },
