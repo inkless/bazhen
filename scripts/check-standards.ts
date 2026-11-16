@@ -932,6 +932,10 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen/src/attach/link.rs::act": "writes frames and keys this build made; reads nothing",
   "crates/bazhen/src/attach/link.rs::pump":
     "moves bytes between the daemon's socket and the person's terminal; tungstenite frames them, and Attachment::keys and frame, which the attach target fuzzes, read them",
+  "crates/bazhen/src/attach/tty.rs::Stops::fd":
+    "borrows the wake-up socket for poll; reads nothing",
+  "crates/bazhen/src/attach/tty.rs::Stops::drop":
+    "has a later stop signal end the process at once; reads nothing",
   "crates/bazhen/src/attach/tty.rs::Wakeups::clear":
     "discards signal wake-ups, whose bytes the handler wrote and which carry no content",
   "crates/bazhen/src/attach/tty.rs::Wakeups::drop": "removes the signal handlers; reads nothing",

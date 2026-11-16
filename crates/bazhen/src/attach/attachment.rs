@@ -71,7 +71,7 @@ pub struct Attachment {
     epoch: Option<u64>,
     /// Keys typed before any epoch was declared, which the daemon would drop: sent once it is.
     held: Vec<u8>,
-    /// How many keys past what `held` keeps were dropped.
+    /// How many bytes of keys past what `held` keeps were dropped.
     dropped: usize,
     /// The person's terminal's size, sent once attached: the daemon ignores one sent before.
     size: Option<Size>,
@@ -201,7 +201,7 @@ impl Attachment {
         let dropped = std::mem::take(&mut self.dropped);
         if dropped > 0 {
             effects.push(Effect::Note(format!(
-                "{dropped} keys typed before the terminal was attached were dropped: more than a \
+                "{dropped} bytes typed before the terminal was attached were dropped: more than a \
                  paste"
             )));
         }
@@ -309,7 +309,7 @@ mod tests {
         assert!(
             attached
                 .iter()
-                .any(|e| matches!(e, Effect::Note(n) if n.starts_with("10 keys"))),
+                .any(|e| matches!(e, Effect::Note(n) if n.starts_with("10 bytes"))),
             "{attached:?}"
         );
     }

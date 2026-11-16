@@ -14,7 +14,7 @@ use tungstenite::handshake::client::Request;
 use tungstenite::{HandshakeError, Message, WebSocket};
 
 use super::attachment::{Attachment, Effect, Ending};
-use super::tty::{self, Wakeups};
+use super::tty::{self, Stops, Wakeups};
 use crate::call::{ANOTHER_BUILD, CALL, Failed};
 use crate::fmt::encode_uri_component;
 
@@ -102,7 +102,7 @@ pub(crate) fn pump(
     ws: &mut WebSocket<UnixStream>,
     attachment: &mut Attachment,
     resizes: &Wakeups,
-    stops: &Wakeups,
+    stops: &Stops,
     notes: &mut Vec<String>,
 ) -> io::Result<Outcome> {
     let stdin = io::stdin();

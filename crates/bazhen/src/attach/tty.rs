@@ -7,6 +7,10 @@ use std::os::unix::net::UnixStream;
 
 use rustix::termios::{OptionalActions, Termios, isatty, tcgetattr, tcgetwinsize, tcsetattr};
 use signal_hook::SigId;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+type PanicHook = Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Send + Sync>;
 
 use super::attachment::Size;
 
@@ -37,9 +41,18 @@ pub(crate) fn size() -> io::Result<Size> {
 
 /// The person's terminal in raw mode, as it was before once this drops, or once the process
 /// panics: a release build aborts on a panic, which runs no `Drop`.
-#[derive(Debug)]
 pub(crate) struct Raw {
     before: Termios,
+    /// The panic hook this one stands in front of, put back once the terminal is.
+    previous: Arc<PanicHook>,
+}
+
+impl std::fmt::Debug for Raw {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Raw")
+            .field("before", &self.before)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Raw {
@@ -49,12 +62,13 @@ impl Raw {
         raw.make_raw();
         tcsetattr(io::stdin(), OptionalActions::Flush, &raw)?;
         let saved = before.clone();
-        let panicked = std::panic::take_hook();
+        let previous: Arc<PanicHook> = Arc::new(std::panic::take_hook());
+        let chained = Arc::clone(&previous);
         std::panic::set_hook(Box::new(move |info| {
             restore(&saved);
-            panicked(info);
+            chained(info);
         }));
-        let raw = Self { before };
+        let raw = Self { before, previous };
         clear()?;
         Ok(raw)
     }
@@ -67,26 +81,31 @@ pub(crate) fn clear() -> io::Result<()> {
 }
 
 /// Puts the person's terminal back as `before` had it, as well as it can be: nothing is left to
-/// report a failure to, and a terminal that's gone needs none of it.
+/// report a failure to, and a terminal that's gone needs none of it. The modes come first, and the
+/// sequences go straight to fd 1: a panic inside a write to stdout still holds its lock.
 fn restore(before: &Termios) {
-    let _ = io::stdout().write_all(LEAVE.as_bytes());
-    let _ = io::stdout().flush();
     let _ = tcsetattr(io::stdin(), OptionalActions::Flush, before);
+    let mut rest = LEAVE.as_bytes();
+    while let Ok(n @ 1..) = rustix::io::write(io::stdout(), rest) {
+        rest = rest.get(n..).unwrap_or_default();
+    }
 }
 
 impl Drop for Raw {
     fn drop(&mut self) {
         restore(&self.before);
-        // The default hook again, as there is no raw terminal left to put back; a hook can't be
-        // changed while unwinding.
+        // The hook from before again, as there is no raw terminal left to put back; a hook can't
+        // be changed while unwinding.
         if !std::thread::panicking() {
-            drop(std::panic::take_hook());
+            let previous = Arc::clone(&self.previous);
+            std::panic::set_hook(Box::new(move |info| previous(info)));
         }
     }
 }
 
-/// Signals as a readable fd, for the attachment's `poll`; the handlers go when it drops. Each
-/// signal it watches no longer does what it would by default: the loop acts on it.
+/// Signals as a readable fd, for the attachment's `poll`; the handlers go when it drops. A signal
+/// handled once never again does what it would by default, so one whose default matters is
+/// watched by `Stops`.
 #[derive(Debug)]
 pub(crate) struct Wakeups {
     wakeups: UnixStream,
@@ -94,16 +113,9 @@ pub(crate) struct Wakeups {
 }
 
 impl Wakeups {
-    /// The terminal's size changing.
+    /// The terminal's size changing, whose default is to do nothing.
     pub(crate) fn resizes() -> io::Result<Self> {
         Self::watch(&[signal_hook::consts::SIGWINCH])
-    }
-
-    /// Being asked to stop: by `kill`, the terminal hanging up, or an interrupt from outside it,
-    /// as a raw terminal sends none of its own.
-    pub(crate) fn stops() -> io::Result<Self> {
-        use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM};
-        Self::watch(&[SIGTERM, SIGHUP, SIGINT])
     }
 
     fn watch(signals: &[std::ffi::c_int]) -> io::Result<Self> {
@@ -141,5 +153,48 @@ impl Drop for Wakeups {
         for &handler in &self.handlers {
             signal_hook::low_level::unregister(handler);
         }
+    }
+}
+
+/// The signals that ask this process to stop: `kill`, the terminal hanging up, and an interrupt
+/// from outside it, as a raw terminal sends none of its own.
+const STOPS: [std::ffi::c_int; 3] = [
+    signal_hook::consts::SIGTERM,
+    signal_hook::consts::SIGHUP,
+    signal_hook::consts::SIGINT,
+];
+
+/// Being asked to stop. The first such signal wakes the attachment's `poll`, so it ends cleanly;
+/// a second ends the process at once, as one does by default, should the loop be stuck writing to
+/// a terminal that stopped reading. So does any once this drops.
+#[derive(Debug)]
+pub(crate) struct Stops {
+    wakeups: Wakeups,
+    asked: Arc<AtomicBool>,
+}
+
+impl Stops {
+    pub(crate) fn watch() -> io::Result<Self> {
+        let wakeups = Wakeups::watch(&STOPS)?;
+        let asked = Arc::new(AtomicBool::new(false));
+        for signal in STOPS {
+            signal_hook::flag::register_conditional_shutdown(
+                signal,
+                128 + signal,
+                Arc::clone(&asked),
+            )?;
+            signal_hook::flag::register(signal, Arc::clone(&asked))?;
+        }
+        Ok(Self { wakeups, asked })
+    }
+
+    pub(crate) fn fd(&self) -> BorrowedFd<'_> {
+        self.wakeups.fd()
+    }
+}
+
+impl Drop for Stops {
+    fn drop(&mut self) {
+        self.asked.store(true, Ordering::SeqCst);
     }
 }

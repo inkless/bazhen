@@ -65,7 +65,7 @@ pub(crate) fn run(
     let mut ws = link::open(socket, &terminal, &caller, &Attachment::hello(size))?;
     let watching = |e: std::io::Error| Failed::Refused(format!("can't watch for signals: {e}"));
     let resizes = tty::Wakeups::resizes().map_err(watching)?;
-    let stops = tty::Wakeups::stops().map_err(watching)?;
+    let stops = tty::Stops::watch().map_err(watching)?;
     let raw = tty::Raw::enter()
         .map_err(|e| Failed::Refused(format!("can't take over the terminal: {e}")))?;
     let mut notes = Vec::new();
