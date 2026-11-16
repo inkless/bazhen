@@ -59,13 +59,16 @@ describe.each([
       ]);
     });
 
-    it("refuses a process in another agent's terminal that presents nothing, by its process", async () => {
+    it("refuses a process Bazhen's runtime runs in no agent's or shell's terminal, by its process", async () => {
       const route = `/v1/terminals/${ids.terminalId}/stream`;
       await daemon.program([process.execPath, probe, daemon.socket, route, probeOut(daemon)]);
       await waitUntil(() => answered(daemon).includes("\r\n\r\n"), "the probe's answer");
       expect(answered(daemon).split("\r\n\r\n")).toEqual([
         expect.stringMatching(/^HTTP\/1\.1 403 Forbidden\r\n/),
-        JSON.stringify({ error: "forbidden", message: "an agent can't attach to a terminal" }),
+        JSON.stringify({
+          error: "forbidden",
+          message: "the caller runs under Bazhen's runtime, in no terminal",
+        }),
       ]);
     });
 

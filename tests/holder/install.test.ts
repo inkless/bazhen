@@ -53,7 +53,11 @@ it("keeps a holder on the build it started from while the next installs, then pr
     // Started outside any scope: not contained on Linux, unreadable where there are no cgroups.
     builds: (await runtime.builds())
       .filter((b) => b.terminalId === holder.terminalId)
-      .map(({ contained, ...build }) => ({ ...build, scoped: contained === true })),
+      .map(({ contained, stats, ...build }) => ({
+        ...build,
+        scoped: contained === true,
+        historyLines: stats?.historyLines,
+      })),
     pruned: await pruneUnusedHolders(dir, uid, next),
     inode: statSync(old.binary).ino,
     same: readFileSync(old.binary).equals(bytes),
@@ -72,6 +76,9 @@ it("keeps a holder on the build it started from while the next installs, then pr
           build: old.build,
           protocol: [HOLDER_PROTOCOL_VERSION],
           scoped: false,
+          socket: holder.socket,
+          holderPid: holder.pid,
+          historyLines: expect.any(Number),
         },
       ],
       pruned: [],

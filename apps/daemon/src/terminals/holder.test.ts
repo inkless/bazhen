@@ -4,7 +4,7 @@ import { holderDoctor } from "./holder.ts";
 const installed = { binary: "/s/holder/0123456789abcdef/bazhen-holder", build: "0123456789abcdef" };
 
 describe("what doctor reports of holders", () => {
-  it("names the installed build, and each answering holder with its build, socket and memory", async () => {
+  it("names the installed build and the build each answering holder runs", async () => {
     const held = {
       terminalId: "term_a",
       build: "fedcba9876543210",
@@ -14,9 +14,7 @@ describe("what doctor reports of holders", () => {
       holderPid: 4242,
       stats: { engineBytes: 1, rss: 2, ringBytes: 3, historyLines: 4 },
     };
-    const runtime = {
-      builds: async () => [held],
-    };
+    const runtime = { builds: async () => [held] };
     const install = { installed: { ...installed, installDir: "/s/holder" } };
     expect(await holderDoctor(install, runtime)).toEqual({
       ...installed,
