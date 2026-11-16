@@ -5,6 +5,7 @@ import {
   type Locator,
   type Page,
 } from "@playwright/test";
+import { answerPatched } from "../support/state-route.ts";
 import { giveTranscript } from "../support/transcript.ts";
 
 type Hook =
@@ -144,3 +145,8 @@ export async function givePageAgentTranscript(page: Page, agentId: string): Prom
  */
 export const status = (within: Page | Locator) =>
   within.locator('section[aria-label="terminal"] > p[aria-hidden="true"]');
+
+/** Shows the page the daemon's own state with `patch` applied, as if the daemon had reported it. */
+export async function patchState(page: Page, patch: (state: object) => object): Promise<void> {
+  await page.route("**/v1/state", (route) => answerPatched(route, patch));
+}
