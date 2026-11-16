@@ -112,6 +112,38 @@ describe("raw signal calls in TypeScript", () => {
     expect(calls("a.ts", source)).toEqual([]);
   });
 
+  it("reads a template's substitutions as code, nested ones included", () => {
+    const source = [
+      'const a = `${child.kill("SIGKILL")}`;',
+      "const b = `x ${`y ${proc.kill()}`} z`;",
+      "const c = `${{ timeout: 1 }.timeout} ${spawn(cmd, [], { timeout: 1 })}`;",
+      "const d = `${'}'}`; process.kill(pid);",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("reads past a regular expression holding a quote, and not a division as one", () => {
+    const source = [
+      'const re = /"/; child.kill();',
+      "const re2 = /'[/']/g.test(s); process.kill(pid);",
+      "const r = total / count; child.kill(); const s = x / y;",
+      "const q = (a) / 2; process.abort(); const w = arr[0] / 3;",
+      "if (ok) return /'/.test(s); child.kill();",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([1, 2, 3, 4, 5]);
+    expect(calls("a.ts", 'const re = /process.kill("x")/; const s = "child.kill()";')).toEqual([]);
+  });
+
+  it("finds process._kill, and a re-export of process's kill", () => {
+    const source = [
+      "process._kill(pid, 9);",
+      'export { kill } from "node:process";',
+      'export { abort as die } from "process";',
+      'export { kill } from "./mine.ts";',
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([1, 2, 3]);
+  });
+
   it("finds process.abort however it is reached", () => {
     const source = [
       "process.abort();",
@@ -362,6 +394,29 @@ describe("kills by a process started to send them", () => {
     ).toEqual([]);
   });
 
+  it("lets a fixture file name command-line kills, but not send a signal itself", () => {
+    const source = [
+      "child.kill();",
+      "spawn(cmd, [], { timeout: 1 });",
+      'const s = "kill -9 -1";',
+      "process.kill(pid);",
+    ].join("\n");
+    for (const file of ["scripts/signal-paths.test.ts", "scripts/signal-paths.ts"])
+      expect(rawSignalCalls(file, source).map((c) => c.line)).toEqual([1, 2, 4]);
+  });
+
+  it("allows a start's timeout, and no other option at that call", () => {
+    const base = "scripts/falsify-base.ts";
+    const call = [
+      'spawnSync("pnpm", installArgs(mode), {',
+      '  killSignal: "SIGKILL",',
+      "  signal: abort.signal,",
+      "  timeout: INSTALL_TIMEOUT_MS,",
+      "});",
+    ].join("\n");
+    expect(rawSignalCalls(base, call).map((c) => c.line)).toEqual([2, 3]);
+  });
+
   it("allows host-guard's cap its own scope's systemctl kill, and nothing else there", () => {
     const cap = "packages/host-guard/src/cap.ts";
     const own = 'output("systemctl", ["--user", "kill", `--signal=${signal}`, unit]);';
@@ -517,6 +572,12 @@ describe("signalling sources", () => {
     expect(isSignallingSource("a.ts", "signalOwnChild(child, 'SIGINT');")).toBe(true);
     expect(isSignallingSource("a.ts", "void reset().finally(() => proc.hangUp());")).toBe(true);
     expect(isSignallingSource("a.ts", "const pty = { hangUp: () => undefined };")).toBe(false);
+    const scope = 'execFile(file, args, { env, timeout, encoding: "utf8" }, done);';
+    expect(rawSignalCalls("packages/host-guard/src/scope.ts", scope)).toEqual([]);
+    expect(isSignallingSource("packages/host-guard/src/scope.ts", scope)).toBe(true);
+    expect(isSignallingSource("scripts/signal-paths.test.ts", 'const s = "kill -9 -1";')).toBe(
+      false,
+    );
     expect(isSignallingSource("a.ts", "await rebindHolderSocket(holder);")).toBe(true);
     expect(
       ["startHolderWith", "rebindHolderWith", "killHolderAt", "rebindHolderAt"].filter(

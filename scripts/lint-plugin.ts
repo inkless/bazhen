@@ -48,8 +48,8 @@ const STARTS = new Set([
 const CHILD_PROCESS = new Set(["child_process", "node:child_process"]);
 const PROCESS = new Set(["process", "node:process"]);
 const GLOBALS = new Set(["globalThis", "global", "window", "self"]);
-/** What on `process` sends a signal: `kill` to any pid, `abort` SIGABRT to this one. */
-const SENDS = new Set(["kill", "abort"]);
+/** What on `process` sends a signal: `kill` and `_kill` to any pid, `abort` SIGABRT to this one. */
+const SENDS = new Set(["kill", "_kill", "abort"]);
 
 const isNode = (value: unknown): value is Node =>
   typeof value === "object" && value !== null && typeof Reflect.get(value, "type") === "string";
@@ -134,6 +134,13 @@ const guard = (reports: { tmux: boolean; signals: boolean }) => ({
               processes.add(local);
             }
           }
+        }
+      },
+      ExportNamedDeclaration(node: Node) {
+        const source = isNode(node["source"]) ? String(node["source"]["value"]) : "";
+        if (!reports.signals || !PROCESS.has(source)) return;
+        for (const spec of nodes(node["specifiers"])) {
+          if (SENDS.has(nameOf(spec["local"]) ?? "")) context.report({ node: spec, message: KILL });
         }
       },
       VariableDeclarator(node: Node) {

@@ -34,6 +34,7 @@ import {
   pnpmScripts,
   rustFailures,
   signalChokepointFailures,
+  allowedSignalFileFailures,
   testSignalDependencyFailures,
   unmarkedSignallingTests,
   skillFailures,
@@ -42,6 +43,7 @@ import {
   checkMigrations,
   STANDARDS_CHECKS,
 } from "./check-standards.ts";
+import { ALLOWED_SIGNALS } from "./signal-paths.ts";
 
 describe("migrationVersionFailures", () => {
   it("takes migrations numbered 1 to the latest in order", () => {
@@ -1592,29 +1594,45 @@ describe("the signal chokepoints", () => {
   const failures = (sources: Record<string, string>) =>
     signalChokepointFailures([...CHOKEPOINTS, ...Object.keys(sources)], (f) => sources[f] ?? "");
   const hits = (source: string) =>
-    failures({ "packages/host-guard/src/tmux.ts": source }).map((f) => f.split(": ")[0]);
+    failures({ "packages/host-guard/src/scope.ts": source }).map((f) => f.split(": ")[0]);
+  const scoped = 'execFile(file, args, { env, timeout, encoding: "utf8" }, (error, stdout) => {});';
 
   it("allows only the exact call an allowed signal names, not another in the same file", () => {
-    const allowed = 'execFileSync("tmux", ["-V"], { encoding: "utf8", timeout: TIMEOUT_MS });';
-    expect(hits(allowed)).toEqual([]);
+    expect(hits(scoped)).toEqual([]);
     expect(
       hits(
         [
-          allowed,
-          'execFileSync("tmux", ["ls"], { encoding: "utf8", timeout: TIMEOUT_MS });',
+          scoped,
+          'execFile(file, args, { env, timeout: 1, encoding: "utf8" }, done);',
           "child.kill();",
-          'execFileSync("tmux", ["-V"], { encoding: "utf8", timeout: 1 });',
+          'execFile(other, args, { env, timeout, encoding: "utf8" }, done);',
         ].join("\n"),
       ),
     ).toEqual([
-      "packages/host-guard/src/tmux.ts:2",
-      "packages/host-guard/src/tmux.ts:3",
-      "packages/host-guard/src/tmux.ts:4",
+      "packages/host-guard/src/scope.ts:2",
+      "packages/host-guard/src/scope.ts:3",
+      "packages/host-guard/src/scope.ts:4",
     ]);
-    expect(hits("const pty = { hangUp: () => proc.kill() };\nchild.kill();")).toEqual([
-      "packages/host-guard/src/tmux.ts:1",
-      "packages/host-guard/src/tmux.ts:2",
+    expect(hits(`${scoped}\nconst pty = { hangUp: () => proc.kill() };`)).toEqual([
+      "packages/host-guard/src/scope.ts:2",
     ]);
+  });
+
+  it("fails an allowed signal found more or fewer times than it says, a copy or none", () => {
+    expect(hits(`${scoped}\n${scoped}`)).toEqual(["packages/host-guard/src/scope.ts"]);
+    expect(failures({ "packages/host-guard/src/scope.ts": `${scoped}\n${scoped}` })).toEqual([
+      expect.stringMatching(/scope\.ts: an allowed signal .* is found 2 times, not 1/),
+    ]);
+    expect(failures({ "packages/host-guard/src/scope.ts": "export {};" })).toEqual([
+      expect.stringMatching(/scope\.ts: an allowed signal .* is found 0 times, not 1/),
+    ]);
+  });
+
+  it("fails an allowed signal listed for a file that no longer exists", () => {
+    expect(allowedSignalFileFailures(["packages/host-guard/src/scope.ts"])).toContainEqual(
+      "scripts/signal-paths.ts: ALLOWED_SIGNALS lists missing packages/host-guard/src/tmux.ts.",
+    );
+    expect(allowedSignalFileFailures(Object.keys(ALLOWED_SIGNALS))).toEqual([]);
   });
 
   it("names each raw signal call outside them, and where to send it instead", () => {

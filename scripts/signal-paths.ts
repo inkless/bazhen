@@ -68,11 +68,11 @@ function signalImports(code: string) {
   });
 }
 
-const TS_KILL = /\bprocess\s*\??\.\s*(?:kill|abort)\b/g;
-const TS_KILL_COMPUTED = /\bprocess\s*\??\.?\s*\[\s*["'`](?:kill|abort)["'`]\s*\]/g;
-const TS_KILL_BOUND = /\{[^}]*\babort\b[^}]*\}\s*=\s*(?:globalThis\s*\.\s*)?process\b/g;
+const TS_KILL = /\bprocess\s*\??\.\s*(?:_?kill|abort)\b/g;
+const TS_KILL_COMPUTED = /\bprocess\s*\??\.?\s*\[\s*["'`](?:_?kill|abort)["'`]\s*\]/g;
+const TS_KILL_BOUND = /\{[^}]*\b(?:_kill|abort)\b[^}]*\}\s*=\s*(?:globalThis\s*\.\s*)?process\b/g;
 const TS_KILL_IMPORT =
-  /\bimport\s*(?:type\s+)?\{[^}]*\b(?:kill|abort)\b[^}]*\}\s*from\s*["'](?:node:)?process["']/g;
+  /\b(?:import|export)\s*(?:type\s+)?\{[^}]*\b(?:_?kill|abort)\b[^}]*\}\s*from\s*["'](?:node:)?process["']/g;
 // A member named kill on anything: a ChildProcess's, a node-pty IPty's, process's. Text can't tell
 // them apart, so each is a signal, and an API whose kill sends none is named for what it does.
 const TS_MEMBER_KILL = /(?:[\w$]+\s*)?\??\.\s*kill\b/g;
@@ -170,11 +170,41 @@ function startOptions(code: string, kept: string) {
 
 const blank = (text: string) => text.replaceAll(/[^\n]/g, " ");
 
+// After these, a `/` opens a regular expression rather than dividing: an operator, an opening
+// bracket, a statement's end, or a keyword that takes an expression. `<` is left out, as JSX's
+// `</` closes a tag.
+const REGEX_AFTER =
+  /(?:[=(,:[!&|?{};+\-*%>~^]|\b(?:return|typeof|case|do|else|in|of|new|delete|void|throw|yield|await|instanceof))$/;
+const opensRegex = (out: string) => {
+  const before = out.trimEnd();
+  return before === "" || REGEX_AFTER.test(before.slice(-16));
+};
+
+/** The end of a regular expression literal opening at `at`, past its flags, or -1 if none does. */
+function regexEnd(source: string, at: number): number {
+  let inClass = false;
+  for (let i = at + 1; i < source.length; i++) {
+    const c = source[i];
+    if (c === "\n") return -1;
+    if (c === "\\") i++;
+    else if (c === "[") inClass = true;
+    else if (c === "]") inClass = false;
+    else if (c === "/" && !inClass) {
+      let end = i + 1;
+      while (/[a-z]/.test(source[end] ?? "")) end++;
+      return end;
+    }
+  }
+  return -1;
+}
+
 /**
- * TypeScript with comments blanked, and with every string and template literal's contents
- * blanked unless `keepStrings`, character for character, so an index in one is an index in the
- * other and in the source. A regular expression literal holding a quote can hide what follows
- * it; the lint rule, which reads the syntax tree, is the TypeScript check that can't be fooled.
+ * TypeScript with comments blanked, and with every string, template text and regular expression
+ * literal's contents blanked unless `keepStrings`, character for character, so an index in one is
+ * an index in the other and in the source. A template's substitutions, `${…}`, are code, read as
+ * any other. A `/` opens a regular expression where the code before it can't be a value it
+ * divides; JSX's `</` never does. The lint rule, which reads the syntax tree, is the check that
+ * needs no such reading.
  */
 export function tsCode(
   source: string,
@@ -183,26 +213,62 @@ export function tsCode(
 ): string {
   let out = "";
   let i = 0;
+  // For each template whose substitution is open, where it began and its unclosed braces.
+  const templates: { start: number; depth: number }[] = [];
+  const text = (body: string) => (keepStrings ? body : blank(body));
+  /** Reads template text from `i` to its next substitution or its closing backtick. */
+  const templateText = (start: number) => {
+    const from = i;
+    while (i < source.length && source[i] !== "`" && !source.startsWith("${", i))
+      i += source[i] === "\\" ? 2 : 1;
+    i = Math.min(i, source.length);
+    out += text(source.slice(from, i));
+    if (source.startsWith("${", i)) {
+      templates.push({ start, depth: 0 });
+      out += "${";
+      i += 2;
+    } else if (i < source.length) {
+      literals.push({ index: start, body: source.slice(start + 1, i) });
+      out += "`";
+      i++;
+    } else literals.push({ index: start, body: source.slice(start + 1) });
+  };
   while (i < source.length) {
     const c = source[i] ?? "";
     const next = source[i + 1];
     const start = i;
+    const open = templates.at(-1);
     if (c === "/" && (next === "/" || next === "*")) {
       const end = next === "/" ? source.indexOf("\n", i) : source.indexOf("*/", i + 2) + 2;
       i = end < start + 2 ? source.length : end;
       out += blank(source.slice(start, i));
-    } else if (c === '"' || c === "'" || c === "`") {
+    } else if (c === "/" && opensRegex(out) && regexEnd(source, i) > 0) {
+      i = regexEnd(source, i);
+      out += "/" + text(source.slice(start + 1, i - 1)) + source[i - 1];
+    } else if (c === '"' || c === "'") {
       i++;
       while (i < source.length && source[i] !== c) i += source[i] === "\\" ? 2 : 1;
       i = Math.min(i + 1, source.length);
       const body = source.slice(start + 1, i - 1);
       literals.push({ index: start, body });
-      out += c + (keepStrings ? body : blank(body)) + (i - start > 1 ? c : "");
+      out += c + text(body) + (i - start > 1 ? c : "");
+    } else if (c === "`") {
+      out += c;
+      i++;
+      templateText(start);
+    } else if (c === "}" && open !== undefined && open.depth === 0) {
+      templates.pop();
+      out += c;
+      i++;
+      templateText(open.start);
     } else {
+      if (open !== undefined && c === "{") open.depth++;
+      if (open !== undefined && c === "}") open.depth--;
       out += c;
       i++;
     }
   }
+  literals.sort((x, y) => x.index - y.index);
   return out;
 }
 
@@ -529,33 +595,50 @@ function commandKills(words: string[], named: boolean): boolean {
 interface AllowedSignal {
   readonly code: RegExp;
   readonly why: string;
+  /** How many places `code` matches, 1 unless given: any other count fails, 0 included. */
+  readonly count?: number;
+  /**
+   * Text that names kills and runs none: it allows a kill by a command line alone, and doesn't
+   * make its file one that signals.
+   */
+  readonly fixture?: boolean;
+  /** The part of each match that is allowed, its first match within it, when not all of it. */
+  readonly at?: RegExp;
 }
 
 /**
  * A start whose `timeout` Node enforces by killing the child it started, through that child's own
- * handle, which reaches nothing once the child is reaped: what `signalOwnChild` checks.
+ * handle, which reaches nothing once the child is reaped: what `signalOwnChild` checks. Only the
+ * `timeout` key is allowed, so another option at the same call still counts.
  */
-const timedOut = (code: RegExp, what: string): AllowedSignal => ({
+const timedOut = (code: RegExp, what: string, count = 1): AllowedSignal => ({
   code,
   why: `${what}, which Node kills through its own handle once it outlives its timeout`,
+  count,
+  at: /\btimeout\b/,
 });
 
 /**
- * The signals allowed outside a chokepoint, each by file, the exact code that sends it, and why
- * it may: a signal found anywhere else in the file still counts. A span that runs over several
- * lines stops at a `;`, so it can't reach into the next statement.
+ * The signals allowed outside a chokepoint, each by file, the exact code that sends it, how many
+ * times it appears there, and why it may: a signal found anywhere else in the file still counts.
+ * A pattern that runs over several lines stops at a `;`, so it can't reach into the next statement.
  */
 export const ALLOWED_SIGNALS: Readonly<Record<string, readonly AllowedSignal[]>> = {
   "scripts/signal-paths.ts": [
-    { code: /[\s\S]*/, why: "the patterns that find kills, which start nothing" },
+    { code: /[\s\S]*/, why: "the patterns that find kills, which start nothing", fixture: true },
   ],
   "scripts/signal-paths.test.ts": [
-    { code: /[\s\S]*/, why: "the fixtures those patterns are tested on, which start nothing" },
+    {
+      code: /[\s\S]*/,
+      why: "the fixtures those patterns are tested on, which start nothing",
+      fixture: true,
+    },
   ],
   "scripts/lint-plugin.medium.test.ts": [
     {
       code: /const FIXTURE = \[[\s\S]*?\]\.join\("\\n"\)/,
       why: "the lint rule's fixture, which oxlint reads and nothing runs",
+      fixture: true,
     },
   ],
   "packages/host-guard/src/cap.ts": [
@@ -655,6 +738,7 @@ export const ALLOWED_SIGNALS: Readonly<Record<string, readonly AllowedSignal[]>>
     timedOut(
       /spawnSync\("node", \[FALSIFY, [^\]]*\], \{[^;]*?timeout: 30_000,/,
       "falsify under test",
+      4,
     ),
   ],
   "tests/api/daemon.ts": [
@@ -689,12 +773,18 @@ function kills(
         (KILL_PROGRAM.test(l.body) &&
           STARTS_PROGRAM.test(code.slice(Math.max(0, l.index - 40), l.index))),
     )
-    .map((l) => ({ index: l.index, line: lineAt(code, l.index), call: `a kill by "${l.body}"` }));
+    .map((l): Signal => ({
+      index: l.index,
+      line: lineAt(code, l.index),
+      call: `a kill by "${l.body}"`,
+      literal: true,
+    }));
   // A program and its arguments as literals in a row: systemctl's or loginctl's kill verbs,
   // fuser -k, or a launcher handed a kill program.
   literals.forEach((l, n) => {
     const next = literals.slice(n + 1, n + 5).map((a) => a.body);
-    const hit = (call: string) => out.push({ index: l.index, line: lineAt(code, l.index), call });
+    const hit = (call: string) =>
+      out.push({ index: l.index, line: lineAt(code, l.index), call, literal: true });
     if (SYSTEMCTL.test(l.body) && next.includes("kill")) hit("systemctl kill");
     if (LOGINCTL.test(l.body) && next.some((a) => LOGINCTL_KILL.test(a))) hit("loginctl kill");
     if (FUSER.test(l.body) && next.some((a) => FUSER_KILL.test(a))) hit("fuser -k");
@@ -704,21 +794,60 @@ function kills(
   return out;
 }
 
-/** The spans of `text` where a signal is allowed (ALLOWED_SIGNALS). */
-function allowedSpans(file: string, text: string): [number, number][] {
-  return (ALLOWED_SIGNALS[file] ?? []).flatMap(({ code }) =>
-    [...text.matchAll(new RegExp(code.source, "g"))].map((m): [number, number] => [
-      m.index,
-      m.index + m[0].length,
-    ]),
-  );
+/** Each entry for `file` with where in `text`, ALLOWED_SIGNALS's text for it, it allows. */
+function allowedIn(file: string, text: string) {
+  return (ALLOWED_SIGNALS[file] ?? []).map((entry) => {
+    const spans = [...text.matchAll(new RegExp(entry.code.source, "g"))]
+      .filter((m) => m[0] !== "")
+      .map((m): [number, number] => {
+        const part = entry.at === undefined ? undefined : entry.at.exec(m[0]);
+        return part === undefined || part === null
+          ? [m.index, m.index + m[0].length]
+          : [m.index + part.index, m.index + part.index + part[0].length];
+      });
+    return { entry, spans };
+  });
 }
 
-const outside = (spans: [number, number][]) => (m: { index: number }) =>
-  !spans.some(([from, to]) => m.index >= from && m.index < to);
+type Signal = { index: number; line: number; call: string; literal?: boolean };
+
+/** Whether one of `allowed` lets `signal` through: a fixture lets only a command line's. */
+const allows = (allowed: ReturnType<typeof allowedIn>, signal: Signal) =>
+  allowed.some(
+    ({ entry, spans }) =>
+      (entry.fixture !== true || signal.literal === true) &&
+      spans.some(([from, to]) => signal.index >= from && signal.index < to),
+  );
+
+const asCalls = (signals: Signal[]) =>
+  signals.toSorted((a, b) => a.index - b.index).map(({ line, call }) => ({ line, call }));
 
 /** Each raw signal call in a file, by line, whatever else the file is. */
 export function rawSignalCalls(file: string, text: string): { line: number; call: string }[] {
+  const { signals, allowed } = signalsIn(file, text);
+  return asCalls(signals.filter((s) => !allows(allowed, s)));
+}
+
+/**
+ * Each ALLOWED_SIGNALS entry for `file` that its text doesn't match exactly as many times as the
+ * entry says: a copy of an allowed call, or an entry whose call has gone.
+ */
+export function allowedSignalFailures(file: string, text: string): string[] {
+  return signalsIn(file, text).allowed.flatMap(({ entry, spans }) =>
+    spans.length === (entry.count ?? 1)
+      ? []
+      : [
+          `${file}: an allowed signal (${entry.why}) is found ${spans.length} times, not ` +
+            `${entry.count ?? 1}; list each call it allows in scripts/signal-paths.ts.`,
+        ],
+  );
+}
+
+/** Every signal in a file, allowed or not, and what ALLOWED_SIGNALS allows there. */
+function signalsIn(
+  file: string,
+  text: string,
+): { signals: Signal[]; allowed: ReturnType<typeof allowedIn> } {
   if (file.endsWith(".rs")) {
     const strings: string[] = [];
     const raw: boolean[] = [];
@@ -728,16 +857,16 @@ export function rawSignalCalls(file: string, text: string): { line: number; call
       body: strings[n] ?? "",
       cooked: raw[n],
     }));
-    const spans = allowedSpans(file, code);
     const direct = found(code, RUST_RAW);
     const imports = signalImports(code).filter(
       (u) => !direct.some((d) => d.index >= u.index && d.index < u.end),
     );
-    return [...direct, ...imports, ...kills(literals, code).filter(outside(spans))]
-      .toSorted((a, b) => a.index - b.index)
-      .map(({ line, call }) => ({ line, call }));
+    return {
+      signals: [...direct, ...imports, ...kills(literals, code)],
+      allowed: allowedIn(file, code),
+    };
   }
-  if (!/\.[cm]?[jt]sx?$/.test(file)) return [];
+  if (!/\.[cm]?[jt]sx?$/.test(file)) return { signals: [], allowed: allowedIn(file, "") };
   const literals: { index: number; body: string }[] = [];
   const code = tsCode(text, false, literals);
   const kept = tsCode(text, true);
@@ -745,8 +874,8 @@ export function rawSignalCalls(file: string, text: string): { line: number; call
   // where it is code.
   const inCode = (m: { index: number }) =>
     code.slice(m.index, m.index + 1) === kept.slice(m.index, m.index + 1);
-  const imports = found(kept, TS_KILL_IMPORT).filter(
-    (m) => code.slice(m.index, m.index + 6) === "import",
+  const imports = found(kept, TS_KILL_IMPORT).filter((m) =>
+    ["import", "export"].includes(code.slice(m.index, m.index + 6)),
   );
   const computed = found(kept, TS_KILL_COMPUTED).filter(inCode);
   // What else names `process`: a default or namespace import of it, or a constant bound to it.
@@ -757,17 +886,17 @@ export function rawSignalCalls(file: string, text: string): { line: number; call
     ),
   ].flatMap((m) => (m[1] === undefined || !inCode(m) ? [] : [m[1]]));
   const viaAlias = aliases.flatMap((alias) => [
-    ...found(code, new RegExp(`\\b${alias}\\s*\\??\\.\\s*(?:kill|abort)\\b`, "g")),
+    ...found(code, new RegExp(`\\b${alias}\\s*\\??\\.\\s*(?:_?kill|abort)\\b`, "g")),
     ...found(
       kept,
-      new RegExp(`\\b${alias}\\s*\\??\\.?\\s*\\[\\s*["'\`](?:kill|abort)["'\`]\\s*\\]`, "g"),
+      new RegExp(`\\b${alias}\\s*\\??\\.?\\s*\\[\\s*["'\`](?:_?kill|abort)["'\`]\\s*\\]`, "g"),
     ).filter(inCode),
   ]);
   const memberComputed = [...kept.matchAll(TS_MEMBER_KILL_COMPUTED)]
     .filter((m) => inCode(m) && !NOT_RECEIVERS.has(m[1] ?? ""))
     .map((m) => ({ index: m.index, line: lineAt(code, m.index), call: m[0] }));
   const seen = new Set<number>();
-  return [
+  const signals = [
     ...found(code, TS_KILL),
     ...found(code, TS_KILL_BOUND),
     ...imports,
@@ -779,11 +908,8 @@ export function rawSignalCalls(file: string, text: string): { line: number; call
     ...found(code, /\bkillSignal\b/g),
     ...startOptions(code, kept),
     ...kills(literals, code),
-  ]
-    .filter((m) => !seen.has(m.index) && seen.add(m.index))
-    .filter(outside(allowedSpans(file, kept)))
-    .toSorted((a, b) => a.index - b.index)
-    .map(({ line, call }) => ({ line, call }));
+  ].filter((m) => !seen.has(m.index) && seen.add(m.index));
+  return { signals, allowed: allowedIn(file, kept) };
 }
 
 /**
@@ -820,7 +946,11 @@ const RUST_SENDERS =
  * turn a check of a target into a signal to anything, so it is changed only in a sandbox.
  */
 export function isSignallingSource(file: string, text: string): boolean {
-  if (Object.hasOwn(SIGNAL_CHOKEPOINTS, file) || rawSignalCalls(file, text).length > 0) return true;
+  if (Object.hasOwn(SIGNAL_CHOKEPOINTS, file)) return true;
+  // Read before the allowed ones are let through: an allowed signal is still a signal.
+  const { signals, allowed } = signalsIn(file, text);
+  const fixtures = allowed.filter(({ entry }) => entry.fixture === true);
+  if (signals.some((s) => !allows(fixtures, s))) return true;
   if (file.endsWith(".rs")) return RUST_SENDERS.test(rustCode(text));
   return /\.[cm]?[jt]sx?$/.test(file) && TS_SENDERS.test(tsCode(text));
 }

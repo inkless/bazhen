@@ -14,6 +14,8 @@ import { isIdent, newlinesIn, rustCode } from "./rust-source.ts";
 import {
   SIGNALS_IGNORE,
   SIGNAL_CHOKEPOINTS,
+  ALLOWED_SIGNALS,
+  allowedSignalFailures,
   chokepointFor,
   rawSignalCalls,
 } from "./signal-paths.ts";
@@ -2340,6 +2342,7 @@ export function signalChokepointFailures(
     if (Object.hasOwn(SIGNAL_CHOKEPOINTS, file) && !product) continue;
     const text = read(file);
     const tests = file.endsWith(".rs") ? testLines(text) : new Set<number>();
+    out.push(...allowedSignalFailures(file, text));
     for (const { line, call } of rawSignalCalls(file, text)) {
       if (product && !tests.has(line)) continue;
       out.push(
@@ -2360,10 +2363,18 @@ export function signalChokepointFailures(
   return out;
 }
 
+/** An ALLOWED_SIGNALS file that no longer exists, whose entries would allow a copy put there. */
+export function allowedSignalFileFailures(files: readonly string[]): string[] {
+  return Object.keys(ALLOWED_SIGNALS)
+    .filter((file) => !files.includes(file))
+    .map((file) => `scripts/signal-paths.ts: ALLOWED_SIGNALS lists missing ${file}.`);
+}
+
 const readRepoFile = (p: string) => readFileSync(join(root, p), "utf8");
 
 function checkSignalChokepoints(): void {
   failures.push(...signalChokepointFailures(repoFiles(), readRepoFile));
+  failures.push(...allowedSignalFileFailures(repoFiles()));
   failures.push(...productChokepointFailures(Object.keys(SIGNAL_CHOKEPOINTS), PRODUCT_CHOKEPOINTS));
   failures.push(...unmarkedSignallingTests(repoFiles(), readRepoFile));
 }
