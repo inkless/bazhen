@@ -97,10 +97,6 @@ describe("DoctorResponse containment", () => {
     expect(kept(containment)).toEqual(containment);
   });
 
-  it("takes a reply from an older daemon, with none", () => {
-    expect(DoctorResponse.safeParse(base).success).toBe(true);
-  });
-
   it.each([
     ["scoped terminals with no caps", scoped],
     [

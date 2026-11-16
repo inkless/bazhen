@@ -129,7 +129,7 @@ describe("a terminal past its memory cap", () => {
       exit = (await hello(over)).exit;
       return exit !== null;
     }, "the over-cap child's exit");
-    expect(exit).toMatchObject({ status: { type: "signalled", signal: "SIGKILL" } });
+    expect(exit).toEqual({ type: "signalled", signal: "SIGKILL" });
     expect(oomKills(overCgroup)).toBeGreaterThanOrEqual(1);
     expect((await hello(over)).holderPid).toBe(over.pid);
     // The under-cap control: the same allocator, its cap above what it takes, is never killed.
