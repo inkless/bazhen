@@ -703,6 +703,18 @@
       "keystrokes": true
     },
     {
+      "input": "\u001bPabc\u001b\\",
+      "keystrokes": true
+    },
+    {
+      "input": "\u001bP1+r544e=787465726d\u001b\\",
+      "keystrokes": true
+    },
+    {
+      "input": "5M",
+      "keystrokes": true
+    },
+    {
       "input": "\u001b]10;rgb:ffff/ffff/ffff\u001b\\",
       "keystrokes": false
     },

@@ -8,7 +8,9 @@ const PASTE_START: &[u8] = b"\x1b[200~";
 const PASTE_END: &[u8] = b"\x1b[201~";
 
 /// Whether `input` holds anything a person typed or pasted: anything beyond the terminal's
-/// replies, outside a paste, and its focus and mouse reports.
+/// replies, outside a paste, and its focus and mouse reports. A report split across two reads is
+/// two pieces neither of which is a report, so each counts as keystrokes, as the daemon counts a
+/// split one in each of the frames it arrives in.
 #[must_use]
 pub fn has_keystrokes(input: &[u8]) -> bool {
     !strip(&without_replies(input), event_report).is_empty()
@@ -152,8 +154,12 @@ fn reply(text: &[u8]) -> Option<usize> {
             })
     };
     let dcs_reply = || {
-        let a = esc.byte(b'P')?.many(|b| b != ESC);
-        a.byte(ESC)?.byte(b'\\')
+        let dcs = esc.byte(b'P')?;
+        let kind = dcs
+            .one_of(b"01")
+            .and_then(|a| a.byte(b'$')?.byte(b'r'))
+            .or_else(|| dcs.byte(b'>')?.byte(b'|'))?;
+        kind.many(|b| b != ESC).byte(ESC)?.byte(b'\\')
     };
     let osc_reply = || {
         let osc = esc.byte(b']')?;
