@@ -727,8 +727,32 @@ const NOT_DECODERS: Record<string, string> = {
     "returns a field or a state; reads no bytes",
   "crates/bazhen-holder/src/conn.rs::Connection::offset":
     "checks an offset fits the protocol; reads no bytes",
-  "crates/bazhen-holder/src/conn.rs::Connection::queue_event":
+  "crates/bazhen-holder/src/conn.rs::Connection::queue_exited":
     "queues a frame this holder encoded; reads nothing",
+  "crates/bazhen-holder/src/conn.rs::Connection::requeue_exited":
+    "queues a frame this holder encoded in place of one it queued; reads nothing",
+  "crates/bazhen-holder/src/conn.rs::Connection::queue_snapshot":
+    "queues a snapshot this holder encoded; reads nothing",
+  "crates/bazhen-holder/src/conn.rs::Connection::queue_state":
+    "queues a report this holder encoded in place of one it queued; reads nothing",
+  "crates/bazhen-holder/src/conn.rs::Connection::owed_snapshot": "returns a count; reads no bytes",
+  "crates/bazhen-holder/src/conn.rs::Connection::holds_a_snapshot":
+    "returns a state; reads no bytes",
+  "crates/bazhen-holder/src/conn.rs::Connection::hold": "keeps a decoded request; reads no bytes",
+  "crates/bazhen-holder/src/conn.rs::Connection::take_after_snapshot":
+    "returns a field; reads no bytes",
+  "crates/bazhen-holder/src/server.rs::Server::publish":
+    "reads the engine's title and screen and queues reports it encodes; reads no bytes",
+  "crates/bazhen-holder/src/server.rs::Server::offset_of": "converts an offset; reads no bytes",
+  "crates/bazhen-holder/src/server.rs::Server::broadcast":
+    "queues a report this holder encodes; reads nothing",
+  "crates/bazhen-holder/src/server.rs::Server::evict_stuck_snapshots":
+    "drops connections by their state; reads no bytes",
+  "crates/bazhen-holder/src/server.rs::evicting_at":
+    "computes a deadline from connections' state; reads no bytes",
+  "crates/bazhen-holder/src/server.rs::snapshot":
+    "answers a decoded snapshot request from the engine; reads no bytes",
+  "crates/bazhen-holder/src/server.rs::owed_snapshots": "sums counts; reads no bytes",
   "crates/bazhen-holder/src/conn.rs::Connection::next_frame":
     "chooses and encodes the next frame from the queue and the ring; reads no bytes",
   "crates/bazhen-holder/src/conn.rs::Connection::take_next":
@@ -766,6 +790,15 @@ const NOT_DECODERS: Record<string, string> = {
     "returns a field or a state; reads no bytes",
   "crates/bazhen-holder/src/conn.rs::Connection::reading":
     "returns a field or a state; reads no bytes",
+  "crates/bazhen-holder/src/conn.rs::Connection::polled":
+    "hands its buffer to receive, or drops the connection on a hang-up; parses nothing itself",
+  "crates/bazhen-holder/src/conn.rs::Connection::held_since": "returns a field; reads no bytes",
+  "crates/bazhen-holder/src/conn.rs::Connection::subscribed":
+    "reads the connection's own state; reads no bytes",
+  "crates/bazhen-holder/src/conn.rs::Connection::latest_subscription":
+    "finds a position in the connection's queue; reads no bytes",
+  "crates/bazhen-holder/src/server.rs::snapshot_line":
+    "orders connections by their state; reads no bytes",
   "crates/bazhen-holder/src/conn.rs::Connection::receive":
     "reads the socket into FrameDecoder::push, which the proto crate's frame target fuzzes; parses nothing itself",
   "crates/bazhen-holder/src/conn.rs::Connection::stuck_since":

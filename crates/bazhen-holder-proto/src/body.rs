@@ -636,7 +636,9 @@ pub struct SubscribeFrom {
     pub offset: Offset,
 }
 
-/// Output from `from` on, or from the holder's offset as it reads the request.
+/// Output from `from` on. Without it, from the offset of a `snapshot` the connection was answered
+/// just before, refused `stale-generation` if a respawn has since overtaken it; with no snapshot
+/// just before, from the holder's offset as it reads the request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubscribeRequest {
     #[serde(
@@ -735,7 +737,8 @@ pub struct Foreground {
     pub pgid_start: StartTime,
 }
 
-/// The ring no longer holds `[from, to)`.
+/// The subscriber isn't sent `[from, to)`: the ring no longer holds it, or the subscriber was
+/// owed more `resized` than the holder keeps for one that lags.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Gap {
     pub from: Offset,
@@ -761,7 +764,10 @@ pub struct Alternate {
     pub on: bool,
 }
 
-/// The child of `generation` ended.
+/// The child of `generation` ended. A subscription ends with it, after the last of the output:
+/// a connection sent it before subscribing, as every open one is when the exit is published, is
+/// sent it again after its subscription's `ok`, and output can follow the first. A consumer takes
+/// the first of a generation's and ignores the rest.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Exited {
     pub generation: Generation,
@@ -769,7 +775,9 @@ pub struct Exited {
     pub status: ExitStatus,
 }
 
-/// A new child runs on the same PTY.
+/// A new child runs on the same PTY. The holder's screen leaves the alternate screen, pushes the
+/// main screen into history as `CSI 2 J` does, and resets as RIS does but keeps the history; a
+/// mirror whose reset clears its history snapshots again instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Respawned {

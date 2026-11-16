@@ -362,20 +362,13 @@ fn tells_a_client_it_shares_no_major_with_the_versions_it_speaks() {
 
 #[test]
 #[ignore = "signals processes; runs in pnpm test:real rust"]
-fn answers_a_request_it_does_not_serve_and_one_it_does_not_know() {
+fn answers_a_request_it_does_not_know() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
-    let home = home("unserved").unwrap();
+    let home = home("unknown").unwrap();
     let (_holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
     let mut client = Client::connect(&socket).unwrap();
     client.hello(false).unwrap();
-    let snapshot = client
-        .refused(&Request::Snapshot { id: RequestId(5) })
-        .unwrap();
-    assert_eq!(
-        (snapshot.request.as_str(), snapshot.code.as_str()),
-        ("snapshot", "unknown-request")
-    );
     // A request type in the requests' range that this build doesn't know: length 5, type 0x2a,
     // request id 6.
     let frame = [&5u32.to_be_bytes()[..], &[0x2a], &6u32.to_be_bytes()].concat();
