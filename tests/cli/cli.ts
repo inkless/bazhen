@@ -1,6 +1,7 @@
 // The `bazhen` CLI as a process, against a fake daemon on the socket it looks for. The suite
 // holds the CLI's verbs, what it sends, what it prints and how it exits, whatever language the CLI
-// is written in: `BAZHEN_CLI` names the binary to run, and without it the Node CLI runs. The api
+// is written in: it runs `target/release/bazhen`, which `pnpm test:medium` builds, unless
+// `BAZHEN_CLI` names another binary, or is `node` for the Node CLI. The api
 // suites, which run the CLI against the real daemon, remain the end-to-end gate.
 
 import { execFile } from "node:child_process";
@@ -32,6 +33,7 @@ import {
 
 const repo = fileURLToPath(new URL("../..", import.meta.url));
 const NODE_CLI = join(repo, "apps/cli/src/main.ts");
+const RUST_CLI = join(repo, "target/release/bazhen");
 /** Past any call the CLI makes here, and short of the project's test timeout. */
 export const RUN_MS = 20_000;
 
@@ -205,7 +207,7 @@ export class FakeDaemon {
 }
 
 /** Whether the suite runs the Node CLI, which differs from the Rust one where a case says so. */
-export const runsNode = () => (process.env["BAZHEN_CLI"] ?? "") === "";
+export const runsNode = () => process.env["BAZHEN_CLI"] === "node";
 
 export interface Ran {
   readonly code: number;
@@ -273,11 +275,10 @@ function run(
   cwd: string,
   input = "",
 ): Promise<Ran> {
-  const binary = process.env["BAZHEN_CLI"];
-  const [file, argv] =
-    binary === undefined || binary === ""
-      ? [process.execPath, [NODE_CLI, ...args]]
-      : [binary, [...args]];
+  const binary = process.env["BAZHEN_CLI"] ?? "";
+  const [file, argv] = runsNode()
+    ? [process.execPath, [NODE_CLI, ...args]]
+    : [binary === "" ? RUST_CLI : binary, [...args]];
   return new Promise((resolve, reject) => {
     const child = execFile(file, argv, { env, cwd, timeout: RUN_MS }, (err, stdout, stderr) => {
       if (err?.killed === true) {

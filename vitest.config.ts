@@ -1,4 +1,3 @@
-import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 // First in every project: the tests start only inside a capped run.
@@ -7,7 +6,6 @@ const CAPPED = "tests/support/capped-setup.ts";
 const CONTAINMENT = "tests/holder/containment.test.ts";
 // In every project: any test may be a property test.
 const SEEDED = "tests/support/fast-check-setup.ts";
-const RUST_CLI = fileURLToPath(new URL("target/release/bazhen", import.meta.url));
 
 export default defineConfig({
   test: {
@@ -38,7 +36,11 @@ export default defineConfig({
             "apps/*/src/**/*.medium.test.ts",
             "scripts/*.medium.test.ts",
           ],
-          exclude: ["scripts/hook-bench.medium.test.ts", "**/node_modules/**"],
+          exclude: [
+            "scripts/hook-bench.medium.test.ts",
+            "scripts/cli-bench.medium.test.ts",
+            "**/node_modules/**",
+          ],
           globalSetup: [CAPPED, "tests/support/medium-setup.ts"],
           setupFiles: [SEEDED],
         },
@@ -55,22 +57,21 @@ export default defineConfig({
         },
       },
       {
-        // The same suite against the Rust CLI, which `pnpm test:medium` builds, while the Node
-        // CLI stays the one `pnpm bazhen` runs.
+        // The same suite against the Node CLI, until it is deleted.
         test: {
-          name: "cli-rust",
+          name: "cli-node",
           include: ["tests/cli/**/*.test.ts"],
           globalSetup: [CAPPED, "tests/support/medium-setup.ts"],
           setupFiles: [SEEDED],
           testTimeout: 30_000,
-          env: { BAZHEN_CLI: RUST_CLI },
+          env: { BAZHEN_CLI: "node" },
         },
       },
       {
         // A wall-clock gate, so it runs alone: in parallel with PTY tests it measures them.
         test: {
           name: "bench",
-          include: ["scripts/hook-bench.medium.test.ts"],
+          include: ["scripts/hook-bench.medium.test.ts", "scripts/cli-bench.medium.test.ts"],
           globalSetup: [CAPPED, "tests/support/medium-setup.ts"],
           setupFiles: [SEEDED],
           fileParallelism: false,

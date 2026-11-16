@@ -95,9 +95,9 @@ against the daemon's public surfaces, never its TypeScript internals.
   real harness CLIs pinned in its `package.json`. No agent reaches a real model, and the daemon
   never sees the developer's own credentials: its environment is built from a short allowlist.
 - `tests/cli` is the CLI's own, held to the same rule: it runs the `bazhen` binary `BAZHEN_CLI`
-  names (the Node CLI without it) against a fake daemon on the socket the CLI looks for, and
-  asserts what the CLI sent, printed and exited with. It needs no tmux, so it runs on the host,
-  and it holds a CLI in any language to the same verbs.
+  names (without it, the release build `pnpm build:cli` makes) against a fake daemon on the socket
+  the CLI looks for, and asserts what the CLI sent, printed and exited with. It needs no tmux, so it
+  runs on the host, and it holds a CLI in any language to the same verbs.
 
 ## Falsification
 

@@ -15,6 +15,7 @@ import {
   realpathSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { request } from "node:http";
@@ -91,18 +92,17 @@ export function overSocket(
   });
 }
 
+/** This checkout's CLI, which `pnpm test:api` builds. */
+const CLI = join(repo, "target/release/bazhen");
+
 /** Runs `bazhen <args>` with `env`, and resolves with how it exited and what it printed. */
 export function bazhen(
   args: readonly string[],
   env: Record<string, string>,
 ): Promise<{ code: number; out: string }> {
   return new Promise((resolve) => {
-    execFile(
-      process.execPath,
-      [join(repo, "apps/cli/src/main.ts"), ...args],
-      { env, timeout: 30_000 },
-      (err, stdout, stderr) =>
-        resolve({ code: err === null ? 0 : Number(err.code ?? 1), out: stdout + stderr }),
+    execFile(CLI, args, { env, timeout: 30_000 }, (err, stdout, stderr) =>
+      resolve({ code: err === null ? 0 : Number(err.code ?? 1), out: stdout + stderr }),
     );
   });
 }
@@ -114,9 +114,7 @@ export function bazhen(
 function cliOnPath(home: string): string {
   const dir = join(home, "cli");
   mkdirSync(dir, { recursive: true });
-  const main = join(repo, "apps/cli/src/main.ts");
-  writeFileSync(join(dir, "bazhen"), `#!/bin/sh\nexec '${process.execPath}' '${main}' "$@"\n`);
-  chmodSync(join(dir, "bazhen"), 0o755);
+  symlinkSync(CLI, join(dir, "bazhen"));
   return dir;
 }
 

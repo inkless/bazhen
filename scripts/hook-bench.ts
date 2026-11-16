@@ -206,12 +206,14 @@ export interface Target {
 /**
  * Times `client` and the floor alternately, so a change in the machine's load hits both sides
  * alike, until the samples settle the verdict or `MEASURE_MS` runs out. Against the stub daemon
- * unless a `target` is given.
+ * unless a `target` is given. The client is given `argument`, a hook's event unless another
+ * client, such as the CLI, is timed.
  */
 export async function measure(
   client = BINARY,
   pairs: Pairs = PAIRS,
   target?: Target,
+  argument = "PreToolUse",
 ): Promise<Verdict> {
   const deadline = performance.now() + MEASURE_MS;
   const left = () => deadline - performance.now();
@@ -233,7 +235,7 @@ export async function measure(
     BAZHEN_AGENT_ID: target?.agentId ?? "agent_bench",
     BAZHEN_SOCKET: socket,
     BZ_HOOK_CLIENT: client,
-    BZ_HOOK_EVENT: target?.event ?? "PreToolUse",
+    BZ_HOOK_EVENT: target?.event ?? argument,
   };
   const payload = target?.payload ?? PAYLOAD;
   const samples = { floor: [] as number[], client: [] as number[] };
