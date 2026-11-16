@@ -9,6 +9,13 @@ import { fileURLToPath } from "node:url";
 import { cssDeclarations } from "../apps/web/src/ui/token-sheet.ts";
 import { gateEnv } from "./cargo-gate.ts";
 import { isMain } from "./is-main.ts";
+import { isIdent, newlinesIn, rustCode } from "./rust-source.ts";
+import {
+  SIGNALS_IGNORE,
+  SIGNAL_CHOKEPOINTS,
+  chokepointFor,
+  rawSignalCalls,
+} from "./signal-paths.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const failures: string[] = [];
@@ -412,71 +419,6 @@ const UNSAFE_MODULES: Record<string, string> = {
     "covers neither",
 };
 
-const RAW_STRING = /r(#*)"/y;
-const isIdent = (c: string | undefined) => c !== undefined && /\w/.test(c);
-const newlinesIn = (text: string) => text.replaceAll(/[^\n]/g, "");
-
-/**
- * Rust source with its comments removed and every string and char literal emptied, so neither a
- * `//` in a string nor an attribute quoted in one changes what the attributes are. Newlines are
- * kept, so a line in the result is the same line in the source. Each string literal becomes
- * `""`, and its contents, a raw string's included, are pushed to `strings` in order, so the nth
- * `""` in the result is `strings[n]`.
- */
-export function rustCode(source: string, strings: string[] = []): string {
-  let out = "";
-  let i = 0;
-  while (i < source.length) {
-    const c = source[i] ?? "";
-    const next = source[i + 1];
-    const start = i;
-    if (c === "/" && next === "/") {
-      while (i < source.length && source[i] !== "\n") i++;
-    } else if (c === "/" && next === "*") {
-      let depth = 1;
-      i += 2;
-      while (i < source.length && depth > 0) {
-        const pair = source.slice(i, i + 2);
-        const step = pair === "/*" ? 1 : pair === "*/" ? -1 : 0;
-        depth += step;
-        i += step === 0 ? 1 : 2;
-      }
-      out += ` ${newlinesIn(source.slice(start, i))}`;
-    } else if (
-      c === "r" &&
-      !isIdent(/[bc]/.test(source[i - 1] ?? "") ? source[i - 2] : source[i - 1])
-    ) {
-      RAW_STRING.lastIndex = i;
-      const raw = RAW_STRING.exec(source);
-      if (raw === null) {
-        out += c;
-        i++;
-        continue;
-      }
-      const close = `"${raw[1] ?? ""}`;
-      const end = source.indexOf(close, i + raw[0].length);
-      i = end === -1 ? source.length : end + close.length;
-      strings.push(source.slice(start + raw[0].length, end === -1 ? source.length : end));
-      out += `""${newlinesIn(source.slice(start, i))}`;
-    } else if (c === '"') {
-      i++;
-      while (i < source.length && source[i] !== '"') i += source[i] === "\\" ? 2 : 1;
-      strings.push(source.slice(start + 1, i));
-      i++;
-      out += `""${newlinesIn(source.slice(start, i))}`;
-    } else if (c === "'" && (next === "\\" || source[i + 2] === "'")) {
-      i += next === "\\" ? 3 : 1;
-      while (i < source.length && source[i] !== "'") i++;
-      i++;
-      out += "' '";
-    } else {
-      out += c;
-      i++;
-    }
-  }
-  return out;
-}
-
 /** The index just past the `]` that closes the `[` at `open`, or the end of `code`. */
 function closingBracket(code: string, open: number): number {
   let depth = 0;
@@ -550,6 +492,30 @@ export function cfgValuesOutsideAllowList(body: string, strings: readonly string
 const UNSAFE_EXPECT = /^expect\s*\(\s*unsafe_code\s*,\s*reason\s*=\s*""\s*,?\s*\)$/;
 const SEE_RUST_MD = "(docs/standards/rust.md § Lints).";
 
+// How a test ignored as signalling processes starts: by refusing to run off a sandbox.
+const REQUIRES_SANDBOX =
+  /^\s*bazhen_test_signal\s*::\s*require_sandbox\s*\(\s*\)\s*(?:\.\s*unwrap\s*\(\s*\)|\?)\s*;/;
+
+/**
+ * Where the body of the first `fn` at or after `from` begins: just past its `{`, or, for a
+ * function declared without one (`fn f(&self);` in a trait), just past its `;`, with no body.
+ * The end of `code` if there is none.
+ */
+function fnBodyStart(code: string, from: number): number {
+  const fn = /\bfn\s+\$?\w+/g;
+  fn.lastIndex = from;
+  const found = fn.exec(code);
+  if (found === null) return code.length;
+  let depth = 0;
+  for (let i = found.index + found[0].length; i < code.length; i++) {
+    const c = code[i];
+    if (c === "(" || c === "[" || c === "<") depth++;
+    else if (c === ")" || c === "]" || (c === ">" && code[i - 1] !== "-")) depth--;
+    else if (depth <= 0 && (c === "{" || c === ";")) return i + 1;
+  }
+  return code.length;
+}
+
 /**
  * Why the attributes in a Rust file don't hold to the standard. Every `#` must begin an attribute
  * written out in full, so a macro can't assemble one from tokens no scan reads; no attribute may
@@ -614,10 +580,26 @@ export function attributeFailures(
           "builds. Use a value in CFG_VALUES in scripts/check-standards.ts, or add a gate that " +
           `builds it ${SEE_RUST_MD}`,
       );
+    } else if (
+      head[1] === "" &&
+      /^ignore\s*=\s*""$/.test(body) &&
+      strings[first] === SIGNALS_IGNORE
+    ) {
+      // A test that signals processes it didn't start: skipped on the host, and run in a sandbox
+      // by `cargo-gate test-all` (scripts/signal-paths.ts). It refuses to run anywhere else
+      // itself, so the attribute can't serve as a plain way to switch a test off.
+      if (!REQUIRES_SANDBOX.test(code.slice(fnBodyStart(code, end)))) {
+        out.push(
+          `${where}: a test ignored as "${SIGNALS_IGNORE}" must start with ` +
+            "`bazhen_test_signal::require_sandbox().unwrap();`, so a run off a sandbox fails " +
+            "instead of signalling anything (docs/standards/testing.md).",
+        );
+      }
     } else if (/(?:^|,)\s*(ignore|should_panic)\b/.test(body)) {
       out.push(
         `${where}: ${attribute} skips a test, or passes it when it fails. A test runs, and fails ` +
-          "on what it asserts; check an error with a Result, not a panic.",
+          "on what it asserts; check an error with a Result, not a panic. The one exception is " +
+          `#[ignore = "${SIGNALS_IGNORE}"] (docs/standards/testing.md).`,
       );
     } else if (/\bclippy\b/.test(body)) {
       out.push(
@@ -1955,6 +1937,82 @@ function checkRust(): void {
   );
 }
 
+/** The lines of Rust source that are test code: under `#[cfg(test)]`. */
+function testLines(source: string): Set<number> {
+  const all = rustCode(source).split("\n");
+  const product = withoutTests(rustCode(source)).split("\n");
+  return new Set(all.flatMap((line, i) => (line === product[i] ? [] : [i + 1])));
+}
+
+/** A dev-dependencies table, plain or a target's, or a crate's own table inside one. */
+const devTable = (name: string) => /(?:^|\.)dev-dependencies(?:\.|$)/.test(name);
+
+/** The chokepoints that are product code, whose test modules are checked like any test. */
+const PRODUCT_CHOKEPOINTS = new Set(["crates/bazhen-holder/src/child.rs"]);
+
+const TEST_SIGNAL_MANIFEST = "crates/bazhen-test-signal/Cargo.toml";
+
+/**
+ * Where a member's manifest takes bazhen-test-signal for anything but its tests. It sends
+ * signals to whatever a test names, with checks fit for a test, so no product may link it.
+ */
+export function testSignalDependencyFailures(manifest: string, text: string): string[] {
+  let table = "";
+  return text.split("\n").flatMap((line, i) => {
+    const header = /^\s*\[([^\]]+)\]/.exec(line);
+    if (header !== null) table = (header[1] ?? "").trim().replaceAll(/["']/g, "");
+    if (!/\bbazhen-test-signal\b/.test(line) || devTable(table)) return [];
+    return [
+      `${manifest}:${i + 1}: takes bazhen-test-signal under [${table}]; only [dev-dependencies] ` +
+        "may, as it signals whatever a test names (docs/standards/testing.md).",
+    ];
+  });
+}
+
+/**
+ * A raw signal call anywhere but a chokepoint (scripts/signal-paths.ts), each by file and line,
+ * and a chokepoint that no longer exists. A pid there unchecked can end every process the user
+ * owns, so each signal goes through code that checks its target.
+ */
+export function signalChokepointFailures(
+  files: readonly string[],
+  read: (file: string) => string,
+): string[] {
+  const out: string[] = [];
+  for (const file of files) {
+    if (file.includes("node_modules/")) continue;
+    // A product chokepoint is exempt in its product code alone: its tests send through the
+    // tests' own chokepoint like any others.
+    const product = PRODUCT_CHOKEPOINTS.has(file);
+    if (Object.hasOwn(SIGNAL_CHOKEPOINTS, file) && !product) continue;
+    const text = read(file);
+    const tests = file.endsWith(".rs") ? testLines(text) : new Set<number>();
+    for (const { line, call } of rawSignalCalls(file, text)) {
+      if (product && !tests.has(line)) continue;
+      out.push(
+        `${file}:${line}: sends a signal directly (${call}); send it through ` +
+          `${chokepointFor(file, tests.has(line))}, which checks its target ` +
+          "(docs/standards/testing.md).",
+      );
+    }
+    if (/^crates\/[^/]+\/Cargo\.toml$/.test(file) && file !== TEST_SIGNAL_MANIFEST) {
+      out.push(...testSignalDependencyFailures(file, text));
+    }
+  }
+  for (const chokepoint of Object.keys(SIGNAL_CHOKEPOINTS)) {
+    if (!files.includes(chokepoint)) {
+      out.push(`scripts/signal-paths.ts: SIGNAL_CHOKEPOINTS lists missing ${chokepoint}.`);
+    }
+  }
+  return out;
+}
+
+function checkSignalChokepoints(): void {
+  failures.push(
+    ...signalChokepointFailures(repoFiles(), (p) => readFileSync(join(root, p), "utf8")),
+  );
+}
+
 function checkCappedScripts(): void {
   for (const file of repoFiles().filter((p) => fileName(p) === "package.json")) {
     const scripts = packageScripts((p) => readFileSync(join(root, p), "utf8"), file);
@@ -2101,6 +2159,7 @@ if (isMain(import.meta)) {
   checkWebTokens();
   checkRust();
   checkCappedScripts();
+  checkSignalChokepoints();
 
   if (failures.length > 0) {
     console.error(`Standards check failed:\n${failures.map((f) => `  - ${f}`).join("\n")}`);

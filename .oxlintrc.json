@@ -38,7 +38,8 @@
     "vitest/no-standalone-expect": "error",
     "no-console": "off",
     "react/react-in-jsx-scope": "off",
-    "bazhen/host-guard": "error"
+    "bazhen/host-guard": "error",
+    "bazhen/signal-guard": "error"
   },
   "overrides": [
     {
@@ -4028,6 +4029,14 @@
       ],
       "rules": {
         "bazhen/host-guard": "off"
+      }
+    },
+    {
+      "files": [
+        "packages/host-guard/src/signal.ts"
+      ],
+      "rules": {
+        "bazhen/signal-guard": "off"
       }
     }
   ],

@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { GATES, configFailures, gateEnv, outsideConfigs, parseGate } from "./cargo-gate.ts";
+import {
+  GATES,
+  configFailures,
+  gateEnv,
+  main,
+  outsideConfigs,
+  parseGate,
+  sandboxRefusal,
+} from "./cargo-gate.ts";
 
 describe("gateEnv", () => {
   it("drops every variable that changes the build's flags, tools or test runner", () => {
@@ -43,14 +51,17 @@ describe("gateEnv", () => {
 describe("parseGate", () => {
   it("names each gate, and for test the tests to run", () => {
     expect([
-      ...["fmt", "lint", "deny", "test"].map((g) => parseGate([g])),
+      ...["fmt", "lint", "deny", "test", "test-all"].map((g) => parseGate([g])),
       parseGate(["test", "refuses_a_cut", "tests::properties::round_trips"]),
+      parseGate(["test-all", "a_sweep"]),
     ]).toEqual([
       { gate: "fmt", tests: [] },
       { gate: "lint", tests: [] },
       { gate: "deny", tests: [] },
       { gate: "test", tests: [] },
+      { gate: "test-all", tests: [] },
       { gate: "test", tests: ["refuses_a_cut", "tests::properties::round_trips"] },
+      { gate: "test-all", tests: ["a_sweep"] },
     ]);
   });
 
@@ -76,12 +87,21 @@ describe("GATES", () => {
       "cargo-clippy",
       "cargo-deny",
       "cargo-nextest",
+      "cargo-nextest",
+    ]);
+  });
+
+  it("runs the ignored tests only in test-all, which is test with them included", () => {
+    expect(GATES.test).not.toContain("--run-ignored");
+    expect(GATES["test-all"].filter((a) => !GATES.test.includes(a))).toEqual([
+      "--run-ignored",
+      "all",
     ]);
   });
 
   it("fails clippy on any warning, and overrides a configured wrapper or compiler", () => {
     expect(GATES.lint.slice(-3)).toEqual(["--", "-D", "warnings"]);
-    for (const gate of [GATES.lint, GATES.test]) {
+    for (const gate of [GATES.lint, GATES.test, GATES["test-all"]]) {
       expect(gate.join(" ")).toContain(
         '--config build.rustc-wrapper="" --config build.rustc-workspace-wrapper="" ' +
           '--config build.rustc="rustc"',
@@ -94,6 +114,46 @@ describe("GATES", () => {
       true,
       true,
     ]);
+  });
+});
+
+/** What `main` exits with for `gate`, and the tools it would have started. */
+const ran = (sandboxed: boolean, gate: string) => {
+  const runs: string[] = [];
+  const run = (bin: string) => {
+    runs.push(bin);
+    return {
+      pid: 0,
+      output: [],
+      stdout: Buffer.of(),
+      stderr: Buffer.of(),
+      status: 0,
+      signal: null,
+    };
+  };
+  return { code: main([gate], { sandboxed, run }), runs };
+};
+
+describe("main", () => {
+  it("starts nothing for test-all off a sandbox, and exits 2", () => {
+    expect(ran(false, "test-all")).toEqual({ code: 2, runs: [] });
+  });
+
+  it("runs a gate that needs no sandbox anywhere", () => {
+    expect(ran(false, "fmt")).toEqual({ code: 0, runs: ["cargo-fmt", "cargo-fmt"] });
+  });
+});
+
+describe("sandboxRefusal", () => {
+  it("refuses test-all off a sandbox, naming where it runs", () => {
+    expect(sandboxRefusal("test-all", false)).toMatch(/^Refusing to run: .*pnpm test:real/);
+  });
+
+  it("runs test-all in a sandbox, and every other gate anywhere", () => {
+    expect([
+      sandboxRefusal("test-all", true),
+      ...(["fmt", "lint", "deny", "test"] as const).map((g) => sandboxRefusal(g, false)),
+    ]).toEqual([undefined, undefined, undefined, undefined, undefined]);
   });
 });
 

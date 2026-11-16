@@ -5,12 +5,13 @@
 //
 // Usage: node scripts/cargo-gate.ts <fmt|lint|deny|test>, or test <name>... to run some tests
 
-import { spawnSync } from "node:child_process";
+import { type SpawnSyncReturns, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isMain } from "./is-main.ts";
+import { SANDBOX_RULE, SIGNALS_IGNORE, inSignalSandbox } from "./signal-paths.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
@@ -55,6 +56,22 @@ export const GATES = {
     "--final-status-level",
     "fail",
   ],
+  // The tests ignored as signalling processes they didn't start too, which only a sandbox runs.
+  "test-all": [
+    "cargo-nextest",
+    "nextest",
+    "run",
+    "--workspace",
+    "--all-features",
+    "--locked",
+    ...NO_WRAPPER,
+    "--run-ignored",
+    "all",
+    "--status-level",
+    "fail",
+    "--final-status-level",
+    "fail",
+  ],
 } as const;
 export type Gate = keyof typeof GATES;
 
@@ -71,6 +88,7 @@ const TOOLS: Record<Gate, { probe: string[]; hint: string }> = {
   lint: { probe: ["cargo-clippy", "--version"], hint: INSTALL_TOOLCHAIN },
   deny: { probe: ["cargo-deny", "--version"], hint: INSTALL_TOOLS },
   test: { probe: ["cargo-nextest", "nextest", "--version"], hint: INSTALL_TOOLS },
+  "test-all": { probe: ["cargo-nextest", "nextest", "--version"], hint: INSTALL_TOOLS },
 };
 
 // Variables that change what cargo, rustc, clippy or nextest run, or with which flags.
@@ -113,11 +131,14 @@ const TEST_NAME = /^\w+(?:::\w+)*$/;
  */
 export function parseGate(args: string[]): { gate: Gate; tests: string[] } {
   const [name, ...rest] = args;
-  const tests = name === "test" && rest.every((t) => TEST_NAME.test(t)) ? rest : undefined;
+  const tests =
+    (name === "test" || name === "test-all") && rest.every((t) => TEST_NAME.test(t))
+      ? rest
+      : undefined;
   if (!isGate(name) || (rest.length > 0 && tests === undefined)) {
     throw new Error(
       `usage: node scripts/cargo-gate.ts <${Object.keys(GATES).join("|")}>, or test <name>... ` +
-        "A gate takes no other arguments: its command is fixed in scripts/cargo-gate.ts.",
+        "test-all takes names too. A gate takes no other arguments: its command is fixed in scripts/cargo-gate.ts.",
     );
   }
   return { gate: name, tests: tests ?? [] };
@@ -163,9 +184,33 @@ export function configFailures(paths: string[], read: (path: string) => string |
   });
 }
 
+/** Why a gate won't run on this host: test-all runs tests only a sandbox may. */
+export function sandboxRefusal(gate: Gate, sandboxed = inSignalSandbox()): string | undefined {
+  if (gate !== "test-all" || sandboxed) return undefined;
+  return `Refusing to run: cargo-gate test-all includes each test ignored as "${SIGNALS_IGNORE}": ${SANDBOX_RULE}.`;
+}
+
 const readIfPresent = (path: string) => (existsSync(path) ? readFileSync(path, "utf8") : undefined);
 
-function main(args: string[]): number {
+/** What `main` reaches outside itself: whether this host is a sandbox, and how it runs a tool. */
+export interface GateHost {
+  readonly sandboxed: boolean;
+  readonly run: (
+    bin: string,
+    args: string[],
+    env: NodeJS.ProcessEnv,
+    quiet: boolean,
+  ) => SpawnSyncReturns<Buffer>;
+}
+
+const thisGateHost = (): GateHost => ({
+  sandboxed: inSignalSandbox(),
+  run: (bin, args, env, quiet) =>
+    spawnSync(bin, args, { cwd: root, env, stdio: quiet ? "ignore" : "inherit" }),
+});
+
+/** Runs a gate, and its exit code. */
+export function main(args: string[], host: GateHost = thisGateHost()): number {
   let gate: Gate;
   let tests: string[];
   try {
@@ -174,9 +219,14 @@ function main(args: string[]): number {
     console.error(error instanceof Error ? error.message : String(error));
     return 2;
   }
+  const refused = sandboxRefusal(gate, host.sandboxed);
+  if (refused !== undefined) {
+    console.error(refused);
+    return 2;
+  }
   const env = gateEnv(process.env);
   const cargoHome = process.env.CARGO_HOME ?? join(homedir(), ".cargo");
-  const compiles = gate === "lint" || gate === "test";
+  const compiles = gate === "lint" || gate === "test" || gate === "test-all";
   const failures = compiles ? configFailures(outsideConfigs(root, cargoHome), readIfPresent) : [];
   if (failures.length > 0) {
     console.error(failures.join("\n"));
@@ -184,13 +234,13 @@ function main(args: string[]): number {
   }
   const { probe, hint } = TOOLS[gate];
   const [probeBin = "", ...probeArgs] = probe;
-  const probed = spawnSync(probeBin, probeArgs, { cwd: root, env, stdio: "ignore" });
+  const probed = host.run(probeBin, probeArgs, env, true);
   if (probed.error !== undefined || probed.status !== 0) {
     console.error(hint);
     return 1;
   }
   const [bin = "", ...rest] = GATES[gate];
-  const run = spawnSync(bin, [...rest, ...tests], { cwd: root, env, stdio: "inherit" });
+  const run = host.run(bin, [...rest, ...tests], env, false);
   if (run.error !== undefined) {
     console.error(run.error.message);
     return 1;

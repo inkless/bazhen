@@ -26,7 +26,9 @@ function flagged(source: string): number[] {
   } catch (error) {
     out = String(Reflect.get(Object(error), "stdout"));
   }
-  return [...out.matchAll(/fixture\.ts:(\d+):\d+: .*host-guard/g)].map((m) => Number(m[1]));
+  return [...out.matchAll(/fixture\.ts:(\d+):\d+: .*(?:host|signal)-guard/g)].map((m) =>
+    Number(m[1]),
+  );
 }
 
 const FIXTURE = [
@@ -69,12 +71,16 @@ const FIXTURE = [
   'linuxNotifier("/usr/bin/notify-send");',
   "declare const spawnGroup: (command: string, args: string[]) => void;",
   'spawnGroup("tmux", ["kill-server"]);',
+  'import proc from "node:process";',
+  'import * as nproc from "node:process";',
+  'proc.kill(-1, "SIGKILL");',
+  'nproc.kill(1, "SIGTERM");',
 ].join("\n");
 
 describe("the host-guard lint rule", () => {
   it("flags every tmux command and signal outside host-guard, a notifier or a process group pointed at tmux included, and nothing that only names tmux", () => {
     expect(flagged(FIXTURE)).toEqual([
-      4, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 36, 39,
+      4, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 36, 39, 42, 43,
     ]);
   });
 });

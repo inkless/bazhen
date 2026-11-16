@@ -241,6 +241,7 @@ export type Override = {
     "import/no-nodejs-modules"?: "error";
     "no-restricted-imports"?: Restriction;
     "bazhen/host-guard"?: "off";
+    "bazhen/signal-guard"?: "off";
   };
 };
 type Restriction = ["error", { patterns: Pattern[] }];
@@ -327,10 +328,11 @@ function overrides(): Override[] {
       },
     ];
   });
-  // The one place allowed to run tmux and send signals.
+  // The one package allowed to run tmux, and within it the one module allowed to send signals.
   return [
     ...areas,
     { files: ["packages/host-guard/src/**"], rules: { "bazhen/host-guard": "off" } },
+    { files: ["packages/host-guard/src/signal.ts"], rules: { "bazhen/signal-guard": "off" } },
   ];
 }
 
@@ -357,6 +359,7 @@ export const config = {
     "no-console": "off",
     "react/react-in-jsx-scope": "off",
     "bazhen/host-guard": "error",
+    "bazhen/signal-guard": "error",
   },
   overrides: overrides(),
   ignorePatterns: ["dist/**", "spikes/**", "**/node_modules/**"],

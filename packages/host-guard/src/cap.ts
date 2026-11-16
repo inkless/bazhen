@@ -14,7 +14,7 @@ import { execFile, execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, watch, type FSWatcher } from "node:fs";
 import { availableParallelism, totalmem } from "node:os";
-import { isAlive, signalGroup, spawnGroup } from "./signal.ts";
+import { isAlive, rethrowUnsafe, signalGroup, spawnGroup } from "./signal.ts";
 
 export interface Cap {
   readonly memory: number;
@@ -492,8 +492,9 @@ async function runGroup(
   const stop = (signal: NodeJS.Signals) => {
     try {
       signalGroup(child, signal);
-    } catch {
-      // The group has gone.
+    } catch (error) {
+      // The group has gone; a refused target is a fault, and surfaces.
+      rethrowUnsafe(error);
     }
   };
   let peak = 0;

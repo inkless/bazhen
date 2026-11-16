@@ -15,6 +15,8 @@ page serves that rule, or keeps tests from hurting the machine and each other.
 | Tests can't reach a real tmux server, and leave none running                       | integration setup and teardown              |
 | Test runs refuse to start when the machine is short of PTYs                        | integration, api and holder setup           |
 | Holder tests use only their run's home, reach no tmux, and leave no holder running | holder setup and teardown                   |
+| A signal is sent only from a chokepoint that checks its target                     | `pnpm check` (`scripts/check-standards.ts`) |
+| A test that may signal processes it didn't start runs only in a sandbox            | `cargo-gate test-all`; `require_sandbox()`  |
 | Suites never synthesise CPU load on a shared machine                               | review; `--cpus` quota on each container    |
 | Every test runs under a memory and time cap                                        | `pnpm check`; vitest setup; cargo's runner  |
 | Fakes over mocks; behaviour-named tests; no snapshots of terminal output           | review                                      |
@@ -199,6 +201,37 @@ A test owns everything it touches and leaves nothing behind.
   only through `tests/support/holder-spawn.ts`, which passes their env through it; lint bans
   `tests/holder` everything else that starts one: `child_process`, `node-pty`, `module`'s
   `createRequire`, `cluster` and `worker_threads`.
+- **Signals.** A signal to a wrong pid ends someone else's work, and one to -1 every process the
+  user owns. Raw signal calls (`process.kill` however it is reached: directly, by a default or
+  namespace import, through a constant bound to `process`, or computed; Rust's `kill_process`,
+  `kill_process_group`, `kill_current_process_group`, `pidfd_send_signal`, `libc::kill`,
+  `libc::killpg`, nix's `kill` and `killpg` by path or in a `use` group, `sigqueue` and the kill
+  syscalls), and a process started to send one (`kill`, `pkill`, `killall`, `killall5` or `skill`
+  run directly, through a launcher such as `env`, `sudo` or `timeout`, or by a shell, `xargs kill`,
+  `systemctl kill`, `loginctl terminate-user` and the like, and `fuser -k`), appear only in the
+  chokepoints `scripts/signal-paths.ts` lists, and `pnpm check` names any other. For TypeScript that
+  is `packages/host-guard/src/signal.ts`, which refuses 0, ±1, this process, its parent and its
+  group before it sends, and signals itself only in `dieBy`, on purpose. Rust tests use the
+  `bazhen-test-signal` crate, a dev-dependency only, which refuses the same and checks a holder's
+  start time and command once a pidfd pins it. The holder itself sends from
+  `crates/bazhen-holder/src/child.rs`, to its child's group and the terminal's foreground group,
+  with no floor of its own until the holder's guard module takes over that path. The one process
+  started to send a signal is `systemctl --user kill` of the cap's own scope
+  (`packages/host-guard/src/cap.ts`). The check is defence in depth: it reads text, so the
+  chokepoints' own refusals are what stop a stray signal. It fails closed on a command line: a kill
+  program there counts wherever it follows a launcher, whatever that launcher's options, or wherever
+  an argument follows it, and a `kill` passes only when, past at most one signal spec and a `--`,
+  and less its redirections and any comment, each operand is `$$`, `$!` or a plain `$var`. It
+  accepts these gaps: a kill program held in a constant; in TypeScript, `{ default as p }`,
+  `Reflect.get`, `require` and dynamic imports of `process`; unusual Rust `use` forms; a kill
+  program more than four arguments after its launcher. A Rust test that may signal processes it
+  didn't start is `#[ignore = "signals processes; runs in pnpm test:real rust"]` and starts with
+  `bazhen_test_signal::require_sandbox().unwrap();`, both of which `pnpm check` requires, so the
+  host skips it and `pnpm test:rust:all` runs it only on a host carrying a root-owned
+  `/etc/bazhen-disposable-host`: the test container or a CI runner. A PID namespace doesn't count:
+  Flatpak terminals, devcontainers, LXD and WSL2 are workstations in one. A test of a guard asserts
+  on what the guard returns, sends `SIGCONT`, or signals only a child it started, so a guard a
+  mutant breaks still harms nothing.
 - **PTYs are a machine-wide resource.** macOS has 511, and a leak starves every terminal on the
   machine. The setup refuses to run above 420 in use. A runtime change that opens PTYs needs a
   lifecycle test that repeats the operation and asserts the handle count returns to its baseline

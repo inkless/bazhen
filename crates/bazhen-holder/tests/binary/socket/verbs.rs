@@ -238,12 +238,26 @@ fn input_signals_and_foreground_after_the_childs_exit_are_refused_exited() {
     let home = home("after").unwrap();
     let (_holder, socket) = serving(&home, &["true"]).unwrap();
     let deadline = Instant::now() + DEADLINE;
+    // Watched as a reader, so no connection left over from the wait still holds the writer when
+    // the one the requests go through asks for it.
+    while Client::connect(&socket)
+        .unwrap()
+        .hello(false)
+        .unwrap()
+        .exit
+        .is_none()
+    {
+        assert!(Instant::now() < deadline, "the child never exited");
+    }
     let mut writer = loop {
         let mut client = Client::connect(&socket).unwrap();
-        if client.hello(true).unwrap().exit.is_some() {
+        if client.hello(true).unwrap().writer {
             break client;
         }
-        assert!(Instant::now() < deadline, "the child never exited");
+        assert!(
+            Instant::now() < deadline,
+            "no connection was made the writer"
+        );
     };
     let input = Request::Input {
         id: writer.id(),

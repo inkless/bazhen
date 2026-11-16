@@ -23,7 +23,7 @@ use std::sync::OnceLock;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use rustix::process::{Pid, Resource, Rlimit, Signal, getrlimit, getsid, kill_process, setrlimit};
+use rustix::process::{Pid, Resource, Rlimit, Signal, getrlimit, getsid, setrlimit};
 
 mod socket;
 
@@ -197,11 +197,9 @@ fn sweep() -> Result<()> {
             continue;
         }
         let pid = entry.holder;
-        let ours = in_test_home(&entry.socket)
-            && start_time(pid).is_some_and(|start| same_start(start, entry.holder_start))
-            && ps("comm=", pid).is_some_and(|comm| is_holder(&comm));
-        if ours && let Some(pid) = i32::try_from(pid).ok().and_then(Pid::from_raw) {
-            let _ = kill_process(pid, Signal::KILL);
+        if in_test_home(&entry.socket) {
+            kill_holder(pid, entry.holder_start)
+                .map_err(|refused| format!("{}: {refused}", path.display()))?;
         }
         // A holder started since, at the same pid, has an entry of its own here.
         if std::fs::read_to_string(&path).is_ok_and(|now| now == text) {
@@ -209,6 +207,33 @@ fn sweep() -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// What became of a holder a ledger entry names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Ended {
+    /// Killed, or already gone.
+    Gone,
+    /// Not the holder the entry names: another process at its pid, or this test or what runs it.
+    NotOurs,
+}
+
+/// Kills the holder at `pid` if it is still the one that started at `start`, checked once the
+/// process is pinned, so a pid reused since is left alone. A refused or failed kill is an error,
+/// never skipped.
+fn kill_holder(pid: u32, start: u64) -> std::result::Result<Ended, bazhen_test_signal::Refused> {
+    use bazhen_test_signal::Refused;
+    let ours = || {
+        start_time(pid).is_some_and(|now| same_start(now, start))
+            && ps("comm=", pid).is_some_and(|comm| is_holder(&comm))
+    };
+    match bazhen_test_signal::signal_if(pid, Signal::KILL, ours) {
+        Ok(true) | Err(Refused::Failed(_, rustix::io::Errno::SRCH)) => Ok(Ended::Gone),
+        Ok(false) | Err(Refused::This(_) | Refused::Parent(_) | Refused::OwnGroup(_)) => {
+            Ok(Ended::NotOurs)
+        }
+        Err(refused) => Err(refused),
+    }
 }
 
 /// A holder this test started, killed when the test ends if it is still the same process.
@@ -291,13 +316,24 @@ impl Drop for Started {
             // Not yet reaped, so the pid is still this holder's.
             let _ = child.kill();
             let _ = child.wait();
-        } else if !self.reaped
-            && start_time(self.pid).is_some_and(|start| same_start(start, self.start))
-            && ps("comm=", self.pid).is_some_and(|comm| is_holder(&comm))
-            && let Ok(pid) = self.pid()
-        {
+        } else if !self.reaped {
             // `exit` timed out, and its thread still waits for the holder.
-            let _ = kill_process(pid, Signal::KILL);
+            match kill_holder(self.pid, self.start) {
+                Ok(Ended::Gone) => {}
+                // A check that failed to read the holder doesn't show it gone, so its entry
+                // stays for the next sweep.
+                Ok(Ended::NotOurs) => return,
+                Err(refused) => {
+                    // Already unwinding, a second panic would abort the run and hide the first.
+                    assert!(
+                        std::thread::panicking(),
+                        "{}: couldn't end holder {}: {refused}",
+                        self.entry.display(),
+                        self.pid
+                    );
+                    return;
+                }
+            }
         }
         let _ = std::fs::remove_file(&self.entry);
     }

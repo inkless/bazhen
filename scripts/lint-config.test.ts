@@ -52,3 +52,13 @@ describe("generated oxlint config", () => {
     ]).toEqual([true, true, false]);
   });
 });
+
+const offFor = (rule: "bazhen/host-guard" | "bazhen/signal-guard") =>
+  config.overrides.filter((o) => o.rules[rule] === "off").flatMap((o) => o.files);
+
+describe("the guards' exemptions", () => {
+  it("lets all of host-guard run tmux, but only its signal module send a signal", () => {
+    expect(offFor("bazhen/host-guard")).toEqual(["packages/host-guard/src/**"]);
+    expect(offFor("bazhen/signal-guard")).toEqual(["packages/host-guard/src/signal.ts"]);
+  });
+});

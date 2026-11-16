@@ -16,12 +16,21 @@ export {
 } from "./tmux.ts";
 export { HOLDER_COMMAND, vouchHolder } from "./holder.ts";
 export {
+  DISPOSABLE_HOST_MARKER,
+  SANDBOX_RULE,
+  inSignalSandbox,
+  thisHost,
+  type SandboxHost,
+} from "./sandbox.ts";
+export {
   dieBy,
   isAlive,
   killHolder,
+  rethrowUnsafe,
   signalGroup,
   signalPane,
   spawnGroup,
+  UnsafeTarget,
   type HolderProcess,
   type PaneGroup,
   type RunOutcome,

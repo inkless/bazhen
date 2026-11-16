@@ -55,7 +55,7 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join, posix } from "node:path";
-import { isAlive, signalGroup, spawnGroup } from "@bazhen/host-guard";
+import { isAlive, rethrowUnsafe, signalGroup, spawnGroup } from "@bazhen/host-guard";
 import { KILLS_ENV } from "./capped.ts";
 import { GATES, configFailures, gateEnv, outsideConfigs } from "./cargo-gate.ts";
 import { isMain } from "./is-main.ts";
@@ -515,8 +515,9 @@ function run(
     const timer = setTimeout(() => {
       timedOut = true;
       options.onTimeout?.();
-      // A signal may be stopping the same group, and signalGroup throws once it has gone.
-      stopGroup(child).catch(() => undefined);
+      // A signal may be stopping the same group, and signalGroup throws once it has gone; a
+      // refused target is a fault, and surfaces.
+      stopGroup(child).catch(rethrowUnsafe);
     }, timeoutMs);
     const finish = (ok: boolean) => {
       clearTimeout(timer);

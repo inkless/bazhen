@@ -19,10 +19,7 @@ use bazhen_holder_proto::body::{
     Argv, Cols, Env, ExitStatus, Generation, NonEmpty, ProcessSpec, Rows, Size,
 };
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
-use rustix::process::{
-    Pid, Signal, WaitOptions, getpgid, getsid, kill_process, kill_process_group, test_kill_process,
-    waitpid,
-};
+use rustix::process::{Pid, Signal, WaitOptions, getpgid, getsid, test_kill_process, waitpid};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -45,7 +42,7 @@ struct EndsChild(Pid);
 impl Drop for EndsChild {
     fn drop(&mut self) {
         if let Ok(None) = waitpid(Some(self.0), WaitOptions::NOHANG) {
-            let _ = kill_process_group(self.0, Signal::KILL);
+            let _ = bazhen_test_signal::signal_group(self.0.as_raw_nonzero().get(), Signal::KILL);
             let _ = waitpid(Some(self.0), WaitOptions::empty());
         }
     }
@@ -258,7 +255,7 @@ fn fds_of(pid: Pid) -> Result<BTreeSet<RawFd>> {
 /// left the group may already be another process's.
 fn kill_grandchild(grandchild: Pid, child: Pid) {
     if getpgid(Some(grandchild)).is_ok_and(|group| group == child) {
-        let _ = kill_process(grandchild, Signal::KILL);
+        let _ = bazhen_test_signal::signal(grandchild.as_raw_nonzero().get(), Signal::KILL);
     }
 }
 
@@ -441,7 +438,7 @@ fn dropping_the_handles_in_an_unwind_signals_nothing() {
         panic!("unwinding through the handles");
     }));
     assert!(unwound.is_err());
-    kill_process(pid, Signal::USR1).unwrap();
+    bazhen_test_signal::signal(pid.as_raw_nonzero().get(), Signal::USR1).unwrap();
     let deadline = Instant::now() + DEADLINE;
     while !read_text(file.path()).contains("usr1") && Instant::now() < deadline {
         let master = pty.master();

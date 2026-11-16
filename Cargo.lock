@@ -65,6 +65,7 @@ version = "0.1.0"
 dependencies = [
  "bazhen-holder-engine",
  "bazhen-holder-proto",
+ "bazhen-test-signal",
  "libc",
  "proptest",
  "rustix",
@@ -99,8 +100,17 @@ dependencies = [
 name = "bazhen-hook"
 version = "0.1.0"
 dependencies = [
+ "bazhen-test-signal",
  "proptest",
  "serde_json",
+]
+
+[[package]]
+name = "bazhen-test-signal"
+version = "0.1.0"
+dependencies = [
+ "rustix",
+ "thiserror",
 ]
 
 [[package]]
