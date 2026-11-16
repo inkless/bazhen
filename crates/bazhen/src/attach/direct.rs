@@ -517,8 +517,8 @@ mod tests {
         }
     }
 
-    /// A holder of `term_x` in `dir` that reads one hello, returns whether it asked to write, and
-    /// answers with `answer` made from the hello's id.
+    /// A holder of `term_x` in `dir` that reads one hello, answers with `answer` made from the
+    /// hello's id, and once the client has hung up returns whether it asked to write.
     fn holder(dir: &Dir, answer: fn(RequestId) -> Reply) -> thread::JoinHandle<Option<bool>> {
         let listener = UnixListener::bind(dir.0.join("term_x.sock")).unwrap();
         thread::spawn(move || {
@@ -528,6 +528,9 @@ mod tests {
             loop {
                 if let Some(Request::Hello { id, body }) = decoder.next_frame().unwrap() {
                     stream.write_all(&answer(id).encode().unwrap()).unwrap();
+                    // Open until the client hangs up, as a holder stays: macOS refuses to set
+                    // options on a socket whose other end has closed.
+                    while stream.read(&mut chunk).is_ok_and(|n| n > 0) {}
                     return body.writer;
                 }
                 let n = stream.read(&mut chunk).unwrap();
