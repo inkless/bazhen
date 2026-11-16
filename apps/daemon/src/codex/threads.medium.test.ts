@@ -252,10 +252,11 @@ describe("Codex thread switches", () => {
     expect([s.boundTo(), s.held(), s.released]).toEqual([A, false, [s.agentId]]);
   });
 
-  it("moves an agent it gave up on once the thread its title names is announced", async () => {
+  it("lets mail go at give-up, and moves the agent once the thread its title names is announced", async () => {
     const s = await setup({ titles: [shown(B)], listed: [{ id: A }], giveUpMs: 20 });
     await s.threads.titleChanged(s.terminal);
     await expect.poll(s.untracked).toBe(true);
+    expect([s.boundTo(), s.held(), s.released]).toEqual([A, false, [s.agentId]]);
     s.announce(B);
     await expect.poll(s.boundTo).toBe(B);
   });
