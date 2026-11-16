@@ -247,7 +247,8 @@ describe("a Codex agent", () => {
   // in the daemon's home, above the work directory.
   it("refuses the human's verbs to a command the agent runs, as that agent's own call", async () => {
     const output = await ranAllowed("cd ..; BAZHEN_HOME=$PWD cli/bazhen devices", "devices");
-    expect(output).toContain("an agent can't list paired devices");
+    // Resolved to an agent: a call refused for its thread has the same start, then why after ":".
+    expect(output).toMatch(/an agent can't list paired devices(?!:)/);
     expect(output).not.toContain("devices=0");
   });
 

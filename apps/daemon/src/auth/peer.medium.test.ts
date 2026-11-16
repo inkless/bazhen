@@ -162,6 +162,29 @@ describe("bazhen-peer, on the socket", () => {
     ]);
   });
 
+  it("takes a caller inside an agent's terminal for that agent, though it names a Codex thread", async () => {
+    const socket = await guarded(peerReading(PEER_SOURCE, () => ours));
+    const call = `
+      import { request } from "node:http";
+      request({ socketPath: ${JSON.stringify(socket)}, method: "POST", path: "/v1/daemon/stop" }, (res) => {
+        let text = "";
+        res.on("data", (d) => (text += d));
+        res.on("end", () => process.stdout.write(res.statusCode + " " + text));
+      }).end();
+    `;
+    const child = spawn(process.execPath, ["--input-type=module", "-e", call], {
+      env: { ...process.env, CODEX_THREAD_ID: "01a1e0f0-593e-7ae1-9d31-769db26227fc" },
+      stdio: ["ignore", "pipe", "inherit"],
+    });
+    let out = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => (out += chunk));
+    await new Promise((resolve) => child.stdout.on("end", resolve));
+    expect(out).toBe(
+      `403 ${JSON.stringify({ error: "forbidden", message: "an agent can't stop the daemon" })}`,
+    );
+  });
+
   it("refuses a caller whose process the reader can't name, as when it fails", async () => {
     const socket = await guarded(peerReading("/bin/false", () => none));
     const [status, body] = await post(socket);

@@ -86,6 +86,20 @@ describe("readingOf", () => {
     ]).toEqual([{ kind: "codex" }, { kind: "agent", agentId: agent }]);
   });
 
+  it("names the agent whose terminal a caller marked only by its environment runs in", () => {
+    expect([
+      readingOf(via(150, chain(150, 150, 100, 10, 1)), terminals),
+      readingOf(via(150, chain(150, 100, 1)), terminals),
+      readingOf(via(950, chain(950, 950, 1)), terminals),
+      readingOf(via(350, chain(350, 300, 300, 10, 1)), terminals),
+    ]).toEqual([
+      { kind: "agent", agentId: agent },
+      { kind: "agent", agentId: agent },
+      { kind: "codex" },
+      { kind: "codex" },
+    ]);
+  });
+
   it("refuses a caller the runtime runs in no terminal, as tmux run-shell starts one", () => {
     expect(readingOf(chain(15, 15, 10, 1), terminals).kind).toBe("refused");
   });
