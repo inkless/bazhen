@@ -713,6 +713,21 @@ describe("HolderRuntime: watching agents' titles", () => {
     expect(watch!.holder.hello).toEqual(expect.objectContaining({ writer: false }));
   });
 
+  it("watches an agent's terminal as it is created, not at the next listing", async () => {
+    const { runtime, terminals } = startingFakes(
+      privateRoot(),
+      {},
+      undefined,
+      {},
+      { titleSyncMs: 60_000 },
+    );
+    const told: string[] = [];
+    onTestFinished(runtime.onTitle((terminalId) => told.push(terminalId)));
+    const ref = await runtime.create(agentSpec());
+    await expect.poll(() => told).toEqual([ref.terminalId]);
+    expect((await lasting(terminals.get(ref.terminalId)!)).length).toBe(1);
+  });
+
   it("finds agents' terminals already running, and never watches a shell's", async () => {
     const root = privateRoot();
     const { runtime, terminals } = startingFakes(root);
