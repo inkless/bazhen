@@ -2,6 +2,7 @@ import {
   checkDelegate,
   checkFinish,
   checkGrant,
+  checkNote,
   checkUnassign,
   grantingAssignment,
   isId,
@@ -11,6 +12,7 @@ import {
   type AssignmentId,
   type Caller,
   type RoleBook,
+  type TaskView,
 } from "@bazhen/core";
 import {
   AssignTaskResponse,
@@ -18,6 +20,7 @@ import {
   EscalateResponse,
   SendMessageResponse,
   TaskCommandResponse,
+  type AddTaskNoteRequest,
   type AgentState,
   type AssignTaskRequest,
   type CreateTaskRequest,
@@ -87,6 +90,15 @@ export class UnknownTask extends Error {
 const GONE: ReadonlySet<AgentState> = new Set<AgentState>(["closing", "closed", "failed"]);
 
 const actor = (caller: Caller) => caller ?? "human";
+
+/**
+ * The role the caller holds on the task as it writes a note there, the first it was given if
+ * several; null for the human, and for an agent on none, which may write only as its owner.
+ */
+function authorRole(view: TaskView, caller: Caller): Role | null {
+  if (caller === null) return null;
+  return view.active.find((a) => a.agentId === caller)?.role ?? null;
+}
 
 /** How many of an agent's escalations may wait for the human at once. */
 const OPEN_ESCALATIONS = 5;
@@ -401,6 +413,32 @@ export class Tasks {
   }
 
   /**
+   * A note on the task from the human or an agent on it: the agent's headline, and, as a
+   * handoff, what the next assignee's brief carries.
+   */
+  note(caller: Caller, taskId: string, req: AddTaskNoteRequest): TaskCommandResponse {
+    const { idempotencyKey, text } = req;
+    const handoff = req.handoff === true;
+    return this.store.once(
+      idempotencyKey,
+      { caller, taskId, text, handoff },
+      (r) => TaskCommandResponse.parse(r),
+      () => {
+        this.checkCaller(caller);
+        const view = this.view(taskId);
+        checkNote(view, caller);
+        const noted = this.store.append({
+          type: "task.noted",
+          entityId: taskId,
+          actor: actor(caller),
+          payload: { text, handoff, role: authorRole(view, caller) },
+        });
+        return { eventIds: [noted] };
+      },
+    );
+  }
+
+  /**
    * Puts an agent's question or problem in the human's inbox, about one of its own tasks when it
    * names one. Only an agent escalates; the human has nobody to escalate to.
    */
@@ -617,7 +655,12 @@ export class Tasks {
     const detail = this.store.taskDetail(taskId);
     if (detail === undefined) throw new UnknownTask(taskId);
     const grants = book.rules(req.role).grants;
-    const body = checkLength(assignedMail(detail, req.role, grants, this.who(caller)));
+    const handoff = this.store.pendingHandoff(taskId);
+    const note =
+      handoff === undefined
+        ? undefined
+        : { ...handoff, by: handoff.agentId === null ? null : this.agentNamed(handoff.agentId) };
+    const body = checkLength(assignedMail(detail, req.role, grants, this.who(caller), note));
     const held = this.store
       .assignments({ agentId }, "active")
       .filter((a) => a.role === req.role).length;

@@ -46,6 +46,7 @@ export const testView: SnapshotView = {
   },
   noticeActions: () => ["dismiss"],
   shellsReport: true,
+  listening: () => false,
 };
 
 /** A browser paired on loopback, which shows no address: for tests where that isn't what is tested. */

@@ -93,6 +93,7 @@ const commands: LanParts["commands"] = {
     delegate: refuse,
     escalate: refuse,
     send: refuse,
+    note: refuse,
   },
 };
 

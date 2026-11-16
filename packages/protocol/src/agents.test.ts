@@ -36,7 +36,7 @@ describe("LaunchAgentRequest", () => {
 });
 
 describe("StateSnapshot", () => {
-  it("still reads a snapshot from a daemon older than its host, attach and command fields", () => {
+  it("still reads a snapshot from a daemon older than its host, attach, command and fleet fields", () => {
     const environmentId = "env_01900000000070008000000000000001";
     const older = {
       epoch: "e",
@@ -64,6 +64,8 @@ describe("StateSnapshot", () => {
       read.environments[0]?.host,
       read.agents[0]?.attachCommand,
       read.agents[0]?.commands,
-    ]).toEqual(["", null, []]);
+      read.agents[0]?.listening,
+      read.agents[0]?.headline,
+    ]).toEqual(["", null, [], false, null]);
   });
 });

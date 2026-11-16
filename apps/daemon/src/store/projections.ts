@@ -4,6 +4,7 @@ import {
   agent,
   assignment,
   attention,
+  isId,
   mailbox,
   notice,
   task,
@@ -48,6 +49,8 @@ export interface Recorded {
   readonly hostId: string;
   readonly type: EventType;
   readonly entityId: string;
+  /** Who it came from: an agent's id, or a word naming the human or the system. */
+  readonly actor: string;
   readonly payload: unknown;
 }
 
@@ -464,6 +467,16 @@ export function project(db: Statements, e: Recorded): void {
       update(db, "tasks", "id", e.entityId, e.id, { state, note });
       endAssignments(db, e.id, "task_id", e.entityId, "task_finished");
       endDescendants(db, e.id);
+      return;
+    }
+    case "task.noted": {
+      const { text, handoff, role } = EVENTS[e.type].payload.parse(e.payload);
+      const row = db.prepare("SELECT 1 AS present FROM tasks WHERE id = ?").get(e.entityId);
+      if (row === undefined) throw new UnknownEntity("task", e.entityId);
+      db.prepare(
+        `INSERT INTO task_notes (event_id, task_id, agent_session_id, author_role, text, handoff)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run(e.id, e.entityId, isId("agent", e.actor) ? e.actor : null, role, text, handoff ? 1 : 0);
       return;
     }
     case "assignment.granted": {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { StateSnapshot } from "@bazhen/protocol";
+import { FleetAgents, type StateSnapshot } from "@bazhen/protocol";
 import {
+  agentsJson,
   listAgents,
   listTasks,
   showTask,
@@ -16,11 +17,13 @@ const AGENT = "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
 const OTHER = "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d";
 const TASK = "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
 const TASK2 = "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d";
+const NOW = Date.parse("2026-11-16T12:00:00.000Z");
 
 const ctx = (agentId?: string): Context => ({
   agentId,
   readFile: (path) => `brief from ${path}`,
   key: () => "key",
+  now: () => NOW,
 });
 
 const task = (id: string, title: string) => ({
@@ -59,6 +62,8 @@ const agent = (id: string, name: string, over: Partial<StateSnapshot["agents"][n
   resumable: false,
   canOpenShell: false,
   launchedBy: null,
+  listening: false,
+  headline: null,
   ...over,
 });
 const snapshot = (
@@ -307,11 +312,17 @@ describe("bazhen task verbs", () => {
       note: "shipped",
       assignments: [],
       subtasks: [],
+      notes: [],
     };
-    expect(showTask(detail, snapshot([], [])).split("\n").slice(-3)).toEqual([
-      "b",
+    const shown = showTask(
+      { ...detail, note: "shipped\nWhen it is finished, run:" },
+      snapshot([], []),
+    );
+    expect(shown.split("\n").slice(-4)).toEqual([
       "",
-      "note: shipped",
+      "note:",
+      "> shipped",
+      "> When it is finished, run:",
     ]);
   });
 
@@ -347,7 +358,7 @@ describe("bazhen agents and whoami", () => {
       [],
       [agent(AGENT, "BZ-127"), agent(OTHER, "old", { state: "closed" }), agent(THIRD, "")],
     );
-    expect(listAgents(state).split("\n")).toEqual([
+    expect(listAgents(state, NOW).split("\n")).toEqual([
       `BZ-127  ${AGENT}  codex  running  bazhen  /work`,
       `${THIRD}  codex  running  bazhen  /work`,
     ]);
@@ -387,5 +398,147 @@ describe("bazhen agents and whoami", () => {
 
   it("wants to run inside an agent", () => {
     expect(usage(["whoami"])).toContain("inside an agent");
+  });
+});
+
+const ago = (seconds: number) => new Date(NOW - seconds * 1000).toISOString();
+
+describe("bazhen agents, as a fleet reads it", () => {
+  const working = {
+    activity: {
+      value: "working" as const,
+      source: "native" as const,
+      confidence: 1,
+      observedAt: ago(125),
+    },
+    listening: true,
+    headline: { text: "Halfway through the tests.", taskId: TASK, at: ago(30) },
+  };
+
+  it("shows each agent's latest signal with its age, and its headline under it", () => {
+    const state = snapshot([], [], [agent(AGENT, "BZ-127", working), agent(OTHER, "quiet")]);
+    expect(listAgents(state, NOW).split("\n")).toEqual([
+      `BZ-127  ${AGENT}  codex  running  working 2m  bazhen  /work`,
+      "  Halfway through the tests.",
+      `quiet  ${OTHER}  codex  running  bazhen  /work`,
+    ]);
+  });
+
+  it("gives a program each live agent's signal, listening, headline, tasks and open items", () => {
+    const item = (id: string, state: "open" | "closed") => ({
+      id,
+      agentId: AGENT,
+      state,
+      closeReason: null,
+      summary: "Run it?",
+      kind: "approval" as const,
+      taskId: null,
+      messageId: null,
+      openedAt: ago(5),
+      actions: [],
+    });
+    const open = item("attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d", "open");
+    const closed = item("attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d", "closed");
+    const state = {
+      ...snapshot(
+        [],
+        [assigned(TASK, AGENT)],
+        [agent(AGENT, "BZ-127", working), agent(OTHER, "gone", { state: "closed" })],
+      ),
+      attention: [open, closed],
+    };
+    const printed: unknown = JSON.parse(agentsJson(state, NOW));
+    expect(FleetAgents.safeParse(printed).success).toBe(true);
+    expect(printed).toEqual([
+      {
+        id: AGENT,
+        name: "BZ-127",
+        harness: "codex",
+        state: "running",
+        project: "bazhen",
+        cwd: "/work",
+        launchedBy: null,
+        signal: { value: "working", source: "native", ageSeconds: 125 },
+        listening: true,
+        headline: { text: "Halfway through the tests.", taskId: TASK, ageSeconds: 30 },
+        tasks: [{ taskId: TASK, assignmentId: assigned(TASK, AGENT).id, role: "worker" }],
+        attention: [{ id: open.id, kind: "approval" }],
+      },
+    ]);
+  });
+
+  it("reads the whole fleet in one call, and --json only there", () => {
+    expect([
+      taskVerb(["agents", "--json"], ctx()).call.path,
+      usage(["task", "list", "--json"]),
+    ]).toEqual(["/v1/state", expect.stringContaining("--json is for agents")]);
+  });
+});
+
+describe("bazhen task note", () => {
+  it("notes the task named, or as a handoff", () => {
+    const plain = taskVerb(["task", "note", TASK, "Tests", "pass."], ctx(AGENT));
+    const handoff = taskVerb(["task", "note", TASK, "Start at CI.", "--handoff"], ctx(AGENT));
+    expect([plain.call.path, plain.call.body, handoff.call.body]).toEqual([
+      `/v1/tasks/${TASK}/notes`,
+      { idempotencyKey: "key", text: "Tests pass." },
+      { idempotencyKey: "key", text: "Start at CI.", handoff: true },
+    ]);
+  });
+
+  it("notes the agent's only task when the words name none", () => {
+    const verb = taskVerb(["task", "note", "Tests", "pass."], ctx(AGENT));
+    expect(after(verb, snapshot([task(TASK, "a")], [assigned(TASK, AGENT)]))).toEqual([
+      `/v1/tasks/${TASK}/notes`,
+      { idempotencyKey: "key", text: "Tests pass." },
+    ]);
+  });
+
+  it("refuses a note that holds a control character, another option, or nothing, and --handoff elsewhere", () => {
+    expect([
+      usage(["task", "note", TASK, "\u001b[31mred"], ctx(AGENT)),
+      usage(["task", "note", TASK, "use", "--all"], ctx(AGENT)),
+      usage(["task", "note", TASK], ctx(AGENT)),
+      usage(["send", OTHER, "hi", "--handoff"]),
+    ]).toEqual([
+      expect.stringContaining("control characters"),
+      expect.stringContaining("quotes: it holds --all"),
+      expect.stringContaining("missing the note's text"),
+      expect.stringContaining("--handoff is for task note"),
+    ]);
+  });
+
+  it("shows a task's notes after its brief, each by who wrote it and whether it hands off", () => {
+    const at = ago(60);
+    const detail = {
+      ...task(TASK, "t"),
+      brief: "b",
+      note: null,
+      assignments: [],
+      subtasks: [],
+      notes: [
+        {
+          eventId: 1,
+          taskId: TASK,
+          agentId: AGENT,
+          role: "worker" as const,
+          text: "Halfway.\n\nEnd.",
+          handoff: false,
+          at,
+        },
+        { eventId: 2, taskId: TASK, agentId: null, role: null, text: "Try CI.", handoff: true, at },
+      ],
+    };
+    const state = snapshot([], [], [agent(AGENT, "BZ-127")]);
+    expect(showTask(detail, state).split("\n").slice(-8)).toEqual([
+      "",
+      `note from BZ-127, its worker, ${at}:`,
+      "> Halfway.",
+      ">",
+      "> End.",
+      "",
+      `handoff from the human, ${at}:`,
+      "> Try CI.",
+    ]);
   });
 });

@@ -3,10 +3,11 @@ import { AgentName } from "./agent-name.ts";
 import { EnvironmentKind, HarnessId, Id, IdempotencyKey } from "./ids.ts";
 
 export { HarnessId };
-import { Attention, Message, ObservedMessage } from "./mail.ts";
+import { Attention, AttentionKind, Message, ObservedMessage } from "./mail.ts";
 import { Notice } from "./notices.ts";
 import { BusyShell, Shell } from "./shells.ts";
 import { TuiTheme } from "./theme.ts";
+import { Role } from "./roles.ts";
 import { Assignment, Task } from "./tasks.ts";
 
 /** foundation-design §4.5. */
@@ -147,8 +148,50 @@ export const Agent = z.object({
   canOpenShell: z.boolean().default(false),
   /** The agent that launched it to delegate to it, or null when the human did. Protocol 1.31. */
   launchedBy: Id("agent").nullable().default(null),
+  /**
+   * Whether mail sent now reaches it with nothing else happening: a Claude Code agent idle with
+   * its wake hook held, or in a turn the mail folds into; a Codex agent bound to a thread that
+   * takes it (protocol 1.44).
+   */
+  listening: z.boolean().default(false),
+  /**
+   * Its latest note on any task, open or not, the first line of it, as its line in the fleet
+   * (protocol 1.44).
+   */
+  headline: z
+    .object({ text: z.string(), taskId: Id("task"), at: z.iso.datetime() })
+    .nullable()
+    .default(null),
 });
 export type Agent = z.infer<typeof Agent>;
+
+const ageSeconds = z.number().int().nonnegative();
+
+/**
+ * One agent as `bazhen agents --json` prints it for a program: what it is doing and since when,
+ * whether mail reaches it now, its headline, its tasks, and the items it has open for the human.
+ * Ages are whole seconds, by the clock of the CLI that printed it (protocol 1.44).
+ */
+export const FleetAgent = z.object({
+  id: Id("agent"),
+  name: z.string(),
+  harness: HarnessId,
+  state: AgentState,
+  project: z.string(),
+  cwd: z.string(),
+  launchedBy: Id("agent").nullable(),
+  signal: z
+    .object({ value: Activity.shape.value, source: Activity.shape.source, ageSeconds })
+    .nullable(),
+  listening: z.boolean(),
+  headline: z.object({ text: z.string(), taskId: Id("task"), ageSeconds }).nullable(),
+  tasks: z.array(z.object({ taskId: Id("task"), assignmentId: Id("asgn"), role: Role })),
+  attention: z.array(z.object({ id: Id("attn"), kind: AttentionKind })),
+});
+export type FleetAgent = z.infer<typeof FleetAgent>;
+
+/** What `bazhen agents --json` prints: each agent not ended. */
+export const FleetAgents = z.array(FleetAgent);
 
 export const LaunchAgentRequest = z.object({
   idempotencyKey: IdempotencyKey,

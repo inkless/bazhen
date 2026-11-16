@@ -9,6 +9,7 @@ import {
   checkDelegate,
   checkFinish,
   checkGrant,
+  checkNote,
   checkUnassign,
   task,
   TaskRefused,
@@ -352,5 +353,26 @@ describe("assignment invariants over any sequence of commands", () => {
 
   it("makes coordinators only on the human's word", () => {
     expect(() => fc.assert(fc.property(commands, coordinatorsFromHuman))).not.toThrow();
+  });
+});
+
+describe("checkNote", () => {
+  it("lets an agent on the task, its owner and the human note it, and no one else", () => {
+    const view = open([asgn(A, "worker")], B);
+    const noters: Caller[] = [A, B, null, C];
+    expect(noters.map((c) => refusal(() => checkNote(view, c)))).toEqual([
+      "allowed",
+      "allowed",
+      "allowed",
+      "forbidden",
+    ]);
+  });
+
+  it("refuses a note on a finished task, even from the human", () => {
+    expect(refusal(() => checkNote({ ...open([]), state: "done" }, null))).toBe("conflict");
+  });
+
+  it("gives an owner whose subtask moved up no say on it", () => {
+    expect(refusal(() => checkNote({ ...open([], B), ownerHolds: false }, B))).toBe("forbidden");
   });
 });

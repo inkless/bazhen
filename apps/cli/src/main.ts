@@ -292,6 +292,7 @@ async function taskCommand(): Promise<number> {
       agentId: process.env["BAZHEN_AGENT_ID"],
       readFile: (path) => readFileSync(path, "utf8"),
       key: () => randomUUID(),
+      now: () => Date.now(),
     });
     const daemon = taskSocket(process.env, socket);
     while (typeof next !== "string") next = next.answer(await call(daemon, next.call, CALL_MS));

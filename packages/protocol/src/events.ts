@@ -41,6 +41,12 @@ const taskCreated = z.object({
   delegatedFrom: Id("asgn").nullable().optional(),
 });
 const taskFinished = z.object({ outcome: TaskOutcome, note: z.string().nullable() });
+const taskNoted = z.object({
+  text: z.string(),
+  handoff: z.boolean(),
+  /** The role its agent held on the task then; null for the human, and for an owner on none. */
+  role: Role.nullable(),
+});
 const transcript = z.object({
   sessionId: z.string().min(1),
   path: z.string().startsWith("/").max(4096),
@@ -425,6 +431,12 @@ export const EVENTS = {
       ownerAgentId: Id("agent").nullable(),
       delegatedFrom: Id("asgn").nullable(),
     }),
+  },
+  /** A note on the task from its actor, the human or an agent (protocol 1.44). */
+  "task.noted": {
+    entity: "task",
+    payload: taskNoted,
+    streamed: taskNoted.omit({ text: true }),
   },
   "assignment.granted": {
     entity: "assignment",

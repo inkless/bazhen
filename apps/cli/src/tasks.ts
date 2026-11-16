@@ -11,20 +11,25 @@ import {
   CreateTaskResponse,
   HarnessId,
   EscalateResponse,
+  Id,
   Role,
   RolesResponse,
   SendMessageResponse,
   StateSnapshot,
   TaskCommandResponse,
   TaskDetail,
+  TaskNoteText,
+  quoteNote,
+  type FleetAgent,
   type Agent,
   type Assignment,
   type Task,
+  type TaskNote,
 } from "@bazhen/protocol";
 import type { Call } from "@bazhen/daemon/client";
 
 export const TASK_USAGE = `usage:
-  bazhen agents
+  bazhen agents [--json]
   bazhen whoami
   bazhen roles
   bazhen rename <agent> <name>
@@ -35,6 +40,7 @@ export const TASK_USAGE = `usage:
   bazhen task unassign <task> <assignment>
   bazhen task done [<task>] [--note <text>] [--cascade]
   bazhen task cancel <task> [--note <text>] [--cascade]
+  bazhen task note [<task>] <text> [--handoff]
   bazhen escalate <question> [--task <task>]
   bazhen send <agent> (<text> | --file <path>)
   bazhen delegate (<agent> | --launch claude-code|codex [--dir <dir>] [--name <name>]) --title <title> (--brief <text> | --brief-file <path>) [--task <task>] [--role <role>]
@@ -58,6 +64,8 @@ export interface Context {
   readonly agentId: string | undefined;
   readonly readFile: (path: string) => string;
   readonly key: () => string;
+  /** The time now, in milliseconds since the epoch, that ages are counted to. */
+  readonly now: () => number;
 }
 
 /**
@@ -98,6 +106,8 @@ const OPTIONS = {
   name: { type: "string" },
   home: { type: "string" },
   port: { type: "string" },
+  json: { type: "boolean" },
+  handoff: { type: "boolean" },
 } as const;
 
 /** The command line's words and options; a malformed one is a Usage, not a crash. */
@@ -110,8 +120,9 @@ function parse(argv: readonly string[]) {
   }
 }
 
-/** The options `send` takes; `--home` and `--port` are every verb's. */
+/** The options `send` and `task note` take beside their text; `--home` and `--port` are every verb's. */
 const SEND_OPTIONS: ReadonlySet<string> = new Set(["file", "home", "port"]);
+const NOTE_OPTIONS: ReadonlySet<string> = new Set(["handoff", "home", "port"]);
 
 const state: Call<StateSnapshot> = { method: "GET", path: "/v1/state", reply: StateSnapshot };
 const rolesCall: Call<RolesResponse> = { method: "GET", path: "/v1/roles", reply: RolesResponse };
@@ -142,6 +153,18 @@ export function taskVerb(argv: readonly string[], ctx: Context): Verb {
   if (name !== "send" && values.file !== undefined) {
     throw new Usage("--file is for send; a brief takes --brief-file");
   }
+  if (values.json !== undefined && name !== "agents") throw new Usage("--json is for agents");
+  if (values.handoff !== undefined && (name !== "task" || sub !== "note")) {
+    throw new Usage("--handoff is for task note");
+  }
+  /** Text given as words, refused when an option took some of it out unseen. */
+  const words = (given: readonly (string | undefined)[], allowed: ReadonlySet<string>) => {
+    const taken = Object.keys(values).filter((o) => !allowed.has(o));
+    if (taken.length > 0) {
+      throw new Usage(`put the text in quotes: it holds --${taken.join(", --")}`);
+    }
+    return given.filter((w) => w !== undefined).join(" ");
+  };
   /** A name the command line gives an agent, checked before the daemon is asked. */
   const newName = (value: string) => {
     const parsed = AgentName.safeParse(value);
@@ -154,7 +177,10 @@ export function taskVerb(argv: readonly string[], ctx: Context): Verb {
     if (!AgentRef.safeParse(ref).success) throw new Usage(`not an agent's name or id: ${ref}`);
     return ref;
   };
-  if (name === "agents") return verb(state, listAgents);
+  if (name === "agents") {
+    const now = ctx.now();
+    return verb(state, (s) => (values.json === true ? agentsJson(s, now) : listAgents(s, now)));
+  }
   if (name === "roles") return verb(rolesCall, listRoles);
   if (name === "whoami") {
     const self = ctx.agentId;
@@ -186,17 +212,12 @@ export function taskVerb(argv: readonly string[], ctx: Context): Verb {
   }
   if (name === "send") {
     const agentId = agentRef(sub, "the agent to send to");
-    // An unquoted word that is another verb's option would be taken out of the text silently.
-    const taken = Object.keys(values).filter((o) => !SEND_OPTIONS.has(o));
-    if (taken.length > 0) {
-      throw new Usage(`put the text in quotes: it holds --${taken.join(", --")}`);
-    }
-    const words = rest.join(" ");
-    if (words !== "" && values.file !== undefined) {
+    const text = words(rest, SEND_OPTIONS);
+    if (text !== "" && values.file !== undefined) {
       throw new Usage("give the text or --file, not both");
     }
     const body =
-      values.file === undefined ? need(words, "the text to send") : ctx.readFile(values.file);
+      values.file === undefined ? need(text, "the text to send") : ctx.readFile(values.file);
     return post(
       `/v1/agents/${encodeURIComponent(agentId)}/messages`,
       SendMessageResponse,
@@ -311,13 +332,34 @@ export function taskVerb(argv: readonly string[], ctx: Context): Verb {
       if (taskId !== undefined) return finish(taskId);
       return ownTask(ctx, finish);
     }
+    case "note": {
+      const [first, ...more] = rest;
+      const named = first !== undefined && Id("task").safeParse(first).success;
+      const text = need(words(named ? more : rest, NOTE_OPTIONS), "the note's text");
+      const parsed = TaskNoteText.safeParse(text);
+      if (!parsed.success) {
+        throw new Usage(parsed.error.issues.map((i) => i.message).join("; "));
+      }
+      const handoff = values.handoff === true;
+      const noteOn = (id: string): Verb =>
+        post(
+          `/v1/tasks/${id}/notes`,
+          TaskCommandResponse,
+          { text: parsed.data, ...(handoff ? { handoff } : {}) },
+          () => `noted on ${id}${handoff ? ", as a handoff for whoever is assigned it next" : ""}`,
+        );
+      return named ? noteOn(first) : ownTask(ctx, noteOn);
+    }
     case undefined:
     default:
       throw new Usage(`unknown task verb ${sub ?? ""}`);
   }
 }
 
-/** `task done` with no task, inside an agent: the one task it is assigned, read from the state. */
+/**
+ * `task done` or `task note` with no task, inside an agent: the one task it is assigned, read from
+ * the state.
+ */
 function ownTask(ctx: Context, finish: (id: string) => Verb): Verb {
   const agentId = ctx.agentId;
   if (agentId === undefined) throw new Usage("missing the task (outside an agent, name it)");
@@ -334,13 +376,32 @@ const activeFor = (s: StateSnapshot, agentId: string) =>
 
 const ended = (a: Agent) => a.state === "closed" || a.state === "failed";
 
-export function listAgents(s: StateSnapshot): string {
+/** Whole seconds from an ISO time to `now`, never negative, so a reader does no date arithmetic. */
+const ageSeconds = (at: string, now: number) =>
+  Math.max(0, Math.floor((now - Date.parse(at)) / 1000));
+
+/** An age as a person reads it at a glance: its largest whole unit. */
+function ago(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+  if (seconds < 86_400) return `${Math.floor(seconds / 3600)}h`;
+  return `${Math.floor(seconds / 86_400)}d`;
+}
+
+export function listAgents(s: StateSnapshot, now: number): string {
   const live = s.agents.filter((a) => !ended(a));
   if (live.length === 0) return "no agents";
   return live
-    .map((a: Agent) =>
-      [a.name, a.id, a.harness, a.state, a.project, a.cwd].filter((f) => f !== "").join("  "),
-    )
+    .flatMap((a: Agent) => {
+      const signal =
+        a.activity === undefined
+          ? ""
+          : `${a.activity.value} ${ago(ageSeconds(a.activity.observedAt, now))}`;
+      const line = [a.name, a.id, a.harness, a.state, signal, a.project, a.cwd]
+        .filter((f) => f !== "")
+        .join("  ");
+      return a.headline === null ? [line] : [line, `  ${a.headline.text}`];
+    })
     .join("\n");
 }
 
@@ -357,6 +418,50 @@ export function listRoles({ roles, problems }: RolesResponse): string {
   );
   const skipped = problems.map((p) => `skipped ${p.file}: ${p.problem}`);
   return [...lines, ...skipped].join("\n");
+}
+
+/**
+ * The fleet for a program to read: each agent not ended, with its latest signal and its age,
+ * whether mail reaches it now, its headline, its tasks, and the items it has open for the human.
+ */
+export function agentsJson(s: StateSnapshot, now: number): string {
+  const agents: FleetAgent[] = s.agents
+    .filter((a) => !ended(a))
+    .map((a) => ({
+      id: a.id,
+      name: a.name,
+      harness: a.harness,
+      state: a.state,
+      project: a.project,
+      cwd: a.cwd,
+      launchedBy: a.launchedBy,
+      signal:
+        a.activity === undefined
+          ? null
+          : {
+              value: a.activity.value,
+              source: a.activity.source,
+              ageSeconds: ageSeconds(a.activity.observedAt, now),
+            },
+      listening: a.listening,
+      headline:
+        a.headline === null
+          ? null
+          : {
+              text: a.headline.text,
+              taskId: a.headline.taskId,
+              ageSeconds: ageSeconds(a.headline.at, now),
+            },
+      tasks: activeFor(s, a.id).map((t) => ({
+        taskId: t.taskId,
+        assignmentId: t.id,
+        role: t.role,
+      })),
+      attention: s.attention
+        .filter((i) => i.agentId === a.id && i.state === "open")
+        .map((i) => ({ id: i.id, kind: i.kind })),
+    }));
+  return JSON.stringify(agents, null, 2);
 }
 
 /**
@@ -425,6 +530,9 @@ const taskLine = (s: StateSnapshot, t: Task, assignees: readonly Assignment[]) =
   return `${t.id}  ${t.title}  [${who}]${parent}`;
 };
 
+const noteWriter = (s: StateSnapshot, n: TaskNote) =>
+  n.agentId === null ? "the human" : `${shown(s, n.agentId)}, its ${n.role ?? "owner"}`;
+
 export function showTask(d: TaskDetail, s: StateSnapshot): string {
   const owner = d.ownerAgentId === null ? "the human" : shown(s, d.ownerAgentId);
   const lines = [
@@ -437,6 +545,11 @@ export function showTask(d: TaskDetail, s: StateSnapshot): string {
     ...d.subtasks.map((t) => `  subtask ${t.id}  ${t.title}  ${t.state}`),
     "",
     d.brief,
+    ...d.notes.flatMap((n) => [
+      "",
+      `${n.handoff ? "handoff" : "note"} from ${noteWriter(s, n)}, ${n.at}:`,
+      quoteNote(n.text),
+    ]),
   ];
-  return d.note === null ? lines.join("\n") : [...lines, "", `note: ${d.note}`].join("\n");
+  return d.note === null ? lines.join("\n") : [...lines, "", "note:", quoteNote(d.note)].join("\n");
 }

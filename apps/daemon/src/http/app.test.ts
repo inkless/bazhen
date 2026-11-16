@@ -55,6 +55,10 @@ const tasks: TaskCommands = {
     if (agentId === "agent_gone") throw new AgentGone(agentId, "closed");
     return { messageId: newId("msg"), eventIds: [agentId === target ? 4 : 0] };
   },
+  note: (caller) => {
+    callers.push(caller);
+    return { eventIds: [12] };
+  },
 };
 /** The viewer and advisory device each notice dismissal reached the handler with. */
 const seenDismissals: [Viewer, string | undefined][] = [];
@@ -490,6 +494,21 @@ describe("HTTP task routes", () => {
     ]);
   });
 
+  it("refuses a note too long, or holding a control character, before any command sees it", async () => {
+    const before = callers.length;
+    const statuses = [
+      (await postNote("x".repeat(4001))).status,
+      (await postNote("a\u001bb")).status,
+    ];
+    expect([statuses, callers.length - before]).toEqual([[400, 400], 0]);
+  });
+
+  it("hands a task's note to its own command, as the socket caller's", async () => {
+    const as = { "bazhen-agent-id": agentId };
+    const noted = await postTo(socket, `/v1/tasks/${newId("task")}/notes`, { text: "halfway" }, as);
+    expect([(await noted.json()).eventIds, callers.at(-1)]).toEqual([[12], agentId]);
+  });
+
   it("answers a read of a task it doesn't have with not found", async () => {
     const res = await app.request(`/v1/tasks/${newId("task")}`, { headers: { host } });
     expect([res.status, await res.json()]).toEqual([
@@ -505,6 +524,8 @@ const postTo = (on: typeof app, path: string, body: object, headers: Record<stri
     headers: { host, "content-type": "application/json", ...headers },
     body: JSON.stringify({ idempotencyKey: "n", ...body }),
   });
+
+const postNote = (text: string) => postTo(app, `/v1/tasks/${newId("task")}/notes`, { text });
 
 describe("agents addressed by name", () => {
   it("takes an agent's name in its path as its id", async () => {
