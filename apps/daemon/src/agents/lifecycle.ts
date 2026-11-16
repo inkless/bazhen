@@ -32,7 +32,7 @@ import {
   StateConflict,
 } from "../commands.ts";
 import type { TerminalAdmission } from "../terminals/budget.ts";
-import { launchOptions } from "./launch.ts";
+import { launchOptions, startedAs } from "./launch.ts";
 import type { AgentQueue } from "./queue.ts";
 import { runtimePayload, UnknownAgent, type AgentTerminal, type Store } from "../store/store.ts";
 
@@ -182,11 +182,12 @@ export class Lifecycle {
       );
       const requested = this.record(agentId, "agent.respawn_requested", {});
       this.startAgain.replaced(agentId);
+      const options = launchOptions(req.theme, launched.name);
       const refs = await this.environment
         .respawn({
           agentId: found.agentId,
           request: launch,
-          options: launchOptions(req.theme, launched.name),
+          options,
           refs: { runtime: found.runtime, externalRef },
           generation: next.generation,
         })
@@ -205,6 +206,7 @@ export class Lifecycle {
           externalRef: rebound ? current : refs.externalRef,
           runtimeRef,
           ...(refs.theme && { theme: refs.theme }),
+          ...startedAs(options),
         }),
       ];
     });
@@ -233,6 +235,7 @@ export class Lifecycle {
         fresh,
       });
       this.startAgain.replaced(agentId);
+      const options = launchOptions(req.theme, launched.name);
       const refs = await this.environment
         .launch({
           agentId: found.agentId,
@@ -240,7 +243,7 @@ export class Lifecycle {
           generation,
           resume: fresh ? null : externalRef,
           request: launch,
-          options: launchOptions(req.theme, launched.name),
+          options,
           size: this.startAgain.size,
         })
         .then(({ runtime, ...rest }) => {
@@ -262,6 +265,7 @@ export class Lifecycle {
           externalRef: rebound ? current : refs.externalRef,
           runtimeRef,
           ...(refs.theme && { theme: refs.theme }),
+          ...startedAs(options),
         }),
       ];
     });

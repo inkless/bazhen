@@ -185,6 +185,23 @@ describe("Claude Code harness", () => {
 const settingsOf = (argv: readonly string[]): unknown =>
   JSON.parse(String(argv[argv.indexOf("--settings") + 1]));
 
+describe("Claude Code's permissions", () => {
+  it("lets the agent run the bazhen verbs it is taught, and no others, without asking", async () => {
+    const { argv } = await claude(() => "s").launchSpec(request, {});
+    expect(Reflect.get(Object(settingsOf(argv)), "permissions")).toEqual({
+      allow: [
+        "Bash(bazhen agents:*)",
+        "Bash(bazhen whoami:*)",
+        "Bash(bazhen rename:*)",
+        "Bash(bazhen task:*)",
+        "Bash(bazhen delegate:*)",
+        "Bash(bazhen escalate:*)",
+        "Bash(bazhen send:*)",
+      ],
+    });
+  });
+});
+
 describe("Claude Code's theme", () => {
   it("goes with its settings on a launch and a resume, and only when the request names one", async () => {
     const harness = new ClaudeCodeHarness({
@@ -317,6 +334,49 @@ describe("Claude Code hooks", () => {
       kind: "toolSettled",
       useId: "t-1",
       fold: { promptId: "p-1" },
+    });
+  });
+
+  describe("a SendMessage", () => {
+    // As Claude Code 2.1.322 and 2.1.325 report one sent to a session, and one to a name no
+    // session holds.
+    const sent = {
+      prompt_id: "p-1",
+      tool_use_id: "t-1",
+      tool_name: "SendMessage",
+      tool_input: { to: "BZ-127", summary: "Status", message: "Rebased; tests pass." },
+      tool_response: { success: true, message: "→ BZ-127 (another Claude session …)", msg_id: "m" },
+    };
+    const notSent = {
+      ...sent,
+      tool_input: { to: "nobody", message: "hello" },
+      tool_response: { success: false, message: "No agent named 'nobody' is reachable." },
+    };
+
+    it("reports the agent's own send, still folding mail into its turn", () => {
+      expect([readHook("PostToolUse", sent), readHook("PostToolUse", notSent)]).toEqual([
+        {
+          kind: "toolSettled",
+          useId: "t-1",
+          fold: { promptId: "p-1" },
+          sent: { to: "BZ-127", text: "Rebased; tests pass.", summary: "Status", accepted: true },
+        },
+        {
+          kind: "toolSettled",
+          useId: "t-1",
+          fold: { promptId: "p-1" },
+          sent: { to: "nobody", text: "hello", summary: null, accepted: false },
+        },
+      ]);
+    });
+
+    it("reports no send by a subagent, a structured message, or another tool", () => {
+      const reads = [
+        readHook("PostToolUse", { ...sent, agent_id: "sub-1" }),
+        readHook("PostToolUse", { ...sent, tool_input: { to: "BZ-127", message: { type: "x" } } }),
+        readHook("PostToolUse", { ...sent, tool_name: "Bash" }),
+      ];
+      expect(reads.map((r) => "sent" in r)).toEqual([false, false, false]);
     });
   });
 

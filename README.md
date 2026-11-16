@@ -218,6 +218,14 @@ failed: the one it was launched with (`--name`), or `<project>-<n>`, whose numbe
 twice. Claude Code shows it as its session's name, which keeps the old one after a rename until the
 agent next starts. Mail stays with the agent's id, which a rename doesn't change.
 
+A Claude Code agent runs `bazhen agents`, `whoami`, `rename`, `task`, `delegate`, `escalate` and
+`send` without a permission prompt: the settings it starts with allow them, beside your own, and
+the daemon decides what each agent may do with them. Other `bazhen` commands still ask. An agent
+that messages another with Claude Code's own SendMessage instead of `bazhen send` shows the
+message on both agents' pages, as sent and with delivery not tracked: Bazhen sees it leave, never
+arrive. It is matched to the agent whose session answers to the name it was sent to, the name
+that agent was last started with.
+
 Roles are configuration. Bazhen ships four, coordinator, lead, worker and reviewer, each a
 Markdown file whose front matter says which roles it may hand on (`grants`), whether a task has
 only one (`singlePerTask`) and how many tasks an agent may hold in it at once

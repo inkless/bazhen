@@ -55,6 +55,19 @@ describe("streamed events", () => {
     expect(event.payload).toEqual({ agentId });
   });
 
+  it("streams an observed message's summary and leaves its text out", () => {
+    const from = "agent_019a7b2c3d4e7f00a1b2c3d4e5f60718";
+    const to = "agent_019a7b2c3d4e7f00a1b2c3d4e5f60719";
+    const sent = { from, to, summary: "Status", accepted: true, toolUseId: "toolu_1" };
+    const event = Event.parse({
+      ...recorded,
+      type: "message.observed",
+      entityType: "message",
+      payload: { ...sent, text: "the secret plan" },
+    });
+    expect(event.payload).toEqual(sent);
+  });
+
   it("streams who a queued message is from, and only an agent's id as that", () => {
     const agentId = "agent_019a7b2c3d4e7f00a1b2c3d4e5f60718";
     const from = "agent_019a7b2c3d4e7f00a1b2c3d4e5f60719";

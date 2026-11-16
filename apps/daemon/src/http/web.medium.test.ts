@@ -55,6 +55,7 @@ function daemon(root: string = bundle(), always = true) {
       tasks: [],
       assignments: [],
       notices: [],
+      observed: [],
     }),
     launch: unused,
     answer: refuse,

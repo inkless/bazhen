@@ -119,9 +119,11 @@ export function project(db: Statements, e: Recorded): void {
       return;
     }
     case "agent.running": {
-      const { externalRef, runtimeRef, theme } = EVENTS[e.type].payload.parse(e.payload);
+      const { externalRef, runtimeRef, theme, harnessName } = EVENTS[e.type].payload.parse(
+        e.payload,
+      );
       advance(db, e.id, e.entityId, ["launch.confirmed", "runtime.confirmed"], {
-        agent: boundTo(db, e.entityId, externalRef),
+        agent: { ...boundTo(db, e.entityId, externalRef), ...startedAs(harnessName) },
         ...(runtimeRef && { terminal: { ...incarnation(runtimeRef), theme: theme ?? null } }),
       });
       return;
@@ -143,10 +145,12 @@ export function project(db: Statements, e: Recorded): void {
       advance(db, e.id, e.entityId, ["respawn.requested", null]);
       return;
     case "agent.respawned": {
-      const { externalRef, runtimeRef, theme } = EVENTS[e.type].payload.parse(e.payload);
+      const { externalRef, runtimeRef, theme, harnessName } = EVENTS[e.type].payload.parse(
+        e.payload,
+      );
       advance(db, e.id, e.entityId, ["launch.confirmed", "respawned"], {
         // A new process reports its own usage, as it does its own activity.
-        agent: { ...boundTo(db, e.entityId, externalRef), usage: null },
+        agent: { ...boundTo(db, e.entityId, externalRef), usage: null, ...startedAs(harnessName) },
         terminal: { ...incarnation(runtimeRef), exit: null, theme: theme ?? null },
       });
       forgetActivity(db, e.entityId);
@@ -171,9 +175,11 @@ export function project(db: Statements, e: Recorded): void {
       return;
     }
     case "agent.relaunched": {
-      const { externalRef, runtimeRef, theme } = EVENTS[e.type].payload.parse(e.payload);
+      const { externalRef, runtimeRef, theme, harnessName } = EVENTS[e.type].payload.parse(
+        e.payload,
+      );
       advance(db, e.id, e.entityId, ["launch.confirmed", "runtime.confirmed"], {
-        agent: boundTo(db, e.entityId, externalRef),
+        agent: { ...boundTo(db, e.entityId, externalRef), ...startedAs(harnessName) },
         terminal: { ...incarnation(runtimeRef), theme: theme ?? null },
       });
       return;
@@ -334,6 +340,15 @@ export function project(db: Statements, e: Recorded): void {
       if (AGENT_FAILURES.has(reason)) {
         db.prepare("UPDATE mailbox SET failures = failures + 1 WHERE id = ?").run(e.entityId);
       }
+      return;
+    }
+    case "message.observed": {
+      const { from, to, summary, accepted, toolUseId } = EVENTS[e.type].payload.parse(e.payload);
+      db.prepare(
+        `INSERT INTO observed_messages
+           (id, from_agent_id, to_agent_id, summary, accepted, tool_use_id, created_event_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).run(e.entityId, from, to, summary, accepted ? 1 : 0, toolUseId, e.id);
       return;
     }
     case "attention.opened": {
@@ -588,6 +603,10 @@ function forgetActivity(db: Statements, agentId: string): void {
 const AGENT_FAILURES: ReadonlySet<string> = new Set(["stop_failed", "interrupted", "not_seen"]);
 
 /** Moves an agent and its terminal together: a local agent's terminal is its process (§4.5). */
+/** A start's harness name, set only by one that records it, so an older schema takes the rest. */
+const startedAs = (harnessName: string | undefined): Columns =>
+  harnessName === undefined ? {} : { harness_name: harnessName };
+
 function advance(
   db: Statements,
   eventId: number,

@@ -215,6 +215,9 @@ const ASSIGNMENT = `SELECT id, task_id AS taskId, agent_session_id AS agentId, r
 /** An agent whose name no other may take: one not ended. */
 const LIVE_NAME = "state NOT IN ('closed', 'failed')";
 
+/** How many observed messages a snapshot carries: the latest. */
+const OBSERVED_KEPT = 200;
+
 const AGENT_TERMINAL = `SELECT a.id, a.state AS agent_state, t.id AS terminal_id,
          t.state AS terminal_state, t.generation, t.runtime, t.locator
   FROM agent_sessions a LEFT JOIN terminals t ON t.id = a.terminal_id`;
@@ -746,6 +749,30 @@ export class Store {
     return named;
   }
 
+  /**
+   * The agents not ended whose harness session was last started with `name`, which that session
+   * answers to, ignoring case as Claude Code does. A rename since doesn't change it.
+   */
+  agentsStartedAs(name: string): { id: AgentSessionId; harness: string }[] {
+    return this.prepare(
+      `SELECT id, harness FROM agent_sessions
+       WHERE harness_name = ? COLLATE NOCASE AND ${LIVE_NAME} ORDER BY created_event_id`,
+    )
+      .all(name)
+      .flatMap(({ id, harness }) =>
+        typeof id === "string" && isId("agent", id) ? [{ id, harness: String(harness) }] : [],
+      );
+  }
+
+  /** Whether `from`'s tool call `toolUseId` was already recorded as a message it sent. */
+  observedSend(from: string, toolUseId: string): boolean {
+    return (
+      this.prepare(
+        "SELECT 1 AS present FROM observed_messages WHERE from_agent_id = ? AND tool_use_id = ?",
+      ).get(from, toolUseId) !== undefined
+    );
+  }
+
   /** The agent not ended that holds `name`, ignoring case. */
   liveAgentNamed(name: string): AgentSessionId | undefined {
     const id = this.prepare(
@@ -1244,8 +1271,30 @@ export class Store {
         tasks: this.prepare(`${TASK} ORDER BY created_event_id`).all(),
         assignments: this.prepare(`${ASSIGNMENT} ORDER BY created_event_id`).all(),
         notices: this.notices(view),
+        observed: this.observed(),
       }),
     );
+  }
+
+  /** The latest messages agents were seen to send each other, oldest first. */
+  private observed() {
+    return this.prepare(
+      `SELECT * FROM (
+         SELECT o.id, o.from_agent_id AS "from", o.to_agent_id AS "to", o.summary, o.accepted,
+                e.ts AS at, o.created_event_id
+         FROM observed_messages o JOIN events e ON e.id = o.created_event_id
+         ORDER BY o.created_event_id DESC LIMIT ${OBSERVED_KEPT}
+       ) ORDER BY created_event_id`,
+    )
+      .all()
+      .map(({ id, from, to, summary, accepted, at }) => ({
+        id,
+        from,
+        to,
+        summary,
+        at,
+        accepted: accepted === 1,
+      }));
   }
 
   /** Every open notice, and the latest closed ones, oldest first. */

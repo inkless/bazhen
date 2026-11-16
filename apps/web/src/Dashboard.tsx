@@ -7,6 +7,7 @@ import { pageNotifier } from "./inbox/notify.ts";
 import { FleetList } from "./fleet/FleetList.tsx";
 import { defaultNamePreview, groupFleet } from "./fleet/model.ts";
 import { ThemeNotice } from "./fleet/ThemeNotice.tsx";
+import { Messages } from "./fleet/Messages.tsx";
 import { Workspace } from "./fleet/Workspace.tsx";
 import { AgentTasks, TaskPage, TasksView } from "./tasks/Tasks.tsx";
 import { pageTheme } from "./ui/theme.ts";
@@ -240,6 +241,7 @@ export function Dashboard() {
                   />
                 </>
               }
+              messages={<Messages state={state} agentId={agent.id} />}
             />
           ) : shell !== undefined ? (
             <ShellPane key={shell.id} shell={shell} onRestarted={selectShell} failed={failed} />

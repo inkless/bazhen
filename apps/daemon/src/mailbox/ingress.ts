@@ -8,7 +8,7 @@ import {
   isCompatible,
   type HookReply,
 } from "@bazhen/protocol";
-import { hookOrigin, readHook } from "@bazhen/harness-claude-code";
+import { hookOrigin, readHook, type SentMessage } from "@bazhen/harness-claude-code";
 import type { ActivityTracker } from "./activity.ts";
 import type { Approvals } from "./approvals.ts";
 import type { SessionBinding } from "./binding.ts";
@@ -30,6 +30,8 @@ export interface IngressDeps {
   readonly activity: ActivityTracker;
   /** Records the model the agent runs and its context use (§11.2). */
   readonly recordUsage: (agentId: string, usage: Usage) => void;
+  /** Records a message the agent sent through its harness's own channel (§5.6). */
+  readonly observeSend: (agentId: string, toolUseId: string, sent: SentMessage) => void;
 }
 
 /**
@@ -103,6 +105,7 @@ export function hookApp(deps: IngressDeps): Hono {
       case "toolSettled":
         deps.approvals.toolSettled(agentId, read.useId);
         if (read.fold !== null && (await own())) {
+          if (read.sent) deps.observeSend(agentId, read.useId, read.sent);
           return framed(deps.mailbox.fold(agentId, read.fold.promptId));
         }
         break;

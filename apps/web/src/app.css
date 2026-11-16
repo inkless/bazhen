@@ -514,6 +514,27 @@ body {
   margin: var(--space-1) 0 var(--space-2);
 }
 
+.observed h3 {
+  margin: var(--space-2) 0 var(--space-1);
+  font-size: var(--font-size-sm);
+}
+
+.observed ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.observed li {
+  overflow-wrap: anywhere;
+}
+
+.observed time,
+.observed .note {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
 /* A name is up to 40 characters with nowhere to break, wider than a phone: these break it anywhere. */
 :is(
   .workspace-head h2,

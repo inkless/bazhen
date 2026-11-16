@@ -116,6 +116,36 @@ export function agentLabelOf(
   return a === undefined ? `agent ${shortId(id)}` : agentLabel(a);
 }
 
+/** A message an agent sent or was sent outside Bazhen's mail, as its workspace lists it. */
+export interface ObservedRow {
+  readonly id: string;
+  /** "To <peer>" for one the agent sent, "From <peer>" for one it was sent. */
+  readonly with: string;
+  readonly summary: string;
+  readonly at: string;
+  readonly accepted: boolean;
+}
+
+/** The messages `agentId` sent or was sent through its harness's own channel, newest first. */
+export function observedRows(
+  state: Pick<StateSnapshot, "observed" | "agents">,
+  agentId: string,
+): ObservedRow[] {
+  return state.observed
+    .filter((m) => m.from === agentId || m.to === agentId)
+    .map(({ id, from, to, summary, at, accepted }) => ({
+      id,
+      with:
+        from === agentId
+          ? `To ${agentLabelOf(state.agents, to)}`
+          : `From ${agentLabelOf(state.agents, from)}`,
+      summary,
+      at,
+      accepted,
+    }))
+    .toReversed();
+}
+
 /**
  * Whether an agent can be respawned in another theme now, and why not: only on the session it
  * has, so not before that session has a conversation to resume. A running one is stopped

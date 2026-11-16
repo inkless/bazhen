@@ -76,6 +76,7 @@ const snapshot = (
     tasks,
     assignments,
     notices: [],
+    observed: [],
   }) satisfies StateSnapshot;
 
 /** The call the verb's answer to `reply` leads to, as path and body; what it prints, if it prints. */

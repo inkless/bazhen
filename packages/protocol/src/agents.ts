@@ -3,7 +3,7 @@ import { AgentName } from "./agent-name.ts";
 import { EnvironmentKind, HarnessId, Id, IdempotencyKey } from "./ids.ts";
 
 export { HarnessId };
-import { Attention, Message } from "./mail.ts";
+import { Attention, Message, ObservedMessage } from "./mail.ts";
 import { Notice } from "./notices.ts";
 import { BusyShell, Shell } from "./shells.ts";
 import { TuiTheme } from "./theme.ts";
@@ -263,6 +263,8 @@ export const StateSnapshot = z.object({
   assignments: z.array(Assignment).default([]),
   /** Every open notice, and the latest closed ones. Protocol 1.38. */
   notices: z.array(Notice).default([]),
+  /** The latest messages agents sent each other outside Bazhen's mail, oldest first. Protocol 1.42. */
+  observed: z.array(ObservedMessage).default([]),
 });
 export type StateSnapshot = z.infer<typeof StateSnapshot>;
 

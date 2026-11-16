@@ -56,6 +56,7 @@ const snapshot = (attention: Attention[], agents: Agent[] = [reviewer]): StateSn
   tasks: [],
   assignments: [],
   notices: [],
+  observed: [],
 });
 
 const boom = () => {

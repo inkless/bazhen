@@ -6,6 +6,7 @@ import {
   agentLabelOf,
   defaultNamePreview,
   groupFleet,
+  observedRows,
   themeRespawn,
 } from "./model.ts";
 
@@ -47,6 +48,7 @@ const snapshot = (agents: Agent[], waitingOn: Agent[] = []): StateSnapshot => ({
   tasks: [],
   assignments: [],
   notices: [],
+  observed: [],
   attention: waitingOn.map((a) => ({
     id: newId("attn"),
     agentId: a.id,
@@ -163,6 +165,34 @@ describe("agentLabelOf", () => {
     expect([agentLabelOf([a], a.id), agentLabelOf([a], gone)]).toEqual([
       "reviewer",
       `agent ${gone.slice(-6)}`,
+    ]);
+  });
+});
+
+/** A message `from` sent `to`, as the daemon observed it. */
+const sent = (from: Agent, to: Agent, summary: string, accepted = true) => ({
+  id: newId("msg"),
+  from: from.id,
+  to: to.id,
+  summary,
+  accepted,
+  at: "2026-11-12T00:00:00.000Z",
+});
+
+describe("observedRows", () => {
+  it("lists what an agent sent and was sent, newest first, each by the other agent's name", () => {
+    const [me, peer, other] = [agentIn("me"), agentIn("BZ-127"), agentIn("other")];
+    const state = {
+      agents: [me, peer, other],
+      observed: [
+        sent(me, peer, "first"),
+        sent(peer, other, "elsewhere"),
+        sent(peer, me, "back", false),
+      ],
+    };
+    expect(observedRows(state, me.id).map((r) => [r.with, r.summary, r.accepted])).toEqual([
+      ["From BZ-127", "back", false],
+      ["To BZ-127", "first", true],
     ]);
   });
 });

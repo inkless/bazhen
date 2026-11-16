@@ -6,6 +6,8 @@
 //                            comes 8 s late, so it outlives the turn that started it
 //   [[fake:error]]           an API error Claude Code doesn't retry, ending the turn in StopFailure
 //   [[fake:ask]]             an AskUserQuestion tool call, one question with two choices
+//   [[fake:send:<to>:<text>]] a SendMessage of <text> to the session named <to>, after the
+//                            ToolSearch that loads it, as Claude Code defers the tool
 //   anything else            a short text reply
 // Every request is kept, so a test can check what the model was sent.
 
@@ -15,6 +17,7 @@ interface Block {
   readonly type: string;
   readonly text?: string;
   readonly content?: unknown;
+  readonly name?: string;
 }
 interface Turn {
   readonly role: string;
@@ -53,6 +56,12 @@ export const FAKE_QUESTION = "Which database should it use?";
 /** What the subagent `[[fake:agent]]` starts is asked to do: answer, slowly. */
 export const SUBAGENT_PROMPT = "A background task. [[fake:slow:8000]]";
 
+/** The tool the model called last in this request's conversation, if any. */
+function lastToolCalled(req: Request): string | undefined {
+  const said = (req.messages ?? []).filter((m) => m.role === "assistant").at(-1)?.content;
+  return Array.isArray(said) ? said.find((b) => b.type === "tool_use")?.name : undefined;
+}
+
 /** The reply to a request: a tool call for a fresh `bash`, `ask` or `agent` marker, else text. */
 function reply(req: Request): { tool?: Tool; text: string } {
   const users = (req.messages ?? []).filter((m) => m.role === "user");
@@ -70,6 +79,22 @@ function reply(req: Request): { tool?: Tool; text: string } {
       tool: { name: "Bash", input: { command: marker[1] ?? "true", description: "test command" } },
       text: "",
     };
+  }
+  const send = [
+    ...users
+      .map((m) => textOf(m.content))
+      .join("\n")
+      .matchAll(/\[\[fake:send:([^:\]]+):([^\]]+)\]\]/g),
+  ].at(-1);
+  if (send !== undefined && !continuing && textOf(last?.content).includes(send[0])) {
+    return {
+      tool: { name: "ToolSearch", input: { query: "select:SendMessage", max_results: 1 } },
+      text: "",
+    };
+  }
+  if (send !== undefined && continuing && lastToolCalled(req) === "ToolSearch") {
+    const input = { to: send[1] ?? "", summary: "A test message", message: send[2] ?? "" };
+    return { tool: { name: "SendMessage", input }, text: "" };
   }
   if (!continuing && textOf(last?.content).includes("[[fake:ask]]")) {
     const options = [

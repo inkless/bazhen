@@ -9,6 +9,7 @@ import { ActivityTracker } from "./activity.ts";
 import { Approvals } from "./approvals.ts";
 import { SessionBinding } from "./binding.ts";
 import { HOOK_SCRIPT, hookClient } from "./hook-command.ts";
+import type { SentMessage } from "@bazhen/harness-claude-code";
 import { hookApp } from "./ingress.ts";
 import { Mailbox } from "./mailbox.ts";
 import { Inbox } from "../attention/inbox.ts";
@@ -23,6 +24,7 @@ afterEach(() => {
 /** The daemon's real hook ingress, served on a Unix socket as main.ts serves it. */
 async function daemon() {
   const { store, agentId } = await claudeAgent();
+  const observed: { id: string; toolUseId: string; sent: SentMessage }[] = [];
   const mailbox = new Mailbox(store);
   const approvals = new Approvals(store);
   const inbox = new Inbox(store, approvals, (id, req) => mailbox.send(id, req));
@@ -41,6 +43,7 @@ async function daemon() {
     binding,
     activity: new ActivityTracker((id, activity) => store.recordActivity(id, activity)),
     recordUsage: (id, usage) => store.recordUsage(id, usage),
+    observeSend: (id, toolUseId, sent) => observed.push({ id, toolUseId, sent }),
   });
   const listener = getRequestListener(app.fetch);
   dir = mkdtempSync("/tmp/bz-ingress-");
@@ -55,7 +58,7 @@ async function daemon() {
       .snapshot(testView)
       .attention.filter((a) => a.kind === "failed")
       .map((a) => `${a.state}:${a.summary}`);
-  return { socket, agentId, mailbox, state, activity, usage, failures };
+  return { socket, agentId, mailbox, state, activity, usage, failures, observed };
 }
 
 /** A Stop's payload, from the agent's own session unless another is named. */
@@ -69,6 +72,17 @@ const postToolUse = (more: Record<string, string> = {}) =>
     prompt_id: "p-1",
     tool_use_id: "t-1",
     ...more,
+  });
+/** The agent's SendMessage to BZ-127, as a PostToolUse from `session` reports it. */
+const sendMessage = (session: string) =>
+  JSON.stringify({
+    hook_event_name: "PostToolUse",
+    session_id: session,
+    prompt_id: "p-1",
+    tool_use_id: "t-1",
+    tool_name: "SendMessage",
+    tool_input: { to: "BZ-127", message: "Rebased." },
+    tool_response: { success: true },
   });
 /** A SessionStart's payload, as /clear starts a new session. */
 const sessionStart = (session: string) =>
@@ -163,6 +177,24 @@ describe.each([
       },
     ]);
     await expect.poll(() => state(messageId)).toBe("emitted");
+  });
+
+  it("records the agent's own SendMessage while folding mail, and none another session sent", async () => {
+    const { socket, agentId, mailbox, observed } = await daemon();
+    const env = { BAZHEN_AGENT_ID: agentId, BAZHEN_SOCKET: socket };
+    const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
+    await run(client, "PostToolUse", env, sendMessage("22222222-2222-4222-8222-222222222222"));
+    const folded = await run(client, "PostToolUse", env, sendMessage(CLAUDE_SESSION));
+    expect([folded.stdout.includes(messageId), observed]).toEqual([
+      true,
+      [
+        {
+          id: agentId,
+          toolUseId: "t-1",
+          sent: { to: "BZ-127", text: "Rebased.", summary: null, accepted: true },
+        },
+      ],
+    ]);
   });
 
   it("never folds mail into a subagent's tool call", async () => {

@@ -106,6 +106,44 @@ test("shows the fleet under its host, and closes an agent from its workspace", a
   await expect(page.getByRole("region", { name: "terminal" })).toHaveCount(0);
 });
 
+/** A message `from` sent `to` with SendMessage, `minutesAgo`, as the daemon observed it. */
+const sent = (
+  from: string,
+  to: string,
+  summary: string,
+  accepted: boolean,
+  minutesAgo: number,
+) => ({
+  id: `msg_0190000000007000800000000000${String(minutesAgo).padStart(4, "0")}`,
+  from,
+  to,
+  summary,
+  accepted,
+  at: new Date(Date.now() - minutesAgo * 60_000).toISOString(),
+});
+
+test("lists the messages an agent sent and was sent with SendMessage, newest first", async ({
+  page,
+}) => {
+  const agentId = await launch(page);
+  const peer = "agent_01900000000070008000000000000099";
+  // As if the agents' hooks had reported them; the daemon records a send only from a real one.
+  await page.route("**/v1/state", async (route) => {
+    const res = await route.fetch();
+    const observed = [
+      sent(agentId, peer, "Rebased", true, 2),
+      sent(peer, agentId, "Review?", false, 1),
+    ];
+    await route.fulfill({ response: res, json: { ...Object(await res.json()), observed } });
+  });
+  await page.goto(`/#/agent/${agentId}`);
+  const messages = workspace(page).getByRole("region", { name: "Messages sent with SendMessage" });
+  await expect(messages.getByRole("listitem")).toHaveText([
+    /^From agent 000099 Review\? .* SendMessage · not sent$/,
+    /^To agent 000099 Rebased .* SendMessage · delivery not tracked$/,
+  ]);
+});
+
 test("names an agent at launch, renames it from its workspace, and refuses a name another holds", async ({
   page,
 }) => {

@@ -52,6 +52,7 @@ const snapshot = (tasks: Task[], assignments: Assignment[]): StateSnapshot => ({
   tasks,
   assignments,
   notices: [],
+  observed: [],
 });
 
 describe("the task list", () => {

@@ -90,6 +90,7 @@ const deps: AppDeps = {
     messages: [],
     shells: [],
     notices: [],
+    observed: [],
   }),
   answer: () => {
     throw new AttentionClosed("attn_x");
@@ -251,6 +252,7 @@ describe("HTTP app", () => {
       tasks: [],
       assignments: [],
       notices: [],
+      observed: [],
     });
   });
 

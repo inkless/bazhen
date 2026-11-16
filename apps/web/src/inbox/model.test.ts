@@ -73,6 +73,7 @@ const snapshot = (attention: Attention[], agents: Agent[] = []): StateSnapshot =
   tasks: [],
   assignments: [],
   notices: [],
+  observed: [],
 });
 
 describe("inbox rows", () => {
