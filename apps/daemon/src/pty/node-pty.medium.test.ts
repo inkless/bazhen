@@ -82,18 +82,12 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("node-pty's own destroy", () => {
-  it("signals its child by pid, which is why the hang-up must not let it", () => {
-    const sent = signals();
-    const { terminal } = standIn();
-    destroy(terminal);
-    expect(sent).toHaveBeenCalledWith(NO_SUCH_PID, "SIGHUP");
-  });
-});
-
 describe("the PTY seam over node-pty", () => {
-  it("hangs up by closing the master, and signals no pid, even through node-pty's destroy", () => {
+  it("hangs up by closing the master, and signals no pid, though node-pty's destroy alone would", () => {
     const sent = signals();
+    destroy(standIn().terminal);
+    expect(sent).toHaveBeenCalledWith(NO_SUCH_PID, "SIGHUP");
+    sent.mockClear();
     const { terminal, socket } = standIn();
     spawned(terminal).hangUp();
     expect(sent).not.toHaveBeenCalled();

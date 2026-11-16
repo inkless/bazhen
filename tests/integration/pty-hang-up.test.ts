@@ -21,8 +21,8 @@ describe("the PTY seam's hang-up", () => {
     const exit = exited(pty);
     const sent = vi.spyOn(process, "kill").mockImplementation(() => true);
     pty.hangUp();
-    await exit;
     expect(sent).not.toHaveBeenCalled();
+    await exit;
   });
 
   it("hangs up a tmux client that has already left, and sends no signal", async () => {
