@@ -177,6 +177,19 @@ const hasControl = (text: string) => {
  */
 const hasNonAscii = (text: string) => /[^\x20-\x7e]/u.test(text);
 
+/**
+ * Why `text` may not be pasted, or undefined when it may: a control character is a key, not text,
+ * and text that may arrive as keys, unmarked, must be printable ASCII as well. Every runtime's
+ * paste refuses by this, with a RangeError.
+ */
+export function pasteTextRefusal(text: string, brackets: boolean): string | undefined {
+  if (hasControl(text)) return "refusing to paste a control character";
+  if (!brackets && hasNonAscii(text)) {
+    return "refusing to paste text beyond printable ASCII that may arrive as keys";
+  }
+  return undefined;
+}
+
 /** ESC [ 2 0 0 ~ and ESC [ 2 0 1 ~, which open and close a bracketed paste, as send-keys -H keys. */
 const PASTE_START = "1b 5b 32 30 30 7e";
 const PASTE_END = "1b 5b 32 30 31 7e";
@@ -221,9 +234,8 @@ export function pasteScript(
   if (!/^%[0-9]+$/.test(target)) throw new RangeError(`not a pane id: ${target}`);
   if (!gate.every((word) => GATE_WORD.test(word)))
     throw new RangeError("a paste's gate takes only plain words");
-  if (hasControl(text)) throw new RangeError("refusing to paste a control character");
-  if (!brackets && hasNonAscii(text))
-    throw new RangeError("refusing to paste text beyond printable ASCII that may arrive as keys");
+  const refused = pasteTextRefusal(text, brackets);
+  if (refused !== undefined) throw new RangeError(refused);
   const at = `-t ${target}`;
   const paste = brackets
     ? [

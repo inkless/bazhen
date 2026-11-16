@@ -26,6 +26,8 @@ import {
   holderSocket,
   holderSocketRefusal,
   holdersDir,
+  PasteRefused,
+  pasteTextRefusal,
   readProcess,
   rebindHolderSocket,
   START_SKEW_S,
@@ -465,6 +467,20 @@ export class HolderRuntime implements RuntimeAdapter {
     } finally {
       client.end();
     }
+  }
+
+  /**
+   * Refuses every paste, once the text and the ref have been checked as for any runtime: a
+   * holder has no gate that checks, in the same turn as it types, that the program would read
+   * the paste as text, so nothing is typed without one.
+   */
+  async paste(ref: RuntimeRef, text: string, brackets: boolean): Promise<void> {
+    const refused = pasteTextRefusal(text, brackets);
+    if (refused !== undefined) throw new RangeError(refused);
+    await this.withProcess(ref, async (client) => {
+      if (client.hello.exit !== null) throw new ProcessState(ref.terminalId, "running");
+    });
+    throw new PasteRefused("a holder terminal has no paste gate");
   }
 
   async signal(ref: RuntimeRef, signal: Signal): Promise<void> {

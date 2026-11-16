@@ -96,6 +96,7 @@ const harness: SnapshotHarness = {
   forge: (ref: Ref) => ({ ...ref, locator: { ...ref.locator, holderStart: "1" } }),
   placeOf: (ref) => ref.locator.socket,
   exitMayBeUnknown: false,
+  pastes: false,
   cwd: userDir(testHome()),
   waitMs: 10_000,
   replay,

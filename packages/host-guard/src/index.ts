@@ -6,6 +6,7 @@ export {
   isSafeEnvEntry,
   pasteScript,
   PasteRefused,
+  pasteTextRefusal,
   readProcess,
   START_SKEW_S,
   terminalGroups,

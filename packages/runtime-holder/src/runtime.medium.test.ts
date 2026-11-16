@@ -18,7 +18,12 @@ import {
   type RuntimeRef,
   type TerminalSpec,
 } from "@bazhen/core";
-import { holderSocket, holdersDir, type StartHolderOptions } from "@bazhen/host-guard";
+import {
+  holderSocket,
+  holdersDir,
+  PasteRefused,
+  type StartHolderOptions,
+} from "@bazhen/host-guard";
 import type { HolderHelloReply } from "@bazhen/protocol";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { HolderRuntime } from "./runtime.ts";
@@ -328,6 +333,22 @@ describe("HolderRuntime: refusing a ref that isn't the holder's process", () => 
     await runtime.signal(refWith(ref, { generation: "1" }), "SIGKILL").catch(() => {});
     await runtime.signal(refWith(ref, { holderPid: "5" }), "SIGKILL").catch(() => {});
     expect(fake.connections.flatMap((c) => c.requests)).toEqual([]);
+  });
+
+  it("refuses every paste, after checking its text and ref, and sends the holder nothing", async () => {
+    const { runtime, ref, fake } = await made();
+    await expect(runtime.paste(ref, "make\r", true)).rejects.toBeInstanceOf(RangeError);
+    await expect(
+      runtime.paste(refWith(ref, { generation: "1" }), "make", false),
+    ).rejects.toMatchObject({
+      reason: "process-replaced",
+    });
+    await expect(runtime.paste(ref, "make", true)).rejects.toBeInstanceOf(PasteRefused);
+    expect(fake.connections.flatMap((c) => c.requests)).toEqual([]);
+    const exited = await made({ exit: { type: "exited", code: 0 } });
+    await expect(exited.runtime.paste(exited.ref, "make", false)).rejects.toBeInstanceOf(
+      ProcessState,
+    );
   });
 
   it("signals a running process, and refuses one that has exited", async () => {
