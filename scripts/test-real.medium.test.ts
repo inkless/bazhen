@@ -15,7 +15,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildContext, isInside, overlay } from "./test-real.ts";
+import { buildContext, isInside, overlay, readMemoryMax } from "./test-real.ts";
 
 const ODD = "odd dir/a\nb.ts";
 const CHANGED = ["added.ts", "new.ts", ODD, "staged.ts", "unstaged.ts", "untracked/u.ts"];
@@ -119,5 +119,19 @@ describe("test:real's overlay", () => {
     expect(isInside(repo, "odd dir/x.ts")).toBe(true);
     expect(isInside(repo, "..sneaky/x.ts")).toBe(true);
     expect(isInside(repo, "link/x.ts")).toBe(false);
+  });
+});
+
+describe("a cgroup's memory.max", () => {
+  it("reads as no cap where it says max, as an unset cap does, and as its bytes where it has one", () => {
+    const root = mkdtempSync(join(tmpdir(), "bz-cgroup-"));
+    dirs.push(root);
+    mkdirSync(join(root, "uncapped"));
+    writeFileSync(join(root, "uncapped/memory.max"), "max\n");
+    mkdirSync(join(root, "capped"));
+    writeFileSync(join(root, "capped/memory.max"), "8589934592\n");
+    expect(readMemoryMax("/uncapped", root)).toBeUndefined();
+    expect(readMemoryMax("/capped", root)).toBe(8589934592);
+    expect(readMemoryMax("/missing", root)).toBeUndefined();
   });
 });

@@ -132,6 +132,10 @@ jobs:
       BZ_TMUX_VERSION: "3.4"
       BZ_TMUX_SHA256: 551ab8dea0bf505c0ad6b7bb35ef567cdde0ccb84357df142c254f35a23e19aa
     steps:
+      # Rootful Docker puts the containers outside the shared slice, and test:real runs there
+      # only on a disposable host.
+      - name: Mark the runner disposable
+        run: sudo touch /etc/bazhen-disposable-host
       - uses: actions/checkout@v7
         with:
           # test:real names the target branch's tip, which a shallow checkout lacks.
