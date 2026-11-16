@@ -92,6 +92,11 @@ export function socketUpgrades(
   peer?: (connection: Socket) => Promise<PeerReading>,
 ) {
   return (req: IncomingMessage, socket: Duplex, head: Buffer): void => {
+    // Node takes its own error listener off a socket it hands to `upgrade`, and ws adds one only
+    // once a route takes the socket: a caller that hangs up while it is identified would
+    // otherwise fail a refusal's write with nothing listening, and end the daemon.
+    const dropped = () => socket.destroy();
+    socket.on("error", dropped);
     const header = (name: string) => {
       const value = req.headers[name];
       return Array.isArray(value) ? value[0] : value;
@@ -100,7 +105,9 @@ export function socketUpgrades(
     void (peer === undefined ? Promise.resolve(undefined) : peer(req.socket)).then(
       (reading) => {
         const who = identify(credentials, presented, reading);
-        if (who.kind === "human") return route(routes, req, socket, head, null);
+        if (who.kind === "human") {
+          return route(routes, req, socket, head, null, () => socket.off("error", dropped));
+        }
         forbidUpgrade(
           socket,
           who.kind === "refused" ? who.reason : "an agent can't attach to a terminal",
@@ -111,17 +118,21 @@ export function socketUpgrades(
   };
 }
 
+/** Hands the upgrade to the route its path matches, calling `handOver` first, or refuses it. */
 function route(
   routes: readonly UpgradeRoute[],
   req: IncomingMessage,
   socket: Duplex,
   head: Buffer,
   device: StoredDevice | null,
+  handOver = () => {},
 ): void {
   const url = new URL(req.url ?? "/", "http://daemon");
   for (const r of routes) {
     const match = r.path.exec(url.pathname);
-    if (match !== null) return r.upgrade(req, socket, head, url, match, device);
+    if (match === null) continue;
+    handOver();
+    return r.upgrade(req, socket, head, url, match, device);
   }
   refuseUpgrade(socket, "404 Not Found");
 }

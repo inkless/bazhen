@@ -1,6 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { fileURLToPath } from "node:url";
 import { WebSocket } from "ws";
 import { Daemon, waitUntil } from "./daemon.ts";
+
+const probe = fileURLToPath(new URL("../support/upgrade-probe.ts", import.meta.url));
+const PROBE_OUT = "upgrade-probe.txt";
+const probeOut = (daemon: Daemon) => `${daemon.work}/${PROBE_OUT}`;
+/** What the probe has received so far, empty until its first chunk. */
+const answered = (daemon: Daemon) => daemon.workFile(PROBE_OUT) ?? "";
 
 /** How an upgrade to `url` went: "open", or the status and message it was refused with. */
 const outcome = (url: string, headers: Record<string, string> = {}) =>
@@ -49,6 +56,16 @@ describe.each([
       expect(await outcome(onSocket(), { "bazhen-agent-token": token })).toEqual([
         403,
         "an agent can't attach to a terminal",
+      ]);
+    });
+
+    it("refuses a process in another agent's terminal that presents nothing, by its process", async () => {
+      const route = `/v1/terminals/${ids.terminalId}/stream`;
+      await daemon.program([process.execPath, probe, daemon.socket, route, probeOut(daemon)]);
+      await waitUntil(() => answered(daemon).includes("\r\n\r\n"), "the probe's answer");
+      expect(answered(daemon).split("\r\n\r\n")).toEqual([
+        expect.stringMatching(/^HTTP\/1\.1 403 Forbidden\r\n/),
+        JSON.stringify({ error: "forbidden", message: "an agent can't attach to a terminal" }),
       ]);
     });
 
