@@ -24,8 +24,9 @@ describe("Tasks send", () => {
     const { store, tasks, lead, worker } = await taskFleet();
     tasks.send(lead, worker, { idempotencyKey: "k", body: "Is the build green?" });
     const cwd = store.agentLaunch(lead)?.launch.cwd;
+    const name = store.agentLaunch(lead)?.name;
     expect(inbox(store, worker)).toEqual([
-      `From agent ${lead} (claude-code, ${cwd}). If it needs an answer: bazhen send ${lead} "<answer>"\n\nIs the build green?`,
+      `From ${name} (${lead}, claude-code, ${cwd}). If it needs an answer: bazhen send ${lead} "<answer>"\n\nIs the build green?`,
     ]);
     expect(senders(store)).toEqual([lead]);
   });
@@ -64,6 +65,7 @@ describe("Tasks send", () => {
     const { store, tasks, coordinator, lead } = await taskFleet();
     const sender = {
       id: lead,
+      name: String(store.agentLaunch(lead)?.name),
       harness: "claude-code",
       cwd: String(store.agentLaunch(lead)?.launch.cwd),
     };

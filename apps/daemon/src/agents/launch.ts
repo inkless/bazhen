@@ -22,6 +22,7 @@ import { failureDetail } from "../commands.ts";
 import { IdempotencyConflict, runtimePayload, type Store } from "../store/store.ts";
 import { FLEET_INSTRUCTIONS } from "../tasks/mail.ts";
 import { resolveDirectory } from "./cwd.ts";
+import { launchName } from "./names.ts";
 import type { TerminalAdmission } from "../terminals/budget.ts";
 import type { AgentQueue } from "./queue.ts";
 
@@ -41,7 +42,12 @@ export function localEnvironmentId(store: Store): EnvironmentId {
 
 /** What a launch key remembers: the request as it was asked, and how that launch ended. */
 const LaunchRecord = z.object({
-  request: z.object({ harness: HarnessId, cwd: z.string(), project: z.string() }),
+  request: z.object({
+    harness: HarnessId,
+    cwd: z.string(),
+    project: z.string(),
+    name: z.string().optional(),
+  }),
   response: LaunchAgentResponse,
   failed: z.boolean(),
 });
@@ -73,7 +79,8 @@ function replay(
   const same =
     prior.request.harness === request.harness &&
     prior.request.cwd === request.cwd &&
-    prior.request.project === request.project;
+    prior.request.project === request.project &&
+    prior.request.name === request.name;
   if (!same) throw new IdempotencyConflict(key);
   const settled = store.agentTerminal({ agentId: prior.response.agentId })?.state;
   if (prior.failed || settled === "failed") {
@@ -114,10 +121,14 @@ export async function launchSettled(
   return launchAgent(deps, req, launchedBy);
 }
 
-/** The options a request names; one without a theme leaves it to the harness. Never stored. */
-export const launchOptions = (theme: TuiTheme | undefined): LaunchOptions => ({
+/**
+ * The options one start of an agent takes: the theme a request names, which, absent, leaves it
+ * to the harness, and the agent's name as it stands now. Never stored.
+ */
+export const launchOptions = (theme: TuiTheme | undefined, name: string): LaunchOptions => ({
   instructions: FLEET_INSTRUCTIONS,
   ...(theme === undefined ? {} : { theme }),
+  ...(name === "" ? {} : { name }),
 });
 
 /**
@@ -132,7 +143,12 @@ export async function launchAgent(
   req: LaunchAgentRequest,
   launchedBy?: AgentSessionId,
 ): Promise<LaunchAgentResponse> {
-  const asked = { harness: req.harness, cwd: req.cwd, project: req.project ?? basename(req.cwd) };
+  const asked = {
+    harness: req.harness,
+    cwd: req.cwd,
+    project: req.project ?? basename(req.cwd),
+    ...(req.name === undefined ? {} : { name: req.name }),
+  };
   const prior = store.recall(req.idempotencyKey);
   // A retry gets the first answer, whatever has happened to the directory since.
   if (prior !== undefined)
@@ -155,8 +171,12 @@ export async function launchAgent(
     });
 
   // Recorded before this call first yields, so a repeat in the same tick finds the key answered.
+  // The name is chosen in the same transaction, so two launches can't take one name.
+  let name = "";
   const launched = record(() => {
+    const named = launchName(store, req.name, request.project);
     budget.admit();
+    name = named.name;
     return store.append({
       ...event,
       type: "agent.launched",
@@ -165,13 +185,14 @@ export async function launchAgent(
         ...request,
         terminalId,
         ...(launchedBy === undefined ? {} : { launchedBy }),
+        ...named,
       },
     });
   }, []);
   // Nothing else may settle the agent while its launch is in flight, so it takes its slot in the
   // same synchronous step as it is recorded: no await may come between the two.
   return queue.run(agentId, async () => {
-    const options = launchOptions(req.theme);
+    const options = launchOptions(req.theme, name);
     const launching = environment.launch({
       agentId,
       terminalId,

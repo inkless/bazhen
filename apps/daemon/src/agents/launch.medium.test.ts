@@ -8,6 +8,7 @@ import { Store } from "../store/store.ts";
 import { fakeEnvironment, storeBudget, tempDb, testView } from "../testing/fixtures.ts";
 import { IdempotencyConflict } from "../store/store.ts";
 import { InvalidDirectory } from "./cwd.ts";
+import { NameTaken } from "./names.ts";
 import { launchAgent, launchSettled, localEnvironmentId } from "./launch.ts";
 import { AgentQueue } from "./queue.ts";
 import { TerminalLimit } from "../terminals/budget.ts";
@@ -56,6 +57,39 @@ describe("localEnvironmentId", () => {
 });
 
 describe("launchAgent", () => {
+  it("names each agent its project's next number, and starts its harness under that name", async () => {
+    const { store, deps, launches } = setup();
+    await launchAgent(deps, request);
+    await launchAgent(deps, { ...request, idempotencyKey: "k-2" });
+    expect([
+      store.snapshot(testView).agents.map((a) => a.name),
+      launches.map((l) => l.options.name),
+    ]).toEqual([
+      ["repo-1", "repo-2"],
+      ["repo-1", "repo-2"],
+    ]);
+  });
+
+  it("launches under the name asked for, and refuses one a live agent holds, recording nothing", async () => {
+    const { store, deps } = setup();
+    await launchAgent(deps, { ...request, name: "lead" });
+    const before = store.events(0).length;
+    const taken = launchAgent(deps, { ...request, idempotencyKey: "k-2", name: "LEAD" });
+    await expect(taken).rejects.toThrow(NameTaken);
+    expect([store.events(0).length, store.snapshot(testView).agents.map((a) => a.name)]).toEqual([
+      before,
+      ["lead"],
+    ]);
+  });
+
+  it("refuses a repeat of a launch's key naming another name", async () => {
+    const { deps } = setup();
+    await launchAgent(deps, { ...request, name: "lead" });
+    await expect(launchAgent(deps, { ...request, name: "worker" })).rejects.toThrow(
+      IdempotencyConflict,
+    );
+  });
+
   it("records the agent before starting it, then running with its harness session", async () => {
     const { store, deps } = setup();
     const answer = await launchAgent(deps, request);
@@ -89,8 +123,8 @@ describe("launchAgent", () => {
     await launchAgent(deps, { ...request, theme: "light" });
     await launchAgent(deps, { ...request, idempotencyKey: "k-2" });
     expect(launches.map((l) => l.options)).toEqual([
-      { theme: "light", instructions: FLEET_INSTRUCTIONS },
-      { instructions: FLEET_INSTRUCTIONS },
+      { theme: "light", instructions: FLEET_INSTRUCTIONS, name: "repo-1" },
+      { instructions: FLEET_INSTRUCTIONS, name: "repo-2" },
     ]);
     expect(store.snapshot(testView).agents.map((a) => a.theme)).toEqual(["light", "dark"]);
   });

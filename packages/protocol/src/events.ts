@@ -74,7 +74,15 @@ export const EVENTS = {
       terminalId: Id("term").nullable(),
       /** The agent that launched it to delegate to it; absent when the human did (1.31). */
       launchedBy: Id("agent").optional(),
+      /** Absent before protocol 1.40. */
+      name: z.string().optional(),
+      /** The `<n>` its default name took, which no later default takes again. */
+      nameOrdinal: z.number().int().positive().optional(),
     }),
+  },
+  "agent.renamed": {
+    entity: "agent",
+    payload: z.object({ name: z.string(), previous: z.string() }),
   },
   "agent.running": {
     entity: "agent",

@@ -27,6 +27,7 @@ import {
 } from "../testing/fixtures.ts";
 import { TerminalLimit } from "../terminals/budget.ts";
 import { launchAgent, localEnvironmentId } from "./launch.ts";
+import { renameAgent } from "./names.ts";
 import { AgentQueue } from "./queue.ts";
 import {
   AgentStateConflict,
@@ -338,12 +339,20 @@ describe("agent lifecycle", () => {
     exit("0");
     await lifecycle.respawn(agentId, { idempotencyKey: "r", generation: 0, theme: "light" });
     expect([respawned[0]?.options, agent()?.theme]).toEqual([
-      { theme: "light", instructions: FLEET_INSTRUCTIONS },
+      { theme: "light", instructions: FLEET_INSTRUCTIONS, name: agent()?.name },
       "light",
     ]);
     exit("1");
     await lifecycle.respawn(agentId, { idempotencyKey: "r2", generation: 1 });
     expect(agent()?.theme).toBe("dark");
+  });
+
+  it("starts a respawn under the name the agent has now, not the one it launched with", async () => {
+    const { store, lifecycle, agentId, exit, respawned } = await running();
+    renameAgent(store, null, agentId, { idempotencyKey: "n", name: "reviewer" });
+    exit("0");
+    await lifecycle.respawn(agentId, { idempotencyKey: "r", generation: 0 });
+    expect(respawned[0]?.options.name).toBe("reviewer");
   });
 
   it("keeps a binding the new TUI moved while it started, over the session it resumed", async () => {

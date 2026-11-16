@@ -20,6 +20,8 @@ import {
 } from "@bazhen/core";
 import { z } from "zod";
 import {
+  defaultName,
+  nameBase,
   Activity,
   Usage,
   AgentState,
@@ -204,6 +206,9 @@ const STRANDED = `t.state = 'open' AND t.owner_agent_id IS NOT NULL AND t.parent
 
 const ASSIGNMENT = `SELECT id, task_id AS taskId, agent_session_id AS agentId, role,
     parent_assignment_id AS parentAssignmentId, state, end_reason AS endReason FROM assignments`;
+
+/** An agent whose name no other may take: one not ended. */
+const LIVE_NAME = "state NOT IN ('closed', 'failed')";
 
 const AGENT_TERMINAL = `SELECT a.id, a.state AS agent_state, t.id AS terminal_id,
          t.state AS terminal_state, t.generation, t.runtime, t.locator
@@ -451,6 +456,7 @@ export class Store {
       if (m.version <= current) continue;
       this.transaction(() => {
         this.db.exec(m.sql);
+        m.run?.(this.db);
         this.db.prepare("INSERT INTO schema_version (version) VALUES (?)").run(m.version);
       });
     }
@@ -704,17 +710,58 @@ export class Store {
   }
 
   /** One agent's harness, if this daemon runs it. */
-  agent(agentId: string): { harness: string; state: AgentState; project: string } | undefined {
-    const row = this.prepare("SELECT harness, state, project FROM agent_sessions WHERE id = ?").get(
-      agentId,
-    );
+  agent(
+    agentId: string,
+  ): { harness: string; state: AgentState; project: string; name: string } | undefined {
+    const row = this.prepare(
+      "SELECT harness, state, project, coalesce(name, '') AS name FROM agent_sessions WHERE id = ?",
+    ).get(agentId);
     return row === undefined
       ? undefined
       : {
           harness: String(row.harness),
           state: AgentState.parse(row.state),
           project: String(row.project),
+          name: String(row.name),
         };
+  }
+
+  /**
+   * The agent `ref` names (foundation-design §11.4): an exact id names that agent in any state;
+   * anything else is a name, matched ignoring case among agents not ended. Never a prefix.
+   */
+  resolveAgent(ref: string): AgentSessionId {
+    if (isId("agent", ref)) {
+      if (this.prepare("SELECT 1 FROM agent_sessions WHERE id = ?").get(ref) === undefined)
+        throw new UnknownAgent(ref);
+      return ref;
+    }
+    const named = this.liveAgentNamed(ref);
+    if (named === undefined) throw new UnknownAgent(ref, "by that name");
+    return named;
+  }
+
+  /** The agent not ended that holds `name`, ignoring case. */
+  liveAgentNamed(name: string): AgentSessionId | undefined {
+    const id = this.prepare(
+      `SELECT id FROM agent_sessions WHERE name = ? COLLATE NOCASE AND ${LIVE_NAME}`,
+    ).get(name)?.id;
+    return typeof id === "string" && isId("agent", id) ? id : undefined;
+  }
+
+  /**
+   * The default name a new agent in `project` takes, and its number: the first after the last
+   * one given under its base that no agent not ended holds. Read and recorded in one transaction.
+   */
+  nextDefaultName(projectName: string): { name: string; ordinal: number } {
+    const base = nameBase(projectName);
+    const last = this.prepare("SELECT last FROM agent_name_counters WHERE base = ?").get(
+      base,
+    )?.last;
+    for (let ordinal = (typeof last === "number" ? last : 0) + 1; ; ordinal++) {
+      const name = defaultName(base, ordinal);
+      if (this.liveAgentNamed(name) === undefined) return { name, ordinal };
+    }
   }
 
   /** The agent a message is for. */
@@ -925,13 +972,17 @@ export class Store {
   }
 
   /** What an agent was launched with, and the harness session it is on, to start it again. */
-  agentLaunch(
-    agentId: string,
-  ):
-    | { launch: AgentLaunchRequest; externalRef: ExternalRef | null; transcript: string | null }
+  agentLaunch(agentId: string):
+    | {
+        launch: AgentLaunchRequest;
+        name: string;
+        externalRef: ExternalRef | null;
+        transcript: string | null;
+      }
     | undefined {
     const row = this.prepare(
-      "SELECT harness, project, cwd, external_ref, transcript FROM agent_sessions WHERE id = ?",
+      `SELECT harness, project, cwd, coalesce(name, '') AS name, external_ref, transcript
+       FROM agent_sessions WHERE id = ?`,
     ).get(agentId);
     if (row === undefined) return undefined;
     const ref = row.external_ref;
@@ -941,6 +992,7 @@ export class Store {
         project: String(row.project),
         cwd: String(row.cwd),
       },
+      name: String(row.name),
       externalRef: typeof ref === "string" ? ExternalRef.parse(JSON.parse(ref)) : null,
       transcript: typeof row.transcript === "string" ? row.transcript : null,
     };
@@ -1093,7 +1145,8 @@ export class Store {
           .all()
           .map((r) => ({ ...r, host: view.host(EnvironmentKind.parse(r.kind)) })),
         agents: this.prepare(
-          `SELECT a.id, a.environment_id AS environmentId, a.harness, a.project, a.cwd, a.state,
+          `SELECT a.id, coalesce(a.name, '') AS name, a.environment_id AS environmentId, a.harness,
+                  a.project, a.cwd, a.state,
                   a.launched_by AS launchedBy,
                   a.terminal_id AS terminalId, t.generation, a.external_ref AS externalRef, t.exit,
                   coalesce(t.theme, 'dark') AS theme, s.activity, a.usage, t.state AS terminalState,

@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { StateSnapshot } from "@bazhen/protocol";
-import { listTasks, showTask, taskVerb, Usage, type Context, type Verb } from "./tasks.ts";
+import {
+  listAgents,
+  listTasks,
+  showTask,
+  taskVerb,
+  Usage,
+  whoami,
+  type Context,
+  type Verb,
+} from "./tasks.ts";
 
 const AGENT = "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
 const OTHER = "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d";
@@ -29,12 +38,38 @@ const assigned = (taskId: string, agentId: string) => ({
   state: "active" as const,
   endReason: null,
 });
-const snapshot = (tasks: StateSnapshot["tasks"], assignments: StateSnapshot["assignments"]) =>
+const ENV = "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
+const agent = (id: string, name: string, over: Partial<StateSnapshot["agents"][number]> = {}) => ({
+  id,
+  name,
+  environmentId: ENV,
+  harness: "codex" as const,
+  project: "bazhen",
+  cwd: "/work",
+  state: "running" as const,
+  terminalId: null,
+  generation: null,
+  externalRef: null,
+  exit: null,
+  theme: "dark" as const,
+  themes: ["dark" as const],
+  attachCommand: null,
+  commands: [],
+  resumable: false,
+  canOpenShell: false,
+  launchedBy: null,
+  ...over,
+});
+const snapshot = (
+  tasks: StateSnapshot["tasks"],
+  assignments: StateSnapshot["assignments"],
+  agents: StateSnapshot["agents"] = [],
+) =>
   ({
     epoch: "e",
     eventId: 1,
     environments: [],
-    agents: [],
+    agents,
     attention: [],
     messages: [],
     shells: [],
@@ -119,14 +154,52 @@ describe("bazhen task verbs", () => {
     ]);
   });
 
-  it("refuses a send to something that is no agent's id, and --file on any other verb", () => {
+  it("refuses a send to something that is no agent's name or id, and --file on any other verb", () => {
     expect([
       usage(["send", "../tasks", "hi"]),
       usage(["escalate", "Pin", "it?", "--file", "q.md"]),
     ]).toEqual([
-      expect.stringContaining("not an agent id"),
+      expect.stringContaining("not an agent's name or id"),
       expect.stringContaining("--file is for send"),
     ]);
+  });
+
+  it("sends to an agent by its name", () => {
+    const verb = taskVerb(["send", "BZ-127", "hi"], ctx(AGENT));
+    expect(verb.call.path).toBe("/v1/agents/BZ-127/messages");
+  });
+
+  it("renames an agent, and refuses a new name that isn't one before asking the daemon", () => {
+    const verb = taskVerb(["rename", "BZ-127", "reviewer"], ctx());
+    expect([verb.call.path, verb.call.body]).toEqual([
+      "/v1/agents/BZ-127/rename",
+      { idempotencyKey: "key", name: "reviewer" },
+    ]);
+    expect([
+      after(verb, { agentId: AGENT, eventIds: [3] }),
+      usage(["rename", "BZ-127", OTHER]),
+    ]).toEqual(["renamed BZ-127 to reviewer", expect.stringContaining("isn't an id")]);
+  });
+
+  it("names a launched agent, and wants --launch for --name", () => {
+    const argv = [
+      "delegate",
+      "--launch",
+      "codex",
+      "--name",
+      "notes",
+      "--title",
+      "t",
+      "--brief",
+      "b",
+    ];
+    expect(taskVerb(argv, ctx(AGENT)).call.body).toMatchObject({
+      launch: { harness: "codex", name: "notes" },
+    });
+    expect([
+      usage(["delegate", OTHER, "--name", "x", "--title", "t", "--brief", "b"]),
+      usage(["delegate", "--launch", "codex", "--name=-x", "--title", "t", "--brief", "b"]),
+    ]).toEqual([expect.stringContaining("give --launch"), expect.stringContaining("a name is")]);
   });
 
   it("delegates to a new agent it launches, in the directory named, rather than to one named", () => {
@@ -204,6 +277,73 @@ describe("bazhen task verbs", () => {
       assignments: [],
       subtasks: [],
     };
-    expect(showTask(detail).split("\n").slice(-3)).toEqual(["b", "", "note: shipped"]);
+    expect(showTask(detail, snapshot([], [])).split("\n").slice(-3)).toEqual([
+      "b",
+      "",
+      "note: shipped",
+    ]);
+  });
+
+  it("names a live assignee by its name, and an ended one by its id, as its name may be another's", () => {
+    const state = snapshot(
+      [task(TASK, "mine"), task(TASK2, "old")],
+      [assigned(TASK, AGENT), assigned(TASK2, OTHER)],
+      [agent(OTHER, "repo-1", { state: "closed" }), agent(AGENT, "repo-1")],
+    );
+    expect(listTasks(state, undefined).split("\n")).toEqual([
+      `${TASK}  mine  [worker repo-1]`,
+      `${TASK2}  old  [worker ${OTHER}]`,
+    ]);
+  });
+});
+
+describe("bazhen agents and whoami", () => {
+  it("lists the agents not ended, each led by its name, and one with none by its id", () => {
+    const THIRD = "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c9d";
+    const state = snapshot(
+      [],
+      [],
+      [agent(AGENT, "BZ-127"), agent(OTHER, "old", { state: "closed" }), agent(THIRD, "")],
+    );
+    expect(listAgents(state).split("\n")).toEqual([
+      `BZ-127  ${AGENT}  codex  running  bazhen  /work`,
+      `${THIRD}  codex  running  bazhen  /work`,
+    ]);
+  });
+
+  it("says who the agent is, who launched it, and whom it reports to on each task", () => {
+    const parent = { ...assigned(TASK2, OTHER), role: "coordinator" as const };
+    const mine = { ...assigned(TASK, AGENT), parentAssignmentId: parent.id };
+    const state = snapshot(
+      [task(TASK, "Write the notes")],
+      [parent, mine],
+      [agent(AGENT, "BZ-127", { launchedBy: OTHER }), agent(OTHER, "coordinator-1")],
+    );
+    expect(whoami(state, AGENT).split("\n")).toEqual([
+      `BZ-127  ${AGENT}`,
+      "codex  running  bazhen  /work",
+      "launched by coordinator-1",
+      "tasks:",
+      `  ${TASK}  Write the notes  as worker, reporting to coordinator-1`,
+    ]);
+  });
+
+  it("says a task an agent owns, given with no assignment above, reports to its owner", () => {
+    const owned = { ...task(TASK, "t"), ownerAgentId: OTHER };
+    const state = snapshot(
+      [owned],
+      [assigned(TASK, AGENT)],
+      [agent(AGENT, "BZ-127"), agent(OTHER, "coordinator-1")],
+    );
+    expect(whoami(state, AGENT)).toContain("as worker, reporting to coordinator-1");
+  });
+
+  it("says a task the human gave reports to the human", () => {
+    const state = snapshot([task(TASK, "t")], [assigned(TASK, AGENT)], [agent(AGENT, "BZ-127")]);
+    expect(whoami(state, AGENT)).toContain("as worker, reporting to the human");
+  });
+
+  it("wants to run inside an agent", () => {
+    expect(usage(["whoami"])).toContain("inside an agent");
   });
 });

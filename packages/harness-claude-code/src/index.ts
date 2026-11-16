@@ -88,7 +88,7 @@ export class ClaudeCodeHarness implements HarnessAdapter {
     session: string[],
     id: string,
     request: AgentLaunchRequest,
-    { theme, instructions }: LaunchOptions,
+    { theme, instructions, name }: LaunchOptions,
   ): HarnessLaunch {
     const choice = this.opts.statusLine?.(request.cwd) ?? { wrap: null };
     const statusLine =
@@ -99,6 +99,7 @@ export class ClaudeCodeHarness implements HarnessAdapter {
       argv: [
         "claude",
         ...session,
+        ...(name === undefined ? [] : ["-n", name]),
         "--settings",
         JSON.stringify({ ...hooks(this.opts.hookCommand), ...statusLine, ...(theme && { theme }) }),
         ...(this.opts.permissionMode === undefined

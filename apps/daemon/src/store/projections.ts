@@ -14,6 +14,7 @@ import {
 import {
   AgentState,
   AssignmentState,
+  nameBase,
   AttentionCloseReason,
   AttentionState,
   EVENTS,
@@ -80,22 +81,33 @@ export function project(db: Statements, e: Recorded): void {
       const {
         environmentId,
         harness,
-        project: name,
+        project: projectName,
         cwd,
         terminalId,
         launchedBy,
+        name,
+        nameOrdinal,
       } = EVENTS[e.type].payload.parse(e.payload);
       db.prepare(
         `INSERT INTO agent_sessions
            (id, environment_id, harness, project, cwd, state, terminal_id, created_event_id, updated_event_id)
          VALUES (?, ?, ?, ?, ?, 'starting', ?, ?, ?)`,
-      ).run(e.entityId, environmentId, harness, name, cwd, terminalId, e.id, e.id);
+      ).run(e.entityId, environmentId, harness, projectName, cwd, terminalId, e.id, e.id);
       // Set apart from the insert, which older schemas, read back by upgrade, must still take.
       if (launchedBy !== undefined) {
         db.prepare("UPDATE agent_sessions SET launched_by = ? WHERE id = ?").run(
           launchedBy,
           e.entityId,
         );
+      }
+      if (name !== undefined) {
+        db.prepare("UPDATE agent_sessions SET name = ? WHERE id = ?").run(name, e.entityId);
+      }
+      if (nameOrdinal !== undefined) {
+        db.prepare(
+          `INSERT INTO agent_name_counters (base, last) VALUES (?, ?)
+           ON CONFLICT (base) DO UPDATE SET last = max(last, excluded.last)`,
+        ).run(nameBase(projectName), nameOrdinal);
       }
       if (terminalId === null) return;
       db.prepare(
@@ -204,6 +216,10 @@ export function project(db: Statements, e: Recorded): void {
       if (sessionIdOf(row.external_ref ?? null) !== sessionId) return;
       update(db, "agent_sessions", "id", e.entityId, e.id, { transcript: path });
       return;
+    }
+    case "agent.renamed": {
+      const { name } = EVENTS[e.type].payload.parse(e.payload);
+      return update(db, "agent_sessions", "id", e.entityId, e.id, { name });
     }
     case "agent.signalled":
       EVENTS[e.type].payload.parse(e.payload);

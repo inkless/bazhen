@@ -45,6 +45,7 @@ import {
   peerMail,
   unassignedMail,
   type Named,
+  type Who,
 } from "./mail.ts";
 
 /** What starts an agent for a delegation, and how far an agent may launch others. */
@@ -222,7 +223,7 @@ export class Tasks {
         const mail = [
           ...this.tell(
             target === undefined ? [] : [target.agentId],
-            unassignedMail(task, caller),
+            unassignedMail(task, this.who(caller)),
             caller,
             idempotencyKey,
           ),
@@ -257,7 +258,7 @@ export class Tasks {
         const view = this.view(taskId);
         const finish = checkFinish(view, caller, outcome, cascade);
         const task = this.named(taskId);
-        checkLength(finishedMail(task, outcome, caller, note));
+        checkLength(finishedMail(task, outcome, this.who(caller), note));
         if (finish.kind === "assignment") {
           const own = finish.assignment;
           const ended = this.store.append({
@@ -267,7 +268,7 @@ export class Tasks {
             payload: { reason: "completed" },
           });
           const giver = this.store.granters(own.id)[0] ?? view.ownerAgentId;
-          const body = completedMail(task, own.agentId, note);
+          const body = completedMail(task, this.agentNamed(own.agentId), note);
           // The human gave it this part; with no agent to tell, the human hears instead.
           if (giver === null) {
             const summary = printable(body);
@@ -327,15 +328,20 @@ export class Tasks {
     });
     const told =
       outcome === "cancelled"
-        ? cancelledMail(task, caller)
-        : finishedMail(task, outcome, caller, note);
+        ? cancelledMail(task, this.who(caller))
+        : finishedMail(task, outcome, this.who(caller), note);
     // The human's task, done by an agent: the human hears through the inbox, not mail.
     if (outcome === "done" && view.ownerAgentId === null && caller !== null) {
       this.raise({ agentId: caller, kind: "task_done", summary: doneSummary(task, note), taskId });
     }
     return [
       finished,
-      ...this.tell([...givers], finishedMail(task, outcome, caller, note), caller, `${key}:givers`),
+      ...this.tell(
+        [...givers],
+        finishedMail(task, outcome, this.who(caller), note),
+        caller,
+        `${key}:givers`,
+      ),
       ...this.tell(workers, told, caller, `${key}:workers`),
     ];
   }
@@ -354,9 +360,10 @@ export class Tasks {
       () => {
         this.checkCaller(caller);
         if (agentId === caller) throw new TaskRefused("forbidden", "you can't send to yourself");
-        const sender = this.store.agentLaunch(caller)?.launch;
+        const sender = this.store.agentLaunch(caller);
         if (sender === undefined) throw new UnknownAgent(caller);
-        const text = checkLength(peerMail({ id: caller, ...sender }, body));
+        const from = { id: caller, name: sender.name, ...sender.launch };
+        const text = checkLength(peerMail(from, body));
         return this.mailbox.send(
           agentId,
           { idempotencyKey: `${idempotencyKey}:sent`, body: text },
@@ -435,14 +442,20 @@ export class Tasks {
     const { parentTaskId } = this.checkDelegation(caller, req);
     const by = this.agentCaller(caller);
     const task = { id: newId("task"), title: req.title, brief: req.brief, parentTaskId };
-    checkLength(assignedMail(task, req.role, by));
+    checkLength(assignedMail(task, req.role, this.who(by)));
     const key = `${idempotencyKey}:launch:${by}`;
     // A launch this command already made is replayed, not counted again against the limits.
     const fresh = this.store.recall(key) === undefined;
     if (fresh) this.checkLaunchLimits(by);
     const cwd = req.launch.cwd ?? this.store.agentLaunch(by)?.launch.cwd;
     if (cwd === undefined) throw new UnknownAgent(by);
-    const launch = { idempotencyKey: key, harness: req.launch.harness, cwd };
+    const { name } = req.launch;
+    const launch = {
+      idempotencyKey: key,
+      harness: req.launch.harness,
+      cwd,
+      ...(name === undefined ? {} : { name }),
+    };
     const { agentId } = await this.launcher.launch(launch, by);
     try {
       return this.delegateTo(caller, req, agentId, asked);
@@ -572,7 +585,7 @@ export class Tasks {
     const view = this.view(taskId);
     const detail = this.store.taskDetail(taskId);
     if (detail === undefined) throw new UnknownTask(taskId);
-    const body = checkLength(assignedMail(detail, req.role, caller));
+    const body = checkLength(assignedMail(detail, req.role, this.who(caller)));
     const checked = checkGrant(view, caller, { agentId, role: req.role });
     const parentAssignmentId = delegatedFrom === undefined ? checked : delegatedFrom;
     const assignmentId = newId("asgn");
@@ -687,6 +700,16 @@ export class Tasks {
   }
 
   /** Whether the agent runs here and will read what it is sent. */
+  /** An agent as mail names it. */
+  private agentNamed(agentId: string): { id: string; name: string } {
+    return { id: agentId, name: this.store.agent(agentId)?.name ?? "" };
+  }
+
+  /** Who a command came from, as mail names them: the human, or an agent by name and id. */
+  private who(caller: Caller): Who {
+    return caller === null ? null : this.agentNamed(caller);
+  }
+
   private reachable(agentId: string): agentId is AgentSessionId {
     const state = this.store.agentTerminal({ agentId })?.state;
     return state !== undefined && !GONE.has(state);

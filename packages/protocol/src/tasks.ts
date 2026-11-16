@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AgentName, AgentRef } from "./agent-name.ts";
 import { HarnessId, Id, IdempotencyKey } from "./ids.ts";
 
 /** What an assignment lets its agent do on its task (foundation-design §3). */
@@ -65,7 +66,8 @@ export const TaskDetail = Task.extend({
 });
 export type TaskDetail = z.infer<typeof TaskDetail>;
 
-const Grant = z.object({ agentId: Id("agent"), role: Role });
+/** The agent by id or, from protocol 1.40, by name. */
+const Grant = z.object({ agentId: AgentRef, role: Role });
 
 /** `POST /v1/tasks`. Assigning in the same request mails the brief, or refuses the whole create. */
 export const CreateTaskRequest = z.object({
@@ -128,13 +130,20 @@ export const DelegateTaskRequest = z
   .object({
     idempotencyKey: IdempotencyKey,
     fromTaskId: Id("task").optional(),
-    /** The agent to give the subtask to; or, with `launch`, none yet. */
-    agentId: Id("agent").optional(),
+    /** The agent to give the subtask to, by id or name; or, with `launch`, none yet. */
+    agentId: AgentRef.optional(),
     /**
      * Launches a new agent for the subtask instead (protocol 1.31), in `cwd`, or the delegating
      * agent's own directory.
      */
-    launch: z.object({ harness: HarnessId, cwd: z.string().min(1).optional() }).optional(),
+    launch: z
+      .object({
+        harness: HarnessId,
+        cwd: z.string().min(1).optional(),
+        /** Protocol 1.40. */
+        name: AgentName.optional(),
+      })
+      .optional(),
     role: Role.exclude(["coordinator"]).default("worker"),
     title: TaskTitle,
     brief: TaskBrief,

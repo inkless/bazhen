@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AgentName } from "./agent-name.ts";
 import { EnvironmentKind, HarnessId, Id, IdempotencyKey } from "./ids.ts";
 
 export { HarnessId };
@@ -99,6 +100,11 @@ export type Environment = z.infer<typeof Environment>;
 
 export const Agent = z.object({
   id: Id("agent"),
+  /**
+   * Unique, ignoring case, among agents not closed or failed; empty only from a daemon older
+   * than protocol 1.40.
+   */
+  name: z.string().default(""),
   environmentId: Id("env"),
   harness: HarnessId,
   project: z.string(),
@@ -152,6 +158,8 @@ export const LaunchAgentRequest = z.object({
   project: z.string().min(1).optional(),
   /** Protocol 1.13. */
   theme: TuiTheme.optional(),
+  /** Absent, the daemon names it `<project>-<n>` (protocol 1.40). */
+  name: AgentName.optional(),
 });
 export type LaunchAgentRequest = z.infer<typeof LaunchAgentRequest>;
 
@@ -212,6 +220,17 @@ export const RelaunchAgentRequest = z.object({
   fresh: z.boolean().optional(),
 });
 export type RelaunchAgentRequest = z.infer<typeof RelaunchAgentRequest>;
+
+/**
+ * `POST /v1/agents/:id/rename`: the human renames any agent, an agent only itself (1.40). A retry
+ * names the agent by its id: the path is resolved before the key is replayed, and a rename that
+ * landed has freed the old name, so a retry by that name finds no agent.
+ */
+export const RenameAgentRequest = z.object({
+  idempotencyKey: IdempotencyKey,
+  name: AgentName,
+});
+export type RenameAgentRequest = z.infer<typeof RenameAgentRequest>;
 
 /** Signals a running agent's process, in place of typing a key into it. */
 export const SignalAgentRequest = z.object({

@@ -11,6 +11,7 @@ const environmentId = newId("env");
 
 const agentIn = (project: string, state: AgentState = "running", over: Partial<Agent> = {}) => ({
   id: newId("agent"),
+  name: project,
   environmentId,
   harness: "claude-code" as const,
   project,

@@ -4,11 +4,13 @@
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import {
+  AgentCommandResponse,
+  AgentName,
+  AgentRef,
   AssignTaskResponse,
   CreateTaskResponse,
   HarnessId,
   EscalateResponse,
-  Id,
   Role,
   SendMessageResponse,
   StateSnapshot,
@@ -22,6 +24,8 @@ import type { Call } from "@bazhen/daemon/client";
 
 export const TASK_USAGE = `usage:
   bazhen agents
+  bazhen whoami
+  bazhen rename <agent> <name>
   bazhen task list [--all]
   bazhen task show <task>
   bazhen task create --title <title> (--brief <text> | --brief-file <path>) [--parent <task>] [--assign <agent> [--role <role>]]
@@ -31,7 +35,8 @@ export const TASK_USAGE = `usage:
   bazhen task cancel <task> [--note <text>] [--cascade]
   bazhen escalate <question> [--task <task>]
   bazhen send <agent> (<text> | --file <path>)
-  bazhen delegate (<agent> | --launch claude-code|codex [--dir <dir>]) --title <title> (--brief <text> | --brief-file <path>) [--task <task>] [--role lead|worker]`;
+  bazhen delegate (<agent> | --launch claude-code|codex [--dir <dir>] [--name <name>]) --title <title> (--brief <text> | --brief-file <path>) [--task <task>] [--role lead|worker]
+<agent> is an agent's name or id.`;
 
 /** A command line that doesn't say what to do; the message says why. */
 export class Usage extends Error {}
@@ -79,6 +84,7 @@ const OPTIONS = {
   cascade: { type: "boolean" },
   launch: { type: "string" },
   dir: { type: "string" },
+  name: { type: "string" },
   home: { type: "string" },
   port: { type: "string" },
 } as const;
@@ -125,7 +131,35 @@ export function taskVerb(argv: readonly string[], ctx: Context): Verb {
   if (name !== "send" && values.file !== undefined) {
     throw new Usage("--file is for send; a brief takes --brief-file");
   }
+  /** A name the command line gives an agent, checked before the daemon is asked. */
+  const newName = (value: string) => {
+    const parsed = AgentName.safeParse(value);
+    if (!parsed.success) throw new Usage(parsed.error.issues.map((i) => i.message).join("; "));
+    return parsed.data;
+  };
+  /** An agent the command line names, by name or id, as a path segment. */
+  const agentRef = (value: string | undefined, what: string) => {
+    const ref = need(value, what);
+    if (!AgentRef.safeParse(ref).success) throw new Usage(`not an agent's name or id: ${ref}`);
+    return ref;
+  };
   if (name === "agents") return verb(state, listAgents);
+  if (name === "whoami") {
+    const self = ctx.agentId;
+    if (self === undefined) throw new Usage("whoami runs inside an agent Bazhen launched");
+    return verb(state, (s) => whoami(s, self));
+  }
+  if (name === "rename") {
+    const agent = agentRef(sub, "the agent to rename");
+    const to = newName(need(rest[0], "the new name"));
+    return post(
+      `/v1/agents/${encodeURIComponent(agent)}/rename`,
+      AgentCommandResponse,
+      { name: to },
+      (r) =>
+        r.eventIds.length === 0 ? `${agent} is already named ${to}` : `renamed ${agent} to ${to}`,
+    );
+  }
   if (name === "escalate") {
     const summary = [sub, ...rest].filter((w) => w !== undefined).join(" ");
     return post(
@@ -139,8 +173,7 @@ export function taskVerb(argv: readonly string[], ctx: Context): Verb {
     );
   }
   if (name === "send") {
-    const agentId = need(sub, "the agent to send to");
-    if (!Id("agent").safeParse(agentId).success) throw new Usage(`not an agent id: ${agentId}`);
+    const agentId = agentRef(sub, "the agent to send to");
     // An unquoted word that is another verb's option would be taken out of the text silently.
     const taken = Object.keys(values).filter((o) => !SEND_OPTIONS.has(o));
     if (taken.length > 0) {
@@ -153,7 +186,7 @@ export function taskVerb(argv: readonly string[], ctx: Context): Verb {
     const body =
       values.file === undefined ? need(words, "the text to send") : ctx.readFile(values.file);
     return post(
-      `/v1/agents/${agentId}/messages`,
+      `/v1/agents/${encodeURIComponent(agentId)}/messages`,
       SendMessageResponse,
       { body },
       (r) => `sent ${r.messageId} to ${agentId}`,
@@ -167,18 +200,24 @@ export function taskVerb(argv: readonly string[], ctx: Context): Verb {
     if (harness === undefined && values.dir !== undefined) {
       throw new Usage("--dir is where a --launch agent starts; give --launch too");
     }
+    if (harness === undefined && values.name !== undefined) {
+      throw new Usage(
+        "--name names a --launch agent; give --launch too, or bazhen rename one that runs",
+      );
+    }
     if (harness !== undefined && !HarnessId.safeParse(harness).success) {
       throw new Usage(`--launch is ${HarnessId.options.join(" or ")}, not ${harness}`);
     }
     const to =
       harness === undefined
-        ? { agentId: need(sub, "the agent to delegate to, or --launch <harness>") }
+        ? { agentId: agentRef(sub, "the agent to delegate to, or --launch <harness>") }
         : {
             launch: {
               harness,
               ...(values.dir === undefined
                 ? {}
                 : { cwd: values.dir.startsWith("~") ? values.dir : resolve(values.dir) }),
+              ...(values.name === undefined ? {} : { name: newName(values.name) }),
             },
           };
     return post(
@@ -203,7 +242,9 @@ export function taskVerb(argv: readonly string[], ctx: Context): Verb {
       return verb(state, (s) => listTasks(s, values.all === true ? undefined : ctx.agentId));
     case "show": {
       const taskId = need(rest[0], "the task");
-      return verb({ method: "GET", path: `/v1/tasks/${taskId}`, reply: TaskDetail }, showTask);
+      return verb({ method: "GET", path: `/v1/tasks/${taskId}`, reply: TaskDetail }, (d) =>
+        verb(state, (s) => showTask(d, s)),
+      );
     }
     case "create":
       return post(
@@ -215,7 +256,7 @@ export function taskVerb(argv: readonly string[], ctx: Context): Verb {
           ...(values.parent === undefined ? {} : { parentTaskId: values.parent }),
           ...(values.assign === undefined
             ? {}
-            : { assign: { agentId: values.assign, role: role("worker") } }),
+            : { assign: { agentId: agentRef(values.assign, "--assign"), role: role("worker") } }),
         },
         (r) =>
           r.assignmentId === null
@@ -223,7 +264,7 @@ export function taskVerb(argv: readonly string[], ctx: Context): Verb {
             : `created ${r.taskId}, assigned as ${r.assignmentId}`,
       );
     case "assign": {
-      const [taskId, agentId] = [need(rest[0], "the task"), need(rest[1], "the agent")];
+      const [taskId, agentId] = [need(rest[0], "the task"), agentRef(rest[1], "the agent")];
       return post(
         `/v1/tasks/${taskId}/assign`,
         AssignTaskResponse,
@@ -279,12 +320,51 @@ function ownTask(ctx: Context, finish: (id: string) => Verb): Verb {
 const activeFor = (s: StateSnapshot, agentId: string) =>
   s.assignments.filter((a) => a.agentId === agentId && a.state === "active");
 
+const ended = (a: Agent) => a.state === "closed" || a.state === "failed";
+
 export function listAgents(s: StateSnapshot): string {
-  const live = s.agents.filter((a) => a.state !== "closed" && a.state !== "failed");
+  const live = s.agents.filter((a) => !ended(a));
   if (live.length === 0) return "no agents";
   return live
-    .map((a: Agent) => `${a.id}  ${a.harness}  ${a.state}  ${a.project}  ${a.cwd}`)
+    .map((a: Agent) =>
+      [a.name, a.id, a.harness, a.state, a.project, a.cwd].filter((f) => f !== "").join("  "),
+    )
     .join("\n");
+}
+
+/**
+ * An agent as the CLI prints it: by its name while it is not ended, as the name then names it
+ * alone; by its id once it has, since another agent may hold its name now, and from a daemon
+ * that names none.
+ */
+function shown(s: StateSnapshot, agentId: string): string {
+  const agent = s.agents.find((a) => a.id === agentId);
+  return agent === undefined || agent.name === "" || ended(agent) ? agentId : agent.name;
+}
+
+/**
+ * The asking agent: its name and where it runs, each task it is on with its role, and whom it
+ * reports to there: as the daemon tells of its work, the agent holding the assignment it was
+ * given under, else the task's owner, else the human.
+ */
+export function whoami(s: StateSnapshot, agentId: string): string {
+  const self = s.agents.find((a) => a.id === agentId);
+  if (self === undefined) throw new Usage(`the daemon has no agent ${agentId}`);
+  const launcher = self.launchedBy === null ? "the human" : shown(s, self.launchedBy);
+  const tasks = activeFor(s, agentId).map((a) => {
+    const task = s.tasks.find((t) => t.id === a.taskId);
+    const giver =
+      s.assignments.find((p) => p.id === a.parentAssignmentId)?.agentId ?? task?.ownerAgentId;
+    const to = giver === undefined || giver === null ? "the human" : shown(s, giver);
+    const title = task?.title ?? "";
+    return `  ${a.taskId}  ${title}  as ${a.role}, reporting to ${to}`;
+  });
+  return [
+    `${self.name}  ${self.id}`,
+    `${self.harness}  ${self.state}  ${self.project}  ${self.cwd}`,
+    `launched by ${launcher}`,
+    ...(tasks.length === 0 ? ["no tasks"] : ["tasks:", ...tasks]),
+  ].join("\n");
 }
 
 /**
@@ -304,6 +384,7 @@ export function listTasks(s: StateSnapshot, agentId: string | undefined): string
   return tasks
     .map((t) =>
       taskLine(
+        s,
         t,
         active.filter((a) => a.taskId === t.id),
       ),
@@ -311,20 +392,20 @@ export function listTasks(s: StateSnapshot, agentId: string | undefined): string
     .join("\n");
 }
 
-const taskLine = (t: Task, assignees: readonly Assignment[]) => {
-  const who = assignees.map((a) => `${a.role} ${a.agentId}`).join(", ") || "unassigned";
+const taskLine = (s: StateSnapshot, t: Task, assignees: readonly Assignment[]) => {
+  const who = assignees.map((a) => `${a.role} ${shown(s, a.agentId)}`).join(", ") || "unassigned";
   const parent = t.parentTaskId === null ? "" : `  (part of ${t.parentTaskId})`;
   return `${t.id}  ${t.title}  [${who}]${parent}`;
 };
 
-export function showTask(d: TaskDetail): string {
-  const owner = d.ownerAgentId === null ? "the human" : d.ownerAgentId;
+export function showTask(d: TaskDetail, s: StateSnapshot): string {
+  const owner = d.ownerAgentId === null ? "the human" : shown(s, d.ownerAgentId);
   const lines = [
     `${d.id}  ${d.title}`,
     `state: ${d.state}; owner: ${owner}${d.parentTaskId === null ? "" : `; part of ${d.parentTaskId}`}`,
     ...d.assignments.map(
       (a) =>
-        `  ${a.id}  ${a.role} ${a.agentId}  ${a.state === "active" ? "active" : `ended (${a.endReason ?? "?"})`}`,
+        `  ${a.id}  ${a.role} ${shown(s, a.agentId)}  ${a.state === "active" ? "active" : `ended (${a.endReason ?? "?"})`}`,
     ),
     ...d.subtasks.map((t) => `  subtask ${t.id}  ${t.title}  ${t.state}`),
     "",

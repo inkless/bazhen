@@ -1,5 +1,9 @@
+import type { ID_PREFIXES } from "@bazhen/protocol";
 import { describe, expect, it } from "vitest";
-import { isId, newId } from "./ids.ts";
+import { isId, newId, type IdPrefix } from "./ids.ts";
+
+/** True only when the two unions hold the same members; a drift either way type-checks false. */
+type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 
 const zeros = (n: number) => new Uint8Array(n);
 
@@ -41,5 +45,12 @@ describe("isId", () => {
   it("does not take one prefix for a longer one that starts with it", () => {
     const id = newId("attn");
     expect([isId("attn", id), isId("att", id)]).toEqual([true, false]);
+  });
+});
+
+describe("the id kinds a name may never be", () => {
+  it("are every kind of id this core mints, no more and no fewer", () => {
+    const same: Same<IdPrefix, (typeof ID_PREFIXES)[number]> = true;
+    expect(same).toBe(true);
   });
 });

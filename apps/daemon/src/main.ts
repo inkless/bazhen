@@ -13,6 +13,7 @@ import { PROTOCOL_VERSION } from "@bazhen/protocol";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
 import { launchAgent, launchSettled, localEnvironmentId } from "./agents/launch.ts";
 import { Lifecycle } from "./agents/lifecycle.ts";
+import { renameAgent } from "./agents/names.ts";
 import { AgentQueue } from "./agents/queue.ts";
 import { reconcile } from "./agents/reconcile.ts";
 import { ServerWatch } from "./agents/server-watch.ts";
@@ -355,6 +356,8 @@ const commands = {
   respawn: (agentId, req) => lifecycle.respawn(agentId, req),
   relaunch: (agentId, req) => lifecycle.relaunch(agentId, req),
   signal: (agentId, req) => lifecycle.signal(agentId, req),
+  rename: (caller, agentId, req) => renameAgent(store, caller, agentId, req),
+  resolveAgent: (ref) => store.resolveAgent(ref),
   openShell: (req, viewer) => shells.open(req, deviceOf(viewer)),
   closeShell: (terminalId, req) => shells.close(terminalId, req),
   restartShell: (terminalId, req, viewer) => shells.restart(terminalId, req, deviceOf(viewer)),
