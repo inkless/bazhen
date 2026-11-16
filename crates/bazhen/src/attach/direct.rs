@@ -240,8 +240,10 @@ pub(crate) fn open(
     while Instant::now() < by {
         match decoder.next_frame() {
             Ok(Some(Reply::Hello { body, .. })) => {
-                stream.set_read_timeout(None).map_err(gone)?;
-                stream.set_nonblocking(true).map_err(gone)?;
+                let ready = stream
+                    .set_read_timeout(None)
+                    .and_then(|()| stream.set_nonblocking(true));
+                after_hello(terminal, ready)?;
                 return Ok((stream, body, decoder));
             }
             Ok(Some(Reply::Error { body, .. })) => {
@@ -280,6 +282,16 @@ pub(crate) fn open(
     Err(Failed::Refused(format!(
         "the holder of {terminal} didn't say hello"
     )))
+}
+
+/// What a failure to set the holder's socket up, once it has said hello, means: the holder has
+/// gone, as macOS says by refusing options on a socket whose other end has closed.
+fn after_hello(terminal: &str, ready: io::Result<()>) -> Result<(), Failed> {
+    ready.map_err(|_| {
+        Failed::Refused(format!(
+            "{terminal}'s holder hung up: the terminal has ended"
+        ))
+    })
 }
 
 /// Moves keys and output until the attachment ends, leaving what the person should read in
@@ -618,6 +630,17 @@ mod tests {
         std::fs::set_permissions(&sealed, std::os::unix::fs::PermissionsExt::from_mode(0o700))
             .unwrap();
         assert_eq!(absent, [true, true, false, false]);
+    }
+
+    #[test]
+    fn takes_a_holder_gone_after_its_hello_for_a_terminal_that_ended() {
+        let refused = io::Error::from_raw_os_error(22);
+        let gone = after_hello("term_x", Err(refused)).unwrap_err();
+        assert!(after_hello("term_x", Ok(())).is_ok());
+        assert!(
+            matches!(&gone, Failed::Refused(m) if m == "term_x's holder hung up: the terminal has ended"),
+            "{gone:?}"
+        );
     }
 
     #[test]
