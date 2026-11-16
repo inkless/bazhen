@@ -14,10 +14,24 @@ const created = {
   payload: { title: "t", brief: "secret plan", ownerAgentId: null, parentTaskId: null },
 };
 
+/** Whether a create request takes the title. */
+const takesTitle = (title: string) =>
+  CreateTaskRequest.safeParse({ idempotencyKey: "k", title, brief: "b" }).success;
+
 describe("task schemas", () => {
   it("refuses a brief longer than a message to the assignee may be", () => {
     const request = { idempotencyKey: "k", title: "t", brief: "x".repeat(20_001) };
     expect(CreateTaskRequest.safeParse(request).success).toBe(false);
+  });
+
+  it("refuses a new title that would end its line in mail or hide text, and still reads a stored one", () => {
+    const bad = ["a\nb", "a\u001bb", "a\u202eb", "a\u200bb", "a\u{e0041}b", "a\ud800b"];
+    const stored = Event.safeParse({ ...created, payload: { ...created.payload, title: "a\nb" } });
+    expect([bad.filter(takesTitle), takesTitle("Fix the build"), stored.success]).toEqual([
+      [],
+      true,
+      true,
+    ]);
   });
 
   it("refuses a blank title", () => {

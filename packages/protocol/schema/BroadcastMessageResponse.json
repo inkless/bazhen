@@ -1,0 +1,59 @@
+{
+  "$id": "BroadcastMessageResponse",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sent": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+          },
+          "messageId": {
+            "type": "string",
+            "pattern": "^msg_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+          }
+        },
+        "required": [
+          "agentId",
+          "messageId"
+        ]
+      }
+    },
+    "skipped": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentId",
+          "reason"
+        ]
+      }
+    },
+    "eventIds": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "exclusiveMinimum": 0,
+        "maximum": 9007199254740991
+      }
+    }
+  },
+  "required": [
+    "sent",
+    "skipped",
+    "eventIds"
+  ]
+}

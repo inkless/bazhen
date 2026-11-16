@@ -15,6 +15,10 @@ import {
   FinishTaskRequest,
   UnassignTaskRequest,
   AddTaskNoteRequest,
+  BroadcastMessageRequest,
+  type BroadcastMessageResponse,
+  WaitMessagesRequest,
+  type WaitMessagesResponse,
   type AssignTaskResponse,
   type CreateTaskResponse,
   type TaskCommandResponse,
@@ -78,6 +82,7 @@ import { AgentGone } from "../mailbox/mailbox.ts";
 import { ShellBusy, ShellOpenFailed, ShellsUnsettled, UnknownShell } from "../shells/lifecycle.ts";
 import { AttentionRefused } from "../attention/inbox.ts";
 import { NoticeClosed, NoticeRefused, type Viewer } from "../attention/notices.ts";
+import { UnknownMessage } from "../mailbox/wait.ts";
 import { MailTooLong, UnknownRole, UnknownTask } from "../tasks/tasks.ts";
 import { refusal, type Allowlists } from "./guard.ts";
 import { webPage } from "./web.ts";
@@ -160,6 +165,11 @@ export interface AppDeps {
     req: UnlinkShellRequest,
   ) => Promise<ShellCommandResponse>;
   readonly tasks: TaskCommands;
+  /** Answers once the messages are settled, or at the timeout or abort with their states then. */
+  readonly waitMessages: (
+    req: WaitMessagesRequest,
+    signal: AbortSignal,
+  ) => Promise<WaitMessagesResponse>;
 }
 
 /** Task commands, each told who asks: an agent by its id, or the human as null. */
@@ -174,6 +184,8 @@ export interface TaskCommands {
   escalate(caller: Caller, req: EscalateRequest): EscalateResponse;
   /** A message to the agent: the human's, or another agent's own words. */
   send(caller: Caller, agentId: string, req: SendMessageRequest): SendMessageResponse;
+  /** One message to each of the task's active assignees but the caller. */
+  broadcast(caller: Caller, taskId: string, req: BroadcastMessageRequest): BroadcastMessageResponse;
   note(caller: Caller, taskId: string, req: AddTaskNoteRequest): TaskCommandResponse;
 }
 
@@ -399,6 +411,12 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   taskRoute("/v1/tasks/:id/unassign", UnassignTaskRequest, (...a) => tasks.unassign(...a));
   taskRoute("/v1/tasks/:id/finish", FinishTaskRequest, (...a) => tasks.finish(...a));
   taskRoute("/v1/tasks/:id/notes", AddTaskNoteRequest, (...a) => tasks.note(...a));
+  taskRoute("/v1/tasks/:id/messages", BroadcastMessageRequest, (...a) => tasks.broadcast(...a));
+  app.post("/v1/messages/wait", async (c) => {
+    const body = WaitMessagesRequest.safeParse(await c.req.json().catch(() => undefined));
+    if (!body.success) return invalid(c, body.error);
+    return c.json(await deps.waitMessages(body.data, c.req.raw.signal));
+  });
   app.get("/v1/tasks/:id", (c) => {
     const detail = tasks.show(c.req.param("id"));
     if (detail === undefined) throw new UnknownTask(c.req.param("id"));
@@ -433,7 +451,9 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     }
     if (err instanceof ShellOpenFailed) return fail(c, 502, "launch_failed", err.message);
     if (err instanceof ShellsUnsettled) return fail(c, 503, "unavailable", err.message);
-    if (err instanceof UnknownTask) return fail(c, 404, "not_found", err.message);
+    if (err instanceof UnknownTask || err instanceof UnknownMessage) {
+      return fail(c, 404, "not_found", err.message);
+    }
     if (err instanceof MailTooLong || err instanceof UnknownRole) {
       return fail(c, 400, "invalid_request", err.message);
     }

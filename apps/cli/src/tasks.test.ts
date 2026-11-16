@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { FleetAgents, type StateSnapshot } from "@bazhen/protocol";
 import {
   agentsJson,
+  isVerb,
   listAgents,
   listTasks,
   showTask,
@@ -88,8 +89,23 @@ const snapshot = (
 /** The call the verb's answer to `reply` leads to, as path and body; what it prints, if it prints. */
 const after = (verb: Verb, reply: unknown) => {
   const next = verb.answer(reply);
-  return typeof next === "string" ? next : [next.call.path, next.call.body];
+  if (typeof next === "string") return next;
+  return isVerb(next) ? [next.call.path, next.call.body] : next;
 };
+
+/** The call a verb's answer leads to, which must be one. */
+const then = (verb: Verb, reply: unknown): Verb => {
+  const next = verb.answer(reply);
+  if (typeof next === "string" || !isVerb(next))
+    throw new Error(`no next call: ${JSON.stringify(next)}`);
+  return next;
+};
+
+const MSG = "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
+const MSG2 = "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d";
+const waited = (...states: [string, string, string][]) => ({
+  messages: states.map(([id, agentId, state]) => ({ id, agentId, state })),
+});
 const usage = (argv: string[], context = ctx()) => {
   try {
     taskVerb(argv, context);
@@ -419,7 +435,7 @@ describe("bazhen agents, as a fleet reads it", () => {
     const state = snapshot([], [], [agent(AGENT, "BZ-127", working), agent(OTHER, "quiet")]);
     expect(listAgents(state, NOW).split("\n")).toEqual([
       `BZ-127  ${AGENT}  codex  running  working 2m  bazhen  /work`,
-      "  Halfway through the tests.",
+      "  > Halfway through the tests.",
       `quiet  ${OTHER}  codex  running  bazhen  /work`,
     ]);
   });
@@ -472,6 +488,141 @@ describe("bazhen agents, as a fleet reads it", () => {
       taskVerb(["agents", "--json"], ctx()).call.path,
       usage(["task", "list", "--json"]),
     ]).toEqual(["/v1/state", expect.stringContaining("--json is for agents")]);
+  });
+});
+
+describe("bazhen send --wait", () => {
+  it("waits on the message it sent, as long as asked, and gives the call that long to come back", () => {
+    const sent = taskVerb(["send", OTHER, "hi", "--wait", "--timeout", "10"], ctx(AGENT));
+    const wait = then(sent, { messageId: MSG, eventIds: [1] });
+    expect([wait.call.path, wait.call.body, wait.call.timeoutMs]).toEqual([
+      "/v1/messages/wait",
+      { messageIds: [MSG], timeoutMs: 10_000 },
+      15_000,
+    ]);
+  });
+
+  it("exits as triage's does: landed once the agent has it, bounced, or still on its way", () => {
+    const wait = then(taskVerb(["send", OTHER, "hi", "--wait"], ctx(AGENT)), {
+      messageId: MSG,
+      eventIds: [],
+    });
+    expect(
+      ["seen", "delivered", "undeliverable", "queued", "offered", "queued_in_codex"].map((state) =>
+        after(wait, waited([MSG, OTHER, state])),
+      ),
+    ).toEqual([
+      { text: `${MSG} to ${OTHER}: seen`, code: 0 },
+      { text: `${MSG} to ${OTHER}: delivered`, code: 0 },
+      { text: `${MSG} to ${OTHER}: undeliverable`, code: 4 },
+      { text: `${MSG} to ${OTHER}: queued`, code: 5 },
+      { text: `${MSG} to ${OTHER}: offered`, code: 5 },
+      { text: `${MSG} to ${OTHER}: queued_in_codex`, code: 5 },
+    ]);
+  });
+
+  it("waits a minute unless told, and refuses a timeout without --wait, past the most, or not whole", () => {
+    const wait = then(taskVerb(["send", OTHER, "hi", "--wait"], ctx(AGENT)), {
+      messageId: MSG,
+      eventIds: [],
+    });
+    expect([
+      wait.call.body,
+      usage(["send", OTHER, "hi", "--timeout", "5"]),
+      usage(["send", OTHER, "hi", "--wait", "--timeout", "601"]),
+      usage(["send", OTHER, "hi", "--wait", "--timeout", "1.5"]),
+      usage(["task", "list", "--wait"]),
+    ]).toEqual([
+      { messageIds: [MSG], timeoutMs: 60_000 },
+      expect.stringContaining("give --wait too"),
+      expect.stringContaining("at most 600"),
+      expect.stringContaining("not 1.5"),
+      expect.stringContaining("--wait is for send"),
+    ]);
+  });
+});
+
+describe("bazhen send --task", () => {
+  it("sends every word after the task to the task's assignees, and says what it sent", () => {
+    const verb = taskVerb(["send", "--task", TASK, "Rebase", "now."], ctx(AGENT));
+    const answer = { sent: [{ agentId: OTHER, messageId: MSG }], skipped: [], eventIds: [1] };
+    expect([verb.call.path, verb.call.body, after(verb, answer)]).toEqual([
+      `/v1/tasks/${TASK}/messages`,
+      { idempotencyKey: "key", body: "Rebase now." },
+      `sent ${MSG} to ${OTHER}`,
+    ]);
+  });
+
+  it("exits as bounced when it skipped anyone, without --wait too", () => {
+    const verb = taskVerb(["send", "--task", TASK, "hi"], ctx(AGENT));
+    const skippedOne = {
+      sent: [{ agentId: OTHER, messageId: MSG }],
+      skipped: [{ agentId: AGENT, reason: "it is closing" }],
+      eventIds: [1],
+    };
+    const skippedAll = { sent: [], skipped: skippedOne.skipped, eventIds: [] };
+    expect([after(verb, skippedOne), after(verb, skippedAll)]).toEqual([
+      { text: `sent ${MSG} to ${OTHER}\nskipped ${AGENT}: it is closing`, code: 4 },
+      { text: `skipped ${AGENT}: it is closing`, code: 4 },
+    ]);
+  });
+
+  it("waits on every message it sent, and exits with the worst: bounced, then still on its way", () => {
+    const verb = taskVerb(["send", "--task", TASK, "hi", "--wait"], ctx(AGENT));
+    const wait = then(verb, {
+      sent: [
+        { agentId: OTHER, messageId: MSG },
+        { agentId: AGENT, messageId: MSG2 },
+      ],
+      skipped: [],
+      eventIds: [],
+    });
+    const code = (a: string, b: string) =>
+      Reflect.get(Object(after(wait, waited([MSG, OTHER, a], [MSG2, AGENT, b]))), "code");
+    expect([
+      Reflect.get(Object(wait.call.body), "messageIds"),
+      code("seen", "delivered"),
+      code("seen", "queued"),
+      code("queued", "undeliverable"),
+    ]).toEqual([[MSG, MSG2], 0, 5, 4]);
+  });
+
+  it("exits as bounced when it could send to no one it was asked to wait on", () => {
+    const verb = taskVerb(["send", "--task", TASK, "hi", "--wait"], ctx(AGENT));
+    const answer = {
+      sent: [],
+      skipped: [{ agentId: OTHER, reason: "it is closing" }],
+      eventIds: [],
+    };
+    expect(after(verb, answer)).toEqual({ text: `skipped ${OTHER}: it is closing`, code: 4 });
+  });
+
+  it("exits as bounced when it skipped anyone, though every message it sent landed", () => {
+    const verb = taskVerb(["send", "--task", TASK, "hi", "--wait"], ctx(AGENT));
+    const wait = then(verb, {
+      sent: [{ agentId: OTHER, messageId: MSG }],
+      skipped: [{ agentId: AGENT, reason: "it is closing" }],
+      eventIds: [],
+    });
+    expect(after(wait, waited([MSG, OTHER, "seen"]))).toEqual({
+      text: `skipped ${AGENT}: it is closing\n${MSG} to ${OTHER}: seen`,
+      code: 4,
+    });
+  });
+
+  it("says what it sent before it waits, so a wait that fails loses no message's id", () => {
+    const verb = taskVerb(["send", OTHER, "hi", "--wait", "--timeout", "10"], ctx(AGENT));
+    expect(then(verb, { messageId: MSG, eventIds: [] }).progress).toBe(
+      `sent ${MSG} to ${OTHER}\nwaiting up to 10 s`,
+    );
+  });
+
+  it("reads --task as a broadcast before the text, after other options too, and as unquoted text in it", () => {
+    const later = taskVerb(["send", "--wait", "--task", TASK, "hi"], ctx(AGENT));
+    expect([later.call.path, usage(["send", OTHER, "use", "--task", TASK])]).toEqual([
+      `/v1/tasks/${TASK}/messages`,
+      expect.stringMatching(/quotes: it holds --task; .* before the text/),
+    ]);
   });
 });
 

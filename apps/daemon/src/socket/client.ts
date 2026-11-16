@@ -24,6 +24,8 @@ export interface Call<T> {
   readonly path: string;
   readonly reply: Schema<T>;
   readonly body?: unknown;
+  /** How long the call may take, for one the daemon holds, as a wait does. */
+  readonly timeoutMs?: number;
 }
 
 /**

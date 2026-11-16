@@ -21,7 +21,7 @@ import {
   StateSnapshot,
   StopResponse,
 } from "@bazhen/protocol";
-import { TASK_USAGE, Usage, taskSocket, taskVerb, type Verb } from "./tasks.ts";
+import { TASK_USAGE, Usage, isVerb, taskSocket, taskVerb, type Answer } from "./tasks.ts";
 import { lanLines } from "./lan.ts";
 import { terminalLines } from "./terminals.ts";
 
@@ -286,7 +286,7 @@ async function devices(): Promise<number> {
 
 /** A task verb: its call, then the call its answer names, until one prints. */
 async function taskCommand(): Promise<number> {
-  let next: string | Verb;
+  let next: Answer;
   try {
     next = taskVerb(process.argv.slice(2), {
       agentId: process.env["BAZHEN_AGENT_ID"],
@@ -295,14 +295,21 @@ async function taskCommand(): Promise<number> {
       now: () => Date.now(),
     });
     const daemon = taskSocket(process.env, socket);
-    while (typeof next !== "string") next = next.answer(await call(daemon, next.call, CALL_MS));
+    while (isVerb(next)) {
+      if (next.progress !== undefined) console.error(next.progress);
+      next = next.answer(await call(daemon, next.call, next.call.timeoutMs ?? CALL_MS));
+    }
   } catch (err) {
     if (!(err instanceof Usage)) throw err;
     console.error(`${err.message}\n${TASK_USAGE}`);
     return 2;
   }
-  console.log(next);
-  return 0;
+  if (typeof next === "string") {
+    console.log(next);
+    return 0;
+  }
+  console.log(next.text);
+  return next.code;
 }
 
 async function run(verb: string): Promise<number> {

@@ -13,6 +13,7 @@ import { PROTOCOL_VERSION, RolesResponse, type LaunchAgentRequest } from "@bazhe
 import { EnvironmentUnavailable, ServerUnconfirmed, StaleGeneration } from "../agents/lifecycle.ts";
 import { AttentionClosed } from "../mailbox/approvals.ts";
 import { AgentGone } from "../mailbox/mailbox.ts";
+import { UnknownMessage } from "../mailbox/wait.ts";
 import { ShellBusy, UnknownShell } from "../shells/lifecycle.ts";
 import { AttentionRefused } from "../attention/inbox.ts";
 import { NoticeClosed, NoticeRefused, type Viewer } from "../attention/notices.ts";
@@ -26,6 +27,9 @@ const runtime = new FakeRuntime();
 const launched = { agentId: newId("agent"), terminalId: newId("term"), eventIds: [2, 3] };
 const callers: Caller[] = [];
 const target = newId("agent");
+const unknownMessage = newId("msg");
+/** The signal each wait was handed, which the request's going away aborts. */
+const waitSignals: AbortSignal[] = [];
 /** The agent each task command was handed, as the body named it once resolved. */
 const addressed: (string | undefined)[] = [];
 /** Who each rename came from, and the agent it was of. */
@@ -54,6 +58,10 @@ const tasks: TaskCommands = {
     callers.push(caller);
     if (agentId === "agent_gone") throw new AgentGone(agentId, "closed");
     return { messageId: newId("msg"), eventIds: [agentId === target ? 4 : 0] };
+  },
+  broadcast: (caller) => {
+    callers.push(caller);
+    return { sent: [], skipped: [], eventIds: [11] };
   },
   note: (caller) => {
     callers.push(caller);
@@ -161,6 +169,12 @@ const deps: AppDeps = {
     return launched;
   },
   tasks,
+  waitMessages: async (req, signal) => {
+    const [id] = req.messageIds;
+    if (id === unknownMessage) throw new UnknownMessage(id);
+    waitSignals.push(signal);
+    return { messages: [] };
+  },
 };
 const restarts: unknown[] = [];
 const app = createApp(deps);
@@ -464,6 +478,15 @@ describe("HTTP task routes", () => {
     expect(callers.slice(-2)).toEqual([agentId, null]);
   });
 
+  it("refuses a task title holding a newline or a control character before any command sees it", async () => {
+    const before = callers.length;
+    const statuses = [
+      (await createTask(app, "a\nb")).status,
+      (await createTask(app, "a\u0007b")).status,
+    ];
+    expect([statuses, callers.length - before]).toEqual([[400, 400], 0]);
+  });
+
   it("refuses a socket caller whose agent id is malformed", async () => {
     const res = await createTask(socket, "bad", { "bazhen-agent-id": "%3" });
     expect(res.status).toBe(400);
@@ -509,6 +532,29 @@ describe("HTTP task routes", () => {
     expect([(await noted.json()).eventIds, callers.at(-1)]).toEqual([[12], agentId]);
   });
 
+  it("hands a task's broadcast to its own command, as the socket caller's", async () => {
+    const as = { "bazhen-agent-id": agentId };
+    const sent = await postTo(socket, `/v1/tasks/${newId("task")}/messages`, { body: "all" }, as);
+    expect([(await sent.json()).eventIds, callers.at(-1)]).toEqual([[11], agentId]);
+  });
+
+  it("hands a wait the signal its request aborts when the client goes away", async () => {
+    const gone = new AbortController();
+    await app.request("/v1/messages/wait", {
+      method: "POST",
+      headers: { host, "content-type": "application/json" },
+      body: JSON.stringify({ messageIds: [newId("msg")], timeoutMs: 1000 }),
+      signal: gone.signal,
+    });
+    const signal = waitSignals.at(-1);
+    gone.abort();
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it("answers a wait on mail it never queued as not found, and one held too long as invalid", async () => {
+    expect([(await wait(0)).status, (await wait(600_001)).status]).toEqual([404, 400]);
+  });
+
   it("answers a read of a task it doesn't have with not found", async () => {
     const res = await app.request(`/v1/tasks/${newId("task")}`, { headers: { host } });
     expect([res.status, await res.json()]).toEqual([
@@ -526,6 +572,9 @@ const postTo = (on: typeof app, path: string, body: object, headers: Record<stri
   });
 
 const postNote = (text: string) => postTo(app, `/v1/tasks/${newId("task")}/notes`, { text });
+
+const wait = (timeoutMs: number) =>
+  postTo(app, "/v1/messages/wait", { messageIds: [unknownMessage], timeoutMs });
 
 describe("agents addressed by name", () => {
   it("takes an agent's name in its path as its id", async () => {

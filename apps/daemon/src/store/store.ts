@@ -27,6 +27,7 @@ import {
   Usage,
   AgentState,
   Assignment,
+  Message,
   TaskDetail,
   TaskNote,
   TaskState,
@@ -588,6 +589,16 @@ export class Store {
       this.prepare("SELECT id FROM attachments_open ORDER BY started_event_id").all(),
       "att",
     );
+  }
+
+  /** The messages with these ids that exist, each with its agent and state. */
+  messages(ids: readonly string[]): Message[] {
+    const marks = ids.map(() => "?").join(", ");
+    return this.prepare(
+      `SELECT id, agent_session_id AS agentId, state FROM mailbox WHERE id IN (${marks})`,
+    )
+      .all(...ids)
+      .map((r) => Message.parse(r));
   }
 
   /** An agent's messages in the given states, oldest first, with when each was first offered. */

@@ -90,8 +90,10 @@ function daemon(always = true) {
       delegate: refuse,
       escalate: refuse,
       send: refuse,
+      broadcast: refuse,
       note: refuse,
     },
+    waitMessages: refuse,
     pairing: { codes, devices },
     gate: { devices, always },
   };

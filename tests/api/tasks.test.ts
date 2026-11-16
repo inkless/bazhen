@@ -152,7 +152,7 @@ describe("tasks and delegation, through the CLI", () => {
     expect(listed.out).toContain(`api-worker  ${worker.agentId}`);
   });
 
-  it("shows an agent's note as its headline in the fleet's JSON", async () => {
+  it("shows an agent's note as its headline, and waits on a send until the agent has it", async () => {
     const created = await daemon.request("/v1/tasks", {
       method: "POST",
       body: {
@@ -175,6 +175,15 @@ describe("tasks and delegation, through the CLI", () => {
         headline: expect.objectContaining({ text: "Halfway there.", taskId }),
       }),
     );
+    const sent = await asAgent(coordinator.agentId, [
+      "send",
+      worker.agentId,
+      "Ping.",
+      "--wait",
+      "--timeout",
+      "20",
+    ]);
+    expect(sent).toMatchObject({ code: 0, out: expect.stringMatching(/: (seen|delivered)$/m) });
   });
 
   it("refuses a worker that delegates, and says why", async () => {
