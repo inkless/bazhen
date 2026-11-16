@@ -66,7 +66,8 @@
           "kind": "approval"
         }
       ]
-    }
+    },
+    "text": "{\"id\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"name\":\"BZ-127\",\"harness\":\"codex\",\"state\":\"running\",\"project\":\"bazhen\",\"cwd\":\"/work\",\"launchedBy\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d\",\"signal\":{\"value\":\"working\",\"source\":\"native\",\"ageSeconds\":125},\"listening\":true,\"headline\":{\"text\":\"Halfway.\",\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"ageSeconds\":30},\"tasks\":[{\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"assignmentId\":\"asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"role\":\"worker\"}],\"attention\":[{\"id\":\"attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"kind\":\"approval\"}]}"
   },
   {
     "name": "example 2",
@@ -97,7 +98,8 @@
       "headline": null,
       "tasks": [],
       "attention": []
-    }
+    },
+    "text": "{\"id\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"name\":\"\",\"harness\":\"claude-code\",\"state\":\"starting\",\"project\":\"p\",\"cwd\":\"/w\",\"launchedBy\":null,\"signal\":null,\"listening\":false,\"headline\":null,\"tasks\":[],\"attention\":[]}"
   },
   {
     "name": "harness = \"claude-code\"",
@@ -128,7 +130,8 @@
       "headline": null,
       "tasks": [],
       "attention": []
-    }
+    },
+    "text": "{\"id\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"name\":\"\",\"harness\":\"claude-code\",\"state\":\"starting\",\"project\":\"p\",\"cwd\":\"/w\",\"launchedBy\":null,\"signal\":null,\"listening\":false,\"headline\":null,\"tasks\":[],\"attention\":[]}"
   },
   {
     "name": "harness = \"codex\"",
@@ -159,7 +162,8 @@
       "headline": null,
       "tasks": [],
       "attention": []
-    }
+    },
+    "text": "{\"id\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"name\":\"\",\"harness\":\"codex\",\"state\":\"starting\",\"project\":\"p\",\"cwd\":\"/w\",\"launchedBy\":null,\"signal\":null,\"listening\":false,\"headline\":null,\"tasks\":[],\"attention\":[]}"
   },
   {
     "name": "state = \"starting\"",
@@ -190,7 +194,8 @@
       "headline": null,
       "tasks": [],
       "attention": []
-    }
+    },
+    "text": "{\"id\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"name\":\"\",\"harness\":\"claude-code\",\"state\":\"starting\",\"project\":\"p\",\"cwd\":\"/w\",\"launchedBy\":null,\"signal\":null,\"listening\":false,\"headline\":null,\"tasks\":[],\"attention\":[]}"
   },
   {
     "name": "state = \"running\"",
@@ -221,7 +226,8 @@
       "headline": null,
       "tasks": [],
       "attention": []
-    }
+    },
+    "text": "{\"id\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"name\":\"\",\"harness\":\"claude-code\",\"state\":\"running\",\"project\":\"p\",\"cwd\":\"/w\",\"launchedBy\":null,\"signal\":null,\"listening\":false,\"headline\":null,\"tasks\":[],\"attention\":[]}"
   },
   {
     "name": "state = \"exited\"",
@@ -252,7 +258,8 @@
       "headline": null,
       "tasks": [],
       "attention": []
-    }
+    },
+    "text": "{\"id\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"name\":\"\",\"harness\":\"claude-code\",\"state\":\"exited\",\"project\":\"p\",\"cwd\":\"/w\",\"launchedBy\":null,\"signal\":null,\"listening\":false,\"headline\":null,\"tasks\":[],\"attention\":[]}"
   },
   {
     "name": "state = \"unknown\"",
@@ -283,7 +290,8 @@
       "headline": null,
       "tasks": [],
       "attention": []
-    }
+    },
+    "text": "{\"id\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"name\":\"\",\"harness\":\"claude-code\",\"state\":\"unknown\",\"project\":\"p\",\"cwd\":\"/w\",\"launchedBy\":null,\"signal\":null,\"listening\":false,\"headline\":null,\"tasks\":[],\"attention\":[]}"
   },
   {
     "name": "state = \"lost\"",
@@ -314,7 +322,8 @@
       "headline": null,
       "tasks": [],
       "attention": []
-    }
+    },
+    "text": "{\"id\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"name\":\"\",\"harness\":\"claude-code\",\"state\":\"lost\",\"project\":\"p\",\"cwd\":\"/w\",\"launchedBy\":null,\"signal\":null,\"listening\":false,\"headline\":null,\"tasks\":[],\"attention\":[]}"
   },
   {
     "name": "state = \"closing\"",
@@ -345,7 +354,8 @@
       "headline": null,
       "tasks": [],
       "attention": []
-    }
+    },
+    "text": "{\"id\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"name\":\"\",\"harness\":\"claude-code\",\"state\":\"closing\",\"project\":\"p\",\"cwd\":\"/w\",\"launchedBy\":null,\"signal\":null,\"listening\":false,\"headline\":null,\"tasks\":[],\"attention\":[]}"
   },
   {
     "name": "state = \"closed\"",
@@ -376,7 +386,8 @@
       "headline": null,
       "tasks": [],
       "attention": []
-    }
+    },
+    "text": "{\"id\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"name\":\"\",\"harness\":\"claude-code\",\"state\":\"closed\",\"project\":\"p\",\"cwd\":\"/w\",\"launchedBy\":null,\"signal\":null,\"listening\":false,\"headline\":null,\"tasks\":[],\"attention\":[]}"
   },
   {
     "name": "state = \"failed\"",
@@ -407,7 +418,8 @@
       "headline": null,
       "tasks": [],
       "attention": []
-    }
+    },
+    "text": "{\"id\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"name\":\"\",\"harness\":\"claude-code\",\"state\":\"failed\",\"project\":\"p\",\"cwd\":\"/w\",\"launchedBy\":null,\"signal\":null,\"listening\":false,\"headline\":null,\"tasks\":[],\"attention\":[]}"
   },
   {
     "name": "signal.value = \"working\"",
@@ -476,7 +488,8 @@
           "kind": "approval"
         }
       ]
-    }
+    },
+    "text": "{\"id\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"name\":\"BZ-127\",\"harness\":\"codex\",\"state\":\"running\",\"project\":\"bazhen\",\"cwd\":\"/work\",\"launchedBy\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d\",\"signal\":{\"value\":\"working\",\"source\":\"native\",\"ageSeconds\":125},\"listening\":true,\"headline\":{\"text\":\"Halfway.\",\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"ageSeconds\":30},\"tasks\":[{\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"assignmentId\":\"asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"role\":\"worker\"}],\"attention\":[{\"id\":\"attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"kind\":\"approval\"}]}"
   },
   {
     "name": "signal.value = \"waiting_input\"",
@@ -545,7 +558,8 @@
           "kind": "approval"
         }
       ]
-    }
+    },
+    "text": "{\"id\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"name\":\"BZ-127\",\"harness\":\"codex\",\"state\":\"running\",\"project\":\"bazhen\",\"cwd\":\"/work\",\"launchedBy\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d\",\"signal\":{\"value\":\"waiting_input\",\"source\":\"native\",\"ageSeconds\":125},\"listening\":true,\"headline\":{\"text\":\"Halfway.\",\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"ageSeconds\":30},\"tasks\":[{\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"assignmentId\":\"asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"role\":\"worker\"}],\"attention\":[{\"id\":\"attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"kind\":\"approval\"}]}"
   },
   {
     "name": "signal.value = \"needs_approval\"",
@@ -614,7 +628,8 @@
           "kind": "approval"
         }
       ]
-    }
+    },
+    "text": "{\"id\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"name\":\"BZ-127\",\"harness\":\"codex\",\"state\":\"running\",\"project\":\"bazhen\",\"cwd\":\"/work\",\"launchedBy\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d\",\"signal\":{\"value\":\"needs_approval\",\"source\":\"native\",\"ageSeconds\":125},\"listening\":true,\"headline\":{\"text\":\"Halfway.\",\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"ageSeconds\":30},\"tasks\":[{\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"assignmentId\":\"asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"role\":\"worker\"}],\"attention\":[{\"id\":\"attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"kind\":\"approval\"}]}"
   },
   {
     "name": "signal.value = \"idle\"",
@@ -683,7 +698,8 @@
           "kind": "approval"
         }
       ]
-    }
+    },
+    "text": "{\"id\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"name\":\"BZ-127\",\"harness\":\"codex\",\"state\":\"running\",\"project\":\"bazhen\",\"cwd\":\"/work\",\"launchedBy\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d\",\"signal\":{\"value\":\"idle\",\"source\":\"native\",\"ageSeconds\":125},\"listening\":true,\"headline\":{\"text\":\"Halfway.\",\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"ageSeconds\":30},\"tasks\":[{\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"assignmentId\":\"asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"role\":\"worker\"}],\"attention\":[{\"id\":\"attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"kind\":\"approval\"}]}"
   },
   {
     "name": "signal.value = \"done\"",
@@ -752,7 +768,8 @@
           "kind": "approval"
         }
       ]
-    }
+    },
+    "text": "{\"id\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"name\":\"BZ-127\",\"harness\":\"codex\",\"state\":\"running\",\"project\":\"bazhen\",\"cwd\":\"/work\",\"launchedBy\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d\",\"signal\":{\"value\":\"done\",\"source\":\"native\",\"ageSeconds\":125},\"listening\":true,\"headline\":{\"text\":\"Halfway.\",\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"ageSeconds\":30},\"tasks\":[{\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"assignmentId\":\"asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"role\":\"worker\"}],\"attention\":[{\"id\":\"attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"kind\":\"approval\"}]}"
   },
   {
     "name": "signal.value = \"failed\"",
@@ -821,7 +838,8 @@
           "kind": "approval"
         }
       ]
-    }
+    },
+    "text": "{\"id\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"name\":\"BZ-127\",\"harness\":\"codex\",\"state\":\"running\",\"project\":\"bazhen\",\"cwd\":\"/work\",\"launchedBy\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d\",\"signal\":{\"value\":\"failed\",\"source\":\"native\",\"ageSeconds\":125},\"listening\":true,\"headline\":{\"text\":\"Halfway.\",\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"ageSeconds\":30},\"tasks\":[{\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"assignmentId\":\"asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"role\":\"worker\"}],\"attention\":[{\"id\":\"attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"kind\":\"approval\"}]}"
   },
   {
     "name": "signal.value = \"unknown\"",
@@ -890,7 +908,8 @@
           "kind": "approval"
         }
       ]
-    }
+    },
+    "text": "{\"id\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"name\":\"BZ-127\",\"harness\":\"codex\",\"state\":\"running\",\"project\":\"bazhen\",\"cwd\":\"/work\",\"launchedBy\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d\",\"signal\":{\"value\":\"unknown\",\"source\":\"native\",\"ageSeconds\":125},\"listening\":true,\"headline\":{\"text\":\"Halfway.\",\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"ageSeconds\":30},\"tasks\":[{\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"assignmentId\":\"asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"role\":\"worker\"}],\"attention\":[{\"id\":\"attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"kind\":\"approval\"}]}"
   },
   {
     "name": "signal.source = \"native\"",
@@ -959,7 +978,8 @@
           "kind": "approval"
         }
       ]
-    }
+    },
+    "text": "{\"id\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"name\":\"BZ-127\",\"harness\":\"codex\",\"state\":\"running\",\"project\":\"bazhen\",\"cwd\":\"/work\",\"launchedBy\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d\",\"signal\":{\"value\":\"working\",\"source\":\"native\",\"ageSeconds\":125},\"listening\":true,\"headline\":{\"text\":\"Halfway.\",\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"ageSeconds\":30},\"tasks\":[{\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"assignmentId\":\"asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"role\":\"worker\"}],\"attention\":[{\"id\":\"attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"kind\":\"approval\"}]}"
   },
   {
     "name": "signal.source = \"heuristic\"",
@@ -1028,7 +1048,8 @@
           "kind": "approval"
         }
       ]
-    }
+    },
+    "text": "{\"id\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"name\":\"BZ-127\",\"harness\":\"codex\",\"state\":\"running\",\"project\":\"bazhen\",\"cwd\":\"/work\",\"launchedBy\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d\",\"signal\":{\"value\":\"working\",\"source\":\"heuristic\",\"ageSeconds\":125},\"listening\":true,\"headline\":{\"text\":\"Halfway.\",\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"ageSeconds\":30},\"tasks\":[{\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"assignmentId\":\"asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"role\":\"worker\"}],\"attention\":[{\"id\":\"attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"kind\":\"approval\"}]}"
   },
   {
     "name": "attention[].kind = \"approval\"",
@@ -1097,7 +1118,8 @@
           "kind": "approval"
         }
       ]
-    }
+    },
+    "text": "{\"id\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"name\":\"BZ-127\",\"harness\":\"codex\",\"state\":\"running\",\"project\":\"bazhen\",\"cwd\":\"/work\",\"launchedBy\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d\",\"signal\":{\"value\":\"working\",\"source\":\"native\",\"ageSeconds\":125},\"listening\":true,\"headline\":{\"text\":\"Halfway.\",\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"ageSeconds\":30},\"tasks\":[{\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"assignmentId\":\"asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"role\":\"worker\"}],\"attention\":[{\"id\":\"attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"kind\":\"approval\"}]}"
   },
   {
     "name": "attention[].kind = \"question\"",
@@ -1166,7 +1188,8 @@
           "kind": "question"
         }
       ]
-    }
+    },
+    "text": "{\"id\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"name\":\"BZ-127\",\"harness\":\"codex\",\"state\":\"running\",\"project\":\"bazhen\",\"cwd\":\"/work\",\"launchedBy\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d\",\"signal\":{\"value\":\"working\",\"source\":\"native\",\"ageSeconds\":125},\"listening\":true,\"headline\":{\"text\":\"Halfway.\",\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"ageSeconds\":30},\"tasks\":[{\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"assignmentId\":\"asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"role\":\"worker\"}],\"attention\":[{\"id\":\"attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"kind\":\"question\"}]}"
   },
   {
     "name": "attention[].kind = \"failed\"",
@@ -1235,7 +1258,8 @@
           "kind": "failed"
         }
       ]
-    }
+    },
+    "text": "{\"id\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"name\":\"BZ-127\",\"harness\":\"codex\",\"state\":\"running\",\"project\":\"bazhen\",\"cwd\":\"/work\",\"launchedBy\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d\",\"signal\":{\"value\":\"working\",\"source\":\"native\",\"ageSeconds\":125},\"listening\":true,\"headline\":{\"text\":\"Halfway.\",\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"ageSeconds\":30},\"tasks\":[{\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"assignmentId\":\"asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"role\":\"worker\"}],\"attention\":[{\"id\":\"attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"kind\":\"failed\"}]}"
   },
   {
     "name": "attention[].kind = \"undeliverable\"",
@@ -1304,7 +1328,8 @@
           "kind": "undeliverable"
         }
       ]
-    }
+    },
+    "text": "{\"id\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"name\":\"BZ-127\",\"harness\":\"codex\",\"state\":\"running\",\"project\":\"bazhen\",\"cwd\":\"/work\",\"launchedBy\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d\",\"signal\":{\"value\":\"working\",\"source\":\"native\",\"ageSeconds\":125},\"listening\":true,\"headline\":{\"text\":\"Halfway.\",\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"ageSeconds\":30},\"tasks\":[{\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"assignmentId\":\"asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"role\":\"worker\"}],\"attention\":[{\"id\":\"attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"kind\":\"undeliverable\"}]}"
   },
   {
     "name": "attention[].kind = \"escalation\"",
@@ -1373,7 +1398,8 @@
           "kind": "escalation"
         }
       ]
-    }
+    },
+    "text": "{\"id\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"name\":\"BZ-127\",\"harness\":\"codex\",\"state\":\"running\",\"project\":\"bazhen\",\"cwd\":\"/work\",\"launchedBy\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d\",\"signal\":{\"value\":\"working\",\"source\":\"native\",\"ageSeconds\":125},\"listening\":true,\"headline\":{\"text\":\"Halfway.\",\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"ageSeconds\":30},\"tasks\":[{\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"assignmentId\":\"asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"role\":\"worker\"}],\"attention\":[{\"id\":\"attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"kind\":\"escalation\"}]}"
   },
   {
     "name": "attention[].kind = \"task_done\"",
@@ -1442,10 +1468,11 @@
           "kind": "task_done"
         }
       ]
-    }
+    },
+    "text": "{\"id\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"name\":\"BZ-127\",\"harness\":\"codex\",\"state\":\"running\",\"project\":\"bazhen\",\"cwd\":\"/work\",\"launchedBy\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d\",\"signal\":{\"value\":\"working\",\"source\":\"native\",\"ageSeconds\":125},\"listening\":true,\"headline\":{\"text\":\"Halfway.\",\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"ageSeconds\":30},\"tasks\":[{\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"assignmentId\":\"asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"role\":\"worker\"}],\"attention\":[{\"id\":\"attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"kind\":\"task_done\"}]}"
   },
   {
-    "name": "an unknown field",
+    "name": "example 1, with a field no version defines in each of its objects",
     "wire": {
       "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
       "name": "BZ-127",
@@ -1457,25 +1484,45 @@
       "signal": {
         "value": "working",
         "source": "native",
-        "ageSeconds": 125
+        "ageSeconds": 125,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
       },
       "listening": true,
       "headline": {
         "text": "Halfway.",
         "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-        "ageSeconds": 30
+        "ageSeconds": 30,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
       },
       "tasks": [
         {
           "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
           "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "role": "worker"
+          "role": "worker",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         }
       ],
       "attention": [
         {
           "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "kind": "approval"
+          "kind": "approval",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         }
       ],
       "fieldFromANewerDaemon": {
@@ -1516,6 +1563,44 @@
           "kind": "approval"
         }
       ]
-    }
+    },
+    "text": "{\"id\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"name\":\"BZ-127\",\"harness\":\"codex\",\"state\":\"running\",\"project\":\"bazhen\",\"cwd\":\"/work\",\"launchedBy\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d\",\"signal\":{\"value\":\"working\",\"source\":\"native\",\"ageSeconds\":125},\"listening\":true,\"headline\":{\"text\":\"Halfway.\",\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"ageSeconds\":30},\"tasks\":[{\"taskId\":\"task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"assignmentId\":\"asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"role\":\"worker\"}],\"attention\":[{\"id\":\"attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"kind\":\"approval\"}]}"
+  },
+  {
+    "name": "example 2, with a field no version defines in each of its objects",
+    "wire": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "",
+      "harness": "claude-code",
+      "state": "starting",
+      "project": "p",
+      "cwd": "/w",
+      "launchedBy": null,
+      "signal": null,
+      "listening": false,
+      "headline": null,
+      "tasks": [],
+      "attention": [],
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "",
+      "harness": "claude-code",
+      "state": "starting",
+      "project": "p",
+      "cwd": "/w",
+      "launchedBy": null,
+      "signal": null,
+      "listening": false,
+      "headline": null,
+      "tasks": [],
+      "attention": []
+    },
+    "text": "{\"id\":\"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d\",\"name\":\"\",\"harness\":\"claude-code\",\"state\":\"starting\",\"project\":\"p\",\"cwd\":\"/w\",\"launchedBy\":null,\"signal\":null,\"listening\":false,\"headline\":null,\"tasks\":[],\"attention\":[]}"
   }
 ]

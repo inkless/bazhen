@@ -28,14 +28,38 @@ pub const AGENT_NAME_RULE: &str =
 #[serde(try_from = "String", into = "String")]
 pub struct AgentName(String);
 
+/// Text that isn't an agent's name; it says the rule, in the protocol's words.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NotAName;
+
+impl fmt::Display for NotAName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(AGENT_NAME_RULE)
+    }
+}
+
+impl std::error::Error for NotAName {}
+
+/// Text that is neither an agent's id nor a name, said as zod says it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NotARef;
+
+impl fmt::Display for NotARef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Invalid input")
+    }
+}
+
+impl std::error::Error for NotARef {}
+
 impl AgentName {
     /// # Errors
     ///
-    /// The protocol's rule, when `text` isn't a name.
-    pub fn parse(text: &str) -> Result<Self, &'static str> {
+    /// `NotAName`, saying the rule, when `text` isn't a name.
+    pub fn parse(text: &str) -> Result<Self, NotAName> {
         is_agent_name(text)
             .then(|| Self(text.to_owned()))
-            .ok_or(AGENT_NAME_RULE)
+            .ok_or(NotAName)
     }
 
     pub fn as_str(&self) -> &str {
@@ -58,8 +82,13 @@ fn is_agent_name(text: &str) -> bool {
 pub struct AgentRef(String);
 
 impl AgentRef {
-    pub fn parse(text: &str) -> Option<Self> {
-        (is_id(kind::Agent::PREFIX, text) || is_agent_name(text)).then(|| Self(text.to_owned()))
+    /// # Errors
+    ///
+    /// `NotARef` when `text` is neither an agent's id nor a name.
+    pub fn parse(text: &str) -> Result<Self, NotARef> {
+        (is_id(kind::Agent::PREFIX, text) || is_agent_name(text))
+            .then(|| Self(text.to_owned()))
+            .ok_or(NotARef)
     }
 
     pub fn as_str(&self) -> &str {
@@ -127,7 +156,7 @@ impl TryFrom<String> for AgentName {
 impl TryFrom<String> for AgentRef {
     type Error = Refused;
     fn try_from(value: String) -> Result<Self, Refused> {
-        Self::parse(&value).ok_or(Refused {
+        Self::parse(&value).map_err(|_| Refused {
             what: "an agent's name or id",
             value,
         })

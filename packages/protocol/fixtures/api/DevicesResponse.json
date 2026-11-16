@@ -25,7 +25,46 @@
     }
   },
   {
-    "name": "an unknown field",
+    "name": "example 2",
+    "wire": {
+      "devices": [
+        {
+          "id": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\ud83d",
+          "pairedAt": "2026-11-16T12:00:00.000Z",
+          "lastSeenAt": "2026-11-16T12:00:00.000Z",
+          "expiresAt": "2026-11-16T12:00:00.000Z"
+        },
+        {
+          "id": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "name": "\udc4d first",
+          "pairedAt": "2026-11-16T12:00:00.000Z",
+          "lastSeenAt": "2026-11-16T12:00:00.000Z",
+          "expiresAt": "2026-11-16T12:00:00.000Z"
+        }
+      ]
+    },
+    "parsed": {
+      "devices": [
+        {
+          "id": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx�",
+          "pairedAt": "2026-11-16T12:00:00.000Z",
+          "lastSeenAt": "2026-11-16T12:00:00.000Z",
+          "expiresAt": "2026-11-16T12:00:00.000Z"
+        },
+        {
+          "id": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "name": "� first",
+          "pairedAt": "2026-11-16T12:00:00.000Z",
+          "lastSeenAt": "2026-11-16T12:00:00.000Z",
+          "expiresAt": "2026-11-16T12:00:00.000Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "example 1, with a field no version defines in each of its objects",
     "wire": {
       "devices": [
         {
@@ -33,7 +72,12 @@
           "name": "phone",
           "pairedAt": "2026-11-16T12:00:00.000Z",
           "lastSeenAt": "2026-11-16T12:00:00.000Z",
-          "expiresAt": "2026-11-16T12:00:00.000Z"
+          "expiresAt": "2026-11-16T12:00:00.000Z",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         }
       ],
       "fieldFromANewerDaemon": {
@@ -47,6 +91,60 @@
         {
           "id": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
           "name": "phone",
+          "pairedAt": "2026-11-16T12:00:00.000Z",
+          "lastSeenAt": "2026-11-16T12:00:00.000Z",
+          "expiresAt": "2026-11-16T12:00:00.000Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "example 2, with a field no version defines in each of its objects",
+    "wire": {
+      "devices": [
+        {
+          "id": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\ud83d",
+          "pairedAt": "2026-11-16T12:00:00.000Z",
+          "lastSeenAt": "2026-11-16T12:00:00.000Z",
+          "expiresAt": "2026-11-16T12:00:00.000Z",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        {
+          "id": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "name": "\udc4d first",
+          "pairedAt": "2026-11-16T12:00:00.000Z",
+          "lastSeenAt": "2026-11-16T12:00:00.000Z",
+          "expiresAt": "2026-11-16T12:00:00.000Z",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        }
+      ],
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "devices": [
+        {
+          "id": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx�",
+          "pairedAt": "2026-11-16T12:00:00.000Z",
+          "lastSeenAt": "2026-11-16T12:00:00.000Z",
+          "expiresAt": "2026-11-16T12:00:00.000Z"
+        },
+        {
+          "id": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "name": "� first",
           "pairedAt": "2026-11-16T12:00:00.000Z",
           "lastSeenAt": "2026-11-16T12:00:00.000Z",
           "expiresAt": "2026-11-16T12:00:00.000Z"

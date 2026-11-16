@@ -39,7 +39,14 @@ import {
   UnassignTaskRequest,
   quoteNote,
 } from "./tasks.ts";
-import { enumPaths, type JsonSchema, replaceAt, uncovered } from "./fixture-coverage.ts";
+import {
+  enumPaths,
+  type JsonSchema,
+  replaceAt,
+  uncovered,
+  wellFormed,
+  withField,
+} from "./fixture-coverage.ts";
 
 /*
  * The API messages another language's client speaks, as fixtures `pnpm schema` writes to
@@ -264,6 +271,7 @@ const loneStates = [
   lone({ tasks: [task] }),
   lone({ assignments: [assignment] }),
   lone({ notices: [notice] }),
+  lone({ attention: [{ ...openAttention, summary: "Run it?\ud83d\ud83d👍" }] }),
 ];
 
 const fullDoctor = {
@@ -397,6 +405,8 @@ const taskNote = {
 interface Example {
   readonly schema: z.ZodType;
   readonly wire: readonly unknown[];
+  /** Printed by a client for a program to read, so its keys' order is part of it too. */
+  readonly printed?: boolean;
 }
 
 const MESSAGES: Readonly<Record<string, Example>> = {
@@ -473,6 +483,12 @@ const MESSAGES: Readonly<Record<string, Example>> = {
       {
         devices: [{ id: DEV, name: "phone", pairedAt: AT, lastSeenAt: AT, expiresAt: AT }],
       },
+      {
+        devices: [
+          { id: DEV, name: `${"x".repeat(63)}\ud83d`, pairedAt: AT, lastSeenAt: AT, expiresAt: AT },
+          { id: DEV, name: "\udc4d first", pairedAt: AT, lastSeenAt: AT, expiresAt: AT },
+        ],
+      },
     ],
   },
   DismissNoticeRequest: { schema: DismissNoticeRequest, wire: [{ idempotencyKey: KEY }] },
@@ -505,6 +521,7 @@ const MESSAGES: Readonly<Record<string, Example>> = {
   },
   FleetAgent: {
     schema: FleetAgent,
+    printed: true,
     wire: [
       {
         id: AGENT,
@@ -622,11 +639,16 @@ const MESSAGES: Readonly<Record<string, Example>> = {
 /** A field no version of the protocol has, which a reader of an open object must pass over. */
 const UNKNOWN_FIELD = "fieldFromANewerDaemon";
 
-/** One fixture: the value on the wire, and what the protocol's schema makes of it. */
+/**
+ * One fixture: the value on the wire, and what the protocol's schema makes of it, each lone
+ * surrogate in its text made U+FFFD, as a reader holding text as UTF-8 must and as Node prints
+ * one. A printed message carries its parsed value's JSON too, so the order of its keys is held.
+ */
 export interface Fixture {
   readonly name: string;
   readonly wire: unknown;
   readonly parsed: unknown;
+  readonly text?: string;
 }
 
 const isSchema = (value: unknown): value is JsonSchema =>
@@ -659,17 +681,27 @@ export function messageFixtures(name: string, example: Example): Fixture[] {
         wire.push({ name: `${path} = ${JSON.stringify(value)}`, value: base });
     }
   }
-  const first = example.wire[0];
-  if (typeof first === "object" && first !== null && !Array.isArray(first)) {
-    wire.push({ name: "an unknown field", value: { ...first, [UNKNOWN_FIELD]: { any: [1] } } });
-  }
+  example.wire.forEach((value, i) => {
+    wire.push({
+      name: `example ${i + 1}, with a field no version defines in each of its objects`,
+      value: withField(schema, value, UNKNOWN_FIELD),
+    });
+  });
   const gaps = uncovered(
     schema,
     wire.map((w) => w.value),
   );
   if (gaps.length > 0)
     throw new Error(`fixtures for ${name} leave unexercised: ${gaps.join(", ")}`);
-  return wire.map((w) => ({ name: w.name, wire: w.value, parsed: example.schema.parse(w.value) }));
+  return wire.map((w) => {
+    const parsed = wellFormed(example.schema.parse(w.value));
+    return {
+      name: w.name,
+      wire: w.value,
+      parsed,
+      ...(example.printed === true ? { text: JSON.stringify(parsed) } : {}),
+    };
+  });
 }
 
 /** A check another language makes the same way: an input, and the protocol's verdict on it. */
@@ -758,6 +790,28 @@ const ORIGIN_INPUTS = [
   "http://127.0.0.2",
 ];
 const QUOTE_INPUTS = ["one", "a\n\nb", "", "\n", "end\n", "  indented"];
+const DATETIME_INPUTS = [
+  "2026-11-16T12:00:00.000Z",
+  "2026-11-16T12:00:00Z",
+  "2026-11-16T12:00Z",
+  "2026-11-16T12:00:00.5Z",
+  "2026-11-16T12:00:00.123456Z",
+  "1969-12-31T23:59:59.999Z",
+  "0000-01-01T00:00:00Z",
+  "2024-02-29T00:00:00Z",
+  "2026-02-29T00:00:00Z",
+  "2026-13-01T00:00:00Z",
+  "2026-11-31T00:00:00Z",
+  "2026-11-16T24:00:00Z",
+  "2026-11-16T12:60:00Z",
+  "2026-11-16T12:00:60Z",
+  "2026-11-16T12:00:00+01:00",
+  "2026-11-16T12:00:00",
+  "2026-11-16 12:00:00Z",
+  "2026-11-16t12:00:00z",
+  "+2026-11-16T12:00:00Z",
+  "",
+];
 
 /** The checks a client makes before it asks the daemon, with the protocol's verdicts. */
 export function checkFixtures() {
@@ -775,6 +829,11 @@ export function checkFixtures() {
     role: verdicts(Role, ROLE_INPUTS),
     taskNoteText: verdicts(TaskNoteText, NOTE_INPUTS),
     plainRemote: ORIGIN_INPUTS.map((input) => ({ input, plain: isPlainRemote(input) })),
+    datetime: DATETIME_INPUTS.map((input) =>
+      z.iso.datetime().safeParse(input).success
+        ? { input, ok: true, ms: Date.parse(input) }
+        : { input, ok: false },
+    ),
     quoteNote: QUOTE_INPUTS.map((input) => ({ input, quoted: quoteNote(input) })),
   };
 }

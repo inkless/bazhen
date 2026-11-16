@@ -29,6 +29,8 @@ use bazhen_protocol::tasks::{
     FinishTaskRequest, TaskCommandResponse, TaskDetail, UnassignTaskRequest,
 };
 use bazhen_protocol::text::{TASK_NOTE_MAX_BYTES, is_plain_remote, quote_note, task_note_text};
+use bazhen_protocol::time::timestamp_ms;
+use bazhen_protocol::wire;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -39,9 +41,10 @@ fn fixtures() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/protocol/fixtures/api")
 }
 
+/// A fixture file, read as the CLI reads the daemon's answers: a lone surrogate as U+FFFD.
 fn read(file: &str) -> Result<Value> {
-    let text = fs::read_to_string(fixtures().join(file)).map_err(|e| format!("{file}: {e}"))?;
-    serde_json::from_str(&text).map_err(|e| format!("{file}: {e}"))
+    let bytes = fs::read(fixtures().join(file)).map_err(|e| format!("{file}: {e}"))?;
+    wire::from_slice(&bytes).map_err(|e| format!("{file}: {e}"))
 }
 
 /// JSON values equal as JavaScript sees them: a number is a number, however `serde_json` holds
@@ -75,6 +78,15 @@ fn round_trips<T: DeserializeOwned + Serialize>(name: &str) -> Result<usize> {
             return Err(format!(
                 "{name}, {what}:\n  encoded {encoded}\n  parsed  {parsed}"
             ));
+        }
+        if let Some(text) = example.get("text").and_then(Value::as_str) {
+            let printed =
+                serde_json::to_string(&decoded).map_err(|e| format!("{name}, {what}: {e}"))?;
+            if printed != text {
+                return Err(format!(
+                    "{name}, {what} prints its keys out of order:\n  {printed}\n  {text}"
+                ));
+            }
         }
     }
     Ok(examples.len())
@@ -160,21 +172,63 @@ fn input(case: &Value) -> &str {
         .unwrap_or_default()
 }
 
+/// A case's verdict: the value the protocol took, or its message for refusing it.
+fn verdict(case: &Value) -> std::result::Result<String, String> {
+    let text = |key: &str| {
+        case.get(key)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    if case.get("ok") == Some(&Value::Bool(true)) {
+        Ok(text("value"))
+    } else {
+        Err(text("message"))
+    }
+}
+
+/// Each section of `checks.json` a test here reads; one it doesn't fails.
+const CHECKS: [&str; 9] = [
+    "agentName",
+    "agentRef",
+    "constants",
+    "datetime",
+    "plainRemote",
+    "quoteNote",
+    "role",
+    "taskId",
+    "taskNoteText",
+];
+
+#[test]
+fn every_section_of_the_checks_is_one_a_test_here_reads() {
+    let checks = checks().unwrap();
+    let written: BTreeSet<&str> = checks
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(written, CHECKS.into_iter().collect());
+}
+
+#[test]
+fn a_time_is_read_as_the_protocol_takes_it_and_javascript_reads_it() {
+    for case in cases("datetime").unwrap() {
+        let expected = (case["ok"] == true).then(|| case["ms"].as_i64().unwrap());
+        assert_eq!(timestamp_ms(input(&case)), expected, "{case}");
+    }
+}
+
 #[test]
 fn names_and_references_are_what_the_protocol_takes() {
     for case in cases("agentName").unwrap() {
-        let got = AgentName::parse(input(&case));
-        assert_eq!(got.is_ok(), case["ok"] == true, "{case}");
-        if let Err(message) = got {
-            assert_eq!(message, case["message"].as_str().unwrap());
-        }
+        let got = AgentName::parse(input(&case)).map(|n| n.as_str().to_owned());
+        assert_eq!(got.map_err(|e| e.to_string()), verdict(&case), "{case}");
     }
     for case in cases("agentRef").unwrap() {
-        assert_eq!(
-            AgentRef::parse(input(&case)).is_some(),
-            case["ok"] == true,
-            "{case}"
-        );
+        let got = AgentRef::parse(input(&case)).map(|r| r.as_str().to_owned());
+        assert_eq!(got.map_err(|e| e.to_string()), verdict(&case), "{case}");
     }
     for case in cases("role").unwrap() {
         assert_eq!(
@@ -196,12 +250,8 @@ fn names_and_references_are_what_the_protocol_takes() {
 #[test]
 fn a_note_is_trimmed_and_held_to_its_limit_and_characters_as_the_protocol_holds_it() {
     for case in cases("taskNoteText").unwrap() {
-        let expected = if case["ok"] == true {
-            Ok(case["value"].as_str().unwrap().to_owned())
-        } else {
-            Err(case["message"].as_str().unwrap().to_owned())
-        };
-        assert_eq!(task_note_text(input(&case)), expected, "{case}");
+        let got = task_note_text(input(&case)).map_err(|e| e.to_string());
+        assert_eq!(got, verdict(&case), "{case}");
     }
 }
 

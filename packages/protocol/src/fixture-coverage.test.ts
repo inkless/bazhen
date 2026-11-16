@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { enumPaths, type JsonSchema, replaceAt, uncovered } from "./fixture-coverage.ts";
+import {
+  enumPaths,
+  type JsonSchema,
+  replaceAt,
+  uncovered,
+  wellFormed,
+  withField,
+} from "./fixture-coverage.ts";
 
 const isSchema = (value: unknown): value is JsonSchema =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -84,5 +91,31 @@ describe("enumPaths and replaceAt", () => {
     });
     expect(replaceAt({ items: [] }, "items[].exit.(type=x).how", "b")).toBeUndefined();
     expect(replaceAt({ owner: null }, "owner.name", "b")).toBeUndefined();
+  });
+});
+
+describe("withField and wellFormed", () => {
+  it("set a field in every object the schema shapes, nested, in arrays and in branches, but no record", () => {
+    const value = {
+      name: "a",
+      owner: null,
+      state: "on",
+      exit: { type: "exited", code: 1 },
+      tags: [{ key: "k" }],
+      counts: { x: 1 },
+    };
+    const f = { any: [1] };
+    expect(withField(schemaOf(Thing), value, "extra")).toEqual({
+      ...value,
+      exit: { type: "exited", code: 1, extra: f },
+      tags: [{ key: "k", extra: f }],
+      extra: f,
+    });
+  });
+
+  it("make every lone surrogate U+FFFD, and leave whole pairs", () => {
+    expect(wellFormed({ a: ["x\ud83d", "\udc4dy", "👍"] })).toEqual({
+      a: ["x\ufffd", "\ufffdy", "👍"],
+    });
   });
 });

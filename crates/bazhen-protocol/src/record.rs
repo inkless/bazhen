@@ -1,6 +1,7 @@
 //! A JSON object whose keys a message doesn't fix, kept in the order it arrived: `bazhen doctor`
 //! prints a record's entries as the daemon listed them.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::marker::PhantomData;
 
@@ -58,13 +59,28 @@ impl<'de, V: Deserialize<'de>> Visitor<'de> for Entries<V> {
 
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Record<V>, A::Error> {
         let mut entries: Vec<(String, V)> = Vec::new();
+        let mut at: HashMap<String, usize> = HashMap::new();
         while let Some((key, value)) = map.next_entry::<String, V>()? {
             // A repeated key keeps its first place and its last value, as JSON.parse does.
-            match entries.iter_mut().find(|(k, _)| *k == key) {
-                Some(entry) => entry.1 = value,
-                None => entries.push((key, value)),
+            if let Some(entry) = at.get(&key).and_then(|&i| entries.get_mut(i)) {
+                entry.1 = value;
+            } else {
+                at.insert(key.clone(), entries.len());
+                entries.push((key, value));
             }
         }
         Ok(Record(entries))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keeps_the_order_keys_came_in_and_a_repeated_key_its_first_place_and_last_value() {
+        let record: Record<u64> = serde_json::from_str(r#"{"b":1,"a":2,"b":3}"#).unwrap();
+        assert_eq!(record.entries(), [("b".to_owned(), 3), ("a".to_owned(), 2)]);
+        assert_eq!(serde_json::to_string(&record).unwrap(), r#"{"b":3,"a":2}"#);
     }
 }

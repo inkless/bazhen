@@ -360,7 +360,7 @@
     }
   },
   {
-    "name": "an unknown field",
+    "name": "example 1, with a field no version defines in each of its objects",
     "wire": {
       "status": "ok",
       "appVersion": "0.1.0",
@@ -369,13 +369,23 @@
       "runtime": {
         "kind": "tmux",
         "state": "healthy",
-        "version": "3.4"
+        "version": "3.4",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
       },
       "runtimes": [
         {
           "kind": "holder",
           "state": "not-running",
-          "version": "holder/1.2"
+          "version": "holder/1.2",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         },
         {
           "kind": "tmux",
@@ -383,12 +393,22 @@
           "version": "3.4",
           "workarounds": [
             "w"
-          ]
+          ],
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         },
         {
           "kind": "other",
           "state": "unreachable",
-          "version": null
+          "version": null,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         }
       ],
       "fieldFromANewerDaemon": {
@@ -427,6 +447,41 @@
           "version": null
         }
       ]
+    }
+  },
+  {
+    "name": "example 2, with a field no version defines in each of its objects",
+    "wire": {
+      "status": "ok",
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.40",
+      "schemaVersion": 0,
+      "runtime": {
+        "kind": "tmux",
+        "state": "unreachable",
+        "version": null,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "status": "ok",
+      "appVersion": "0.1.0",
+      "protocolVersion": "1.40",
+      "schemaVersion": 0,
+      "runtime": {
+        "kind": "tmux",
+        "state": "unreachable",
+        "version": null
+      }
     }
   }
 ]

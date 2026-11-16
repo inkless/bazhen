@@ -225,7 +225,7 @@
     }
   },
   {
-    "name": "an unknown field",
+    "name": "example 1, with a field no version defines in each of its objects",
     "wire": {
       "roles": [
         {
@@ -239,7 +239,12 @@
           "singlePerTask": true,
           "maxActiveTasks": 2,
           "prompt": "You lead.",
-          "source": "user"
+          "source": "user",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         },
         {
           "key": "lead",
@@ -252,13 +257,23 @@
           "singlePerTask": true,
           "maxActiveTasks": null,
           "prompt": "You lead.",
-          "source": "builtin"
+          "source": "builtin",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         }
       ],
       "problems": [
         {
           "file": "/r/x.md",
-          "problem": "no prompt"
+          "problem": "no prompt",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         }
       ],
       "fieldFromANewerDaemon": {

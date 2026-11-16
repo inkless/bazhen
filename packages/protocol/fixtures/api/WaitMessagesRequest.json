@@ -15,7 +15,7 @@
     }
   },
   {
-    "name": "an unknown field",
+    "name": "example 1, with a field no version defines in each of its objects",
     "wire": {
       "messageIds": [
         "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"

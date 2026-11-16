@@ -162,3 +162,47 @@ const splitPath = (path: string) =>
     .replaceAll("[]", ".[]")
     .split(".")
     .filter((s) => s !== "");
+
+/**
+ * `value` with `field` set in every object whose shape the schema fixes, nested ones, array items
+ * and union branches included, though never in a record, whose keys are its data.
+ */
+export function withField(schema: JsonSchema, value: unknown, field: string): unknown {
+  if (value === null) return value;
+  const branch =
+    schema.anyOf?.find((b) => b.type !== "null") ??
+    schema.oneOf?.find((b) => {
+      const d = discriminator(b);
+      return d !== undefined && isObject(value) && value[d[0]] === d[1];
+    });
+  if (branch !== undefined) return withField(branch, value, field);
+  if (Array.isArray(value) && schema.items !== undefined) {
+    const items = schema.items;
+    return value.map((item) => withField(items, item, field));
+  }
+  if (!isObject(value)) return value;
+  if (typeof schema.additionalProperties === "object") {
+    const values = schema.additionalProperties;
+    return Object.fromEntries(
+      Object.entries(value).map(([k, v]) => [k, withField(values, v, field)]),
+    );
+  }
+  const properties = schema.properties ?? {};
+  const out = Object.fromEntries(
+    Object.entries(value).map(([k, v]) => {
+      const property = properties[k];
+      return [k, property === undefined ? v : withField(property, v, field)];
+    }),
+  );
+  return { ...out, [field]: { any: [1] } };
+}
+
+/** `value` with every lone surrogate in its strings made U+FFFD, as UTF-8 can hold it. */
+export function wellFormed(value: unknown): unknown {
+  if (typeof value === "string") return value.toWellFormed();
+  if (Array.isArray(value)) return value.map(wellFormed);
+  if (isObject(value)) {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, wellFormed(v)]));
+  }
+  return value;
+}

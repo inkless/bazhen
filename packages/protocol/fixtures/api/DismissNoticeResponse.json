@@ -13,7 +13,7 @@
     }
   },
   {
-    "name": "an unknown field",
+    "name": "example 1, with a field no version defines in each of its objects",
     "wire": {
       "eventIds": [
         4

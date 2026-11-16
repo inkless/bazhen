@@ -1413,7 +1413,7 @@
     }
   },
   {
-    "name": "an unknown field",
+    "name": "example 1, with a field no version defines in each of its objects",
     "wire": {
       "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
       "title": "t",
@@ -1430,7 +1430,12 @@
           "role": "worker",
           "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
           "state": "ended",
-          "endReason": "unassigned"
+          "endReason": "unassigned",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         },
         {
           "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
@@ -1439,7 +1444,12 @@
           "role": "worker",
           "parentAssignmentId": null,
           "state": "active",
-          "endReason": null
+          "endReason": null,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         }
       ],
       "subtasks": [
@@ -1448,7 +1458,12 @@
           "title": "t",
           "state": "done",
           "ownerAgentId": null,
-          "parentTaskId": null
+          "parentTaskId": null,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         }
       ],
       "notes": [
@@ -1459,7 +1474,12 @@
           "role": "worker",
           "text": "Halfway.",
           "handoff": true,
-          "at": "2026-11-16T12:00:00.000Z"
+          "at": "2026-11-16T12:00:00.000Z",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         },
         {
           "eventId": 7,
@@ -1468,7 +1488,12 @@
           "role": null,
           "text": "Halfway.",
           "handoff": false,
-          "at": "2026-11-16T12:00:00.000Z"
+          "at": "2026-11-16T12:00:00.000Z",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         }
       ],
       "fieldFromANewerDaemon": {
@@ -1534,6 +1559,37 @@
           "at": "2026-11-16T12:00:00.000Z"
         }
       ]
+    }
+  },
+  {
+    "name": "example 2, with a field no version defines in each of its objects",
+    "wire": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "title": "t",
+      "state": "done",
+      "ownerAgentId": null,
+      "parentTaskId": null,
+      "brief": "b",
+      "note": null,
+      "assignments": [],
+      "subtasks": [],
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "title": "t",
+      "state": "done",
+      "ownerAgentId": null,
+      "parentTaskId": null,
+      "brief": "b",
+      "note": null,
+      "assignments": [],
+      "subtasks": [],
+      "notes": []
     }
   }
 ]

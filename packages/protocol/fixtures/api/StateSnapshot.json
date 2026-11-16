@@ -1261,6 +1261,56 @@
     }
   },
   {
+    "name": "example 11",
+    "wire": {
+      "epoch": "e",
+      "eventId": 1,
+      "environments": [],
+      "agents": [],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "open",
+          "closeReason": null,
+          "summary": "Run it?\ud83d\ud83d👍",
+          "kind": "approval",
+          "taskId": null,
+          "messageId": null,
+          "openedAt": "2026-11-16T12:00:00.000Z",
+          "actions": []
+        }
+      ],
+      "messages": []
+    },
+    "parsed": {
+      "epoch": "e",
+      "eventId": 1,
+      "environments": [],
+      "agents": [],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "open",
+          "closeReason": null,
+          "summary": "Run it?��👍",
+          "kind": "approval",
+          "taskId": null,
+          "messageId": null,
+          "openedAt": "2026-11-16T12:00:00.000Z",
+          "actions": []
+        }
+      ],
+      "messages": [],
+      "shells": [],
+      "tasks": [],
+      "assignments": [],
+      "notices": [],
+      "observed": []
+    }
+  },
+  {
     "name": "environments[].kind = \"local\"",
     "wire": {
       "epoch": "e",
@@ -4792,19 +4842,13 @@
           "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
           "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
           "state": "open",
-          "closeReason": "answered",
-          "summary": "Run it?",
+          "closeReason": null,
+          "summary": "Run it?\ud83d\ud83d👍",
           "kind": "approval",
-          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": null,
+          "messageId": null,
           "openedAt": "2026-11-16T12:00:00.000Z",
-          "actions": [
-            "allow",
-            "deny",
-            "reply",
-            "resend",
-            "dismiss"
-          ]
+          "actions": []
         }
       ],
       "messages": []
@@ -4819,19 +4863,13 @@
           "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
           "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
           "state": "open",
-          "closeReason": "answered",
-          "summary": "Run it?",
+          "closeReason": null,
+          "summary": "Run it?��👍",
           "kind": "approval",
-          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": null,
+          "messageId": null,
           "openedAt": "2026-11-16T12:00:00.000Z",
-          "actions": [
-            "allow",
-            "deny",
-            "reply",
-            "resend",
-            "dismiss"
-          ]
+          "actions": []
         }
       ],
       "messages": [],
@@ -4854,19 +4892,13 @@
           "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
           "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
           "state": "closed",
-          "closeReason": "answered",
-          "summary": "Run it?",
+          "closeReason": null,
+          "summary": "Run it?\ud83d\ud83d👍",
           "kind": "approval",
-          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": null,
+          "messageId": null,
           "openedAt": "2026-11-16T12:00:00.000Z",
-          "actions": [
-            "allow",
-            "deny",
-            "reply",
-            "resend",
-            "dismiss"
-          ]
+          "actions": []
         }
       ],
       "messages": []
@@ -4881,19 +4913,13 @@
           "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
           "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
           "state": "closed",
-          "closeReason": "answered",
-          "summary": "Run it?",
+          "closeReason": null,
+          "summary": "Run it?��👍",
           "kind": "approval",
-          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": null,
+          "messageId": null,
           "openedAt": "2026-11-16T12:00:00.000Z",
-          "actions": [
-            "allow",
-            "deny",
-            "reply",
-            "resend",
-            "dismiss"
-          ]
+          "actions": []
         }
       ],
       "messages": [],
@@ -5473,20 +5499,14 @@
         {
           "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
           "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "state": "closed",
-          "closeReason": "answered",
-          "summary": "Run it?",
+          "state": "open",
+          "closeReason": null,
+          "summary": "Run it?\ud83d\ud83d👍",
           "kind": "approval",
-          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": null,
+          "messageId": null,
           "openedAt": "2026-11-16T12:00:00.000Z",
-          "actions": [
-            "allow",
-            "deny",
-            "reply",
-            "resend",
-            "dismiss"
-          ]
+          "actions": []
         }
       ],
       "messages": []
@@ -5500,20 +5520,14 @@
         {
           "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
           "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "state": "closed",
-          "closeReason": "answered",
-          "summary": "Run it?",
+          "state": "open",
+          "closeReason": null,
+          "summary": "Run it?��👍",
           "kind": "approval",
-          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": null,
+          "messageId": null,
           "openedAt": "2026-11-16T12:00:00.000Z",
-          "actions": [
-            "allow",
-            "deny",
-            "reply",
-            "resend",
-            "dismiss"
-          ]
+          "actions": []
         }
       ],
       "messages": [],
@@ -5535,20 +5549,14 @@
         {
           "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
           "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "state": "closed",
-          "closeReason": "answered",
-          "summary": "Run it?",
+          "state": "open",
+          "closeReason": null,
+          "summary": "Run it?\ud83d\ud83d👍",
           "kind": "question",
-          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": null,
+          "messageId": null,
           "openedAt": "2026-11-16T12:00:00.000Z",
-          "actions": [
-            "allow",
-            "deny",
-            "reply",
-            "resend",
-            "dismiss"
-          ]
+          "actions": []
         }
       ],
       "messages": []
@@ -5562,20 +5570,14 @@
         {
           "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
           "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "state": "closed",
-          "closeReason": "answered",
-          "summary": "Run it?",
+          "state": "open",
+          "closeReason": null,
+          "summary": "Run it?��👍",
           "kind": "question",
-          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": null,
+          "messageId": null,
           "openedAt": "2026-11-16T12:00:00.000Z",
-          "actions": [
-            "allow",
-            "deny",
-            "reply",
-            "resend",
-            "dismiss"
-          ]
+          "actions": []
         }
       ],
       "messages": [],
@@ -5597,20 +5599,14 @@
         {
           "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
           "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "state": "closed",
-          "closeReason": "answered",
-          "summary": "Run it?",
+          "state": "open",
+          "closeReason": null,
+          "summary": "Run it?\ud83d\ud83d👍",
           "kind": "failed",
-          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": null,
+          "messageId": null,
           "openedAt": "2026-11-16T12:00:00.000Z",
-          "actions": [
-            "allow",
-            "deny",
-            "reply",
-            "resend",
-            "dismiss"
-          ]
+          "actions": []
         }
       ],
       "messages": []
@@ -5624,20 +5620,14 @@
         {
           "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
           "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "state": "closed",
-          "closeReason": "answered",
-          "summary": "Run it?",
+          "state": "open",
+          "closeReason": null,
+          "summary": "Run it?��👍",
           "kind": "failed",
-          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": null,
+          "messageId": null,
           "openedAt": "2026-11-16T12:00:00.000Z",
-          "actions": [
-            "allow",
-            "deny",
-            "reply",
-            "resend",
-            "dismiss"
-          ]
+          "actions": []
         }
       ],
       "messages": [],
@@ -5659,20 +5649,14 @@
         {
           "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
           "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "state": "closed",
-          "closeReason": "answered",
-          "summary": "Run it?",
+          "state": "open",
+          "closeReason": null,
+          "summary": "Run it?\ud83d\ud83d👍",
           "kind": "undeliverable",
-          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": null,
+          "messageId": null,
           "openedAt": "2026-11-16T12:00:00.000Z",
-          "actions": [
-            "allow",
-            "deny",
-            "reply",
-            "resend",
-            "dismiss"
-          ]
+          "actions": []
         }
       ],
       "messages": []
@@ -5686,20 +5670,14 @@
         {
           "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
           "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "state": "closed",
-          "closeReason": "answered",
-          "summary": "Run it?",
+          "state": "open",
+          "closeReason": null,
+          "summary": "Run it?��👍",
           "kind": "undeliverable",
-          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": null,
+          "messageId": null,
           "openedAt": "2026-11-16T12:00:00.000Z",
-          "actions": [
-            "allow",
-            "deny",
-            "reply",
-            "resend",
-            "dismiss"
-          ]
+          "actions": []
         }
       ],
       "messages": [],
@@ -5721,20 +5699,14 @@
         {
           "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
           "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "state": "closed",
-          "closeReason": "answered",
-          "summary": "Run it?",
+          "state": "open",
+          "closeReason": null,
+          "summary": "Run it?\ud83d\ud83d👍",
           "kind": "escalation",
-          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": null,
+          "messageId": null,
           "openedAt": "2026-11-16T12:00:00.000Z",
-          "actions": [
-            "allow",
-            "deny",
-            "reply",
-            "resend",
-            "dismiss"
-          ]
+          "actions": []
         }
       ],
       "messages": []
@@ -5748,20 +5720,14 @@
         {
           "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
           "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "state": "closed",
-          "closeReason": "answered",
-          "summary": "Run it?",
+          "state": "open",
+          "closeReason": null,
+          "summary": "Run it?��👍",
           "kind": "escalation",
-          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": null,
+          "messageId": null,
           "openedAt": "2026-11-16T12:00:00.000Z",
-          "actions": [
-            "allow",
-            "deny",
-            "reply",
-            "resend",
-            "dismiss"
-          ]
+          "actions": []
         }
       ],
       "messages": [],
@@ -5783,20 +5749,14 @@
         {
           "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
           "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "state": "closed",
-          "closeReason": "answered",
-          "summary": "Run it?",
+          "state": "open",
+          "closeReason": null,
+          "summary": "Run it?\ud83d\ud83d👍",
           "kind": "task_done",
-          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": null,
+          "messageId": null,
           "openedAt": "2026-11-16T12:00:00.000Z",
-          "actions": [
-            "allow",
-            "deny",
-            "reply",
-            "resend",
-            "dismiss"
-          ]
+          "actions": []
         }
       ],
       "messages": []
@@ -5810,20 +5770,14 @@
         {
           "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
           "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "state": "closed",
-          "closeReason": "answered",
-          "summary": "Run it?",
+          "state": "open",
+          "closeReason": null,
+          "summary": "Run it?��👍",
           "kind": "task_done",
-          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": null,
+          "messageId": null,
           "openedAt": "2026-11-16T12:00:00.000Z",
-          "actions": [
-            "allow",
-            "deny",
-            "reply",
-            "resend",
-            "dismiss"
-          ]
+          "actions": []
         }
       ],
       "messages": [],
@@ -8083,7 +8037,7 @@
     }
   },
   {
-    "name": "an unknown field",
+    "name": "example 1, with a field no version defines in each of its objects",
     "wire": {
       "epoch": "e1",
       "eventId": 42,
@@ -8091,7 +8045,12 @@
         {
           "id": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
           "kind": "local",
-          "host": "my-mac"
+          "host": "my-mac",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         }
       ],
       "agents": [
@@ -8108,11 +8067,21 @@
           "externalRef": {
             "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
             "kind": "claude-session",
-            "id": "s-1"
+            "id": "s-1",
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
           },
           "exit": {
             "type": "exited",
-            "code": 1
+            "code": 1,
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
           },
           "theme": "light",
           "themes": [
@@ -8124,12 +8093,22 @@
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "running tests",
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -8145,11 +8124,26 @@
           "headline": {
             "text": "Halfway.",
             "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-            "at": "2026-11-16T12:00:00.000Z"
+            "at": "2026-11-16T12:00:00.000Z",
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
           },
           "needsRestart": {
             "holderPid": 4242,
-            "served": true
+            "served": true,
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
+          },
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
           }
         },
         {
@@ -8164,7 +8158,17 @@
           "externalRef": null,
           "exit": {
             "type": "signalled",
-            "signal": "SIGTERM"
+            "signal": "SIGTERM",
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
+          },
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
           }
         },
         {
@@ -8182,14 +8186,35 @@
             "value": "idle",
             "source": "heuristic",
             "confidence": 1,
-            "observedAt": "2026-11-16T12:00:00.000Z"
+            "observedAt": "2026-11-16T12:00:00.000Z",
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
           },
-          "usage": {},
+          "usage": {
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
+          },
           "attachCommand": null,
           "launchedBy": null,
           "headline": null,
           "needsRestart": {
-            "holderPid": null
+            "holderPid": null,
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
+          },
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
           }
         }
       ],
@@ -8210,7 +8235,12 @@
             "reply",
             "resend",
             "dismiss"
-          ]
+          ],
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         },
         {
           "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
@@ -8222,14 +8252,24 @@
           "taskId": null,
           "messageId": null,
           "openedAt": "2026-11-16T12:00:00.000Z",
-          "actions": []
+          "actions": [],
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         }
       ],
       "messages": [
         {
           "id": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
           "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "state": "queued"
+          "state": "queued",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         }
       ],
       "shells": [
@@ -8243,7 +8283,12 @@
           "name": "build",
           "foreground": {
             "command": "make",
-            "since": "2026-11-16T12:00:00.000Z"
+            "since": "2026-11-16T12:00:00.000Z",
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
           },
           "theme": "dark",
           "attachCommand": "tmux attach",
@@ -8256,7 +8301,17 @@
           "retypeable": true,
           "needsRestart": {
             "holderPid": 7,
-            "served": false
+            "served": false,
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
+          },
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
           }
         },
         {
@@ -8268,7 +8323,12 @@
           "linkedAgentId": null,
           "theme": "light",
           "attachCommand": null,
-          "commands": []
+          "commands": [],
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         },
         {
           "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
@@ -8282,7 +8342,12 @@
           "commands": [],
           "name": null,
           "foreground": null,
-          "needsRestart": null
+          "needsRestart": null,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         },
         {
           "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
@@ -8295,7 +8360,17 @@
           "attachCommand": null,
           "commands": [],
           "needsRestart": {
-            "holderPid": null
+            "holderPid": null,
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
+          },
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
           }
         }
       ],
@@ -8305,14 +8380,24 @@
           "title": "t",
           "state": "open",
           "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-          "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d"
+          "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         },
         {
           "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
           "title": "t",
           "state": "done",
           "ownerAgentId": null,
-          "parentTaskId": null
+          "parentTaskId": null,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         }
       ],
       "assignments": [
@@ -8323,7 +8408,12 @@
           "role": "worker",
           "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
           "state": "ended",
-          "endReason": "unassigned"
+          "endReason": "unassigned",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         },
         {
           "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
@@ -8332,7 +8422,12 @@
           "role": "worker",
           "parentAssignmentId": null,
           "state": "active",
-          "endReason": null
+          "endReason": null,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         }
       ],
       "notices": [
@@ -8347,7 +8442,12 @@
             "id": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
             "name": "phone",
             "origin": "https://box.ts.net",
-            "address": "192.168.1.5"
+            "address": "192.168.1.5",
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
           },
           "actions": [
             "dismiss"
@@ -8355,7 +8455,17 @@
           "closedBy": "owner-socket",
           "closedFrom": {
             "id": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-            "name": "phone"
+            "name": "phone",
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
+          },
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
           }
         },
         {
@@ -8370,7 +8480,12 @@
             "dismiss"
           ],
           "closedBy": null,
-          "closedFrom": null
+          "closedFrom": null,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         },
         {
           "id": "ntc_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
@@ -8383,13 +8498,23 @@
             "id": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
             "name": "phone",
             "origin": "https://box.ts.net",
-            "address": null
+            "address": null,
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
           },
           "actions": [
             "dismiss"
           ],
           "closedBy": null,
-          "closedFrom": null
+          "closedFrom": null,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         }
       ],
       "observed": [
@@ -8399,7 +8524,12 @@
           "to": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
           "summary": "ping",
           "accepted": true,
-          "at": "2026-11-16T12:00:00.000Z"
+          "at": "2026-11-16T12:00:00.000Z",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         }
       ],
       "fieldFromANewerDaemon": {
@@ -8758,6 +8888,804 @@
           "at": "2026-11-16T12:00:00.000Z"
         }
       ]
+    }
+  },
+  {
+    "name": "example 2, with a field no version defines in each of its objects",
+    "wire": {
+      "epoch": "e0",
+      "eventId": 0,
+      "environments": [
+        {
+          "id": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "opencode-server",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        }
+      ],
+      "agents": [
+        {
+          "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "harness": "codex",
+          "project": "p",
+          "cwd": "/w",
+          "state": "exited",
+          "terminalId": null,
+          "generation": null,
+          "externalRef": null,
+          "exit": {
+            "type": "unknown",
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
+          },
+          "needsRestart": null,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        }
+      ],
+      "attention": [],
+      "messages": [],
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "epoch": "e0",
+      "eventId": 0,
+      "environments": [
+        {
+          "id": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "opencode-server",
+          "host": ""
+        }
+      ],
+      "agents": [
+        {
+          "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "name": "",
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "harness": "codex",
+          "project": "p",
+          "cwd": "/w",
+          "state": "exited",
+          "terminalId": null,
+          "generation": null,
+          "externalRef": null,
+          "exit": {
+            "type": "unknown"
+          },
+          "theme": "dark",
+          "themes": [
+            "dark"
+          ],
+          "attachCommand": null,
+          "commands": [],
+          "resumable": false,
+          "canOpenShell": false,
+          "launchedBy": null,
+          "listening": false,
+          "headline": null,
+          "needsRestart": null
+        }
+      ],
+      "attention": [],
+      "messages": [],
+      "shells": [],
+      "tasks": [],
+      "assignments": [],
+      "notices": [],
+      "observed": []
+    }
+  },
+  {
+    "name": "example 3, with a field no version defines in each of its objects",
+    "wire": {
+      "epoch": "e",
+      "eventId": 1,
+      "environments": [
+        {
+          "id": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "local",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        }
+      ],
+      "agents": [],
+      "attention": [],
+      "messages": [],
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "epoch": "e",
+      "eventId": 1,
+      "environments": [
+        {
+          "id": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "local",
+          "host": ""
+        }
+      ],
+      "agents": [],
+      "attention": [],
+      "messages": [],
+      "shells": [],
+      "tasks": [],
+      "assignments": [],
+      "notices": [],
+      "observed": []
+    }
+  },
+  {
+    "name": "example 4, with a field no version defines in each of its objects",
+    "wire": {
+      "epoch": "e",
+      "eventId": 1,
+      "environments": [],
+      "agents": [
+        {
+          "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "name": "BZ-127",
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "harness": "claude-code",
+          "project": "bazhen",
+          "cwd": "/work",
+          "state": "running",
+          "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "generation": 3,
+          "externalRef": {
+            "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "kind": "claude-session",
+            "id": "s-1",
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
+          },
+          "exit": {
+            "type": "exited",
+            "code": 1,
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
+          },
+          "theme": "light",
+          "themes": [
+            "light",
+            "dark"
+          ],
+          "activity": {
+            "value": "working",
+            "source": "native",
+            "confidence": 0.75,
+            "observedAt": "2026-11-16T12:00:00.000Z",
+            "detail": "running tests",
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
+          },
+          "usage": {
+            "model": "claude-opus-5-5",
+            "contextUsedPercent": 41.5,
+            "contextWindowTokens": 200000,
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
+          },
+          "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
+          "commands": [
+            "close",
+            "respawn",
+            "signal",
+            "relaunch"
+          ],
+          "resumable": true,
+          "canOpenShell": true,
+          "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "listening": true,
+          "headline": {
+            "text": "Halfway.",
+            "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "at": "2026-11-16T12:00:00.000Z",
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
+          },
+          "needsRestart": {
+            "holderPid": 4242,
+            "served": true,
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
+          },
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        }
+      ],
+      "attention": [],
+      "messages": [],
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "epoch": "e",
+      "eventId": 1,
+      "environments": [],
+      "agents": [
+        {
+          "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "name": "BZ-127",
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "harness": "claude-code",
+          "project": "bazhen",
+          "cwd": "/work",
+          "state": "running",
+          "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "generation": 3,
+          "externalRef": {
+            "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "kind": "claude-session",
+            "id": "s-1"
+          },
+          "exit": {
+            "type": "exited",
+            "code": 1
+          },
+          "theme": "light",
+          "themes": [
+            "light",
+            "dark"
+          ],
+          "activity": {
+            "value": "working",
+            "source": "native",
+            "confidence": 0.75,
+            "observedAt": "2026-11-16T12:00:00.000Z",
+            "detail": "running tests"
+          },
+          "usage": {
+            "model": "claude-opus-5-5",
+            "contextUsedPercent": 41.5,
+            "contextWindowTokens": 200000
+          },
+          "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
+          "commands": [
+            "close",
+            "respawn",
+            "signal",
+            "relaunch"
+          ],
+          "resumable": true,
+          "canOpenShell": true,
+          "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "listening": true,
+          "headline": {
+            "text": "Halfway.",
+            "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "at": "2026-11-16T12:00:00.000Z"
+          },
+          "needsRestart": {
+            "holderPid": 4242,
+            "served": true
+          }
+        }
+      ],
+      "attention": [],
+      "messages": [],
+      "shells": [],
+      "tasks": [],
+      "assignments": [],
+      "notices": [],
+      "observed": []
+    }
+  },
+  {
+    "name": "example 5, with a field no version defines in each of its objects",
+    "wire": {
+      "epoch": "e",
+      "eventId": 1,
+      "environments": [],
+      "agents": [],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "closed",
+          "closeReason": "answered",
+          "summary": "Run it?",
+          "kind": "approval",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "openedAt": "2026-11-16T12:00:00.000Z",
+          "actions": [
+            "allow",
+            "deny",
+            "reply",
+            "resend",
+            "dismiss"
+          ],
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        }
+      ],
+      "messages": [],
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "epoch": "e",
+      "eventId": 1,
+      "environments": [],
+      "agents": [],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "closed",
+          "closeReason": "answered",
+          "summary": "Run it?",
+          "kind": "approval",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "openedAt": "2026-11-16T12:00:00.000Z",
+          "actions": [
+            "allow",
+            "deny",
+            "reply",
+            "resend",
+            "dismiss"
+          ]
+        }
+      ],
+      "messages": [],
+      "shells": [],
+      "tasks": [],
+      "assignments": [],
+      "notices": [],
+      "observed": []
+    }
+  },
+  {
+    "name": "example 6, with a field no version defines in each of its objects",
+    "wire": {
+      "epoch": "e",
+      "eventId": 1,
+      "environments": [],
+      "agents": [],
+      "attention": [],
+      "messages": [
+        {
+          "id": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "queued",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        }
+      ],
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "epoch": "e",
+      "eventId": 1,
+      "environments": [],
+      "agents": [],
+      "attention": [],
+      "messages": [
+        {
+          "id": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "queued"
+        }
+      ],
+      "shells": [],
+      "tasks": [],
+      "assignments": [],
+      "notices": [],
+      "observed": []
+    }
+  },
+  {
+    "name": "example 7, with a field no version defines in each of its objects",
+    "wire": {
+      "epoch": "e",
+      "eventId": 1,
+      "environments": [],
+      "agents": [],
+      "attention": [],
+      "messages": [],
+      "shells": [
+        {
+          "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "running",
+          "generation": 1,
+          "cwd": "/w",
+          "linkedAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "name": "build",
+          "foreground": {
+            "command": "make",
+            "since": "2026-11-16T12:00:00.000Z",
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
+          },
+          "theme": "dark",
+          "attachCommand": "tmux attach",
+          "commands": [
+            "close",
+            "restart",
+            "rename",
+            "unlink"
+          ],
+          "retypeable": true,
+          "needsRestart": {
+            "holderPid": 7,
+            "served": false,
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
+          },
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        }
+      ],
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "epoch": "e",
+      "eventId": 1,
+      "environments": [],
+      "agents": [],
+      "attention": [],
+      "messages": [],
+      "shells": [
+        {
+          "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "running",
+          "generation": 1,
+          "cwd": "/w",
+          "linkedAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "name": "build",
+          "foreground": {
+            "command": "make",
+            "since": "2026-11-16T12:00:00.000Z"
+          },
+          "theme": "dark",
+          "attachCommand": "tmux attach",
+          "commands": [
+            "close",
+            "restart",
+            "rename",
+            "unlink"
+          ],
+          "retypeable": true,
+          "needsRestart": {
+            "holderPid": 7,
+            "served": false
+          }
+        }
+      ],
+      "tasks": [],
+      "assignments": [],
+      "notices": [],
+      "observed": []
+    }
+  },
+  {
+    "name": "example 8, with a field no version defines in each of its objects",
+    "wire": {
+      "epoch": "e",
+      "eventId": 1,
+      "environments": [],
+      "agents": [],
+      "attention": [],
+      "messages": [],
+      "tasks": [
+        {
+          "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "title": "t",
+          "state": "open",
+          "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        }
+      ],
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "epoch": "e",
+      "eventId": 1,
+      "environments": [],
+      "agents": [],
+      "attention": [],
+      "messages": [],
+      "shells": [],
+      "tasks": [
+        {
+          "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "title": "t",
+          "state": "open",
+          "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d"
+        }
+      ],
+      "assignments": [],
+      "notices": [],
+      "observed": []
+    }
+  },
+  {
+    "name": "example 9, with a field no version defines in each of its objects",
+    "wire": {
+      "epoch": "e",
+      "eventId": 1,
+      "environments": [],
+      "agents": [],
+      "attention": [],
+      "messages": [],
+      "assignments": [
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "ended",
+          "endReason": "unassigned",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        }
+      ],
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "epoch": "e",
+      "eventId": 1,
+      "environments": [],
+      "agents": [],
+      "attention": [],
+      "messages": [],
+      "shells": [],
+      "tasks": [],
+      "assignments": [
+        {
+          "id": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker",
+          "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "ended",
+          "endReason": "unassigned"
+        }
+      ],
+      "notices": [],
+      "observed": []
+    }
+  },
+  {
+    "name": "example 10, with a field no version defines in each of its objects",
+    "wire": {
+      "epoch": "e",
+      "eventId": 1,
+      "environments": [],
+      "agents": [],
+      "attention": [],
+      "messages": [],
+      "notices": [
+        {
+          "id": "ntc_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "device_paired",
+          "state": "closed",
+          "closeReason": "dismissed",
+          "summary": "A device paired",
+          "openedAt": "2026-11-16T12:00:00.000Z",
+          "device": {
+            "id": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "name": "phone",
+            "origin": "https://box.ts.net",
+            "address": "192.168.1.5",
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
+          },
+          "actions": [
+            "dismiss"
+          ],
+          "closedBy": "owner-socket",
+          "closedFrom": {
+            "id": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "name": "phone",
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
+          },
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        }
+      ],
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "epoch": "e",
+      "eventId": 1,
+      "environments": [],
+      "agents": [],
+      "attention": [],
+      "messages": [],
+      "shells": [],
+      "tasks": [],
+      "assignments": [],
+      "notices": [
+        {
+          "id": "ntc_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "device_paired",
+          "state": "closed",
+          "closeReason": "dismissed",
+          "summary": "A device paired",
+          "openedAt": "2026-11-16T12:00:00.000Z",
+          "device": {
+            "id": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "name": "phone",
+            "origin": "https://box.ts.net",
+            "address": "192.168.1.5"
+          },
+          "actions": [
+            "dismiss"
+          ],
+          "closedBy": "owner-socket",
+          "closedFrom": {
+            "id": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "name": "phone"
+          }
+        }
+      ],
+      "observed": []
+    }
+  },
+  {
+    "name": "example 11, with a field no version defines in each of its objects",
+    "wire": {
+      "epoch": "e",
+      "eventId": 1,
+      "environments": [],
+      "agents": [],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "open",
+          "closeReason": null,
+          "summary": "Run it?\ud83d\ud83d👍",
+          "kind": "approval",
+          "taskId": null,
+          "messageId": null,
+          "openedAt": "2026-11-16T12:00:00.000Z",
+          "actions": [],
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        }
+      ],
+      "messages": [],
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "epoch": "e",
+      "eventId": 1,
+      "environments": [],
+      "agents": [],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "state": "open",
+          "closeReason": null,
+          "summary": "Run it?��👍",
+          "kind": "approval",
+          "taskId": null,
+          "messageId": null,
+          "openedAt": "2026-11-16T12:00:00.000Z",
+          "actions": []
+        }
+      ],
+      "messages": [],
+      "shells": [],
+      "tasks": [],
+      "assignments": [],
+      "notices": [],
+      "observed": []
     }
   }
 ]
