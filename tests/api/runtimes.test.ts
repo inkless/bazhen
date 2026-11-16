@@ -48,7 +48,9 @@ describe("a daemon running terminals on both runtimes", () => {
     daemon.writeConfig('[runtime]\ndefault = "holder"\n');
     await daemon.restart();
     holderShell = await openShell(daemon, "holder-shell");
-    holderAgent = String((await daemon.launch("holder-agent")).terminalId);
+    const launched = await daemon.launch("holder-agent");
+    holderAgent = String(launched.terminalId);
+    await daemon.running(launched.agentId);
   }, 120_000);
   afterAll(async () => {
     await daemon?.stop();

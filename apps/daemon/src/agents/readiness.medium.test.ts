@@ -28,6 +28,7 @@ async function starting(
   stops.push(box.follow());
   const up: TerminalId[] = [];
   const reused: TerminalId[] = [];
+  const left: TerminalId[] = [];
   const released: string[] = [];
   const logged: string[] = [];
   const readiness = new Readiness({
@@ -37,12 +38,13 @@ async function starting(
     notStarted: notStarted?.(box) ?? ((id, summary) => box.notStarted(id, summary)),
     terminalUp: (terminal) => up.push(terminal),
     terminalReused: (terminal) => reused.push(terminal),
+    terminalLeft: (terminal) => left.push(terminal),
     released: (id) => released.push(id),
     now,
     log: (message) => logged.push(message),
   });
   const follow = () => stops.push(readiness.follow());
-  return { store, agentId, terminalId, box, readiness, follow, up, reused, released, logged };
+  return { store, agentId, terminalId, box, readiness, follow, up, reused, left, released, logged };
 }
 
 /** The agent's not-started items, as `state:closeReason`. */
@@ -158,6 +160,21 @@ describe("launch readiness", () => {
       [s.terminalId],
       [s.terminalId],
     ]);
+  });
+
+  it("says when no start will come in a reused terminal: a refused respawn, or a close", async () => {
+    const s = await starting();
+    s.follow();
+    const system = { entityId: s.agentId, actor: "system" } as const;
+    s.store.append({ ...system, type: "agent.exited", payload: { exit: { type: "unknown" } } });
+    s.store.append({ ...system, type: "agent.respawn_requested", payload: {} });
+    s.store.append({
+      ...system,
+      type: "agent.respawn_rejected",
+      payload: { reason: "daemon_restart" },
+    });
+    s.store.append({ ...system, type: "agent.closing", payload: {} });
+    expect([s.reused, s.left]).toEqual([[s.terminalId], [s.terminalId, s.terminalId]]);
   });
 
   it("tries again, and says so, when telling the human fails", async () => {

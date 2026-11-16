@@ -147,6 +147,11 @@ export class CodexThreads {
     this.reused.add(terminal);
   }
 
+  /** No TUI is starting in `terminal` any more: its respawn was refused, or it is closing. */
+  left(terminal: TerminalId): void {
+    this.reused.delete(terminal);
+  }
+
   /**
    * A terminal's title may have changed: to `title`, when the runtime said which, or else to what
    * reading it finds. Resolves once it has been acted on.

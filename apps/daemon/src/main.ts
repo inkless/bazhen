@@ -373,6 +373,7 @@ const readiness = new Readiness({
   notStarted: (agentId, summary) => inbox.notStarted(agentId, summary),
   terminalUp: (terminalId) => void codexThreads.titleChanged(terminalId),
   terminalReused: (terminalId) => codexThreads.reusing(terminalId),
+  terminalLeft: (terminalId) => codexThreads.left(terminalId),
   released: (agentId) => codexMail.deliverQueued(agentId),
 });
 const stopReadiness = readiness.follow();
