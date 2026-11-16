@@ -120,6 +120,7 @@ describe("kills by a process started to send them", () => {
       "echo $(date and an open substitution",
       "pid=$(cat /tmp/pid); kill $pid",
       "`date` checkSkills and skillFailures",
+      'sh -c "kill -TERM \\"$pid\\""',
       'if [ -n "$(pgrep x)" ]; then kill $pid; fi',
       'sh -c "echo \\"done\\"; kill -s TERM \\$\\$"',
       "PROMPT_COMMAND+=$'\\n''__after=$?'",
