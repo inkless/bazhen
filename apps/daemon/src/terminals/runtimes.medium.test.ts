@@ -2,7 +2,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { newId, RoutedRuntime, type HarnessAdapter } from "@bazhen/core";
+import { newId, RoutedRuntime, UnsupportedOnRuntime, type HarnessAdapter } from "@bazhen/core";
+import type { HarnessId } from "@bazhen/protocol";
 import { FakeRuntime } from "@bazhen/core/testing";
 import { LocalEnvironment } from "@bazhen/env-local";
 import { launchAgent, localEnvironmentId } from "../agents/launch.ts";
@@ -20,6 +21,7 @@ const claude: HarnessAdapter = {
   themes: ["light", "dark"],
   launchSpec: async () => ({ argv: ["claude"], env: {}, externalRef: null }),
 };
+const codex: HarnessAdapter = { ...claude, id: "codex" };
 
 /**
  * One daemon's store over a tmux and a holder runtime, and its environment as configured for
@@ -33,17 +35,17 @@ function twoRuntimes() {
     new LocalEnvironment({
       id: localEnvironmentId(store),
       runtime: new RoutedRuntime({ runtimes: [tmux, holder], defaultKind, onError: () => {} }),
-      harnesses: [claude],
+      harnesses: [claude, codex],
       socket: "/run/b.sock",
     });
   const queue = new AgentQueue();
   const size = { cols: 80, rows: 24 };
   const home = mkdtempSync(join(tmpdir(), "bz-home-"));
-  const launch = async (kind: "tmux" | "holder") =>
+  const launch = async (kind: "tmux" | "holder", harness: HarnessId = "claude-code") =>
     (
       await launchAgent(
         { store, environment: on(kind), size, home, queue, budget: unlimited },
-        { idempotencyKey: newId("att"), harness: "claude-code", cwd: "~" },
+        { idempotencyKey: newId("att"), harness, cwd: "~" },
       )
     ).agentId;
   const shellsOn = (kind: "tmux" | "holder") =>
@@ -156,6 +158,37 @@ describe("reconciling each runtime by itself", () => {
   });
 });
 
+describe("reconciling what can't be read whole", () => {
+  it("concludes nothing on a runtime that reads healthy and then can't be listed", async () => {
+    const { store, tmux, holder, on, launch, agentState, log } = twoRuntimes();
+    const onTmux = await launch("tmux");
+    const onHolder = await launch("holder");
+    const cut = cutLaunch(store, "holder");
+    Object.assign(holder, {
+      inventory: async () => {
+        throw new Error("the holders at /run/h.sock can't be read");
+      },
+    });
+    tmux.reboot();
+    await reconcile(store, on("tmux"), log);
+    expect([agentState(onTmux), agentState(onHolder), agentState(cut)]).toEqual([
+      "lost",
+      "running",
+      "starting",
+    ]);
+  });
+
+  it("says once at boot which terminals are on a runtime it doesn't run, and leaves them", async () => {
+    const { store, on, log, logged, agentState } = twoRuntimes();
+    const elsewhere = cutLaunch(store, "screen");
+    await reconcile(store, on("tmux"), log);
+    expect([agentState(elsewhere), logged]).toEqual([
+      "starting",
+      [`reconcile: agent ${elsewhere}'s terminal is on screen, which this daemon doesn't run`],
+    ]);
+  });
+});
+
 describe("making a new terminal for an old one", () => {
   it("relaunches a lost tmux agent onto the holders once they are the default", async () => {
     const { store, tmux, holder, on, queue, launch, log } = twoRuntimes();
@@ -191,5 +224,29 @@ describe("making a new terminal for an old one", () => {
       "holder",
       "holder",
     ]);
+  });
+
+  it("refuses a Codex agent the holders would run, recording nothing, and starts one on tmux", async () => {
+    const { store, launch, agentState } = twoRuntimes();
+    await expect(launch("holder", "codex")).rejects.toBeInstanceOf(UnsupportedOnRuntime);
+    const onTmux = await launch("tmux", "codex");
+    expect([store.snapshot(testView).agents.length, agentState(onTmux)]).toEqual([1, "running"]);
+  });
+
+  it("refuses to relaunch a lost Codex agent onto the holders", async () => {
+    const { store, tmux, on, queue, launch, log } = twoRuntimes();
+    const agentId = await launch("tmux", "codex");
+    tmux.reboot();
+    await reconcile(store, on("tmux"), log);
+    const relaunched = new Lifecycle(store, on("holder"), queue, quietStartAgain).relaunch(
+      agentId,
+      {
+        idempotencyKey: newId("att"),
+        generation: 0,
+        fresh: true,
+      },
+    );
+    await expect(relaunched).rejects.toBeInstanceOf(UnsupportedOnRuntime);
+    expect(store.agentTerminal({ agentId })?.state).toBe("lost");
   });
 });

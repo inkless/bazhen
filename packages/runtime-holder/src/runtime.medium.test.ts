@@ -260,7 +260,7 @@ describe("HolderRuntime: creating and finding terminals", () => {
 
   it("finds its terminals with their tags, leaving out stale sockets and foreign holders", async () => {
     const root = privateRoot();
-    const { runtime, errors } = runtimeAt(root);
+    const { runtime } = runtimeAt(root);
     const agentId = newId("agent");
     const ours = newId("term");
     await fakeTerminal(root, ours, { tags: encodeTags({ kind: "agent", agentId }) });
@@ -269,15 +269,8 @@ describe("HolderRuntime: creating and finding terminals", () => {
     // A second name for its socket outlives the listener, as a dead holder's file does.
     linkSync(dead.server.path, holderSocket(root, newId("term")));
     await dead.server.close();
-    const locked = await fakeTerminal(root, newId("term"));
-    chmodSync(locked.server.path, 0o000);
     expect((await runtime.inventory()).map((e) => [e.ref.terminalId, e.tags])).toEqual([
       [ours, { kind: "agent", agentId }],
-    ]);
-    // Reported once, however often it is read while it stays unreadable.
-    await runtime.inventory();
-    expect(errors).toEqual([
-      expect.objectContaining({ message: expect.stringContaining("can't be read") }),
     ]);
   });
 
@@ -305,6 +298,21 @@ describe("HolderRuntime: creating and finding terminals", () => {
     await new Promise((wait) => setTimeout(wait, 100));
     stop();
     expect([(await runtime.health()).state, seen]).toEqual(["unreachable", []]);
+  });
+
+  it("refuses an inventory while any holder can't be read, and still sees the others' exits", async () => {
+    const root = privateRoot();
+    const { runtime, errors } = runtimeAt(root, { exitPollMs: 20 });
+    const ended = newId("term");
+    await fakeTerminal(root, ended, { exit: { type: "exited", code: 0 } });
+    chmodSync((await fakeTerminal(root, newId("term"))).server.path, 0o000);
+    const seen: string[] = [];
+    const stop = runtime.onExit((ref) => seen.push(ref.terminalId));
+    await expect.poll(() => seen.length).toBeGreaterThan(1);
+    stop();
+    await expect(runtime.inventory()).rejects.toThrow("can't be read");
+    // Reported once, however often exit polling reads it while it stays unreadable.
+    expect([seen[0], errors.length]).toEqual([ended, 1]);
   });
 
   it("reports an exited terminal on every check, under its generation", async () => {

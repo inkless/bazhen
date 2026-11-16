@@ -79,6 +79,7 @@ import {
 import { Roles } from "./roles/roles.ts";
 import { Tasks } from "./tasks/tasks.ts";
 import { TerminalBudget } from "./terminals/budget.ts";
+import { defaultRuntimeRefusal } from "./terminals/runtimes.ts";
 import { nodePtySpawner } from "./pty/node-pty.ts";
 import { listeningOf } from "./mailbox/listening.ts";
 import { waitForMail } from "./mailbox/wait.ts";
@@ -191,11 +192,9 @@ void pruneUnusedHolders(holderDir, inputs.uid, holderInstall).then(
   },
   (err: unknown) => console.warn(`holder builds weren't pruned: ${String(err)}`),
 );
-if (config.defaultRuntime === "holder" && holderInstall.installed === null) {
-  console.error(
-    `bazhen: runtime.default = "holder" (${configFile.path}), but no holder can be started: ` +
-      holderInstall.reason,
-  );
+const noDefault = defaultRuntimeRefusal(config.defaultRuntime, holderInstall, configFile.path);
+if (noDefault !== null) {
+  console.error(`bazhen: ${noDefault}`);
   process.exit(1);
 }
 // Built with or without an installed build: holders made earlier are served either way, and only

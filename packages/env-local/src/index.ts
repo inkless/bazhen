@@ -236,7 +236,8 @@ export class LocalEnvironment implements EnvironmentAdapter {
 
   /**
    * Refuses an agent a terminal already carries, live or dead: an agent has one terminal at a time.
-   * Only a reachable runtime is read; with no server running its inventory is empty.
+   * Only the runtime it is made on is read, and only while reachable; with no server running its
+   * inventory is empty.
    */
   async launch({
     agentId,
@@ -250,8 +251,9 @@ export class LocalEnvironment implements EnvironmentAdapter {
   }: AgentLaunch): Promise<AgentRefs> {
     const harness = this.harness(request);
     if (resume !== null && harness.resumeSpec === undefined) throw new NotResumable(agentId);
-    if ((await this.health()).state === "reachable") {
-      const carried = (await this.inventory()).some((e) => e.agentId === agentId);
+    const target = on ?? this.defaultRuntime;
+    if ((await this.health([], target)).state === "reachable") {
+      const carried = (await this.inventory(target)).some((e) => e.agentId === agentId);
       if (carried) throw new AgentTerminalExists(agentId);
     }
     const launch =

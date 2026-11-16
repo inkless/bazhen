@@ -204,11 +204,11 @@ describe("Store", () => {
     upgraded.close();
   });
 
-  it("upgrades a schema-24 database, every terminal it had made on tmux", () => {
+  it("upgrades a database from the schema before 28, every terminal it had made on tmux", () => {
     const path = dbPath();
     const old = Store.open(
       path,
-      MIGRATIONS.filter((m) => m.version <= 24),
+      MIGRATIONS.filter((m) => m.version < 28),
     );
     const { agentId } = launch(old, withEnvironment(old));
     const shellId = runningShell(old);

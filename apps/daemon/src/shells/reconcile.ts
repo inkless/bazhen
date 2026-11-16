@@ -1,6 +1,6 @@
 import type { EnvironmentAdapter, ShellInventoryEntry } from "@bazhen/core";
 import { runtimePayload, type ShellTerminal, type Store } from "../store/store.ts";
-import { byRuntime } from "../terminals/runtimes.ts";
+import { byRuntime, unrouted } from "../terminals/runtimes.ts";
 import type { ShellLifecycle } from "./lifecycle.ts";
 
 /**
@@ -16,8 +16,11 @@ export async function reconcileShells(
   shells: Pick<ShellLifecycle, "closeExited">,
   log: (message: string) => void = console.warn,
 ): Promise<void> {
-  for (const [runtime, recorded] of byRuntime(environment, store.recoverableShells(environment.id)))
-    await reconcileOn(store, environment, shells, runtime, recorded, log);
+  const recorded = store.recoverableShells(environment.id);
+  for (const { terminalId, runtimeKind } of unrouted(environment, recorded))
+    log(`reconcile: shell ${terminalId} is on ${runtimeKind}, which this daemon doesn't run`);
+  for (const [runtime, on] of byRuntime(environment, recorded))
+    await reconcileOn(store, environment, shells, runtime, on, log);
 }
 
 async function reconcileOn(

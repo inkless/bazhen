@@ -1,5 +1,6 @@
 import {
   advanceTerminal,
+  assertRunsOn,
   AgentTerminalExists,
   agentCommands,
   HarnessRefused,
@@ -27,6 +28,7 @@ import {
 import {
   failureDetail,
   forceable,
+  stillRunning,
   fromEnvironment as failed,
   StaleGeneration,
   StateConflict,
@@ -145,10 +147,7 @@ export class Lifecycle {
             // still run, or one an environment that can't be reached holds. It never skips a close
             // that would work, so a terminal on a reachable server is still ended.
             if (req.force !== true || !forceable(cause)) fromEnvironment(agentId, cause);
-            console.warn(
-              `agent ${agentId} closed by force; its terminal's tmux server ` +
-                `(pid ${found.runtime?.locator.serverPid ?? "unknown"}) may still be running it`,
-            );
+            console.warn(`agent ${agentId} closed by force; ${stillRunning(found.runtime)}`);
           });
       }
       return () => [
@@ -231,6 +230,7 @@ export class Lifecycle {
       this.startAgain.budget.admit();
       // A new terminal, so on the runtime of the moment, wherever the lost one was.
       const on = this.environment.defaultRuntime;
+      assertRunsOn(launch.harness, on);
       const requested = this.record(agentId, "agent.relaunch_requested", {
         terminalId,
         generation,

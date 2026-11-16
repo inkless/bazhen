@@ -1,6 +1,6 @@
 import type { AgentInventoryEntry, EnvironmentAdapter } from "@bazhen/core";
 import { runtimePayload, type AgentTerminal, type Store } from "../store/store.ts";
-import { byRuntime } from "../terminals/runtimes.ts";
+import { byRuntime, unrouted } from "../terminals/runtimes.ts";
 import { recordClosed } from "./lifecycle.ts";
 
 /**
@@ -17,8 +17,13 @@ export async function reconcile(
   environment: EnvironmentAdapter,
   log: (message: string) => void = console.warn,
 ): Promise<void> {
-  for (const [runtime, agents] of byRuntime(environment, store.recoverable(environment.id)))
-    await reconcileOn(store, environment, runtime, agents, log);
+  const agents = store.recoverable(environment.id);
+  for (const { agentId, runtimeKind } of unrouted(environment, agents))
+    log(
+      `reconcile: agent ${agentId}'s terminal is on ${runtimeKind}, which this daemon doesn't run`,
+    );
+  for (const [runtime, on] of byRuntime(environment, agents))
+    await reconcileOn(store, environment, runtime, on, log);
 }
 
 async function reconcileOn(

@@ -27,6 +27,7 @@ import {
 import { InvalidDirectory, resolveDirectory } from "../agents/cwd.ts";
 import {
   forceable,
+  stillRunning,
   fromEnvironment as failed,
   StaleGeneration,
   StateConflict,
@@ -526,10 +527,7 @@ export class ShellLifecycle {
       .close({ runtime: found.runtime, externalRef: null })
       .catch((cause: unknown) => {
         if (!force || !forceable(cause)) fromEnvironment(found.terminalId, cause);
-        this.log(
-          `shell ${found.terminalId} closed by force; its terminal's tmux server ` +
-            `(pid ${found.runtime?.locator.serverPid ?? "unknown"}) may still be running it`,
-        );
+        this.log(`shell ${found.terminalId} closed by force; ${stillRunning(found.runtime)}`);
       });
   }
 

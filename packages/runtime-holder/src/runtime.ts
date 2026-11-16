@@ -314,12 +314,33 @@ export class HolderRuntime implements RuntimeAdapter {
     );
   }
 
+  /**
+   * Every terminal a holder answers for. A socket that can't be read makes it throw: a reader that
+   * concludes from what is missing, as reconciliation does, must not take a holder it couldn't read
+   * for one that isn't there.
+   */
   async inventory(): Promise<RuntimeInventoryEntry[]> {
+    const { entries, unreadable } = await this.listed();
+    if (unreadable.length > 0)
+      throw new Error(`the holders at ${unreadable.join(", ")} can't be read`);
+    return entries;
+  }
+
+  /**
+   * What `inventory` reads, leaving out the sockets that couldn't be read, each reported once until
+   * it reads again: for readers that only act on what they find, as exit polling does.
+   */
+  private async listed(): Promise<{
+    readonly entries: RuntimeInventoryEntry[];
+    readonly unreadable: string[];
+  }> {
     const all = await this.reachAll();
     const listed = new Set(all.map((reached) => reached.socket));
     for (const socket of this.unreadable) if (!listed.has(socket)) this.unreadable.delete(socket);
-    return all.flatMap((reached) => {
+    const unreadable: string[] = [];
+    const entries = all.flatMap((reached): RuntimeInventoryEntry[] => {
       if (reached.is === "unreadable") {
+        unreadable.push(reached.socket);
         if (!this.unreadable.has(reached.socket)) {
           this.unreadable.add(reached.socket);
           this.report(
@@ -338,6 +359,7 @@ export class HolderRuntime implements RuntimeAdapter {
       if (basename(reached.socket) !== `${terminalId}.sock`) return [];
       return [{ ref: this.refOf(terminalId, hello), tags, exit: hello.exit }];
     });
+    return { entries, unreadable };
   }
 
   async create(spec: TerminalSpec): Promise<RuntimeRef> {
@@ -534,7 +556,7 @@ export class HolderRuntime implements RuntimeAdapter {
 
   async foregrounds(terminalIds: ReadonlySet<string>): Promise<TerminalForeground[]> {
     if (terminalIds.size === 0) return [];
-    const live = (await this.inventory()).filter(
+    const live = (await this.listed()).entries.filter(
       (e) => e.exit === null && terminalIds.has(e.ref.terminalId),
     );
     const groups = (
@@ -601,7 +623,7 @@ export class HolderRuntime implements RuntimeAdapter {
   }
 
   private async deadTerminals(): Promise<DeadTerminal[]> {
-    return (await this.inventory()).flatMap((e) =>
+    return (await this.listed()).entries.flatMap((e) =>
       e.exit === null ? [] : [{ ref: e.ref, status: e.exit }],
     );
   }

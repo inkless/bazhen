@@ -1,4 +1,18 @@
 import type { EnvironmentAdapter } from "@bazhen/core";
+import type { HolderInstall } from "@bazhen/runtime-holder";
+
+/**
+ * Why the daemon can't start with `runtime.default` as configured, or null when it can: every new
+ * terminal would go to a holder, and with no build installed none could start.
+ */
+export function defaultRuntimeRefusal(
+  defaultRuntime: string,
+  install: HolderInstall,
+  configPath: string,
+): string | null {
+  if (defaultRuntime !== "holder" || install.installed !== null) return null;
+  return `runtime.default = "holder" (${configPath}), but no holder can be started: ${install.reason}`;
+}
 
 /**
  * `terminals` by the runtime each was made on, for each of the environment's runtimes that has
@@ -6,6 +20,19 @@ import type { EnvironmentAdapter } from "@bazhen/core";
  * terminal recorded goes with the default runtime. A terminal on a runtime the environment doesn't
  * run is in no group, so nothing is ever concluded about it.
  */
+/**
+ * Each of `terminals` on a runtime the environment doesn't run, with that runtime, which nothing
+ * is ever concluded about; a reconcile says so once, at boot.
+ */
+export function unrouted<T extends { readonly runtimeKind: string | null }>(
+  environment: Pick<EnvironmentAdapter, "runtimes">,
+  terminals: readonly T[],
+): T[] {
+  return terminals.filter(
+    (t) => t.runtimeKind !== null && !environment.runtimes.includes(t.runtimeKind),
+  );
+}
+
 export function byRuntime<T extends { readonly runtimeKind: string | null }>(
   environment: Pick<EnvironmentAdapter, "runtimes" | "defaultRuntime">,
   terminals: readonly T[],
