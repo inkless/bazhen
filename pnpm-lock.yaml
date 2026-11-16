@@ -429,6 +429,12 @@ importers:
         specifier: 8.22.2
         version: 8.22.2
 
+  tests/cli:
+    dependencies:
+      '@bazhen/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+
   tests/e2e:
     dependencies:
       '@bazhen/host-guard':

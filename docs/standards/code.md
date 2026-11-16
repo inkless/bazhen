@@ -55,6 +55,8 @@ Each layer has one job:
   its behalf.
   It starts processes only through `tests/support/holder-spawn.ts`, never `child_process`,
   `node-pty`, `module`, `cluster` or `worker_threads` itself.
+- `tests/cli` runs the CLI as a process and imports only the protocol, to check the replies its
+  fake daemon gives.
 
 The allowlist is each package's `package.json` dependencies: pnpm lets a package import only
 what it declares. Lint adds what `package.json` can't express: Node built-ins, type-only

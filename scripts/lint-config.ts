@@ -200,6 +200,24 @@ export const MATRIX: Area[] = [
       "@bazhen/cli",
     ],
   },
+  // The CLI's black-box suite: the CLI as a process, against a fake daemon on its socket. It
+  // reaches the CLI only through its command line, so it holds whatever language the CLI is in.
+  {
+    dir: "tests/cli",
+    medium: true,
+    banned: [
+      "@bazhen/core",
+      "@bazhen/host-guard",
+      "@bazhen/runtime-tmux",
+      "@bazhen/runtime-holder",
+      "@bazhen/env-local",
+      "@bazhen/harness-claude-code",
+      "@bazhen/harness-codex",
+      "@bazhen/daemon",
+      "@bazhen/cli",
+      "@bazhen/web",
+    ],
+  },
   {
     dir: "apps/web",
     banned: ["@bazhen/core", "@bazhen/runtime-tmux", "@bazhen/runtime-holder", "@bazhen/daemon"],

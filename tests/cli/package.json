@@ -1,0 +1,9 @@
+{
+  "name": "@bazhen/cli-tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@bazhen/protocol": "workspace:*"
+  }
+}

@@ -41,6 +41,7 @@ Engineering at Google_.
 | medium | `tests/integration/*.test.ts`      | a private tmux server, real PTYs     | `pnpm test:real integration`           |
 | medium | `tests/holder/*.test.ts`           | holders and real PTYs, no tmux       | `pnpm test:real holder`                |
 | medium | `tests/holder/containment.test.ts` | holders in real systemd scopes       | CI's containment job only              |
+| medium | `tests/cli/*.test.ts`              | the CLI as a process, a fake daemon  | `pnpm test:medium`                     |
 | large  | `tests/api/*.test.ts`              | the daemon as a process, tmux, CLIs  | `pnpm test:real api`                   |
 | large  | `tests/e2e/*.spec.ts`              | daemon, web client and browser       | `pnpm test:real e2e`                   |
 
@@ -93,6 +94,10 @@ against the daemon's public surfaces, never its TypeScript internals.
 - `tests/api` is that suite. It starts the daemon under a temporary `BAZHEN_HOME` and runs the
   real harness CLIs pinned in its `package.json`. No agent reaches a real model, and the daemon
   never sees the developer's own credentials: its environment is built from a short allowlist.
+- `tests/cli` is the CLI's own, held to the same rule: it runs the `bazhen` binary `BAZHEN_CLI`
+  names (the Node CLI without it) against a fake daemon on the socket the CLI looks for, and
+  asserts what the CLI sent, printed and exited with. It needs no tmux, so it runs on the host,
+  and it holds a CLI in any language to the same verbs.
 
 ## Falsification
 

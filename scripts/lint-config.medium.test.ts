@@ -138,6 +138,7 @@ describe("each package.json, against the import matrix", () => {
       "tests/api": [],
       "tests/e2e": [],
       "tests/holder": [],
+      "tests/cli": [],
     });
   });
 });

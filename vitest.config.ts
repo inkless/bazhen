@@ -42,6 +42,17 @@ export default defineConfig({
         },
       },
       {
+        // The CLI as a process: a case may wait out the CLI's own deadlines, and RUN_MS in
+        // tests/cli/cli.ts caps each run below this.
+        test: {
+          name: "cli",
+          include: ["tests/cli/**/*.test.ts"],
+          globalSetup: [CAPPED, "tests/support/medium-setup.ts"],
+          setupFiles: [SEEDED],
+          testTimeout: 30_000,
+        },
+      },
+      {
         // A wall-clock gate, so it runs alone: in parallel with PTY tests it measures them.
         test: {
           name: "bench",

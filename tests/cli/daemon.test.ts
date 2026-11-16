@@ -1,0 +1,652 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  DevicesResponse,
+  DismissNoticeResponse,
+  DoctorResponse,
+  EnvRefreshResponse,
+  HealthResponse,
+  type Notice,
+  PairingCodeResponse,
+  RevokeDeviceResponse,
+  StateSnapshot,
+  StopResponse,
+} from "@bazhen/protocol";
+import { type Scene, scene } from "./cli.ts";
+import { AGENT, OTHER, THIRD, UUID, agent, doctor, health, snapshot } from "./fixtures.ts";
+
+let s: Scene;
+beforeEach(async () => {
+  s = await scene();
+});
+afterEach(async () => {
+  await s.cleanup();
+});
+
+const lines = (text: string) => text.split("\n");
+
+describe("bazhen status", () => {
+  it("says the daemon's version, each runtime, and its agents counted by state", async () => {
+    s.daemon
+      .answer(
+        "GET /v1/health",
+        HealthResponse,
+        health({
+          runtimes: [
+            { kind: "tmux", state: "healthy", version: "3.4" },
+            { kind: "holder", state: "not-running", version: null },
+          ],
+        }),
+      )
+      .answer(
+        "GET /v1/state",
+        StateSnapshot,
+        snapshot({
+          agents: [agent(AGENT, "a"), agent(OTHER, "b", { state: "closed" }), agent(THIRD, "c")],
+        }),
+      );
+    const ran = await s.bazhen(["status"]);
+    expect([ran.code, lines(ran.stdout)]).toEqual([
+      0,
+      [
+        "bazhen 0.1.0 (protocol 1.49), running",
+        "tmux: healthy 3.4",
+        "holder: not-running",
+        "agents: 2 running, 1 closed",
+        "",
+      ],
+    ]);
+  });
+
+  it("says tmux alone for a daemon that reports only that, and no agents", async () => {
+    s.daemon
+      .answer("GET /v1/health", HealthResponse, health())
+      .answer("GET /v1/state", StateSnapshot, snapshot());
+    const ran = await s.bazhen(["status"]);
+    expect(lines(ran.stdout).slice(1)).toEqual(["tmux: healthy 3.4", "agents: none", ""]);
+  });
+});
+
+const web = async (w: NonNullable<DoctorResponse["web"]>) => {
+  s.daemon
+    .answer("GET /v1/health", HealthResponse, health())
+    .answer("GET /v1/daemon/doctor", DoctorResponse, doctor({ web: w }));
+  const out = lines((await s.bazhen(["doctor"])).stdout);
+  return out.slice(out.indexOf("config: /home/u/.config/bazhen/config.toml") + 2, -3);
+};
+
+const tail = async (over: Partial<DoctorResponse>) => {
+  s.daemon
+    .answer("GET /v1/health", HealthResponse, health())
+    .answer("GET /v1/daemon/doctor", DoctorResponse, doctor(over));
+  return lines((await s.bazhen(["doctor"])).stdout).slice(5, -3);
+};
+
+const on = (build: string | null, protocol = ["1.2"]) => ({ terminalId: "t", build, protocol });
+
+describe("bazhen doctor", () => {
+  it("shows what the daemon runs with, and passes when every runtime answers", async () => {
+    s.daemon.answer("GET /v1/health", HealthResponse, health()).answer(
+      "GET /v1/daemon/doctor",
+      DoctorResponse,
+      doctor({
+        runtimes: [
+          { kind: "tmux", state: "healthy", version: "3.4" },
+          { kind: "holder", state: "healthy", version: "holder/1.2" },
+        ],
+        agents: { shell: "login", loginShell: "/bin/zsh" },
+        codex: { daemon: null, cli: "0.166.0" },
+        notifications: { desktop: true, notifier: "notify-send" },
+      }),
+    );
+    const ran = await s.bazhen(["doctor"]);
+    expect([ran.code, lines(ran.stdout)]).toEqual([
+      0,
+      [
+        "bazhen 0.1.0 (protocol 1.49)",
+        "tmux: healthy 3.4",
+        "holder: healthy holder/1.2",
+        "hook client: /repo/target/release/bazhen-hook",
+        "config: /home/u/.config/bazhen/config.toml",
+        "agents.shell: login (/bin/zsh)",
+        "codex: app-server not connected yet, cli 0.166.0",
+        "desktop notifications: on",
+        "environment: captured 2026-11-16T12:00:00.000Z at start, 40 variables kept",
+        "  removed: secrets 2, session 1",
+        "",
+      ],
+    ]);
+  });
+
+  it("warns of the hook script, a missing config, and a capture by refresh", async () => {
+    s.daemon.answer("GET /v1/health", HealthResponse, health()).answer(
+      "GET /v1/daemon/doctor",
+      DoctorResponse,
+      doctor({
+        hookClient: { path: "/repo/hook.sh", fallback: true },
+        config: { path: "/c.toml", found: false },
+        codex: { daemon: "0.160.0", cli: null },
+        env: { capturedAt: "t", source: "refresh", kept: 3, removed: {} },
+      }),
+    );
+    const out = lines((await s.bazhen(["doctor"])).stdout);
+    expect(out).toEqual(
+      expect.arrayContaining([
+        "hook client: /repo/hook.sh",
+        "  warning: bazhen-hook is not built; hooks use the slower curl script",
+        "config: /c.toml (none; defaults)",
+        "agents.shell: direct",
+        "codex: app-server 0.160.0 (as last connected), cli not found",
+        "environment: captured t by bazhen env refresh, 3 variables kept",
+        "  removed: none",
+      ]),
+    );
+  });
+
+  it("fails when any runtime can't be read, not only tmux", async () => {
+    s.daemon.answer("GET /v1/health", HealthResponse, health()).answer(
+      "GET /v1/daemon/doctor",
+      DoctorResponse,
+      doctor({
+        runtimes: [
+          { kind: "tmux", state: "healthy", version: "3.4" },
+          { kind: "holder", state: "unreachable", version: "holder/1.2" },
+        ],
+      }),
+    );
+    const ran = await s.bazhen(["doctor"]);
+    expect([ran.code, lines(ran.stdout).slice(1, 3)]).toEqual([
+      1,
+      ["tmux: healthy 3.4", "holder: unreachable holder/1.2"],
+    ]);
+  });
+
+  it("fails, saying the daemon isn't running, when nothing answers", async () => {
+    await s.daemon.close();
+    const ran = await s.bazhen(["doctor"]);
+    expect([ran.code, ran.stdout]).toEqual([1, `daemon: not running (no answer on ${s.socket})\n`]);
+  });
+
+  describe("on the web", () => {
+    it("says loopback alone serves, where the app is, and the risk of no pairing", async () => {
+      expect(
+        await web({
+          externalOrigins: [],
+          from: null,
+          allowInsecureOrigins: false,
+          pairing: { mode: "auto", required: false },
+          app: null,
+        }),
+      ).toEqual([
+        "external origins: none (loopback only)",
+        "web app: not built; `pnpm build` builds it, and the daemon serves only the API until then",
+        'pairing: not required on loopback (web.pairing = "auto", no external origins); a request a proxy forwards from another machine must still pair',
+        `  warning: any local process or other user of this machine who can reach the daemon's port on 127.0.0.1 controls the agents; set web.pairing = "always" on a shared machine`,
+      ]);
+    });
+
+    it("names external origins, warns of plain HTTP to another host, and requires pairing", async () => {
+      expect(
+        await web({
+          externalOrigins: [
+            "https://box.tail.ts.net",
+            "http://192.168.1.5:7900",
+            "http://localhost:7901",
+          ],
+          from: "config",
+          allowInsecureOrigins: true,
+          pairing: { mode: "always", required: true },
+          app: "/repo/apps/web/dist",
+        }),
+      ).toEqual([
+        "external origins: https://box.tail.ts.net, http://192.168.1.5:7900, http://localhost:7901 (from config)",
+        "  warning: plain HTTP to another host (http://192.168.1.5:7900); anyone on the network can read the traffic, device tokens included",
+        "web app: served from /repo/apps/web/dist",
+        'pairing: required on every origin (web.pairing = "always"); `bazhen pair`',
+      ]);
+    });
+
+    const lan = {
+      url: "https://my-mac.local:7942",
+      allow: ["192.168.1.0/24"],
+      certificate: {
+        fingerprint: "ab cd",
+        path: "/s/tls/lan.crt",
+        expiresAt: "2029-02-11T00:00:00.000Z",
+      },
+      error: null,
+      subnets: [{ interface: "eno1", cidr: "192.168.1.0/24" }],
+    };
+    const base = { externalOrigins: [], from: null, allowInsecureOrigins: false };
+
+    it("shows where the LAN listener serves and the certificate to trust", async () => {
+      expect(await web({ ...base, lan })).toEqual([
+        "external origins: none (loopback only)",
+        "LAN: https://my-mac.local:7942, to 192.168.1.0/24",
+        "  certificate SHA-256: ab cd",
+        "  certificate: /s/tls/lan.crt, expires 2029-02-11T00:00:00.000Z",
+        "  this host's subnets: 192.168.1.0/24 (eno1)",
+      ]);
+    });
+
+    it("says the LAN listener isn't serving when it stopped, or its certificate couldn't be used", async () => {
+      expect(
+        await web({
+          ...base,
+          lan: {
+            ...lan,
+            certificate: null,
+            error: "the LAN certificate can't be used",
+            subnets: [],
+          },
+        }),
+      ).toEqual([
+        "external origins: none (loopback only)",
+        "LAN: https://my-mac.local:7942, to 192.168.1.0/24",
+        "  not serving: the LAN certificate can't be used",
+        "  this host's subnets: none",
+      ]);
+    });
+
+    it("says the LAN listener isn't serving before its certificate, when it stopped with one loaded", async () => {
+      expect(await web({ ...base, lan: { ...lan, error: "listen EADDRINUSE" } })).toEqual([
+        "external origins: none (loopback only)",
+        "LAN: https://my-mac.local:7942, to 192.168.1.0/24",
+        "  not serving: listen EADDRINUSE",
+        "  certificate SHA-256: ab cd",
+        "  certificate: /s/tls/lan.crt, expires 2029-02-11T00:00:00.000Z",
+        "  this host's subnets: 192.168.1.0/24 (eno1)",
+      ]);
+    });
+  });
+
+  describe("on terminals and holders", () => {
+    it("shows the open count against the budget, and the machine's PTYs", async () => {
+      expect(
+        await tail({
+          terminals: {
+            open: 3,
+            max: 100,
+            host: { used: 37, max: 4096, exact: true },
+            refusing: null,
+          },
+        }),
+      ).toEqual([
+        "terminals: 3 open, at most 100 (terminals.max_open)",
+        "  machine PTYs: 37 of 4096 in use",
+      ]);
+    });
+
+    it("says new terminals are refused at the budget, and when the machine is short of PTYs", async () => {
+      expect(
+        await tail({ terminals: { open: 4, max: 4, host: null, refusing: "budget" } }),
+      ).toEqual([
+        "terminals: 4 open, at most 4 (terminals.max_open)",
+        "  new agents and shells are refused until one is closed",
+        "  machine PTYs: can't be counted here",
+      ]);
+      expect(
+        await tail({
+          terminals: {
+            open: 1,
+            max: 100,
+            host: { used: 40, max: 511, exact: false },
+            refusing: "host",
+          },
+        }),
+      ).toEqual([
+        "terminals: 1 open, at most 100 (terminals.max_open)",
+        "  new agents and shells are refused: the machine is short of PTYs",
+        "  machine PTYs: as many as 40 of 511 in use (the count includes closed ones)",
+      ]);
+    });
+
+    const NEW = "3f9a0c1d2e4b5a67";
+    const OLD = "81ce22d09b7f4410";
+
+    it("says why no holder is installed", async () => {
+      expect(
+        await tail({ holder: { binary: null, build: null, reason: "x isn't built", holders: [] } }),
+      ).toEqual(["holder: none installed (x isn't built)"]);
+    });
+
+    it("counts terminals by the holder build they run, marking older and unknown builds", async () => {
+      const binary = `/s/holder/${NEW}/bazhen-holder`;
+      const holders = [on(NEW), on(OLD), on(NEW), on(null), on(OLD, ["1.3", "1.2"])];
+      expect(await tail({ holder: { binary, build: NEW, reason: null, holders } })).toEqual([
+        `holder: build ${NEW} (${binary})`,
+        `  2 terminals on ${NEW}, protocol 1.2`,
+        `  1 terminal on ${OLD} (older build; restart to upgrade), protocol 1.2`,
+        "  1 terminal on an unknown build, protocol 1.2",
+        `  1 terminal on ${OLD} (older build; restart to upgrade), protocol 1.3, 1.2`,
+      ]);
+    });
+
+    it("warns under a runtime of each defect Bazhen works around there", async () => {
+      const runtimes = [
+        {
+          kind: "tmux",
+          state: "healthy" as const,
+          version: "3.4",
+          workarounds: [
+            "tmux 3.4 crashes when a dead pane's focus changes; Bazhen keeps focus off dead panes",
+          ],
+        },
+        { kind: "holder", state: "healthy" as const, version: "holder/1.2", workarounds: [] },
+      ];
+      s.daemon
+        .answer("GET /v1/health", HealthResponse, health())
+        .answer("GET /v1/daemon/doctor", DoctorResponse, doctor({ runtimes }));
+      expect(lines((await s.bazhen(["doctor"])).stdout).slice(1, 4)).toEqual([
+        "tmux: healthy 3.4",
+        "  warning: tmux 3.4 crashes when a dead pane's focus changes; Bazhen keeps focus off dead panes",
+        "holder: healthy holder/1.2",
+      ]);
+    });
+
+    const GIB = 1024 ** 3;
+    const scoped = {
+      state: "scoped" as const,
+      systemd: 255,
+      oomPolicy: true,
+      terminal: { asked: "50%", bytes: 31 * GIB },
+      total: { asked: "infinity", bytes: null },
+      swap: { asked: "0", bytes: 0 },
+    };
+
+    it("says each holder terminal runs in a scope of its own, with its caps", async () => {
+      expect(await tail({ containment: scoped })).toEqual([
+        "containment: each holder terminal in a systemd scope of its own, at most 50% (31.0 GiB) each with 0 (none) of swap, and infinity (no cap) together",
+        "  tmux terminals are not contained",
+      ]);
+    });
+
+    it("rounds a cap's GiB half up, as it is said, and notes a systemd too old for OOMPolicy", async () => {
+      const quarter = {
+        ...scoped,
+        oomPolicy: false,
+        systemd: 249,
+        terminal: { asked: "256M", bytes: GIB / 4 },
+        total: { asked: "1.15G", bytes: Math.round(1.15 * GIB) },
+      };
+      expect(
+        await tail({
+          containment: quarter,
+          runtimes: [{ kind: "holder", state: "healthy", version: null }],
+        }),
+      ).toEqual([
+        "containment: each holder terminal in a systemd scope of its own, at most 256M (0.3 GiB) each with 0 (none) of swap, and 1.15G (1.2 GiB) together",
+        "  note: systemd 249 predates OOMPolicy for scopes (253), so the kernel alone decides what dies past a cap",
+      ]);
+    });
+
+    it("counts holder terminals running outside a scope, and says to restart them only when scopes are made", async () => {
+      const holders = [
+        { ...on("b"), contained: false },
+        { ...on("b"), contained: false },
+        { ...on("b"), contained: true },
+        { ...on("b"), contained: null },
+        on("b"),
+      ];
+      const holder = { binary: "/h", build: "b", reason: null, holders };
+      const one = {
+        binary: "/h",
+        build: "b",
+        reason: null,
+        holders: [{ ...on("b"), contained: false }],
+      };
+      const runtimes = [{ kind: "holder", state: "healthy" as const, version: null }];
+      expect(await tail({ containment: scoped, holder, runtimes })).toContain(
+        "  2 holder terminals run outside a scope; restart them to contain them",
+      );
+      expect(await tail({ containment: scoped, holder: one, runtimes })).toContain(
+        "  1 holder terminal runs outside a scope; restart it to contain it",
+      );
+      expect(
+        await tail({
+          containment: { state: "uncontained", why: "no systemd user manager" },
+          holder: one,
+          runtimes,
+        }),
+      ).toEqual([
+        "holder: build b (/h)",
+        "  1 terminal on b, protocol 1.2",
+        "containment: none (no systemd user manager)",
+        "  warning: one terminal's runaway memory can end every other terminal",
+        "  1 holder terminal runs outside a scope",
+      ]);
+    });
+
+    it("says containment hasn't been checked before a holder terminal starts", async () => {
+      expect(await tail({ containment: { state: "unchecked" } })).toEqual([
+        "containment: not checked yet (no holder terminal has started since the daemon did)",
+        "  tmux terminals are not contained",
+      ]);
+    });
+  });
+});
+
+describe("bazhen stop", () => {
+  it("stops the daemon, and waits until it no longer answers", async () => {
+    s.daemon
+      .answer("GET /v1/health", HealthResponse, health())
+      .answerWith("POST /v1/daemon/stop", StopResponse, () => {
+        const { daemon } = s;
+        setTimeout(() => void daemon.close(), 300);
+        return {};
+      });
+    const begun = Date.now();
+    const ran = await s.bazhen(["stop"]);
+    expect([ran.code, ran.stdout]).toEqual([0, "bazhen stopped; agents keep running\n"]);
+    expect(Date.now() - begun).toBeGreaterThanOrEqual(300);
+    const routes = s.daemon.routes();
+    expect(routes.slice(0, 2)).toEqual(["GET /v1/health", "POST /v1/daemon/stop"]);
+    expect(routes.slice(2).length).toBeGreaterThan(0);
+    expect(new Set(routes.slice(2))).toEqual(new Set(["GET /v1/health"]));
+  });
+
+  it("says it isn't running, and succeeds: stopping is idempotent", async () => {
+    await s.daemon.close();
+    const ran = await s.bazhen(["stop"]);
+    expect([ran.code, ran.stdout]).toEqual([0, "bazhen is not running\n"]);
+  });
+
+  it("fails when the daemon still answers five seconds after it was told to stop", async () => {
+    s.daemon
+      .answer("GET /v1/health", HealthResponse, health())
+      .answer("POST /v1/daemon/stop", StopResponse, {});
+    const ran = await s.bazhen(["stop"]);
+    expect([ran.code, ran.stdout, ran.stderr]).toEqual([
+      1,
+      "",
+      "bazhen is still answering after 5 s\n",
+    ]);
+  }, 15_000);
+});
+
+describe("bazhen env refresh", () => {
+  it("sends this shell's whole environment, and says what was kept, removed, refused and unchanged", async () => {
+    s.daemon.answer("POST /v1/daemon/env", EnvRefreshResponse, {
+      capturedAt: "t",
+      kept: 12,
+      removed: { secrets: 2 },
+      refused: ["BAD=NAME"],
+      unchanged: [AGENT, OTHER],
+    });
+    const ran = await s.bazhen(["env", "refresh"], { FOO_TOKEN: "rotated" });
+    expect([ran.code, lines(ran.stdout)]).toEqual([
+      0,
+      [
+        "environment refreshed: 12 variables kept; removed: secrets 2",
+        "  left as they were (tmux can't take them as data): BAD=NAME",
+        "  2 running agents keep their environment until respawned:",
+        `    ${AGENT}`,
+        `    ${OTHER}`,
+        "",
+      ],
+    ]);
+    expect(s.daemon.calls("POST /v1/daemon/env")[0]?.body).toEqual({
+      env: expect.objectContaining({ FOO_TOKEN: "rotated", BAZHEN_HOME: s.home }),
+    });
+  });
+
+  it("says nothing was removed, refused or left unchanged when nothing was", async () => {
+    s.daemon.answer("POST /v1/daemon/env", EnvRefreshResponse, {
+      capturedAt: "t",
+      kept: 3,
+      removed: {},
+      refused: [],
+      unchanged: [],
+    });
+    const ran = await s.bazhen(["env", "refresh"]);
+    expect(ran.stdout).toBe("environment refreshed: 3 variables kept; removed: none\n");
+  });
+
+  it("wants refresh after env", async () => {
+    const ran = await s.bazhen(["env"]);
+    expect([ran.code, ran.stdout, ran.stderr]).toEqual([
+      2,
+      "",
+      expect.stringContaining("usage: bazhen"),
+    ]);
+  });
+});
+
+describe("bazhen pair", () => {
+  it("shows a code to enter, until when it works, and where to open", async () => {
+    s.daemon.answer("POST /v1/pairing/codes", PairingCodeResponse, {
+      code: "ABCD2345",
+      expiresAt: "2026-11-16T12:05:00.000Z",
+      origins: ["https://box.tail.ts.net"],
+    });
+    const ran = await s.bazhen(["pair"]);
+    const out = lines(ran.stdout);
+    expect([ran.code, out[0], out.slice(2)]).toEqual([
+      0,
+      "pairing code: ABCD-2345",
+      ["  open https://box.tail.ts.net", ""],
+    ]);
+    expect(out[1]).toMatch(/^enter it in the browser to pair; it works once, until \S.*$/);
+  });
+
+  it("shows the LAN address and the certificate fingerprint to check before trusting it", async () => {
+    s.daemon.answer("POST /v1/pairing/codes", PairingCodeResponse, {
+      code: "ABCD2345",
+      expiresAt: "2026-11-16T12:05:00.000Z",
+      origins: [],
+      lan: {
+        url: "https://my-mac.local:7942",
+        fingerprint: "AB:CD",
+        expiresAt: "2029-02-11T00:00:00.000Z",
+      },
+    });
+    const out = lines((await s.bazhen(["pair"])).stdout);
+    expect(out.slice(2, 5)).toEqual([
+      "  on the LAN, open https://my-mac.local:7942",
+      "  before trusting its certificate, check that its SHA-256 is",
+      "    AB:CD",
+    ]);
+    expect(out[5]).toMatch(/^ {2}\(the certificate lasts until \S+\)$/);
+    expect(out.slice(6)).toEqual(["  and if it isn't, don't trust it or pair", ""]);
+  });
+});
+
+const device = (id: string, name: string, expiresAt: string) => ({
+  id,
+  name,
+  pairedAt: "2026-11-01T00:00:00.000Z",
+  lastSeenAt: "2026-11-02T00:00:00.000Z",
+  expiresAt,
+});
+
+describe("bazhen devices", () => {
+  const DEV = "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
+  const DEV2 = "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d";
+  const NTC = "ntc_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
+  const notice = (deviceId: string, state: "open" | "closed"): Notice => ({
+    id: NTC,
+    kind: "device_paired",
+    state,
+    closeReason: null,
+    summary: "A device paired",
+    openedAt: "2026-11-01T00:00:00.000Z",
+    device: { id: deviceId, name: "phone", origin: "https://box.tail.ts.net", address: null },
+    actions: ["dismiss"],
+    closedBy: null,
+    closedFrom: null,
+  });
+
+  it("lists paired devices, marking an expired one and a new one, with names made safe to print", async () => {
+    s.daemon
+      .answer("GET /v1/devices", DevicesResponse, {
+        devices: [
+          device(DEV, "\u001b[2Jphone​", "2099-01-01T00:00:00.000Z"),
+          device(DEV2, "old laptop", "2020-01-01T00:00:00.000Z"),
+        ],
+      })
+      .answer("GET /v1/state", StateSnapshot, snapshot({ notices: [notice(DEV, "open")] }));
+    const ran = await s.bazhen(["devices"]);
+    expect(lines(ran.stdout)).toEqual([
+      `${DEV}  ?[2Jphone?  paired 2026-11-01T00:00:00.000Z, last used 2026-11-02T00:00:00.000Z (new: \`bazhen devices dismiss\` once you know it)`,
+      `${DEV2}  old laptop  paired 2026-11-01T00:00:00.000Z, last used 2026-11-02T00:00:00.000Z (expired)`,
+      "",
+    ]);
+  });
+
+  it("says how to pair when none is", async () => {
+    s.daemon
+      .answer("GET /v1/devices", DevicesResponse, { devices: [] })
+      .answer("GET /v1/state", StateSnapshot, snapshot());
+    expect((await s.bazhen(["devices"])).stdout).toBe(
+      "no paired devices; pair one with `bazhen pair`\n",
+    );
+  });
+
+  it("revokes a device", async () => {
+    s.daemon.answer(`POST /v1/devices/${DEV}/revoke`, RevokeDeviceResponse, {});
+    const ran = await s.bazhen(["devices", "revoke", DEV]);
+    expect([ran.code, ran.stdout]).toEqual([0, `revoked ${DEV}; its open views are closed\n`]);
+  });
+
+  it("dismisses a device's open pairing notice, and fails when it has none", async () => {
+    s.daemon
+      .answer(
+        "GET /v1/state",
+        StateSnapshot,
+        snapshot({
+          notices: [
+            notice(DEV, "open"),
+            { ...notice(DEV2, "closed"), id: "ntc_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d" },
+          ],
+        }),
+      )
+      .answer(`POST /v1/notices/${NTC}/dismiss`, DismissNoticeResponse, { eventIds: [4] });
+    const dismissed = await s.bazhen(["devices", "dismiss", DEV]);
+    const none = await s.bazhen(["devices", "dismiss", DEV2]);
+    expect([dismissed.code, dismissed.stdout]).toEqual([
+      0,
+      `dismissed the pairing notice of ${DEV}\n`,
+    ]);
+    expect(s.daemon.calls(`POST /v1/notices/${NTC}/dismiss`).map((r) => r.body)).toEqual([
+      { idempotencyKey: expect.stringMatching(UUID) },
+    ]);
+    expect([none.code, none.stdout, none.stderr]).toEqual([
+      1,
+      "",
+      `no open pairing notice for ${DEV2}\n`,
+    ]);
+  });
+
+  it("wants the device for revoke and dismiss, and refuses another word", async () => {
+    const runs = await Promise.all([
+      s.bazhen(["devices", "revoke"]),
+      s.bazhen(["devices", "dismiss"]),
+      s.bazhen(["devices", "forget", DEV]),
+    ]);
+    expect(runs.map((r) => [r.code, r.stdout, r.stderr.split("\n")[0]])).toEqual([
+      [2, "", "usage: bazhen devices revoke <id>"],
+      [2, "", "usage: bazhen devices dismiss <id>"],
+      [2, "", expect.stringContaining("usage: bazhen")],
+    ]);
+    expect(s.daemon.received).toEqual([]);
+  });
+});
