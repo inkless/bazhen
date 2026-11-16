@@ -245,6 +245,14 @@ only one (`singlePerTask`) and how many tasks an agent may hold in it at once
 takes effect at its next use. A file that doesn't parse is reported and skipped, and the built-in
 stands; `bazhen roles` lists both.
 
+An agent launched in a role starts with Bazhen's fleet instructions, then `## Your role: <title>`
+and the role's prompt. `delegate --launch` launches in the role it delegates; a launch request
+names one with `role`. Claude Code reads the prompt from a file only you can read, in the daemon's
+run directory (`--append-system-prompt-file`), so it is never in a process's arguments; Codex gets
+it in its thread's first item. An edit to the role's file reaches the agent at its next start, and
+until then the state snapshot marks its prompt changed. Given a role it wasn't launched in, an
+agent's brief carries that role's prompt the first time.
+
 The human assigns any role. As shipped, a coordinator gives the task to a lead, workers or
 reviewers, a lead to workers or reviewers, and a worker or reviewer to no one; a worker holds one
 task at a time. An agent whose role grants something runs the task: its `done` finishes it. One

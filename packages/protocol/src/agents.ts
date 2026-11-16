@@ -5,9 +5,9 @@ import { EnvironmentKind, HarnessId, Id, IdempotencyKey } from "./ids.ts";
 export { HarnessId };
 import { Attention, AttentionKind, Message, ObservedMessage } from "./mail.ts";
 import { Notice } from "./notices.ts";
+import { Role } from "./roles.ts";
 import { BusyShell, NeedsRestart, Shell } from "./shells.ts";
 import { TuiTheme } from "./theme.ts";
-import { Role } from "./roles.ts";
 import { Assignment, Task } from "./tasks.ts";
 
 /** foundation-design §4.5. */
@@ -164,6 +164,13 @@ export const Agent = z.object({
     .default(null),
   /** Set while its terminal runs on a holder this build can't fully serve; null otherwise. */
   needsRestart: NeedsRestart.nullable().default(null),
+  /** The role whose prompt it was launched with, which changes only by launching another. */
+  role: Role.nullable().default(null),
+  /**
+   * Whether the prompt it would start with now differs from the one its last start gave it, as
+   * after an edit to its role's file. It takes the new one at its next start (protocol 1.55).
+   */
+  promptChanged: z.boolean().default(false),
 });
 export type Agent = z.infer<typeof Agent>;
 
@@ -205,6 +212,8 @@ export const LaunchAgentRequest = z.object({
   theme: TuiTheme.optional(),
   /** Absent, the daemon names it `<project>-<n>` (protocol 1.40). */
   name: AgentName.optional(),
+  /** The role whose prompt it starts with; absent for none (protocol 1.55). */
+  role: Role.optional(),
 });
 export type LaunchAgentRequest = z.infer<typeof LaunchAgentRequest>;
 

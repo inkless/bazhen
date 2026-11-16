@@ -448,6 +448,15 @@ export const MIGRATIONS: readonly Migration[] = [
       UPDATE agent_sessions SET untokened = 1 WHERE state NOT IN ('closed', 'failed');
     `,
   },
+  {
+    // An agent's launch role, and the hash of the prompt its last start gave it. Agents from
+    // before have neither: no role, and no prompt to have changed from.
+    version: 30,
+    sql: `
+      ALTER TABLE agent_sessions ADD COLUMN role TEXT;
+      ALTER TABLE agent_sessions ADD COLUMN prompt_hash TEXT;
+    `,
+  },
 ];
 
 const trimAt24 = (s: string) => s.replaceAll(/^[-_]+|[-_]+$/g, "");

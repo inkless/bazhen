@@ -20,12 +20,22 @@ import {
   type RoleSource,
 } from "@bazhen/protocol";
 
+/** A role no definition has: `bazhen roles` lists those that do. */
+export class UnknownRole extends Error {
+  readonly role: string;
+
+  constructor(role: string) {
+    super(`no role is defined as ${role}: bazhen roles lists them`);
+    this.role = role;
+  }
+}
+
 /** The built-in role files, shipped beside the daemon's source, which it runs from. */
 export const BUILTIN_DIR = fileURLToPath(new URL("../../roles/", import.meta.url));
 
 /**
- * The longest prompt a role may have. A brief carries a role's prompt the first time an agent is
- * given a role it wasn't launched in, so it must leave a brief room within one message.
+ * The longest prompt a role may have. An agent given a role it wasn't launched in is sent the
+ * role's prompt as a message of its own, so it must fit in one, with room for its heading.
  */
 const PROMPT_MAX = 10_000;
 
@@ -124,7 +134,8 @@ function listing(dir: string): { files: string[]; signature: string } | { error:
 function readText(path: string): { readonly text: string } | { readonly problem: string } {
   let fd: number;
   try {
-    fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+    // O_NOCTTY: the daemon leads its own session, so a file that is a terminal mustn't become its own.
+    fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOCTTY);
   } catch (error) {
     return { problem: `can't read it: ${reasonOf(error)}` };
   }

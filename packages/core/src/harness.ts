@@ -22,6 +22,16 @@ export interface LaunchOptions {
   /** Text added to the harness's own system instructions for this agent, such as its fleet verbs. */
   readonly instructions?: string;
   /**
+   * A private file holding `instructions`, for a harness that reads them from one, so they stay
+   * out of its arguments.
+   */
+  readonly instructionsFile?: string;
+  /**
+   * Whether `instructions` differ from those the agent's last start gave it, for a harness whose
+   * session keeps what it was first given across a resume.
+   */
+  readonly instructionsChanged?: boolean;
+  /**
    * The agent's name as it stands at this start, for a harness that shows or addresses its
    * session by one. A rename reaches the harness only at its next start.
    */

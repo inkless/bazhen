@@ -528,6 +528,7 @@ describe("Store snapshot view", () => {
     noticeActions: () => [],
     shellsReport: true,
     listening: () => false,
+    promptHash: () => "",
   };
 
   it("names each environment's host as the view says", () => {
@@ -1371,5 +1372,80 @@ describe("terminalPids", () => {
     );
     const pids = store.terminalPids();
     expect([pids.agents.get(701), [...pids.runtimes]]).toEqual([agentId, [700]]);
+  });
+});
+
+describe("launch roles", () => {
+  it("upgrades a schema-24 database, its agents launched in no role and with no prompt to have changed from", () => {
+    const path = dbPath();
+    const v24 = Store.open(path, MIGRATIONS.slice(0, 24));
+    const { agentId } = launch(v24, withEnvironment(v24));
+    v24.append(running(agentId));
+    v24.close();
+    const upgraded = Store.open(path);
+    const view = { ...testView, promptHash: () => "a prompt it was never given" };
+    expect(upgraded.snapshot(view).agents[0]).toMatchObject({ role: null, promptChanged: false });
+    upgraded.close();
+  });
+
+  it("keeps the role an agent was launched in, and the hash of the prompt its last start gave it", () => {
+    const store = Store.open(dbPath());
+    const environmentId = withEnvironment(store);
+    const agentId = newId("agent");
+    store.append({
+      type: "agent.launched",
+      entityId: agentId,
+      actor: "system",
+      payload: {
+        environmentId,
+        harness: "claude-code",
+        project: "p",
+        cwd: "/work",
+        terminalId: newId("term"),
+        role: "lead",
+        promptHash: "h1",
+      },
+    });
+    store.append(running(agentId));
+    expect(store.agentLaunch(agentId)).toMatchObject({ role: "lead", promptHash: "h1" });
+    store.close();
+  });
+
+  it("composes each role's prompt once a snapshot, and never says an ended agent's changed", () => {
+    const store = Store.open(dbPath());
+    const environmentId = withEnvironment(store);
+    const launched = (role: string) => {
+      const agentId = newId("agent");
+      store.append({
+        type: "agent.launched",
+        entityId: agentId,
+        actor: "system",
+        payload: {
+          environmentId,
+          harness: "claude-code",
+          project: "p",
+          cwd: "/work",
+          terminalId: newId("term"),
+          role,
+          promptHash: "old",
+        },
+      });
+      return agentId;
+    };
+    const [a, , gone] = [launched("lead"), launched("lead"), launched("lead")];
+    store.append(running(a));
+    store.append({
+      type: "agent.failed",
+      entityId: gone,
+      actor: "system",
+      payload: { reason: "launch_rejected" },
+    });
+    const asked: (string | null)[] = [];
+    const view = { ...testView, promptHash: (role: string | null) => (asked.push(role), "new") };
+    expect([store.snapshot(view).agents.map((x) => x.promptChanged), asked]).toEqual([
+      [true, true, false],
+      ["lead"],
+    ]);
+    store.close();
   });
 });

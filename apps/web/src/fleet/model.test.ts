@@ -40,6 +40,8 @@ const agentIn = (project: string, state: AgentState = "running", over: Partial<A
   listening: false,
   headline: null,
   needsRestart: null,
+  role: null,
+  promptChanged: false,
   ...over,
 });
 

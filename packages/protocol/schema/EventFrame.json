@@ -254,6 +254,13 @@
                     "runtime": {
                       "type": "string",
                       "minLength": 1
+                    },
+                    "role": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9-]{0,31}$"
+                    },
+                    "promptHash": {
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -785,6 +792,9 @@
                     },
                     "harnessName": {
                       "type": "string"
+                    },
+                    "promptHash": {
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -1072,6 +1082,9 @@
                       ]
                     },
                     "harnessName": {
+                      "type": "string"
+                    },
+                    "promptHash": {
                       "type": "string"
                     }
                   },

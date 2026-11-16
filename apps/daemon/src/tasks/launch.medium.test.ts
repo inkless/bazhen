@@ -216,7 +216,7 @@ describe("delegating to a new agent", () => {
     const req = launchRequest("d");
     const cwd = String(store.agentLaunch(coordinator)?.launch.cwd);
     await launcher.launch(
-      { idempotencyKey: `d:launch:${coordinator}`, ...launch, cwd },
+      { idempotencyKey: `d:launch:${coordinator}`, ...launch, cwd, role: "worker" },
       coordinator,
     );
     const count = agents().length;
@@ -263,6 +263,49 @@ describe("delegating to a new agent", () => {
         kind: "escalation",
         summary: expect.stringContaining("Close it"),
       }),
+    ]);
+  });
+});
+
+describe("delegating to a launched agent, in a role", () => {
+  it("launches it in the role it is delegated, so it isn't sent that role's prompt again", async () => {
+    const { store, tasks, coordinator } = await coordinated();
+    const req = { ...launchRequest("d"), role: "reviewer" };
+    const { taskId } = await tasks.launchAndDelegate(coordinator, req);
+    const agentId = String(store.assignments({ taskId })[0]?.agentId);
+    const roleMail = inbox(store, agentId).filter((m) => m.startsWith("## Your role"));
+    expect([store.agentLaunch(agentId)?.role, roleMail]).toEqual(["reviewer", []]);
+  });
+});
+
+describe("a role the agent wasn't launched in", () => {
+  it("is sent its prompt the first time the agent holds it, just before the brief, and not again", async () => {
+    const { store, tasks, worker } = await taskFleet();
+    const review = (key: string) =>
+      tasks.create(null, {
+        idempotencyKey: key,
+        ...brief,
+        assign: { agentId: worker, role: "reviewer" },
+      });
+    const first = review("r1");
+    review("r2");
+    const mail = inbox(store, worker).filter((m) => /^(## Your role|You are assigned)/.test(m));
+    expect(mail.map((m) => m.split("\n")[0])).toEqual([
+      `## Your role on task ${first.taskId}: Reviewer`,
+      expect.stringContaining(`You are assigned to task ${first.taskId} as its reviewer`),
+      expect.stringContaining("as its reviewer"),
+    ]);
+  });
+
+  it("takes a brief as long as one to an agent launched in the role, and still sends the role's prompt", async () => {
+    const { store, tasks, worker } = await taskFleet();
+    const long = { title: "Read it all", brief: "x".repeat(19_300) };
+    const assign = { agentId: worker, role: "reviewer" };
+    const { taskId } = tasks.create(null, { idempotencyKey: "r", ...long, assign });
+    const mail = inbox(store, worker);
+    expect([mail.at(-2)?.split("\n")[0], mail.at(-1)?.includes(long.brief)]).toEqual([
+      `## Your role on task ${taskId}: Reviewer`,
+      true,
     ]);
   });
 });

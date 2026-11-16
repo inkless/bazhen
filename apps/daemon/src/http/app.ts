@@ -84,7 +84,8 @@ import { ShellBusy, ShellOpenFailed, ShellsUnsettled, UnknownShell } from "../sh
 import { AttentionRefused } from "../attention/inbox.ts";
 import { NoticeClosed, NoticeRefused, type Viewer } from "../attention/notices.ts";
 import { UnknownMessage } from "../mailbox/wait.ts";
-import { MailTooLong, UnknownRole, UnknownTask } from "../tasks/tasks.ts";
+import { UnknownRole } from "../roles/roles.ts";
+import { MailTooLong, UnknownTask } from "../tasks/tasks.ts";
 import { refusal, type Allowlists } from "./guard.ts";
 import { webPage } from "./web.ts";
 import {

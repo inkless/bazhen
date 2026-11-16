@@ -27,7 +27,9 @@ import { AgentQueue } from "../agents/queue.ts";
 import { upgrades, type UpgradeRoute } from "../http/upgrades.ts";
 import { Mailbox } from "../mailbox/mailbox.ts";
 import type { Raised } from "../attention/inbox.ts";
+import { Prompts } from "../agents/prompts.ts";
 import { builtinRoles } from "../roles/roles.ts";
+import { FLEET_INSTRUCTIONS } from "../tasks/mail.ts";
 import { Tasks } from "../tasks/tasks.ts";
 import { TerminalBudget, type TerminalAdmission } from "../terminals/budget.ts";
 import { Store, type PairedFrom, type SnapshotView } from "../store/store.ts";
@@ -48,6 +50,7 @@ export const testView: SnapshotView = {
   noticeActions: () => ["dismiss"],
   shellsReport: true,
   listening: () => false,
+  promptHash: () => "",
 };
 
 /** A browser paired on loopback, which shows no address: for tests where that isn't what is tested. */
@@ -82,11 +85,21 @@ export const untokenedCredentials: AgentCredentials = {
 };
 
 /** What starting an agent again needs, for a test that doesn't look at it. */
+/** Prompts as the daemon composes them, from the built-in roles, written to a directory of their own. */
+export const testPrompts = (dir: string = mkdtempSync(join(tmpdir(), "bz-prompts-"))) =>
+  new Prompts(
+    dir,
+    FLEET_INSTRUCTIONS,
+    () => BUILTIN_BOOK,
+    () => {},
+  );
+
 export const quietStartAgain = {
   size: { cols: 80, rows: 24 },
   replaced: () => {},
   budget: unlimited,
   tokens: untokened,
+  prompts: testPrompts(),
 };
 
 export const tempDb = () => join(mkdtempSync(join(tmpdir(), "bz-store-")), "bazhen.db");
@@ -157,6 +170,7 @@ export async function withAgent(
       queue: new AgentQueue(),
       budget: unlimited,
       tokens: untokened,
+      prompts: testPrompts(),
     },
     { idempotencyKey: "launch", harness: "claude-code", cwd: "~" },
   );
@@ -298,6 +312,7 @@ export async function withCodexAgents(...threads: (string | null)[]) {
         queue: new AgentQueue(),
         budget: unlimited,
         tokens: untokened,
+        prompts: testPrompts(),
       },
       { idempotencyKey: `codex-${String(threadId)}`, harness: "codex", cwd: "~" },
     );
@@ -336,6 +351,7 @@ export async function taskFleet(
     queue: new AgentQueue(),
     budget: unlimited,
     tokens: untokened,
+    prompts: testPrompts(),
   };
   const launch = async (key: string) => {
     const { agentId } = await launchAgent(deps, {
@@ -354,6 +370,7 @@ export async function taskFleet(
     ...deps,
     budget: storeBudget(store, maxOpen),
     tokens: untokened,
+    prompts: testPrompts(),
     ...(delegated === undefined ? {} : { environment: fakeEnvironment(store, delegated) }),
   };
   const launcher = {

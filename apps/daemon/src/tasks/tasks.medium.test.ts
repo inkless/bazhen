@@ -3,8 +3,8 @@ import { newId, resolveRoles, TaskRefused } from "@bazhen/core";
 import { recordClosed } from "../agents/lifecycle.ts";
 import { UnknownAgent, type Store } from "../store/store.ts";
 import { inbox, settled, taskFleet, testView } from "../testing/fixtures.ts";
-import { builtinRoles } from "../roles/roles.ts";
-import { MailTooLong, Tasks, UnknownRole } from "./tasks.ts";
+import { builtinRoles, UnknownRole } from "../roles/roles.ts";
+import { MailTooLong, Tasks } from "./tasks.ts";
 
 const brief = { title: "Fix the build", brief: "It fails on Node 26." };
 
@@ -51,7 +51,8 @@ describe("Tasks", () => {
       ...brief,
       assign: { agentId: worker, role: "worker" },
     });
-    const [mail] = inbox(store, worker);
+    // Its first, the worker's prompt, comes because it wasn't launched as a worker.
+    const mail = inbox(store, worker).at(-1);
     expect(mail).toContain("It fails on Node 26.");
     expect(mail).toContain(`bazhen task done ${taskId}`);
   });
@@ -97,8 +98,9 @@ describe("Tasks", () => {
     };
     const first = tasks.create(null, req);
     expect(tasks.create(null, req)).toEqual(first);
+    // The worker's prompt and the brief, each once.
     expect([store.snapshot(testView).assignments.length, inbox(store, worker).length]).toEqual([
-      1, 1,
+      1, 2,
     ]);
   });
 

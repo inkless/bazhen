@@ -33,6 +33,8 @@ const reviewer: Agent = {
   listening: false,
   headline: null,
   needsRestart: null,
+  role: null,
+  promptChanged: false,
 };
 
 const open = (n: number): Attention => ({

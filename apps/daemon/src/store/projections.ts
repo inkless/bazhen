@@ -91,6 +91,8 @@ export function project(db: Statements, e: Recorded): void {
         name,
         nameOrdinal,
         runtime,
+        role,
+        promptHash,
       } = EVENTS[e.type].payload.parse(e.payload);
       db.prepare(
         `INSERT INTO agent_sessions
@@ -107,6 +109,10 @@ export function project(db: Statements, e: Recorded): void {
       if (name !== undefined) {
         db.prepare("UPDATE agent_sessions SET name = ? WHERE id = ?").run(name, e.entityId);
       }
+      if (role !== undefined) {
+        db.prepare("UPDATE agent_sessions SET role = ? WHERE id = ?").run(role, e.entityId);
+      }
+      deliveredPrompt(db, e.entityId, promptHash);
       if (nameOrdinal !== undefined) {
         db.prepare(
           `INSERT INTO agent_name_counters (base, last) VALUES (?, ?)
@@ -150,9 +156,10 @@ export function project(db: Statements, e: Recorded): void {
       advance(db, e.id, e.entityId, ["respawn.requested", null]);
       return;
     case "agent.respawned": {
-      const { externalRef, runtimeRef, theme, harnessName } = EVENTS[e.type].payload.parse(
-        e.payload,
-      );
+      const { externalRef, runtimeRef, theme, harnessName, promptHash } = EVENTS[
+        e.type
+      ].payload.parse(e.payload);
+      deliveredPrompt(db, e.entityId, promptHash);
       advance(db, e.id, e.entityId, ["launch.confirmed", "respawned"], {
         // A new process reports its own usage, as it does its own activity.
         agent: { ...boundTo(db, e.entityId, externalRef), usage: null, ...startedAs(harnessName) },
@@ -181,9 +188,10 @@ export function project(db: Statements, e: Recorded): void {
       return;
     }
     case "agent.relaunched": {
-      const { externalRef, runtimeRef, theme, harnessName } = EVENTS[e.type].payload.parse(
-        e.payload,
-      );
+      const { externalRef, runtimeRef, theme, harnessName, promptHash } = EVENTS[
+        e.type
+      ].payload.parse(e.payload);
+      deliveredPrompt(db, e.entityId, promptHash);
       advance(db, e.id, e.entityId, ["launch.confirmed", "runtime.confirmed"], {
         agent: { ...boundTo(db, e.entityId, externalRef), ...startedAs(harnessName) },
         terminal: { ...incarnation(runtimeRef), theme: theme ?? null },
@@ -638,6 +646,12 @@ function boundTo(db: Statements, agentId: string, externalRef: ExternalRef | nul
 
 const sessionIdOf = (stored: SQLOutputValue | null): unknown =>
   typeof stored === "string" ? Reflect.get(Object(JSON.parse(stored)), "id") : null;
+
+/** The prompt a start gave the agent, which a start from before prompts were hashed doesn't say. */
+function deliveredPrompt(db: Statements, agentId: string, hash: string | undefined): void {
+  if (hash === undefined) return;
+  db.prepare("UPDATE agent_sessions SET prompt_hash = ? WHERE id = ?").run(hash, agentId);
+}
 
 /** A new or closed process says nothing yet: the last one's signal goes with it. */
 function forgetActivity(db: Statements, agentId: string): void {

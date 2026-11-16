@@ -12,6 +12,7 @@ import {
   unlimited,
   untokened,
   withAgent,
+  testPrompts,
 } from "../testing/fixtures.ts";
 import { launchAgent, localEnvironmentId } from "./launch.ts";
 import { Lifecycle } from "./lifecycle.ts";
@@ -55,6 +56,7 @@ const launch = (store: Store, environment: EnvironmentAdapter, queue: AgentQueue
       queue,
       budget: unlimited,
       tokens: untokened,
+      prompts: testPrompts(),
     },
     { idempotencyKey: key, harness: "claude-code", cwd: "~" },
   );

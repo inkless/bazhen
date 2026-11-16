@@ -197,7 +197,12 @@ export interface SnapshotView {
   readonly shellsReport: boolean;
   /** Whether mail sent to a running agent now reaches it with nothing else happening. */
   listening(agent: Listener): boolean;
+  /** The hash of the prompt an agent launched in `role` would start with now. */
+  promptHash(role: string | null): string;
 }
+
+/** Agents that will never start again. */
+const ENDED: ReadonlySet<string> = new Set<AgentState>(["closed", "failed"]);
 
 /** Terminal states whose runtime target still exists, so a human can attach to it. */
 const ATTACHABLE: ReadonlySet<string> = new Set<TerminalState>(["running", "unknown", "exited"]);
@@ -1118,12 +1123,17 @@ export class Store {
     | {
         launch: AgentLaunchRequest;
         name: string;
+        /** The role whose prompt it was launched with. */
+        role: string | null;
+        /** The hash of the prompt its last start gave it, when a start recorded one. */
+        promptHash: string | null;
         externalRef: ExternalRef | null;
         transcript: string | null;
       }
     | undefined {
     const row = this.prepare(
-      `SELECT harness, project, cwd, coalesce(name, '') AS name, external_ref, transcript
+      `SELECT harness, project, cwd, coalesce(name, '') AS name, role, prompt_hash, external_ref,
+              transcript
        FROM agent_sessions WHERE id = ?`,
     ).get(agentId);
     if (row === undefined) return undefined;
@@ -1135,6 +1145,8 @@ export class Store {
         cwd: String(row.cwd),
       },
       name: String(row.name),
+      role: typeof row.role === "string" ? row.role : null,
+      promptHash: typeof row.prompt_hash === "string" ? row.prompt_hash : null,
       externalRef: typeof ref === "string" ? ExternalRef.parse(JSON.parse(ref)) : null,
       transcript: typeof row.transcript === "string" ? row.transcript : null,
     };
@@ -1315,6 +1327,15 @@ export class Store {
    * only the daemon's surroundings know.
    */
   snapshot(view: SnapshotView): StateSnapshot {
+    // Composed once a snapshot for each role, however many agents were launched in it.
+    const hashes = new Map<string | null, string>();
+    const hashNow = (role: string | null) => {
+      const known = hashes.get(role);
+      if (known !== undefined) return known;
+      const hash = view.promptHash(role);
+      hashes.set(role, hash);
+      return hash;
+    };
     return this.transaction("read", () =>
       StateSnapshot.parse({
         epoch: this.epoch(),
@@ -1325,7 +1346,7 @@ export class Store {
         agents: this.prepare(
           `SELECT a.id, coalesce(a.name, '') AS name, a.environment_id AS environmentId, a.harness,
                   a.project, a.cwd, a.state,
-                  a.launched_by AS launchedBy,
+                  a.launched_by AS launchedBy, a.role, a.prompt_hash,
                   a.terminal_id AS terminalId, t.generation, a.external_ref AS externalRef, t.exit,
                   coalesce(t.theme, 'dark') AS theme, s.activity, a.usage, t.state AS terminalState,
                   t.runtime, t.locator, a.transcript, t.restart_protocol AS needsRestart,
@@ -1347,6 +1368,7 @@ export class Store {
               locator,
               transcript,
               needsRestart,
+              prompt_hash,
               ...row
             }) => {
               const { headlineText, headlineTask, headlineAt, ...r } = row;
@@ -1383,6 +1405,11 @@ export class Store {
                     harness: evidence.harness,
                     activity: activity === null ? null : activityOf(activity).value,
                   }),
+                // An ended agent starts no more, and one from before hashes has none to differ.
+                promptChanged:
+                  !ENDED.has(String(r.state)) &&
+                  typeof prompt_hash === "string" &&
+                  hashNow(typeof r.role === "string" ? r.role : null) !== prompt_hash,
                 headline:
                   typeof headlineText === "string"
                     ? { text: headline(headlineText), taskId: headlineTask, at: headlineAt }

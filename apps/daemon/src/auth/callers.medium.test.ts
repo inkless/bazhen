@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { newId } from "@bazhen/core";
-import { launchAgent } from "../agents/launch.ts";
+import { launchAgent, localEnvironmentId } from "../agents/launch.ts";
 import { Lifecycle } from "../agents/lifecycle.ts";
 import { AgentQueue } from "../agents/queue.ts";
 import { MIGRATIONS } from "../store/migrations.ts";
@@ -19,8 +19,8 @@ import {
   fakeEnvironment,
   quietStartAgain,
   tempDb,
+  testPrompts,
   unlimited,
-  untokened,
   withAgent,
 } from "../testing/fixtures.ts";
 import { AgentTokens, startWithToken } from "./callers.ts";
@@ -35,22 +35,35 @@ async function tokens() {
 
 const tokenDir = () => join(mkdtempSync(join(tmpdir(), "bz-tokens-")), "agents");
 
-/** A store with an agent launched at the schema before tokens, then upgraded. */
-async function upgraded() {
+/**
+ * A store with an agent running at the schema before tokens, then upgraded. Its events are
+ * appended by hand, since a launch records its prompt's hash, which that schema has no column for.
+ */
+function upgraded() {
   const path = tempDb();
-  const before = Store.open(path, MIGRATIONS.slice(0, -1));
-  const { agentId } = await launchAgent(
-    {
-      store: before,
-      environment: fakeEnvironment(before),
-      size: { cols: 80, rows: 24 },
-      home: tmpdir(),
-      queue: new AgentQueue(),
-      budget: unlimited,
-      tokens: untokened,
-    },
-    { idempotencyKey: "launch", harness: "claude-code", cwd: "~" },
+  const before = Store.open(
+    path,
+    MIGRATIONS.filter((m) => m.version < 29),
   );
+  const agentId = newId("agent");
+  const terminalId = newId("term");
+  const entity = { entityId: agentId, actor: "system" };
+  before.append({
+    ...entity,
+    type: "agent.launched",
+    payload: {
+      environmentId: localEnvironmentId(before),
+      harness: "claude-code",
+      project: "p",
+      cwd: tmpdir(),
+      terminalId,
+    },
+  });
+  before.append({
+    ...entity,
+    type: "agent.running",
+    payload: { externalRef: null, runtimeRef: { runtime: "tmux", locator: { generation: "0" } } },
+  });
   before.close();
   return { store: Store.open(path), agentId };
 }
@@ -94,7 +107,7 @@ describe("AgentTokens", () => {
   });
 
   it("keeps an agent started before agents had tokens known by its id when its restart is refused", async () => {
-    const { store, agentId } = await upgraded();
+    const { store, agentId } = upgraded();
     const t = new AgentTokens(store, tokenDir(), uid);
     const start = startWithToken(t, agentId, () => Promise.reject(new Error("refused")));
     await expect(start).rejects.toThrow("refused");
@@ -102,14 +115,14 @@ describe("AgentTokens", () => {
   });
 
   it("knows an agent started before agents had tokens by its id no more once a start of its own goes ahead", async () => {
-    const { store, agentId } = await upgraded();
+    const { store, agentId } = upgraded();
     const t = new AgentTokens(store, tokenDir(), uid);
     await startWithToken(t, agentId, async () => {});
     expect(t.untokened(agentId)).toBe(false);
   });
 
   it("knows an agent from before agents had tokens by its id no more once it is closed", async () => {
-    const { store, agentId } = await upgraded();
+    const { store, agentId } = upgraded();
     const t = new AgentTokens(store, tokenDir(), uid);
     await new Lifecycle(store, fakeEnvironment(store), new AgentQueue(), quietStartAgain).close(
       agentId,
@@ -165,6 +178,7 @@ describe("AgentTokens", () => {
         queue: new AgentQueue(),
         budget: unlimited,
         tokens: t,
+        prompts: testPrompts(),
       },
       { idempotencyKey: "second", harness: "claude-code", cwd: "~" },
     );
@@ -178,7 +192,7 @@ describe("AgentTokens", () => {
   });
 
   it("knows an agent running from before agents had tokens by its id, once upgraded", async () => {
-    const { store, agentId } = await upgraded();
+    const { store, agentId } = upgraded();
     expect(new AgentTokens(store, tokenDir(), uid).untokened(agentId)).toBe(true);
   });
 });

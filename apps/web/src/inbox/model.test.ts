@@ -63,6 +63,8 @@ const agentNamed = (agent: Agent["id"], name: string, state: AgentState): Agent 
   listening: false,
   headline: null,
   needsRestart: null,
+  role: null,
+  promptChanged: false,
 });
 
 const snapshot = (attention: Attention[], agents: Agent[] = []): StateSnapshot => ({
