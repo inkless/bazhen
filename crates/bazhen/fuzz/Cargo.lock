@@ -19,6 +19,7 @@ name = "bazhen"
 version = "0.1.0"
 dependencies = [
  "bazhen-client",
+ "bazhen-holder-proto",
  "bazhen-protocol",
  "clap",
  "jiff",
@@ -39,6 +40,15 @@ version = "0.0.0"
 dependencies = [
  "bazhen",
  "libfuzzer-sys",
+]
+
+[[package]]
+name = "bazhen-holder-proto"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

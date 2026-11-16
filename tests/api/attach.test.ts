@@ -40,6 +40,25 @@ describe("bazhen attach, on a holder terminal", () => {
     expect(shells.find((s) => s.id === terminalId)?.state).toBe("running");
   });
 
+  it("with --direct while the daemon runs, only views: the web app's keys still land", async () => {
+    const terminalId = await shell("viewed");
+    const direct = attachInScript(daemon, `${terminalId} --direct`);
+    left.push(direct.leave);
+    direct.type("printf 'direct-%s\\n' 9\r");
+    const view = await daemon.socketView(terminalId, "interactive");
+    await view.drive();
+    view.type("printf 'viewed-%s\\n' 7\r");
+    await waitUntil(() => direct.shown().includes("viewed-7"), "the web's command, seen directly");
+    direct.type(DETACH);
+    const code = await direct.exited;
+    view.close();
+    expect([
+      code,
+      direct.shown().includes("direct-9"),
+      direct.shown().includes("--direct only viewed the terminal"),
+    ]).toEqual([0, false, true]);
+  });
+
   it("ends, saying so, when the terminal exits", async () => {
     const terminalId = await shell("exits");
     const attached = attachInScript(daemon, terminalId);
@@ -54,5 +73,23 @@ describe("bazhen attach, on a holder terminal", () => {
       0,
       true,
     ]);
+  });
+
+  it("goes straight to the holder with the daemon down, and types there", async () => {
+    const terminalId = await shell("straight");
+    await daemon.crash();
+    try {
+      const direct = attachInScript(daemon, terminalId);
+      left.push(direct.leave);
+      direct.type("printf 'straight-%s\\n' 5\r");
+      await waitUntil(() => direct.shown().includes("straight-5"), "the command's output");
+      direct.type(DETACH);
+      expect([
+        await direct.exited,
+        direct.shown().includes("bazhen is not running: attaching straight"),
+      ]).toEqual([0, true]);
+    } finally {
+      await daemon.restart();
+    }
   });
 });

@@ -689,6 +689,8 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen/src/reply.rs::decode": "reply",
   "crates/bazhen/src/attach/attachment.rs::Attachment::keys": "attach",
   "crates/bazhen/src/attach/attachment.rs::Attachment::frame": "attach",
+  "crates/bazhen/src/attach/attachment.rs::DetachKeys::scan": "attach",
+  "crates/bazhen/src/attach/direct.rs::Direct::keys": "attach",
   "crates/bazhen-protocol/src/wire.rs::well_formed": "wire",
   "crates/bazhen-protocol/src/wire.rs::from_slice": "wire",
   "crates/bazhen-protocol/src/input.rs::has_keystrokes": "input",
@@ -955,6 +957,10 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen/src/attach/link.rs::drain":
     "reads the daemon's frames through tungstenite, and their text through Attachment::frame, which the attach target fuzzes",
   "crates/bazhen/src/attach/link.rs::act": "writes frames and keys this build made; reads nothing",
+  "crates/bazhen/src/attach/direct.rs::pump":
+    "moves bytes between a holder's socket and the person's terminal; bazhen-holder-proto's FrameDecoder, which its frame target fuzzes, and Direct::keys, which the attach target fuzzes, read them",
+  "crates/bazhen/src/attach/direct.rs::write_whole":
+    "writes a request this build encoded; reads nothing",
   "crates/bazhen/src/attach/link.rs::pump":
     "moves bytes between the daemon's socket and the person's terminal; tungstenite frames them, and Attachment::keys and frame, which the attach target fuzzes, read them",
   "crates/bazhen/src/attach/tty.rs::Stops::fd":

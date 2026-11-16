@@ -27,7 +27,7 @@ const VALUED: [&str; 15] = [
 ];
 
 /// The options that are on or off.
-const SWITCHES: [&str; 5] = ["all", "cascade", "json", "wait", "handoff"];
+const SWITCHES: [&str; 6] = ["all", "cascade", "json", "wait", "handoff", "direct"];
 
 /// What the command line said.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

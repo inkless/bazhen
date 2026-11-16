@@ -74,11 +74,40 @@ enum Standing {
     Driving,
 }
 
+/// The keys the person types, but for two `Ctrl-\` in a row, which detach. A `Ctrl-\` followed
+/// by any other key goes out with that key, however the reads split them.
+#[derive(Debug, Default)]
+pub struct DetachKeys {
+    /// A `Ctrl-\` held back until the next key says whether it detaches.
+    held: bool,
+}
+
+impl DetachKeys {
+    /// The keys to send of `keys`, and whether they detach, after which the rest are dropped.
+    pub fn scan(&mut self, keys: &[u8]) -> (Vec<u8>, bool) {
+        let mut typed = Vec::with_capacity(keys.len() + 1);
+        for &key in keys {
+            if self.held {
+                self.held = false;
+                if key == DETACH {
+                    return (typed, true);
+                }
+                typed.push(DETACH);
+            }
+            if key == DETACH {
+                self.held = true;
+            } else {
+                typed.push(key);
+            }
+        }
+        (typed, false)
+    }
+}
+
 /// One attachment's state between steps.
 #[derive(Debug, Default)]
 pub struct Attachment {
-    /// A `Ctrl-\` held back until the next key says whether it detaches.
-    detaching: bool,
+    keys: DetachKeys,
     attached: bool,
     /// The epoch of the latest lease, sent once attached.
     epoch: Option<u64>,
@@ -131,23 +160,7 @@ impl Attachment {
     /// The keys typed: sent as typed, but for two `Ctrl-\` in a row, which detach. A `Ctrl-\`
     /// followed by any other key is sent, with that key, however the reads split them.
     pub fn keys(&mut self, keys: &[u8]) -> Vec<Effect> {
-        let mut typed = Vec::with_capacity(keys.len() + 1);
-        let mut detached = false;
-        for &key in keys {
-            if self.detaching {
-                self.detaching = false;
-                if key == DETACH {
-                    detached = true;
-                    break;
-                }
-                typed.push(DETACH);
-            }
-            if key == DETACH {
-                self.detaching = true;
-            } else {
-                typed.push(key);
-            }
-        }
+        let (typed, detached) = self.keys.scan(keys);
         let end = detached.then_some(Effect::End(Ending::Detached));
         if self.declared() && self.lease == Standing::Driving {
             let input = (!typed.is_empty()).then_some(Effect::Input(typed));

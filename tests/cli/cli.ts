@@ -11,6 +11,7 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
+import { createServer as createSocketServer, type Socket } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -28,6 +29,10 @@ import {
   SendMessageRequest,
   UnassignTaskRequest,
   WaitMessagesRequest,
+  encodeHolderReply,
+  HOLDER_PROTOCOL_VERSION,
+  holderRequestDecoder,
+  type HolderHelloRequest,
 } from "@bazhen/protocol";
 
 const repo = fileURLToPath(new URL("../..", import.meta.url));
@@ -284,4 +289,63 @@ function run(
     child.stdin?.on("error", () => {});
     child.stdin?.end(input);
   });
+}
+
+/** A holder's socket as `bazhen attach --direct` finds it: what it was asked, and its end. */
+export interface FakeHolder {
+  /** Each `hello` the holder was sent, in order. */
+  readonly hellos: HolderHelloRequest[];
+  readonly close: () => Promise<void>;
+}
+
+/**
+ * A holder of `terminalId` listening at `path`, which answers `hello` as a holder speaking this
+ * build's protocol does, granting the writer slot to whoever asks, and nothing else.
+ */
+export async function fakeHolder(path: string, terminalId: string): Promise<FakeHolder> {
+  const hellos: HolderHelloRequest[] = [];
+  const sockets = new Set<Socket>();
+  const server = createSocketServer((socket) => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+    socket.on("error", () => {});
+    const decoder = holderRequestDecoder();
+    socket.on("data", (chunk: Uint8Array) => {
+      for (const request of decoder.push(chunk).frames) {
+        if (request.type !== "hello") continue;
+        hellos.push(request.body);
+        const body = {
+          version: HOLDER_PROTOCOL_VERSION,
+          protocol: [HOLDER_PROTOCOL_VERSION],
+          terminalId,
+          tags: {},
+          generation: 0,
+          holderPid: 4242,
+          holderStart: 1_700_000_000,
+          childPid: 4243,
+          childStart: 1_700_000_000,
+          exit: null,
+          size: { cols: 80, rows: 24 },
+          offset: 0,
+          title: "",
+          alternate: false,
+          historyLines: 10_000,
+          writer: request.body.writer === true,
+        };
+        socket.write(encodeHolderReply({ type: "hello", id: request.id, body }));
+      }
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(path, resolve);
+  });
+  return {
+    hellos,
+    close: () =>
+      new Promise<void>((resolve) => {
+        for (const socket of sockets) socket.destroy();
+        server.close(() => resolve());
+      }),
+  };
 }

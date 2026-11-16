@@ -17,6 +17,8 @@ pub mod reply;
 mod sha256;
 mod tasks;
 
+/// The holder's frames, for the fuzz targets to name what a direct attachment sends.
+pub use bazhen_holder_proto;
 /// The protocol's messages, for the fuzz targets to name what they decode.
 pub use bazhen_protocol;
 
@@ -82,7 +84,8 @@ if it bounced, and 5 if it is still on its way when the timeout (60 s unless giv
 pub(crate) const USAGE: &str = concat!(
     "usage: bazhen <start|stop|status|doctor|env refresh|pair|devices [revoke|dismiss <id>]> ",
     "[--home <dir>] [--port <port>]\n",
-    "usage: bazhen attach <agent|shell|terminal> [--home <dir>]   (Ctrl-\\ Ctrl-\\ detaches)\n",
+    "usage: bazhen attach <agent|shell|terminal> [--direct] [--home <dir>]\n",
+    "  Ctrl-\\ Ctrl-\\ detaches; a second kill ends it at once, after which `reset` repairs the terminal\n",
     "usage:
   bazhen agents [--json]
   bazhen whoami

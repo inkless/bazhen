@@ -1,25 +1,33 @@
 //! `bazhen attach <agent|shell|terminal>`: the person's own terminal on one of Bazhen's, through
-//! the daemon's socket, as an interactive view like the web app's. `Ctrl-\ Ctrl-\` detaches.
+//! the daemon's socket, as an interactive view like the web app's; or with `--direct`, straight to
+//! a terminal's holder when the daemon is down. `Ctrl-\ Ctrl-\` detaches.
 //!
 //! Its attachment state is public so the fuzz targets in `fuzz/` can reach it.
 
 pub mod attachment;
+pub mod direct;
 mod link;
 mod tty;
 
+use std::io;
 use std::path::Path;
 
 use bazhen_client::Caller;
 use bazhen_protocol::agents::StateSnapshot;
 use bazhen_protocol::id::PROTOCOL_ID;
+use bazhen_protocol::ids::is_id;
 use serde::Deserialize;
 
 use self::attachment::{Attachment, Ending};
+use self::direct::Direct;
 use self::link::Outcome;
 use crate::args::Parsed;
 use crate::call::{ANOTHER_BUILD, CALL, Daemon, Failed};
 use crate::out::Out;
 use crate::{Exit, USAGE};
+
+const NOT_A_TERMINAL: &str =
+    "bazhen attach takes over a terminal: run it in one, not from a pipe or a script";
 
 /// All attaching reads of `/v1/health`, so a daemon of another build still answers it.
 #[derive(Deserialize)]
@@ -28,24 +36,50 @@ struct Answering {
     protocol_id: String,
 }
 
-/// Attaches to the terminal `p` names, through the daemon at `socket`.
+/// How an attachment came to an end, by either path.
+enum Done {
+    Ended(Ending),
+    /// The daemon stopped answering.
+    DaemonGone,
+    /// The holder hung up.
+    HolderGone,
+    Broke(io::Error),
+}
+
+/// Attaches to the terminal `p` names, through the daemon at `socket` or, with `--direct` or no
+/// daemon to answer, straight to its holder beside it.
 pub(crate) fn run(
     p: &Parsed,
     socket: &Path,
     daemon: &Daemon,
     out: &mut Out,
 ) -> Result<Exit, Failed> {
-    let stray: Vec<&str> = p.given().filter(|o| *o != "home").collect();
+    let stray: Vec<&str> = p
+        .given()
+        .filter(|o| *o != "home" && *o != "direct")
+        .collect();
     let (Some(target), None, true) = (p.word(1), p.word(2), stray.is_empty()) else {
         out.err(&format!(
-            "bazhen attach takes one agent, shell or terminal, and no option but --home\n{USAGE}"
+            "bazhen attach takes one agent, shell or terminal, and no option but --direct and \
+             --home\n{USAGE}"
         ));
         return Ok(Exit::Usage);
     };
-    let health: Answering = daemon.get("/v1/health", CALL)?;
-    if health.protocol_id != PROTOCOL_ID {
-        out.err(ANOTHER_BUILD);
-        return Ok(Exit::Failed);
+    let holders = socket.parent().unwrap_or(socket).join("holders");
+    if p.has("direct") {
+        return straight(&holders, target, daemon, out);
+    }
+    match daemon.get::<Answering>("/v1/health", CALL) {
+        Ok(health) if health.protocol_id != PROTOCOL_ID => {
+            out.err(ANOTHER_BUILD);
+            return Ok(Exit::Failed);
+        }
+        Ok(_) => {}
+        Err(Failed::NotRunning) if is_id("term", target) => {
+            out.err("bazhen is not running: attaching straight to the terminal's holder");
+            return straight(&holders, target, daemon, out);
+        }
+        Err(e) => return Err(e),
     }
     let state: StateSnapshot = daemon.get("/v1/state", CALL)?;
     let terminal = match terminal_of(&state, target) {
@@ -56,18 +90,14 @@ pub(crate) fn run(
         }
     };
     if !tty::interactive() {
-        out.err("bazhen attach takes over a terminal: run it in one, not from a pipe or a script");
+        out.err(NOT_A_TERMINAL);
         return Ok(Exit::Failed);
     }
     let caller = Caller::from_env();
     let size =
         tty::size().map_err(|e| Failed::Refused(format!("can't read the terminal's size: {e}")))?;
     let mut ws = link::open(socket, &terminal, &caller, &Attachment::hello(size))?;
-    let watching = |e: std::io::Error| Failed::Refused(format!("can't watch for signals: {e}"));
-    let resizes = tty::Wakeups::resizes().map_err(watching)?;
-    let stops = tty::Stops::watch().map_err(watching)?;
-    let raw = tty::Raw::enter()
-        .map_err(|e| Failed::Refused(format!("can't take over the terminal: {e}")))?;
+    let (resizes, stops, raw) = take_over()?;
     let mut notes = Vec::new();
     let mut rejoined = false;
     let outcome = loop {
@@ -90,43 +120,97 @@ pub(crate) fn run(
         }
     };
     drop(raw);
-    for note in &notes {
+    let done = match outcome {
+        Ok(Outcome::Ended(ending)) => Done::Ended(ending),
+        Ok(Outcome::Gone) => Done::DaemonGone,
+        Err(e) => Done::Broke(e),
+    };
+    Ok(report(done, target, &notes, out))
+}
+
+/// Attaches straight to `target`'s holder, in `holders`. It asks to type only when no daemon
+/// answers, and says so when it can't.
+fn straight(holders: &Path, target: &str, daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
+    if !is_id("term", target) {
+        out.err("bazhen attach --direct takes a terminal id: names are the daemon's to resolve");
+        return Ok(Exit::Usage);
+    }
+    // A daemon that answers, even oddly, may hold the terminal's input: never type behind it.
+    let asks = matches!(daemon.answers(), Ok(false));
+    let (mut stream, hello, mut decoder) = direct::open(holders, target, asks)?;
+    if !tty::interactive() {
+        out.err(NOT_A_TERMINAL);
+        return Ok(Exit::Failed);
+    }
+    let mut notes = Vec::new();
+    if !asks {
+        notes.push(
+            "the daemon is running, so --direct only viewed the terminal: attach without it to type"
+                .to_owned(),
+        );
+    } else if !hello.writer {
+        notes.push(
+            "another connection holds the terminal's input, so this attachment only viewed it"
+                .to_owned(),
+        );
+    }
+    let mut direct = Direct::new(asks && hello.writer);
+    let (resizes, stops, raw) = take_over()?;
+    let outcome = direct::pump(
+        &mut stream,
+        &mut decoder,
+        &mut direct,
+        &resizes,
+        &stops,
+        &mut notes,
+    );
+    drop(raw);
+    let done = match outcome {
+        Ok(Some(ending)) => Done::Ended(ending),
+        Ok(None) => Done::HolderGone,
+        Err(e) => Done::Broke(e),
+    };
+    Ok(report(done, target, &notes, out))
+}
+
+/// The person's terminal, raw, with its resizes and the signals to stop watched.
+fn take_over() -> Result<(tty::Wakeups, tty::Stops, tty::Raw), Failed> {
+    let watching = |e: io::Error| Failed::Refused(format!("can't watch for signals: {e}"));
+    let resizes = tty::Wakeups::resizes().map_err(watching)?;
+    let stops = tty::Stops::watch().map_err(watching)?;
+    let raw = tty::Raw::enter()
+        .map_err(|e| Failed::Refused(format!("can't take over the terminal: {e}")))?;
+    Ok((resizes, stops, raw))
+}
+
+/// Says how the attachment to `target` ended, with what the daemon or holder said on the way,
+/// once the person's terminal is theirs again.
+fn report(done: Done, target: &str, notes: &[String], out: &mut Out) -> Exit {
+    for note in notes {
         out.err(&format!("bazhen: {note}"));
     }
-    Ok(match outcome {
-        Ok(Outcome::Ended(Ending::Detached)) => {
-            out.err(&format!("detached from {target}"));
-            Exit::Done
-        }
-        Ok(Outcome::Ended(Ending::Stopped)) => {
-            out.err(&format!("stopped by a signal; {target} goes on"));
-            Exit::Failed
-        }
-        Ok(Outcome::Ended(Ending::Exited)) => {
-            out.err(&format!("{target}: the terminal exited"));
-            Exit::Done
-        }
-        Ok(Outcome::Ended(Ending::Evicted)) => {
-            out.err("fell behind the terminal's output twice in a row: attach again");
-            Exit::Failed
-        }
-        Ok(Outcome::Ended(Ending::Lost)) => {
-            out.err(&format!("the daemon lost {target}'s terminal"));
-            Exit::Failed
-        }
-        Ok(Outcome::Ended(Ending::Failed(why))) => {
-            out.err(&why);
-            Exit::Failed
-        }
-        Ok(Outcome::Gone) => {
-            out.err("the daemon stopped answering");
-            Exit::NotRunning
-        }
-        Err(e) => {
-            out.err(&format!("the attachment broke: {e}"));
-            Exit::Failed
-        }
-    })
+    let (said, exit) = match done {
+        Done::Ended(Ending::Detached) => (format!("detached from {target}"), Exit::Done),
+        Done::Ended(Ending::Stopped) => (
+            format!("stopped by a signal; {target} goes on"),
+            Exit::Failed,
+        ),
+        Done::Ended(Ending::Exited) => (format!("{target}: the terminal exited"), Exit::Done),
+        Done::Ended(Ending::Evicted) => (
+            "fell behind the terminal's output twice in a row: attach again".to_owned(),
+            Exit::Failed,
+        ),
+        Done::Ended(Ending::Lost) => (format!("the daemon lost {target}'s terminal"), Exit::Failed),
+        Done::Ended(Ending::Failed(why)) => (why, Exit::Failed),
+        Done::DaemonGone => ("the daemon stopped answering".to_owned(), Exit::NotRunning),
+        Done::HolderGone => (
+            format!("{target}'s holder hung up: the terminal has ended"),
+            Exit::Failed,
+        ),
+        Done::Broke(e) => (format!("the attachment broke: {e}"), Exit::Failed),
+    };
+    out.err(&said);
+    exit
 }
 
 /// The terminal `target` names: an agent's or a shell's, by its name or id, or a terminal by its
