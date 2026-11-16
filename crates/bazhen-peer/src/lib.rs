@@ -5,7 +5,8 @@
 //!
 //! Every answer is whole or refused. A walk that stops at a process it can't read might have
 //! passed an agent's terminal, and a peer that has gone, or whose pid another process now holds,
-//! isn't the one that connected: either would read as no agent's, so neither is answered.
+//! isn't the one the kernel named at accept: either would read as no agent's, so neither is
+//! answered.
 
 use std::fmt;
 use std::io;
@@ -44,7 +45,8 @@ pub enum Refused {
     Unreadable(io::Error),
     /// Another user is at the other end, whom the daemon never serves.
     Foreign { uid: u32 },
-    /// The pid's process started after the connection was accepted: not the one that connected.
+    /// The pid's process started after the connection was accepted, so it took a pid its caller
+    /// gave up.
     Replaced { started: u64, accepted: u64 },
     /// The walk went past `MAX_ANCESTORS` without reaching a process with no parent.
     Endless,
@@ -56,9 +58,9 @@ impl From<io::Error> for Refused {
     }
 }
 
-/// Who is at the other end of `socket`, accepted at `accepted` (epoch seconds), as the kernel
-/// recorded it at connect. The peer's pid is read again once the walk is done: a process that
-/// started since the connection was accepted holds a pid the connector gave up.
+/// Who is at the other end of `socket`, accepted at `accepted` (epoch seconds), as the kernel names
+/// it (`process::peer_pid`). Its start is read again once the walk is done: a process that started
+/// since the connection was accepted holds a pid its caller gave up.
 ///
 /// # Errors
 ///

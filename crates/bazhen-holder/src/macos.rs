@@ -244,7 +244,9 @@ pub(crate) fn peer_uid(socket: BorrowedFd<'_>) -> io::Result<u32> {
     }
 }
 
-/// The process at the other end of a Unix socket, as it was when it connected.
+/// The process `LOCAL_PEERPID` names at the other end of a Unix socket. As XNU's source reads, that
+/// is the peer socket's last user, the last process to send or receive on it, which need not be
+/// the one that connected.
 pub(crate) fn peer_pid(socket: BorrowedFd<'_>) -> io::Result<Pid> {
     let mut pid: libc::pid_t = 0;
     let mut len =
