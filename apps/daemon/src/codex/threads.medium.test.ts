@@ -41,6 +41,8 @@ async function setup(opts: {
   runtime?: "tmux" | "holder";
   /** What `thread/list` waits on before it answers, as a server slow to answer. */
   listing?: Promise<unknown>;
+  /** Letting held mail go throws, as a mailbox failing would. */
+  releaseFails?: boolean;
   /** Its agents still starting, their TUIs not yet up. */
   starting?: boolean;
 }) {
@@ -87,7 +89,10 @@ async function setup(opts: {
     },
     log: (message) => logged.push(message),
     retryMs: opts.retryMs ?? 5,
-    released: (id) => released.push(id),
+    released: (id) => {
+      released.push(id);
+      if (opts.releaseFails === true) throw new Error("the mailbox is unavailable");
+    },
     ready: (id) => readiness.ready(id, "codex_title"),
     ...(opts.giveUpMs === undefined ? {} : { giveUpMs: opts.giveUpMs }),
   });
@@ -270,6 +275,15 @@ describe("Codex thread switches", () => {
     const lists = s.lists.length;
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect([s.boundTo(), s.released, s.lists.length]).toEqual([A, [s.agentId], lists]);
+  });
+
+  it("follows the next title though letting a left terminal's mail go throws", async () => {
+    const s = await setup({ titles: [shown(B)], listed: [{ id: A }], releaseFails: true });
+    await s.threads.titleChanged(s.terminal);
+    s.threads.left(s.terminal);
+    const read = s.titled.length;
+    await s.threads.titleChanged(s.terminal);
+    expect([s.released, s.titled.length]).toEqual([[s.agentId], read + 1]);
   });
 
   it("leaves the agent on its thread when no thread is listed in time, and says so", async () => {
