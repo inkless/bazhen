@@ -70,6 +70,7 @@ name = "bazhen"
 version = "0.1.0"
 dependencies = [
  "bazhen-client",
+ "bazhen-holder-proto",
  "bazhen-protocol",
  "bazhen-test-signal",
  "clap",

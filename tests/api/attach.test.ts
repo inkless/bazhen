@@ -40,6 +40,25 @@ describe("bazhen attach, on a holder terminal", () => {
     expect(shells.find((s) => s.id === terminalId)?.state).toBe("running");
   });
 
+  it("with --direct while the daemon runs, only views: the web app's keys still land", async () => {
+    const terminalId = await shell("viewed");
+    const direct = attachInScript(daemon, `${terminalId} --direct`);
+    left.push(direct.leave);
+    direct.type("printf 'direct-%s\\n' 9\r");
+    const view = await daemon.socketView(terminalId, "interactive");
+    await view.drive();
+    view.type("printf 'viewed-%s\\n' 7\r");
+    await direct.shows("viewed-7", "the web's command, seen directly");
+    direct.type(DETACH);
+    const code = await direct.exited;
+    view.close();
+    expect([
+      code,
+      direct.shown().includes("direct-9"),
+      direct.shown().includes("--direct only viewed the terminal"),
+    ]).toEqual([0, false, true]);
+  });
+
   it("ends, saying so, when the terminal exits", async () => {
     const terminalId = await shell("exits");
     const attached = attachInScript(daemon, terminalId);
@@ -54,5 +73,39 @@ describe("bazhen attach, on a holder terminal", () => {
       0,
       true,
     ]);
+  });
+});
+
+describe("bazhen attach, straight to the holder while the daemon is down", () => {
+  let daemon: Daemon;
+  let left: (() => void)[] = [];
+  beforeAll(async () => {
+    daemon = await Daemon.start({ config: '[runtime]\ndefault = "holder"\n' });
+  });
+  afterEach(() => {
+    for (const leave of left) leave();
+    left = [];
+  });
+  afterAll(async () => {
+    await daemon?.stop();
+  });
+
+  it("types there, and lets go of the input once the daemon is back", async () => {
+    const opened = await daemon.request("/v1/shells", {
+      method: "POST",
+      body: { idempotencyKey: "straight", cwd: daemon.work },
+    });
+    const terminalId = ShellCommandResponse.parse(opened.body).terminalId;
+    await daemon.crash();
+    const direct = attachInScript(daemon, terminalId);
+    left.push(direct.leave);
+    direct.type("printf 'straight-%s\\n' 5\r");
+    await direct.shows("straight-5", "the command's output");
+    await daemon.restart();
+    expect([
+      await direct.exited,
+      direct.shown().includes("bazhen is not running: attaching straight"),
+      direct.shown().includes("the daemon is back, so this attachment let go"),
+    ]).toEqual([0, true, true]);
   });
 });
