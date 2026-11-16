@@ -190,11 +190,14 @@ export class CodexThreads {
 
   private async follow(terminal: TerminalId, told?: string): Promise<void> {
     const { store, runtime } = this.opts;
+    const agent = store.codexAgentIn(terminal);
+    if (agent === undefined) {
+      this.gaveUp.delete(terminal);
+      return this.settle(terminal);
+    }
+    const title = told ?? (await runtime.title(agent.runtime));
     const gaveUpOn = this.gaveUp.get(terminal);
     this.gaveUp.delete(terminal);
-    const agent = store.codexAgentIn(terminal);
-    if (agent === undefined) return this.settle(terminal);
-    const title = told ?? (await runtime.title(agent.runtime));
     // The TUI empties its title as it exits, which names no thread to follow.
     if (title.trim() === "") return this.settle(terminal);
     const prefix = titlePrefix(title);
