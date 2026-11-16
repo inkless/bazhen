@@ -37,6 +37,11 @@ export interface TerminalSpec {
    * its first query on; none, and the runtime says nothing of its own.
    */
   readonly theme?: TuiTheme;
+  /**
+   * The kind of runtime it is created on, which a routed runtime sends it to; none, and its
+   * default. A runtime of one kind ignores it.
+   */
+  readonly runtime?: string;
 }
 
 /** What a terminal runs: a respawn keeps the terminal, its tags and its size, and replaces this. */

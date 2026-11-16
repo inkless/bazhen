@@ -104,6 +104,8 @@ type ExitListener = (ref: RuntimeRef, status: ExitStatus) => void;
 export interface FakeRuntimeOptions {
   /** Which `Attached` it returns: tmux's, by default, or a holder's. */
   readonly attach?: Attached["kind"];
+  /** The kind its refs name, `fake` by default; two of different kinds make a routed pair. */
+  readonly kind?: string;
 }
 
 const EXIT = /(?:^|;)\s*exit (\d+)\s*$/;
@@ -143,7 +145,7 @@ export interface Pasted {
 }
 
 export class FakeRuntime implements RuntimeAdapter {
-  readonly kind = "fake";
+  readonly kind: string;
   private readonly terminals = new Map<TerminalId, Terminal>();
   private readonly listeners = new Set<ExitListener>();
   private reachable = true;
@@ -154,6 +156,7 @@ export class FakeRuntime implements RuntimeAdapter {
 
   constructor(opts: FakeRuntimeOptions = {}) {
     this.attachKind = opts.attach ?? "history";
+    this.kind = opts.kind ?? "fake";
   }
 
   async health(): Promise<RuntimeHealth> {
