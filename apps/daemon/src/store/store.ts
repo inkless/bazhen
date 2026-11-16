@@ -1,6 +1,7 @@
 import { closeSync, constants, fchmodSync, fstatSync, openSync } from "node:fs";
 import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqlite";
 import type { Listener } from "../mailbox/listening.ts";
+import type { TerminalPids } from "../auth/peer.ts";
 import {
   isId,
   offeredCommands,
@@ -949,6 +950,31 @@ export class Store {
       agentId,
     )?.environment_id;
     return typeof id === "string" && isId("env", id) ? id : undefined;
+  }
+
+  /**
+   * The processes the terminals not yet ended run, as their refs record them: each agent's and
+   * shell's root (a tmux pane's process, or a holder's child), and the processes running them
+   * (tmux servers and holders).
+   */
+  terminalPids(): TerminalPids {
+    const agents = new Map<number, AgentSessionId>();
+    const shells = new Set<number>();
+    const runtimes = new Set<number>();
+    const rows = this.prepare(
+      `SELECT kind, agent_session_id, locator FROM terminals
+       WHERE state NOT IN ('closed', 'failed') AND locator IS NOT NULL`,
+    ).all();
+    for (const { kind, agent_session_id: agentId, locator } of rows) {
+      const at = parseLocator(locator);
+      const root = pidIn(at, "panePid") ?? pidIn(at, "childPid");
+      const runtime = pidIn(at, "serverPid") ?? pidIn(at, "holderPid");
+      if (runtime !== undefined) runtimes.add(runtime);
+      if (root === undefined) continue;
+      if (kind === "shell") shells.add(root);
+      else if (typeof agentId === "string" && isId("agent", agentId)) agents.set(root, agentId);
+    }
+    return { agents, shells, runtimes };
   }
 
   /**
@@ -1928,3 +1954,19 @@ const sameActivity = (a: Activity, b: Activity) =>
 
 const activityOf = (column: SQLOutputValue | undefined): Activity =>
   Activity.parse(JSON.parse(String(column)));
+
+/** A terminal's recorded locator, as the runtime wrote it; empty when it isn't one. */
+function parseLocator(locator: unknown): Record<string, unknown> {
+  try {
+    const value: unknown = JSON.parse(String(locator));
+    return typeof value === "object" && value !== null ? { ...value } : {};
+  } catch {
+    return {};
+  }
+}
+
+/** A pid a locator records under `key`, when it is one. */
+function pidIn(locator: Record<string, unknown>, key: string): number | undefined {
+  const pid = Number(locator[key]);
+  return Number.isInteger(pid) && pid > 1 ? pid : undefined;
+}

@@ -1,3 +1,4 @@
+import type { HttpBindings } from "@hono/node-server";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { newId } from "@bazhen/core";
@@ -58,6 +59,7 @@ function app(
   lan: () => PairingCodeResponse["lan"] = () => undefined,
   shellReport: SocketParts["shellReport"] = () => "kept",
   shellPrompt: SocketParts["shellPrompt"] = () => true,
+  peer?: SocketParts["peer"],
 ) {
   const commands = new Hono<AppEnv>();
   commands.post("/v1/attention/:id/answer", (c) => c.json({ answered: c.req.param("id") }));
@@ -66,8 +68,9 @@ function app(
   commands.post("/v1/attention/:id/resend", (c) => c.json({ resent: c.req.param("id") }));
   commands.post("/v1/notices/:id/dismiss", (c) => c.json({ dismissed: c.req.param("id") }));
   commands.get("/v1/state", (c) => c.json({ state: true }));
-  const hooks = new Hono();
+  const hooks = new Hono<{ Bindings: HttpBindings }>();
   hooks.post("/v1/hooks", (c) => c.text("hook"));
+  hooks.post("/v1/hooks/ack", (c) => c.json({}));
   return socketApp({
     commands,
     hooks,
@@ -82,6 +85,7 @@ function app(
     lan,
     shellReport,
     shellPrompt,
+    ...(peer && { peer }),
   });
 }
 
@@ -109,8 +113,13 @@ const callOn = (
   });
 
 /** A route in neither the agents' list nor the hooks': the human's alone. */
-const humansAlone = (route: { path: string }) =>
-  !AGENT_OPEN.includes(route.path) && !SELF_IDENTIFIED.includes(route.path);
+const humansAlone = (route: { method: string; path: string }) =>
+  !agentOpen(route) && !SELF_IDENTIFIED.includes(route.path);
+
+/** Whether `AGENT_OPEN` lists the route, by its method and path. */
+function agentOpen(route: { method: string; path: string }): boolean {
+  return AGENT_OPEN.some(([method, path]) => method === route.method && path === route.path);
+}
 
 const answer = (headers: Record<string, string> = {}) =>
   app().request("/v1/attention/attn_x/answer", { method: "POST", headers });
@@ -242,7 +251,7 @@ describe("socketApp", () => {
     expect([res.status, (await res.json()).error]).toEqual([403, "forbidden"]);
   });
 
-  it("refuses a token that is no live agent's on every route but the hooks, which answer for themselves", async () => {
+  it("refuses a token that is no live agent's on every route but those that identify their callers themselves", async () => {
     const daemon = app();
     const routes = routesOf(daemon);
     const bad = { "bazhen-agent-token": "u".repeat(43) };
@@ -250,7 +259,8 @@ describe("socketApp", () => {
       routes.map(async (r) => [r.path, (await callOn(daemon, r, bad)).status === 403]),
     );
     expect(routes.length).toBeGreaterThan(10);
-    expect(refused).toEqual(routes.map((r) => [r.path, !r.path.startsWith("/v1/hooks")]));
+    const unidentified = ["/v1/hooks", "/v1/hooks/ack", "/v1/codex/pane-title"];
+    expect(refused).toEqual(routes.map((r) => [r.path, !unidentified.includes(r.path)]));
   });
 
   it("puts every route it serves in exactly one of the agents', the human's and the hooks' lists", () => {
@@ -258,7 +268,8 @@ describe("socketApp", () => {
     const routes = routesOf(app());
     const lists = routes.map((r) => [
       r.path,
-      [AGENT_OPEN, humans, SELF_IDENTIFIED].filter((list) => list.includes(r.path)).length,
+      [agentOpen(r), humans.includes(r.path), SELF_IDENTIFIED.includes(r.path)].filter(Boolean)
+        .length,
     ]);
     expect(lists).toEqual(routes.map((r) => [r.path, 1]));
   });
@@ -274,6 +285,27 @@ describe("socketApp", () => {
       expect.arrayContaining(["/v1/pairing/codes", "/v1/devices/:id/revoke", "/v1/daemon/env"]),
     );
     expect(statuses).toEqual(routes.map((r) => [r.path, 403]));
+  });
+
+  it("takes tmux's pane-title hook, which runs under its server in no terminal, and refuses that caller elsewhere", async () => {
+    const titled: string[] = [];
+    const daemon = app(
+      undefined,
+      (pane) => titled.push(pane),
+      undefined,
+      undefined,
+      undefined,
+      async () => ({ kind: "refused", reason: "the caller runs under Bazhen's runtime" }),
+    );
+    // The guard reads the connection's peer; these requests have none, so the reading is faked.
+    const env = { incoming: { socket: {} } };
+    const call = (path: string, body: unknown) =>
+      daemon.request(path, { method: "POST", body: JSON.stringify(body) }, env);
+    const statuses = [
+      (await call("/v1/codex/pane-title", { pane: "%1" })).status,
+      (await call("/v1/pairing/codes", {})).status,
+    ];
+    expect([statuses, titled]).toEqual([[204, 403], ["%1"]]);
   });
 
   it("refuses an approval answer from an agent that proves itself with its token", async () => {

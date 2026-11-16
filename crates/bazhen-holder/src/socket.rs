@@ -405,15 +405,9 @@ const fn refuses(peer: u32, own: u32) -> bool {
     peer != own
 }
 
-#[cfg(target_os = "linux")]
-fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
-    Ok(rustix::net::sockopt::socket_peercred(stream)?.uid.as_raw())
-}
-
-#[cfg(target_os = "macos")]
 fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
     use std::os::fd::AsFd as _;
-    crate::macos::peer_uid(stream.as_fd())
+    crate::process::peer_uid(stream.as_fd())
 }
 
 #[cfg(test)]

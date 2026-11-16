@@ -84,6 +84,24 @@
         "fallback"
       ]
     },
+    "peerReader": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "config": {
       "type": "object",
       "properties": {

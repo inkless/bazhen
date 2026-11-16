@@ -4,6 +4,7 @@ import { createServer, request, type Server } from "node:http";
 import { join } from "node:path";
 import { getRequestListener } from "@hono/node-server";
 import { afterEach, describe, expect, it } from "vitest";
+import { newId } from "@bazhen/core";
 import {
   CLAUDE_SESSION,
   claudeAgent,
@@ -17,7 +18,7 @@ import { Approvals } from "./approvals.ts";
 import { SessionBinding } from "./binding.ts";
 import { HOOK_SCRIPT, hookClient } from "./hook-command.ts";
 import type { SentMessage } from "@bazhen/harness-claude-code";
-import { hookApp } from "./ingress.ts";
+import { hookApp, type IngressDeps } from "./ingress.ts";
 import { Mailbox } from "./mailbox.ts";
 import { Inbox } from "../attention/inbox.ts";
 
@@ -32,7 +33,7 @@ afterEach(() => {
  * The daemon's real hook ingress, served on a Unix socket as main.ts serves it. A `tokened`
  * agent is given a token, in `tokenFile`; otherwise it is one started before agents had tokens.
  */
-async function daemon(tokened = false) {
+async function daemon(tokened = false, peer?: IngressDeps["peer"]) {
   const { store, agentId } = await claudeAgent();
   dir = mkdtempSync("/tmp/bz-ingress-");
   const tokens = new AgentTokens(store, join(dir, "agents"), process.getuid?.() ?? 0);
@@ -54,6 +55,7 @@ async function daemon(tokened = false) {
     },
     knows: (id) => id === agentId,
     credentials: tokened ? tokens : untokenedCredentials,
+    ...(peer && { peer }),
     binding,
     activity: new ActivityTracker((id, activity) => store.recordActivity(id, activity)),
     recordUsage: (id, usage) => store.recordUsage(id, usage),
@@ -145,6 +147,18 @@ describe.each([
     const own = await run(client, "wait", { ...env, BAZHEN_AGENT_AUTH_FILE: tokenFile });
     expect(own.code).toBe(2);
     await expect.poll(() => state(messageId)).toBe("emitted");
+  });
+
+  it("gives an agent's mail to no hook with its token from another agent's process", async () => {
+    const elsewhere = newId("agent");
+    const { socket, agentId, mailbox, state, tokenFile } = await daemon(true, async () => ({
+      kind: "agent",
+      agentId: elsewhere,
+    }));
+    const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
+    const env = { BAZHEN_AGENT_ID: agentId, BAZHEN_SOCKET: socket };
+    const borrowed = await run(client, "wait", { ...env, BAZHEN_AGENT_AUTH_FILE: tokenFile });
+    expect([borrowed.code, borrowed.stderr, state(messageId)]).toEqual([0, "", "queued"]);
   });
 
   it("gives an agent's mail to no hook that names it without its live token", async () => {

@@ -48,6 +48,17 @@ const binaryOf = (result: HolderInstall) => {
 const ls = () => readdirSync(dir).toSorted();
 
 describe("installing the holder", () => {
+  it("installs another binary the same way under its own name, and finds it installed again", async () => {
+    const first = await installHolder({ source, dir, uid, command: "bazhen-peer" });
+    const again = await installHolder({ source, dir, uid, command: "bazhen-peer" });
+    const binary = join(dir, buildOf("build one"), "bazhen-peer");
+    expect([binaryOf(first), binaryOf(again), statSync(binary).mode & 0o777]).toEqual([
+      binary,
+      binary,
+      0o500,
+    ]);
+  });
+
   it("copies the build under its hash, read-only, in a directory only this user can reach", async () => {
     const result = await install();
     const build = buildOf("build one");

@@ -98,3 +98,27 @@ describe("the bazhen verbs a Claude Code agent is taught", () => {
     ]).toEqual([true, true, true, true]);
   });
 });
+
+describe("an agent that unsets its environment", () => {
+  it(
+    "is known as that agent while it calls from inside its own process tree, so it can't pair a browser",
+    {
+      timeout: 120_000,
+    },
+    async () => {
+      // `pair` finds the daemon by its home, which agents aren't given; this test's daemon isn't
+      // at the default one.
+      const command = `env -u BAZHEN_AGENT_ID -u BAZHEN_AGENT_AUTH_FILE BAZHEN_HOME=${daemon.home} bazhen pair > unset-pair.txt 2>&1`;
+      await mail("unset", `[[fake:bash:${command}]]`);
+      await expect.poll(async () => (await openFor(command)).length, { timeout: 30_000 }).toBe(1);
+      for (const item of await openFor(command))
+        await daemon.request(`/v1/attention/${item.id}/answer`, {
+          method: "POST",
+          body: { idempotencyKey: "allow-unset", decision: "allow" },
+        });
+      await expect
+        .poll(() => String(daemon.workFile("unset-pair.txt")), { timeout: 60_000 })
+        .toContain("an agent can't pair a device");
+    },
+  );
+});
