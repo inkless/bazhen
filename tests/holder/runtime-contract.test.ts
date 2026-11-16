@@ -141,10 +141,11 @@ describe("HolderRuntime: watching an agent's title", () => {
       env: {},
       size: { cols: 80, rows: 24 },
       generation: 0,
+      historyLines: 10_000,
     } as const;
     const ref = await runtime.create(spec);
     await expect.poll(() => heard, { timeout: harness.waitMs }).toEqual([""]);
-    const { stream } = await runtime.attach(ref, null, 0);
+    const { stream } = await runtime.attach(ref, null);
     onTestFinished(() => stream.close());
     stream.write(new TextEncoder().encode("the thread\r"));
     await expect.poll(() => heard, { timeout: harness.waitMs }).toEqual(["", "the thread"]);
@@ -185,6 +186,7 @@ describe("HolderRuntime: a terminal's theme", () => {
       env: {},
       size: { cols: 80, rows: 24 },
       generation: 0,
+      historyLines: 10_000,
     } as const;
     const light = await runtime.create({ ...spec, theme: "light" });
     await expect.poll(exited(light), { timeout: harness.waitMs }).not.toBeNull();

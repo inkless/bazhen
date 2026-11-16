@@ -36,6 +36,7 @@ const spec = (): TerminalSpec => ({
   env: {},
   size: { cols: 80, rows: 24 },
   generation: 0,
+  historyLines: 10_000,
 });
 
 /** A runtime on a server of its own, holding one terminal, and that terminal's ref. */

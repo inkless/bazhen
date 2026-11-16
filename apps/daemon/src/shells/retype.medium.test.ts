@@ -60,6 +60,7 @@ async function lostShell({
   const store = Store.open(path);
   const runtime = new FakeRuntime();
   const environment = new LocalEnvironment({
+    historyLines: 10_000,
     id: localEnvironmentId(store),
     runtime,
     harnesses: [],

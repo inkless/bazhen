@@ -14,7 +14,6 @@ import {
   type TerminalId,
 } from "@bazhen/core";
 import {
-  HISTORY_LINES,
   PROTOCOL_VERSION,
   TERMINAL_COLOURS,
   type AttachmentMode,
@@ -178,6 +177,8 @@ interface Watched {
   readonly terminal: TerminalId;
   readonly stream: RuntimeStream;
   readonly screen: ScreenSource;
+  /** How much history above its screen the terminal keeps, as its runtime said on attach. */
+  readonly historyLines: number;
   /** Where the stream is: the position of the next byte it delivers. */
   at: Position;
   readonly viewers: Map<AttachmentId, Entry>;
@@ -276,7 +277,7 @@ export class TerminalHub {
       this.end(watched, resumes.attachmentId, "replaced");
     }
     // Not before: a view clears its screen for a snapshot, and one turned away would lose it.
-    viewer.notify({ type: "snapshot_start" });
+    viewer.notify({ type: "snapshot_start", historyLines: watched.historyLines });
     viewer.notify(leaseFrame(watched, id));
     await this.sendSnapshot(watched, id, entry, shown.vt);
     // The view may have left, or the terminal closed, while its snapshot was sent.
@@ -313,7 +314,7 @@ export class TerminalHub {
     const existing = this.watched.get(ref.terminalId);
     if (existing !== undefined) return { watched: await existing, opened: false };
     const opening = (async () => {
-      const attached = await this.runtime.attach(ref, size, HISTORY_LINES);
+      const attached = await this.runtime.attach(ref, size);
       const { stream } = attached;
       const watched: Watched = {
         terminal: ref.terminalId,
@@ -322,6 +323,7 @@ export class TerminalHub {
           attached.kind === "history"
             ? emulatorScreen(attached, () => TERMINAL_COLOURS[this.log.theme(ref.terminalId)])
             : runtimeScreen(attached),
+        historyLines: attached.historyLines,
         at:
           attached.kind === "history"
             ? { generation: 0, offset: 0 }

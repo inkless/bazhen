@@ -27,6 +27,7 @@ const size = { cols: 100, rows: 30 };
 const spec = (
   argv: [string, ...string[]],
   tags: TerminalTags = { kind: "agent", agentId: newId("agent") },
+  historyLines = 10_000,
 ) => ({
   terminalId: newId("term"),
   tags,
@@ -35,6 +36,7 @@ const spec = (
   env: {},
   size,
   generation: 0,
+  historyLines,
 });
 
 afterAll(() => server.kill());
@@ -100,7 +102,7 @@ describe("tmux runtime on a private server", () => {
     };
     const ref = await runtime.create(wide);
     await expect.poll(() => screen(ref.locator.session), { timeout: 10_000 }).toContain("done");
-    const { stream, history } = await runtime.attach(ref, null, HISTORY_LINES);
+    const { stream, history } = await runtime.attach(ref, null);
     stream.close();
     // Whole lines up to the screen, so the capture wasn't cut short. The very last row above the
     // screen can be the start of a line the screen goes on with.
@@ -124,7 +126,7 @@ describe("tmux runtime on a private server", () => {
       'print s "\\033[0m " i } print "done" }\'; sleep 30';
     const ref = await small.create(spec(["sh", "-c", art]));
     await expect.poll(() => screen(ref.locator.session), { timeout: 10_000 }).toContain("done");
-    const { stream, history } = await small.attach(ref, null, HISTORY_LINES);
+    const { stream, history } = await small.attach(ref, null);
     stream.close();
     const numbers = history.split("\n").map((line) => Number(/ (\d+)$/.exec(line)?.[1]));
     const onScreen = Number(/ (\d+)$/m.exec(screen(ref.locator.session))?.[1]);
@@ -153,7 +155,7 @@ describe("tmux runtime on a private server", () => {
 
   it("keeps the browser on its normal screen, where it has scrollback", async () => {
     const ref = await runtime.create(spec(["sh", "-c", "echo on-screen; sleep 30"]));
-    const { stream } = await runtime.attach(ref, size, 0);
+    const { stream } = await runtime.attach(ref, size);
     let seen = "";
     stream.onData((b) => (seen += Buffer.from(b).toString("latin1")));
     await expect.poll(() => seen, { timeout: 3000 }).toContain("on-screen");
@@ -163,7 +165,7 @@ describe("tmux runtime on a private server", () => {
 
   it("sends a themed terminal's blank cells to its client in the theme's colours, as truecolour", async () => {
     const ref = await runtime.create({ ...spec(["sleep", "30"]), theme: "light" });
-    const { stream } = await runtime.attach(ref, size, 0);
+    const { stream } = await runtime.attach(ref, size);
     let seen = "";
     stream.onData((b) => (seen += Buffer.from(b).toString("latin1")));
     // The light theme's text #202225 and background #fdfdfd, which the browser then draws as given.
@@ -175,7 +177,7 @@ describe("tmux runtime on a private server", () => {
 
   it("passes Ctrl-B to the program instead of treating it as a tmux prefix", async () => {
     const ref = await runtime.create(spec(["cat"]));
-    const { stream } = await runtime.attach(ref, size, 0);
+    const { stream } = await runtime.attach(ref, size);
     let seen = "";
     stream.onData((b) => (seen += Buffer.from(b).toString("utf8")));
     stream.write(Buffer.from("\x02c"));
@@ -189,7 +191,7 @@ describe("tmux runtime on a private server", () => {
 
   it("keeps a trailing semicolon in an argv element", async () => {
     const ref = await runtime.create(spec(["sh", "-c", 'printf "<%s>" "$1"; sleep 30', "_", "x;"]));
-    const { stream } = await runtime.attach(ref, size, 0);
+    const { stream } = await runtime.attach(ref, size);
     let seen = "";
     stream.onData((b) => (seen += Buffer.from(b).toString("utf8")));
     await expect.poll(() => seen, { timeout: 3000 }).toContain("<x;>");
@@ -252,7 +254,7 @@ describe("tmux runtime on a private server", () => {
 
   it("reports a resize that fails, instead of dropping the error", async () => {
     const ref = await runtime.create(spec(["cat"]));
-    const { stream } = await runtime.attach(ref, size, 0);
+    const { stream } = await runtime.attach(ref, size);
     await runtime.close(ref);
     await expect(stream.resize({ cols: 80, rows: 24 })).rejects.toThrow(TmuxError);
     stream.close();
@@ -262,7 +264,7 @@ describe("tmux runtime on a private server", () => {
     const ref = await runtime.create(
       spec(["sh", "-c", "printf main; sleep 0.5; printf '\\033[?1049halt'; sleep 30"]),
     );
-    const { stream, alternate } = await runtime.attach(ref, size, 0);
+    const { stream, alternate } = await runtime.attach(ref, size);
     const pushed: boolean[] = [];
     stream.onAlternate((on) => pushed.push(on));
     await expect.poll(() => pushed, { timeout: 3000 }).toEqual([true]);
@@ -272,14 +274,18 @@ describe("tmux runtime on a private server", () => {
 
   it("keeps blank lines at the end of the history", async () => {
     const ref = await runtime.create(
-      spec([
-        "sh",
-        "-c",
-        'seq 1 40; echo; echo; echo; for i in $(seq 1 29); do echo "screen $i"; done; printf "end"; sleep 30',
-      ]),
+      spec(
+        [
+          "sh",
+          "-c",
+          'seq 1 40; echo; echo; echo; for i in $(seq 1 29); do echo "screen $i"; done; printf "end"; sleep 30',
+        ],
+        undefined,
+        6,
+      ),
     );
     await expect.poll(() => screen(ref.locator.session), { timeout: 3000 }).toContain("end");
-    const { stream, history } = await runtime.attach(ref, size, 6);
+    const { stream, history } = await runtime.attach(ref, size);
     expect(history.split("\n")).toEqual(["38", "39", "40", "", "", ""]);
     stream.close();
   });
@@ -291,7 +297,7 @@ describe("tmux runtime on a private server", () => {
     await expect
       .poll(() => screen(ref.locator.session), { timeout: 3000 })
       .toContain("on the alternate screen");
-    const { stream, history, alternate } = await runtime.attach(ref, size, 50);
+    const { stream, history, alternate } = await runtime.attach(ref, size);
     expect([history, alternate]).toEqual(["", true]);
     stream.close();
   });
@@ -299,17 +305,17 @@ describe("tmux runtime on a private server", () => {
   it("attaches with no history when the program's output still fits on the screen", async () => {
     const ref = await runtime.create(spec(["sh", "-c", "echo only-line; sleep 30"]));
     await expect.poll(() => screen(ref.locator.session), { timeout: 3000 }).toContain("only-line");
-    const { stream, history } = await runtime.attach(ref, size, 5);
+    const { stream, history } = await runtime.attach(ref, size);
     expect(history).toBe("");
     stream.close();
   });
 
   it("attaches with the history just above the screen, including lines a smaller client pushed off it", async () => {
     const ref = await runtime.create(
-      spec(["sh", "-c", 'for i in $(seq 1 100); do echo "line $i"; done; sleep 30']),
+      spec(["sh", "-c", 'for i in $(seq 1 100); do echo "line $i"; done; sleep 30'], undefined, 5),
     );
     await expect.poll(() => screen(ref.locator.session), { timeout: 3000 }).toContain("line 100");
-    const { stream, history } = await runtime.attach(ref, { cols: 100, rows: 20 }, 5);
+    const { stream, history } = await runtime.attach(ref, { cols: 100, rows: 20 });
     const top = Number(/line (\d+)/.exec(screen(ref.locator.session))?.[1]);
     expect(history.split("\n")).toEqual([5, 4, 3, 2, 1].map((back) => `line ${top - back}`));
     stream.close();
@@ -348,7 +354,7 @@ describe("tmux runtime on a private server", () => {
     const baseline = ptyHandleCount();
     let closes = 0;
     for (let i = 0; i < 30; i++) {
-      const { stream } = await runtime.attach(ref, size, 0);
+      const { stream } = await runtime.attach(ref, size);
       stream.onClose(() => closes++);
       await sleep(20);
       stream.close();

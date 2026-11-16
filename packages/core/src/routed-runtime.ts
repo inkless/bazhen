@@ -127,8 +127,8 @@ export class RoutedRuntime implements RuntimeAdapter {
     return this.only(spec.runtime ?? this.defaultKind).create(spec);
   }
 
-  async attach(ref: RuntimeRef, size: Size | null, historyLines: number): Promise<Attached> {
-    return this.of(ref).attach(ref, size, historyLines);
+  async attach(ref: RuntimeRef, size: Size | null): Promise<Attached> {
+    return this.of(ref).attach(ref, size);
   }
 
   async close(ref: RuntimeRef): Promise<void> {

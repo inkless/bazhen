@@ -63,7 +63,7 @@ const running = async (runtime: RuntimeAdapter, ref: RuntimeRef) => {
 
 /** A client attached on a snapshot, with the output its stream has carried since. */
 async function snapshotClient(runtime: RuntimeAdapter, ref: RuntimeRef) {
-  const attached = await runtime.attach(ref, null, 0);
+  const attached = await runtime.attach(ref, null);
   onTestFinished(() => attached.stream.close());
   assert(attached.kind === "snapshot", `attached with ${attached.kind}`);
   let live = "";
@@ -115,6 +115,7 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
   const spec = (
     argv: readonly [string, ...string[]],
     tags: TerminalTags = { kind: "agent", agentId: newId("agent") },
+    historyLines = 10_000,
   ): TerminalSpec => ({
     terminalId: newId("term"),
     tags,
@@ -123,6 +124,7 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
     env: {},
     size: { cols: 80, rows: 24 },
     generation: 0,
+    historyLines,
   });
 
   /** The cause the runtime gives, or, where it may not learn it, unknown. */
@@ -226,7 +228,7 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       async () => {
         const runtime = fresh();
         const ref = await runtime.create(spec(["cat"]));
-        const { stream } = await runtime.attach(ref, { cols: 100, rows: 30 }, 0);
+        const { stream } = await runtime.attach(ref, { cols: 100, rows: 30 });
         onTestFinished(() => stream.close());
         let seen = "";
         stream.onData((bytes) => (seen += decode(bytes)));
@@ -245,7 +247,7 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       async () => {
         const runtime = fresh();
         const ref = await runtime.create(spec(["cat"]));
-        const { stream } = await runtime.attach(ref, { cols: 100, rows: 30 }, 0);
+        const { stream } = await runtime.attach(ref, { cols: 100, rows: 30 });
         onTestFinished(() => stream.close());
         let seen = "";
         stream.onData((bytes) => (seen += decode(bytes)));
@@ -290,7 +292,7 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
     it("round-trips input through an attached terminal", async () => {
       const runtime = fresh();
       const ref = await runtime.create(spec(["cat"]));
-      const { stream } = await runtime.attach(ref, { cols: 100, rows: 30 }, 0);
+      const { stream } = await runtime.attach(ref, { cols: 100, rows: 30 });
       onTestFinished(() => stream.close());
       let seen = "";
       stream.onData((bytes) => (seen += decode(bytes)));
@@ -301,7 +303,7 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
     it("pushes each switch to or from the alternate screen, once", async () => {
       const runtime = fresh();
       const ref = await runtime.create(spec(["cat"]));
-      const { stream, alternate } = await runtime.attach(ref, null, 0);
+      const { stream, alternate } = await runtime.attach(ref, null);
       onTestFinished(() => stream.close());
       const pushed: boolean[] = [];
       stream.onAlternate((on) => pushed.push(on));
@@ -318,7 +320,7 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
     it("reads the title its program set last", async () => {
       const runtime = fresh();
       const ref = await runtime.create(spec(["cat"]));
-      const { stream } = await runtime.attach(ref, null, 0);
+      const { stream } = await runtime.attach(ref, null);
       onTestFinished(() => stream.close());
       stream.write(encode("\x1b]2;first\x07\r"));
       await expect.poll(() => runtime.title(ref), { timeout: harness.waitMs }).toBe("first");
@@ -326,14 +328,20 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       await expect.poll(() => runtime.title(ref), { timeout: harness.waitMs }).toBe("the thread");
     });
 
+    it("reports on attach the history depth each terminal was made with", async () => {
+      const runtime = fresh();
+      const shallow = await runtime.create(spec(["cat"], undefined, 7));
+      const deep = await runtime.create(spec(["cat"], undefined, 30_000));
+      const attached = [await runtime.attach(shallow, null), await runtime.attach(deep, null)];
+      for (const { stream } of attached) onTestFinished(() => stream.close());
+      expect(attached.map((a) => a.historyLines)).toEqual([7, 30_000]);
+    });
+
     it("says a stream ended when its terminal ends or its consumer closes it", async () => {
       const runtime = fresh();
       await runtime.create(spec(sleeping)); // keeps the server up once the other is gone
       const ref = await runtime.create(spec(["cat"]));
-      const [kept, dropped] = [
-        await runtime.attach(ref, null, 0),
-        await runtime.attach(ref, null, 0),
-      ];
+      const [kept, dropped] = [await runtime.attach(ref, null), await runtime.attach(ref, null)];
       const whys: string[] = [];
       kept.stream.onClose((why) => whys.push(`terminal ${why}`));
       dropped.stream.onClose((why) => whys.push(`consumer ${why}`));
@@ -350,7 +358,7 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       await runtime.create(spec(sleeping)); // keeps the server up once the other is gone
       const ref = await runtime.create(spec(sleeping));
       await runtime.close(ref);
-      await expect(runtime.attach(ref, null, 0)).rejects.toMatchObject({ reason: "gone" });
+      await expect(runtime.attach(ref, null)).rejects.toMatchObject({ reason: "gone" });
     });
 
     it("reports how the terminal's own process ended, or, where it can't, that it could not tell", async () => {
@@ -386,11 +394,26 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       expect(harness.placeOf(next)).toBe(harness.placeOf(ref));
     });
 
+    it("keeps a terminal's history depth across a respawn", async () => {
+      const runtime = fresh();
+      const ref = await runtime.create(spec(exiting(0), undefined, 7));
+      await deadOf(runtime, ref);
+      const next = await runtime.respawn(ref, {
+        argv: sleeping,
+        cwd: harness.cwd,
+        env: {},
+        generation: 1,
+      });
+      const { stream, historyLines } = await runtime.attach(next, null);
+      onTestFinished(() => stream.close());
+      expect(historyLines).toBe(7);
+    });
+
     it("respawns a terminal left on its alternate screen onto its main screen", async () => {
       const runtime = fresh();
       const s = spec(["cat"]);
       const ref = await runtime.create(s);
-      const { stream } = await runtime.attach(ref, null, 0);
+      const { stream } = await runtime.attach(ref, null);
       onTestFinished(() => stream.close());
       const pushed: boolean[] = [];
       stream.onAlternate((on) => pushed.push(on));
@@ -399,7 +422,7 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       await runtime.signal(ref, "SIGTERM");
       await deadOf(runtime, ref);
       const next = await runtime.respawn(ref, { ...s, generation: 1, argv: sleeping });
-      const after = await runtime.attach(next, null, 0);
+      const after = await runtime.attach(next, null);
       onTestFinished(() => after.stream.close());
       expect(after.alternate).toBe(false);
     });
@@ -450,7 +473,7 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       const runtime = fresh();
       const ref = await runtime.create(spec(sleeping));
       const forged = harness.forge(ref);
-      await expect(runtime.attach(forged, null, 0)).rejects.toMatchObject({
+      await expect(runtime.attach(forged, null)).rejects.toMatchObject({
         reason: "server-replaced",
       });
     });
@@ -598,6 +621,7 @@ export function snapshotContract(name: string, harness: SnapshotHarness): void {
     env: {},
     size: { cols: 80, rows: 24 },
     generation: 0,
+    historyLines: 10_000,
   };
 
   describe(`${name}: the snapshot attach contract`, () => {

@@ -43,6 +43,7 @@ const titler = (): TerminalSpec => ({
   env: {},
   size: { cols: 80, rows: 24 },
   generation: 0,
+  historyLines: 10_000,
 });
 
 /** A hook client that does `first`, then logs the pane it was run for, then does `last`. */
@@ -145,7 +146,7 @@ async function viewDeadTerminal(withoutHook: boolean) {
   const pane = String(ref.locator.paneId);
   const dead = () => tmuxOut(server, "display-message", "-p", "-t", pane, "#{pane_dead}").trim();
 
-  const first = await runtime.attach(ref, null, 0);
+  const first = await runtime.attach(ref, null);
   await expect.poll(() => attached(server), { timeout: 5_000 }).toBe(true);
   tmuxOut(server, "send-keys", "-t", pane, "Enter");
   await expect.poll(dead, { timeout: 5_000 }).toBe("1");
@@ -153,7 +154,7 @@ async function viewDeadTerminal(withoutHook: boolean) {
   await expect.poll(() => attached(server), { timeout: 5_000 }).toBe(false);
   const leftAlive = server.alive();
 
-  const second = await runtime.attach(ref, null, 0);
+  const second = await runtime.attach(ref, null);
   await expect.poll(() => attached(server), { timeout: 5_000 }).toBe(true);
   second.stream.close();
   await expect.poll(() => attached(server), { timeout: 5_000 }).toBe(false);

@@ -319,7 +319,13 @@ export class HolderStream implements SnapshotStream {
     // The consumer registers its callbacks in the turn `attach` resolves in; output read meanwhile
     // waits for it.
     setImmediate(() => this.flow());
-    return { kind: "snapshot", ...attached, stream: this, alternate: this.alternate };
+    return {
+      kind: "snapshot",
+      ...attached,
+      stream: this,
+      alternate: this.alternate,
+      historyLines: reader.hello.historyLines,
+    };
   }
 
   /** Where the reader's events come in, in the order the holder sent them. */

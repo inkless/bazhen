@@ -17,9 +17,10 @@ describe("the fake runtime's controls", () => {
       env: {},
       size: { cols: 80, rows: 24 },
       generation: 0,
+      historyLines: 10_000,
     } as const;
     const ref = await fake.create(spec);
-    const { stream } = await fake.attach(ref, null, 0);
+    const { stream } = await fake.attach(ref, null);
     const pushed: boolean[] = [];
     stream.onAlternate((on) => pushed.push(on));
     fake.output(ref, "\x1b[?1049h");
@@ -38,9 +39,10 @@ describe("the fake runtime's controls", () => {
       env: {},
       size: { cols: 80, rows: 24 },
       generation: 0,
+      historyLines: 2,
     });
     fake.scroll(ref, "one\ntwo\nthree");
-    const attached = await fake.attach(ref, null, 2);
+    const attached = await fake.attach(ref, null);
     assert(attached.kind === "history", "attached with a snapshot");
     const { stream, history } = attached;
     let closed = false;

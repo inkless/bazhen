@@ -73,6 +73,18 @@ describe("readConfigFile", () => {
     ],
     ["a budget of no terminals", "[terminals]\nmax_open = 0", "terminals.max_open:"],
     ["a fraction of a terminal", "[terminals]\nmax_open = 1.5", "terminals.max_open:"],
+    ["negative history", "[terminals]\nhistory_lines = -1", "terminals.history_lines:"],
+    [
+      "history given as a string",
+      '[terminals]\nhistory_lines = "10000"',
+      "terminals.history_lines:",
+    ],
+    ["a fraction of a line", "[terminals]\nhistory_lines = 1.5", "terminals.history_lines:"],
+    [
+      "more history than a holder keeps",
+      "[terminals]\nhistory_lines = 100001",
+      "terminals.history_lines:",
+    ],
     ["a cap systemd wouldn't take", '[terminals]\nmemory_max = "8GB"', "terminals.memory_max:"],
     [
       "a cap over all memory",

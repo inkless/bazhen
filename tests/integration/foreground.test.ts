@@ -15,7 +15,15 @@ afterAll(() => server.kill());
 async function readIn(cwd: string) {
   const terminalId = newId("term");
   const tags = { kind: "shell" } as const;
-  const spec = { terminalId, tags, cwd, env: {}, size: { cols: 80, rows: 24 }, generation: 0 };
+  const spec = {
+    terminalId,
+    tags,
+    cwd,
+    env: {},
+    size: { cols: 80, rows: 24 },
+    generation: 0,
+    historyLines: 10_000,
+  };
   await runtime.create({ ...spec, argv: ["sleep", "300"] });
   return (await runtime.foregrounds(new Set([terminalId])))[0];
 }

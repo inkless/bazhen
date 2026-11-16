@@ -52,6 +52,7 @@ async function newTerminalEnv(): Promise<Record<string, string>> {
     env: {},
     size: { cols: 80, rows: 24 },
     generation: 0,
+    historyLines: 10_000,
   });
   await expect.poll(() => existsSync(out), { timeout: 10_000 }).toBe(true);
   return Object.fromEntries(
@@ -77,6 +78,7 @@ async function colorterm(env: Record<string, string>): Promise<string> {
     env,
     size: { cols: 80, rows: 24 },
     generation: 0,
+    historyLines: 10_000,
   });
   await expect.poll(() => existsSync(out), { timeout: 10_000 }).toBe(true);
   return readFileSync(out, "utf8");

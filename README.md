@@ -85,10 +85,14 @@ retype_last_command = false # keep each shell's last line to type back; see docs
 
 [terminals]
 max_open = 100 # agents' and shells' terminals open at once
+history_lines = 10000 # lines of history each new terminal keeps, up to 100000; see below
 memory_max = "50%" # each holder terminal's memory, where it can be contained; see docs/holder.md
 total_memory_max = "80%" # every holder terminal's together: at least 64M, a whole 1-100%, or "infinity"
 swap_max = "0" # each holder terminal's swap: bytes, "0" for none, or "infinity"
 ```
+
+Each line of history costs memory in every view of a terminal, and in the daemon's copy of each
+tmux terminal: at 100,000 lines of 200 columns, a full history is roughly 240 MB per view.
 
 Desktop notifications go through `notify-send` on Linux, and on macOS through Bazhen's own
 notifier app, which `pnpm build:notify` builds with Xcode's command-line tools (restart the

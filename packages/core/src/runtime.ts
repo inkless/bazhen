@@ -37,6 +37,8 @@ export interface TerminalSpec {
    * its first query on; none, and the runtime says nothing of its own.
    */
   readonly theme?: TuiTheme;
+  /** How many lines of history above its screen it keeps, for as long as it runs. */
+  readonly historyLines: number;
   /**
    * The kind of runtime it is created on, which a routed runtime sends it to; none, and its
    * default. A runtime of one kind ignores it.
@@ -223,6 +225,11 @@ interface AttachedClient {
   readonly stream: RuntimeStream;
   /** Whether the program was on its alternate screen as the client attached. */
   readonly alternate: boolean;
+  /**
+   * How many lines of history above its screen the terminal keeps, as the runtime reports it: the
+   * depth it was made with, whatever the daemon's configuration says now.
+   */
+  readonly historyLines: number;
 }
 
 /** A client whose first output redraws the screen, but can't redraw the history above it. */
@@ -281,6 +288,11 @@ export interface SnapshotAttached extends Snapshot {
   readonly stream: SnapshotStream;
   /** Whether the program was on its alternate screen as the client attached. */
   readonly alternate: boolean;
+  /**
+   * How many lines of history above its screen the terminal keeps, as the runtime reports it: the
+   * depth it was made with, whatever the daemon's configuration says now.
+   */
+  readonly historyLines: number;
 }
 
 export interface RuntimeAdapter {
@@ -301,11 +313,10 @@ export interface RuntimeAdapter {
   compatibility?(): Promise<Compatibility>;
   create(spec: TerminalSpec): Promise<RuntimeRef>;
   /**
-   * Opens a client at `size`, or, given null, at whatever size the terminal already has, with up
-   * to `historyLines` of the history above its screen. A runtime that keeps a depth of its own per
-   * terminal may ignore `historyLines`.
+   * Opens a client at `size`, or, given null, at whatever size the terminal already has, with the
+   * history the terminal keeps above its screen.
    */
-  attach(ref: RuntimeRef, size: Size | null, historyLines: number): Promise<Attached>;
+  attach(ref: RuntimeRef, size: Size | null): Promise<Attached>;
   /**
    * Ends the terminal. A terminal the runtime positively no longer has counts as closed; one whose
    * server may still run it is `TerminalUnconfirmed`.

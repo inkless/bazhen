@@ -25,6 +25,7 @@ const spec = (argv: TerminalSpec["argv"] = ["sleep", "300"]): TerminalSpec => ({
   env: {},
   size: { cols: 80, rows: 24 },
   generation: 0,
+  historyLines: 10_000,
 });
 
 const ids = async (runtime: RuntimeAdapter) =>
@@ -78,7 +79,7 @@ describe("RoutedRuntime", () => {
     const onTmux = await routed.create(spec());
     const onHolder = await routed.create({ ...spec(), runtime: "holder" });
     await routed.close(onHolder);
-    const attached = await routed.attach(onTmux, null, 0);
+    const attached = await routed.attach(onTmux, null);
     attached.stream.close();
     expect([
       await ids(holder),
