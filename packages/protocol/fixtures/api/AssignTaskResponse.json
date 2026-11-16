@@ -1,0 +1,37 @@
+[
+  {
+    "name": "example 1",
+    "wire": {
+      "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "eventIds": [
+        3
+      ]
+    },
+    "parsed": {
+      "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "eventIds": [
+        3
+      ]
+    }
+  },
+  {
+    "name": "an unknown field",
+    "wire": {
+      "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "eventIds": [
+        3
+      ],
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "eventIds": [
+        3
+      ]
+    }
+  }
+]

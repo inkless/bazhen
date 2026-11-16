@@ -1,0 +1,1521 @@
+[
+  {
+    "name": "example 1",
+    "wire": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "working",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "approval"
+        }
+      ]
+    },
+    "parsed": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "working",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "approval"
+        }
+      ]
+    }
+  },
+  {
+    "name": "example 2",
+    "wire": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "",
+      "harness": "claude-code",
+      "state": "starting",
+      "project": "p",
+      "cwd": "/w",
+      "launchedBy": null,
+      "signal": null,
+      "listening": false,
+      "headline": null,
+      "tasks": [],
+      "attention": []
+    },
+    "parsed": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "",
+      "harness": "claude-code",
+      "state": "starting",
+      "project": "p",
+      "cwd": "/w",
+      "launchedBy": null,
+      "signal": null,
+      "listening": false,
+      "headline": null,
+      "tasks": [],
+      "attention": []
+    }
+  },
+  {
+    "name": "harness = \"claude-code\"",
+    "wire": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "",
+      "harness": "claude-code",
+      "state": "starting",
+      "project": "p",
+      "cwd": "/w",
+      "launchedBy": null,
+      "signal": null,
+      "listening": false,
+      "headline": null,
+      "tasks": [],
+      "attention": []
+    },
+    "parsed": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "",
+      "harness": "claude-code",
+      "state": "starting",
+      "project": "p",
+      "cwd": "/w",
+      "launchedBy": null,
+      "signal": null,
+      "listening": false,
+      "headline": null,
+      "tasks": [],
+      "attention": []
+    }
+  },
+  {
+    "name": "harness = \"codex\"",
+    "wire": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "",
+      "harness": "codex",
+      "state": "starting",
+      "project": "p",
+      "cwd": "/w",
+      "launchedBy": null,
+      "signal": null,
+      "listening": false,
+      "headline": null,
+      "tasks": [],
+      "attention": []
+    },
+    "parsed": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "",
+      "harness": "codex",
+      "state": "starting",
+      "project": "p",
+      "cwd": "/w",
+      "launchedBy": null,
+      "signal": null,
+      "listening": false,
+      "headline": null,
+      "tasks": [],
+      "attention": []
+    }
+  },
+  {
+    "name": "state = \"starting\"",
+    "wire": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "",
+      "harness": "claude-code",
+      "state": "starting",
+      "project": "p",
+      "cwd": "/w",
+      "launchedBy": null,
+      "signal": null,
+      "listening": false,
+      "headline": null,
+      "tasks": [],
+      "attention": []
+    },
+    "parsed": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "",
+      "harness": "claude-code",
+      "state": "starting",
+      "project": "p",
+      "cwd": "/w",
+      "launchedBy": null,
+      "signal": null,
+      "listening": false,
+      "headline": null,
+      "tasks": [],
+      "attention": []
+    }
+  },
+  {
+    "name": "state = \"running\"",
+    "wire": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "",
+      "harness": "claude-code",
+      "state": "running",
+      "project": "p",
+      "cwd": "/w",
+      "launchedBy": null,
+      "signal": null,
+      "listening": false,
+      "headline": null,
+      "tasks": [],
+      "attention": []
+    },
+    "parsed": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "",
+      "harness": "claude-code",
+      "state": "running",
+      "project": "p",
+      "cwd": "/w",
+      "launchedBy": null,
+      "signal": null,
+      "listening": false,
+      "headline": null,
+      "tasks": [],
+      "attention": []
+    }
+  },
+  {
+    "name": "state = \"exited\"",
+    "wire": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "",
+      "harness": "claude-code",
+      "state": "exited",
+      "project": "p",
+      "cwd": "/w",
+      "launchedBy": null,
+      "signal": null,
+      "listening": false,
+      "headline": null,
+      "tasks": [],
+      "attention": []
+    },
+    "parsed": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "",
+      "harness": "claude-code",
+      "state": "exited",
+      "project": "p",
+      "cwd": "/w",
+      "launchedBy": null,
+      "signal": null,
+      "listening": false,
+      "headline": null,
+      "tasks": [],
+      "attention": []
+    }
+  },
+  {
+    "name": "state = \"unknown\"",
+    "wire": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "",
+      "harness": "claude-code",
+      "state": "unknown",
+      "project": "p",
+      "cwd": "/w",
+      "launchedBy": null,
+      "signal": null,
+      "listening": false,
+      "headline": null,
+      "tasks": [],
+      "attention": []
+    },
+    "parsed": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "",
+      "harness": "claude-code",
+      "state": "unknown",
+      "project": "p",
+      "cwd": "/w",
+      "launchedBy": null,
+      "signal": null,
+      "listening": false,
+      "headline": null,
+      "tasks": [],
+      "attention": []
+    }
+  },
+  {
+    "name": "state = \"lost\"",
+    "wire": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "",
+      "harness": "claude-code",
+      "state": "lost",
+      "project": "p",
+      "cwd": "/w",
+      "launchedBy": null,
+      "signal": null,
+      "listening": false,
+      "headline": null,
+      "tasks": [],
+      "attention": []
+    },
+    "parsed": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "",
+      "harness": "claude-code",
+      "state": "lost",
+      "project": "p",
+      "cwd": "/w",
+      "launchedBy": null,
+      "signal": null,
+      "listening": false,
+      "headline": null,
+      "tasks": [],
+      "attention": []
+    }
+  },
+  {
+    "name": "state = \"closing\"",
+    "wire": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "",
+      "harness": "claude-code",
+      "state": "closing",
+      "project": "p",
+      "cwd": "/w",
+      "launchedBy": null,
+      "signal": null,
+      "listening": false,
+      "headline": null,
+      "tasks": [],
+      "attention": []
+    },
+    "parsed": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "",
+      "harness": "claude-code",
+      "state": "closing",
+      "project": "p",
+      "cwd": "/w",
+      "launchedBy": null,
+      "signal": null,
+      "listening": false,
+      "headline": null,
+      "tasks": [],
+      "attention": []
+    }
+  },
+  {
+    "name": "state = \"closed\"",
+    "wire": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "",
+      "harness": "claude-code",
+      "state": "closed",
+      "project": "p",
+      "cwd": "/w",
+      "launchedBy": null,
+      "signal": null,
+      "listening": false,
+      "headline": null,
+      "tasks": [],
+      "attention": []
+    },
+    "parsed": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "",
+      "harness": "claude-code",
+      "state": "closed",
+      "project": "p",
+      "cwd": "/w",
+      "launchedBy": null,
+      "signal": null,
+      "listening": false,
+      "headline": null,
+      "tasks": [],
+      "attention": []
+    }
+  },
+  {
+    "name": "state = \"failed\"",
+    "wire": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "",
+      "harness": "claude-code",
+      "state": "failed",
+      "project": "p",
+      "cwd": "/w",
+      "launchedBy": null,
+      "signal": null,
+      "listening": false,
+      "headline": null,
+      "tasks": [],
+      "attention": []
+    },
+    "parsed": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "",
+      "harness": "claude-code",
+      "state": "failed",
+      "project": "p",
+      "cwd": "/w",
+      "launchedBy": null,
+      "signal": null,
+      "listening": false,
+      "headline": null,
+      "tasks": [],
+      "attention": []
+    }
+  },
+  {
+    "name": "signal.value = \"working\"",
+    "wire": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "working",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "approval"
+        }
+      ]
+    },
+    "parsed": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "working",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "approval"
+        }
+      ]
+    }
+  },
+  {
+    "name": "signal.value = \"waiting_input\"",
+    "wire": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "waiting_input",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "approval"
+        }
+      ]
+    },
+    "parsed": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "waiting_input",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "approval"
+        }
+      ]
+    }
+  },
+  {
+    "name": "signal.value = \"needs_approval\"",
+    "wire": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "needs_approval",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "approval"
+        }
+      ]
+    },
+    "parsed": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "needs_approval",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "approval"
+        }
+      ]
+    }
+  },
+  {
+    "name": "signal.value = \"idle\"",
+    "wire": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "idle",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "approval"
+        }
+      ]
+    },
+    "parsed": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "idle",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "approval"
+        }
+      ]
+    }
+  },
+  {
+    "name": "signal.value = \"done\"",
+    "wire": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "done",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "approval"
+        }
+      ]
+    },
+    "parsed": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "done",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "approval"
+        }
+      ]
+    }
+  },
+  {
+    "name": "signal.value = \"failed\"",
+    "wire": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "failed",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "approval"
+        }
+      ]
+    },
+    "parsed": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "failed",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "approval"
+        }
+      ]
+    }
+  },
+  {
+    "name": "signal.value = \"unknown\"",
+    "wire": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "unknown",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "approval"
+        }
+      ]
+    },
+    "parsed": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "unknown",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "approval"
+        }
+      ]
+    }
+  },
+  {
+    "name": "signal.source = \"native\"",
+    "wire": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "working",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "approval"
+        }
+      ]
+    },
+    "parsed": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "working",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "approval"
+        }
+      ]
+    }
+  },
+  {
+    "name": "signal.source = \"heuristic\"",
+    "wire": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "working",
+        "source": "heuristic",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "approval"
+        }
+      ]
+    },
+    "parsed": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "working",
+        "source": "heuristic",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "approval"
+        }
+      ]
+    }
+  },
+  {
+    "name": "attention[].kind = \"approval\"",
+    "wire": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "working",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "approval"
+        }
+      ]
+    },
+    "parsed": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "working",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "approval"
+        }
+      ]
+    }
+  },
+  {
+    "name": "attention[].kind = \"question\"",
+    "wire": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "working",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "question"
+        }
+      ]
+    },
+    "parsed": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "working",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "question"
+        }
+      ]
+    }
+  },
+  {
+    "name": "attention[].kind = \"failed\"",
+    "wire": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "working",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "failed"
+        }
+      ]
+    },
+    "parsed": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "working",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "failed"
+        }
+      ]
+    }
+  },
+  {
+    "name": "attention[].kind = \"undeliverable\"",
+    "wire": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "working",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "undeliverable"
+        }
+      ]
+    },
+    "parsed": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "working",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "undeliverable"
+        }
+      ]
+    }
+  },
+  {
+    "name": "attention[].kind = \"escalation\"",
+    "wire": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "working",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "escalation"
+        }
+      ]
+    },
+    "parsed": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "working",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "escalation"
+        }
+      ]
+    }
+  },
+  {
+    "name": "attention[].kind = \"task_done\"",
+    "wire": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "working",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "task_done"
+        }
+      ]
+    },
+    "parsed": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "working",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "task_done"
+        }
+      ]
+    }
+  },
+  {
+    "name": "an unknown field",
+    "wire": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "working",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "approval"
+        }
+      ],
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "BZ-127",
+      "harness": "codex",
+      "state": "running",
+      "project": "bazhen",
+      "cwd": "/work",
+      "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+      "signal": {
+        "value": "working",
+        "source": "native",
+        "ageSeconds": 125
+      },
+      "listening": true,
+      "headline": {
+        "text": "Halfway.",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "ageSeconds": 30
+      },
+      "tasks": [
+        {
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "role": "worker"
+        }
+      ],
+      "attention": [
+        {
+          "id": "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "approval"
+        }
+      ]
+    }
+  }
+]

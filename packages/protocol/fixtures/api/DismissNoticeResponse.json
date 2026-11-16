@@ -1,0 +1,33 @@
+[
+  {
+    "name": "example 1",
+    "wire": {
+      "eventIds": [
+        4
+      ]
+    },
+    "parsed": {
+      "eventIds": [
+        4
+      ]
+    }
+  },
+  {
+    "name": "an unknown field",
+    "wire": {
+      "eventIds": [
+        4
+      ],
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "eventIds": [
+        4
+      ]
+    }
+  }
+]

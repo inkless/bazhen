@@ -1,0 +1,307 @@
+[
+  {
+    "name": "example 1",
+    "wire": {
+      "roles": [
+        {
+          "key": "lead",
+          "title": "Lead",
+          "description": "Runs the task.",
+          "grants": [
+            "worker",
+            "reviewer"
+          ],
+          "singlePerTask": true,
+          "maxActiveTasks": 2,
+          "prompt": "You lead.",
+          "source": "user"
+        },
+        {
+          "key": "lead",
+          "title": "Lead",
+          "description": "Runs the task.",
+          "grants": [
+            "worker",
+            "reviewer"
+          ],
+          "singlePerTask": true,
+          "maxActiveTasks": null,
+          "prompt": "You lead.",
+          "source": "builtin"
+        }
+      ],
+      "problems": [
+        {
+          "file": "/r/x.md",
+          "problem": "no prompt"
+        }
+      ]
+    },
+    "parsed": {
+      "roles": [
+        {
+          "key": "lead",
+          "title": "Lead",
+          "description": "Runs the task.",
+          "grants": [
+            "worker",
+            "reviewer"
+          ],
+          "singlePerTask": true,
+          "maxActiveTasks": 2,
+          "prompt": "You lead.",
+          "source": "user"
+        },
+        {
+          "key": "lead",
+          "title": "Lead",
+          "description": "Runs the task.",
+          "grants": [
+            "worker",
+            "reviewer"
+          ],
+          "singlePerTask": true,
+          "maxActiveTasks": null,
+          "prompt": "You lead.",
+          "source": "builtin"
+        }
+      ],
+      "problems": [
+        {
+          "file": "/r/x.md",
+          "problem": "no prompt"
+        }
+      ]
+    }
+  },
+  {
+    "name": "roles[].source = \"builtin\"",
+    "wire": {
+      "roles": [
+        {
+          "key": "lead",
+          "title": "Lead",
+          "description": "Runs the task.",
+          "grants": [
+            "worker",
+            "reviewer"
+          ],
+          "singlePerTask": true,
+          "maxActiveTasks": 2,
+          "prompt": "You lead.",
+          "source": "builtin"
+        },
+        {
+          "key": "lead",
+          "title": "Lead",
+          "description": "Runs the task.",
+          "grants": [
+            "worker",
+            "reviewer"
+          ],
+          "singlePerTask": true,
+          "maxActiveTasks": null,
+          "prompt": "You lead.",
+          "source": "builtin"
+        }
+      ],
+      "problems": [
+        {
+          "file": "/r/x.md",
+          "problem": "no prompt"
+        }
+      ]
+    },
+    "parsed": {
+      "roles": [
+        {
+          "key": "lead",
+          "title": "Lead",
+          "description": "Runs the task.",
+          "grants": [
+            "worker",
+            "reviewer"
+          ],
+          "singlePerTask": true,
+          "maxActiveTasks": 2,
+          "prompt": "You lead.",
+          "source": "builtin"
+        },
+        {
+          "key": "lead",
+          "title": "Lead",
+          "description": "Runs the task.",
+          "grants": [
+            "worker",
+            "reviewer"
+          ],
+          "singlePerTask": true,
+          "maxActiveTasks": null,
+          "prompt": "You lead.",
+          "source": "builtin"
+        }
+      ],
+      "problems": [
+        {
+          "file": "/r/x.md",
+          "problem": "no prompt"
+        }
+      ]
+    }
+  },
+  {
+    "name": "roles[].source = \"user\"",
+    "wire": {
+      "roles": [
+        {
+          "key": "lead",
+          "title": "Lead",
+          "description": "Runs the task.",
+          "grants": [
+            "worker",
+            "reviewer"
+          ],
+          "singlePerTask": true,
+          "maxActiveTasks": 2,
+          "prompt": "You lead.",
+          "source": "user"
+        },
+        {
+          "key": "lead",
+          "title": "Lead",
+          "description": "Runs the task.",
+          "grants": [
+            "worker",
+            "reviewer"
+          ],
+          "singlePerTask": true,
+          "maxActiveTasks": null,
+          "prompt": "You lead.",
+          "source": "user"
+        }
+      ],
+      "problems": [
+        {
+          "file": "/r/x.md",
+          "problem": "no prompt"
+        }
+      ]
+    },
+    "parsed": {
+      "roles": [
+        {
+          "key": "lead",
+          "title": "Lead",
+          "description": "Runs the task.",
+          "grants": [
+            "worker",
+            "reviewer"
+          ],
+          "singlePerTask": true,
+          "maxActiveTasks": 2,
+          "prompt": "You lead.",
+          "source": "user"
+        },
+        {
+          "key": "lead",
+          "title": "Lead",
+          "description": "Runs the task.",
+          "grants": [
+            "worker",
+            "reviewer"
+          ],
+          "singlePerTask": true,
+          "maxActiveTasks": null,
+          "prompt": "You lead.",
+          "source": "user"
+        }
+      ],
+      "problems": [
+        {
+          "file": "/r/x.md",
+          "problem": "no prompt"
+        }
+      ]
+    }
+  },
+  {
+    "name": "an unknown field",
+    "wire": {
+      "roles": [
+        {
+          "key": "lead",
+          "title": "Lead",
+          "description": "Runs the task.",
+          "grants": [
+            "worker",
+            "reviewer"
+          ],
+          "singlePerTask": true,
+          "maxActiveTasks": 2,
+          "prompt": "You lead.",
+          "source": "user"
+        },
+        {
+          "key": "lead",
+          "title": "Lead",
+          "description": "Runs the task.",
+          "grants": [
+            "worker",
+            "reviewer"
+          ],
+          "singlePerTask": true,
+          "maxActiveTasks": null,
+          "prompt": "You lead.",
+          "source": "builtin"
+        }
+      ],
+      "problems": [
+        {
+          "file": "/r/x.md",
+          "problem": "no prompt"
+        }
+      ],
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "roles": [
+        {
+          "key": "lead",
+          "title": "Lead",
+          "description": "Runs the task.",
+          "grants": [
+            "worker",
+            "reviewer"
+          ],
+          "singlePerTask": true,
+          "maxActiveTasks": 2,
+          "prompt": "You lead.",
+          "source": "user"
+        },
+        {
+          "key": "lead",
+          "title": "Lead",
+          "description": "Runs the task.",
+          "grants": [
+            "worker",
+            "reviewer"
+          ],
+          "singlePerTask": true,
+          "maxActiveTasks": null,
+          "prompt": "You lead.",
+          "source": "builtin"
+        }
+      ],
+      "problems": [
+        {
+          "file": "/r/x.md",
+          "problem": "no prompt"
+        }
+      ]
+    }
+  }
+]

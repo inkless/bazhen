@@ -1,0 +1,40 @@
+//! Roles, as their files define them.
+
+use serde::{Deserialize, Serialize};
+
+use crate::names::Role;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RoleSource {
+    Builtin,
+    User,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleDefinition {
+    pub key: Role,
+    pub title: String,
+    pub description: String,
+    pub grants: Vec<Role>,
+    pub single_per_task: bool,
+    /// Null for no limit.
+    pub max_active_tasks: Option<u64>,
+    pub prompt: String,
+    pub source: RoleSource,
+}
+
+/// A role file that was skipped, and why.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleProblem {
+    pub file: String,
+    pub problem: String,
+}
+
+/// `GET /v1/roles`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RolesResponse {
+    pub roles: Vec<RoleDefinition>,
+    pub problems: Vec<RoleProblem>,
+}

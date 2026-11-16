@@ -1,0 +1,58 @@
+[
+  {
+    "name": "example 1",
+    "wire": {
+      "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "eventIds": [
+        1
+      ]
+    },
+    "parsed": {
+      "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "eventIds": [
+        1
+      ]
+    }
+  },
+  {
+    "name": "example 2",
+    "wire": {
+      "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "assignmentId": null,
+      "eventIds": [
+        1
+      ]
+    },
+    "parsed": {
+      "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "assignmentId": null,
+      "eventIds": [
+        1
+      ]
+    }
+  },
+  {
+    "name": "an unknown field",
+    "wire": {
+      "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "eventIds": [
+        1
+      ],
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "assignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "eventIds": [
+        1
+      ]
+    }
+  }
+]
