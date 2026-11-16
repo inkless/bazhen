@@ -16,7 +16,8 @@ import { AttachCommand } from "./AttachCommand.tsx";
 import { Dock } from "../shells/Dock.tsx";
 import { useDockLayout, useTabbedDock } from "../shells/layout.ts";
 import { linkedShells, shellLabel } from "../shells/model.ts";
-import { agentActions, agentLabel, exitText } from "./model.ts";
+import { AgentRename } from "./AgentRename.tsx";
+import { agentActions, agentLabel, exitText, isEnded } from "./model.ts";
 
 /** Why an agent that can't be opened shows no terminal. */
 const NO_TERMINAL: Partial<Record<AgentState, string>> = {
@@ -77,6 +78,7 @@ export function Workspace({
   // since a second click before then would name the generation the first one replaced.
   const [sentAt, setSentAt] = useState<string | null>(null);
   const [message, setMessage] = useState("");
+  const [renaming, setRenaming] = useState(false);
   // A close refused because the terminal's old server may still run it: only then is force offered.
   const [unconfirmed, setUnconfirmed] = useState(false);
   const removing = buttons.includes("remove");
@@ -112,6 +114,11 @@ export function Workspace({
           <span className={`state state-${agent.state}`}>{agent.state}</span>
           {agent.exit !== null && <span>{exitText(agent.exit)}</span>}
           <span className="spacer" />
+          {!isEnded(agent) && !renaming && (
+            <Button variant="quiet" onPress={() => setRenaming(true)}>
+              Rename
+            </Button>
+          )}
           {buttons.includes("respawn") && (
             <Button
               isDisabled={busy}
@@ -182,6 +189,9 @@ export function Workspace({
             />
           )}
         </header>
+        {renaming && !isEnded(agent) && (
+          <AgentRename agent={agent} onDone={() => setRenaming(false)} failed={failed} />
+        )}
         <p className="cwd">{agent.cwd}</p>
         {open ? (
           <form onSubmit={send}>

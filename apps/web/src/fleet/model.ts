@@ -1,4 +1,10 @@
-import type { Agent, Environment, ExitStatus, StateSnapshot } from "@bazhen/protocol";
+import {
+  nameBase,
+  type Agent,
+  type Environment,
+  type ExitStatus,
+  type StateSnapshot,
+} from "@bazhen/protocol";
 
 /** A button the workspace shows; `remove` is close, said of an agent whose terminal is gone. */
 export type AgentButton = "respawn" | "relaunch" | "close" | "remove";
@@ -88,6 +94,16 @@ export const shortId = (id: string) => id.slice(-6);
 export function agentLabel(a: Pick<Agent, "id" | "name" | "project" | "state">): string {
   if (a.name === "") return `${a.project} (${shortId(a.id)})`;
   return isEnded(a) ? `${a.name} (${shortId(a.id)})` : a.name;
+}
+
+/**
+ * The name a launch in `cwd` would be given by default. The daemon takes the project from the
+ * directory's last part once it has resolved `~` and the like, so only an absolute directory's
+ * can be said here; the number is the daemon's counter, which the page doesn't have.
+ */
+export function defaultNamePreview(cwd: string): string {
+  if (!cwd.startsWith("/")) return "<project>-<n>";
+  return `${nameBase(cwd.replace(/\/+$/, "").split("/").at(-1) ?? "")}-<n>`;
 }
 
 /** The label of the agent `id` names, for a site that holds only the id. */

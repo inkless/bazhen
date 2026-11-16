@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { Agent, AgentState, StateSnapshot } from "@bazhen/protocol";
-import { agentActions, agentLabel, agentLabelOf, groupFleet, themeRespawn } from "./model.ts";
+import {
+  agentActions,
+  agentLabel,
+  agentLabelOf,
+  defaultNamePreview,
+  groupFleet,
+  themeRespawn,
+} from "./model.ts";
 
 let serial = 0;
 /** An id of the protocol's shape: a prefix and 32 hex digits, version 7. */
@@ -157,6 +164,25 @@ describe("agentLabelOf", () => {
       "reviewer",
       `agent ${gone.slice(-6)}`,
     ]);
+  });
+});
+
+describe("defaultNamePreview", () => {
+  it("names a launch in an absolute directory after its last part, as the daemon's default does", () => {
+    expect([
+      defaultNamePreview("/work/playground"),
+      defaultNamePreview("/work/playground/"),
+      defaultNamePreview("/work/my app (old)"),
+      defaultNamePreview("/"),
+    ]).toEqual(["playground-<n>", "playground-<n>", "my-app-old-<n>", "agent-<n>"]);
+  });
+
+  it("can't say the project of a directory the daemon resolves, so it doesn't guess", () => {
+    expect([
+      defaultNamePreview("~/work/web"),
+      defaultNamePreview("web"),
+      defaultNamePreview(""),
+    ]).toEqual(["<project>-<n>", "<project>-<n>", "<project>-<n>"]);
   });
 });
 
