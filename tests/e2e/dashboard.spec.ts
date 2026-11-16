@@ -1,4 +1,5 @@
 import { hostname } from "node:os";
+import { basename } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { givePageAgentTranscript, kill, launch, screen, uniqueName } from "./page.ts";
 
@@ -26,6 +27,16 @@ function launchElsewhere(page: Page, name?: string): Promise<number> {
 }
 
 const workspace = (page: Page) => page.getByRole("article", { name: "agent" });
+
+/** The path of every POST the page sends to a path ending `suffix`, as it sends them. */
+function posts(page: Page, suffix: string): string[] {
+  const sent: string[] = [];
+  page.on("request", (r) => {
+    const path = new URL(r.url()).pathname;
+    if (r.method() === "POST" && path.endsWith(suffix)) sent.push(path);
+  });
+  return sent;
+}
 
 const json = (status: number, body: object) => ({
   status,
@@ -69,8 +80,13 @@ test("shows the fleet under its host, and closes an agent from its workspace", a
   const agents = page.getByRole("list", { name: "agents" });
   await expect(agents.getByRole("heading", { level: 2 })).toHaveText(new RegExp(`^${hostname()}`));
   await expect(agents.locator('[aria-current="true"]')).toBeVisible();
-  // Launched without a name, it is given its project's next number.
-  await expect(workspace(page).getByRole("heading", { level: 2 })).toHaveText(/^[\w-]+-\d+$/);
+  // Launched without a name, it is given its project's next number; then its project and harness.
+  await expect(workspace(page).locator(".workspace-head > :is(h2, .meta, .state)")).toHaveText([
+    /^[\w-]+-\d+$/,
+    basename(String(process.env["BZ_E2E_WORK"])),
+    "claude-code",
+    "running",
+  ]);
 
   await workspace(page).getByText("Attach from a terminal").click();
   await expect(workspace(page).locator(".attach code")).toContainText(" attach-session -t ");
@@ -79,7 +95,9 @@ test("shows the fleet under its host, and closes an agent from its workspace", a
   await page.getByRole("dialog").getByRole("button", { name: "Close agent" }).click();
   await expect(stateOf(page, "closed")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole("region", { name: "terminal" })).toHaveCount(0);
-  await expect(workspace(page).getByRole("button", { name: /Close agent|Respawn/ })).toHaveCount(0);
+  await expect(
+    workspace(page).getByRole("button", { name: /Close agent|Respawn|Rename/ }),
+  ).toHaveCount(0);
   await expect(agents.locator('[aria-current="true"]')).toHaveCount(0);
 
   await page.getByRole("button", { name: /Show ended agents/ }).click();
@@ -92,20 +110,36 @@ test("names an agent at launch, renames it from its workspace, and refuses a nam
   page,
 }) => {
   const name = uniqueName("scout");
-  await launch(page, name);
+  const agentId = await launch(page, name);
   const current = page.getByRole("list", { name: "agents" }).locator('[aria-current="true"]');
   const heading = workspace(page).getByRole("heading", { level: 2 });
   await expect(heading).toHaveText(name);
   await expect(current).toContainText(name);
 
-  const renamed = uniqueName("reviewer");
-  await workspace(page).getByRole("button", { name: "Rename" }).click();
+  const renames = posts(page, "/rename");
+  const rename = workspace(page).getByRole("button", { name: "Rename" });
+  await rename.click();
   const form = workspace(page).getByRole("form", { name: "rename agent" });
-  await form.getByLabel("Name").fill(renamed);
+  const field = form.getByLabel("Name");
+  await expect(field).toBeFocused();
+  await field.fill("-not-a-name");
+  await form.getByRole("button", { name: "Save" }).click();
+  await expect(form.getByRole("alert")).toContainText("a name is 1 to 40");
+  await expect(field).toHaveAttribute("aria-invalid", "true");
+  await form.getByRole("button", { name: "Cancel" }).click();
+  await expect(rename).toBeFocused();
+  expect(renames).toEqual([]);
+
+  // Sent by its id: once it lands, a retry by the old name would find no agent.
+  const renamed = uniqueName("reviewer");
+  await rename.click();
+  await field.fill(renamed);
   await form.getByRole("button", { name: "Save" }).click();
   await expect(heading).toHaveText(renamed);
   await expect(current).toContainText(renamed);
   await expect(form).toHaveCount(0);
+  await expect(rename).toBeFocused();
+  expect(renames).toEqual([`/v1/agents/${agentId}/rename`]);
 
   const taken = uniqueName("taken");
   expect(await launchElsewhere(page, taken)).toBe(200);
@@ -114,6 +148,20 @@ test("names an agent at launch, renames it from its workspace, and refuses a nam
   await form.getByRole("button", { name: "Save" }).click();
   await expect(form.getByRole("alert")).toContainText(`another agent is named ${taken}`);
   await expect(heading).toHaveText(renamed);
+});
+
+test("refuses a launch under a name that isn't one, beside the field, and sends nothing", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const launches = posts(page, "/v1/agents");
+  await page.getByPlaceholder("/path/to/project").fill(String(process.env["BZ_E2E_WORK"]));
+  const name = page.locator(".launch").getByLabel("Name");
+  await name.fill("-bad");
+  await page.getByRole("button", { name: "Launch Claude Code" }).click();
+  await expect(page.getByRole("alert")).toContainText("a name is 1 to 40");
+  await expect(name).toHaveAttribute("aria-invalid", "true");
+  expect(launches).toEqual([]);
 });
 
 test("respawns an agent whose process ended, onto a fresh terminal", async ({ page }) => {
