@@ -394,6 +394,21 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       expect(harness.placeOf(next)).toBe(harness.placeOf(ref));
     });
 
+    it("keeps a terminal's history depth across a respawn", async () => {
+      const runtime = fresh();
+      const ref = await runtime.create(spec(exiting(0), undefined, 7));
+      await deadOf(runtime, ref);
+      const next = await runtime.respawn(ref, {
+        argv: sleeping,
+        cwd: harness.cwd,
+        env: {},
+        generation: 1,
+      });
+      const { stream, historyLines } = await runtime.attach(next, null);
+      onTestFinished(() => stream.close());
+      expect(historyLines).toBe(7);
+    });
+
     it("respawns a terminal left on its alternate screen onto its main screen", async () => {
       const runtime = fresh();
       const s = spec(["cat"]);

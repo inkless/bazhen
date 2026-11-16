@@ -21,7 +21,7 @@ import { closeNotice, offersInstall, pageNow, thisPlatform } from "../install.ts
 import { isApple, matchKey } from "./keymap.ts";
 import { statusText, type Status } from "./status.ts";
 import { Backoff } from "./reconnect.ts";
-import { scrollbackFor, wheelAction, type TerminalKind } from "./scroll.ts";
+import { scrollbackFor, startSnapshot, wheelAction, type TerminalKind } from "./scroll.ts";
 import { attachScrollInput } from "./scroll-input.ts";
 import { loadSettings } from "./settings.ts";
 import { attachTakeover } from "./takeover.ts";
@@ -224,9 +224,7 @@ function connect(
       if (f.type === "snapshot_start") {
         // The view is redrawn from the top: a glide would carry on through the new screen.
         scroll.stopGlide();
-        // Before the snapshot's history is written, or the lines past the old depth are lost.
-        term.options.scrollback = scrollbackFor(f.historyLines);
-        term.reset();
+        startSnapshot(term, f);
       } else if (f.type === "snapshot_end") backoff.reset();
       else if (f.type === "screen") alternate = f.alternate;
       else if (f.type === "attached") {
