@@ -14,6 +14,7 @@ import {
   HolderStats,
   HolderSubscribeRequest,
   hasLoneSurrogate,
+  isOlderHolderMajor,
   negotiateHolder,
 } from "./holder.ts";
 import { HISTORY_LINES } from "./stream.ts";
@@ -70,6 +71,17 @@ describe("hasLoneSurrogate", () => {
     const depth = 200_000;
     const deep: unknown = JSON.parse(`${"[".repeat(depth)}"\ud800"${"]".repeat(depth)}`);
     expect(hasLoneSurrogate(deep)).toBe(true);
+  });
+});
+
+describe("isOlderHolderMajor", () => {
+  it("is true only for a major below this build's, whatever the minors", () => {
+    expect([
+      isOlderHolderMajor("1.9", "2.0"),
+      isOlderHolderMajor("2.0", "2.3"),
+      isOlderHolderMajor("3.0", "2.0"),
+      isOlderHolderMajor("x", "2.0"),
+    ]).toEqual([true, false, false, false]);
   });
 });
 

@@ -146,6 +146,13 @@ describe("RoutedRuntime", () => {
     await expect(routed.foregrounds(new Set())).rejects.toThrow("can't be read");
   });
 
+  it("names every runtime's outdated terminals, a runtime with none naming nothing", async () => {
+    const { holder, routed } = pair();
+    const old = newId("term");
+    Object.assign(holder, { outdated: async () => new Map([[old, ["2.0"]]]) });
+    expect([...(await routed.outdated())]).toEqual([[old, ["2.0"]]]);
+  });
+
   it("hears every runtime's exits until unsubscribed from all of them", async () => {
     const { routed } = pair();
     const a = await routed.create(spec(["sh", "-c", "exit 3"]));

@@ -266,6 +266,12 @@ export interface RuntimeAdapter {
   health(recorded?: readonly RuntimeRef[]): Promise<RuntimeHealth>;
   /** The terminals the server holds: none when no server runs. An unreadable server throws. */
   inventory(): Promise<RuntimeInventoryEntry[]>;
+  /**
+   * The terminals that run where this build can't fully serve them, such as on a holder of an
+   * older protocol major, each with the versions what runs it speaks; they need a restart to be
+   * served in full. Absent from a runtime whose terminals are always served in full.
+   */
+  outdated?(): Promise<ReadonlyMap<TerminalId, readonly string[]>>;
   create(spec: TerminalSpec): Promise<RuntimeRef>;
   /**
    * Opens a client at `size`, or, given null, at whatever size the terminal already has, with up

@@ -124,6 +124,19 @@ export function negotiateHolder(ours: readonly string[], theirs: readonly string
 }
 
 /**
+ * Whether `agreed`, the version a holder and this build settled on, is of an older major than
+ * `ours`: one the daemon still serves, but whose terminal needs a restart to reach the current.
+ */
+export function isOlderHolderMajor(
+  agreed: string,
+  ours: string = HOLDER_PROTOCOL_VERSION,
+): boolean {
+  const [theirs] = topMinors([agreed]).keys();
+  const [mine] = topMinors([ours]).keys();
+  return theirs !== undefined && mine !== undefined && theirs < mine;
+}
+
+/**
  * A byte offset in the terminal's output since its generation began. Safe integers only, the
  * same as a binary frame's u64 offset is held to when decoded.
  */

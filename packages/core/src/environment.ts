@@ -215,6 +215,11 @@ export interface EnvironmentAdapter {
   health(known?: readonly RuntimeRef[], runtime?: string): Promise<EnvironmentHealth>;
   /** Given `runtime`, only the agents on that runtime. */
   inventory(runtime?: string): Promise<AgentInventoryEntry[]>;
+  /**
+   * The terminals, agents' and shells', that run where they can't be served in full and need a
+   * restart, each with the versions what runs it speaks; on `runtime` alone if named.
+   */
+  outdated?(runtime?: string): Promise<ReadonlyMap<TerminalId, readonly string[]>>;
   launch(launch: AgentLaunch): Promise<AgentRefs>;
   /** Starts the agent's exited terminal again, on its existing harness session. */
   respawn(respawn: AgentRespawn): Promise<AgentRefs & { readonly runtime: RuntimeRef }>;

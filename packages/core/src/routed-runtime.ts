@@ -11,6 +11,7 @@ import type {
   TerminalForeground,
   TerminalSpec,
 } from "./runtime.ts";
+import type { TerminalId } from "./ids.ts";
 
 /**
  * A ref names a runtime this daemon doesn't run. Never "gone": the terminal may well be running
@@ -100,6 +101,14 @@ export class RoutedRuntime implements RuntimeAdapter {
   async inventory(): Promise<RuntimeInventoryEntry[]> {
     const all = await Promise.all([...this.runtimes.values()].map((r) => r.inventory()));
     return all.flat();
+  }
+
+  /** Every runtime's outdated terminals; one that can't be read throws, as its inventory does. */
+  async outdated(): Promise<ReadonlyMap<TerminalId, readonly string[]>> {
+    const all = await Promise.all(
+      [...this.runtimes.values()].map(async (r) => [...((await r.outdated?.()) ?? [])]),
+    );
+    return new Map(all.flat());
   }
 
   async create(spec: TerminalSpec): Promise<RuntimeRef> {
