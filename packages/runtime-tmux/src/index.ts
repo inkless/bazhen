@@ -527,8 +527,9 @@ export class TmuxRuntime implements RuntimeAdapter {
       .split(" ")
       .map(Number);
     // A program on its alternate screen has no history of its own: tmux's is the main screen's,
-    // behind it. With no history, `-E -1` would capture the screen's first line instead.
-    const lines = alternate === 1 ? 0 : held;
+    // behind it. With no history, `-E -1` would capture the screen's first line instead. A resize
+    // that shrinks the screen pushes its lines into history past the limit until tmux next trims.
+    const lines = alternate === 1 ? 0 : Math.min(historyLines, held);
     const history = lines > 0 ? await this.historyOf(session, lines) : "";
     const paneId = located(pane.ref, "paneId");
     await this.resetIfDead(paneId);
