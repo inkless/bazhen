@@ -290,6 +290,7 @@ describe("falsify on a branch in a linked worktree", () => {
       sawOldSource: stubLog().includes("SOURCE: export const v = 1;"),
       sawNewSource: stubLog().includes("SOURCE: export const v = 2;"),
       sawNewTest: stubLog().includes('it("caps"'),
+      builtCli: stubLog().includes("BUILD:"),
     }).toEqual({
       status: 0,
       killed: true,
@@ -297,6 +298,7 @@ describe("falsify on a branch in a linked worktree", () => {
       sawOldSource: true,
       sawNewSource: false,
       sawNewTest: true,
+      builtCli: false,
     });
   });
 
@@ -1250,12 +1252,5 @@ describe("falsify on a branch with a new CLI test", () => {
       said: result.output.includes("cargo wrote no"),
       verdict: /KILLED|SURVIVED|INVALID/.test(result.output),
     }).toEqual({ status: 1, said: true, verdict: false });
-  });
-
-  it("builds no CLI for a branch whose new tests aren't the CLI's", () => {
-    expect({ status: againstBase().status, built: stubLog().includes("BUILD:") }).toEqual({
-      status: 0,
-      built: false,
-    });
   });
 });
