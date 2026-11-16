@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { tmuxVersion } from "@bazhen/host-guard";
 import { StateSnapshot } from "@bazhen/protocol";
 import { Daemon, LOGIN_SHELL, bazhen, cliHome, overSocket } from "./daemon.ts";
 
@@ -156,6 +157,9 @@ describe("bazhen start's environment", () => {
   });
 });
 
+const [tmuxMajor, tmuxMinor] = tmuxVersion();
+const crashesOnDeadPaneFocus = tmuxMajor < 3 || (tmuxMajor === 3 && tmuxMinor < 5);
+
 describe("bazhen doctor", () => {
   let daemon: Daemon;
   beforeAll(async () => {
@@ -173,6 +177,12 @@ describe("bazhen doctor", () => {
     expect(out).toContain("external origins: none (loopback only)\n");
     expect(out).toContain("web app: not built;");
     expect(out).not.toContain("sentinel-value-never-shown");
+  });
+
+  it("warns of the dead-pane crash on a tmux before 3.5, and only there", async () => {
+    const { code, out } = await bazhen(["doctor"], daemon.env);
+    expect(code).toBe(0);
+    expect(out.includes("  warning: tmux before 3.5 crashes")).toBe(crashesOnDeadPaneFocus);
   });
 });
 

@@ -6,13 +6,14 @@ import { fakeTmux, removeFakes } from "./testing/fake-tmux.ts";
 afterEach(removeFakes);
 
 /**
- * A `tmux` that answers `-V` and `list-sessions` and logs each attempt at the settings. It refuses
+ * A `tmux` that answers its version and `list-sessions`, and logs each attempt at the settings. It refuses
  * them with a status of its own, or, the first time, hangs until the runtime's timeout stops it
  * and exits 0, as a real client does on SIGTERM, and takes them after that.
  */
 const FAKE_TMUX = `#!/bin/sh
 case "$*" in
 *" -V") echo "tmux 3.5a" ;;
+*" display-message -p #{version}") echo "3.5a" ;;
 *" list-sessions "*) ;;
 *" set-hook "*)
   echo attempt >> "$FAKE_DIR/attempts"

@@ -79,6 +79,8 @@ export interface Compatibility {
 export interface RuntimeHealth {
   readonly state: RuntimeHealthState;
   readonly version: string | null;
+  /** Defects of this runtime's version that Bazhen works around, and what each costs. */
+  readonly workarounds?: readonly string[];
 }
 
 export interface RuntimeInventoryEntry {

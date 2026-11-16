@@ -29,6 +29,11 @@ export const RuntimeHealthReport = z.object({
   kind: z.string(),
   state: RuntimeHealthState,
   version: z.string().nullable(),
+  /**
+   * Defects of this runtime's version that Bazhen works around, each with what it costs, worded
+   * for a person. Absent from a daemon before 1.50.
+   */
+  workarounds: z.array(z.string()).optional(),
 });
 export type RuntimeHealthReport = z.infer<typeof RuntimeHealthReport>;
 

@@ -19,6 +19,14 @@ export function runtimeLines(reported: Reported): string[] {
   );
 }
 
+/** As `runtimeLines`, each followed by a warning for every defect Bazhen works around there. */
+export function doctorRuntimeLines(reported: Reported): string[] {
+  return runtimeReports(reported).flatMap((report) => [
+    ...runtimeLines({ runtime: report, runtimes: [report] }),
+    ...(report.workarounds ?? []).map((w) => `  warning: ${w}`),
+  ]);
+}
+
 /** Whether a runtime can't be read: then doctor fails, as it did when tmux alone couldn't be. */
 export const anyUnreachable = (reported: Reported) =>
   runtimeReports(reported).some((r) => r.state === "unreachable");

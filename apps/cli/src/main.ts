@@ -25,7 +25,7 @@ import { TASK_USAGE, Usage, isVerb, taskSocket, taskVerb, type Answer } from "./
 import { lanLines } from "./lan.ts";
 import { holderLines } from "./holder.ts";
 import { terminalLines } from "./terminals.ts";
-import { anyUnreachable, runtimeLines } from "./runtimes.ts";
+import { anyUnreachable, doctorRuntimeLines, runtimeLines } from "./runtimes.ts";
 
 /** The exit status when the daemon isn't running. */
 const NOT_RUNNING = 3;
@@ -102,7 +102,7 @@ async function doctor(): Promise<number> {
     .map(([rule, count]) => `${rule} ${count}`)
     .join(", ");
   console.log(`bazhen ${d.appVersion} (protocol ${d.protocolVersion})`);
-  for (const line of runtimeLines(d)) console.log(line);
+  for (const line of doctorRuntimeLines(d)) console.log(line);
   console.log(`hook client: ${d.hookClient.path}`);
   if (d.hookClient.fallback) {
     console.log("  warning: bazhen-hook is not built; hooks use the slower curl script");

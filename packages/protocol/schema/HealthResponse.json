@@ -68,6 +68,12 @@
               "string",
               "null"
             ]
+          },
+          "workarounds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
