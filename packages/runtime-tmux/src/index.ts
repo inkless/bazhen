@@ -580,11 +580,15 @@ export class TmuxRuntime implements RuntimeAdapter {
         screen.dispose();
         // Closing the master alone hangs the client up only once every copy of it is closed, and
         // a later attach client can inherit one. tmux detaches the client by its terminal
-        // device, which names no other PTY while this master is open. The reset runs first, in
-        // the same list, so the client never leaves a dead pane that asked for focus reports.
-        void this.tmux(
-          ...sequence([...this.deadPaneReset(paneId), ["detach-client", "-t", proc.tty]]),
-        )
+        // device, which names no other PTY while this master is open, and only then: `tty` is
+        // undefined once it has closed. The reset runs first, in the same list, so the client
+        // never leaves a dead pane that asked for focus reports.
+        const { tty } = proc;
+        const leaving = [
+          ...this.deadPaneReset(paneId),
+          ...(tty === undefined ? [] : [["detach-client", "-t", tty]]),
+        ];
+        void (leaving.length === 0 ? Promise.resolve("") : this.tmux(...sequence(leaving)))
           .catch(() => undefined)
           .finally(() => proc.hangUp());
       },

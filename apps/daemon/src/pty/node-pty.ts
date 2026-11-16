@@ -89,7 +89,9 @@ export function ptySpawner(spawn: PtySpawn, terminal: object): PtySpawner {
       proc.onExit(end);
       Reflect.apply(method(proc, "on"), proc, ["close", end]);
       return {
-        tty,
+        get tty() {
+          return ended ? undefined : tty;
+        },
         onData: (cb) => {
           proc.onData((d: string | Buffer) => cb(typeof d === "string" ? Buffer.from(d) : d));
         },
