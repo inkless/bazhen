@@ -183,9 +183,8 @@ describe("a Codex agent's TUI coming up", () => {
     void s.threads.heard(s.terminal);
     await expect.poll(() => s.lists.length).toBe(1);
     titled(shown(A));
-    const recorded = respawn(s);
     const stale = s.threads.heard(s.terminal);
-    recorded();
+    respawn(s)();
     titled("");
     answer(undefined);
     await stale;
