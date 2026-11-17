@@ -1602,7 +1602,8 @@ describe("decoderFailures", () => {
     fuzzed: Record<string, string>,
     notDecoders: Record<string, string>,
     tree = repo,
-  ) => decoderFailures(Object.keys(tree), (p) => tree[p] ?? "", fuzzed, notDecoders);
+    publicFields: Record<string, string> = {},
+  ) => decoderFailures(Object.keys(tree), (p) => tree[p] ?? "", fuzzed, notDecoders, publicFields);
   const fuzzed = { "crates/p/src/lib.rs::decode": "decode" };
   const exempt = { "crates/p/src/lib.rs::send": "an encoder" };
 
@@ -1649,27 +1650,27 @@ describe("decoderFailures", () => {
     const reader = {
       ...repo,
       "crates/p/src/reader.rs": [
-        "pub struct Reader {",
+        "pub struct Framer {",
         "    buf: Vec<u8>,",
         "}",
         "pub struct Frame<'a>(&'a [u8]);",
         "pub struct Plain {",
         "    n: u32,",
         "}",
-        "impl Reader {",
+        "impl Framer {",
         "    pub fn new() -> Self { todo() }",
-        "    pub fn next_frame(&mut self) -> Option<u8> { None }",
+        "    pub fn next_frame(&mut self) -> Option<u8> { self.buf.pop() }",
         "}",
         "impl Plain {",
         "    pub fn get(&self) -> u32 { 0 }",
         "}",
         "pub fn decode(f: Frame<'_>) {}",
-        "type Alias = Reader;",
+        "type Alias = Framer;",
       ].join("\n"),
     };
     expect(failures(fuzzed, exempt, reader).map((f) => f.split(": ")[0])).toEqual([
       "crates/p/src/reader.rs::Alias",
-      "crates/p/src/reader.rs::Reader::next_frame",
+      "crates/p/src/reader.rs::Framer::next_frame",
       "crates/p/src/reader.rs::decode",
     ]);
   });
@@ -1694,7 +1695,7 @@ describe("decoderFailures", () => {
         "struct Middle { inner: Inner }",
         "pub struct Outer { m: Middle }",
         "impl Outer {",
-        "    pub fn go(&self) {}",
+        "    pub fn go(&self) { walk(&self.m) }",
         "}",
         "pub struct Plain<T> { t: T }",
         "impl<T: Clone> Plain<T> {",
@@ -1721,14 +1722,156 @@ describe("decoderFailures", () => {
         "}",
         "pub struct Sock { s: UnixStream, buf: Vec<u8> }",
         "impl Sock {",
-        "    pub fn id(&self) -> u32 { 0 }",
+        "    pub fn pending(&self) -> usize { self.buf.len() }",
         "}",
         "pub fn watch(w: &Watch) {}",
       ].join("\n"),
     };
     expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
       "crates/p/src/fd.rs::Watch::clear",
-      "crates/p/src/fd.rs::Sock::id",
+      "crates/p/src/fd.rs::Sock::pending",
+    ]);
+  });
+
+  it("takes a carrier's method for a decoder only when it uses a field holding the bytes", () => {
+    const tree = {
+      ...repo,
+      "crates/p/src/conn.rs": [
+        "pub struct Conn {",
+        "    id: u64,",
+        "    buffered: bool,",
+        "    cache: HashMap<u64, String>,",
+        "    frames: HashMap<u64, Vec<u8>>,",
+        "    hook: fn(u64) -> u64,",
+        "    #[allow(dead_code)]",
+        "    buf: Vec<u8>,",
+        "    inner: Inner,",
+        "}",
+        "struct Inner { b: Box<[u8]> }",
+        "pub struct Pair(u64, Vec<u8>);",
+        "impl Conn {",
+        "    pub fn id(&self) -> u64 { self.id }",
+        "    pub fn is_buffered(&self) -> bool { self.buffered }",
+        "    pub fn cached(&self) -> usize { self.cache.len() }",
+        "    pub fn framed(&self) -> usize { self.frames.len() }",
+        "    pub fn hooked(&self) -> u64 { (self.hook)(self.id) }",
+        "    pub fn alias(&self) -> usize { let b = &self.buf; b.len() }",
+        "    pub fn helper(&self) { parse(&self.buf) }",
+        "    pub fn closure(&self) -> bool { (0..4).any(|i| self.buf.get(i).is_some()) }",
+        "    pub fn nested(&self) { touch(&self.inner) }",
+        "    pub fn path(&self) { self::log(self.id) }",
+        "}",
+        "impl Pair {",
+        "    pub fn first(&self) -> u64 { self.0 }",
+        "    pub fn second(&self) -> usize { self.1.len() }",
+        "}",
+      ].join("\n"),
+    };
+    expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
+      "crates/p/src/conn.rs::Conn::framed",
+      "crates/p/src/conn.rs::Conn::alias",
+      "crates/p/src/conn.rs::Conn::helper",
+      "crates/p/src/conn.rs::Conn::closure",
+      "crates/p/src/conn.rs::Conn::nested",
+      "crates/p/src/conn.rs::Pair::second",
+    ]);
+  });
+
+  it("takes a carrier's method that hands on or matches self, or calls one that counts", () => {
+    const tree = {
+      ...repo,
+      "crates/p/src/conn.rs": [
+        "pub struct Conn { id: u64, buf: Vec<u8> }",
+        "impl Conn {",
+        "    pub fn handed(&self) { parse_conn(self) }",
+        "    pub fn matched(&self) -> usize { let Self { buf, .. } = self; buf.len() }",
+        "    pub fn by_path(&mut self) { Self::reset(self) }",
+        "    fn bytes(&self) -> &[u8] { &self.buf }",
+        "    pub fn first(&self) -> Option<u8> { self.bytes().first().copied() }",
+        "    pub fn second(&self) -> Option<u8> { self.first() }",
+        "    pub fn named(&self) -> u64 { self.id }",
+        "    pub fn quiet(&self) -> u64 { self.named() }",
+        "    pub fn elsewhere(&self) { self.flush_all() }",
+        "    pub fn merge(&mut self, other: &Self) {}",
+        "    pub fn boxed(self: Box<Self>) -> u64 { self.id }",
+        "}",
+      ].join("\n"),
+    };
+    expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
+      "crates/p/src/conn.rs::Conn::handed",
+      "crates/p/src/conn.rs::Conn::matched",
+      "crates/p/src/conn.rs::Conn::by_path",
+      "crates/p/src/conn.rs::Conn::bytes",
+      "crates/p/src/conn.rs::Conn::first",
+      "crates/p/src/conn.rs::Conn::second",
+      "crates/p/src/conn.rs::Conn::elsewhere",
+      "crates/p/src/conn.rs::Conn::merge",
+    ]);
+  });
+
+  it("takes every self method of a carrier no field pins its bytes to", () => {
+    const tree = {
+      ...repo,
+      "crates/p/src/a.rs": [
+        "pub enum Msg { Data(Vec<u8>), Ping }",
+        "impl Msg {",
+        "    pub fn code(&self) -> u8 { 0 }",
+        "}",
+        "pub struct Keyed { n: u64, b: Vec<u8> }",
+        "impl Keyed {",
+        "    pub fn n(&self) -> u64 { self.n }",
+        "}",
+        "pub struct Twin { n: u64, b: Vec<u8> }",
+        "impl Twin {",
+        "    pub fn n(&self) -> u64 { self.n }",
+        "}",
+        "pub enum Mirror { A(Vec<u8>) }",
+        "pub struct Bounded<R> where R: Read { r: R, n: u64 }",
+        "impl<R> Bounded<R> {",
+        "    pub fn n(&self) -> u64 { self.n }",
+        "}",
+      ].join("\n"),
+      "crates/p/src/b.rs": [
+        "pub enum Twin { A(Vec<u8>) }",
+        "pub struct Mirror { n: u64, b: Vec<u8> }",
+        "impl Mirror {",
+        "    pub fn n(&self) -> u64 { self.n }",
+        "}",
+      ].join("\n"),
+    };
+    expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
+      "crates/p/src/a.rs::Msg::code",
+      "crates/p/src/a.rs::Twin::n",
+      "crates/p/src/a.rs::Bounded::n",
+      "crates/p/src/b.rs::Mirror::n",
+    ]);
+  });
+
+  it("names a pub byte field another crate could read, unless listed with a reason", () => {
+    const tree = {
+      ...repo,
+      "crates/p/src/pubs.rs": [
+        "pub struct Open {",
+        "    #[allow(dead_code)]",
+        "    pub buf: Vec<u8>,",
+        "    pub n: u64,",
+        "    pub(crate) mine: Vec<u8>,",
+        "    own: Vec<u8>,",
+        "}",
+        "pub struct Tuple(pub [u8; 4], pub(super) Vec<u8>);",
+        "pub struct Listed { pub rgb: [u8; 3], pub bare: [u8; 3] }",
+      ].join("\n"),
+    };
+    const listed = {
+      "crates/p/src/pubs.rs::Listed::rgb": "a colour",
+      "crates/p/src/pubs.rs::Listed::bare": " ",
+      "crates/p/src/pubs.rs::Gone::x": "a colour",
+    };
+    expect(failures(fuzzed, exempt, tree, listed)).toEqual([
+      expect.stringContaining("crates/p/src/pubs.rs::Open::buf: a pub byte field"),
+      expect.stringContaining("crates/p/src/pubs.rs::Tuple::0: a pub byte field"),
+      expect.stringContaining("Listed::bare is in PUBLIC_BYTE_FIELDS with no reason"),
+      expect.stringContaining("Gone::x is listed, but no such pub byte field exists"),
     ]);
   });
 

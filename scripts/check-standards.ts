@@ -723,10 +723,6 @@ const FUZZED_DECODERS: Record<string, string> = {
 const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/process.rs::procargs2_split":
     "reached only through procargs2_args and procargs2_env, which proc_args fuzzes",
-  "crates/bazhen-holder/src/holder.rs::Holder::retire_later":
-    "starts ending a child the holder spawned; reads no bytes",
-  "crates/bazhen-holder/src/holder.rs::Holder::retire":
-    "starts ending a child the holder spawned; reads no bytes",
   "crates/bazhen-holder/src/session.rs::Member::of_send":
     "names what the guard's send made of a process; reads no bytes",
   "crates/bazhen-holder/src/engine.rs::advance":
@@ -739,11 +735,6 @@ const NOT_DECODERS: Record<string, string> = {
     "copies the child's output into the ring and the engine's Engine::advance, which its advance target fuzzes",
   "crates/bazhen-holder/src/engine.rs::Screen::new": "keeps a ring and an engine; reads no bytes",
   "crates/bazhen-holder/src/engine.rs::Screen::ring": "returns a field; reads no bytes",
-  "crates/bazhen-holder/src/engine.rs::Screen::engine": "returns a field; reads no bytes",
-  "crates/bazhen-holder/src/engine.rs::Screen::engine_mut": "returns a field; reads no bytes",
-  "crates/bazhen-holder/src/engine.rs::Screen::take_replies":
-    "hands over replies the engine wrote itself; reads no bytes",
-  "crates/bazhen-holder/src/holder.rs::Holder::output_mut": "returns a field; reads no bytes",
   "crates/bazhen-holder/src/holder.rs::Holder::reply":
     "queues replies the engine wrote itself for the child; reads no bytes",
   "crates/bazhen-holder/src/input.rs::InputQueue::offer_replies":
@@ -752,18 +743,8 @@ const NOT_DECODERS: Record<string, string> = {
     "queues a decoded input request's bytes for the child; parses nothing",
   "crates/bazhen-holder/src/server.rs::stats":
     "reads the holder's own counts; no bytes from a peer",
-  "crates/bazhen-holder/src/conn.rs::Connection::accepted":
-    "returns a field or a state; reads no bytes",
-  "crates/bazhen-holder/src/conn.rs::Connection::answering":
-    "returns a field or a state; reads no bytes",
-  "crates/bazhen-holder/src/conn.rs::Connection::has_request":
-    "returns a field or a state; reads no bytes",
   "crates/bazhen-holder/src/conn.rs::Connection::queue_subscribed":
     "queues a frame this holder encoded, with where output then starts; reads nothing",
-  "crates/bazhen-holder/src/conn.rs::Connection::live_cursor":
-    "returns a field or a state; reads no bytes",
-  "crates/bazhen-holder/src/conn.rs::Connection::offset":
-    "checks an offset fits the protocol; reads no bytes",
   "crates/bazhen-holder/src/conn.rs::Connection::queue_exited":
     "queues a frame this holder encoded; reads nothing",
   "crates/bazhen-holder/src/conn.rs::Connection::requeue_exited":
@@ -772,15 +753,8 @@ const NOT_DECODERS: Record<string, string> = {
     "queues a snapshot this holder encoded; reads nothing",
   "crates/bazhen-holder/src/conn.rs::Connection::queue_state":
     "queues a report this holder encoded in place of one it queued; reads nothing",
-  "crates/bazhen-holder/src/conn.rs::Connection::owed_snapshot": "returns a count; reads no bytes",
-  "crates/bazhen-holder/src/conn.rs::Connection::holds_a_snapshot":
-    "returns a state; reads no bytes",
-  "crates/bazhen-holder/src/conn.rs::Connection::hold": "keeps a decoded request; reads no bytes",
-  "crates/bazhen-holder/src/conn.rs::Connection::take_after_snapshot":
-    "returns a field; reads no bytes",
   "crates/bazhen-holder/src/server.rs::Server::publish":
     "reads the engine's title and screen and queues reports it encodes; reads no bytes",
-  "crates/bazhen-holder/src/server.rs::Server::offset_of": "converts an offset; reads no bytes",
   "crates/bazhen-holder/src/server.rs::Server::broadcast":
     "queues a report this holder encodes; reads nothing",
   "crates/bazhen-holder/src/server.rs::Server::evict_stuck_snapshots":
@@ -792,43 +766,16 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/server.rs::owed_snapshots": "sums counts; reads no bytes",
   "crates/bazhen-holder/src/conn.rs::Connection::next_frame":
     "chooses and encodes the next frame from the queue and the ring; reads no bytes",
-  "crates/bazhen-holder/src/conn.rs::Connection::take_next":
-    "takes FrameDecoder::next_frame's result, which the proto crate's frame target fuzzes",
-  "crates/bazhen-holder/src/conn.rs::Connection::deadline":
-    "returns a field or a state; reads no bytes",
-  "crates/bazhen-holder/src/conn.rs::Connection::drop_now":
-    "changes the connection's phase; reads nothing",
-  "crates/bazhen-holder/src/conn.rs::Connection::fd": "borrows the socket for poll; reads nothing",
   "crates/bazhen-holder/src/conn.rs::Connection::flush":
     "writes frames this holder encoded; reads nothing",
-  "crates/bazhen-holder/src/conn.rs::Connection::hang_up":
-    "changes the connection's phase; reads nothing",
-  "crates/bazhen-holder/src/conn.rs::Connection::id": "returns a field or a state; reads no bytes",
   "crates/bazhen-holder/src/conn.rs::Connection::interest":
     "says what poll should wait for; reads nothing",
   "crates/bazhen-holder/src/conn.rs::Connection::is_finished":
     "returns a field or a state; reads no bytes",
-  "crates/bazhen-holder/src/conn.rs::Connection::is_gone":
-    "returns a field or a state; reads no bytes",
-  "crates/bazhen-holder/src/conn.rs::Connection::is_open":
-    "returns a field or a state; reads no bytes",
-  "crates/bazhen-holder/src/conn.rs::Connection::is_opening":
-    "returns a field or a state; reads no bytes",
-  "crates/bazhen-holder/src/conn.rs::Connection::may_send":
-    "returns a field or a state; reads no bytes",
-  "crates/bazhen-holder/src/conn.rs::Connection::next_request":
-    "hands over FrameDecoder::next_frame's result, which the proto crate's frame target fuzzes",
-  "crates/bazhen-holder/src/conn.rs::Connection::open":
-    "changes the connection's phase; reads nothing",
   "crates/bazhen-holder/src/conn.rs::Connection::queue":
     "queues a frame this holder encoded; reads nothing",
-  "crates/bazhen-holder/src/conn.rs::Connection::queued":
-    "returns a field or a state; reads no bytes",
-  "crates/bazhen-holder/src/conn.rs::Connection::reading":
-    "returns a field or a state; reads no bytes",
   "crates/bazhen-holder/src/conn.rs::Connection::polled":
     "hands its buffer to receive, or drops the connection on a hang-up; parses nothing itself",
-  "crates/bazhen-holder/src/conn.rs::Connection::held_since": "returns a field; reads no bytes",
   "crates/bazhen-holder/src/conn.rs::Connection::subscribed":
     "reads the connection's own state; reads no bytes",
   "crates/bazhen-holder/src/conn.rs::Connection::latest_subscription":
@@ -837,10 +784,7 @@ const NOT_DECODERS: Record<string, string> = {
     "orders connections by their state; reads no bytes",
   "crates/bazhen-holder/src/conn.rs::Connection::receive":
     "reads the socket into FrameDecoder::push, which the proto crate's frame target fuzzes; parses nothing itself",
-  "crates/bazhen-holder/src/conn.rs::Connection::stuck_since":
-    "returns a field or a state; reads no bytes",
   "crates/bazhen-holder/src/ring.rs::Ring::capacity": "returns a field or a state; reads no bytes",
-  "crates/bazhen-holder/src/ring.rs::Ring::end": "returns a field or a state; reads no bytes",
   "crates/bazhen-holder/src/ring.rs::Ring::held": "returns a field or a state; reads no bytes",
   "crates/bazhen-holder/src/ring.rs::Ring::push":
     "copies the child's output into the ring as it came; parses nothing",
@@ -852,26 +796,12 @@ const NOT_DECODERS: Record<string, string> = {
     "the ring's Output: copies the child's output in; parses nothing",
   "crates/bazhen-holder/src/holder.rs::Holder::after_poll":
     "reads the master into the Output, a sink that parses nothing; reaps the child",
-  "crates/bazhen-holder/src/holder.rs::Holder::child_pid":
-    "returns a field or a state; reads no bytes",
-  "crates/bazhen-holder/src/holder.rs::Holder::close":
-    "starts signalling the child's groups; reads nothing",
-  "crates/bazhen-holder/src/holder.rs::Holder::generation":
-    "returns a field or a state; reads no bytes",
-  "crates/bazhen-holder/src/holder.rs::Holder::master":
-    "borrows the master fd for poll; reads nothing",
-  "crates/bazhen-holder/src/holder.rs::Holder::output":
-    "returns a field or a state; reads no bytes",
-  "crates/bazhen-holder/src/holder.rs::Holder::wakeups":
-    "borrows the SIGCHLD wake-up fd for poll; reads nothing",
   "crates/bazhen-holder/src/server.rs::Server::accept": "accepts connections; reads no bytes",
   "crates/bazhen-holder/src/server.rs::Server::close_done":
     "checks whether a close is done; reads nothing",
   "crates/bazhen-holder/src/server.rs::Server::release_writer":
     "frees the writer slot once no open connection holds it; reads nothing",
   "crates/bazhen-holder/src/server.rs::Server::deadline":
-    "returns a field or a state; reads no bytes",
-  "crates/bazhen-holder/src/server.rs::Server::listening":
     "returns a field or a state; reads no bytes",
   "crates/bazhen-holder/src/server.rs::Server::poll": "waits on fds; reads nothing",
   "crates/bazhen-holder/src/server.rs::Server::run":
@@ -896,7 +826,6 @@ const NOT_DECODERS: Record<string, string> = {
     "queues an event this holder encoded; reads nothing",
   "crates/bazhen-holder/src/conn.rs::Connection::push_event":
     "queues an event this holder encoded; reads nothing",
-  "crates/bazhen-holder/src/holder.rs::Holder::reaper": "returns a field; reads no bytes",
   "crates/bazhen-holder/src/holder.rs::Holder::respawn":
     "swaps in a new PTY and child; reads no bytes",
   "crates/bazhen-holder/src/server.rs::foreground":
@@ -908,15 +837,8 @@ const NOT_DECODERS: Record<string, string> = {
     "queues decoded input for the child, parsing none of it",
   "crates/bazhen-holder/src/holder.rs::Holder::flush_input":
     "writes queued input to the master; reads nothing",
-  "crates/bazhen-holder/src/holder.rs::Holder::resize": "sets the window size; reads nothing",
-  "crates/bazhen-holder/src/holder.rs::Holder::child_exited":
-    "returns a field or a state; reads no bytes",
-  "crates/bazhen-holder/src/holder.rs::Holder::ended": "returns a state; reads no bytes",
   "crates/bazhen-holder/src/holder.rs::Holder::master_closed":
     "marks the master's output over and drops queued input; reads nothing",
-  "crates/bazhen-holder/src/holder.rs::Holder::foreground_group":
-    "asks the master for its foreground group; reads no bytes",
-  "crates/bazhen-holder/src/holder.rs::Holder::signal": "signals the child's group; reads nothing",
   "crates/bazhen-holder/src/input.rs::InputQueue::is_empty":
     "returns a field or a state; reads no bytes",
   "crates/bazhen-holder/src/input.rs::InputQueue::len":
@@ -954,14 +876,10 @@ const NOT_DECODERS: Record<string, string> = {
     "a step of has_keystrokes, which the input target fuzzes",
   "crates/bazhen-protocol/src/input.rs::reply":
     "a step of has_keystrokes, which the input target fuzzes",
-  "crates/bazhen/src/attach/attachment.rs::Attachment::declared":
-    "reads whether an epoch was declared; parses nothing",
   "crates/bazhen/src/attach/attachment.rs::Attachment::declare":
     "hands the keys Attachment::keys held over, whole; parses nothing",
   "crates/bazhen/src/attach/attachment.rs::Attachment::engage":
     "asks for the lease when keys are held for it; reads no bytes",
-  "crates/bazhen/src/attach/attachment.rs::Attachment::resized":
-    "records the terminal's size and frames it; reads no bytes",
   "crates/bazhen/src/attach/link.rs::drain":
     "reads the daemon's frames through tungstenite, and their text through Attachment::frame, which the attach target fuzzes",
   "crates/bazhen/src/attach/link.rs::act": "writes frames and keys this build made; reads nothing",
@@ -981,11 +899,8 @@ const NOT_DECODERS: Record<string, string> = {
     "the Output trait's method: a sink handed the child's bytes in order, to keep",
   "crates/bazhen-holder/src/holder.rs::Discard::write":
     "drops the bytes it is handed; parses nothing",
-  "crates/bazhen-holder/src/holder.rs::Holder::exit": "returns the published exit; reads nothing",
   "crates/bazhen-holder/src/holder.rs::Holder::turn":
     "polls, then hands a readable master to read_master; parses nothing",
-  "crates/bazhen-holder/src/holder.rs::Holder::deadline":
-    "picks the nearer of two deadlines; reads nothing",
   "crates/bazhen-holder/src/holder.rs::Holder::read_master":
     "copies the child's output to the Output in chunks, unparsed",
   "crates/bazhen-holder/src/holder.rs::Holder::step":
@@ -1125,6 +1040,15 @@ const NOT_DECODERS: Record<string, string> = {
     "reads /proc/self/stat for own_pid, which proc_stat fuzzes",
 };
 
+// A carrier's bytes are found by the methods of its own crate that use the field holding them, so
+// a field another crate can read is listed here with why its bytes aren't from outside.
+const PUBLIC_BYTE_FIELDS: Record<string, string> = {
+  "crates/bazhen-holder-proto/src/body.rs::ThemeColours::text":
+    "a built-in theme's RGB, which Theme::colours makes in-process",
+  "crates/bazhen-holder-proto/src/body.rs::ThemeColours::background":
+    "a built-in theme's RGB, which Theme::colours makes in-process",
+};
+
 // An impl block, whose associated types its trait requires, so they aren't aliases. (A trait's
 // own associated types take no `= …` on stable, so the alias pattern never matches them.)
 const IMPL_BLOCK = /(?<=^|[;{}])\s*(?:(?:pub(?:\([^)]*\))?|unsafe)\s+)*impl\b[^{;]*(?=\{)/gm;
@@ -1173,30 +1097,130 @@ const BYTE_TYPE_NAMES = new Set(
 );
 
 /**
- * The structs and enums in `code` with a field that carries bytes. Such a type is a byte type
- * too: its methods read the bytes through `self`, as a stateful frame reader does.
+ * The types of a crate that carry bytes, each with the fields that hold them. `undefined` means
+ * any use of `self` may reach the bytes: an enum, whose variants are read by `match self`, or a
+ * struct whose bytes come by a type parameter bounded by a byte trait (`struct R<T: Read>`).
  */
-function byteCarriers(code: string): Set<string> {
-  const items = [...code.matchAll(/\b(?:struct|enum)\s+(\w+)/g)].map((m) => ({
-    name: m[1] ?? "",
+type Carriers = Map<string, Set<string> | undefined>;
+
+/**
+ * The structs and enums in `code` with a field that carries bytes. Such a type is a byte type
+ * too: a method of it reads the bytes through `self`, as a stateful frame reader does, when it
+ * uses a field that holds them.
+ */
+function byteCarriers(code: string): Carriers {
+  const items = [...code.matchAll(/\b(struct|enum)\s+(\w+)/g)].map((m) => ({
+    kind: m[1],
+    name: m[2] ?? "",
     body: code.slice(m.index, itemEnd(code, m.index)),
   }));
-  const carriers = new Set(items.filter((i) => BYTES_IN.test(i.body)).map((i) => i.name));
+  const names = new Set(items.filter((i) => BYTES_IN.test(i.body)).map((i) => i.name));
   // A type holding a carrier carries bytes too, however deep: repeat until nothing is added.
   for (let grew = true; grew;) {
     grew = false;
     for (const { name, body } of items) {
-      if (!carriers.has(name) && mentionsAny(body.slice(name.length), carriers)) {
-        carriers.add(name);
+      if (!names.has(name) && mentionsAny(body.slice(name.length), names)) {
+        names.add(name);
         grew = true;
       }
     }
   }
+  const carriers: Carriers = new Map();
+  for (const { kind, name, body } of items.filter((i) => names.has(i.name))) {
+    const struct = kind === "struct" ? structFields(body) : undefined;
+    const holds = (type: string) => BYTES_IN.test(type) || mentionsAny(type, names);
+    const fields =
+      struct === undefined || holds(struct.head)
+        ? undefined
+        : new Set(struct.fields.filter((f) => holds(f.type)).map((f) => f.name));
+    // Two types of one name in a crate: either's byte fields may be the one a method uses.
+    const known = carriers.has(name) ? carriers.get(name) : new Set<string>();
+    carriers.set(
+      name,
+      known === undefined || fields === undefined ? undefined : new Set([...known, ...fields]),
+    );
+  }
   return carriers;
 }
 
-const mentionsAny = (text: string, names: Set<string>) =>
+/**
+ * A struct's fields, by name or, in a tuple struct, by index, each with whether it is `pub` to
+ * other crates, and its head: its generics and `where` clause.
+ */
+function structFields(item: string): {
+  head: string;
+  fields: { name: string; type: string; public: boolean }[];
+} {
+  const name = /\bstruct\s+\w+\s*/.exec(item);
+  const from = (name?.index ?? 0) + (name?.[0].length ?? 0);
+  let i = from;
+  for (let depth = 0; i < item.length; i++) {
+    const c = item[i];
+    if (c === "<") depth++;
+    else if (c === ">" && item[i - 1] !== "-") depth--;
+    else if (depth <= 0 && (c === "{" || c === "(" || c === ";")) break;
+  }
+  const open = item[i];
+  if (open !== "{" && open !== "(") return { head: item.slice(from), fields: [] };
+  const parts: string[] = [];
+  let depth = 0;
+  let start = i + 1;
+  let close = item.length;
+  for (let j = i; j < item.length; j++) {
+    const c = item[j];
+    if ("([{<".includes(c ?? "")) depth++;
+    else if (")]}".includes(c ?? "") || (c === ">" && item[j - 1] !== "-")) depth--;
+    if (depth === 0) {
+      close = j;
+      break;
+    }
+    if (depth === 1 && c === ",") {
+      parts.push(item.slice(start, j));
+      start = j + 1;
+    }
+  }
+  parts.push(item.slice(start, close));
+  const fields = parts
+    .map((p) => p.replace(/#\s*\[(?:[^[\]]|\[[^\]]*\])*\]/g, "").trim())
+    .filter((p) => p !== "")
+    .map((p, index) => {
+      const visibility = /^pub\b\s*(\([^)]*\))?\s*/.exec(p);
+      const field = p.slice(visibility?.[0].length ?? 0);
+      const named = /^(\w+)\s*:(?!:)([\s\S]*)$/.exec(field);
+      return {
+        name: open === "{" ? (named?.[1] ?? "") : String(index),
+        type: open === "{" ? (named?.[2] ?? field) : field,
+        public: visibility !== null && visibility[1] === undefined,
+      };
+    });
+  return { head: item.slice(from, i) + item.slice(close + 1), fields };
+}
+
+const mentionsAny = (text: string, names: Iterable<string>) =>
   [...names].some((n) => new RegExp(`\\b${n}\\b`).test(text));
+
+/**
+ * Whether a method body reaches the bytes of `self`, whose type holds them in `fields`
+ * (`undefined`: in any use of `self`). It does by one of those fields, by `self` itself handed on
+ * or matched, or by calling a method of its own that does (`calls`) or one it doesn't know.
+ */
+function reachesBytes(
+  body: string,
+  fields: Set<string> | undefined,
+  calls: (method: string) => boolean,
+): boolean {
+  if (fields === undefined) return true;
+  if (/\bself\b(?!\s*(?:\.|::))/.test(body)) return true;
+  if (
+    fields.size > 0 &&
+    new RegExp(`\\bself\\s*\\.\\s*(?:${[...fields].join("|")})\\b`).test(body)
+  ) {
+    return true;
+  }
+  return [...body.matchAll(/\bself\s*\.\s*(\w+)\s*(?:::\s*<[^()]*>\s*)?\(/g)].some(([, m]) =>
+    calls(m ?? ""),
+  );
+}
 
 /**
  * Each impl block in `code`: where it spans, the type it is for, and whether its generics or
@@ -1292,14 +1316,15 @@ const inside = (i: number, spans: { start: number; end: number }[]) =>
  * the body. A method is named with its type (`Reader::next_frame`), so two types' methods of one
  * name stay apart.
  */
-export function byteTakers(source: string, carriers: Set<string> = new Set()): string[] {
+export function byteTakers(source: string, carriers: Carriers = new Map()): string[] {
   const code = withoutTests(rustCode(source));
   const blocks = implBlocks(code);
   const fns = [...code.matchAll(/\bfn\s+(\w+)/g)].map((m) => {
     const { end, takes } = signature(code.slice(m.index));
     const open = m.index + end;
     const close = code[open] === "{" ? itemEnd(code, open) : open;
-    return { m, takes, open, close, body: code.slice(open, close) };
+    const block = blocks.find((b) => b.start < m.index && m.index < b.end);
+    return { m, fn: m[1] ?? "", block, takes, open, close, body: code.slice(open, close) };
   });
   const bodies = fns.map((f) => ({ start: f.open, end: f.close }));
   const own = new Set(
@@ -1307,17 +1332,46 @@ export function byteTakers(source: string, carriers: Set<string> = new Set()): s
       .filter(({ m }) => !inside(m.index, blocks) && !inside(m.index, bodies))
       .map(({ m }) => m[1]),
   );
-  return fns.flatMap(({ m, takes, body }) => {
-    const block = blocks.find((b) => b.start < m.index && m.index < b.end);
-    const fn = m[1] ?? "";
+  const methods = (type: string) => fns.filter((f) => f.block?.type === type);
+  const selfMethods = fns.filter(
+    (f) =>
+      f.block !== undefined &&
+      (carriers.has(f.block.type) || f.block.byteBound) &&
+      /\bself\b/.test(f.takes),
+  );
+  // A method reaching bytes through a method of its own: repeat until nothing is added.
+  const viaSelf = new Set<(typeof fns)[number]>();
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const f of selfMethods.filter((s) => !viaSelf.has(s))) {
+      const type = f.block?.type ?? "";
+      const fields = f.block?.byteBound ? undefined : carriers.get(type);
+      const calls = (name: string) => {
+        const called = methods(type).filter((g) => g.fn === name);
+        return called.length === 0 || called.some((g) => viaSelf.has(g));
+      };
+      if (reachesBytes(f.body, fields, calls)) {
+        viaSelf.add(f);
+        grew = true;
+      }
+    }
+  }
+  return fns.flatMap((f) => {
+    const { fn, block, takes, body } = f;
     const name = block === undefined ? fn : `${block.type}::${fn}`;
-    const viaSelf =
+    const takesSelfType =
       block !== undefined &&
       (carriers.has(block.type) || block.byteBound) &&
-      /\bself\b/.test(takes);
+      /\bSelf\b/.test(takes.replace(/\bself\s*:[^,)]*/, ""));
     const reads =
-      BODY_READS.test(body) || [...body.matchAll(BARE_READ)].some(([, f]) => !own.has(f));
-    return BYTES_IN.test(takes) || mentionsAny(takes, carriers) || viaSelf || reads ? [name] : [];
+      BODY_READS.test(body) || [...body.matchAll(BARE_READ)].some(([, g]) => !own.has(g));
+    return BYTES_IN.test(takes) ||
+      mentionsAny(takes, carriers.keys()) ||
+      takesSelfType ||
+      viaSelf.has(f) ||
+      reads
+      ? [name]
+      : [];
   });
 }
 
@@ -1332,17 +1386,20 @@ function definedFunctions(source: string): string[] {
 }
 
 /**
- * Why a function that takes bytes has no fuzz target and no reason it needs none, or why an
- * entry in either list is stale or its target missing.
+ * Why a function that takes bytes has no fuzz target and no reason it needs none, why a `pub` byte
+ * field has no reason it holds no bytes from outside, or why an entry in a list is stale or its
+ * target missing.
  */
 export function decoderFailures(
   paths: string[],
   read: (path: string) => string,
   fuzzed: Record<string, string>,
   notDecoders: Record<string, string>,
+  publicByteFields: Record<string, string> = {},
 ): string[] {
   const out: string[] = [];
   const found = new Set<string>();
+  const publicFound = new Set<string>();
   const defined = new Set<string>();
   const sources = paths.filter((p) => /^crates\/[^/]+\/src\/.+\.rs$/.test(p));
   const testOnly = testModuleFiles(sources, read);
@@ -1354,7 +1411,7 @@ export function decoderFailures(
   }
   const crateCarriers = new Map([...crateCode].map(([crate, code]) => [crate, byteCarriers(code)]));
   for (const file of product) {
-    const carriers = crateCarriers.get(crateOf(file)) ?? new Set<string>();
+    const carriers: Carriers = crateCarriers.get(crateOf(file)) ?? new Map();
     const code = blankItems(withoutTests(rustCode(read(file))), IMPL_BLOCK);
     for (const fn of definedFunctions(read(file))) defined.add(`${file}::${fn}`);
     for (const use of code.matchAll(/\buse\b[^;]*;/g)) {
@@ -1367,8 +1424,22 @@ export function decoderFailures(
         }
       }
     }
+    for (const struct of code.matchAll(/\bstruct\s+(\w+)/g)) {
+      const { fields } = structFields(code.slice(struct.index, itemEnd(code, struct.index)));
+      for (const field of fields.filter((f) => f.public && BYTES_IN.test(f.type))) {
+        const key = `${file}::${struct[1]}::${field.name}`;
+        publicFound.add(key);
+        if (!(key in publicByteFields)) {
+          out.push(
+            `${key}: a pub byte field, which another crate can read where the decoder rule ` +
+              "doesn't look: make it private and read it in a method of its type, or list it in " +
+              "PUBLIC_BYTE_FIELDS with why its bytes aren't from outside.",
+          );
+        }
+      }
+    }
     for (const alias of code.matchAll(/\btype\s+(\w+)[^=;]*=([^;]*);/g)) {
-      if (BYTES_IN.test(alias[2] ?? "") || mentionsAny(alias[2] ?? "", carriers)) {
+      if (BYTES_IN.test(alias[2] ?? "") || mentionsAny(alias[2] ?? "", carriers.keys())) {
         out.push(
           `${file}::${alias[1]}: names a byte type, which hides it from the decoder rule. ` +
             "Write the byte type in each signature instead.",
@@ -1385,6 +1456,16 @@ export function decoderFailures(
             "isn't one (scripts/check-standards.ts, docs/standards/rust.md § Tests).",
         );
       }
+    }
+  }
+  for (const [key, reason] of Object.entries(publicByteFields)) {
+    if (!publicFound.has(key)) {
+      out.push(`scripts/check-standards.ts: ${key} is listed, but no such pub byte field exists.`);
+    } else if (reason.trim() === "") {
+      out.push(
+        `scripts/check-standards.ts: ${key} is in PUBLIC_BYTE_FIELDS with no reason its bytes ` +
+          "aren't from outside.",
+      );
     }
   }
   for (const key of Object.keys(fuzzed).filter((k) => !defined.has(k))) {
@@ -2121,6 +2202,7 @@ export function rustFailures(
     macroModules?: Record<string, string>;
     fuzzed?: Record<string, string>;
     notDecoders?: Record<string, string>;
+    publicByteFields?: Record<string, string>;
     heavyAllowed?: Record<string, string>;
   } = {},
 ): string[] {
@@ -2209,7 +2291,15 @@ export function rustFailures(
   pinned("clippy.toml", CLIPPY_CONFIG, "CLIPPY_CONFIG");
   pinned(".cargo/config.toml", CARGO_CONFIG, "CARGO_CONFIG");
   pinned(".cargo/mutants.toml", MUTANTS_CONFIG, "MUTANTS_CONFIG");
-  out.push(...decoderFailures(paths, read, options.fuzzed ?? {}, options.notDecoders ?? {}));
+  out.push(
+    ...decoderFailures(
+      paths,
+      read,
+      options.fuzzed ?? {},
+      options.notDecoders ?? {},
+      options.publicByteFields ?? {},
+    ),
+  );
   return out;
 }
 
@@ -2282,6 +2372,7 @@ function checkRust(): void {
       macroModules: MACRO_MODULES,
       fuzzed: FUZZED_DECODERS,
       notDecoders: NOT_DECODERS,
+      publicByteFields: PUBLIC_BYTE_FIELDS,
       heavyAllowed: HEAVY_ALLOWED,
     }),
   );
