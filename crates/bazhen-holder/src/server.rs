@@ -347,9 +347,6 @@ impl Server {
             let longest = self
                 .conns
                 .iter_mut()
-                // No test tells `> 0` from `>= 0` here or in `evicting_at`: that needs a peer stuck
-                // while it owes no snapshot. To try: shrink the accepted connection's SO_SNDBUF in
-                // the test harness, so plain output sticks one.
                 .filter(|conn| conn.owed_snapshot() > 0 && Some(conn.id()) != writer)
                 .filter_map(|conn| conn.stuck_since().map(|since| (since, conn)))
                 .filter(|(since, _)| now.saturating_duration_since(*since) >= stuck_for)
@@ -673,7 +670,6 @@ fn evicting_at(conns: &[Connection], shared: &Shared) -> Option<Instant> {
     }
     conns
         .iter()
-        // `> 0` is untested against `>= 0`, as in `evict_stuck_snapshots`.
         .filter(|conn| conn.owed_snapshot() > 0 && Some(conn.id()) != shared.writer)
         .filter_map(Connection::stuck_since)
         .map(|since| since + shared.stuck_to_evict)
@@ -1540,6 +1536,27 @@ mod tests {
         }
     }
 
+    /// Ends the test process, failing, with `stalled` unless dropped within `within`. A turn
+    /// that never returns can't fail an assertion: the test's own thread is the one in it, and a
+    /// holder can't move to another, as its engine isn't `Send`.
+    struct StallWatch {
+        _alive: std::sync::mpsc::Sender<()>,
+    }
+
+    impl StallWatch {
+        fn new(within: Duration, stalled: &'static str) -> Self {
+            let (alive, watched) = std::sync::mpsc::channel::<()>();
+            std::thread::spawn(move || {
+                if watched.recv_timeout(within) == Err(std::sync::mpsc::RecvTimeoutError::Timeout) {
+                    // Past the test harness's capture, which an exit would never print.
+                    let _ = writeln!(std::io::stderr(), "{stalled}");
+                    std::process::exit(101);
+                }
+            });
+            Self { _alive: alive }
+        }
+    }
+
     /// Long enough that no peer is dropped for being stuck however slow the host.
     const NEVER: Duration = Duration::from_secs(3600);
 
@@ -1592,7 +1609,7 @@ mod tests {
 
     #[test]
     #[ignore = "signals processes; runs in pnpm test:real rust"]
-    fn a_peer_that_leaves_its_snapshot_unread_is_dropped_for_one_that_waits_but_never_the_writer() {
+    fn only_a_peer_stuck_owing_a_snapshot_is_dropped_for_one_that_waits_and_never_the_writer() {
         bazhen_test_signal::require_sandbox().unwrap();
         let mut big = Failing::big("snapshot-evict", 10, NEVER);
         let _writer = big.peer(&[hello_as(true), snapshot_request(10)]);
@@ -1602,6 +1619,31 @@ mod tests {
                 .conns
                 .iter()
                 .any(|c| Some(c.id()) == b.server.shared.writer && c.stuck_since().is_some())
+        });
+        // Stuck next, on output alone: the ring's 64 KiB fill a send buffer shrunk before it
+        // subscribes, where `admit`'s would take them all.
+        let plain = big.server.next_id + 1;
+        let plain_peer = big.peer(&[hello_request()]);
+        big.until_within("the plain peer accepted", 30, |b| b.server.next_id == plain);
+        let accepted = big.server.conns.iter().find(|c| c.id() == plain).unwrap();
+        rustix::net::sockopt::set_socket_send_buffer_size(accepted.fd(), 4096).unwrap();
+        let from_the_start = Request::Subscribe {
+            id: RequestId(3),
+            body: body::SubscribeRequest {
+                from: Some(SubscribeFrom {
+                    generation: body::Generation::new(0).unwrap(),
+                    offset: Offset::new(0).unwrap(),
+                }),
+            },
+        };
+        (&plain_peer)
+            .write_all(&from_the_start.encode().unwrap())
+            .unwrap();
+        big.until_within("the plain peer stuck owing no snapshot", 30, |b| {
+            b.server
+                .conns
+                .iter()
+                .any(|c| c.id() == plain && c.stuck_since().is_some() && c.owed_snapshot() == 0)
         });
         let _peers: Vec<UnixStream> = (11..14)
             .map(|id| big.peer(&[hello_request(), snapshot_request(id)]))
@@ -1624,11 +1666,19 @@ mod tests {
             .server
             .conns
             .iter()
-            .filter(|c| Some(c.id()) != writer)
+            .filter(|c| c.owed_snapshot() > 0 && Some(c.id()) != writer)
             .filter_map(|c| c.stuck_since().map(|since| (since, c.id())))
             .min()
             .map(|(_, id)| id);
         let _held = big.peer(&[hello_request(), snapshot_request(14)]);
+        // What is armed builds one snapshot of `BIG` and waits out `stuck_to_evict`: a few seconds
+        // on a Linux host, and an estimated 25 at most on CI's macOS runner, whose suite is five
+        // times slower. Two minutes is five times that, and far under a test's time cap.
+        let watch = StallWatch::new(
+            Duration::from_secs(120),
+            "a turn never returned: the eviction went on picking peers whose drop makes no room, \
+             as a dropped one owing no snapshot is",
+        );
         big.until_within("a snapshot held for room", 30, Failing::holding);
         // The loop wakes for the drop when the first peer owing a snapshot, the writer aside, has
         // been stuck long enough, though nothing else happens.
@@ -1645,6 +1695,7 @@ mod tests {
             Some(first_stuck + big.server.shared.stuck_to_evict)
         );
         big.until_within("the held snapshot answered", 30, |b| !b.holding());
+        drop(watch);
         let ids: Vec<u64> = big.server.conns.iter().map(Connection::id).collect();
         assert!(
             ids.iter().any(|&id| Some(id) == writer),
@@ -1654,7 +1705,8 @@ mod tests {
             !ids.iter().any(|&id| Some(id) == longest),
             "the longest stuck was kept"
         );
-        assert_eq!(ids.len(), 4, "more were dropped than made room");
+        assert!(ids.contains(&plain), "a peer owing no snapshot was dropped");
+        assert_eq!(ids.len(), 5, "more were dropped than made room");
     }
 
     #[test]
