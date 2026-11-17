@@ -34,6 +34,9 @@ const CLI_MAIN = "crates/bazhen/src/main.rs";
 const TEST = "packages/a/src/x.test.ts";
 const CONTROL = `Control: ${TEST} › caps: return v = 1 -> expected 2, got 1`;
 
+/** A test call whose title falsify can't read, split so this file's own line isn't one. */
+const UNREADABLE = ["it", "(name, () => {});"].join("");
+
 const STUB_PNPM = `#!/bin/sh
 {
   echo "ARGS: $*"
@@ -491,7 +494,7 @@ describe("falsify on a branch in a linked worktree", () => {
   });
 
   it("takes a control for another new test in the file as none for one whose title it couldn't read", () => {
-    renameTest('it("caps", () => {});\nit(name, () => {});', CONTROL);
+    renameTest(branchTest(`${UNREADABLE}\n`), CONTROL);
     expect(againstBase()).toEqual({
       status: 1,
       output: expect.stringContaining(
