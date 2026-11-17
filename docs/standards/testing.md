@@ -252,7 +252,8 @@ A test owns everything it touches and leaves nothing behind.
   `process`, or computed, in code or in a template's `${…}`; a member
   named `kill` on anything, as text can't tell a `ChildProcess` or a node-pty terminal from
   another object; a `timeout`, `killSignal` or `signal` option to a `child_process` start, which
-  Node enforces with a kill; Rust's `kill_process`,
+  Node enforces with a kill, and any options to one that aren't written out in the call, as a
+  variable, a spread or a computed key could hold one; Rust's `kill_process`,
   `kill_process_group`, `kill_current_process_group`, `pidfd_send_signal`, `libc::kill`,
   `libc::killpg`, `tgkill` and `tkill`, nix's `kill` and `killpg` by path, a `use` naming `libc`
   or a `signal` module that imports `kill`, a glob or a rename at any depth of its groups, any
