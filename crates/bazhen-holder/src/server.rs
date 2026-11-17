@@ -1256,7 +1256,9 @@ mod tests {
         let mut drained = vec![0; 1 << 20];
         while conn.queued() > 0 {
             conn.flush(now, &ring);
-            let _ = peer.read(&mut drained).unwrap();
+            let _ = peer
+                .read(&mut drained)
+                .expect("the peer was sent nothing to read");
         }
         assert_eq!(conn.interest(ring.end()), PollFlags::empty());
         server.conns.push(conn);
