@@ -301,7 +301,7 @@ export function startHolder(options: StartHolderOptions): Promise<StartedHolder>
   return startHolderWith(options, {});
 }
 
-/** `startHolder`, with its OS calls replaced. Not exported from the package. */
+/** `startHolder`, with its OS calls replaced. Not for product code. */
 export async function startHolderWith(
   options: StartHolderOptions,
   seams: StartSeams,
@@ -558,15 +558,14 @@ export function vouchHolder(holder: HolderProcess): Promise<HolderProcess | null
   return vouchHolderWith(holder, "kill");
 }
 
-/** `vouchHolder`, for either use, with `ps` and the clock replaced. Not exported from the package. */
+/** `vouchHolder`, for either use, with `ps` replaced. Not for product code. */
 export async function vouchHolderWith(
   holder: HolderProcess,
   use: HolderUse,
   read: (pid: number) => Promise<PsReading> = readProcess,
-  now: () => number = Date.now,
 ): Promise<HolderProcess | null> {
   const reading = await read(holder.pid);
-  return isHolder(reading, holder) ? vouchHolderProcess(holder, use, now()) : null;
+  return isHolder(reading, holder) ? vouchHolderProcess(holder, use) : null;
 }
 
 /**
@@ -578,7 +577,7 @@ export function rebindHolderSocket(holder: HolderProcess): Promise<boolean> {
   return rebindHolderWith(holder, readProcess, rebindHolder);
 }
 
-/** `rebindHolderSocket`, with `ps` and the send replaced. Not exported from the package. */
+/** `rebindHolderSocket`, with `ps` and the send replaced. Not for product code. */
 export async function rebindHolderWith(
   holder: HolderProcess,
   read: (pid: number) => Promise<PsReading>,

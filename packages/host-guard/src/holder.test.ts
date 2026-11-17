@@ -6,7 +6,14 @@ import {
   rebindHolderWith,
   vouchHolderWith,
 } from "./holder.ts";
-import { killHolder, killHolderAt, rebindHolder, rebindHolderAt } from "./signal.ts";
+import {
+  killHolder,
+  killHolderAt,
+  PROOF_MS,
+  proofClock,
+  rebindHolder,
+  rebindHolderAt,
+} from "./signal.ts";
 import type { PsReading } from "./tmux.ts";
 
 // Above every system's pid limit, so even a broken guard reaches no process.
@@ -46,8 +53,8 @@ describe("the holder kill guard", () => {
   it("kills only a holder vouched for in the last second, and only once", async () => {
     const kill = stubKill();
     expect(() => killHolder(holder)).toThrow("unvouched");
-    const stale = await vouchHolderWith(holder, "kill", theHolder, () => 0);
-    expect(() => killHolderAt(stale!, 1_001)).toThrow("stale proof");
+    const stale = await vouchHolderWith(holder, "kill", theHolder);
+    expect(() => killHolderAt(stale!, proofClock() + PROOF_MS + 1)).toThrow("stale proof");
     const proof = await vouchHolderWith(holder, "kill", theHolder);
     expect(killHolder(proof!)).toBe(true);
     expect(() => killHolder(proof!)).toThrow("unvouched");
@@ -59,8 +66,8 @@ describe("the holder rebind guard", () => {
   it("sends SIGUSR1 only to a holder vouched for a rebind in the last second, and only once", async () => {
     const kill = stubKill();
     expect(() => rebindHolder(holder)).toThrow("unvouched");
-    const stale = await vouchHolderWith(holder, "rebind", theHolder, () => 0);
-    expect(() => rebindHolderAt(stale!, 1_001)).toThrow("stale proof");
+    const stale = await vouchHolderWith(holder, "rebind", theHolder);
+    expect(() => rebindHolderAt(stale!, proofClock() + PROOF_MS + 1)).toThrow("stale proof");
     const proof = await vouchHolderWith(holder, "rebind", theHolder);
     expect(rebindHolder(proof!)).toBe(true);
     expect(() => rebindHolder(proof!)).toThrow("unvouched");

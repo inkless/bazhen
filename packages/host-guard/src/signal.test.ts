@@ -1,25 +1,40 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import {
   groupInPs,
   groupInStat,
   isAlive,
   killHolder,
+  killHolderAt,
+  PROOF_MS,
   rebindHolder,
+  rebindHolderAt,
   signalGroup,
   signalOwnChild,
   signalPane,
+  signalPaneAt,
   signalServer,
+  signalServerAt,
   unsafeTarget,
   vouch,
+  vouchAt,
   vouchHolderProcess,
+  vouchHolderProcessAt,
   vouchServer,
+  vouchServerAt,
+  type HolderProcess,
+  type HolderUse,
+  type PaneGroup,
+  type ServerProcess,
 } from "./signal.ts";
 
-const pane = { pid: 4242, server: "/tmp/bz-x/s", pane: "%1", generation: "0" };
+// Above every system's pid limit, so even a broken guard reaches no process.
+const pane = { pid: 2 ** 22 + 1, server: "/tmp/bz-x/s", pane: "%1", generation: "0" };
 
 describe("the signal guard", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   it("refuses a group it did not start", () => {
-    expect(() => signalGroup({ pid: 4242 }, "SIGTERM")).toThrow("not started here");
+    expect(() => signalGroup({ pid: pane.pid }, "SIGTERM")).toThrow("not started here");
   });
 
   it("refuses a pane no tmux server vouched for", () => {
@@ -27,8 +42,26 @@ describe("the signal guard", () => {
   });
 
   it("refuses a proof older than a second, before anything is sent", () => {
-    const proof = vouch(pane, 0);
-    expect(() => signalPane(proof, "SIGTERM", 1_001)).toThrow("stale proof");
+    const proof = vouchAt(pane, 0);
+    expect(() => signalPaneAt(proof, "SIGTERM", PROOF_MS + 1)).toThrow("stale proof");
+  });
+
+  it("refuses a proof spent before it was made, as a clock set back would have it", () => {
+    const proof = vouchAt(pane, 5_000);
+    expect(() => signalPaneAt(proof, "SIGTERM", 4_999)).toThrow("stale proof");
+  });
+
+  // Stubbed, so the send each proof reaches sends nothing.
+  it("sends on a proof spent the moment it was made", () => {
+    const kill = vi.spyOn(process, "kill").mockImplementation(() => true);
+    signalPaneAt(vouchAt(pane, 5_000), "SIGTERM", 5_000);
+    expect(kill.mock.calls).toEqual([[-pane.pid, "SIGTERM"]]);
+  });
+
+  it("sends on a proof spent exactly a second after it was made", () => {
+    const kill = vi.spyOn(process, "kill").mockImplementation(() => true);
+    signalPaneAt(vouchAt(pane, 0), "SIGTERM", PROOF_MS);
+    expect(kill.mock.calls).toEqual([[-pane.pid, "SIGTERM"]]);
   });
 
   it("refuses to probe init, every process, or a group", () => {
@@ -69,19 +102,24 @@ describe("the tmux server signal guard", () => {
   });
 
   it("refuses to signal a server on a proof older than a second", () => {
-    const proof = vouchServer(server, 0);
-    expect(() => signalServer(proof, 1_001)).toThrow("stale proof");
+    const proof = vouchServerAt(server, 0);
+    expect(() => signalServerAt(proof, PROOF_MS + 1)).toThrow("stale proof");
+  });
+
+  it("refuses to signal a server on a proof spent before it was made", () => {
+    const proof = vouchServerAt(server, 5_000);
+    expect(() => signalServerAt(proof, 4_999)).toThrow("stale proof");
   });
 
   it("refuses a proof presented once already, even a refused one, without sending", () => {
-    const proof = vouchServer(server, 0);
-    expect(() => signalServer(proof, 1_001)).toThrow("stale proof");
-    expect(() => signalServer(proof, 0)).toThrow("unvouched");
+    const proof = vouchServerAt(server, 0);
+    expect(() => signalServerAt(proof, PROOF_MS + 1)).toThrow("stale proof");
+    expect(() => signalServerAt(proof, 0)).toThrow("unvouched");
   });
 
   it("refuses a hand-made copy of a proof", () => {
-    const proof = vouchServer(server, 0);
-    expect(() => signalServer({ ...proof }, 0)).toThrow("unvouched");
+    const proof = vouchServerAt(server, 0);
+    expect(() => signalServerAt({ ...proof }, 0)).toThrow("unvouched");
   });
 
   it("refuses to vouch for init, every process, or a group", () => {
@@ -176,5 +214,55 @@ describe("reading this process's group", () => {
       ].map(Number.isNaN),
     ).toEqual([true, true, true, true]);
     expect(groupInPs(" 3000\n")).toBe(3000);
+  });
+});
+
+describe("a holder proof's age", () => {
+  // Above every system's pid limit, so even a broken guard reaches no process.
+  const holder = { pid: 2 ** 22 + 1, start: 0 };
+
+  it("refuses a kill proof spent before it was made or after its second", () => {
+    expect(() => killHolderAt(vouchHolderProcessAt(holder, "kill", 5_000), 4_999)).toThrow(
+      "stale proof",
+    );
+    expect(() => killHolderAt(vouchHolderProcessAt(holder, "kill", 0), PROOF_MS + 1)).toThrow(
+      "stale proof",
+    );
+  });
+
+  it("refuses a rebind proof spent before it was made or after its second", () => {
+    expect(() => rebindHolderAt(vouchHolderProcessAt(holder, "rebind", 5_000), 4_999)).toThrow(
+      "stale proof",
+    );
+    expect(() => rebindHolderAt(vouchHolderProcessAt(holder, "rebind", 0), PROOF_MS + 1)).toThrow(
+      "stale proof",
+    );
+  });
+});
+
+describe("the forms product code calls", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  // The types refuse a time, but a caller can still be typed to pass one; it must change nothing.
+  // Stubbed, so the send each proof reaches sends nothing.
+  it("judge a proof by their own clock, whatever time their caller hands them", () => {
+    const kill = vi.spyOn(process, "kill").mockImplementation(() => true);
+    const vouchWithTime: (group: PaneGroup, now: number) => PaneGroup = vouch;
+    const signalWithTime: (pane: PaneGroup, signal: NodeJS.Signals, now: number) => void =
+      signalPane;
+    signalPane(vouchWithTime(pane, Number.MIN_SAFE_INTEGER), "SIGTERM");
+    signalWithTime(vouch(pane), "SIGTERM", Number.MAX_SAFE_INTEGER);
+    expect(kill.mock.calls).toEqual([
+      [-pane.pid, "SIGTERM"],
+      [-pane.pid, "SIGTERM"],
+    ]);
+
+    expectTypeOf(vouch).parameters.toEqualTypeOf<[PaneGroup]>();
+    expectTypeOf(signalPane).parameters.toEqualTypeOf<[PaneGroup, NodeJS.Signals]>();
+    expectTypeOf(vouchServer).parameters.toEqualTypeOf<[ServerProcess]>();
+    expectTypeOf(signalServer).parameters.toEqualTypeOf<[ServerProcess]>();
+    expectTypeOf(vouchHolderProcess).parameters.toEqualTypeOf<[HolderProcess, HolderUse]>();
+    expectTypeOf(killHolder).parameters.toEqualTypeOf<[HolderProcess]>();
+    expectTypeOf(rebindHolder).parameters.toEqualTypeOf<[HolderProcess]>();
   });
 });

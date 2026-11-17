@@ -38,7 +38,20 @@ const FIXTURES: Record<string, string> = {
   "scripts/l.ts":
     'export { dieBy } from "../packages/host-guard/src/index.ts";\n' +
     'export { killHolderAt } from "../packages/host-guard/src/signal.ts";\n',
-  "packages/host-guard/src/m.ts": 'export { startHolderWith } from "./holder.ts";\n',
+  "packages/host-guard/src/m.ts": 'export { startHolder } from "./holder.ts";\n',
+  "packages/host-guard/src/n.ts":
+    'export { signalPaneAt } from "./signal.ts";\n' +
+    'export { startHolderWith as start } from "./holder";\n',
+  "packages/host-guard/src/o.ts": 'import * as signal from "./signal.ts";\nexport { signal };\n',
+  "packages/host-guard/src/r.ts": 'export * from "./signal.ts";\n',
+  "packages/host-guard/src/s.ts":
+    'export { vouchAt } from "../src/signal.ts";\n' +
+    'export { killHolderAt } from "../../host-guard/src/signal.ts";\n',
+  "packages/host-guard/src/t.ts":
+    'export { vouch } from "./signal.ts";\nexport { formatWith } from "node:util";\n',
+  "packages/host-guard/src/p.test.ts":
+    'export { signalPaneAt } from "./signal.ts";\nexport { vouchHolderWith } from "./holder.ts";\n',
+  "packages/host-guard/src/q.medium.test.ts": 'export { killHolderAt } from "./signal.ts";\n',
   "tests/holder/g.test.ts":
     'export { spawn } from "node:child_process";\nexport { spawn as pty } from "node-pty";\n' +
     'export { createRequire } from "node:module";\nexport { fork } from "cluster";\n' +
@@ -104,6 +117,20 @@ describe("the generated oxlint config, run by oxlint", () => {
       "k.ts": ["eslint(no-restricted-imports)"],
       "scripts/l.ts": ["eslint(no-restricted-imports)"],
       "packages/host-guard/src/m.ts": [],
+      // A clock or a check swapped out is for host-guard's tests, never its product modules.
+      "packages/host-guard/src/n.ts": [
+        "eslint(no-restricted-imports)",
+        "eslint(no-restricted-imports)",
+      ],
+      "packages/host-guard/src/o.ts": ["eslint(no-restricted-imports)"],
+      "packages/host-guard/src/r.ts": ["eslint(no-restricted-imports)"],
+      "packages/host-guard/src/s.ts": [
+        "eslint(no-restricted-imports)",
+        "eslint(no-restricted-imports)",
+      ],
+      "packages/host-guard/src/t.ts": [],
+      "packages/host-guard/src/p.test.ts": [],
+      "packages/host-guard/src/q.medium.test.ts": [],
     });
   });
 });

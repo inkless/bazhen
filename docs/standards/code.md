@@ -45,9 +45,14 @@ Each layer has one job:
   (`spawnGroup`), a pane its tmux server vouched for (`paneGroup`, `signalPane`), or one of its own
   tmux servers, with `SIGUSR1` alone, once `ps` shows that pid is the server on that socket, started
   when its refs recorded (`recreateSocket`, `signalServer`), and never 0, ±1, this process, its
-  parent or its group. It depends on nothing of Bazhen's, so anything may use it. A child this
-  process spawned and still holds is signalled through `signalOwnChild`, which sends through the
-  child's own handle, so it reaches nothing once the child is reaped. A start's `timeout` is
+  parent or its group. Each proof of a target is good once, within a second of its check, by a
+  monotonic clock the signal module reads itself: no form product code calls takes a time, so a
+  proof can't be made to outlive its process and reach a pid reused since. The `*At` forms that do
+  take one, and the `*With` forms that replace a check, are for tests; lint bans them from
+  host-guard's product modules, and only its index is importable elsewhere. It depends on nothing
+  of Bazhen's, so anything may use it. A child this process spawned and still holds is signalled
+  through `signalOwnChild`, which sends through the child's own handle, so it reaches nothing once
+  the child is reaped. A start's `timeout` is
   allowed only where `scripts/signal-paths.ts` lists it. The PTY seam hangs up by closing the PTY,
   and the kernel hangs up whichever session holds the terminal then: node-pty reaps its child before
   anyone hears it exit, so nothing signals that child by its pid. Rust sends through
