@@ -1448,10 +1448,18 @@ export function decoderFailures(
   // finds another.
   let crateCarriers = new Map([...crateCode].map(([crate, code]) => [crate, byteCarriers(code)]));
   const imported = new Map<string, Set<string>>();
+  const idents = crateIdents(paths, read, [...crateCode.keys()]);
   for (let grew = true; grew;) {
     grew = false;
+    // A crate's own carriers, and the ones it brings in, which a `pub use` passes on.
+    const visible = new Map(
+      [...crateCode.keys()].map((c) => [
+        c,
+        new Set([...(crateCarriers.get(c)?.keys() ?? []), ...(imported.get(c) ?? [])]),
+      ]),
+    );
     for (const [crate, code] of crateCode) {
-      const names = importedCarriers(code, crate, crateCarriers);
+      const names = importedCarriers(code, crate, visible, idents);
       if (names.size !== (imported.get(crate)?.size ?? 0)) {
         imported.set(crate, names);
         crateCarriers.set(crate, byteCarriers(code, names));
@@ -1496,7 +1504,8 @@ export function decoderFailures(
       }
     }
     for (const alias of code.matchAll(/\btype\s+(\w+)[^=;]*=([^;]*);/g)) {
-      if (BYTES_IN.test(alias[2] ?? "") || mentionsAny(alias[2] ?? "", carriers.keys())) {
+      const named = [...carriers.keys(), ...(imported.get(crateOf(file)) ?? [])];
+      if (BYTES_IN.test(alias[2] ?? "") || mentionsAny(alias[2] ?? "", named)) {
         out.push(
           `${file}::${alias[1]}: names a byte type, which hides it from the decoder rule. ` +
             "Write the byte type in each signature instead.",
@@ -1588,27 +1597,86 @@ function testModuleFiles(paths: string[], read: (path: string) => string): Set<s
 const crateOf = (file: string) => /^crates\/[^/]+/.exec(file)?.[0] ?? "";
 
 /**
- * The carriers of other crates that `code`, the code of `crate`, names: in a `use` of that crate
- * (all of them for a glob), or in a path through it (`bazhen_holder_proto::frame::Request`). A type
- * of another crate is named no other way, so one of the same name there isn't taken for it.
+ * The carriers of other crates that `code`, the code of `crate`, names. Another crate's type is
+ * named only through that crate: in a `use` of it (all of its carriers for a glob), or in a path
+ * through a name for it or for one of its modules (`bazhen_holder_proto::frame::Request`,
+ * `proto::Request` after `use bazhen_holder_proto as proto;`, `frame::Request` after
+ * `use bazhen_holder_proto::frame;`). So a type of the same name that `crate` doesn't bring in
+ * isn't taken for one. `visible` is each crate's carriers, its own and those it brings in, which
+ * it can pass on; `idents` is each crate's names in code.
  */
 function importedCarriers(
   code: string,
   crate: string,
-  crateCarriers: Map<string, Carriers>,
+  visible: Map<string, Set<string>>,
+  idents: Map<string, string[]>,
 ): Set<string> {
   const out = new Set<string>();
-  for (const [other, carriers] of crateCarriers) {
+  for (const [other, carriers] of visible) {
     if (other === crate || carriers.size === 0) continue;
-    const ident = other.slice("crates/".length).replace(/-/g, "_");
-    const uses = [...code.matchAll(new RegExp(`\\buse\\s+(?:::\\s*)?${ident}\\b[^;]*;`, "g"))];
-    const paths = [...code.matchAll(new RegExp(`\\b${ident}(?:\\s*::\\s*\\w+)+`, "g"))];
+    const crateNames = `(?:${(idents.get(other) ?? []).join("|")})`;
+    const uses = [...code.matchAll(new RegExp(`\\buse\\s+(?:::\\s*)?${crateNames}\\b[^;]*;`, "g"))];
+    const externs = code.matchAll(
+      new RegExp(`\\bextern\\s+crate\\s+${crateNames}\\s+as\\s+(\\w+)`, "g"),
+    );
+    // Every name a `use` of the crate binds may be the crate or a module of it, under any alias.
+    const bound = new Set([
+      ...(idents.get(other) ?? []),
+      ...[...externs].map((m) => m[1] ?? ""),
+      ...uses.flatMap((m) => m[0].match(/\b\w+\b/g) ?? []),
+    ]);
+    for (const keyword of ["use", "pub", "crate", "self", "super", "as", "in"])
+      bound.delete(keyword);
+    const paths = code.matchAll(
+      new RegExp(`\\b(?:${[...bound].join("|")})(?:\\s*::\\s*\\w+)+`, "g"),
+    );
     const text = [...uses, ...paths].map((m) => m[0]).join("\n");
-    for (const name of carriers.keys()) {
+    for (const name of carriers) {
       if (uses.some((m) => m[0].includes("*")) || mentionsAny(text, [name])) out.add(name);
     }
   }
   return out;
+}
+
+/**
+ * The names Rust code may give each crate of `crates`: its package name, with `-` as `_`, and each
+ * name a manifest gives it by `package = "…"`.
+ */
+function crateIdents(
+  paths: string[],
+  read: (path: string) => string,
+  crates: string[],
+): Map<string, string[]> {
+  const manifests = paths.filter((p) => /(?:^|\/)Cargo\.toml$/.test(p));
+  const byPackage = new Map<string, string>();
+  for (const crate of crates) {
+    const manifest = `${crate}/Cargo.toml`;
+    const lines = manifests.includes(manifest)
+      ? (tomlTables(read(manifest)).get("[package]") ?? [])
+      : [];
+    const name = lines
+      .map((l) => /^name\s*=\s*"([^"]+)"/.exec(l)?.[1])
+      .find((n) => n !== undefined);
+    byPackage.set(name ?? crate.slice("crates/".length), crate);
+  }
+  const idents = new Map([...byPackage].map(([name, crate]) => [crate, [name.replace(/-/g, "_")]]));
+  for (const manifest of manifests) {
+    for (const [header, lines] of tomlTables(read(manifest))) {
+      const renamed = (key: string, text: string) => {
+        const crate = byPackage.get(/\bpackage\s*=\s*"([^"]+)"/.exec(text)?.[1] ?? "");
+        if (crate !== undefined) idents.get(crate)?.push(key.replace(/-/g, "_"));
+      };
+      const table = /^\[(?:.+\.)?dependencies\.([\w-]+)\]$/.exec(header);
+      if (table) renamed(table[1] ?? "", lines.join("\n"));
+      for (const line of lines) {
+        const inline = /^([\w-]+)\s*=\s*\{(.*)\}$/.exec(line);
+        if (inline && /^\[(?:.+\.)?dependencies\]$/.test(header)) {
+          renamed(inline[1] ?? "", inline[2] ?? "");
+        }
+      }
+    }
+  }
+  return idents;
 }
 
 /** Why a crate's fuzz manifest isn't a cargo-fuzz crate of its own with exact pins. */

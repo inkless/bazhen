@@ -448,19 +448,21 @@ What differs:
   `io::stdin().lock()`, a closure's read included). A socket, a file or an fd in a signature isn't bytes: holding one is not
   reading it, so a function that only binds, borrows or sets one up needs no entry. A struct or enum
   of the same crate that carries bytes (a byte field, a parameter bounded by a byte trait, or a
-  field of such a type), or one of another crate that a `use` or a path brings in, is a byte type
-  too: a function taking one is a decoder, as is a method of it taking `self` that can reach the
-  bytes, as a stateful frame reader reads through `self`. A method reaches them when its body uses a
-  field holding them (`self.buf`, `let b = &self.buf;`, a closure or a helper given it), uses `self`
-  other than by a field (handed on, matched, destructured), calls a method of its own that reaches
-  them, or calls one with no body in the file. One that only reads the type's other fields, as a
-  getter of an id does, isn't a decoder. Every method taking `self` counts when no field pins the
-  bytes: on an enum, a struct whose bytes come by a type parameter bounded by a byte trait
-  (`struct R<T: Read>`), and in an impl bounded by one (`impl<R: Read> Reader<R>`). A method taking
-  another value of its own type (`other: &Self`) is a decoder too. A byte field `pub` to other
-  crates fails unless it is listed in `PUBLIC_BYTE_FIELDS` with why its bytes aren't from outside:
-  another crate reads it where the rule doesn't look. So does a struct whose fields the rule can't
-  split, since it can't tell which hold bytes.
+  field of such a type), or one of another crate that this crate brings in (by a `use` or a path,
+  through the crate, a module of it, an alias for either or another crate's re-export, the crate
+  under its package name or a name a manifest gives it), is a byte type too: a function taking one
+  is a decoder, as is a method of it taking `self` that can reach the bytes, as a stateful frame
+  reader reads through `self`. A method reaches them when its body uses a field holding them
+  (`self.buf`, `let b = &self.buf;`, a closure or a helper given it), uses `self` other than by a
+  field (handed on, matched, destructured), calls a method of its own that reaches them, or calls
+  one with no body in the file. One that only reads the type's other fields, as a getter of an id
+  does, isn't a decoder. Every method taking `self` counts when no field pins the bytes: on an enum,
+  a struct whose bytes come by a type parameter bounded by a byte trait (`struct R<T: Read>`), and
+  in an impl bounded by one (`impl<R: Read> Reader<R>`). A method taking another value of its own
+  type (`other: &Self`) is a decoder too. A byte field `pub` to other crates fails unless it is
+  listed in `PUBLIC_BYTE_FIELDS` with why its bytes aren't from outside: another crate reads it
+  where the rule doesn't look. So does a struct whose fields the rule can't split, since it can't
+  tell which hold bytes.
   `scripts/check-standards.ts` fails until each is listed in `FUZZED_DECODERS` with the fuzz target
   that calls it, or in `NOT_DECODERS` with why it isn't one: an encoder, a function that reads bytes
   only to hand them to a fuzzed decoder, one reached only through a fuzzed decoder. A module

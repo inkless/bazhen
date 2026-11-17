@@ -1591,6 +1591,17 @@ describe("byteTakers", () => {
   });
 });
 
+/** A crate's source holding one type whose field is `field`, with a method using it and one not. */
+const carrierCrate = (name: string, field: string, head = "") =>
+  [
+    head,
+    `pub struct ${name} { f: ${field}, n: u64 }`,
+    `impl ${name} {`,
+    "    pub fn f(&self) { look(&self.f) }",
+    "    pub fn n(&self) -> u64 { self.n }",
+    "}",
+  ].join("\n");
+
 describe("decoderFailures", () => {
   const lib = "pub fn decode(b: &[u8]) {}\nfn send(b: &[u8]) {}\nfn other(x: u8) {}\n";
   const repo: Record<string, string> = {
@@ -1897,6 +1908,95 @@ describe("decoderFailures", () => {
       "crates/r/src/lib.rs",
       "crates/r/src/lib.rs::Holder::c",
       "crates/r/src/lib.rs::Globbed::s",
+    ]);
+  });
+
+  it("follows another crate's carrier through a module, a renamed crate, an alias or a re-export", () => {
+    const tree = {
+      ...repo,
+      "crates/q/src/lib.rs": [
+        "pub mod frame {",
+        "    pub struct Request { b: Vec<u8> }",
+        "}",
+        "pub struct Decoder { buf: Vec<u8> }",
+        "pub struct Other { buf: Vec<u8> }",
+        "pub struct Third { buf: Vec<u8> }",
+        "pub struct Fourth { buf: Vec<u8> }",
+        "pub struct Fifth { buf: Vec<u8> }",
+      ].join("\n"),
+      "crates/p/src/conn.rs": [
+        "use q::frame;",
+        "use q as proto;",
+        "use q::{self as hq};",
+        "extern crate q as eq;",
+        "pub use q::Fourth;",
+        "type Dec = proto::Fifth;",
+        "pub struct Conn {",
+        "    id: u64,",
+        "    held: Option<frame::Request>,",
+        "    d: proto::Decoder,",
+        "    o: hq::Other,",
+        "    t: eq::Third,",
+        "}",
+        "impl Conn {",
+        "    pub fn id(&self) -> u64 { self.id }",
+        "    pub fn held(&self) -> bool { self.held.is_some() }",
+        "    pub fn d(&self) { look(&self.d) }",
+        "    pub fn o(&self) { look(&self.o) }",
+        "    pub fn t(&self) { look(&self.t) }",
+        "}",
+      ].join("\n"),
+      "crates/w/src/lib.rs": [
+        "use q::{self as hw};",
+        "pub struct W { f: self::inner::Decoder, n: u64 }",
+        "impl W {",
+        "    pub fn f(&self) { look(&self.f) }",
+        "}",
+      ].join("\n"),
+      "crates/r/src/lib.rs": [
+        "use p::Fourth;",
+        "pub struct Boxed { f: Fourth, n: u64 }",
+        "impl Boxed {",
+        "    pub fn f(&self) { look(&self.f) }",
+        "    pub fn n(&self) -> u64 { self.n }",
+        "}",
+      ].join("\n"),
+    };
+    expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
+      "crates/p/src/conn.rs::Dec",
+      "crates/p/src/conn.rs::Conn::held",
+      "crates/p/src/conn.rs::Conn::d",
+      "crates/p/src/conn.rs::Conn::o",
+      "crates/p/src/conn.rs::Conn::t",
+      "crates/r/src/lib.rs::Boxed::f",
+    ]);
+  });
+
+  it("names a crate by its package, and by each name a manifest gives it", () => {
+    const tree = {
+      ...repo,
+      "Cargo.toml": '[workspace.dependencies]\nqw = { package = "queue", path = "crates/q" }\n',
+      "crates/q/Cargo.toml": [
+        "[package]",
+        'name = "queue"',
+        "[package.metadata.docs]",
+        'qm = { package = "queue" }',
+      ].join("\n"),
+      "crates/q/src/lib.rs": "pub struct Frames { buf: Vec<u8> }",
+      "crates/a/Cargo.toml": '[dependencies]\nqq = { package = "queue", path = "../q" }\n',
+      "crates/a/src/lib.rs": carrierCrate("A", "qq::Frames"),
+      "crates/b/Cargo.toml": '[dependencies.qz]\npackage = "queue"\npath = "../q"\n',
+      "crates/b/src/lib.rs": carrierCrate("B", "qz::Frames"),
+      "crates/c/src/lib.rs": carrierCrate("C", "qw::Frames"),
+      "crates/d/src/lib.rs": carrierCrate("D", "Frames", "use q::Frames;"),
+      "crates/e/src/lib.rs": carrierCrate("E", "Frames", "use queue::Frames;"),
+      "crates/m/src/lib.rs": carrierCrate("M", "qm::Frames"),
+    };
+    expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
+      "crates/a/src/lib.rs::A::f",
+      "crates/b/src/lib.rs::B::f",
+      "crates/c/src/lib.rs::C::f",
+      "crates/e/src/lib.rs::E::f",
     ]);
   });
 
