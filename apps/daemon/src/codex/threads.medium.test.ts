@@ -628,12 +628,42 @@ describe("Codex thread switches", () => {
     expect([s.boundTo(), s.titled]).toEqual([A, []]);
   });
 
-  it("follows titles in the order they changed", async () => {
-    const s = await setup({ titles: [shown(B), shown(A)] });
-    s.announce(A);
-    s.announce(B);
-    await Promise.all([s.threads.titleChanged(s.terminal), s.threads.titleChanged(s.terminal)]);
-    expect([s.boundTo(), s.resumed]).toEqual([A, [B, A]]);
+  it("follows every change told during a follow with one more, which reads the latest title", async () => {
+    const { promise: listing, resolve: answer } = Promise.withResolvers<unknown>();
+    const s = await setup({
+      titles: [shown(B), shown(A)],
+      runtime: "holder",
+      listing,
+      listed: [{ id: A }, { id: B }],
+    });
+    const first = s.threads.heard(s.terminal);
+    await expect.poll(() => s.lists.length).toBe(1);
+    const told = Array.from({ length: 20 }, () => s.threads.heard(s.terminal));
+    answer(undefined);
+    await Promise.all([first, ...told]);
+    expect([s.boundTo(), s.resumed, s.titled.length]).toEqual([A, [B, A], 2]);
+  });
+
+  it("follows changes told after its terminal was left after the drop, not in a follow queued before it", async () => {
+    const s = await setup({ titles: [shown(B)], listed: [{ id: A }], retryMs: 60_000 });
+    const before = s.threads.titleChanged(s.terminal);
+    s.threads.left(s.terminal);
+    const after = Array.from({ length: 5 }, () => s.threads.titleChanged(s.terminal));
+    await Promise.all([before, ...after]);
+    expect([s.held(), s.titled.length]).toEqual([true, 2]);
+  });
+
+  it("keeps one follow queued for a left terminal while the follow queued before the drop runs", async () => {
+    const { promise: listing, resolve: answer } = Promise.withResolvers<unknown>();
+    const s = await setup({ titles: [shown(B)], listing, listed: [{ id: A }], retryMs: 60_000 });
+    const before = s.threads.titleChanged(s.terminal);
+    s.threads.left(s.terminal);
+    const after = s.threads.titleChanged(s.terminal);
+    await expect.poll(() => s.lists.length).toBe(1);
+    const told = Array.from({ length: 5 }, () => s.threads.titleChanged(s.terminal));
+    answer(undefined);
+    await Promise.all([before, after, ...told]);
+    expect([s.held(), s.titled.length]).toEqual([true, 2]);
   });
 });
 

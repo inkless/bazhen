@@ -97,6 +97,11 @@ export class CodexThreads {
   private starting: Set<string> | undefined;
   /** One title at a time, in the order the runtimes reported them. */
   private queue: Promise<void> = Promise.resolve();
+  /**
+   * Each terminal's follow that is queued and has not yet read its title, which every change told
+   * meanwhile joins, since that read will see it.
+   */
+  private readonly pending = new Map<TerminalId, Promise<void>>();
 
   constructor(opts: CodexThreadsOptions) {
     this.opts = opts;
@@ -162,6 +167,8 @@ export class CodexThreads {
    * it waited on is dropped, and its agent's held mail let go.
    */
   left(terminal: TerminalId): void {
+    // A change told from now on is followed after the drop, not by a follow queued before it.
+    this.pending.delete(terminal);
     // After any follow in flight, which would otherwise wait again on a move dropped under it.
     this.queue = this.queue
       .then(() => {
@@ -175,15 +182,22 @@ export class CodexThreads {
 
   /** A terminal's title may have changed. Resolves once it has been read and acted on. */
   titleChanged(terminal: TerminalId): Promise<void> {
-    this.queue = this.queue
-      .then(() => this.follow(terminal))
+    const queued = this.pending.get(terminal);
+    if (queued !== undefined) return queued;
+    const followed: Promise<void> = this.queue
+      .then(() => {
+        if (this.pending.get(terminal) === followed) this.pending.delete(terminal);
+        return this.follow(terminal);
+      })
       .catch((err: unknown) => {
         this.log(`codex: following terminal ${terminal} failed: ${String(err)}`);
         // A move it was waiting on is tried again, or given up, rather than left holding mail.
         const m = this.moving.get(terminal);
         if (m !== undefined) this.later(terminal, m);
       });
-    return this.queue;
+    this.pending.set(terminal, followed);
+    this.queue = followed;
+    return followed;
   }
 
   private async follow(terminal: TerminalId): Promise<void> {
