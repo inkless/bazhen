@@ -2,7 +2,7 @@
 // WebSocket and tmux. Nothing here imports the daemon's code, so the same tests can certify a
 // daemon written in another language.
 
-import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import {
   chmodSync,
@@ -170,6 +170,17 @@ export async function waitUntil(
 
 /** A shell Bazhen can integrate with, by the name of its snippet. */
 export type IntegratedShell = "zsh" | "bash" | "fish";
+
+/**
+ * Whether the integration types a line back into `kind` as installed here: into every zsh and bash,
+ * and into fish 3.7 and 4.0 only, as `apps/daemon/src/shells/integration/fish` checks.
+ */
+export function typesBack(kind: IntegratedShell): boolean {
+  if (kind !== "fish") return true;
+  fishVersion ??= spawnSync("fish", ["--version"], { encoding: "utf8" }).stdout ?? "";
+  return /^fish, version (3\.7|4\.0)\./.test(fishVersion);
+}
+let fishVersion: string | undefined;
 
 /**
  * A `$SHELL` that starts `kind` with an rc file holding only `rcLine`, in a directory of its own
