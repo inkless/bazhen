@@ -385,6 +385,63 @@ mod tests {
     }
 
     #[test]
+    fn the_log_on_disk_keeps_its_lines_until_full_then_moves_them_aside() {
+        let dir = Scratch::new("aside");
+        let dir = dir.path();
+        let socket = dir.join("term.sock");
+        let mut log = BoundedLog::new(DiskLog::beside(&socket), LOG_CAP);
+        log.write_all(b"one\n").unwrap();
+        log.write_all(b"two\n").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.join("term.log")).unwrap(),
+            "one\ntwo\n"
+        );
+        assert!(
+            !dir.join("term.log.1").exists(),
+            "moved aside under the cap"
+        );
+        let mut log = BoundedLog::new(DiskLog::beside(&socket), 10);
+        log.write_all(b"three\n").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.join("term.log.1")).unwrap(),
+            "one\ntwo\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("term.log")).unwrap(),
+            "three\n"
+        );
+    }
+
+    /// A directory of this run's own, made empty and removed when dropped, whether the test
+    /// passed or not, so no earlier run's files are read by a later one under the same pid.
+    struct Scratch(std::path::PathBuf);
+
+    impl Scratch {
+        fn new(name: &str) -> Self {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let dir = std::env::temp_dir().join(format!(
+                "bz-holder-log-{name}-{}-{nanos}",
+                std::process::id()
+            ));
+            std::fs::create_dir(&dir).unwrap();
+            Self(dir)
+        }
+
+        fn path(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
     fn the_log_on_disk_is_its_owners_alone_and_refuses_a_symlink() {
         let dir = std::env::temp_dir().join(format!("bz-holder-log-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
