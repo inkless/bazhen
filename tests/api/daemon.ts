@@ -898,11 +898,13 @@ export class Daemon {
   }
 
   /**
-   * Runs the Codex CLI on this daemon's Codex home, as its user would: without this daemon's home,
-   * which an app-server it starts would hand every command it runs.
+   * Runs the Codex CLI on this daemon's Codex home, as its user would: without Bazhen's settings,
+   * as the daemon runs it, since an app-server it starts would hand them to every command it runs.
    */
   async codex(...args: string[]): Promise<void> {
-    const { BAZHEN_HOME: _home, ...env } = this.env;
+    const env = Object.fromEntries(
+      Object.entries(this.env).filter(([name]) => !name.startsWith("BAZHEN_")),
+    );
     await run("codex", args, { env, timeout: 90_000 });
   }
 
