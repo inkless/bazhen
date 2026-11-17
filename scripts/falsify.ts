@@ -1551,11 +1551,17 @@ async function main(args: string[]): Promise<number> {
         VITEST_TIMEOUT_MS,
         vitestOptions,
       );
-      let projects = new Map<string, string[]>();
+      let projects: Map<string, string[]>;
       try {
         projects = projectsOf(JSON.parse(readFileSync(listFile, "utf8")), [dir, realpathSync(dir)]);
-      } catch {
-        // No listing: no run, so every target is INVALID.
+      } catch (error) {
+        // Listing only globs the config's include patterns, so a failure is a fault, not a verdict.
+        const why = error instanceof Error ? error.message : String(error);
+        console.error(
+          `falsify: \`vitest list\` couldn't name the projects of the tests to judge (${why}), so ` +
+            "none can be judged.",
+        );
+        return 1;
       }
       // One run per project, as its own pnpm script runs it: two projects' global setups in one
       // process clash (one sets the home the other refuses, or puts a refusing tmux on PATH).

@@ -97,6 +97,7 @@ case "$1" in
     ;;
   exec)
     if [ "$3" = list ]; then
+      [ "\${STUB_FAIL_LIST:-}" = 1 ] && exit 1
       for arg in "$@"; do
         case "$arg" in --json=*) listing="\${arg#--json=}" ;; esac
       done
@@ -1386,6 +1387,16 @@ describe("falsify on a branch with a new CLI test", () => {
 });
 
 describe("falsify on a branch with new tests in two vitest projects", () => {
+  it("fails without a verdict when vitest can't name the tests' projects", () => {
+    const result = againstBase({ STUB_FAIL_LIST: "1" });
+    expect({
+      status: result.status,
+      said: result.output.includes("couldn't name the projects of the tests to judge"),
+      verdict: /KILLED|SURVIVED|INVALID/.test(result.output),
+      ran: stubLog().includes("VITEST:"),
+    }).toEqual({ status: 1, said: true, verdict: false, ran: false });
+  });
+
   it("runs each project's targets in a run of its own, and judges them all", () => {
     const api = "tests/api/y.test.ts";
     write(fx.linked, api, branchTest('import { v } from "../../packages/a/src/x.ts";\n'));
@@ -1625,8 +1636,9 @@ const RUNS_BINARIES: Record<string, string[]> = {
   "tests/support/holder-spawn.ts": ["debug/bazhen-holder", "debug/bazhen-holder-replay"],
 };
 // Files whose paths into a target/ are data, not binaries they run: falsify itself, its tests'
-// fixtures, and absolute paths in doctor's fixtures.
+// fixtures, absolute paths in doctor's fixtures, and a store test's scratch folder named target.
 const MENTIONS_TARGET = [
+  "apps/daemon/src/store/store.medium.test.ts",
   "packages/protocol/src/api-fixtures.ts",
   "scripts/falsify.medium.test.ts",
   "scripts/falsify.test.ts",
@@ -1635,8 +1647,9 @@ const MENTIONS_TARGET = [
   "tests/cli/fixtures.ts",
 ];
 const FALSIFY_TESTS = ["scripts/falsify.medium.test.ts", "scripts/falsify.test.ts"];
-// Any spelling of a path into target/: a quoted or slashed `target/`, or "target" joined to more.
-const TARGET_MENTION = /["'`/]target\/|["']target["']\s*[,+]/;
+// Any spelling of a path into target/: a quoted or slashed `target/`, or "target" joined to more,
+// or ending a join whose result is joined to more later.
+const TARGET_MENTION = /["'`/]target\/|["']target["']\s*[,+)]/;
 /** The binaries a file names, except the fixtures of falsify's own tests. */
 const named = (path: string, text: string) =>
   FALSIFY_TESTS.includes(path) ? [] : namedBinaries(path, text).toSorted();
@@ -1687,6 +1700,7 @@ describe("the repository's tests that run a binary", () => {
   it("reach a binary however a test's helper spells its path, or fail here", () => {
     const spellings = [
       'join(repo, "target", "release", name)',
+      'join(repo, "target")',
       '"target/" + profile',
       "`${root}/target/${profile}/bazhen`",
       "`target/${profile}/bazhen`",
