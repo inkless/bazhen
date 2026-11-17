@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   classify,
+  failureLine,
   harnessFiles,
   hasControl,
   addedRustTests,
@@ -220,6 +221,52 @@ describe("classify", () => {
     expect(classify(report(result("t", "failed"), result("t", "passed")), FILE, "t")).toBe(
       "INVALID",
     );
+  });
+});
+
+describe("failureLine", () => {
+  it("is the first line with text of the test's first failure message", () => {
+    const failed = result("t", "failed", [
+      "\n  AssertionError: expected 1\n    at x.ts:1",
+      "second",
+    ]);
+    expect(failureLine(report(failed), FILE, "t")).toBe("AssertionError: expected 1");
+  });
+
+  it("drops terminal escapes, and cuts a long line short", () => {
+    const failed = result("t", "failed", [`\u001b[31mError: ${"x".repeat(400)}\u001b[39m`]);
+    expect(failureLine(report(failed), FILE, "t")).toBe(`Error: ${"x".repeat(292)}…`);
+  });
+
+  it("puts a space for each control character, and never cuts a character in two", () => {
+    const controlled = result("t", "failed", ["Error: a\rb\tc\u0007d\u007fe"]);
+    const long = result("t", "failed", ["😀".repeat(400)]);
+    expect([
+      failureLine(report(controlled), FILE, "t"),
+      failureLine(report(long), FILE, "t"),
+    ]).toEqual(["Error: a b c d e", `${"😀".repeat(299)}…`]);
+  });
+
+  it("is the file's message for a test it doesn't have, as a file that won't load", () => {
+    const failedToLoad: VitestReport = {
+      testResults: [
+        {
+          name: `/tmp/wt/${FILE}`,
+          status: "failed",
+          message: "Failed to load url ./y.ts\nmore",
+          assertionResults: [],
+        },
+      ],
+    };
+    expect(failureLine(failedToLoad, FILE, "t")).toBe("Failed to load url ./y.ts");
+  });
+
+  it("is nothing for a test with no failure message, or none in the report", () => {
+    expect([
+      failureLine(report(result("t", "passed")), FILE, "t"),
+      failureLine(report(result("t", "failed", ["", "  "])), FILE, "t"),
+      failureLine({ testResults: [] }, FILE, "t"),
+    ]).toEqual([undefined, undefined, undefined]);
   });
 });
 

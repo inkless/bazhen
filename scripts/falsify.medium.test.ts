@@ -53,6 +53,16 @@ case "$1" in
     if [ "\${STUB_FAIL_OFFLINE:-}" = 1 ]; then
       for arg in "$@"; do [ "$arg" = --offline ] && exit 1; done
     fi
+    # As pnpm does: the dependencies' builds run with the install unless scripts are ignored.
+    case " $* " in *" --ignore-scripts "*) ;; *) : > .stub-deps-built ;; esac
+    exit 0
+    ;;
+  rebuild)
+    if [ "\${STUB_FAIL_REBUILD:-}" = 1 ]; then
+      echo "ERR_PNPM_IGNORED_BUILDS Ignored build scripts: stub-dep@1.0.0"
+      exit 1
+    fi
+    : > .stub-deps-built
     exit 0
     ;;
   run)
@@ -146,10 +156,19 @@ case "$1" in
         case "$arg" in *.test.ts) files="$files $arg" ;; esac
       done
     fi
+    # A test fails, whatever the source, while a dependency's build it needs hasn't run.
+    status="$STUB_STATUS"
+    failure="\${STUB_FAILURE:-}"
+    if [ ! -e .stub-deps-built ]; then
+      status=failed
+      failure="Error: stub-dep is not built"
+    fi
+    messages=""
+    [ -n "$failure" ] && messages="\\"$failure\\""
     printf '{"testResults":[' > "$out"
     sep=""
     for file in $files; do
-      printf '%s{"name":"%s/%s","status":"failed","assertionResults":[{"title":"caps","status":"%s","failureMessages":[]}]}' "$sep" "$(pwd)" "$file" "$STUB_STATUS" >> "$out"
+      printf '%s{"name":"%s/%s","status":"failed","assertionResults":[{"title":"caps","status":"%s","failureMessages":[%s]}]}' "$sep" "$(pwd)" "$file" "$status" "$messages" >> "$out"
       sep=","
     done
     printf ']}' >> "$out"
@@ -482,6 +501,50 @@ describe("falsify on a branch in a linked worktree", () => {
       onlineEnd: result.output.includes("pnpm --prefer-offline line 25"),
       offlineStart: result.output.includes("pnpm --offline line 1\n"),
     }).toEqual({ status: 1, offlineEnd: true, onlineEnd: true, offlineStart: false });
+  });
+
+  it("runs the dependencies' builds the install ignored before any test, so a passing test survives", () => {
+    const result = againstBase({ STUB_STATUS: "passed" });
+    expect({
+      result,
+      steps: stubLog().match(/^(?:ARGS: (?:install|rebuild)\b|VITEST:)/gm),
+    }).toEqual({
+      result: { status: 1, output: expect.stringContaining(`SURVIVED ${TEST} › caps`) },
+      steps: ["ARGS: install", "ARGS: rebuild", "VITEST:"],
+    });
+  });
+
+  it("judges nothing, naming allowBuilds and what pnpm said, when the dependencies' builds fail", () => {
+    const result = againstBase({ STUB_FAIL_REBUILD: "1" });
+    expect({
+      status: result.status,
+      said: result.output.includes("Ignored build scripts: stub-dep@1.0.0"),
+      named: /`pnpm rebuild`[^\n]*allowBuilds/.test(result.output),
+      toldToInstall: result.output.includes("run `pnpm install`"),
+      judged: /KILLED|SURVIVED|INVALID/.test(result.output),
+      ranTests: stubLog().includes("VITEST:"),
+      leftovers: leftovers(),
+    }).toEqual({
+      status: 1,
+      said: true,
+      named: true,
+      toldToInstall: false,
+      judged: false,
+      ranTests: false,
+      leftovers: [],
+    });
+  });
+
+  it("prints under a failed test the first line of what failed it", () => {
+    const result = againstBase({
+      STUB_FAILURE: "AssertionError: expected 1 to be 2\\n    at x.test.ts:3",
+    });
+    expect(result).toEqual({
+      status: 0,
+      output: expect.stringContaining(
+        `KILLED   ${TEST} › caps\n           failed: AssertionError: expected 1 to be 2\n`,
+      ),
+    });
   });
 
   it("sweeps a stale worktree whose pid is dead and keeps one whose pid is alive", () => {
