@@ -250,7 +250,7 @@ describe("a Codex agent's TUI coming up", () => {
   });
 
   it.each(["tmux", "holder"] as const)(
-    "never takes a title read as a respawn commits for the new TUI's, on %s",
+    "never takes a title read as a respawn commits for the new TUI's, but takes the new TUI's, on %s",
     async (runtime) => {
       const s: Awaited<ReturnType<typeof setup>> = await setup({
         titles: [shown(A)],
@@ -258,12 +258,31 @@ describe("a Codex agent's TUI coming up", () => {
         reading: () => respawn(s)(),
       });
       await s.threads.heard(s.terminal);
-      expect(s.lifecycle()).toBe("starting");
+      const dropped = s.lifecycle();
+      await s.threads.titleChanged(s.terminal);
+      expect([dropped, s.lifecycle()]).toEqual(["starting", "running"]);
+    },
+  );
+
+  it.each([
+    ["no thread", shown(C), []],
+    ["several threads", shown(B), [{ id: B }, { id: B2 }]],
+  ])(
+    "neither holds the mail of, nor says it keeps its thread for, an agent respawned while the threads are listed for a title naming %s",
+    async (_, title, listed) => {
+      const { promise: listing, resolve: answer } = Promise.withResolvers<unknown>();
+      const s = await setup({ titles: [title], runtime: "holder", listing, listed });
+      const followed = s.threads.heard(s.terminal);
+      await expect.poll(() => s.lists.length).toBe(1);
+      respawn(s)();
+      answer(undefined);
+      await followed;
+      expect([s.held(), s.untracked()]).toEqual([false, false]);
     },
   );
 
   it.each(["tmux", "holder"] as const)(
-    "neither moves nor readies an agent respawned while its move's thread resumes, on %s",
+    "neither moves nor readies an agent respawned while its move's thread resumes, but readies it on the new TUI's title, on %s",
     async (runtime) => {
       const s: Awaited<ReturnType<typeof setup>> = await setup({
         titles: [shown(B)],
@@ -272,7 +291,13 @@ describe("a Codex agent's TUI coming up", () => {
       });
       s.announce(B);
       await s.threads.heard(s.terminal);
-      expect([s.lifecycle(), s.boundTo()]).toEqual(["starting", A]);
+      const dropped = [s.lifecycle(), s.boundTo()];
+      s.titles.splice(0, 1, shown(A));
+      await s.threads.titleChanged(s.terminal);
+      expect([dropped, [s.lifecycle(), s.boundTo()]]).toEqual([
+        ["starting", A],
+        ["running", A],
+      ]);
     },
   );
 });

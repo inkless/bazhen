@@ -195,8 +195,7 @@ export class CodexThreads {
     }
     // Read now, not when the change was told: a respawn since then has cleared it.
     const title = await runtime.title(agent.runtime);
-    // A respawn committed while it was read: the respawn's start reads the new process's.
-    if (store.codexAgentIn(terminal)?.generation !== agent.generation) return this.settle(terminal);
+    if (this.replaced(terminal, agent.generation)) return this.settle(terminal);
     const gaveUpOn = this.gaveUp.get(terminal);
     this.gaveUp.delete(terminal);
     // The TUI empties its title as it exits, which names no thread to follow.
@@ -215,8 +214,10 @@ export class CodexThreads {
     const waited = prior?.agentId === agent.agentId && prior.prefix === prefix ? prior : undefined;
     let found = matching(prefix, this.seen);
     if (found.length === 0 && waited?.threadId !== undefined) found = [waited.threadId];
-    if (found.length === 0)
+    if (found.length === 0) {
       found = matching(prefix, await this.listed(waited === undefined ? LIST_PAGES : 1));
+      if (this.replaced(terminal, agent.generation)) return this.settle(terminal);
+    }
     if (found.length > 1) {
       this.settle(terminal);
       return this.untracked(agent.agentId, `${found.length} threads match ${prefix}`);
@@ -261,6 +262,15 @@ export class CodexThreads {
     this.tracked(agent.agentId);
     // Bound to the new thread now, so held mail goes there.
     this.settle(terminal);
+  }
+
+  /**
+   * The terminal no longer runs the agent's process of `generation`: it was respawned, or the
+   * agent left it. A title read from that process is not acted on; a respawn's start reads the
+   * new process's.
+   */
+  private replaced(terminal: TerminalId, generation: number): boolean {
+    return this.opts.store.codexAgentIn(terminal)?.generation !== generation;
   }
 
   /**
