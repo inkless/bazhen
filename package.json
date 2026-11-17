@@ -34,6 +34,7 @@
     "build:hook": "cargo build --release --quiet --locked -p bazhen-hook -p bazhen-peer",
     "build:holder": "cargo build --quiet --locked -p bazhen-holder -p bazhen-holder-engine",
     "build:holder:release": "cargo build --profile release-holder --quiet --locked -p bazhen-holder",
+    "build:bins": "cargo build --quiet --locked --workspace --bins",
     "build:notify": "node scripts/build-notify-mac.ts",
     "bench:engine": "pnpm run build:engine && node scripts/capped.ts --memory 4G --time 10m -- node scripts/engine-replay.ts",
     "bench:hook": "node scripts/capped.ts --memory 4G --time 10m -- node scripts/hook-bench.ts",

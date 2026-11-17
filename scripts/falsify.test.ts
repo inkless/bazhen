@@ -7,7 +7,10 @@ import {
   binaryInputs,
   cargoErrors,
   depInfoSources,
+  binariesOf,
   isRevertible,
+  manifestNames,
+  namedBinaries,
   newTitles,
   parseArgs,
   parseNameStatus,
@@ -379,14 +382,14 @@ describe("revertsOf", () => {
     expect(revertsOf(changes)).toEqual(changes);
   });
 
-  it("reverts the Rust workspace's changes when a CLI test runs, and only then", () => {
+  it("reverts the Rust workspace's changes when a test runs a binary, and only then", () => {
     const rust = [
       ...modified("crates/bazhen/src/main.rs", "Cargo.toml", "Cargo.lock"),
       { status: "R", oldPath: "crates/bazhen/src/old.rs", path: "crates/bazhen/src/new.rs" },
     ];
     const changes = [...rust, ...modified("README.md", "crates.md")];
-    expect({ cli: revertsOf(changes, { cli: true }), other: revertsOf(changes) }).toEqual({
-      cli: rust,
+    expect({ rust: revertsOf(changes, { rust: true }), other: revertsOf(changes) }).toEqual({
+      rust,
       other: [],
     });
   });
@@ -419,6 +422,72 @@ describe("binaryInputs", () => {
       "crates/bazhen/Cargo.toml",
       "crates/p/Cargo.toml",
     ]);
+  });
+});
+
+describe("namedBinaries", () => {
+  it("reads a path joined to the repository and a URL resolving into its target/", () => {
+    const source = [
+      'const CLI = join(repo, "target/release/bazhen");',
+      "const H = new URL('../../../../target/release-holder/bazhen-holder', import.meta.url);",
+      "const R = `target/debug/bazhen-holder-replay`;",
+    ].join("\n");
+    expect(namedBinaries("apps/daemon/src/terminals/x.ts", source)).toEqual([
+      "release/bazhen",
+      "debug/bazhen-holder-replay",
+      "release-holder/bazhen-holder",
+    ]);
+  });
+
+  it("ignores a fixture's absolute path, a URL resolving elsewhere, and a deeper path", () => {
+    const source = [
+      'hookClient: { path: "/repo/target/release/bazhen-hook" },',
+      'new URL("../target/release/bazhen", import.meta.url);',
+      'const built = "target/falsify/release/bazhen";',
+    ].join("\n");
+    expect(namedBinaries("tests/cli/x.test.ts", source)).toEqual([]);
+  });
+});
+
+describe("manifestNames", () => {
+  it("gives the package's name and each binary's, and no dependency's", () => {
+    const manifest = [
+      "[package]",
+      'name = "bazhen-holder-engine"',
+      "[dependencies]",
+      'vt = { package = "alacritty", version = "1" }',
+      "[[bin]]",
+      'name = "bazhen-holder-replay"',
+      'path = "src/bin/replay.rs"',
+    ].join("\n");
+    expect(manifestNames(manifest)).toEqual(["bazhen-holder-engine", "bazhen-holder-replay"]);
+  });
+});
+
+describe("binariesOf", () => {
+  const files: Record<string, string> = {
+    "tests/x/a.test.ts": 'import { h } from "./helper.ts";\nconst B = "target/debug/b";',
+    "tests/x/helper.ts": 'import "../support/deep";\nconst C = "target/release/c";',
+    "tests/support/deep.ts": 'import "./deeper.ts";\nimport "@bazhen/core";',
+    "tests/support/deeper.ts": 'import "../x/helper.ts";\nconst D = "target/release/d";',
+    "tests/x/spawns.test.ts": 'const main = join(repo, "apps/d/src/main.ts");',
+    "apps/d/src/main.ts": 'import "./h.ts";',
+    "apps/d/src/h.ts": 'const H = new URL("../../../target/release-holder/h", import.meta.url);',
+  };
+  const read = (path: string) => files[path];
+
+  it("names directly what the test and its own imports name, and reaches the rest", () => {
+    expect(binariesOf("tests/x/a.test.ts", read)).toEqual({
+      direct: ["debug/b", "release/c"],
+      reached: ["debug/b", "release/c", "release/d"],
+    });
+  });
+
+  it("reaches what a source file it names by its path from the root leads to", () => {
+    expect(binariesOf("tests/x/spawns.test.ts", read)).toEqual({
+      direct: [],
+      reached: ["release-holder/h"],
+    });
   });
 });
 
@@ -490,14 +559,14 @@ describe("relatedReverts", () => {
     ).toEqual(["scripts/falsify.ts"]);
   });
 
-  it("counts a reverted input of the CLI for a test of the CLI, and for no other test", () => {
-    const reverted = ["crates/bazhen/src/main.rs", "crates/bazhen-holder/src/lib.rs"];
-    const inputs = ["crates/bazhen/src/main.rs", "Cargo.lock"];
-    const source = 'import { scene } from "./cli.ts";';
-    expect({
-      cli: relatedReverts("tests/cli/agents.test.ts", source, reverted, PACKAGES, inputs),
-      other: relatedReverts("tests/api/agents.test.ts", source, reverted, PACKAGES, inputs),
-    }).toEqual({ cli: ["crates/bazhen/src/main.rs"], other: [] });
+  it("counts a reverted input of the binaries the test names, and no other", () => {
+    const test = "apps/daemon/src/mailbox/hook.medium.test.ts";
+    const reverted = ["crates/bazhen-hook/src/main.rs", "crates/bazhen-holder/src/lib.rs"];
+    const inputs = ["crates/bazhen-hook/src/main.rs", "Cargo.lock"];
+    const source = 'import { hook } from "./hook-command.ts";';
+    expect(relatedReverts(test, source, reverted, PACKAGES, inputs)).toEqual([
+      "crates/bazhen-hook/src/main.rs",
+    ]);
   });
 
   it("ignores a type-only import", () => {

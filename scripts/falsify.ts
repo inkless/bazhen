@@ -16,12 +16,17 @@
 //             recorded as a trailer in a commit on the branch:
 //             `Control: <what you broke> -> <how the test failed>`.
 //
-// A test under tests/cli runs the `bazhen` binary BAZHEN_CLI names, not code it imports. When
-// one is judged, the branch's Rust changes are reverted in the worktree too, and the CLI is built
-// there with `pnpm run build:cli`, so the test runs the base's CLI, built with HEAD's script,
-// toolchain and .cargo config. It is related to a reverted file the CLI was built from, as cargo's
-// dep-info for it lists, or to its crates' manifests. A CLI that won't build is no verdict:
-// falsify fails, naming cargo's error.
+// A test that runs a Rust binary finds it in the repository's target/, which the worktree has
+// none of. When a judged test, or anything it reaches through relative imports or source paths it
+// names, names one (`target/<profile>/<name>`), the branch's Rust changes are reverted in the
+// worktree too, every binary is built there with `pnpm run build:bins` in each profile reached,
+// and each one this run built is copied to the worktree's target/: the test runs the base's
+// binaries, built with HEAD's script, toolchain and .cargo config. Only a name a crate's manifest
+// declares counts. A test is related to a reverted file that a binary it names, or a file it
+// imports directly names, was built from, as cargo's dep-info for it lists, or to that binary's
+// crates' manifests. A test that fails while it reaches a binary the base doesn't build is
+// INVALID: the binary's absence failed it. Binaries that won't build are no verdict: falsify
+// fails, naming cargo's error.
 //
 // A Rust test under crates/ lives in the file it tests, so reverting the source would revert the
 // test with it. When the branch touches the Rust workspace, nextest lists the tests at the base and
@@ -49,8 +54,11 @@
 
 import { execFileSync, type ChildProcess } from "node:child_process";
 import {
+  chmodSync,
   closeSync,
+  copyFileSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   openSync,
   readdirSync,
@@ -61,7 +69,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { basename, isAbsolute, join, posix, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, posix, resolve } from "node:path";
 import { isAlive, rethrowUnsafe, signalGroup, spawnGroup } from "@bazhen/host-guard";
 import { KILLS_ENV } from "./capped.ts";
 import { GATES, configFailures, gateEnv, installCommand, outsideConfigs } from "./cargo-gate.ts";
@@ -90,10 +98,17 @@ const REVERTIBLE = /^(?:(?:apps|packages)\/[^/]+\/src\/|scripts\/.+\.tsx?$)/;
 // What can change the set of Rust tests, or what a Rust binary does: a crate's files, or the
 // workspace's manifest and lockfile.
 const RUST_INPUT = /^(?:crates\/|Cargo\.(?:toml|lock)$)/;
-// Tests that run the `bazhen` binary BAZHEN_CLI names, rather than importing what they test.
-const CLI_TESTS = "tests/cli/";
-// The CLI's own source, which cargo's record of what built it must list.
-const CLI_MAIN = "crates/bazhen/src/main.rs";
+// The target folders a test runs a binary from, each with the cargo profile that fills it.
+const PROFILES: Readonly<Record<string, string>> = {
+  debug: "dev",
+  release: "release",
+  "release-holder": "release-holder",
+};
+// A string naming a binary in the repository's target/, as a test joins to the repository's root.
+const TARGET_STRING = /["'`](target\/[\w-]+\/[\w-]+)["'`]/g;
+const IN_TARGET = /^target\/([\w-]+\/[\w-]+)$/;
+// A source file named by its path from the repository's root, as a test names a program it runs.
+const ROOT_SOURCE = /["'`]((?:apps|packages|scripts|tests)\/[\w./-]+\.[cm]?tsx?)["'`]/g;
 const TITLE = /(?<![.\w])(?:it|test)(?:\.\w+(?:\([^()]*\))?)*\(\s*(["'`])((?:\\.|(?!\1).)+)\1/g;
 const TEST_CALL = /(?<![.\w])(?:it|test)(?:\.\w+)*\s*\(/;
 const CONTROL_TRAILER = /^Control: .+ -> .+$/m;
@@ -200,11 +215,12 @@ const pathsOf = (c: Change) => (c.oldPath === undefined ? [c.path] : [c.path, c.
 
 /**
  * The changes the revert check puts back as the base had them: the revertible source, and the
- * changed outputs of every generator whose source that includes. When `cli`, a CLI test is among
- * those judged, so the Rust workspace is put back too, and the CLI built from it is the base's.
+ * changed outputs of every generator whose source that includes. When `rust`, a judged test runs
+ * a Rust binary, so the Rust workspace is put back too, and the binaries built from it are the
+ * base's.
  */
-export function revertsOf(changes: Change[], { cli = false } = {}): Change[] {
-  const reverts = (path: string) => isRevertible(path) || (cli && RUST_INPUT.test(path));
+export function revertsOf(changes: Change[], { rust = false } = {}): Change[] {
+  const reverts = (path: string) => isRevertible(path) || (rust && RUST_INPUT.test(path));
   const source = changes.filter((c) => pathsOf(c).some(reverts));
   const reverted = source.flatMap(pathsOf);
   const outputs = GENERATED.filter((g) => reverted.some((p) => within(p, g.sources))).flatMap(
@@ -413,7 +429,7 @@ const HARNESS = "scripts/falsify.ts";
  * workspace package (`@bazhen/x`, `@bazhen/x/sub`), which counts every reverted path under that
  * package's folder. A `new URL("<path>", import.meta.url)` naming a reverted file counts too, so
  * a test that runs a script instead of importing it is related to it, and so does any of
- * `cliInputs`, what the CLI was built from, for a test of the CLI. `packages` maps package
+ * `ranFrom`, what the binaries the test names were built from. `packages` maps package
  * names to folders, e.g. `@bazhen/core` → `packages/core`.
  */
 export function relatedReverts(
@@ -421,12 +437,9 @@ export function relatedReverts(
   testSource: string,
   revertedPaths: string[],
   packages: Record<string, string>,
-  cliInputs: readonly string[] = [],
+  ranFrom: readonly string[] = [],
 ): string[] {
-  const related = new Set<string>();
-  if (isCliTest(testPath)) {
-    for (const r of revertedPaths) if (cliInputs.includes(r)) related.add(r);
-  }
+  const related = new Set<string>(revertedPaths.filter((r) => ranFrom.includes(r)));
   for (const [, url = ""] of testSource.matchAll(FILE_URL)) {
     const path = posix.join(posix.dirname(testPath), url);
     if (revertedPaths.includes(path)) related.add(path);
@@ -444,7 +457,70 @@ export function relatedReverts(
   return [...related];
 }
 
-export const isCliTest = (path: string): boolean => path.startsWith(CLI_TESTS);
+/**
+ * The binaries in the repository's target/ the file at `path` names, as `<profile>/<name>`: a
+ * string `target/<profile>/<name>`, or a `new URL` resolving there. An absolute path, as a
+ * fixture's `/repo/target/release/bazhen-hook`, isn't the repository's.
+ */
+export function namedBinaries(path: string, source: string): string[] {
+  const named = new Set<string>();
+  for (const [, string = ""] of source.matchAll(TARGET_STRING)) {
+    named.add(string.slice("target/".length));
+  }
+  for (const [, url = ""] of source.matchAll(FILE_URL)) {
+    const binary = IN_TARGET.exec(posix.join(posix.dirname(path), url))?.[1];
+    if (binary !== undefined) named.add(binary);
+  }
+  return [...named];
+}
+
+/**
+ * The names a crate's manifest gives, its package's and its binaries': what a binary in target/
+ * may be called. A path into target/ with any other name, as a fixture's, names no binary.
+ */
+export const manifestNames = (manifest: string): string[] =>
+  [...manifest.matchAll(/^name\s*=\s*"([^"]+)"/gm)].map(([, name = ""]) => name);
+
+/**
+ * The binaries the test at `testPath` names `direct`ly, itself or in a file it imports by a
+ * relative path, and every one it `reaches`: named by anything its relative imports, or the
+ * source files named by their path from the repository's root (`apps/daemon/src/main.ts`, which a
+ * test spawns), lead to, followed to their end. `read` returns a file's text, or undefined where
+ * there is none.
+ */
+export function binariesOf(
+  testPath: string,
+  read: (path: string) => string | undefined,
+): { direct: string[]; reached: string[] } {
+  const direct = new Set<string>();
+  const reached = new Set<string>();
+  const seen = new Set([testPath]);
+  // Each file with whether its binaries are the test's own: the test's, or a relative import's.
+  const queue: [string, boolean][] = [[testPath, true]];
+  const visit = (path: string | undefined, own: boolean) => {
+    if (path === undefined || seen.has(path)) return;
+    seen.add(path);
+    queue.push([path, own]);
+  };
+  for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
+    const [path, own] = next;
+    const source = read(path);
+    if (source === undefined) continue;
+    for (const binary of namedBinaries(path, source)) {
+      reached.add(binary);
+      if (own) direct.add(binary);
+    }
+    for (const specifier of runtimeSpecifiers(source)) {
+      if (!specifier.startsWith(".")) continue;
+      visit(
+        namedPaths(path, specifier).find((c) => read(c) !== undefined),
+        own && path === testPath,
+      );
+    }
+    for (const [, named = ""] of source.matchAll(ROOT_SOURCE)) visit(named, false);
+  }
+  return { direct: [...direct], reached: [...reached] };
+}
 
 /**
  * The files under `root` a cargo dep-info file (`<binary>.d`) lists as its binary's inputs,
@@ -696,67 +772,96 @@ function refusesCargoConfig(dir: string, what: string): boolean {
   return true;
 }
 
+/** Each binary a build made, as `<profile>/<name>`, and the files it was built from. */
+type Built = Map<string, string[]>;
+
+/** Calls `each` with every dep-info file at the top of the profile folders under `target`. */
+function eachDepInfo(target: string, each: (folder: string, name: string) => void): void {
+  for (const profile of Object.keys(PROFILES)) {
+    const folder = join(target, profile);
+    if (!existsSync(folder)) continue;
+    for (const name of readdirSync(folder)) if (name.endsWith(".d")) each(folder, name);
+  }
+}
+
 /**
- * Builds the CLI in the worktree `dir` with its own `build:cli` script, and returns the binary
- * and what it was built from; or undefined, with the reason printed, so no CLI test is judged
- * against a binary that isn't the base's.
+ * Builds every binary in the worktree `dir` in each of `profiles`, with its own `build:bins`
+ * script, copies each one this run built to the worktree's own target/, and returns them with what
+ * each was built from; or undefined, with the reason printed, so no test is judged against a
+ * binary that isn't the base's.
  */
-async function buildCli(
+async function buildBinaries(
   dir: string,
   top: string,
-): Promise<{ binary: string; inputs: string[] } | undefined> {
-  if (refusesCargoConfig(dir, "builds the base's CLI")) return undefined;
-  const binary = join(cargoTarget(top), "release", "bazhen");
-  // Cargo writes it on every build, a fresh one included; one left by an earlier run would name
-  // another worktree's files.
-  const depInfo = `${binary}.d`;
-  rmSync(depInfo, { force: true });
-  const log = join(dir, "falsify-build-cli.log");
-  const fd = openSync(log, "w");
-  let ok: boolean;
-  let timedOut = false;
-  try {
-    ok = await run("pnpm", ["run", "build:cli"], dir, CARGO_TIMEOUT_MS, {
-      env: rustEnv(top),
-      stderr: fd,
-      onTimeout: () => (timedOut = true),
-    });
-  } finally {
-    closeSync(fd);
-  }
-  if (!ok) {
-    const said = readFileSync(log, "utf8");
-    const errors = cargoErrors(said);
-    const why = timedOut
-      ? `it timed out after ${CARGO_TIMEOUT_MS / 1000} s`
-      : errors.length > 0
-        ? `cargo said:\n${errors.map((line) => `  ${line}`).join("\n")}`
-        : "it named no cargo error";
-    console.error(
-      "falsify: `pnpm run build:cli` failed in the temporary worktree, so the CLI tests can't be " +
-        `judged against the base's CLI: ${why}\nThe end of what it said:\n${indentedTail(said)}`,
-    );
-    return undefined;
-  }
-  if (!existsSync(depInfo)) {
-    console.error(
-      `falsify: the base's CLI built, but cargo wrote no ${depInfo}, so what it was built from ` +
-        "is unknown and no CLI test can be judged.",
-    );
-    return undefined;
+  profiles: readonly string[],
+): Promise<Built | undefined> {
+  if (refusesCargoConfig(dir, "builds the base's binaries")) return undefined;
+  const target = cargoTarget(top);
+  // Cargo writes a binary's dep-info on every build, a no-op one included, so the ones that come
+  // back mark what this run built; one left by an earlier run would name another worktree's files.
+  eachDepInfo(target, (folder, name) => rmSync(join(folder, name), { force: true }));
+  for (const profile of profiles) {
+    const args = ["run", "build:bins", "--profile", profile];
+    const log = join(dir, `falsify-build-${profile}.log`);
+    const fd = openSync(log, "w");
+    let ok: boolean;
+    let timedOut = false;
+    try {
+      ok = await run("pnpm", args, dir, CARGO_TIMEOUT_MS, {
+        env: rustEnv(top),
+        stderr: fd,
+        onTimeout: () => (timedOut = true),
+      });
+    } finally {
+      closeSync(fd);
+    }
+    if (!ok) {
+      const said = readFileSync(log, "utf8");
+      const errors = cargoErrors(said);
+      const why = timedOut
+        ? `it timed out after ${CARGO_TIMEOUT_MS / 1000} s`
+        : errors.length > 0
+          ? `cargo said:\n${errors.map((line) => `  ${line}`).join("\n")}`
+          : "it named no cargo error";
+      console.error(
+        `falsify: \`pnpm ${args.join(" ")}\` failed in the temporary worktree, so the tests that ` +
+          `run a binary can't be judged against the base's: ${why}\nThe end of what it said:\n` +
+          indentedTail(said),
+      );
+      return undefined;
+    }
   }
   const root = realpathSync(dir);
-  const sources = depInfoSources(readFileSync(depInfo, "utf8"), root);
-  if (!sources.includes(CLI_MAIN)) {
-    // As when a cargo config sets build.dep-info-basedir, which makes the paths relative.
+  const built: Built = new Map();
+  let unknown: string | undefined;
+  eachDepInfo(target, (folder, name) => {
+    const binary = join(folder, name.slice(0, -".d".length));
+    if (!existsSync(binary)) return;
+    const sources = depInfoSources(readFileSync(join(folder, name), "utf8"), root);
+    // None when a cargo config sets build.dep-info-basedir, which makes the paths relative.
+    if (!sources.some((s) => s.startsWith("crates/"))) unknown ??= join(folder, name);
+    const named = `${basename(folder)}/${basename(binary)}`;
+    const copy = join(dir, "target", named);
+    mkdirSync(dirname(copy), { recursive: true });
+    copyFileSync(binary, copy);
+    chmodSync(copy, statSync(binary).mode);
+    built.set(named, binaryInputs(sources));
+  });
+  if (unknown !== undefined) {
     console.error(
-      `falsify: cargo's record of what the base's CLI was built from, ${depInfo}, doesn't name ` +
-        `${CLI_MAIN} under ${root}, so the reverts it covers are unknown and no CLI test can be ` +
-        "judged.",
+      `falsify: cargo's record of what a base binary was built from, ${unknown}, names no file ` +
+        `under ${root}/crates, so the reverts it covers are unknown and no test can be judged.`,
     );
     return undefined;
   }
-  return { binary, inputs: binaryInputs(sources) };
+  if (built.size === 0) {
+    console.error(
+      `falsify: the base's binaries built, but cargo wrote no dep-info under ${target}, so what ` +
+        "they were built from is unknown and no test that runs one can be judged.",
+    );
+    return undefined;
+  }
+  return built;
 }
 
 /**
@@ -1190,9 +1295,39 @@ async function main(args: string[]): Promise<number> {
       title,
     }));
   });
+  const headFiles = new Set(
+    git(["ls-tree", "-r", "-z", "--name-only", "--full-tree", head]).split("\0"),
+  );
+  const blobs = new Map<string, string>();
+  const atHead = (path: string) => {
+    if (!headFiles.has(path)) return undefined;
+    const text = blobs.get(path) ?? git(["cat-file", "blob", `${head}:${path}`]);
+    blobs.set(path, text);
+    return text;
+  };
+  const crateNames = new Set(
+    [...headFiles]
+      .filter((path) => /^crates\/[^/]+\/Cargo\.toml$/.test(path))
+      .flatMap((path) => manifestNames(atHead(path) ?? "")),
+  );
+  const isBinary = (binary: string) => crateNames.has(binary.slice(binary.indexOf("/") + 1));
+  const binaries = new Map(
+    targets.map((t) => {
+      const { direct, reached } = binariesOf(t.file, atHead);
+      return [t.file, { direct: direct.filter(isBinary), reached: reached.filter(isBinary) }];
+    }),
+  );
+  // Built only in the profiles a judged test may run a binary from: each is a whole build.
+  const profiles = [
+    ...new Set(
+      [...binaries.values()].flatMap((b) =>
+        b.reached.flatMap((binary) => PROFILES[binary.split("/")[0] ?? ""] ?? []),
+      ),
+    ),
+  ];
+  const runsBinaries = profiles.length > 0;
   // Before any test runs, Rust's included: the TS side would refuse after the mutants had run.
-  const cliTests = targets.some((t) => isCliTest(t.file));
-  const reverts = revertsOf(changes, { cli: cliTests });
+  const reverts = revertsOf(changes, { rust: runsBinaries });
   if (targets.length > 0 && reverts.length > 0) {
     const work = signallingWork(
       reverts.flatMap(pathsOf),
@@ -1236,6 +1371,7 @@ async function main(args: string[]): Promise<number> {
     title: string;
     outcome: Outcome;
     unrelated?: boolean;
+    unbuilt?: string[];
     note?: string;
   }[] = [];
 
@@ -1274,11 +1410,11 @@ async function main(args: string[]): Promise<number> {
         );
         return 1;
       }
-      // A CLI test runs the binary BAZHEN_CLI names: the base's, never the caller's own build.
-      let cli: { binary: string; inputs: string[] } | undefined;
-      if (cliTests) {
-        cli = await buildCli(dir, top);
-        if (cli === undefined) return 1;
+      let built: Built = new Map();
+      if (runsBinaries) {
+        const made = await buildBinaries(dir, top, profiles);
+        if (made === undefined) return 1;
+        built = made;
       }
       const reportFile = join(dir, "falsify-report.json");
       await run(
@@ -1293,7 +1429,10 @@ async function main(args: string[]): Promise<number> {
         ],
         dir,
         VITEST_TIMEOUT_MS,
-        cli === undefined ? {} : { env: { ...isolatedEnv(), BAZHEN_CLI: cli.binary } },
+        // A CLI test runs the binary BAZHEN_CLI names: the base's, never the caller's own build.
+        runsBinaries
+          ? { env: { ...isolatedEnv(), BAZHEN_CLI: join(dir, "target", "release", "bazhen") } }
+          : {},
       );
       let report: VitestReport = { testResults: [] };
       try {
@@ -1309,11 +1448,16 @@ async function main(args: string[]): Promise<number> {
       for (const t of targets) {
         const outcome = classify(report, t.file, t.title);
         const source = readFileSync(join(dir, t.file), "utf8");
+        const { direct = [], reached = [] } = binaries.get(t.file) ?? {};
+        const inputs = direct.flatMap((b) => built.get(b) ?? []);
+        const unbuilt = reached.filter((b) => !built.has(b));
         if (
           outcome === "SURVIVED" &&
-          relatedReverts(t.file, source, revertedPaths, packages, cli?.inputs).length === 0
+          relatedReverts(t.file, source, revertedPaths, packages, inputs).length === 0
         ) {
           results.push({ ...t, outcome: "INVALID", unrelated: true });
+        } else if (outcome === "KILLED" && unbuilt.length > 0) {
+          results.push({ ...t, outcome: "INVALID", unbuilt });
         } else results.push({ ...t, outcome });
       }
     } finally {
@@ -1326,7 +1470,13 @@ async function main(args: string[]): Promise<number> {
 
   console.log(`falsify: new tests run against the source at ${base.slice(0, 12)}`);
   for (const r of results) {
-    const note = r.note ?? (r.unrelated ? " (passed; unrelated to the source change)" : "");
+    const note =
+      r.note ??
+      (r.unrelated
+        ? " (passed; unrelated to the source change)"
+        : r.unbuilt
+          ? ` (failed; the base builds no ${r.unbuilt.map((b) => `target/${b}`).join(", ")})`
+          : "");
     console.log(`  ${r.outcome.padEnd(8)} ${r.file} › ${r.title}${note}`);
   }
   if (rust.total > 0) {
@@ -1375,7 +1525,8 @@ async function main(args: string[]): Promise<number> {
       reverts.length === 0
         ? "\nThis branch adds tests but no source change to revert."
         : "\nSome tests could not be judged by reverting (new symbols, tests unrelated to the " +
-            "source change, unparsed titles, load errors or timeouts).",
+            "source change, binaries the base doesn't build, unparsed titles, load errors or " +
+            "timeouts).",
     );
     console.error(
       "Break the code by hand, confirm each test fails on its assertion, and record it in a " +

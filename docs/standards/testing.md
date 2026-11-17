@@ -112,12 +112,19 @@ Every new test must be shown to fail without the code it covers.
   see the base's. A script's committed output is reverted with it (`.oxlintrc.json` with
   `scripts/lint-config.ts`; the protocol's schema and fixtures with their sources), listed in
   `GENERATED` in `scripts/falsify.ts`, and the protocol id the Rust crates speak with them.
-  A `tests/cli` test runs the CLI rather than importing it, so when one is judged the branch's
-  Rust changes are reverted too and the CLI is built there with `pnpm run build:cli`: it runs the
-  base's CLI, built with HEAD's script, toolchain and `.cargo` config. It is related to a
-  reverted file the CLI was built from, as cargo lists them, or to its crates' manifests; a change
-  to the workspace's manifest or lockfile alone needs a control. A CLI that won't build fails the
-  check, naming cargo's error. A branch that changes falsify,
+  A test that runs a Rust binary finds it in the repository's target folder. When a judged test,
+  or anything its relative imports or the source paths it names lead to, names one
+  (`target/<profile>/<name>`, as `tests/cli`, `tests/api`, `tests/holder` and the daemon's hook
+  and peer tests do through their helpers), the branch's Rust changes are reverted too. Every
+  binary is then built there with `pnpm run build:bins --profile <profile>`, in each profile
+  reached, and copied to the worktree's own target folder, so the test runs the base's binaries,
+  built with HEAD's script, toolchain and `.cargo` config. It is related to a reverted file that a
+  binary named by the test, or by a file it imports directly, was built from, as cargo lists them,
+  or to that binary's crates' manifests; a change to the workspace's manifest or lockfile alone
+  needs a control. A test that fails while it reaches a binary the base doesn't build is INVALID.
+  Binaries that won't build fail the check, naming cargo's error. A new helper that names a binary
+  goes in `RUNS_BINARIES` in `scripts/falsify.medium.test.ts`, which fails until it does. A
+  branch that changes falsify,
   anything it imports, or how it is run is judged by the base's falsify too, in CI and in
   `pnpm test:real falsify` (`pnpm test:falsify:base`, `scripts/falsify-base.ts`, which runs only
   in a sandbox), so its new tests also need what that falsify asks for, usually a `Control:`
@@ -125,7 +132,7 @@ Every new test must be shown to fail without the code it covers.
   - **KILLED** — it failed. Good.
   - **SURVIVED** — it passed without the change, so it can't detect the change. The check
     fails. Only a test that directly imports a reverted file, runs one it names with
-    `new URL("<file>", import.meta.url)`, or runs a CLI built from one, can survive.
+    `new URL("<file>", import.meta.url)`, or runs a binary built from one, can survive.
   - **INVALID** — no verdict: it couldn't load, timed out, was skipped, its title couldn't be
     read or isn't unique, or it passed but imports no reverted file, so it is unrelated to the
     source change (a characterization or property test of existing code); a branch that adds
