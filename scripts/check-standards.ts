@@ -674,10 +674,11 @@ export function macroFailures(
 }
 
 // Every function in crates/ that takes bytes from outside (a slice, a buffer or a reader), or reads
-// them in its body (from a socket, a file or stdin), is a decoder until it is shown not to be: listed here with the fuzz target that drives it, or in
-// NOT_DECODERS with why it isn't one (docs/standards/rust.md § Tests). A decoder of text from
-// outside is listed here by hand, as pane_title's body is: the rule can't tell such text apart. A
-// target is crates/<crate>/fuzz/fuzz_targets/<target>.rs, and must call the function.
+// them in its body (from a socket, a file or stdin), is a decoder until it is shown not to be:
+// listed here with the fuzz target that drives it, or in NOT_DECODERS with why it isn't one
+// (docs/standards/rust.md § Tests). A decoder of text from outside is listed here by hand, as
+// pane_title's body is: the rule can't tell such text apart. A target is
+// crates/<crate>/fuzz/fuzz_targets/<target>.rs, and must call the function.
 const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-client/src/framing.rs::reply_end": "framing",
   "crates/bazhen-client/src/framing.rs::Framing::end_of": "framing",
@@ -1126,17 +1127,19 @@ const NOT_DECODERS: Record<string, string> = {
 const IMPL_BLOCK = /(?<=^|[;{}])\s*(?:(?:pub(?:\([^)]*\))?|unsafe)\s+)*impl\b[^{;]*(?=\{)/gm;
 
 // Types a function takes that carry bytes from outside the process: anything holding u8s, a
-// reader of any kind, or a handle that can only be read (stdin, a child's output). A socket, a file
-// or an fd isn't one, since holding it isn't reading it: a function that reads one does so in its
-// body, which BODY_READS reads.
+// reader of any kind, a handle that can only be read (stdin, a child's output), or a WebSocket,
+// whose `read()` takes nothing to read into, so BODY_READS can't see it. A socket, a file or an fd
+// isn't one, since holding it isn't reading it: a function that reads one does so in its body,
+// which BODY_READS reads.
 const BYTES_IN =
-  /\[(?:(?:core|std)::primitive::)?u8\b|\b(?:Vec|VecDeque)<(?:(?:core|std)::primitive::)?u8>|\*\s*(?:const|mut)\s+u8\b|\bItem\s*=\s*u8\b|\b(?:(?:Async)?(?:Buf)?Read|Buf|Bytes|BytesMut|Stdin\w*|Child(?:Stdout|Stderr))\b/;
+  /\[(?:(?:core|std)::primitive::)?u8\b|\b(?:Vec|VecDeque)<(?:(?:core|std)::primitive::)?u8>|\*\s*(?:const|mut)\s+u8\b|\bItem\s*=\s*u8\b|\b(?:(?:Async)?(?:Buf)?Read(?:er)?|Buf|Bytes|BytesMut|Stdin\w*|Child(?:Stdout|Stderr)|WebSocket)\b/;
 
 // The reads of std::io, the socket and fd calls, and the reads of a file, whether called as a
 // method, by path or by a bare name a `use` brought in.
 const READS =
   "read|read_exact|read_to_end|read_to_string|read_line|read_until|read_vectored|read_buf|" +
-  "recv|recv_from|recv_vectored|recvfrom|recvmsg|peek|peek_from|pread|readv|preadv";
+  "read_buf_exact|read_at|read_exact_at|recv|recv_from|recv_vectored|recvfrom|recvmsg|recvmmsg|" +
+  "peek|peek_from|pread|readv|preadv";
 
 // A read in a function's body. A method must be given something to read into, so a channel's
 // `recv()`, an iterator's `peek()` and `OpenOptions::read(true)` aren't reads; stdin counts once it
@@ -1154,15 +1157,15 @@ const BODY_READS = new RegExp(
   ].join("|"),
 );
 
-// A read called by a bare name, as a `use libc::read;` lets it be. A function of the file's own
-// by that name is read where it is defined, so a call to it isn't one.
-const BARE_READ = new RegExp(`(?<![.:]\\s*|\\bfn\\s+)\\b(${READS}|fill_buf)\\s*\\(`, "g");
+// A read called by a bare name, as a `use libc::read;` or `use std::io::copy;` lets it be. A
+// function of the file's own by that name is read where it is defined, so a call to it isn't one.
+const BARE_READ = new RegExp(`(?<![.:]\\s*|\\bfn\\s+)\\b(${READS}|fill_buf|copy)\\s*\\(`, "g");
 
 // The names a `use … as` may not rename: each byte type above, and the containers that hold u8s.
 const BYTE_TYPE_NAMES = new Set(
   (
-    "u8 Read BufRead AsyncRead AsyncBufRead Buf Bytes BytesMut Stdin StdinLock ChildStdout " +
-    "ChildStderr Vec VecDeque"
+    "u8 Read BufRead AsyncRead AsyncBufRead Reader BufReader Buf Bytes BytesMut Stdin StdinLock " +
+    "ChildStdout ChildStderr WebSocket Vec VecDeque"
   ).split(" "),
 );
 
@@ -1415,8 +1418,9 @@ export function decoderFailures(
 
 /**
  * The files among `paths` that hold a module compiled only under test: one declared out of line
- * as `#[cfg(test)] mod name;`, and every module inside it. A declaration with another attribute,
- * such as `#[path]`, is left alone, so its file is still read as product code.
+ * as `#[cfg(test)] mod name;`, and every module inside it. A declaration inside an inline `mod
+ * outer { … }` names `outer/name.rs`. A declaration with another attribute, such as `#[path]`, is
+ * left alone, so its file is still read as product code.
  */
 function testModuleFiles(paths: string[], read: (path: string) => string): Set<string> {
   const out = new Set<string>();
@@ -1425,10 +1429,16 @@ function testModuleFiles(paths: string[], read: (path: string) => string): Set<s
     const dir = /(?:^|\/)(?:lib|main|mod)\.rs$/.test(file)
       ? file.replace(/[^/]+$/, "")
       : file.replace(/\.rs$/, "/");
-    for (const [, name = ""] of rustCode(read(file)).matchAll(declared)) {
-      for (const p of paths) {
-        if (p === `${dir}${name}.rs` || p.startsWith(`${dir}${name}/`)) out.add(p);
-      }
+    const code = rustCode(read(file));
+    const inline = [...code.matchAll(/\bmod\s+(\w+)\s*\{/g)].map((m) => ({
+      name: m[1] ?? "",
+      start: m.index,
+      end: itemEnd(code, m.index),
+    }));
+    for (const m of code.matchAll(declared)) {
+      const outer = inline.filter((o) => inside(m.index, [o])).map((o) => `${o.name}/`);
+      const at = `${dir}${outer.join("")}${m[1] ?? ""}`;
+      for (const p of paths) if (p === `${at}.rs` || p.startsWith(`${at}/`)) out.add(p);
     }
   }
   return out;

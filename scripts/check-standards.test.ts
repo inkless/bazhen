@@ -1452,8 +1452,11 @@ describe("byteTakers", () => {
       "fn spawned(c: Child) {}",
       "fn net(s: TcpStream, u: UdpSocket) {}",
       "fn drain(s: &mut UnixStream) { s.read(&mut chunk) }",
+      "fn frames(ws: &mut WebSocket<UnixStream>) { match ws.read() { _ => {} } }",
+      "fn lines(r: BufReader<File>) { for l in r.lines() {} }",
+      "fn pulled<R: AsyncBufRead>(r: R) {}",
     ].join("\n");
-    expect(byteTakers(source)).toEqual(["drain"]);
+    expect(byteTakers(source)).toEqual(["drain", "frames", "lines", "pulled"]);
   });
 
   it("names a function that reads in its body, and leaves what only looks like a read", () => {
@@ -1493,6 +1496,14 @@ describe("byteTakers", () => {
       "fn spaced() { s . read (\n &mut b) }",
       "fn opened() { OpenOptions::new().read(true).open(p)?.read_to_end(&mut v) }",
       "fn closure() { let f = |s: &mut T| s.read(&mut b); }",
+      "fn at() { f.read_at(&mut b, 0) }",
+      "fn exact_at() { f.read_exact_at(&mut b, 0) }",
+      "fn many() { libc::recvmmsg(fd, v, n, 0, t) }",
+      "fn buf_exact() { r.read_buf_exact(cursor) }",
+      "fn copied_bare() { copy(&mut from, &mut to) }",
+      "fn moved() { std::ptr::copy(a, b, n) }",
+      "fn sliced() { v.copy_from_slice(w) }",
+      "fn guarded() -> RwLockReadGuard<'_, u8> { lock.read() }",
       "fn options() { OpenOptions::new().read(true).write(false).open(p) }",
       "fn closed() { o.read( false ) }",
       "fn channel() { rx.recv() }",
@@ -1550,6 +1561,11 @@ describe("byteTakers", () => {
       "spaced",
       "opened",
       "closure",
+      "at",
+      "exact_at",
+      "many",
+      "buf_exact",
+      "copied_bare",
       "leaves",
     ]);
   });
@@ -1726,13 +1742,17 @@ describe("decoderFailures", () => {
       "crates/p/src/q.rs": "fn e(b: &[u8]) {}\nmod t;\n#[cfg(test)]\nmod v;\n",
       "crates/p/src/q/t.rs": "fn f(b: &[u8]) {}",
       "crates/p/src/q/v.rs": "fn g(b: &[u8]) {}",
-      "crates/r/src/lib.rs": "mod t;\n// #[cfg(test)]\nmod u;\n",
+      "crates/r/src/lib.rs":
+        "mod t;\n// #[cfg(test)]\nmod u;\nmod outer {\n    #[cfg(test)]\n    mod w;\n}\n",
+      "crates/r/src/w.rs": "fn j(b: &[u8]) {}",
+      "crates/r/src/outer/w.rs": "fn k(b: &[u8]) {}",
       "crates/r/src/t.rs": "fn h(b: &[u8]) {}",
       "crates/r/src/u.rs": "fn i(b: &[u8]) {}",
     };
     expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
       "crates/p/src/q.rs::e",
       "crates/p/src/q/t.rs::f",
+      "crates/r/src/w.rs::j",
       "crates/r/src/t.rs::h",
       "crates/r/src/u.rs::i",
     ]);
@@ -1780,6 +1800,18 @@ describe("decoderFailures", () => {
         expect.stringContaining("`u8 as Byte` renames a byte type"),
       ],
       [expect.stringContaining("lib.rs::send is in NOT_DECODERS with no reason")],
+    ]);
+  });
+
+  it("refuses a rename of a buffered reader or a WebSocket, which are byte types", () => {
+    const renamed = {
+      ...repo,
+      "crates/p/src/use.rs":
+        "use std::io::BufReader as Lines;\nuse tungstenite::WebSocket as Ws;\n",
+    };
+    expect(failures(fuzzed, exempt, renamed)).toEqual([
+      expect.stringContaining("`BufReader as Lines` renames a byte type"),
+      expect.stringContaining("`WebSocket as Ws` renames a byte type"),
     ]);
   });
 
