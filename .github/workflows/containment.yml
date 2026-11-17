@@ -36,7 +36,7 @@ env:
 
 jobs:
   containment:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       # It starts holders and drives an OOM kill, so it runs only on a host thrown away after use.

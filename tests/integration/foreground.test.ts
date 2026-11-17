@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { filterEnv, newId } from "@bazhen/core";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
 import { nodePtySpawner } from "@bazhen/daemon/pty";
@@ -11,7 +11,11 @@ const server = testServer("foreground");
 const runtime = new TmuxRuntime({ server, pty: nodePtySpawner, env: filterEnv(process.env).env });
 afterAll(() => server.killServer());
 
-/** A terminal running `sleep` in `cwd`, and what one read of its foreground says of it. */
+/**
+ * A terminal running `sleep` in `cwd`, and what a read of its foreground says of it once `sleep`
+ * runs. The pane starts as `env -u TMUX sleep 300`, so a read before `env` has exec'd `sleep`
+ * finds `env`, or tmux's own fork before that; a slower `env`, as uutils' is, makes that likely.
+ */
 async function readIn(cwd: string) {
   const terminalId = newId("term");
   const tags = { kind: "shell" } as const;
@@ -25,7 +29,14 @@ async function readIn(cwd: string) {
     historyLines: 10_000,
   };
   await runtime.create({ ...spec, argv: ["sleep", "300"] });
-  return (await runtime.foregrounds(new Set([terminalId])))[0];
+  return vi.waitFor(
+    async () => {
+      const read = (await runtime.foregrounds(new Set([terminalId])))[0];
+      if (read?.command !== "sleep") throw new Error(`the pane runs ${read?.command}, not sleep`);
+      return read;
+    },
+    { timeout: 10_000 },
+  );
 }
 
 describe("a terminal's directory, as its foreground read gives it", () => {

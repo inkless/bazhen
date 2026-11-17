@@ -83,6 +83,12 @@ describe("what a run says when it ends", () => {
     ]);
   });
 
+  it("says when a memory kill may have gone uncounted, even for a test binary", () => {
+    const why = "journalctl couldn't be read";
+    const killed = { ...ended, code: null, signal: "SIGKILL" as const, uncounted: why };
+    expect(report(killed, cap, "scope", true)).toEqual([`capped: ${why}`]);
+  });
+
   it("keeps a test binary quiet unless a cap fired, and takes no SIGKILL for a memory kill", () => {
     expect(report(ended, cap, "scope", true)).toEqual([]);
     expect(report({ ...ended, code: null, signal: "SIGKILL" }, cap, "scope", true)).toEqual([]);

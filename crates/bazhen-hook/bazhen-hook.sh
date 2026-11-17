@@ -11,7 +11,7 @@ agent_header() {
   token=$(cat "$BAZHEN_AGENT_AUTH_FILE" 2>/dev/null) || return 0
   case "$token" in *[!A-Za-z0-9_-]*) return 0 ;; esac
   [ "${#token}" -eq 43 ] || return 0
-  printf 'Bazhen-Agent-Token: %s\r\n' "$token" >"$1"
+  printf 'Bazhen-Agent-Token: %s\n' "$token" >"$1"
 }
 
 # The status line: run the user's own command (the rest of the arguments) on the same input,

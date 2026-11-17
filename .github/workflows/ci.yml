@@ -19,7 +19,7 @@ env:
 jobs:
   check:
     name: check (${{ matrix.os }}, node ${{ matrix.node }})
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -30,12 +30,6 @@ jobs:
         os: [ubuntu-latest]
         # "pinned" is the version in .nvmrc, so a bump never renames the check.
         node: ["24", "pinned"]
-        # `os` names the check, which the main ruleset requires by name, and `runner` is where it
-        # runs. The suites don't pass on ubuntu-26.04 yet (fish 4.2 among others), so Linux jobs
-        # stay on 24.04 until they do.
-        include:
-          - os: ubuntu-latest
-            runner: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
         with:
@@ -107,17 +101,15 @@ jobs:
   # model, so it needs no credentials. It is slower than `pnpm check`, so it is a job of its own.
   api:
     name: api (${{ matrix.os }})
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         # Linux only, as in `check`: the real-tmux suites refuse any host but a marked Linux one.
-        # `os` names the check and `runner` is where it runs, as in `check`.
-        os: [ubuntu-latest]
-        include:
-          - os: ubuntu-latest
-            runner: ubuntu-24.04
+        # 24.04's fish (3.7) is one the shell integration types a restarted shell's line back into,
+        # and the latest image's isn't, so between them the suite covers both.
+        os: [ubuntu-latest, ubuntu-24.04]
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -143,7 +135,7 @@ jobs:
   # runs, so the job costs one build and one suite, not three.
   integration-tmux-3-4:
     name: integration (tmux 3.4)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       BZ_TMUX_VERSION: "3.4"
@@ -166,7 +158,7 @@ jobs:
       - run: pnpm test:real integration
 
   e2e:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -191,7 +183,7 @@ jobs:
 
   falsify:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7

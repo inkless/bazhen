@@ -9,6 +9,7 @@ import {
   cpuLimit,
   fallbackWatchdog,
   isAncestor,
+  journalArgs,
   journalKills,
   judgeProbe,
   ownedArgv,
@@ -284,19 +285,59 @@ describe("whether vitest may start", () => {
   });
 });
 
+/** A capped scope's journal entry, as `journalctl -o json` prints one. */
+const entry = (fields: Record<string, string>) =>
+  JSON.stringify({ USER_UNIT: "bazhen-capped-1-1.scope", ...fields });
+
 describe("reading memory", () => {
   it("reads a cgroup's anonymous bytes and its kills", () => {
     expect(statAnon("file 900\nanon 1234\nanon_thp 0\n")).toBe(1234);
     expect(oomKills("low 0\nhigh 0\nmax 3\noom 1\noom_kill 2\n")).toBe(2);
   });
 
-  it("counts the OOM kills systemd logged for a scope, and nothing else it logged", () => {
+  it("counts the OOM kills systemd logged for a scope by their message id, in any wording", () => {
+    const oom = "fe6faa94e7774663a0da52717891d8ef";
     const log = [
-      "Started bazhen-capped-1-1.scope - /usr/bin/node.",
-      "bazhen-capped-1-1.scope: A process of this unit has been killed by the OOM killer.",
-      "bazhen-capped-1-1.scope: Consumed 1.2s CPU time.",
+      entry({ MESSAGE: "Started bazhen-capped-1-1.scope - /usr/bin/node." }),
+      entry({
+        MESSAGE_ID: oom,
+        MESSAGE:
+          "bazhen-capped-1-1.scope: A process of this unit has been killed by the OOM killer.",
+      }),
+      entry({
+        MESSAGE_ID: oom,
+        MESSAGE:
+          "bazhen-capped-1-1.scope: The kernel OOM killer killed some processes in this unit.",
+      }),
+      entry({
+        MESSAGE_ID: oom,
+        MESSAGE:
+          "bazhen-capped-1-1.scope: The kernel OOM killer killed some processes in this unit.",
+      }),
+      entry({
+        MESSAGE_ID: "ae8f7b866b0347b9af31fe1c80b127c0",
+        MESSAGE: "bazhen-capped-1-1.scope: Consumed 1.2s CPU time.",
+      }),
+      entry({ MESSAGE: "a process said: killed by the OOM killer" }),
+      JSON.stringify({ MESSAGE_ID: [oom] }),
+      "-- No entries --",
+      `{"MESSAGE_ID":"${oom}`,
+      "null",
+      "",
     ].join("\n");
-    expect(journalKills(log)).toBe(1);
+    expect(journalKills(log)).toBe(3);
+  });
+
+  it("asks the journal for a unit's OOM kills alone, as one id a line", () => {
+    const args = journalArgs("bazhen-capped-1-1.scope", 5_400);
+    expect(args.slice(0, 5)).toEqual([
+      "--user",
+      "-u",
+      "bazhen-capped-1-1.scope",
+      "MESSAGE_ID=fe6faa94e7774663a0da52717891d8ef",
+      "--since=@5",
+    ]);
+    expect(args).toEqual(expect.arrayContaining(["-o", "json", "--output-fields=MESSAGE_ID"]));
   });
 
   it("counts every process below the root, a child that left its group included", () => {
