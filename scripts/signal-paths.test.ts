@@ -533,6 +533,7 @@ describe("starts the scan can't follow to a call", () => {
         "const { exec } = ns;",
         "const seams = { ...cp };",
         "const starts = [...[sp]];",
+        "ns.default.execFile(cmd, [], { timeout: 1 });",
       ]),
     ).toEqual([
       unfollowed(6, "cp"),
@@ -542,6 +543,81 @@ describe("starts the scan can't follow to a call", () => {
       unfollowed(10, "ns"),
       unfollowed(11, "cp"),
       unfollowed(12, "sp (spawn)"),
+      unfollowed(13, "ns.default"),
+    ]);
+  });
+
+  it("finds a promisified start that is exported, as other files call it unread", () => {
+    const source = [
+      'import { execFile } from "node:child_process";',
+      'import * as cp from "node:child_process";',
+      "export const run = promisify(execFile);",
+      "export let go = util.promisify(cp.execFile);",
+      "export var ex = promisify(execFile);",
+      'run("ps", [], { timeout: 1 });',
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source).map((c) => [c.line, c.call])).toEqual([
+      [3, "run (execFile) used other than in a call"],
+      [4, "go (execFile) used other than in a call"],
+      [5, "ex (execFile) used other than in a call"],
+      [6, "timeout option of execFile"],
+    ]);
+  });
+
+  it("reads child_process imported by the name default as imported whole", () => {
+    const source = [
+      'import { default as cp } from "node:child_process";',
+      'import { "default" as qp, spawn } from "child_process";',
+      "cp.execFile(cmd, [], { timeout: 1 });",
+      "qp.spawn(cmd, [], { timeout: 1 });",
+      "const c = cp;",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source).map((c) => [c.line, c.call])).toEqual([
+      [3, "timeout option of execFile"],
+      [4, "timeout option of spawn"],
+      [5, "cp used other than in a call"],
+    ]);
+  });
+
+  it("reads a member's, a field's or a key's name as no mention, after any modifier", () => {
+    expect(
+      at([
+        "interface Seams {",
+        "  readonly env: E;",
+        "  readonly execFile?: typeof execFile;",
+        "  fork: Fork",
+        "  run(file: string): Promise<void>;",
+        "}",
+        "class Real {",
+        "  private execFile: typeof execFile;",
+        "  public sp!: Sp;",
+        "  declare readonly fork?: Fork;",
+        "}",
+        "const names = {",
+        "  cp: 1,",
+        "  ns: 2,",
+        "};",
+      ]),
+    ).toEqual([]);
+  });
+
+  it("finds a start chosen by a conditional, or compared by a case, though a : follows it", () => {
+    expect(
+      at([
+        "const f = ok ? execFile : sp;",
+        "const g = ok ?",
+        "  fork : run;",
+        "switch (x) { case execFile: break; }",
+        "const h = ok ? a ?? cp : ns;",
+      ]),
+    ).toEqual([
+      unfollowed(6, "execFile"),
+      unfollowed(6, "sp (spawn)"),
+      unfollowed(8, "fork"),
+      unfollowed(8, "run (execFile)"),
+      unfollowed(9, "execFile"),
+      unfollowed(10, "cp"),
+      unfollowed(10, "ns"),
     ]);
   });
 

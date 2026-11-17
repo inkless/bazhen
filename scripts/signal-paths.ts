@@ -244,9 +244,9 @@ const spreadArguments = (start: string, args: { text: string; at: number }[]) =>
  * What a file binds to child_process's starts. `named` maps each name a call of which is a start
  * to the start: every start's own name, called bare, whether imported or not, then each import
  * alias and each name bound by `promisify`. `bound` holds the names this file binds itself, by
- * importing or promisifying a start; `modules` its default and namespace imports. `imports` spans
- * each import the scan reads, and `promisified` is where each `promisify` it resolves names the
- * name it binds and the start it binds it to.
+ * importing or promisifying a start; `modules` its default and namespace imports, `{ default as
+ * cp }` included. `imports` spans each import the scan reads, and `promisified` is where each
+ * `promisify` it resolves names the start it binds, and the name it binds it to unless exported.
  */
 interface StartBindings {
   named: Map<string, string>;
@@ -268,6 +268,7 @@ function startBindings(code: string, kept: string): StartBindings {
     for (const spec of (m[4] ?? "").split(",")) {
       const [imported, local] = spec.trim().split(/\s+as\s+/);
       const start = imported?.replace(/^(["'])(.*)\1$/, "$2");
+      if (start === "default" && local !== undefined) modules.push(local);
       if (start === undefined || !STARTERS.some((s) => s === start)) continue;
       named.set(local ?? start, start);
       bound.add(local ?? start);
@@ -287,7 +288,9 @@ function startBindings(code: string, kept: string): StartBindings {
       continue;
     named.set(local, named.get(start) ?? start);
     bound.add(local);
-    promisified.add(name).add(at);
+    promisified.add(at);
+    // Exported, the name is called in files that don't bind it, where no call of it is read.
+    if (!/\bexport\s+$/.test(code.slice(0, m.index))) promisified.add(name);
   }
   return { named, bound, modules, imports, promisified };
 }
@@ -346,8 +349,10 @@ function startOptions(code: string, bindings: StartBindings) {
 /**
  * Each place a start this file binds goes where the scan can't follow it to a call: a mention of
  * a bound name, or of child_process imported whole, that isn't a start's call, the `promisify`
- * that binds it, its import, a `typeof` or a key; and child_process named as a string anywhere but
- * the source of an import the scan reads. Through any of these a start can be called with options
+ * that binds it, its import, a `typeof` or a key (a name a `:` follows, with no conditional's `?`
+ * before it); a start or `default` read as a member of child_process imported whole but not
+ * called; and child_process named as a string anywhere but the source of an import the scan
+ * reads. Through any of these a start can be called with options
  * no rule reads, `.call`, `Reflect.apply`, an alias, a seam object, `require` and `import()`
  * among them, so each is flagged rather than followed.
  */
@@ -375,7 +380,7 @@ function unfollowedStarts(code: string, kept: string, bindings: StartBindings) {
       promisified.has(m.index) ||
       imported(m.index) ||
       /\btypeof\s+$/.test(before) ||
-      (/[{,]\s*$/.test(before) && /^\s*\??:/.test(after));
+      (/^\s*[?!]?\s*:/.test(after) && !/(?:\?|\bcase)\s*$/.test(before));
     if (followed) return [];
     if (bound.has(name)) {
       const start = named.get(name) ?? name;
@@ -388,7 +393,7 @@ function unfollowedStarts(code: string, kept: string, bindings: StartBindings) {
     }
     const member = /^\s*\??\.\s*([\w$]+)/.exec(after)?.[1];
     if (member === undefined) return [unfollowed(m.index, `${name} used other than in a call`)];
-    return STARTERS.some((s) => s === member)
+    return member === "default" || STARTERS.some((s) => s === member)
       ? [unfollowed(m.index, `${name}.${member} used other than in a call`)]
       : [];
   });
