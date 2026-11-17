@@ -3,7 +3,8 @@
 use bazhen_holder::rss::resident_pages;
 use bazhen_holder::session::member_state;
 use bazhen_holder::start_time::{
-    boot_time, epoch_seconds, has_exited, own_pid, parent_field, start_ticks, stat_field,
+    boot_time, epoch_seconds, has_exited, own_pid, parent_field, session_field, start_ticks,
+    stat_field,
 };
 use libfuzzer_sys::fuzz_target;
 
@@ -22,9 +23,16 @@ fuzz_target!(|data: &[u8]| {
             assert_eq!(stat_field(&named, n), field);
         }
     }
-    let (parent, exited) = (parent_field(data), has_exited(data));
+    let (parent, session, exited) = (parent_field(data), session_field(data), has_exited(data));
     if data.contains(&b')') {
-        assert_eq!((parent_field(&named), has_exited(&named)), (parent, exited));
+        assert_eq!(
+            (
+                parent_field(&named),
+                session_field(&named),
+                has_exited(&named)
+            ),
+            (parent, session, exited)
+        );
     }
     assert_eq!(own_pid(&[b"7 ".as_slice(), data].concat()), Some(7));
     let _ = own_pid(data);

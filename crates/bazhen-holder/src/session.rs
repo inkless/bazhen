@@ -2,9 +2,10 @@
 //!
 //! A session's id is its leader's pid, so while the holder hasn't reaped the leader no new
 //! session can be given that number, and a process whose session is that id is the terminal's.
-//! A pass lists every process and keeps those whose session is that id; the guard then holds each
-//! one and checks it again before it signals (`guard::signal_member`), so a pid that ends and is
-//! given to another process between the listing and the signal is never signalled.
+//! A step lists every process once, with the session each was in (`Listing`); each pass keeps
+//! those whose session is that id and reads each again, and the guard then holds each one and
+//! checks it again before it signals (`guard::signal_member`), so a pid that ends and is given to
+//! another process between the listing and the signal is never signalled.
 
 use std::collections::HashSet;
 use std::io;
@@ -17,12 +18,13 @@ use crate::child::CLOSE_GRACE;
 use crate::guard::{self, Refused, SendError};
 
 /// How often an ending looks at its session once the leader has exited, and sends `SIGKILL` again
-/// once the grace is over: each look is one listing of every process.
+/// once the grace is over: each look is a pass over its step's listing of every process.
 pub const SWEEP_EVERY: Duration = Duration::from_millis(50);
 /// How many `SIGKILL` passes an ending makes before it gives up on what is left.
 pub const KILL_SWEEPS: u32 = 10;
-/// How many empty passes in a row end a session. One isn't enough: a pass lists every process
-/// first, so a member's child started after the listing is missed if the member then exits.
+/// How many empty passes in a row end a session. One isn't enough: a pass works from its step's
+/// listing, made before it, so a member's child started after the listing is missed if the member
+/// then exits.
 pub const EMPTY_PASSES: u32 = 2;
 
 /// What one pass over the session found.
@@ -93,6 +95,70 @@ pub fn member_state(stat: &[u8], session: i32) -> Member {
     }
 }
 
+/// A process as a step's listing saw it: its pid, and the session it was in, `None` when that
+/// couldn't be read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Listed {
+    pub(crate) pid: Pid,
+    pub(crate) session: Option<i32>,
+}
+
+/// Every process, listed once for all the passes of one holder step, and only once a pass asks.
+///
+/// A pass skips only what the listing saw in another session, and reads again every process it
+/// keeps before it signals. A process can't join a session, only leave its own for a new one
+/// numbered by its own pid, and a session's id is its leader's unreaped pid, so a process listed
+/// outside stays outside unless its pid is given to a new process. A pass made later in the step
+/// than the listing so misses only a process started since, as a pass that listed for itself
+/// misses one started after its own listing; the next step, `SWEEP_EVERY` on, lists again and
+/// finds it. The hangup's `SIGCONT` pass shares its `SIGHUP` pass's listing, so it continues what
+/// that pass hung up: a process started in between was forked by a running member, since a
+/// stopped process can't fork.
+#[derive(Debug)]
+pub struct Listing {
+    list: fn() -> io::Result<Vec<Listed>>,
+    listed: Option<Vec<Listed>>,
+}
+
+impl Default for Listing {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Listing {
+    /// A listing of this system's processes, not yet made.
+    pub fn new() -> Self {
+        Self::by(list)
+    }
+
+    /// A listing that `list` makes.
+    pub(crate) const fn by(list: fn() -> io::Result<Vec<Listed>>) -> Self {
+        Self { list, listed: None }
+    }
+
+    /// The pids listed in `session`, or whose session couldn't be read, in the order listed.
+    /// Lists first if no pass has yet; a listing that failed isn't kept, so the next pass lists
+    /// again.
+    fn candidates(&mut self, session: Pid) -> io::Result<Vec<Pid>> {
+        let listed = match &mut self.listed {
+            Some(listed) => listed,
+            None => self.listed.insert((self.list)()?),
+        };
+        let session = session.as_raw_pid();
+        Ok(listed
+            .iter()
+            .filter(|seen| seen.session.is_none_or(|sid| sid == session))
+            .map(|seen| seen.pid)
+            .collect())
+    }
+}
+
+/// Every process of this system, with its session.
+pub(crate) fn list() -> io::Result<Vec<Listed>> {
+    os::list()
+}
+
 /// The session a child leads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Session(Pid);
@@ -111,16 +177,16 @@ impl Session {
 
     /// Sends `signal` to every live process in the session, its leader included.
     pub fn signal(self, signal: Signal) -> Sweep {
-        self.pass(Some(signal))
+        self.pass(Some(signal), &mut Listing::new())
     }
 
     /// Finds every live process in the session, and signals none.
     pub fn count(self) -> Sweep {
-        self.pass(None)
+        self.pass(None, &mut Listing::new())
     }
 
-    fn pass(self, signal: Option<Signal>) -> Sweep {
-        match os::pids() {
+    fn pass(self, signal: Option<Signal>, listing: &mut Listing) -> Sweep {
+        match listing.candidates(self.0) {
             Ok(pids) => self.pass_among(pids, signal),
             Err(error) => {
                 tracing::error!(%error, "could not list the processes to find a session's");
@@ -178,13 +244,14 @@ pub struct Ending<S: Sweeper = Session> {
 
 /// What makes an ending's passes over its session.
 pub trait Sweeper {
-    /// One pass: `signal` sent to every live member of the session, or, with `None`, none sent.
-    fn sweep(&mut self, signal: Option<Signal>) -> Sweep;
+    /// One pass over `listing`: `signal` sent to every live member of the session, or, with
+    /// `None`, none sent.
+    fn sweep(&mut self, signal: Option<Signal>, listing: &mut Listing) -> Sweep;
 }
 
 impl Sweeper for Session {
-    fn sweep(&mut self, signal: Option<Signal>) -> Sweep {
-        self.pass(signal)
+    fn sweep(&mut self, signal: Option<Signal>, listing: &mut Listing) -> Sweep {
+        self.pass(signal, listing)
     }
 }
 
@@ -230,8 +297,8 @@ impl<S: Sweeper> Ending<S> {
         }
     }
 
-    /// Makes the pass that is due, if one is.
-    pub fn step(&mut self, leader_exited: bool, now: Instant) {
+    /// Makes the pass that is due, if one is, over `listing`, the step's.
+    pub fn step(&mut self, leader_exited: bool, now: Instant, listing: &mut Listing) {
         if self.deadline(leader_exited).is_none_or(|at| now < at) {
             return;
         }
@@ -239,18 +306,18 @@ impl<S: Sweeper> Ending<S> {
         if !self.hung_up {
             // A stopped process acts on `SIGHUP` only once continued.
             for signal in [Signal::HUP, Signal::CONT] {
-                let sweep = self.pass(Some(signal));
+                let sweep = self.pass(Some(signal), listing);
                 self.note_refused(&sweep);
             }
             self.hung_up = true;
             return;
         }
         if !self.killing() && now < self.kill_at {
-            let sweep = self.pass(None);
+            let sweep = self.pass(None, listing);
             self.count_empty(&sweep);
             return;
         }
-        let sweep = self.pass(Some(Signal::KILL));
+        let sweep = self.pass(Some(Signal::KILL), listing);
         self.note_refused(&sweep);
         self.kills_left = self.kills_left.saturating_sub(1);
         if leader_exited {
@@ -270,8 +337,8 @@ impl<S: Sweeper> Ending<S> {
         }
     }
 
-    fn pass(&mut self, signal: Option<Signal>) -> Sweep {
-        self.sweeper.sweep(signal)
+    fn pass(&mut self, signal: Option<Signal>, listing: &mut Listing) -> Sweep {
+        self.sweeper.sweep(signal, listing)
     }
 
     fn count_empty(&mut self, sweep: &Sweep) {
@@ -321,7 +388,7 @@ mod os {
     use rustix::io::Errno;
     use rustix::process::{Pid, PidfdFlags, Signal, getpid, pidfd_open};
 
-    use super::{Member, member_state};
+    use super::{Listed, Member, member_state};
 
     pub(super) fn supported() -> io::Result<()> {
         match pidfd_open(getpid(), PidfdFlags::empty()) {
@@ -355,7 +422,45 @@ mod os {
         }
     }
 
-    pub(super) fn pids() -> io::Result<Vec<Pid>> {
+    pub(super) fn list() -> io::Result<Vec<Listed>> {
+        Ok(pids()?
+            .into_iter()
+            .filter_map(|pid| {
+                seen(
+                    pid,
+                    std::fs::read(format!("/proc/{}/stat", pid.as_raw_nonzero())),
+                )
+            })
+            .collect())
+    }
+
+    /// What a read of `pid`'s `/proc/<pid>/stat` puts in the listing: nothing for a process
+    /// gone, and a session left unknown for one that couldn't be read.
+    pub(super) fn seen(pid: Pid, stat: io::Result<Vec<u8>>) -> Option<Listed> {
+        match stat {
+            Ok(stat) => Some(Listed {
+                pid,
+                session: listed_session(&stat),
+            }),
+            Err(error) if gone(&error) => None,
+            Err(_) => Some(Listed { pid, session: None }),
+        }
+    }
+
+    /// The session a `/proc/<pid>/stat` line says its process is in, `None` for a line
+    /// `member_state` can't read, so that `visit` reads it again and fails the pass.
+    fn listed_session(stat: &[u8]) -> Option<i32> {
+        let session = crate::start_time::session_field(stat)?;
+        (member_state(stat, session) != Member::Failed).then_some(session)
+    }
+
+    /// Whether a read of a process's `stat` failed because it has no process any more.
+    fn gone(error: &io::Error) -> bool {
+        error.kind() == io::ErrorKind::NotFound
+            || error.raw_os_error() == Some(Errno::SRCH.raw_os_error())
+    }
+
+    fn pids() -> io::Result<Vec<Pid>> {
         let mut pids = Vec::new();
         for entry in std::fs::read_dir("/proc")? {
             let name = entry?.file_name();
@@ -373,12 +478,7 @@ mod os {
     pub(super) fn visit(pid: Pid, session: Pid, signal: Option<Signal>) -> Member {
         let stat = match std::fs::read(format!("/proc/{}/stat", pid.as_raw_nonzero())) {
             Ok(stat) => stat,
-            Err(error)
-                if error.kind() == io::ErrorKind::NotFound
-                    || error.raw_os_error() == Some(Errno::SRCH.raw_os_error()) =>
-            {
-                return Member::Outside;
-            }
+            Err(error) if gone(&error) => return Member::Outside,
             Err(error) => {
                 tracing::warn!(pid = pid.as_raw_nonzero(), %error, "could not read a process");
                 return Member::Failed;
@@ -397,16 +497,44 @@ mod os {
 mod os {
     use std::io;
 
-    use rustix::process::{Pid, Signal};
+    use rustix::process::{Pid, Signal, getsid};
 
-    use super::Member;
+    use super::{Listed, Member};
 
-    pub(super) fn pids() -> io::Result<Vec<Pid>> {
-        crate::macos::pids()
+    /// A process whose session can't be read is left out: `visit` counts it outside.
+    pub(super) fn list() -> io::Result<Vec<Listed>> {
+        Ok(crate::macos::pids()?
+            .into_iter()
+            .filter_map(|pid| {
+                let session = getsid(Some(pid)).ok()?;
+                Some(Listed {
+                    pid,
+                    session: Some(session.as_raw_pid()),
+                })
+            })
+            .collect())
     }
 
     pub(super) fn visit(pid: Pid, session: Pid, signal: Option<Signal>) -> Member {
         crate::macos::visit(pid, session, signal)
+    }
+}
+
+/// How many listings the counting sources of a test on this thread have made.
+#[cfg(test)]
+pub(crate) mod listings {
+    use std::cell::Cell;
+
+    std::thread_local! {
+        static MADE: Cell<usize> = const { Cell::new(0) };
+    }
+
+    pub(crate) fn made() -> usize {
+        MADE.with(Cell::get)
+    }
+
+    pub(crate) fn count_one() {
+        MADE.with(|made| made.set(made.get() + 1));
     }
 }
 
@@ -755,7 +883,7 @@ mod tests {
         let now = Instant::now();
         // The hangup is two passes, SIGHUP then SIGCONT, and the pid refuses both.
         let log = crate::test_log::logged(|| {
-            scripted([refusing.clone(), refusing], now).step(false, now);
+            scripted([refusing.clone(), refusing], now).step(false, now, &mut unlisted());
         });
         assert_eq!(log.matches("another user's").count(), 1, "{log}");
         assert!(log.contains(&format!("pid={NO_PROCESS}")), "{log}");
@@ -775,7 +903,7 @@ mod tests {
     }
 
     impl Sweeper for Scripted {
-        fn sweep(&mut self, signal: Option<Signal>) -> Sweep {
+        fn sweep(&mut self, signal: Option<Signal>, _: &mut Listing) -> Sweep {
             let sweep = self.sweeps.pop_front().unwrap_or_default();
             self.passes.push((signal, sweep.clone()));
             sweep
@@ -815,6 +943,179 @@ mod tests {
         }
     }
 
+    /// A step's listing, for passes that never read it.
+    fn unlisted() -> Listing {
+        fn never() -> io::Result<Vec<Listed>> {
+            panic!("a scripted pass listed the processes")
+        }
+        Listing::by(never)
+    }
+
+    fn listed(pid: i32, session: Option<i32>) -> Listed {
+        Listed {
+            pid: Pid::from_raw(pid).unwrap(),
+            session,
+        }
+    }
+
+    /// The sessions of `three_sessions`' processes, one each.
+    const SESSIONS: [i32; 3] = [NO_PROCESS + 10, NO_PROCESS + 11, NO_PROCESS + 12];
+
+    /// Three processes, the first in the first of `SESSIONS` and so on, counted as one listing.
+    fn three_sessions() -> Vec<Listed> {
+        listings::count_one();
+        SESSIONS
+            .iter()
+            .zip(NO_PROCESS..)
+            .map(|(session, pid)| listed(pid, Some(*session)))
+            .collect()
+    }
+
+    /// Passes that only ask their step's listing for their session's candidates, and signal
+    /// nothing.
+    #[derive(Debug)]
+    struct Querying {
+        session: Pid,
+        found: Vec<Vec<Pid>>,
+    }
+
+    impl Sweeper for Querying {
+        fn sweep(&mut self, _: Option<Signal>, listing: &mut Listing) -> Sweep {
+            self.found.push(listing.candidates(self.session).unwrap());
+            Sweep::default()
+        }
+    }
+
+    #[test]
+    fn a_step_lists_once_for_every_ending_that_makes_a_pass_and_not_at_all_for_none() {
+        let now = Instant::now();
+        let mut endings: Vec<Ending<Querying>> = SESSIONS
+            .iter()
+            .map(|session| {
+                let session = Pid::from_raw(*session).unwrap();
+                Ending::new(
+                    Querying {
+                        session,
+                        found: Vec::new(),
+                    },
+                    now,
+                )
+            })
+            .collect();
+        let step = |endings: &mut Vec<Ending<Querying>>, at| {
+            let mut listing = Listing::by(|| Ok(three_sessions()));
+            for ending in endings {
+                ending.step(false, at, &mut listing);
+            }
+        };
+        step(&mut endings, now);
+        assert_eq!(listings::made(), 1, "the hangups, two passes each");
+        step(&mut endings, now + CLOSE_GRACE / 2);
+        assert_eq!(listings::made(), 1, "a step none of them has a pass due in");
+        step(&mut endings, now + CLOSE_GRACE);
+        assert_eq!(listings::made(), 2, "the kills");
+        for (at, ending) in endings.iter().enumerate() {
+            let own = vec![Pid::from_raw(NO_PROCESS + i32::try_from(at).unwrap()).unwrap()];
+            assert_eq!(ending.sweeper.found, vec![own; 3], "ending {at}");
+        }
+    }
+
+    #[test]
+    fn a_listing_keeps_the_sessions_processes_and_those_it_couldnt_read_in_listed_order() {
+        let mut listing = Listing::by(|| {
+            let session = Some(NO_PROCESS + 10);
+            Ok(vec![
+                listed(NO_PROCESS + 4, session),
+                listed(NO_PROCESS + 1, Some(NO_PROCESS + 11)),
+                listed(NO_PROCESS + 3, None),
+                listed(NO_PROCESS + 2, Some(0)),
+                listed(NO_PROCESS, session),
+            ])
+        });
+        let session = Pid::from_raw(NO_PROCESS + 10).unwrap();
+        let kept = listing.candidates(session).unwrap();
+        let expected: Vec<Pid> = [NO_PROCESS + 4, NO_PROCESS + 3, NO_PROCESS]
+            .into_iter()
+            .map(|pid| Pid::from_raw(pid).unwrap())
+            .collect();
+        assert_eq!(kept, expected);
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn a_process_whose_stat_cant_be_read_or_made_sense_of_is_listed_with_its_session_unknown() {
+        let pid = Pid::from_raw(NO_PROCESS).unwrap();
+        let unknown = Some(Listed { pid, session: None });
+        let unreadable = io::Error::from_raw_os_error(libc::EMFILE);
+        assert_eq!(os::seen(pid, Err(unreadable)), unknown);
+        let no_threads = b"42 (a) S 1 42 42".as_slice();
+        let bad_threads = b"42 (a) S 1 42 42 0 -1 0 0 0 0 0 0 0 0 0 20 0 x 0 100".as_slice();
+        for line in [no_threads, bad_threads] {
+            assert_eq!(member_state(line, 42), Member::Failed);
+            assert_eq!(os::seen(pid, Ok(line.to_vec())), unknown, "{line:?}");
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn a_process_gone_is_left_out_and_one_read_is_listed_in_its_session_zombie_or_not() {
+        let pid = Pid::from_raw(NO_PROCESS).unwrap();
+        for errno in [libc::ENOENT, libc::ESRCH] {
+            assert_eq!(
+                os::seen(pid, Err(io::Error::from_raw_os_error(errno))),
+                None
+            );
+        }
+        let in_42 = Some(Listed {
+            pid,
+            session: Some(42),
+        });
+        for (state, threads) in [("S", 1), ("Z", 1), ("Z", 3), ("X", 1)] {
+            assert_eq!(
+                os::seen(pid, Ok(stat(state, 42, threads))),
+                in_42,
+                "{state}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_failed_listing_is_made_again_by_the_next_pass_and_one_made_is_kept() {
+        fn fails_once() -> io::Result<Vec<Listed>> {
+            if listings::made() == 0 {
+                listings::count_one();
+                return Err(io::Error::from_raw_os_error(libc::EMFILE));
+            }
+            Ok(three_sessions())
+        }
+        let session = Pid::from_raw(SESSIONS[0]).unwrap();
+        let mut listing = Listing::by(fails_once);
+        assert!(listing.candidates(session).is_err());
+        let own = vec![Pid::from_raw(NO_PROCESS).unwrap()];
+        assert_eq!(listing.candidates(session).unwrap(), own);
+        assert_eq!(listing.candidates(session).unwrap(), own);
+        assert_eq!(listings::made(), 2);
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn passes_over_one_listing_each_find_their_own_session_and_no_other() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let (first, second) = (Leader::start(JOB), Leader::start(JOB));
+        let (first_job, second_job) = (job_pid(&first), job_pid(&second));
+        let mut listing = Listing::new();
+        let found = first.session().sweep(None, &mut listing);
+        assert_eq!(
+            sorted(found.reached),
+            sorted(vec![first.child.pid(), first_job])
+        );
+        let found = second.session().sweep(None, &mut listing);
+        assert_eq!(
+            sorted(found.reached),
+            sorted(vec![second.child.pid(), second_job])
+        );
+    }
+
     #[test]
     fn an_ending_kills_what_a_pass_missed_and_ends_only_after_two_empty_passes() {
         let (leader, job) = (NO_PROCESS, NO_PROCESS + 1);
@@ -823,14 +1124,14 @@ mod tests {
         // The second kill's listing was made before the job started, so it found nothing.
         let kills = [reaching(&[leader]), Sweep::default(), reaching(&[job])];
         let mut ending = scripted(hangup.into_iter().chain(kills), now);
-        ending.step(false, now);
+        ending.step(false, now, &mut unlisted());
         let mut at = now + CLOSE_GRACE;
         for _ in 0..4 {
-            ending.step(true, at);
+            ending.step(true, at, &mut unlisted());
             assert!(!ending.is_over());
             at = ending.deadline(true).unwrap();
         }
-        ending.step(true, at);
+        ending.step(true, at, &mut unlisted());
         assert!(ending.is_over());
         let kill = Some(Signal::KILL);
         let hup = [Some(Signal::HUP), Some(Signal::CONT)];
@@ -842,12 +1143,12 @@ mod tests {
         let now = Instant::now();
         let mut ending = scripted([], now);
         assert_eq!(ending.deadline(false), Some(now));
-        ending.step(false, now);
+        ending.step(false, now, &mut unlisted());
         let mut at = now;
         for _ in 0..2 {
             assert!(!ending.is_over());
             at = ending.deadline(true).unwrap();
-            ending.step(true, at);
+            ending.step(true, at, &mut unlisted());
         }
         assert!(ending.is_over());
         assert_eq!(at, now + Duration::from_millis(100));
@@ -997,7 +1298,7 @@ mod tests {
                 .max(now);
                 let expected = rules.step(exited, now);
                 let before = ending.sweeper.passes.len();
-                ending.step(exited, now);
+                ending.step(exited, now, &mut unlisted());
                 let made = &ending.sweeper.passes[before..];
                 let signals: Vec<Option<Signal>> = made.iter().map(|(signal, _)| *signal).collect();
                 prop_assert_eq!(signals, expected, "step {}", index);

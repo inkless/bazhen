@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use bazhen_holder::child::{CLOSE_GRACE, ChildProcess, Reaper};
 use bazhen_holder::pty::{self, Pty, WindowSize};
-use bazhen_holder::session::SWEEP_EVERY;
+use bazhen_holder::session::{Listing, SWEEP_EVERY};
 use bazhen_holder_proto::body::{
     Argv, Cols, Env, ExitStatus, Generation, NonEmpty, ProcessSpec, Rows, Size,
 };
@@ -489,11 +489,15 @@ fn a_close_kills_a_child_that_ignores_the_hangup_once_the_grace_is_over() {
     let now = Instant::now();
     running.child.close(now);
     assert_eq!(running.child.close_deadline(), Some(now));
-    running.child.close_step(now);
+    running.child.close_step(now, &mut Listing::new());
     assert_eq!(running.child.close_deadline(), Some(now + CLOSE_GRACE));
-    running.child.close_step(now + CLOSE_GRACE / 2);
+    running
+        .child
+        .close_step(now + CLOSE_GRACE / 2, &mut Listing::new());
     assert_eq!(running.child.close_deadline(), Some(now + CLOSE_GRACE));
-    running.child.close_step(now + CLOSE_GRACE);
+    running
+        .child
+        .close_step(now + CLOSE_GRACE, &mut Listing::new());
     assert_eq!(
         running.child.close_deadline(),
         Some(now + CLOSE_GRACE + SWEEP_EVERY)
@@ -557,8 +561,10 @@ fn a_close_kills_the_childs_whole_group_once_the_grace_is_over() {
     let grandchild = pid_in(file.path()).unwrap();
     let now = Instant::now();
     running.child.close(now);
-    running.child.close_step(now);
-    running.child.close_step(now + CLOSE_GRACE);
+    running.child.close_step(now, &mut Listing::new());
+    running
+        .child
+        .close_step(now + CLOSE_GRACE, &mut Listing::new());
     assert_eq!(wait_exit(&mut running).unwrap(), signalled("SIGKILL"));
     let gone = wait_gone(grandchild);
     kill_grandchild(grandchild, running.child.pid());
@@ -624,7 +630,7 @@ fn close_now(running: &mut Running) -> Result<()> {
     bazhen_test_signal::require_sandbox()?;
     let now = Instant::now();
     running.child.close(now);
-    running.child.close_step(now);
+    running.child.close_step(now, &mut Listing::new());
     Ok(())
 }
 
@@ -639,7 +645,9 @@ fn close_until_ended(running: &mut Running) -> Result<()> {
             return Err("the close never ended".into());
         }
         running.child.poll_exit();
-        running.child.close_step(Instant::now());
+        running
+            .child
+            .close_step(Instant::now(), &mut Listing::new());
         wait_once(running, Duration::from_millis(20))?;
     }
     Ok(())
@@ -719,7 +727,7 @@ fn closing_an_exited_child_with_nothing_left_ends_without_waiting_out_the_grace(
     let mut at = now;
     while let Some(next) = running.child.close_deadline() {
         at = next;
-        running.child.close_step(at);
+        running.child.close_step(at, &mut Listing::new());
     }
     assert!(running.child.ended());
     assert!(at < now + CLOSE_GRACE, "{:?}", at - now);
