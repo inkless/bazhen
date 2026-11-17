@@ -699,7 +699,8 @@ export class HolderRuntime implements RuntimeAdapter {
   /**
    * One read of every leader's command, and one more of those with a directory, however many
    * terminals there are: each `ps` started holds up everything else the caller serves until it
-   * has exec'd.
+   * has exec'd. A first read that can't be made throws, so a lasting failure is reported rather
+   * than every foreground silently kept as it was.
    */
   async foregrounds(terminalIds: ReadonlySet<string>): Promise<TerminalForeground[]> {
     if (terminalIds.size === 0) return [];
@@ -718,6 +719,8 @@ export class HolderRuntime implements RuntimeAdapter {
       )
     ).flat();
     const commands = await this.commands(groups.map((g) => g.pgid));
+    if (commands === "unreadable")
+      throw new Error("can't read the terminals' foreground processes");
     const named = groups.flatMap((group) => {
       const command = commandIn(commands, group);
       return command === null ? [] : [{ ...group, command }];

@@ -1215,15 +1215,20 @@ const sorted = (pids: readonly number[]) => [...pids].toSorted((a, b) => a - b);
 describe("HolderRuntime: what holds terminals' foregrounds", () => {
   /** When every foreground group's leader started, as its holder says. */
   const LEADER_START = 1_700_000_100;
+  /**
+   * When this process started, as `ps` would show it: a leader that reads for real, so a read
+   * that ignores the seam finds it.
+   */
+  const OWN_START = Math.floor(Date.now() / 1000 - process.uptime());
   /** A pid above the system's limit: no process, and so no working directory, has it. */
   const NO_CWD = FAKE_PID + 7;
 
   /** Answers `foreground` naming `pgid`, led by a process other than the terminal's own. */
   const leading =
-    (pgid: number): Handler =>
+    (pgid: number, pgidStart: number): Handler =>
     (holder, request) => {
       if (request.type !== "foreground") return ok(holder, request);
-      const body = { childPid: FAKE_PID, childStart: FAKE_START, pgid, pgidStart: LEADER_START };
+      const body = { childPid: FAKE_PID, childStart: FAKE_START, pgid, pgidStart };
       holder.send({ type: "foreground", id: request.id, body });
     };
 
@@ -1248,11 +1253,11 @@ describe("HolderRuntime: what holds terminals' foregrounds", () => {
     (pids: readonly number[]): Read =>
       new Map(pids.map((pid) => [pid, { start, comm }]));
 
-  async function terminalsLedBy(root: string, pgids: readonly number[]) {
+  async function terminalsLedBy(root: string, pgids: readonly number[], start = LEADER_START) {
     const ids: string[] = [];
     for (const pgid of pgids) {
       const terminalId = newId("term");
-      await fakeTerminal(root, terminalId, {}, leading(pgid));
+      await fakeTerminal(root, terminalId, {}, leading(pgid, start));
       ids.push(terminalId);
     }
     return ids;
@@ -1294,12 +1299,13 @@ describe("HolderRuntime: what holds terminals' foregrounds", () => {
     });
   });
 
-  it("reads no terminal's foreground when ps can't be read, and reads no further", async () => {
+  it("refuses the sweep when its leaders can't be read, and reads no further", async () => {
     const root = privateRoot();
     const { asked, commands } = commandsReading(() => "unreadable");
     const { runtime } = runtimeAt(root, { commands });
-    const ids = await terminalsLedBy(root, [process.pid, NO_CWD]);
-    expect([await runtime.foregrounds(new Set(ids.map(String))), asked.length]).toEqual([[], 1]);
+    const ids = await terminalsLedBy(root, [process.pid], OWN_START);
+    await expect(runtime.foregrounds(new Set(ids.map(String)))).rejects.toThrow("can't read");
+    expect(asked).toHaveLength(1);
   });
 
   it("keeps the commands and drops every directory when the second read can't be made", async () => {
@@ -1339,7 +1345,7 @@ describe("HolderRuntime: what holds terminals' foregrounds", () => {
     const root = privateRoot();
     const { commands } = commandsReading(() => "unreadable");
     const { runtime } = runtimeAt(root, { commands });
-    await terminalsLedBy(root, [NO_CWD]);
+    await terminalsLedBy(root, [process.pid], OWN_START);
     const [ref] = (await runtime.inventory()).map((e) => e.ref);
     await expect(runtime.foreground(ref!)).rejects.toThrow("can't read terminal");
   });

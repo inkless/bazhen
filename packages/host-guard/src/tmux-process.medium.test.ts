@@ -40,6 +40,11 @@ describe("many processes' foreground groups at once", () => {
   it("is unreadable, never half read, when ps prints more than it may", async () => {
     expect(await terminalGroups([process.pid], 4)).toBe("unreadable");
   });
+
+  it("reads the others past a pid no process could have", async () => {
+    const read = await terminalGroups([process.pid, 2 ** 31, 0, -1]);
+    expect(read).toEqual(new Map([[process.pid, expect.any(Number)]]));
+  });
 });
 
 describe("many processes' commands at once", () => {
@@ -66,7 +71,19 @@ describe("many processes' commands at once", () => {
     expect(await processCommands(free.slice(0, 2))).toEqual(new Map());
   });
 
-  it("is unreadable, never half read, when ps prints more than it may", async () => {
+  it("is unreadable, never half read, when ps prints more commands than it may", async () => {
     expect(await processCommands([process.pid], 4)).toBe("unreadable");
+  });
+
+  it("reads no process, running nothing, for no pid a process could have", async () => {
+    expect([await processCommands([]), await processCommands([0, 1, 2 ** 31])]).toEqual([
+      new Map(),
+      new Map(),
+    ]);
+  });
+
+  it("reads the others' commands past a pid no process could have", async () => {
+    const read = await processCommands([2 ** 31, process.pid, 1, 0, -1]);
+    expect(read).toEqual(new Map([[process.pid, expect.anything()]]));
   });
 });

@@ -6,6 +6,7 @@ import { execFile, execFileSync, type StdioOptions } from "node:child_process";
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
+import { isPid } from "./cwd.ts";
 import { signalServer, vouch, vouchServer, type PaneGroup } from "./signal.ts";
 
 const run = promisify(execFile);
@@ -410,9 +411,18 @@ export function psPrinted(outcome: PsOutcome): string | undefined {
   return String(field("stderr") ?? "").trim() === "" ? stdout : undefined;
 }
 
-/** One `ps -p` run over `pids`, printing `columns`, within its timeout and `maxBytes`. */
-function psOf(pids: readonly number[], columns: string, maxBytes: number): Promise<PsOutcome> {
-  const args = ["-ww", "-p", pids.join(","), "-o", columns];
+/**
+ * One `ps -p` run over those of `pids` a process could have, printing `columns`, within its
+ * timeout and `maxBytes`; none is run for none. A pid out of range would fail the whole run.
+ */
+async function psOf(
+  pids: readonly number[],
+  columns: string,
+  maxBytes: number,
+): Promise<PsOutcome> {
+  const wanted = [...new Set(pids.filter(isPid))];
+  if (wanted.length === 0) return { stdout: "" };
+  const args = ["-ww", "-p", wanted.join(","), "-o", columns];
   return run("ps", args, {
     env: PS_ENV,
     timeout: TIMEOUT_MS,
@@ -435,7 +445,6 @@ export async function terminalGroups(
   pids: readonly number[],
   maxBytes = GROUPS_MAX_BYTES,
 ): Promise<Map<number, number> | "unreadable"> {
-  if (pids.length === 0) return new Map();
   const printed = psPrinted(await psOf(pids, "pid=,tpgid=", maxBytes));
   return printed === undefined ? "unreadable" : parseGroups(printed);
 }
@@ -455,16 +464,15 @@ const COMMANDS_MAX_BYTES = 1024 * 1024;
 /**
  * The start and command of each of `pids` that has a process, by pid, from one run of `ps`
  * whatever their number: absent pids are left out. A run that fails otherwise, prints more than
- * it may, or prints a line that doesn't parse, is unreadable rather than half read.
+ * it may, or prints a line that doesn't parse, is unreadable rather than half read. BSD's `ps`
+ * prints a command as it is, so one whose name holds a newline makes the whole read unreadable.
  */
 export async function processCommands(
   pids: readonly number[],
   maxBytes = COMMANDS_MAX_BYTES,
 ): Promise<Map<number, ProcessCommand> | "unreadable"> {
-  const wanted = [...new Set(pids)];
-  if (wanted.length === 0) return new Map();
   // The command last: macOS cuts any other column to 16 characters.
-  const printed = psPrinted(await psOf(wanted, "pid=,lstart=,comm=", maxBytes));
+  const printed = psPrinted(await psOf(pids, "pid=,lstart=,comm=", maxBytes));
   return (printed === undefined ? undefined : parseCommands(printed)) ?? "unreadable";
 }
 

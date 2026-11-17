@@ -10,7 +10,11 @@ const TIMEOUT_MS = 5_000;
 const MAX_BYTES = 1024 * 1024;
 const LSOF_ENV = { LC_ALL: "C", PATH: process.env["PATH"] ?? "/usr/bin:/usr/sbin:/bin" };
 
-const isPid = (pid: number) => Number.isSafeInteger(pid) && pid > 1;
+/** The largest pid there can be: a `pid_t` is 32 bits, and a larger one fails `ps` and `lsof`. */
+const PID_MAX = 2 ** 31 - 1;
+
+/** Whether `pid` could be a process to read: never 0, 1 or a negative group, nor out of range. */
+export const isPid = (pid: number) => Number.isSafeInteger(pid) && pid > 1 && pid <= PID_MAX;
 
 /**
  * Each pid's directory from `lsof -a -d cwd -Fpn0`, whose fields each end in a NUL: `p<pid>`,
