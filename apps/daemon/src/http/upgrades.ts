@@ -55,7 +55,7 @@ export function upgrades(
   routes: readonly UpgradeRoute[],
   gate: DeviceGate | null = null,
 ) {
-  return (req: IncomingMessage, socket: Duplex, head: Buffer): void => {
+  return contained(async (req, socket, head) => {
     const { host, origin } = req.headers;
     const refused = refusal(allow, { host, origin, acting: true });
     if (refused !== null) return refuseUpgrade(socket, REFUSAL_STATUS[refused]);
@@ -78,7 +78,7 @@ export function upgrades(
     // where it had to pair.
     if (verified !== null) gate?.devices.hold(verified.device.id, socket, { required });
     route(routes, req, socket, head, verified?.device ?? null);
-  };
+  });
 }
 
 /**
@@ -91,48 +91,58 @@ export function socketUpgrades(
   routes: readonly UpgradeRoute[],
   peer?: (connection: Socket) => Promise<PeerReading>,
 ) {
-  return (req: IncomingMessage, socket: Duplex, head: Buffer): void => {
-    // Node takes its own error listener off a socket it hands to `upgrade`, and ws adds one only
-    // once a route takes the socket: a caller that hangs up while it is identified would
-    // otherwise fail a refusal's write with nothing listening, and end the daemon.
-    const dropped = () => socket.destroy();
-    socket.on("error", dropped);
+  return contained(async (req, socket, head) => {
     const header = (name: string) => {
       const value = req.headers[name];
       return Array.isArray(value) ? value[0] : value;
     };
     const presented = { token: header(AGENT_TOKEN_HEADER), said: header(AGENT_ID_HEADER) };
-    void (peer === undefined ? Promise.resolve(undefined) : peer(req.socket)).then(
-      (reading) => {
-        const who = identify(credentials, presented, reading);
-        if (who.kind === "human") {
-          return route(routes, req, socket, head, null, () => socket.off("error", dropped));
-        }
-        forbidUpgrade(
-          socket,
-          who.kind === "refused" ? who.reason : "an agent can't attach to a terminal",
-        );
-      },
-      () => forbidUpgrade(socket, "the caller's process can't be read for sure"),
+    const reading = peer === undefined ? undefined : await peer(req.socket).catch(() => null);
+    if (reading === null) {
+      return forbidUpgrade(socket, "the caller's process can't be read for sure");
+    }
+    const who = identify(credentials, presented, reading);
+    if (who.kind === "human") return route(routes, req, socket, head, null);
+    forbidUpgrade(
+      socket,
+      who.kind === "refused" ? who.reason : "an agent can't attach to a terminal",
     );
+  });
+}
+
+/**
+ * `listen` as an upgrade listener that no one upgrade can end the daemon through. Node takes its
+ * own error listener off a socket it hands to `upgrade`, and ws adds one only once a route takes
+ * the socket, so a caller that resets would fail the next write to it with nothing listening. A
+ * throw is logged and the socket destroyed: a route may already have answered 101, so no status
+ * can follow it.
+ */
+function contained(
+  listen: (req: IncomingMessage, socket: Duplex, head: Buffer) => Promise<void>,
+): (req: IncomingMessage, socket: Duplex, head: Buffer) => void {
+  return (req, socket, head) => {
+    socket.on("error", () => socket.destroy());
+    void listen(req, socket, head).catch((err: unknown) => {
+      console.error("an upgrade failed", err);
+      socket.destroy();
+    });
   };
 }
 
-/** Hands the upgrade to the route its path matches, calling `handOver` first, or refuses it. */
+/** Hands the upgrade to the route its path matches, or refuses it. */
 function route(
   routes: readonly UpgradeRoute[],
   req: IncomingMessage,
   socket: Duplex,
   head: Buffer,
   device: StoredDevice | null,
-  handOver = () => {},
 ): void {
-  const url = new URL(req.url ?? "/", "http://daemon");
+  // Node's parser takes request targets, such as `//[`, that URL can't read.
+  const url = URL.parse(req.url ?? "/", "http://daemon");
+  if (url === null) return refuseUpgrade(socket, "400 Bad Request");
   for (const r of routes) {
     const match = r.path.exec(url.pathname);
-    if (match === null) continue;
-    handOver();
-    return r.upgrade(req, socket, head, url, match, device);
+    if (match !== null) return r.upgrade(req, socket, head, url, match, device);
   }
   refuseUpgrade(socket, "404 Not Found");
 }
