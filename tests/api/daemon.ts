@@ -691,6 +691,13 @@ export class Daemon {
     return readFileSync(file, "utf8").trim();
   }
 
+  /** The environment Codex's managed app-server on this daemon's Codex home runs with (Linux only). */
+  codexServerEnv(): Record<string, string> {
+    const file = join(this.home, "codex", "app-server-daemon", "daemon.pid");
+    const pid: unknown = Reflect.get(Object(JSON.parse(readFileSync(file, "utf8"))), "pid");
+    return processEnv(Number(pid));
+  }
+
   /** The environment a shell terminal's process runs with (Linux only). */
   shellEnv(terminalId: string): Record<string, string> {
     return processEnv(Number(this.paneFact(terminalId, "pane_pid", "@bazhen_terminal_id")));

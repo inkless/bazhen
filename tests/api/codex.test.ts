@@ -521,8 +521,15 @@ describe("a Codex agent", () => {
     );
     expect(leaked["BAZHEN_AGENT_ID"]).toBe(starter.agentId);
     try {
-      await daemon.codex("app-server", "daemon", "stop");
-      await daemon.codexWith(leaked, "app-server", "daemon", "start");
+      // With Bazhen down, nothing but this start brings the server back.
+      await daemon.crash();
+      try {
+        await daemon.codex("app-server", "daemon", "stop");
+        await daemon.codexWith(leaked, "app-server", "daemon", "start");
+      } finally {
+        await daemon.restart();
+      }
+      expect(daemon.codexServerEnv()["BAZHEN_AGENT_ID"]).toBe(starter.agentId);
       const agent = await daemon.launch("codex-on-leaked", "codex");
       await waitUntil(() => daemon.screen(agent.agentId).includes(BANNER.codex), "Codex's TUI");
       const output = await ranAllowed(
