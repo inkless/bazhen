@@ -782,11 +782,11 @@ export class HolderRuntime implements RuntimeAdapter {
   }
 
   /**
-   * Calls `cb` with an agent terminal's title: as the runtime starts watching it, and each time
-   * its program sets one. Returns the unsubscribe function, which ends every watch once no
-   * listener is left.
+   * Calls `cb` with an agent terminal whose title may have changed, for `title()` to read: as the
+   * runtime starts watching it, and each time its program sets one. Returns the unsubscribe
+   * function, which ends every watch once no listener is left.
    */
-  onTitle(cb: (terminalId: TerminalId, title: string) => void): () => void {
+  onTitle(cb: (terminalId: TerminalId) => void): () => void {
     return this.titles.subscribe(cb);
   }
 

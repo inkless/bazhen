@@ -22,7 +22,7 @@ export interface TitleWatchOptions {
   readonly onError: (err: unknown) => void;
 }
 
-type Listener = (terminalId: TerminalId, title: string) => void;
+type Listener = (terminalId: TerminalId) => void;
 
 /** A connection being opened, or open, to one holder; `client` is set once it is. */
 interface Watching {
@@ -35,8 +35,9 @@ const sameHolder = (a: Pick<Watching, "holderPid" | "holderStart">, b: Watching)
   a.holderPid === b.holderPid && a.holderStart === b.holderStart;
 
 /**
- * Tells its listeners each listed terminal's title: as its connection opens, then each `title` its
- * holder reports, which a holder sends to every connection, not only a subscribed one. One
+ * Tells its listeners which listed terminal's title may have changed: as its connection opens,
+ * then at each `title` its holder reports, which a holder sends to every connection, not only a
+ * subscribed one. It tells no title: one told could be read after a respawn it predates. One
  * connection per terminal, to the holder that runs it now, while anyone listens, none after. A
  * holder that goes away ends its connection, so a terminal a listing leaves out, as one whose
  * holder was slow to answer, keeps its watch.
@@ -106,15 +107,11 @@ export class TitleWatch {
     };
     this.watching.set(terminalId, entry);
     const ours = () => this.watching.get(terminalId) === entry;
-    // A title read with `hello`, in the same chunk, reaches here before `hello` is checked: the
-    // latest is kept until then, and told in place of the one `hello` named.
-    let early: string | undefined;
     let client: HolderClient;
     try {
       client = await this.opts.connect(socket, (event) => {
-        if (event.type !== "title") return;
-        if (entry.client === null) early = event.body.text;
-        else if (ours()) this.tell(terminalId, event.body.text);
+        // One read with `hello`, before it is checked, is covered by the tell that follows it.
+        if (event.type === "title" && entry.client !== null && ours()) this.tell(terminalId);
       });
     } catch {
       // Watched again at the next sync, if it is still listed.
@@ -131,7 +128,7 @@ export class TitleWatch {
     void client.ended.then(() => {
       if (ours()) this.watching.delete(terminalId);
     });
-    this.tell(terminalId, early ?? hello.title);
+    this.tell(terminalId);
   }
 
   private forget(terminalId: TerminalId): void {
@@ -140,10 +137,10 @@ export class TitleWatch {
     entry?.client?.end();
   }
 
-  private tell(terminalId: TerminalId, title: string): void {
+  private tell(terminalId: TerminalId): void {
     for (const listener of this.listeners) {
       try {
-        listener(terminalId, title);
+        listener(terminalId);
       } catch (err) {
         this.opts.onError(err);
       }

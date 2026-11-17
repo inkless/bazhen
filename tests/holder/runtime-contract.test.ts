@@ -130,8 +130,8 @@ describe("HolderRuntime: watching an agent's title", () => {
     const holders = holderRuntime();
     onTestFinished(() => holders.dispose());
     const { runtime } = holders;
-    const heard: string[] = [];
-    onTestFinished(runtime.onTitle((_, title) => heard.push(title)));
+    const told: string[] = [];
+    onTestFinished(runtime.onTitle((terminalId) => told.push(terminalId)));
     const spec = {
       terminalId: newId("term"),
       tags: { kind: "agent", agentId: newId("agent") },
@@ -144,11 +144,16 @@ describe("HolderRuntime: watching an agent's title", () => {
       historyLines: 10_000,
     } as const;
     const ref = await runtime.create(spec);
-    await expect.poll(() => heard, { timeout: harness.waitMs }).toEqual([""]);
+    const tells = async (n: number) => {
+      const all = Array(n).fill(ref.terminalId);
+      await expect.poll(() => told, { timeout: harness.waitMs }).toEqual(all);
+    };
+    await tells(1);
+    expect(await runtime.title(ref)).toBe("");
     const { stream } = await runtime.attach(ref, null);
     onTestFinished(() => stream.close());
     stream.write(new TextEncoder().encode("the thread\r"));
-    await expect.poll(() => heard, { timeout: harness.waitMs }).toEqual(["", "the thread"]);
+    await tells(2);
     expect(await runtime.title(ref)).toBe("the thread");
     await expect.poll(() => exitOf(runtime, ref), { timeout: harness.waitMs }).not.toBeNull();
     const respawned = await runtime.respawn(ref, {
@@ -156,7 +161,7 @@ describe("HolderRuntime: watching an agent's title", () => {
       generation: 1,
       argv: ["sleep", "300"],
     });
-    await expect.poll(() => heard, { timeout: harness.waitMs }).toEqual(["", "the thread", ""]);
+    await tells(3);
     expect(await runtime.title(respawned)).toBe("");
   });
 });

@@ -1141,7 +1141,7 @@ export class Store {
   /** The live Codex agent whose terminal is up, with its thread and the terminal's incarnation. */
   codexAgentIn(terminalId: TerminalId) {
     const sql = `SELECT a.id, a.environment_id, json_extract(a.external_ref, '$.id') AS thread,
-                        t.id AS terminal_id, t.runtime, t.locator
+                        t.id AS terminal_id, t.runtime, t.locator, t.generation
                  FROM agent_sessions a JOIN terminals t ON t.id = a.terminal_id
                  WHERE ${UP_CODEX}
                    AND json_extract(a.external_ref, '$.kind') = 'codex-thread'
@@ -1151,7 +1151,13 @@ export class Store {
     if (row === undefined || runtime === null) return undefined;
     const environmentId = String(row.environment_id);
     if (!isId("env", environmentId)) return undefined;
-    return { agentId: String(row.id), environmentId, threadId: String(row.thread), runtime };
+    return {
+      agentId: String(row.id),
+      environmentId,
+      threadId: String(row.thread),
+      runtime,
+      generation: Number(row.generation),
+    };
   }
 
   /** The Codex threads the live Codex agents are bound to. */

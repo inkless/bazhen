@@ -66,7 +66,9 @@ export const UNTRACKED = "thread switches are not being tracked";
 /**
  * Follows a Codex TUI from thread to thread (foundation-design §5.8, C6). The TUI keeps its
  * terminal's title set to the thread it shows, and the runtime tells the daemon when a title
- * changes: tmux by a hook, a holder by the frame it sends. The title
+ * changes: tmux by a hook, a holder by the frame it sends. Each change is read when it is acted
+ * on, and acted on only while the terminal runs the process it was read from, so no title the
+ * last TUI left behind a respawn is taken for the new one's. The title
  * holds at most the id's first 29 characters, so it is resolved against the threads the
  * app-server has announced, then against its thread list, for one from before Bazhen connected.
  * Only exactly one match moves the agent: several, or a title that is no thread id, leaves it on
@@ -146,13 +148,13 @@ export class CodexThreads {
   }
 
   /**
-   * A title a runtime heard set in a terminal, `title` when it said which: followed if it is a
-   * Codex agent's, and dropped at once otherwise, so other agents' titles, however often they
-   * change, never wait in the queue ahead of a Codex agent's.
+   * A runtime heard a title set in a terminal: followed if it is a Codex agent's, and dropped at
+   * once otherwise, so other agents' titles, however often they change, never wait in the queue
+   * ahead of a Codex agent's.
    */
-  heard(terminal: TerminalId, title?: string): Promise<void> {
+  heard(terminal: TerminalId): Promise<void> {
     if (!this.opts.store.isCodexTerminal(terminal)) return Promise.resolve();
-    return this.titleChanged(terminal, title);
+    return this.titleChanged(terminal);
   }
 
   /**
@@ -171,13 +173,10 @@ export class CodexThreads {
       });
   }
 
-  /**
-   * A terminal's title may have changed: to `title`, when the runtime said which, or else to what
-   * reading it finds. Resolves once it has been acted on.
-   */
-  titleChanged(terminal: TerminalId, title?: string): Promise<void> {
+  /** A terminal's title may have changed. Resolves once it has been read and acted on. */
+  titleChanged(terminal: TerminalId): Promise<void> {
     this.queue = this.queue
-      .then(() => this.follow(terminal, title))
+      .then(() => this.follow(terminal))
       .catch((err: unknown) => {
         this.log(`codex: following terminal ${terminal} failed: ${String(err)}`);
         // A move it was waiting on is tried again, or given up, rather than left holding mail.
@@ -187,14 +186,17 @@ export class CodexThreads {
     return this.queue;
   }
 
-  private async follow(terminal: TerminalId, told?: string): Promise<void> {
+  private async follow(terminal: TerminalId): Promise<void> {
     const { store, runtime } = this.opts;
     const agent = store.codexAgentIn(terminal);
     if (agent === undefined) {
       this.gaveUp.delete(terminal);
       return this.settle(terminal);
     }
-    const title = told ?? (await runtime.title(agent.runtime));
+    // Read now, not when the change was told: a respawn since then has cleared it.
+    const title = await runtime.title(agent.runtime);
+    // A respawn committed while it was read: the respawn's start reads the new process's.
+    if (store.codexAgentIn(terminal)?.generation !== agent.generation) return this.settle(terminal);
     const gaveUpOn = this.gaveUp.get(terminal);
     this.gaveUp.delete(terminal);
     // The TUI empties its title as it exits, which names no thread to follow.
@@ -241,8 +243,12 @@ export class CodexThreads {
         : await this.resumed(this.move(terminal, agent.agentId, prefix), terminal, threadId);
     if (!subscribed) return;
     const now = store.codexAgentIn(terminal);
-    // Closed, or moved again by another title, while the thread was being resumed.
-    if (now?.agentId !== agent.agentId || now.threadId !== agent.threadId)
+    // Closed, respawned, or moved again by another title, while the thread was being resumed.
+    if (
+      now?.agentId !== agent.agentId ||
+      now.threadId !== agent.threadId ||
+      now.generation !== agent.generation
+    )
       return this.settle(terminal);
     store.append({
       type: "agent.external_ref_updated",
@@ -353,8 +359,9 @@ export class CodexThreads {
   }
 
   /**
-   * The title names the agent's thread, and a runtime drops a title when it respawns, so this TUI
-   * set it: it is up, and switches are followed again, if it said they weren't.
+   * The title names the agent's thread, was read from the terminal's current process, and a
+   * runtime drops a title when it respawns, so this TUI set it: it is up, and switches are
+   * followed again, if it said they weren't.
    */
   private tracked(agentId: string): void {
     this.opts.ready?.(agentId);

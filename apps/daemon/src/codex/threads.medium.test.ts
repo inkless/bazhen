@@ -45,8 +45,13 @@ async function setup(opts: {
   releaseFails?: boolean;
   /** Its agents still starting, their TUIs not yet up. */
   starting?: boolean;
+  /** Runs while a title is first read, before the read answers. */
+  reading?: () => void;
+  /** Runs while a thread is first resumed, before the resume answers. */
+  resuming?: () => void;
 }) {
   let unsaved = opts.unsaved ?? 0;
+  let { reading, resuming } = opts;
   const runtime = opts.runtime ?? "tmux";
   const agents = opts.starting === true ? withStartingCodexAgentsOn : withCodexAgentsOn;
   const { store, agentOn } = await agents(runtime, A, ...(opts.others ?? []));
@@ -68,6 +73,8 @@ async function setup(opts: {
     runtime: {
       title: async (ref) => {
         titled.push(ref);
+        reading?.();
+        reading = undefined;
         const title = (titles.length > 1 ? titles.shift() : titles[0]) ?? "";
         if (title === GONE) throw new Error("can't find pane: %0");
         return title;
@@ -84,6 +91,8 @@ async function setup(opts: {
       },
       resume: async (threadId) => {
         resumed.push(threadId);
+        resuming?.();
+        resuming = undefined;
         if (unsaved-- > 0) throw new Error(`no rollout found for thread id ${threadId}`);
       },
     },
@@ -141,7 +150,10 @@ function respawn(s: Awaited<ReturnType<typeof setup>>) {
     s.store.append({
       ...system,
       type: "agent.respawned",
-      payload: { externalRef, runtimeRef: { runtime: "tmux", locator: { ...ref?.locator } } },
+      payload: {
+        externalRef,
+        runtimeRef: { runtime: ref?.runtime ?? "tmux", locator: { ...ref?.locator } },
+      },
     });
 }
 
@@ -163,6 +175,49 @@ describe("a Codex agent's TUI coming up", () => {
     await s.threads.titleChanged(s.terminal);
     expect([before, s.lifecycle()]).toEqual(["starting", "running"]);
   });
+
+  it("never takes the last TUI's title, heard before a respawn, for the new TUI's", async () => {
+    const { promise: listing, resolve: answer } = Promise.withResolvers<unknown>();
+    const s = await setup({ titles: [shown(C)], runtime: "holder", listing });
+    const titled = (title: string) => s.titles.splice(0, s.titles.length, title);
+    void s.threads.heard(s.terminal);
+    await expect.poll(() => s.lists.length).toBe(1);
+    titled(shown(A));
+    const recorded = respawn(s);
+    const stale = s.threads.heard(s.terminal);
+    recorded();
+    titled("");
+    answer(undefined);
+    await stale;
+    expect(s.lifecycle()).toBe("starting");
+  });
+
+  it.each(["tmux", "holder"] as const)(
+    "never takes a title read as a respawn commits for the new TUI's, on %s",
+    async (runtime) => {
+      const s: Awaited<ReturnType<typeof setup>> = await setup({
+        titles: [shown(A)],
+        runtime,
+        reading: () => respawn(s)(),
+      });
+      await s.threads.heard(s.terminal);
+      expect(s.lifecycle()).toBe("starting");
+    },
+  );
+
+  it.each(["tmux", "holder"] as const)(
+    "neither moves nor readies an agent respawned while its move's thread resumes, on %s",
+    async (runtime) => {
+      const s: Awaited<ReturnType<typeof setup>> = await setup({
+        titles: [shown(B)],
+        runtime,
+        resuming: () => respawn(s)(),
+      });
+      s.announce(B);
+      await s.threads.heard(s.terminal);
+      expect([s.lifecycle(), s.boundTo()]).toEqual(["starting", A]);
+    },
+  );
 });
 
 describe("Codex thread switches", () => {
@@ -456,19 +511,12 @@ describe("Codex thread switches", () => {
 
   it("drops at once a title heard where no Codex agent runs, while a Codex agent's follow waits", async () => {
     const { promise: listing } = Promise.withResolvers<unknown>();
-    const s = await setup({ titles: [shown(A)], runtime: "holder", listing });
-    void s.threads.heard(s.terminal, shown(C));
+    const s = await setup({ titles: [shown(C)], runtime: "holder", listing });
+    void s.threads.heard(s.terminal);
     await expect.poll(() => s.lists.length).toBe(1);
-    const other = s.threads.heard(newId("term"), "⠋ thinking").then(() => "dropped");
+    const other = s.threads.heard(newId("term")).then(() => "dropped");
     const queued = new Promise((resolve) => setTimeout(() => resolve("queued"), 200));
     await expect(Promise.race([other, queued])).resolves.toBe("dropped");
-  });
-
-  it("acts on the title a runtime told it, without reading it again", async () => {
-    const s = await setup({ titles: [shown(A)], runtime: "holder" });
-    s.announce(B);
-    await s.threads.titleChanged(s.terminal, shown(B));
-    expect([s.boundTo(), s.titled]).toEqual([B, []]);
   });
 
   it("moves an agent, after a restart, to a thread the server lists only later and never announces", async () => {
