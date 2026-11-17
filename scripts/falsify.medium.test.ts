@@ -416,6 +416,24 @@ function renameTest(call: string, trailer?: string): void {
   git(fx.linked, "commit", "--quiet", "--amend", "-m", "feat: v2", ...message);
 }
 
+const IMPORTS = 'import { v } from "./x.ts";\n';
+
+const lines = (...text: string[]) => `${text.join("\n")}\n`;
+
+/**
+ * Remakes the branch on a base whose test file is `base`, with one commit changing the source to
+ * `v = 2` and the test file to `head`.
+ */
+function branchOn(base: string, head: string): void {
+  git(fx.linked, "reset", "--quiet", "--hard", fx.base);
+  write(fx.linked, TEST, base);
+  git(fx.linked, "commit", "--quiet", "-am", "test: base");
+  fx.base = git(fx.linked, "rev-parse", "HEAD").trim();
+  write(fx.linked, SOURCE, "export const v = 2;\n");
+  write(fx.linked, TEST, head);
+  git(fx.linked, "commit", "--quiet", "-am", "feat: v2");
+}
+
 const stubLog = () => readFileSync(fx.log, "utf8");
 const falsifyWorktrees = (cwd: string) =>
   git(cwd, "worktree", "list", "--porcelain")
@@ -502,6 +520,32 @@ describe("falsify on a branch in a linked worktree", () => {
     expect(againstBase({ STUB_STATUS: "passed" })).toEqual({
       status: 1,
       output: expect.stringMatching(/SURVIVED[\s\S]*\n {2}Renamed: v -> caps\n/),
+    });
+  });
+
+  it("judges only the test a branch adds, not an unchanged one the diff reads as removed and added", () => {
+    const moved = lines('it("v", () => {', "  expect(v).toBe(1);", "});");
+    const block = lines(
+      'describe("block", () => {',
+      '  it("stays", () => {',
+      "    expect(v).toBe(1);",
+      "    expect(v).not.toBe(2);",
+      "  });",
+      "});",
+    );
+    branchOn(IMPORTS + block + moved, IMPORTS + moved + block + 'it("caps", () => {});\n');
+    expect(git(fx.linked, "diff", fx.base, "--", TEST)).toMatch(/^\+it\("v"/m);
+    expect(againstBase()).toEqual({
+      status: 0,
+      output: expect.not.stringMatching(/› (?:v|stays)\b/),
+    });
+  });
+
+  it("reads the title of a chained test call that the formatter wrapped onto its next line", () => {
+    renameTest(lines('it("v", () => {});', "it.runIf(true)(", '  "caps",', "  () => {},", ");"));
+    expect(againstBase()).toEqual({
+      status: 0,
+      output: expect.stringContaining(`KILLED   ${TEST} › caps`),
     });
   });
 

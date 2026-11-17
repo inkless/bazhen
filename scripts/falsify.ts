@@ -44,15 +44,16 @@
 // `Control: tests::name: <what you broke> -> <how the test failed>`
 // (docs/standards/rust.md § Tests).
 //
-// Titles come from added lines that look like `it(...)`/`test(...)` calls, so a fixture string in
-// a test file such as 'it("fixture", f)' counts as a test too. It then can't be found in the
-// report and comes out INVALID: the safe direction, since it asks for a control.
+// A test is new when its title is: HEAD's copy of the file has more tests with that title than
+// the base's, read from both copies' test calls (scripts/test-calls.ts), however git's diff aligns
+// them or the formatter lays them out. A test that moved, or whose body changed under its title,
+// isn't new.
 //
 // A test renamed and otherwise unchanged isn't new, and a commit trailer on the branch says so:
 // `Renamed: <old title> -> <new title>`. It is left out only when it holds: the old title is one
 // test in the file at the base and none at HEAD, the new title one at HEAD and none at the base,
-// and the test's block (its call line to its closing line) is the base's but for the title. Any
-// other change, to its body, options or call, leaves it judged as new.
+// and the test's call is the base's token for token but for the title, comments and layout aside.
+// Any other change, to its body, options or call, leaves it judged as new.
 //
 // The worktree's dependencies are installed, and built, as the checkout's are, so a test fails
 // there only on the base's source. Under each test that failed, the first line of what failed it.
@@ -94,6 +95,7 @@ import { GATES, configFailures, gateEnv, installCommand, outsideConfigs } from "
 import { isMain } from "./is-main.ts";
 import { inSandbox, judgeableHere, signallingWork } from "./falsify-signals.ts";
 import { RESULTS_FILE_ENV, UNFINISHED, partialReport } from "./falsify-reporter.ts";
+import { testCalls, type TestCall } from "./test-calls.ts";
 import {
   failedOnAssertion,
   inTestCode,
@@ -128,8 +130,6 @@ const TARGET_STRING = /["'`](target\/[\w-]+\/[\w-]+)["'`]/g;
 const IN_TARGET = /^target\/([\w-]+\/[\w-]+)$/;
 // A source file named by its path from the repository's root, as a test names a program it runs.
 const ROOT_SOURCE = /["'`]((?:apps|packages|scripts|tests)\/[\w./-]+\.[cm]?tsx?)["'`]/g;
-const TITLE = /(?<![.\w])(?:it|test)(?:\.\w+(?:\([^()]*\))?)*\(\s*(["'`])((?:\\.|(?!\1).)+)\1/g;
-const TEST_CALL = /(?<![.\w])(?:it|test)(?:\.\w+)*\s*\(/;
 export const WORKTREE_PREFIX = "bz-falsify-";
 const LOCK_REASON = /^bz-falsify pid=(\d+)$/;
 export const INSTALL_TIMEOUT_MS = 120_000;
@@ -295,46 +295,42 @@ export function parseNameStatus(out: string): Change[] {
 
 const unparsedIn = (file: string) => `<unparsed test in ${file}>`;
 
-const unescape = (title: string) => title.replace(/\\(["'`])/g, "$1");
+/** What a test is counted by: its title, or the tokens of one that can't be read. */
+const countedBy = (t: TestCall) => (t.title === undefined ? `\0${t.titleTokens}` : t.title);
 
 /**
- * Titles of tests whose `it(...)`/`test(...)` line the change adds. Every added test call whose
- * title can't be read (wrapped onto the next line, interpolated, a variable) adds an
- * `<unparsed test in FILE>` marker, which classifies as INVALID and so forces a Control trailer.
- * An existing test whose call line only became `async`, for a seam that did, is left out: it
- * isn't new, and its behaviour may not have changed at all. A test removed and added again with
- * the same call line, as when it is rewritten elsewhere in the file, is judged like a new one.
+ * The titles of the tests in a test file that HEAD has more of than the base, read from both
+ * sides' test calls (`testCalls`), so a test that only moved, or whose body or layout changed under
+ * its title, isn't new. A test whose title can't be read (interpolated, a variable) counts by its
+ * title's tokens, and each new one adds an `<unparsed test in FILE>` marker, which classifies as
+ * INVALID and so forces a Control trailer. So does a side that can't be read at all, with why.
  */
-export function newTitles(diff: string, file: string): string[] {
-  const added = new Map<string, string>();
-  const removed = new Map<string, string>();
-  for (const line of diff.split("\n")) {
-    const side = line.startsWith("+") ? added : line.startsWith("-") ? removed : undefined;
-    if (side === undefined || /^(\+\+\+|---) /.test(line) || !TEST_CALL.test(line)) continue;
-    let parsed = false;
-    for (const [, quote, title] of line.matchAll(TITLE)) {
-      if (title === undefined || (quote === "`" && title.includes("${"))) continue;
-      side.set(unescape(title), line.slice(1).trim());
-      parsed = true;
-    }
-    if (!parsed && side === added) added.set(unparsedIn(file), "");
+export function changedTests(
+  base: string | undefined,
+  head: string,
+  file: string,
+): { titles: string[]; unreadable?: string } {
+  const before = base === undefined ? [] : testCalls(base);
+  if (typeof before === "string") {
+    return { titles: [unparsedIn(file)], unreadable: `the base's copy has ${before}` };
   }
-  const onlyMadeAsync = (title: string, call: string) => {
-    const before = removed.get(title);
-    return before !== undefined && before !== call && withoutAsync(before) === withoutAsync(call);
-  };
-  return [...added].flatMap(([title, call]) => (onlyMadeAsync(title, call) ? [] : [title]));
+  const after = testCalls(head);
+  if (typeof after === "string") {
+    return { titles: [unparsedIn(file)], unreadable: `HEAD's copy has ${after}` };
+  }
+  const left = new Map<string, number>();
+  for (const t of before) left.set(countedBy(t), (left.get(countedBy(t)) ?? 0) + 1);
+  const titles = new Set<string>();
+  for (const t of after) {
+    const count = left.get(countedBy(t)) ?? 0;
+    left.set(countedBy(t), count - 1);
+    if (count <= 0) titles.add(t.title ?? unparsedIn(file));
+  }
+  return { titles: [...titles] };
 }
-
-const withoutAsync = (call: string) => call.replaceAll(/\basync\s+/g, "");
 
 const RENAMED_TRAILER = /^Renamed: (.+)$/gm;
 const ARROW = " -> ";
-// A call line ending in one of these leaves its call open, so the test's block ends only at a
-// closing line with the call line's indent.
-const OPENS_CALL = /[{([,]$/;
-const OPENS = /(?:[{([,]|=>)$/;
-const CLOSES = /^[)}]/;
 
 export type RenameTrailer = { trailer: string; from: string; to: string };
 
@@ -355,91 +351,16 @@ export function renameTrailers(messages: string): RenameTrailer[] {
   });
 }
 
-type TestBlock = { title: string; block: string | undefined };
+type TestBlock = { title: string; body: string };
 
 const titled = (tests: TestBlock[], title: string) => tests.filter((t) => t.title === title);
 
-const indentOf = (line: string) => /^\s*/.exec(line)?.[0].length ?? 0;
-
-const BACKTICK = /(?<!\\)(?:\\\\)*`/g;
-
-/** Whether a template literal is open after `line`, given whether one was open before it. */
-const opensTemplate = (open: boolean, line: string) =>
-  (line.match(BACKTICK)?.length ?? 0) % 2 === 1 ? !open : open;
-
-/** The test call on `line` with a readable title: its title as written, and where it ends. */
-function testCall(line: string): { raw: string; end: number } | undefined {
-  if (!TEST_CALL.test(line)) return undefined;
-  const match = [...line.matchAll(TITLE)].find(
-    ([, quote, title]) => title !== undefined && !(quote === "`" && title.includes("${")),
-  );
-  const raw = match?.[2];
-  return match === undefined || raw === undefined
-    ? undefined
-    : { raw, end: match.index + match[0].length };
-}
-
-/**
- * Each test call in a file with a readable title, and its block: the call line and the lines up
- * to its end, with the title's quoted string as a placeholder and the call line's indent taken off
- * every line but those inside a template literal, kept as they are. The end is read from the
- * formatter's layout: the lines indented deeper than the call or inside a template, then a closing
- * line at its indent with no deeper line after it. A call left open with no such line has no block.
- *
- * Which lines are inside a template is read by counting backticks, which a backtick in a string,
- * a comment or a `${}` misleads. Read that way, a template's `}` line can pass for the closing
- * line and cut the block short. A miscount runs on until another odd backtick, so one that reaches
- * a test call, or the end of the file, inside a template is caught, and then no test in the file
- * has a block. One that ends inside the same test is caught only by the deeper line after a closing
- * line, so a test with two misread backticks and a template between them can still be cut short.
- */
-function testsIn(source: string): TestBlock[] {
-  const lines = source.split("\n");
-  const inside: boolean[] = [];
-  let open = false;
-  for (const line of lines) {
-    inside.push(open);
-    open = opensTemplate(open, line);
-  }
-  const calls = lines.map(testCall);
-  const counted = !open && calls.every((call, i) => call === undefined || !inside[i]);
-  const tests: TestBlock[] = [];
-  for (const [i, line] of lines.entries()) {
-    const call = calls[i];
-    if (call === undefined) continue;
-    const title = unescape(call.raw);
-    if (!counted) {
-      tests.push({ title, block: undefined });
-      continue;
-    }
-    const indent = indentOf(line);
-    const block = [
-      `${line.slice(indent, call.end - call.raw.length - 2)}\0${line.slice(call.end)}`,
-    ];
-    let next = i + 1;
-    for (; next < lines.length; next++) {
-      const text = lines[next] ?? "";
-      if (inside[next]) block.push(text);
-      else if (text.trim() !== "" && indentOf(text) <= indent) break;
-      else block.push(text.trim() === "" ? "" : text.slice(indent));
-    }
-    while (block.at(-1) === "") block.pop();
-    const closing = lines[next];
-    let closed: boolean;
-    if (
-      closing !== undefined &&
-      indentOf(closing) === indent &&
-      CLOSES.test(closing.slice(indent))
-    ) {
-      block.push(closing.slice(indent));
-      const after = lines.slice(next + 1).find((text) => text.trim() !== "");
-      closed = after === undefined || indentOf(after) <= indent;
-    } else {
-      closed = !OPENS_CALL.test(block[0] ?? "") && !OPENS.test(block.at(-1) ?? "");
-    }
-    tests.push({ title, block: closed ? block.join("\n") : undefined });
-  }
-  return tests;
+/** The tests in a file with a readable title, or why the file can't be read. */
+function testsIn(source: string): TestBlock[] | string {
+  const calls = testCalls(source);
+  return typeof calls === "string"
+    ? calls
+    : calls.flatMap(({ title, body }) => (title === undefined ? [] : [{ title, body }]));
 }
 
 /**
@@ -456,6 +377,8 @@ export function renameRefusal(
 ): string | undefined {
   const before = testsIn(base ?? "");
   const after = testsIn(head ?? "");
+  if (typeof before === "string") return `the base's copy of the file has ${before}`;
+  if (typeof after === "string") return `HEAD's copy of the file has ${after}`;
   const old = titled(before, from);
   if (old.length !== 1) {
     return old.length === 0
@@ -468,11 +391,9 @@ export function renameRefusal(
   if (now.length !== 1) {
     return now.length === 0 ? `HEAD has no test "${to}"` : `HEAD has ${now.length} tests "${to}"`;
   }
-  const [was] = old;
-  const is = now[0];
-  if (was?.block === undefined) return `the end of "${from}" can't be found`;
-  if (is?.block === undefined) return `the end of "${to}" can't be found`;
-  return was.block === is.block ? undefined : `"${to}" isn't "${from}" with only its title changed`;
+  return old[0]?.body === now[0]?.body
+    ? undefined
+    : `"${to}" isn't "${from}" with only its title changed`;
 }
 
 /**
@@ -484,7 +405,8 @@ export function renamedFrom(
   head: string | undefined,
   title: string,
 ): string | undefined {
-  const froms = new Set(testsIn(base ?? "").map((t) => t.title));
+  const before = testsIn(base ?? "");
+  const froms = new Set(typeof before === "string" ? [] : before.map((t) => t.title));
   const renamed = [...froms].filter((from) => renameRefusal(base, head, from, title) === undefined);
   return renamed.length === 1 ? renamed[0] : undefined;
 }
@@ -1826,13 +1748,6 @@ async function main(args: string[]): Promise<number> {
 
   const changes = parseNameStatus(git(["diff", "--name-status", "-z", "-M", ...range]));
   const tests = changes.filter((c) => c.status !== "D" && TEST_FILE.test(c.path));
-  const found = tests.flatMap((t) => {
-    const paths = t.status === "R" && t.oldPath ? [t.oldPath, t.path] : [t.path];
-    return newTitles(git(["diff", "-M", ...range, "--", ...paths]), t.path).map((title) => ({
-      file: t.path,
-      title,
-    }));
-  });
   const basePaths = new Map(
     tests.map((t) => [t.path, t.status === "R" && t.oldPath ? t.oldPath : t.path]),
   );
@@ -1844,6 +1759,16 @@ async function main(args: string[]): Promise<number> {
     read.set(file, both);
     return both;
   };
+  const found = tests.flatMap((t) => {
+    const { base: before, head: after } = sides(t.path);
+    const { titles, unreadable } = changedTests(before, after ?? "", t.path);
+    if (unreadable !== undefined) {
+      console.log(
+        `falsify: ${t.path}: ${unreadable}, so its new tests count as one whose title couldn't be read`,
+      );
+    }
+    return titles.map((title) => ({ file: t.path, title }));
+  });
   const targets = leaveOutRenames(found, renameTrailers(messages), sides);
   const headFiles = new Set(
     git(["ls-tree", "-r", "-z", "--name-only", "--full-tree", head]).split("\0"),
