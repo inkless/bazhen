@@ -50,6 +50,9 @@
 // and the test's block (its call line to its closing line) is the base's but for the title. Any
 // other change, to its body, options or call, leaves it judged as new.
 //
+// The worktree's dependencies are installed, and built, as the checkout's are, so a test fails
+// there only on the base's source. Under each test that failed, the first line of what failed it.
+//
 // Only committed work is judged: the worktree is checked out at HEAD, so commit before running.
 // The temporary worktree is locked with this process's pid. A run killed before it could clean
 // up leaves it behind, and the next run removes it once that pid is dead.
@@ -79,6 +82,7 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, posix, resolve } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import { isAlive, rethrowUnsafe, signalGroup, spawnGroup } from "@bazhen/host-guard";
 import { KILLS_ENV } from "./capped.ts";
 import { GATES, configFailures, gateEnv, installCommand, outsideConfigs } from "./cargo-gate.ts";
@@ -585,15 +589,42 @@ export function projectsOf(listing: unknown, roots: readonly string[]): Map<stri
   return projects;
 }
 
-export function classify(report: VitestReport, file: string, title: string): Outcome {
+/** The report's one result for the test, or undefined when it has none or several. */
+function resultOf(report: VitestReport, file: string, title: string) {
   const suite = report.testResults.find((r) => r.name.endsWith(file));
-  if (!suite || suite.assertionResults.length === 0) return "INVALID";
-  const matches = suite.assertionResults.filter((a) => a.title === title);
-  const test = matches[0];
-  if (test === undefined || matches.length > 1) return "INVALID";
+  const matches = suite?.assertionResults.filter((a) => a.title === title) ?? [];
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+export function classify(report: VitestReport, file: string, title: string): Outcome {
+  const test = resultOf(report, file, title);
+  if (test === undefined) return "INVALID";
   if (test.status === "passed") return "SURVIVED";
   if (test.failureMessages.some((m) => /Test timed out/.test(m))) return "INVALID";
   return test.status === "failed" ? "KILLED" : "INVALID";
+}
+
+const FAILURE_LINE_MAX = 300;
+
+/**
+ * The first line of what failed the test: its first failure message's, or, where it has none, its
+ * file's, as a file that fails to load has. Undefined when neither says anything.
+ */
+export function failureLine(report: VitestReport, file: string, title: string): string | undefined {
+  const messages = [
+    resultOf(report, file, title)?.failureMessages[0],
+    report.testResults.find((r) => r.name.endsWith(file))?.message,
+  ];
+  for (const message of messages) {
+    const line = stripVTControlCharacters(message ?? "")
+      .split("\n")
+      .map((l) => l.trim())
+      .find((l) => l !== "");
+    if (line !== undefined) {
+      return line.length > FAILURE_LINE_MAX ? `${line.slice(0, FAILURE_LINE_MAX - 1)}…` : line;
+    }
+  }
+  return undefined;
 }
 
 // Runtime imports: `import … from`/`export … from` (not `import type`), `import "…"` and
@@ -945,8 +976,10 @@ function run(
 export const INSTALL_MODES = ["--offline", "--prefer-offline"] as const;
 
 // --ignore-scripts: the root `prepare` script (husky) would set core.hooksPath in the shared git
-// config, and nothing else needs a lifecycle script (node-pty's build is declined via
-// allowBuilds).
+// config. The dependencies' builds still have to run, as the checkout's install ran them, or a
+// test fails on the base for want of one: Claude Code's links the native binary the api tests
+// start, and without it `claude` is a stub that exits 1. `pnpm rebuild` runs those allowBuilds
+// approves and no project's own lifecycle script; `--pending` would run the root's `prepare`.
 export const installArgs = (mode: (typeof INSTALL_MODES)[number]) => [
   "install",
   "--frozen-lockfile",
@@ -954,20 +987,29 @@ export const installArgs = (mode: (typeof INSTALL_MODES)[number]) => [
   mode,
 ];
 
-/** What each failed install attempt printed to stderr, or undefined once one succeeds. */
+/** Runs `pnpm <args>` in `dir`, and returns the end of what it said if it failed. */
+async function pnpmFailure(dir: string, args: string[], log: string): Promise<string | undefined> {
+  const path = join(dir, log);
+  const fd = openSync(path, "w");
+  let ok: boolean;
+  try {
+    ok = await run("pnpm", args, dir, INSTALL_TIMEOUT_MS, { stdout: fd, stderr: fd });
+  } finally {
+    closeSync(fd);
+  }
+  return ok ? undefined : indentedTail(readFileSync(path, "utf8"));
+}
+
+/** What each failed install attempt printed, or undefined once one succeeds and builds. */
 async function install(dir: string): Promise<string[] | undefined> {
   const said: string[] = [];
   for (const mode of INSTALL_MODES) {
-    const path = join(dir, `falsify-install${mode.slice(1)}.log`);
-    const fd = openSync(path, "w");
-    let ok: boolean;
-    try {
-      ok = await run("pnpm", installArgs(mode), dir, INSTALL_TIMEOUT_MS, { stderr: fd });
-    } finally {
-      closeSync(fd);
+    const failed = await pnpmFailure(dir, installArgs(mode), `falsify-install${mode.slice(1)}.log`);
+    if (failed === undefined) {
+      const unbuilt = await pnpmFailure(dir, ["rebuild"], "falsify-rebuild.log");
+      return unbuilt === undefined ? undefined : [`\`pnpm rebuild\` said:\n${unbuilt}`];
     }
-    if (ok) return undefined;
-    said.push(`\`pnpm install ${mode}\` said:\n${indentedTail(readFileSync(path, "utf8"))}`);
+    said.push(`\`pnpm install ${mode}\` said:\n${failed}`);
   }
   return said;
 }
@@ -1700,6 +1742,7 @@ async function main(args: string[]): Promise<number> {
     unrelated?: boolean;
     unbuilt?: string[];
     note?: string;
+    failure?: string | undefined;
   }[] = [];
 
   results.push(...rustTests);
@@ -1808,6 +1851,7 @@ async function main(args: string[]): Promise<number> {
       const packages = workspacePackages(dir);
       for (const t of targets) {
         const outcome = classify(report, t.file, t.title);
+        const failure = outcome === "SURVIVED" ? undefined : failureLine(report, t.file, t.title);
         const source = readFileSync(join(dir, t.file), "utf8");
         const { direct = [], reached = [] } = binaries.get(t.file) ?? {};
         const inputs = direct.flatMap((b) => built.get(b) ?? []);
@@ -1818,8 +1862,8 @@ async function main(args: string[]): Promise<number> {
         ) {
           results.push({ ...t, outcome: "INVALID", unrelated: true });
         } else if (outcome === "KILLED" && unbuilt.length > 0) {
-          results.push({ ...t, outcome: "INVALID", unbuilt });
-        } else results.push({ ...t, outcome });
+          results.push({ ...t, outcome: "INVALID", unbuilt, failure });
+        } else results.push({ ...t, outcome, failure });
       }
     } finally {
       cleanup?.();
@@ -1839,6 +1883,7 @@ async function main(args: string[]): Promise<number> {
           ? ` (failed; the base builds no ${r.unbuilt.map((b) => `target/${b}`).join(", ")})`
           : "");
     console.log(`  ${r.outcome.padEnd(8)} ${r.file} › ${r.title}${note}`);
+    if (r.failure !== undefined) console.log(`           failed: ${r.failure}`);
   }
   if (rust.total > 0) {
     console.log(
