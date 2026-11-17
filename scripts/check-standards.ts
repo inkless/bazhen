@@ -902,6 +902,10 @@ const NOT_DECODERS: Record<string, string> = {
     "moves bytes between a holder's socket and the person's terminal; bazhen-holder-proto's FrameDecoder, which its frame target fuzzes, and Direct::keys, which the attach target fuzzes, read them",
   "crates/bazhen/src/attach/direct.rs::write_whole":
     "writes a request this build encoded; reads nothing",
+  "crates/bazhen/src/events.rs::drain":
+    "reads the daemon's frames through tungstenite, and their text through wire::from_slice, which the wire target fuzzes",
+  "crates/bazhen/src/events.rs::follow":
+    "opens the event stream and hands it to drain, which reads it; reads no bytes itself",
   "crates/bazhen/src/attach/link.rs::pump":
     "moves bytes between the daemon's socket and the person's terminal; tungstenite frames them, and Attachment::keys and frame, which the attach target fuzzes, read them",
   "crates/bazhen/src/attach/tty.rs::Wakeups::clear":

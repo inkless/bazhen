@@ -16,6 +16,7 @@ import {
 } from "./agents.ts";
 import { DevicesResponse, PairingCodeResponse, RevokeDeviceResponse } from "./devices.ts";
 import { HarnessId, Id } from "./ids.ts";
+import { EventEnvelopeFrame } from "./events.ts";
 import { DoctorResponse, EnvRefreshRequest, EnvRefreshResponse, HealthResponse } from "./index.ts";
 import {
   MESSAGE_WAIT_MAX_MS,
@@ -591,6 +592,41 @@ const MESSAGES: Readonly<Record<string, Example>> = {
     ],
   },
   EscalateResponse: { schema: EscalateResponse, wire: [{ attentionId: ATTN }] },
+  EventEnvelopeFrame: {
+    schema: EventEnvelopeFrame,
+    wire: [
+      {
+        type: "event",
+        event: {
+          id: 41,
+          ts: AT,
+          type: "terminal.renamed",
+          entityType: "terminal",
+          entityId: TERM,
+          actor: "user",
+          causationId: null,
+          correlationId: null,
+          payload: { name: "build" },
+        },
+      },
+      {
+        type: "event",
+        event: {
+          id: 42,
+          ts: AT,
+          type: "agent.renamed",
+          entityType: "agent",
+          entityId: AGENT,
+          actor: AGENT,
+          causationId: 41,
+          correlationId: KEY,
+          payload: { name: "reviewer", previous: "bazhen-3" },
+        },
+      },
+      { type: "reset", reason: "stale" },
+      { type: "reset", reason: "foreign" },
+    ],
+  },
   FinishTaskRequest: {
     schema: FinishTaskRequest,
     wire: [

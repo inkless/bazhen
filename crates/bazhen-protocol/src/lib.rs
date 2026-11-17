@@ -4,6 +4,7 @@
 
 pub mod agents;
 pub mod daemon;
+pub mod events;
 pub mod id;
 pub mod ids;
 pub mod input;

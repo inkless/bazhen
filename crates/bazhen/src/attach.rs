@@ -7,7 +7,7 @@
 pub mod attachment;
 pub mod direct;
 mod link;
-mod tty;
+pub(crate) mod tty;
 
 use std::io;
 use std::path::Path;

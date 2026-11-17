@@ -295,6 +295,8 @@ The verbs the web client's agent controls use, for a terminal or a script:
 | `bazhen shells list [--all]`                                       | The shells neither closed nor failed, or with `--all` every one                   |
 | `bazhen shells open [<agent> \| --dir …]`                          | A shell beside an agent, in its directory, else in `--dir` or where it runs       |
 | `bazhen shells close <shell> [--confirm-busy] [--force]`           | Close a shell, named by its id or a name one open shell has, in any case          |
+| `bazhen events --follow [--after <event>]`                         | Each event as it happens, until Ctrl-C; it tries again while the daemon is away   |
+| `bazhen wait <agent\|shell> <state>\|ended [--timeout <s>]`        | Wait for an agent or shell to be in a state; an agent is `running` once ready     |
 
 All but `shells list`, which only reads, are yours alone: the daemon refuses them to an agent, and
 the CLI prints its refusal. A command acts on the agent or shell as `/v1/state` shows it at that
@@ -303,6 +305,14 @@ nothing is tried again. Each exits 0 when done (or there was nothing to do), 1 w
 mistake in the command line, with nothing sent, and 3 when no daemon is running. `--json` prints the
 CLI's reading of the daemon's answer: `{ agentId, eventIds }`, and a launch's `terminalId`; for a
 shell `{ terminalId, eventIds }`, and for `shells list` the shells as `/v1/state` shows them.
+
+`events --follow` prints a line an event, or with `--json` each event as the daemon sent it, and
+says so when events were missed and it follows on from the daemon's state. `wait` exits 0 once
+the agent or shell is in the state, 1 if it ended otherwise, and 5 if the timeout (60 s unless
+given, at least 1) runs out first, whatever the daemon is doing; with `--json` it prints the
+record that met it. Both are yours alone too: the daemon refuses an agent the event stream.
+Ctrl-C ends `events --follow` at once while it waits on the stream, and within 5 s while it waits
+on a call to the daemon, such as opening the stream again.
 
 ## What Bazhen knows about who is calling
 

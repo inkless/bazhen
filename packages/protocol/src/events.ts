@@ -502,17 +502,28 @@ export type EventPayload<T extends EventType> = z.infer<(typeof EVENTS)[T]["payl
 
 const isEventType = (type: string): type is EventType => Object.hasOwn(EVENTS, type);
 
+/**
+ * An event as a client that reads no payload takes it: of any type, its payload unread. Each
+ * registered type's branch of `Event` is this, with its type, entity and payload pinned.
+ */
+export const EventEnvelope = z.object({
+  id: z.number().int().positive(),
+  ts: z.string(),
+  type: z.string(),
+  entityType: z.string(),
+  entityId: z.string(),
+  actor: z.string(),
+  causationId: z.number().int().positive().nullable(),
+  correlationId: z.string().nullable(),
+  payload: z.unknown(),
+});
+export type EventEnvelope = z.infer<typeof EventEnvelope>;
+
 const eventBranch = (type: EventType) => {
   const entry: { readonly payload: z.ZodType; readonly streamed?: z.ZodType } = EVENTS[type];
-  return z.object({
-    id: z.number().int().positive(),
-    ts: z.string(),
+  return EventEnvelope.extend({
     type: z.literal(type),
     entityType: z.literal(EVENTS[type].entity),
-    entityId: z.string(),
-    actor: z.string(),
-    causationId: z.number().int().positive().nullable(),
-    correlationId: z.string().nullable(),
     payload: entry.streamed ?? entry.payload,
   });
 };
@@ -564,3 +575,10 @@ export const EventFrame = z.discriminatedUnion("type", [
   z.object({ type: z.literal("reset"), reason: ResetReason }),
 ]);
 export type EventFrame = z.infer<typeof EventFrame>;
+
+/** `EventFrame` as a client that reads only each event's envelope takes it. */
+export const EventEnvelopeFrame = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("event"), event: EventEnvelope }),
+  z.object({ type: z.literal("reset"), reason: ResetReason }),
+]);
+export type EventEnvelopeFrame = z.infer<typeof EventEnvelopeFrame>;

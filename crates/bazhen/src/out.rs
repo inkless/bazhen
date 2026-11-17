@@ -17,6 +17,11 @@ impl Out {
         }
     }
 
+    /// Whether stdout was found closed: no one reads what is printed now.
+    pub(crate) fn closed(&self) -> bool {
+        self.closed
+    }
+
     /// `text` and a newline on stderr; a stderr no one reads is no reason to fail either.
     pub(crate) fn err(&mut self, text: &str) {
         if !self.err_closed && writeln!(io::stderr().lock(), "{text}").is_err() {

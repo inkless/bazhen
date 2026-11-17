@@ -94,7 +94,8 @@ export function upgrades(
 /**
  * The daemon socket's `upgrade` listener. The socket's 0600 mode is what admits a caller, so no
  * Host, Origin or pairing check applies; each caller is identified as every socket request is,
- * and only the human may open one: an agent could otherwise type into another agent's terminal.
+ * and only the human may open one: an agent could otherwise type into another agent's terminal,
+ * or follow every change to every agent.
  */
 export function socketUpgrades(
   credentials: AgentCredentials,
@@ -119,10 +120,7 @@ export function socketUpgrades(
     }
     const who = identify(credentials, presented, reading);
     if (who.kind === "human") return route(routes, req, socket, head, null);
-    forbidUpgrade(
-      socket,
-      who.kind === "refused" ? who.reason : "an agent can't attach to a terminal",
-    );
+    forbidUpgrade(socket, who.kind === "refused" ? who.reason : "an agent can't open a stream");
   });
 }
 

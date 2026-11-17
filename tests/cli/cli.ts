@@ -4,7 +4,8 @@
 // binary, as falsify names the base's build. The api suites, which run the CLI against the real
 // daemon, remain the end-to-end gate.
 
-import { execFile } from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import {
   createServer,
@@ -14,6 +15,7 @@ import {
 } from "node:http";
 import { createServer as createSocketServer, type Socket } from "node:net";
 import { join } from "node:path";
+import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
 import {
   AddTaskNoteRequest,
@@ -27,6 +29,7 @@ import {
   EnvRefreshRequest,
   ErrorResponse,
   EscalateRequest,
+  EventEnvelopeFrame,
   CallerResponse,
   FinishTaskRequest,
   LaunchAgentRequest,
@@ -43,6 +46,7 @@ import {
   holderRequestDecoder,
   type HolderHelloRequest,
 } from "@bazhen/protocol";
+import { WebSocketServer } from "ws";
 
 const repo = fileURLToPath(new URL("../..", import.meta.url));
 const RUST_CLI = join(repo, "target/release/bazhen");
@@ -112,11 +116,42 @@ const json = (status: number, value: unknown): Reply => ({
  * request whose body the daemon would refuse is answered 400, as the daemon answers it; a route it
  * wasn't given answers Hono's plain-text 404.
  */
+/** One `/v1/events` stream the CLI opened: what the fake daemon sends on it. */
+export interface EventStream {
+  /** Sends `frame`, checked against the schema. */
+  readonly send: (frame: EventEnvelopeFrame) => void;
+  /** Closes the stream, as the daemon does after a reset or when it stops. */
+  readonly close: () => void;
+}
+
+/** RFC 6455's key suffix, from which a server's `Sec-WebSocket-Accept` is made. */
+const WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
+/** `text` as a server's WebSocket text frame, unmasked. */
+function textFrame(text: string): Buffer {
+  const data = Buffer.from(text, "utf8");
+  if (data.length >= 65536) throw new Error("a frame this long needs the 64-bit length");
+  const head =
+    data.length < 126
+      ? Buffer.from([0x81, data.length])
+      : Buffer.from([0x81, 126, data.length >> 8, data.length & 0xff]);
+  return Buffer.concat([head, data]);
+}
+
 export class FakeDaemon {
   readonly received: Received[] = [];
   readonly #routes = new Map<string, (r: Received) => Reply>();
   readonly #server: Server;
   readonly #hung: ServerResponse[] = [];
+  readonly #sockets = new WebSocketServer({ noServer: true });
+  /** Streams answered by hand, closed with the daemon. */
+  readonly #held: Duplex[] = [];
+  /** Answers an upgrade by hand, in place of the WebSocket server. */
+  #byHand: ((conn: Duplex, key: string) => void) | undefined;
+  /** The `/v1/events` streams the CLI opened, in order. */
+  readonly opened: EventStream[] = [];
+  #serve: readonly ((stream: EventStream) => void)[] | undefined;
+  #refuse = { status: 404, type: "text/plain", body: "404 Not Found" };
 
   private constructor(server: Server) {
     this.#server = server;
@@ -130,6 +165,36 @@ export class FakeDaemon {
       req.setEncoding("utf8");
       req.on("data", (chunk: string) => (text += chunk));
       req.on("end", () => daemon.#respond(req.method ?? "", req.url ?? "", req.headers, text, res));
+    });
+    server.on("upgrade", (req, conn: Duplex, head: Buffer) => {
+      const path = req.url ?? "";
+      daemon.received.push({ method: "GET", path, headers: req.headers, body: undefined });
+      if (daemon.#byHand !== undefined) {
+        daemon.#held.push(conn);
+        daemon.#byHand(conn, String(req.headers["sec-websocket-key"]));
+        return;
+      }
+      const serve = daemon.#serve;
+      if (serve === undefined) {
+        const reply = daemon.#refuse;
+        conn.end(
+          `HTTP/1.1 ${reply.status} Refused\r\ncontent-type: ${reply.type}\r\n` +
+            `content-length: ${Buffer.byteLength(reply.body)}\r\nconnection: close\r\n\r\n${reply.body}`,
+        );
+        return;
+      }
+      if (!path.startsWith("/v1/events?")) {
+        conn.end("HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
+        return;
+      }
+      daemon.#sockets.handleUpgrade(req, conn, head, (ws) => {
+        const stream: EventStream = {
+          send: (frame) => ws.send(JSON.stringify(EventEnvelopeFrame.parse(frame))),
+          close: () => ws.close(),
+        };
+        serve[daemon.opened.length]?.(stream);
+        daemon.opened.push(stream);
+      });
     });
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);
@@ -205,6 +270,48 @@ export class FakeDaemon {
     return this;
   }
 
+  /** Serves `/v1/events`: the CLI's nth stream gets `serves[n]`; one past them is left open. */
+  events(...serves: ((stream: EventStream) => void)[]): this {
+    this.#serve = serves;
+    return this;
+  }
+
+  /** Refuses every `/v1/events` stream, as the daemon refuses an upgrade. */
+  refuseEvents(status: number, error: ErrorResponse): this {
+    this.#serve = undefined;
+    this.#refuse = {
+      status,
+      type: "application/json",
+      body: JSON.stringify(ErrorResponse.parse(error)),
+    };
+    return this;
+  }
+
+  /** Never answers a `/v1/events` upgrade, as a wedged daemon doesn't. */
+  hangEvents(): this {
+    this.#byHand = () => undefined;
+    return this;
+  }
+
+  /**
+   * Answers the CLI's `/v1/events` streams with `texts` as frames in the same write as the 101,
+   * then leaves them open; what the stream sends after goes as frames written by hand too.
+   */
+  eventsWithTheAnswer(...texts: string[]): this {
+    this.#byHand = (conn, key) => {
+      const accept = createHash("sha1").update(`${key}${WEBSOCKET_GUID}`).digest("base64");
+      const answer =
+        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+        `Sec-WebSocket-Accept: ${accept}\r\n\r\n`;
+      conn.write(Buffer.concat([Buffer.from(answer), ...texts.map(textFrame)]));
+      this.opened.push({
+        send: (frame) => conn.write(textFrame(JSON.stringify(EventEnvelopeFrame.parse(frame)))),
+        close: () => conn.end(Buffer.from([0x88, 0])),
+      });
+    };
+    return this;
+  }
+
   /** Never answers `route`, as a wedged daemon doesn't. */
   hang(route: string): this {
     this.#routes.set(route, () => "hang");
@@ -224,6 +331,9 @@ export class FakeDaemon {
   /** Stops answering: the socket refuses connections from now on, as a stopped daemon's does. */
   async close(): Promise<void> {
     for (const res of this.#hung.splice(0)) res.destroy();
+    for (const conn of this.#held.splice(0)) conn.destroy();
+    for (const ws of this.#sockets.clients) ws.terminate();
+    this.#sockets.close();
     if (!this.#server.listening) return;
     this.#server.closeAllConnections();
     await new Promise<void>((resolve) => this.#server.close(() => resolve()));
@@ -253,6 +363,8 @@ export interface Scene {
     env?: Record<string, string>,
     input?: string,
   ) => Promise<Ran>;
+  /** Starts `bazhen <args>` in `dir` and leaves it running, as `events --follow` runs. */
+  readonly start: (args: readonly string[]) => Running;
   /** As `bazhen`, with only `env` and the scene's PATH: no BAZHEN_HOME. */
   readonly bare: (args: readonly string[], env: Record<string, string>) => Promise<Ran>;
   readonly cleanup: () => Promise<void>;
@@ -283,10 +395,74 @@ export async function scene(): Promise<Scene> {
     bazhen: (args, env = {}, input = "") =>
       run(args, { ...path, BAZHEN_HOME: home, ...env }, dir, input),
     bare: (args, env) => run(args, { ...path, ...env }, dir),
+    start: (args) => start(args, { ...path, BAZHEN_HOME: home }, dir),
     cleanup: async () => {
       await daemon.close();
       rmSync(root, { recursive: true, force: true });
     },
+  };
+}
+
+/** A CLI left running: what it has printed so far, and how it ends. */
+export interface Running {
+  readonly child: ChildProcess;
+  readonly stdout: () => string;
+  readonly stderr: () => string;
+  /** Resolves once stdout or stderr holds `text`; rejects if the CLI ends first. */
+  readonly printed: (text: string) => Promise<void>;
+  /** Stops reading the CLI's stdout, as `head` does once it has its lines. */
+  readonly stopReading: () => void;
+  readonly ended: Promise<Ran>;
+}
+
+function start(args: readonly string[], env: Record<string, string>, cwd: string): Running {
+  const binary = process.env["BAZHEN_CLI"] ?? "";
+  const file = binary === "" ? RUST_CLI : binary;
+  const child = spawn(file, args, { env, cwd, timeout: RUN_MS });
+  let stdout = "";
+  let stderr = "";
+  const waiting: { text: string; resolve: () => void; reject: (e: Error) => void }[] = [];
+  const check = () => {
+    for (const w of waiting.splice(0)) {
+      if (stdout.includes(w.text) || stderr.includes(w.text)) w.resolve();
+      else waiting.push(w);
+    }
+  };
+  child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+    stdout += chunk;
+    check();
+  });
+  child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+    stderr += chunk;
+    check();
+  });
+  child.stdout.on("error", () => {});
+  const ended = new Promise<Ran>((resolve, reject) => {
+    child.on("error", reject);
+    child.on("close", (code, signal) => {
+      for (const w of waiting.splice(0)) {
+        w.reject(new Error(`bazhen ended without printing ${w.text}:\n${stdout}${stderr}`));
+      }
+      if (signal !== null) {
+        reject(new Error(`bazhen ${args.join(" ")} ended by ${signal}:\n${stdout}${stderr}`));
+        return;
+      }
+      resolve({ code: code ?? 1, stdout, stderr });
+    });
+  });
+  // Every wait on `ended` is a test's own; a CLI that outlived its test is no failure of that.
+  ended.catch(() => {});
+  return {
+    child,
+    stdout: () => stdout,
+    stderr: () => stderr,
+    printed: (text) =>
+      new Promise((resolve, reject) => {
+        waiting.push({ text, resolve, reject });
+        check();
+      }),
+    stopReading: () => child.stdout.destroy(),
+    ended,
   };
 }
 

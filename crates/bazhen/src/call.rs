@@ -1,13 +1,17 @@
 //! A call to the daemon: one request over its socket, as the caller this process's environment
 //! names, and its answer read as the message the call expects.
 
-use std::path::PathBuf;
+use std::os::unix::net::UnixStream;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use bazhen_client::{Caller, Error, Method, exchange};
 use bazhen_protocol::daemon::HealthStatus;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use tungstenite::WebSocket;
+use tungstenite::handshake::HandshakeError;
+use tungstenite::handshake::client::Request;
 
 use crate::reply::{LIMITS, Unread, decode};
 
@@ -72,6 +76,17 @@ pub(crate) struct Daemon {
 }
 
 impl Daemon {
+    /// The WebSocket at `path`, its handshake bounded by `within`; a refusal says `refused` and
+    /// its status when it gives no reason.
+    pub(crate) fn upgrade(
+        &self,
+        path: &str,
+        refused: &str,
+        within: Duration,
+    ) -> Result<WebSocket<UnixStream>, Failed> {
+        upgrade(&self.socket, &self.caller, path, refused, within)
+    }
+
     pub(crate) fn at(socket: impl Into<PathBuf>) -> Self {
         Self {
             socket: socket.into(),
@@ -174,5 +189,60 @@ fn env_name(header: &str) -> &'static str {
         "BAZHEN_DEVICE_ID"
     } else {
         "BAZHEN_AGENT_ID"
+    }
+}
+
+/// A refusal's body, as far as the person needs it.
+#[derive(Deserialize)]
+struct Refusal {
+    message: String,
+}
+
+/// The WebSocket at `path` through the daemon at `socket`, as `caller`, its reads and writes
+/// bounded by `within`. A refusal says what the daemon said, else `refused` and its status.
+pub(crate) fn upgrade(
+    socket: &Path,
+    caller: &Caller,
+    path: &str,
+    refused: &str,
+    within: Duration,
+) -> Result<WebSocket<UnixStream>, Failed> {
+    let stream = UnixStream::connect(socket).map_err(|_| Failed::NotRunning)?;
+    stream
+        .set_read_timeout(Some(within))
+        .and_then(|()| stream.set_write_timeout(Some(within)))
+        .map_err(|_| Failed::NotRunning)?;
+    let mut request = Request::builder()
+        .uri(format!("ws://localhost{path}"))
+        .header("Host", "localhost")
+        .header("Connection", "Upgrade")
+        .header("Upgrade", "websocket")
+        .header("Sec-WebSocket-Version", "13")
+        .header(
+            "Sec-WebSocket-Key",
+            tungstenite::handshake::client::generate_key(),
+        );
+    let said = caller
+        .headers()
+        .map_err(|e| Failed::Unsendable(e.to_string()))?;
+    for (name, value) in said {
+        request = request.header(name, value);
+    }
+    let request = request
+        .body(())
+        .map_err(|e| Failed::Unsendable(e.to_string()))?;
+    match tungstenite::client::client(request, stream) {
+        Ok((ws, _)) => Ok(ws),
+        Err(HandshakeError::Failure(tungstenite::Error::Http(response))) => {
+            if response.status() == 404 {
+                return Err(Failed::Refused(ANOTHER_BUILD.to_owned()));
+            }
+            let body = response.body().as_deref().unwrap_or_default();
+            let said = serde_json::from_slice::<Refusal>(body).map(|r| r.message);
+            Err(Failed::Refused(said.unwrap_or_else(|_| {
+                format!("{refused}: HTTP {}", response.status())
+            })))
+        }
+        Err(_) => Err(Failed::NotRunning),
     }
 }

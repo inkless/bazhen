@@ -8,7 +8,7 @@ use clap::parser::ValueSource;
 use clap::{Arg, ArgAction, ArgMatches, Command};
 
 /// The options that take a value.
-const VALUED: [&str; 15] = [
+const VALUED: [&str; 16] = [
     "title",
     "brief",
     "brief-file",
@@ -24,10 +24,11 @@ const VALUED: [&str; 15] = [
     "home",
     "port",
     "timeout",
+    "after",
 ];
 
 /// The options that are on or off.
-const SWITCHES: [&str; 9] = [
+const SWITCHES: [&str; 10] = [
     "all",
     "cascade",
     "json",
@@ -37,6 +38,7 @@ const SWITCHES: [&str; 9] = [
     "force",
     "confirm-busy",
     "fresh",
+    "follow",
 ];
 
 /// What the command line said.

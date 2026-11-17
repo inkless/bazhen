@@ -755,7 +755,7 @@ const socketListener = getRequestListener(
 );
 const socketServer = createServer((req, res) => void socketListener(req, res));
 socketServer.on("connection", (connection) => noteAccepted(connection));
-socketServer.on("upgrade", socketUpgrades(agentTokens, [terminalStream], peer));
+socketServer.on("upgrade", socketUpgrades(agentTokens, streams, peer));
 socketServer.requestTimeout = 0;
 rmSync(paths.socket, { force: true });
 socketServer.listen(paths.socket, () => chmodSync(paths.socket, 0o600));

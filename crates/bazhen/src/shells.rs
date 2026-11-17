@@ -151,7 +151,7 @@ fn close(p: &Parsed, daemon: &Daemon) -> Step<String> {
 
 /// The shell `given` names: by its id, else by a name only one open shell has, ignoring ASCII case
 /// as an agent's name is matched, since shells' names needn't differ.
-fn shell_named<'s>(state: &'s StateSnapshot, given: &str) -> Step<&'s Shell> {
+pub(crate) fn shell_named<'s>(state: &'s StateSnapshot, given: &str) -> Step<&'s Shell> {
     if let Some(shell) = state.shells.iter().find(|s| s.id.as_str() == given) {
         return Ok(shell);
     }

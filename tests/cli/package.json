@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@bazhen/protocol": "workspace:*"
+    "@bazhen/protocol": "workspace:*",
+    "ws": "8.22.2"
+  },
+  "devDependencies": {
+    "@types/ws": "8.18.2"
   }
 }

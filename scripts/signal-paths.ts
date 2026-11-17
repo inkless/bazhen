@@ -1056,6 +1056,10 @@ export const ALLOWED_SIGNALS: Readonly<Record<string, readonly AllowedSignal[]>>
   ],
   "tests/cli/cli.ts": [
     timedOut(/execFile\(file, args, \{ env, cwd, timeout: RUN_MS \}/, "the CLI under test"),
+    timedOut(
+      /spawn\(file, args, \{ env, cwd, timeout: RUN_MS \}/,
+      "the CLI under test, left running",
+    ),
   ],
 };
 

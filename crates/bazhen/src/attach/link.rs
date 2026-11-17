@@ -9,13 +9,11 @@ use bazhen_client::Caller;
 use bazhen_protocol::stream::StreamClientFrame;
 use rustix::event::{PollFd, PollFlags, poll};
 use rustix::io::Errno;
-use serde::Deserialize;
-use tungstenite::handshake::client::Request;
-use tungstenite::{HandshakeError, Message, WebSocket};
+use tungstenite::{Message, WebSocket};
 
 use super::attachment::{Attachment, Effect, Ending};
 use super::tty::{self, Stops, Wakeups};
-use crate::call::{ANOTHER_BUILD, CALL, Failed};
+use crate::call::{CALL, Failed, upgrade};
 use crate::fmt::encode_uri_component;
 
 /// The most keys read from the person's terminal at once.
@@ -29,12 +27,6 @@ pub(crate) enum Outcome {
     Gone,
 }
 
-/// A refusal's body, as far as the person needs it.
-#[derive(Deserialize)]
-struct Refusal {
-    message: String,
-}
-
 /// The stream of `terminal` through the daemon at `socket`, as `caller`, joined with `hello`.
 pub(crate) fn open(
     socket: &Path,
@@ -42,58 +34,22 @@ pub(crate) fn open(
     caller: &Caller,
     hello: &StreamClientFrame,
 ) -> Result<WebSocket<UnixStream>, Failed> {
-    let stream = UnixStream::connect(socket).map_err(|_| Failed::NotRunning)?;
-    stream
-        .set_read_timeout(Some(CALL))
-        .and_then(|()| stream.set_write_timeout(Some(CALL)))
+    let mut ws = upgrade(
+        socket,
+        caller,
+        &format!("/v1/terminals/{}/stream", encode_uri_component(terminal)),
+        "the daemon refused to attach",
+        CALL,
+    )?;
+    let hello = serde_json::to_string(hello).map_err(|e| Failed::Unsendable(e.to_string()))?;
+    ws.send(Message::text(hello))
         .map_err(|_| Failed::NotRunning)?;
-    let mut request = Request::builder()
-        .uri(format!(
-            "ws://localhost/v1/terminals/{}/stream",
-            encode_uri_component(terminal)
-        ))
-        .header("Host", "localhost")
-        .header("Connection", "Upgrade")
-        .header("Upgrade", "websocket")
-        .header("Sec-WebSocket-Version", "13")
-        .header(
-            "Sec-WebSocket-Key",
-            tungstenite::handshake::client::generate_key(),
-        );
-    let said = caller
-        .headers()
-        .map_err(|e| Failed::Unsendable(e.to_string()))?;
-    for (name, value) in said {
-        request = request.header(name, value);
-    }
-    let request = request
-        .body(())
-        .map_err(|e| Failed::Unsendable(e.to_string()))?;
-    match tungstenite::client::client(request, stream) {
-        Ok((mut ws, _)) => {
-            let hello =
-                serde_json::to_string(hello).map_err(|e| Failed::Unsendable(e.to_string()))?;
-            ws.send(Message::text(hello))
-                .map_err(|_| Failed::NotRunning)?;
-            ws.get_ref()
-                .set_read_timeout(None)
-                .and_then(|()| ws.get_ref().set_write_timeout(None))
-                .and_then(|()| ws.get_ref().set_nonblocking(true))
-                .map_err(|_| Failed::NotRunning)?;
-            Ok(ws)
-        }
-        Err(HandshakeError::Failure(tungstenite::Error::Http(response))) => {
-            if response.status() == 404 {
-                return Err(Failed::Refused(ANOTHER_BUILD.to_owned()));
-            }
-            let body = response.body().as_deref().unwrap_or_default();
-            let said = serde_json::from_slice::<Refusal>(body).map(|r| r.message);
-            Err(Failed::Refused(said.unwrap_or_else(|_| {
-                format!("the daemon refused to attach: HTTP {}", response.status())
-            })))
-        }
-        Err(_) => Err(Failed::NotRunning),
-    }
+    ws.get_ref()
+        .set_read_timeout(None)
+        .and_then(|()| ws.get_ref().set_write_timeout(None))
+        .and_then(|()| ws.get_ref().set_nonblocking(true))
+        .map_err(|_| Failed::NotRunning)?;
+    Ok(ws)
 }
 
 /// Moves keys, output and frames until the attachment ends. The notices the daemon sent on the
@@ -216,6 +172,7 @@ fn act(
 mod tests {
     use super::*;
     use crate::attach::attachment::{Attachment, Size};
+    use crate::call::ANOTHER_BUILD;
     use std::io::{Read as _, Write as _};
     use std::os::unix::net::UnixListener;
     use std::path::PathBuf;
@@ -289,7 +246,7 @@ mod tests {
         let server = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
             read_head(&mut stream);
-            let body = r#"{"error":"forbidden","message":"an agent can't attach to a terminal"}"#;
+            let body = r#"{"error":"forbidden","message":"an agent can't open a stream"}"#;
             // In one write, as the daemon answers: a reader that sees the head without the body
             // has no reason to give.
             let refusal = format!(
@@ -302,7 +259,7 @@ mod tests {
         let refused = open(&dir.socket(), "term_x", &Caller::default(), &hello).unwrap_err();
         server.join().unwrap();
         assert!(
-            matches!(&refused, Failed::Refused(m) if m == "an agent can't attach to a terminal"),
+            matches!(&refused, Failed::Refused(m) if m == "an agent can't open a stream"),
             "{refused:?}"
         );
     }
