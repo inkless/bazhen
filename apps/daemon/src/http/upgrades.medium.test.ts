@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
-import { connect } from "node:net";
+import { connect, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket, WebSocketServer } from "ws";
 import { newId } from "@bazhen/core";
 import type { AgentCredentials } from "../auth/callers.ts";
@@ -14,6 +14,7 @@ import { socketUpgrades, type UpgradeRoute } from "./upgrades.ts";
 let server: Server | undefined;
 let dir: string | undefined;
 afterEach(() => {
+  vi.restoreAllMocks();
   server?.close();
   if (dir !== undefined) rmSync(dir, { recursive: true, force: true });
   dir = undefined;
@@ -29,12 +30,49 @@ function echo(): UpgradeRoute {
   };
 }
 
-/** A server whose one route accepts `/echo/:word` and sends the word back. */
-async function serving() {
-  const served = await serveUpgrades([echo()]);
+/** A route whose upgrade throws, as a broken route would. */
+const throwing: UpgradeRoute = {
+  path: /^\/throws$/,
+  upgrade: () => {
+    throw new Error("the route broke");
+  },
+};
+
+/** A server whose routes are the echo route and `more`. */
+async function serving(...more: UpgradeRoute[]) {
+  const served = await serveUpgrades([echo(), ...more]);
   server = served.server;
   return `ws://${served.host}`;
 }
+
+/** A WebSocket upgrade request for `target`, as raw bytes, since ws sends only targets it can read. */
+const upgradeRequest = (target: string, host = "x") =>
+  `GET ${target} HTTP/1.1\r\nHost: ${host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n` +
+  "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
+
+/**
+ * Sends an upgrade for `target` on `conn`; what came back once the connection closed: the
+ * response's status line, or "closed" if nothing did. Undefined while it is open.
+ */
+function rawUpgrade(conn: Socket, target: string, host?: string) {
+  let received = "";
+  let answer: string | undefined;
+  conn.on("data", (d: Buffer) => (received += d.toString("latin1")));
+  conn.on("error", () => {});
+  conn.on("close", () => (answer = received === "" ? "closed" : received.split("\r\n")[0]));
+  conn.write(upgradeRequest(target, host));
+  return () => answer;
+}
+
+/** A raw connection to the server at `base`, a URL `serving` gave, and the Host it is known by. */
+function dial(base: string) {
+  const { hostname, port, host } = new URL(base);
+  return { conn: connect(Number(port), hostname), host };
+}
+
+/** The echo route's first message on `ws`. */
+const echoed = (ws: WebSocket) =>
+  new Promise((resolve) => ws.once("message", (d: Buffer) => resolve(d.toString("utf8"))));
 
 describe("WebSocket upgrades", () => {
   it("hands a matching path to its route, with what the path captured", async () => {
@@ -60,6 +98,50 @@ describe("WebSocket upgrades", () => {
     const ws = new WebSocket(`${await serving()}/nowhere`);
     expect(await upgradeOutcome(ws)).toBe(404);
   });
+
+  it("answers a request target URL can't read with 400, and serves the next caller", async () => {
+    const base = await serving();
+    const { conn, host } = dial(base);
+    const answer = rawUpgrade(conn, "//[", host);
+    await expect.poll(answer).toBe("HTTP/1.1 400 Bad Request");
+    const next = new WebSocket(`${base}/echo/again`);
+    expect(await echoed(next)).toBe("again");
+    next.close();
+  });
+
+  it("closes an upgrade whose route throws, logs why, and serves the next caller", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const base = await serving(throwing);
+    const { conn, host } = dial(base);
+    const answer = rawUpgrade(conn, "/throws", host);
+    await expect.poll(answer).toBe("closed");
+    expect(logged).toHaveBeenCalledWith("an upgrade failed", new Error("the route broke"));
+    const next = new WebSocket(`${base}/echo/again`);
+    expect(await echoed(next)).toBe("again");
+    next.close();
+  });
+
+  it("lets no error escape from a caller that resets before its refusal is written", async () => {
+    const escaped: unknown[] = [];
+    const escape = (err: unknown) => escaped.push(err);
+    process.on("uncaughtException", escape);
+    try {
+      const base = await serving();
+      const closed = new Promise((resolve) =>
+        server?.once("connection", (s: Socket) => s.once("close", resolve)),
+      );
+      const { conn } = dial(base);
+      conn.on("error", () => {});
+      conn.write(upgradeRequest("/echo/hi", "evil.example"), () => conn.resetAndDestroy());
+      await closed;
+      const next = new WebSocket(`${base}/echo/again`);
+      expect(await echoed(next)).toBe("again");
+      next.close();
+    } finally {
+      process.off("uncaughtException", escape);
+    }
+    expect(escaped).toEqual([]);
+  });
 });
 
 const agent = newId("agent");
@@ -73,14 +155,17 @@ const credentials: AgentCredentials = {
  * The echo route on a Unix socket, as the daemon's socket serves streams, with `peer` as the read
  * of each caller's process; the URL a client connects to it with.
  */
-async function servingOnSocket(peer?: () => Promise<PeerReading>) {
+async function servingOnSocket(peer?: () => Promise<PeerReading>, ...more: UpgradeRoute[]) {
   dir = mkdtempSync(join(tmpdir(), "bz-upgrade-"));
   const path = join(dir, "bazhen.sock");
   server = createServer();
-  server.on("upgrade", socketUpgrades(credentials, [echo()], peer));
+  server.on("upgrade", socketUpgrades(credentials, [echo(), ...more], peer));
   await new Promise<void>((resolve) => server?.listen(path, resolve));
   return (route: string) => `ws+unix://${path}:${route}`;
 }
+
+/** The socket's path, from the URL maker `servingOnSocket` gave. */
+const socketPath = (url: (route: string) => string) => url("").slice("ws+unix://".length, -1);
 
 /**
  * A peer read that holds the first caller until `release`, then reads it as `first`; every later
@@ -173,6 +258,26 @@ describe("WebSocket upgrades on the daemon's socket", () => {
     expect(await upgradeOutcome(new WebSocket(url("/nowhere")))).toBe(404);
   });
 
+  it("answers a request target URL can't read with 400 on the socket, and serves the next caller", async () => {
+    const url = await servingOnSocket();
+    const answer = rawUpgrade(connect(socketPath(url)), "//[");
+    await expect.poll(answer).toBe("HTTP/1.1 400 Bad Request");
+    const next = new WebSocket(url("/echo/again"));
+    expect(await echoed(next)).toBe("again");
+    next.close();
+  });
+
+  it("closes an upgrade on the socket whose route throws, logs why, and serves the next caller", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const url = await servingOnSocket(undefined, throwing);
+    const answer = rawUpgrade(connect(socketPath(url)), "/throws");
+    await expect.poll(answer).toBe("closed");
+    expect(logged).toHaveBeenCalledWith("an upgrade failed", new Error("the route broke"));
+    const next = new WebSocket(url("/echo/again"));
+    expect(await echoed(next)).toBe("again");
+    next.close();
+  });
+
   it.each([
     { who: "refused", first: { kind: "refused", reason: "gone" }, at: "/echo/hi" },
     { who: "the human, at no route", first: { kind: "outside" }, at: "/nowhere" },
@@ -182,12 +287,8 @@ describe("WebSocket upgrades on the daemon's socket", () => {
     async ({ first, at }) => {
       const { peer, read, release } = holdingFirst(first);
       const url = await servingOnSocket(peer);
-      const path = url("").slice("ws+unix://".length, -1);
-      const gone = connect(path);
-      gone.write(
-        `GET ${at} HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n` +
-          "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n",
-      );
+      const gone = connect(socketPath(url));
+      gone.write(upgradeRequest(at));
       await read;
       await new Promise((resolve) => gone.destroy().once("close", resolve));
       release();
