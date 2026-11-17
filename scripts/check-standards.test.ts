@@ -1944,6 +1944,16 @@ describe("the signal chokepoints", () => {
     ]);
   });
 
+  it("asks for a start's unread options to be written in the call, not sent elsewhere", () => {
+    expect(failures({ "scripts/a.ts": "execFileSync(cmd, args, OPTS);\nchild.kill();" })).toEqual([
+      "scripts/a.ts:1: options of execFileSync not written inline, so the check can't tell " +
+        "whether they set a timeout, killSignal or signal, which Node enforces with a kill; " +
+        "write the args as an array and the options as an object literal in the call, " +
+        "`[...args]` and `{}` included (docs/standards/testing.md).",
+      expect.stringMatching(/^scripts\/a\.ts:2: sends a signal directly \(child\.kill\); send it/),
+    ]);
+  });
+
   it("allows them in the chokepoints, and leaves installed packages alone", () => {
     const raw = "kill_process(pid, Signal::KILL); process.kill(pid);";
     expect(signalChokepointFailures([...CHOKEPOINTS, "node_modules/x/a.ts"], () => raw)).toEqual(

@@ -182,36 +182,47 @@ const isFunction = (shape: string) =>
   /^(?:async\s+)?function\b/.test(shape) ||
   /^(?:async\s*)?(?:\(\)\s*(?::[^=?]*)?|[\w$]+\s*)=>/.test(shape);
 
-// An array in an options slot is the args, and undefined or null is no options.
-const NO_OPTIONS = /^(?:\[\]|undefined|null)$/;
+const NOTHING = /^(?:undefined|null)$/;
+// A key in a literal object the scan can't read as a name: a spread, a computed key, or a quoted
+// one, whose quotes are blanked; a getter's, a setter's or a method's included.
+const UNREAD_KEY = /^(?:\.\.\.|(?:(?:get|set|async)\s*)?(?:\*\s*)?["'`[])/;
 
 /**
  * Where in a start's argument `arg` options may be that the scan can't read: all of it, unless it
- * is a literal object, an array, a function, undefined or null; in a literal object, each spread
- * and computed key. Offsets are in `arg.text`.
+ * is a literal object, an array (the args), a function (the callback), undefined or null; in a
+ * literal object, each key it can't read. Offsets are in `arg.text`.
  */
 function unreadOptions(arg: { text: string }): number[] {
   const shape = outline(arg.text);
   if (shape === "{}") {
     return listItems(arg.text)
-      .filter((entry) => entry.text.startsWith("...") || entry.text.startsWith("["))
+      .filter((entry) => UNREAD_KEY.test(entry.text))
       .map((entry) => entry.at);
   }
-  return NO_OPTIONS.test(shape) || isFunction(shape) ? [] : [0];
+  return shape === "[]" || NOTHING.test(shape) || isFunction(shape) ? [] : [0];
 }
 
 /**
  * The arguments of a start Node may read its options from. `exec`'s second; for the others the
- * third, and the second when no third follows it or the third is a callback, since Node takes a
- * second argument that isn't an array as the options.
+ * third, and the second too unless a third follows that may be the options, since Node takes a
+ * second argument that isn't an array as the options, and `execFile(file, options, callback)`
+ * takes undefined or null for the callback. Where a third may be the options, the second is
+ * taken for the args: Node's types allow only an array there, so options in it, as in
+ * `spawn(cmd, OPTS, undefined)`, need a cast past TypeScript.
  */
 function optionSlots(start: string, args: { text: string; at: number }[]) {
   if (start === "exec" || start === "execSync") return args.slice(1, 2);
-  const third = args[2];
-  return third === undefined || isFunction(outline(third.text))
+  const third = args[2] === undefined ? "" : outline(args[2].text);
+  return third === "" || NOTHING.test(third) || isFunction(third)
     ? args.slice(1, 3)
     : args.slice(2, 3);
 }
+
+/** A start's arguments spread from a value, up to its last options slot: any may be the options. */
+const spreadArguments = (start: string, args: { text: string; at: number }[]) =>
+  args
+    .slice(0, start === "exec" || start === "execSync" ? 2 : 3)
+    .filter((arg) => arg.text.startsWith("..."));
 
 /**
  * Each `timeout`, `killSignal` or `signal` key in a child_process start's arguments, and each
@@ -263,15 +274,22 @@ function startOptions(code: string, kept: string) {
     const declared =
       DECLARED_AFTER.test(code.slice(0, call.index)) && /^\s*[{:]/.test(code.slice(close + 1));
     if (declared) return options;
-    const unread = optionSlots(start, listItems(args)).flatMap((arg) =>
-      unreadOptions(arg).map((at) => open + arg.at + at),
-    );
+    const items = listItems(args);
+    const spread = spreadArguments(start, items);
+    // Past a spread no argument's slot is known, so the spread alone stands for the call.
+    const unread =
+      spread.length > 0
+        ? spread.map((arg) => open + arg.at)
+        : optionSlots(start, items).flatMap((arg) =>
+            unreadOptions(arg).map((at) => open + arg.at + at),
+          );
     return [
       ...options,
       ...unread.map((index) => ({
         index,
         line: lineAt(code, index),
         call: `options of ${start} not written inline`,
+        unread: true as const,
       })),
     ];
   });
@@ -912,7 +930,11 @@ function allowedIn(file: string, text: string) {
   });
 }
 
-type Signal = { index: number; line: number; call: string; literal?: boolean };
+/**
+ * A signal found in a file. `unread` marks a start's options the scan can't read, which may set a
+ * kill or not.
+ */
+type Signal = { index: number; line: number; call: string; literal?: boolean; unread?: boolean };
 
 /** Whether one of `allowed` lets `signal` through: a fixture lets only a command line's. */
 const allows = (allowed: ReturnType<typeof allowedIn>, signal: Signal) =>
@@ -923,10 +945,15 @@ const allows = (allowed: ReturnType<typeof allowedIn>, signal: Signal) =>
   );
 
 const asCalls = (signals: Signal[]) =>
-  signals.toSorted((a, b) => a.index - b.index).map(({ line, call }) => ({ line, call }));
+  signals
+    .toSorted((a, b) => a.index - b.index)
+    .map(({ line, call, unread }) => (unread === true ? { line, call, unread } : { line, call }));
 
 /** Each raw signal call in a file, by line, whatever else the file is. */
-export function rawSignalCalls(file: string, text: string): { line: number; call: string }[] {
+export function rawSignalCalls(
+  file: string,
+  text: string,
+): { line: number; call: string; unread?: true }[] {
   const { signals, allowed } = signalsIn(file, text);
   return asCalls(signals.filter((s) => !allows(allowed, s)));
 }

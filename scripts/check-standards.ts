@@ -2425,8 +2425,17 @@ export function signalChokepointFailures(
     const text = read(file);
     const tests = file.endsWith(".rs") ? testLines(text) : new Set<number>();
     out.push(...allowedSignalFailures(file, text));
-    for (const { line, call } of rawSignalCalls(file, text)) {
+    for (const { line, call, unread } of rawSignalCalls(file, text)) {
       if (product && !tests.has(line)) continue;
+      if (unread === true) {
+        out.push(
+          `${file}:${line}: ${call}, so the check can't tell whether they set a timeout, ` +
+            "killSignal or signal, which Node enforces with a kill; write the args as an array " +
+            "and the options as an object literal in the call, `[...args]` and `{}` included " +
+            "(docs/standards/testing.md).",
+        );
+        continue;
+      }
       out.push(
         `${file}:${line}: sends a signal directly (${call}); send it through ` +
           `${chokepointFor(file, tests.has(line))}, which checks its target ` +

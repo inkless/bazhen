@@ -283,13 +283,12 @@ describe("kills Node sends for a process start's options", () => {
 });
 
 const unread = (start: string) => `options of ${start} not written inline`;
+const unreadAt = (line: number, start: string) => ({ line, call: unread(start), unread: true });
 
 describe("a start's options the scan can't read", () => {
   it("finds options passed through a constant, which could hold a timeout", () => {
     const source = ["const OPTS = { timeout: 5_000 };", "execFileSync(cmd, args, OPTS);"];
-    expect(rawSignalCalls("a.ts", source.join("\n"))).toEqual([
-      { line: 2, call: unread("execFileSync") },
-    ]);
+    expect(rawSignalCalls("a.ts", source.join("\n"))).toEqual([unreadAt(2, "execFileSync")]);
   });
 
   it("finds them at the options slot of each start, however the start is named", () => {
@@ -323,6 +322,53 @@ describe("a start's options the scan can't read", () => {
     );
   });
 
+  it("finds a second argument that may be the options, before a callback of undefined or null", () => {
+    expect(calls("a.ts", "execFile(file, opts, undefined);\nexecFile(file, opts, null);")).toEqual([
+      unread("execFile"),
+      unread("execFile"),
+    ]);
+  });
+
+  it("finds arguments spread from a value at or before the options, which may hold them", () => {
+    const source = [
+      "spawn(...a);",
+      "execFile(...callArgs, done);",
+      "execSync(...x);",
+      "spawn(cmd, ...rest);",
+      "execFile(cmd, args, ...rest);",
+      "exec(cmd, ...rest);",
+      "execFile(cmd, [], {}, ...callbacks);",
+      "exec(cmd, {}, ...callbacks);",
+      "spawn(cmd, [...args], {});",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source)).toEqual([
+      unreadAt(1, "spawn"),
+      unreadAt(2, "execFile"),
+      unreadAt(3, "execSync"),
+      unreadAt(4, "spawn"),
+      unreadAt(5, "execFile"),
+      unreadAt(6, "exec"),
+    ]);
+  });
+
+  it("finds a key it can't read as a name: computed or quoted, a getter's or a method's too", () => {
+    const source = [
+      "spawn(cmd, args, {",
+      "  get [K]() { return 1; },",
+      "  async [k]() {},",
+      "  *[k]() {},",
+      "  async *[k]() {},",
+      '  "timeout": 5,',
+      '  get "timeout"() { return 1; },',
+      "  'killSignal': \"SIGKILL\",",
+      "  [`signal`]: s,",
+      '  stdio: "inherit",',
+      "  getStdio: 1,",
+      "});",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([2, 3, 4, 5, 6, 7, 8, 9]);
+  });
+
   it("finds a callback in a variable, which text can't tell from the options", () => {
     expect(calls("a.ts", "execFile(cmd, args, done);")).toEqual([unread("execFile")]);
   });
@@ -352,10 +398,7 @@ describe("a start's options the scan can't read", () => {
       "  [key]: value,",
       "});",
     ].join("\n");
-    expect(rawSignalCalls("a.ts", source)).toEqual([
-      { line: 2, call: unread("spawn") },
-      { line: 4, call: unread("spawn") },
-    ]);
+    expect(rawSignalCalls("a.ts", source)).toEqual([unreadAt(2, "spawn"), unreadAt(4, "spawn")]);
   });
 
   it("reads literals, and a spread inside an option's own value, and finds only the rest", () => {
@@ -363,8 +406,8 @@ describe("a start's options the scan can't read", () => {
       'spawn(cmd, args, { env: { ...process.env, A: "1" }, stdio: ["pipe", log, log] });',
       "spawn(cmd, [...args, file]);",
       'spawn("sh", ["-c", line], {});',
-      "spawnSync(cmd, args, undefined);",
-      "spawnSync(cmd, args, null);",
+      "spawnSync(cmd, [], undefined);",
+      "spawnSync(cmd, [], null);",
       "execFile(cmd, [], { env }, done);",
       'execFile("ps", ["-A"], (error, stdout) => done(stdout));',
       'execFile("ps", ["-A"], function (error, stdout) {});',
@@ -377,7 +420,7 @@ describe("a start's options the scan can't read", () => {
       "server.run(args, opts);",
       "spawn(cmd, args, opts);",
     ].join("\n");
-    expect(rawSignalCalls("a.ts", source)).toEqual([{ line: 16, call: unread("spawn") }]);
+    expect(rawSignalCalls("a.ts", source)).toEqual([unreadAt(16, "spawn")]);
   });
 
   it("skips a declaration named for a start, whose parameters are no options, not a call", () => {
@@ -413,7 +456,7 @@ describe("a start's options the scan can't read", () => {
     ].join("\n");
     expect(rawSignalCalls("a.ts", source)).toEqual([
       { line: 21, call: "timeout option of execFile" },
-      { line: 28, call: unread("execFileSync") },
+      unreadAt(28, "execFileSync"),
     ]);
   });
 
@@ -425,7 +468,7 @@ describe("a start's options the scan can't read", () => {
       "  timeout: INSTALL_TIMEOUT_MS,",
       "});",
     ].join("\n");
-    expect(rawSignalCalls(base, call)).toEqual([{ line: 2, call: unread("spawnSync") }]);
+    expect(rawSignalCalls(base, call)).toEqual([unreadAt(2, "spawnSync")]);
   });
 });
 
