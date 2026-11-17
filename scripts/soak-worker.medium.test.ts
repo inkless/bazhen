@@ -6,9 +6,10 @@
 
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { markersIn, PROBE } from "./soak-worker.ts";
@@ -45,6 +46,10 @@ function recorded(line: string): Recorded {
   };
 }
 
+/** A worker's records so far, from whole lines only: the last may still be being written. */
+const recordsIn = (out: string) =>
+  existsSync(out) ? readFileSync(out, "utf8").split("\n").slice(0, -1).map(recorded) : [];
+
 /** Each probe's time, a probe never answered as Infinity, which fails any bound on time. */
 const probeTimes = (ran: Ran) =>
   ran.events.filter((e) => e.kind === "probe").map((e) => e.ms ?? Number.POSITIVE_INFINITY);
@@ -52,7 +57,7 @@ const probeTimes = (ran: Ran) =>
 /** The last marker the worker printed; NaN, which no bound holds, for none. */
 const lastMarker = (ran: Ran) => markersIn(ran.output, "w").at(-1) ?? Number.NaN;
 /** The marker counts the worker recorded as written, in order. */
-const writtenOf = (ran: Ran) =>
+const writtenOf = (ran: Pick<Ran, "events">) =>
   ran.events.filter((e) => e.kind === "marker").map((e) => e.n ?? Number.NaN);
 
 /**
@@ -62,25 +67,35 @@ const writtenOf = (ran: Ran) =>
 type Answer = { readonly afterMs: number; readonly reply?: string } | "never";
 const AT_ONCE: Answer = { afterMs: 0 };
 
+function startWorker([mode = "idle", ...options]: readonly string[]) {
+  const name = `w${Math.random().toString(36).slice(2, 8)}`;
+  const out = join(dir, `${name}.jsonl`);
+  const child = spawn(process.execPath, [WORKER, mode, name, out, ...options], {
+    stdio: ["pipe", "pipe", "inherit"],
+  });
+  child.stdout.setEncoding("utf8");
+  const ran = (output: string, code: number | null): Ran => ({
+    output: output.replaceAll(name, "w"),
+    events: recordsIn(out),
+    code,
+  });
+  return { child, out, ran };
+}
+
 /**
  * Runs a worker until it has asked `probes` probes, answering each as `answer` says, typing
  * `typed` once it starts, then closes its input and waits for it to exit and its output to be
  * read to the end.
  */
 async function runWorker(
-  [mode = "idle", ...options]: readonly string[],
+  args: readonly string[],
   { probes, answer, typed = "" }: { probes: number; answer: Answer; typed?: string },
 ): Promise<Ran> {
-  const name = `w${Math.random().toString(36).slice(2, 8)}`;
-  const out = join(dir, `${name}.jsonl`);
-  const child = spawn(process.execPath, [WORKER, mode, name, out, ...options], {
-    stdio: ["pipe", "pipe", "inherit"],
-  });
+  const { child, ran } = startWorker(args);
   let output = "";
   let asked = 0;
   const askedAll = Promise.withResolvers<void>();
   const reply = (text: string) => child.stdin.writable && child.stdin.write(text);
-  child.stdout.setEncoding("utf8");
   child.stdout.on("data", (chunk: string) => {
     output += chunk;
     const now = output.split(PROBE).length - 1;
@@ -100,12 +115,29 @@ async function runWorker(
     child.stdin.end();
   }
   const [code] = await exited;
-  const events = readFileSync(out, "utf8").trim().split("\n").map(recorded);
-  return {
-    output: output.replaceAll(name, "w"),
-    events,
-    code: typeof code === "number" ? code : null,
+  return ran(output, typeof code === "number" ? code : null);
+}
+
+/**
+ * Runs a worker whose output nobody reads, so the pipe fills and its writes stall, until its
+ * recorded count has stopped moving; then closes its input and reads its output only once it has
+ * exited, so it ends with output still waiting to be written.
+ */
+async function runStalled(args: readonly string[]): Promise<Ran> {
+  const { child, out, ran } = startWorker(args);
+  const stalled = () => {
+    const written = writtenOf({ events: recordsIn(out) }).slice(-3);
+    return written.length === 3 && written.every((n) => n === written[0]);
   };
+  while (!stalled()) await sleep(20);
+  const exited = once(child, "exit");
+  const closed = once(child, "close");
+  child.stdin.end();
+  const [code] = await exited;
+  let output = "";
+  child.stdout.on("data", (chunk: string) => (output += chunk));
+  await closed;
+  return ran(output, typeof code === "number" ? code : null);
 }
 
 /** Whole-millisecond clocks read a timer of n ms as a little under n. */
@@ -138,6 +170,12 @@ describe("soak worker", () => {
     expect(written).toEqual(written.toSorted((a, b) => a - b));
     expect(written[0]).toBeGreaterThan(0);
     expect(written.at(-1)).toBeLessThanOrEqual(lastMarker(ran));
+  });
+
+  it("records no marker as written that its output doesn't hold, even ending with output stalled", async () => {
+    const ran = await runStalled(["flood", ...FAST, "--flood-on", "100000"]);
+    expect(writtenOf(ran).at(-1)).toBeGreaterThan(0);
+    expect(writtenOf(ran).at(-1)).toBeLessThanOrEqual(lastMarker(ran));
   });
 
   it("records a probe never answered as null", async () => {
