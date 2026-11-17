@@ -222,13 +222,21 @@ scores are not a gate, because their cost and equivalent mutants make the number
 The holder's whole crate is swept by `pnpm test:real mutants --group <signal|lifecycle|rest>
 [--shard k/n]` (`scripts/holder-mutants.ts`), a tool for finding untested code, not a check. The
 groups go most valuable first: code that signals, then binding the socket and the server's close
-and drop paths, then the rest, each about one container run. Every mutant cargo-mutants' Rust
-tests miss is judged again by `pnpm test:holder`, so one only the black-box suite catches isn't
-counted missed. A survivor in signal or lifecycle code gets a test that kills it, or a note saying
-why it changes nothing. The script refuses to start before it lists anything anywhere but a
-sandbox, since a mutant of the holder can signal any pid it computes, and refuses a run whose
-groups don't partition the crate's mutants. CI's `Holder mutants` workflow runs a group by hand,
-never on a push.
+and drop paths, then the rest. A fourth group, `macos`, holds the files only macOS compiles; the
+script refuses it elsewhere, since every mutant of code that isn't compiled would read as missed.
+Groups go by file, so a `#[cfg(target_os = "macos")]` item in a file Linux also compiles stays in
+that file's group and reads as missed on Linux: such a survivor is classed by reading it against
+the tests CI's `rust (macos)` job runs.
+Every mutant cargo-mutants' Rust tests miss is judged again by `pnpm test:holder`, so one only the
+black-box suite catches isn't counted missed. A survivor gets a test that kills it, or a note
+saying why it changes nothing. `--only <regex>` narrows a group to the mutants whose names it
+matches, to see new tests kill them: each one caught is printed with the tests that failed on it
+and where they panicked, what the tests' `Control:` trailers name. It refuses a narrowed run that
+would list a mutant it doesn't name, as cargo-mutants does a struct-field deletion whatever its
+`--re` says. The script refuses to start
+before it lists anything anywhere but a sandbox, since a mutant of the holder can signal any pid
+it computes, and refuses a run whose groups don't partition the crate's mutants. CI's
+`Holder mutants` workflow runs a group by hand, never on a push.
 
 The chaos suite, `tests/holder/chaos.test.ts`, deals holders the faults of a daemon's machine
 through a stand-in daemon, a process of its own running `HolderRuntime`

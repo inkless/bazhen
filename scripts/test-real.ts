@@ -1,10 +1,10 @@
-// `pnpm test:real [suite…] [--base <ref>] [--group <g> [--shard k/n]]`: the real-tmux suites, the
-// holder's mutants by group (scripts/holder-mutants.ts), and the soak's short runs
-// (scripts/soak.ts), in a container built from this worktree (docs/standards/testing.md). The
-// build context is a fresh repository holding HEAD and falsify's base, overlaid with the
-// worktree's uncommitted files, so falsify judges commits and the other suites test what is on
-// disk. Each suite gets a container of its own, with nothing of
-// the host's: no mount, no socket, no network.
+// `pnpm test:real [suite…] [--base <ref>] [--group <g> [--shard k/n] [--only <regex>]]`: the
+// real-tmux suites, the holder's mutants by group (scripts/holder-mutants.ts), and the soak's
+// short runs (scripts/soak.ts), in a container built from this worktree
+// (docs/standards/testing.md). The build context is a fresh repository holding HEAD and falsify's
+// base, overlaid with the worktree's uncommitted files, so falsify judges commits and the other
+// suites test what is on disk. Each suite gets a container of its own, with nothing of the host's:
+// no mount, no socket, no network.
 //
 // A run removes its containers, image and context on every exit it can observe, a signal
 // included: docker runs asynchronously in a process group of its own, and a signal is forwarded
@@ -50,15 +50,22 @@ const BASE_REF = "refs/remotes/origin/main";
 const isSuite = (name: string): name is Suite => Object.hasOwn(SUITES, name);
 const USAGE =
   `usage: pnpm test:real [${Object.keys(SUITES).join("|")}]… [--base <ref>] ` +
-  "[--group <g> [--shard k/n]]";
+  "[--group <g> [--shard k/n] [--only <regex>]]";
 
-/** The groups of the holder's mutants, as scripts/holder-mutants.ts names them. */
+/**
+ * The groups of the holder's mutants, as scripts/holder-mutants.ts names them, whose code the
+ * container's Linux compiles.
+ */
 export const MUTANT_GROUPS: readonly string[] = ["signal", "lifecycle", "rest"];
 
-/** Which of the holder's mutants the `mutants` suite runs: a group, and a shard of it. */
+/**
+ * Which of the holder's mutants the `mutants` suite runs: a group, a shard of it, and of those
+ * only the ones a regex names.
+ */
 export interface MutantsPart {
   readonly group: string;
   readonly shard?: string;
+  readonly only?: string;
 }
 
 /**
@@ -69,18 +76,28 @@ export function suiteCommand(suite: Suite, mutants?: MutantsPart): string[] {
   if (suite === "mutants") {
     if (mutants === undefined) throw new Error(`the mutants suite needs --group; ${USAGE}`);
     const shard = mutants.shard === undefined ? [] : ["--shard", mutants.shard];
-    return ["pnpm", SUITES.mutants, "--group", mutants.group, ...shard];
+    const only = mutants.only === undefined ? [] : ["--only", mutants.only];
+    return ["pnpm", SUITES.mutants, "--group", mutants.group, ...shard, ...only];
   }
   if (suite !== "falsify") return ["pnpm", SUITES[suite]];
   const base = `--base ${BASE_REF}`;
   return ["sh", "-c", `pnpm ${SUITES.falsify} ${base} && pnpm test:falsify:base ${base}`];
 }
 
-const OPTIONS = ["--base", "--group", "--shard"] as const;
+/** Why `text` isn't a JavaScript regex, as holder-mutants reads `--only`, or nothing. */
+function regexError(text: string): string | undefined {
+  try {
+    return new RegExp(text).source === "(?:)" ? "it is empty" : undefined;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
+const OPTIONS = ["--base", "--group", "--shard", "--only"] as const;
 
 /**
  * The suites named on the command line, in order, or the default set; falsify's base; and, for
- * the mutants suite, its group and shard, which it needs and nothing else takes.
+ * the mutants suite, its group, shard and narrowing, which it needs and nothing else takes.
  */
 export function parseArgs(args: readonly string[]): {
   suites: Suite[];
@@ -105,19 +122,32 @@ export function parseArgs(args: readonly string[]): {
   const base = values.get("--base") ?? DEFAULT_BASE;
   const group = values.get("--group");
   const shard = values.get("--shard");
+  const only = values.get("--only");
   const suites = names.length === 0 ? DEFAULT_SUITES : [...new Set(names.filter(isSuite))];
   if (
     (group !== undefined) !== suites.includes("mutants") ||
-    (shard !== undefined && group === undefined)
+    ((shard !== undefined || only !== undefined) && group === undefined)
   ) {
-    throw new Error(`--group and --shard go with the mutants suite, which needs a group; ${USAGE}`);
+    throw new Error(
+      `--group, --shard and --only go with the mutants suite, which needs a group; ${USAGE}`,
+    );
   }
   if (group === undefined) return { suites, base };
   // Refused here, before an image is built for a run that would refuse it.
   if (!MUTANT_GROUPS.includes(group)) {
     throw new Error(`no mutant group ${group}; it is one of ${MUTANT_GROUPS.join(", ")}`);
   }
-  return { suites, base, mutants: { group, ...(shard === undefined ? {} : { shard }) } };
+  const unreadable = only === undefined ? undefined : regexError(only);
+  if (unreadable !== undefined) throw new Error(`--only takes a regex: ${unreadable}`);
+  return {
+    suites,
+    base,
+    mutants: {
+      group,
+      ...(shard === undefined ? {} : { shard }),
+      ...(only === undefined ? {} : { only }),
+    },
+  };
 }
 
 /** The image's build arguments: the repository's own pins, and the Rust tools falsify runs. */

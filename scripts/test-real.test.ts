@@ -59,15 +59,44 @@ describe("pnpm test:real", () => {
     ]);
   });
 
-  it("refuses a mutant group the sweep doesn't have, before building anything", () => {
+  it("passes on --only, which narrows the group to the mutants it names", () => {
+    const only = "^crates/bazhen-holder/src/ring\\.rs:(?:10|12):";
+    expect(parseArgs(["mutants", "--group", "rest", "--only", only])).toEqual({
+      suites: ["mutants"],
+      base: "origin/main",
+      mutants: { group: "rest", only },
+    });
+    expect(suiteCommand("mutants", { group: "rest", only })).toEqual([
+      "pnpm",
+      "test:mutants:holder",
+      "--group",
+      "rest",
+      "--only",
+      only,
+    ]);
+  });
+
+  it("refuses a mutant group the sweep doesn't have, or whose code the container doesn't compile, before building anything", () => {
     expect(() => parseArgs(["mutants", "--group", "everything"])).toThrow("no mutant group");
-    expect(MUTANT_GROUPS).toEqual(Object.keys(GROUPS));
+    expect(GROUPS.macos.platform).toBe("darwin");
+    expect(() => parseArgs(["mutants", "--group", "macos"])).toThrow("no mutant group");
+    expect(MUTANT_GROUPS).toEqual(
+      Object.entries(GROUPS)
+        .filter(([, spec]) => spec.platform === undefined)
+        .map(([name]) => name),
+    );
   });
 
   it("refuses the mutants suite without a group, and a group or shard without the mutants suite", () => {
     expect(() => parseArgs(["mutants"])).toThrow("needs a group");
     expect(() => parseArgs(["holder", "--group", "signal"])).toThrow("needs a group");
     expect(() => parseArgs(["mutants", "--shard", "1/3"])).toThrow("needs a group");
+    expect(() => parseArgs(["mutants", "--only", "ring"])).toThrow("needs a group");
+    expect(() => parseArgs(["holder", "--only", "ring"])).toThrow("needs a group");
+    expect(() => parseArgs(["mutants", "--group", "rest", "--only", "ring("])).toThrow(
+      "--only takes a regex",
+    );
+    expect(() => parseArgs(["mutants", "--group", "rest", "--only", ""])).toThrow("it is empty");
     expect(() => parseArgs(["mutants", "--group"])).toThrow("usage");
   });
 

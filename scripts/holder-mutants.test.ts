@@ -1,14 +1,22 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  type Effects,
   GROUPS,
+  type MutantRun,
+  failures,
   groupFilters,
   groupOf,
   main,
+  narrowed,
+  narrowingFaults,
   nextestSummary,
   parseArgs,
   parseOutcomes,
   partitionFaults,
+  refusalUnderTest,
   report,
+  rustLiteral,
+  selections,
   type Verdict,
 } from "./holder-mutants.ts";
 
@@ -26,6 +34,42 @@ const baseline = (summary = "Success") => ({ scenario: "Baseline", summary });
 /** A listing that holds `names` unfiltered and nothing for any group's filters. */
 const unfilteredOnly = (names: string[]) => (filters: readonly string[]) =>
   filters.length === 0 ? names : [];
+
+/**
+ * Effects for `main` that spawn nothing: a run inside a sandbox on Linux, with `list` as the
+ * listing and a mutate and judge that record their calls.
+ */
+function stubbed(list: Effects["list"], run: Partial<MutantRun> = {}) {
+  const mutate = vi.fn<Effects["mutate"]>(async () => ({
+    outcomes: [],
+    log: () => "",
+    diffFile: (o) => `diff/${o.name}`,
+    ...run,
+  }));
+  const judge = vi.fn<Effects["judge"]>(async () => true);
+  return { sandboxed: () => true, list, platform: "linux" as const, mutate, judge };
+}
+
+/**
+ * A crate of `names` in rest, and a macOS mutant that partitions only into the macos group, so a
+ * main without one stops at its partition check: under falsify, the base's main runs these
+ * tests with the real cargo-mutants.
+ */
+function restCrate(names: string[], more: [string, string[]][] = []) {
+  const mac = at("macos.rs", "replace parent -> Option<Pid> with None");
+  return listingOf(
+    new Map([
+      ["", [mac, ...names]],
+      [groupFilters("macos")[0]!.join(" "), [mac]],
+      [groupFilters("rest")[0]!.join(" "), names],
+      ...more,
+    ]),
+  );
+}
+
+/** A listing that holds, for each selection in `listings`, its names, and nothing for any other. */
+const listingOf = (listings: ReadonlyMap<string, string[]>) => (filters: readonly string[]) =>
+  listings.get(filters.join(" ")) ?? [];
 
 describe("groupOf", () => {
   it("puts every mutant of a file that signals in the signal group", () => {
@@ -49,6 +93,14 @@ describe("groupOf", () => {
 
   it("doesn't take a server function whose name only starts like a lifecycle one", () => {
     expect(groupOf(at("server.rs", "replace Server::turnover with ()"))).toBe("rest");
+  });
+
+  it("puts code compiled only on macOS in a group of its own, out of rest", () => {
+    expect(groupOf(at("macos.rs", "replace parent -> Option<Pid> with None"))).toBe("macos");
+    const [rest] = groupFilters("rest");
+    expect(rest).toEqual(
+      expect.arrayContaining(["--exclude", "crates/bazhen-holder/src/macos.rs"]),
+    );
   });
 });
 
@@ -90,13 +142,23 @@ describe("partitionFaults", () => {
 
   it("finds nothing wrong with listings that partition the mutants as groupOf does", () => {
     expect(
-      partitionFaults(all, { signal: [all[0]!], lifecycle: [all[1]!], rest: [all[2]!] }),
+      partitionFaults(all, {
+        signal: [all[0]!],
+        lifecycle: [all[1]!],
+        rest: [all[2]!],
+        macos: [],
+      }),
     ).toEqual([]);
   });
 
   it("names a mutant in no group, one in two, and one in the wrong group", () => {
     expect(
-      partitionFaults(all, { signal: [all[0]!, all[2]!], lifecycle: [all[0]!], rest: [] }),
+      partitionFaults(all, {
+        signal: [all[0]!, all[2]!],
+        lifecycle: [all[0]!],
+        rest: [],
+        macos: [],
+      }),
     ).toEqual([
       `${all[2]} is listed in signal, not rest`,
       `${all[0]} is in signal and lifecycle`,
@@ -148,6 +210,123 @@ describe("report", () => {
   });
 });
 
+describe("report, of a run narrowed by --only", () => {
+  it("lists each mutant caught with what failed on it", () => {
+    const name = at("ring.rs", "replace Ring::end -> u64 with 0");
+    const outcomes = parseOutcomes({ outcomes: [outcome("CaughtMutant", name)] });
+    const caught = new Map([[name, ["bazhen-holder ring::tests::wraps", "ring.rs:9:5: boom"]]]);
+    expect(report("rest", outcomes, new Map(), new Map(), caught)).toEqual([
+      "holder-mutants: rest: 1 mutants, 6.5 s of build and Rust tests each",
+      `caught\t${name}`,
+      "\tbazhen-holder ring::tests::wraps",
+      "\tring.rs:9:5: boom",
+      "holder-mutants: rest: caught 1",
+    ]);
+  });
+
+  it("says so when it finds no failing test for a mutant caught, rather than name none", () => {
+    const name = at("ring.rs", "replace Ring::end -> u64 with 0");
+    const outcomes = parseOutcomes({ outcomes: [outcome("CaughtMutant", name)] });
+    expect(report("rest", outcomes, new Map(), new Map(), new Map([[name, []]]))).toContain(
+      "\t(no failing test found)",
+    );
+  });
+});
+
+describe("failures", () => {
+  it("names each test nextest says failed once, then where each panicked and why", () => {
+    const log = [
+      "        PASS [   0.010s] (  1/230) bazhen-holder ring::tests::keeps",
+      "        FAIL [   0.004s] (  2/230) bazhen-holder ring::tests::wraps",
+      "──── STDERR:             bazhen-holder ring::tests::wraps",
+      "",
+      "thread 'ring::tests::wraps' panicked at crates/bazhen-holder/src/ring.rs:120:9:",
+      "assertion `left == right` failed",
+      "  left: 1",
+      "     TIMEOUT [  60.001s] bazhen-holder::binary socket::rebinds",
+      "     Summary [  61.000s] 230 tests run: 228 passed, 1 failed, 1 timed out, 0 skipped",
+      "        FAIL [   0.004s] bazhen-holder ring::tests::wraps",
+    ].join("\n");
+    expect(failures(log)).toEqual([
+      "bazhen-holder ring::tests::wraps",
+      "bazhen-holder::binary socket::rebinds",
+      "crates/bazhen-holder/src/ring.rs:120:9: assertion `left == right` failed",
+    ]);
+  });
+
+  it("reads a log nextest wrote in colour", () => {
+    const esc = String.fromCharCode(0x1b);
+    const log = `        ${esc}[31;1mFAIL${esc}[0m [   0.004s] ${esc}[35;1mbazhen-holder${esc}[0m ring::tests::wraps\n`;
+    expect(failures(log)).toEqual(["bazhen-holder ring::tests::wraps"]);
+  });
+
+  it("finds nothing in a log where every test passed", () => {
+    expect(failures("        PASS [   0.010s] bazhen-holder ring::tests::keeps\n")).toEqual([]);
+  });
+});
+
+describe("narrowing a group to some of its mutants", () => {
+  const names = [
+    at("process.rs", "replace procargs2_split -> Option<(Vec<&[u8]>, &[u8])> with None"),
+    at("ring.rs", "replace += with -= in Ring::push"),
+    at("start.rs", "delete ! in run"),
+  ];
+
+  it("matches each name whole and nothing else, whatever regex syntax it holds", () => {
+    const pattern = new RegExp(`^(?:${names.map(rustLiteral).join("|")})$`);
+    expect(names.map((n) => pattern.test(n))).toEqual([true, true, true]);
+    expect(pattern.test(`${names[1]} `)).toBe(false);
+    expect(pattern.test(names[1]!.replace("+=", "x="))).toBe(false);
+  });
+
+  it("replaces a selection's --re, which would widen it, and its files by the names' own, keeping its exclusions", () => {
+    expect(
+      narrowed(
+        ["--file", "a.rs", "--exclude", "b.rs", "--re", "^old", "--exclude-re", "skip"],
+        [names[2]!, names[1]!, at("start.rs", "replace run with ()")],
+      ),
+    ).toEqual([
+      "--exclude",
+      "b.rs",
+      "--exclude-re",
+      "skip",
+      "--file",
+      "crates/bazhen-holder/src/start.rs",
+      "--file",
+      "crates/bazhen-holder/src/ring.rs",
+      "--re",
+      `^(?:${[names[2]!, names[1]!, at("start.rs", "replace run with ()")].map(rustLiteral).join("|")})$`,
+    ]);
+  });
+
+  it("finds a mutant listed beyond the names, as a struct-field deletion is, and a name not listed", () => {
+    const deletion = at("ring.rs", "delete field end from struct Ring expression in Ring::new");
+    expect(narrowingFaults(names, names)).toEqual([]);
+    expect(narrowingFaults(names.slice(1), [...names.slice(0, 2), deletion])).toEqual([
+      `${names[0]} is listed though --only doesn't name it: cargo-mutants lists a struct-field deletion whatever --re says, so name it in --only too`,
+      `${deletion} is listed though --only doesn't name it: cargo-mutants lists a struct-field deletion whatever --re says, so name it in --only too`,
+      `${names[2]} is named but not listed`,
+    ]);
+  });
+
+  it("narrows each of a group's selections to what it lists of the names, and drops a selection with none", () => {
+    const flush = at("conn.rs", "replace Connection::flush with ()");
+    const [files = "", inServer = ""] = groupFilters("lifecycle").map((f) => f.join(" "));
+    const listings = new Map([
+      [files, [at("socket.rs", "replace Socket::rebind with ()")]],
+      [inServer, [flush]],
+    ]);
+    const [byName, ...others] = selections("lifecycle", /Connection::flush/, listingOf(listings));
+    expect(others).toEqual([]);
+    expect(byName).toEqual(narrowed(groupFilters("lifecycle")[1]!, [flush]));
+    expect(byName?.slice(0, 2)).toEqual(["--file", "crates/bazhen-holder/src/conn.rs"]);
+  });
+
+  it("leaves the group's selections as they are without --only", () => {
+    expect(selections("rest", undefined, () => [])).toEqual(groupFilters("rest"));
+  });
+});
+
 describe("nextestSummary", () => {
   it("finds the last line where nextest says how many tests it ran and skipped", () => {
     const log = [
@@ -177,24 +356,119 @@ describe("parseArgs", () => {
     expect(() => parseArgs(["--group", "everything"])).toThrow("usage");
     expect(() => parseArgs(["--group", "rest", "--shard", "half"])).toThrow("k/n");
   });
+
+  it("takes --only as a regex of mutant names, and refuses it with none", () => {
+    expect(parseArgs(["--group", "rest", "--only", "ring\\.rs:1[0-9]:"]).only).toEqual(
+      /ring\.rs:1[0-9]:/,
+    );
+    expect(() => parseArgs(["--group", "rest", "--only"])).toThrow("--only takes");
+  });
 });
 
 describe("main", () => {
   it("refuses off a sandbox before it lists or builds anything", async () => {
-    const list = vi.fn<(filters: readonly string[]) => string[]>(() => []);
+    const effects = { ...stubbed(vi.fn(() => [])), sandboxed: () => false };
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    expect(await main(["--group", "signal"], { sandboxed: () => false, list })).toBe(1);
-    expect(list).not.toHaveBeenCalled();
+    expect(await main(["--group", "signal"], effects)).toBe(1);
+    expect(effects.list).not.toHaveBeenCalled();
+    expect(effects.mutate).not.toHaveBeenCalled();
     expect(error).toHaveBeenCalledWith(expect.stringContaining("refusing to run here"));
     error.mockRestore();
   });
 
   it("stops before mutating when the groups don't partition what cargo-mutants lists", async () => {
     const stray = at("ring.rs", "replace Ring::end -> u64 with 0");
-    const list = vi.fn<(filters: readonly string[]) => string[]>(unfilteredOnly([stray]));
+    const effects = stubbed(unfilteredOnly([stray]));
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    expect(await main(["--group", "signal"], { sandboxed: () => true, list })).toBe(1);
+    expect(await main(["--group", "signal"], effects)).toBe(1);
+    expect(effects.mutate).not.toHaveBeenCalled();
     expect(error).toHaveBeenCalledWith(expect.stringContaining(`${stray} is in no group`));
     error.mockRestore();
+  });
+
+  it("refuses the macOS group anywhere its code isn't compiled, before it lists anything", async () => {
+    const effects = stubbed(vi.fn(() => []));
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await main(["--group", "macos"], effects)).toBe(1);
+    expect(effects.list).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("compiled only on darwin"));
+    error.mockRestore();
+  });
+
+  it("stops before mutating when --only names no mutant of the group", async () => {
+    const effects = stubbed(restCrate([at("ring.rs", "replace Ring::end -> u64 with 0")]));
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await main(["--group", "rest", "--only", "nothing"], effects)).toBe(1);
+    expect(effects.mutate).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("names no mutant of rest"));
+    error.mockRestore();
+  });
+
+  it("stops before mutating when a narrowed selection lists a mutant --only doesn't name", async () => {
+    const named = at("ring.rs", "replace Ring::end -> u64 with 0");
+    const deletion = at("ring.rs", "delete field end from struct Ring expression in Ring::new");
+    const narrowedListing = narrowed(groupFilters("rest")[0]!, [named]).join(" ");
+    const effects = stubbed(restCrate([named], [[narrowedListing, [named, deletion]]]));
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await main(["--group", "rest", "--only", "Ring::end"], effects)).toBe(1);
+    expect(effects.mutate).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining(`${deletion} is listed though --only doesn't name it`),
+    );
+    error.mockRestore();
+  });
+
+  it("mutates through the runner it is given, and judges each mutant missed by the holder suite", async () => {
+    const caughtName = at("ring.rs", "replace Ring::end -> u64 with 0");
+    const missedName = at("ring.rs", "replace Ring::start -> u64 with 0");
+    const summary = "Summary [   1.000s] 2 tests run: 2 passed, 0 skipped";
+    const effects = stubbed(restCrate([caughtName, missedName]), {
+      outcomes: parseOutcomes({
+        outcomes: [
+          baseline(),
+          outcome("CaughtMutant", caughtName),
+          outcome("MissedMutant", missedName),
+        ],
+      }),
+      log: () => summary,
+    });
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    expect(await main(["--group", "rest", "--shard", "1/9"], effects)).toBe(0);
+    expect(effects.mutate.mock.calls).toEqual([[groupFilters("rest")[0], "1/9", 2]]);
+    expect(effects.judge.mock.calls).toEqual([
+      ["crates/bazhen-holder/src/ring.rs", `diff/${missedName}`],
+    ]);
+    expect(log.mock.calls.map(([line]) => line)).toEqual([
+      "holder-mutants: rest: 2 mutants, 6.5 s of build and Rust tests each",
+      `suite\t${missedName}\t${summary}`,
+      "holder-mutants: rest: caught 1, suite 1",
+    ]);
+    log.mockRestore();
+  });
+
+  it("narrowed by --only, mutates just the names and prints what failed on each caught", async () => {
+    const named = at("ring.rs", "replace Ring::end -> u64 with 0");
+    const other = at("ring.rs", "replace Ring::start -> u64 with 0");
+    const narrowedFilters = narrowed(groupFilters("rest")[0]!, [named]);
+    const effects = stubbed(restCrate([named, other], [[narrowedFilters.join(" "), [named]]]), {
+      outcomes: parseOutcomes({ outcomes: [outcome("CaughtMutant", named)] }),
+      log: () => "        FAIL [   0.004s] bazhen-holder ring::tests::ends\n",
+    });
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    expect(await main(["--group", "rest", "--only", "Ring::end"], effects)).toBe(0);
+    expect(effects.mutate.mock.calls).toEqual([[narrowedFilters, undefined, 2]]);
+    expect(log.mock.calls.map(([line]) => line)).toContain("\tbazhen-holder ring::tests::ends");
+    log.mockRestore();
+  });
+});
+
+describe("refusalUnderTest", () => {
+  it("refuses a real run of mutants inside a test run, and allows one outside", () => {
+    expect(refusalUnderTest({ VITEST: "true" })).toContain("under a test");
+    expect(refusalUnderTest({})).toBeUndefined();
+  });
+
+  it("is in force in this very test run", () => {
+    expect(refusalUnderTest(process.env)).toContain("under a test");
   });
 });
