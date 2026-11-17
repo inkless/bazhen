@@ -41,6 +41,28 @@ export class UnknownEntity extends Error {
   }
 }
 
+/**
+ * An agent's binding to a Codex thread another agent holds: one that is live, or can be started
+ * again on that thread. Two agents on one thread would each take the other's mail and approvals.
+ */
+export class ThreadHeld extends Error {
+  readonly threadId: string;
+  readonly holder: string;
+
+  constructor(agentId: string, threadId: string, holder: string) {
+    super(`agent ${agentId} can't be bound to Codex thread ${threadId}: agent ${holder} holds it`);
+    this.threadId = threadId;
+    this.holder = holder;
+  }
+}
+
+/**
+ * The Codex agents that hold the thread their reference names: every one not closed and not
+ * failed to launch, since an exited or lost agent is started again on the thread it is bound to.
+ */
+export const HELD_CODEX = `state NOT IN ('closed', 'failed')
+  AND json_extract(external_ref, '$.kind') = 'codex-thread'`;
+
 /** An event as written, with its id and the installation that wrote it. */
 export interface Recorded {
   readonly id: number;
@@ -642,6 +664,15 @@ function closeAttention(db: Statements, e: Recorded, reason: AttentionCloseReaso
 function boundTo(db: Statements, agentId: string, externalRef: ExternalRef | null): Columns {
   const row = db.prepare("SELECT external_ref FROM agent_sessions WHERE id = ?").get(agentId);
   const moved = sessionIdOf(row?.external_ref ?? null) !== (externalRef?.id ?? null);
+  if (moved && externalRef?.kind === "codex-thread") {
+    const holder = db
+      .prepare(
+        `SELECT id FROM agent_sessions
+         WHERE ${HELD_CODEX} AND json_extract(external_ref, '$.id') = ? AND id != ? LIMIT 1`,
+      )
+      .get(externalRef.id, agentId)?.id;
+    if (holder !== undefined) throw new ThreadHeld(agentId, externalRef.id, String(holder));
+  }
   return {
     external_ref: externalRef === null ? null : JSON.stringify(externalRef),
     ...(moved && { transcript: null }),

@@ -56,7 +56,9 @@ import {
   type ShellCommand,
 } from "@bazhen/protocol";
 import { MIGRATIONS, NUMBERED_MIGRATIONS, type Migration } from "./migrations.ts";
-import { project, type Recorded, type Statements } from "./projections.ts";
+import { HELD_CODEX, project, ThreadHeld, type Recorded, type Statements } from "./projections.ts";
+
+export { ThreadHeld };
 
 export interface NewEvent<T extends EventType> {
   readonly type: T;
@@ -1081,6 +1083,17 @@ export class Store {
   /** Every live Codex agent bound to a thread. */
   codexAgentsOn(threadId: string): string[] {
     const sql = `SELECT id FROM agent_sessions WHERE ${LIVE_CODEX} AND ${THREAD} = ?`;
+    return this.prepare(sql)
+      .all(threadId)
+      .map((r) => String(r.id));
+  }
+
+  /**
+   * Every Codex agent that holds a thread: live, or one that can be started again on it. No other
+   * agent can be bound to it while one does.
+   */
+  codexThreadHolders(threadId: string): string[] {
+    const sql = `SELECT id FROM agent_sessions WHERE ${HELD_CODEX} AND ${THREAD} = ?`;
     return this.prepare(sql)
       .all(threadId)
       .map((r) => String(r.id));

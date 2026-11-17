@@ -1,6 +1,6 @@
 import type { RuntimeRef, TerminalId } from "@bazhen/core";
 import { matching, readThreadList, readThreadStarted, titlePrefix } from "@bazhen/harness-codex";
-import type { Store } from "../store/store.ts";
+import { ThreadHeld, type Store } from "../store/store.ts";
 import type { ChannelListener } from "./channel.ts";
 
 export interface CodexThreadsOptions {
@@ -40,15 +40,23 @@ export const paneTitleCommand = (client: string, socket: string) =>
 
 /**
  * A terminal waiting to move its agent to the thread its title names, by the prefix it names: for
- * which agent, since when, and the thread once one matches it.
+ * which agent, since when, and the thread once one matches it. A terminal whose title couldn't be
+ * read waits too, with no prefix if it named none before: its TUI may show any thread.
  */
 interface Moving {
   readonly agentId: string;
-  readonly prefix: string;
+  readonly prefix: string | null;
   threadId?: string;
   readonly since: number;
   waitMs: number;
   timer?: ReturnType<typeof setTimeout>;
+  /**
+   * Its last follow failed, as a read of its title does, so the thread its TUI shows isn't known.
+   * It is never given up on: that would let the mail go to a thread the TUI may have left.
+   */
+  unread?: boolean;
+  /** Its agent was said, once, to keep its mail held past the give-up time. */
+  told?: boolean;
 }
 
 /** How many new thread ids are kept to resolve titles against; the oldest go first. */
@@ -77,9 +85,10 @@ export const UNTRACKED = "thread switches are not being tracked";
  * down. So a title that matches nothing, or names a thread that can't be resumed yet, is a move
  * that waits: tried again with backoff for as long as the title still names it, sooner when a
  * thread it names is announced, and given up after a while. The agent's new mail is held
- * meanwhile, since it would otherwise go to a thread the user no longer sees. A thread another
- * running agent is bound to is never moved onto. Mail and approvals follow the binding without
- * more work.
+ * meanwhile, since it would otherwise go to a thread the user no longer sees. A title that can't
+ * be read holds it too, and is never given up on, since the TUI may show any thread. A thread
+ * another agent holds, live or to be started again on it, is never moved onto. Mail and
+ * approvals follow the binding without more work.
  */
 export class CodexThreads {
   private readonly opts: CodexThreadsOptions;
@@ -119,7 +128,7 @@ export class CodexThreads {
         this.seen.delete(old);
       }
       for (const [terminal, m] of this.moving) {
-        if (id.startsWith(m.prefix)) void this.titleChanged(terminal);
+        if (m.prefix !== null && id.startsWith(m.prefix)) void this.titleChanged(terminal);
       }
       for (const [terminal, prefix] of this.gaveUp) {
         if (id.startsWith(prefix)) void this.titleChanged(terminal);
@@ -191,9 +200,7 @@ export class CodexThreads {
       })
       .catch((err: unknown) => {
         this.log(`codex: following terminal ${terminal} failed: ${String(err)}`);
-        // A move it was waiting on is tried again, or given up, rather than left holding mail.
-        const m = this.moving.get(terminal);
-        if (m !== undefined) this.later(terminal, m);
+        this.unsure(terminal);
       });
     this.pending.set(terminal, followed);
     this.queue = followed;
@@ -210,6 +217,8 @@ export class CodexThreads {
     // Read now, not when the change was told: a respawn since then has cleared it.
     const title = await runtime.title(agent.runtime);
     if (this.replaced(terminal, agent.generation)) return this.settle(terminal);
+    const unread = this.moving.get(terminal);
+    if (unread !== undefined) unread.unread = false;
     const gaveUpOn = this.gaveUp.get(terminal);
     this.gaveUp.delete(terminal);
     // The TUI empties its title as it exits, which names no thread to follow.
@@ -246,8 +255,9 @@ export class CodexThreads {
         this.log(`codex: no thread matches ${prefix} yet; agent ${agent.agentId} waits to move`);
       return this.later(terminal, this.move(terminal, agent.agentId, prefix));
     }
-    // One thread, one agent: a /resume of another agent's thread is not a move.
-    if (store.codexAgentsOn(threadId).some((id) => id !== agent.agentId)) {
+    // One thread, one agent: a /resume of another agent's thread is not a move, though that agent
+    // is lost or exited, since it is started again on it.
+    if (store.codexThreadHolders(threadId).some((id) => id !== agent.agentId)) {
       this.settle(terminal);
       return this.untracked(agent.agentId, `thread ${threadId} is another agent's`);
     }
@@ -265,14 +275,21 @@ export class CodexThreads {
       now.generation !== agent.generation
     )
       return this.settle(terminal);
-    store.append({
-      type: "agent.external_ref_updated",
-      entityId: agent.agentId,
-      actor: "system",
-      payload: {
-        externalRef: { environmentId: agent.environmentId, kind: "codex-thread", id: threadId },
-      },
-    });
+    try {
+      store.append({
+        type: "agent.external_ref_updated",
+        entityId: agent.agentId,
+        actor: "system",
+        payload: {
+          externalRef: { environmentId: agent.environmentId, kind: "codex-thread", id: threadId },
+        },
+      });
+    } catch (err) {
+      // Another agent was bound to it while it was being resumed.
+      if (!(err instanceof ThreadHeld)) throw err;
+      this.settle(terminal);
+      return this.untracked(agent.agentId, `thread ${threadId} is another agent's`);
+    }
     this.tracked(agent.agentId);
     // Bound to the new thread now, so held mail goes there.
     this.settle(terminal);
@@ -292,7 +309,7 @@ export class CodexThreads {
    * same, so its backoff and give-up time go on; a new one otherwise, with a give-up time of its
    * own, as a title naming one unsaved `/new` after another gets.
    */
-  private move(terminal: TerminalId, agentId: string, prefix: string): Moving {
+  private move(terminal: TerminalId, agentId: string, prefix: string | null): Moving {
     const prior = this.moving.get(terminal);
     if (prior?.agentId === agentId && prior.prefix === prefix) return prior;
     const m: Moving = { agentId, prefix, since: Date.now(), waitMs: this.opts.retryMs ?? 500 };
@@ -333,13 +350,37 @@ export class CodexThreads {
   }
 
   /**
+   * A follow of the terminal failed, so the thread its TUI shows isn't known: its agent's mail is
+   * held, and the terminal followed again, until one reads its title.
+   */
+  private unsure(terminal: TerminalId): void {
+    try {
+      const agentId = this.opts.store.codexAgentIn(terminal)?.agentId;
+      const m =
+        this.moving.get(terminal) ??
+        (agentId === undefined ? undefined : this.move(terminal, agentId, null));
+      if (m === undefined) return;
+      m.unread = true;
+      this.later(terminal, m);
+    } catch (err) {
+      this.log(`codex: terminal ${terminal} could not be followed again: ${String(err)}`);
+    }
+  }
+
+  /**
    * Follows the terminal again after a wait, or, past the give-up time, leaves the agent on its
-   * thread and lets its held mail go there.
+   * thread and lets its held mail go there. A terminal whose title can't be read keeps its mail
+   * held, and says so once.
    */
   private later(terminal: TerminalId, m: Moving): void {
-    if (Date.now() - m.since >= (this.opts.giveUpMs ?? RESUME_GIVE_UP_MS)) {
+    const overdue = Date.now() - m.since >= (this.opts.giveUpMs ?? RESUME_GIVE_UP_MS);
+    if (overdue && m.unread === true && m.told !== true) {
+      m.told = true;
+      this.untracked(m.agentId, "its title can't be read, so its mail is held");
+    }
+    if (overdue && m.unread !== true) {
       this.settle(terminal);
-      this.gaveUp.set(terminal, m.prefix);
+      if (m.prefix !== null) this.gaveUp.set(terminal, m.prefix);
       const why =
         m.threadId === undefined
           ? `no thread matches ${m.prefix}`

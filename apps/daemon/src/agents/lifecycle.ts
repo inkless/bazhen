@@ -9,6 +9,7 @@ import {
   ProcessState,
   StaleIncarnation,
   terminal,
+  type AgentSessionId,
   type EnvironmentAdapter,
   type RuntimeRef,
   type Size,
@@ -19,6 +20,7 @@ import {
   type EventPayload,
   type EventType,
   type ExitStatus,
+  type ExternalRef,
   type RelaunchAgentRequest,
   type RespawnAgentRequest,
   type SignalAgentRequest,
@@ -61,6 +63,24 @@ export interface StartAgainDeps {
   /** Each start gets a new token, which ends the last one's; a close removes the file. */
   readonly tokens: AgentTokenIssuer;
   readonly prompts: Prompts;
+}
+
+/**
+ * The Codex thread an agent would resume is held by another agent too, as a store from before
+ * one agent held a thread may have it: a start would put both on it.
+ */
+export class ThreadTaken extends NotResumable {
+  constructor(agentId: AgentSessionId, threadId: string, others: readonly string[]) {
+    super(agentId);
+    this.message = `agent ${agentId} can't resume Codex thread ${threadId}: ${others.join(", ")} is on it too`;
+  }
+}
+
+/** Refuses a start of `agentId` on `externalRef` if that is a Codex thread another agent holds. */
+function refuseTaken(store: Store, agentId: AgentSessionId, externalRef: ExternalRef | null) {
+  if (externalRef?.kind !== "codex-thread") return;
+  const others = store.codexThreadHolders(externalRef.id).filter((id) => id !== agentId);
+  if (others.length > 0) throw new ThreadTaken(agentId, externalRef.id, others);
 }
 
 /** A message's states before it reaches its agent or can't. */
@@ -177,6 +197,7 @@ export class Lifecycle {
         !this.environment.resumes({ harness: launch.harness, externalRef, transcript })
       )
         throw new NotResumable(found.agentId);
+      refuseTaken(this.store, found.agentId, externalRef);
       const next = advanceTerminal(
         { state: found.terminalState, generation: found.generation },
         "respawned",
@@ -229,6 +250,7 @@ export class Lifecycle {
       const fresh = req.fresh === true;
       if (!fresh && !this.environment.resumes({ harness: launch.harness, externalRef, transcript }))
         throw new NotResumable(found.agentId);
+      if (!fresh) refuseTaken(this.store, found.agentId, externalRef);
       const terminalId = newId("term");
       const generation = found.generation + 1;
       this.startAgain.budget.admit();

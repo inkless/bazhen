@@ -5,6 +5,7 @@ import { holderSocket, holdersDir } from "@bazhen/host-guard";
 import { HolderRuntime } from "@bazhen/runtime-holder";
 import { listenFakeHolder } from "@bazhen/runtime-holder/testing";
 import {
+  bindLegacy,
   FIXTURE_TMUX_SOCKET,
   testView,
   withCodexAgents,
@@ -13,11 +14,15 @@ import {
 } from "../testing/fixtures.ts";
 import { localEnvironmentId } from "../agents/launch.ts";
 import { Readiness } from "../agents/readiness.ts";
+import { ThreadHeld } from "../store/store.ts";
 import { CodexThreads, UNTRACKED } from "./threads.ts";
 
 const A = "01a1ce15-39c0-7183-b5b6-f6f2f0000001";
 const B = "01a1ce15-6f85-7482-9722-6f4f70000002";
 const C = "01a1ce15-9d28-7111-8222-933330000003";
+const D = "01a1ce15-c3a4-7333-8444-944440000004";
+const E = "01a1ce15-d5b6-7555-8666-955550000005";
+const F = "01a1ce15-e7c8-7777-8888-966660000006";
 /** A title read that fails, as for a pane tmux no longer has. */
 const GONE = "<gone>";
 /** Shares its first 29 characters with B. */
@@ -373,14 +378,16 @@ describe("Codex thread switches", () => {
     ]);
   });
 
-  it("still holds no mail for a title it gave up on after a read of the title fails", async () => {
+  it("holds mail while a title it gave up on can't be read, and none once it reads it again", async () => {
     const s = await setup({ titles: [shown(B)], listed: [{ id: A }], giveUpMs: 20 });
+    const waits = () => s.logged.filter((line) => line.includes("waits to move")).length;
     await s.threads.titleChanged(s.terminal);
     await expect.poll(s.untracked).toBe(true);
     s.titles.splice(0, s.titles.length, GONE, shown(B));
     await s.threads.titleChanged(s.terminal);
-    await s.threads.titleChanged(s.terminal);
-    expect([s.boundTo(), s.held(), s.released]).toEqual([A, false, [s.agentId]]);
+    expect(s.held()).toBe(true);
+    await expect.poll(s.held).toBe(false);
+    expect([s.boundTo(), s.released, waits()]).toEqual([A, [s.agentId, s.agentId], 1]);
   });
 
   it("lets mail go at give-up, and moves the agent once the thread its title names is announced", async () => {
@@ -473,12 +480,45 @@ describe("Codex thread switches", () => {
     expect([s.held(), s.released]).toEqual([false, [s.agentId]]);
   });
 
-  it("lets held mail go when reading the title keeps failing past the give-up time", async () => {
+  it("holds mail while reading the title keeps failing past the give-up time, says so once, and moves once it reads", async () => {
     const s = await setup({ titles: [shown(B), GONE], unsaved: 1, giveUpMs: 20 });
     s.announce(B);
     await s.threads.titleChanged(s.terminal);
+    await expect.poll(s.untracked).toBe(true);
+    await expect.poll(() => s.titled.length).toBeGreaterThan(5);
+    const said = s.logged.filter((line) => line.includes("mail is held"));
+    expect([s.boundTo(), s.held(), s.released, said.length]).toEqual([A, true, [], 1]);
+    s.titles.splice(0, s.titles.length, shown(B));
+    await expect.poll(s.boundTo).toBe(B);
+    expect([s.held(), s.released, s.untracked()]).toEqual([false, [s.agentId], false]);
+  });
+
+  it("holds an agent's mail at start while its title can't be read, and moves it once it reads", async () => {
+    const s = await setup({ titles: [GONE, shown(B)], runtime: "holder" });
+    s.announce(B);
+    s.threads.followAll();
+    await s.threads.titleChanged(s.terminal);
+    expect([s.boundTo(), s.held(), s.released]).toEqual([A, true, []]);
+    await expect.poll(s.boundTo).toBe(B);
+    expect([s.held(), s.released]).toEqual([false, [s.agentId]]);
+  });
+
+  it("holds an agent's mail when a title it is told of can't be read, and moves it once it reads", async () => {
+    const s = await setup({ titles: [GONE, shown(B)] });
+    s.announce(B);
+    await s.threads.titleChanged(s.terminal);
+    expect([s.boundTo(), s.held(), s.released]).toEqual([A, true, []]);
+    await expect.poll(s.boundTo).toBe(B);
+    expect([s.held(), s.released]).toEqual([false, [s.agentId]]);
+  });
+
+  it("lets the mail held for a title that can't be read go once nothing will start in its terminal", async () => {
+    const s = await setup({ titles: [GONE] });
+    await s.threads.titleChanged(s.terminal);
+    expect(s.held()).toBe(true);
+    s.threads.left(s.terminal);
     await expect.poll(s.held).toBe(false);
-    expect([s.boundTo(), s.released, s.untracked()]).toEqual([A, [s.agentId], true]);
+    expect([s.boundTo(), s.released]).toEqual([A, [s.agentId]]);
   });
 
   it("holds every agent's mail at start until its title has been read", async () => {
@@ -503,6 +543,44 @@ describe("Codex thread switches", () => {
     await s.threads.titleChanged(s.terminal);
     expect([s.boundTo(), s.resumed, s.untracked()]).toEqual([A, [], true]);
     expect(s.store.codexAgent(B)).toBe(s.agentOn(B));
+  });
+
+  it("never moves an agent onto the thread of an agent that is lost, exited or closing", async () => {
+    const s = await setup({ titles: [shown(B), shown(C), shown(D)], others: [B, C, D] });
+    const system = { actor: "system", payload: {} } as const;
+    s.store.append({ ...system, type: "agent.lost", entityId: s.agentOn(B) });
+    s.store.append({
+      type: "agent.exited",
+      entityId: s.agentOn(C),
+      actor: "system",
+      payload: { exit: { type: "unknown" } },
+    });
+    s.store.append({ ...system, type: "agent.closing", entityId: s.agentOn(D) });
+    s.announce(B);
+    s.announce(C);
+    s.announce(D);
+    await s.threads.titleChanged(s.terminal);
+    await s.threads.titleChanged(s.terminal);
+    await s.threads.titleChanged(s.terminal);
+    expect([s.titled.length, s.boundTo(), s.resumed, s.untracked()]).toEqual([3, A, [], true]);
+  });
+
+  it("leaves the agent on its thread when another agent is bound to the thread while it is resumed", async () => {
+    const during: { resuming?: () => void } = {};
+    const s = await setup({ titles: [shown(B)], others: [C], resuming: () => during.resuming?.() });
+    const other = s.agentOn(C);
+    const environmentId = String(s.store.agentEnvironment(other));
+    during.resuming = () =>
+      s.store.append({
+        type: "agent.external_ref_updated",
+        entityId: other,
+        actor: "system",
+        payload: { externalRef: { environmentId, kind: "codex-thread", id: B } },
+      });
+    s.announce(B);
+    await s.threads.titleChanged(s.terminal);
+    expect([s.boundTo(), s.store.codexAgentsOn(B), s.untracked()]).toEqual([A, [other], true]);
+    expect([s.held(), s.released]).toEqual([false, [s.agentId]]);
   });
 
   it("says switches are followed again once a move takes", async () => {
@@ -674,7 +752,6 @@ describe("the agent on a Codex thread", () => {
   });
 
   it("is no agent once the agent bound to it has exited, is lost, closing or closed, beside one still live", async () => {
-    const [D, E] = ["01a1ce15-c3a4-7333-8444-944440000004", "01a1ce15-d5b6-7555-8666-955550000005"];
     const { store, agentOn } = await withCodexAgents(A, B, C, D, E);
     const user = { actor: "user", payload: {} } as const;
     store.append({ ...user, type: "agent.lost", entityId: agentOn(A) });
@@ -745,19 +822,42 @@ describe("the agent on a Codex thread", () => {
     expect([store.codexAgent(A), store.codexAgent(C)]).toEqual([agentOn(A), undefined]);
   });
 
-  it("is no agent when two are on it, so nothing meant for one reaches the other", async () => {
-    const { store, agentOn } = await withCodexAgents(A, B);
+  it("is no agent when two are on it, as a store from before one agent held a thread may have", async () => {
+    const { store, path, agentOn } = await withCodexAgents(A, B);
     const [one, two] = [agentOn(A), agentOn(B)];
-    const environmentId = String(store.agentEnvironment(two));
-    store.append({
-      type: "agent.external_ref_updated",
-      entityId: two,
-      actor: "system",
-      payload: { externalRef: { environmentId, kind: "codex-thread", id: A } },
-    });
+    bindLegacy(path, two, A);
     expect([
       store.codexAgent(A),
       store.codexAgentsOn(A).toSorted((x, y) => x.localeCompare(y)),
     ]).toEqual([undefined, [one, two].toSorted((x, y) => x.localeCompare(y))]);
+  });
+
+  it("can't be bound to an agent while another agent holds it, live, lost, exited or closing, and can once it has closed", async () => {
+    const { store, agentOn } = await withCodexAgents(A, B, C, D, E, F);
+    const system = { actor: "system", payload: {} } as const;
+    store.append({ ...system, type: "agent.lost", entityId: agentOn(B) });
+    store.append({
+      type: "agent.exited",
+      entityId: agentOn(C),
+      actor: "system",
+      payload: { exit: { type: "unknown" } },
+    });
+    store.append({ ...system, type: "agent.closing", entityId: agentOn(D) });
+    store.append({ ...system, type: "agent.closing", entityId: agentOn(F) });
+    store.append({ ...system, type: "agent.closed", entityId: agentOn(F) });
+    const mover = agentOn(E);
+    const environmentId = String(store.agentEnvironment(mover));
+    const bind = (id: string) => () =>
+      store.append({
+        type: "agent.external_ref_updated",
+        entityId: mover,
+        actor: "system",
+        payload: { externalRef: { environmentId, kind: "codex-thread", id } },
+      });
+    const before = store.snapshot(testView).eventId;
+    for (const held of [A, B, C, D]) expect(bind(held)).toThrow(ThreadHeld);
+    const refused = [store.snapshot(testView).eventId, store.codexThread(mover)];
+    bind(F)();
+    expect([refused, store.codexAgent(F)]).toEqual([[before, E], mover]);
   });
 });

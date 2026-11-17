@@ -112,6 +112,20 @@ export function age(path: string, ts = "2026-01-01T00:00:00.000Z"): void {
   raw.close();
 }
 
+/**
+ * Binds `agentId` to Codex thread `threadId` in the database at `path` by writing its row, past
+ * the store's checks, as a store written before one thread was held by one agent may have it.
+ */
+export function bindLegacy(path: string, agentId: string, threadId: string): void {
+  const raw = new DatabaseSync(path);
+  const environmentId = raw
+    .prepare("SELECT environment_id FROM agent_sessions WHERE id = ?")
+    .get(agentId)?.environment_id;
+  const ref = JSON.stringify({ environmentId, kind: "codex-thread", id: threadId });
+  raw.prepare("UPDATE agent_sessions SET external_ref = ? WHERE id = ?").run(ref, agentId);
+  raw.close();
+}
+
 /** A local environment that runs Claude Code only, launching however `launch` says. */
 export function fakeEnvironment(
   store: Store,
@@ -322,7 +336,8 @@ async function codexAgents(
   starting: boolean,
   threads: readonly (string | null)[],
 ) {
-  const store = Store.open(tempDb());
+  const path = tempDb();
+  const store = Store.open(path);
   const agents = new Map<string | null, string>();
   for (const [i, threadId] of threads.entries()) {
     const environment: EnvironmentAdapter = {
@@ -364,7 +379,7 @@ async function codexAgents(
     if (agentId === undefined) throw new Error(`no agent on thread ${String(threadId)}`);
     return agentId;
   };
-  return { store, agentOn };
+  return { store, path, agentOn };
 }
 
 /** A store with one running Codex agent, bound to `threadId`. */
