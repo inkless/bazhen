@@ -154,9 +154,9 @@ case "$1" in
         printf '{"kind":"result","file":"%s","id":"c","status":"failed","failureMessages":["AssertionError: expected 1 to be 2"]}\\n' "$file" >> "$BZ_FALSIFY_RESULTS_FILE"
         printf '{"kind":"result","file":"%s","id":"h","status":"pass' "$file" >> "$BZ_FALSIFY_RESULTS_FILE"
       fi
+      trap 'echo TERMED >> "$STUB_LOG"' TERM
       echo "HANGING $$" >> "$STUB_LOG"
       echo "stub vitest: still running" >&2
-      trap 'echo TERMED >> "$STUB_LOG"' TERM
       i=0
       while [ $i -lt 20 ]; do sleep 1; i=$((i + 1)); done
     fi
@@ -226,10 +226,12 @@ if [ "$2" = run ]; then
   hang=""
   if grep -q MUTATED ${LIB}; then hang="\${STUB_HANG:-}"; else hang="\${STUB_HANG_UNMUTATED:-}"; fi
   if [ "$hang" = 1 ]; then
+    # Trapped before HANGING is logged: a test signals as soon as it reads HANGING, and a SIGTERM
+    # that lands first would end the stub without TERMED.
+    [ "\${STUB_STUBBORN:-}" = 1 ] && trap 'echo TERMED >> "$STUB_LOG"' TERM
     echo "HANGING $$" >> "$STUB_LOG"
     if [ "\${STUB_STUBBORN:-}" = 1 ]; then
       # Outlasts SIGTERM, so falsify waits out its grace before SIGKILL.
-      trap 'echo TERMED >> "$STUB_LOG"' TERM
       i=0
       while [ $i -lt 20 ]; do sleep 1; i=$((i + 1)); done
     fi
