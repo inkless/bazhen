@@ -351,6 +351,14 @@ function falsify(args: string[], extra: Record<string, string> = {}) {
 
 const againstBase = (extra: Record<string, string> = {}) => falsify(["--base", fx.base], extra);
 
+/** Rewrites the branch's commit so its test file has the base's test `v` as `call` instead. */
+function renameTest(call: string, trailer?: string): void {
+  write(fx.linked, TEST, `import { v } from "./x.ts";\n${call}\n`);
+  git(fx.linked, "add", TEST);
+  const message = trailer === undefined ? [] : ["-m", trailer];
+  git(fx.linked, "commit", "--quiet", "--amend", "-m", "feat: v2", ...message);
+}
+
 const stubLog = () => readFileSync(fx.log, "utf8");
 const falsifyWorktrees = (cwd: string) =>
   git(cwd, "worktree", "list", "--porcelain")
@@ -411,6 +419,33 @@ describe("falsify on a branch in a linked worktree", () => {
       output: expect.stringContaining("SURVIVED"),
     });
     expect(leftovers()).toEqual([]);
+  });
+
+  it("leaves out a test a Renamed trailer names only while its block is the base's", () => {
+    renameTest('it("caps", () => {});', "Renamed: v -> caps");
+    const renamed = againstBase({ STUB_STATUS: "passed" });
+    renameTest('it("caps", () => void v);', "Renamed: v -> caps");
+    const rewritten = againstBase({ STUB_STATUS: "passed" });
+    expect({ renamed, rewritten }).toEqual({
+      renamed: {
+        status: 0,
+        output: expect.stringContaining(`RENAMED ${TEST} › caps (was "v"), not judged`),
+      },
+      rewritten: {
+        status: 1,
+        output: expect.stringMatching(
+          /Renamed: v -> caps doesn't apply \(.*"caps" isn't "v" with only its title changed\)[\s\S]*SURVIVED/,
+        ),
+      },
+    });
+  });
+
+  it("names the Renamed trailer a surviving test needs when it is the base's under a new title", () => {
+    renameTest('it("caps", () => {});');
+    expect(againstBase({ STUB_STATUS: "passed" })).toEqual({
+      status: 1,
+      output: expect.stringMatching(/SURVIVED[\s\S]*\n {2}Renamed: v -> caps\n/),
+    });
   });
 
   it("fails on an INVALID test until a commit on the branch records a control", () => {

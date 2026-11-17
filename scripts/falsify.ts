@@ -44,6 +44,12 @@
 // a test file such as 'it("fixture", f)' counts as a test too. It then can't be found in the
 // report and comes out INVALID: the safe direction, since it asks for a control.
 //
+// A test renamed and otherwise unchanged isn't new, and a commit trailer on the branch says so:
+// `Renamed: <old title> -> <new title>`. It is left out only when it holds: the old title is one
+// test in the file at the base and none at HEAD, the new title one at HEAD and none at the base,
+// and the test's block (its call line to its closing line) is the base's but for the title. Any
+// other change, to its body, options or call, leaves it judged as new.
+//
 // Only committed work is judged: the worktree is checked out at HEAD, so commit before running.
 // The temporary worktree is locked with this process's pid. A run killed before it could clean
 // up leaves it behind, and the next run removes it once that pid is dead.
@@ -281,6 +287,168 @@ export function newTitles(diff: string, file: string): string[] {
 }
 
 const withoutAsync = (call: string) => call.replaceAll(/\basync\s+/g, "");
+
+const RENAMED_TRAILER = /^Renamed: (.+)$/gm;
+const ARROW = " -> ";
+// A call line ending in one of these leaves its call open, so the test's block ends only at a
+// closing line with the call line's indent.
+const OPENS_CALL = /[{([,]$/;
+const OPENS = /(?:[{([,]|=>)$/;
+const CLOSES = /^[)}]/;
+
+export type RenameTrailer = { trailer: string; from: string; to: string };
+
+/**
+ * Each `Renamed: <old> -> <new>` trailer in the branch's messages, split at each of its arrows in
+ * turn, since a title could hold one. Only a reading the rename check accepts applies.
+ */
+export function renameTrailers(messages: string): RenameTrailer[] {
+  return [...messages.matchAll(RENAMED_TRAILER)].flatMap(([, line = ""]) => {
+    const trailer = line.trimEnd();
+    const pairs: RenameTrailer[] = [];
+    for (let at = trailer.indexOf(ARROW); at !== -1; at = trailer.indexOf(ARROW, at + 1)) {
+      const from = trailer.slice(0, at);
+      const to = trailer.slice(at + ARROW.length);
+      if (from !== "" && to !== "") pairs.push({ trailer, from, to });
+    }
+    return pairs;
+  });
+}
+
+type TestBlock = { title: string; block: string | undefined };
+
+const titled = (tests: TestBlock[], title: string) => tests.filter((t) => t.title === title);
+
+const indentOf = (line: string) => /^\s*/.exec(line)?.[0].length ?? 0;
+
+/**
+ * Each test call in a file with a readable title, and its block: the call line and the lines up
+ * to its end, with the title's quoted string as a placeholder and the call line's indent taken off
+ * every line. The end is read from the formatter's layout: the lines indented deeper than the call,
+ * then a closing line at its indent. A call left open with no such line has no block.
+ */
+function testsIn(source: string): TestBlock[] {
+  const lines = source.split("\n");
+  const tests: TestBlock[] = [];
+  for (const [i, line] of lines.entries()) {
+    if (!TEST_CALL.test(line)) continue;
+    const match = [...line.matchAll(TITLE)].find(
+      ([, quote, title]) => title !== undefined && !(quote === "`" && title.includes("${")),
+    );
+    const raw = match?.[2];
+    if (match === undefined || raw === undefined) continue;
+    const indent = indentOf(line);
+    const end = match.index + match[0].length;
+    const block = [`${line.slice(indent, end - raw.length - 2)}\0${line.slice(end)}`];
+    let next = i + 1;
+    for (; next < lines.length; next++) {
+      const text = lines[next] ?? "";
+      if (text.trim() !== "" && indentOf(text) <= indent) break;
+      block.push(text.trim() === "" ? "" : text.slice(indent));
+    }
+    while (block.at(-1) === "") block.pop();
+    const closing = lines[next];
+    let closed: boolean;
+    if (
+      closing !== undefined &&
+      indentOf(closing) === indent &&
+      CLOSES.test(closing.slice(indent))
+    ) {
+      block.push(closing.slice(indent));
+      closed = true;
+    } else {
+      closed = !OPENS_CALL.test(block[0] ?? "") && !OPENS.test(block.at(-1) ?? "");
+    }
+    tests.push({ title: unescape(raw), block: closed ? block.join("\n") : undefined });
+  }
+  return tests;
+}
+
+/**
+ * Why a test titled `to` in a test file at HEAD isn't the base's test `from` under a new title,
+ * or undefined when it is. `base` and `head` are the file's text on each side, undefined where
+ * that side has no such file. It is a rename only when each title names exactly one test, on its
+ * own side alone, and the test's block is the base's with only its title changed.
+ */
+export function renameRefusal(
+  base: string | undefined,
+  head: string | undefined,
+  from: string,
+  to: string,
+): string | undefined {
+  const before = testsIn(base ?? "");
+  const after = testsIn(head ?? "");
+  const old = titled(before, from);
+  if (old.length !== 1) {
+    return old.length === 0
+      ? `the base has no test "${from}"`
+      : `the base has ${old.length} tests "${from}"`;
+  }
+  if (titled(after, from).length > 0) return `HEAD still has a test "${from}"`;
+  if (titled(before, to).length > 0) return `the base already has a test "${to}"`;
+  const now = titled(after, to);
+  if (now.length !== 1) {
+    return now.length === 0 ? `HEAD has no test "${to}"` : `HEAD has ${now.length} tests "${to}"`;
+  }
+  const [was] = old;
+  const is = now[0];
+  if (was?.block === undefined) return `the end of "${from}" can't be found`;
+  if (is?.block === undefined) return `the end of "${to}" can't be found`;
+  return was.block === is.block ? undefined : `"${to}" isn't "${from}" with only its title changed`;
+}
+
+/**
+ * The title of the one test the base has and HEAD lost that the test `title` renames, by the
+ * rule `renameRefusal` applies, or undefined.
+ */
+export function renamedFrom(
+  base: string | undefined,
+  head: string | undefined,
+  title: string,
+): string | undefined {
+  const froms = new Set(testsIn(base ?? "").map((t) => t.title));
+  const renamed = [...froms].filter((from) => renameRefusal(base, head, from, title) === undefined);
+  return renamed.length === 1 ? renamed[0] : undefined;
+}
+
+type Target = { file: string; title: string };
+
+/**
+ * The new tests left to judge once those a `Renamed:` trailer shows are the base's under a new
+ * title are left out, each of those printed. A trailer that applies to no test is printed with why,
+ * and its test is judged. `hints` names the base test each judged one looks like a rename of, by
+ * `${file} ${title}`.
+ */
+function leaveOutRenames(
+  found: Target[],
+  trailers: RenameTrailer[],
+  sides: (file: string) => { base: string | undefined; head: string | undefined },
+): { targets: Target[]; hints: Map<string, string> } {
+  const applied = new Set<string>();
+  const refusals = new Map<string, string>();
+  const hints = new Map<string, string>();
+  const targets = found.filter((t) => {
+    const { base, head } = sides(t.file);
+    for (const r of trailers.filter((trailer) => trailer.to === t.title)) {
+      const why = renameRefusal(base, head, r.from, r.to);
+      if (why === undefined) {
+        applied.add(r.trailer);
+        console.log(`falsify: RENAMED ${t.file} › ${t.title} (was "${r.from}"), not judged`);
+        return false;
+      }
+      if (!refusals.has(r.trailer)) refusals.set(r.trailer, `${t.file}: ${why}`);
+    }
+    const from = renamedFrom(base, head, t.title);
+    if (from !== undefined) hints.set(`${t.file} ${t.title}`, from);
+    return true;
+  });
+  for (const trailer of new Set(trailers.map((r) => r.trailer))) {
+    if (applied.has(trailer)) continue;
+    const why = refusals.get(trailer) ?? "the branch adds no test of that name";
+    console.log(`falsify: Renamed: ${trailer} doesn't apply (${why}), so its test is judged`);
+  }
+  return { targets, hints };
+}
 
 /**
  * Each test in a `cargo nextest list --message-format json` report, as `<target> <test name>`.
@@ -1403,13 +1571,20 @@ async function main(args: string[]): Promise<number> {
 
   const changes = parseNameStatus(git(["diff", "--name-status", "-z", "-M", ...range]));
   const tests = changes.filter((c) => c.status !== "D" && TEST_FILE.test(c.path));
-  const targets = tests.flatMap((t) => {
+  const found = tests.flatMap((t) => {
     const paths = t.status === "R" && t.oldPath ? [t.oldPath, t.path] : [t.path];
     return newTitles(git(["diff", "-M", ...range, "--", ...paths]), t.path).map((title) => ({
       file: t.path,
       title,
     }));
   });
+  const basePaths = new Map(
+    tests.map((t) => [t.path, t.status === "R" && t.oldPath ? t.oldPath : t.path]),
+  );
+  const { targets, hints } = leaveOutRenames(found, renameTrailers(messages), (file) => ({
+    base: fileAt(base, basePaths.get(file) ?? file),
+    head: fileAt(head, file),
+  }));
   const headFiles = new Set(
     git(["ls-tree", "-r", "-z", "--name-only", "--full-tree", head]).split("\0"),
   );
@@ -1652,6 +1827,16 @@ async function main(args: string[]): Promise<number> {
       "\nThese tests pass without the change, so they cannot detect it. Make each one assert the " +
         "behaviour the change introduces (bz-write-unit-test).",
     );
+    const renames = survived.flatMap((r) => {
+      const from = hints.get(`${r.file} ${r.title}`);
+      return from === undefined ? [] : [`  Renamed: ${from} -> ${r.title}`];
+    });
+    if (renames.length > 0) {
+      console.error(
+        "Some are a test the base has under a new title. If that is all they are, say so in a " +
+          `commit message on the branch:\n${renames.join("\n")}`,
+      );
+    }
     return 1;
   }
   const uncontrolled = uncontrolledRustTests(

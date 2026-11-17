@@ -18,6 +18,9 @@ import {
   parseNameStatus,
   projectsOf,
   relatedReverts,
+  renamedFrom,
+  renameRefusal,
+  renameTrailers,
   revertsOf,
   rustTestIds,
   signalExitCode,
@@ -645,5 +648,135 @@ describe("relatedReverts", () => {
   it("ignores a type-only import", () => {
     const source = 'import type { TerminalState } from "@bazhen/protocol";';
     expect(related(source, ["packages/protocol/src/index.ts"])).toEqual([]);
+  });
+});
+
+const lines = (...text: string[]) => text.join("\n") + "\n";
+
+const BASE_TESTS = lines(
+  'import { expect, it } from "vitest";',
+  'import { v } from "./x.ts";',
+  "",
+  'it("adds one", () => {',
+  "  expect(v + 1).toBe(2);",
+  "});",
+  "",
+  'it("keeps v", () => expect(v).toBe(1));',
+);
+
+const renamedTo = (title: string, source = BASE_TESTS) =>
+  source.replace('it("adds one"', `it("${title}"`);
+
+const RENAMED = renamedTo("adds one to v");
+
+const CHANGED = '"adds one to v" isn\'t "adds one" with only its title changed';
+
+const refusal = (base: string | undefined, head: string) =>
+  renameRefusal(base, head, "adds one", "adds one to v");
+
+/** The source with the first test's closing line cut. */
+const cut = (source: string) => source.replace('});\n\nit("keeps v"', '\nit("keeps v"');
+
+/** A copy of the base's first test under `title`, after the rest. */
+const withCopy = (source: string, title: string) =>
+  source + lines(`it("${title}", () => {`, "  expect(v + 1).toBe(2);", "});");
+
+describe("renameTrailers", () => {
+  it("reads each Renamed line, at every arrow a title could split at", () => {
+    const messages = lines(
+      "test: rename",
+      "",
+      "Renamed: adds one -> adds one to v",
+      "Control: x -> y",
+      "Renamed: a -> b -> c",
+      "  Renamed: indented -> ignored",
+    );
+    expect(renameTrailers(messages)).toEqual([
+      { trailer: "adds one -> adds one to v", from: "adds one", to: "adds one to v" },
+      { trailer: "a -> b -> c", from: "a", to: "b -> c" },
+      { trailer: "a -> b -> c", from: "a -> b", to: "c" },
+    ]);
+  });
+});
+
+describe("renameRefusal", () => {
+  it("accepts a test whose block is the base's but for its title, quotes and indent", () => {
+    const moved = lines(
+      'import { describe, expect, it } from "vitest";',
+      'import { v } from "./x.ts";',
+      "",
+      'describe("v", () => {',
+      "  it('adds one to v', () => {",
+      "    expect(v + 1).toBe(2);",
+      "  });",
+      "});",
+      "",
+      'it("keeps v", () => expect(v).toBe(1));',
+    );
+    const oneLine = BASE_TESTS.replace('it("keeps v"', 'it("keeps v as it was"');
+    expect([
+      refusal(BASE_TESTS, RENAMED),
+      refusal(BASE_TESTS, moved),
+      renameRefusal(BASE_TESTS, oneLine, "keeps v", "keeps v as it was"),
+    ]).toEqual([undefined, undefined, undefined]);
+  });
+
+  it("judges as new a renamed test whose body changed", () => {
+    expect(refusal(BASE_TESTS, RENAMED.replace("toBe(2)", "toBeGreaterThan(1)"))).toBe(CHANGED);
+  });
+
+  it("judges as new a renamed test given an option, or skipped", () => {
+    const options = BASE_TESTS.replace('it("adds one", ', 'it("adds one to v", { retry: 2 }, ');
+    const skipped = BASE_TESTS.replace('it("adds one"', 'it.skip("adds one to v"');
+    expect([refusal(BASE_TESTS, options), refusal(BASE_TESTS, skipped)]).toEqual([
+      CHANGED,
+      CHANGED,
+    ]);
+  });
+
+  it("judges as new a different test that a trailer claims renames a deleted one", () => {
+    const head = BASE_TESTS.replace('it("adds one"', 'it("doubles v"').replace("v + 1", "v * 2");
+    expect(renameRefusal(BASE_TESTS, head, "adds one", "doubles v")).toBe(
+      '"doubles v" isn\'t "adds one" with only its title changed',
+    );
+  });
+
+  it("judges as new a test whose old title HEAD still has", () => {
+    expect(refusal(BASE_TESTS, withCopy(RENAMED, "adds one"))).toBe(
+      'HEAD still has a test "adds one"',
+    );
+  });
+
+  it("judges as new a test whose new title the base already has", () => {
+    const base = withCopy(BASE_TESTS, "adds one to v");
+    expect(refusal(base, renamedTo("adds one to v", base))).toBe(
+      'the base already has a test "adds one to v"',
+    );
+  });
+
+  it("judges as new a test whose old or new title is on two tests, or whose file is new", () => {
+    expect([
+      refusal(withCopy(BASE_TESTS, "adds one"), RENAMED),
+      refusal(BASE_TESTS, withCopy(RENAMED, "adds one to v")),
+      refusal(undefined, RENAMED),
+    ]).toEqual([
+      'the base has 2 tests "adds one"',
+      'HEAD has 2 tests "adds one to v"',
+      'the base has no test "adds one"',
+    ]);
+  });
+
+  it("judges as new a test whose block has no closing line", () => {
+    expect(refusal(cut(BASE_TESTS), cut(RENAMED))).toBe('the end of "adds one" can\'t be found');
+  });
+});
+
+describe("renamedFrom", () => {
+  it("names the lost base test a new test renames, and nothing for a new test", () => {
+    expect([
+      renamedFrom(BASE_TESTS, RENAMED, "adds one to v"),
+      renamedFrom(BASE_TESTS, RENAMED.replace("toBe(2)", "toBe(3)"), "adds one to v"),
+      renamedFrom(BASE_TESTS, withCopy(RENAMED, "adds one"), "adds one to v"),
+    ]).toEqual(["adds one", undefined, undefined]);
   });
 });
