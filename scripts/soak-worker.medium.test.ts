@@ -9,7 +9,6 @@ import { once } from "node:events";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { markersIn, PROBE } from "./soak-worker.ts";
@@ -118,6 +117,14 @@ async function runWorker(
   return ran(output, typeof code === "number" ? code : null);
 }
 
+/** Three marker records in a row with one count: the worker's writes have stopped. */
+const stalled = (written: readonly number[]) =>
+  written.length === 3 && written.every((n) => n === written[0]);
+/**
+ * Inside vitest's 5 s test timeout, so a worker that never stalls fails here, showing its counts.
+ */
+const STALL_TIMEOUT_MS = 4_000;
+
 /**
  * Runs a worker whose output nobody reads, so the pipe fills and its writes stall, until its
  * recorded count has stopped moving; then closes its input and reads its output only once it has
@@ -125,13 +132,15 @@ async function runWorker(
  */
 async function runStalled(args: readonly string[]): Promise<Ran> {
   const { child, out, ran } = startWorker(args);
-  const stalled = () => {
-    const written = writtenOf({ events: recordsIn(out) }).slice(-3);
-    return written.length === 3 && written.every((n) => n === written[0]);
-  };
-  while (!stalled()) await sleep(20);
   const exited = once(child, "exit");
   const closed = once(child, "close");
+  // An exit ends the wait at once, with its code to show, rather than at the timeout.
+  const lastThree = () =>
+    child.exitCode === null ? writtenOf({ events: recordsIn(out) }).slice(-3) : child.exitCode;
+  await expect
+    .poll(lastThree, { timeout: STALL_TIMEOUT_MS, interval: 20 })
+    .toSatisfy((last) => typeof last === "number" || stalled(last));
+  expect(child.exitCode).toBeNull();
   child.stdin.end();
   const [code] = await exited;
   let output = "";
