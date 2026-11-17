@@ -10,7 +10,7 @@ const dir = mkdtempSync(join(tmpdir(), "bz-lint-plugin-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 /** What oxlint reports under `bazhen(host-guard)` or `bazhen(signal-guard)` in `source`, by line. */
-function reports(source: string): { line: number; message: string }[] {
+function reports(source: string): { line: number; message: string; rule: string }[] {
   const file = join(dir, "fixture.ts");
   writeFileSync(file, source);
   let out = "";
@@ -27,8 +27,8 @@ function reports(source: string): { line: number; message: string }[] {
     out = String(Reflect.get(Object(error), "stdout"));
   }
   return [
-    ...out.matchAll(/fixture\.ts:(\d+):\d+: (.*) \[\w+\/bazhen\((?:host|signal)-guard\)\]/g),
-  ].map((m) => ({ line: Number(m[1]), message: m[2] ?? "" }));
+    ...out.matchAll(/fixture\.ts:(\d+):\d+: (.*) \[\w+\/bazhen\(((?:host|signal)-guard)\)\]/g),
+  ].map((m) => ({ line: Number(m[1]), message: m[2] ?? "", rule: m[3] ?? "" }));
 }
 
 /** The lines oxlint reports under `bazhen(host-guard)` or `bazhen(signal-guard)` in `source`. */
@@ -37,11 +37,12 @@ const flagged = (source: string) =>
     .map((r) => r.line)
     .toSorted((a, b) => a - b);
 
-/** Each line reported in `source`, with whether every report on it is the unfollowed start's. */
+/** Each line reported in `source`, with whether every report on it is host-guard's unfollowed start. */
 const unfollowed = (source: string) => {
   const lines = new Map<number, boolean>();
-  for (const { line, message } of reports(source)) {
-    lines.set(line, (lines.get(line) ?? true) && /can read whether it runs tmux/.test(message));
+  for (const { line, message, rule } of reports(source)) {
+    const start = rule === "host-guard" && /can read whether it runs tmux/.test(message);
+    lines.set(line, (lines.get(line) ?? true) && start);
   }
   return [...lines].toSorted(([a], [b]) => a - b);
 };
@@ -116,9 +117,13 @@ const IMPORTS = [
   'import { execFile, execFileSync, spawn } from "node:child_process";',
   'import * as cp from "node:child_process";',
   'import cpd, { fork } from "child_process";',
+  'import { default as cpx } from "node:child_process";',
+  'import type * as cpt from "node:child_process";',
+  'import type { spawn as typedSpawn } from "node:child_process";',
   'import { spawnGroup, runBounded, TmuxServer } from "@bazhen/host-guard";',
   'import * as hg from "@bazhen/host-guard";',
   'import { runIn } from "../packages/host-guard/src/index.ts";',
+  'import { runOwned } from "@bazhen/host-guard/cap";',
   'import { promisify } from "node:util";',
   'import util from "node:util";',
   'import { createRequire } from "node:module";',
@@ -142,7 +147,10 @@ const UNFOLLOWED = [
   "export const uncalled = cp.spawn;",
   "export const { execSync } = cp;",
   "export const bound = hg.spawnGroup.bind(null);",
-  "export const defaulted = [cpd];",
+  "export const defaulted = [cpd, cpx];",
+  "export const nested = cpd.default;",
+  'export const dynamic = (name: "spawn") => cp[name];',
+  "export const subpath = [runOwned];",
   "export { fork };",
   "export default runBounded;",
   'require("child_process");',
@@ -181,6 +189,12 @@ const FOLLOWED = [
   'export { TmuxServer } from "@bazhen/host-guard";',
   'export type { ChildProcess as Child } from "node:child_process";',
   "export const child: ChildProcess | null = null;",
+  "export type Spawned = ReturnType<typeof cpt.spawn>;",
+  "export type { typedSpawn };",
+  'export type { spawn as SpawnType } from "node:child_process";',
+  'export type * from "node:child_process";',
+  'import type cpTyped = require("node:child_process");',
+  "export type Typed = typeof cpTyped;",
   'const viaUtil = util.promisify(execFile); void viaUtil("git", []);',
 ];
 

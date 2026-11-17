@@ -177,9 +177,7 @@ const guard = (reports: { tmux: boolean; signals: boolean }) => ({
         return strings(constants.get(String(node["name"])), depth + 1);
       return [];
     };
-    const namesModule = (node: unknown) =>
-      !(isNode(node) && node.type === "ArrayExpression") &&
-      strings(node).some((s) => startsOf(s) !== undefined);
+    const namesModule = (node: unknown) => strings(node).some((s) => startsOf(s) !== undefined);
 
     const isProcess = (node: unknown): boolean =>
       isNode(node) &&
