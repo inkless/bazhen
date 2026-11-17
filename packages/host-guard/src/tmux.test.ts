@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   environmentScript,
+  parseCommands,
   parseGroups,
   parseLstart,
   parsePsLine,
   pasteScript,
   PASTE_REFUSED,
   psFailure,
+  psPrinted,
   serverVerdict,
   socketRefusal,
 } from "./tmux.ts";
@@ -276,5 +278,65 @@ describe("foreground groups read back", () => {
         [17, -1],
       ]),
     );
+  });
+});
+
+/** A `ps` run that failed, as its promise form rejects: an error carrying `fields`. */
+const failed = (fields: Record<string, unknown>) => ({
+  error: Object.assign(new Error("Command failed: ps"), fields),
+});
+
+describe("what a ps run over many pids printed", () => {
+  const lines = " 4242 Mon Nov 16 23:19:26 2026 node\n";
+
+  it("takes procps's partial output, exiting 0, as the pids it found", () => {
+    expect(psPrinted({ stdout: lines })).toBe(lines);
+  });
+
+  it("takes procps's exit 1 with nothing printed as no pid found", () => {
+    expect(psPrinted(failed({ code: 1, stdout: "", stderr: "" }))).toBe("");
+  });
+
+  it("takes BSD's exit 1 for a missing pid as the ones it still printed", () => {
+    expect(psPrinted(failed({ code: 1, stdout: lines, stderr: "" }))).toBe(lines);
+  });
+
+  it("is unreadable for any other failure, whatever it printed", () => {
+    expect([
+      psPrinted(failed({ code: 1, stdout: lines, stderr: "ps: illegal option -- w\nusage: ps" })),
+      psPrinted(failed({ code: 2, stdout: lines, stderr: "" })),
+      psPrinted(failed({ code: null, killed: true, signal: "SIGTERM", stdout: lines, stderr: "" })),
+      psPrinted(failed({ code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER", stdout: lines, stderr: "" })),
+      psPrinted({ error: new Error("spawn ps ENOENT") }),
+    ]).toEqual([undefined, undefined, undefined, undefined, undefined]);
+  });
+});
+
+describe("processes' commands read back", () => {
+  const start = Date.UTC(2026, 10, 16, 23, 19, 26) / 1000;
+
+  it("reads each pid's start and whole command, spaces and a macOS path included", () => {
+    const out = [
+      "    1 Mon Nov 16 23:19:26 2026 systemd",
+      " 4242 Mon Nov 16 23:19:26 2026 tmux: server",
+      "70001 Mon Nov 16 23:19:26 2026 /Applications/Visual Studio Code.app/Contents/MacOS/Electron",
+      "",
+    ].join("\n");
+    expect(parseCommands(out)).toEqual(
+      new Map([
+        [1, { start, comm: "systemd" }],
+        [4242, { start, comm: "tmux: server" }],
+        [70001, { start, comm: "/Applications/Visual Studio Code.app/Contents/MacOS/Electron" }],
+      ]),
+    );
+  });
+
+  it("reads nothing printed as no process", () => {
+    expect(parseCommands("")).toEqual(new Map());
+  });
+
+  it("refuses the whole read for any line it can't parse", () => {
+    for (const bad of ["not a row", " 4242 jeu. 16 nov. 23:19:26 2026 node", " 4242 node"])
+      expect(parseCommands(` 17 Mon Nov 16 23:19:26 2026 node\n${bad}\n`)).toBeUndefined();
   });
 });

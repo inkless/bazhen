@@ -33,6 +33,8 @@ import {
   inTerminalScope,
   PasteRefused,
   pasteTextRefusal,
+  processCommands,
+  type ProcessCommand,
   processCwds,
   readProcess,
   rebindHolderSocket,
@@ -101,6 +103,10 @@ export interface HolderRuntimeOptions {
   readonly containment?: () => Promise<Containment>;
   /** Whether a holder's pid runs in a terminal's scope: host-guard's, unless a test says. */
   readonly inScope?: (pid: number) => boolean | null;
+  /** Reads processes' starts and commands: host-guard's `processCommands`, unless a test says. */
+  readonly commands?: (
+    pids: readonly number[],
+  ) => Promise<ReadonlyMap<number, ProcessCommand> | "unreadable">;
 }
 
 /** A holder that answered, the build it runs and the protocol versions it speaks. */
@@ -199,6 +205,9 @@ export class HolderRuntime implements RuntimeAdapter {
       onError: this.report,
     });
   }
+
+  private readonly commands = (pids: readonly number[]) =>
+    (this.opts.commands ?? processCommands)(pids);
 
   private readonly report = (err: unknown) =>
     (this.opts.onError ?? ((e: unknown) => console.warn("holder runtime:", e)))(err);
@@ -670,11 +679,13 @@ export class HolderRuntime implements RuntimeAdapter {
    * leader's command, checked against the start the holder read so a reused pid is refused.
    */
   async foreground(ref: RuntimeRef): Promise<Foreground> {
-    const { command, own } = await this.foregroundGroup(ref);
-    return { command, own };
+    const group = await this.foregroundGroup(ref);
+    const command = commandIn(await this.commands([group.pgid]), group);
+    if (command === null) throw new Error(`can't read terminal ${ref.terminalId}'s foreground`);
+    return { command, own: group.own };
   }
 
-  /** `foreground`, with the group the holder named and when its leader started. */
+  /** The group holding the terminal's foreground as its holder names it, and its leader's start. */
   private async foregroundGroup(ref: RuntimeRef) {
     const read = await this.withProcess(ref, async (client) => {
       if (client.hello.exit !== null) throw new ProcessState(ref.terminalId, "running");
@@ -682,11 +693,15 @@ export class HolderRuntime implements RuntimeAdapter {
         throw refusal(ref, error);
       });
     });
-    const command = await commandOf(read.pgid, read.pgidStart);
-    if (command === null) throw new Error(`can't read terminal ${ref.terminalId}'s foreground`);
-    return { command, own: read.pgid === read.childPid, pgid: read.pgid, start: read.pgidStart };
+    return { own: read.pgid === read.childPid, pgid: read.pgid, start: read.pgidStart };
   }
 
+  /**
+   * One read of every leader's command, and one more of those with a directory, however many
+   * terminals there are: each `ps` started holds up everything else the caller serves until it
+   * has exec'd. A first read that can't be made throws, so a lasting failure is reported rather
+   * than every foreground silently kept as it was.
+   */
   async foregrounds(terminalIds: ReadonlySet<string>): Promise<TerminalForeground[]> {
     if (terminalIds.size === 0) return [];
     const live = (await this.listed()).entries.filter(
@@ -703,16 +718,24 @@ export class HolderRuntime implements RuntimeAdapter {
         }),
       )
     ).flat();
+    const commands = await this.commands(groups.map((g) => g.pgid));
+    if (commands === "unreadable")
+      throw new Error("can't read the terminals' foreground processes");
+    const named = groups.flatMap((group) => {
+      const command = commandIn(commands, group);
+      return command === null ? [] : [{ ...group, command }];
+    });
     // The foreground's own directory, as tmux reports a pane's: read once for them all, and kept
     // only for a leader that is still the one that started when the holder said.
-    const cwds = await processCwds(groups.map((g) => g.pgid));
-    return Promise.all(
-      groups.map(async ({ ref, command, own, pgid, start }) => {
-        const cwd = cwds.get(pgid);
-        const still = cwd !== undefined && (await commandOf(pgid, start)) !== null;
-        return { ref, command, own, cwd: still ? cwd : null };
-      }),
-    );
+    const cwds = await processCwds(named.map((g) => g.pgid));
+    const leaders = named.filter((g) => cwds.has(g.pgid));
+    const still =
+      leaders.length === 0 ? new Map() : await this.commands(leaders.map((g) => g.pgid));
+    return named.map(({ ref, command, own, pgid, start }) => {
+      const cwd = cwds.get(pgid);
+      const same = cwd !== undefined && commandIn(still, { pgid, start }) !== null;
+      return { ref, command, own, cwd: same ? cwd : null };
+    });
   }
 
   /** The title in the holder's `hello`: its current process's, whichever generation that is. */
@@ -788,9 +811,15 @@ function refusal(ref: RuntimeRef, error: unknown): unknown {
   return error;
 }
 
-/** The command of the process leading group `pgid`, if it is still the one that started at `start`. */
-async function commandOf(pgid: number, start: number): Promise<string | null> {
-  const reading = await readProcess(pgid);
-  if (typeof reading === "string" || Math.abs(reading.start - start) > START_SKEW_S) return null;
-  return basename(reading.comm);
+/**
+ * The command of the process leading group `pgid`, as `read` shows it, if that is still the one
+ * that started at `start`.
+ */
+function commandIn(
+  read: ReadonlyMap<number, ProcessCommand> | "unreadable",
+  { pgid, start }: { readonly pgid: number; readonly start: number },
+): string | null {
+  const shown = read === "unreadable" ? undefined : read.get(pgid);
+  if (shown === undefined || Math.abs(shown.start - start) > START_SKEW_S) return null;
+  return basename(shown.comm);
 }

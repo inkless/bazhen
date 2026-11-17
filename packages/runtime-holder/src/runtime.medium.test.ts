@@ -26,6 +26,7 @@ import {
   holderSocket,
   holdersDir,
   PasteRefused,
+  START_SKEW_S,
   type StartHolderOptions,
 } from "@bazhen/host-guard";
 import { type HolderHelloReply, type HolderReply, HolderSpawnSpec } from "@bazhen/protocol";
@@ -1202,5 +1203,150 @@ describe("HolderRuntime: streams", () => {
     await pending;
     expect(order).toEqual(["closed", "rejected"]);
     await expect(stream.snapshot()).rejects.toThrow("closed");
+  });
+});
+
+/** Foregrounds read, by terminal. */
+const byTerminal = (read: Awaited<ReturnType<HolderRuntime["foregrounds"]>>) =>
+  Object.fromEntries(read.map(({ ref, ...rest }) => [ref.terminalId, rest]));
+
+const sorted = (pids: readonly number[]) => [...pids].toSorted((a, b) => a - b);
+
+describe("HolderRuntime: what holds terminals' foregrounds", () => {
+  /** When every foreground group's leader started, as its holder says. */
+  const LEADER_START = 1_700_000_100;
+  /**
+   * When this process started, as `ps` would show it: a leader that reads for real, so a read
+   * that ignores the seam finds it.
+   */
+  const OWN_START = Math.floor(Date.now() / 1000 - process.uptime());
+  /** A pid above the system's limit: no process, and so no working directory, has it. */
+  const NO_CWD = FAKE_PID + 7;
+
+  /** Answers `foreground` naming `pgid`, led by a process other than the terminal's own. */
+  const leading =
+    (pgid: number, pgidStart: number): Handler =>
+    (holder, request) => {
+      if (request.type !== "foreground") return ok(holder, request);
+      const body = { childPid: FAKE_PID, childStart: FAKE_START, pgid, pgidStart };
+      holder.send({ type: "foreground", id: request.id, body });
+    };
+
+  type Commands = NonNullable<HolderRuntimeOptions["commands"]>;
+  type Read = Awaited<ReturnType<Commands>>;
+
+  /** The commands seam, answering each read in turn and recording the pids each was asked. */
+  function commandsReading(...reads: ((pids: readonly number[]) => Read)[]) {
+    const asked: number[][] = [];
+    const commands: Commands = async (pids) => {
+      asked.push(sorted(pids));
+      const read = reads[asked.length - 1];
+      if (read === undefined) throw new Error(`commands read a ${asked.length}th time`);
+      return read(pids);
+    };
+    return { asked, commands };
+  }
+
+  /** Every pid asked, led by `comm`, started when its holder says. */
+  const all =
+    (comm: string, start = LEADER_START) =>
+    (pids: readonly number[]): Read =>
+      new Map(pids.map((pid) => [pid, { start, comm }]));
+
+  async function terminalsLedBy(root: string, pgids: readonly number[], start = LEADER_START) {
+    const ids: string[] = [];
+    for (const pgid of pgids) {
+      const terminalId = newId("term");
+      await fakeTerminal(root, terminalId, {}, leading(pgid, start));
+      ids.push(terminalId);
+    }
+    return ids;
+  }
+
+  it("reads every leader's command at once, and again only the leaders with a directory", async () => {
+    const root = privateRoot();
+    const pgids = [process.pid, process.ppid, NO_CWD];
+    const { asked, commands } = commandsReading(all("/usr/bin/vim"), all("/usr/bin/vim"));
+    const { runtime } = runtimeAt(root, { commands });
+    const [own, parent, gone] = await terminalsLedBy(root, pgids);
+    const read = await runtime.foregrounds(new Set([own, parent, gone].map(String)));
+    expect([asked, byTerminal(read)]).toEqual([
+      [sorted(pgids), sorted([process.pid, process.ppid])],
+      {
+        [String(own)]: { command: "vim", own: false, cwd: expect.any(String) },
+        [String(parent)]: { command: "vim", own: false, cwd: expect.any(String) },
+        [String(gone)]: { command: "vim", own: false, cwd: null },
+      },
+    ]);
+  });
+
+  it("leaves out a terminal whose leader ps doesn't show, or shows started at another time", async () => {
+    const root = privateRoot();
+    const later = LEADER_START + START_SKEW_S + 1;
+    const { commands } = commandsReading(
+      () =>
+        new Map([
+          [NO_CWD, { start: LEADER_START + START_SKEW_S, comm: "less" }],
+          [NO_CWD + 1, { start: later, comm: "less" }],
+        ]),
+      all("less"),
+    );
+    const { runtime } = runtimeAt(root, { commands });
+    const [shown, reused, missing] = await terminalsLedBy(root, [NO_CWD, NO_CWD + 1, NO_CWD + 2]);
+    const read = await runtime.foregrounds(new Set([shown, reused, missing].map(String)));
+    expect(byTerminal(read)).toEqual({
+      [String(shown)]: { command: "less", own: false, cwd: null },
+    });
+  });
+
+  it("refuses the sweep when its leaders can't be read, and reads no further", async () => {
+    const root = privateRoot();
+    const { asked, commands } = commandsReading(() => "unreadable");
+    const { runtime } = runtimeAt(root, { commands });
+    const ids = await terminalsLedBy(root, [process.pid], OWN_START);
+    await expect(runtime.foregrounds(new Set(ids.map(String)))).rejects.toThrow("can't read");
+    expect(asked).toHaveLength(1);
+  });
+
+  it("keeps the commands and drops every directory when the second read can't be made", async () => {
+    const root = privateRoot();
+    const { commands } = commandsReading(all("htop"), () => "unreadable");
+    const { runtime } = runtimeAt(root, { commands });
+    const [own] = await terminalsLedBy(root, [process.pid]);
+    expect(byTerminal(await runtime.foregrounds(new Set([String(own)])))).toEqual({
+      [String(own)]: { command: "htop", own: false, cwd: null },
+    });
+  });
+
+  it("drops a directory whose leader has changed by the second read", async () => {
+    const root = privateRoot();
+    const { commands } = commandsReading(all("htop"), all("htop", LEADER_START + 60));
+    const { runtime } = runtimeAt(root, { commands });
+    const [own] = await terminalsLedBy(root, [process.pid]);
+    expect(byTerminal(await runtime.foregrounds(new Set([String(own)])))).toEqual({
+      [String(own)]: { command: "htop", own: false, cwd: null },
+    });
+  });
+
+  it("reads one terminal's foreground with one read of its leader", async () => {
+    const root = privateRoot();
+    const { asked, commands } = commandsReading(all("/bin/-zsh"));
+    const { runtime } = runtimeAt(root, { commands });
+    const [terminalId] = await terminalsLedBy(root, [NO_CWD]);
+    const [ref] = (await runtime.inventory()).map((e) => e.ref);
+    expect([ref?.terminalId, await runtime.foreground(ref!), asked]).toEqual([
+      terminalId,
+      { command: "-zsh", own: false },
+      [[NO_CWD]],
+    ]);
+  });
+
+  it("refuses one terminal's foreground when its leader can't be read", async () => {
+    const root = privateRoot();
+    const { commands } = commandsReading(() => "unreadable");
+    const { runtime } = runtimeAt(root, { commands });
+    await terminalsLedBy(root, [process.pid], OWN_START);
+    const [ref] = (await runtime.inventory()).map((e) => e.ref);
+    await expect(runtime.foreground(ref!)).rejects.toThrow("can't read terminal");
   });
 });

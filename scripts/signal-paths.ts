@@ -686,7 +686,7 @@ export const ALLOWED_SIGNALS: Readonly<Record<string, readonly AllowedSignal[]>>
     timedOut(/run\("ps", args, \{ env: PS_ENV, timeout: TIMEOUT_MS \}\)/, "ps, reading a holder"),
     timedOut(
       /run\("ps", args, \{\s*env: PS_ENV,\s*timeout: TIMEOUT_MS,/,
-      "ps, reading terminals' foreground groups",
+      "ps, reading many processes' foreground groups or commands at once",
     ),
     timedOut(
       /execFile\(\s*bin,\s*argv,\s*\{\s*env: opts\.env,\s*timeout: opts\.timeout \?\? TIMEOUT_MS,\s*maxBuffer:/,
