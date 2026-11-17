@@ -10,6 +10,7 @@ mod call;
 mod daemon_verbs;
 mod doctor;
 mod fmt;
+mod lifecycle;
 mod out;
 mod paths;
 mod printers;
@@ -81,32 +82,28 @@ pub(crate) const TASK_USAGE: &str = "usage:
 exits 0 once the agent has the message in a prompt (a turn cut short may still get it again), 4
 if it bounced, and 5 if it is still on its way when the timeout (60 s unless given) runs out.";
 
-pub(crate) const USAGE: &str = concat!(
+pub(crate) const LIFECYCLE_USAGE: &str = "usage:
+  bazhen launch claude-code|codex [--dir <dir>] [--name <name>] [--role <role>] [--json]
+  bazhen close <agent> [--confirm-busy] [--force] [--json]
+  bazhen respawn <agent> [--json]
+  bazhen relaunch <agent> [--fresh] [--json]
+  bazhen signal <agent> INT|TERM|HUP|KILL [--json]
+launch starts in --dir, else where it runs. close --confirm-busy ends what runs in the agent's
+shells; --force records closed an agent whose terminal's server can't be shown gone, though it
+may still run. relaunch --fresh starts a new harness session when the old one can't resume.";
+
+const DAEMON_USAGE: &str = concat!(
     "usage: bazhen <start|stop|status|doctor|env refresh|pair|devices [revoke|dismiss <id>]> ",
     "[--home <dir>] [--port <port>]\n",
     "usage: bazhen attach <agent|shell|terminal> [--direct] [--home <dir>]\n",
     "  Ctrl-\\ Ctrl-\\ detaches; a second kill ends it at once, after which `reset` repairs the terminal\n",
-    "  --direct types only while no daemon is there, and lets go of the input once one is back\n",
-    "usage:
-  bazhen agents [--json]
-  bazhen whoami
-  bazhen roles
-  bazhen rename <agent> <name>
-  bazhen task list [--all]
-  bazhen task show <task>
-  bazhen task create --title <title> (--brief <text> | --brief-file <path>) [--parent <task>] [--assign <agent> [--role <role>]]
-  bazhen task assign <task> <agent> [--role <role>]
-  bazhen task unassign <task> <assignment>
-  bazhen task done [<task>] [--note <text>] [--cascade]
-  bazhen task cancel <task> [--note <text>] [--cascade]
-  bazhen task note [<task>] <text> [--handoff]
-  bazhen escalate <question> [--task <task>]
-  bazhen send (<agent> | --task <task>) (<text> | --file <path>) [--wait [--timeout <seconds>]]
-  bazhen delegate (<agent> | --launch claude-code|codex [--dir <dir>] [--name <name>]) --title <title> (--brief <text> | --brief-file <path>) [--task <task>] [--role <role>]
-<agent> is an agent's name or id, and <role> one of the roles bazhen roles lists. send --wait
-exits 0 once the agent has the message in a prompt (a turn cut short may still get it again), 4
-if it bounced, and 5 if it is still on its way when the timeout (60 s unless given) runs out."
+    "  --direct types only while no daemon is there, and lets go of the input once one is back",
 );
+
+/// The usage of every verb.
+pub(crate) fn usage() -> String {
+    [DAEMON_USAGE, TASK_USAGE, LIFECYCLE_USAGE].join("\n")
+}
 
 const NOT_RUNNING: &str = "bazhen is not running; start it with `bazhen start`";
 
@@ -120,7 +117,7 @@ fn run(args: Vec<OsString>, out: &mut Out) -> Exit {
     let p = match args::parse(args) {
         Ok(p) => p,
         Err(args::BadLine(message)) => {
-            out.err(&format!("{message}\n{USAGE}"));
+            out.err(&format!("{message}\n{}", usage()));
             return Exit::Usage;
         }
     };
@@ -145,6 +142,7 @@ fn run(args: Vec<OsString>, out: &mut Out) -> Exit {
                 .unwrap_or(socket);
             tasks::run(&p, &Daemon::at(task_socket), now_ms, out)
         }
+        "launch" | "close" | "respawn" | "relaunch" | "signal" => lifecycle::run(&p, &daemon, out),
         "attach" => attach::run(&p, Path::new(&daemon.socket()), &daemon, out),
         "start" => Ok(daemon_verbs::start(&p, out)),
         "stop" => daemon_verbs::stop(&daemon, out),
@@ -154,7 +152,7 @@ fn run(args: Vec<OsString>, out: &mut Out) -> Exit {
         "devices" => daemon_verbs::devices(&p, &daemon, now_ms, out),
         "env" => daemon_verbs::env_refresh(&p, &daemon, out),
         _ => {
-            out.err(USAGE);
+            out.err(&usage());
             Ok(Exit::Usage)
         }
     };

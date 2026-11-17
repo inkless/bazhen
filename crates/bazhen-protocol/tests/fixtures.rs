@@ -7,7 +7,9 @@ use std::fs;
 use std::path::PathBuf;
 
 use bazhen_protocol::agents::{
-    AgentCommandResponse, CallerResponse, FleetAgent, HarnessId, RenameAgentRequest, StateSnapshot,
+    AgentCommandResponse, CallerResponse, CloseAgentRequest, FleetAgent, HarnessId,
+    LaunchAgentRequest, LaunchAgentResponse, RelaunchAgentRequest, RenameAgentRequest,
+    RespawnAgentRequest, SignalAgentRequest, StateSnapshot,
 };
 use bazhen_protocol::daemon::{
     DoctorResponse, EnvRefreshRequest, EnvRefreshResponse, HealthResponse, StopResponse,
@@ -107,6 +109,7 @@ const MESSAGES: &[(&str, RoundTrip)] = &[
         round_trips::<BroadcastMessageResponse>,
     ),
     ("CallerResponse", round_trips::<CallerResponse>),
+    ("CloseAgentRequest", round_trips::<CloseAgentRequest>),
     ("CreateTaskRequest", round_trips::<CreateTaskRequest>),
     ("CreateTaskResponse", round_trips::<CreateTaskResponse>),
     ("DelegateTaskRequest", round_trips::<DelegateTaskRequest>),
@@ -124,12 +127,17 @@ const MESSAGES: &[(&str, RoundTrip)] = &[
     ("FinishTaskRequest", round_trips::<FinishTaskRequest>),
     ("FleetAgent", round_trips::<FleetAgent>),
     ("HealthResponse", round_trips::<HealthResponse>),
+    ("LaunchAgentRequest", round_trips::<LaunchAgentRequest>),
+    ("LaunchAgentResponse", round_trips::<LaunchAgentResponse>),
     ("PairingCodeResponse", round_trips::<PairingCodeResponse>),
+    ("RelaunchAgentRequest", round_trips::<RelaunchAgentRequest>),
     ("RenameAgentRequest", round_trips::<RenameAgentRequest>),
+    ("RespawnAgentRequest", round_trips::<RespawnAgentRequest>),
     ("RevokeDeviceResponse", round_trips::<RevokeDeviceResponse>),
     ("RolesResponse", round_trips::<RolesResponse>),
     ("SendMessageRequest", round_trips::<SendMessageRequest>),
     ("SendMessageResponse", round_trips::<SendMessageResponse>),
+    ("SignalAgentRequest", round_trips::<SignalAgentRequest>),
     ("StateSnapshot", round_trips::<StateSnapshot>),
     ("StopResponse", round_trips::<StopResponse>),
     ("StreamClientFrame", round_trips::<StreamClientFrame>),

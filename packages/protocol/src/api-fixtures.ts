@@ -3,8 +3,14 @@ import { AgentName, AgentRef, AGENT_NAME_MAX } from "./agent-name.ts";
 import {
   AgentCommandResponse,
   CallerResponse,
+  CloseAgentRequest,
   FleetAgent,
+  LaunchAgentRequest,
+  LaunchAgentResponse,
+  RelaunchAgentRequest,
   RenameAgentRequest,
+  RespawnAgentRequest,
+  SignalAgentRequest,
   StateSnapshot,
   StopResponse,
 } from "./agents.ts";
@@ -471,6 +477,20 @@ const MESSAGES: Readonly<Record<string, Example>> = {
   },
   AssignTaskResponse: { schema: AssignTaskResponse, wire: [{ assignmentId: ASGN, eventIds: [3] }] },
   CallerResponse: { schema: CallerResponse, wire: [{ agentId: AGENT }, { agentId: null }] },
+  CloseAgentRequest: {
+    schema: CloseAgentRequest,
+    wire: [
+      { idempotencyKey: KEY, generation: 0 },
+      {
+        idempotencyKey: KEY,
+        generation: 3,
+        force: true,
+        keepShells: [TERM],
+        confirmBusy: true,
+        confirmedBusy: [{ terminalId: TERM, program: "vim" }],
+      },
+    ],
+  },
   BroadcastMessageResponse: {
     schema: BroadcastMessageResponse,
     wire: [
@@ -620,6 +640,28 @@ const MESSAGES: Readonly<Record<string, Example>> = {
       },
     ],
   },
+  LaunchAgentRequest: {
+    schema: LaunchAgentRequest,
+    wire: [
+      { idempotencyKey: KEY, harness: "claude-code", cwd: "/work" },
+      {
+        idempotencyKey: KEY,
+        harness: "codex",
+        cwd: "~/w",
+        project: "bazhen",
+        theme: "light",
+        name: "reviewer",
+        role: "worker",
+      },
+    ],
+  },
+  LaunchAgentResponse: {
+    schema: LaunchAgentResponse,
+    wire: [
+      { agentId: AGENT, terminalId: TERM, eventIds: [1, 2] },
+      { agentId: AGENT, terminalId: null, eventIds: [] },
+    ],
+  },
   PairingCodeResponse: {
     schema: PairingCodeResponse,
     wire: [
@@ -632,9 +674,23 @@ const MESSAGES: Readonly<Record<string, Example>> = {
       },
     ],
   },
+  RelaunchAgentRequest: {
+    schema: RelaunchAgentRequest,
+    wire: [
+      { idempotencyKey: KEY, generation: 2 },
+      { idempotencyKey: KEY, generation: 2, theme: "dark", fresh: true },
+    ],
+  },
   RenameAgentRequest: {
     schema: RenameAgentRequest,
     wire: [{ idempotencyKey: KEY, name: "reviewer" }],
+  },
+  RespawnAgentRequest: {
+    schema: RespawnAgentRequest,
+    wire: [
+      { idempotencyKey: KEY, generation: 1 },
+      { idempotencyKey: KEY, generation: 1, theme: "light" },
+    ],
   },
   RevokeDeviceResponse: { schema: RevokeDeviceResponse, wire: [{}] },
   RolesResponse: {
@@ -648,6 +704,10 @@ const MESSAGES: Readonly<Record<string, Example>> = {
   },
   SendMessageRequest: { schema: SendMessageRequest, wire: [{ idempotencyKey: KEY, body: "hi" }] },
   SendMessageResponse: { schema: SendMessageResponse, wire: [{ messageId: MSG, eventIds: [1] }] },
+  SignalAgentRequest: {
+    schema: SignalAgentRequest,
+    wire: [{ idempotencyKey: KEY, generation: 4, signal: "SIGTERM" }],
+  },
   StateSnapshot: { schema: StateSnapshot, wire: [fullState, oldState, ...loneStates] },
   StopResponse: { schema: StopResponse, wire: [{}] },
   StreamClientFrame: {

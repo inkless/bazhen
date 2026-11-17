@@ -7,7 +7,7 @@ use crate::ids::{AgentId, AssignmentId, AttentionId, EnvironmentId, TaskId, Term
 use crate::mail::{Attention, AttentionKind, Message, ObservedMessage};
 use crate::names::{AgentName, Role};
 use crate::notices::Notice;
-use crate::shells::{NeedsRestart, Shell, TuiTheme};
+use crate::shells::{BusyShell, NeedsRestart, Shell, TuiTheme};
 use crate::tasks::{Assignment, Task};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -341,6 +341,103 @@ pub struct CallerResponse {
 pub struct AgentCommandResponse {
     pub agent_id: AgentId,
     pub event_ids: Vec<u64>,
+}
+
+/// A signal a running agent's process may be sent, in place of typing a key into it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum Signal {
+    Sigint,
+    Sigterm,
+    Sighup,
+    Sigkill,
+}
+
+impl Signal {
+    pub const ALL: [Self; 4] = [Self::Sigint, Self::Sigterm, Self::Sighup, Self::Sigkill];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Sigint => "SIGINT",
+            Self::Sigterm => "SIGTERM",
+            Self::Sighup => "SIGHUP",
+            Self::Sigkill => "SIGKILL",
+        }
+    }
+}
+
+/// `POST /v1/agents`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LaunchAgentRequest {
+    pub idempotency_key: String,
+    pub harness: HarnessId,
+    pub cwd: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<TuiTheme>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<AgentName>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<Role>,
+}
+
+/// What a launch produced: the agent, its terminal once it has one, and the events recorded.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LaunchAgentResponse {
+    pub agent_id: AgentId,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub terminal_id: Option<TerminalId>,
+    pub event_ids: Vec<u64>,
+}
+
+/// `POST /v1/agents/:id/close`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloseAgentRequest {
+    pub idempotency_key: String,
+    pub generation: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub force: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_shells: Option<Vec<TerminalId>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirm_busy: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirmed_busy: Option<Vec<BusyShell>>,
+}
+
+/// `POST /v1/agents/:id/respawn`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RespawnAgentRequest {
+    pub idempotency_key: String,
+    pub generation: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<TuiTheme>,
+}
+
+/// `POST /v1/agents/:id/relaunch`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelaunchAgentRequest {
+    pub idempotency_key: String,
+    pub generation: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<TuiTheme>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fresh: Option<bool>,
+}
+
+/// `POST /v1/agents/:id/signal`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SignalAgentRequest {
+    pub idempotency_key: String,
+    pub generation: u64,
+    pub signal: Signal,
 }
 
 #[cfg(test)]

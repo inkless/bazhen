@@ -20,7 +20,7 @@ use crate::args::Parsed;
 use crate::call::{CALL, Daemon, Failed};
 use crate::fmt::{encode_uri_component, local, printable, uuid};
 use crate::out::Out;
-use crate::{Exit, USAGE, doctor};
+use crate::{Exit, doctor, usage};
 
 /// How long a stopped daemon may take to stop answering.
 const STOPPED_WITHIN: Duration = Duration::from_secs(5);
@@ -143,7 +143,7 @@ pub(crate) fn doctor(daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
 /// Gives agents started from now on this shell's environment.
 pub(crate) fn env_refresh(p: &Parsed, daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
     if p.word(1) != Some("refresh") {
-        out.err(USAGE);
+        out.err(&usage());
         return Ok(Exit::Usage);
     }
     let env = std::env::vars_os()
@@ -272,7 +272,7 @@ pub(crate) fn devices(
             Ok(Exit::Done)
         }
         Some(_) => {
-            out.err(USAGE);
+            out.err(&usage());
             Ok(Exit::Usage)
         }
         None => {
