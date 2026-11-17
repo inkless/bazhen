@@ -43,6 +43,8 @@ pub(crate) enum Stop {
     NotHere(String),
     /// A file the command line names can't be read.
     Unreadable(String),
+    /// The daemon's state says the command can't be made, as for an agent it doesn't have.
+    Refused(String),
     Call(Failed),
 }
 
@@ -52,9 +54,9 @@ impl From<Failed> for Stop {
     }
 }
 
-type Step<T> = Result<T, Stop>;
+pub(crate) type Step<T> = Result<T, Stop>;
 
-fn usage<T>(message: impl Into<String>) -> Step<T> {
+pub(crate) fn usage<T>(message: impl Into<String>) -> Step<T> {
     Err(Stop::Usage(message.into()))
 }
 
@@ -95,7 +97,7 @@ pub(crate) fn run(p: &Parsed, daemon: &Daemon, now_ms: i64, out: &mut Out) -> Re
             out.err(&message);
             Ok(Exit::Usage)
         }
-        Err(Stop::Unreadable(message)) => {
+        Err(Stop::Unreadable(message) | Stop::Refused(message)) => {
             out.err(&message);
             Ok(Exit::Failed)
         }
@@ -110,7 +112,7 @@ struct Verb<'a> {
 }
 
 /// `value`, refused as missing when absent or empty.
-fn need<'v>(value: Option<&'v str>, what: &str) -> Step<&'v str> {
+pub(crate) fn need<'v>(value: Option<&'v str>, what: &str) -> Step<&'v str> {
     match value {
         Some(v) if !v.is_empty() => Ok(v),
         _ => usage(format!("missing {what}")),
@@ -118,17 +120,17 @@ fn need<'v>(value: Option<&'v str>, what: &str) -> Step<&'v str> {
 }
 
 /// An agent the command line names, by name or id.
-fn agent_ref(value: Option<&str>, what: &str) -> Step<AgentRef> {
+pub(crate) fn agent_ref(value: Option<&str>, what: &str) -> Step<AgentRef> {
     let given = need(value, what)?;
     AgentRef::parse(given).or_else(|_| usage(format!("not an agent's name or id: {given}")))
 }
 
 /// A name the command line gives an agent, checked before the daemon is asked.
-fn new_name(value: &str) -> Step<AgentName> {
+pub(crate) fn new_name(value: &str) -> Step<AgentName> {
     AgentName::parse(value).or_else(|e| usage(e.to_string()))
 }
 
-fn key() -> Step<String> {
+pub(crate) fn key() -> Step<String> {
     uuid().map_err(|e| Stop::Unreadable(format!("can't read the system's random source: {e}")))
 }
 
@@ -248,7 +250,14 @@ impl Verb<'_> {
         if name != "send" && self.has("file") {
             return usage("--file is for send; a brief takes --brief-file");
         }
-        for (option, owner) in [("wait", "send"), ("timeout", "send"), ("json", "agents")] {
+        for (option, owner) in [
+            ("wait", "send"),
+            ("timeout", "send"),
+            ("json", "agents"),
+            ("force", "close"),
+            ("confirm-busy", "close"),
+            ("fresh", "relaunch"),
+        ] {
             if self.has(option) && name != owner {
                 return usage(format!("--{option} is for {owner}"));
             }
@@ -553,13 +562,7 @@ impl Verb<'_> {
                 None,
             ),
             Some(harness) => {
-                let cwd = self.value("dir").map(|dir| {
-                    if dir.starts_with('~') {
-                        dir.to_owned()
-                    } else {
-                        resolve(dir)
-                    }
-                });
+                let cwd = self.value("dir").map(start_dir);
                 let name = self.value("name").map(new_name).transpose()?;
                 (None, Some(Launch { harness, cwd, name }))
             }
@@ -747,6 +750,16 @@ impl Verb<'_> {
             ""
         };
         Ok(format!("noted on {task}{suffix}").into())
+    }
+}
+
+/// The directory a new agent starts in: one under the daemon user's home as given, for the daemon
+/// to expand, and any other made absolute from where the command runs.
+pub(crate) fn start_dir(dir: &str) -> String {
+    if dir.starts_with('~') {
+        dir.to_owned()
+    } else {
+        resolve(dir)
     }
 }
 

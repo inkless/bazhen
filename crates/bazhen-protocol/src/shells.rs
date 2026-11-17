@@ -44,6 +44,14 @@ pub enum ShellCommand {
     Unlink,
 }
 
+/// A program the user was shown running in a shell, and chose to end with it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BusyShell {
+    pub terminal_id: TerminalId,
+    pub program: String,
+}
+
 /// The program a shell runs in its foreground, and since when.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Foreground {

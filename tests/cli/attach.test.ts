@@ -50,6 +50,14 @@ describe("bazhen attach", () => {
     ]);
   });
 
+  it("finds an agent by its name in another case, as the daemon does", async () => {
+    const ran = await attach("STALE");
+    expect([ran.code, ran.stderr.trim()]).toEqual([
+      1,
+      "STALE runs on a holder this build can't speak to: restart it, then attach",
+    ]);
+  });
+
   it("refuses an agent with no running terminal", async () => {
     const ran = await attach("gone");
     expect([ran.code, ran.stderr.trim()]).toEqual([1, "gone has no running terminal to attach to"]);

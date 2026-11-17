@@ -1,0 +1,86 @@
+[
+  {
+    "name": "example 1",
+    "wire": {
+      "idempotencyKey": "0b8f8a52-58a3-4c49-9e2f-5d0f8c1c2a10",
+      "generation": 1
+    },
+    "parsed": {
+      "idempotencyKey": "0b8f8a52-58a3-4c49-9e2f-5d0f8c1c2a10",
+      "generation": 1
+    }
+  },
+  {
+    "name": "example 2",
+    "wire": {
+      "idempotencyKey": "0b8f8a52-58a3-4c49-9e2f-5d0f8c1c2a10",
+      "generation": 1,
+      "theme": "light"
+    },
+    "parsed": {
+      "idempotencyKey": "0b8f8a52-58a3-4c49-9e2f-5d0f8c1c2a10",
+      "generation": 1,
+      "theme": "light"
+    }
+  },
+  {
+    "name": "theme = \"light\"",
+    "wire": {
+      "idempotencyKey": "0b8f8a52-58a3-4c49-9e2f-5d0f8c1c2a10",
+      "generation": 1,
+      "theme": "light"
+    },
+    "parsed": {
+      "idempotencyKey": "0b8f8a52-58a3-4c49-9e2f-5d0f8c1c2a10",
+      "generation": 1,
+      "theme": "light"
+    }
+  },
+  {
+    "name": "theme = \"dark\"",
+    "wire": {
+      "idempotencyKey": "0b8f8a52-58a3-4c49-9e2f-5d0f8c1c2a10",
+      "generation": 1,
+      "theme": "dark"
+    },
+    "parsed": {
+      "idempotencyKey": "0b8f8a52-58a3-4c49-9e2f-5d0f8c1c2a10",
+      "generation": 1,
+      "theme": "dark"
+    }
+  },
+  {
+    "name": "example 1, with a field no version defines in each of its objects",
+    "wire": {
+      "idempotencyKey": "0b8f8a52-58a3-4c49-9e2f-5d0f8c1c2a10",
+      "generation": 1,
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "idempotencyKey": "0b8f8a52-58a3-4c49-9e2f-5d0f8c1c2a10",
+      "generation": 1
+    }
+  },
+  {
+    "name": "example 2, with a field no version defines in each of its objects",
+    "wire": {
+      "idempotencyKey": "0b8f8a52-58a3-4c49-9e2f-5d0f8c1c2a10",
+      "generation": 1,
+      "theme": "light",
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "idempotencyKey": "0b8f8a52-58a3-4c49-9e2f-5d0f8c1c2a10",
+      "generation": 1,
+      "theme": "light"
+    }
+  }
+]

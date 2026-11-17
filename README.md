@@ -281,6 +281,25 @@ whatever the environment names, and even when it names no agent. A Codex command
 terminal is that agent's with no variable set. With no daemon running, these verbs say so and
 exit 3.
 
+## Running agents from a shell
+
+The verbs the web client's agent controls use, for a terminal or a script:
+
+| Command                                                            | Does                                                                              |
+| ------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| `bazhen launch claude-code\|codex [--dir …] [--name …] [--role …]` | Start an agent in `--dir`, else where the command runs                            |
+| `bazhen close <agent> [--confirm-busy] [--force]`                  | Close it; `--confirm-busy` also ends what runs in its shells                      |
+| `bazhen respawn <agent>`                                           | Start an exited agent again, on its harness session                               |
+| `bazhen relaunch <agent> [--fresh]`                                | Start a lost agent again on a new terminal; `--fresh` if its session can't resume |
+| `bazhen signal <agent> INT\|TERM\|HUP\|KILL`                       | Send its process a signal, named with or without `SIG`                            |
+
+They are yours alone: the daemon refuses each to an agent, and the CLI prints its refusal. A
+command acts on the agent as `/v1/state` shows it at that moment, by its id; if the agent moved on
+before it arrived, the daemon refuses it as stale and nothing is tried again. Each exits 0 when
+done (or there was nothing to do), 1 when refused, 2 on a mistake in the command line, with
+nothing sent, and 3 when no daemon is running. `--json` prints the CLI's reading of the daemon's
+answer: `{ agentId, eventIds }`, and a launch's `terminalId`.
+
 ## What Bazhen knows about who is calling
 
 With the peer reader running, a call on the daemon's socket from inside an agent is that agent's.
