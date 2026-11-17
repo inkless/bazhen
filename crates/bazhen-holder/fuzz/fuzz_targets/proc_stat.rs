@@ -2,12 +2,14 @@
 
 use bazhen_holder::rss::resident_pages;
 use bazhen_holder::session::member_state;
-use bazhen_holder::start_time::{boot_time, epoch_seconds, start_ticks, stat_field};
+use bazhen_holder::start_time::{
+    boot_time, epoch_seconds, has_exited, own_pid, parent_field, start_ticks, stat_field,
+};
 use libfuzzer_sys::fuzz_target;
 
 // Any bytes, as `/proc/<pid>/stat` could hold them once a program names itself, or as
 // `/proc/self/statm` could: no reader may panic, and what precedes the last `)` never changes the
-// start or any field, as a name in front of it can't.
+// start or any field, as a name in front of it can't. The pid is the first token, whatever follows.
 fuzz_target!(|data: &[u8]| {
     let ticks = start_ticks(data);
     let named = [b"1 (any) name".as_slice(), data].concat();
@@ -20,6 +22,12 @@ fuzz_target!(|data: &[u8]| {
             assert_eq!(stat_field(&named, n), field);
         }
     }
+    let (parent, exited) = (parent_field(data), has_exited(data));
+    if data.contains(&b')') {
+        assert_eq!((parent_field(&named), has_exited(&named)), (parent, exited));
+    }
+    assert_eq!(own_pid(&[b"7 ".as_slice(), data].concat()), Some(7));
+    let _ = own_pid(data);
     let state = member_state(data, 42);
     if data.contains(&b')') {
         assert_eq!(member_state(&named, 42), state);

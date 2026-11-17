@@ -19,12 +19,10 @@ pub fn parent(pid: Pid) -> io::Result<Option<Pid>> {
     #[cfg(target_os = "linux")]
     {
         let stat = std::fs::read(format!("/proc/{}/stat", pid.as_raw_pid()))?;
-        if matches!(crate::start_time::stat_field(&stat, 3), Some(b"Z" | b"X")) {
+        if crate::start_time::has_exited(&stat) {
             return Err(io::Error::other(format!("process {pid:?} has exited")));
         }
-        let raw = crate::start_time::stat_field(&stat, 4)
-            .and_then(|field| std::str::from_utf8(field).ok())
-            .and_then(|field| field.parse::<i32>().ok())
+        let raw = crate::start_time::parent_field(&stat)
             .ok_or_else(|| io::Error::other(format!("process {pid:?} names no parent")))?;
         Ok(Pid::from_raw(raw))
     }

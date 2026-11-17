@@ -345,12 +345,7 @@ mod os {
             }
         }
         let stat = std::fs::read("/proc/self/stat")?;
-        let own = stat
-            .split(|&b| b == b' ')
-            .next()
-            .and_then(|field| std::str::from_utf8(field).ok())
-            .and_then(|field| field.parse::<i32>().ok());
-        if own == Some(getpid().as_raw_pid()) {
+        if crate::start_time::own_pid(&stat) == Some(getpid().as_raw_pid()) {
             Ok(())
         } else {
             Err(io::Error::other(

@@ -1,6 +1,7 @@
 //! When a process started, in epoch seconds, exactly as `ps -o lstart` shows it: the daemon
 //! checks a pid against reuse by comparing the two, so the holder reads the same source `ps`
-//! does on each OS. A child that has exited but isn't yet reaped still has one.
+//! does on each OS. A child that has exited but isn't yet reaped still has one. Every field the
+//! holder takes from a `/proc/<pid>/stat` line is parsed here.
 
 use std::io;
 
@@ -82,6 +83,26 @@ pub fn stat_field(stat: &[u8], n: usize) -> Option<&[u8]> {
         .nth(n.checked_sub(3)?)
 }
 
+/// Field 1 of a `/proc/<pid>/stat` line: the pid it is of, as this PID namespace numbers it.
+pub fn own_pid(stat: &[u8]) -> Option<i32> {
+    stat.split(|&b| b == b' ')
+        .next()
+        .and_then(decimal)
+        .and_then(|pid| i32::try_from(pid).ok())
+}
+
+/// Field 4 of a `/proc/<pid>/stat` line: the parent's pid, 0 for a process that has none.
+pub fn parent_field(stat: &[u8]) -> Option<i32> {
+    stat_field(stat, 4)
+        .and_then(decimal)
+        .and_then(|pid| i32::try_from(pid).ok())
+}
+
+/// Whether a `/proc/<pid>/stat` line is of a process that has exited: a zombie, or one dead.
+pub fn has_exited(stat: &[u8]) -> bool {
+    matches!(stat_field(stat, 3), Some(b"Z" | b"X"))
+}
+
 /// The `btime` line of `/proc/stat`: when the system booted, in epoch seconds.
 pub fn boot_time(system: &[u8]) -> Option<u64> {
     system
@@ -132,6 +153,38 @@ mod tests {
         assert_eq!(boot_time(b"btime \n"), None);
     }
 
+    #[test]
+    fn reads_the_pid_its_parent_and_whether_it_exited() {
+        let running = stat_line(b"sh", 7);
+        let zombie = b"4242 (sh) Z 1 4242 4242 0 -1".as_slice();
+        let dead = b"4242 (sh) X 31 4242".as_slice();
+        assert_eq!(
+            [
+                own_pid(&running),
+                parent_field(&running),
+                parent_field(dead)
+            ],
+            [Some(4242), Some(1), Some(31)]
+        );
+        assert_eq!(
+            [has_exited(&running), has_exited(zombie), has_exited(dead)],
+            [false, true, true]
+        );
+    }
+
+    #[test]
+    fn reads_no_pid_from_a_field_that_isnt_one() {
+        assert_eq!(own_pid(b"(sh) S 1"), None);
+        assert_eq!(own_pid(b"4242(sh) S 1"), None);
+        assert_eq!(own_pid(b"-1 (sh) S 1"), None);
+        assert_eq!(own_pid(b"2147483648 (sh) S 1"), None);
+        assert_eq!(parent_field(b"4242 (sh) S -1 4242"), None);
+        assert_eq!(parent_field(b"4242 (sh) S 2147483648 4242"), None);
+        assert_eq!(parent_field(b"4242 (sh) S"), None);
+        assert!(!has_exited(b"4242 (sh)"));
+        assert!(!has_exited(b"4242 sh Z 1"));
+    }
+
     proptest! {
         /// A program can name itself anything, `) ` and newlines included.
         #[test]
@@ -139,7 +192,10 @@ mod tests {
             name in proptest::collection::vec(any::<u8>(), 0..40),
             ticks in any::<u64>(),
         ) {
-            prop_assert_eq!(start_ticks(&stat_line(&name, ticks)), Some(ticks));
+            let stat = stat_line(&name, ticks);
+            prop_assert_eq!(start_ticks(&stat), Some(ticks));
+            prop_assert_eq!((own_pid(&stat), parent_field(&stat)), (Some(4242), Some(1)));
+            prop_assert!(!has_exited(&stat));
         }
     }
 
