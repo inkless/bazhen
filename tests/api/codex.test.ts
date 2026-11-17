@@ -63,11 +63,15 @@ const offered = () =>
 const state = async () => StateSnapshot.parse((await daemon.request("/v1/state")).body);
 
 /**
- * Has the asker run `command` outside the sandbox, allowed from the inbox, then `echo <tag>=$?`
+ * Has `agent` run `command` outside the sandbox, allowed from the inbox, then `echo <tag>=$?`
  * after it; the call's output, once it has one. The prompt must fit one row of the TUI.
  */
-async function ranAllowed(command: string, tag: string): Promise<string> {
-  await daemon.prompt(asker, `[[fake:shell:${command}; echo ${tag}=$?]]`);
+async function ranAllowed(
+  command: string,
+  tag: string,
+  agent: LaunchAgentResponse = asker,
+): Promise<string> {
+  await daemon.prompt(agent, `[[fake:shell:${command}; echo ${tag}=$?]]`);
   const id = await openItemFor(`echo ${tag}=`);
   const answered = await daemon.request(`/v1/attention/${id}/answer`, {
     method: "POST",
@@ -395,6 +399,38 @@ describe("a Codex agent", () => {
         timeout: 30_000,
       })
       .toBe("delivered");
+  });
+
+  // The TUI loads the threads it starts itself, so only its own flags can give them the socket:
+  // the daemon's resume of a loaded thread changes nothing. These pin a Codex whose `--remote` TUI
+  // sends its `-c` flags with each thread it starts. No BAZHEN_HOME: the socket must come from
+  // the thread.
+  it("tells a command on the thread a /new started which agent it is, at the daemon that launched it", async () => {
+    const output = await ranAllowed("../cli/bazhen whoami", "whoami-new", launched);
+    expect(output).toContain(launched.agentId);
+    expect(output).toContain("whoami-new=0");
+  });
+
+  it("follows its TUI to the thread a /fork starts, whose commands reach the daemon that launched it", async () => {
+    const bound = async () =>
+      (await state()).agents.find((a) => a.id === launched.agentId)?.externalRef?.id;
+    const before = await bound();
+    await daemon.prompt(launched, "/fork");
+    await expect
+      .poll(
+        async () => {
+          const now = await bound();
+          return {
+            moved: now !== before,
+            shown: showsThread(daemon.paneTitle(launched.agentId), String(now)),
+          };
+        },
+        { timeout: 30_000 },
+      )
+      .toEqual({ moved: true, shown: true });
+    const output = await ranAllowed("../cli/bazhen whoami", "whoami-fork", launched);
+    expect(output).toContain(launched.agentId);
+    expect(output).toContain("whoami-fork=0");
   });
 
   it("answers a respawn Codex refuses with Codex's own reason, and records it", async () => {

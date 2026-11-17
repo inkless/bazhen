@@ -897,9 +897,13 @@ export class Daemon {
     return before;
   }
 
-  /** Runs the Codex CLI on this daemon's Codex home, as its user would. */
+  /**
+   * Runs the Codex CLI on this daemon's Codex home, as its user would: without this daemon's home,
+   * which an app-server it starts would hand every command it runs.
+   */
   async codex(...args: string[]): Promise<void> {
-    await run("codex", args, { env: this.env, timeout: 90_000 });
+    const { BAZHEN_HOME: _home, ...env } = this.env;
+    await run("codex", args, { env, timeout: 90_000 });
   }
 
   /**
