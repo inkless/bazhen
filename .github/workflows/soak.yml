@@ -37,7 +37,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(inputs.os == 'linux' && '["ubuntu-latest"]' || inputs.os == 'macos' && '["macos-latest"]' || '["ubuntu-latest","macos-latest"]') }}
+        os: ${{ fromJSON(inputs.os == 'linux' && '["ubuntu-24.04"]' || inputs.os == 'macos' && '["macos-latest"]' || '["ubuntu-24.04","macos-latest"]') }}
     steps:
       - name: Refuse more hours than a hosted job can hold
         env:
