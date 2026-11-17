@@ -36,6 +36,9 @@ const delivered = async (messageId: string) =>
   (await state()).messages.find((m) => m.id === messageId)?.state === "delivered";
 const openFor = async (command: string) =>
   (await state()).attention.filter((a) => a.state === "open" && a.summary.includes(command));
+/** Whether the turn carrying `messageId` has ended, or stopped to ask before running `command`. */
+const endedOrAsked = async (messageId: string, command: string) =>
+  (await delivered(messageId)) || (await openFor(command)).length > 0;
 
 describe("Claude Code's own SendMessage between Bazhen agents", () => {
   it("is recorded from the sender's hook as sent to the agent its name reaches", async () => {
@@ -77,7 +80,10 @@ async function asks(key: string, command: string, shownAs: string): Promise<bool
 describe("the bazhen verbs a Claude Code agent is taught", () => {
   it("run without asking, while the daemon's other commands still ask", async () => {
     const { messageId } = await mail("whoami", "[[fake:bash:bazhen whoami]]");
-    await expect.poll(() => delivered(messageId), { timeout: 30_000 }).toBe(true);
+    // The turn ends, or stops at an ask, which is the one thing the verb must not do.
+    await expect
+      .poll(() => endedOrAsked(messageId, "bazhen whoami"), { timeout: 30_000 })
+      .toBe(true);
     const name = await nameOf(sender.agentId);
     const ran = model.requests.filter((r) => r.includes("tool_result")).at(-1);
     expect([(await openFor("bazhen whoami")).length, ran]).toEqual([

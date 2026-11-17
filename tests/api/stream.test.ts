@@ -56,11 +56,8 @@ describe("the terminal stream", () => {
     const first = await daemon.view(terminalId, "interactive");
     await expect.poll(() => first.text(), { timeout: 10_000 }).toContain("Claude Code");
     const late = await daemon.view(terminalId, "observe");
-    await expect.poll(() => late.text(), { timeout: 10_000 }).toContain("Claude Code");
-    // Seeded from the daemon's snapshot, through the one client.
-    expect(late.frames.map((f) => f.type)).toEqual(
-      expect.arrayContaining(["snapshot_start", "snapshot_end"]),
-    );
+    // Seeded from the daemon's snapshot, through the one client, not from a later repaint.
+    expect(await late.snapshotText()).toContain("Claude Code");
     // An earlier view's client may still be on its way out.
     await expect
       .poll(

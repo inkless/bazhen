@@ -79,9 +79,11 @@ describe("launching an agent", () => {
 
   it("shows a launched agent as running in the state snapshot", async () => {
     const { agentId } = LaunchAgentResponse.parse((await launch("second")).body);
-    await daemon.running(agentId);
-    const state = StateSnapshot.parse((await daemon.request("/v1/state")).body);
-    expect(state.agents.find((a) => a.id === agentId)).toMatchObject({
+    const shown = async () =>
+      StateSnapshot.parse((await daemon.request("/v1/state")).body).agents.find(
+        (a) => a.id === agentId,
+      );
+    await expect.poll(shown, { timeout: 30_000 }).toMatchObject({
       harness: "claude-code",
       state: "running",
       cwd: daemon.work,

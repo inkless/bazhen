@@ -106,7 +106,8 @@ describe("after the daemon is killed with -9 and started again", () => {
   });
 
   it("delivers the message held across the kill, labelled as a possible re-delivery", async () => {
-    await expect.poll(() => messageState(held), { timeout: 60_000 }).toBe("delivered");
+    // Within the test's own timeout, so a message given up on fails here, by its state.
+    await expect.poll(() => messageState(held), { timeout: 30_000 }).toBe("delivered");
     expect(model.requests.join()).toContain(`possible re-delivery of ${held}`);
   });
 
