@@ -147,7 +147,7 @@ describe("launch readiness", () => {
     expect(stuck(s.store)).toEqual(["closed:dismissed"]);
   });
 
-  it("times a respawn as a new start, says its terminal is reused, and says when it is up", async () => {
+  it("times a respawn as a new start, and says when it is up", async () => {
     const s = await starting();
     s.follow();
     await expect.poll(() => stuck(s.store)).toEqual(["open:"]);
