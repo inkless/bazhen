@@ -13,7 +13,11 @@ use crate::tasks::{Assignment, Task};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentState {
+    /// Until its harness shows a sign of life, even once its terminal runs: a TUI held at a trust
+    /// or login dialog isn't up. A respawn or relaunch returns it here.
     Starting,
+    /// Its harness has shown it is up since it last started: the state to wait on for an agent
+    /// that is ready.
     Running,
     Exited,
     Unknown,
